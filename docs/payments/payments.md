@@ -117,12 +117,11 @@ Production moved to the v12 replacement on 2026-10-06 at 02:03 UTC (PR 1272,
 destination checkpoint carried the owner's Terms and Privacy edits of 01:27 to
 01:29 UTC as four guarded full-row compare-and-swap updates, read back equal to
 v11, and then the insert-only delta wrote the rows the checkpoint lacked. The
-remaining source changes were `updatedAt` bumps, rate-limit leases and expired
+remaining source changes were `updatedAt` bumps, rate-limit counters and expired
 cache invalidations. After the deploy switched the binding, a second checkpoint
-and delta found a gap of five NCLS pageviews, one session summary and one
-rate-limit lease: the pageviews were inserted and read back, the session summary
-was left to v12's own later row for the same session, and the lease expires
-within the hour. Foreign keys are clean after every write. Production answers
+and delta found a gap of five NCLS pageviews and one session summary: the
+pageviews were inserted and read back, and the session summary was left to
+v12's own later row for the same session. Foreign keys are clean after every write. Production answers
 200 for the platform, docs, pricing and policies pages, both verified tenant
 sites, the dashboard Payments, Plan, Payouts and Earnings surfaces and the MCP
 workspace read. NCLS was not upgraded.
@@ -180,8 +179,8 @@ Stripe's settlement timing and payout schedule are separate. KrabiClaw does not
 apply Airbnb check-in payout-release rules. Bank changes use Stripe Express;
 sent payouts cannot be redirected. Merchant refunds require authenticated browser
 approval. A paid visit's rejection or cancellation, a guest's own cancellation of
-a deposit-paid reservation inside its terms, and the recovery of a capture
-nothing could be fulfilled for are each Stripe's full-remaining refund: the
+a deposit-paid reservation inside its terms, and the refund of a bank debit that
+cleared after its capacity went are each Stripe's full-remaining refund: the
 request names no amount, Stripe returns whatever it still holds for the
 payment, and the recorded amount is the one Stripe reports. The approval screen
 shows that remainder read from the charge. Each refund is one request under a
@@ -272,8 +271,7 @@ notification and durable per-recipient email receipts. Email receipts remain on
 the merchant's financial activity when a personal account is deleted. Existing
 Better Auth anonymous linking transfers purchases, notification targets and read
 acknowledgements; current purchase ownership authorizes a return-proof replay.
-Booking conversion completes before notification delivery. Delivery and realtime
-publication failures remain visible and retryable through the canonical path.
+Booking conversion completes before notification delivery.
 
 Better Auth Stripe still owns subscriptions, and the fees are invoiced on them;
 Stripe's own invoice emails carry their status. There is no scheduled
@@ -365,9 +363,9 @@ required collection and the product payment configuration stay unchanged.
 The public booking hold uses the canonical allocator predicate,
 including tenant/calendar-group half-open overlap exclusion. Holds expire after
 60 minutes. Review-pending Bookings have no Checkout TTL and consume capacity.
-Only authenticated native capture converts the hold to the canonical pending or
-confirmed Booking and commits its lifecycle activity/operational ID atomically.
-Late or unfulfillable capture creates an automatic full-principal refund intent.
+A card or Link authorization, or a bank debit once it clears, converts the hold
+to the canonical pending or confirmed Booking and commits its lifecycle
+activity/operational ID atomically. A card is captured only after that commit.
 
 Stripe account + livemode + native object identity scope every financial mutation.
 The connected snapshot webhook is separate from the subscription handler; durable
@@ -379,7 +377,7 @@ returns non-2xx and Stripe redelivers the event until the write lands.
 
 The buyer pays on the business's own site at `/pay/<payment id>`, not on a hosted
 Checkout. `createPaymentCheckout` opens a Stripe PaymentIntent on the connected
-account (`payment_attempts.stripe_payment_intent_id`) and hands the browser the
+account (`payments.stripe_payment_intent_id`) and hands the browser the
 page path and a purchase claim, carried in the URL fragment so no server, log or
 referrer sees it. Stripe's Payment Element, mounted on the connected account in
 deferred mode with the business's payment method configuration, collects the
@@ -419,13 +417,40 @@ intents settle via `reconcilePaymentIntent` when the `payment_intent.succeeded`
 webhook fires. Clearing failures still generate financial notifications. An
 intent in `requires_payment_method` with `last_payment_error` remains payable
 and retains its active hold so the buyer can retry, including after a
-recoverable confirmation decline. A canceled intent is terminal: it marks the
-payment failed and releases the active hold.
+recoverable confirmation decline, until its window ends. A bank debit that
+fails after that gives back the 14 days it was holding. A canceled intent is
+terminal: it releases the active hold.
 
-**Expiry.** The buyer's time to pay is the attempt's `expires_at`. Every
-availability query ignores a hold past it, and the confirm endpoint refuses an
-attempt past it, so an unpaid intent simply stays unused at Stripe. A capture that
-lands late anyway takes the unfulfillable-capture path and is refunded.
+**Expiry.** The buyer's time to pay is `payments.checkout_expires_at`. Every
+availability query ignores a hold past `expires_at`, and the confirm endpoint
+refuses a payment past its window. Before the confirm request goes to Stripe, one
+conditional write extends the active, unexpired hold by an hour; a hold that has
+already lapsed stops the confirmation there.
+
+**Cards and Link: authorize, book, capture.** Both use manual capture
+(`payment_method_options[card|link].capture_method`; surcharge and tax are in the
+authorized total). When Stripe reports `requires_capture`, from the confirm
+response, the webhook or the pay page's return, the hold becomes the booking and
+only then is the payment captured. If the capacity has gone the authorization is
+cancelled: nothing is charged and nothing is refunded. These intents use automatic
+confirmation, because Stripe refuses `confirmation_method: manual` alongside
+`automatic_payment_methods`, so a browser holding the client secret could confirm
+one late; the browser only gets the secret for `requires_action`, and a late
+authorization is cancelled the same way.
+
+A lost capture response is not a failure. Stripe's status is read again before
+anything is retried, and the hold finds the same booking. If Stripe cancels an
+authorization a booking was committed on, nothing was paid and the business gets a
+payment-failed alert on the booking.
+
+**ACH.** Confirmation starts the debit, so there is nothing to authorize. The hold
+keeps the capacity for 14 days while the debit clears, and the booking is made
+when it succeeds. Stripe tries instant bank verification and falls back to
+microdeposits: the pay page then shows Stripe's verification link, and the hold
+lasts through verification. A verification that fails or expires returns the
+intent to `requires_payment_method` with its error, which gives the capacity back. A debit that clears after its capacity went, because the business closed
+what it paid for, goes back through the ordinary refund under
+`unfulfillable:<intent>`, and a redelivery repeats that refund rather than booking.
 
 **Tax.** A business in a Stripe Tax business location
 (https://docs.stripe.com/tax/supported-countries) with active Stripe Tax
@@ -458,9 +483,9 @@ handoff creates no financial records. MCP exposes only payment, summary, payout
 history and operating-usage reads, plus `get_payments_dashboard_link` for a setup
 URL lookup. Refund preparation/execution and Checkout creation are dashboard/public
 booking operations. After authenticated browser approval, paid rejection commits
-cancellation, allocation release and full refund intent in one guarded D1 batch;
-provider retry and interrupted-refund recovery remain durable. Ordinary cancellation
-is distinct.
+cancellation, allocation release and full refund intent in one guarded D1 batch,
+then asks Stripe for the refund, repeating the same idempotent request only if its
+response is lost. Ordinary cancellation is distinct.
 
 Every reservation, class and consultation has one cancellation rule, Airbnb's
 1-day policy, and it is not a setting. A guest who cancels at least 24 hours

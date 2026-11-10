@@ -54,7 +54,7 @@ test('a thread and the record it refers to commit and cancel as one', { timeout:
       // The branch offers it: a session at a location takes seats only while
       // that location is still selling the product.
       `INSERT INTO product_locations (organization_id,product_id,location_id,active,published,created_by,updated_by) VALUES ('${ORG}','product-proof','${LOCATION}',1,1,'${ACTOR}','${ACTOR}')`,
-      `INSERT INTO product_booking_configs (product_id,organization_id,duration_minutes,default_capacity,created_by,updated_by) VALUES ('product-proof','${ORG}',120,1,'${ACTOR}','${ACTOR}')`,
+      `INSERT INTO product_booking_configs (product_id,organization_id,duration_minutes,default_capacity,scheduling_mode,created_by,updated_by) VALUES ('product-proof','${ORG}',120,1,'business','${ACTOR}','${ACTOR}')`,
       `INSERT INTO product_sessions (id,organization_id,product_id,location_id,timezone,starts_at,ends_at,capacity,status,created_by,updated_by)
         VALUES ('session-proof','${ORG}','product-proof','${LOCATION}','Asia/Bangkok','2099-01-05T07:00:00.000Z','2099-01-05T09:00:00.000Z',1,'scheduled','${ACTOR}','${ACTOR}')`,
     ].map(statement => db.prepare(statement)))
@@ -63,9 +63,10 @@ test('a thread and the record it refers to commit and cancel as one', { timeout:
     // the thread is written only where that claim landed. Exactly as the public
     // booking route writes it — claim first, thread conditional on it, then the
     // booking takes the thread's id.
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), DB: db } as CloudflareEnv
     async function bookSession(id: string) {
       return claimSessionCapacity(db, {
-        organizationId: ORG, productId: 'product-proof', sessionId: 'session-proof',
+        env, organizationId: ORG, productId: 'product-proof', sessionId: 'session-proof',
         productVariantId: 'variant-proof', partySize: 1, userId: null, requestId: null,
         following: bookingId => [
           ...requestInsertQueries({
@@ -259,7 +260,7 @@ test('archive and unarchive file a conversation without touching its booking, st
       `INSERT INTO products (kind, id,organization_id,name,slug,created_by,updated_by) VALUES ('experience', 'product-proof','${ORG}','Pottery Class','pottery-class','${ACTOR}','${ACTOR}')`,
       `INSERT INTO product_variants (id,organization_id,product_id,name,created_by,updated_by) VALUES ('variant-proof','${ORG}','product-proof','Standard','${ACTOR}','${ACTOR}')`,
       `INSERT INTO product_locations (organization_id,product_id,location_id,active,published,created_by,updated_by) VALUES ('${ORG}','product-proof','${LOCATION}',1,1,'${ACTOR}','${ACTOR}')`,
-      `INSERT INTO product_booking_configs (product_id,organization_id,duration_minutes,default_capacity,created_by,updated_by) VALUES ('product-proof','${ORG}',120,4,'${ACTOR}','${ACTOR}')`,
+      `INSERT INTO product_booking_configs (product_id,organization_id,duration_minutes,default_capacity,scheduling_mode,created_by,updated_by) VALUES ('product-proof','${ORG}',120,4,'business','${ACTOR}','${ACTOR}')`,
       session('session-ended', ENDED),
       session('session-future', FUTURE),
       thread('contact', 'contact', '2026-09-01T00:00:00.000Z'),

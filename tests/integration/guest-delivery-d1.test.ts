@@ -406,7 +406,7 @@ test('a replayed status email sends its recorded content and refuses a supersede
 
     const input = {
       threadId: 'booking-status', actorUserId: 'user-status',
-      env: { EMAIL_DELIVERY_MODE: 'provider', RESEND_API_KEY: 'controlled-provider-only', EMAIL_FROM: 'KrabiClaw <hello@krabiclaw.com>', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example' },
+      env: { EMAIL_DELIVERY_MODE: 'provider', RESEND_API_KEY: 'controlled-provider-only', EMAIL_FROM: 'KrabiClaw <hello@krabiclaw.com>', EMAIL_REPLY_SECRET: 'status-retry-proof', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example' },
     }
     const cancel = { ...input, action: 'cancel', idempotencyKey: 'cancel-status' }
     assert.deepEqual(await executeGuestThreadOperation(db, cancel), {
@@ -477,14 +477,9 @@ test('a failed stay cancellation email retries its recorded content after displa
     env: { DB: { type: 'd1' }, ORGANIZATION_CACHE: { type: 'kv' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'stay-cancellation-delivery-proof', exportName: 'Hub' } },
   } }] })
   const requests: Array<{ body: { to: string[]; subject: string; text: string; html: string }; idempotencyKey: string | null }> = []
-  const providerReadbacks: string[] = []
   let reject = true
   t.mock.method(globalThis, 'fetch', async (url: string, init: RequestInit) => {
-    if (url === 'https://api.resend.com/emails/stay-cancellation-delivered' && init.method === 'GET') {
-      providerReadbacks.push(url)
-      const sent = requests.at(-1)!.body
-      return Response.json({ id: 'stay-cancellation-delivered', message_id: '<stay-cancellation-delivered@provider-proof.com>', to: sent.to, subject: sent.subject, html: sent.html, text: sent.text })
-    }
+    // Only the send: nothing reads the email back from Resend.
     assert.equal(url, 'https://api.resend.com/emails')
     requests.push({ body: JSON.parse(String(init.body)), idempotencyKey: new Headers(init.headers).get('idempotency-key') })
     return reject
@@ -575,7 +570,7 @@ test('a failed stay cancellation email retries its recorded content after displa
     assert.deepEqual(requests, [original, original])
     const settled = await getDeliveryById(db, deliveryId)
     assert.deepEqual({ status: settled!.status, error: settled!.error, providerMessageId: settled!.provider_message_id }, { status: 'sent', error: null, providerMessageId: 'stay-cancellation-delivered' })
-    assert.equal(settled!.email_message_id, '<stay-cancellation-delivered@provider-proof.com>')
+    assert.equal(settled!.email_message_id, null, 'the RFC Message-ID arrives with Resend\'s webhook, not the send')
     assert(settled!.email_json)
     const frozenEmail = JSON.parse(settled!.email_json)
     assert.deepEqual({ to: frozenEmail.message.to, subject: frozenEmail.message.subject, html: frozenEmail.message.html, text: frozenEmail.message.text }, {
@@ -583,7 +578,6 @@ test('a failed stay cancellation email retries its recorded content after displa
     })
     await notifyStayCancelled(env, db, access.organizationId, stay.id, 'host', 0)
     assert.equal(requests.length, 2)
-    assert.equal(providerReadbacks.length, 1, 'a settled replay neither sends nor repeats native metadata readback')
     assert.deepEqual(await db.prepare('SELECT * FROM activity_entries WHERE dedupe_key = ?').bind(`stay-cancellation:${stay.id}`).first(), entry)
     assert.equal(await db.prepare("SELECT count(*) AS count FROM activity_entries WHERE request_id = ? AND event_name = 'stay.host_cancelled'").bind(stay.request_id).first('count'), 1)
     assert.equal(await db.prepare('SELECT count(*) AS count FROM guest_thread_deliveries WHERE entry_id = ?').bind(entry.id).first('count'), 1)
@@ -606,11 +600,6 @@ test('a guest-cancelled stay alerts owners with the whole stay and the team look
     if (url.startsWith('https://api.sandbox.push.apple.com/')) {
       pushes.push({ url, body: JSON.parse(String(init.body)) })
       return new Response(null, { status: 200 })
-    }
-    const readback = url.match(/^https:\/\/api\.resend\.com\/emails\/sent-(\d+)$/u)
-    if (readback && init.method === 'GET') {
-      const sent = emails[Number(readback[1]) - 1]!
-      return Response.json({ id: `sent-${readback[1]}`, message_id: `<sent-${readback[1]}@provider-proof.com>`, to: sent.to, subject: sent.subject, html: sent.html, text: sent.text })
     }
     assert.equal(url, 'https://api.resend.com/emails')
     emails.push(JSON.parse(String(init.body)))
@@ -701,7 +690,7 @@ test('a booking move into a full session leaves the original booking exactly as 
       "INSERT INTO business_locations (id,organization_id,slug,title,timezone) VALUES ('loc-move','org-move','move','Move','Asia/Bangkok')",
       "INSERT INTO products (kind, id, organization_id, name, slug, created_by, updated_by) VALUES ('experience', 'prod-move','org-move','Class','class','user-move','user-move')",
       "INSERT INTO product_variants (id, organization_id, product_id, name, created_by, updated_by) VALUES ('var-move','org-move','prod-move','Adult','user-move','user-move')",
-      "INSERT INTO product_booking_configs (product_id, organization_id, duration_minutes, default_capacity, created_by, updated_by) VALUES ('prod-move','org-move',60,4,'user-move','user-move')",
+      "INSERT INTO product_booking_configs (product_id, organization_id, duration_minutes, default_capacity, scheduling_mode, created_by, updated_by) VALUES ('prod-move','org-move',60,4,'business','user-move','user-move')",
       // The branch offers it: a session at a location only takes seats while
       // that location is still selling the product.
       "INSERT INTO product_locations (organization_id, product_id, location_id, active, published, created_by, updated_by) VALUES ('org-move','prod-move','loc-move',1,1,'user-move','user-move')",
@@ -977,7 +966,7 @@ test('native Resend test transport persists one delivered financial email throug
       native = await resendData('native financial test email readback', () => client.emails.get(String(receipt.provider_message_id)))
     }
     assert.equal(native.id, receipt.provider_message_id)
-    assert.equal(receipt.email_message_id, native.message_id, 'the stored RFC identity is the actual provider-assigned Message-ID')
+    assert.equal(receipt.email_message_id, null, 'the RFC Message-ID is recorded from Resend\'s webhook, not read back')
     assert.deepEqual(native.to, ['delivered@resend.dev'])
     assert.equal(native.subject, input.guest.message.title)
     assert.equal(native.last_event, 'delivered')
@@ -1016,7 +1005,6 @@ test('native Resend test transport persists one delivered financial email throug
     assert.deepEqual(threadedReadback.to, ['delivered@resend.dev'])
     assert.equal(threadedReadback.subject, reply.subject)
     assert.equal(threadedReadback.id, savedReply!.provider_message_id)
-    assert.equal(threadedReadback.message_id, savedReply!.email_message_id)
     assert.match(threadedReadback.message_id, /^<[^<>\s]+@[^<>\s]+>$/u)
     assert.notEqual(threadedReadback.message_id, native.message_id)
     const threadedReplay = await deliverReceiptEmail(db, { env, delivery: replyReceipt, threadId: null, email: reply })

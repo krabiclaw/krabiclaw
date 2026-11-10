@@ -31,7 +31,7 @@ export async function seedExperience(createTenant: CreateTenant): Promise<SeedTe
         variants: [{ name: 'One guest', prices: [{ unit_amount: input.amount, currency: 'THB' }] }],
         booking: {
           location_id: input.location.id, duration_minutes: 120, default_capacity: input.capacity, confirmation_mode: 'instant',
-          scheduling_mode: 'legacy', assigned_member_id: hostMemberId,
+          scheduling_mode: 'business', assigned_member_id: hostMemberId,
           weekly_slots: [0, 1, 2, 3, 4, 5, 6].map(weekday => ({ weekday, start_time: input.start })),
         },
       })

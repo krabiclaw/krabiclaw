@@ -19,7 +19,6 @@ import { linkedAccountAccessToken } from '~/server/utils/auth'
 import { getGoogleAdsReport } from '~/server/utils/google-ads'
 import { querySearchAnalytics } from '~/server/utils/google-search-console'
 import { getSocialConnections } from '~/server/utils/social-publication'
-import { isPublicationPreparationResumable } from '~/shared/posts'
 import { experiencePublicationBlocker, getProduct, resolveVariantPrice } from '~/server/utils/product-management'
 import type { CurrencyCode } from '~/shared/currencies'
 
@@ -298,10 +297,8 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
     }
     const connectedChannel = (['instagram', 'facebook', 'discord'] as const).find(channel => connections?.channels.some(connection => connection.channel === channel && connection.connected && connection.problems.length === 0)) ?? null
     const entitled = await hasOrganizationEntitlement(principal.env, organizationId, 'managed_service')
-    const receipts = await queryAll<{ post_id: string; state: string; attempt_id: string | null; updated_at: string }>(db,
-      'SELECT post_id,state,attempt_id,updated_at FROM post_publications WHERE organization_id=?', [organizationId])
-    const draftPosts = posts.filter(post => (post.status === 'draft' || connectedChannel && entitled)
-      && !receipts.some(receipt => receipt.post_id === post.id && !isPublicationPreparationResumable(receipt, now.getTime())))
+    const receipts = await queryAll<{ post_id: string }>(db, 'SELECT post_id FROM post_publications WHERE organization_id=?', [organizationId])
+    const draftPosts = posts.filter(post => (post.status === 'draft' || connectedChannel && entitled) && !receipts.some(receipt => receipt.post_id === post.id))
     for (const post of draftPosts) offer('post.publish', post.id, post.title ? `Finish sharing “${post.title}”` : 'Finish your photo or social post',
       `${post.status === 'published' ? 'The website post is published; no completed social publication is recorded.' : 'Continue the post already in progress.'}${!connectedChannel && !socialEvidenceUnavailable ? ' Connect a social account to publish it there.' : ''}`,
       postEditorPath(organization.slug, post.id), 80, { goal: goalFor('social'), locationId: post.location_id, recency: post.updated_at, icon: 'i-lucide-image-plus' })
@@ -398,7 +395,7 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
       `${base}/calendar?${new URLSearchParams({ product_id: gap.productId, date: gap.from, month: gap.from.slice(0, 7) })}`, 95,
       { goal: goalFor('availability'), locationId: gap.locationId, productId: gap.productId, recency: gap.from, icon: 'i-lucide-calendar-range' })
   } else if (canOperate && (organization.vertical === 'experience' || organization.vertical === 'service')) {
-    const sessions = await listSessions(db, { organizationId, locationId: input.locationId, fromInstant: now.toISOString(), toInstant: new Date(now.getTime() + 7 * 86_400_000).toISOString() })
+    const sessions = await listSessions(db, { env: principal.env, organizationId, locationId: input.locationId, fromInstant: now.toISOString(), toInstant: new Date(now.getTime() + 7 * 86_400_000).toISOString() })
     const open = sessions.find(session => session.remaining !== null && session.remaining > 0 && !session.is_full)
     const product = open && products.find(product => product.id === open.product_id)
     if (open && product && canWrite && enabled('social') && canPreparePost) offer('post.create', JSON.stringify(['session', product.id, open.id]),

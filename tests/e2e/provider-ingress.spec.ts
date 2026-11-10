@@ -1,8 +1,8 @@
 import { Buffer } from 'node:buffer'
 import { createHmac, randomUUID } from 'node:crypto'
 import { expect, test } from '@playwright/test'
-import { buildReplyToAddress } from '../../server/utils/submission-messages'
 import { loginAs } from './helpers/auth'
+import { findE2eAuthFixture } from '../../config/development-auth-fixtures'
 import { mcpData, mcpRequest } from './helpers/mcp'
 import type { InboxRow, InboxStreamItem, InboxThread } from '../../server/domain/guest-threads/types'
 import { seededTenant } from './seed/manifest'
@@ -171,12 +171,11 @@ test('native email replies retain their RFC ancestry through repeated dashboard 
   expect(originalEmail.message.references).toBeUndefined()
   // Delivered through the local runtime's email event, so the Worker's own
   // email handler parses, verifies and records the reply, and its accept or
-  // reject is what Email Routing would receive.
-  const replyTo = await buildReplyToAddress({
-    EMAIL_REPLY_SECRET: process.env.EMAIL_REPLY_SECRET,
-    NUXT_PUBLIC_PLATFORM_DOMAIN: baseURL,
-  }, 'contact', initial.id)
-  expect(replyTo).toMatch(/^rc[0-9a-f]{56}@/)
+  // reject is what Email Routing would receive. The guest answers the address
+  // the email actually carried.
+  const guestReplyAddress = /^rg[0-9a-f]{56}@/
+  const replyTo = originalEmail.message.replyTo
+  expect(replyTo).toMatch(guestReplyAddress)
   const body = `Signed guest reply ${randomUUID()}`
   const subject = `Re: ${originalEmail.message.subject}`
   const emailDate = new Date().toUTCString()
@@ -259,9 +258,10 @@ test('native email replies retain their RFC ancestry through repeated dashboard 
   expect(firstStaffReceipt.email_json).toEqual(expect.any(String))
   const firstStaffEmail = JSON.parse(firstStaffReceipt.email_json!) as FrozenEmail
   expect(firstStaffEmail.message).toMatchObject({
-    to: guestEmail, subject, emailPurpose: 'transactional', replyTo,
+    to: guestEmail, subject, emailPurpose: 'transactional',
     inReplyTo: secondMessageId, references: [messageId, secondMessageId],
   })
+  expect(firstStaffEmail.message.replyTo).toMatch(guestReplyAddress)
   expect(firstStaffEmail.message.html).toContain(staffBody)
   expect(firstStaffEmail.message.text).toContain(staffBody)
   expect(firstStaffEmail.message.html).toContain('You received this email because')
@@ -282,15 +282,63 @@ test('native email replies retain their RFC ancestry through repeated dashboard 
   expect(nextReceipt.email_message_id).toBeNull()
   const nextEmail = JSON.parse(nextReceipt.email_json!) as FrozenEmail
   expect(nextEmail.message).toMatchObject({
-    to: guestEmail, subject, emailPurpose: 'transactional', replyTo,
+    to: guestEmail, subject, emailPurpose: 'transactional',
     inReplyTo: secondMessageId, references: [messageId, secondMessageId],
   })
+  expect(nextEmail.message.replyTo).toMatch(guestReplyAddress)
+  // Each email's address names its own conversation entry.
+  expect(new Set([replyTo, firstStaffEmail.message.replyTo, nextEmail.message.replyTo]).size).toBe(3)
   expect(nextEmail.message.html).toContain(nextStaffBody)
   const repliedResponse = await fetchPhase('verify repeated staff entries', detailUrl, {})
   expect(repliedResponse.status(), await repliedResponse.text()).toBe(200)
   const { thread: replied } = await repliedResponse.json() as { thread: InboxThread }
   expect(replied.stream.filter(item => item.type === 'message' && item.body === staffBody)).toMatchObject([{ side: 'business', author: 'You' }])
   expect(replied.stream.filter(item => item.type === 'message' && item.body === nextStaffBody)).toMatchObject([{ side: 'business', author: 'You' }])
+
+  // The owner was alerted to each guest email, in one conversation: one subject,
+  // and on each a signed reply-to naming that message, which answers the guest as that owner.
+  const alerts = (await readDeliveries('read owner alerts')).filter(delivery => delivery.purpose === 'owner_alert' && delivery.email_json !== null)
+    .map(delivery => JSON.parse(delivery.email_json!) as FrozenEmail).filter(email => email.message.replyTo?.startsWith('rm'))
+  // The signed-in owner replies, so the inbox labels the reply "You"; every other member alerted is someone else.
+  const ownerAddress = findE2eAuthFixture('user-e2e-demo-owner').email
+  const ownerAlerts = alerts.filter(email => email.message.to === ownerAddress)
+  expect(ownerAlerts.length).toBeGreaterThanOrEqual(2)
+  expect(new Set(ownerAlerts.map(email => email.message.subject)).size).toBe(1)
+  expect(new Set(ownerAlerts.map(email => email.message.replyTo)).size).toBe(ownerAlerts.length)
+  expect(ownerAlerts.some(email => email.message.text.includes(body))).toBe(true)
+  expect(ownerAlerts.every(email => email.message.text.includes('Reply to this email or from the dashboard.'))).toBe(true)
+  const memberReplyTo = ownerAlerts[0]!.message.replyTo!
+  const ownerBody = `Owner email reply ${randomUUID()}`
+  const ownerReply = (phase: string, from: string, messageId: string, headers: string[] = []) => fetchPhase(phase, '/cdn-cgi/local/email', {
+    method: 'POST',
+    params: { from, to: memberReplyTo },
+    data: [
+      `From: Owner <${from}>`, `To: ${memberReplyTo}`, `Subject: Re: ${ownerAlerts[0]!.message.subject}`, `Message-ID: ${messageId}`, ...headers,
+      `Date: ${new Date().toUTCString()}`, 'MIME-Version: 1.0', 'Content-Type: text/plain; charset=utf-8', '',
+      ownerBody, '', `On ${new Date().toUTCString()} KrabiClaw <hello@krabiclaw.com> wrote:`, `> ${body}`, '',
+    ].join('\r\n'),
+  })
+  const ownerMessageId = `<${randomUUID()}@e2e.example.test>`
+  for (const phase of ['receive owner reply to the alert', 'receive the same owner reply again']) {
+    const accepted = await ownerReply(phase, ownerAddress, ownerMessageId)
+    expect(accepted.status(), await accepted.text()).toBe(200)
+    expect(await accepted.text()).toBe('Worker successfully processed email')
+  }
+  // An out-of-office is accepted and reaches nobody; the count of emails to the guest below proves it.
+  const outOfOffice = await ownerReply('drop an automatic reply', ownerAddress, `<${randomUUID()}@e2e.example.test>`, ['Auto-Submitted: auto-replied'])
+  expect(outOfOffice.status(), await outOfOffice.text()).toBe(200)
+  const strangerReply = await ownerReply('reject a reply from another sender', 'someone-else@e2e.example.test', `<${randomUUID()}@e2e.example.test>`)
+  expect(strangerReply.status()).toBe(400)
+  expect(await strangerReply.text()).toBe('Worker rejected email with the following reason: This reply address is not valid for the address you replied from. Reply from the address the alert was sent to, or answer from the dashboard.')
+  // The guest is emailed the owner's words, once, without the quoted alert.
+  const toGuest = (await readDeliveries('read the emailed owner reply')).filter(delivery => delivery.purpose === 'member_reply')
+    .map(delivery => JSON.parse(delivery.email_json!) as FrozenEmail).filter(email => email.message.text.includes(ownerBody))
+  expect(toGuest).toHaveLength(1)
+  expect(toGuest[0]!.message.to).toBe(guestEmail)
+  expect(toGuest[0]!.message.text).not.toContain('wrote:')
+  const answeredResponse = await fetchPhase('verify the owner reply in the conversation', detailUrl, {})
+  const { thread: answered } = await answeredResponse.json() as { thread: InboxThread }
+  expect(answered.stream.filter(item => item.type === 'message' && item.body === ownerBody)).toMatchObject([{ side: 'business', author: 'You' }])
   } finally {
     await release()
   }

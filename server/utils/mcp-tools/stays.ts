@@ -10,7 +10,7 @@ import { STAY_HOME_ACCESSIBILITY_FEATURES, STAY_ROOM_ACCESSIBILITY_FEATURES } fr
 import { MAX_ORDERED_MEDIA_ASSETS } from '~/shared/media-placement-contract'
 import { memberAccessPrincipal } from '~/server/utils/member-access'
 import { organizationEventContext } from '~/server/utils/organization-events'
-import { cancelStay, createStay, createStayPhotoRoom, deleteStayPayment, getStay, listStays, moveStayPhotos, readStayCalendar, recordStayPayment, removeStayPhotoRoom, setStayNights, stayAccessFor, updateStay, updateStayHomeAccessibility, updateStayPhotoRoom, STAY_STATUSES, STAY_TURNOVER_FIELDS, type StayAccess, type StayHome, type StayDetail } from '~/server/domain/stays'
+import { cancelStay, moveStay, createStay, createStayPhotoRoom, deleteStayPayment, getStay, listStays, moveStayPhotos, readStayCalendar, recordStayPayment, removeStayPhotoRoom, setStayNights, stayAccessFor, updateStay, updateStayHomeAccessibility, updateStayPhotoRoom, STAY_STATUSES, STAY_TURNOVER_FIELDS, type StayAccess, type StayHome, type StayDetail } from '~/server/domain/stays'
 import { MAX_STAY_NIGHTS, STAY_CHANNELS, STAY_PAYMENT_METHODS } from '~/shared/bookings'
 
 const text = { type: 'string', minLength: 1 }
@@ -30,7 +30,7 @@ const key = { type: 'string', minLength: 1, maxLength: 200, description: 'Caller
 const payment = { type: 'object', properties: { id: text, stay_id: text, amount_minor: { type: 'integer' }, currency: text, method: { type: 'string', enum: [...STAY_PAYMENT_METHODS] }, paid_on: day, reference: nullableText, note: nullableText, created_at: text, created_by: text },
   required: ['id', 'stay_id', 'amount_minor', 'currency', 'method', 'paid_on', 'reference', 'note', 'created_at', 'created_by'] }
 const stayProperties = {
-  id: text, product_id: text, location_id: text, timezone: text, channel: { type: 'string', enum: [...STAY_CHANNELS] }, owner: { type: 'string', enum: ['app', 'channel'] },
+  id: text, product_id: text, booked_product_id: { ...nullableText, description: 'The listing a channel reservation is booked on when the host moved the guest to another home; null when they sleep where they booked.' }, booked_home_name: nullableText, location_id: text, timezone: text, channel: { type: 'string', enum: [...STAY_CHANNELS] }, owner: { type: 'string', enum: ['app', 'channel'] },
   status: { type: 'string', enum: [...STAY_STATUSES] }, overbooked: { type: 'boolean' }, check_in_date: day, check_out_date: day, arrival_time: time,
   adults: { type: 'integer' }, children: { type: 'integer' }, infants: { type: 'integer' }, guest_name: nullableText, guest_surname: nullableText,
   guest_email: nullableText, guest_phone: nullableText, user_id: nullableText, total_minor: { type: 'integer' }, currency: text, notes: nullableText,
@@ -42,8 +42,8 @@ const stayProperties = {
 }
 const channelPush = { ...CHANNEL_PUSH_SCHEMA, description: "What the home's connected channel took from this change: null when no channel push is needed; pushed when delivery completed; pending, with the reason, while it waits out Channex's rate limit or an unconfirmed attempt it sends again. A refused channel update returns a committed error." }
 const onlinePayment = { type: ['object', 'null'], description: 'The Stripe payment the guest made when booking this stay on the site; null for a stay booked any other way. paid_minor counts it net of refunds.',
-  properties: { payment_id: text, state: { type: 'string', enum: ['pending', 'captured', 'failed', 'recovery', 'refunded'] }, currency: text, amount_minor: { type: 'integer' }, captured_minor: { type: 'integer' }, refunded_minor: { type: 'integer' }, receipt_url: nullableText, created_at: text },
-  required: ['payment_id', 'state', 'currency', 'amount_minor', 'captured_minor', 'refunded_minor', 'receipt_url', 'created_at'] }
+  properties: { payment_id: text, currency: text, amount_minor: { type: 'integer' }, captured_minor: { type: 'integer' }, refunded_minor: { type: 'integer' }, receipt_url: nullableText, created_at: text },
+  required: ['payment_id', 'currency', 'amount_minor', 'captured_minor', 'refunded_minor', 'receipt_url', 'created_at'] }
 const stayTurnoverProperties = Object.fromEntries(STAY_TURNOVER_FIELDS.map(field => [field, stayProperties[field]]))
 /** What a member responsible for the home reads of a stay: dates, arrival, the guest's first name and party. */
 const stayTurnover = { type: 'object', description: 'A member’s view of a stay at a home they look after: dates, arrival time, the guest’s first name and party. Owners and admins read the whole stay.', properties: stayTurnoverProperties, required: [...STAY_TURNOVER_FIELDS], additionalProperties: false }
@@ -213,6 +213,9 @@ export const STAYS_TOOLS: McpToolDefinition[] = [
   organizationTool({ name: 'update_stay', domain: 'stays', minimumRole: 'admin', description: 'Change a host-entered stay’s dates, party, guest details, total or notes using stay.version from get_stay. Supply at least one changed field; empty and unchanged edits are refused. Omitted fields keep their values. Returns a compact stay receipt and the saved values of supplied fields. Replans pending automatic guest messages and updates connected Airbnb availability through Channex. A failed channel update reports the committed edit; read get_stay before retrying. Channel-owned stays must be edited on their channel.',
     inputSchema: { stay_id: stayId, expected_version: version, ...guestFields, anyOf: Object.keys(guestFields).map(field => ({ required: [field] })) }, required: ['stay_id', 'expected_version'],
     outputSchema: { ...stayMutation, properties: { ...stayMutation.properties, saved_fields: { type: 'object', properties: Object.fromEntries(Object.keys(guestFields).map(field => [field, stayProperties[field as keyof typeof stayProperties]])), minProperties: 1, additionalProperties: false } }, required: [...stayMutation.required, 'saved_fields'] } }),
+  organizationTool({ name: 'move_stay', domain: 'stays', minimumRole: 'admin', description: 'Move a guest to another of the host’s homes, for example after a double booking. The nights, turnover and later messages follow the guest, a channel reservation stays on the listing it was booked on, the new home gets a job to be made ready, and the guest is sent the new address and check-in instructions. Moving back to the booked listing undoes the move. The new home must be free for every night and have check-in instructions.',
+    inputSchema: { stay_id: stayId, expected_version: version, product_id: { ...productId, description: 'The home to move the guest to: a product of kind stay, from list_products.' } }, required: ['stay_id', 'expected_version', 'product_id'],
+    outputSchema: { ...stayMutation, properties: { ...stayMutation.properties, guest_notified: { type: 'boolean', description: 'False when the stay has no guest conversation to send through; tell the host to message the guest on the channel.' } }, required: [...stayMutation.required, 'guest_notified'] } }),
   organizationTool({ name: 'cancel_stay', domain: 'stays', minimumRole: 'admin', description: 'Cancel a host-entered stay under its current version, free its nights, cancel pending automatic guest messages and update availability on the home’s connected Airbnb listing through Channex. A failed channel update reports that cancellation was saved. If a website payment needs a refund, returns financial_action_required with an authenticated dashboard link before cancellation or financial writes. Offline refunds can be recorded separately with record_stay_payment; that record moves no money.',
     inputSchema: { stay_id: stayId, expected_version: version, reason: { type: 'string', maxLength: 500 } }, required: ['stay_id', 'expected_version'],
     outputSchema: { ...stayMutation, properties: { ...stayMutation.properties, stay: { ...stayReceipt, properties: { ...stayReceiptProperties, cancelled_at: nullableText, cancellation_reason: nullableText }, required: [...stayReceipt.required, 'cancelled_at', 'cancellation_reason'] } } } }),
@@ -275,6 +278,10 @@ export async function handleStaysTools(ctx: McpExecutorContext): Promise<unknown
       const { stay_id: _id, ...patch } = args
       const stay = await updateStay(db, env, access, requiredString(args, 'stay_id'), patch as Record<string, unknown> & { expected_version: unknown })
       return { ...stayMutationReceipt(stay), saved_fields: Object.fromEntries(Object.keys(guestFields).filter(field => Object.hasOwn(patch, field)).map(field => [field, stay[field as keyof typeof stay]])) }
+    }
+    case 'move_stay': {
+      const stay = await moveStay(db, env, access, requiredString(args, 'stay_id'), { expected_version: args.expected_version, product_id: args.product_id })
+      return { ...stayMutationReceipt(stay), guest_notified: stay.guest_notified }
     }
     case 'cancel_stay': {
       const stay = await cancelStay(db, env, access, requiredString(args, 'stay_id'), { expected_version: args.expected_version, reason: args.reason, financial_writes_allowed: false })

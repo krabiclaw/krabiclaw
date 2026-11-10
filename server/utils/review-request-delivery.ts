@@ -60,7 +60,7 @@ export async function sendReviewRequestForBooking(
       reviewUrl,
       userId: request.user_id,
       // One invitation retains its link and receipt across retries. The
-      // receipt resumes provider readback rather than sending accepted mail.
+      // receipt is never sent twice once Resend accepted it.
       delivery: { guestThreadId: bookingId, sourceEntryId: entry.id },
     })
     await markReviewRequestSendSuccess(db, request.id)

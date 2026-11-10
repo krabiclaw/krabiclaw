@@ -20,7 +20,7 @@ import {
   attachStripeGa4IntentToSubscription,
   type StripeGa4Intent,
 } from '~/server/utils/stripe-ga4-intents'
-import { deliverViaMeasurementProtocol, sendMeasurementProtocol } from '~/server/utils/ga4-delivery'
+import { deliverViaMeasurementProtocol, readGa4Delivery, sendMeasurementProtocol } from '~/server/utils/ga4-delivery'
 import { originatingOwnerId, recordOrganizationConversionEvent } from '~/server/utils/organization-conversions'
 import { getPlatformOrganization } from '~/server/utils/platform-organization'
 import { projectConversionToGa4 } from '~/utils/ga4-projection'
@@ -302,14 +302,14 @@ async function recordStripePurchase(
     },
   })
   const projection = projectConversionToGa4({ eventName: 'purchase', value, params: { purchase_type: purchaseType, subscription_id: subscriptionId } })
-  const delivery = await deliverViaMeasurementProtocol(env, db, {
+  // Stripe delivers an event at least once. A redelivered invoice is the recorded purchase; only a
+  // send Google refused goes again. Everything else (disabled, disconnected, no consent) is a recorded outcome.
+  const previous = recorded.created ? null : await readGa4Delivery(db, recorded.id)
+  const delivery = previous && previous.status !== 'failed' ? previous : await deliverViaMeasurementProtocol(env, db, {
     eventId: recorded.id, organizationId: platformOrganizationId, event: projection,
     clientId: context.clientId, userId: context.userId, sessionId: gaSessionNumber(context.sessionId), sessionCapturedAt: context.sessionCapturedAt,
   })
-  // A failed send makes Stripe redeliver; the native event is already
-  // recorded and its identity is returned on the retry. Everything else
-  // (disabled, disconnected, no consent) is a recorded outcome, not an error.
-  if (delivery.status === 'failed' || delivery.status === 'sending') throw new Error(`GA4 purchase delivery failed for invoice ${invoice.id}: ${delivery.detail}`)
+  if (delivery.status === 'failed') throw new Error(`GA4 purchase delivery failed for invoice ${invoice.id}: ${delivery.detail}`)
 
   if (context.intent && (purchaseType === 'upgrade' || purchaseType === 'downgrade' || purchaseType === 'initial_subscription' || purchaseType === 'resubscription')) {
     await consumeStripeGa4Intent(db, context.intent.id, event.id)
@@ -498,11 +498,12 @@ async function recordStripeRefund(
     },
   })
   const projection = projectConversionToGa4({ eventName: 'refund', value, params: { refund_id: refund.id, subscription_id: subscriptionId } })
-  const delivery = await deliverViaMeasurementProtocol(env, db, {
+  const previous = recorded.created ? null : await readGa4Delivery(db, recorded.id)
+  const delivery = previous && previous.status !== 'failed' ? previous : await deliverViaMeasurementProtocol(env, db, {
     eventId: recorded.id, organizationId: platformOrganizationId, event: projection,
     clientId: context.clientId, userId: context.userId, sessionId: null, sessionCapturedAt: null,
   })
-  if (delivery.status === 'failed' || delivery.status === 'sending') throw new Error(`GA4 refund delivery failed for refund ${refund.id}: ${delivery.detail}`)
+  if (delivery.status === 'failed') throw new Error(`GA4 refund delivery failed for refund ${refund.id}: ${delivery.detail}`)
 }
 
 /** The subscription an invoice belongs to, across both Stripe invoice shapes. */

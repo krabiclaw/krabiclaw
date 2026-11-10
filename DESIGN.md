@@ -746,9 +746,8 @@ shows the current draft beside its preview on desktop. A phone keeps media,
 caption and publication controls in one scroll. Optional headline, link button
 and location stay in More options. Save
 draft is secondary to Publish. An existing Post opens the same composer, not a
-six-row field index. Each destination retains its own canonical receipt and
-failure/reconciliation controls; website publication never implies social
-delivery. `PostEditorPage` and `usePostEditor` reuse the existing media picker,
+six-row field index. Each destination retains its own canonical receipt;
+website publication never implies social delivery. `PostEditorPage` and `usePostEditor` reuse the existing media picker,
 public media renderer, post writer and publisher that MCP uses.
 
 Creation references read on 2026-10-25: [Instagram's media-first post flow](https://www.facebook.com/help/instagram/442418472487929),

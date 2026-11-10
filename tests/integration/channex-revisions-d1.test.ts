@@ -5,7 +5,7 @@ import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/
 import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
-import { applyChannelBooking, createStay } from '../../server/domain/stays.ts'
+import { applyChannelBooking, createStay, getStay, listStayMoveOptions, moveStay } from '../../server/domain/stays.ts'
 import { applyBookingRevision, runRevisionFeed } from '../../server/integrations/channex/booking-revisions.ts'
 
 // Airbnb bookings landing as channel stays: acknowledged only after they
@@ -221,6 +221,92 @@ test('an unknown home is logged and acknowledged; a failed read is not acknowled
       { external_id: 'rev-x', status: 'ignored_disconnected' }, { external_id: 'rev-y', status: 'failed' }, { external_id: 'rev-y', status: 'acknowledged' },
     ])
 
+  } finally {
+    globalThis.fetch = realFetch
+    await runtime.dispose()
+  }
+})
+
+test('a moved guest takes the nights, turnover and messages to the new home while the reservation keeps its listing', { timeout: 120_000 }, async () => {
+  const { runtime, db, env, productId } = await boot()
+  const channex = new FakeChannex()
+  const realFetch = globalThis.fetch
+  globalThis.fetch = channex.fetch as typeof fetch
+  const access = { organizationId: ORG, actorId: OWNER, manage: true }
+  try {
+    await db.prepare(`INSERT INTO business_locations (id, organization_id, slug, title, status, timezone, created_at, updated_at)
+      VALUES ('annex-site', ?, 'annex', 'Annex', 'active', 'America/Denver', '2026-10-15T00:00:00.000Z', '2026-10-15T00:00:00.000Z')`).bind(ORG).run()
+    const annex = (await createProduct(db, { env, organizationId: ORG, actor: { actorId: OWNER }, product: {
+      kind: 'stay', name: 'Annex', variants: [{ name: 'Annex', prices: [{ unit_amount: 15_000, currency: 'USD' }] }],
+      stay: { location_id: 'annex-site', check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 1, assigned_member_id: null, assigned_team_id: null },
+    } })).id
+    const booking: Booking = { id: 'bk-move', property_id: 'prop-1', status: 'new', arrival: '2027-03-10', departure: '2027-03-13', amount: '300.00', revision: '' }
+    // Channex delivered the guest's conversation for this booking on its listing.
+    await db.prepare(`INSERT INTO requests (id, kind, organization_id, payload_json) VALUES ('thread-move', 'stay', ?, '{"guest":{"name":"Lee","email":"lee@example.test","phone":null}}')`).bind(ORG).run()
+    await db.prepare(`INSERT INTO channel_threads (provider, external_thread_id, organization_id, product_id, request_id, external_booking_id, provider_updated_at) VALUES ('channex', 'ext-thread', ?, ?, 'thread-move', 'bk-move', '2026-10-15T00:00:00Z')`).bind(ORG, productId).run()
+    channex.revise('rev-move', booking, '2026-10-15T01:00:00Z')
+    const stayId = (await applyBookingRevision(db, env, 'rev-move') as { stay_id: string }).stay_id
+    const landed = await getStay(db, access, stayId)
+    assert.ok(landed.request_id, 'the guest has a conversation to be told in')
+
+    // Without instructions the guest could not be told how to get in, so the move is refused and nothing changes.
+    await assert.rejects(moveStay(db, env, access, stayId, { expected_version: landed.version, product_id: annex }), /Add check-in instructions/)
+    assert.equal((await getStay(db, access, stayId)).product_id, productId)
+    await db.prepare('UPDATE product_stay_configs SET check_in_instructions = ? WHERE product_id = ?').bind('Door code 1234', annex).run()
+
+    const [option] = await listStayMoveOptions(db, access, stayId)
+    assert.deepEqual([option!.product_id, option!.taken, option!.has_instructions], [annex, [], true])
+
+    const moved = await moveStay(db, env, access, stayId, { expected_version: landed.version, product_id: annex })
+    assert.deepEqual([moved.product_id, moved.booked_product_id, moved.guest_notified], [annex, productId, true])
+    const claims = async () => (await db.prepare('SELECT product_id, date FROM stay_nights WHERE stay_id = ? ORDER BY date').bind(stayId).all()).results
+    assert.deepEqual(await claims(), ['2027-03-10', '2027-03-11', '2027-03-12'].map(date => ({ product_id: annex, date })))
+    assert.deepEqual(await db.prepare("SELECT product_id, starts_at FROM tasks WHERE dedupe_key = ?").bind(`turnover:${stayId}`).first(), { product_id: annex, starts_at: '2027-03-13T18:00:00.000Z' })
+    assert.deepEqual(await db.prepare('SELECT kind, status, product_id, title, due_at FROM tasks WHERE dedupe_key = ?').bind(`stay-ready:${stayId}:${annex}`).first(),
+      { kind: 'stay_ready', status: 'open', product_id: annex, title: 'Get Annex ready', due_at: '2027-03-10T22:00:00.000Z' })
+    const told = await db.prepare("SELECT product_id, status, body FROM scheduled_guest_messages WHERE stay_id = ? AND template_title = 'Your stay has moved'").bind(stayId).first<{ product_id: string; status: string; body: string }>()
+    assert.deepEqual([told!.product_id, told!.status], [annex, 'pending'])
+    assert.match(told!.body, /Your stay has moved to Annex|your stay has moved to Annex/)
+    assert.match(told!.body, /Door code 1234/)
+    assert.match(told!.body, /any you received for Cabin/)
+
+    // The reservation still holds its listing's nights: they are closed there, not resold.
+    assert.equal(JSON.parse((await db.prepare("SELECT sent_json FROM channel_night_pushes WHERE product_id = ? AND date = '2027-03-11'").bind(productId).first<{ sent_json: string }>())!.sent_json).availability, 0)
+
+    // Neither home takes another stay over the moved guest's nights, in the write itself: the listing because
+    // the reservation still holds it, the destination because the guest sleeps there.
+    await assert.rejects(createStay(db, env, access, { product_id: productId, idempotency_key: 'listing-held', check_in_date: '2027-03-11', check_out_date: '2027-03-12', adults: 1, guest_name: 'Second', total_minor: 100 }), /already holds one of these nights/)
+    await assert.rejects(createStay(db, env, access, { product_id: annex, idempotency_key: 'annex-held', check_in_date: '2027-03-11', check_out_date: '2027-03-12', adults: 1, guest_name: 'Second', total_minor: 100 }), /already holds one of these nights/)
+    assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM stays WHERE idempotency_key IN ('listing-held', 'annex-held')").first('n'), 0)
+
+    // A later revision names the listing it was booked on, and the guest stays where they sleep.
+    channex.revise('rev-move-2', { ...booking, status: 'modified', departure: '2027-03-14' }, '2026-10-16T01:00:00Z')
+    await applyBookingRevision(db, env, 'rev-move-2')
+    assert.deepEqual(await db.prepare('SELECT product_id, booked_product_id, check_out_date, overbooked FROM stays WHERE id = ?').bind(stayId).first(), { product_id: annex, booked_product_id: productId, check_out_date: '2027-03-14', overbooked: 0 })
+    assert.equal((await claims()).length, 4)
+
+    // A home someone else holds cannot take the guest.
+    await createStay(db, env, access, { product_id: productId, idempotency_key: 'later-host', check_in_date: '2027-03-20', check_out_date: '2027-03-22', adults: 1, guest_name: 'Later', total_minor: 100 })
+    channex.revise('rev-other-home', { ...booking, id: 'bk-blocked', code: 'HMBLOCKED', arrival: '2027-03-12', departure: '2027-03-15' }, '2026-10-17T01:00:00Z')
+    const blocked = (await applyBookingRevision(db, env, 'rev-other-home') as { stay_id: string }).stay_id
+    const blockedStay = await getStay(db, access, blocked)
+    await assert.rejects(moveStay(db, env, access, blocked, { expected_version: blockedStay.version, product_id: annex }), /not free for every night/)
+
+    channex.revise('rev-other-home-cancel', { ...booking, id: 'bk-blocked', code: 'HMBLOCKED', status: 'cancelled', arrival: '2027-03-12', departure: '2027-03-15' }, '2026-10-18T01:00:00Z')
+    await applyBookingRevision(db, env, 'rev-other-home-cancel')
+    // Moving back to the booked listing undoes it: the listing is theirs again and the job is called off.
+    // The guest is told how to get in again, so the listing needs its instructions too.
+    await db.prepare('UPDATE product_stay_configs SET check_in_instructions = ? WHERE product_id = ?').bind('Door code 5678', productId).run()
+    const current = await getStay(db, access, stayId)
+    const undone = await moveStay(db, env, access, stayId, { expected_version: current.version, product_id: productId })
+    assert.deepEqual([undone.product_id, undone.booked_product_id], [productId, null])
+    assert.deepEqual((await claims()).map(row => (row as { product_id: string }).product_id), Array(4).fill(productId))
+    assert.equal((await db.prepare('SELECT status FROM tasks WHERE dedupe_key = ?').bind(`stay-ready:${stayId}:${annex}`).first<{ status: string }>())!.status, 'cancelled')
+
+    // A stay booked directly has no listing to go back to: its new home still gets the job.
+    const direct = await createStay(db, env, access, { product_id: productId, idempotency_key: 'direct-move', check_in_date: '2027-06-01', check_out_date: '2027-06-03', adults: 1, guest_name: 'Direct Guest', total_minor: 10_000 })
+    await moveStay(db, env, access, direct.id, { expected_version: direct.version, product_id: annex })
+    assert.equal((await db.prepare('SELECT status FROM tasks WHERE dedupe_key = ?').bind(`stay-ready:${direct.id}:${annex}`).first<{ status: string }>())?.status, 'open')
   } finally {
     globalThis.fetch = realFetch
     await runtime.dispose()

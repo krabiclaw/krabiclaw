@@ -60,9 +60,9 @@ async function boot() {
       await db.prepare("INSERT INTO product_variants (id, organization_id, product_id, name, created_by, updated_by) VALUES (?, ?, ?, 'Seat', ?, ?)").bind(`${id}-seat`, ORG, id, OWNER, OWNER).run()
     }
     await db.prepare("INSERT INTO product_locations (organization_id, product_id, location_id, active, published, created_by, updated_by) VALUES (?, 'class', 'brooklyn', 1, 1, ?, ?)").bind(ORG, OWNER, OWNER).run()
-    await db.prepare("INSERT INTO product_booking_configs (product_id, organization_id, duration_minutes, default_capacity, scheduling_mode, created_by, updated_by) VALUES ('class', ?, 120, 12, 'legacy', ?, ?)").bind(ORG, OWNER, OWNER).run()
-    await db.prepare(`INSERT INTO member_scheduling (member_id, organization_id, timezone, weekly_json, time_off_json, windows_json, windows_until, public_name, public_approved, calendar_revision, updated_at, updated_by)
-      VALUES (?, ?, ?, '[]', '[]', '[]', '2027-01-01T00:00:00.000Z', 'Dana Brooks, Esq.', 1, 'r1', ?, ?)`).bind(`m-${OWNER}`, ORG, ZONE, NOW, OWNER).run()
+    await db.prepare("INSERT INTO product_booking_configs (product_id, organization_id, duration_minutes, default_capacity, scheduling_mode, created_by, updated_by) VALUES ('class', ?, 120, 12, 'business', ?, ?)").bind(ORG, OWNER, OWNER).run()
+    await db.prepare(`INSERT INTO member_scheduling (member_id, organization_id, timezone, weekly_json, time_off_json, public_name, public_approved, updated_at, updated_by)
+      VALUES (?, ?, ?, '[]', '[]', 'Dana Brooks, Esq.', 1, ?, ?)`).bind(`m-${OWNER}`, ORG, ZONE, NOW, OWNER).run()
     await db.prepare("INSERT INTO product_booking_configs (product_id, organization_id, duration_minutes, default_capacity, scheduling_mode, assigned_member_id, held_online, created_by, updated_by) VALUES ('family', ?, 60, 1, 'provider', ?, 1, ?, ?)").bind(ORG, `m-${OWNER}`, OWNER, OWNER).run()
     // New York is five hours behind UTC in November.
     const session = (id: string, product: string, day: string, hour: number, member: string | null = null) => {

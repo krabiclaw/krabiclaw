@@ -43,8 +43,7 @@ persisted intent rows without an in-memory cursor.
 mapping. Its subject is `(organization_id, integration_revision, booking_kind,
 operational_id)`; `operational_id` means `bookings.id` or `reservations.id`.
 A partial unique index permits one live intent per subject while retaining
-deleted provider identities as history. `request_id` is the thread identity, never the operational Booking ID (including
-legacy public responses named `booking_id`). Foundation reschedules keep the
+deleted provider identities as history. `request_id` is the thread identity, never the operational Booking ID. Foundation reschedules keep the
 operational ID and therefore update the same mapped Google event.
 
 The worker preallocates a Google-compatible event ID before provider I/O. A
@@ -306,11 +305,11 @@ deleted its mapped event. Disconnect deleted all 13 managed identities while
 preserving an independently created event.
 
 Member free/busy reads returned that independent event's exact UTC interval.
-Google rejected the original single 94-day query as too long. The canonical read
-now uses contiguous 30-day requests, retaining the full 94-day horizon and
-committing coverage only after every window succeeds. A rejected final window
-retains the last complete cache and exposes Google's reason; availability fails
-closed. Deleting the test event and rechecking returned no busy intervals. Both
+Google rejected the original single 94-day query as too long, so a read uses
+contiguous 30-day requests across the span it needs. Nothing Google answers is
+stored: availability asks Google for the span of the sessions being read, and a
+window Google refuses fails that read with Google's status. Deleting the test event and
+rechecking returned no busy intervals. Both
 domain connections were disconnected, test events removed, and the member's
 test hours cleared. The Google linked account and existing grants were retained.
 

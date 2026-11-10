@@ -19,8 +19,11 @@ operator, and historical booked assignments are not backfilled or rewritten.
 
 ## Shared interfaces across the four feature PRs
 
-- Operational identity: `bookings.id`. Public `booking_id` remains `requests.id`;
-  `operational_booking_id` and `request_id` make both identities explicit.
+- Identities: a booking is two records. `request_id` is `requests.id`, the guest
+  thread (conversation, guest snapshot, cancellation link); `operational_booking_id`
+  is `bookings.id`, the seat on a session. Every created-booking response names
+  both; a booking that requires payment answers with its checkout instead, and
+  the two ids exist once the payment captures. Neither is called `booking_id`.
 - Config: `ProductBookingConfig` in `server/utils/availability.ts` and
   `product_booking_configs` in `server/db/schema.ts`. `confirmation_mode` is
   instant/review, default instant. `online_timezone` explicitly configures online
@@ -41,9 +44,9 @@ operator, and historical booked assignments are not backfilled or rewritten.
   these same capacity/exclusion predicates; browser redirects are not authority.
   Review rejection returns captured principal through Payments, independently of
   booking status. No fake capture or unpaid required-payment bypass is permitted.
-- Durable effects: existing `activity_entries` record committed lifecycle changes;
-  downstream Calendar/Payments should use operational Booking ID and dedupe identity
-  after commit. Provider failures never roll back a committed appointment.
+- Recorded effects: existing `activity_entries` record committed lifecycle changes;
+  downstream Calendar/Payments read the operational Booking ID after commit. A
+  provider failure never rolls back a committed appointment.
 - Identity: guest Better Auth `user_id` and guest contact snapshot belong to the
   booking/thread. Operator actor identity belongs to activity entries, never the
   guest. MCP (#1202) calls canonical domain operations; Calendar (#1203) projects
@@ -89,14 +92,15 @@ hold during conversion. Do not add another overlap policy.
 `env`, optional `body`, `deliveryId`, and `idempotencyKey` (required for mutations).
 `reject` is a distinct pending-only merchant transition with `host_rejected`;
 ordinary `cancel` remains distinct. Payments extends the existing mutation batch
-with refund permission and a full-principal refund intent, followed by durable
-provider retry. Foundation has no dependency on finance tables or provider state.
+with refund permission and a full-principal refund intent, then asks Stripe for
+the refund once. Foundation has no dependency on finance tables or provider state.
 
 Lifecycle activity events include `booking.created`, `booking.confirm`,
 `booking.reject`, `booking.cancel` and accepted change operations. Payloads carry
-`operational_booking_id` and `request_id`; downstream consumers dedupe the durable
-entry identity and read the canonical Booking after commit. Dashboard detail
-retains its legacy request `id` and exposes `operationalBookingId` separately.
+`operational_booking_id` and `request_id`; downstream consumers read the canonical
+Booking after commit. Dashboard detail is addressed by its thread `id` (the request
+ID in its route) and exposes `operationalBookingId` for operations on the Booking
+itself.
 
 ## Local proof and completed review
 
@@ -184,7 +188,7 @@ Provider integration must use Better Auth organization membership as identity,
 explicit Product eligibility and individual recurring hours. Automatically allocate
 an eligible available member in the same atomic boundary as pending/confirmed
 capacity (and future checkout holds), preserve operational Booking ID on moves,
-and expose the actual assigned member to operator/guest projections and durable
+and expose the actual assigned member to operator/guest projections and
 Calendar/Payments events. Removing eligibility must preserve booked commitments.
 Do not reinterpret a tenant calendar_group as a provider ID or silently remove its
 existing overlap protection. Payments and Calendar migrations/interfaces are being
@@ -214,7 +218,7 @@ inherit the source binding. `set_consultation_mode` configures only the existing
 site mode through the CMS writer; MCP's normal mutation path awaits cache purge.
 Booking MCP operations share the public allocator, guest inbox transitions,
 notification receipts and change proposals. Creation requires a numeric price,
-uses durable caller idempotency and records operator provenance independently
+takes the caller's idempotency key and records operator provenance independently
 of guest identity. Guest acknowledgement is an explicit choice; owner alerts
 and audit history remain mandatory. Booking writes are annotated as open-world
 because they can email guests. Tool names and descriptions retain staging's

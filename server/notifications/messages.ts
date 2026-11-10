@@ -46,6 +46,9 @@ export interface NotificationQuote {
   photos: Array<{ imageUrl: string; alt: string }>
 }
 
+/** Earlier messages of a conversation, shown quietly under the new one: who wrote, and what. */
+export type NotificationHistory = Array<{ author: string; text: string }>
+
 export interface NotificationAction {
   url: string
   label: string
@@ -82,6 +85,8 @@ export interface NotificationMessage {
    * notification.
    */
   quote?: NotificationQuote
+  /** The conversation's last messages before the quoted one, oldest first, as context. Email only. */
+  history?: NotificationHistory
   sections?: NotificationSection[]
   primaryAction?: NotificationAction
   secondaryAction?: NotificationAction

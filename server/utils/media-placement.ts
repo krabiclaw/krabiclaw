@@ -242,6 +242,7 @@ export async function attachMediaPlacement(db: DbClient, input: {
   })
   if (!asset) throw new HTTPError({ statusCode: 400, statusMessage: 'asset_id is required' })
   const current = await canonicalPlacementState(db, input)
+  // Already attached: a retry after the card failed to render repairs the card.
   if (current.asset_ids.includes(input.assetId)) {
     await refreshSocialCardForPlacement(db, input)
     return canonicalPlacementState(db, input)

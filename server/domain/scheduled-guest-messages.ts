@@ -55,7 +55,7 @@ function validTimestamp(value: string, field: string): void {
   if (!isValidInstant(value) || new Date(value).toISOString() !== value) messagingError(500, 'INVALID_MESSAGING_DATA', `The stored ${field} timestamp is invalid`, field)
 }
 
-/** Only pending plans change. A completed or uncertain send can never be recreated. */
+/** Only pending plans change. A completed or attempted send can never be recreated. */
 async function plan(db: DbClient, template: MessageTemplateRow, stay: PlanningStay, now: string): Promise<void> {
   const existing = await queryFirst<ScheduledGuestMessageRow>(db, 'SELECT * FROM scheduled_guest_messages WHERE template_id = ? AND stay_id = ?', [template.id, stay.id])
   if (existing && existing.status !== 'pending') return
@@ -241,12 +241,7 @@ function sendFailure(outcome: Exclude<OperationOutcome, { ok: true }>): SendFail
     case 'missing_idempotency_key': return { status: 'failed', reason: 'The scheduled send had no idempotency key.', error_code: 'MISSING_IDEMPOTENCY_KEY', error_field: 'idempotencyKey' }
     case 'invalid_photo': return { status: 'failed', reason: outcome.message, error_code: 'INVALID_PHOTO', error_field: 'photos' }
     case 'invalid_transition': return { status: 'needs_review', reason: outcome.message, error_code: 'IDEMPOTENCY_CONFLICT', error_field: 'idempotencyKey' }
-    case 'delivery_failed': return {
-      // Only a refused delivery is a definite failure; an uncertain or
-      // unreviewed attempt is never resent automatically.
-      status: outcome.code === 'DELIVERY_FAILED' || outcome.code === 'CHANNEL_REPLY_FAILED' ? 'failed' : 'needs_review',
-      reason: outcome.message, error_code: outcome.code, error_field: outcome.field,
-    }
+    case 'delivery_failed': return { status: 'failed', reason: outcome.message, error_code: outcome.code, error_field: outcome.field }
   }
 }
 

@@ -315,7 +315,7 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
       default_capacity: row.default_capacity === null ? null : Number(row.default_capacity),
       confirmation_mode: row.confirmation_mode as 'instant' | 'review', online_payment_required: Number(row.online_payment_required) === 1,
       held_online: Number(row.held_online) === 1,
-      scheduling_mode: row.scheduling_mode as 'legacy' | 'provider', assigned_member_id: row.assigned_member_id === null ? null : String(row.assigned_member_id),
+      scheduling_mode: row.scheduling_mode as 'business' | 'provider', assigned_member_id: row.assigned_member_id === null ? null : String(row.assigned_member_id),
       assigned_team_id: row.assigned_team_id === null ? null : String(row.assigned_team_id),
       ...storedQuestions(row.questions),
     }
@@ -429,18 +429,21 @@ export async function listProducts(db: DbClient, organizationId: string): Promis
 /** Public experiences use the same readiness check as publication, including sold-out sessions. */
 async function publicProductWindow(db: DbClient, organizationId: string, products: Product[], window?: { limit: number; offset: number }, env?: CloudflareEnv, sharedPaymentSetup?: () => ReturnType<typeof readStripeCheckoutSetup>, bookableOnly = false): Promise<Product[]> {
   let setup: ReturnType<typeof readStripeCheckoutSetup> | undefined
-  const paymentSetup = sharedPaymentSetup ?? (() => {
-    if (!env) throw new Error('The organization environment is required to assess paid booking readiness')
-    return setup ??= readStripeCheckoutSetup(db, organizationId, env)
-  })
+  const requireEnv = () => {
+    if (!env) throw new Error('The organization environment is required to assess booking readiness')
+    return env
+  }
+  const paymentSetup = sharedPaymentSetup ?? (() => setup ??= readStripeCheckoutSetup(db, organizationId, requireEnv()))
   // Readiness needs the currency and the scheduled sessions; a catalog of N
   // products read both N times. They are read once here and handed down.
   const needsReadiness = products.filter(product => bookableOnly ? Boolean(product.booking || product.order_url) || product.kind === 'stay' : product.kind === 'experience' || product.kind === 'stay' || Boolean(product.booking))
+  // Only experiences and services read sessions; a stay's readiness and a linked offering's never do.
+  const sessionBacked = needsReadiness.filter(product => !product.order_url && product.kind !== 'stay')
   const { listSessions } = await import('~/server/utils/availability')
   const [activeLocationIds, currency, allSessions] = await Promise.all([
     bookableOnly ? queryAll<{ id: string }>(db, "SELECT id FROM business_locations WHERE organization_id = ? AND status = 'active'", [organizationId]).then(rows => new Set(rows.map(location => location.id))) : undefined,
     needsReadiness.some(product => !product.order_url) ? organizationDefaultCurrency(db, organizationId) : undefined,
-    needsReadiness.some(product => !product.order_url) ? listSessions(db, { organizationId, fromInstant: new Date().toISOString(), toInstant: new Date(Date.now() + 400 * 86_400_000).toISOString() }) : [],
+    sessionBacked.length ? listSessions(db, { env: requireEnv(), organizationId, productIds: sessionBacked.map(product => product.id), fromInstant: new Date().toISOString(), toInstant: new Date(Date.now() + 400 * 86_400_000).toISOString() }) : [],
   ])
   const sessionsByProduct = new Map<string, SessionAvailability[]>()
   for (const session of allSessions) {
@@ -1108,6 +1111,17 @@ function productWrites(
         JSON.stringify(planned.stay.amenity_answers), planned.stay.cancellation_policy, planned.stay.long_term_cancellation_policy,
         planned.stay.assigned_member_id, planned.stay.assigned_team_id, JSON.stringify(planned.stay.questions), now, now, actor.actorId, actor.actorId],
     })
+    if (upsert && (options.stayFields === undefined || options.stayFields.includes('assigned_member_id') || options.stayFields.includes('assigned_team_id'))) {
+      // The home's open cleaning jobs are its assignee's: a new assignee takes them over. A save that
+      // restates the same assignee leaves a job's own assignment alone, so this runs before the home is written.
+      writes.splice(writes.length - 1, 0, {
+        query: `UPDATE tasks SET assigned_member_id = ?, assigned_team_id = ?, version = version + 1, updated_at = ?
+          WHERE organization_id = ? AND product_id = ? AND status = 'open' AND kind IN ('turnover', 'stay_ready') AND (assigned_member_id IS NOT ? OR assigned_team_id IS NOT ?)
+            AND EXISTS (SELECT 1 FROM product_stay_configs c WHERE c.organization_id = ? AND c.product_id = ? AND (c.assigned_member_id IS NOT ? OR c.assigned_team_id IS NOT ?))`,
+        params: [planned.stay.assigned_member_id, planned.stay.assigned_team_id, now, organizationId, planned.id, planned.stay.assigned_member_id, planned.stay.assigned_team_id,
+          organizationId, planned.id, planned.stay.assigned_member_id, planned.stay.assigned_team_id],
+      })
+    }
     if (upsert && (options.stayFields === undefined || options.stayFields.includes('amenities') || options.stayFields.includes('amenity_answers'))) {
       // A removed listing fact cannot retain room references. Invalidate every
       // affected room draft before deleting the references in this same batch.
@@ -2047,6 +2061,8 @@ export async function deleteProduct(db: DbClient, input: {
     ...pages.flatMap(page => page.queries),
     ...resourceLocalizationDeletionQueries('product', { query: 'SELECT ?', params: [input.productId] }),
     ...invalidations,
+    // Its pictures go with it; the assets stay in the library.
+    buildDeleteOwnerPlacementsQuery({ ownerType: 'product', ownerId: input.productId, organizationId: input.organizationId }),
     { query: 'DELETE FROM products WHERE organization_id = ? AND id = ?', params: [input.organizationId, input.productId] },
   ], { operation: 'Delete product', action: 'delete it', stay: product.kind === 'stay' }).catch((error: unknown) => {
     if (/NOT NULL constraint failed: products\.updated_at/.test(error instanceof Error ? error.message : String(error))) conflict('This product received a booking, stay, guest conversation, schedule or checkout while you were deleting it. Turn it off instead of deleting it.')
@@ -2092,9 +2108,10 @@ export async function productBookingReadiness(db: DbClient, organizationId: stri
   if (product.order_url) return { ready: missing.length === 0, missing }
   if (!product.booking) missing.push('booking')
   else if (!product.booking.duration_minutes) missing.push('booking.duration_minutes')
+  if (!options.env) throw new Error('The organization environment is required to assess booking readiness')
   const currency = options.currency ?? await organizationDefaultCurrency(db, organizationId)
   const { listSessions, sessionAllocationPredicate } = await import('~/server/utils/availability')
-  const sessions = (options.sessions ?? await listSessions(db, { organizationId, productId: product.id, fromInstant: new Date().toISOString(), toInstant: new Date(Date.now() + 400 * 86_400_000).toISOString() }))
+  const sessions = (options.sessions ?? await listSessions(db, { env: options.env, organizationId, productId: product.id, fromInstant: new Date().toISOString(), toInstant: new Date(Date.now() + 400 * 86_400_000).toISOString() }))
     .filter(session => session.location_id === null
       ? options.locationId === undefined && Boolean(product.booking?.held_online)
       : locations.some(location => location.location_id === session.location_id && location.published && (!requireActive || location.active)))
@@ -2122,7 +2139,7 @@ export async function productBookingReadiness(db: DbClient, organizationId: stri
     if (!candidate) missing.push('booking.schedule')
     return { ready: missing.length === 0, missing }
   }
-  const allocation = candidate ? await sessionAllocationPredicate(db, { organizationId, productId: product.id, sessionId: candidate.id, partySize: 0, now: new Date().toISOString(), requireActive: Boolean(requireActive) }) : undefined
+  const allocation = candidate ? await sessionAllocationPredicate(db, { env: options.env, organizationId, productId: product.id, sessionId: candidate.id, partySize: 0, now: new Date().toISOString(), requireActive: Boolean(requireActive) }) : undefined
   if (allocation) {
     allocation.query = `(${allocation.query}) AND EXISTS (SELECT 1 FROM organization WHERE id=? AND default_currency=?)
       AND EXISTS (SELECT 1 FROM product_booking_configs WHERE organization_id=? AND product_id=? AND held_online=? AND online_payment_required=?)

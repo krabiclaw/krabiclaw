@@ -9,6 +9,12 @@ reviews:
   poem: false
   review_status: true
   collapse_walkthrough: false
+  # An epoch archives its migrations here unchanged; they were reviewed when written.
+  path_filters:
+    - "!migrations-history/**"
+    # Drizzle writes these snapshots; the schema they describe is reviewed in
+    # server/db/schema.ts and the baseline SQL.
+    - "!migrations/meta/**"
   # Deliberately absent. It blocks the PR until findings are resolved, and an
   # agent cannot dismiss a review after fixing one, so the gate would deadlock
   # on the author it is meant to hold to account.
@@ -71,6 +77,19 @@ reviews:
           to make a failing test pass, unless the diff states which of the spec or
           the application was wrong and why the old premise no longer holds.
   path_instructions:
+    - path: "**"
+      instructions: |
+        Trust the provider. Stripe, Better Auth, Channex, Resend, Meta, Discord,
+        Google and Cloudflare own their own retries, idempotency and delivery.
+        Do not suggest adding claims, leases, in-flight locks, retry ledgers,
+        re-drive jobs, or handling for an "ambiguous" or "uncertain" provider
+        outcome. A failed call fails visibly; that is the whole requirement.
+        Removing such machinery is the desired direction, not a regression.
+
+        Providers are the source of truth for what they own. Do not suggest
+        mirroring provider status locally. Stripe's PaymentIntent owns payment
+        status; its Charge and Refund records own refunds and disputes. This
+        application owns inventory, bookings and fulfillment.
     - path: '**/*'
       instructions: |
         Focus only on genuine bugs, security vulnerabilities, and data integrity issues.

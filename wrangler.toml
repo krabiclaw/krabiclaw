@@ -91,9 +91,9 @@ MCP_DIAGNOSTICS_ENABLED = "true"
 # secret; CI's E2E job gives its local Worker the PREVIEW_SECRET_PREVIEW repo
 # secret (see .github/workflows/ci.yml):
 #   yarn wrangler secret put PREVIEW_SECRET
-# EMAIL_REPLY_SECRET signs reply+<type>-<id>-<token>@reply.<platform-domain> addresses
-# (server/utils/submission-messages.ts) so a customer's inbound reply can be matched back to the
-# right reservation/contact/experience-booking thread without a DB lookup by address alone.
+# EMAIL_REPLY_SECRET signs r<g|m><entry><token>@reply.<platform-domain> addresses
+# (server/utils/reply-address.ts) so an inbound reply can be matched back to the conversation
+# entry its email was about.
 # It must stay stable across deploys because rotating it invalidates reply-to addresses already
 # sent out in guest emails. Staging syncs it from the fixed EMAIL_REPLY_SECRET_STAGING repo
 # secret on every run (see .github/workflows/ci.yml); production is set once manually and not
@@ -107,8 +107,8 @@ MCP_DIAGNOSTICS_ENABLED = "true"
 
 [[d1_databases]]
 binding = "DB"
-database_name = "krabiclaw-production-v25"
-database_id = "9657b8e8-3c5f-43ea-9e97-c8517facf082"
+database_name = "krabiclaw-production-v26"
+database_id = "f9f2f077-46c9-47bb-875f-3f77668e2832"
 migrations_dir = "migrations"
 remote = false
 
@@ -191,8 +191,8 @@ WHATSAPP_DELIVERY_MODE = "provider"
 
 [[env.dev.d1_databases]]
 binding = "DB"
-database_name = "krabiclaw-production-v25"
-database_id = "9657b8e8-3c5f-43ea-9e97-c8517facf082"
+database_name = "krabiclaw-production-v26"
+database_id = "f9f2f077-46c9-47bb-875f-3f77668e2832"
 migrations_dir = "migrations"
 remote = false
 
@@ -268,8 +268,8 @@ E2E_ALLOW_DEV_ROUTES = "true"
 
 [[env.staging.d1_databases]]
 binding = "DB"
-database_name = "krabiclaw-staging-v25"
-database_id = "2d7c538b-76ae-4098-a3bc-d93372ffbad8"
+database_name = "krabiclaw-staging-v26"
+database_id = "041c627b-b0e9-4543-bc06-f88a93f03ac7"
 migrations_dir = "migrations"
 remote = false
 
@@ -345,8 +345,8 @@ WHATSAPP_DELIVERY_MODE = "log_only"
 
 [[env.e2e.d1_databases]]
 binding = "DB"
-database_name = "krabiclaw-production-v25"
-database_id = "9657b8e8-3c5f-43ea-9e97-c8517facf082"
+database_name = "krabiclaw-production-v26"
+database_id = "f9f2f077-46c9-47bb-875f-3f77668e2832"
 migrations_dir = "migrations"
 remote = false
 

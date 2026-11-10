@@ -132,7 +132,7 @@ const ENUM_FILTERS: Record<string, readonly string[]> = {
   value_basis: ['quoted', 'purchase', 'refund'],
   event_name: ['pageview', ...ORGANIZATION_CONVERSION_EVENT_NAMES],
   attribution_basis: ['own_touch', 'inherited', 'session_current', 'checkout', 'none'],
-  ga4_delivery_status: ['sending', 'sent', 'dispatched', 'not_configured', 'disconnected', 'no_consent_context', 'consent_rejected', 'failed'],
+  ga4_delivery_status: ['sent', 'dispatched', 'not_configured', 'disconnected', 'no_consent_context', 'consent_rejected', 'failed'],
 }
 const FILTER_KEYS = new Set([...Object.keys(EVENT_FIELDS), 'path_prefix', 'campaign_prefix', 'outcome_event'])
 export const ANALYTICS_QUERY_DIMENSIONS = Object.keys(EVENT_FIELDS)

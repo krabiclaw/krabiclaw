@@ -3,7 +3,7 @@ import { HTTPError } from 'nitro'
 import { queryFirst } from '~/server/db'
 import { sessionMemberSql } from '~/server/utils/provider-allocation'
 import { listSessions, materializeSessions } from '~/server/utils/availability'
-import { requireSchedulingAccess, refreshMemberBusy, type SchedulingActor } from './member-scheduling'
+import { requireSchedulingAccess, type SchedulingActor } from './member-scheduling'
 import { getGuestRequest } from './requests'
 import { requestBookingChange } from './guest-threads/booking-changes'
 import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
@@ -34,9 +34,8 @@ export async function reassignBookingProvider(actor: SchedulingActor, input: { b
     if (booking.assigned_member_id === input.member_id) throw new HTTPError({ statusCode: 409, message: 'This consultation is already with that attorney' })
     const config = await queryFirst(db, "SELECT 1 FROM product_booking_configs WHERE organization_id=? AND product_id=? AND scheduling_mode='provider'", [actor.organizationId, booking.product_id])
     if (!config) throw new HTTPError({ statusCode: 409, message: 'This consultation is not scheduled with an attorney' })
-    await refreshMemberBusy(db, actor.env, input.member_id, true)
     await materializeSessions(db, { organizationId: actor.organizationId, productId: booking.product_id, actorId: actor.userId, throughDate: addLocalDays(localDateAt(new Date(booking.starts_at), booking.timezone), 1) })
-    const sessions = await listSessions(db, { organizationId: actor.organizationId, productId: booking.product_id, fromInstant: booking.starts_at, toInstant: new Date(Date.parse(booking.starts_at) + 1).toISOString() })
+    const sessions = await listSessions(db, { env: actor.env, organizationId: actor.organizationId, productId: booking.product_id, fromInstant: booking.starts_at, toInstant: new Date(Date.parse(booking.starts_at) + 1).toISOString() })
     const target = sessions.filter(session => session.starts_at === booking.starts_at && session.ends_at === booking.ends_at && session.location_id === booking.location_id && session.assigned_member_id === input.member_id)
     if (target.length !== 1) throw new HTTPError({ statusCode: 409, message: 'That attorney has no available consultation at this time. Choose a published consultation time.' })
     sessionId = target[0]!.id

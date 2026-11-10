@@ -1,6 +1,6 @@
 import { HTTPError } from 'nitro'
 import { organizationTool, type McpToolDefinition } from './shared'
-import { memberSchedulingList, readMemberScheduling, requireSchedulingAccess, writeMemberScheduling, selectBusyCalendars, refreshMemberBusy } from '~/server/domain/member-scheduling'
+import { memberSchedulingList, readMemberScheduling, requireSchedulingAccess, writeMemberScheduling, selectBusyCalendars } from '~/server/domain/member-scheduling'
 import { purgePublicResourceCacheNow } from '~/server/utils/public-resource-cache'
 import { requiredString, NOT_HANDLED, type McpExecutorContext } from './execution'
 const member={member_id:{type:'string',minLength:1,description:'Organization membership ID from get_member_scheduling.members[].id or list_organization_members.members[].id, not the person’s userId. Ordinary members may name only their own membership.'}}
@@ -9,10 +9,9 @@ const nullableString = { type: ['string', 'null'] }
 const scheduling = { type: 'object', properties: {
   member_id: { type: 'string' }, timezone: nullableString, updated_at: { type: 'string' },
   weekly: { type: ['array', 'null'], items: { type: 'object', properties: { weekday: { type: 'integer', minimum: 0, maximum: 6 }, start: { type: 'string' }, end: { type: 'string' } }, required: ['weekday', 'start', 'end'] } }, time_off: { type: ['array', 'null'], items: interval },
-  calendar_account_id: nullableString, calendar_ids: { type: 'array', items: { type: 'string' } }, calendar_status: { type: 'string', enum: ['internal', 'disconnected', 'error', 'stale', 'ready'] },
-  busy_from: nullableString, busy_until: nullableString, busy_checked_at: nullableString, busy_error: nullableString,
+  calendar_account_id: nullableString, calendar_ids: { type: 'array', items: { type: 'string' } }, calendar_status: { type: 'string', enum: ['internal', 'disconnected', 'ready'] },
   calendar_conflict_count: { type: 'integer' }, calendar_conflicts: { type: 'array', items: { type: 'object', properties: { session_id: { type: 'string' }, starts_at: { type: 'string' }, ends_at: { type: 'string' }, booking_count: { type: 'integer', minimum: 1 } }, required: ['session_id', 'starts_at', 'ends_at', 'booking_count'] } },
-}, required: ['member_id', 'timezone', 'updated_at', 'weekly', 'time_off', 'calendar_account_id', 'calendar_ids', 'calendar_status', 'busy_from', 'busy_until', 'busy_checked_at', 'busy_error', 'calendar_conflict_count', 'calendar_conflicts'], additionalProperties: false }
+}, required: ['member_id', 'timezone', 'updated_at', 'weekly', 'time_off', 'calendar_account_id', 'calendar_ids', 'calendar_status', 'calendar_conflict_count', 'calendar_conflicts'], additionalProperties: false }
 const schedulingMutation = { type: 'object', properties: Object.fromEntries(Object.entries(scheduling.properties).filter(([key]) => ['member_id', 'updated_at', 'timezone', 'weekly', 'time_off'].includes(key))), required: ['member_id', 'updated_at', 'timezone', 'weekly', 'time_off'], additionalProperties: false }
 const schedulingMutationResult = { type: 'object', properties: { scheduling: schedulingMutation }, required: ['scheduling'], additionalProperties: false }
 const schedulingListResult = { type: 'object', properties: { scheduling: { ...scheduling, type: ['object', 'null'] }, members: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, name: { type: 'string' }, image: nullableString, self: { type: 'boolean' }, scheduling: { ...scheduling, type: ['object', 'null'] } }, required: ['id', 'name', 'image', 'self', 'scheduling'] } } }, oneOf: [{ required: ['scheduling'] }, { required: ['members'] }], additionalProperties: false }
@@ -42,15 +41,13 @@ export async function handleProvidersTools(ctx:McpExecutorContext):Promise<unkno
  await requireSchedulingAccess(actor,memberId)
  let saved
  if(toolName==='get_member_scheduling' || toolName==='get_member_public_profile') {
-  saved=await readMemberScheduling(organization.db,actor.organizationId,memberId)
+  saved=await readMemberScheduling(organization.db,actor.env,actor.organizationId,memberId)
   return toolName==='get_member_scheduling'?{scheduling:schedulingRead(saved)}:{profile:profileRead(saved)}
  }
  else if(toolName==='set_member_scheduling' || toolName==='update_member_public_profile') {const input={...args};delete input.member_id;saved=await writeMemberScheduling(actor,memberId,input as unknown as Parameters<typeof writeMemberScheduling>[2]);await purgePublicResourceCacheNow(actor.env,actor.organizationId)}
  else if(toolName==='set_member_busy_calendars') {
   await selectBusyCalendars(actor,memberId,args as unknown as Parameters<typeof selectBusyCalendars>[2])
-  const refreshed=await refreshMemberBusy(organization.db,actor.env,memberId,true)
-  if(refreshed?.error)throw new HTTPError({statusCode:502,message:`Calendar selection was saved, but its availability check failed: ${refreshed.error}`,data:{code:'MEMBER_CALENDAR_REFRESH_FAILED',committed:true}})
-  saved=await readMemberScheduling(organization.db,actor.organizationId,memberId)
+  saved=await readMemberScheduling(organization.db,actor.env,actor.organizationId,memberId)
  } else return NOT_HANDLED
  if(!saved)throw new HTTPError({statusCode:404,message:'Member scheduling not found',data:{code:'MEMBER_SCHEDULING_NOT_FOUND'}})
  if(toolName==='update_member_public_profile')return {profile:profileRead(saved)}

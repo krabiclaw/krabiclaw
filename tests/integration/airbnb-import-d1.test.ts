@@ -654,7 +654,6 @@ test('a connected home can resend its full calendar without tearing down its map
     const mapping = await db.prepare('SELECT property_id, room_type_id, rate_plan_id, channel_id, enabled, import_stage FROM product_channel_mappings WHERE product_id = ?').bind(productId).first()
     const channel = structuredClone(channex.channel)
     const messages = channex.messagesProperty
-    const sent = await db.prepare('SELECT date, state, sent_json FROM channel_night_pushes WHERE product_id = ? ORDER BY date').bind(productId).all().then(result => result.results)
     const requests: Array<{ path: string; values: FakeBody['values'] }> = []
     let during: (() => Promise<void>) | undefined
     let limited = false
@@ -668,13 +667,6 @@ test('a connected home can resend its full calendar without tearing down its map
         if (limited) return Response.json({ errors: { message: 'Slow down' } }, { status: 429 })
       }
       return channex.fetch(input, init)
-    }
-    // A real night save owns the delivery lease while its provider call is in flight. Full sync refuses before resetting anything.
-    during = async () => {
-      const busy = await call()
-      assert.equal(busy.status, 409)
-      assert.deepEqual(busy.body.data, { code: 'CHANNEL_DELIVERY_BUSY' })
-      assert.deepEqual(await db.prepare('SELECT date, sent_json FROM channel_night_pushes WHERE product_id = ? ORDER BY date').bind(productId).all().then(result => result.results), sent.map(({ date, sent_json }) => ({ date, sent_json })))
     }
     assert.deepEqual((await setStayNights(db, env, manager, { product_id: productId, from: addDays(today(), 20), to: addDays(today(), 21), price_minor: 24500 })).channel_push, { state: 'pushed', detail: null })
     requests.length = 0
@@ -696,45 +688,41 @@ test('a connected home can resend its full calendar without tearing down its map
     assert.deepEqual(channex.channel, channel)
     assert.equal(channex.messagesProperty, messages)
     assert.deepEqual(await db.prepare('SELECT operation_id, pending_step, status FROM channex_connections').first(), { operation_id: null, pending_step: null, status: 'connected' })
-    // A provider pause belongs to the property. Recovery waits for it and retains the failed night's attempt count.
+    // A call Channex did not confirm leaves the night pending with Channex's answer; a full sync sends the whole calendar, this night with it.
     limited = true
     assert.equal((await setStayNights(db, env, manager, { product_id: productId, from: addDays(today(), 21), to: addDays(today(), 22), price_minor: 25500 })).channel_push?.state, 'pending')
-    const pause = await db.prepare('SELECT retry_at, detail, attempts FROM channel_night_pushes WHERE product_id = ? AND date = ?').bind(productId, addDays(today(), 21)).first<{ retry_at: string; detail: string; attempts: number }>()
-    assert.equal(pause!.attempts, 1)
+    const pause = await db.prepare('SELECT detail FROM channel_night_pushes WHERE product_id = ? AND date = ?').bind(productId, addDays(today(), 21)).first<{ detail: string }>()
+    assert.match(pause!.detail, /^Channex did not confirm the restrictions update for .*: .*429/)
     limited = false
     requests.length = 0
     const pausedStart = channex.seen.length
-    assert.deepEqual(await call(), { status: 200, body: { product_id: productId, channel_push: { state: 'pending', detail: pause!.detail } } })
-    assert.deepEqual(requests, [])
-    assert.deepEqual(channex.seen.slice(pausedStart), [{ method: 'GET', path: '/channels/chan-1' }, { method: 'GET', path: '/properties/prop-1' }, { method: 'GET', path: '/channels/chan-1/action/listing_details' }, { method: 'GET', path: `/rate_plans/${channex.ratePlan}` }])
-    assert.deepEqual(await db.prepare('SELECT state, retry_at, COUNT(*) AS nights FROM channel_night_pushes WHERE product_id = ? GROUP BY state, retry_at').bind(productId).all().then(result => result.results), [{ state: 'pending', retry_at: pause!.retry_at, nights: 500 }])
-    assert.equal(await db.prepare('SELECT attempts FROM channel_night_pushes WHERE product_id = ? AND date = ?').bind(productId, addDays(today(), 21)).first('attempts'), 1)
-    assert.deepEqual((await readStayCalendar(db, manager, { productId, from: addDays(today(), 21), to: addDays(today(), 22) })).nights.map(night => [night.date, night.price_minor, night.channel]),
-      [[addDays(today(), 21), 25500, { state: 'pending', detail: pause!.detail }]])
-    // The existing delivery task completes the queued full sync, without another manual request or any mapping operation.
-    await db.prepare("UPDATE channel_night_pushes SET retry_at = '2000-01-01T00:00:00.000Z' WHERE product_id = ?").bind(productId).run()
-    assert.deepEqual(await deliverPendingChannelNights(db, env), { homes: 1 })
+    assert.deepEqual(await call(), { status: 200, body: { product_id: productId, channel_push: { state: 'pushed', detail: null } } })
     assertFull(pausedStart)
     assert.equal(channex.restrictions[addDays(today(), 21)]!.rate, '255.00')
     assert.deepEqual(await db.prepare('SELECT state, COUNT(*) AS nights FROM channel_night_pushes WHERE product_id = ? GROUP BY state').bind(productId).all().then(result => result.results), [{ state: 'pushed', nights: 500 }])
     assert.deepEqual((await readStayCalendar(db, manager, { productId, from: addDays(today(), 20), to: addDays(today(), 22) })).nights.map(night => [night.date, night.price_minor, night.channel]),
       [[addDays(today(), 20), 24500, { state: 'pushed', detail: null }], [addDays(today(), 21), 25500, { state: 'pushed', detail: null }]])
-    assert.deepEqual(await db.prepare("SELECT state, json_extract(sent_json, '$.rate') AS rate, attempts, retry_at FROM channel_night_pushes WHERE product_id = ? AND date = ?").bind(productId, addDays(today(), 21)).first(),
-      { state: 'pushed', rate: '255.00', attempts: 0, retry_at: null })
+    assert.deepEqual(await db.prepare("SELECT state, json_extract(sent_json, '$.rate') AS rate FROM channel_night_pushes WHERE product_id = ? AND date = ?").bind(productId, addDays(today(), 21)).first(),
+      { state: 'pushed', rate: '255.00' })
     assert.deepEqual(channex.channel, channel)
     assert.equal(channex.messagesProperty, messages)
-    // The first full-sync call can outlive its lease. A booking's new delivery must not be overwritten by the old second batch.
+    // A booking during the full sync: the full sync's later availability batch carries the inventory it read before the
+    // booking, so the nights it had in flight stay pending and the next delivery sends only what Channex has not got: the booked nights taken.
     requests.length = 0
     during = async () => {
-      await db.prepare("UPDATE product_channel_mappings SET delivery_lease_until = '2000-01-01T00:00:00.000Z' WHERE product_id = ?").bind(productId).run()
       const booking = await createStay(db, env, manager, { product_id: productId, idempotency_key: 'during-full-sync', check_in_date: addDays(today(), 30), check_out_date: addDays(today(), 32), adults: 2, guest_name: 'Ana', total_minor: 37900 })
       assert.deepEqual(booking.channel_push, { state: 'pushed', detail: null })
       assert.equal(channex.availability[addDays(today(), 30)], 0)
     }
-    assert.deepEqual(await call(), { status: 200, body: { product_id: productId, channel_push: { state: 'pushed', detail: null } } })
-    assert.deepEqual(requests.map(request => request.path), ['/restrictions', '/restrictions', '/availability'])
+    assert.deepEqual(await call(), { status: 200, body: { product_id: productId, channel_push: { state: 'pending', detail: 'This change was saved while a delivery was under way; the next delivery sends it' } } })
+    assert.deepEqual(requests.map(request => request.path), ['/restrictions', '/restrictions', '/availability', '/availability'])
+    assert.deepEqual(await db.prepare("SELECT state, COUNT(*) AS nights FROM channel_night_pushes WHERE product_id = ? GROUP BY state").bind(productId).all().then(result => result.results), [{ state: 'pending', nights: 500 }])
+    requests.length = 0
+    assert.deepEqual(await deliverPendingChannelNights(db, env), { homes: 1 })
+    assert.deepEqual(requests.map(request => [request.path, request.values.map(value => [value.date_from, value.date_to, value.availability])]), [['/availability', [[addDays(today(), 30), addDays(today(), 31), 0]]]])
     assert.equal(channex.availability[addDays(today(), 30)], 0)
     assert.equal(channex.availability[addDays(today(), 31)], 0)
+    assert.deepEqual(await db.prepare("SELECT state, COUNT(*) AS nights FROM channel_night_pushes WHERE product_id = ? GROUP BY state").bind(productId).all().then(result => result.results), [{ state: 'pushed', nights: 500 }])
     await connection.deactivate(productId)
     const stopped = await call()
     assert.equal(stopped.status, 409)
@@ -745,7 +733,7 @@ test('a connected home can resend its full calendar without tearing down its map
   }
 })
 
-test('a live manual full sync retains both locks beyond fifteen minutes and excludes stopping or disconnecting its listing', { timeout: 120_000 }, async (context) => {
+test('a live manual full sync retains the connection lock beyond fifteen minutes and excludes stopping or disconnecting its listing', { timeout: 120_000 }, async (context) => {
   const { runtime, db, env } = await boot()
   const channex = new FakeChannex()
   const realFetch = globalThis.fetch
@@ -768,18 +756,13 @@ test('a live manual full sync retains both locks beyond fifteen minutes and excl
         requests.push({ path: url.pathname.slice('/api/v1'.length), values: (JSON.parse(String(init.body)) as FakeBody).values })
         if (requests.length === 1) {
           const held = await db.prepare('SELECT operation_id, updated_at FROM channex_connections WHERE organization_id = ?').bind(ORG).first<{ operation_id: string; updated_at: string }>()
-          const delivery = await db.prepare('SELECT delivery_lease FROM product_channel_mappings WHERE product_id = ?').bind(productId).first<string>('delivery_lease')
           assert.ok(held!.operation_id)
-          assert.ok(delivery)
           for (let minute = 1; minute <= 16; minute++) {
             context.mock.timers.tick(60_000)
             await context.waitFor(async () => {
               assert.deepEqual(await db.prepare('SELECT operation_id, updated_at FROM channex_connections WHERE organization_id = ?').bind(ORG).first(), {
                 operation_id: held!.operation_id, updated_at: new Date(startedAt + Math.floor(minute / 5) * 300_000).toISOString(),
               })
-              const renewed = await db.prepare('SELECT delivery_lease, delivery_lease_until FROM product_channel_mappings WHERE product_id = ?').bind(productId).first<{ delivery_lease: string; delivery_lease_until: string }>()
-              assert.equal(renewed!.delivery_lease, delivery)
-              assert(Date.parse(renewed!.delivery_lease_until) > Date.now())
             }, { timeout: 10_000 })
           }
           assert(Date.now() - Date.parse(held!.updated_at) > 15 * 60_000)
@@ -800,7 +783,6 @@ test('a live manual full sync retains both locks beyond fifteen minutes and excl
     for (const request of requests) assert.deepEqual(request.values.flatMap(value => Array.from({ length: daysBetween(value.date_from, value.date_to) + 1 }, (_, offset) => addDays(value.date_from, offset))), Array.from({ length: 500 }, (_, offset) => addDays(from, offset)))
     assert.deepEqual(await db.prepare('SELECT state, COUNT(*) AS nights FROM channel_night_pushes WHERE product_id = ? GROUP BY state').bind(productId).all().then(rows => rows.results), [{ state: 'pushed', nights: 500 }])
     assert.deepEqual(await db.prepare('SELECT operation_id, pending_step, status FROM channex_connections WHERE organization_id = ?').bind(ORG).first(), { operation_id: null, pending_step: null, status: 'connected' })
-    assert.deepEqual(await db.prepare('SELECT delivery_lease, delivery_lease_until FROM product_channel_mappings WHERE product_id = ?').bind(productId).first(), { delivery_lease: null, delivery_lease_until: null })
     assert.deepEqual(channex.channel, channel)
     assert.equal(channex.messagesProperty, messages)
   } finally {
@@ -810,7 +792,7 @@ test('a live manual full sync retains both locks beyond fifteen minutes and excl
   }
 })
 
-test('a connection renewal failure during full sync prevents its second ARI call and reports its cause without manufacturing an uncertain connection write', { timeout: 120_000 }, async (context) => {
+test('a connection renewal failure during full sync is reported after the calendar is delivered, without manufacturing an uncertain connection write', { timeout: 120_000 }, async (context) => {
   const { runtime, db, env } = await boot()
   const channex = new FakeChannex()
   const realFetch = globalThis.fetch
@@ -833,10 +815,7 @@ test('a connection renewal failure during full sync prevents its second ARI call
         if (requests.length === 1) {
           for (let minute = 0; minute < 5; minute++) {
             context.mock.timers.tick(60_000)
-            await context.waitFor(async () => {
-              const until = await db.prepare('SELECT delivery_lease_until FROM product_channel_mappings WHERE product_id = ?').bind(productId).first<string>('delivery_lease_until')
-              assert(Date.parse(until!) > Date.now())
-            }, { timeout: 10_000 })
+            await new Promise(resolve => setTimeout(resolve, 10))
           }
         }
       }
@@ -849,10 +828,9 @@ test('a connection renewal failure during full sync prevents its second ARI call
       assert(errorChainForTelemetry(error).some(cause => cause.message.includes('Connection renewal refused')))
       return true
     })
-    assert.deepEqual(requests, ['/restrictions'])
-    assert.deepEqual(await db.prepare('SELECT state, COUNT(*) AS nights FROM channel_night_pushes WHERE product_id = ? GROUP BY state').bind(productId).all().then(rows => rows.results), [{ state: 'pending', nights: 500 }])
+    assert.deepEqual(requests, ['/restrictions', '/availability'])
+    assert.deepEqual(await db.prepare('SELECT state, COUNT(*) AS nights FROM channel_night_pushes WHERE product_id = ? GROUP BY state').bind(productId).all().then(rows => rows.results), [{ state: 'pushed', nights: 500 }])
     assert.deepEqual(await db.prepare('SELECT operation_id, pending_step, status FROM channex_connections WHERE organization_id = ?').bind(ORG).first(), { operation_id: null, pending_step: null, status: 'connected' })
-    assert.deepEqual(await db.prepare('SELECT delivery_lease, delivery_lease_until FROM product_channel_mappings WHERE product_id = ?').bind(productId).first(), { delivery_lease: null, delivery_lease_until: null })
   } finally {
     context.mock.timers.reset()
     globalThis.fetch = realFetch
@@ -901,7 +879,7 @@ test('a renewal failure before a repeatable minimum-stay update cancels the unse
     assert.deepEqual(channex.seen.slice(before).filter(request => request.method !== 'GET'), [])
     assert.deepEqual(channex.properties[0]!.settings, { min_stay_type: 'both' })
     assert.deepEqual(await db.prepare('SELECT operation_id, pending_step, status FROM channex_connections WHERE organization_id = ?').bind(ORG).first(), { operation_id: null, pending_step: null, status: 'connected' })
-    assert.deepEqual(await db.prepare('SELECT delivery_lease, delivery_lease_until, enabled, import_stage FROM product_channel_mappings WHERE product_id = ?').bind(productId).first(), { delivery_lease: null, delivery_lease_until: null, enabled: 0, import_stage: 'inventory' })
+    assert.deepEqual(await db.prepare('SELECT enabled, import_stage FROM product_channel_mappings WHERE product_id = ?').bind(productId).first(), { enabled: 0, import_stage: 'inventory' })
   } finally {
     context.mock.restoreAll()
     context.mock.timers.reset()
@@ -1054,8 +1032,8 @@ test('a sync request is checked against the plan once, then KrabiClaw imports, a
   try {
     await connected(db, env, channex)
     // The owner hosts with a published profile, so the two homes added by hand can be published.
-    await db.prepare(`INSERT INTO member_scheduling (member_id, organization_id, timezone, weekly_json, time_off_json, windows_json, windows_until, public_name, public_bio, public_approved, calendar_revision, updated_at, updated_by)
-      VALUES ('m-owner', ?, ?, '[]', '[]', '[]', '2026-10-15T00:00:00.000Z', 'Owner Host', NULL, 1, 'revision', '2026-10-15T00:00:00.000Z', ?)`).bind(ORG, TZ, OWNER).run()
+    await db.prepare(`INSERT INTO member_scheduling (member_id, organization_id, timezone, weekly_json, time_off_json, public_name, public_bio, public_approved, updated_at, updated_by)
+      VALUES ('m-owner', ?, ?, '[]', '[]', 'Owner Host', NULL, 1, '2026-10-15T00:00:00.000Z', ?)`).bind(ORG, TZ, OWNER).run()
     for (const name of ['Dune Hut', 'Reef Hut']) {
       const made = await createStayHome(env, db, manager, stayHomeInput({ name, timezone: TZ, address: `1 ${name} Rd`, city: 'Moab', country: 'US', check_in_time: '15:00', check_out_time: '11:00', max_guests: 2, min_nights: 1, base_price_minor: 100_00 }), name)
       await updateStayHome(env, db, manager, made.product_id, { assigned_member_id: 'm-owner' })
@@ -1078,7 +1056,7 @@ test('a sync request is checked against the plan once, then KrabiClaw imports, a
     const runCron = () => runAirbnbSyncJobs(env, Date.now() + 60_000)
     // The cron task's run: as many as it takes, each a slice of its own.
     const cron = async () => { for (let run = 0; run < 6; run++) await runAirbnbSyncJobs(env, Date.now() + 60_000) }
-    const job = () => db.prepare('SELECT action, state, product_id, last_error_code, attempts FROM airbnb_sync_jobs WHERE listing_id = ?').bind(LISTING).first<Record<string, unknown>>()
+    const job = () => db.prepare('SELECT action, state, product_id, last_error_code FROM airbnb_sync_jobs WHERE listing_id = ?').bind(LISTING).first<Record<string, unknown>>()
 
     // Airbnb sync is Business: on Basic the request is refused before anything is queued, and nothing reaches Channex.
     await db.prepare("UPDATE subscription SET status = 'canceled' WHERE id = 'sub-boot'").run()
@@ -1096,19 +1074,19 @@ test('a sync request is checked against the plan once, then KrabiClaw imports, a
     const queued = await call('POST', { sync: [{ listing_id: LISTING }] })
     assert.equal(queued.status, 202)
     assert.deepEqual((queued.body.listings as Array<Record<string, unknown>>).map(listing => [listing.listing_id, listing.action, listing.status]), [[LISTING, 'sync', 'queued']])
-    assert.deepEqual(await job(), { action: 'sync', state: 'pending', product_id: null, last_error_code: null, attempts: 0 })
+    assert.deepEqual(await job(), { action: 'sync', state: 'pending', product_id: null, last_error_code: null })
     assert.equal(channex.seen.filter(request => request.method !== 'GET').length, writesBefore, 'HTTP only queues the change')
     await runCron()
-    assert.deepEqual(await job(), { action: 'sync', state: 'failed', product_id: null, last_error_code: 'MISSING_DETAIL', attempts: 1 })
+    assert.deepEqual(await job(), { action: 'sync', state: 'failed', product_id: null, last_error_code: 'MISSING_DETAIL' })
     const failedRow = ((await call('GET')).body.listings as Array<{ status: string; error: { code: string } }>)[0]!
     assert.deepEqual([failedRow.status, failedRow.error.code], ['failed', 'MISSING_DETAIL'])
     assert.equal(await count(db, 'product_channel_mappings'), 0)
 
-    // Airbnb failing behind Channex when the job runs is retried on its own, with its code, rather than failing the listing.
+    // Airbnb failing behind Channex when the job runs fails the listing with Airbnb's answer; asking again runs it again.
     assert.equal((await call('POST', { sync: [{ listing_id: LISTING, details: form.missingDetails }] })).status, 202)
     channex.airbnbDown = true
     await runAirbnbSyncJobs(env, Date.now() + 60_000)
-    assert.deepEqual(await db.prepare('SELECT state, attempts, last_error_code FROM airbnb_sync_jobs WHERE listing_id = ?').bind(LISTING).first(), { state: 'error', attempts: 1, last_error_code: 'AIRBNB_UNAVAILABLE' })
+    assert.deepEqual(await db.prepare('SELECT state, last_error_code FROM airbnb_sync_jobs WHERE listing_id = ?').bind(LISTING).first(), { state: 'failed', last_error_code: 'AIRBNB_UNAVAILABLE' })
     channex.airbnbDown = false
 
     // With the missing contact in the request's details, asked again, the same listing imports, a few photos per step, and goes live.
@@ -1116,13 +1094,13 @@ test('a sync request is checked against the plan once, then KrabiClaw imports, a
     const propertyCreatesBefore = channex.seen.filter(request => request.method === 'POST' && request.path === '/properties').length
     assert.equal((await call('POST', { sync: [{ listing_id: LISTING, details: form.missingDetails }] })).status, 202)
     const queuedId = await db.prepare('SELECT id FROM airbnb_sync_jobs WHERE listing_id = ?').bind(LISTING).first('id')
-    const yielded = { state: 'pending', attempts: 0, lease_token: null, lease_until: null, last_error_code: null }
-    assert.deepEqual(await db.prepare('SELECT state, attempts, lease_token, lease_until, last_error_code FROM airbnb_sync_jobs WHERE listing_id = ?').bind(LISTING).first(), yielded)
+    const yielded = { state: 'pending', last_error_code: null }
+    assert.deepEqual(await db.prepare('SELECT state, last_error_code FROM airbnb_sync_jobs WHERE listing_id = ?').bind(LISTING).first(), yielded)
     assert.equal(await count(db, 'product_channel_mappings'), 0)
     assert.equal(channex.seen.filter(request => request.method === 'POST' && request.path === '/properties').length, propertyCreatesBefore, 'HTTP does not begin the import')
     // A cron invocation inside its 30-second launch reserve does not start this step.
     assert.deepEqual(await runAirbnbSyncJobs(env, Date.now() + 29_000), { stepped: 0, done: 0, failed: 0 })
-    assert.deepEqual(await db.prepare('SELECT state, attempts, lease_token, lease_until, last_error_code FROM airbnb_sync_jobs WHERE listing_id = ?').bind(LISTING).first(), yielded)
+    assert.deepEqual(await db.prepare('SELECT state, last_error_code FROM airbnb_sync_jobs WHERE listing_id = ?').bind(LISTING).first(), yielded)
     assert.equal(channex.seen.filter(request => request.method === 'POST' && request.path === '/properties').length, propertyCreatesBefore)
     // The first provider step consumes the cron's launch window. Its completed
     // stage is retained without an attempt or failure when the cron yields.
@@ -1141,13 +1119,13 @@ test('a sync request is checked against the plan once, then KrabiClaw imports, a
       Date.now = clock
       globalThis.fetch = channex.fetch as typeof fetch
     }
-    assert.deepEqual(await db.prepare('SELECT state, attempts, lease_token, lease_until, last_error_code FROM airbnb_sync_jobs WHERE listing_id = ?').bind(LISTING).first(), yielded)
+    assert.deepEqual(await db.prepare('SELECT state, last_error_code FROM airbnb_sync_jobs WHERE listing_id = ?').bind(LISTING).first(), yielded)
     assert.equal(await db.prepare('SELECT import_stage FROM product_channel_mappings').first('import_stage'), 'property')
     assert.equal(channex.seen.filter(request => request.method === 'POST' && request.path === '/properties').length, propertyCreatesBefore, 'cron yields before launching another provider step')
     await cron()
     assert.equal(await db.prepare('SELECT id FROM airbnb_sync_jobs WHERE listing_id = ?').bind(LISTING).first('id'), queuedId, 'cron resumes the same yielded request generation')
     const done = await job()
-    assert.deepEqual({ ...done, product_id: null }, { action: 'sync', state: 'done', product_id: null, last_error_code: null, attempts: 0 })
+    assert.deepEqual({ ...done, product_id: null }, { action: 'sync', state: 'done', product_id: null, last_error_code: null })
     const productId = done!.product_id as string
     assert.deepEqual(await db.prepare('SELECT import_stage, enabled FROM product_channel_mappings WHERE product_id = ?').bind(productId).first(), { import_stage: 'complete', enabled: 1 })
     assert.deepEqual(((await call('GET')).body.listings as Array<Record<string, unknown>>).map(listing => [listing.product_id, listing.action, listing.status, listing.stage, listing.error]), [[productId, 'sync', 'done', 'complete', null]])
@@ -1161,7 +1139,7 @@ test('a sync request is checked against the plan once, then KrabiClaw imports, a
     assert.equal((await call('POST', { sync: [{ listing_id: LISTING }] })).status, 202)
     const unchangedCalendarStart = channex.seen.length
     await runCron()
-    assert.deepEqual(await job(), { action: 'sync', state: 'done', product_id: productId, last_error_code: null, attempts: 0 })
+    assert.deepEqual(await job(), { action: 'sync', state: 'done', product_id: productId, last_error_code: null })
     assert.equal((await readStayHome(db, manager, productId)).min_nights, 7)
     assert.equal(channex.ratePlans.get(channex.ratePlan)!.min_stay_arrival, 7)
     assert.deepEqual(channex.seen.slice(unchangedCalendarStart).filter(request => request.method === 'POST' && ['/restrictions', '/availability'].includes(request.path)), [], 'a refresh does not replay an already confirmed calendar')
@@ -1176,16 +1154,14 @@ test('a sync request is checked against the plan once, then KrabiClaw imports, a
     assert.equal(queuedNight.channel_push?.state, 'pending')
     assert.equal((await call('POST', { sync: [{ listing_id: LISTING }] })).status, 202)
     assert.deepEqual(await runCron(), { stepped: 1, done: 0, failed: 0 })
-    assert.deepEqual(await job(), { action: 'sync', state: 'pending', product_id: productId, last_error_code: null, attempts: 0 })
+    assert.deepEqual(await job(), { action: 'sync', state: 'pending', product_id: productId, last_error_code: null })
     const waitingRefresh = await new AirbnbConnection(db, env, ORG, OWNER).refreshContent(productId)
     assert.deepEqual(waitingRefresh.channel_push, queuedNight.channel_push)
     assert.equal(await db.prepare('SELECT completed_at FROM airbnb_sync_jobs WHERE listing_id = ?').bind(LISTING).first('completed_at'), null)
     globalThis.fetch = channex.fetch as typeof fetch
-    await db.prepare("UPDATE channel_night_pushes SET retry_at = '2000-01-01T00:00:00.000Z' WHERE product_id = ? AND state = 'pending'").bind(productId).run()
-    await db.prepare("UPDATE airbnb_sync_jobs SET next_attempt_at = '2000-01-01T00:00:00.000Z' WHERE listing_id = ?").bind(LISTING).run()
     const confirmedRefreshStart = channex.seen.length
     assert.deepEqual(await runCron(), { stepped: 1, done: 1, failed: 0 })
-    assert.deepEqual(await job(), { action: 'sync', state: 'done', product_id: productId, last_error_code: null, attempts: 0 })
+    assert.deepEqual(await job(), { action: 'sync', state: 'done', product_id: productId, last_error_code: null })
     assert.deepEqual(channex.seen.slice(confirmedRefreshStart).filter(request => request.method === 'POST' && ['/restrictions', '/availability'].includes(request.path)), [{ method: 'POST', path: '/restrictions' }])
     assert.deepEqual((await readStayCalendar(db, manager, { productId, from: queuedDate, to: addDays(queuedDate, 1) })).nights.map(night => [night.price_minor, night.channel]), [[25000, { state: 'pushed', detail: null }]])
     // An authored canonical change survives the next source refresh and the full sync restores Airbnb to it.
@@ -1193,7 +1169,7 @@ test('a sync request is checked against the plan once, then KrabiClaw imports, a
     channex.availabilityRules.default_min_nights = 11
     assert.equal((await call('POST', { sync: [{ listing_id: LISTING }] })).status, 202)
     await runCron()
-    assert.deepEqual(await job(), { action: 'sync', state: 'done', product_id: productId, last_error_code: null, attempts: 0 })
+    assert.deepEqual(await job(), { action: 'sync', state: 'done', product_id: productId, last_error_code: null })
     const protectedHome = await readStayHome(db, manager, productId)
     assert.deepEqual([protectedHome.min_nights, protectedHome.description, channex.availabilityRules.default_min_nights], [9, 'Host words stay.', 9])
     assert((JSON.parse(String(await db.prepare('SELECT import_content FROM product_channel_mappings WHERE product_id = ?').bind(productId).first('import_content'))) as ImportContentReport).kept_host_edits.includes('min_nights'))
@@ -1202,7 +1178,7 @@ test('a sync request is checked against the plan once, then KrabiClaw imports, a
     assert.equal((await call('POST', { sync: [{ listing_id: LISTING }] })).status, 202)
     const failedRefreshStart = channex.seen.length
     await runCron()
-    assert.deepEqual(await job(), { action: 'sync', state: 'error', product_id: productId, last_error_code: 'INVALID_PROVIDER_RESPONSE', attempts: 1 })
+    assert.deepEqual(await job(), { action: 'sync', state: 'failed', product_id: productId, last_error_code: 'INVALID_PROVIDER_RESPONSE' })
     assert.deepEqual(channex.seen.slice(failedRefreshStart).filter(request => request.method !== 'GET'), [])
     assert.equal((await readStayHome(db, manager, productId)).min_nights, 9)
     channex.availabilityRules.default_min_nights = 9
@@ -1211,11 +1187,11 @@ test('a sync request is checked against the plan once, then KrabiClaw imports, a
     const stopped = await call('POST', { stop: [productId] })
     assert.deepEqual([stopped.status, (stopped.body.listings as Array<Record<string, unknown>>)[0]!.action], [202, 'stop'])
     await runCron()
-    assert.deepEqual(await job(), { action: 'stop', state: 'done', product_id: productId, last_error_code: null, attempts: 0 })
+    assert.deepEqual(await job(), { action: 'stop', state: 'done', product_id: productId, last_error_code: null })
     assert.deepEqual(await db.prepare('SELECT import_stage, enabled FROM product_channel_mappings WHERE product_id = ?').bind(productId).first(), { import_stage: 'draft', enabled: 0 })
     assert.deepEqual([channex.channel.ratePlans, await countActiveHomes(db, ORG)], [[], 2])
     // A home found partway through activation (as one interrupted at `messages`) is carried to complete. A provider
-    // failure on the way is retried on its own: the listing shows its attempts and when the next one runs.
+    // failure on the way fails the listing with Channex's answer; asking again carries on from the same stage.
     const connection = new AirbnbConnection(db, env, ORG, OWNER)
     await connection.activate(productId)
     for (let step = 0; step < 6 && (await connection.advance(productId)).stage !== 'messages'; step++);
@@ -1223,15 +1199,14 @@ test('a sync request is checked against the plan once, then KrabiClaw imports, a
     channex.failMessages = true
     assert.equal((await call('POST', { sync: [{ listing_id: LISTING }] })).status, 202)
     await runCron()
-    assert.deepEqual(await job(), { action: 'sync', state: 'error', product_id: productId, last_error_code: 'CHANNEX_REQUEST_FAILED', attempts: 1 })
-    const retrying = ((await call('GET')).body.listings as Array<Record<string, unknown>>)[0]!
-    assert.deepEqual([retrying.status, retrying.stage, retrying.attempts, typeof retrying.next_attempt_at, (retrying.error as { code: string }).code], ['running', 'messages', 1, 'string', 'CHANNEX_REQUEST_FAILED'])
+    assert.deepEqual(await job(), { action: 'sync', state: 'failed', product_id: productId, last_error_code: 'CHANNEX_REQUEST_FAILED' })
+    const failedAtMessages = ((await call('GET')).body.listings as Array<Record<string, unknown>>)[0]!
+    assert.deepEqual([failedAtMessages.status, failedAtMessages.stage, (failedAtMessages.error as { code: string }).code], ['failed', 'messages', 'CHANNEX_REQUEST_FAILED'])
     channex.failMessages = false
-    await db.prepare("UPDATE airbnb_sync_jobs SET next_attempt_at = '2000-01-01T00:00:00.000Z' WHERE listing_id = ?").bind(LISTING).run()
+    assert.equal((await call('POST', { sync: [{ listing_id: LISTING }] })).status, 202)
     await cron()
-    assert.deepEqual(await job(), { action: 'sync', state: 'done', product_id: productId, last_error_code: null, attempts: 1 })
+    assert.deepEqual(await job(), { action: 'sync', state: 'done', product_id: productId, last_error_code: null })
     assert.deepEqual(await db.prepare('SELECT import_stage, enabled FROM product_channel_mappings WHERE product_id = ?').bind(productId).first(), { import_stage: 'complete', enabled: 1 })
-    assert.equal(((await call('GET')).body.listings as Array<Record<string, unknown>>)[0]!.next_attempt_at, null)
 
     // Growth ends: Stripe deletes the subscription and Better Auth marks it canceled. On Basic, the newest live homes
     // past the one it includes, the Airbnb one among them, go back to drafts: KrabiClaw queues its stop itself, and the task runs it.
@@ -1240,7 +1215,7 @@ test('a sync request is checked against the plan once, then KrabiClaw imports, a
     await returnExtrasToDraftsForPlanEnd(env, db, { type: 'customer.subscription.deleted', data: { object: { id: 'sub-org', customer: 'cus_org', status: 'canceled' } } } as unknown as Stripe.Event)
     assert.deepEqual(await db.prepare('SELECT action, state, requested_by FROM airbnb_sync_jobs WHERE listing_id = ?').bind(LISTING).first(), { action: 'stop', state: 'pending', requested_by: null })
     await runCron()
-    assert.deepEqual(await job(), { action: 'stop', state: 'done', product_id: productId, last_error_code: null, attempts: 0 })
+    assert.deepEqual(await job(), { action: 'stop', state: 'done', product_id: productId, last_error_code: null })
     assert.deepEqual(await db.prepare('SELECT import_stage, enabled FROM product_channel_mappings WHERE product_id = ?').bind(productId).first(), { import_stage: 'draft', enabled: 0 })
     assert.deepEqual([channex.channel.ratePlans, await countActiveHomes(db, ORG)], [[], 1])
 
@@ -1260,14 +1235,14 @@ test('a sync request is checked against the plan once, then KrabiClaw imports, a
     await db.prepare("UPDATE member SET role = 'member' WHERE userId = ? AND organizationId = ?").bind(OWNER, ORG).run()
     const refusedAccessStart = channex.seen.length
     await runCron()
-    assert.deepEqual(await job(), { action: 'sync', state: 'failed', product_id: productId, last_error_code: 'FORBIDDEN', attempts: 1 })
+    assert.deepEqual(await job(), { action: 'sync', state: 'failed', product_id: productId, last_error_code: 'FORBIDDEN' })
     assert.deepEqual(channex.seen.slice(refusedAccessStart), [])
     await db.prepare("UPDATE member SET role = 'owner' WHERE userId = ? AND organizationId = ?").bind(OWNER, ORG).run()
     assert.equal((await call('POST', { sync: [{ listing_id: LISTING }] })).status, 202)
     await db.prepare('DELETE FROM member WHERE userId = ? AND organizationId = ?').bind(OWNER, ORG).run()
     const removedAccessStart = channex.seen.length
     await runCron()
-    assert.deepEqual(await job(), { action: 'sync', state: 'failed', product_id: productId, last_error_code: 'REQUESTER_REMOVED', attempts: 1 })
+    assert.deepEqual(await job(), { action: 'sync', state: 'failed', product_id: productId, last_error_code: 'REQUESTER_REMOVED' })
     assert.deepEqual(channex.seen.slice(removedAccessStart), [])
 
   } finally {
@@ -1293,10 +1268,6 @@ test('a full-plan sync swap stops its old home before activation and reconnects 
     assert.equal(await countActiveHomes(db, ORG), 2)
     const queued = await requestAirbnbSync(env, db, ORG, OWNER, { sync: [{ listing_id: 'listing-99' }], stop: [first.product_id] })
     assert.equal(queued.length, 2)
-    await db.prepare('UPDATE airbnb_sync_jobs SET next_attempt_at = ? WHERE action = ?').bind(new Date(Date.now() + 60_000).toISOString(), 'stop').run()
-    assert.deepEqual(await runAirbnbSyncJobs(env, Date.now() + 1_000, { startReserveMs: 0 }), { stepped: 0, done: 0, failed: 0 })
-    assert.equal((await readStayHome(db, manager, replacement.product_id)).live, false, 'a delayed stop retains the home allowance until it finishes')
-    await db.prepare("UPDATE airbnb_sync_jobs SET next_attempt_at = NULL WHERE action = 'stop'").run()
     const totals = await runAirbnbSyncJobs(env, Date.now() + 60_000)
     assert.equal(totals.done, 2)
     assert.equal(totals.failed, 0)
@@ -1325,7 +1296,7 @@ test('a full-plan sync swap stops its old home before activation and reconnects 
   }
 })
 
-test('slice deadlines cancel provider reads and photo bodies, and uncertain writes stay failed without duplicate mutations', { timeout: 120_000 }, async () => {
+test('slice deadlines cancel provider reads and photo bodies and fail the job with that reason; an unverified write stays held for review', { timeout: 120_000 }, async () => {
   const { runtime, db, env } = await boot()
   const channex = new FakeChannex()
   const realFetch = globalThis.fetch
@@ -1333,7 +1304,7 @@ test('slice deadlines cancel provider reads and photo bodies, and uncertain writ
   try {
     const connection = await connected(db, env, channex)
     const prepared = await connection.prepare(LISTING, form)
-    const job = () => db.prepare('SELECT state, last_error_code, attempts, lease_token, lease_until FROM airbnb_sync_jobs WHERE listing_id = ?').bind(LISTING).first()
+    const job = () => db.prepare('SELECT state, last_error_code FROM airbnb_sync_jobs WHERE listing_id = ?').bind(LISTING).first()
     const stalled = (matches: (url: URL, init: RequestInit) => boolean, body = false) => {
       globalThis.fetch = async (input, init = {}) => {
         const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input : input.url)
@@ -1346,7 +1317,7 @@ test('slice deadlines cancel provider reads and photo bodies, and uncertain writ
     await requestAirbnbSync(env, db, ORG, OWNER, { sync: [{ listing_id: LISTING }] })
     stalled(url => url.pathname === '/api/v1/channels/chan-1')
     assert.equal((await runAirbnbSyncJobs(env, Date.now() + 1_000, { startReserveMs: 0 })).failed, 1)
-    assert.deepEqual(await job(), { state: 'error', last_error_code: 'SYNC_SLICE_ENDED', attempts: 1, lease_token: null, lease_until: null })
+    assert.deepEqual(await job(), { state: 'failed', last_error_code: 'SYNC_SLICE_ENDED' })
     assert.deepEqual(await db.prepare('SELECT status, operation_id, pending_step FROM channex_connections').first(), { status: 'connected', operation_id: null, pending_step: null })
 
     globalThis.fetch = channex.fetch as typeof fetch
@@ -1355,7 +1326,7 @@ test('slice deadlines cancel provider reads and photo bodies, and uncertain writ
     await requestAirbnbSync(env, db, ORG, OWNER, { sync: [{ listing_id: LISTING }] })
     stalled(url => url.origin === CDN, true)
     assert.equal((await runAirbnbSyncJobs(env, Date.now() + 1_000, { startReserveMs: 0 })).failed, 1)
-    assert.deepEqual(await job(), { state: 'error', last_error_code: 'SYNC_SLICE_ENDED', attempts: 1, lease_token: null, lease_until: null })
+    assert.deepEqual(await job(), { state: 'failed', last_error_code: 'SYNC_SLICE_ENDED' })
     assert.equal(await count(db, 'media_assets'), 0)
     assert.deepEqual(await db.prepare('SELECT operation_id, pending_step FROM channex_connections').first(), { operation_id: null, pending_step: null })
 
@@ -1370,7 +1341,7 @@ test('slice deadlines cancel provider reads and photo bodies, and uncertain writ
     stalled((url, init) => { if (url.pathname === '/api/v1/channels/chan-1/mappings' && init.method === 'POST') { sent++; return true } return false })
     // Syncing again sends the calendar ahead first (the stop forgot what Channex had), then maps the listing.
     assert.equal((await runAirbnbSyncJobs(env, Date.now() + 5_000, { startReserveMs: 0 })).failed, 1)
-    assert.deepEqual(await job(), { state: 'failed', last_error_code: 'SYNC_SLICE_ENDED', attempts: 1, lease_token: null, lease_until: null })
+    assert.deepEqual(await job(), { state: 'failed', last_error_code: 'SYNC_SLICE_ENDED' })
     assert.equal(await db.prepare('SELECT status FROM channex_connections').first('status'), 'needs_review')
     assert.equal(await db.prepare('SELECT pending_step FROM channex_connections').first('pending_step'), 'map_airbnb_listing')
     assert.deepEqual(await runAirbnbSyncJobs(env, Date.now() + 1_000, { startReserveMs: 0 }), { stepped: 0, done: 0, failed: 0 })
@@ -1381,7 +1352,7 @@ test('slice deadlines cancel provider reads and photo bodies, and uncertain writ
   }
 })
 
-test('a paid home retains a failed meter report and retries terminal billing before completing', { timeout: 120_000 }, async () => {
+test('a paid home records a failed meter report and reports it again before completing', { timeout: 120_000 }, async () => {
   const { runtime, db, env } = await boot()
   const channex = new FakeChannex()
   const realFetch = globalThis.fetch
@@ -1414,24 +1385,24 @@ test('a paid home retains a failed meter report and retries terminal billing bef
       receipts.push({ event: data.get('event_name')!, customer: data.get('payload[stripe_customer_id]')!, value: data.get('payload[value]')! })
       return new Response(JSON.stringify({ object: 'billing.meter_event', identifier: `meter-${requests}`, event_name: data.get('event_name'), created: Math.floor(Date.now() / 1000), livemode: false }), { status: 200, headers: { 'content-type': 'application/json', 'request-id': `req-${requests}` } })
     }
-    const job = () => db.prepare('SELECT state, last_error_code, attempts, lease_token, lease_until FROM airbnb_sync_jobs').first()
-    const retry = async () => { await db.prepare("UPDATE airbnb_sync_jobs SET next_attempt_at = '2000-01-01T00:00:00.000Z'").run() }
+    const job = () => db.prepare('SELECT state, last_error_code FROM airbnb_sync_jobs').first()
+    const retry = async () => { await requestAirbnbSync(env, db, ORG, OWNER, { sync: [{ listing_id: LISTING }] }) }
     await requestAirbnbSync(env, db, ORG, OWNER, { sync: [{ listing_id: LISTING }] })
     // The slice covers the mapping stage's calendar check and the activation; the stalled meter report ends it.
     assert.equal((await runAirbnbSyncJobs(env, Date.now() + 10_000, { startReserveMs: 0 })).failed, 1)
-    assert.deepEqual(await job(), { state: 'error', last_error_code: 'SYNC_SLICE_ENDED', attempts: 1, lease_token: null, lease_until: null })
+    assert.deepEqual(await job(), { state: 'failed', last_error_code: 'SYNC_SLICE_ENDED' })
     assert.deepEqual(await db.prepare('SELECT import_stage, enabled FROM product_channel_mappings').first(), { import_stage: 'reservations', enabled: 1 })
     assert.equal(requests, 1, 'the SDK does not retry beyond the operation deadline')
     await retry()
     assert.equal((await runAirbnbSyncJobs(env, Date.now() + 10_000, { startReserveMs: 0 })).failed, 1)
-    assert.deepEqual(await job(), { state: 'error', last_error_code: 'SYNC_SLICE_ENDED', attempts: 2, lease_token: null, lease_until: null })
+    assert.deepEqual(await job(), { state: 'failed', last_error_code: 'SYNC_SLICE_ENDED' })
     assert.deepEqual(await db.prepare('SELECT import_stage, enabled FROM product_channel_mappings').first(), { import_stage: 'complete', enabled: 1 })
     assert.equal(requests, 2)
     const providerStart = channex.seen.length
     stalled = false
     await retry()
     assert.equal((await runAirbnbSyncJobs(env, Date.now() + 60_000)).done, 1)
-    assert.deepEqual(await job(), { state: 'done', last_error_code: null, attempts: 2, lease_token: null, lease_until: null })
+    assert.deepEqual(await job(), { state: 'done', last_error_code: null })
     assert.deepEqual(receipts, [{ event: 'krabiclaw_homes', customer: 'cus_paid_host', value: '1' }])
     assert.deepEqual(channex.seen.slice(providerStart).filter(entry => entry.method !== 'GET'), [], 'billing recovery does not repeat confirmed calendar or content writes')
     assert.equal((await readStayHome(db, manager, prepared.product_id)).live, true)
@@ -1440,7 +1411,7 @@ test('a paid home retains a failed meter report and retries terminal billing bef
     refused = true
     await requestAirbnbSync(env, db, ORG, OWNER, { stop: [prepared.product_id] })
     assert.equal((await runAirbnbSyncJobs(env, Date.now() + 60_000)).failed, 1)
-    assert.deepEqual(await job(), { state: 'failed', last_error_code: 'SYNC_STEP_FAILED', attempts: 1, lease_token: null, lease_until: null })
+    assert.deepEqual(await job(), { state: 'failed', last_error_code: 'SYNC_STEP_FAILED' })
     assert.match((await db.prepare('SELECT last_error FROM airbnb_sync_jobs').first<string>('last_error'))!, /changes were saved.*Meter refused/)
     assert.deepEqual(await db.prepare('SELECT import_stage, enabled FROM product_channel_mappings').first(), { import_stage: 'draft', enabled: 0 })
     assert.equal((await readStayHome(db, manager, prepared.product_id)).live, false)
@@ -1451,7 +1422,7 @@ test('a paid home retains a failed meter report and retries terminal billing bef
     refused = false
     await requestAirbnbSync(env, db, ORG, OWNER, { stop: [prepared.product_id] })
     assert.equal((await runAirbnbSyncJobs(env, Date.now() + 60_000)).done, 1)
-    assert.deepEqual(await job(), { state: 'done', last_error_code: null, attempts: 0, lease_token: null, lease_until: null })
+    assert.deepEqual(await job(), { state: 'done', last_error_code: null })
     assert.deepEqual(receipts.slice(1), [{ event: 'krabiclaw_homes', customer: 'cus_paid_host', value: '0' }])
     assert.equal(channex.seen.filter(entry => entry.method !== 'GET').length, stoppedWrites)
   } finally {
@@ -1690,7 +1661,7 @@ test('a failed verification read retains the completed provider write for review
       return channex.fetch(input, init)
     }
     assert.equal((await runAirbnbSyncJobs(env, Date.now() + 60_000)).failed, 1)
-    assert.deepEqual(await db.prepare('SELECT state, last_error_code, lease_token, lease_until FROM airbnb_sync_jobs').first(), { state: 'failed', last_error_code: 'CHANNEX_REQUEST_FAILED', lease_token: null, lease_until: null })
+    assert.deepEqual(await db.prepare('SELECT state, last_error_code FROM airbnb_sync_jobs').first(), { state: 'failed', last_error_code: 'CHANNEX_REQUEST_FAILED' })
     assert.deepEqual(await db.prepare('SELECT status, pending_step FROM channex_connections').first(), { status: 'needs_review', pending_step: 'map_airbnb_listing' })
     assert.equal(channex.channel.ratePlans.length, 1, 'the provider applied the write whose verification failed')
     assert.deepEqual(await runAirbnbSyncJobs(env, Date.now() + 1_000, { startReserveMs: 0 }), { stepped: 0, done: 0, failed: 0 })
@@ -1719,28 +1690,22 @@ test('a full sync Channex took without naming its task is logged as failed and t
       await track(db, channex, productId)
       result = await connection.advance(productId)
     }
-    // The full sync goes through the delivery outbox: an unconfirmed call pauses the property, the nights stay pending, the stage is asked again.
+    // The full sync goes through the delivery outbox: the unconfirmed restrictions call leaves the nights pending with
+    // Channex's answer, the availability call still goes, and the stage is asked again.
     assert.deepEqual(result, { product_id: productId, stage: 'inventory', waiting: true, content: null })
-    assert.deepEqual(await db.prepare("SELECT kind, status, task_id FROM channel_sync_log WHERE direction = 'outbound' AND product_id = ?").bind(productId).all().then(rows => rows.results),
-      [{ kind: 'restrictions', status: 'failed', task_id: null }])
+    assert.deepEqual(await db.prepare("SELECT kind, status, task_id FROM channel_sync_log WHERE direction = 'outbound' AND product_id = ? ORDER BY created_at, rowid").bind(productId).all().then(rows => rows.results),
+      [{ kind: 'restrictions', status: 'failed', task_id: null }, { kind: 'availability', status: 'pushed', task_id: 'task-availability' }])
     const pending = await db.prepare("SELECT state, COUNT(*) AS nights, MIN(detail) AS detail FROM channel_night_pushes WHERE product_id = ? GROUP BY state").bind(productId).all().then(rows => rows.results)
     assert.equal(pending.length, 1)
     assert.partialDeepStrictEqual(pending[0], { state: 'pending', nights: 500 })
-    assert.match(String(pending[0]!.detail), /Channex did not confirm the restrictions update .* Attempt 1; sending again at/)
+    assert.match(String(pending[0]!.detail), /^Channex did not confirm the restrictions update for .*: Channex reported success for an ARI call without its task/)
     assert.deepEqual(await db.prepare('SELECT status, pending_step FROM channex_connections').first(), { status: 'connected', pending_step: null })
-    // Asked again before the retry time, the stage sends nothing and the nights wait on.
+    // Asked again, the stage sends only what Channex has not confirmed: the restrictions, which it now names a task for.
     unnamed = false
-    const calls = channex.seen.length
-    await track(db, channex, productId)
-    assert.deepEqual(await connection.advance(productId), { product_id: productId, stage: 'inventory', waiting: true, content: null })
-    assert.deepEqual(channex.seen.slice(calls).filter(request => request.method === 'POST'), [])
-    assert.deepEqual(await db.prepare("SELECT state, COUNT(*) AS nights, MIN(attempts) AS attempts FROM channel_night_pushes WHERE product_id = ? GROUP BY state").bind(productId).all().then(rows => rows.results), [{ state: 'pending', nights: 500, attempts: 1 }])
-    // Channex naming its task on the retry lets the import on: one restrictions and one availability call, both confirmed.
-    await db.prepare("UPDATE channel_night_pushes SET retry_at = '2000-01-01T00:00:00.000Z' WHERE product_id = ?").bind(productId).run()
     await track(db, channex, productId)
     assert.deepEqual(await connection.advance(productId), { product_id: productId, stage: 'verify_inventory', waiting: false, content: null })
     assert.deepEqual(await db.prepare("SELECT kind, status, task_id FROM channel_sync_log WHERE direction = 'outbound' AND product_id = ? ORDER BY created_at, rowid").bind(productId).all().then(rows => rows.results),
-      [{ kind: 'restrictions', status: 'failed', task_id: null }, { kind: 'restrictions', status: 'pushed', task_id: 'task-restrictions' }, { kind: 'availability', status: 'pushed', task_id: 'task-availability' }])
+      [{ kind: 'restrictions', status: 'failed', task_id: null }, { kind: 'availability', status: 'pushed', task_id: 'task-availability' }, { kind: 'restrictions', status: 'pushed', task_id: 'task-restrictions' }])
   } finally {
     globalThis.fetch = realFetch
     await runtime.dispose()
@@ -1786,33 +1751,13 @@ test('an in-flight stop cannot mark a newer sync request done', { timeout: 120_0
     await assert.rejects(connection.activate(prepared.product_id), error => error instanceof HTTPError && error.data?.code === 'CONNECTION_BUSY')
     returnStop()
     assert.equal((await older).done, 0)
-    assert.deepEqual(await db.prepare('SELECT action, state, lease_token, lease_until FROM airbnb_sync_jobs').first(), { action: 'sync', state: 'pending', lease_token: null, lease_until: null })
+    assert.deepEqual(await db.prepare('SELECT action, state FROM airbnb_sync_jobs').first(), { action: 'sync', state: 'pending' })
     assert.equal((await readStayHome(db, manager, prepared.product_id)).live, false)
     globalThis.fetch = channex.fetch as typeof fetch
     assert.equal((await runAirbnbSyncJobs(env, Date.now() + 60_000)).done, 1)
     assert.deepEqual(await db.prepare('SELECT action, state FROM airbnb_sync_jobs').first(), { action: 'sync', state: 'done' })
     assert.equal((await readStayHome(db, manager, prepared.product_id)).live, true)
 
-    // An expired lease can be reclaimed while its old provider call is still
-    // returning. Only the new holder may complete the durable job.
-    await requestAirbnbSync(env, db, ORG, OWNER, { stop: [prepared.product_id] })
-    let reclaimed = false
-    globalThis.fetch = async (input, init = {}) => {
-      const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input : input.url)
-      if (!reclaimed && init.method === 'DELETE' && url.pathname.includes('/mappings/')) {
-        reclaimed = true
-        await db.prepare("UPDATE airbnb_sync_jobs SET lease_until = '2000-01-01T00:00:00.000Z'").run()
-        assert.deepEqual(await runAirbnbSyncJobs(env, Date.now() + 1_000, { startReserveMs: 0 }), { stepped: 0, done: 0, failed: 0 })
-      }
-      return channex.fetch(input, init)
-    }
-    assert.equal((await runAirbnbSyncJobs(env, Date.now() + 60_000)).done, 0)
-    assert.equal(reclaimed, true)
-    assert.deepEqual(await db.prepare('SELECT action, state, lease_token, lease_until FROM airbnb_sync_jobs').first(), { action: 'stop', state: 'pending', lease_token: null, lease_until: null })
-    assert.equal((await readStayHome(db, manager, prepared.product_id)).live, false)
-    globalThis.fetch = channex.fetch as typeof fetch
-    await db.prepare("UPDATE airbnb_sync_jobs SET next_attempt_at = '2000-01-01T00:00:00.000Z'").run()
-    assert.equal((await runAirbnbSyncJobs(env, Date.now() + 60_000)).done, 1)
   } finally {
     globalThis.fetch = realFetch
     await runtime.dispose()

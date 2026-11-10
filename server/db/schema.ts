@@ -73,8 +73,8 @@ export const business_locations = sqliteTable("business_locations", {
 	check("business_locations_categories_check", sql`categories IS NULL OR (json_valid(categories) AND json_type(categories) IS 'array')`),
 	unique("business_locations_organization_id_slug_unique").on(table.organization_id, table.slug),
 	// Parent key for the organization-scoped catalog relations (prices,
-	// product_locations, availability rules, sessions, inventory levels,
-	// reservation configuration) which scope by organization + location without
+	// product_locations, availability rules, sessions, reservation
+	// configuration) which scope by organization + location without
 	// restating the site.
 	unique("business_locations_organization_id_id_unique").on(table.organization_id, table.id),
 	check("business_locations_opening_hours_check", sql`opening_hours IS NULL OR (json_valid(opening_hours) AND json_type(opening_hours) IS 'object' AND json_type(opening_hours, '$.periods') IS 'array')`),
@@ -86,12 +86,10 @@ export const business_locations = sqliteTable("business_locations", {
 // The inbox: one conversation thread with a guest, and its workflow state.
 // Row meaning: someone contacted this site, and this is the thread.
 // Owner/scope: organization + site; location_id routes the thread to a branch.
-// This table does NOT own booking truth. It used to carry
-//   (product_id, booking_date, time_slot, party_size, status) as an
-//   independently writable copy of an occurrence; the occurrence is now a
-//   product_sessions row, the seat claim a bookings row, and a table
-//   reservation a reservations row. Each links back here through request_id.
-//   A contact thread has neither and is not forced into the booking model.
+// This table does NOT own booking truth. The occurrence is a product_sessions
+//   row, the seat claim a bookings row, and a table reservation a
+//   reservations row; each links back here through request_id. A contact
+//   thread has neither and is not forced into the booking model.
 // Null semantics: user_id NULL is a guest with no Better Auth user. review_id NULL means
 //   no review was solicited from this thread. location_id NULL means the
 //   thread is site-wide.
@@ -259,7 +257,7 @@ export const organization_goals = sqliteTable('organization_goals', {
 
 // Something the business could do, as the opportunity selector found it at one
 // evidence revision (server/domain/opportunities.ts). New evidence is a new
-// row; the old one becomes superseded. Accepting creates its one task
+// row; a row whose evidence is gone stays as it was. Accepting creates its one task
 // (tasks.opportunity_id); dismissing records the owner's decision. Tasks
 // reference this table, so its value sets (operation, status) are enforced by
 // the domain, not by a CHECK a new value would have to rebuild. A decision
@@ -272,7 +270,7 @@ export const opportunities = sqliteTable('opportunities', {
   evidence_revision: text().notNull(),
   goal_id: text(),
   goal_revision: text(),
-  status: text({ enum: ['open', 'accepted', 'dismissed', 'superseded'] }).notNull(),
+  status: text({ enum: ['open', 'accepted', 'dismissed'] }).notNull(),
   available_at: text(),
   decision_note: text(),
   decided_at: text(),
@@ -302,7 +300,7 @@ export const opportunities = sqliteTable('opportunities', {
 export const tasks = sqliteTable('tasks', {
   id: text().primaryKey(),
   organization_id: text().notNull().references(() => organization.id, { onDelete: 'cascade' }),
-  kind: text({ enum: ['turnover', 'guest_reply', 'message_delivery', 'booking_review', 'booking_change', 'opportunity', 'custom'] }).notNull(),
+  kind: text({ enum: ['turnover', 'guest_reply', 'message_delivery', 'booking_review', 'booking_change', 'opportunity', 'custom', 'stay_ready', 'consultation_prep', 'consultation_follow_up'] }).notNull(),
   subject_type: text({ enum: ['stay', 'request', 'scheduled_guest_message', 'booking', 'reservation', 'article', 'post', 'product'] }),
   subject_id: text(),
   product_id: text(),
@@ -334,7 +332,7 @@ export const tasks = sqliteTable('tasks', {
   index('tasks_member_status_due_idx').on(table.organization_id, table.assigned_member_id, table.status, table.due_at),
   index('tasks_team_status_due_idx').on(table.organization_id, table.assigned_team_id, table.status, table.due_at),
   index('tasks_subject_idx').on(table.subject_type, table.subject_id),
-  check('tasks_kind_check', sql`kind IN ('turnover', 'guest_reply', 'message_delivery', 'booking_review', 'booking_change', 'opportunity', 'custom')
+  check('tasks_kind_check', sql`kind IN ('turnover', 'guest_reply', 'message_delivery', 'booking_review', 'booking_change', 'opportunity', 'custom', 'stay_ready', 'consultation_prep', 'consultation_follow_up')
     AND (subject_type IS NULL) = (subject_id IS NULL)
     AND (subject_type IS NULL OR subject_type IN ('stay', 'request', 'scheduled_guest_message', 'booking', 'reservation', 'article', 'post', 'product'))
     AND (kind <> 'custom' OR subject_type IS NULL)
@@ -445,14 +443,14 @@ export const teamMember = sqliteTable("teamMember", {
 }, table => [index("teamMember_teamId_idx").on(table.teamId), index("teamMember_userId_idx").on(table.userId)]);
 
 // ---------------------------------------------------------------------------
-// Catalog: products, variants, options, prices, publication, collections.
+// Catalog: products, variants, prices, publication, collections.
 //
 // One catalog for every vertical. A restaurant dish, a pottery class, and a
 // consultation are all Products; nothing about their storage differs. There is
 // one explicit kind for customer-facing facts; pricing and booking still
 // share the same model. Capabilities compose: a Product gains booking by having a product_booking_configs row,
-// stock by having an inventory_items row, a page by being referenced from a
-// content_documents root. Absence of a capability row is the absence of the
+// a place to stay by having a product_stay_configs row, a page by being
+// referenced from a content_documents root. Absence of a capability row is the absence of the
 // capability, never a NULL to be interpreted.
 //
 // Value sets (price `type`, session/booking `status`, product `kind`)
@@ -495,8 +493,8 @@ export const products = sqliteTable("products", {
 	description: text().default("").notNull(),
 	// Merchant sale-enable control. Not visibility, not stock, not a counter.
 	// Site visibility is product_publications.published; location visibility is
-	// product_locations.published; stock is inventory_levels; seats are
-	// product_sessions.capacity. A product with active = 0 is not sold out.
+	// product_locations.published; seats are product_sessions.capacity. A
+	// product with active = 0 is not sold out.
 	active: integer({ mode: "boolean" }).default(true).notNull(),
 	// Narrow ordering destination (a delivery partner, a booking host). NOT the
 	// public product page: that is resolved from an explicit publication/site
@@ -535,18 +533,16 @@ export const products = sqliteTable("products", {
 	check("products_order_url_check", sql`order_url IS NULL OR (order_url LIKE 'https://_%' AND instr(order_url, '@') = 0 AND instr(order_url, char(10)) = 0 AND instr(order_url, char(13)) = 0)`),
 ]);
 
-// The purchasable unit. Every Product has at least one — a Product with no
-// customer-selectable options has one real default variant, not a special
-// product-only purchase path. "At least one" is an application invariant with
+// The purchasable unit. Every Product has at least one — a Product sold one
+// way has one real default variant, not a special product-only purchase path. "At least one" is an application invariant with
 // real-boundary coverage: SQL cannot express it without making inserts
 // circular.
 // Row meaning: one buyable configuration of a Product.
 // Owner/scope: organization, through product_id.
-// Keys: id; (organization_id, id) for prices/inventory/bookings;
-//   (organization_id, product_id, id) so option selections can prove
-//   same-product membership.
-// Null semantics: sku NULL means unstocked/untracked identity, not empty.
-// Deletion: cascades to prices, option-value selections, inventory items.
+// Keys: id; (organization_id, id) for prices; (organization_id, product_id,
+//   id) so a row naming both proves the variant belongs to that product.
+// Null semantics: sku NULL means the variant has no merchant SKU, not empty.
+// Deletion: cascades to prices.
 //   Deleting the last variant of a Product is refused by the domain layer.
 // Do NOT create a variant for a currency, a location, a price revision, or
 // another scheduled class date. Those are prices, product_locations, price
@@ -581,8 +577,8 @@ export const product_variants = sqliteTable("product_variants", {
 //   billing terms, optionally only at this location, optionally only during
 //   this period.
 // Owner/scope: organization, through the variant. There is NO product_id
-//   column: the Product is resolved through product_variant_id. Two writable
-//   parents that can disagree is the defect this replaces.
+//   column: the Product is resolved through product_variant_id, so a price
+//   has one parent and cannot disagree with it.
 // Null semantics: location_id NULL is a DECLARED location-neutral scope, not a
 //   missing association and not a wildcard to fall back to. valid_from_at NULL
 //   means "since always"; valid_until_at NULL means "until further notice".
@@ -702,11 +698,9 @@ export const product_locations = sqliteTable("product_locations", {
 ]);
 
 // Merchant merchandising: a named, ordered grouping a site presents.
-// This replaces `product_categories` and the `featured` / `featured_sort_order`
-// columns. A curated "Featured" grouping is a Collection whose membership is
-// explicit; there is no second featured-product truth on products. This is
-// merchandising, not a taxonomy — no unused classification system is
-// introduced to preserve the old table's name.
+// A curated "Featured" grouping is a Collection whose membership is explicit;
+// there is no second featured-product truth on products. This is
+// merchandising, not a taxonomy.
 // Row meaning: one grouping on one site, optionally narrowed to one location
 //   (a menu section that exists only at one branch).
 // Null semantics: location_id NULL means the grouping applies site-wide.
@@ -778,7 +772,9 @@ export const product_booking_configs = sqliteTable("product_booking_configs", {
 	// Held online: its sessions come from each provider's working hours, in
 	// that provider's timezone, rather than from weekly slots at a location.
 	held_online: integer({ mode: "boolean" }).default(false).notNull(),
-	scheduling_mode: text().default("legacy").notNull(),
+	// business: the business publishes its own sessions. provider: an assigned
+	// member's or team's working hours. Every writer names it; there is no default.
+	scheduling_mode: text().notNull(),
 	assigned_member_id: text(),
 	assigned_team_id: text().references(() => team.id, { onDelete: "set null" }),
 	// The tenant's own questions asked with each booking (shared/form-questions.ts):
@@ -798,13 +794,13 @@ export const product_booking_configs = sqliteTable("product_booking_configs", {
 	check("product_booking_configs_duration_check", sql`duration_minutes IS NULL OR duration_minutes > 0`),
 	check("product_booking_configs_capacity_check", sql`default_capacity IS NULL OR default_capacity >= 0`),
 	check("product_booking_configs_confirmation_check", sql`confirmation_mode IN ('instant', 'review')`),
+	check("product_booking_configs_scheduling_mode_check", sql`scheduling_mode IN ('business', 'provider')`),
 	check("product_booking_configs_payment_check", sql`online_payment_required IN (0, 1)`),
 	// A provider's departure may clear responsibility without changing online delivery.
 	check("product_booking_configs_held_online_check", sql`held_online IN (0, 1) AND (held_online = 0 OR scheduling_mode = 'provider')`),
 ]);
 
-// Typed weekly recurrence. This replaces the `recurring_slots` JSON map; it is
-// not that map relocated into another ungoverned column.
+// Typed weekly recurrence, one row per rule; recurrence is never a JSON map.
 // Row meaning: sessions of this Product should exist on this weekday at this
 //   local start time, every `interval_weeks` weeks, within the effective dates.
 // Recurrence is defined in LOCAL WALL TIME plus an IANA timezone — an offset
@@ -983,9 +979,7 @@ export const bookings = sqliteTable("bookings", {
 	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 }, (table) => [
-	// The status set lives here now. It never did: `status` was plain text with
-	// a comment pointing somewhere else, which is how `pending` survived after
-	// nothing wrote it on purpose.
+	// The status set is closed here, where the column is.
 	check("bookings_status_check", sql`status IN ('pending', 'confirmed', 'cancelled')`),
 	check("bookings_instants_check", sql`(cancelled_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', cancelled_at, '+0 days') IS cancelled_at) AND (created_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at) AND (updated_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at)`),
 	// A booking pins what it holds. Deleting the session or the variant it
@@ -1018,17 +1012,15 @@ export const bookings = sqliteTable("bookings", {
 // Location reservations.
 //
 // A restaurant table reservation is not a product session and the restaurant
-// is not selling a catalog item by taking it. This capability is location-owned
-// and stays that way; it replaces `business_locations.booking_json` with typed
-// columns and is NOT a second experience-booking implementation wearing the
-// reservation name.
+// is not selling a catalog item by taking it. This capability is location-owned,
+// in typed columns, and is NOT a second experience-booking implementation
+// wearing the reservation name.
 //
 // Opening hours and special hours remain on business_locations as the declared
 // hours source. They are not copied into a product schedule.
 // ---------------------------------------------------------------------------
 
-// Reservation policy for one location, typed. This replaces the eleven keys
-// that lived under booking_json.$.reservation.policy.
+// Reservation policy for one location, typed.
 // Row meaning: this location takes reservations, under this policy. The
 //   existence of the row is the capability; there is no enabled flag and no
 //   operational JSON reader.
@@ -1407,7 +1399,11 @@ export const product_nights = sqliteTable("product_nights", {
 export const stays = sqliteTable("stays", {
 	id: text().primaryKey(),
 	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
+	// The home the guest actually sleeps in: its nights, turnover and messages follow it.
 	product_id: text().notNull(),
+	// The listing a channel reservation is booked on, when the host moved the
+	// guest to another home; NULL when they sleep where they booked.
+	booked_product_id: text(),
 	channel: text().$type<'airbnb' | 'vrbo' | 'booking_com' | 'direct'>().notNull(),
 	owner: text().$type<'app' | 'channel'>().notNull(),
 	status: text().$type<'pending' | 'confirmed' | 'cancelled'>().notNull(),
@@ -1459,6 +1455,8 @@ export const stays = sqliteTable("stays", {
 	answers: text().default("[]").notNull(),
 }, (table) => [
 	foreignKey({ columns: [table.organization_id, table.product_id], foreignColumns: [product_stay_configs.organization_id, product_stay_configs.product_id], name: "stays_home_scope_fk" }).onDelete("no action"),
+	foreignKey({ columns: [table.organization_id, table.booked_product_id], foreignColumns: [product_stay_configs.organization_id, product_stay_configs.product_id], name: "stays_booked_home_scope_fk" }).onDelete("no action"),
+	check("stays_booked_home_check", sql`booked_product_id IS NULL OR booked_product_id <> product_id`),
 	unique("stays_org_product_id_unique").on(table.organization_id, table.product_id, table.id),
 	unique("stays_org_id_unique").on(table.organization_id, table.id),
 	uniqueIndex("stays_idempotency_unique").on(table.organization_id, table.idempotency_key).where(sql`idempotency_key IS NOT NULL`),
@@ -1605,7 +1603,7 @@ export const scheduled_guest_messages = sqliteTable("scheduled_guest_messages", 
 	created_at: text().notNull(),
 	updated_at: text().notNull(),
 }, (table) => [
-	foreignKey({ columns: [table.organization_id, table.product_id, table.stay_id], foreignColumns: [stays.organization_id, stays.product_id, stays.id], name: "scheduled_guest_messages_stay_scope_fk" }).onDelete("cascade"),
+	foreignKey({ columns: [table.organization_id, table.stay_id], foreignColumns: [stays.organization_id, stays.id], name: "scheduled_guest_messages_stay_scope_fk" }).onDelete("cascade"),
 	foreignKey({ columns: [table.organization_id, table.request_id], foreignColumns: [requests.organization_id, requests.id], name: "scheduled_guest_messages_request_scope_fk" }).onDelete("no action"),
 	foreignKey({ columns: [table.organization_id, table.template_id], foreignColumns: [message_templates.organization_id, message_templates.id], name: "scheduled_guest_messages_template_scope_fk" }).onDelete("no action"),
 	uniqueIndex("scheduled_guest_messages_template_stay_unique").on(table.template_id, table.stay_id),
@@ -1804,57 +1802,6 @@ export const channel_night_pushes = sqliteTable("channel_night_pushes", {
 	check("channel_night_pushes_updated_at_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at`),
 	check("channel_night_pushes_attempts_check", sql`attempts >= 0`),
 	check("channel_night_pushes_retry_check", sql`retry_at IS NULL OR (state = 'pending' AND strftime('%Y-%m-%dT%H:%M:%fZ', retry_at, '+0 days') IS retry_at)`),
-]);
-
-// ---------------------------------------------------------------------------
-// Inventory.
-//
-// Optional capability: a service has no inventory row and that is correct, not
-// missing data. Stock is variant-and-location identity. It is NOT a price
-// attribute and NOT a boolean on products — the old `products.available`
-// column conflated a merchant control with a stock count, and both are gone.
-//
-// Available stock derives from ONE authoritative quantity model: on_hand minus
-// reserved, per level. No second counter is maintained anywhere.
-// ---------------------------------------------------------------------------
-
-// Row meaning: this variant's stock is tracked.
-// Keys: one item per variant.
-// Deletion: cascades from variant; cascades to levels.
-// Read/write: server/utils/product-management.ts.
-export const inventory_items = sqliteTable("inventory_items", {
-	id: text().primaryKey(),
-	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
-	product_variant_id: text().notNull(),
-	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
-	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
-}, (table) => [
-	check("inventory_items_instants_check", sql`(created_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at) AND (updated_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at)`),
-	foreignKey({ columns: [table.organization_id, table.product_variant_id], foreignColumns: [product_variants.organization_id, product_variants.id], name: "inventory_items_variant_scope_fk" }).onDelete("cascade"),
-	unique("inventory_items_org_id_unique").on(table.organization_id, table.id),
-	unique("inventory_items_variant_unique").on(table.product_variant_id),
-]);
-
-// Row meaning: how much of this item is held at this location.
-// `on_hand` is physical quantity; `reserved` is the part already allocated.
-//   Available is on_hand - reserved, computed, never stored.
-// Deletion: cascades from item and from location.
-// Read/write: server/utils/product-management.ts.
-export const inventory_levels = sqliteTable("inventory_levels", {
-	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
-	inventory_item_id: text().notNull(),
-	location_id: text().notNull(),
-	on_hand: integer().default(0).notNull(),
-	reserved: integer().default(0).notNull(),
-	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
-	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
-}, (table) => [
-	primaryKey({ columns: [table.inventory_item_id, table.location_id], name: "inventory_levels_pk" }),
-	check("inventory_levels_instants_check", sql`(created_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at) AND (updated_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at)`),
-	foreignKey({ columns: [table.organization_id, table.inventory_item_id], foreignColumns: [inventory_items.organization_id, inventory_items.id], name: "inventory_levels_item_scope_fk" }).onDelete("cascade"),
-	foreignKey({ columns: [table.organization_id, table.location_id], foreignColumns: [business_locations.organization_id, business_locations.id], name: "inventory_levels_location_scope_fk" }).onDelete("cascade"),
-	index("inventory_levels_location_idx").on(table.location_id),
-	check("inventory_levels_quantities_check", sql`on_hand >= 0 AND reserved >= 0 AND reserved <= on_hand`),
 ]);
 
 // ---------------------------------------------------------------------------
@@ -2162,16 +2109,12 @@ export const oauthRefreshToken = sqliteTable("oauthRefreshToken", {
 /**
  * The business. One record, one name, one handle, one mark.
  *
- * This used to be two: an `organization` holding identity and membership, and a
- * `organizations` row beside it holding everything the business actually is. The two
- * disagreed — `organization.name` read "Pottery House Owner" while the site
- * rendered "Pottery House Krabi" — and the handle lived in three columns across
- * them. `organizations` is gone and its configuration is here, as Better Auth
- * `additionalFields` (see organizationOptions in server/utils/auth.ts), which is
- * the plugin's own extension point rather than a table bolted alongside it.
+ * Identity and membership are Better Auth's; the business's configuration is
+ * here as Better Auth `additionalFields` (see organizationOptions in
+ * server/utils/auth.ts), the plugin's own extension point, not a table beside it.
  *
- * `name` carries what `organization.brand_name` carried: the name the business's own
- * website renders in `og:site_name`. There is no separate brand name.
+ * `name` is the name the business's own website renders in `og:site_name`.
+ * There is no separate brand name.
  */
 export const organization = sqliteTable("organization", {
 	id: text().primaryKey(),
@@ -2189,7 +2132,7 @@ export const organization = sqliteTable("organization", {
 	// placement, which is why this stays NULL.
 	logo: text(),
 
-	// ── Formerly `organizations`. ────────────────────────────────────────────────────
+	// ── The business's configuration (additionalFields). ─────────────────────────────
 	consultation_settings_json: text({ mode: "json" }).$type<OrganizationSettings["consultation"]>(),
 	settings_json: text({ mode: "json" }).$type<OrganizationSettings>().default({}).notNull(),
 	theme_id: text().default("saya-theme-v1").notNull(),
@@ -2220,8 +2163,8 @@ export const organization = sqliteTable("organization", {
 }, (table) => [
 	check("organization_slug_required_check", sql`trim(slug) <> ''`),
 	// `createdAt` is Better Auth's integer unixepoch, not a text instant, so it
-	// is not checked here. `last_published_at` was, and is gone: `updated_at` is
-	// the row's modification time and nothing else recorded a publish.
+	// is not checked here. `updated_at` is the row's modification time; nothing
+	// on the organization records a publish.
 	check("organization_instants_check", sql`(updated_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at) AND (analytics_data_start_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', analytics_data_start_at, '+0 days') IS analytics_data_start_at)`),
 	check("organization_settings_json_check", sql`json_valid(settings_json) AND json_type(settings_json) IS 'object'`),
 	check("organization_consultation_settings_check", sql`consultation_settings_json IS NULL OR (json_valid(consultation_settings_json) AND json_type(consultation_settings_json) IS 'object' AND json_extract(consultation_settings_json, '$.mode') IN ('external_url', 'native_disabled', 'native') AND json_type(consultation_settings_json, '$.cta_label') IS 'text' AND json_type(consultation_settings_json, '$.schedule_path') IS 'text' AND json_extract(consultation_settings_json, '$.schedule_path') LIKE '/%' AND json_type(consultation_settings_json, '$.confirmation_path') IS 'text' AND json_extract(consultation_settings_json, '$.confirmation_path') LIKE '/%' AND (json_type(consultation_settings_json, '$.metadata_json') IS NULL OR json_type(consultation_settings_json, '$.metadata_json') IN ('null', 'object')) AND (json_type(consultation_settings_json, '$.external_url') IS NULL OR json_type(consultation_settings_json, '$.external_url') IN ('null', 'text'))) IS TRUE`),
@@ -2466,6 +2409,8 @@ export const team_threads = sqliteTable("team_threads", {
 	id: text().primaryKey(),
 	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
 	stay_id: text(),
+	// The consultation this conversation is about.
+	booking_id: text().references(() => bookings.id, { onDelete: "set null" }),
 	location_id: text(),
 	created_by_user_id: text().references(() => user.id, { onDelete: "set null" }),
 	name: text(),
@@ -2484,6 +2429,7 @@ export const team_threads = sqliteTable("team_threads", {
 	uniqueIndex("team_threads_participants_unique").on(table.organization_id, table.participants_key),
 	index("team_threads_org_activity_idx").on(table.organization_id, table.last_message_at),
 	index("team_threads_org_stay_idx").on(table.organization_id, table.stay_id),
+	index("team_threads_org_booking_idx").on(table.organization_id, table.booking_id),
 	index("team_threads_org_location_idx").on(table.organization_id, table.location_id),
 	check("team_threads_instants_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', last_message_at, '+0 days') IS last_message_at AND strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at`),
 ]);
@@ -2506,12 +2452,16 @@ export const team_thread_members = sqliteTable("team_thread_members", {
 // A message's photos are media placements (team_message / attachments).
 // sender_user_id is NULL only once the sender's account has been deleted.
 // The sender's idempotency key replays the same message instead of a second one.
+// An automatic message is one KrabiClaw wrote into the conversation (a job, a
+// reminder, a move); it is shown as sent automatically, alerts only the people
+// it is for, and is never counted as unread.
 export const team_messages = sqliteTable("team_messages", {
 	id: text().primaryKey(),
 	organization_id: text().notNull(),
 	thread_id: text().notNull(),
 	sender_user_id: text().references(() => user.id, { onDelete: "set null" }),
 	body: text().notNull(),
+	automatic: integer({ mode: "boolean" }).default(false).notNull(),
 	idempotency_key: text().notNull(),
 	request_hash: text().notNull(),
 	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
@@ -2877,10 +2827,9 @@ export const content_documents = sqliteTable("content_documents", {
 	check("content_documents_path_check", sql`path IS NULL OR (path LIKE '/%' AND path NOT LIKE '//%')`),
 	check("content_documents_page_copy_check", sql`kind <> 'page' OR (path IS NOT NULL AND title IS NOT NULL)`),
 	check("content_documents_qa_scope_check", sql`kind <> 'qa' OR row_role <> 'root' OR ((location_id IS NULL OR scope_path IS NULL) AND (scope_path IS NULL OR scope_path LIKE '/%'))`),
-	// 'listed' and 'unlisted' say whether the document appears in its index. The
-	// value used to be 'public', which read as a second answer to "is this
-	// published" beside `status` — an unlisted document is just as public, it is
-	// simply not listed.
+	// 'listed' and 'unlisted' say whether the document appears in its index, not
+	// whether it is published (that is `status`): an unlisted document is just
+	// as public, it is simply not listed.
 	check("content_documents_article_visibility_check", sql`kind NOT IN ('article','social_post') OR row_role <> 'root' OR (visibility IN ('listed','unlisted')) IS 1`),
 	check("content_documents_qa_state_check", sql`kind <> 'qa' OR row_role <> 'root' OR ((status IN ('published','hidden')) IS 1 AND (source IN ('manual','import','template')) IS 1)`),
 	// Articles and social posts are drafts or published. Nothing publishes on a
@@ -2894,8 +2843,6 @@ export const content_documents = sqliteTable("content_documents", {
 	// draft has an address before it has words. The caption itself is optional:
 	// an empty draft is a draft, and publication decides what is publishable.
 	check("content_documents_copy_required_check", sql`row_role <> 'root' OR ((kind NOT IN ('page','article','qa') OR title IS NOT NULL) AND (kind NOT IN ('article','social_post') OR slug IS NOT NULL))`),
-	// Website social posts are explicitly authored by the organization.
-	check("content_documents_social_source_check", sql`kind <> 'social_post' OR row_role <> 'root' OR (source IN ('manual','template')) IS 1`),
 ]);
 
 // One local social post and one actual Facebook, Instagram or Discord object.
@@ -3294,10 +3241,21 @@ export const payments = sqliteTable("payments", {
  surcharge_amount: integer().default(0).notNull(),
  captured_amount: integer().default(0).notNull(),
  refunded_amount: integer().default(0).notNull(),
- state: text().$type<'pending' | 'captured' | 'failed' | 'recovery' | 'refunded'>().default("pending").notNull(),
  stripe_payment_intent_id: text(),
  stripe_charge_id: text(),
  receipt_url: text(),
+ /** The buyer's checkout request; a retry with this key reopens the same purchase. */
+ idempotency_key: text().unique(),
+ /** The time the buyer has to pay; the pay page refuses past it. */
+ checkout_expires_at: text(),
+ /** The amount and payment method the buyer was shown and confirmed: `{ payment_method_id, subtotal, surcharge, total, reviewed_at }`. */
+ review_json: text(),
+ /** Handed back on a checkout retry; only its hash authorizes the pay page. */
+ return_token: text(),
+ return_token_hash: text().unique(),
+ return_expires_at: text(),
+ claimed_at: text(),
+ claimed_user_id: text().references(() => user.id, { onDelete: "set null" }),
  created_at: text().notNull(),
  updated_at: text().notNull(),
 }, t => [
@@ -3307,24 +3265,6 @@ export const payments = sqliteTable("payments", {
  check("payments_amounts_check", sql`amount >= 0 AND captured_amount >= 0 AND refunded_amount >= 0 AND refunded_amount <= captured_amount`),
  check("payments_currency_check", sql`length(currency) = 3 AND currency = upper(currency)`),
 ]);
-
-export const payment_attempts = sqliteTable("payment_attempts", {
- id: text().primaryKey(),
- payment_id: text().notNull().references(() => payments.id, { onDelete: "restrict" }),
- idempotency_key: text().notNull().unique(),
- /** Hosted Checkout, before payments moved to the PaymentIntent the buyer confirms on the site. */
- stripe_checkout_id: text(),
- checkout_url: text(),
- stripe_payment_intent_id: text(),
- /** The amount and payment method the buyer was shown and confirmed: `{ payment_method_id, subtotal, surcharge, total, reviewed_at }`. */
- review_json: text(),
- return_token: text().notNull(),
- status: text().default("creating").notNull(),
- expires_at: text().notNull(),
- error: text(),
- created_at: text().notNull(),
- updated_at: text().notNull(),
-});
 
 export const payment_checkout_holds = sqliteTable("payment_checkout_holds", {
  id: text().primaryKey(),
@@ -3451,14 +3391,6 @@ export const stripe_connected_customers = sqliteTable("stripe_connected_customer
  stripe_customer_id: text().notNull(),
  created_at: text().notNull(),
 }, t => [primaryKey({ columns: [t.user_id, t.stripe_account_id, t.livemode] })]);
-export const payment_claims = sqliteTable("payment_claims", {
- token_hash: text().primaryKey(),
- payment_id: text().notNull().references(() => payments.id, { onDelete: "restrict" }),
- expires_at: text().notNull(),
- claimed_at: text(),
- claimed_user_id: text().references(() => user.id, { onDelete: "set null" }),
-});
-
 // Provider report progress and attributable cost snapshots support late correction;
 // Stripe remains the financial record authority. Unattributed fees are never billed.
 export const payment_fee_reports = sqliteTable("payment_fee_reports", {
@@ -3500,25 +3432,17 @@ export const member_scheduling = sqliteTable("member_scheduling", {
  timezone: text(),
  weekly_json: text(),
  time_off_json: text(),
- windows_json: text(),
- windows_until: text(),
  public_name: text(),
  public_photo_url: text(),
  public_bio: text(),
  public_approved: integer({ mode: "boolean" }).default(false).notNull(),
  calendar_account_id: text(),
  calendar_ids_json: text().default("[]").notNull(),
- calendar_revision: text().notNull(),
- busy_json: text().default("[]").notNull(),
- busy_from: text(),
- busy_until: text(),
- busy_checked_at: text(),
- busy_error: text(),
  updated_at: text().notNull(),
  updated_by: text().notNull(),
 }, t => [index("member_scheduling_org_idx").on(t.organization_id),
  foreignKey({ columns: [t.member_id, t.organization_id], foreignColumns: [member.id, member.organizationId] }).onDelete("cascade"),
- check("member_scheduling_hours_check", sql`(${t.timezone} IS NULL AND ${t.weekly_json} IS NULL AND ${t.time_off_json} IS NULL AND ${t.windows_json} IS NULL AND ${t.windows_until} IS NULL) OR (${t.timezone} IS NOT NULL AND ${t.weekly_json} IS NOT NULL AND ${t.time_off_json} IS NOT NULL AND ${t.windows_json} IS NOT NULL AND ${t.windows_until} IS NOT NULL)`),
+ check("member_scheduling_hours_check", sql`(${t.timezone} IS NULL AND ${t.weekly_json} IS NULL AND ${t.time_off_json} IS NULL) OR (${t.timezone} IS NOT NULL AND ${t.weekly_json} IS NOT NULL AND ${t.time_off_json} IS NOT NULL)`),
 ]);
 
 // A creation attempt survives an ambiguous provider response. Retry discovers

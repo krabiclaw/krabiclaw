@@ -7,10 +7,11 @@ import { getGuestRequest, getThreadOperationalRecord, requestSummary, type cance
 import { execute, queryAll, queryFirst, type DbClient } from '~/server/db'
 import { organizationEventQuery } from '~/server/utils/organization-events'
 import { getEmailDeliveryMode, hashEmail, sendEmail, type EmailSendResult } from '~/server/utils/email-delivery'
-import { buildWhatsAppTemplatePayload, sendWhatsAppNotification, WhatsAppTemplateRefusal, type WhatsAppTemplate } from '~/server/utils/whatsapp'
+import { buildWhatsAppTemplatePayload, sendWhatsAppImage, sendWhatsAppNotification, WhatsAppTemplateRefusal, type SendWhatsAppResult, type WhatsAppTemplate } from '~/server/utils/whatsapp'
+import { whatsAppServiceWindowOpen } from '~/server/utils/mcp-context'
 import { hasOrganizationEntitlement } from '~/server/utils/billing'
 import { getWhatsAppDeliveryMode } from '~/server/utils/whatsapp-delivery'
-import { buildReplyToAddress } from '~/server/utils/submission-messages'
+import { buildReplyToAddress, type ReplyAs } from '~/server/utils/reply-address'
 import { assignedResponsibilitySql, listOrganizationNotificationMembers } from '~/server/utils/member-access'
 import { wantsNotification } from '~/server/domain/notification-preferences'
 import { listUserDevices, retireDevice, type UserDevice } from '~/server/domain/devices'
@@ -54,13 +55,15 @@ import {
   stayCancelledMessage,
   stayTurnoverAlert,
   taskAlertMessage,
+  REPLY_NOTE,
 } from '~/server/notifications/events'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { createCanonicalNotification, isConversationNotification, isScheduleNotification, notifyBuyerThread, type NotificationSeverity } from '~/server/utils/notification-center'
 import { buildOwnerThreadInboxUrl, buildBuyerRequestActivityUrl, dashboardOrigin, destinationUnavailable, getPlatformDomain, platformOrigin, resolveDashboardSlugs } from '~/server/utils/dashboard-notification-links'
 import { bookingEditorPath, insightsPath, reviewEditorPath } from '~/server/utils/dashboard-links'
-import { createDeliveryReceipt, deliverReceiptEmail, isDeliverySent, recordDeliveryOutcome } from '~/server/domain/guest-threads/deliveries'
+import { createDeliveryReceipt, deliverReceiptEmail, getDeliveryById, isDeliverySent, recordDeliveryOutcome } from '~/server/domain/guest-threads/deliveries'
 import { appendEntry, findEntryByDedupeKey, getEntryById, parseEntryPayload } from '~/server/domain/guest-threads/entries'
+import { listMessagePhotos, messagePreview } from '~/server/domain/guest-threads/attachments'
 import { publishGuestInboxThreadEvent, publishNotificationInvalidation } from '~/server/cloudflare/guest-inbox-events'
 import type { GuestThreadDeliveryPurpose, GuestThreadDeliveryRow, GuestThreadEntryRow } from '~/server/domain/guest-threads/types'
 import { getPersistedSourceLocale } from '~/server/utils/localization'
@@ -230,7 +233,6 @@ interface GuestThreadReplyNotificationInput extends Omit<OrganizationContext, 'o
   guestEmail?: string | null
   guestPhone?: string | null
   inboundChannel: 'email' | 'whatsapp' | 'web' | 'airbnb'
-  messagePreview: string
 }
 
 function organizationName(opts: OrganizationContext): string {
@@ -396,13 +398,20 @@ async function publishAssignedConversationAlert(
 }
 
 
+/** The conversation entry an email's reply address names: the delivery it is recorded on. */
+function requireDeliveryEntry(delivery: ThreadDeliveryContext | null | undefined): string {
+  if (!delivery) throw new Error('A reply address names a conversation entry, and this email has no conversation delivery')
+  return delivery.entryId
+}
+
 async function sendEmailNotification(
   env: NotificationEnv,
   db: DbClient,
   opts: Omit<OrganizationContext, 'organizationId'> & { organizationId: string | null } & {
     locationId?: string | null
     to: string
-    replyTo?: string | null
+    /** Who a reply to this email speaks as; the address names the delivery's conversation entry. */
+    replyAs?: ReplyAs
     template: string
     title: string
     payload: Record<string, string>
@@ -434,13 +443,19 @@ async function sendEmailNotification(
   // mail. Replays still complete metadata, error clearing and publication.
 
   const email = {
-    to: opts.to, replyTo: opts.replyTo, subject: opts.email.subject,
+    to: opts.to, subject: opts.email.subject,
+    ...(opts.replyAs ? { replyTo: await buildReplyToAddress(env, requireDeliveryEntry(deliveryContext), opts.replyAs) } : {}),
     html: opts.email.html, text: opts.email.text, emailPurpose: opts.email.emailPurpose,
     unsubscribeOneClickUrl: opts.unsubscribeOneClickUrl ?? null,
   }
   let result: EmailSendResult
   if (delivery) {
-    const outcome = await deliverReceiptEmail(db, { env, delivery, threadId: deliveryContext!.threadId, email })
+    const outcome = await deliverReceiptEmail(db, { env, delivery, threadId: deliveryContext!.threadId, email }).catch(async (error: unknown) => {
+      // The dispatcher writes a failure onto the delivery before raising it, where the thread shows it.
+      const recorded = await getDeliveryById(db, delivery.id)
+      if (recorded?.error) throw new RecordedDeliveryFailure(`Email delivery failed: ${recorded.error}`, { cause: error })
+      throw error
+    })
     if (isDeliverySent(outcome)) {
       if (!outcome.provider_message_id) throw new Error('Sent email delivery has no provider identity')
       result = { status: 'sent', messageId: outcome.provider_message_id }
@@ -469,14 +484,7 @@ async function sendEmailNotification(
 async function sendWhatsAppThreadNotification(
   env: NotificationEnv,
   db: DbClient,
-  opts: {
-    organizationId: string
-    locationId?: string | null
-    toPhone: string
-    template: WhatsAppTemplate
-    vars: Record<string, string>
-    delivery: ThreadDeliveryContext
-  },
+  opts: { delivery: ThreadDeliveryContext; send: () => Promise<SendWhatsAppResult> },
 ): Promise<boolean> {
   const delivery = await createDeliveryReceipt(db, {
     entryId: opts.delivery.entryId,
@@ -487,7 +495,7 @@ async function sendWhatsAppThreadNotification(
   })
   if (isDeliverySent(delivery) || delivery.status === 'skipped') return true
 
-  const result = await sendWhatsAppNotification(env, opts)
+  const result = await opts.send()
   await recordDeliveryOutcome(db, {
     deliveryId: delivery.id,
     status: result.status,
@@ -503,7 +511,11 @@ async function sendWhatsAppThreadNotification(
  * built only for a browser and inside its send, so a link that cannot be built
  * is that browser's recorded failure and never stops a phone's alert.
  */
-type PushAlert = Omit<ApnsAlert, 'badge'> & { url: () => Promise<string> }
+type PushAlert = Omit<ApnsAlert, 'badge'> & {
+  url: () => Promise<string>
+  /** The message's first photo. A browser shows it; the app's alerts carry text, as APNs shows nothing else without a notification service extension. */
+  image: string | null
+}
 
 type PushDispatch =
   | { status: 'sent'; providerMessageId: string | null }
@@ -514,12 +526,12 @@ async function dispatchPush(env: NotificationEnv, db: DbClient, userId: string, 
   if (device.kind === 'apns') {
     const apnsId = crypto.randomUUID()
     // Read when it is sent, after the notification it announces was recorded, so the icon counts it.
-    const result = await sendApnsAlert(env, { deviceToken: device.token, environment: device.environment, apnsId, alert: { ...alert, badge: await unreadBadge(env, db, userId) } })
+    const result = await sendApnsAlert(env, { deviceToken: device.token, environment: device.environment, apnsId, alert: { title: alert.title, body: alert.body, threadId: alert.threadId, data: alert.data, badge: await unreadBadge(env, db, userId) } })
     return result.status === 'sent' ? { status: 'sent', providerMessageId: apnsId } : { status: 'failed', error: result.error, deviceGone: result.tokenRetired }
   }
   const result = await sendWebPush(env, {
     subscription: { endpoint: device.token, p256dh: device.p256dh, auth: device.auth },
-    alert: { title: alert.title, body: alert.body, url: await alert.url(), tag: alert.threadId },
+    alert: { title: alert.title, body: alert.body, url: await alert.url(), tag: alert.threadId, image: alert.image },
   })
   return result.status === 'sent' ? { status: 'sent', providerMessageId: result.messageId } : { status: 'failed', error: result.error, deviceGone: result.subscriptionGone }
 }
@@ -603,8 +615,10 @@ function memberNotificationSends(
         preferencesUrl: `https://${getPlatformDomain(env)}/dashboard/account/profile/notifications`,
         unsubscribeUrl: recipient.unsubscribeUrl,
       })
+      // Only an email that says it can be answered carries a reply address: an alert about a new booking or cancellation does not send the member's reply to the guest.
       await sendEmailNotification(env, db, {
         ...input, to, title: input.message.title,
+        ...(input.message.finePrint === REPLY_NOTE ? { replyAs: { kind: 'member' as const, userId: recipient.userId } } : {}),
         email: { subject: sanitizeEmailHeaderValue(input.message.title), ...rendered },
         unsubscribeOneClickUrl: recipient.unsubscribeOneClickUrl,
         delivery: threadDelivery(input.context, 'owner_alert', 'email', input.template, to, input.eventKey),
@@ -618,9 +632,19 @@ function memberNotificationSends(
     if (mapped.omitted.length) console.info('whatsapp_facts_omitted', { template, omitted: mapped.omitted })
     sends.push((async () => {
       if (!await sendWhatsAppThreadNotification(env, db, {
-        organizationId: input.organizationId, locationId: input.locationId ?? null, toPhone, template, vars: mapped.vars,
         delivery: threadDelivery(input.context, 'owner_alert', 'whatsapp', template, toPhone, input.eventKey),
+        send: () => sendWhatsAppNotification(env, { organizationId: input.organizationId, locationId: input.locationId ?? null, toPhone, template, vars: mapped.vars }),
       })) throw new RecordedDeliveryFailure(`WhatsApp notification was not delivered for organization ${input.organizationId}`)
+      // No approved template has an image header, so the message's photos follow it as images,
+      // which Meta delivers only while the member's 24-hour service window is open.
+      const photos = input.message.quote?.photos ?? []
+      if (!photos.length || !await whatsAppServiceWindowOpen(db, recipient.userId)) return
+      for (const [index, photo] of photos.entries()) {
+        if (!await sendWhatsAppThreadNotification(env, db, {
+          delivery: threadDelivery(input.context, 'owner_alert', 'whatsapp', `${template}:photo:${index}`, toPhone, input.eventKey && `${input.eventKey}:photo:${index}`),
+          send: () => sendWhatsAppImage(env, { organizationId: input.organizationId, toPhone, imageUrl: photo.imageUrl }),
+        })) throw new RecordedDeliveryFailure(`WhatsApp photo was not delivered for organization ${input.organizationId}`)
+      }
     })())
   }
   sends.push(...recipient.pushDevices.map(device => sendPushThreadNotification(env, db, {
@@ -628,6 +652,7 @@ function memberNotificationSends(
     delivery: threadDelivery(input.context, 'owner_alert', 'push', input.pushTemplate, device.token, input.eventKey),
     alert: {
       title: input.message.title, body: input.message.preheader,
+      image: input.message.quote?.photos[0]?.imageUrl ?? null,
       url: async () => input.message.primaryAction.url,
       threadId: input.target.kind === 'guest' || input.target.kind === 'team' ? input.target.threadId : null,
       data: { organizationId: input.organizationId, userId: recipient.userId, ...input.target },
@@ -977,17 +1002,14 @@ export async function notifyReservationCreated(
   const prettyDate = formatCalendarDate(opts.date, 'en')
   const prettyTime = formatTime(opts.time, 'en')
   const platformDomain = getPlatformDomain(env)
-  const [replyTo, inboxUrl] = await Promise.all([
-    buildReplyToAddress(env, 'reservation', opts.reservationId),
-    opts.ownerInboxUrl !== undefined
-      ? opts.ownerInboxUrl
-      : buildOwnerInboxUrl(env, db, {
-          organizationId: opts.organizationId,
-          locationId: opts.locationId,
-          tab: 'reservations',
-          submissionId: opts.reservationId,
-        }),
-  ])
+  const inboxUrl = opts.ownerInboxUrl !== undefined
+    ? opts.ownerInboxUrl
+    : await buildOwnerInboxUrl(env, db, {
+        organizationId: opts.organizationId,
+        locationId: opts.locationId,
+        tab: 'reservations',
+        submissionId: opts.reservationId,
+      })
   const threadContext = await getOpeningThreadContext(db, 'reservation', opts.reservationId)
 
   const payload = {
@@ -1043,7 +1065,7 @@ export async function notifyReservationCreated(
     ...(opts.guestAcknowledgement === false ? [] : [sendEmailNotification(env, db, {
       ...opts,
       to: opts.email,
-      replyTo,
+      replyAs: { kind: 'guest' },
       template: 'reservation_customer_received',
       title: guestMessage.title,
       payload,
@@ -1134,6 +1156,7 @@ export async function notifyReservationCancelled(
     sendEmailNotification(env, db, {
       ...opts,
       to: opts.email,
+      replyAs: { kind: 'guest' },
       template: 'reservation_customer_cancelled',
       title: guestMessage.title,
       payload,
@@ -1153,7 +1176,6 @@ export async function notifyContactSubmitted(
 ) {
   const restaurant = organizationName(opts)
   const platformDomain = getPlatformDomain(env)
-  const replyTo = await buildReplyToAddress(env, 'contact', opts.contactId)
   const inboxUrl = await buildOwnerInboxUrl(env, db, {
     organizationId: opts.organizationId,
     locationId: opts.locationId,
@@ -1207,7 +1229,7 @@ export async function notifyContactSubmitted(
     sendEmailNotification(env, db, {
       ...opts,
       to: opts.email,
-      replyTo,
+      replyAs: { kind: 'guest' },
       template: 'contact_customer_received',
       title: guestMessage.title,
       payload,
@@ -1297,7 +1319,7 @@ export async function notifyReviewRequest(
   await sendEmailNotification(env, db, {
     ...opts,
     to: opts.email,
-    replyTo: await buildReplyToAddress(env, opts.bookingType, opts.bookingId),
+    replyAs: { kind: 'guest' },
     template: 'booking_thank_you_review_request',
     title: `How was your visit to ${restaurant}?`,
     delivery: { threadId: opts.delivery.guestThreadId, entryId: opts.delivery.sourceEntryId, purpose: 'status_update', idempotencyKey: recorded?.id ?? `review-request:${opts.requestId}` },
@@ -1330,17 +1352,14 @@ export async function notifyBookingCreated(
   const prettyDate = new Intl.DateTimeFormat('en-US', { timeZone: opts.timezone, dateStyle: 'medium' }).format(new Date(opts.startsAt))
   const prettyTime = formatTimestamp(opts.startsAt, 'en', opts.timezone, { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })
   const platformDomain = getPlatformDomain(env)
-  const [replyTo, inboxUrl] = await Promise.all([
-    buildReplyToAddress(env, 'booking', opts.bookingId),
-    opts.ownerInboxUrl !== undefined
-      ? opts.ownerInboxUrl
-      : buildOwnerInboxUrl(env, db, {
-          organizationId: opts.organizationId,
-          locationId: opts.locationId,
-          tab: 'bookings',
-          submissionId: opts.bookingId,
-        }),
-  ])
+  const inboxUrl = opts.ownerInboxUrl !== undefined
+    ? opts.ownerInboxUrl
+    : await buildOwnerInboxUrl(env, db, {
+        organizationId: opts.organizationId,
+        locationId: opts.locationId,
+        tab: 'bookings',
+        submissionId: opts.bookingId,
+      })
   const threadContext = await getOpeningThreadContext(db, 'booking', opts.bookingId)
 
   const payload = {
@@ -1405,7 +1424,7 @@ export async function notifyBookingCreated(
     ...(opts.guestAcknowledgement === false ? [] : [sendEmailNotification(env, db, {
       ...opts,
       to: opts.email,
-      replyTo,
+      replyAs: { kind: 'guest' },
       template: 'booking_customer_received',
       title: guestTitle,
       payload,
@@ -1546,8 +1565,7 @@ export async function notifyStayBooked(env: NotificationEnv, db: DbClient, organ
   const home = stay.home
   const studio = organizationName({ organizationId, organizationName: organization.name })
   const threadContext = await getOpeningThreadContext(db, 'stay', stay.request_id)
-  const [replyTo, inboxUrl, hero, logoUrl, guest, contact, audience] = await Promise.all([
-    buildReplyToAddress(env, 'stay', stay.request_id),
+  const [inboxUrl, hero, logoUrl, guest, contact, audience] = await Promise.all([
     buildOwnerThreadInboxUrl(env, db, { organizationId, locationId: home.location_id, threadId: stay.request_id }),
     messageHero(db, organizationId, { type: 'product', id: home.product_id }),
     organizationLogo(db, organizationId),
@@ -1591,7 +1609,7 @@ export async function notifyStayBooked(env: NotificationEnv, db: DbClient, organ
       memberIds: audience.memberIds, memberAlert: { message: stayBookedMessage(stayTurnoverAlert(ownerInput, audience.stayUrl, memberGuestName({ name: stay.guest_name }))), stayId: stay.id },
     }),
     sendEmailNotification(env, db, {
-      organizationId, organizationName: studio, locationId: home.location_id, to: stay.guest_email, replyTo,
+      organizationId, organizationName: studio, locationId: home.location_id, to: stay.guest_email, replyAs: { kind: 'guest' },
       template: 'stay_customer_confirmed', title: guestTitle, payload,
       email: { subject: guestTitle, ...guestEmail },
       buyerAlert: true,
@@ -1619,8 +1637,7 @@ export async function notifyStayCancelled(env: NotificationEnv, db: DbClient, or
     const organization = await queryFirst<{ name: string | null }>(db, 'SELECT name FROM organization WHERE id = ?', [organizationId])
     if (!organization || !stay.guest_email || !stay.guest_name) throw new Error('A stay paid on the site needs its organization, guest name and email')
     const studio = organizationName({ organizationId, organizationName: organization.name })
-    const [replyTo, inboxUrl, hero, logoUrl, guest, contact] = await Promise.all([
-      buildReplyToAddress(env, 'stay', stay.request_id),
+    const [inboxUrl, hero, logoUrl, guest, contact] = await Promise.all([
       buildOwnerThreadInboxUrl(env, db, { organizationId, locationId: home.location_id, threadId: stay.request_id }),
       messageHero(db, organizationId, { type: 'product', id: home.product_id }),
       organizationLogo(db, organizationId),
@@ -1641,7 +1658,7 @@ export async function notifyStayCancelled(env: NotificationEnv, db: DbClient, or
       threadId: stay.request_id, kind: 'operation', actorKind: by === 'guest' ? 'guest' : 'member', channel: 'web', body: guestEmail.text,
       eventName: `stay.${by}_cancelled`, dedupeKey,
       payloadJson: { subject: guestTitle, refund_minor: refundMinor, location_id: home.location_id,
-        email: { to: stay.guest_email, fromName: studio, replyTo, html: guestEmail.html, text: guestEmail.text },
+        email: { to: stay.guest_email, fromName: studio, html: guestEmail.html, text: guestEmail.text },
         owner: {
           guestName: stay.guest_name, guestEmail: stay.guest_email, guestPhone: stay.guest_phone, homeName: home.name,
           checkIn: [day(stay.check_in_date, 'en-US'), home.check_in_time ? formatTime(home.check_in_time, 'en-US') : null].filter(Boolean).join(' · '), checkOut: [day(stay.check_out_date, 'en-US'), home.check_out_time ? formatTime(home.check_out_time, 'en-US') : null].filter(Boolean).join(' · '),
@@ -1663,7 +1680,7 @@ export async function notifyStayCancelled(env: NotificationEnv, db: DbClient, or
   if (!isRecord(stored?.email)) throw new Error('Stay cancellation notification has no recorded email content to retry')
   const recorded = z.object({
     subject: z.string().min(1), refund_minor: z.number().int().nonnegative(), location_id: z.string().min(1),
-    email: z.object({ to: z.string().min(1), fromName: z.string().min(1), replyTo: z.string().nullable(), html: z.string().min(1), text: z.string().min(1) }),
+    email: z.object({ to: z.string().min(1), fromName: z.string().min(1), html: z.string().min(1), text: z.string().min(1) }),
     owner: z.object({
       guestName: z.string(), guestEmail: z.string(), guestPhone: z.string().nullable(), homeName: z.string(), checkIn: z.string(), checkOut: z.string(),
       nights: z.string(), guests: z.string(), refund: z.string(), organizationName: z.string(), heroImageUrl: z.string().nullable(), replyUrl: z.string().min(1),
@@ -1683,7 +1700,7 @@ export async function notifyStayCancelled(env: NotificationEnv, db: DbClient, or
       memberIds: audience.memberIds, memberAlert: { message: stayCancelledMessage(stayTurnoverAlert(ownerInput, audience.stayUrl, memberGuestName({ name: recorded.owner.guestName }))), stayId: stay.id },
     })] : []),
     sendEmailNotification(env, db, {
-      organizationId, organizationName: recorded.email.fromName, locationId: recorded.location_id, to: recorded.email.to, replyTo: recorded.email.replyTo,
+      organizationId, organizationName: recorded.email.fromName, locationId: recorded.location_id, to: recorded.email.to, replyAs: { kind: 'guest' },
       template: 'stay_customer_cancelled', title: recorded.subject, payload,
       email: { subject: recorded.subject, html: recorded.email.html, text: recorded.email.text, emailPurpose: 'transactional' },
       buyerAlert: true,
@@ -1776,6 +1793,7 @@ export async function notifyBookingCancelled(
     sendEmailNotification(env, db, {
       ...opts,
       to: opts.email,
+      replyAs: { kind: 'guest' },
       template: 'booking_customer_cancelled',
       title: guestMessage.title,
       payload,
@@ -1906,7 +1924,6 @@ export async function notifyGuestThreadReply(
     submission_id: opts.submissionId,
     participant_label: opts.participantLabel,
     inbound_channel: opts.inboundChannel,
-    message_preview: opts.messagePreview.slice(0, 200),
     deep_link: replyUrl ?? '',
   }
 
@@ -1916,12 +1933,13 @@ export async function notifyGuestThreadReply(
   if (!entry || entry.request_id !== opts.threadId) throw new Error(`Message ${opts.sourceEntryId} is not in conversation ${opts.threadId}`)
   const support = isAirbnbSupportMessage(entry)
   if (entry.actor_kind !== 'guest' && !support) throw new Error(`Message ${entry.id} is neither a guest's nor Airbnb Support's; nobody is alerted to it`)
+  const { guestName, body, photos, preview, history } = await alertedMessage(db, thread, entry)
   const ownerMessage = {
     ...messageReceived({
-      sender: support ? { kind: 'support' } : { kind: 'person', name: opts.participantLabel, email: opts.guestEmail ?? null },
+      sender: support ? { kind: 'support' } : { kind: 'person', name: guestName, email: opts.guestEmail ?? null },
       conversationLabel: { email: 'Email reply', whatsapp: 'WhatsApp reply', web: 'Website reply', airbnb: 'Airbnb message' }[opts.inboundChannel],
       about: summary.productTitle ?? summary.locationTitle,
-      messagePreview: opts.messagePreview,
+      messagePreview: preview, body, photos, history,
       translation: airbnbTranslation(entry),
       record: support ? null : await conversationRecord(db, thread),
       organizationName: business,
@@ -1943,6 +1961,7 @@ export async function notifyGuestThreadReply(
     // same entry does not notify the owner a second time.
     idempotencyKey: `notification:${opts.sourceEntryId}:${template}`,
     title: ownerMessage.title,
+    message: preview,
     threadId: threadContext.guestThreadId,
     deepLink: payload.deep_link || null,
   })
@@ -1963,6 +1982,45 @@ export async function notifyGuestThreadReply(
     target: { kind: 'guest', threadId: opts.threadId },
   })))
   raiseUnrecordedOwnerAlertFailures('notifyGuestThreadReply', `thread ${opts.threadId}`, results.map(result => ({ result, task: 'ownerAlert' })))
+}
+
+/** How many earlier messages an alert shows under the new one. */
+const ALERT_HISTORY = 3
+
+/**
+ * The message an alert is about, read from the conversation itself: its words,
+ * its photos as served from the media store (public URLs a mail client and Meta
+ * can fetch), what a list says when it has no words, and the last messages
+ * before it, named as the inbox names their authors.
+ */
+async function alertedMessage(db: DbClient, thread: GuestRequest, entry: GuestThreadEntryRow) {
+  // The conversation reader depends on this module through the inbox, so it is loaded when an alert needs it.
+  const [{ getGuestThreadDetail }, { inboxGuestNames }] = await Promise.all([import('~/server/domain/guest-threads/detail'), import('~/server/domain/guest-threads/inbox')])
+  const detail = await getGuestThreadDetail(db, thread.id, thread.organization_id)
+  if (!detail) throw new Error(`Conversation ${thread.id} could not be read for its alert`)
+  const { guestName: guest, guestFullName } = inboxGuestNames(detail)
+  const messages = detail.entries.filter(item => item.kind === 'message')
+  const position = messages.findIndex(item => item.id === entry.id)
+  const alerted = messages[position]
+  if (!alerted) throw new Error(`Message ${entry.id} is not shown in conversation ${thread.id}`)
+  const author = (item: typeof alerted): string => {
+    const name = item.actorLabel ?? (item.actorKind === 'guest' ? guest : detail.organizationName)
+    if (!name) throw new Error(`Message ${item.id} in conversation ${thread.id} has no author to name`)
+    return name
+  }
+  const fileCount = (payload: Record<string, unknown> | null) =>
+    (Array.isArray(payload?.attachments) ? payload.attachments.length : 0) + (Array.isArray(payload?.unshownFiles) ? payload.unshownFiles.length : 0)
+  const said = (item: typeof alerted) => item.body?.trim()
+    || (item.attachments.length ? messagePreview(null, item.attachments.length) : fileCount(item.payload) === 1 ? 'Sent an attachment' : `Sent ${fileCount(item.payload)} attachments`)
+  return {
+    guestName: guestFullName,
+    // A file with no words is still what the guest sent; photos show themselves.
+    body: alerted.body?.trim() || (alerted.attachments.length ? '' : said(alerted)),
+    photos: alerted.attachments.map(photo => ({ imageUrl: photo.url, alt: photo.alt ?? `Photo from ${guest}` })),
+    preview: said(alerted),
+    history: messages.slice(0, position).filter(item => item.body?.trim() || item.attachments.length || fileCount(item.payload)).slice(-ALERT_HISTORY)
+      .map(item => ({ author: author(item), text: said(item) })),
+  }
 }
 
 /** Channex marks an Airbnb agent's message with the role AGENT (read from a live thread, 2026-10-23); the mirror records it as the system's. */
@@ -2037,13 +2095,15 @@ export async function notifyAirbnbInquiry(env: NotificationEnv, db: DbClient, in
   const asked = await queryFirst<GuestThreadEntryRow>(db, `SELECT * FROM activity_entries WHERE request_id = ? AND kind = 'message' AND actor_kind = 'guest'
     AND sequence < (SELECT sequence FROM activity_entries WHERE id = ? AND request_id = ?) ORDER BY sequence DESC LIMIT 1`, [thread.id, input.entryId, thread.id])
   if (!asked?.body?.trim()) throw new HTTPError({ statusCode: 500, message: 'The inquiry conversation has no message from the guest', data: { code: 'CHANNEL_INQUIRY_MESSAGE_MISSING', field: 'request_id', request_id: thread.id } })
-  const [home, record, replyUrl] = await Promise.all([
+  const [home, record, replyUrl, photos] = await Promise.all([
     channelHome(db, thread),
     inquiryRecord(db, thread, input.inquiry),
     buildOwnerThreadInboxUrl(env, db, { organizationId: thread.organization_id, threadId: thread.id }),
+    listMessagePhotos(db, 'activity_entry', [asked.id]).then(found => found.get(asked.id) ?? []),
   ])
   const message = inquiryReceivedMessage({
     guestName: input.inquiry.guestName, message: asked.body.trim(), translation: airbnbTranslation(asked), record, replyUrl,
+    photos: photos.map(photo => ({ imageUrl: photo.url, alt: photo.alt ?? `Photo from ${input.inquiry.guestName}` })),
     organizationName: organizationName({ organizationId: thread.organization_id, organizationName: home.organization_name }),
   })
   await notifyOwner(env, db, {
@@ -2075,7 +2135,7 @@ export async function notifyTeamMessage(env: NotificationEnv, db: DbClient, inpu
     'SELECT name FROM organization WHERE id = ?', [input.organizationId])
   if (!organization) throw new HTTPError({ statusCode: 500, message: 'The team conversation organization is missing', data: { code: 'TEAM_ORGANIZATION_MISSING', field: 'organization_id' } })
   const replyUrl = await dashboardPathUrl(env, db, input.organizationId, `/messages/team/${encodeURIComponent(input.threadId)}?view=team`)
-  const message = { ...messageReceived({ sender: { kind: 'person', name: input.senderName, email: null }, conversationLabel: 'Team', about: null, messagePreview: input.messagePreview, translation: null, record: null, organizationName: organization.name, replyUrl }),
+  const message = { ...messageReceived({ sender: { kind: 'person', name: input.senderName, email: null }, conversationLabel: 'Team', about: null, messagePreview: input.messagePreview, body: input.messagePreview, photos: [], history: [], translation: null, record: null, organizationName: organization.name, replyUrl }),
     organizationLogoUrl: await organizationLogo(db, input.organizationId) }
   const recipients = (await resolveOwnerRecipients(env, db, {
     organizationId: input.organizationId, category: message.category, emailPurpose: message.emailPurpose,
@@ -2306,49 +2366,14 @@ async function notifyTaskPeople(env: NotificationEnv, db: DbClient, input: { org
   raiseUnrecordedOwnerAlertFailures('notifyTaskPeople', `task ${input.taskId}`, results.map(result => ({ result, task: 'taskAlert' })))
 }
 
-export async function notifyTaskAssigned(env: NotificationEnv, db: DbClient, input: { organizationId: string; taskId: string; actorUserId: string; recipientUserIds: string[] }): Promise<void> {
+export async function notifyTaskAssigned(env: NotificationEnv, db: DbClient, input: { organizationId: string; taskId: string; actorUserId: string | null; recipientUserIds: string[] }): Promise<void> {
   const version = await queryFirst<{ version: number }>(db, 'SELECT version FROM tasks WHERE organization_id = ? AND id = ?', [input.organizationId, input.taskId])
   if (!version) throw new Error(`Task ${input.taskId} disappeared before its assignment alert`)
   await notifyTaskPeople(env, db, { ...input, kind: 'assigned', eventKey: `task-assigned:${input.taskId}:${version.version}` })
 }
 
-/**
- * Turnovers whose window starts today, told to their people once, at the start
- * of the home's working day (its location's opening hours that day), or at the
- * window's own start when the location keeps no hours. Run by the scheduler
- * that sends automatic guest messages.
- */
-export async function notifyStartingTurnovers(env: NotificationEnv, db: DbClient, now = new Date()): Promise<{ alerted: number }> {
-  const { getDateIntervals, parseOpeningHours, parseSpecialHours } = await import('~/shared/reservation-hours')
-  const { localDateAt, localDateTimeToInstant } = await import('~/utils/timezone')
-  const soon = new Date(now.getTime() + 36 * 3_600_000).toISOString()
-  const rows = await queryAll<{ id: string; organization_id: string; starts_at: string; timezone: string; assigned_member_id: string | null; assigned_team_id: string | null; opening_hours: string | null; special_hours: string | null }>(db, `
-    SELECT t.id, t.organization_id, t.starts_at, t.timezone, t.assigned_member_id, t.assigned_team_id, l.opening_hours, l.special_hours
-      FROM tasks t LEFT JOIN business_locations l ON l.organization_id = t.organization_id AND l.id = t.location_id
-     WHERE t.kind = 'turnover' AND t.status = 'open' AND t.starts_at IS NOT NULL AND t.starts_at <= ?
-       AND (t.assigned_member_id IS NOT NULL OR t.assigned_team_id IS NOT NULL)`, [soon])
-  let alerted = 0
-  const failures: unknown[] = []
-  for (const row of rows) {
-    const day = localDateAt(now, row.timezone)
-    if (localDateAt(new Date(row.starts_at), row.timezone) !== day) continue
-    const intervals = getDateIntervals(parseOpeningHours(row.opening_hours ? JSON.parse(row.opening_hours) : null), parseSpecialHours(row.special_hours ? JSON.parse(row.special_hours) : null), day)
-    const opens = intervals?.find(interval => interval.start >= 0)
-    const workday = opens ? localDateTimeToInstant(day, `${String(Math.floor(opens.start / 60)).padStart(2, '0')}:${String(opens.start % 60).padStart(2, '0')}`, row.timezone, 'compatible').toISOString() : row.starts_at
-    if (now.toISOString() < (workday < row.starts_at ? workday : row.starts_at)) continue
-    const eventKey = `task-starting:${row.id}:${day}`
-    if (await queryFirst(db, "SELECT id FROM activity_entries WHERE kind = 'notification' AND dedupe_key LIKE ? LIMIT 1", [`notification:${eventKey}:%`])) continue
-    const recipients = row.assigned_member_id
-      ? await queryAll<{ userId: string }>(db, 'SELECT userId FROM member WHERE organizationId = ? AND id = ?', [row.organization_id, row.assigned_member_id])
-      : await queryAll<{ userId: string }>(db, 'SELECT tm.userId FROM teamMember tm JOIN team t ON t.id = tm.teamId WHERE t.organizationId = ? AND t.id = ?', [row.organization_id, row.assigned_team_id])
-    try {
-      await notifyTaskPeople(env, db, { organizationId: row.organization_id, taskId: row.id, recipientUserIds: recipients.map(recipient => recipient.userId), kind: 'starting', actorUserId: null, eventKey })
-      alerted += 1
-    } catch (error) {
-      failures.push(error)
-    }
-  }
-  if (failures.length) throw new AggregateError(failures, `${failures.length} turnover start alerts failed`)
-  return { alerted }
+/** A job an owner or admin keeps for themselves starts today: the task alert, once per day. The organization's jobs wake sends it. */
+export async function notifyTaskStarting(env: NotificationEnv, db: DbClient, input: { organizationId: string; taskId: string; day: string; recipientUserIds: string[] }): Promise<void> {
+  await notifyTaskPeople(env, db, { organizationId: input.organizationId, taskId: input.taskId, recipientUserIds: input.recipientUserIds, kind: 'starting', actorUserId: null, eventKey: `task-starting:${input.taskId}:${input.day}` })
 }
 

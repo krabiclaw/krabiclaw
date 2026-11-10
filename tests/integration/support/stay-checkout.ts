@@ -31,8 +31,8 @@ export async function buyStay(db: D1Database, input: {
   const now = new Date().toISOString()
   const paymentId = `${input.id}-payment`, holdId = `${input.id}-hold`
   await db.batch([
-    db.prepare(`INSERT INTO payments (id, organization_id, buyer_user_id, stripe_account_id, livemode, subject_type, subject_id, location_id, currency, amount, captured_amount, state, stripe_payment_intent_id, price_snapshot_json, created_at, updated_at)
-      VALUES (?, ?, ?, 'acct_seller', 0, 'stay', NULL, ?, ?, ?, ?, 'captured', ?, ?, ?, ?)`)
+    db.prepare(`INSERT INTO payments (id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,subject_id,location_id,currency,amount,captured_amount,stripe_payment_intent_id,price_snapshot_json,created_at,updated_at)
+      VALUES (?, ?, ?, 'acct_seller', 0, 'stay', NULL, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .bind(paymentId, input.organizationId, input.buyerUserId, input.locationId, input.currency, total, total, `pi_${input.id}`, JSON.stringify({ title: 'Stay', quantity: 1, price: { unit_amount: total, currency: input.currency }, stay: purchase }), now, now),
     db.prepare(`INSERT INTO payment_checkout_holds (id, organization_id, product_id, location_id, timezone, buyer_user_id, payment_id, quantity, amount, currency, starts_at, ends_at, status, expires_at, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', '2099-01-01T00:00:00.000Z', ?)`)

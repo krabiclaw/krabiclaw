@@ -17,14 +17,13 @@ are published there by the KrabiClaw bot, from the dashboard or MCP
   only the chosen channel and the linked account, in `organization_integrations`.
   No organization holds a Discord token.
 - The bot creates the message with the publication's nonce and
-  `enforce_nonce`, so a repeated create returns the same message, and with
-  mentions disabled. Text over 2000 characters is refused, never split.
-  Attachments: up to ten JPEG, PNG, GIF, WebP, MP4, MOV or WebM files, 20 MiB
-  each and 25 MiB together, checked against the fetched bytes.
+  `enforce_nonce`, so a repeated create returns the same message. Discord
+  applies its own message and attachment limits, and its refusal is what the
+  publication reports. `<@user-id>` in a post's text pings that member.
 - A receipt's link opens only for members of that channel, so the public site
   does not list Discord.
-- `reconcile_post_publication` resolves an unknown outcome by finding the bot's
-  message with this post's exact text and media in the channel.
+- `reconcile_post_publication` refreshes a publication's receipt from the bot's
+  message id, which `list_channel_posts` shows.
 
 ## Configuration
 

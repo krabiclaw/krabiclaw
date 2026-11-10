@@ -4,7 +4,7 @@ import { queryAll, queryFirst, type DbClient } from '~/server/db'
 import { loadOwnerPictures } from '~/server/notifications/hero'
 import { getStripeConnectedAccount, paymentsStripe } from '~/server/utils/stripe-connect'
 import type { CloudflareEnv } from '~/server/utils/auth'
-import { authorizePayments, type FinancialPrincipal, type Payment } from './index'
+import { authorizePayments, type FinancialPrincipal, type Payment, type VisiblePayment } from './index'
 import { channelReservationAmounts } from '~/server/domain/stays'
 
 /**
@@ -164,7 +164,7 @@ export function payoutStatusLabel(status: string): string {
 }
 
 /** The month's transactions as Airbnb's list reads them: the picture, the buyer, and the record each opens. */
-export async function paymentTransactions(db: DbClient, principal: FinancialPrincipal, organizationSlug: string, page: { payments: Payment[]; next_cursor: string | null }) {
+export async function paymentTransactions(db: DbClient, principal: FinancialPrincipal, organizationSlug: string, page: { payments: VisiblePayment[]; next_cursor: string | null }) {
   const ids = page.payments.map(payment => payment.id)
   const json = JSON.stringify(ids)
   const [pictures, buyers, bookings, orders] = ids.length
@@ -183,7 +183,7 @@ export async function paymentTransactions(db: DbClient, principal: FinancialPrin
       const request = bookings.find(row => row.payment_id === payment.id)?.request_id
       const to = request ? `${base}/${payment.subject_type}/${encodeURIComponent(request)}` : `${base}/${orders.some(row => row.payment_id === payment.id) ? 'order' : 'payment'}/${encodeURIComponent(payment.id)}`
       return {
-        id: payment.id, created_at: payment.created_at, currency: payment.currency, amount: payment.amount, captured_amount: payment.captured_amount, refunded_amount: payment.refunded_amount, state: payment.state,
+        id: payment.id, created_at: payment.created_at, currency: payment.currency, amount: payment.amount, captured_amount: payment.captured_amount, refunded_amount: payment.refunded_amount,
         title: picture.title, image_url: picture.imageUrl, buyer_name: buyers.find(row => row.id === payment.id)?.name ?? null,
         starts_at: picture.startsAt, ends_at: picture.endsAt, timezone: picture.timeZone, to,
       }

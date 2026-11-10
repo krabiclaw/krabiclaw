@@ -22,6 +22,8 @@ export interface WebPushAlert {
   url: string
   /** Replaces an earlier notification about the same conversation; absent when it belongs to none. */
   tag: string | null
+  /** A photo the message carries, shown in the notification where the browser supports it. */
+  image: string | null
 }
 
 export type WebPushSendResult =

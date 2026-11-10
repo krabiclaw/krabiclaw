@@ -23,9 +23,12 @@ through it with the same tools.
 - Posts: `create_post` makes a draft (pass a new `idempotency_key`); `publish_post` publishes to
   exactly the `targets` named — `{"channel":"organization"}` and the `target_id` and
   `connection_revision` from `get_social_connections` — and returns one outcome per target.
-  `processing` is finished by calling `publish_post` again; `unknown` is resolved only by
-  `reconcile_post_publication`, never by publishing again. Nothing is scheduled: a client that
-  wants a post out later calls `publish_post` then.
+  Each outcome has a `status`: `published` (with `public_url` when the destination gives one),
+  `already_published` for a target this post already reached, `failed` with the provider's
+  reason, or `skipped` when the destination is not connected or not on the plan;
+  `publish_post` again once the cause is fixed. `reconcile_post_publication` reads a
+  publication's post on its destination and refreshes the receipt. Nothing is scheduled: a
+  client that wants a post out later calls `publish_post` then.
 
 KrabiClaw's marketing site is an ordinary organization running the platform
 template. Its blog and documentation are article collections on that
@@ -147,9 +150,9 @@ business and location will be used.
 
 Tool output schemas describe successful results. A failed call uses MCP
 `isError: true` and text content explaining the reason. Execution failures may
-include a JSON object with `status`, `code` and recovery fields; schema failures
-use the SDK's validation text. A failure carrying `committed: true` means the
-write was saved and a later part failed: read current state before retrying.
+include a JSON object with `status` and `code`; schema failures use the SDK's
+validation text. A failure carrying `committed: true` means the write was saved
+and a later part, named in the message, was not done.
 
 Every retained tool declares `readOnlyHint`, `destructiveHint` and `openWorldHint`
 explicitly. A tool is classified against all supported branches, including optional
@@ -286,7 +289,7 @@ An existing appointment import must have a separately supported audited contract
 it must never be represented as a new payment or fabricated paid Stripe record.
 
 `operational_booking_id` means `bookings.id`. `request_id` means the guest inbox
-thread ID; the legacy public `booking_id` continues to mean that request ID.
+thread ID. No booking tool or public booking response returns a `booking_id`.
 Review confirmation/rejection and cancellation invoke the canonical guest-thread
 operation service with durable operation keys and guest status messages. Confirm
 approves a pending booking; reject declines a pending booking; cancel ends a

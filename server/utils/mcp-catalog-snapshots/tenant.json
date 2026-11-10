@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:8a0ab254703f1e603a5284cea585418fe9ff8d70a77702b8ae6bae9f3efc3acc",
-  "documentationFingerprint": "sha256:31d2728c32f0c0d33ac30a2e8ad3b33985d101d592d074fd6acb93c79f6e484c",
+  "fingerprint": "sha256:d0007d915ed275a6d083411b3b0c3838a3fff0230e2ee135d9dc47e098c9e8f8",
+  "documentationFingerprint": "sha256:24f2c645631c651a5504015711848296ad21df8beaa58cd8c13408c490a15636",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -172,7 +172,10 @@
                   "booking_review",
                   "booking_change",
                   "opportunity",
-                  "custom"
+                  "custom",
+                  "stay_ready",
+                  "consultation_prep",
+                  "consultation_follow_up"
                 ],
                 "type": "string"
               },
@@ -8605,7 +8608,7 @@
     {
       "name": "batch_create_products",
       "title": "Batch create products",
-      "description": "Create several products in the selected site’s catalog when the user supplies a new catalog batch. Validates every entry before writing; any invalid entry rejects the complete request. Publication and location offerings are assigned separately.",
+      "description": "Create several products in the selected site’s catalog when the user supplies a new catalog batch. Validates every entry before writing; any invalid entry rejects the complete request. Creating a place to stay reports the business's current live-home count to its Stripe subscription; an unpublished home adds nothing to it. Publication and location offerings are assigned separately.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -10086,9 +10089,9 @@
                       "type": "string"
                     },
                     "scheduling_mode": {
-                      "description": "Legal consultations require provider scheduling with an explicitly assigned attorney or legal team. Experiences may use legacy business scheduling without one named provider. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
+                      "description": "Legal consultations require provider scheduling with an explicitly assigned attorney or legal team. business: the business publishes its own sessions; an assigned member or team is optional and hosts them, but their working hours do not set the times. Experiences may use it. provider: times come from the assigned member’s or team’s working hours. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
                       "enum": [
-                        "legacy",
+                        "business",
                         "provider"
                       ],
                       "type": "string"
@@ -12232,7 +12235,7 @@
       "annotations": {
         "destructiveHint": false,
         "idempotentHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "readOnlyHint": false,
         "title": "Batch create products"
       },
@@ -14097,7 +14100,10 @@
                   "booking_review",
                   "booking_change",
                   "opportunity",
-                  "custom"
+                  "custom",
+                  "stay_ready",
+                  "consultation_prep",
+                  "consultation_follow_up"
                 ],
                 "type": "string"
               },
@@ -21512,14 +21518,6 @@
               "slug": {
                 "type": "string"
               },
-              "source": {
-                "description": "The organization authored this website post or created it from a template.",
-                "enum": [
-                  "manual",
-                  "template"
-                ],
-                "type": "string"
-              },
               "status": {
                 "enum": [
                   "draft",
@@ -23451,9 +23449,9 @@
                 "type": "boolean"
               },
               "scheduling_mode": {
-                "description": "Legal consultations require provider scheduling with an explicitly assigned attorney or legal team. Experiences may use legacy business scheduling without one named provider. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
+                "description": "Legal consultations require provider scheduling with an explicitly assigned attorney or legal team. business: the business publishes its own sessions; an assigned member or team is optional and hosts them, but their working hours do not set the times. Experiences may use it. provider: times come from the assigned member’s or team’s working hours. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
                 "enum": [
-                  "legacy",
+                  "business",
                   "provider"
                 ],
                 "type": "string"
@@ -26976,9 +26974,9 @@
                     "type": "string"
                   },
                   "scheduling_mode": {
-                    "description": "Legal consultations require provider scheduling with an explicitly assigned attorney or legal team. Experiences may use legacy business scheduling without one named provider. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
+                    "description": "Legal consultations require provider scheduling with an explicitly assigned attorney or legal team. business: the business publishes its own sessions; an assigned member or team is optional and hosts them, but their working hours do not set the times. Experiences may use it. provider: times come from the assigned member’s or team’s working hours. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
                     "enum": [
-                      "legacy",
+                      "business",
                       "provider"
                     ],
                     "type": "string"
@@ -37907,7 +37905,10 @@
                   "booking_review",
                   "booking_change",
                   "opportunity",
-                  "custom"
+                  "custom",
+                  "stay_ready",
+                  "consultation_prep",
+                  "consultation_follow_up"
                 ],
                 "type": "string"
               },
@@ -42654,7 +42655,7 @@
     {
       "name": "delete_post",
       "title": "Delete post",
-      "description": "Delete a post from the website. Its Facebook, Instagram and Discord posts are not deleted; use delete_channel_post for an explicit supported channel deletion. Refused while a publication of it is in progress or unresolved.",
+      "description": "Delete a post from the website. Its Facebook, Instagram and Discord posts are not deleted; use delete_channel_post for an explicit supported channel deletion.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -49589,30 +49590,6 @@
                 "scheduling": {
                   "additionalProperties": false,
                   "properties": {
-                    "busy_checked_at": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "busy_error": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "busy_from": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "busy_until": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
                     "calendar_account_id": {
                       "type": [
                         "string",
@@ -49659,8 +49636,6 @@
                       "enum": [
                         "internal",
                         "disconnected",
-                        "error",
-                        "stale",
                         "ready"
                       ],
                       "type": "string"
@@ -49738,10 +49713,6 @@
                     "calendar_account_id",
                     "calendar_ids",
                     "calendar_status",
-                    "busy_from",
-                    "busy_until",
-                    "busy_checked_at",
-                    "busy_error",
                     "calendar_conflict_count",
                     "calendar_conflicts"
                   ],
@@ -49768,30 +49739,6 @@
           "scheduling": {
             "additionalProperties": false,
             "properties": {
-              "busy_checked_at": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "busy_error": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "busy_from": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "busy_until": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
               "calendar_account_id": {
                 "type": [
                   "string",
@@ -49838,8 +49785,6 @@
                 "enum": [
                   "internal",
                   "disconnected",
-                  "error",
-                  "stale",
                   "ready"
                 ],
                 "type": "string"
@@ -49917,10 +49862,6 @@
               "calendar_account_id",
               "calendar_ids",
               "calendar_status",
-              "busy_from",
-              "busy_until",
-              "busy_checked_at",
-              "busy_error",
               "calendar_conflict_count",
               "calendar_conflicts"
             ],
@@ -52013,9 +51954,6 @@
                   "null"
                 ]
               },
-              "state": {
-                "type": "string"
-              },
               "timezone": {
                 "type": [
                   "string",
@@ -52035,7 +51973,6 @@
               "amount",
               "captured_amount",
               "refunded_amount",
-              "state",
               "title",
               "to"
             ],
@@ -52784,14 +52721,6 @@
               "slug": {
                 "type": "string"
               },
-              "source": {
-                "description": "The organization authored this website post or created it from a template.",
-                "enum": [
-                  "manual",
-                  "template"
-                ],
-                "type": "string"
-              },
               "status": {
                 "enum": [
                   "draft",
@@ -53035,9 +52964,9 @@
                     "type": "string"
                   },
                   "scheduling_mode": {
-                    "description": "Legal consultations require provider scheduling with an explicitly assigned attorney or legal team. Experiences may use legacy business scheduling without one named provider. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
+                    "description": "Legal consultations require provider scheduling with an explicitly assigned attorney or legal team. business: the business publishes its own sessions; an assigned member or team is optional and hosts them, but their working hours do not set the times. Experiences may use it. provider: times come from the assigned member’s or team’s working hours. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
                     "enum": [
-                      "legacy",
+                      "business",
                       "provider"
                     ],
                     "type": "string"
@@ -65388,6 +65317,19 @@
                       "null"
                     ]
                   },
+                  "booked_home_name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "booked_product_id": {
+                    "description": "The listing a channel reservation is booked on when the host moved the guest to another home; null when they sleep where they booked.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
                   "cancellation_policy": {
                     "description": "The home cancellation policy the guest booked under on the site; it decides what their own cancellation refunds. Null for a stay not paid on the site.",
                     "enum": [
@@ -65591,21 +65533,10 @@
                       },
                       "refunded_minor": {
                         "type": "integer"
-                      },
-                      "state": {
-                        "enum": [
-                          "pending",
-                          "captured",
-                          "failed",
-                          "recovery",
-                          "refunded"
-                        ],
-                        "type": "string"
                       }
                     },
                     "required": [
                       "payment_id",
-                      "state",
                       "currency",
                       "amount_minor",
                       "captured_minor",
@@ -65761,6 +65692,8 @@
                 "required": [
                   "id",
                   "product_id",
+                  "booked_product_id",
+                  "booked_home_name",
                   "location_id",
                   "timezone",
                   "channel",
@@ -66553,6 +66486,10 @@
                   },
                   "type": "array"
                 },
+                "automatic": {
+                  "description": "Written by KrabiClaw (a cleaning job, a reminder, a move), not by a member; never counted as unread.",
+                  "type": "boolean"
+                },
                 "body": {
                   "type": "string"
                 },
@@ -66601,6 +66538,7 @@
                   "type": "string"
                 },
                 "senderId": {
+                  "description": "The sender; null for an automatic message, or once a person’s account was deleted.",
                   "type": [
                     "string",
                     "null"
@@ -66614,6 +66552,7 @@
                 "id",
                 "threadId",
                 "senderId",
+                "automatic",
                 "body",
                 "createdAt",
                 "attachments",
@@ -70356,9 +70295,6 @@
                     "null"
                   ]
                 },
-                "state": {
-                  "type": "string"
-                },
                 "timezone": {
                   "type": [
                     "string",
@@ -70378,7 +70314,6 @@
                 "amount",
                 "captured_amount",
                 "refunded_amount",
-                "state",
                 "title",
                 "to"
               ],
@@ -70719,14 +70654,6 @@
                   ]
                 },
                 "slug": {
-                  "type": "string"
-                },
-                "source": {
-                  "description": "The organization authored this website post or created it from a template.",
-                  "enum": [
-                    "manual",
-                    "template"
-                  ],
                   "type": "string"
                 },
                 "status": {
@@ -72605,7 +72532,10 @@
               "booking_review",
               "booking_change",
               "opportunity",
-              "custom"
+              "custom",
+              "stay_ready",
+              "consultation_prep",
+              "consultation_follow_up"
             ],
             "type": "string"
           },
@@ -72814,7 +72744,10 @@
                           "booking_review",
                           "booking_change",
                           "opportunity",
-                          "custom"
+                          "custom",
+                          "stay_ready",
+                          "consultation_prep",
+                          "consultation_follow_up"
                         ],
                         "type": "string"
                       },
@@ -73187,6 +73120,10 @@
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
+          "booking_id": {
+            "minLength": 1,
+            "type": "string"
+          },
           "cursor": {
             "description": "Opaque next_cursor from the previous page.",
             "type": "string"
@@ -73222,6 +73159,12 @@
           "conversations": {
             "items": {
               "properties": {
+                "bookingId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "canLeave": {
                   "type": "boolean"
                 },
@@ -73242,6 +73185,363 @@
                 },
                 "isGroup": {
                   "type": "boolean"
+                },
+                "job": {
+                  "description": "A stay conversation’s cleaning job (the turnover, or the job to get the home ready after a move) as list_tasks presents it; null when the stay has none the caller may see.",
+                  "properties": {
+                    "action": {
+                      "type": [
+                        "object",
+                        "null"
+                      ]
+                    },
+                    "assignee": {
+                      "anyOf": [
+                        {
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "initial": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "type": {
+                              "enum": [
+                                "member",
+                                "team"
+                              ],
+                              "type": "string"
+                            },
+                            "you": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "id",
+                            "name",
+                            "initial",
+                            "you"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "avatar": {
+                      "type": [
+                        "object",
+                        "null"
+                      ]
+                    },
+                    "can": {
+                      "properties": {
+                        "assign": {
+                          "type": "boolean"
+                        },
+                        "complete": {
+                          "type": "boolean"
+                        },
+                        "edit": {
+                          "type": "boolean"
+                        },
+                        "reopen": {
+                          "type": "boolean"
+                        },
+                        "skip": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "complete",
+                        "skip",
+                        "reopen",
+                        "assign",
+                        "edit"
+                      ],
+                      "type": "object"
+                    },
+                    "detail": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "dueAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "error": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "face": {
+                      "enum": [
+                        "photo",
+                        "compact"
+                      ],
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "imageUrl": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "kind": {
+                      "enum": [
+                        "turnover",
+                        "guest_reply",
+                        "message_delivery",
+                        "booking_review",
+                        "booking_change",
+                        "opportunity",
+                        "custom",
+                        "stay_ready",
+                        "consultation_prep",
+                        "consultation_follow_up"
+                      ],
+                      "type": "string"
+                    },
+                    "locationId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "note": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "notes": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "outcome": {
+                      "type": [
+                        "object",
+                        "null"
+                      ]
+                    },
+                    "path": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "person": {
+                      "anyOf": [
+                        {
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "initial": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "type": {
+                              "enum": [
+                                "member",
+                                "team"
+                              ],
+                              "type": "string"
+                            },
+                            "you": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "id",
+                            "name",
+                            "initial",
+                            "you"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "productId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "requestId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "reservation": {
+                      "properties": {
+                        "conversation": {
+                          "anyOf": [
+                            {
+                              "properties": {
+                                "description": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "label": {
+                                  "type": "string"
+                                },
+                                "to": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "label",
+                                "description",
+                                "to"
+                              ],
+                              "type": "object"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "dateLabel": {
+                          "type": "string"
+                        },
+                        "groupHeadline": {
+                          "type": "string"
+                        },
+                        "guestImageUrl": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "homeName": {
+                          "type": "string"
+                        },
+                        "statusLabel": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "dateLabel",
+                        "groupHeadline",
+                        "homeName",
+                        "statusLabel",
+                        "guestImageUrl",
+                        "conversation"
+                      ],
+                      "type": "object"
+                    },
+                    "sheet": {
+                      "type": "object"
+                    },
+                    "startsAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "status": {
+                      "enum": [
+                        "open",
+                        "done",
+                        "skipped",
+                        "cancelled"
+                      ],
+                      "type": "string"
+                    },
+                    "statusLine": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "stayId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "tag": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "timezone": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "integer"
+                    },
+                    "when": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "kind",
+                    "status",
+                    "version",
+                    "face",
+                    "tag",
+                    "imageUrl",
+                    "avatar",
+                    "statusLine",
+                    "title",
+                    "when",
+                    "detail",
+                    "error",
+                    "note",
+                    "person",
+                    "assignee",
+                    "sheet",
+                    "startsAt",
+                    "dueAt",
+                    "timezone",
+                    "notes",
+                    "outcome",
+                    "action",
+                    "path",
+                    "productId",
+                    "locationId",
+                    "stayId",
+                    "requestId",
+                    "can"
+                  ],
+                  "type": [
+                    "object",
+                    "null"
+                  ]
                 },
                 "lastMessage": {
                   "properties": {
@@ -73312,6 +73612,7 @@
                   ]
                 },
                 "name": {
+                  "description": "A group’s name; a stay conversation is titled by the home the guest sleeps in.",
                   "type": [
                     "string",
                     "null"
@@ -73403,6 +73704,7 @@
                 "createdAt",
                 "lastMessageAt",
                 "stayId",
+                "bookingId",
                 "locationId",
                 "name",
                 "isGroup",
@@ -73413,6 +73715,7 @@
                 "unread",
                 "unreadCount",
                 "stay",
+                "job",
                 "location",
                 "lastMessage"
               ],
@@ -73630,6 +73933,175 @@
       ],
       "domain": "team_messaging",
       "minimumRole": "member",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
+      "name": "move_stay",
+      "title": "Move stay",
+      "description": "Move a guest to another of the host’s homes, for example after a double booking. The nights, turnover and later messages follow the guest, a channel reservation stays on the listing it was booked on, the new home gets a job to be made ready, and the guest is sent the new address and check-in instructions. Moving back to the booked listing undoes the move. The new home must be free for every night and have check-in instructions.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_version": {
+            "description": "stay.version from the latest get_stay call; a stale version is refused.",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "organization_id": {
+            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
+            "minLength": 1,
+            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
+            "type": "string"
+          },
+          "product_id": {
+            "description": "The home to move the guest to: a product of kind stay, from list_products.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "stay_id": {
+            "description": "Stay ID from list_stays.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "stay_id",
+          "expected_version",
+          "product_id"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "additionalProperties": false,
+        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
+        "properties": {
+          "channel_push": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "properties": {
+                  "detail": {
+                    "type": "null"
+                  },
+                  "state": {
+                    "const": "pushed"
+                  }
+                },
+                "required": [
+                  "state",
+                  "detail"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "detail": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "state": {
+                    "const": "pending"
+                  }
+                },
+                "required": [
+                  "state",
+                  "detail"
+                ],
+                "type": "object"
+              }
+            ],
+            "description": "What the home's connected channel took from this change: null when no channel push is needed; pushed when delivery completed; pending, with the reason, while it waits out Channex's rate limit or an unconfirmed attempt it sends again. A refused channel update returns a committed error.",
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "guest_notified": {
+            "description": "False when the stay has no guest conversation to send through; tell the host to message the guest on the channel.",
+            "type": "boolean"
+          },
+          "stay": {
+            "additionalProperties": false,
+            "properties": {
+              "check_in_date": {
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                "type": "string"
+              },
+              "check_out_date": {
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                "type": "string"
+              },
+              "id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "product_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "request_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "status": {
+                "enum": [
+                  "pending",
+                  "confirmed",
+                  "cancelled"
+                ],
+                "type": "string"
+              },
+              "updated_at": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "version": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "id",
+              "product_id",
+              "request_id",
+              "status",
+              "version",
+              "updated_at",
+              "check_in_date",
+              "check_out_date"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "stay",
+          "channel_push",
+          "guest_notified"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false,
+        "title": "Move stay"
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "stays",
+      "minimumRole": "admin",
       "requiredEntitlement": null,
       "fileParams": [],
       "uiResourceUri": null
@@ -74681,7 +75153,7 @@
     {
       "name": "publish_post",
       "title": "Publish post",
-      "description": "Publish the post to the selected website or social destinations, returning one result per target. Retry processing with the same post; reconcile an unknown result before publishing again.",
+      "description": "Publish the post to the selected website or social destinations, returning one result per target with its status: published, already_published, failed with the provider error, or skipped. Publish again after a failure once its cause is fixed. A provider_unreachable failure may still have reached the destination: find its post there and pass that provider_post_id to reconcile_post_publication before publishing again.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -74798,9 +75270,7 @@
                   "enum": [
                     "published",
                     "already_published",
-                    "processing",
                     "failed",
-                    "unknown",
                     "skipped"
                   ],
                   "type": "string"
@@ -85647,7 +86117,7 @@
     {
       "name": "reconcile_post_publication",
       "title": "Reconcile post publication",
-      "description": "Read an existing social publication and refresh its receipt without publishing. Supply provider_post_id only for the exact post on the connected destination; unproven outcomes remain unknown.",
+      "description": "Read an existing social publication on its destination and refresh its receipt without publishing. Supply provider_post_id only for the exact post on the connected destination.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -85707,9 +86177,7 @@
                 "enum": [
                   "published",
                   "already_published",
-                  "processing",
                   "failed",
-                  "unknown",
                   "skipped"
                 ],
                 "type": "string"
@@ -87245,9 +87713,9 @@
                       "type": "string"
                     },
                     "scheduling_mode": {
-                      "description": "Legal consultations require provider scheduling with an explicitly assigned attorney or legal team. Experiences may use legacy business scheduling without one named provider. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
+                      "description": "Legal consultations require provider scheduling with an explicitly assigned attorney or legal team. business: the business publishes its own sessions; an assigned member or team is optional and hosts them, but their working hours do not set the times. Experiences may use it. provider: times come from the assigned member’s or team’s working hours. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
                       "enum": [
-                        "legacy",
+                        "business",
                         "provider"
                       ],
                       "type": "string"
@@ -100956,6 +101424,10 @@
                 },
                 "type": "array"
               },
+              "automatic": {
+                "description": "Written by KrabiClaw (a cleaning job, a reminder, a move), not by a member; never counted as unread.",
+                "type": "boolean"
+              },
               "body": {
                 "type": "string"
               },
@@ -101004,6 +101476,7 @@
                 "type": "string"
               },
               "senderId": {
+                "description": "The sender; null for an automatic message, or once a person’s account was deleted.",
                 "type": [
                   "string",
                   "null"
@@ -101017,6 +101490,7 @@
               "id",
               "threadId",
               "senderId",
+              "automatic",
               "body",
               "createdAt",
               "attachments",
@@ -102404,8 +102878,6 @@
                 "enum": [
                   "internal",
                   "disconnected",
-                  "error",
-                  "stale",
                   "ready"
                 ],
                 "type": "string"
@@ -102804,9 +103276,9 @@
             "type": "array"
           },
           "scheduling_mode": {
-            "description": "Legal consultations require provider scheduling with an explicitly assigned attorney or legal team. Experiences may use legacy business scheduling without one named provider. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
+            "description": "Legal consultations require provider scheduling with an explicitly assigned attorney or legal team. business: the business publishes its own sessions; an assigned member or team is optional and hosts them, but their working hours do not set the times. Experiences may use it. provider: times come from the assigned member’s or team’s working hours. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
             "enum": [
-              "legacy",
+              "business",
               "provider"
             ],
             "type": "string"
@@ -102955,9 +103427,9 @@
                 "type": "string"
               },
               "scheduling_mode": {
-                "description": "Legal consultations require provider scheduling with an explicitly assigned attorney or legal team. Experiences may use legacy business scheduling without one named provider. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
+                "description": "Legal consultations require provider scheduling with an explicitly assigned attorney or legal team. business: the business publishes its own sessions; an assigned member or team is optional and hosts them, but their working hours do not set the times. Experiences may use it. provider: times come from the assigned member’s or team’s working hours. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
                 "enum": [
-                  "legacy",
+                  "business",
                   "provider"
                 ],
                 "type": "string"
@@ -104213,7 +104685,10 @@
                   "booking_review",
                   "booking_change",
                   "opportunity",
-                  "custom"
+                  "custom",
+                  "stay_ready",
+                  "consultation_prep",
+                  "consultation_follow_up"
                 ],
                 "type": "string"
               },
@@ -104475,6 +104950,11 @@
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
+          "booking_id": {
+            "description": "Optional booking ID you may read; never a guest request ID.",
+            "minLength": 1,
+            "type": "string"
+          },
           "idempotency_key": {
             "description": "Required for a manually created group. Keep the same key for an identical retry.",
             "maxLength": 200,
@@ -114858,7 +115338,7 @@
     {
       "name": "update_post",
       "title": "Update post",
-      "description": "Change at least one supplied website post field. First call get_post for its updated_at and use that as expected_updated_at. Omitted fields retain their values; null clears a nullable field. Published social posts are unchanged; unresolved publication prevents content edits.",
+      "description": "Change at least one supplied website post field. First call get_post for its updated_at and use that as expected_updated_at. Omitted fields retain their values; null clears a nullable field. Published social posts are unchanged.",
       "inputSchema": {
         "additionalProperties": false,
         "anyOf": [
@@ -115290,14 +115770,6 @@
               "slug": {
                 "type": "string"
               },
-              "source": {
-                "description": "The organization authored this website post or created it from a template.",
-                "enum": [
-                  "manual",
-                  "template"
-                ],
-                "type": "string"
-              },
               "status": {
                 "enum": [
                   "draft",
@@ -115434,9 +115906,9 @@
                 "type": "boolean"
               },
               "scheduling_mode": {
-                "description": "Legal consultations require provider scheduling with an explicitly assigned attorney or legal team. Experiences may use legacy business scheduling without one named provider. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
+                "description": "Legal consultations require provider scheduling with an explicitly assigned attorney or legal team. business: the business publishes its own sessions; an assigned member or team is optional and hosts them, but their working hours do not set the times. Experiences may use it. provider: times come from the assigned member’s or team’s working hours. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
                 "enum": [
-                  "legacy",
+                  "business",
                   "provider"
                 ],
                 "type": "string"
@@ -117430,9 +117902,9 @@
                     "type": "string"
                   },
                   "scheduling_mode": {
-                    "description": "Legal consultations require provider scheduling with an explicitly assigned attorney or legal team. Experiences may use legacy business scheduling without one named provider. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
+                    "description": "Legal consultations require provider scheduling with an explicitly assigned attorney or legal team. business: the business publishes its own sessions; an assigned member or team is optional and hosts them, but their working hours do not set the times. Experiences may use it. provider: times come from the assigned member’s or team’s working hours. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
                     "enum": [
-                      "legacy",
+                      "business",
                       "provider"
                     ],
                     "type": "string"
@@ -128842,7 +129314,10 @@
                   "booking_review",
                   "booking_change",
                   "opportunity",
-                  "custom"
+                  "custom",
+                  "stay_ready",
+                  "consultation_prep",
+                  "consultation_follow_up"
                 ],
                 "type": "string"
               },
@@ -129334,18 +129809,18 @@
         "text": "Update the catalog from: <items_description> Use get_workspace_context, list_organizations and list_locations to resolve the business and explicit location. Read every relevant list_location_products and list_collections page before matching existing IDs. For a restaurant menu, use update_menu with a stable idempotency_key, the stated sections and prices. Match existing product, variant, price and collection IDs. Omitted items and order remain; use set_collection_products or reorder_collections only when the user requests a complete new order. For other products, use create_product for new entries or update_product for partial edits. Use reconcile_products only when the user requests complete replacement of the supplied entries. Ask for missing prices or booking facts. Use get_product and list_location_products to read back the result, then open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "create_product": "sha256:912c8db5ae1435fddcb72ac18140bca66778b05eb41f1523bc649131b6df6386",
-        "get_product": "sha256:a42cc2a6355622aa4b35199655e6076923b056237f5c4a0e29133116ef6c2664",
+        "create_product": "sha256:cc9a0443c9d867bbdeb6ebdc38348e744611e34a0b87160f899d9c2391a5d0ba",
+        "get_product": "sha256:c7de79b898642a58f86d4e1611e5ee1565801058c4c942c5b4bb55c7e7afa19a",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_collections": "sha256:7eb8f62291a619df46fa146bc6142f898aac1de8bda513b7a0bf92182faff563",
         "list_location_products": "sha256:2015626d39e62ce848fe36e9f0b99ac1e50b9afb915d67d7ce067553afb700b6",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_organizations": "sha256:9edf9d564e3c56a28961d41b27d0694753b5c31e889b63ebc171b6478336e901",
-        "reconcile_products": "sha256:cdfb81a442260bd3efbb1bfc8a74cc2d2f3fb6296910b0e4fa652703b8a35a63",
+        "reconcile_products": "sha256:31a7995ab9c82d529a1f291c8b186938caabc9fb629b139e5785b3c9fe907173",
         "reorder_collections": "sha256:c8ad3c90e1fe802222fc5c184e33daa7f2f71b24f6161eddc408f1b1e485a59b",
         "set_collection_products": "sha256:124140d2c1f17f41c466ca886c7fcabdfa4d9f34d9b6f0da8a1299548ae49289",
         "update_menu": "sha256:947551eb104f6be470aeaab3b3570d0ab9924d01450192f8ac88a77f91de7433",
-        "update_product": "sha256:ffa1d299e527684eb92380cdbf51be23633f94a08b74eb8143ea5e06d78c03b3"
+        "update_product": "sha256:2c157a511f451614b32894c34a750df08944e9b1d5f339ee5351f699ec7038db"
       }
     },
     {
@@ -129365,13 +129840,12 @@
       ],
       "rendered": {
         "description": "Create and publish a post",
-        "text": "Call create_post with a new idempotency_key and this body: <body> If the user supplied or approved media, pass it as create_post media in the order they want it shown: the cover first, then the gallery. Publish only to: <destinations>. For Facebook, Instagram or Discord, call get_social_connections and use the exact target_id and connection_revision it returns; if the destination is not connected or has a problem, say so instead of publishing elsewhere. Show the user the draft's preview_url, then call publish_post with the post's updated_at as expected_updated_at and one target per named destination. Report each outcome exactly as returned. processing means call publish_post again later to finish the same post; unknown means use reconcile_post_publication, never publish again."
+        "text": "Call create_post with a new idempotency_key and this body: <body> If the user supplied or approved media, pass it as create_post media in the order they want it shown: the cover first, then the gallery. Publish only to: <destinations>. For Facebook, Instagram or Discord, call get_social_connections and use the exact target_id and connection_revision it returns; if the destination is not connected or has a problem, say so instead of publishing elsewhere. Show the user the draft's preview_url, then call publish_post with the post's updated_at as expected_updated_at and one target per named destination. Report each outcome exactly as returned: published, with its public_url when the destination gives one; already_published; failed with the provider's reason; or skipped."
       },
       "toolContracts": {
-        "create_post": "sha256:9a4b0be3540b52a6e36d1ee95660bd0826ad7d57cc710c4cf4fabf41ea1a1888",
+        "create_post": "sha256:e800e3c19ecf887d09aa70d80dcbe66d985196d2138620b369cb9e1f9cace67a",
         "get_social_connections": "sha256:ce06b442ff3f389bf517c54c51ff4fb762a7bde099820d26f260139f1e3d1686",
-        "publish_post": "sha256:10402907cb24b4e5a40aad8a874039e36fca793e2453e87bec83015218572c2c",
-        "reconcile_post_publication": "sha256:00cccb196535fe18cb6304fbe3ee58fa254a10a02ff44e5039300d3be42f9d38"
+        "publish_post": "sha256:fbfd1f5ff6cbdc02ecba0e29e88a7efc5bedb5e6b60ad98eca33b6e99016f1b2"
       }
     },
     {
@@ -129390,8 +129864,8 @@
       },
       "toolContracts": {
         "attach_media": "sha256:b6f84ecad030ec9ec81a253682c86d6f8a10dc0c3b35564c873c21bbdbace35a",
-        "create_product": "sha256:912c8db5ae1435fddcb72ac18140bca66778b05eb41f1523bc649131b6df6386",
-        "get_product": "sha256:a42cc2a6355622aa4b35199655e6076923b056237f5c4a0e29133116ef6c2664",
+        "create_product": "sha256:cc9a0443c9d867bbdeb6ebdc38348e744611e34a0b87160f899d9c2391a5d0ba",
+        "get_product": "sha256:c7de79b898642a58f86d4e1611e5ee1565801058c4c942c5b4bb55c7e7afa19a",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_product_booking_sessions": "sha256:fdcf715f6c14aff05a8147ea3b792666cbeacf121462706a79b93df3739bdbd7",
@@ -129413,20 +129887,20 @@
         "confirm_product_booking": "sha256:373f9f84360e37716dc1476d28b8f6b47c14001642ebaff8d713d74a7d3a8eaa",
         "get_guest_conversation": "sha256:bbc45bf9bdc9097c8aad98e871de2e959a34fbfaf24635f8d2490185732bab59",
         "get_product_booking": "sha256:1f0d7f20d207a6fb1aecb169e86483ae515c5b6209fbf9fe948a2be26860968d",
-        "get_team_conversation": "sha256:68a4390f99121151a6c3dcca2e3cff8675166b27d958e7a1a71dcd3a4c9a81d0",
+        "get_team_conversation": "sha256:12380ef1805dc5084585e661b7d481bf924b0ccaae5c0ffa1aac4d7999cd08e3",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_guest_conversations": "sha256:9bae34357644916476bec0c0d9a07dc7dbf2beb726716b882a886a05097d1ee0",
         "list_location_reviews": "sha256:95068cff21ac3fea416a9fa8ec3a8ad2d01db79ea0825274c0295b89f15f5d92",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_team_conversation_recipients": "sha256:1dd41b8c0a687298a77151839812ddcf99fbd5cf7283e9f5ea2a85e11a70deb0",
-        "list_team_conversations": "sha256:7d0d80ed5a7b2c7b2d46ce8cac3aadddf63040756dafc586723b6bf623914283",
+        "list_team_conversations": "sha256:1d7d0e453b5897c4f47bc11a4be939eed31a39eed442513ff59f78f953ef7d0c",
         "mark_team_conversation_read": "sha256:3ad65b07c9bd78090f9f81aeffa74ac00f1c201ee8b6325cf16cd879f1e2644d",
         "reject_product_booking": "sha256:91a5bee34d02b729a3dacb01885157ce63b443594116d8710ca90313fb76e357",
         "reply_to_guest": "sha256:25c1e77ff9ef3f712ea7e9671dd942c63f69a64b91c216f327488210021447f8",
         "request_product_booking_change": "sha256:502724204b628e20343ed268bb7cd9e0734adf3f85df52e6360657338430edcc",
         "request_table_reservation_change": "sha256:00c70a0252033e9df90a66171d64b1728bf1bae7c681a3e7e702ef864223bb88",
-        "send_team_message": "sha256:b9f715f29f98d627cd0e5fa89f873b5623e13d5ba0867cc7dba69216ba886f97",
-        "start_team_conversation": "sha256:b297eb76fda6a481f0246ee8c6c39d5481ebe9379dd979ecee747b54c67f0492",
+        "send_team_message": "sha256:a1da8c45097286e7a2f9b5f0abcfafc9319a970eb70e6c3859e972be70beea73",
+        "start_team_conversation": "sha256:936cdcf65c7d841f0da4c5bf208573caff2204fab1481fd7f1d5dbda45d22699",
         "update_team_group": "sha256:e58436da6c0b45816e909c58d6ff9265c364e410a5c5edf696a7c6085bb3f6cb"
       }
     },
@@ -129461,8 +129935,8 @@
       "toolContracts": {
         "attach_media": "sha256:b6f84ecad030ec9ec81a253682c86d6f8a10dc0c3b35564c873c21bbdbace35a",
         "get_location": "sha256:5ea35903cf5c7ae17e874fd4c1061dbfbb1b936c3550dedbb2883f74a2aaee1f",
-        "get_post": "sha256:1bfb415fc3917a3aad29e1b1ae44db4a092b10dd169974b39c89832c4a69017d",
-        "get_product": "sha256:a42cc2a6355622aa4b35199655e6076923b056237f5c4a0e29133116ef6c2664",
+        "get_post": "sha256:084fd73ea9efe150fe8e7812e02a80394a52477719bdab8ed3c33beae8225df8",
+        "get_product": "sha256:c7de79b898642a58f86d4e1611e5ee1565801058c4c942c5b4bb55c7e7afa19a",
         "get_site_page": "sha256:4991f484621a89a5c664386fca8d24faea4ce852a275059de9ec33ba04e3ea51",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "save_media_attachment": "sha256:dd3e83b857a53f97fa3f6a27e1788dc247133a954108a09e5f7c200b4a1e3a93",
@@ -129478,7 +129952,7 @@
         "text": "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft ID and revision. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Check for missing brand assets like logo, favicon, social card, palette colors, hero media, and about page story. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result."
       },
       "toolContracts": {
-        "create_product": "sha256:912c8db5ae1435fddcb72ac18140bca66778b05eb41f1523bc649131b6df6386",
+        "create_product": "sha256:cc9a0443c9d867bbdeb6ebdc38348e744611e34a0b87160f899d9c2391a5d0ba",
         "get_organization": "sha256:7659406922dc74826fdfd890dc16fb069dbc35c3af276860b62306848b471f06",
         "get_site_page": "sha256:4991f484621a89a5c664386fca8d24faea4ce852a275059de9ec33ba04e3ea51",
         "get_website_draft": "sha256:3fc96867bd2ccb2dbd9ece2124b0b7250cce1219a6da69d014dc81985d1bba23",
@@ -129504,15 +129978,15 @@
       },
       "toolContracts": {
         "get_location": "sha256:5ea35903cf5c7ae17e874fd4c1061dbfbb1b936c3550dedbb2883f74a2aaee1f",
-        "get_product": "sha256:a42cc2a6355622aa4b35199655e6076923b056237f5c4a0e29133116ef6c2664",
+        "get_product": "sha256:c7de79b898642a58f86d4e1611e5ee1565801058c4c942c5b4bb55c7e7afa19a",
         "get_reservation_policy": "sha256:1e70aca37a43c0512b2249b7c26e37844b0c04959bd40d3fbb5a73d711238943",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_product_booking_sessions": "sha256:fdcf715f6c14aff05a8147ea3b792666cbeacf121462706a79b93df3739bdbd7",
         "list_products": "sha256:d586cfff763528e260cc3f640a44ab69c1e6a41d4cc4c28edac2d1cfee1aa837",
         "replace_product_weekly_schedule": "sha256:cc5f48fb054661e70ce26d988fc12a29f4325c7fc59b5b20852fb98d0e0e2451",
-        "set_product_booking_config": "sha256:325fc0b5cb4d6ab6c21227ea94b6d2c22a1192af199b3286145207bbd58b1379",
-        "update_product": "sha256:ffa1d299e527684eb92380cdbf51be23633f94a08b74eb8143ea5e06d78c03b3",
+        "set_product_booking_config": "sha256:8c67bc22b63c56cfb20a31a29157a677470e584182a6739d0a0e91e85cc8b082",
+        "update_product": "sha256:2c157a511f451614b32894c34a750df08944e9b1d5f339ee5351f699ec7038db",
         "update_reservation_policy": "sha256:33b8ea1a819ab514a06e8bec979fc44a57260e2eb53d39d35be97b74fe092f66"
       }
     },
@@ -129532,7 +130006,7 @@
         "list_products": "sha256:d586cfff763528e260cc3f640a44ab69c1e6a41d4cc4c28edac2d1cfee1aa837",
         "list_site_pages": "sha256:5a49aa342807192ee45d329880f2f459d1914154e9a04a43562c0ea3587879cc",
         "set_media": "sha256:79e758a2b687c65350fa364dd1169fb47edc54c166f71d2c1ccee5a380a1295b",
-        "update_product": "sha256:ffa1d299e527684eb92380cdbf51be23633f94a08b74eb8143ea5e06d78c03b3",
+        "update_product": "sha256:2c157a511f451614b32894c34a750df08944e9b1d5f339ee5351f699ec7038db",
         "update_site_page": "sha256:1a5471900a3203b0215956f65d00b00a18459bf28b204542377bbdf93af009a1"
       }
     },
@@ -129545,17 +130019,17 @@
         "text": "Use get_workspace_context and get_organization_analytics to read recent traffic. Use list_products, get_product and list_product_booking_sessions for bookable offerings and availability, and list_guest_conversations plus get_guest_conversation for current guest demand. Recommend the most useful action supported by those records. Use reply_to_guest, update_product or create_post and publish_post for the action the user requests, then read back its actual outcome and report any incomplete delivery or dashboard handoff."
       },
       "toolContracts": {
-        "create_post": "sha256:9a4b0be3540b52a6e36d1ee95660bd0826ad7d57cc710c4cf4fabf41ea1a1888",
+        "create_post": "sha256:e800e3c19ecf887d09aa70d80dcbe66d985196d2138620b369cb9e1f9cace67a",
         "get_guest_conversation": "sha256:bbc45bf9bdc9097c8aad98e871de2e959a34fbfaf24635f8d2490185732bab59",
         "get_organization_analytics": "sha256:06e0bfe504a9b9183d0429a06162e4af2d760695c842396608752a8f107cb4d9",
-        "get_product": "sha256:a42cc2a6355622aa4b35199655e6076923b056237f5c4a0e29133116ef6c2664",
+        "get_product": "sha256:c7de79b898642a58f86d4e1611e5ee1565801058c4c942c5b4bb55c7e7afa19a",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_guest_conversations": "sha256:9bae34357644916476bec0c0d9a07dc7dbf2beb726716b882a886a05097d1ee0",
         "list_product_booking_sessions": "sha256:fdcf715f6c14aff05a8147ea3b792666cbeacf121462706a79b93df3739bdbd7",
         "list_products": "sha256:d586cfff763528e260cc3f640a44ab69c1e6a41d4cc4c28edac2d1cfee1aa837",
-        "publish_post": "sha256:10402907cb24b4e5a40aad8a874039e36fca793e2453e87bec83015218572c2c",
+        "publish_post": "sha256:fbfd1f5ff6cbdc02ecba0e29e88a7efc5bedb5e6b60ad98eca33b6e99016f1b2",
         "reply_to_guest": "sha256:25c1e77ff9ef3f712ea7e9671dd942c63f69a64b91c216f327488210021447f8",
-        "update_product": "sha256:ffa1d299e527684eb92380cdbf51be23633f94a08b74eb8143ea5e06d78c03b3"
+        "update_product": "sha256:2c157a511f451614b32894c34a750df08944e9b1d5f339ee5351f699ec7038db"
       }
     }
   ]

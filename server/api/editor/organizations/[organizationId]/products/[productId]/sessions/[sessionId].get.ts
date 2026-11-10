@@ -9,6 +9,6 @@ export default defineHandler(async (event) => {
   const productId = getRouterParam(event, 'productId')
   const sessionId = getRouterParam(event, 'sessionId')
   if (!organizationId || !productId || !sessionId) throw new HTTPError({ statusCode: 400, statusMessage: 'Organization, product and session are required' })
-  const { db, organization } = await requireProductAccess(event, organizationId, productId)
-  return jsonResponse({ success: true, session: await getSessionAvailability(db, organization.id, productId, sessionId) })
+  const { db, env, organization } = await requireProductAccess(event, organizationId, productId)
+  return jsonResponse({ success: true, session: await getSessionAvailability(db, env, organization.id, productId, sessionId) })
 })

@@ -72,8 +72,8 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
       "INSERT INTO products (id, organization_id, kind, name, slug, created_by, updated_by) VALUES ('class', 'org', 'experience', 'Pasta Class', 'class', 'owner', 'owner')",
       "INSERT INTO products (id, organization_id, kind, name, slug, created_by, updated_by) VALUES ('home', 'org', 'stay', 'Garden Cottage', 'home', 'owner', 'owner')",
       ...['consult', 'class'].map(id => `INSERT INTO product_variants (id, organization_id, product_id, name, created_by, updated_by) VALUES ('${id}-v', 'org', '${id}', 'Standard', 'owner', 'owner')`),
-      "INSERT INTO product_booking_configs (product_id, organization_id, duration_minutes, default_capacity, created_by, updated_by) VALUES ('class', 'org', 120, 8, 'owner', 'owner')",
-      "INSERT INTO product_booking_configs (product_id, organization_id, duration_minutes, default_capacity, created_by, updated_by) VALUES ('consult', 'org', 30, 1, 'owner', 'owner')",
+      "INSERT INTO product_booking_configs (product_id, organization_id, duration_minutes, default_capacity, scheduling_mode, created_by, updated_by) VALUES ('class', 'org', 120, 8, 'business', 'owner', 'owner')",
+      "INSERT INTO product_booking_configs (product_id, organization_id, duration_minutes, default_capacity, scheduling_mode, created_by, updated_by) VALUES ('consult', 'org', 30, 1, 'business', 'owner', 'owner')",
       "INSERT INTO product_locations (organization_id, product_id, location_id, created_by, updated_by) VALUES ('org', 'home', 'room', 'owner', 'owner')",
       "INSERT INTO product_stay_configs (organization_id, product_id, location_id, check_in_time, check_out_time, max_guests, min_nights, created_by, updated_by) VALUES ('org', 'home', 'room', '15:00', '11:00', 4, 1, 'owner', 'owner')",
       ...['g-dinner', 'g-early', 'g-cancelled', 'g-old', 'g-absent', 'g-consult', 'g-class', 'g-stay'].map(id => `INSERT INTO user (id, name, email, isAnonymous) VALUES ('${id}', 'Anonymous', 'anon-${id}@customers.krabiclaw.local', 1)`),
@@ -175,16 +175,10 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
     await reservation('retry-metadata', 'g-dinner', 'room', at(-25 * HOUR))
     await db.prepare("UPDATE requests SET payload_json = json_set(payload_json, '$.guest.email', 'guest@provider-proof.com') WHERE id = ?").bind(T['retry-metadata']).run()
     const accepted: Array<{ key: string | null; body: { to: string[]; subject: string; html: string } }> = []
-    let failReadback = true
     let rejectSend = false
     let sendAttempts = 0
     const transport = mock.method(globalThis, 'fetch', async (url: string, init: RequestInit) => {
-      if (init.method === 'GET') {
-        if (failReadback) return Response.json({ name: 'application_error', message: 'controlled metadata failure' }, { status: 503 })
-        const sent = accepted.find(item => url.endsWith(`/${item.key}`))!
-        assert(sent)
-        return Response.json({ id: sent.key, message_id: `<${sent.key}@provider-proof.com>`, to: sent.body.to, subject: sent.body.subject })
-      }
+      // Only the send: nothing reads an invitation back from Resend.
       assert.equal(url, 'https://api.resend.com/emails')
       sendAttempts += 1
       if (rejectSend) return Response.json({ name: 'application_error', message: 'controlled unsent failure' }, { status: 503 })
@@ -198,23 +192,14 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
     try {
       const providerEnv = { ...env, EMAIL_DELIVERY_MODE: 'provider', RESEND_API_KEY: 'controlled-provider-only', EMAIL_FROM: 'Proof <hello@krabiclaw.com>' }
       const send = () => sendReviewRequestForBooking(providerEnv, db, 'reservation', T['retry-metadata']!)
-      const failed = await send()
-      assert.equal(failed.sent, false)
-      assert.match(failed.error!, /controlled metadata failure/)
-      assert.equal(accepted.length, 1)
+      // Resend's answer with the email id sends the invitation; a sent invitation is not due again.
+      const first = await send()
+      assert.equal(first.sent, true, JSON.stringify(first))
       const emailedToken = tokenOf(accepted[0]!.body.html)
-      // A pre-migration row recovers only the exact token that was emailed.
-      // Once acceptance is persisted, recovery also works past provider key expiry.
-      await db.prepare("UPDATE guest_thread_deliveries SET email_json = json_set(email_json, '$.preparedAt', ?) WHERE entry_id IN (SELECT id FROM activity_entries WHERE request_id = ?)").bind(at(-25 * HOUR), T['retry-metadata']).run()
-      await db.prepare('UPDATE review_requests SET token = NULL WHERE id = ?').bind(failed.requestId).run()
-      await db.prepare("UPDATE guest_thread_deliveries SET id = 'historical-review-receipt' WHERE entry_id IN (SELECT id FROM activity_entries WHERE request_id = ?)").bind(T['retry-metadata']).run()
-      await db.prepare("UPDATE requests SET payload_json = json_set(payload_json, '$.guest.email', 'edited@provider-proof.com') WHERE id = ?").bind(T['retry-metadata']).run()
-      failReadback = false
-      const retries = await Promise.all([send(), send(), send()])
-      assert.ok(retries.every(result => result.sent), JSON.stringify(retries))
-      assert.equal(accepted.length, 1, 'an accepted invitation resumes readback rather than sending another email')
-      assert.ok(await getReviewRequestByToken(db, emailedToken), 'the original emailed link still validates')
-      assert.deepEqual(await db.prepare('SELECT send_count, last_error, first_sent_at IS NOT NULL AS sent FROM review_requests WHERE id = ?').bind(failed.requestId).first(), { send_count: 1, last_error: null, sent: 1 })
+      await assert.rejects(send(), /not due a review invitation/u)
+      assert.equal(accepted.length, 1, 'a sent invitation is never sent again')
+      assert.ok(await getReviewRequestByToken(db, emailedToken), 'the emailed link validates')
+      assert.deepEqual(await db.prepare('SELECT send_count, last_error, first_sent_at IS NOT NULL AS sent FROM review_requests WHERE id = ?').bind(first.requestId).first(), { send_count: 1, last_error: null, sent: 1 })
       assert.equal(await db.prepare('SELECT count(*) n FROM guest_thread_deliveries d JOIN activity_entries e ON e.id = d.entry_id WHERE e.request_id = ?').bind(T['retry-metadata']).first('n'), 1)
 
       const hub = env.GUEST_INBOX_HUBS!.get(env.GUEST_INBOX_HUBS!.idFromName('org'))

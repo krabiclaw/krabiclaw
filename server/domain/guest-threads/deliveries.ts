@@ -1,9 +1,9 @@
 import { execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import type { WebhookEventPayload } from 'resend'
 import { notifyBuyerThread } from '~/server/utils/notification-center'
-import { buildReplyToAddress, type ReplyEmailEnv } from '~/server/utils/submission-messages'
+import type { ReplyEmailEnv } from '~/server/utils/submission-messages'
+import { buildReplyToAddress } from '~/server/utils/reply-address'
 import { emailSender, getEmailDeliveryMode, isEmailMessageId, sendEmail, type EmailInput } from '~/server/utils/email-delivery'
-import { getResendClient, resendData } from '~/server/utils/resend'
 import { isRecord } from '~/server/utils/type-guards'
 import { publishGuestInboxThreadEvent, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 import type {
@@ -12,13 +12,11 @@ import type {
   GuestThreadDeliveryProvider,
   GuestThreadDeliveryRow,
   GuestThreadDeliveryStatus,
-  GuestThreadSubmissionType,
 } from './types'
 
-/** Email delivery also retains the provider's RFC ID before a later reply can depend on it. */
+/** The provider took it: its answer carried the message's id. */
 export function isDeliverySent(delivery: GuestThreadDeliveryRow): boolean {
-  const sent = delivery.status === 'accepted' || delivery.status === 'sent' || delivery.status === 'delivered' || delivery.status === 'read'
-  return sent && (delivery.channel !== 'email' || delivery.provider !== 'resend' || delivery.purpose === 'owner_alert' || isEmailMessageId(delivery.email_message_id))
+  return delivery.status === 'accepted' || delivery.status === 'sent' || delivery.status === 'delivered' || delivery.status === 'read'
 }
 
 interface EmailSnapshot {
@@ -38,33 +36,6 @@ function readEmailSnapshot(json: string): EmailSnapshot {
     throw new Error('Email delivery is missing its recorded request fields')
   }
   return snapshot as unknown as EmailSnapshot
-}
-
-async function readProviderEmail(db: DbClient, env: ReplyEmailEnv, delivery: GuestThreadDeliveryRow) {
-  if (delivery.provider !== 'resend' || !delivery.provider_message_id) throw new Error('Email delivery has no Resend identity')
-  const client = getResendClient(env)
-  const deadline = Date.now() + 20_000
-  let email = await resendData('conversation email readback', () => client.emails.get(delivery.provider_message_id!))
-  // Accepted email is initially queued with message_id=null. Wait for the
-  // provider to assign it; the saved API UUID remains the recovery identity.
-  while (!isEmailMessageId(email.message_id)) {
-    if (email.id !== delivery.provider_message_id || email.message_id || !['queued', 'sent'].includes(email.last_event) || Date.now() >= deadline) {
-      throw new Error(`Resend email has no usable RFC Message-ID (${email.last_event}); its recorded provider identity can resume readback`)
-    }
-    await new Promise(resolve => setTimeout(resolve, 1000))
-    email = await resendData('conversation email readback', () => client.emails.get(delivery.provider_message_id!))
-  }
-  if (email.id !== delivery.provider_message_id) throw new Error('Resend returned a different email identity')
-  if (delivery.email_message_id && delivery.email_message_id !== email.message_id) throw new Error('Resend email Message-ID differs from its recorded delivery')
-  if (delivery.email_json) {
-    const snapshot = readEmailSnapshot(delivery.email_json)
-    if (email.to.length !== 1 || email.to[0]!.trim().toLowerCase() !== snapshot.message.to.trim().toLowerCase() || email.subject !== snapshot.message.subject) {
-      throw new Error('Resend email does not match its recorded recipient and subject')
-    }
-  }
-  const updated = await execute(db, 'UPDATE guest_thread_deliveries SET email_message_id = ? WHERE id = ? AND (email_message_id IS NULL OR email_message_id = ?)', [email.message_id, delivery.id, email.message_id])
-  if (!updated.meta.changes) throw new Error('Email delivery RFC identity changed during provider readback')
-  return email
 }
 
 /** Only this request and this recipient can contribute email ancestry. */
@@ -113,11 +84,48 @@ async function conversationEmailParent(db: DbClient, delivery: GuestThreadDelive
     parent ??= { subject, messageId }
     references.push(messageId)
   }
-  const subject = parent?.subject ?? knownSubject
-  return parent ? {
+  // No earlier email to answer: the email starts the conversation's thread with its own subject.
+  if (!parent) return {}
+  const subject = parent.subject ?? knownSubject
+  return {
     ...(subject === null ? {} : { subject: `Re: ${subject.replace(/^(?:re:\s*)+/iu, '').replace(/[\r\n]+/gu, ' ').trim()}`.trim() }),
     inReplyTo: parent.messageId, references: [...new Set(references.reverse())],
-  } : null
+  }
+}
+
+/**
+ * A member's alerts about one conversation, guest or team, are one email
+ * thread: each keeps the subject of the first alert sent to that recipient and
+ * answers the alert before it, so every mail client threads them, not only
+ * Gmail by subject. Alerts to other recipients, and the guest's own emails, are
+ * never its ancestry. An alert about no conversation starts no thread.
+ */
+async function alertEmailParent(db: DbClient, delivery: GuestThreadDeliveryRow, recipient: string) {
+  // The alert's conversation: its guest conversation, or its team message's team conversation (the key the reply path reads).
+  const anchor = await queryFirst<{ request_id: string | null; team_thread_id: string | null }>(db, `
+    SELECT a.request_id, tm.thread_id AS team_thread_id FROM activity_entries a
+    LEFT JOIN team_messages tm ON tm.organization_id = a.organization_id AND tm.id = substr(a.dedupe_key, 14) AND a.dedupe_key = 'team-message:' || tm.id
+    WHERE a.id = ?`, [delivery.entry_id])
+  if (!anchor) throw new Error(`Alert delivery ${delivery.id} has no ledger entry`)
+  if (!anchor.request_id && !anchor.team_thread_id) return {}
+  const entries = anchor.request_id ? 'activity_entries e'
+    : "team_messages tm JOIN activity_entries e ON e.dedupe_key = 'team-message:' || tm.id AND e.organization_id = tm.organization_id"
+  const earlier = await queryAll<{ email_json: string; email_message_id: string | null; provider: string }>(db, `
+    SELECT d.email_json, d.email_message_id, d.provider FROM ${entries} JOIN guest_thread_deliveries d ON d.entry_id = e.id
+    WHERE ${anchor.request_id ? 'e.request_id' : 'tm.thread_id'} = ? AND d.id <> ? AND d.channel = 'email' AND d.purpose = 'owner_alert'
+      AND d.email_json IS NOT NULL AND d.status IN ('accepted', 'sent', 'delivered', 'read')
+    ORDER BY d.created_at, d.id`, [anchor.request_id ?? anchor.team_thread_id, delivery.id])
+  const alerts = earlier.map(row => ({ ...row, snapshot: readEmailSnapshot(row.email_json) }))
+    .filter(row => row.snapshot.message.to.trim().toLowerCase() === recipient)
+  // The first alert to this recipient starts the thread with its own subject.
+  if (!alerts.length) return {}
+  // A log-only alert was never mailed, so it has no RFC identity to answer.
+  const references = alerts.flatMap(row => row.provider === 'resend' && row.email_message_id !== null ? [row.email_message_id] : [])
+  if (!references.every(isEmailMessageId)) throw new Error('Prior alert email has an invalid RFC Message-ID')
+  return {
+    subject: alerts[0]!.snapshot.message.subject,
+    ...(references.length ? { inReplyTo: references.at(-1)!, references } : {}),
+  }
 }
 
 /** The one receipt-backed email dispatcher, shared by notifications and replies. */
@@ -129,19 +137,18 @@ export async function deliverReceiptEmail(db: DbClient, input: {
   if (delivery.provider !== (getEmailDeliveryMode(input.env) === 'provider' ? 'resend' : 'log_only')) throw new Error('Email delivery mode differs from its recorded provider')
   const entry = await queryFirst<{ request_id: string | null; sequence: number | null }>(db, 'SELECT request_id, sequence FROM activity_entries WHERE id = ?', [delivery.entry_id])
   if (!entry || entry.request_id !== input.threadId) throw new Error('Email delivery does not belong to the targeted conversation')
-  const threaded = input.threadId !== null && delivery.purpose !== 'owner_alert'
+  const threaded = input.threadId !== null
   if (threaded && entry.sequence === null) throw new Error('Conversation email delivery has no ledger sequence')
   try {
     if (!isDeliverySent(delivery) && !delivery.provider_message_id) {
       if (delivery.email_json === null) {
-        if (delivery.provider === 'resend' && Date.now() - Date.parse(delivery.created_at) >= 24 * 60 * 60 * 1000) {
-          throw new Error('This email has no recorded provider identity and is past Resend\'s 24-hour idempotency window. Review its provider delivery before sending again.')
-        }
-        const parent = threaded ? await conversationEmailParent(db, delivery, input.threadId!, entry.sequence!, input.email.to.trim().toLowerCase()) : null
+        const recipient = input.email.to.trim().toLowerCase()
+        const ancestry = delivery.purpose === 'owner_alert' ? await alertEmailParent(db, delivery, recipient)
+          : threaded ? await conversationEmailParent(db, delivery, input.threadId!, entry.sequence!, recipient) : {}
         const snapshot: EmailSnapshot = {
           preparedAt: new Date().toISOString(),
           sender: delivery.provider === 'resend' || input.env.EMAIL_FROM?.trim() ? emailSender(input.env, input.email.fromName) : null,
-          message: { ...input.email, ...(parent ?? {}) },
+          message: { ...input.email, ...ancestry },
         }
         // The first contender freezes the complete request. A retry never
         // changes ancestry, subject, recipient, sender, body or attachments.
@@ -150,28 +157,24 @@ export async function deliverReceiptEmail(db: DbClient, input: {
       }
       const snapshot = readEmailSnapshot(delivery.email_json!)
       if (snapshot.message.to.trim().toLowerCase() !== input.email.to.trim().toLowerCase()) throw new Error('Email recipient differs from its recorded delivery')
-      if (delivery.provider === 'resend' && Date.now() - Date.parse(snapshot.preparedAt) >= 24 * 60 * 60 * 1000) {
-        throw new Error('This email has no recorded provider identity and is past Resend\'s 24-hour idempotency window. Review its provider delivery before sending again.')
-      }
-      // A provider ID is persisted before readback. If readback fails, retrying
-      // resumes it instead of sending the message a second time.
-      if (!delivery.provider_message_id) {
-        const result = await sendEmail({ ...input.env, ...(snapshot.sender ? { EMAIL_FROM: snapshot.sender } : {}) }, { ...snapshot.message, idempotencyKey: delivery.id })
-        delivery = await recordDeliveryOutcome(db, {
-          deliveryId: delivery.id, status: result.status,
-          providerMessageId: result.status === 'sent' ? result.messageId : null,
-          error: result.status === 'failed' ? result.error : null,
-        })
-        if (result.status === 'failed') return delivery
-      }
+      // The receipt's id is Resend's idempotency key, so sending it again sends nothing twice.
+      // The email's RFC Message-ID arrives with Resend's delivered webhook.
+      const result = await sendEmail({ ...input.env, ...(snapshot.sender ? { EMAIL_FROM: snapshot.sender } : {}) }, { ...snapshot.message, idempotencyKey: delivery.id })
+      delivery = await recordDeliveryOutcome(db, {
+        deliveryId: delivery.id, status: result.status,
+        providerMessageId: result.status === 'sent' ? result.messageId : null,
+        error: result.status === 'failed' ? result.error : null,
+      })
+      if (result.status === 'failed') return delivery
     }
-    if (delivery.provider === 'resend' && delivery.purpose !== 'owner_alert' && delivery.provider_message_id && delivery.email_message_id === null) await readProviderEmail(db, input.env, delivery)
     await execute(db, "UPDATE guest_thread_deliveries SET error = NULL WHERE id = ? AND status IN ('accepted','sent','delivered','read')", [delivery.id])
     const completed = await getDeliveryById(db, delivery.id)
     if (!completed) throw new Error('Email delivery disappeared after dispatch')
     return completed
   } catch (error) {
-    await execute(db, 'UPDATE guest_thread_deliveries SET error = ? WHERE id = ?', [error instanceof Error ? error.message : String(error), delivery.id])
+    // A send that threw did not send: it is failed with its error, and sending it again reuses
+    // the receipt's id as Resend's idempotency key.
+    await recordDeliveryOutcome(db, { deliveryId: delivery.id, status: 'failed', error: error instanceof Error ? error.message : String(error) })
     throw error
   }
 }
@@ -362,14 +365,13 @@ export async function recordDeliveryOutcome(
     status: Exclude<GuestThreadDeliveryStatus, 'pending'>
     providerMessageId?: string | null
     error?: string | null
-    nonDeliveryConfirmed?: boolean
   },
 ): Promise<GuestThreadDeliveryRow> {
   await executeBatch(db, [{
     query: `UPDATE guest_thread_deliveries
-      SET status = ?, provider_message_id = COALESCE(?, provider_message_id), error = ?, non_delivery_confirmed = ?, updated_at = ?
+      SET status = ?, provider_message_id = COALESCE(?, provider_message_id), error = ?, updated_at = ?
       WHERE id = ? AND status NOT IN ('accepted', 'sent', 'delivered', 'read')`,
-    params: [input.status, input.providerMessageId ?? null, input.error ?? null, input.nonDeliveryConfirmed === undefined ? null : input.nonDeliveryConfirmed ? 1 : 0, new Date().toISOString(), input.deliveryId],
+    params: [input.status, input.providerMessageId ?? null, input.error ?? null, new Date().toISOString(), input.deliveryId],
   }, ...await deliveryTaskQueries(db, input.deliveryId)], { operation: 'Record delivery outcome' })
   const updated = await getDeliveryById(db, input.deliveryId)
   if (!updated) throw new Error('Guest thread delivery not found')
@@ -390,7 +392,6 @@ export async function deliverGuestThreadEmail(
     fromName: string
     subject: string
     email: { html: string; text: string }
-    submissionType: GuestThreadSubmissionType
     submissionId: string
   },
 ): Promise<GuestThreadDeliveryRow> {
@@ -406,7 +407,7 @@ export async function deliverGuestThreadEmail(
     email: {
       to: input.to, fromName: input.fromName, subject: input.subject,
       ...input.email, emailPurpose: 'transactional',
-      replyTo: await buildReplyToAddress(input.env, input.submissionType, input.submissionId),
+      replyTo: await buildReplyToAddress(input.env, input.delivery.entry_id, { kind: 'guest' }),
     },
   })
 }
@@ -428,6 +429,6 @@ export async function listThreadDeliveries(db: DbClient, threadId: string): Prom
 
 /** A failure worth showing in the thread. */
 export function isVisibleDeliveryFailure(delivery: GuestThreadDeliveryRow): boolean {
-  return delivery.status === 'failed' || delivery.status === 'uncertain'
+  return delivery.status === 'failed'
     || (delivery.channel === 'email' && delivery.status !== 'skipped' && Boolean(delivery.error))
 }

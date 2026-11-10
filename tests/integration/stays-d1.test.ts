@@ -1722,23 +1722,28 @@ test('a stay paid on a business’s site returns to that site’s stay confirmat
     // reconciles the payment, which runs the real conversion that makes the checkout guest's stay.
     const nightly = ['2026-11-01', '2026-11-02', '2026-11-03'].map(date => ({ date, price_minor: 15_000 }))
     const purchase = { product_id: cabin.id, location_id: 'cabin-site', timezone: 'America/Denver', check_in_date: '2026-11-01', check_out_date: '2026-11-04', adults: 2, children: 0, infants: 0, total_minor: 45_000, currency: 'USD', cancellation_policy: 'moderate', nightly, guest: { name: 'Ana', email: 'ana@example.com', phone: null, notes: null } }
-    await db.prepare(`INSERT INTO payments (id, organization_id, buyer_user_id, stripe_account_id, livemode, subject_type, subject_id, location_id, currency, amount, captured_amount, state, stripe_payment_intent_id, price_snapshot_json, created_at, updated_at)
-      VALUES ('stay-pay', ?, ?, 'acct_seller', 0, 'stay', NULL, 'cabin-site', 'USD', 45000, 45000, 'captured', 'pi_stay-pay', ?, ?, ?)`).bind(ORG, checkoutGuest, JSON.stringify({ title: 'Cabin', quantity: 1, price: { unit_amount: 45_000, currency: 'USD' }, method_configuration_id: 'pmc_test', stay: purchase }), NOW, NOW).run()
+    await db.prepare(`INSERT INTO payments (id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,subject_id,location_id,currency,amount,captured_amount,stripe_payment_intent_id,price_snapshot_json,created_at,updated_at)
+      VALUES ('stay-pay', ?, ?, 'acct_seller', 0, 'stay', NULL, 'cabin-site', 'USD', 45000, 45000, 'pi_stay-pay', ?, ?, ?)`).bind(ORG, checkoutGuest, JSON.stringify({ title: 'Cabin', quantity: 1, price: { unit_amount: 45_000, currency: 'USD' }, method_configuration_id: 'pmc_test', stay: purchase }), NOW, NOW).run()
     await db.prepare(`INSERT INTO payment_checkout_holds (id, organization_id, product_id, location_id, timezone, buyer_user_id, payment_id, quantity, amount, currency, starts_at, ends_at, status, converted_stay_id, expires_at, created_at)
       VALUES ('stay-hold', ?, ?, 'cabin-site', 'America/Denver', ?, 'stay-pay', 2, 45000, 'USD', '2026-11-01', '2026-11-04', 'active', NULL, '2099-01-01T00:00:00.000Z', ?)`).bind(ORG, cabin.id, checkoutGuest, NOW).run()
     const claim = crypto.randomUUID() + crypto.randomUUID()
-    await db.prepare("INSERT INTO payment_attempts (id, payment_id, idempotency_key, stripe_payment_intent_id, return_token, status, expires_at, created_at, updated_at) VALUES ('a:stay-pay', 'stay-pay', 'checkout:stay', 'pi_stay-pay', ?, 'open', '2099-01-01T00:00:00.000Z', ?, ?)").bind(claim, NOW, NOW).run()
-    await db.prepare("INSERT INTO payment_claims (token_hash, payment_id, expires_at) VALUES (?, 'stay-pay', '2099-01-01T00:00:00.000Z')").bind(await tokenHash(claim)).run()
+    await db.prepare("UPDATE payments SET idempotency_key = 'checkout:stay', stripe_payment_intent_id = 'pi_stay-pay', return_token = ?, checkout_expires_at = '2099-01-01T00:00:00.000Z', return_token_hash = ?, return_expires_at = '2099-01-01T00:00:00.000Z' WHERE id = 'stay-pay'").bind(claim, await tokenHash(claim)).run()
     const charge = { id: 'ch_stay', object: 'charge', livemode: false, amount: 45_000, currency: 'usd', created: 1_790_000_000, payment_intent: 'pi_stay-pay', payment_method: 'pm_card', receipt_url: 'https://pay.stripe.com/receipts/stay', billing_details: { email: 'ana@example.com' } }
+    let stayIntentStatus = 'requires_capture'
     const originalFetch = globalThis.fetch
     t.mock.method(globalThis, 'fetch', async (request: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(request instanceof Request ? request.url : String(request))
       if (url.origin !== 'https://api.stripe.com') return originalFetch(request, init)
-      assert.equal(init?.method, 'GET')
       assert.equal(new Headers(init?.headers).get('stripe-account'), 'acct_seller')
+      if (url.pathname === '/v1/payment_intents/pi_stay-pay/capture') {
+        // The card is charged only once its stay exists.
+        assert.equal(init?.method, 'POST')
+        assert.equal(await db.prepare("SELECT status FROM payment_checkout_holds WHERE id = 'stay-hold'").first('status'), 'converted')
+        stayIntentStatus = 'succeeded'
+      } else assert.equal(init?.method, 'GET')
       if (url.pathname === '/v1/charges/ch_stay') return Response.json(charge)
-      assert.equal(url.pathname, '/v1/payment_intents/pi_stay-pay')
-      return Response.json({ id: 'pi_stay-pay', object: 'payment_intent', livemode: false, currency: 'usd', amount: 45_000, amount_received: 45_000, status: 'succeeded', customer: null, application_fee_amount: null, latest_charge: charge, metadata: { krabiclaw_payment_id: 'stay-pay' } })
+      assert.match(url.pathname, /^\/v1\/payment_intents\/pi_stay-pay(\/capture)?$/u)
+      return Response.json({ id: 'pi_stay-pay', object: 'payment_intent', livemode: false, currency: 'usd', amount: 45_000, amount_received: stayIntentStatus === 'succeeded' ? 45_000 : 0, status: stayIntentStatus, customer: null, application_fee_amount: null, latest_charge: charge, metadata: { krabiclaw_payment_id: 'stay-pay' } })
     })
     const app = new H3()
     app.use((event) => { event.context.organizationId = ORG })
@@ -1758,7 +1763,7 @@ test('a stay paid on a business’s site returns to that site’s stay confirmat
     const returned = await back.json() as { state: string; kind: string; activity_id: string; receipt_token: string }
     assert.deepEqual({ state: returned.state, kind: returned.kind, activity_id: returned.activity_id }, { state: 'paid', kind: 'stay', activity_id: activityId })
     assert.equal(typeof returned.receipt_token, 'string')
-    assert.deepEqual(await db.prepare("SELECT claimed_user_id FROM payment_claims WHERE payment_id = 'stay-pay'").first(), { claimed_user_id: buyer })
+    assert.deepEqual(await db.prepare("SELECT claimed_user_id FROM payments WHERE id = 'stay-pay'").first(), { claimed_user_id: buyer })
     // The claim moved the stay, its payment and its hold to the browser that paid.
     assert.deepEqual(await db.prepare("SELECT (SELECT user_id FROM stays WHERE id = ?) AS stay, (SELECT buyer_user_id FROM payments WHERE id = 'stay-pay') AS payment, (SELECT buyer_user_id FROM payment_checkout_holds WHERE id = 'stay-hold') AS hold").bind(stay.id).first(), { stay: buyer, payment: buyer, hold: buyer })
     // The confirmation page reads the stay its link names, here from a browser with no session at all, as
