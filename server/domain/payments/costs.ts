@@ -6,16 +6,20 @@ import type {CloudflareEnv} from '~/server/utils/auth'
 import {stripeLivemodeFromKey} from '~/server/utils/stripe-connect'
 import {deliverPaymentsUsage} from './usage'
 
-/** Exact provider decimal conversion; never binary floating point or FX. */
-export function stripeFeeMinor(value:string,currency:string):number {
- if(!isCurrencyCode(currency)) throw new Error(`Unsupported report currency ${currency}`)
- const digits=currencyFractionDigits(currency)
- const match=/^(-?)(\d+)(?:\.(\d+))?$/u.exec(value)
+const REPORT_SCALE=18n
+/** Exact provider decimal at Stripe's own 18-decimal scale; the report itemizes fees below a minor unit. */
+export function stripeFeeScaled(value:string):bigint {
+ const match=/^(-?)(\d+)(?:\.(\d{1,18}))?$/u.exec(value)
  if(!match) throw new Error('Stripe fee amount must be an exact decimal')
- const fraction=match[3]??''
- if(fraction.slice(digits).replace(/0/gu,'')) throw new Error('Stripe fee precision exceeds currency minor units')
- const integer=BigInt(match[2]!)*10n**BigInt(digits)+BigInt(fraction.slice(0,digits).padEnd(digits,'0')||'0')
- const result=Number(match[1]? -integer:integer)
+ const scaled=BigInt(match[2]!)*10n**REPORT_SCALE+BigInt((match[3]??'').padEnd(Number(REPORT_SCALE),'0'))
+ return match[1]? -scaled:scaled
+}
+/** A fee identity's exact total in minor units, rounded half away from zero once; never binary floating point or FX. */
+export function stripeFeeMinor(scaled:bigint,currency:string):number {
+ if(!isCurrencyCode(currency)) throw new Error(`Unsupported report currency ${currency}`)
+ const unit=10n**(REPORT_SCALE-BigInt(currencyFractionDigits(currency)))
+ const magnitude=scaled<0n?-scaled:scaled
+ const result=Number((scaled<0n?-1n:1n)*((magnitude+unit/2n)/unit))
  if(!Number.isSafeInteger(result)) throw new Error('Stripe cost exceeds safe minor units')
  return result
 }
@@ -45,17 +49,16 @@ interface Snapshot {source_id:string;organization_id:string|null;payment_id:stri
  * identified by what incurred them, and the rows sharing an identity are summed.
  */
 export async function ingestStripeFeeReport(db:DbClient,livemode:boolean,csv:string,stripe?:Stripe) {
- const grouped=new Map<string,{incurred_by:string;currency:string;amount:number;incurred_at:string}>()
+ const scaled=new Map<string,{incurred_by:string;currency:string;scaled:bigint;incurred_at:string}>()
  for(const row of feeReportRows(csv)){
   const currency=row.currency!.toUpperCase(),source=`stripe-fee:${Number(livemode)}:${row.fee_transaction_id}:${row.incurred_by}:${currency}`
-  const amount=stripeFeeMinor(row.amount!,currency)+stripeFeeMinor(row.tax||'0',currency)
+  if(!isCurrencyCode(currency)) throw new Error(`Unsupported report currency ${currency}`)
   const timestamp = row.incurred_at!
   const incurredAt=new Date(/[Zz]|[+-]\d{2}:?\d{2}$/u.test(timestamp) ? timestamp : timestamp.replace(' ', 'T')+'Z').toISOString()
-  const previous=grouped.get(source)
-  const total = amount+(previous?.amount??0)
-  if(!Number.isSafeInteger(total))throw new Error('Grouped Stripe cost exceeds safe minor units')
-  grouped.set(source,{incurred_by:row.incurred_by!,currency,amount:total,incurred_at:previous?.incurred_at??incurredAt})
+  const previous=scaled.get(source)
+  scaled.set(source,{incurred_by:row.incurred_by!,currency,scaled:stripeFeeScaled(row.amount!)+stripeFeeScaled(row.tax||'0')+(previous?.scaled??0n),incurred_at:previous?.incurred_at??incurredAt})
  }
+ const grouped=new Map([...scaled].map(([source,row])=>[source,{incurred_by:row.incurred_by,currency:row.currency,amount:stripeFeeMinor(row.scaled,row.currency),incurred_at:row.incurred_at}]))
  let attributed=0,unattributed=0;const organizations=new Set<string>()
  for(const [source,row] of grouped){
   const candidates=await queryAll<{id:string;organization_id:string}>(db,`SELECT p.id,p.organization_id FROM payments p WHERE p.livemode=? AND (p.stripe_charge_id=? OR p.stripe_payment_intent_id=? OR EXISTS(SELECT 1 FROM payment_refunds r WHERE r.payment_id=p.id AND r.stripe_refund_id=?) OR EXISTS(SELECT 1 FROM payment_disputes d WHERE d.payment_id=p.id AND d.stripe_dispute_id=?)) LIMIT 2`,[Number(livemode),row.incurred_by,row.incurred_by,row.incurred_by,row.incurred_by])
