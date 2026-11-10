@@ -2,9 +2,10 @@ import { HTTPError } from 'nitro'
 import { executeBatch, queryAll, queryAllPages, queryFirst, type DbClient } from '~/server/db'
 import { assertAssignedBookingAccess, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import { organizationEventQuery } from '~/server/utils/organization-events'
-import { getGuestRequest } from '~/server/domain/requests'
+import { getGuestRequest, getThreadOperationalRecord } from '~/server/domain/requests'
 import { getStay, readStayHome, stayAccessFor, type StayAccess } from '~/server/domain/stays'
-import { isValidInstant } from '~/utils/timezone'
+import { isValidInstant, localNow } from '~/utils/timezone'
+import { formatPostalAddress, parsePostalAddress } from '~/utils/postal-address'
 import { messageListPage, messageText, messagingError, parseGuestMessageSchedule, type GuestMessageSchedule, type MessageListQuery } from './guest-message-schedule'
 import { CHECK_IN_MESSAGE_TITLE, planTemplateMessages, publishScheduledGuestMessageChange } from './scheduled-guest-messages'
 import type { GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
@@ -177,7 +178,20 @@ export async function guestThreadMessagingContext(db: DbClient, principal: Membe
   ])
   if (stay && channel && stay.product_id !== channel.product_id) messagingError(409, 'CHANNEL_THREAD_ASSOCIATION_CONFLICT', 'The stay and provider conversation name different homes', 'productId')
   const productId = stay ? stay.product_id : channel ? channel.product_id : null
-  return { requestId, home: productId === null ? null : await readStayHome(db, access, productId), stay: stay ? await getStay(db, access, stay.id) : null }
+  return { requestId, home: productId === null ? null : await readStayHome(db, access, productId), stay: stay ? await getStay(db, access, stay.id) : null,
+    booking: thread.kind === 'booking' || thread.kind === 'reservation' ? await threadBooking(db, requestId) : null }
+}
+
+/** The class, consultation or table a booking or reservation conversation is about, at its location's local time. */
+async function threadBooking(db: DbClient, requestId: string) {
+  const record = await getThreadOperationalRecord(db, requestId)
+  if (!record || (record.kind !== 'booking' && record.kind !== 'reservation')) return null
+  const location = record.location_id === null ? null
+    : await queryFirst<{ title: string; address: string | null; phone: string | null }>(db, 'SELECT title, address, phone FROM business_locations WHERE organization_id = ? AND id = ?', [record.organization_id, record.location_id])
+  if (record.location_id !== null && !location) messagingError(500, 'INVALID_GUEST_THREAD', 'The booking location does not exist', 'locationId')
+  const local = (instant: string) => { const at = localNow(record.timezone, new Date(instant)); return `${at.date} ${at.time}` }
+  return { kind: record.kind, status: record.status, offering: record.product_name, location: location?.title ?? null, address: location?.address ? formatPostalAddress(parsePostalAddress(location.address)) : null, phone: location?.phone ?? null, partySize: record.party_size,
+    timezone: record.timezone, startsAt: local(record.starts_at), endsAt: local(record.ends_at), noShow: record.no_show_at !== null }
 }
 
 export interface ScheduledGuestMessageRow {
