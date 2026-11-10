@@ -124,7 +124,7 @@ export const conversations = sqliteTable("conversations", {
 	check("conversations_payload_check", sql`json_valid(payload_json) AND json_type(payload_json) = 'object'`),
 	check("conversations_kind_check", sql`(kind = 'team' AND user_id IS NULL AND blocked_at IS NULL AND payload_json = '{}' AND participants_key IS NOT NULL)
 		OR (kind IN ('contact', 'booking') AND name IS NULL AND is_group = 0 AND participants_key IS NULL AND created_by_user_id IS NULL)`),
-	check("conversations_contact_check", sql`kind <> 'contact' OR (booking_id IS NULL AND json_type(payload_json, '$.message') IS 'text')`),
+	check("conversations_contact_check", sql`kind <> 'contact' OR booking_id IS NULL`),
 	// A booking's guest may be known by name alone (an imported reservation);
 	// a contact needs an email or a phone to be answered.
 	check("conversations_guest_payload_check", sql`kind = 'team' OR (

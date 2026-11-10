@@ -1,40 +1,34 @@
-import type { DashboardInvalidation, GuestThreadInvalidation, NotificationInvalidation, StayInvalidation } from '~/shared/dashboard-invalidations'
+import type { ConversationEvent, DashboardInvalidation, StayInvalidation } from '~/shared/dashboard-invalidations'
 import { queryFirst, type DbClient } from '~/server/db'
 import { HTTPError } from 'nitro'
-
-export type GuestInboxEventType = GuestThreadInvalidation['type']
 
 export interface GuestInboxPublicationEnv {
   GUEST_INBOX_HUBS?: DurableObjectNamespace
 }
 
-export async function publishGuestInboxThreadEvent(
+/** A message was written in a conversation, or it or the conversation changed: the gateway tells who may see it. */
+export async function publishConversationEvent(
   env: GuestInboxPublicationEnv,
   db: DbClient,
-  input: {
-    threadId: string
-    type: GuestInboxEventType
-  },
+  input: { conversationId: string; type: ConversationEvent['type'] },
 ): Promise<void> {
-  const thread = await queryFirst<{
-    id: string
-    organization_id: string
-    location_id: string | null
-  }>(db, `
-    SELECT id, organization_id, location_id
-    FROM requests
-    WHERE id = ?
-    LIMIT 1
-  `, [input.threadId])
-  if (!thread) throw new Error(`Guest thread ${input.threadId} not found for inbox publication`)
+  const conversation = await queryFirst<{ id: string; organization_id: string; location_id: string | null; kind: string }>(db,
+    'SELECT id, organization_id, location_id, kind FROM conversations WHERE id = ?', [input.conversationId])
+  if (!conversation) throw new Error(`Conversation ${input.conversationId} not found for publication`)
   await publishDashboardInvalidation(env, {
     eventId: crypto.randomUUID(),
     type: input.type,
-    organizationId: thread.organization_id,
-    locationId: thread.location_id,
-    threadId: thread.id,
+    organizationId: conversation.organization_id,
+    locationId: conversation.location_id,
+    conversationId: conversation.id,
+    team: conversation.kind === 'team',
     occurredAt: new Date().toISOString(),
   })
+}
+
+/** One person's read position or archive moved; only their own apps hear it. */
+export async function publishConversationAck(env: GuestInboxPublicationEnv, input: { organizationId: string; conversationId: string; targetUserId: string }): Promise<void> {
+  await publishDashboardInvalidation(env, { ...input, eventId: crypto.randomUUID(), type: 'MESSAGE_ACK', occurredAt: new Date().toISOString() })
 }
 
 export async function publishDashboardInvalidation(
@@ -64,17 +58,6 @@ export async function publishDashboardInvalidation(
     console.error('dashboard_invalidation_transport_failed', { ...publication, status: response.status })
     throw new HTTPError({ statusCode: 503, message: `Dashboard invalidation publication failed with HTTP ${response.status}`, data: { code: 'DASHBOARD_PUBLICATION_FAILED', field: 'realtime', publicationStatus: response.status } })
   }
-}
-
-export async function publishNotificationInvalidation(
-  env: GuestInboxPublicationEnv,
-  input: Omit<NotificationInvalidation, 'eventId' | 'occurredAt'>,
-): Promise<void> {
-  await publishDashboardInvalidation(env, {
-    ...input,
-    eventId: crypto.randomUUID(),
-    occurredAt: new Date().toISOString(),
-  })
 }
 
 /** Every still-authorized member reconciles its own resource access. */
