@@ -49,7 +49,7 @@ import { productEditorKey, type BookingConcern } from '~/components/dashboard/Pr
 import OfferCard from '~/components/dashboard/OfferCard.vue'
 import { offer } from '~/shared/offers'
 import ResponsibilityPicker from '~/components/dashboard/ResponsibilityPicker.vue'
-import { NOTICE_OPTIONS } from '~/shared/availability-settings'
+import { NOTICE_OPTIONS, noticeSummary } from '~/shared/availability-settings'
 
 definePageMeta({ layout: 'dashboard' })
 const p = inject(productEditorKey)!
@@ -76,7 +76,12 @@ const { data: members, status: membersStatus } = await useMemberSchedulingList((
 watch(() => [p.form.assigned_member_id, p.form.assigned_team_id], ([memberId, teamId]) => {
   if (legal.value && (memberId || teamId)) p.form.scheduling_mode = 'provider'
 })
-const noticeOptions = NOTICE_OPTIONS.map(option => ({ value: String(option.value), label: option.label, description: 'description' in option ? option.description : undefined }))
+// A notice saved through MCP outside Airbnb's choices is still shown, selected, as its own card.
+const noticeOptions = computed(() => {
+  const saved = p.product.value?.booking?.advance_notice_minutes ?? 0
+  const options = NOTICE_OPTIONS.map(option => ({ value: String(option.value), label: option.label, description: 'description' in option ? option.description : undefined }))
+  return NOTICE_OPTIONS.some(option => option.value === saved) ? options : [...options, { value: String(saved), label: noticeSummary(saved), description: undefined }]
+})
 const notice = computed({
   get: () => String(p.form.advance_notice_minutes ?? 0),
   set: (value: string) => { p.form.advance_notice_minutes = Number(value) || null },

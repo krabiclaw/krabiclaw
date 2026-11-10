@@ -68,6 +68,7 @@ import { formatTimestamp } from '~/utils/timezone'
 import { presentationForProduct } from '~/utils/product-presentation'
 import type { ProductKind } from '~/shared/product-details'
 import { changeNoticeMinutes, noticeDuration, outsideNotice } from '~/shared/availability-settings'
+import { ApiClientError } from '~/utils/api-clients'
 
 /**
  * The page a guest's cancellation link opens.
@@ -136,7 +137,9 @@ const startOverHref = computed(() => localePath(props.kind === 'booking'
   : '/reservations'))
 
 // The offering's advance notice closes the guest's own cancellation, as the cancel route refuses it.
-const cancellationClosed = computed(() => Boolean(booking.value && !outsideNotice(booking.value.starts_at, booking.value.advance_notice_minutes)))
+// A page left open past the cutoff learns it from the server's refusal.
+const closedByServer = ref(false)
+const cancellationClosed = computed(() => closedByServer.value || Boolean(booking.value && !outsideNotice(booking.value.starts_at, booking.value.advance_notice_minutes)))
 const cancellationSubmitted = ref(false)
 const cancelled = computed(() => cancellationSubmitted.value || booking.value?.status === 'cancelled')
 const loading = ref(false)
@@ -154,6 +157,7 @@ async function handleCancel() {
     })
     cancellationSubmitted.value = true
   } catch (err) {
+    if (err instanceof ApiClientError && err.code === 'cancellation_closed') { closedByServer.value = true; return }
     const message = (err as { data?: { error?: string } })?.data?.error
     cancelError.value = message || (booking.value?.can_retry_cancellation ? copy('toast_refund_failed') : copy('toast_cancel_failed'))
   } finally {
