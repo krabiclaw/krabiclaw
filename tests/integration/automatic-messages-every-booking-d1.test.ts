@@ -4,7 +4,8 @@ import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/
 import { Miniflare } from 'miniflare'
 import { H3Event } from 'h3'
 import * as schema from '../../server/db/schema.ts'
-import { saveMessageTemplate } from '../../server/domain/guest-messaging.ts'
+import { guestThreadMessagingContext, saveMessageTemplate } from '../../server/domain/guest-messaging.ts'
+import { memberAccessPrincipal } from '../../server/utils/member-access.ts'
 import { sendDueScheduledGuestMessages } from '../../server/domain/scheduled-guest-messages.ts'
 import { createProductBooking } from '../../server/domain/product-bookings.ts'
 import { createTableReservation } from '../../server/domain/table-reservations.ts'
@@ -111,6 +112,11 @@ test('consultations, classes and table reservations are sent their automatic mes
       body: { name: 'Dee', email: 'dee@proof.example', phone: '+66812345678', date: dinner.date, time: dinner.time, guests: '2', location_id: 'bistro-place' } })
     assert.equal(reserved.status, 201, JSON.stringify(reserved.body))
     const dee = { requestId: String(reserved.body.request_id), reservationId: String(reserved.body.operational_reservation_id) }
+
+    // A conversation names what it is about for whoever replies (suggested replies, MCP): the table, for how many, at its own local time.
+    const context = await guestThreadMessagingContext(db, memberAccessPrincipal({ userId: OWNER, organizationId: bistro.organizationId, role: 'owner' }, { env }), dee.requestId)
+    assert.deepEqual(context.record, { kind: 'reservation', status: 'confirmed', offering: null, location: `${bistro.organizationId} main`, address: null, phone: null, partySize: 2,
+      timezone: 'Asia/Bangkok', starts: `${dinner.date} ${dinner.time}`, ends: `${dinner.date} 21:00`, noShow: false })
 
     // Each booking's plan, read from the table rather than from the planner that wrote it.
     const planned = (kind: 'booking' | 'reservation', id: string, templateId: string) => db.prepare('SELECT * FROM scheduled_guest_messages WHERE subject_type = ? AND subject_id = ? AND template_id = ?').bind(kind, id, templateId).first<Record<string, string | null>>()

@@ -8,6 +8,7 @@ import type { CloudflareEnv } from '~/server/utils/auth'
 import { recordBookingCancelled } from '~/server/domain/booking-analytics'
 import { executeBatch, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { isBookingComplete, type BookingStatus } from '~/shared/bookings'
+import { isValidInstant, isValidTimezone, localDateAt, localDateTimeToInstant } from '~/utils/timezone'
 import { noticeDuration, outsideNotice } from '~/shared/availability-settings'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
 import { formAnswerSnapshotsSchema } from '~/shared/form-questions'
@@ -223,6 +224,23 @@ export interface BookedRecord extends Omit<ThreadOperationalRecord, 'review_id'>
   updated_at: string
   location_updated_at: string | null
   fingerprint: string
+}
+
+/**
+ * When a booked record starts and ends, as its own clock reads it: a stay's
+ * check-in and checkout days at its home's times (no instant without a time),
+ * anything else its own instants on their local days.
+ */
+export function bookedRecordWindow(record: Pick<BookedRecord, 'id' | 'kind' | 'timezone' | 'check_in_date' | 'check_out_date' | 'check_in_time' | 'check_out_time' | 'starts_at' | 'ends_at'>):
+  { start: { date: string; instant: string | null }; end: { date: string; instant: string | null } } {
+  if (!isValidTimezone(record.timezone) || /^[+-]/.test(record.timezone)) throw new HTTPError({ statusCode: 500, message: `The ${record.kind} ${record.id} has no IANA timezone`, data: { code: 'INVALID_HOME_TIMEZONE', field: 'timezone' } })
+  if (record.check_in_date !== null && record.check_out_date !== null) {
+    const at = (date: string, time: string | null) => ({ date, instant: time === null ? null : localDateTimeToInstant(date, time, record.timezone, 'earlier').toISOString() })
+    return { start: at(record.check_in_date, record.check_in_time), end: at(record.check_out_date, record.check_out_time) }
+  }
+  for (const value of [record.starts_at, record.ends_at]) if (!isValidInstant(value)) throw new HTTPError({ statusCode: 500, message: `The ${record.kind} ${record.id} has an invalid start or end time`, data: { code: 'INVALID_BOOKING_TIME', field: 'startsAt' } })
+  const at = (instant: string) => ({ date: localDateAt(new Date(instant), record.timezone), instant })
+  return { start: at(record.starts_at), end: at(record.ends_at) }
 }
 
 export async function readBookedRecord(db: DbClient, organizationId: string, ref: { kind: BookedKind; id: string }): Promise<BookedRecord | null> {

@@ -1362,6 +1362,9 @@ test('a v22 replacement preserves stay rules, retires imported duplicates and ap
       // v24 retires requests' conversation_state and resolved_at; every other recorded value is kept.
       for (const table of preservedTables) recorded[table] = (source.prepare(`SELECT * FROM ${table} ORDER BY 1,2`).all() as Array<Record<string, unknown>>)
         .map(row => { if (table !== 'requests') return row; const { conversation_state: _state, resolved_at: _resolved, ...kept } = row; return kept })
+      // A conversation's stay or booking is its booked-record reference since migration 0003; every other value is v22's.
+      recorded.team_threads = (recorded.team_threads as Array<Record<string, unknown>>).map(({ stay_id: stayId, booking_id: bookingId, ...thread }) =>
+        ({ ...thread, subject_type: stayId ? 'stay' : bookingId ? 'booking' : null, subject_id: stayId ?? bookingId ?? null }))
       arrivalRules = source.prepare(`SELECT ${nightProjection} FROM product_nights ORDER BY product_id,date`).all()
       homeMinimums = source.prepare('SELECT product_id,min_nights FROM product_stay_configs ORDER BY product_id').all()
       originalPushes = source.prepare(`SELECT ${pushProjection} FROM channel_night_pushes ORDER BY product_id,date`).all() as Array<Record<string, unknown>>

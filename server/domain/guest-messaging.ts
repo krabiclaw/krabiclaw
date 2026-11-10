@@ -2,9 +2,10 @@ import { HTTPError } from 'nitro'
 import { executeBatch, queryAll, queryAllPages, queryFirst, type DbClient } from '~/server/db'
 import { assertAssignedBookingAccess, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import { organizationEventQuery } from '~/server/utils/organization-events'
-import { getGuestRequest, type BookedKind } from '~/server/domain/requests'
+import { BOOKED_RECORDS_SQL, bookedRecordWindow, getGuestRequest, type BookedKind, type BookedRecord } from '~/server/domain/requests'
+import { formatPostalAddress, parsePostalAddress } from '~/utils/postal-address'
 import { getStay, readStayHome, stayAccessFor, type StayAccess } from '~/server/domain/stays'
-import { isValidInstant } from '~/utils/timezone'
+import { isValidInstant, localNow } from '~/utils/timezone'
 import { messageListPage, messageText, messagingError, parseGuestMessageSchedule, type GuestMessageSchedule, type MessageListQuery } from './guest-message-schedule'
 import { CHECK_IN_MESSAGE_TITLE, planTemplateMessages, publishScheduledGuestMessageChange } from './scheduled-guest-messages'
 import type { GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
@@ -200,7 +201,25 @@ export async function guestThreadMessagingContext(db: DbClient, principal: Membe
   ])
   if (stay && channel && stay.product_id !== channel.product_id) messagingError(409, 'CHANNEL_THREAD_ASSOCIATION_CONFLICT', 'The stay and provider conversation name different homes', 'productId')
   const productId = stay ? stay.product_id : channel ? channel.product_id : null
-  return { requestId, home: productId === null ? null : await readStayHome(db, access, productId), stay: stay ? await getStay(db, access, stay.id) : null }
+  return { requestId, home: productId === null ? null : await readStayHome(db, access, productId), stay: stay ? await getStay(db, access, stay.id) : null,
+    record: await conversationRecord(db, principal.organizationId, requestId) }
+}
+
+/**
+ * The stay, booking or table reservation a conversation is about, as its guest
+ * would read it: what and where, for how many, and its start and end on its
+ * own clock. Null for a conversation with no booked record (an inquiry).
+ */
+async function conversationRecord(db: DbClient, organizationId: string, requestId: string) {
+  const record = await queryFirst<BookedRecord & { location: string | null; address: string | null; phone: string | null }>(db, `
+    SELECT br.*, l.title AS location, l.address, l.phone FROM ${BOOKED_RECORDS_SQL} br
+      LEFT JOIN business_locations l ON l.organization_id = br.organization_id AND l.id = br.location_id
+     WHERE br.organization_id = ? AND br.request_id = ?`, [organizationId, requestId])
+  if (!record) return null
+  const window = bookedRecordWindow(record)
+  const local = (at: { date: string; instant: string | null }) => at.instant === null ? at.date : (({ date, time }) => `${date} ${time}`)(localNow(record.timezone, new Date(at.instant)))
+  return { kind: record.kind, status: record.status, offering: record.product_name, location: record.location, address: record.address ? formatPostalAddress(parsePostalAddress(record.address)) : null,
+    phone: record.phone, partySize: record.party_size, timezone: record.timezone, starts: local(window.start), ends: local(window.end), noShow: record.no_show_at !== null }
 }
 
 export interface ScheduledGuestMessageRow {

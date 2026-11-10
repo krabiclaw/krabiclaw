@@ -7,7 +7,7 @@ import { templateSchedule, type MessageTemplateRow, type ScheduledGuestMessageRo
 import { sendScheduledGuestReply, type OperationOutcome } from './guest-threads/operations'
 import { publishGuestInboxThreadEvent, publishStayInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 import { ChannexError } from '~/server/integrations/channex/client'
-import { BOOKED_RECORDS_SQL, bookedRecordGuard, readBookedRecord, type BookedKind, type BookedRecord } from './requests'
+import { BOOKED_RECORDS_SQL, bookedRecordGuard, bookedRecordWindow, readBookedRecord, type BookedKind, type BookedRecord } from './requests'
 
 type Plan = Pick<ScheduledGuestMessageRow, 'due_at' | 'status' | 'reason' | 'error_code' | 'error_field'>
 
@@ -16,16 +16,10 @@ export function messageSubject(row: Pick<ScheduledGuestMessageRow, 'subject_type
   return { kind: row.subject_type, id: row.subject_id }
 }
 
-/** The day and instant a schedule counts from at the record's start and end: a stay's nights at its home's times, anything else its own instants. */
+/** The day and instant a schedule counts from at the record's start and end. */
 function anchors(record: BookedRecord): { check_in: ScheduleAnchor; check_out: ScheduleAnchor } {
-  if (!isValidTimezone(record.timezone) || /^[+-]/.test(record.timezone)) messagingError(500, 'INVALID_HOME_TIMEZONE', 'Scheduled messages require the booking’s IANA timezone', 'timezone')
-  if (record.check_in_date !== null && record.check_out_date !== null) {
-    const at = (date: string, time: string | null) => ({ date, instant: time === null ? null : localDateTimeToInstant(date, time, record.timezone, 'earlier').toISOString() })
-    return { check_in: at(record.check_in_date, record.check_in_time), check_out: at(record.check_out_date, record.check_out_time) }
-  }
-  for (const value of [record.starts_at, record.ends_at]) if (!isValidInstant(value)) messagingError(500, 'INVALID_BOOKING_TIME', 'The booking has an invalid start or end time', 'startsAt')
-  const at = (instant: string) => ({ date: localDateAt(new Date(instant), record.timezone), instant })
-  return { check_in: at(record.starts_at), check_out: at(record.ends_at) }
+  const window = bookedRecordWindow(record)
+  return { check_in: window.start, check_out: window.end }
 }
 
 /** A scheduled message belongs to its conversation, or its actual stay when no conversation exists. */
