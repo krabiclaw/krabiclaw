@@ -17,7 +17,6 @@ type Approval={id:string;action:Action;amount:number;note:string|null;currency:s
 const WORDING:Record<Action,{question:string;button:string}>={
  refund:{question:'Send a refund of',button:'Approve and send refund'},
  reject_booking:{question:'Decline the booking and refund',button:'Approve decline and full refund'},
- cancel_reservation:{question:'Cancel the reservation and refund',button:'Approve cancellation and full refund'},
  cancel_booking:{question:'Cancel the booking and refund',button:'Approve cancellation and full refund'},
  cancel_stay:{question:'Cancel the stay and refund',button:'Approve cancellation and full refund'},
 }

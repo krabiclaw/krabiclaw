@@ -9,7 +9,8 @@ import { guestReplyDestination } from './operations'
 import { getGuestRequest } from '~/server/domain/requests'
 import { OPENING_EVENT } from './opening'
 import { formatFormAnswer } from '~/shared/form-questions'
-import { threadRecordTitle } from '~/lib/components/workspace/messages/guest-thread-client'
+import { EXPERIENCE_PRESENTATION } from '~/utils/product-presentation'
+import { normalizeVertical } from '~/utils/vertical-copy'
 import { calendarDate, clockTime, dayLabel, firstName, initial, localDateKey, providerInstant, sendTime, stayWhen } from './presentation'
 import { formatCalendarRange } from '~/utils/timezone'
 import type {
@@ -120,7 +121,7 @@ async function threadFacts(db: DbClient, raw: GuestThreadDetailViewModel, organi
   const inquiry = inquiryEntry && text(inquiryEntry.payload?.check_in_date) && text(inquiryEntry.payload?.check_out_date)
     ? { checkIn: String(inquiryEntry.payload!.check_in_date), checkOut: String(inquiryEntry.payload!.check_out_date) } : null
   const record = raw.operationalRecord
-  // A stay is its nights; a booking or reservation is its start, in the home's clock; an inquiry is the dates asked about.
+  // A stay is its nights; a booking is its start, in the home's clock; an inquiry is the dates asked about.
   const when = record?.check_in_date && record.check_out_date ? stayWhen(record.check_in_date, record.check_out_date, now, timeZone)
     : record ? `${calendarDate(localDateKey(record.starts_at, timeZone))}, ${clockTime(record.starts_at, timeZone)}`
       : inquiry && kind === 'guest' ? formatCalendarRange(inquiry.checkIn, inquiry.checkOut, 'en-US') : null
@@ -153,8 +154,16 @@ function receipt(entry: GuestThreadEntryViewModel, guestName: string): string | 
 }
 
 function recordNoun(raw: GuestThreadDetailViewModel): string {
-  if (raw.submissionType === 'stay' || raw.submissionType === 'contact') return 'reservation'
-  return resolveBookingPresentation(raw.submissionType, raw.organizationVertical).noun
+  const record = raw.operationalRecord
+  if (!record || record.kind === 'stay') return 'reservation'
+  return resolveBookingPresentation(record.product_kind, raw.organizationVertical).noun
+}
+
+/** What Show reservation calls the record, in the business's own word: a stay or a table is a reservation, a class an experience. */
+function recordTitle(record: NonNullable<GuestThreadDetailViewModel['operationalRecord']>, vertical: string | null): string {
+  if (record.kind === 'stay') return 'Reservation'
+  if (record.product_kind === 'experience' && normalizeVertical(vertical ?? '') !== 'service') return EXPERIENCE_PRESENTATION.itemLabel
+  return resolveBookingPresentation(record.product_kind, vertical).label
 }
 
 /** Who did something, as the reader says it: "You", a teammate's first name, the guest. */
@@ -165,7 +174,7 @@ function actorName(entry: GuestThreadEntryViewModel, facts: ThreadFacts, viewer:
   return facts.raw.organizationName ?? 'KrabiClaw'
 }
 
-const SILENT_EVENTS = new Set(['channel.inquiry_received', 'booking.created', 'reservation.created', 'stay.created'])
+const SILENT_EVENTS = new Set(['channel.inquiry_received', 'booking.created', 'stay.created'])
 
 /** A sentence the server writes for something that happened to the conversation or its record; null for what the header already says. */
 function eventSentence(entry: GuestThreadEntryViewModel, facts: ThreadFacts, viewer: Viewer): string | null {
@@ -328,7 +337,7 @@ export async function getInboxThread(db: DbClient, threadId: string, organizatio
     translated: items.some(item => item.type === 'message' && item.translated !== null),
     recordId: record ? record.kind === 'stay' ? record.id : raw.id : null,
     recordKind: record?.kind ?? null,
-    recordTitle: record ? record.kind === 'stay' ? 'Reservation' : threadRecordTitle(record.kind, raw.organizationVertical) : null,
+    recordTitle: record ? recordTitle(record, raw.organizationVertical) : null,
     activityPath: raw.activityPath,
     stream: items,
     pending,

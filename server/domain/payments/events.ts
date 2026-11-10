@@ -1,8 +1,5 @@
 import type Stripe from 'stripe'
 import type { CloudflareEnv } from '~/server/utils/auth'
-import { reservationClaimQuery } from '~/server/utils/reservations'
-import { notifyTableReservationCreated } from '~/server/domain/table-reservations'
-import { localNow } from '~/utils/timezone'
 import { notifyProductBookingCreated } from '~/server/domain/product-bookings'
 import { execute, executeBatch, queryAll, queryFirst, type DbClient, type BatchQuery } from '~/server/db'
 import { isRecord } from '~/server/utils/type-guards'
@@ -85,12 +82,12 @@ async function settlePaymentIntent(db:DbClient,stripe:Stripe,payment:Payment,rep
   // Once this purchase has been sent back to the buyer, a redelivery finishes that and never books it.
   if(await queryFirst(db,'SELECT 1 FROM payment_refunds WHERE payment_id=? AND idempotency_key=?',[payment.id,unfulfillableKey(intent)])){await refundUnfulfillable(db,stripe,env,recorded,intent,capture);return intent}
   if (payment.subject_type === 'stay' && recorded.refunded_amount === 0) { await settleStayPayment(db, stripe, env, recorded, intent, capture); return intent }
-  if (recorded.refunded_amount > 0 || !['booking', 'reservation'].includes(payment.subject_type)) {await notifyPaymentFinancialEvent(db,stripe,env,recorded,capture);return intent}
+  if (recorded.refunded_amount > 0 || payment.subject_type !== 'booking') {await notifyPaymentFinancialEvent(db,stripe,env,recorded,capture);return intent}
   const hold = await queryFirst<Hold>(db,'SELECT * FROM payment_checkout_holds WHERE payment_id=? AND organization_id=?',[payment.id,payment.organization_id])
   if (!hold || !hold.request_id) throw new Error('Captured visit payment has no durable hold and guest request')
   if(!await commitVisit(db,env,payment,hold,new Date(charge.created*1000).toISOString())){await refundUnfulfillable(db,stripe,env,recorded,intent,capture);return intent}
   if(!await queryFirst(db,'SELECT id FROM organization WHERE id=?',[payment.organization_id])&&await queryFirst(db,'SELECT organization_id FROM payment_servicing_tenants WHERE organization_id=? AND stripe_account_id=? AND livemode=?',[payment.organization_id,payment.stripe_account_id,payment.livemode])){await notifyPaymentFinancialEvent(db,stripe,env,recorded,capture);return intent}
-    const outcomes=await Promise.allSettled([notifyPaymentFinancialEvent(db,stripe,env,await requirePayment(db,payment.organization_id,payment.id),capture),payment.subject_type === 'booking' ? notifyProductBookingCreated(env,db,hold.organization_id,hold.request_id) : notifyTableReservationCreated(env,db,hold.organization_id,hold.request_id)])
+    const outcomes=await Promise.allSettled([notifyPaymentFinancialEvent(db,stripe,env,await requirePayment(db,payment.organization_id,payment.id),capture),notifyProductBookingCreated(env,db,hold.organization_id,hold.request_id)])
   raiseSettledFailures('Captured visit delivery',payment.id,outcomes,['capture notification','booking creation notification'])
   await execute(db,"UPDATE requests SET payload_json=json_set(payload_json,'$.provenance.followups_completed',json('true')) WHERE id=? AND organization_id=? AND json_type(payload_json,'$.provenance')='object'",[hold.request_id,hold.organization_id])
   return intent
@@ -118,36 +115,29 @@ async function captureOnceBooked(db:DbClient,stripe:Stripe,env:CloudflareEnv,pay
 
 async function commitPurchase(db:DbClient,env:CloudflareEnv,payment:Payment,chargedAt:string):Promise<boolean>{
  if(payment.subject_type==='stay')return await commitStay(db,payment)!==null
- if(payment.subject_type!=='booking'&&payment.subject_type!=='reservation')return true
+ if(payment.subject_type!=='booking')return true
  const hold=await queryFirst<Hold>(db,'SELECT * FROM payment_checkout_holds WHERE payment_id=? AND organization_id=?',[payment.id,payment.organization_id])
  if(!hold||!hold.request_id)throw new Error('Authorized visit payment has no durable hold and guest request')
  return await commitVisit(db,env,payment,hold,chargedAt)
 }
 
-/** The hold becomes its booking or reservation. True when it is one, now or already; false when its capacity has gone. */
+/** The hold becomes its booking. True when it is one, now or already; false when its capacity has gone. */
 async function commitVisit(db:DbClient,env:CloudflareEnv,payment:Payment,hold:Hold,chargedAt:string):Promise<boolean>{
  if(hold.status==='converted')return true
  if(!hold.request_id)throw new Error('Visit hold has no guest request')
  const now=new Date().toISOString()
  const subjectId = crypto.randomUUID()
- let claim: BatchQuery
- const kind = payment.subject_type === 'booking' ? 'booking' : 'reservation'
- const table = kind === 'booking' ? 'bookings' : 'reservations'
- const convertedColumn = kind === 'booking' ? 'converted_booking_id' : 'converted_reservation_id'
- if (kind === 'booking') {
-   if (!hold.product_id || !hold.variant_id || !hold.session_id) throw new Error('Booking hold has no offering or session')
-   claim = await sessionClaimQuery(db, {env,bookingId:subjectId,organizationId:hold.organization_id,productId:hold.product_id,sessionId:hold.session_id,productVariantId:hold.variant_id,partySize:hold.quantity,userId:hold.buyer_user_id,requestId:hold.request_id,now,chargedPaymentId:payment.id,chargedAt:chargedAt})
- } else {
-   if (hold.product_id || !hold.location_id || !hold.timezone) throw new Error('Reservation hold has invalid location facts')
-   const local = localNow(hold.timezone, new Date(hold.starts_at))
-   claim = await reservationClaimQuery(db, {organizationId:hold.organization_id,locationId:hold.location_id,reservationId:subjectId,requestId:hold.request_id,userId:hold.buyer_user_id,timezone:hold.timezone,startsAt:hold.starts_at,endsAt:hold.ends_at,date:local.date,timeSlot:local.time,partySize:hold.quantity,chargedPaymentId:payment.id,chargedAt:chargedAt})
- }
+ if (!hold.product_id || !hold.variant_id || !hold.session_id) throw new Error('Booking hold has no offering or session')
+ // The terms the guest saw when they started paying are the terms they booked.
+ const policy = await queryFirst<{ policy: string | null }>(db, "SELECT json_extract(price_snapshot_json, '$.policy') AS policy FROM payments WHERE id=?", [payment.id])
+ if (!policy?.policy) throw new Error('Booking payment has no frozen booking policy')
+ const claim: BatchQuery = await sessionClaimQuery(db, {env,bookingId:subjectId,organizationId:hold.organization_id,productId:hold.product_id,sessionId:hold.session_id,productVariantId:hold.variant_id,partySize:hold.quantity,userId:hold.buyer_user_id,requestId:hold.request_id,now,chargedPaymentId:payment.id,chargedAt:chargedAt,policyJson:policy.policy})
  let created: boolean
  try {
    const results = await executeBatch(db,[claim,
-     {query:`UPDATE payment_checkout_holds SET status='converted',${convertedColumn}=? WHERE id=? AND status IN ('active','released') AND EXISTS(SELECT 1 FROM ${table} WHERE id=?)`,params:[subjectId,hold.id,subjectId]},
-     {query:`INSERT INTO activity_entries(id,request_id,kind,scope_kind,actor_kind,event_name,payload_json,dedupe_key,sequence,occurred_at,created_at) SELECT ?,v.request_id,'operation','request','system',?,json_object(?,v.id,'request_id',v.request_id,'afterStatus',v.status,'payment_id',?,'intent',?),?,COALESCE((SELECT MAX(sequence) FROM activity_entries WHERE request_id=v.request_id),0)+1,?,? FROM ${table} v WHERE v.id=? AND v.request_id IS NOT NULL ON CONFLICT(dedupe_key) DO NOTHING`,params:[crypto.randomUUID(),`${kind}.created`,`operational_${kind}_id`,payment.id,`${kind}.created`,`${kind}:${subjectId}:created`,now,now,subjectId]},
-     {query:`UPDATE payments SET subject_id=?,updated_at=? WHERE id=? AND EXISTS(SELECT 1 FROM ${table} WHERE id=?)`,params:[subjectId,now,payment.id,subjectId]},
+     {query:`UPDATE payment_checkout_holds SET status='converted',converted_booking_id=? WHERE id=? AND status IN ('active','released') AND EXISTS(SELECT 1 FROM bookings WHERE id=?)`,params:[subjectId,hold.id,subjectId]},
+     {query:`INSERT INTO activity_entries(id,request_id,kind,scope_kind,actor_kind,event_name,payload_json,dedupe_key,sequence,occurred_at,created_at) SELECT ?,v.request_id,'operation','request','system','booking.created',json_object('operational_booking_id',v.id,'request_id',v.request_id,'afterStatus',v.status,'payment_id',?,'intent','booking.created'),?,COALESCE((SELECT MAX(sequence) FROM activity_entries WHERE request_id=v.request_id),0)+1,?,? FROM bookings v WHERE v.id=? AND v.request_id IS NOT NULL ON CONFLICT(dedupe_key) DO NOTHING`,params:[crypto.randomUUID(),payment.id,`booking:${subjectId}:created`,now,now,subjectId]},
+     {query:`UPDATE payments SET subject_id=?,updated_at=? WHERE id=? AND EXISTS(SELECT 1 FROM bookings WHERE id=?)`,params:[subjectId,now,payment.id,subjectId]},
      ...conversationTaskQueries(hold.request_id,now),
    ],{operation:'Convert authenticated visit payment'})
    created = results[0]?.meta.changes === 1

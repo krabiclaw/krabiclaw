@@ -18,10 +18,9 @@ import { readStripeCheckoutSetup } from '~/server/utils/stripe-connect'
 import { experiencePublicationBlocker, getProduct } from '~/server/utils/product-management'
 import { readIntegration } from '~/server/utils/organization-integrations'
 import { getSessionAvailability } from '~/server/utils/availability'
-import { listReservationSlots } from '~/server/utils/reservations'
 import { MAX_HOMES_CALENDAR_DAYS, readStayGapCandidates, stayAccessFor } from '~/server/domain/stays'
 import { addLocalDays, formatCalendarRange, formatTimestamp, isValidCalendarDate, localDateAt, localDateTimeToInstant } from '~/utils/timezone'
-import { PRODUCT_DETAIL_FIELDS } from '~/shared/product-details'
+import { PRODUCT_DETAIL_FIELDS, type ProductKind } from '~/shared/product-details'
 import { platformLocale } from '~/shared/platform-locales'
 import { stayGuestFirstName } from '~/shared/bookings'
 import { UPCOMING_RESERVATION_DAYS } from '~/shared/dashboard-today'
@@ -143,7 +142,7 @@ export async function listBusinessOutcomes(
     } else if (row.request_id && row.source_table === 'activity_entries') {
       const operationalId = text(payload.operational_booking_id)
       if (operationalId) {
-        if (row.request_kind !== 'booking' && row.request_kind !== 'reservation' && row.request_kind !== 'stay') {
+        if (row.request_kind !== 'booking' && row.request_kind !== 'stay') {
           invalidEvidence(row, 'Operational activity has no valid recorded request kind')
         }
         subject = { kind: row.request_kind, id: operationalId }
@@ -284,11 +283,13 @@ export async function readArticleDistribution(db: DbClient, principal: MemberAcc
  * consultation's "Before you arrive" and "What to bring", or a home's
  * directions, wifi and house manual. A home's check-in instructions are not
  * here; every confirmed stay is already sent them the day before arrival. A
- * table reservation has no host-authored preparation, so it has none.
+ * table has preparation only when its host wrote some.
  */
 export interface BookingWelcome {
   requestId: string
   kind: BookedKind
+  /** What was booked: an experience, a consultation, a table or a stay's home. */
+  productKind: ProductKind
   recordId: string
   status: string
   /** The booked instant, or a stay's check-in date. */
@@ -302,7 +303,7 @@ export interface BookingWelcome {
 }
 
 interface WelcomeRow {
-  kind: BookedKind; record_id: string; request_id: string; status: string; starts_at: string; check_in_date: string | null; check_out_date: string | null; check_in_time: string | null
+  kind: BookedKind; product_kind: ProductKind; record_id: string; request_id: string; status: string; starts_at: string; check_in_date: string | null; check_out_date: string | null; check_in_time: string | null
   timezone: string; product_id: string; product_name: string; location_id: string | null; guest_name: string | null
   details_json: string | null; directions: string | null; wifi_network: string | null; wifi_password: string | null; house_manual: string | null
 }
@@ -346,7 +347,7 @@ export async function readBookingWelcomes(db: DbClient, organizationId: string, 
   const now = input.now.toISOString(), until = new Date(input.now.getTime() + UPCOMING_RESERVATION_DAYS * 86_400_000).toISOString()
   const only = (column: string, value: string | undefined) => value === undefined ? '' : `AND ${column} = ?`
   const rows = await queryAll<WelcomeRow>(db, `
-    SELECT br.kind, br.id AS record_id, br.request_id, br.status, br.starts_at, br.check_in_date, br.check_out_date, br.check_in_time, br.timezone,
+    SELECT br.kind, br.product_kind, br.id AS record_id, br.request_id, br.status, br.starts_at, br.check_in_date, br.check_out_date, br.check_in_time, br.timezone,
       br.product_id, br.product_name, br.location_id, COALESCE(st.guest_name, json_extract(r.payload_json, '$.guest.name')) AS guest_name,
       p.details_json, c.directions, c.wifi_network, c.wifi_password, c.house_manual
     FROM ${BOOKED_RECORDS_SQL} br
@@ -372,7 +373,7 @@ export async function readBookingWelcomes(db: DbClient, organizationId: string, 
     } else if (row.starts_at <= now) return []
     const message = welcomeMessage(row)
     if (message === null) return []
-    return [{ requestId: row.request_id, kind: row.kind, recordId: row.record_id, status: row.status, startsAt: row.check_in_date ?? row.starts_at, timezone: row.timezone,
+    return [{ requestId: row.request_id, kind: row.kind, productKind: row.product_kind, recordId: row.record_id, status: row.status, startsAt: row.check_in_date ?? row.starts_at, timezone: row.timezone,
       productId: row.product_id, locationId: row.location_id, guestFirstName: stayGuestFirstName(row.guest_name), message }]
   })
 }
@@ -424,13 +425,6 @@ export async function readBusinessProgressReference(
         const session = await getSessionAvailability(db, principal.env, principal.organizationId, resourceId, occurrence)
         if (session.status !== 'scheduled' || session.starts_at <= new Date().toISOString() || session.remaining === null || session.remaining < 1 || session.is_full) throw missing()
         availability = session
-      } else if (kind === 'reservation') {
-        const location = await queryFirst<{ timezone: string }>(db, 'SELECT timezone FROM business_locations WHERE id=? AND organization_id=?', [resourceId, principal.organizationId])
-        if (!location || !Number.isFinite(Date.parse(occurrence)) || occurrence <= new Date().toISOString()) throw missing()
-        const slots = await listReservationSlots(db, { organizationId: principal.organizationId, locationId: resourceId, date: localDateAt(new Date(occurrence), location.timezone) })
-        const slot = slots.slots.find(slot => slot.starts_at === occurrence)
-        if (!slot || slot.is_closed || slot.is_full || slot.remaining === null || slot.remaining < 1) throw missing()
-        availability = slot
       } else throw missing()
     }
     const kind = input.operation === 'article.create' ? 'article' : 'social_post'

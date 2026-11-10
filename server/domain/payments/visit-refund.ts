@@ -5,11 +5,11 @@ import { freeCancellationUntil } from '~/shared/availability-settings'
 
 /** Declining or cancelling a paid visit or stay returns the whole payment, as Airbnb's host cancellation does. */
 export type VisitRefundAction='reject'|'cancel'
-export type VisitRefundSubject='booking'|'reservation'|'stay'
-export const visitRefundKey=(action:VisitRefundAction,subjectType:VisitRefundSubject,subjectId:string)=>`${action==='reject'?'rejected':subjectType==='reservation'?'cancelled-reservation':subjectType==='stay'?'cancelled-stay':'cancelled'}:${subjectId}`
-type GuestRefundSubject='booking'|'reservation'
+export type VisitRefundSubject='booking'|'stay'
+export const visitRefundKey=(action:VisitRefundAction,subjectType:VisitRefundSubject,subjectId:string)=>`${action==='reject'?'rejected':subjectType==='stay'?'cancelled-stay':'cancelled'}:${subjectId}`
+type GuestRefundSubject='booking'
 export const guestVisitRefundKey=(subjectType:GuestRefundSubject,subjectId:string)=>`guest-cancelled-${subjectType}:${subjectId}`
-const authorizationActionFor=(action:VisitRefundAction,subjectType:VisitRefundSubject)=>subjectType==='stay'?'cancel_stay':subjectType==='reservation'?'cancel_reservation':action==='reject'?'reject_booking':'cancel_booking'
+const authorizationActionFor=(action:VisitRefundAction,subjectType:VisitRefundSubject)=>subjectType==='stay'?'cancel_stay':action==='reject'?'reject_booking':'cancel_booking'
 
 /** Extends the canonical visit operation's batch, never a second booking writer. */
 /** `committed` is the caller's own write in the same batch: the refund is queued only where it took effect. */
@@ -22,7 +22,7 @@ export async function visitRefundQueries(db:DbClient,input:{action:VisitRefundAc
   throw new HTTPError({statusCode:409,statusMessage:'This paid stay requires a refund before cancellation can complete. Open it in the dashboard to review and approve the financial action. The stay has not changed.',data:{code:'financial_action_required',dashboard_url:`/dashboard/${encodeURIComponent(org.slug)}/bookings/stay/${encodeURIComponent(input.subjectId)}`}})
  }
  if(input.financialWritesAllowed===false){
-  const destination=await queryFirst<{slug:string;request_id:string|null}>(db,`SELECT o.slug,b.request_id FROM organization o JOIN ${input.subjectType==='booking'?'bookings':'reservations'} b ON b.organization_id=o.id WHERE o.id=? AND b.id=?`,[input.organizationId,input.subjectId])
+  const destination=await queryFirst<{slug:string;request_id:string|null}>(db,`SELECT o.slug,b.request_id FROM organization o JOIN bookings b ON b.organization_id=o.id WHERE o.id=? AND b.id=?`,[input.organizationId,input.subjectId])
   if(!destination?.slug||!destination.request_id)throw new HTTPError({statusCode:409,statusMessage:'Paid booking dashboard destination is unavailable'})
   throw new HTTPError({statusCode:409,statusMessage:`This paid visit requires a refund before ${input.action==='reject'?'rejection':'cancellation'} can complete. Open its dashboard details to review and approve the financial action. The booking has not changed.`,data:{code:'financial_action_required',dashboard_url:`/dashboard/${encodeURIComponent(destination.slug)}/bookings/${input.subjectType}/${encodeURIComponent(destination.request_id)}`}})
  }
@@ -75,9 +75,8 @@ export async function guestVisitRefundQueries(db: DbClient, input: {
 export async function canRetryGuestVisitRefund(db: DbClient, input: {
  organizationId: string; subjectType: GuestRefundSubject; subjectId: string; requestId: string; buyerUserId?: string
 }): Promise<boolean> {
- const table = input.subjectType === 'booking' ? 'bookings' : 'reservations'
  return Boolean(await queryFirst(db, `SELECT f.id FROM payment_refunds f JOIN payments p ON p.id = f.payment_id
-  JOIN ${table} v ON v.id = p.subject_id AND v.organization_id = p.organization_id
+  JOIN bookings v ON v.id = p.subject_id AND v.organization_id = p.organization_id
   JOIN requests r ON r.id = v.request_id AND r.organization_id = v.organization_id AND r.kind = ?
   WHERE p.organization_id = ? AND p.subject_type = ? AND p.subject_id = ? AND r.id = ?
     AND v.status = 'cancelled' AND json_extract(r.payload_json, '$.cancellation.used_at') IS NOT NULL

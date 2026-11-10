@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { OPEN_TERMS_JSON } from './support/booking-terms.ts'
 import test from 'node:test'
 import { Miniflare } from 'miniflare'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
@@ -40,7 +41,7 @@ test('Google time changes request client approval while canonical appointments a
     for (const [id, start, end] of [['s',at('14:00'),at('14:30')], ['s2',at('15:00'),at('15:30')]]) await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,timezone,starts_at,ends_at,capacity,created_by,updated_by) VALUES(?,'org','p','America/New_York',?,?,1,'actor','actor')").bind(id,start,end).run()
     await db.prepare(`INSERT INTO requests(id,kind,organization_id,user_id,payload_json) VALUES('thread','booking','org','buyer','{"guest":{"name":"Jane Doe","email":"jane@example.test","phone":null},"notes":"PRIVATE LEGAL MATTER","party_size_is_minimum":false,"ip_hash":null,"cancellation":{"token_hash":null,"expires_at":null,"used_at":null}}')`).run()
     const env = { ...await mf.getBindings<CloudflareEnv>(), BETTER_AUTH_URL:'https://proof.example', BETTER_AUTH_SECRET:'local-proof-secret-long-enough-for-auth', STRIPE_SECRET_KEY:'sk_test_local_d1_no_stripe_requests', NUXT_PUBLIC_PLATFORM_DOMAIN:'https://krabiclaw.test', EMAIL_REPLY_SECRET:'reply-secret', EMAIL_DELIVERY_MODE:'log_only' } as CloudflareEnv
-    const { bookingId } = await claimSessionCapacity(db, { env, organizationId:'org', productId:'p', sessionId:'s', productVariantId:'v', partySize:1, requestId:'thread', userId:'buyer' })
+    const { bookingId } = await claimSessionCapacity(db, { policyJson: OPEN_TERMS_JSON, env, organizationId:'org', productId:'p', sessionId:'s', productVariantId:'v', partySize:1, requestId:'thread', userId:'buyer' })
     await storeCalendarSelection(db,'org',{account_id:'linked-account',calendar_id:'chosen',calendar_name:'KrabiClaw'})
     const provider = {token:async()=> 'token'}
     const events = new Map<string,Record<string,unknown>>()

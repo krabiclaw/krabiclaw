@@ -7,7 +7,7 @@ import type { BookingChangeView } from './booking-changes'
 export type GuestThreadEntryKind = 'submission' | 'message' | 'operation' | 'assignment'
 export type GuestThreadActorKind = 'guest' | 'member' | 'system'
 export type GuestThreadChannel = 'web' | 'email' | 'whatsapp' | 'airbnb' | 'system'
-export type GuestThreadSubmissionType = 'contact' | 'reservation' | 'booking' | 'stay'
+export type GuestThreadSubmissionType = 'contact' | 'booking' | 'stay'
 export type GuestThreadDeliveryChannel = 'email' | 'whatsapp' | 'airbnb' | 'push'
 export type GuestThreadDeliveryProvider = 'resend' | 'meta' | 'channex' | 'apns' | 'web_push' | 'log_only'
 export type GuestThreadDeliveryPurpose = 'owner_alert' | 'guest_acknowledgement' | 'member_reply' | 'scheduled_message' | 'status_update'
@@ -62,9 +62,9 @@ export interface ThreadSummaryProjection {
  * The opening submission's fields, named once here so the detail API and the
  * conversation view cannot drift apart. A `Record<string, unknown>` is what let
  * the view read `date`/`time`/`requests` — names the API never emitted — and
- * silently render a reservation with no date on it.
+ * silently render a booking with no date on it.
  *
- * A contact thread carries `subject`/`message`; a reservation or booking
+ * A contact thread carries `subject`/`message`; a booking
  * carries the occurrence, read from its operational record. A field the thread
  * does not have is null, never a stand-in from somewhere else.
  */
@@ -214,7 +214,7 @@ export interface GuestThreadDetailViewModel {
   /** An open guest_reply task: the guest asked something nobody has answered. */
   needsReply: boolean
   source: ThreadDetailSourceModel
-  operationalRecord: Pick<ThreadOperationalRecord, 'id' | 'kind' | 'status' | 'starts_at' | 'ends_at' | 'timezone' | 'party_size' | 'check_in_date' | 'check_out_date'> | null
+  operationalRecord: Pick<ThreadOperationalRecord, 'id' | 'kind' | 'product_kind' | 'status' | 'starts_at' | 'ends_at' | 'timezone' | 'party_size' | 'check_in_date' | 'check_out_date'> | null
   entries: GuestThreadEntryViewModel[]
   /** What can be done to the booking. Where the conversation lives is below, separately. */
   availableActions: string[]
@@ -332,9 +332,9 @@ export interface InboxThread {
   when: string | null
   /** A message in the conversation was translated: the header says "Translation on". */
   translated: boolean
-  /** What Show reservation opens: a stay's id, or the conversation's own id for a booking or reservation (the id the reservation route takes). */
+  /** What Show reservation opens: a stay's id, or the conversation's own id for a booking (the id the booking route takes). */
   recordId: string | null
-  recordKind: 'stay' | 'booking' | 'reservation' | null
+  recordKind: 'stay' | 'booking' | null
   /** The record in the business's own word: "Reservation", "Consultation", "Experience". */
   recordTitle: string | null
   /** In a guest's own inbox, where their booking is shown; null for the business. */

@@ -5,7 +5,6 @@ import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import { memberAccessPrincipal } from '../../server/utils/member-access.ts'
-import { upsertLocationReservationConfig } from '../../server/utils/reservations.ts'
 import { readPlacesCalendar, setPlaceDates, type PlaceDay } from '../../server/domain/places.ts'
 import { parseSpecialHours } from '../../shared/reservation-hours.ts'
 
@@ -38,7 +37,7 @@ async function boot() {
       await db.prepare("INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, ?, ?, 1, 0, 0)").bind(id, id === OWNER ? 'Dana Brooks, Esq.' : 'Sam Staff', `${id}@example.test`).run()
       await db.prepare('INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES (?, ?, ?, ?, 0)').bind(`m-${id}`, ORG, id, role).run()
     }
-    // Brooklyn opens Tuesday to Sunday; Williamsburg every day, with the Thursday closed by its host. The studio takes no reservations and is no row.
+    // Brooklyn opens Tuesday to Sunday; Williamsburg every day, with the Thursday closed by its host. The studio has no tables and is no row.
     const hours = (days: number[]) => JSON.stringify({ periods: days.map(day => ({ open: { day, hour: 17, minute: 0 }, close: { day, hour: 22, minute: 0 } })) })
     const address = JSON.stringify({ regionCode: 'US', addressLines: ['77 Dean St'], locality: 'Brooklyn' })
     for (const [id, title, opening, special] of [
@@ -49,10 +48,19 @@ async function boot() {
       await db.prepare(`INSERT INTO business_locations (id, organization_id, slug, title, status, timezone, address, opening_hours, special_hours, created_at, updated_at)
         VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)`).bind(id, ORG, id, title, ZONE, address, opening, special, NOW, NOW).run()
     }
-    for (const location of ['brooklyn', 'williamsburg']) await upsertLocationReservationConfig(db, { organizationId: ORG, locationId: location, patch: { duration_minutes: 90, slot_capacity: 40 }, actorId: OWNER })
-    // Two tables on Brooklyn's Tuesday, one cancelled; one on Williamsburg's Saturday.
+    // Each restaurant's tables, the owner's to handle.
+    for (const location of ['brooklyn', 'williamsburg']) {
+      await db.prepare("INSERT INTO products (kind, id, organization_id, name, slug, created_by, updated_by) VALUES ('table', ?, ?, ?, ?, ?, ?)").bind(`${location}-tables`, ORG, `${location} tables`, `${location}-tables`, OWNER, OWNER).run()
+      await db.prepare("INSERT INTO product_variants (id, organization_id, product_id, name, created_by, updated_by) VALUES (?, ?, ?, 'Table', ?, ?)").bind(`${location}-table`, ORG, `${location}-tables`, OWNER, OWNER).run()
+      await db.prepare("INSERT INTO product_locations (organization_id, product_id, location_id, active, published, created_by, updated_by) VALUES (?, ?, ?, 1, 1, ?, ?)").bind(ORG, `${location}-tables`, location, OWNER, OWNER).run()
+      await db.prepare("INSERT INTO product_booking_configs (product_id, organization_id, unit, duration_minutes, default_capacity, scheduling_mode, payment_basis, assigned_member_id, created_by, updated_by) VALUES (?, ?, 'slot', 90, 40, 'business', 'per_booking', ?, ?, ?)").bind(`${location}-tables`, ORG, `m-${OWNER}`, OWNER, OWNER).run()
+    }
+    // Two tables booked on Brooklyn's Tuesday, one cancelled; one on Williamsburg's Saturday.
     for (const [id, location, at, status] of [['r1', 'brooklyn', '2026-11-10T23:00:00.000Z', 'confirmed'], ['r2', 'brooklyn', '2026-11-11T00:30:00.000Z', 'confirmed'], ['r3', 'brooklyn', '2026-11-11T01:00:00.000Z', 'cancelled'], ['r4', 'williamsburg', '2026-11-14T23:00:00.000Z', 'confirmed']]) {
-      await db.prepare('INSERT INTO reservations (id, organization_id, location_id, timezone, starts_at, ends_at, party_size, status) VALUES (?, ?, ?, ?, ?, ?, 2, ?)').bind(id, ORG, location, ZONE, at, new Date(Date.parse(at) + 5_400_000).toISOString(), status).run()
+      await db.prepare(`INSERT INTO product_sessions (id, organization_id, product_id, location_id, timezone, starts_at, ends_at, capacity, status, created_by, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, 40, 'scheduled', ?, ?)`)
+        .bind(`${id}-seating`, ORG, `${location}-tables`, location, ZONE, at, new Date(Date.parse(at!) + 5_400_000).toISOString(), OWNER, OWNER).run()
+      await db.prepare(`INSERT INTO bookings (id, organization_id, product_id, product_session_id, product_variant_id, party_size, policy_json, status) VALUES (?, ?, ?, ?, ?, 2, '{"advance_notice_minutes":null,"party_size_min":null,"party_size_max":null,"minimum_guest_age":null,"accessibility_contact_required":false,"payment":null}', ?)`)
+        .bind(id, ORG, `${location}-tables`, `${id}-seating`, `${location}-table`, status).run()
     }
     // The pizza class at Brooklyn: a session each weekday evening, Wednesday's booked. The family-law consultation is Dana's hours: two slots on weekdays.
     for (const [id, name, kind] of [['class', 'Pizza Class', 'experience'], ['family', 'Family Law', 'service']]) {
@@ -75,8 +83,8 @@ async function boot() {
       await session(`family-${offset}-a`, 'family', day, 10)
       await session(`family-${offset}-b`, 'family', day, 14)
     }
-    await db.prepare("INSERT INTO bookings (id, organization_id, product_id, product_session_id, product_variant_id, party_size, status) VALUES ('b1', ?, 'class', 'class-2', 'class-seat', 3, 'confirmed')").bind(ORG).run()
-    await db.prepare("INSERT INTO bookings (id, organization_id, product_id, product_session_id, product_variant_id, party_size, status) VALUES ('b2', ?, 'family', 'family-1-a', 'family-seat', 1, 'pending')").bind(ORG).run()
+    await db.prepare(`INSERT INTO bookings (id, organization_id, product_id, product_session_id, product_variant_id, party_size, policy_json, status) VALUES ('b1', ?, 'class', 'class-2', 'class-seat', 3, '{"advance_notice_minutes":null,"party_size_min":null,"party_size_max":null,"minimum_guest_age":null,"accessibility_contact_required":false,"payment":null}', 'confirmed')`).bind(ORG).run()
+    await db.prepare(`INSERT INTO bookings (id, organization_id, product_id, product_session_id, product_variant_id, party_size, policy_json, status) VALUES ('b2', ?, 'family', 'family-1-a', 'family-seat', 1, '{"advance_notice_minutes":null,"party_size_min":null,"party_size_max":null,"minimum_guest_age":null,"accessibility_contact_required":false,"payment":null}', 'pending')`).bind(ORG).run()
     const principal = (userId: string, role: string) => memberAccessPrincipal({ userId, organizationId: ORG, role } as never, { env })
     return { runtime, db, owner: principal(OWNER, 'owner'), staff: principal(STAFF, 'member') }
   } catch (error) {
@@ -118,9 +126,12 @@ test('the places calendar reads each location, experience and consultation with 
     const assigned = await readPlacesCalendar(db, staff, { from: FROM, to: TO })
     assert.deepEqual(assigned.places, [])
     assert.equal(assigned.manage, false)
-    await db.prepare('UPDATE business_locations SET assigned_member_id = ? WHERE id = ?').bind(`m-${STAFF}`, 'williamsburg').run()
+    // Handling Williamsburg's tables is what puts Williamsburg on the member's calendar.
+    await db.prepare('UPDATE product_booking_configs SET assigned_member_id = ? WHERE product_id = ?').bind(`m-${STAFF}`, 'williamsburg-tables').run()
+    assert.deepEqual((await readPlacesCalendar(db, staff, { from: FROM, to: TO })).places.map(entry => entry.place.id), ['williamsburg'])
+    // Hosting the class held at Brooklyn is handling a product offered there, which reaches Brooklyn too.
     await db.prepare('UPDATE product_booking_configs SET assigned_member_id = ? WHERE product_id = ?').bind(`m-${STAFF}`, 'class').run()
-    assert.deepEqual((await readPlacesCalendar(db, staff, { from: FROM, to: TO })).places.map(entry => entry.place.id), ['williamsburg', 'class'])
+    assert.deepEqual((await readPlacesCalendar(db, staff, { from: FROM, to: TO })).places.map(entry => entry.place.id), ['brooklyn', 'williamsburg', 'class'])
 
     for (const input of [{ from: 'soon', to: TO }, { from: TO, to: FROM }, { from: FROM, to: '2027-02-01' }]) await assert.rejects(readPlacesCalendar(db, owner, input), code('INVALID_PLACE_DATES'))
   } finally {
@@ -136,7 +147,7 @@ test('blocking and opening a place’s days writes a location’s closures and a
       await assert.rejects(write('location', 'brooklyn', body), code('INVALID_PLACE_DATES'), JSON.stringify(body))
     }
     await assert.rejects(write('room', 'brooklyn', { from: FROM, to: TO, closed: true }), code('PLACE_NOT_FOUND'))
-    // The studio takes no reservations, so it is no row of the grid; the day leaf and Select dates still block it through this write, and read it back.
+    // The studio has no tables, so it is no row of the grid; the day leaf and Select dates still block it through this write, and read it back.
     const studio = await write('location', 'studio', { from: '2026-11-10', to: '2026-11-11', closed: true })
     assert.deepEqual(state(studio.days), ['10:blocked::0:'])
     assert.deepEqual(parseSpecialHours(JSON.parse((await db.prepare('SELECT special_hours FROM business_locations WHERE id = ?').bind('studio').first<{ special_hours: string }>())!.special_hours)), [{ kind: 'closure', starts_on: '2026-11-10', ends_on: '2026-11-10', note: null }])

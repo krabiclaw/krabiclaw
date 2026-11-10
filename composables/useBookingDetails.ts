@@ -62,7 +62,7 @@ export async function useBookingDetails(bookingType: DashboardRecordType, bookin
   // rather than guessing, so it is only asked once the booking has loaded.
   const purchase = bookingType === 'order' || bookingType === 'payment'
   const presentation = computed(() => booking.value
-    ? purchase ? PURCHASE : resolveBookingPresentation(booking.value.type as 'reservation' | 'booking', booking.value.vertical)
+    ? booking.value.productKind === null ? PURCHASE : resolveBookingPresentation(booking.value.productKind, booking.value.vertical)
     : null)
   const noun = computed(() => presentation.value?.noun ?? '')
 

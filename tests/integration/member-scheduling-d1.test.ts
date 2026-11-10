@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { OPEN_TERMS_JSON } from './support/booking-terms.ts'
 import test from 'node:test'
 import { symmetricEncrypt } from 'better-auth/crypto'
 import { Miniflare } from 'miniflare'
@@ -183,7 +184,7 @@ test('member self-service uses Better Auth permissions, public approval is admin
   const unreadable=await readMemberScheduling(db,env,'org','member-one')
   assert.equal(unreadable?.calendar_status,'disconnected')
   // A calendar that cannot be read fails the claim visibly instead of guessing the member is free.
-  await assert.rejects(()=>claimSessionCapacity(db,{env,organizationId:'org',productId:'one',sessionId:'session-one',productVariantId:'variant-one',partySize:1}),{message:'The account this integration was connected through is no longer linked. Connect it again.'})
+  await assert.rejects(()=>claimSessionCapacity(db,{policyJson: OPEN_TERMS_JSON, env,organizationId:'org',productId:'one',sessionId:'session-one',productVariantId:'variant-one',partySize:1}),{message:'The account this integration was connected through is no longer linked. Connect it again.'})
   assert.equal(await db.prepare("SELECT count(*) n FROM bookings WHERE product_session_id='session-one'").first('n'),0)
   // Cancelling an unbooked session asks no calendar, so an unreadable one does not stand in the way, nor does another scheduled session of the same offering at the same time.
   await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,timezone,starts_at,ends_at,capacity,created_by,updated_by)VALUES('session-one-b','org','one','UTC',?,?,1,'owner','owner')").bind(`${day}T14:30:00.000Z`,`${day}T15:30:00.000Z`).run()
@@ -194,10 +195,10 @@ test('member self-service uses Better Auth permissions, public approval is admin
   assert.equal(await db.prepare("SELECT status FROM product_sessions WHERE id='session-one'").first('status'),'cancelled')
   await db.prepare("DELETE FROM product_sessions WHERE id='session-one-b'").run()
   await db.prepare("UPDATE product_sessions SET status='scheduled' WHERE id='session-one'").run()
-  const healthy=await claimSessionCapacity(db,{env,organizationId:'org',productId:'two',sessionId:'session-two',productVariantId:'variant-two',partySize:1})
+  const healthy=await claimSessionCapacity(db,{policyJson: OPEN_TERMS_JSON, env,organizationId:'org',productId:'two',sessionId:'session-two',productVariantId:'variant-two',partySize:1})
   assert.equal(await db.prepare('SELECT c.assigned_member_id FROM bookings b JOIN product_booking_configs c ON c.product_id=b.product_id AND c.organization_id=b.organization_id WHERE b.id=?').bind(healthy.bookingId).first('assigned_member_id'),'member-two','a booking is its offering\'s member\'s')
   await db.prepare("UPDATE member_scheduling SET calendar_account_id=NULL WHERE member_id='member-one'").run()
-  assert((await claimSessionCapacity(db,{env,organizationId:'org',productId:'one',sessionId:'session-one',productVariantId:'variant-one',partySize:1})).bookingId)
+  assert((await claimSessionCapacity(db,{policyJson: OPEN_TERMS_JSON, env,organizationId:'org',productId:'one',sessionId:'session-one',productVariantId:'variant-one',partySize:1})).bookingId)
   await db.prepare("UPDATE member_scheduling SET calendar_account_id='busy-linked' WHERE member_id='member-one'").run()
   t.mock.method(globalThis,'fetch',async(input)=>{assert.equal(String(input),'https://www.googleapis.com/calendar/v3/freeBusy');return Response.json({calendars:{'busy-calendar':{busy:[{start,end}]}}})})
   const laterConflict = await readMemberScheduling(db,env,'org','member-one')

@@ -12,7 +12,7 @@ export default defineHandler(async (event) => {
     throw new HTTPError({ statusCode: 400, message: 'Valid booking type and ID are required' })
   }
   const access = await getNotificationAccess(event)
-  const unreadNotificationIds = bookingType === 'booking' || bookingType === 'reservation'
+  const unreadNotificationIds = bookingType === 'booking'
     ? await unreadScheduleNotificationIds(access.db, access, bookingType, bookingId) : []
   const booking = await loadDashboardBookingDetails(event, { type: bookingType, bookingId })
   return jsonResponse({ booking, unreadNotificationIds })

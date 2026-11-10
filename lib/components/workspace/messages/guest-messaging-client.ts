@@ -5,7 +5,7 @@ import { authClient } from '~/lib/auth-client'
 import { isValidInstant, isValidTimezone } from '~/utils/timezone'
 import type { GuestMessageSchedule } from '~/server/domain/guest-message-schedule'
 import type { MessageTemplate, listMessageOfferings, listMessageTemplates, listScheduledGuestMessages, scheduledGuestMessage } from '~/server/domain/guest-messaging'
-import { resolveAggregateBookingPresentation, type BookingKind } from '~/utils/booking-presentation'
+import { resolveAggregateBookingPresentation } from '~/utils/booking-presentation'
 
 export type { MessageTemplate, GuestMessageSchedule }
 export type MessageTemplatePage = Awaited<ReturnType<typeof listMessageTemplates>>
@@ -37,7 +37,7 @@ export function isMessageTemplatePage(value: unknown): value is MessageTemplateP
 export function isScheduledMessage(value: unknown): value is ScheduledMessage {
   return isRecord(value) && ['id', 'organizationId', 'title', 'body'].every(key => typeof value[key] === 'string' && Boolean(value[key]))
     && (value.productId === null || (typeof value.productId === 'string' && Boolean(value.productId)))
-    && ['stay', 'booking', 'reservation'].includes(String(value.subjectType)) && typeof value.subjectId === 'string' && Boolean(value.subjectId)
+    && ['stay', 'booking'].includes(String(value.subjectType)) && typeof value.subjectId === 'string' && Boolean(value.subjectId)
     && value.stayId === (value.subjectType === 'stay' ? value.subjectId : null)
     && ['pending', 'sending', 'sent', 'failed', 'needs_review', 'cancelled', 'skipped'].includes(String(value.status))
     && (value.requestId === null || typeof value.requestId === 'string') && (value.templateId === null || typeof value.templateId === 'string')
@@ -51,19 +51,19 @@ export function isScheduledMessagePage(value: unknown): value is ScheduledMessag
 export type MessageOffering = Awaited<ReturnType<typeof listMessageOfferings>>['offerings'][number]
 export function isMessageOfferings(value: unknown): value is { offerings: MessageOffering[] } {
   return isRecord(value) && Array.isArray(value.offerings) && value.offerings.every(offering => isRecord(offering)
-    && ['stay', 'experience', 'service', 'reservation'].includes(String(offering.kind)) && typeof offering.id === 'string' && Boolean(offering.id)
+    && ['stay', 'experience', 'service', 'table'].includes(String(offering.kind)) && typeof offering.id === 'string' && Boolean(offering.id)
     && typeof offering.name === 'string' && Boolean(offering.name) && (offering.timezone === null || (typeof offering.timezone === 'string' && isValidTimezone(offering.timezone))))
 }
 
 /**
  * The words a schedule is described with. A place to stay checks in and out
  * in its home's time zone; anything else is the booking's own noun
- * (consultation, reservation, booking) starting and ending.
+ * (consultation, reservation, booking) starting and ending: a restaurant's
+ * bookings are mostly its tables, so it says reservation.
  */
 export function scheduleVocabulary(vertical: string) {
   if (vertical === 'lodging') return { received: 'a new direct reservation', check_in: 'check-in', check_out: 'checkout', aroundCheckIn: 'Around check-in', aroundCheckOut: 'Around checkout', checkInDay: 'On check-in day', checkOutDay: 'On checkout day', zone: 'home’s time zone' }
-  const kind: BookingKind = vertical === 'restaurant' ? 'reservation' : 'booking'
-  const { noun } = resolveAggregateBookingPresentation([{ kind, vertical }])
+  const { noun } = resolveAggregateBookingPresentation([{ kind: vertical === 'restaurant' ? 'table' : 'experience', vertical }])
   return { received: `a new ${noun}`, check_in: `the ${noun} starts`, check_out: `the ${noun} ends`, aroundCheckIn: `Around the start of the ${noun}`, aroundCheckOut: `Around the end of the ${noun}`,
     checkInDay: `On the day the ${noun} starts`, checkOutDay: `On the day the ${noun} ends`, zone: `${noun}’s time zone` }
 }

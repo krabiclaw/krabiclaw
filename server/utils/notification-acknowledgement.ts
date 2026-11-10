@@ -123,7 +123,7 @@ export async function setConversationRead(
 export async function unreadScheduleNotificationIds(
   db: DbClient,
   visibility: NotificationVisibility,
-  kind: 'stay' | 'reservation' | 'booking',
+  kind: 'stay' | 'booking',
   id: string,
 ): Promise<string[]> {
   const recordMatch = kind === 'stay'

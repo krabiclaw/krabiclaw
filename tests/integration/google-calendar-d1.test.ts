@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { OPEN_TERMS_JSON } from './support/booking-terms.ts'
 import test from 'node:test'
 import { Miniflare } from 'miniflare'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
@@ -29,7 +30,7 @@ test('committed consultation projection is tenant scoped, private, idempotent an
     await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,timezone,starts_at,ends_at,capacity,created_by,updated_by) VALUES('s','org','p','America/New_York','2099-11-01T14:00:00.000Z','2099-11-01T14:30:00.000Z',1,'actor','actor')").run()
     await db.prepare(`INSERT INTO requests(id,kind,organization_id,payload_json) VALUES('thread','booking','org','{"guest":{"name":"Jane Doe","email":"private@example.test","phone":null},"notes":"PRIVATE MATTER"}')`).run()
     const env = { DB: db, BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://krabiclaw.test' } as CloudflareEnv
-    const { bookingId } = await claimSessionCapacity(db, { env, organizationId: 'org', productId: 'p', sessionId: 's', productVariantId: 'v', partySize: 1, requestId: 'thread' })
+    const { bookingId } = await claimSessionCapacity(db, { policyJson: OPEN_TERMS_JSON, env, organizationId: 'org', productId: 'p', sessionId: 's', productVariantId: 'v', partySize: 1, requestId: 'thread' })
     await storeCalendarSelection(db, 'org', { account_id: 'linked-account', calendar_id: 'chosen', calendar_name: 'Calendar' })
     const integration = (await readCalendarIntegration(db, 'org'))!
     assert.equal((await calendarSubjects(db, 'other', integration)).length, 0)
@@ -101,7 +102,7 @@ test('committed consultation projection is tenant scoped, private, idempotent an
     // Failed cleanup is retained even when Google answers 404 for lost access.
     await disconnectCalendar(db, 'org')
     // Cancelled subject was already deleted; create another real committed claim.
-    const second = await claimSessionCapacity(db, { env, organizationId: 'org', productId: 'p', sessionId: 's', productVariantId: 'v', partySize: 1 })
+    const second = await claimSessionCapacity(db, { policyJson: OPEN_TERMS_JSON, env, organizationId: 'org', productId: 'p', sessionId: 's', productVariantId: 'v', partySize: 1 })
     await syncCalendarOrganization(env, 'org', 25, provider)
     assert.equal((await readCalendarIntegration(db, 'org'))?.status, 'disabled')
     assert.equal((await db.prepare("SELECT measurement_id FROM organization_integrations WHERE organization_id='org' AND provider='google_analytics'").first())?.measurement_id, 'G-123')
@@ -182,7 +183,7 @@ test('bounded Calendar backfill resumes and cancelled historical Sessions are cl
     for (let i = 0; i < 55; i++) {
       const start = Date.parse('2099-11-01T00:00:00.000Z') + i * 3600_000
       await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,timezone,starts_at,ends_at,capacity,created_by,updated_by) VALUES(?,'org','p','UTC',?,?,1,'actor','actor')").bind(`s${i.toString().padStart(2, '0')}`, new Date(start).toISOString(), new Date(start + 1800_000).toISOString()).run()
-      bookings.push((await claimSessionCapacity(db, { env, organizationId: 'org', productId: 'p', sessionId: `s${i.toString().padStart(2, '0')}`, productVariantId: 'v', partySize: 1 })).bookingId)
+      bookings.push((await claimSessionCapacity(db, { policyJson: OPEN_TERMS_JSON, env, organizationId: 'org', productId: 'p', sessionId: `s${i.toString().padStart(2, '0')}`, productVariantId: 'v', partySize: 1 })).bookingId)
     }
     await storeCalendarSelection(db, 'org', { account_id: 'linked-account', calendar_id: 'chosen', calendar_name: 'Calendar' })
     const provider = { token: async () => 'token' }
@@ -247,7 +248,7 @@ test('scheduled Calendar sync reports thrown and event failures while projecting
       await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,unit,duration_minutes,held_online,scheduling_mode,assigned_member_id,confirmation_mode,created_by,updated_by) VALUES(?,?,'slot',30,1,'provider',?,'review','actor','actor')").bind(org, org, `host-${org}`).run()
       await db.prepare("INSERT INTO product_variants(id,organization_id,product_id,name,created_by,updated_by) VALUES(?,?,?,'Consultation','actor','actor')").bind(org, org, org).run()
       await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,timezone,starts_at,ends_at,capacity,created_by,updated_by) VALUES(?,?,?,'UTC','2099-11-01T10:00:00.000Z','2099-11-01T10:30:00.000Z',1,'actor','actor')").bind(org, org, org).run()
-      await claimSessionCapacity(db, { env, organizationId: org, productId: org, sessionId: org, productVariantId: org, partySize: 1 })
+      await claimSessionCapacity(db, { policyJson: OPEN_TERMS_JSON, env, organizationId: org, productId: org, sessionId: org, productVariantId: org, partySize: 1 })
       await storeCalendarSelection(db, org, { account_id: 'linked', calendar_id: org, calendar_name: org })
     }
     await db.prepare("CREATE TRIGGER reject_broken_projection BEFORE INSERT ON google_calendar_event_links WHEN NEW.organization_id='a-broken' BEGIN SELECT RAISE(ABORT,'projection write rejected'); END").run()
@@ -338,10 +339,16 @@ test('experience and dining Calendar management links follow canonical buyer own
     await db.prepare("INSERT INTO product_locations(organization_id,product_id,location_id,active,published,created_by,updated_by) VALUES('org','experience','dining',1,1,'actor','actor')").run()
     await db.prepare("INSERT INTO product_variants(id,organization_id,product_id,name,created_by,updated_by) VALUES('variant','org','experience','Seat','actor','actor')").run()
     await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,location_id,timezone,starts_at,ends_at,capacity,created_by,updated_by) VALUES('session','org','experience','dining','UTC','2099-11-01T14:00:00.000Z','2099-11-01T14:30:00.000Z',8,'actor','actor')").run()
-    for (const [id,kind] of [['experience-thread','booking'],['dining-thread','reservation']]) await db.prepare(`INSERT INTO requests(id,kind,organization_id,user_id,payload_json) VALUES(?,?,'org','buyer','{"guest":{"name":"Buyer","email":"buyer@example.test","phone":null},"notes":"PRIVATE NOTES","cancellation":{"token_hash":"PRIVATE_CAPABILITY","expires_at":null,"used_at":null}}')`).bind(id,kind).run()
+    // The dining room's tables are a product of their own, booked the same way.
+    await db.prepare("INSERT INTO products(kind,id,organization_id,name,slug,created_by,updated_by) VALUES('table','tables','org','Dining tables','tables','actor','actor')").run()
+    await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,unit,duration_minutes,held_online,scheduling_mode,confirmation_mode,created_by,updated_by) VALUES('tables','org','slot',60,0,'business','instant','actor','actor')").run()
+    await db.prepare("INSERT INTO product_locations(organization_id,product_id,location_id,active,published,created_by,updated_by) VALUES('org','tables','dining',1,1,'actor','actor')").run()
+    await db.prepare("INSERT INTO product_variants(id,organization_id,product_id,name,created_by,updated_by) VALUES('table-variant','org','tables','Table','actor','actor')").run()
+    await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,location_id,timezone,starts_at,ends_at,capacity,created_by,updated_by) VALUES('seating','org','tables','dining','UTC','2099-11-02T14:00:00.000Z','2099-11-02T15:00:00.000Z',10,'actor','actor')").run()
+    for (const id of ['experience-thread','dining-thread']) await db.prepare(`INSERT INTO requests(id,kind,organization_id,user_id,payload_json) VALUES(?,'booking','org','buyer','{"guest":{"name":"Buyer","email":"buyer@example.test","phone":null},"notes":"PRIVATE NOTES","cancellation":{"token_hash":"PRIVATE_CAPABILITY","expires_at":null,"used_at":null}}')`).bind(id).run()
     const env={DB:db,NUXT_PUBLIC_PLATFORM_DOMAIN:'http://localhost:3113'} as CloudflareEnv
-    await claimSessionCapacity(db,{env,organizationId:'org',productId:'experience',sessionId:'session',productVariantId:'variant',partySize:1,requestId:'experience-thread',userId:'buyer'})
-    await db.prepare("INSERT INTO reservations(id,organization_id,location_id,user_id,request_id,timezone,starts_at,ends_at,party_size) VALUES('reservation','org','dining','buyer','dining-thread','UTC','2099-11-02T14:00:00.000Z','2099-11-02T15:00:00.000Z',2)").run()
+    await claimSessionCapacity(db,{policyJson: OPEN_TERMS_JSON, env,organizationId:'org',productId:'experience',sessionId:'session',productVariantId:'variant',partySize:1,requestId:'experience-thread',userId:'buyer'})
+    await claimSessionCapacity(db,{policyJson: OPEN_TERMS_JSON, env,organizationId:'org',productId:'tables',sessionId:'seating',productVariantId:'table-variant',partySize:2,requestId:'dining-thread',userId:'buyer'})
     await storeCalendarSelection(db,'org',{account_id:'linked',calendar_id:'managed',calendar_name:'Calendar'})
     const provider={token:async()=> 'token'}
     const events=new Map<string,Record<string,unknown>>()
@@ -362,10 +369,12 @@ test('experience and dining Calendar management links follow canonical buyer own
     assert.equal((await syncCalendarOrganization(env,'org',25,provider)).failed,0)
     assert.equal(events.size,2)
     const links=(await db.prepare('SELECT request_id,event_id FROM google_calendar_event_links ORDER BY request_id').all()).results
+    assert.deepEqual(links.map(link=>link.request_id),['dining-thread','experience-thread'])
     for(const link of links) {
-      const kind=link.request_id==='dining-thread'?'reservation':'booking'
+      // A table is still a reservation to its guest; every visit is managed at its booking.
+      const word=link.request_id==='dining-thread'?'reservation':'booking'
       const event=events.get(String(link.event_id))!
-      assert.ok(String(event.description).endsWith(`Manage ${kind}: http://localhost:3113/dashboard/account/activity/${kind}/${link.request_id}`))
+      assert.ok(String(event.description).endsWith(`Manage ${word}: http://localhost:3113/dashboard/account/activity/booking/${link.request_id}`))
       assert.equal(event.attendees,undefined,'this link does not introduce consultation attendee semantics to other verticals')
       assert.ok(!JSON.stringify(event).includes('PRIVATE_'))
       assert.ok(!JSON.stringify(event).includes('PRIVATE NOTES'))

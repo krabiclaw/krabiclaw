@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { OPEN_TERMS_JSON } from './support/booking-terms.ts'
 import test from 'node:test'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
@@ -11,6 +12,7 @@ import {
   claimSessionCapacity,
   listSessions,
   materializeSessions,
+  ruleStartTimes,
   setBookingStatus,
   sessionMoveQuery,
   updateSession,
@@ -22,7 +24,7 @@ import { updateThreadProjectionIfLatestEntry } from '../../server/domain/guest-t
 import { listDashboardLocations } from '../../server/utils/dashboard-context.ts'
 import { createProduct, getProduct, removeProductLocation, updateProduct } from '../../server/utils/product-management.ts'
 import { occurrenceKey } from '../../shared/bookings.ts'
-import { addLocalDays, localDateTimeToInstant, localNow } from '../../utils/timezone.ts'
+import { addLocalDays, formatTimestamp, localDateTimeToInstant, localNow } from '../../utils/timezone.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 import { assertAssignedBookingAccess, memberAccessPrincipal } from '../../server/utils/member-access.ts'
 
@@ -79,6 +81,46 @@ function addRule(db: D1Database, id: string, over: Partial<{ weekday: number; st
     .bind(id, ORG, PRODUCT, over.location_id === undefined ? LOCATION : over.location_id, over.timezone ?? 'Asia/Bangkok', over.weekday ?? 0,
       over.start_time ?? '14:00', ACTOR, ACTOR).run()
 }
+
+test('a repeating weekly time puts a session on every interval through its last start, inside the place\'s hours, once', { timeout: 120_000 }, async () => {
+  const { runtime, db, env } = await boot()
+  try {
+    // The rule's own start times: its start, then every interval through its end; a single time is itself.
+    assert.deepEqual(ruleStartTimes({ start_time: '16:00', end_time: '20:30', interval_minutes: 30 }), ['16:00', '16:30', '17:00', '17:30', '18:00', '18:30', '19:00', '19:30', '20:00', '20:30'])
+    assert.deepEqual(ruleStartTimes({ start_time: '17:00', end_time: '17:40', interval_minutes: 15 }), ['17:00', '17:15', '17:30'])
+    assert.deepEqual(ruleStartTimes({ start_time: '10:00', end_time: null, interval_minutes: null }), ['10:00'])
+    // The studio is open 17:00–21:00 every day; a two-hour session must fit inside.
+    await db.prepare('UPDATE business_locations SET opening_hours = ? WHERE id = ?')
+      .bind(JSON.stringify({ periods: [0, 1, 2, 3, 4, 5, 6].map(day => ({ open: { day, hour: 17, minute: 0 }, close: { day, hour: 21, minute: 0 } })) }), LOCATION).run()
+    const slots = [0, 1, 2, 3, 4, 5, 6].map(weekday => ({ weekday, start_time: '16:00', end_time: '20:30', interval_minutes: 30 }))
+    await assert.rejects(replaceWeeklySchedule(db, { organizationId: ORG, productId: PRODUCT, locationId: LOCATION, actorId: ACTOR, slots: [{ weekday: 1, start_time: '16:00', end_time: '20:30' }] }), /end_time and interval_minutes are given together/)
+    await assert.rejects(replaceWeeklySchedule(db, { organizationId: ORG, productId: PRODUCT, locationId: LOCATION, actorId: ACTOR, slots: [{ weekday: 1, start_time: '16:00', end_time: '15:00', interval_minutes: 30 }] }), /end_time must be after start_time/)
+    const saved = await replaceWeeklySchedule(db, { organizationId: ORG, productId: PRODUCT, locationId: LOCATION, actorId: ACTOR, slots })
+    assert.equal(saved.rules.length, 7, 'one rule per weekday, not one per seating')
+    assert.ok(saved.sessions.skipped.length > 0 && saved.sessions.skipped.every(skip => skip.reason === 'location_closed'), 'starts the hours cannot hold are skipped, by name')
+    const rules = (await db.prepare('SELECT weekday, start_time, end_time, interval_minutes FROM product_availability_rules WHERE product_id = ? ORDER BY weekday').bind(PRODUCT).all()).results
+    assert.deepEqual(rules[1], { weekday: 1, start_time: '16:00', end_time: '20:30', interval_minutes: 30 })
+
+    const day = addLocalDays(localNow('Asia/Bangkok').date, 3)
+    const window = { fromInstant: localDateTimeToInstant(day, '00:00', 'Asia/Bangkok', 'compatible').toISOString(), toInstant: localDateTimeToInstant(addLocalDays(day, 1), '00:00', 'Asia/Bangkok', 'compatible').toISOString() }
+    const local = (instant: string) => formatTimestamp(instant, 'en', 'Asia/Bangkok', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+    const onDay = await listSessions(db, { env, organizationId: ORG, productId: PRODUCT, ...window })
+    // 16:00 and 16:30 start before opening; 19:30 onwards would end after closing.
+    assert.deepEqual(onDay.map(session => [local(session.starts_at), local(session.ends_at), session.capacity, session.remaining]),
+      [['17:00', '19:00', 10, 10], ['17:30', '19:30', 10, 10], ['18:00', '20:00', 10, 10], ['18:30', '20:30', 10, 10], ['19:00', '21:00', 10, 10]])
+
+    // Running generation again over the same window makes nothing new.
+    const again = await materializeSessions(db, { organizationId: ORG, productId: PRODUCT, throughDate: addLocalDays(localNow('Asia/Bangkok').date, 31), actorId: ACTOR })
+    assert.equal(again.created, 0)
+    assert.equal((await listSessions(db, { env, organizationId: ORG, productId: PRODUCT, ...window })).length, 5)
+
+    // A dated closure takes the day's seatings off sale without deleting them.
+    await db.prepare('UPDATE business_locations SET special_hours = ? WHERE id = ?').bind(JSON.stringify([{ kind: 'closure', starts_on: day, ends_on: day, note: null }]), LOCATION).run()
+    assert.deepEqual((await listSessions(db, { env, organizationId: ORG, productId: PRODUCT, ...window })).map(session => [session.remaining, session.is_full]), Array(5).fill([0, true]))
+  } finally {
+    await runtime.dispose()
+  }
+})
 
 test('session materialization is idempotent across cancel, edit and reschedule, and retains assigned session locations', { timeout: 120_000 }, async () => {
   const { runtime, db, env } = await boot()
@@ -259,10 +301,10 @@ test('concurrent claims cannot exceed capacity, and variants share one pool', { 
       .bind(ORG, PRODUCT, LOCATION, ACTOR, ACTOR).run()
 
     // Two ticket tiers, one seat pool: 3 adults + 2 children fills the class.
-    await claimSessionCapacity(db, { env, organizationId: ORG, productId: PRODUCT, sessionId: 'sess-1', productVariantId: 'var-adult', partySize: 3 })
-    await claimSessionCapacity(db, { env, organizationId: ORG, productId: PRODUCT, sessionId: 'sess-1', productVariantId: 'var-child', partySize: 2 })
+    await claimSessionCapacity(db, { policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: PRODUCT, sessionId: 'sess-1', productVariantId: 'var-adult', partySize: 3 })
+    await claimSessionCapacity(db, { policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: PRODUCT, sessionId: 'sess-1', productVariantId: 'var-child', partySize: 2 })
     await assert.rejects(
-      claimSessionCapacity(db, { env, organizationId: ORG, productId: PRODUCT, sessionId: 'sess-1', productVariantId: 'var-adult', partySize: 1 }),
+      claimSessionCapacity(db, { policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: PRODUCT, sessionId: 'sess-1', productVariantId: 'var-adult', partySize: 1 }),
       CapacityUnavailableError,
       'a ticket tier does not get its own seat pool',
     )
@@ -270,7 +312,7 @@ test('concurrent claims cannot exceed capacity, and variants share one pool', { 
     // Concurrency: eight parties of one race for three seats.
     await db.prepare("UPDATE product_sessions SET capacity = 8 WHERE id = 'sess-1'").run()
     const outcomes = await Promise.allSettled(Array.from({ length: 8 }, () =>
-      claimSessionCapacity(db, { env, organizationId: ORG, productId: PRODUCT, sessionId: 'sess-1', productVariantId: 'var-adult', partySize: 1 })))
+      claimSessionCapacity(db, { policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: PRODUCT, sessionId: 'sess-1', productVariantId: 'var-adult', partySize: 1 })))
     const granted = outcomes.filter(outcome => outcome.status === 'fulfilled').length
     assert.equal(granted, 3, `exactly the three remaining seats were granted, got ${granted}`)
     const claimed = await db.prepare("SELECT SUM(party_size) n FROM bookings WHERE product_session_id = 'sess-1' AND status = 'confirmed'").first<number>('n')
@@ -294,7 +336,7 @@ test('capacity cannot be reduced below seats already claimed, and a past session
     await db.prepare(`INSERT INTO product_sessions (id, organization_id, product_id, location_id, timezone, starts_at, ends_at, capacity, status, created_by, updated_by)
       VALUES ('sess-cap', ?, ?, ?, 'Asia/Bangkok', '2099-01-05T07:00:00.000Z', '2099-01-05T09:00:00.000Z', 10, 'scheduled', ?, ?)`)
       .bind(ORG, PRODUCT, LOCATION, ACTOR, ACTOR).run()
-    await claimSessionCapacity(db, { env, organizationId: ORG, productId: PRODUCT, sessionId: 'sess-cap', productVariantId: 'var-adult', partySize: 6 })
+    await claimSessionCapacity(db, { policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: PRODUCT, sessionId: 'sess-cap', productVariantId: 'var-adult', partySize: 6 })
     await assert.rejects(
       updateSession(db, { env, organizationId: ORG, sessionId: 'sess-cap', actorId: ACTOR, capacity: 4 }),
       /already has 6 seats claimed/, 'reducing capacity below claimed seats is refused, not silently oversold')
@@ -304,12 +346,12 @@ test('capacity cannot be reduced below seats already claimed, and a past session
       VALUES ('sess-past', ?, ?, ?, 'Asia/Bangkok', '2020-01-05T07:00:00.000Z', '2020-01-05T09:00:00.000Z', 10, 'scheduled', ?, ?)`)
       .bind(ORG, PRODUCT, LOCATION, ACTOR, ACTOR).run()
     await assert.rejects(
-      claimSessionCapacity(db, { env, organizationId: ORG, productId: PRODUCT, sessionId: 'sess-past', productVariantId: 'var-adult', partySize: 1 }),
+      claimSessionCapacity(db, { policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: PRODUCT, sessionId: 'sess-past', productVariantId: 'var-adult', partySize: 1 }),
       CapacityUnavailableError, 'a session in the past takes no bookings')
 
     await db.prepare("UPDATE product_sessions SET status = 'cancelled' WHERE id = 'sess-cap'").run()
     await assert.rejects(
-      claimSessionCapacity(db, { env, organizationId: ORG, productId: PRODUCT, sessionId: 'sess-cap', productVariantId: 'var-adult', partySize: 1 }),
+      claimSessionCapacity(db, { policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: PRODUCT, sessionId: 'sess-cap', productVariantId: 'var-adult', partySize: 1 }),
       CapacityUnavailableError, 'a cancelled session takes no bookings')
   } finally { await runtime.dispose() }
 })
@@ -352,7 +394,7 @@ test('required online collection needs Payments setup as well as entitlement, wh
 
 test('shared booking defaults retain omissions, zero and null; all history blocks removal', { timeout: 120_000 }, async () => {
   const { runtime, db, env } = await boot()
-  const scope = { organizationId: ORG, productId: PRODUCT, actorId: ACTOR, env }
+  const scope = { organizationId: ORG, productId: PRODUCT, actorId: ACTOR, env, policyJson: OPEN_TERMS_JSON }
   try {
     await setProductBookingConfig(db, { ...scope, patch: { default_capacity: 0 } })
     assert.deepEqual(await db.prepare('SELECT duration_minutes, default_capacity FROM product_booking_configs WHERE product_id = ?').bind(PRODUCT).first(), { duration_minutes: 120, default_capacity: 0 })
@@ -377,11 +419,11 @@ test('shared booking defaults retain omissions, zero and null; all history block
 
 test('weekly replacement uses saved timezone, converges and preserves booked occurrences on clear', { timeout: 120_000 }, async () => {
   const { runtime, db, env } = await boot()
-  const scope = { organizationId: ORG, productId: PRODUCT, locationId: LOCATION, actorId: ACTOR, env }
+  const scope = { organizationId: ORG, productId: PRODUCT, locationId: LOCATION, actorId: ACTOR, env, policyJson: OPEN_TERMS_JSON }
   const slots = [{ weekday: 0, start_time: '14:00' }, { weekday: 1, start_time: '10:00' }]
   try {
     await assert.rejects(replaceWeeklySchedule(db, { ...scope, timezone: 'UTC', slots }), /timezone must match/)
-    await assert.rejects(replaceWeeklySchedule(db, { ...scope, slots: [{ weekday: 0, start_time: '14:00', capacity: null }] }), /only weekday and start_time/)
+    await assert.rejects(replaceWeeklySchedule(db, { ...scope, slots: [{ weekday: 0, start_time: '14:00', capacity: null }] }), /slots support weekday, start_time, end_time and interval_minutes; set duration and capacity on the product/)
     await assert.rejects(replaceWeeklySchedule(db, { ...scope, locationId: 'foreign-location', slots }), /Location not found/)
     await db.prepare(`INSERT INTO business_locations (id, organization_id, slug, title, status, timezone, created_at, updated_at)
       VALUES ('other-studio', ?, 'other-studio', 'Other studio', 'active', 'Asia/Bangkok', ?, ?)`).bind(ORG, NOW, NOW).run()
@@ -417,7 +459,7 @@ test('weekly replacement uses saved timezone, converges and preserves booked occ
 test('readding a weekly slot preserves every fact of sessions with booking history', { timeout: 120_000 }, async () => {
   for (const scenario of ['active', 'cancelled-booking', 'cancelled-session', 'edited', 'moved'] as const) {
     const { runtime, db, env } = await boot()
-    const scope = { organizationId: ORG, productId: PRODUCT, locationId: LOCATION, actorId: ACTOR, env }
+    const scope = { organizationId: ORG, productId: PRODUCT, locationId: LOCATION, actorId: ACTOR, env, policyJson: OPEN_TERMS_JSON }
     const slots = [{ weekday: 0, start_time: '14:00' }]
     try {
       await replaceWeeklySchedule(db, { ...scope, slots })
@@ -467,7 +509,7 @@ test('unbooked re-add retains the existing cancellation and default-refresh beha
 
 test('re-adoption protects cancelled history and a claim racing its atomic write', { timeout: 120_000 }, async () => {
   const { runtime, db, env } = await boot()
-  const scope = { organizationId: ORG, productId: PRODUCT, actorId: ACTOR, env }
+  const scope = { organizationId: ORG, productId: PRODUCT, actorId: ACTOR, env, policyJson: OPEN_TERMS_JSON }
   try {
     await addRule(db, 'neutral-old')
     const throughDate = addLocalDays(localNow('Asia/Bangkok').date, 31)
@@ -533,8 +575,8 @@ test('one provider\'s online offerings exclude overlapping pending requests and 
       await db.batch(queries.map(query => db.prepare(query.query).bind(...query.params!)))
     }
     const inputs = [
-      { env, organizationId: ORG, productId: PRODUCT, sessionId: 'session-one', productVariantId: 'var-adult', partySize: 1, requestId: 'thread-one' },
-      { env, organizationId: ORG, productId: 'prod-consult', sessionId: 'session-two', productVariantId: 'var-consult', partySize: 1, requestId: 'thread-two' },
+      { env, policyJson: OPEN_TERMS_JSON, organizationId: ORG, productId: PRODUCT, sessionId: 'session-one', productVariantId: 'var-adult', partySize: 1, requestId: 'thread-one' },
+      { env, policyJson: OPEN_TERMS_JSON, organizationId: ORG, productId: 'prod-consult', sessionId: 'session-two', productVariantId: 'var-consult', partySize: 1, requestId: 'thread-two' },
     ]
     const raced = await Promise.allSettled(inputs.map(input => claimSessionCapacity(db, input)))
     assert.equal(raced.filter(result => result.status === 'fulfilled').length, 1)
@@ -558,7 +600,7 @@ test('one provider\'s online offerings exclude overlapping pending requests and 
     assert.equal((await executeGuestThreadOperation(db, confirm)).ok, true)
     assert.deepEqual(await openReplies(db, winner.requestId), [`guest_reply:${winner.requestId}:${guestReply.id}`], 'replaying an older decision does not answer a new guest message')
     assert.equal(await db.prepare('SELECT COUNT(*) n FROM bookings').first('n'), 1)
-    const moved = await sessionMoveQuery(db, { env, bookingId: record!.id, organizationId: ORG, productId: winner.productId, sessionId: winner.sessionId, partySize: 1, now: new Date().toISOString() })
+    const moved = await sessionMoveQuery(db, { env, bookingId: record!.id, organizationId: ORG, fromProductId: winner.productId, productId: winner.productId, productVariantId: winner.productVariantId, sessionId: winner.sessionId, partySize: 1, now: new Date().toISOString() })
     assert.equal((await db.prepare(moved.query).bind(...moved.params!).run()).meta.changes, 1, 'same-session changes exclude the allocation being moved')
     assert.equal((await getThreadOperationalRecord(db, winner.requestId))?.id, record!.id)
     assert.equal((await getThreadOperationalRecord(db, winner.requestId))?.status, 'confirmed')
@@ -570,7 +612,7 @@ test('one provider\'s online offerings exclude overlapping pending requests and 
     const loser = inputs[1 - index]!
     // A booking conversation without its own allocation is invalid. Neither
     // a status transition nor a reply can manufacture its missing record.
-    const missingRecord = { statusCode: 404, message: 'The conversation has no matching booking or reservation', data: { code: 'REQUEST_OPERATIONAL_RECORD_NOT_FOUND', request_id: loser.requestId } }
+    const missingRecord = { statusCode: 404, message: 'The conversation has no matching booking', data: { code: 'REQUEST_OPERATIONAL_RECORD_NOT_FOUND', request_id: loser.requestId } }
     await assert.rejects(executeGuestThreadOperation(db, { ...confirm, threadId: loser.requestId }), missingRecord)
     const reply = { ...confirm, threadId: loser.requestId, action: 'reply', body: 'We can help with your booking.', idempotencyKey: 'before-allocation' }
     await assert.rejects(executeGuestThreadOperation(db, reply), missingRecord)
@@ -588,7 +630,7 @@ test('one provider\'s online offerings exclude overlapping pending requests and 
     // A delivered receipt proves that an earlier operation finished, not that
     // its required booking still exists when that operation is replayed.
     await db.prepare('DELETE FROM bookings WHERE id = ?').bind(record!.id).run()
-    await assert.rejects(executeGuestThreadOperation(db, cancel), { statusCode: 404, message: 'The conversation has no matching booking or reservation', data: { code: 'REQUEST_OPERATIONAL_RECORD_NOT_FOUND', request_id: winner.requestId } })
+    await assert.rejects(executeGuestThreadOperation(db, cancel), { statusCode: 404, message: 'The conversation has no matching booking', data: { code: 'REQUEST_OPERATIONAL_RECORD_NOT_FOUND', request_id: winner.requestId } })
 
     const questionRequest = 'thread-question-before-confirmation'
     await db.batch(requestInsertQueries({ id: questionRequest, kind: 'booking', organization_id: ORG, location_id: null, user_id: null, review_id: null, payload: threadPayloadForGuest({ name: 'Guest', email: 'guest@example.com' }), created_at: NOW, updated_at: NOW }).map(query => db.prepare(query.query).bind(...query.params!)))
@@ -619,14 +661,14 @@ test('provider allocation shares a class Session, excludes distinct overlapping 
   // One provider in one place: their two services at the studio cannot overlap.
   for(const [id,product]of [['group-session',PRODUCT],['other-session',second]])await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,location_id,timezone,starts_at,ends_at,capacity,created_by,updated_by)VALUES(?,?,?,?,'UTC',?,?,3,?,?)").bind(id,ORG,product,LOCATION,start,end,ACTOR,ACTOR).run()
   const claims=await Promise.allSettled([
-   claimSessionCapacity(db,{env,organizationId:ORG,productId:PRODUCT,sessionId:'group-session',productVariantId:'var-adult',partySize:1}),
-   claimSessionCapacity(db,{env,organizationId:ORG,productId:second,sessionId:'other-session',productVariantId:'second-variant',partySize:1})
+   claimSessionCapacity(db,{policyJson: OPEN_TERMS_JSON, env,organizationId:ORG,productId:PRODUCT,sessionId:'group-session',productVariantId:'var-adult',partySize:1}),
+   claimSessionCapacity(db,{policyJson: OPEN_TERMS_JSON, env,organizationId:ORG,productId:second,sessionId:'other-session',productVariantId:'second-variant',partySize:1})
   ])
   assert.equal(claims.filter(c=>c.status==='fulfilled').length,1,'only one distinct overlapping Session acquires provider occupancy')
   const winner=await db.prepare("SELECT b.id,b.product_id,b.product_session_id,c.assigned_member_id FROM bookings b JOIN product_booking_configs c ON c.product_id=b.product_id AND c.organization_id=b.organization_id WHERE b.status='confirmed'").first<{id:string;product_id:string;product_session_id:string;assigned_member_id:string}>()
   assert.equal(winner?.assigned_member_id,'provider-one')
   const variant=winner!.product_id===PRODUCT?'var-child':'second-variant'
-  const attendee=await claimSessionCapacity(db,{env,organizationId:ORG,productId:winner!.product_id,sessionId:winner!.product_session_id,productVariantId:variant,partySize:1})
+  const attendee=await claimSessionCapacity(db,{policyJson: OPEN_TERMS_JSON, env,organizationId:ORG,productId:winner!.product_id,sessionId:winner!.product_session_id,productVariantId:variant,partySize:1})
   assert.equal(await db.prepare('SELECT c.assigned_member_id FROM bookings b JOIN product_booking_configs c ON c.product_id=b.product_id AND c.organization_id=b.organization_id WHERE b.id=?').bind(attendee.bookingId).first('assigned_member_id'),'provider-one','a second attendee shares the offering\'s provider')
   assert.equal(await db.prepare('SELECT COUNT(*) n FROM bookings').first('n'),2)
   assert.equal((await listSessions(db,{env,organizationId:ORG,fromInstant:`${day}T00:00:00.000Z`,toInstant:`${day}T23:59:59.999Z`})).find(s=>s.id===winner!.product_session_id)?.remaining,1,'remaining capacity is attendee based')
@@ -638,7 +680,7 @@ test('provider allocation shares a class Session, excludes distinct overlapping 
   for(const sessionId of ['',null,['group-session']])await assert.rejects(()=>publicProductHosts(db,ORG,winner!.product_id,sessionId),{statusCode:400})
   await db.prepare("UPDATE product_booking_configs SET assigned_member_id=NULL WHERE product_id=?").bind(winner!.product_id).run()
   await db.prepare("UPDATE member_scheduling SET time_off_json=? WHERE member_id='provider-one'").bind(JSON.stringify([{start,end}])).run()
-  await assert.rejects(()=>claimSessionCapacity(db,{env,organizationId:ORG,productId:winner!.product_id,sessionId:winner!.product_session_id,productVariantId:variant,partySize:1}), winner!.product_id === second
+  await assert.rejects(()=>claimSessionCapacity(db,{policyJson: OPEN_TERMS_JSON, env,organizationId:ORG,productId:winner!.product_id,sessionId:winner!.product_session_id,productVariantId:variant,partySize:1}), winner!.product_id === second
     ? (error: unknown) => { const failure = error as { status: number; data: unknown }; assert.equal(failure.status, 409); assert.deepEqual(failure.data, { code: 'ATTORNEY_REQUIRED', field: 'host' }); return true }
     : CapacityUnavailableError)
   // A booking is its offering's member's: an offering nobody handles has no host to show for any of its sessions.
@@ -689,10 +731,10 @@ test('new legal consultations require an eligible named attorney while experienc
         .bind(id, ORG, product, LOCATION, start, end, ACTOR, ACTOR).run()
     }
     // An earlier consultation is its practice area's like every other one.
-    await db.prepare("INSERT INTO bookings (id,organization_id,product_id,product_session_id,product_variant_id,party_size,status) VALUES ('historical-consultation',?,?,'consultation-historical','consultation-variant',1,'confirmed')").bind(ORG, consultation).run()
-    const experience = await claimSessionCapacity(db, { env, organizationId: ORG, productId: PRODUCT, sessionId: 'class-business-clock', productVariantId: 'var-adult', partySize: 1 })
+    await db.prepare(`INSERT INTO bookings (id,organization_id,product_id,product_session_id,product_variant_id,party_size,policy_json,status) VALUES ('historical-consultation',?,?,'consultation-historical','consultation-variant',1,'{"advance_notice_minutes":null,"party_size_min":null,"party_size_max":null,"minimum_guest_age":null,"accessibility_contact_required":false,"payment":null}','confirmed')`).bind(ORG, consultation).run()
+    const experience = await claimSessionCapacity(db, { policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: PRODUCT, sessionId: 'class-business-clock', productVariantId: 'var-adult', partySize: 1 })
     assert.equal(await db.prepare('SELECT c.assigned_member_id FROM bookings b JOIN product_booking_configs c ON c.product_id=b.product_id AND c.organization_id=b.organization_id WHERE b.id=?').bind(experience.bookingId).first('assigned_member_id'), 'class-host', 'a class booking is its host\'s')
-    const scope = { organizationId: ORG, productId: consultation, actorId: ACTOR, env }
+    const scope = { organizationId: ORG, productId: consultation, actorId: ACTOR, env, policyJson: OPEN_TERMS_JSON }
     const attorneyRequired = (error: unknown) => { const failure = error as { status: number; data: unknown }; assert.equal(failure.status, 409); assert.deepEqual(failure.data, { code: 'ATTORNEY_REQUIRED', field: 'scheduling_mode' }); return true }
     await assert.rejects(setProductBookingConfig(db, { ...scope, patch: { duration_minutes: 30 } }), attorneyRequired)
     await assert.rejects(listSessions(db, { env, organizationId: ORG, productId: consultation, fromInstant: startsAt, toInstant: `${day}T23:59:59.999Z` }), attorneyRequired)
@@ -736,7 +778,7 @@ test('new legal consultations require an eligible named attorney while experienc
 
 test('an online offering is booked in its provider\'s hours, in the provider\'s zone, and follows those hours as they change', { timeout: 120_000 }, async () => {
   const { runtime, db, env } = await boot()
-  const scope = { organizationId: ORG, productId: PRODUCT, actorId: ACTOR, env }
+  const scope = { organizationId: ORG, productId: PRODUCT, actorId: ACTOR, env, policyJson: OPEN_TERMS_JSON }
   try {
     const { writeMemberScheduling } = await import('../../server/domain/member-scheduling.ts')
     const zone = 'America/Los_Angeles'

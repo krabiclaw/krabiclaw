@@ -242,9 +242,13 @@ Telemetry stores hashed session and client identifiers. Never log raw session
 ids, OAuth client ids, bearer tokens, authorization headers, full arguments,
 article bodies, or upload URLs.
 
-## Product bookings and restaurant table Reservations
+## Product bookings, consultations and restaurant tables
 
-Consultations use Product → Variant → Price → Session → Booking. Product bookings
+Classes, consultations and restaurant tables use Product → Variant → Price → Session → Booking.
+A restaurant's tables are one `table` product per location: its weekly slots repeat a
+seating every `interval_minutes` through each service, `default_capacity` is the guests
+seatable per start time, and a deposit is the variant price with `payment_basis`
+`per_booking` and an optional `payment_min_party_size`. Product bookings
 are managed with `list_product_booking_sessions`, `list_product_bookings`,
 `get_product_booking`, `create_product_booking`, `confirm_product_booking`,
 `reject_product_booking`, `cancel_product_booking`, and
@@ -299,11 +303,11 @@ the absolute `dashboard_url` and report the operation as incomplete. Changes
 invoke the existing immutable guest proposal flow: they do not mutate the booking
 until guest acceptance, and acceptance retains review status and operational ID.
 
-Restaurant table Reservations remain separate. `cancel_table_reservation` takes
-`operational_reservation_id` (`reservations.id`);
-`request_table_reservation_change` proposes location/date/time/party changes through
-the same guest approval flow. Restaurant Reservations have no pending review
-confirmation/rejection tools. `list_table_reservations` reads them.
+A table booking is a booking: the same tools read, cancel and change it, and
+`request_product_booking_change` may move it to a session of the business's table
+product at another location. Its `expected_updated_at` is the booking's own
+`operational_updated_at` from `get_product_booking`; a guest message in the
+conversation does not refuse the business's change.
 
 ## Lodging homes, stays and nightly calendars
 
@@ -356,8 +360,8 @@ and does not imply certification.
 `update_stay_arrival_guide` saves private instructions without sending or
 publishing them. Message-template tools configure automatic messages, each
 always sent on a schedule for named offerings: homes, experiences and
-consultations by product, table reservations by location. The scheduler sends
-into each stay's, booking's or reservation's own conversation, cancels pending
+consultations and restaurant tables by product. The scheduler sends
+into each stay's or booking's own conversation, cancels pending
 messages with the booking and moves them with it; every confirmed stay is also
 sent its home's check-in instructions at 10:00 the day before arrival.
 `list_scheduled_guest_messages` exposes pending messages and failures, and

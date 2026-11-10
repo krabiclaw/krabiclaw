@@ -1,18 +1,9 @@
-import { getSourceLocale } from '~/server/utils/organization-locales'
 import { CONTENT_BLOCK_TYPES } from '~/shared/content-registries'
 import { pageEditorPath } from '~/server/utils/dashboard-links'
 import type { McpToolDefinition } from './shared'
-import { contentBlockDataInputSchema, contentBlockMediaInputRef, contentBlockObject, contentBlockTypeBranches, contentBlockUpdatedAtInput, locationReservationConfigObject, locationReservationConfigWriteSchema, pageInfoObject, paginationInputSchema, renderedBookingPolicySummaryObject, organizationTool, workspaceContextObject } from './shared'
+import { contentBlockDataInputSchema, contentBlockMediaInputRef, contentBlockObject, contentBlockTypeBranches, contentBlockUpdatedAtInput, pageInfoObject, paginationInputSchema, organizationTool } from './shared'
 import { HTTPError } from 'nitro';
 import type { McpExecutorContext } from './execution'
-import {
-  DEFAULT_RESERVATION_DURATION_MINUTES,
-  requireLocationReservationConfig,
-  renderBookingPolicySummary,
-  reservationPolicySummarySource,
-  upsertLocationReservationConfig,
-  validateLocationReservationConfigPatch,
-} from '~/server/utils/reservations'
 import {
   createTenantPage,
   deleteTenantPage,
@@ -37,7 +28,7 @@ import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-reso
 import { refreshSocialCard } from '~/server/utils/social-card'
 import { renderStructuredResponse } from '~/server/utils/mcp-render'
 import { paginateMcpCollection } from '~/server/utils/mcp-pagination'
-import { NOT_HANDLED, omit, mutationContextPayload, optionalString, requiredString, rethrowAsInvalidParams } from './execution'
+import { NOT_HANDLED, optionalString, requiredString, rethrowAsInvalidParams } from './execution'
 
 // Page writes provide complete required metadata; omitted optional values retain
 // their stored values on update.
@@ -273,55 +264,6 @@ export const CONTENT_TOOLS: McpToolDefinition[] = [
         required: ['deleted'],
       },
     }),
-  organizationTool({
-      name: 'get_reservation_policy',
-      description: 'Read one location’s table reservation settings and guest-facing policy summary. Product session bookings use get_product for their separate configuration.',
-      domain: 'content',
-      minimumRole: 'admin',
-      inputSchema: {
-        location_id: { type: 'string' },
-        locale: { type: 'string' },
-      },
-      required: ['location_id'],
-      outputSchema: {
-        type: 'object',
-        properties: {
-          policy: locationReservationConfigObject,
-          summary: renderedBookingPolicySummaryObject,
-        },
-        required: ['policy', 'summary'],
-      },
-    }),
-  organizationTool({
-      name: 'update_reservation_policy',
-      description: 'Enable or update table reservations using the location’s saved hours, including the questions asked with each reservation. New setup defaults to two hours, unlimited capacity, no advance notice and no deposit. Use the current updated_at when amending it; omitted fields keep their value. Deposits need an amount, currency, tax treatment and ready Payments. Cancellation is not a setting: every reservation is free to cancel until 24 hours before the start. A class or consultation closes free cancellation at 24 hours or its own minimum notice, if longer (set_product_booking_config).',
-      domain: 'content',
-      minimumRole: 'admin',
-      inputSchema: {
-        expected_updated_at: { type: ["string", "null"], description: "Current policy updated_at; null when creating." },
-        location_id: { type: 'string' },
-        locale: { type: 'string' },
-        ...locationReservationConfigWriteSchema,
-        duration_minutes: { ...locationReservationConfigWriteSchema.duration_minutes, default: DEFAULT_RESERVATION_DURATION_MINUTES, description: 'Minutes per reservation. Defaults to 120 on setup; null restores that default. Omit to keep the current duration.' },
-        slot_capacity: { ...locationReservationConfigWriteSchema.slot_capacity, description: 'Guests per start time. Defaults to unlimited on setup; null removes the limit.' },
-        advance_notice_minutes: { ...locationReservationConfigWriteSchema.advance_notice_minutes, description: 'Required notice before the start. Defaults to zero on setup; null removes the rule.' },
-        deposit_required: { ...locationReservationConfigWriteSchema.deposit_required, description: 'Defaults to false on setup. Omit to keep the current requirement.' },
-      },
-      required: ['location_id', 'expected_updated_at'],
-      outputSchema: {
-        type: 'object',
-        properties: {
-          ok: { type: 'boolean' },
-          entity: { type: 'string', enum: ['reservation_policy'] },
-          location_id: { type: 'string' },
-          changed_fields: { type: 'array', items: { type: 'string' } },
-          updated_at: { type: 'string' },
-          context: workspaceContextObject,
-          summary: renderedBookingPolicySummaryObject,
-        },
-        required: ['ok', 'entity', 'location_id'],
-      },
-    }),
 ]
 
 function nullableStringArg(args: Record<string, unknown>, key: string, fallback: string | null): string | null {
@@ -524,43 +466,6 @@ export async function handleContentTools(ctx: McpExecutorContext): Promise<unkno
       } catch (error) {
         return rethrowAsInvalidParams(error);
       }
-    case "get_reservation_policy": {
-      const locationId = requiredString(args, "location_id");
-      const locale = optionalString(args, "locale") ?? await getSourceLocale(organization.db, organization.organizationId);
-      const config = await requireLocationReservationConfig(organization.db, {
-        organizationId: organization.organizationId,
-        locationId,
-      });
-      return {
-        policy: config,
-        summary: renderBookingPolicySummary(reservationPolicySummarySource(config), locale),
-      };
-    }
-    case "update_reservation_policy": {
-      const locationId = requiredString(args, "location_id");
-      const locale = optionalString(args, "locale") ?? await getSourceLocale(organization.db, organization.organizationId);
-      const patch = await validateLocationReservationConfigPatch(omit(args as Record<string, unknown>, ["location_id", "locale", "expected_updated_at"]));
-      const config = await upsertLocationReservationConfig(organization.db, {
-        organizationId: organization.organizationId,
-        locationId,
-        patch,
-        actorId: organization.userId, env: organization.env, expectedUpdatedAt: optionalString(args, "expected_updated_at"),
-      });
-      const policyContext = await mutationContextPayload(organization, { locationId });
-      return renderStructuredResponse(
-        {
-          ok: true,
-          entity: "reservation_policy",
-          location_id: locationId,
-          changed_fields: Object.keys(patch).filter(field => field !== "expected_questions_revision"),
-          updated_at: config.updated_at,
-          context: policyContext,
-          summary: renderBookingPolicySummary(reservationPolicySummarySource(config), locale),
-        },
-        "Updated the reservation policy.",
-        { policy: config },
-      );
-    }
     case "append_content_block": {
       const document = await requireOrganizationDocument(ctx, requiredString(args, "document_id"))
       const afterBlockId = optionalString(args, "after_block_id")

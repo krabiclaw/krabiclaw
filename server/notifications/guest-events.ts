@@ -146,48 +146,20 @@ function contactSection(input: GuestBookingInput) {
     : []
 }
 
-export function guestReservationReceivedMessage(input: GuestBookingInput): NotificationMessage {
-  const locale = guestLocale(input)
-  return {
-    locale: locale.locale,
-    title: locale.messages['email.subject.reservation_confirmed']!.replace('{place}', input.organizationName),
-    preheader: `${input.organizationName} · ${input.date} · ${input.time}`,
-    hero: input.heroImageUrl ? { imageUrl: input.heroImageUrl, alt: input.organizationName } : null,
-    facts: guestVisitFacts(input),
-    primaryAction: input.receiptUrl ? { url: input.receiptUrl, label: locale.messages['booking.receipt']! } : manageAction(input),
-    secondaryAction: input.receiptUrl ? manageAction(input) : undefined,
-    sections: contactSection(input),
-    emailPurpose: 'transactional',
-    emailReason: locale.messages['email.reason.reservation']!.replace('{organization}', input.organizationName),
-    category: 'reservations_bookings',
-    organizationName: input.organizationName,
-    organizationLogoUrl: input.organizationLogoUrl,
-  }
-}
+/**
+ * The guest's own word for what they booked, in their language: a table is a
+ * reservation, anything else a booking. The caller reads it from the booking's
+ * presentation (utils/booking-presentation), never from the vertical alone.
+ */
+export type GuestBookingWording = 'booking' | 'reservation'
 
-export function guestReservationCancelledMessage(input: GuestBookingInput & { wasConfirmed: boolean }): NotificationMessage {
+export function guestBookingReceivedMessage(input: GuestBookingInput & { productTitle: string; status?: 'pending' | 'confirmed'; wording: GuestBookingWording }): NotificationMessage {
   const locale = guestLocale(input)
+  const reservation = input.wording === 'reservation'
   return {
     locale: locale.locale,
-    title: locale.messages['site.reservation_cancel.cancelled_title']!,
-    preheader: `${input.organizationName} · ${input.date} · ${input.time}`,
-    hero: null,
-    facts: guestVisitFacts(input),
-    primaryAction: manageAction(input),
-    sections: contactSection(input),
-    emailPurpose: 'transactional',
-    emailReason: locale.messages['email.reason.reservation_cancelled']!.replace('{organization}', input.organizationName),
-    category: 'reservations_bookings',
-    organizationName: input.organizationName,
-    organizationLogoUrl: input.organizationLogoUrl,
-  }
-}
-
-export function guestBookingReceivedMessage(input: GuestBookingInput & { productTitle: string; status?: 'pending' | 'confirmed' }): NotificationMessage {
-  const locale = guestLocale(input)
-  return {
-    locale: locale.locale,
-    title: locale.messages[input.status === 'pending' ? 'booking.request_received' : 'booking.confirmed']!,
+    title: input.status === 'pending' ? locale.messages['booking.request_received']!
+      : reservation ? locale.messages['email.subject.reservation_confirmed']!.replace('{place}', input.organizationName) : locale.messages['booking.confirmed']!,
     preheader: `${input.productTitle} · ${input.date} · ${input.time}`,
     hero: input.heroImageUrl ? { imageUrl: input.heroImageUrl, alt: input.productTitle } : null,
     intro: input.status === 'pending' ? locale.messages['booking.pending_message']! : undefined,
@@ -196,7 +168,7 @@ export function guestBookingReceivedMessage(input: GuestBookingInput & { product
     secondaryAction: input.receiptUrl ? manageAction(input) : undefined,
     sections: contactSection(input),
     emailPurpose: 'transactional',
-    emailReason: locale.messages['email.reason.booking']!.replace('{organization}', input.organizationName),
+    emailReason: locale.messages[reservation ? 'email.reason.reservation' : 'email.reason.booking']!.replace('{organization}', input.organizationName),
     category: 'reservations_bookings',
     organizationName: input.organizationName,
     organizationLogoUrl: input.organizationLogoUrl,
@@ -254,18 +226,19 @@ export function guestStayConfirmedMessage(input: GuestStayInput): NotificationMe
   }
 }
 
-export function guestBookingCancelledMessage(input: GuestBookingInput & { productTitle: string; wasConfirmed: boolean }): NotificationMessage {
+export function guestBookingCancelledMessage(input: GuestBookingInput & { productTitle: string; wasConfirmed: boolean; wording: GuestBookingWording }): NotificationMessage {
   const locale = guestLocale(input)
+  const reservation = input.wording === 'reservation'
   return {
     locale: locale.locale,
-    title: locale.messages['site.experience_cancel.cancelled_title']!,
+    title: locale.messages[reservation ? 'site.reservation_cancel.cancelled_title' : 'site.experience_cancel.cancelled_title']!,
     preheader: `${input.productTitle} · ${input.date} · ${input.time}`,
     hero: null,
     facts: guestVisitFacts(input),
     primaryAction: manageAction(input),
     sections: contactSection(input),
     emailPurpose: 'transactional',
-    emailReason: locale.messages['email.reason.booking_cancelled']!.replace('{organization}', input.organizationName),
+    emailReason: locale.messages[reservation ? 'email.reason.reservation_cancelled' : 'email.reason.booking_cancelled']!.replace('{organization}', input.organizationName),
     category: 'reservations_bookings',
     organizationName: input.organizationName,
     organizationLogoUrl: input.organizationLogoUrl,

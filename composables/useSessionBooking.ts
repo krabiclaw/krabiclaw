@@ -19,12 +19,15 @@ export interface SessionBookingContext {
   organizationName: string
   product: PublicProduct
   currency: CurrencyCode
-  location: PublicProductLocation | null
+  /** The branch it is booked at, as far as booking reads it; null online. */
+  location: Pick<PublicProductLocation, 'id' | 'slug' | 'title' | 'address'> | null
   sessions: PublicProductSession[]
   showPartySize?: boolean
+  /** The place's phone, offered on the receipt for a guest whose plans change. */
+  contactPhone?: string | null
 }
 
-/** The public Product booking flow, shared by location pages and online consultations. */
+/** The public Product booking flow, shared by product pages, online consultations and a restaurant's tables. */
 export function useSessionBooking(input: MaybeRefOrGetter<SessionBookingContext>) {
   const context = computed(() => toValue(input))
   const { locale, localePath, t } = useI18n()
@@ -37,7 +40,9 @@ export function useSessionBooking(input: MaybeRefOrGetter<SessionBookingContext>
   const formQuestions = useFormQuestionState(() => context.value.product.booking, computed({ get: () => contactForm.value.answers, set: (answers) => { contactForm.value.answers = answers } }))
   const defaultPhoneCountry = computed(() => getPhoneCountry(context.value.location?.address?.regionCode)?.code)
   const showPartySize = computed(() => context.value.showPartySize !== false)
-  const selectedPartySize = ref(1)
+  /** The smallest party one booking takes, as the offering states it. */
+  const guestsMin = computed(() => context.value.product.booking?.party_size_min ?? 1)
+  const selectedPartySize = ref(guestsMin.value)
   const partySize = computed({
     get: () => showPartySize.value ? selectedPartySize.value : 1,
     set: (value: number) => { selectedPartySize.value = showPartySize.value ? value : 1 },
@@ -77,6 +82,19 @@ export function useSessionBooking(input: MaybeRefOrGetter<SessionBookingContext>
     if (allowTimezoneSelection.value) guestTimezone.value = new Intl.DateTimeFormat().resolvedOptions().timeZone
   })
   watch(bookingTimezone, () => { timeSelection.value = null })
+  // A page that books more than one product (a restaurant's tables at each of its
+  // locations) starts each one over: its option, its times and its form.
+  watch(() => context.value.product.id, () => {
+    selectedVariantId.value = sellableVariants.value.length === 1 ? sellableVariants.value[0]!.id : null
+    timeSelection.value = null
+    sessions.value = [...context.value.sessions]
+    bookingStep.value = 1
+    selectedPartySize.value = guestsMin.value
+    bookingError.value = ''
+    checkoutRequestKey.value = null
+    checkoutFingerprint = null
+    contactForm.value = { ...contactForm.value, answers: {} }
+  })
   const referenceDate = computed(() => bookingTimezone.value ? localDateAt(new Date(), bookingTimezone.value) : undefined)
 
   function localDateOf(session: PublicProductSession) {
@@ -133,11 +151,13 @@ export function useSessionBooking(input: MaybeRefOrGetter<SessionBookingContext>
    * all takes any party the endpoint accepts.
    */
   const MAX_PARTY_SIZE = 99
+  // The offering's own largest party, when it states one: a restaurant takes larger tables by phone.
+  const partyLimit = computed(() => context.value.product.booking?.party_size_max ?? MAX_PARTY_SIZE)
   const guestsMax = computed(() => {
     const pool = selectedSession.value ? [selectedSession.value] : sessions.value
     if (!pool.length) return 1
-    if (pool.some(session => session.remaining === null)) return MAX_PARTY_SIZE
-    return Math.max(1, ...pool.map(session => session.remaining ?? 0))
+    if (pool.some(session => session.remaining === null)) return partyLimit.value
+    return Math.min(partyLimit.value, Math.max(1, ...pool.map(session => session.remaining ?? 0)))
   })
 
   const selectedSession = computed<PublicProductSession | null>(() => {
@@ -287,7 +307,8 @@ export function useSessionBooking(input: MaybeRefOrGetter<SessionBookingContext>
         await navigateTo({ path: response.pay_path, hash: `#${response.purchase_claim}` })
         return
       }
-      mirrorSubmission('booking_submit', response.measurement, context.value.location?.id ?? null, response.quoted_value)
+      // A table is a reservation to the business's ad and analytics accounts, which already count it by that name.
+      mirrorSubmission(context.value.product.kind === 'table' ? 'reservation_submit' : 'booking_submit', response.measurement, context.value.location?.id ?? null, response.quoted_value)
       setBookingConfirmation({
         type: 'booking', status: response.status, operationalBookingId: response.operational_booking_id, requestId: response.request_id,
         locale: locale.value,
@@ -308,6 +329,7 @@ export function useSessionBooking(input: MaybeRefOrGetter<SessionBookingContext>
         locationId: context.value.location?.id ?? null,
         locationName: context.value.location?.title ?? context.value.organizationName,
         locationSlug: context.value.location?.slug ?? null,
+        contactPhone: context.value.contactPhone ?? null,
       })
       bookingOpen.value = false
       await navigateTo({ path: localePath('/bookings/confirmed'), query: { id: response.request_id }, hash: `#${response.cancellation_token}` })
@@ -327,7 +349,7 @@ export function useSessionBooking(input: MaybeRefOrGetter<SessionBookingContext>
   }
 
     return { bookingOpen, bookingStep, contactForm, formQuestions, defaultPhoneCountry, partySize, showPartySize, allowTimezoneSelection, guestTimezone, bookingTimezone, timezoneOptions, selectedVariantId, selectedPrice, sellableVariants, variantPriceLabel,
-      timeSelection, submitting, bookingError, sessions, sessionsPending, availabilityDates, referenceDate, guestsMax,
+      timeSelection, submitting, bookingError, sessions, sessionsPending, availabilityDates, referenceDate, guestsMin, guestsMax,
       selectedSession, loadSessions, openBooking, openBookingAt, upcomingSessions,
       sessionDayLabel, sessionTimeLabel, submitBooking }
 }

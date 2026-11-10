@@ -29,11 +29,6 @@ export default defineHandler(async (event) => {
   const reviewCount = body.review_count === undefined || body.review_count === null || String(body.review_count).trim() === ''
     ? undefined
     : (() => { const n = Number(body.review_count); return Number.isFinite(n) ? n : undefined })()
-  const assignedMemberId = body.assigned_member_id === undefined
-    ? undefined
-    : body.assigned_member_id === null || body.assigned_member_id === ''
-      ? null
-      : String(body.assigned_member_id)
 
   const result = await updateLocation(
     db, organizationId, locationId, {
@@ -48,7 +43,7 @@ export default defineHandler(async (event) => {
         ? undefined
         : body.special_hours === null
           ? null
-          : body.special_hours as UpdateLocationInput['special_hours'], expected_updated_at: typeof body.expected_updated_at === 'string' ? body.expected_updated_at : undefined, description: typeof body.description === 'string' ? body.description : body.description === null ? null : undefined, short_description: typeof body.short_description === 'string' ? body.short_description : body.short_description === null ? null : undefined, price_level: typeof body.price_level === 'string' ? body.price_level : body.price_level === null ? null : undefined, google_place_id: typeof body.google_place_id === 'string' ? body.google_place_id : body.google_place_id === null ? null : undefined, timezone: typeof body.timezone === 'string' ? body.timezone.trim() || null : body.timezone === null ? null : undefined, rating, review_count: reviewCount, assigned_member_id: assignedMemberId, status: body.status as UpdateLocationInput['status'], }, session.user.id, env, )
+          : body.special_hours as UpdateLocationInput['special_hours'], expected_updated_at: typeof body.expected_updated_at === 'string' ? body.expected_updated_at : undefined, description: typeof body.description === 'string' ? body.description : body.description === null ? null : undefined, short_description: typeof body.short_description === 'string' ? body.short_description : body.short_description === null ? null : undefined, price_level: typeof body.price_level === 'string' ? body.price_level : body.price_level === null ? null : undefined, google_place_id: typeof body.google_place_id === 'string' ? body.google_place_id : body.google_place_id === null ? null : undefined, timezone: typeof body.timezone === 'string' ? body.timezone.trim() || null : body.timezone === null ? null : undefined, rating, review_count: reviewCount, status: body.status as UpdateLocationInput['status'], }, session.user.id, env, )
 
   if (result.status >= 400) {
     return jsonResponse(result.data, { status: result.status })

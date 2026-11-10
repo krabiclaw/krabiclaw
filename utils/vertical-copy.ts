@@ -91,16 +91,13 @@ export type VerticalCopy = {
   contactInfoHeading: string
   phoneLabelShort: string
   emailLabelShort: string
-  reservationPoliciesHeading: string
   goodToKnowKicker: string
   callButtonLabel: string
   contactFormButtonLabel: string
   locationLabel: string
-  selectLocationLabel: string
   chooseLocationLabel: string
   oneGuestLabel: string
   thankYouLabel: (_name: string) => string
-  confirmationMessage: (_guests: number | string, _guestLabel: string, _date: string, _time: string) => string
   manageLabel: (_word: string) => string
   cancelAnytimeLabel: string
   callUsLabel: (_phone: string) => string
@@ -196,17 +193,13 @@ const registry: Record<LocaleCode, Partial<Record<OrganizationVertical, Vertical
       contactInfoHeading: "Contact Information",
       phoneLabelShort: "Phone",
       emailLabelShort: "Email",
-      reservationPoliciesHeading: "Reservation Policies",
       goodToKnowKicker: "Good to know",
       callButtonLabel: "Call",
       contactFormButtonLabel: "Contact Form",
       locationLabel: "Location",
-      selectLocationLabel: "Select a location",
       chooseLocationLabel: "Please choose a location.",
       oneGuestLabel: "1 Guest",
       thankYouLabel: (_name: string) => `Thank you, ${_name}!`,
-      confirmationMessage: (_guests: number | string, _guestLabel: string, _date: string, _time: string) =>
-        `Your reservation for ${_guests} ${_guestLabel} on ${_date} at ${_time} is confirmed.`,
       manageLabel: (_word: string) => `Manage ${_word}`,
       cancelAnytimeLabel: "Changed your plans? Cancel anytime before your visit.",
       callUsLabel: (_phone: string) => `Call us: ${_phone}`,
@@ -297,17 +290,13 @@ const registry: Record<LocaleCode, Partial<Record<OrganizationVertical, Vertical
       contactInfoHeading: "Contact Information",
       phoneLabelShort: "Phone",
       emailLabelShort: "Email",
-      reservationPoliciesHeading: "Booking Policies",
       goodToKnowKicker: "Good to know",
       callButtonLabel: "Call",
       contactFormButtonLabel: "Contact Form",
       locationLabel: "Studio",
-      selectLocationLabel: "Select a studio",
       chooseLocationLabel: "Please choose a studio.",
       oneGuestLabel: "1 Guest",
       thankYouLabel: (_name: string) => `Thank you, ${_name}!`,
-      confirmationMessage: (_guests: number | string, _guestLabel: string, _date: string, _time: string) =>
-        `We've received your request for ${_guests} ${_guestLabel} on ${_date} at ${_time}.`,
       manageLabel: (_word: string) => `Manage ${_word}`,
       cancelAnytimeLabel: "Changed your plans? Cancel anytime before your visit.",
       callUsLabel: (_phone: string) => `Call us: ${_phone}`,
@@ -400,17 +389,13 @@ const registry: Record<LocaleCode, Partial<Record<OrganizationVertical, Vertical
       contactInfoHeading: "ข้อมูลติดต่อ",
       phoneLabelShort: "โทรศัพท์",
       emailLabelShort: "อีเมล",
-      reservationPoliciesHeading: "นโยบายการจอง",
       goodToKnowKicker: "ควรทราบ",
       callButtonLabel: "โทร",
       contactFormButtonLabel: "แบบฟอร์มติดต่อ",
       locationLabel: "สาขา",
-      selectLocationLabel: "เลือกสาขา",
       chooseLocationLabel: "กรุณาเลือกสาขา",
       oneGuestLabel: "1 แขก",
       thankYouLabel: (_name: string) => `ขอบคุณ ${_name}!`,
-      confirmationMessage: (_guests: number | string, _guestLabel: string, _date: string, _time: string) =>
-        `การจองสำหรับ ${_guests} ${_guestLabel} วันที่ ${_date} เวลา ${_time} ได้รับการยืนยันแล้ว`,
       manageLabel: (_word: string) => `จัดการ${_word}`,
       cancelAnytimeLabel: "เปลี่ยนแผนแล้วหรือ? ยกเลิกได้ทุกเมื่อก่อนมาเยือน",
       callUsLabel: (_phone: string) => `โทรหาเรา: ${_phone}`,
@@ -501,17 +486,13 @@ const registry: Record<LocaleCode, Partial<Record<OrganizationVertical, Vertical
       contactInfoHeading: "ข้อมูลติดต่อ",
       phoneLabelShort: "โทรศัพท์",
       emailLabelShort: "อีเมล",
-      reservationPoliciesHeading: "นโยบายการจอง",
       goodToKnowKicker: "ควรทราบ",
       callButtonLabel: "โทร",
       contactFormButtonLabel: "แบบฟอร์มติดต่อ",
       locationLabel: "สตูดิโอ",
-      selectLocationLabel: "เลือกสตูดิโอ",
       chooseLocationLabel: "กรุณาเลือกสตูดิโอ",
       oneGuestLabel: "1 แขก",
       thankYouLabel: (_name: string) => `ขอบคุณ ${_name}!`,
-      confirmationMessage: (_guests: number | string, _guestLabel: string, _date: string, _time: string) =>
-        `เราได้รับคำขอของคุณสำหรับ ${_guests} ${_guestLabel} วันที่ ${_date} เวลา ${_time}`,
       manageLabel: (_word: string) => `จัดการ${_word}`,
       cancelAnytimeLabel: "เปลี่ยนแผนแล้วหรือ? ยกเลิกได้ทุกเมื่อก่อนมาเยือน",
       callUsLabel: (_phone: string) => `โทรหาเรา: ${_phone}`,
@@ -590,14 +571,10 @@ registry.en.service = {
   guestsLabelPlural: "clients",
   guestsLabel: "Clients",
   selectGuestsLabel: "Select clients",
-  reservationPoliciesHeading: "Consultation Details",
   goodToKnowKicker: "Good to know",
   locationLabel: "Office",
-  selectLocationLabel: "Select an office",
   chooseLocationLabel: "Please choose an office or consultation location.",
   oneGuestLabel: "1 client",
-  confirmationMessage: (_guests: number | string, _guestLabel: string, _date: string, _time: string) =>
-    `We have received your consultation request for ${_guests} ${_guestLabel} on ${_date} at ${_time}.`,
   callUsLabel: (_phone: string) => `Call: ${_phone}`,
 }
 
@@ -653,13 +630,9 @@ registry.th.service = {
   guestsLabelPlural: "คน",
   guestsLabel: "จำนวนผู้รับคำปรึกษา",
   selectGuestsLabel: "เลือกจำนวนผู้รับคำปรึกษา",
-  reservationPoliciesHeading: "รายละเอียดการปรึกษา",
   locationLabel: "สำนักงาน",
-  selectLocationLabel: "เลือกสำนักงาน",
   chooseLocationLabel: "โปรดเลือกสำนักงานหรือช่องทางติดต่อ",
   oneGuestLabel: "1 คน",
-  confirmationMessage: (_guests: number | string, _guestLabel: string, _date: string, _time: string) =>
-    `เราได้รับคำขอปรึกษาสำหรับ ${_guests} ${_guestLabel} ในวันที่ ${_date} เวลา ${_time} แล้ว`,
 }
 
 // Japanese has complete copy for every supported vertical. Shared wording is
@@ -741,17 +714,13 @@ registry.ja.restaurant = {
   contactInfoHeading: "連絡先",
   phoneLabelShort: "電話",
   emailLabelShort: "メール",
-  reservationPoliciesHeading: "ご予約について",
   goodToKnowKicker: "ご案内",
   callButtonLabel: "電話する",
   contactFormButtonLabel: "お問い合わせフォーム",
   locationLabel: "店舗",
-  selectLocationLabel: "店舗を選択",
   chooseLocationLabel: "店舗を選択してください。",
   oneGuestLabel: "1名",
   thankYouLabel: (_name: string) => `${_name}様、ありがとうございます。`,
-  confirmationMessage: (_guests: number | string, _guestLabel: string, _date: string, _time: string) =>
-    `${_date} ${_time}、${_guests}${_guestLabel}様のご予約が確定しました。`,
   manageLabel: (_word: string) => `${_word}を管理`,
   cancelAnytimeLabel: "ご予定が変わった場合は、ご来店前にキャンセルできます。",
   callUsLabel: (_phone: string) => `お電話：${_phone}`,
@@ -784,10 +753,7 @@ registry.ja.experience = {
   addSecondLocationNote: "最初のスタジオを接続した後、2つ目を追加できます。",
   mainDiningRoomLabel: "メインスタジオ",
   locationLabel: "スタジオ",
-  selectLocationLabel: "スタジオを選択",
   chooseLocationLabel: "スタジオを選択してください。",
-  confirmationMessage: (_guests: number | string, _guestLabel: string, _date: string, _time: string) =>
-    `${_date} ${_time}、${_guests}${_guestLabel}様のご予約リクエストを受け付けました。`,
 }
 
 registry.ja.service = {
@@ -837,12 +803,8 @@ registry.ja.service = {
   specialRequestsPlaceholder: "どのようなお手伝いが必要かお知らせください。",
   guestsLabel: "相談人数",
   selectGuestsLabel: "相談人数を選択",
-  reservationPoliciesHeading: "ご相談の詳細",
   locationLabel: "事務所",
-  selectLocationLabel: "事務所を選択",
   chooseLocationLabel: "事務所または窓口を選択してください。",
-  confirmationMessage: (_guests: number | string, _guestLabel: string, _date: string, _time: string) =>
-    `${_date} ${_time}、${_guests}${_guestLabel}様のご相談リクエストを受け付けました。`,
 }
 
 // Vietnamese has complete copy for every supported vertical, composed the same
@@ -924,17 +886,13 @@ registry.vi.restaurant = {
   contactInfoHeading: "Thông tin liên hệ",
   phoneLabelShort: "Điện thoại",
   emailLabelShort: "Email",
-  reservationPoliciesHeading: "Chính sách đặt bàn",
   goodToKnowKicker: "Thông tin hữu ích",
   callButtonLabel: "Gọi điện",
   contactFormButtonLabel: "Biểu mẫu liên hệ",
   locationLabel: "Chi nhánh",
-  selectLocationLabel: "Chọn chi nhánh",
   chooseLocationLabel: "Vui lòng chọn một chi nhánh.",
   oneGuestLabel: "1 khách",
   thankYouLabel: (_name: string) => `Cảm ơn bạn, ${_name}.`,
-  confirmationMessage: (_guests: number | string, _guestLabel: string, _date: string, _time: string) =>
-    `Đặt bàn cho ${_guests} ${_guestLabel} vào ${_date} lúc ${_time} đã được xác nhận.`,
   manageLabel: (_word: string) => `Quản lý ${_word}`,
   cancelAnytimeLabel: "Nếu kế hoạch thay đổi, bạn có thể hủy trước khi đến.",
   callUsLabel: (_phone: string) => `Gọi: ${_phone}`,
@@ -968,12 +926,8 @@ registry.vi.experience = {
   secondLocationLabel: "Studio thứ hai",
   addSecondLocationNote: "Bạn có thể thêm studio thứ hai sau khi kết nối studio đầu tiên.",
   mainDiningRoomLabel: "Studio chính",
-  reservationPoliciesHeading: "Chính sách đặt chỗ",
   locationLabel: "Studio",
-  selectLocationLabel: "Chọn studio",
   chooseLocationLabel: "Vui lòng chọn một studio.",
-  confirmationMessage: (_guests: number | string, _guestLabel: string, _date: string, _time: string) =>
-    `Chúng tôi đã nhận yêu cầu đặt chỗ cho ${_guests} ${_guestLabel} vào ${_date} lúc ${_time}.`,
 }
 
 registry.vi.service = {
@@ -1026,14 +980,10 @@ registry.vi.service = {
   guestsLabelPlural: "người",
   guestsLabel: "Khách hàng",
   selectGuestsLabel: "Chọn số lượng khách hàng",
-  reservationPoliciesHeading: "Chi tiết tư vấn",
   goodToKnowKicker: "Thông tin hữu ích",
   locationLabel: "Văn phòng",
-  selectLocationLabel: "Chọn văn phòng",
   chooseLocationLabel: "Vui lòng chọn văn phòng hoặc đầu mối liên hệ.",
   oneGuestLabel: "1 người",
-  confirmationMessage: (_guests: number | string, _guestLabel: string, _date: string, _time: string) =>
-    `Chúng tôi đã nhận yêu cầu tư vấn cho ${_guests} ${_guestLabel} vào ${_date} lúc ${_time}.`,
 }
 
 // Lodging lists homes at /stays; business address records are not properties.
@@ -1057,8 +1007,6 @@ registry.en.lodging = {
   viewMenuRoute: "",
   specialRequestsPlaceholder: "Tell us anything that will help us prepare for your stay.",
   cancelAnytimeLabel: "Need to change your plans? Contact us before arrival.",
-  confirmationMessage: (_guests: number | string, _guestLabel: string, _date: string, _time: string) =>
-    `We've received your stay request for ${_guests} ${_guestLabel} arriving ${_date}.`,
 }
 
 registry.th.lodging = {
@@ -1081,8 +1029,6 @@ registry.th.lodging = {
   viewMenuRoute: "",
   specialRequestsPlaceholder: "บอกเราได้ทุกอย่างที่ช่วยให้เราเตรียมพร้อมสำหรับการเข้าพักของคุณ",
   cancelAnytimeLabel: "ต้องการเปลี่ยนแผน? ติดต่อเราก่อนวันเข้าพัก",
-  confirmationMessage: (_guests: number | string, _guestLabel: string, _date: string, _time: string) =>
-    `เราได้รับคำขอเข้าพักสำหรับ ${_guests} ${_guestLabel} เข้าพักวันที่ ${_date} แล้ว`,
 }
 
 registry.ja.lodging = {
@@ -1105,8 +1051,6 @@ registry.ja.lodging = {
   viewMenuRoute: "",
   specialRequestsPlaceholder: "ご滞在の準備に役立つことがあれば何でもお知らせください。",
   cancelAnytimeLabel: "ご予定が変わった場合は、到着前にご連絡ください。",
-  confirmationMessage: (_guests: number | string, _guestLabel: string, _date: string, _time: string) =>
-    `${_date}からのご宿泊、${_guests}${_guestLabel}様のリクエストを受け付けました。`,
 }
 
 registry.vi.lodging = {
@@ -1129,8 +1073,6 @@ registry.vi.lodging = {
   viewMenuRoute: "",
   specialRequestsPlaceholder: "Cho chúng tôi biết bất cứ điều gì giúp chúng tôi chuẩn bị cho kỳ lưu trú của bạn.",
   cancelAnytimeLabel: "Cần thay đổi kế hoạch? Hãy liên hệ với chúng tôi trước khi đến.",
-  confirmationMessage: (_guests: number | string, _guestLabel: string, _date: string, _time: string) =>
-    `Chúng tôi đã nhận yêu cầu lưu trú cho ${_guests} ${_guestLabel}, nhận phòng ngày ${_date}.`,
 }
 
 export function normalizeVertical(vertical: string | null | undefined): string {

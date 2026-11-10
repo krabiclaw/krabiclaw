@@ -16,7 +16,7 @@ Output only a JSON array of the reply strings, without commentary, markdown, or 
 /**
  * One to three draft replies for the web composer's Suggested replies, the way
  * the iPhone drafts them on the device: from the whole conversation and
- * everything the business saved about the home, stay, booking or reservation behind it. Nothing is
+ * everything the business saved about the home, stay or booking behind it. Nothing is
  * sent; nothing is stored.
  */
 export async function suggestGuestReplies(db: DbClient, env: Record<string, unknown>, principal: MemberAccessPrincipal, threadId: string): Promise<{ generationId: string; suggestions: string[] }> {

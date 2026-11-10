@@ -9,7 +9,7 @@ import { isRecord } from "~/server/utils/type-guards";
 const COUNT_FIELDS = new Set(['count', 'total', 'limit', 'offset', 'party_size', 'quantity', 'capacity', 'remaining_capacity', 'duration_ms', 'unit_amount', 'amount']);
 const BOOLEAN_FIELDS = new Set(['success', 'isError', 'completed', 'operation_completed', 'mutation_applied', 'retry_with_same_idempotency_key', 'action_required', 'has_more', 'has_next_page', 'acknowledge_guest', 'confirm', 'replayed']);
 const STATUS_VALUES = new Set(['success', 'error', 'auth_required', 'blocked', 'action_required', 'pending', 'pending_review', 'confirmed', 'cancelled', 'declined', 'rejected', 'draft', 'published', 'unpublished', 'active', 'inactive', 'paid', 'unpaid', 'refunded', 'partially_refunded', 'failed', 'processing', 'completed']);
-const CONTAINER_FIELDS = new Set(['structuredContent', 'result', 'data', 'page_info', 'booking', 'reservation', 'payment']);
+const CONTAINER_FIELDS = new Set(['structuredContent', 'result', 'data', 'page_info', 'booking', 'payment']);
 const MCP_METHODS = new Set(['initialize', 'ping', 'notifications/initialized', 'tools/list', 'tools/call', 'resources/list', 'resources/templates/list', 'resources/read', 'prompts/list', 'prompts/get']);
 
 export function mcpTelemetryMethod(method: string | null | undefined): string {

@@ -127,7 +127,7 @@ export function insightsPath(orgSlug: string, query?: { startDate: string; endDa
   return query ? `${path}?${new URLSearchParams(query)}` : path
 }
 
-export function bookingEditorPath(orgSlug: string, kind: 'reservation' | 'booking' | 'stay', requestId: string): string {
+export function bookingEditorPath(orgSlug: string, kind: 'booking' | 'stay', requestId: string): string {
   return `${organizationBase(orgSlug)}/bookings/${kind}/${encodeURIComponent(requestId)}`
 }
 

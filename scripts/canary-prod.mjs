@@ -54,7 +54,7 @@ async function main() {
   }
 
   const before = {
-    reservations: Number(d1Query(`SELECT COUNT(*) as c FROM requests WHERE kind = 'reservation' AND organization_id = '${sqlEscape(expectedOrgId)}'`)[0]?.c ?? 0),
+    bookings: Number(d1Query(`SELECT COUNT(*) as c FROM requests WHERE kind = 'booking' AND organization_id = '${sqlEscape(expectedOrgId)}'`)[0]?.c ?? 0),
     contacts: Number(d1Query(`SELECT COUNT(*) as c FROM requests WHERE kind = 'contact' AND organization_id = '${sqlEscape(expectedOrgId)}'`)[0]?.c ?? 0),
   }
 
@@ -131,7 +131,7 @@ async function main() {
     }
 
     const after = {
-      reservations: Number(d1Query(`SELECT COUNT(*) as c FROM requests WHERE kind = 'reservation' AND organization_id = '${sqlEscape(expectedOrgId)}'`)[0]?.c ?? 0),
+      bookings: Number(d1Query(`SELECT COUNT(*) as c FROM requests WHERE kind = 'booking' AND organization_id = '${sqlEscape(expectedOrgId)}'`)[0]?.c ?? 0),
       contacts: Number(d1Query(`SELECT COUNT(*) as c FROM requests WHERE kind = 'contact' AND organization_id = '${sqlEscape(expectedOrgId)}'`)[0]?.c ?? 0),
     }
 

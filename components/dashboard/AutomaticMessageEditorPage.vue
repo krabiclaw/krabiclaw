@@ -71,7 +71,7 @@ const { data: offeringsData, error: offeringsReadError } = await useAsyncData(`a
 const offerings = computed(() => offeringsData.value?.offerings ?? [])
 const offeringsError = computed(() => offeringsReadError.value ? getErrorMessage(offeringsReadError.value, 'Offerings could not be loaded') : '')
 const vertical = computed(() => dashboard.organization.value?.vertical ?? '')
-const counterparty = computed(() => vertical.value === 'service' ? resolveBookingPresentation('booking', 'service').counterpartyNoun : 'guest')
+const counterparty = computed(() => vertical.value === 'service' ? resolveBookingPresentation('service', 'service').counterpartyNoun : 'guest')
 watchEffect(() => { if (level.child.value && (isNew.value || !['content', 'schedule'].includes(level.child.value))) showError(createError({ statusCode: 404, statusMessage: 'Automatic message concern not found' })) })
 const valid = computed(() => {
   if (!draft.value.title.trim() || !draft.value.body.trim()) return false

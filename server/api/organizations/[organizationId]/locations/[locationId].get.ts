@@ -28,7 +28,6 @@ interface LocationRow {
   last_synced_at: string | null
   created_at: string
   updated_at: string
-  assigned_member_id: string | null
 }
 
 export default defineHandler(async (event) => {
@@ -43,7 +42,7 @@ export default defineHandler(async (event) => {
     const { db, organization } = await requireLocationAccess(event, organizationId, locationId)
 
     const location = await queryFirst<LocationRow>(db, `
-      SELECT bl.id, bl.slug, bl.title, bl.address, bl.phone, bl.website_url, bl.maps_url, bl.latitude, bl.longitude, bl.opening_hours, bl.special_hours, bl.categories, bl.description, bl.short_description, bl.email, bl.price_level, bl.google_place_id, bl.rating, bl.review_count, bl.status, bl.last_synced_at, bl.created_at, bl.updated_at, bl.assigned_member_id
+      SELECT bl.id, bl.slug, bl.title, bl.address, bl.phone, bl.website_url, bl.maps_url, bl.latitude, bl.longitude, bl.opening_hours, bl.special_hours, bl.categories, bl.description, bl.short_description, bl.email, bl.price_level, bl.google_place_id, bl.rating, bl.review_count, bl.status, bl.last_synced_at, bl.created_at, bl.updated_at
       FROM business_locations bl
       WHERE bl.id = ? AND bl.organization_id = ?
       LIMIT 1

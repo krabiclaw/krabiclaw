@@ -103,7 +103,7 @@ async function assignedThreadScope(principal?: MemberAccessPrincipal | null) {
  * The operational record a thread refers to.
  *
  * A thread carries no time, party size or status of its own any more, so the
- * inbox reads them from the booking or reservation that links back to it. A
+ * inbox reads them from the booking or stay that links back to it. A
  * thread with no record yields NULLs, and the surface says the thread has no
  * booking rather than printing a fabricated slot.
  */
@@ -112,9 +112,6 @@ const OPERATIONAL_RECORDS_SQL = `(
       FROM bookings b JOIN product_sessions s ON s.id = b.product_session_id
       JOIN product_booking_configs bc ON bc.organization_id = b.organization_id AND bc.product_id = b.product_id
      WHERE b.request_id IS NOT NULL
-    UNION ALL
-    SELECT r.request_id, r.status, r.party_size, r.starts_at, r.ends_at, r.timezone, NULL, NULL, NULL, NULL, NULL
-      FROM reservations r WHERE r.request_id IS NOT NULL
     UNION ALL
     SELECT st.request_id, st.status, st.adults + st.children, ${STAY_THREAD_STARTS_SQL('st')}, ${STAY_THREAD_ENDS_SQL('st')}, l.timezone, st.check_in_date, st.check_out_date, bc.assigned_member_id, st.product_id, st.channel
       FROM stays st
@@ -260,11 +257,11 @@ const SUPPORT_THREAD_SQL = `(EXISTS (SELECT 1 FROM activity_entries e WHERE e.re
 
 /**
  * A booking lands as a stay, not as a conversation: a stay is in the inbox once someone has written.
- * A checkout's thread waits on the guest: it is a conversation once payment has created its booking or reservation.
+ * A checkout's thread waits on the guest: it is a conversation once payment has created its booking.
  */
 const HAS_CONVERSATION_SQL = `(gt.kind <> 'stay' OR EXISTS (SELECT 1 FROM activity_entries e WHERE e.request_id = gt.id AND e.kind = 'message' AND ${messageHasContentSql('e')}))
   AND (json_extract(gt.payload_json, '$.provenance.creation_kind') IS NOT 'checkout'
-    OR EXISTS (SELECT 1 FROM bookings b WHERE b.request_id = gt.id) OR EXISTS (SELECT 1 FROM reservations v WHERE v.request_id = gt.id))`
+    OR EXISTS (SELECT 1 FROM bookings b WHERE b.request_id = gt.id))`
 
 const UNREAD_FOR_MEMBER_SQL = `EXISTS (
         SELECT 1 FROM activity_entries n
@@ -358,7 +355,7 @@ export async function listGuestThreads(
     FROM requests gt${OPERATIONAL_RECORD_SQL}
     JOIN organization o ON o.id = gt.organization_id
     LEFT JOIN business_locations bl ON bl.id = gt.location_id
-    WHERE gt.kind IN ('contact', 'reservation', 'booking', 'stay') AND ${scope.where}${unreadFilter}
+    WHERE gt.kind IN ('contact', 'booking', 'stay') AND ${scope.where}${unreadFilter}
     ORDER BY latest_at DESC, gt.id
     LIMIT ? OFFSET ?
   `, [...scope.params, ...unreadParams, limit, opts.offset ?? 0])
@@ -441,7 +438,7 @@ export async function countUnreadInboxThreads(db: DbClient, organizationId: stri
   const rows = await queryAll<{ support: number; count: number }>(db, `
     SELECT ${SUPPORT_THREAD_SQL} AS support, COUNT(*) AS count
       FROM requests gt${OPERATIONAL_RECORD_SQL} LEFT JOIN business_locations bl ON bl.id = gt.location_id
-     WHERE gt.kind IN ('contact', 'reservation', 'booking', 'stay') AND ${scope.where} AND ${UNREAD_FOR_MEMBER_SQL}
+     WHERE gt.kind IN ('contact', 'booking', 'stay') AND ${scope.where} AND ${UNREAD_FOR_MEMBER_SQL}
      GROUP BY 1`, [...scope.params, opts.userId, opts.userId])
   const support = rows.find(row => row.support === 1)?.count ?? 0
   const guests = rows.find(row => row.support !== 1)?.count ?? 0
@@ -525,7 +522,7 @@ export async function listOrganizationGuestThreads(
       op.status AS operational_status
     FROM requests gt${OPERATIONAL_RECORD_SQL}
     LEFT JOIN business_locations bl ON bl.id = gt.location_id${PLACE_IMAGE_SQL}
-    WHERE gt.kind IN ('contact', 'reservation', 'booking', 'stay') AND ${where}
+    WHERE gt.kind IN ('contact', 'booking', 'stay') AND ${where}
     ${unreadFilter}
     ORDER BY gt.updated_at DESC, gt.id
     LIMIT ? OFFSET ?
@@ -598,9 +595,8 @@ async function listUnreadThreadIds(db: DbClient, threadIds: string[], userId: st
 
 /** The guest entry a reply task is about: a message, or a contact form's own words. */
 export const GUEST_QUESTION_SQL = `guest_entry.actor_kind = 'guest' AND (guest_entry.kind = 'message' OR (guest_entry.kind = 'submission' AND r.kind = 'contact'))`
-/** A cancelled booking, reservation or stay answers what the guest asked before it, by when the guest asked it. */
+/** A cancelled booking or stay answers what the guest asked before it, by when the guest asked it. */
 export const CANCELLED_AFTER_SQL = `(EXISTS (SELECT 1 FROM bookings record WHERE record.request_id = guest_entry.request_id AND record.status = 'cancelled' AND record.cancelled_at >= ${guestEntryAskedAtSql('guest_entry')})
-  OR EXISTS (SELECT 1 FROM reservations record WHERE record.request_id = guest_entry.request_id AND record.status = 'cancelled' AND record.cancelled_at >= ${guestEntryAskedAtSql('guest_entry')})
   OR EXISTS (SELECT 1 FROM stays record WHERE record.request_id = guest_entry.request_id AND record.status = 'cancelled' AND record.cancelled_at >= ${guestEntryAskedAtSql('guest_entry')}))`
 
 /**
@@ -735,8 +731,8 @@ export function conversationTaskQueries(requestId: string, now: string): BatchQu
         AND p.request_id = ? AND p.event_name = 'booking_change.requested' AND ${CHANGE_ANSWERED_SQL}`,
     params: [now, now, requestId],
   }, {
-    // A change that needs the business: one the guest asked for (now), a business proposal on a booking or
-    // reservation (from when it expires unanswered), or a Google Calendar move the booking refused.
+    // A change that needs the business: one the guest asked for (now), a business proposal on a booking
+    // (from when it expires unanswered), or a Google Calendar move the booking refused.
     query: `INSERT INTO tasks (id, organization_id, kind, subject_type, subject_id, product_id, location_id, starts_at, timezone, status, dedupe_key, version, created_at, updated_at)
       SELECT lower(hex(randomblob(16))), r.organization_id, 'booking_change', r.kind, record.id, record.product_id, r.location_id,
           CASE WHEN p.event_name = 'booking_change.requested' AND p.actor_kind <> 'guest'
@@ -745,11 +741,10 @@ export function conversationTaskQueries(requestId: string, now: string): BatchQu
         FROM requests r JOIN organization o ON o.id = r.organization_id
         LEFT JOIN business_locations l ON l.organization_id = r.organization_id AND l.id = r.location_id
         JOIN (SELECT b.id, b.request_id, b.product_id, ps.ends_at, ps.timezone FROM bookings b JOIN product_sessions ps ON ps.id = b.product_session_id AND ps.organization_id = b.organization_id
-              UNION ALL SELECT v.id, v.request_id, NULL, v.ends_at, v.timezone FROM reservations v
               UNION ALL SELECT s.id, s.request_id, s.product_id, NULL, NULL FROM stays s) record ON record.request_id = r.id
         JOIN activity_entries p ON p.request_id = r.id
        WHERE r.id = ? AND ((p.event_name = 'booking_change.requested' AND NOT ${CHANGE_ANSWERED_SQL}
-           AND (p.actor_kind = 'guest' OR r.kind IN ('booking', 'reservation')))
+           AND (p.actor_kind = 'guest' OR r.kind = 'booking'))
          OR p.event_name = 'calendar_sync.move_refused')
       ON CONFLICT (dedupe_key) DO NOTHING`,
     params: [now, now, requestId],

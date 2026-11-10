@@ -16,7 +16,6 @@ import { getMediaAsset, listMediaAssets } from '~/server/utils/media-asset-manag
 import { getDashboardLocationContext } from '~/server/utils/dashboard-context'
 import { parseLocationPayload } from '~/server/utils/location-payload'
 import { getProduct, hydrateProductMedia, productPublicPresentation, summarizeLocationProducts } from '~/server/utils/product-management'
-import { getLocationReservationConfig } from '~/server/utils/reservations'
 import { requireBlogAccess } from '~/server/utils/blog-access'
 import { getBlogPost, listBlogPosts } from '~/server/utils/content/publishing'
 import { isArticleCollection } from '~/utils/article-collections'
@@ -196,9 +195,8 @@ export async function loadDashboardLocationOverview(
   }
   const principal = memberAccessPrincipal(organization, { env, event })
   await assertLocationAccess(db, { ...principal, locationId })
-  const [catalog, reservationConfig, counts] = await Promise.all([
+  const [catalog, counts] = await Promise.all([
     summarizeLocationProducts(db, { organizationId: organization.id, locationId }),
-    getLocationReservationConfig(db, { organizationId: organization.id, locationId }),
     loadLocationContentCounts(db, organizationId, locationId),
   ])
   return {
@@ -207,7 +205,6 @@ export async function loadDashboardLocationOverview(
       location: parseLocationPayload(location)!,
     },
     catalog,
-    reservationConfig,
     counts,
   }
 }

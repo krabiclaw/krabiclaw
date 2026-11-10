@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { OPEN_TERMS_JSON } from './support/booking-terms.ts'
 import test from 'node:test'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
@@ -197,7 +198,7 @@ test('a consultation gives its attorney jobs that follow the booking and an aler
     await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,timezone,starts_at,ends_at,capacity,status,created_by,updated_by) VALUES('session',?,'product','America/New_York','2099-10-01T13:00:00.000Z','2099-10-01T14:00:00.000Z',1,'scheduled','host','host')").bind(ORG).run()
     const opening = { id: 'consult-request', kind: 'booking' as const, organization_id: ORG, location_id: null, user_id: null, review_id: null, payload: threadPayloadForGuest({ name: 'Client', email: 'client@example.test' }), created_at: NOW, updated_at: NOW }
     await db.batch(requestInsertQueries(opening).map(write => db.prepare(write.query).bind(...write.params)))
-    const booking = await claimSessionCapacity(db, { env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1, requestId: opening.id })
+    const booking = await claimSessionCapacity(db, { policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1, requestId: opening.id })
     const jobs = async () => (await db.prepare("SELECT kind, subject_type, subject_id, assigned_member_id, starts_at, status FROM tasks WHERE kind IN ('consultation_prep', 'consultation_follow_up') ORDER BY kind").all<{ kind: string; status: string }>()).results
     const recompute = () => executeBatch(db, conversationTaskQueries(opening.id, new Date().toISOString()), { operation: 'Recompute consultation jobs' })
     await db.prepare("UPDATE bookings SET status = 'confirmed' WHERE id = ?").bind(booking.bookingId).run()

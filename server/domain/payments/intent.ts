@@ -70,10 +70,10 @@ function snapshotOf(payment: Payment) {
  * checkout hold's — the one the purchase reserved.
  */
 async function handoffSubject(db: DbClient, organizationId: string, payment: Payment, snapshot: ReturnType<typeof snapshotOf>) {
-  const hold = payment.subject_type === 'booking' || payment.subject_type === 'reservation'
-    ? await queryFirst<{ starts_at: string; ends_at: string; timezone: string; location_id: string | null }>(db, 'SELECT starts_at,ends_at,timezone,location_id FROM payment_checkout_holds WHERE payment_id=? AND organization_id=? ORDER BY created_at DESC LIMIT 1', [payment.id, organizationId])
+  const hold = payment.subject_type === 'booking'
+    ? await queryFirst<{ starts_at: string; ends_at: string; timezone: string; location_id: string | null; quantity: number }>(db, 'SELECT starts_at,ends_at,timezone,location_id,quantity FROM payment_checkout_holds WHERE payment_id=? AND organization_id=? ORDER BY created_at DESC LIMIT 1', [payment.id, organizationId])
     : null
-  if ((payment.subject_type === 'booking' || payment.subject_type === 'reservation') && !hold) throw new Error('Payment has no checkout hold for its time')
+  if (payment.subject_type === 'booking' && !hold) throw new Error('Payment has no checkout hold for its time')
   const productId = snapshot.stay?.product_id ?? snapshot.product_id
   // A payment outlives its product: a deleted product leaves its kind unknown, and the summary omits what depends on it.
   const product = productId ? await queryFirst<{ kind: string; slug: string; advance_notice_minutes: number | null }>(db, 'SELECT p.kind,p.slug,c.advance_notice_minutes FROM products p LEFT JOIN product_booking_configs c ON c.product_id=p.id AND c.organization_id=p.organization_id WHERE p.id=? AND p.organization_id=?', [productId, organizationId]) : null
@@ -85,6 +85,8 @@ async function handoffSubject(db: DbClient, organizationId: string, payment: Pay
   const picture = ownerId ? (await loadOwnerPictures(db, organizationId, ownerType, [ownerId])).get(ownerId) ?? null : null
   return {
     kind: product?.kind ?? (productId ? null : payment.subject_type), image_url: picture?.imageUrl ?? null, starts_at: hold?.starts_at ?? null, ends_at: hold?.ends_at ?? null, timezone: hold?.timezone ?? null,
+    // The party the booking is for: a table's deposit is one per booking, whatever the party.
+    party_size: hold?.quantity ?? null,
     // Where the offering's page is, so the buyer can read its full terms or change what they picked.
     product_slug: product?.slug ?? null, location_slug: location?.slug ?? null,
     free_cancellation_until: freeUntil && new Date().toISOString() <= freeUntil ? freeUntil : null,
@@ -233,7 +235,7 @@ export async function confirmPayment(db: DbClient, stripe: Stripe, env: Cloudfla
  * unpaid booking's confirmation carries.
  */
 export type PaymentReturn =
-  | { state: 'paid'; kind: 'booking' | 'reservation'; request_id: string; cancellation_token: string }
+  | { state: 'paid'; kind: 'booking'; request_id: string; cancellation_token: string }
   | { state: 'paid'; kind: 'stay'; activity_id: string; receipt_token: string }
   /** Stripe is still clearing the payment; nothing is booked until it captures. */
   | { state: 'processing' }
@@ -259,7 +261,7 @@ async function paymentReceipt(db: DbClient, env: CloudflareEnv, payment: Payment
     if (!stay) throw new Error('Converted stay hold has no stay')
     return { state: 'paid', kind: 'stay', activity_id: stay.id, receipt_token: (await createReplayableReservationCancelToken(env.EMAIL_REPLY_SECRET ?? '', stay.id)).token }
   }
-  if (payment.subject_type !== 'booking' && payment.subject_type !== 'reservation') throw new Error(`Payment subject ${payment.subject_type} has no guest confirmation`)
+  if (payment.subject_type !== 'booking') throw new Error(`Payment subject ${payment.subject_type} has no guest confirmation`)
   if (!hold.request_id) throw new Error('Captured visit payment has no guest request')
   const request = await getGuestRequest(db, hold.request_id, payment.organization_id, payment.subject_type)
   const cancellation = await createReplayableReservationCancelToken(env.EMAIL_REPLY_SECRET ?? '', hold.request_id)

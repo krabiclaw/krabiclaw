@@ -5,6 +5,7 @@ import { devLoginHeaders, seededSiteHeaders, seededSiteURL, testBaseUrl } from '
 import { loginAs } from './helpers/auth'
 import { mcpData, mcpRequest } from './helpers/mcp'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
+import { seededTables } from './helpers/tables'
 import type { Product, PublicProduct } from '../../server/types/products'
 import type { InboxThread } from '../../server/domain/guest-threads/types'
 import type { TaskSection } from '../../server/domain/tasks'
@@ -176,22 +177,14 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     expectOwnerDispatch(state)
   })
 
-  test('Ember & Slice restaurant reservation persists and creates log-only owner dispatch', async ({ page, request }, testInfo) => {
+  test('Ember & Slice table booking persists and creates log-only owner dispatch', async ({ page, request }, testInfo) => {
     const restaurant = seededTenant('restaurant')
     const brooklyn = restaurant.locations.brooklyn!
     const baseURL = seededSiteURL('restaurant')
     const since = new Date().toISOString()
     const email = `restaurant-reservation-${Date.now()}@playwright.example`
     const unlock = await acquireTenantMutationLock(testInfo, restaurant.organizationId)
-    const policyUrl = `${testBaseUrl()}/api/editor/organizations/${restaurant.organizationId}/locations/${brooklyn.id}/reservation-config`
-    let original: { duration_minutes: number | null; updated_at: string | null } | null | undefined
     try {
-      await loginAs(request, testBaseUrl(), 'user-e2e-kikuzuki-owner')
-      const read = await request.get(policyUrl)
-      expect(read.status(), await read.text()).toBe(200)
-      original = (await read.json()).config
-      const configured = await request.put(policyUrl, { data: { duration_minutes: 60, expected_updated_at: original?.updated_at ?? null } })
-      expect(configured.status(), await configured.text()).toBe(200)
       await openTenantPage(page, `${baseURL}/reservations`, seededSiteHeaders('restaurant'))
       await waitForNuxtHydration(page)
       await page.locator('article').filter({ has: page.getByRole('heading', { name: brooklyn.title, exact: true }) }).getByRole('button', { name: 'Request Reservation', exact: true }).click()
@@ -199,50 +192,36 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
       await page.getByLabel('Full name').fill('Restaurant Journey Test')
       await page.getByLabel('Email address').fill(email)
       await page.getByLabel(/Phone number/i).fill('+12025550123')
-      const submission = page.waitForResponse(response => response.request().method() === 'POST' && response.url().endsWith('/api/public/reservations'))
-      await page.getByLabel('Your details').getByRole('button', { name: /request reservation|ขอจองโต๊ะ/i }).click()
+      // The dining room's tables are booked as their product: the same booking every offering takes.
+      const submission = page.waitForResponse(response => response.request().method() === 'POST' && response.url().endsWith(`/api/public/products/${seededTables('brooklyn').slug}/book`))
+      await page.getByLabel('Your details').getByRole('button', { name: 'Confirm booking', exact: true }).click()
       const response = await submission
-      expect(response.status()).toBe(201)
-      const reservation: { id?: unknown; cancellationToken?: unknown; message?: unknown } = await response.json()
-      expect(reservation.message).toBe('Your reservation is confirmed.')
-      expect(reservation.id).toEqual(expect.any(String))
-      expect(reservation.cancellationToken).toEqual(expect.any(String))
-      if (typeof reservation.id !== 'string' || typeof reservation.cancellationToken !== 'string') {
-        throw new Error('Reservation response omitted its lookup credentials')
+      expect(response.status(), await response.text()).toBe(201)
+      const reservation: { request_id?: unknown; cancellation_token?: unknown; message?: unknown } = await response.json()
+      expect(reservation.message).toEqual(expect.stringMatching(/^Your reservation for .+ is confirmed\.$/u))
+      expect(reservation.request_id).toEqual(expect.any(String))
+      expect(reservation.cancellation_token).toEqual(expect.any(String))
+      if (typeof reservation.request_id !== 'string' || typeof reservation.cancellation_token !== 'string') {
+        throw new Error('The table booking response omitted its lookup credentials')
       }
-      // A booking and a reservation are read back through one route: what holds
-      // the seats differs, what the guest is shown does not.
-      const persisted = await request.get(`${baseURL}/api/public/booking-requests/${reservation.id}`, {
-        headers: { ...seededSiteHeaders('restaurant'), Authorization: `Bearer ${reservation.cancellationToken}` },
+      // Read back through the guest's receipt: a table, booked and confirmed.
+      const persisted = await request.get(`${baseURL}/api/public/booking-requests/${reservation.request_id}`, {
+        headers: { ...seededSiteHeaders('restaurant'), Authorization: `Bearer ${reservation.cancellation_token}` },
       })
       expect(persisted.status(), await persisted.text()).toBe(200)
-      const persistedBody: { booking?: { kind?: unknown; status?: unknown } } = await persisted.json()
-      expect(persistedBody.booking?.kind).toBe('reservation')
-      expect(persistedBody.booking?.status).toBe('confirmed')
-      await expect(page).toHaveURL(/\/reservations\/confirmed/)
+      const persistedBody: { booking?: { kind?: unknown; product_kind?: unknown; status?: unknown; location_id?: unknown } } = await persisted.json()
+      expect(persistedBody.booking).toMatchObject({ kind: 'booking', product_kind: 'table', status: 'confirmed', location_id: brooklyn.id })
+      await expect(page).toHaveURL(/\/bookings\/confirmed/)
       await expect(page.locator('main')).toContainText('Reservation confirmed')
       await expect(page.locator('main')).not.toContainText(/confirm your .* shortly/i)
       const state = await waitForNotifications(request, baseURL, restaurant.organizationId, since, state =>
-        state.notifications.some(row => row.template === 'new_reservation')
+        state.notifications.some(row => row.template === 'new_booking')
         && state.deliveries.some(row => row.purpose === 'owner_alert' && row.channel === 'whatsapp' && row.status === 'sent')
         && state.deliveries.some(row => row.purpose === 'guest_acknowledgement' && row.channel === 'email' && row.status === 'sent'),
       )
       expectOwnerDispatch(state)
     } finally {
-      try {
-        if (original !== undefined) {
-          const current = await request.get(policyUrl)
-          expect(current.status(), await current.text()).toBe(200)
-          // A location that had no usable reservation policy is returned to
-          // disabled reservations, rather than writing an incomplete policy.
-          const restored = !original || original.duration_minutes === null
-            ? await request.delete(policyUrl)
-            : await request.put(policyUrl, { data: { duration_minutes: original.duration_minutes, expected_updated_at: (await current.json()).config.updated_at } })
-          expect(restored.status(), await restored.text()).toBe(200)
-        }
-      } finally {
-        await unlock()
-      }
+      await unlock()
     }
   })
 
@@ -278,7 +257,6 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     expect((await book('Missing Session', 'past@playwright.example', '')).status()).toBe(400)
     expect((await book('Unknown Session', 'slot@playwright.example', 'session-that-does-not-exist')).status()).toBe(404)
     expect((await request.post(`${baseURL}/api/public/contact`, { headers, data: {} })).status()).toBe(400)
-    expect((await request.post(`${baseURL}/api/public/reservations`, { headers, data: {} })).status()).toBe(400)
     await openTenantPage(page, `${seededSiteURL('experience')}${wheel.pagePath}`, seededSiteHeaders('experience'))
     await waitForNuxtHydration(page)
     await page.getByRole('button', { name: 'Book now' }).first().click()

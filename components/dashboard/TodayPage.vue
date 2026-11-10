@@ -189,7 +189,7 @@ const { data, pending, error: loadError, refresh } = await useAsyncData(
     const now = new Date()
     // From yesterday's UTC date, so every zone's tomorrow is inside; each visit is then compared in its own zone.
     const from = addLocalDays(now.toISOString().slice(0, 10), -1)
-    const agenda = await applicationFetch<AgendaPayload>('/api/account/agenda', { query: { from, to: addLocalDays(from, 364), kinds: 'reservation,booking,stay' }, validate: isAgenda })
+    const agenda = await applicationFetch<AgendaPayload>('/api/account/agenda', { query: { from, to: addLocalDays(from, 364), kinds: 'booking,stay' }, validate: isAgenda })
     return { business: null, visits: agenda.items.filter(item => item.dayKey > localDateAt(now, item.timeZone)).map(item => agendaToTodayCard(item, { resolvedAt: now.toISOString() })) }
   },
 )

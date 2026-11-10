@@ -28,7 +28,7 @@
         <UDropdownMenu :items="viewItems" :content="{ align: 'end' }" :ui="{ content: 'w-44' }">
           <UButton :icon="VIEWS[view].icon" color="neutral" variant="soft" square :aria-label="`View: ${VIEWS[view].label}`" />
         </UDropdownMenu>
-        <!-- The gear opens this location's reservation settings, as Airbnb's opens the listing's. -->
+        <!-- The gear opens this location's availability settings, as Airbnb's opens the listing's. -->
         <UButton
           v-if="!personalScope && !sessionProduct && chosenLocation"
           icon="i-lucide-settings"
@@ -313,7 +313,7 @@ const props = defineProps<{
 }>()
 
 // Named here rather than imported: the agenda module is the server's, and a value import would bundle it.
-const AGENDA_KINDS = ['reservation', 'booking', 'post', 'stay'] as const satisfies readonly AgendaKind[]
+const AGENDA_KINDS = ['booking', 'post', 'stay'] as const satisfies readonly AgendaKind[]
 // Weeks start on Sunday, as Airbnb's do.
 const WEEKDAYS = [
   { short: 'S', rest: 'un', long: 'Sunday' }, { short: 'M', rest: 'on', long: 'Monday' }, { short: 'T', rest: 'ue', long: 'Tuesday' },

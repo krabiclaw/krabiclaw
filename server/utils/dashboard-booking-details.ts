@@ -7,11 +7,10 @@ import type { H3Event } from 'nitro'
 import { HTTPError } from 'nitro'
 import { queryAll, queryFirst, type DbClient } from '~/server/db'
 import { getDashboardMemberContext } from '~/server/utils/dashboard-context'
-import { assertResourceAccess, assertAssignedBookingAccess, memberAccessPrincipal, roleAllows } from '~/server/utils/member-access'
-import { renderBookingPolicySummary, visitPolicySummarySource, type RenderedBookingPolicySummary } from '~/server/utils/reservations'
-import type { BookingPolicySummarySource } from '~/server/utils/booking-policy-summary'
+import { assertAssignedBookingAccess, memberAccessPrincipal, roleAllows } from '~/server/utils/member-access'
+import { formatBookingPolicySummary, parseBookingPolicy, type FormattedBookingPolicySummary } from '~/server/utils/booking-policy-summary'
 import { freeCancellationUntil, outsideNotice } from '~/shared/availability-settings'
-import { assertProductKind, type ProductKind } from '~/shared/product-details'
+import type { ProductKind } from '~/shared/product-details'
 import { getSourceLocale } from '~/server/utils/organization-locales'
 import { loadOwnerPictures } from '~/server/notifications/hero'
 import { addLocalDays, isValidCalendarDate, localDateTimeToInstant, localPartsAt } from '~/utils/timezone'
@@ -26,7 +25,7 @@ import { formAnswerSnapshotsSchema, type FormAnswerSnapshot } from '~/shared/for
 import { canRetryGuestVisitRefund } from '~/server/domain/payments/visit-refund'
 import {paymentStateLabel,paymentDisplay,paymentRefundsDisplay,paymentOrderDisplay,type PaymentDisplay,type PaymentRefundDisplay,type PaymentOrderDisplay} from '~/shared/payment-display'
 
-export type DashboardBookingType = 'reservation' | 'booking'
+export type DashboardBookingType = 'booking'
 /** What the record screen can show: a visit, or a purchase that stands on its own (an order, or a payment whose visit is gone). */
 export type DashboardRecordType = DashboardBookingType | 'order' | 'payment'
 
@@ -53,9 +52,9 @@ interface BookingRow {
   timezone: string
   status: string
   requests: string | null
-  experience_id: string | null
-  experience_title: string | null
-  session_id: string | null
+  experience_id: string
+  experience_title: string
+  session_id: string
   scheduling_mode: string | null
   session_status: string | null
   request_id: string | null
@@ -63,9 +62,9 @@ interface BookingRow {
   cancellation_used_at: string | null
   created_at: string
   updated_at: string
-  policy_json: string | null
-  product_kind: string | null
-  /** A class's or consultation's advance notice; null for a reservation. */
+  policy_json: string
+  product_kind: ProductKind
+  /** The offering's advance notice, which also closes the guest's own cancellation; null is no notice. */
   advance_notice_minutes: number | null
   product_details_json: string | null
   no_show_at: string | null
@@ -88,6 +87,8 @@ export interface DashboardBookingDetails {
   operationalUpdatedAt: string
   operationalBookingId: string
   type: DashboardRecordType
+  /** What was booked: a table reads as a reservation. Null for a purchase. */
+  productKind: ProductKind | null
   organizationId: string
   organizationName: string
   vertical: string
@@ -121,15 +122,15 @@ export interface DashboardBookingDetails {
   requests: string | null
   experienceId: string | null
   /**
-   * The session a booking holds seats in. Null for a reservation, which has no
-   * occurrence row. A change to a booking names the session it moves to, so the
-   * screen has to know which one it is on now.
+   * The session a booking holds seats in. A change to a booking names the
+   * session it moves to, so the screen has to know which one it is on now.
+   * Null for a purchase.
    */
   sessionId: string | null
   threadId: string | null
   createdAt: string
   updatedAt: string
-  policy: RenderedBookingPolicySummary | null
+  policy: FormattedBookingPolicySummary | null
   notes: DashboardBookingNote[]
   /** The guest's answers to the business's own questions, in the wording they answered. A request made before questions has none. */
   answers: FormAnswerSnapshot[]
@@ -183,9 +184,9 @@ async function loadBookingRow(
   type: DashboardBookingType,
   bookingId: string,
 ): Promise<BookingRow | null> {
-  // When, for how many and against what all live on the record the thread
-  // refers to — a reservation or a booking — not on the thread. The thread
-  // carries the conversation and the guest.
+  // When, for how many and against what all live on the booking the thread
+  // refers to, not on the thread. The thread carries the conversation and the
+  // guest.
   return queryFirst<BookingRow>(db, `SELECT r.id, record.id AS operational_id, r.organization_id, s.name AS organization_name, s.vertical,
     record.assigned_member_id, record.operational_updated_at, record.policy_json, record.product_kind, record.product_details_json, record.scheduling_mode, record.advance_notice_minutes, record.session_status, record.location_id, l.slug AS location_slug, l.title AS location_title, l.address AS location_address,
     json_extract(r.payload_json, '$.guest.name') AS guest_name, json_extract(r.payload_json, '$.guest.email') AS guest_email, json_extract(r.payload_json, '$.guest.phone') AS guest_phone,
@@ -195,22 +196,16 @@ async function loadBookingRow(
     FROM requests r
     JOIN organization s ON s.id = r.organization_id
     JOIN (
-      SELECT b.id, b.request_id, b.status, b.party_size, ps.starts_at, ps.ends_at, ps.timezone, ps.location_id, b.product_id, p.name AS product_name, ps.id AS product_session_id, cfg.assigned_member_id, b.updated_at AS operational_updated_at, NULL AS policy_json, p.kind AS product_kind, p.details_json AS product_details_json, cfg.scheduling_mode, cfg.advance_notice_minutes, ps.status AS session_status, b.no_show_at
+      SELECT b.id, b.request_id, b.status, b.party_size, ps.starts_at, ps.ends_at, ps.timezone, ps.location_id, b.product_id, p.name AS product_name, ps.id AS product_session_id, cfg.assigned_member_id, b.updated_at AS operational_updated_at, b.policy_json, p.kind AS product_kind, p.details_json AS product_details_json, cfg.scheduling_mode, cfg.advance_notice_minutes, ps.status AS session_status, b.no_show_at
         FROM bookings b JOIN product_sessions ps ON ps.id = b.product_session_id JOIN products p ON p.id = b.product_id
         LEFT JOIN product_booking_configs cfg ON cfg.product_id = b.product_id AND cfg.organization_id = b.organization_id
-      UNION ALL
-      SELECT res.id, res.request_id, res.status, res.party_size, res.starts_at, res.ends_at, res.timezone, res.location_id, NULL, NULL, NULL, NULL, res.updated_at, res.policy_json, NULL, NULL, NULL, NULL, NULL, res.no_show_at FROM reservations res
     ) record ON record.request_id = r.id
     LEFT JOIN business_locations l ON l.id = record.location_id
     WHERE r.id = ? AND r.kind = ? AND ${scope.buyerUserId ? `r.user_id = ? AND ${REQUEST_CURRENT_BUYER_SQL}` : 'r.organization_id = ?'}`, [bookingId, type, scope.buyerUserId ?? scope.organizationId])
 }
 
 async function assertBookingAccess(context: BookingAccessContext, row: BookingRow) {
-  if (row.experience_id) return assertAssignedBookingAccess(context.db, { ...memberAccessPrincipal(context.organization, { env: context.env }), bookingId: row.operational_id })
-  await assertResourceAccess(context.db, {
-    ...memberAccessPrincipal(context.organization, { env: context.env}),
-    resourceLocationId: row.location_id,
-  })
+  await assertAssignedBookingAccess(context.db, { ...memberAccessPrincipal(context.organization, { env: context.env }), bookingId: row.operational_id })
 }
 
 function localDateOf(row: Pick<BookingRow, 'starts_at' | 'timezone'>): string {
@@ -270,11 +265,11 @@ export async function loadDashboardBookingDetails(
  * request's current buyer, the team's private notes and scheduling stay with
  * the team, and the payments are the ones this account made.
  */
-// A booking shows its experience's picture and a reservation its location's. Organization artwork never stands in.
-async function loadResourceImage(db: DbClient, row: BookingRow, type: DashboardBookingType) {
-  const [ownerType, ownerId] = type === 'booking' && row.experience_id
-    ? ['product' as const, row.experience_id]
-    : ['business_location' as const, row.location_id]
+// A booking shows its offering's picture and a table its location's. Organization artwork never stands in.
+async function loadResourceImage(db: DbClient, row: BookingRow) {
+  const [ownerType, ownerId] = row.product_kind === 'table'
+    ? ['business_location' as const, row.location_id]
+    : ['product' as const, row.experience_id]
   if (!ownerId) return null
   return (await loadOwnerPictures(db, row.organization_id, ownerType, [ownerId], { organizationFallback: false })).get(ownerId)?.imageUrl ?? null
 }
@@ -300,16 +295,15 @@ async function composeBookingDetails(
 ): Promise<DashboardBookingDetails> {
   if (row.location_id !== null && !row.location_title) throw new HTTPError({ statusCode: 500, message: 'The booking location is missing its title' })
 
-  const locations = await queryAll<{ id: string; title: string }>(db, 'SELECT id, title FROM business_locations WHERE organization_id = ? ORDER BY title', [row.organization_id])
-  const visibleLocations = locations.filter(location => type === 'reservation' || location.id === row.location_id)
+  // A table may move to the business's tables at any of its locations; anything else stays where it is.
+  const visibleLocations = await queryAll<{ id: string; title: string }>(db, row.product_kind === 'table'
+    ? `SELECT DISTINCT l.id, l.title FROM business_locations l JOIN product_locations pl ON pl.organization_id = l.organization_id AND pl.location_id = l.id
+        JOIN products p ON p.id = pl.product_id AND p.organization_id = pl.organization_id AND p.kind = 'table'
+        JOIN product_booking_configs c ON c.organization_id = p.organization_id AND c.product_id = p.id
+       WHERE l.organization_id = ? ORDER BY l.title`
+    : 'SELECT id, title FROM business_locations WHERE organization_id = ? AND id IS ? ORDER BY title', row.product_kind === 'table' ? [row.organization_id] : [row.organization_id, row.location_id])
   const locationPictures = await loadOwnerPictures(db, row.organization_id, 'business_location', visibleLocations.map(location => location.id))
-
-  let policy: BookingPolicySummarySource = row.policy_json ? JSON.parse(row.policy_json) as BookingPolicySummarySource : visitPolicySummarySource('reservation', null)
-  let productKind: ProductKind | undefined
-  if (type === 'booking') {
-    productKind = assertProductKind(row.product_kind)
-    policy = visitPolicySummarySource('experience', row.advance_notice_minutes)
-  }
+  const policy = parseBookingPolicy(row.policy_json)
   const [policyLocale, notes, timeZone, contact] = await Promise.all([
     getSourceLocale(db,row.organization_id),
     reader.buyerUserId ? Promise.resolve([]) : listInternalNotes(db, row.request_id),
@@ -340,6 +334,7 @@ async function composeBookingDetails(
     id: row.id,
     operationalBookingId: row.operational_id,
     type,
+    productKind: row.product_kind,
     organizationId: row.organization_id,
     organizationName: row.organization_name,
     vertical: row.vertical,
@@ -347,8 +342,8 @@ async function composeBookingDetails(
     locationSlug: row.location_slug,
     locationTitle: row.location_id === null ? 'Online' : row.location_title!,
     locationAddress: row.location_address ? formatPostalAddress(parsePostalAddress(row.location_address)) || null : null,
-    resourceImageUrl: await loadResourceImage(db, row, type),
-    resourceTitle: row.experience_title || (row.location_id === null ? 'Online' : row.location_title!),
+    resourceImageUrl: await loadResourceImage(db, row),
+    resourceTitle: row.product_kind === 'table' && row.location_title ? row.location_title : row.experience_title,
     guestName: row.guest_name,
     guestEmail: row.guest_email,
     guestPhone: row.guest_phone,
@@ -373,7 +368,7 @@ async function composeBookingDetails(
     threadId: row.request_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    policy: renderBookingPolicySummary(policy, policyLocale, productKind),
+    policy: formatBookingPolicySummary(policy, policyLocale, row.product_kind),
     notes,
     answers: row.answers_json === null ? [] : formAnswerSnapshotsSchema.parse(JSON.parse(row.answers_json)),
     pendingChange: await pendingBookingChange(db, row.request_id),
@@ -381,9 +376,9 @@ async function composeBookingDetails(
     payments:reader.buyerUserId||reader.canReadPayments?payments:null,
     // The same rule the public cancel route applies, read here so the screen
     // does not offer a cancellation the write would refuse.
-    guestCanCancel: ['pending', 'confirmed'].includes(row.status) && row.ends_at > now && !complete && !row.cancellation_used_at && (row.advance_notice_minutes === null || outsideNotice(row.starts_at, row.advance_notice_minutes, Date.parse(now))),
+    guestCanCancel: ['pending', 'confirmed'].includes(row.status) && row.ends_at > now && !complete && !row.cancellation_used_at && (policy.advance_notice_minutes === null || outsideNotice(row.starts_at, policy.advance_notice_minutes, Date.parse(now))),
     guestCanRetryCancellation,
-    guestCancelRefunds: now <= freeCancellationUntil(row.starts_at, row.advance_notice_minutes),
+    guestCancelRefunds: now <= freeCancellationUntil(row.starts_at, policy.advance_notice_minutes),
     contactPhone: contact?.contactPhone ?? null,
     noShowAt: row.no_show_at,
     canMarkNoShow: !reader.buyerUserId && row.status === 'confirmed' && row.no_show_at === null && row.review_id === null && row.starts_at <= now,
@@ -423,19 +418,32 @@ export async function requestDashboardBookingChange(
 }
 
 /**
- * The scheduled sessions of a booking's own offering on one local day, for
- * whoever may change that booking: its booked provider reads them without
- * product access. The booking's current session is among them when it is that day.
+ * The scheduled sessions a booking can move to on one local day, for whoever
+ * may change that booking: its booked provider reads them without product
+ * access. They are its own offering's, or for a table, the business's tables
+ * at the location named (its own when none is). The booking's current session
+ * is among them when it is that day.
  */
-export async function listDashboardBookingChangeSessions(event: H3Event, input: { bookingId: string; date: unknown }) {
+export async function listDashboardBookingChangeSessions(event: H3Event, input: { bookingId: string; date: unknown; locationId?: unknown }) {
   if (typeof input.date !== 'string' || !isValidCalendarDate(input.date)) throw new HTTPError({ statusCode: 400, message: 'date must be a calendar date' })
+  if (input.locationId !== undefined && (typeof input.locationId !== 'string' || !input.locationId)) throw new HTTPError({ statusCode: 400, message: 'location_id must name a location' })
   const context = await bookingContext(event)
   const row = await loadBookingRow(context.db, { organizationId: context.organization.id }, 'booking', input.bookingId)
-  if (!row?.experience_id) throw new HTTPError({ statusCode: 404, message: 'Booking not found' })
+  if (!row) throw new HTTPError({ statusCode: 404, message: 'Booking not found' })
   await assertBookingAccess(context, row)
-  const sessions = await listSessions(context.db, { env: context.env, organizationId: row.organization_id, productId: row.experience_id, statuses: ['scheduled'],
-    fromInstant: localDateTimeToInstant(input.date, '00:00', row.timezone, 'compatible').toISOString(),
-    toInstant: localDateTimeToInstant(addLocalDays(input.date, 1), '00:00', row.timezone, 'compatible').toISOString() })
+  const elsewhere = input.locationId !== undefined && input.locationId !== row.location_id
+  if (elsewhere && row.product_kind !== 'table') throw new HTTPError({ statusCode: 409, message: 'Only a table booking can move to another location' })
+  const target = elsewhere
+    ? await queryFirst<{ product_id: string; timezone: string }>(context.db, `SELECT p.id AS product_id, l.timezone FROM products p
+        JOIN product_locations pl ON pl.organization_id = p.organization_id AND pl.product_id = p.id
+        JOIN business_locations l ON l.organization_id = pl.organization_id AND l.id = pl.location_id
+        JOIN product_booking_configs c ON c.organization_id = p.organization_id AND c.product_id = p.id
+       WHERE p.organization_id = ? AND p.kind = 'table' AND pl.location_id = ?`, [row.organization_id, input.locationId])
+    : { product_id: row.experience_id, timezone: row.timezone }
+  if (!target) throw new HTTPError({ statusCode: 404, message: 'That location takes no table bookings' })
+  const sessions = await listSessions(context.db, { env: context.env, organizationId: row.organization_id, productId: target.product_id, statuses: ['scheduled'], ...(elsewhere ? { locationId: input.locationId as string } : {}),
+    fromInstant: localDateTimeToInstant(input.date, '00:00', target.timezone, 'compatible').toISOString(),
+    toInstant: localDateTimeToInstant(addLocalDays(input.date, 1), '00:00', target.timezone, 'compatible').toISOString() })
   // A start inside the offering's advance notice cannot be moved into; the booked one stays shown.
   return sessions.filter(session => session.id === row.session_id || outsideNotice(session.starts_at, row.advance_notice_minutes))
 }
@@ -484,7 +492,7 @@ export async function addDashboardBookingNote(
 }
 
 export function isDashboardBookingType(value: string | undefined): value is DashboardBookingType {
-  return value === 'reservation' || value === 'booking'
+  return value === 'booking'
 }
 
 export function isDashboardRecordType(value: string | undefined): value is DashboardRecordType {
@@ -530,6 +538,7 @@ async function composePurchaseDetails(db: DbClient, env: CloudflareEnv, scope: B
     locationSlug: payment.location_slug,
     locationTitle: payment.location_id === null ? 'Online' : payment.location_title ?? 'Online',
     locationAddress: null,
+    productKind: null,
     resourceImageUrl,
     resourceTitle: snapshot.title,
     guestName: payment.buyer_name,

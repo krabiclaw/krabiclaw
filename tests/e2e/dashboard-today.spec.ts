@@ -2,6 +2,7 @@ import { expect, test, type BrowserContext, type WebSocket } from '@playwright/t
 import { loginAs, authRequestHeaders } from './helpers/auth'
 import { dismissPreviewToolbar } from './helpers'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
+import { bookTable, openSeating, seededTables } from './helpers/tables'
 import { seededSiteHeaders } from './test-env'
 import { seededTenant } from './seed/manifest'
 import type { TaskPerson, TaskSection, TaskView } from '../../server/domain/tasks'
@@ -167,68 +168,56 @@ test('an assigned member receives no owner work or unassigned restaurant work', 
   }
 })
 
-test('branch assignments grant and revoke a member’s reservation agenda and inbox', async ({ page, browser, request, baseURL }, testInfo) => {
+test('the member who handles a branch’s tables gains and loses its table bookings on the agenda and in the inbox', async ({ page, browser, request, baseURL }, testInfo) => {
   test.setTimeout(120_000)
-  test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Reservations and role changes use disposable local data only')
+  test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Table bookings and role changes use disposable local data only')
   const release = await acquireTenantMutationLock(testInfo, seededTenant('restaurant').organizationId)
   const org = 'ember-slice-demo'
   const organizationId = seededTenant('restaurant').organizationId
   const locationId = seededTenant('restaurant').locations.brooklyn.id
-  const locationPath = `/api/dashboard/locations/${locationId}`
+  // A branch's tables are one product; the member its booking setup names handles every table booked there.
+  const tables = seededTables('brooklyn')
+  const tablesPath = `/api/editor/organizations/${organizationId}/products/${tables.id}/booking`
+  const chefMemberId = seededTenant('restaurant').memberIds['user-e2e-demo-owner']!
   const inboxPath = `/api/dashboard/organizations/${organizationId}/guest-threads`
-  type Assignment = { assigned_member_id: string | null }
   type Member = { id: string; userId: string; role: string }
-  let original: Assignment | null = null
+  let reassigned = false
   let actor: Member | undefined
   let reservationId: string | null = null
   let memberContext: BrowserContext | null = null
   const failures: unknown[] = []
-  const readAssignment = async () => {
-    const response = await page.request.get(`/api/organizations/${organizationId}/locations/${locationId}`)
-    expect(response.status(), await response.text()).toBe(200)
-    return (await response.json() as { location: Assignment }).location
+  const assign = async (memberId: string) => {
+    const saved = await page.request.put(tablesPath, { data: { assigned_member_id: memberId } })
+    expect(saved.status(), await saved.text()).toBe(200)
   }
   try {
     memberContext = await browser.newContext({ baseURL })
     const memberRequest = memberContext.request
     await loginAs(page.request, baseURL!)
-    original = await readAssignment()
     const members = await page.request.get('/api/dashboard/members', { params: { org } })
     expect(members.status(), await members.text()).toBe(200)
     actor = (await members.json() as { members: Member[] }).members.find(member => member.userId === 'user-e2e-demo-role-owner')
     expect(actor, 'The canonical role actor already belongs to the demo tenant').toBeDefined()
     if (!actor) throw new Error('The canonical demo role actor is missing')
-    // The branch keeps the tenant's own responsibility; the actor holds none of it.
-    expect(original.assigned_member_id).not.toBe(actor.id)
+    // The tables are the chef's to handle; the actor holds none of them.
+    expect(actor.id).not.toBe(chefMemberId)
 
-    const availability = await request.get('/api/public/reservations/availability', {
-      headers: seededSiteHeaders('restaurant'), params: { location_id: locationId, date: new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10), days: 7 },
-    })
-    expect(availability.status(), await availability.text()).toBe(200)
-    const calendar = await availability.json() as { timezone: string; dates: Array<{ date: string; slots: Array<{ time_slot: string; starts_at: string; is_closed: boolean; is_full: boolean; remaining: number | null }> }> }
-    const day = calendar.dates.find(day => day.slots.some(slot => !slot.is_closed && !slot.is_full && (slot.remaining === null || slot.remaining >= 2)))
-    const slot = day?.slots.find(slot => !slot.is_closed && !slot.is_full && (slot.remaining === null || slot.remaining >= 2))
-    expect(slot, 'The existing demo reservation policy and hours expose a future table for two').toBeDefined()
-    if (!day || !slot) throw new Error('The existing demo location has no future table for two')
+    const slot = await openSeating(request, 2, 2 * 86_400_000)
+    const day = { date: new Intl.DateTimeFormat('en-CA', { timeZone: slot.timezone }).format(new Date(slot.starts_at)) }
     const guestName = `Branch${Date.now()} Guest`
-    const booked = await request.post('/api/public/reservations', { headers: seededSiteHeaders('restaurant'), data: {
-      name: guestName, email: `branch-assignment-${Date.now()}@playwright.example`, phone: '+61491570007',
-      date: day.date, time: slot.time_slot, guests: '2', location_id: locationId, idempotency_key: crypto.randomUUID(),
-    } })
-    expect(booked.status(), await booked.text()).toBe(201)
-    reservationId = (await booked.json() as { id: string }).id
+    reservationId = (await bookTable(request, { name: guestName, email: `branch-assignment-${Date.now()}@playwright.example`, phone: '+61491570007', partySize: 2, seating: slot })).requestId
     expect(reservationId).toEqual(expect.any(String))
-    const bookingPath = `/api/dashboard/bookings/reservation/${reservationId}`
-    const destination = `${ORG}/bookings/reservation/${reservationId}`
+    const bookingPath = `/api/dashboard/bookings/booking/${reservationId}`
+    const destination = `${ORG}/bookings/booking/${reservationId}`
     const ownerBooking = await page.request.get(bookingPath, { params: { org } })
     expect(ownerBooking.status(), await ownerBooking.text()).toBe(200)
     const { booking } = await ownerBooking.json() as { booking: DashboardBookingDetails }
-    expect(booking).toMatchObject({ id: reservationId, threadId: reservationId, organizationId, locationId, guestName, status: 'confirmed', bookingDate: day.date, bookingTime: slot.time_slot, timeZone: calendar.timezone, partySize: 2 })
+    expect(booking).toMatchObject({ threadId: reservationId, organizationId, locationId, guestName, status: 'confirmed', bookingDate: day.date, timeZone: slot.timezone, partySize: 2 })
     const ownerThread = await page.request.get(`${inboxPath}/${reservationId}`)
     expect(ownerThread.status(), await ownerThread.text()).toBe(200)
     // The conversation is about this reservation at this branch; the record above holds its time, party and status.
     const ownerConversation = (await ownerThread.json() as { thread: InboxThread }).thread
-    expect(ownerConversation).toMatchObject({ id: reservationId, kind: 'guest', guestName, channel: 'direct', home: booking.locationTitle, recordId: reservationId, recordKind: 'reservation' })
+    expect(ownerConversation).toMatchObject({ id: reservationId, kind: 'guest', guestName, channel: 'direct', home: booking.locationTitle, recordId: booking.id, recordKind: 'booking' })
     expect(ownerConversation.when).toEqual(expect.any(String))
     // The thread header's second line: the branch and the reservation's time, as the server wrote them.
     const headerFacts = `${booking.locationTitle} · ${ownerConversation.when}`
@@ -243,19 +232,13 @@ test('branch assignments grant and revoke a member’s reservation agenda and in
     memberPage.on('websocket', socket => sockets.push(socket))
     await dismissPreviewToolbar(memberPage)
     const verifyAccess = async (assigned: boolean) => {
-      // A confirmed reservation is a Calendar commitment, not a task: neither Today nor Upcoming lists it.
-      for (const range of ['today', 'upcoming'] as const) {
-        const feedResponse = await memberRequest.get('/api/dashboard/today', { params: { org, range } })
-        expect(feedResponse.status(), await feedResponse.text()).toBe(200)
-        expect((await feedResponse.json() as BusinessToday).tasks.flatMap(section => section.tasks).filter(task => task.requestId === reservationId)).toEqual([])
-      }
       const agendaResponse = await memberRequest.get('/api/dashboard/agenda', { params: { org, from: day.date, to: day.date } })
       expect(agendaResponse.status(), await agendaResponse.text()).toBe(200)
       const agenda = await agendaResponse.json() as AgendaPayload
-      if (assigned) expect(agenda.items.find(item => item.requestId === reservationId)).toMatchObject({ id: `reservation:${reservationId}`, kind: 'reservation', requestId: reservationId, locationId, title: guestName, status: 'confirmed', startsAt: slot.starts_at, to: destination })
+      if (assigned) expect(agenda.items.find(item => item.requestId === reservationId)).toMatchObject({ id: `booking:${reservationId}`, kind: 'booking', requestId: reservationId, locationId, title: guestName, status: 'confirmed', startsAt: slot.starts_at, to: destination })
       else expect(agenda.items.some(item => item.requestId === reservationId)).toBe(false)
       for (const path of [inboxPath, '/api/dashboard/guest-threads']) {
-        const response = await memberRequest.get(path, { params: { org, location_id: locationId, type: 'reservation' } })
+        const response = await memberRequest.get(path, { params: { org, location_id: locationId, type: 'booking' } })
         expect(response.status(), await response.text()).toBe(200)
         const { threads } = await response.json() as InboxListPage
         if (assigned) expect(threads.find(thread => thread.id === reservationId)).toMatchObject({ id: reservationId, kind: 'guest', guestName, home: booking.locationTitle, when: ownerConversation.when })
@@ -266,8 +249,8 @@ test('branch assignments grant and revoke a member’s reservation agenda and in
       const record = await memberRequest.get(bookingPath, { params: { org } })
       expect(record.status(), await record.text()).toBe(assigned ? 200 : 404)
       if (assigned) {
-        expect((await detail.json() as { thread: InboxThread }).thread).toMatchObject({ id: reservationId, guestName, home: booking.locationTitle, when: ownerConversation.when, recordId: reservationId, recordKind: 'reservation' })
-        expect((await record.json() as { booking: DashboardBookingDetails }).booking).toMatchObject({ id: reservationId, threadId: reservationId, guestName, locationId, status: 'confirmed' })
+        expect((await detail.json() as { thread: InboxThread }).thread).toMatchObject({ id: reservationId, guestName, home: booking.locationTitle, when: ownerConversation.when, recordId: booking.id, recordKind: 'booking' })
+        expect((await record.json() as { booking: DashboardBookingDetails }).booking).toMatchObject({ id: booking.id, threadId: reservationId, guestName, locationId, status: 'confirmed' })
         const openedThread = memberPage.waitForResponse(response => response.request().method() === 'GET'
           && new URL(response.url()).pathname === `${inboxPath}/${reservationId}`)
         expect((await memberPage.goto(`${ORG}/messages/${reservationId}`))?.status()).toBe(200)
@@ -279,10 +262,8 @@ test('branch assignments grant and revoke a member’s reservation agenda and in
       }
     }
     await verifyAccess(false)
-    const assignedMember = { assigned_member_id: actor.id }
-    const memberSaved = await page.request.patch(locationPath, { params: { org }, data: assignedMember })
-    expect(memberSaved.status(), await memberSaved.text()).toBe(200)
-    expect(await readAssignment()).toMatchObject(assignedMember)
+    await assign(actor.id)
+    reassigned = true
     await verifyAccess(true)
 
     const socket = sockets.findLast(socket => !socket.isClosed() && new URL(socket.url()).pathname === '/api/dashboard/guest-inbox/socket')
@@ -293,8 +274,9 @@ test('branch assignments grant and revoke a member’s reservation agenda and in
       const event: unknown = JSON.parse(String(frame.payload))
       return isDashboardInvalidation(event) && event.type === 'access.changed' && event.organizationId === organizationId
     } })
-    const cleared = await page.request.patch(locationPath, { params: { org }, data: { assigned_member_id: null } })
-    expect(cleared.status(), await cleared.text()).toBe(200)
+    // The tables go back to the chef.
+    await assign(chefMemberId)
+    reassigned = false
     await accessChanged
     // Revocation clears the conversation already on screen before any fresh navigation or member reads.
     await expect(memberPage.getByText(guestName, { exact: true })).toHaveCount(0)
@@ -302,7 +284,6 @@ test('branch assignments grant and revoke a member’s reservation agenda and in
     await expect(memberPage.getByRole('textbox', { name: 'Write a message…', exact: true })).toHaveCount(0)
     await expect(memberPage.locator(`[data-thread-row="${reservationId}"]`)).toHaveCount(0)
     await expect(memberPage.getByText('This conversation is no longer available', { exact: true })).toBeVisible()
-    expect(await readAssignment()).toMatchObject({ assigned_member_id: null })
     await verifyAccess(false)
   } catch (error) {
     failures.push(error)
@@ -311,17 +292,13 @@ test('branch assignments grant and revoke a member’s reservation agenda and in
       if (reservationId) {
         const cancelled = await page.request.post(`${inboxPath}/${reservationId}/operations/cancel`, { data: { idempotencyKey: crypto.randomUUID() } })
         expect(cancelled.status(), await cancelled.text()).toBe(200)
-        const read = await page.request.get(`/api/dashboard/bookings/reservation/${reservationId}`, { params: { org } })
+        const read = await page.request.get(`/api/dashboard/bookings/booking/${reservationId}`, { params: { org } })
         expect(read.status(), await read.text()).toBe(200)
-        expect((await read.json() as { booking: DashboardBookingDetails }).booking).toMatchObject({ id: reservationId, status: 'cancelled' })
+        expect((await read.json() as { booking: DashboardBookingDetails }).booking).toMatchObject({ threadId: reservationId, status: 'cancelled' })
       }
     } catch (error) { failures.push(error) }
     try {
-      if (original) {
-        const restored = await page.request.patch(locationPath, { params: { org }, data: { assigned_member_id: original.assigned_member_id } })
-        expect(restored.status(), await restored.text()).toBe(200)
-        expect(await readAssignment()).toMatchObject({ assigned_member_id: original.assigned_member_id })
-      }
+      if (reassigned) await assign(chefMemberId)
     } catch (error) { failures.push(error) }
     try {
       if (actor) {

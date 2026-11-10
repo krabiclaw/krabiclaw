@@ -88,22 +88,20 @@ export async function getMessageTemplate(db: DbClient, organizationId: string, t
 }
 
 /**
- * What an automatic message can name: every home, every product with booking
- * settings (an experience or a consultation), and every location that takes
- * table reservations. A home carries its timezone; a session's is its own.
+ * What an automatic message can name: every product with booking settings — a
+ * home, an experience, a consultation or a restaurant's tables. A home carries
+ * its timezone; a session's is its own.
  */
 export async function listMessageOfferings(db: DbClient, access: StayAccess) {
-  const offerings = await queryAll<{ kind: 'stay' | 'experience' | 'service' | 'reservation'; id: string; name: string; timezone: string | null }>(db, `
+  const offerings = await queryAll<{ kind: 'stay' | 'experience' | 'service' | 'table'; id: string; name: string; timezone: string | null }>(db, `
     SELECT p.kind, p.id, COALESCE(home.internal_name, p.name) AS name, l.timezone FROM product_booking_configs c
       JOIN products p ON p.organization_id = c.organization_id AND p.id = c.product_id
       LEFT JOIN product_stay_configs home ON home.organization_id = c.organization_id AND home.product_id = c.product_id
       LEFT JOIN business_locations l ON l.organization_id = home.organization_id AND l.id = home.location_id WHERE c.organization_id = ?
-    UNION ALL SELECT 'reservation', l.id, l.title, l.timezone FROM location_reservation_configs c
-      JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id WHERE c.organization_id = ?
-    ORDER BY name, id`, [access.organizationId, access.organizationId])
+    ORDER BY name, id`, [access.organizationId])
   for (const offering of offerings) {
     if (!offering.name?.trim()) messagingError(500, 'INVALID_MESSAGE_OFFERING', `Offering ${offering.id} has no name`, 'offerings')
-    if (!['stay', 'experience', 'service', 'reservation'].includes(offering.kind)) messagingError(500, 'INVALID_MESSAGE_OFFERING', `Offering ${offering.id} is a ${offering.kind}, which takes no bookings`, 'offerings')
+    if (!['stay', 'experience', 'service', 'table'].includes(offering.kind)) messagingError(500, 'INVALID_MESSAGE_OFFERING', `Offering ${offering.id} is a ${offering.kind}, which takes no bookings`, 'offerings')
   }
   return { offerings }
 }
@@ -123,13 +121,11 @@ export async function saveMessageTemplate(db: DbClient, env: GuestInboxPublicati
     messagingError(current === null ? 422 : 409, current === null ? 'INVALID_MESSAGING_FIELD' : 'MESSAGE_TEMPLATE_VERSION_CONFLICT', current === null ? 'A new automatic message has no expectedVersion' : 'This automatic message changed; reload it before editing', 'expectedVersion')
   }
   // Every named offering is bookable in this workspace (listMessageOfferings):
-  // a home, a product with booking settings, or a location that takes table
-  // reservations. The write repeats the check.
-  const offerings = `? = (SELECT count(*) FROM json_each(?) named WHERE EXISTS (SELECT 1 FROM product_booking_configs c WHERE c.organization_id = ? AND c.product_id = named.value)
-      OR EXISTS (SELECT 1 FROM location_reservation_configs c WHERE c.organization_id = ? AND c.location_id = named.value))`
-  const offeringGuard = [schedule.productIds.length, JSON.stringify(schedule.productIds), access.organizationId, access.organizationId]
+  // a product with booking settings. The write repeats the check.
+  const offerings = `? = (SELECT count(*) FROM json_each(?) named WHERE EXISTS (SELECT 1 FROM product_booking_configs c WHERE c.organization_id = ? AND c.product_id = named.value))`
+  const offeringGuard = [schedule.productIds.length, JSON.stringify(schedule.productIds), access.organizationId]
   if (!await queryFirst(db, `SELECT 1 WHERE ${offerings}`, offeringGuard)) {
-    messagingError(404, 'MESSAGE_OFFERING_NOT_FOUND', 'Every scheduled home, experience, consultation or reservation location must be bookable in this workspace', 'schedule.productIds')
+    messagingError(404, 'MESSAGE_OFFERING_NOT_FOUND', 'Every scheduled home, experience, consultation or table must be bookable in this workspace', 'schedule.productIds')
   }
   const previous = current === null ? null : templateSchedule(current)
   const sameReceivedScope = schedule.trigger === 'booking_received' && previous?.trigger === 'booking_received'
@@ -204,7 +200,7 @@ export async function guestThreadMessagingContext(db: DbClient, principal: Membe
 }
 
 /**
- * The stay, booking or table reservation a conversation is about, as its guest
+ * The stay or booking (a table, class or consultation) a conversation is about, as its guest
  * would read it: what and where, for how many, and its start and end on its
  * own clock. Null for a conversation with no booked record (an inquiry).
  */

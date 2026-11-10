@@ -49,7 +49,7 @@ export interface Collection {
 }
 
 /** What generating a session offering's occurrences starts from (unit `slot`). Sessions keep their own. */
-export type ProductBookingConfig = Pick<import('~/server/utils/availability').ProductBookingConfigRecord, 'duration_minutes' | 'default_capacity' | 'confirmation_mode' | 'online_payment_required' | 'held_online' | 'scheduling_mode' | 'assigned_member_id' | 'advance_notice_minutes' | 'questions' | 'questions_revision'>
+export type ProductBookingConfig = Pick<import('~/server/utils/availability').ProductBookingConfigRecord, 'duration_minutes' | 'default_capacity' | 'confirmation_mode' | 'online_payment_required' | 'held_online' | 'scheduling_mode' | 'assigned_member_id' | 'advance_notice_minutes' | 'questions' | 'questions_revision' | 'party_size_min' | 'party_size_max' | 'minimum_guest_age' | 'accessibility_contact_required' | 'payment_basis' | 'payment_min_party_size'>
 
 /**
  * A place to stay: the one location it is at and its stay settings. Times are

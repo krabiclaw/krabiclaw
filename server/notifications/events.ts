@@ -52,7 +52,8 @@ function answersFact(answers: readonly FormAnswerSnapshot[] | null | undefined):
   return fact('answers', 'Answers', answers.map(answer => `${answer.label}: ${formatFormAnswer(answer, { yes: 'Yes', no: 'No' })}`).join('\n'))
 }
 
-export interface ReservationEventInput {
+/** A class, consultation or table booking as its owner reads it, in the place's own clock. */
+export interface BookingEventInput {
   guestName: string
   guestEmail: string
   guestPhone: string | null
@@ -61,6 +62,7 @@ export interface ReservationEventInput {
   day: string
   time: string
   partySize: string
+  /** Where it happens; null for an online booking. */
   locationName: string | null
   organizationName: string
   notes: string | null
@@ -70,59 +72,15 @@ export interface ReservationEventInput {
   paid?: string | null
   /** The guest's answers to the business's own questions. */
   answers?: readonly FormAnswerSnapshot[] | null
+  productTitle: string
+  presentation: BookingPresentation
+  partyLabel?: string
+  counterpartyLabel?: string
 }
 
-export function reservationCreatedMessage(input: ReservationEventInput): MemberAlertMessage {
-  return {
-    title: `Reservation confirmed - ${input.guestName}, ${input.day}`,
-    preheader: `${input.date} at ${input.time} · ${input.partySize}`,
-    hero: input.heroImageUrl ? { imageUrl: input.heroImageUrl, alt: '' } : null,
-    facts: facts(
-      fact('guestName', 'Guest', input.guestName, true),
-      fact('date', 'Date', input.date, true),
-      fact('time', 'Time', input.time, true),
-      fact('partySize', 'Party size', input.partySize, true),
-      fact('context', 'Location', input.locationName),
-      fact('guestPhone', 'Phone', input.guestPhone && formatPhone(input.guestPhone)),
-      fact('guestEmail', 'Email', input.guestEmail, true),
-      fact('notes', 'Special requests', input.notes),
-      answersFact(input.answers),
-      fact('paid', 'Paid online', input.paid ?? null),
-    ),
-    primaryAction: { url: input.replyUrl, label: 'Reply in dashboard' },
-    category: 'reservations_bookings',
-    emailPurpose: 'transactional',
-    emailReason: `You received this email because you receive reservation notifications for ${input.organizationName}.`,
-    organizationName: input.organizationName,
-  }
-}
-
-export function reservationCancelledMessage(input: ReservationEventInput & { wasConfirmed: boolean }): MemberAlertMessage {
-  // Whether it was confirmed decides how urgently an owner acts, and the
-  // approved template has no slot of its own for it — so it leads the venue
-  // fact, which WhatsApp does carry, instead of living only in the subject.
-  const standing = input.wasConfirmed ? 'Confirmed reservation' : 'Reservation request'
-  const venue = [standing, input.locationName].filter(Boolean).join(' · ')
-  return {
-    title: `${input.wasConfirmed ? 'Reservation canceled' : 'Reservation request withdrawn'} - ${input.guestName}, ${input.day}`,
-    preheader: `${input.date} at ${input.time} · ${input.partySize}`,
-    hero: input.heroImageUrl ? { imageUrl: input.heroImageUrl, alt: '' } : null,
-    facts: facts(
-      fact('guestName', 'Guest', input.guestName, true),
-      fact('context', 'What was canceled', venue, true),
-      fact('date', 'Date', input.date, true),
-      fact('time', 'Time', input.time, true),
-      fact('partySize', 'Party size', input.partySize, true),
-      fact('guestPhone', 'Phone', input.guestPhone && formatPhone(input.guestPhone)),
-      fact('guestEmail', 'Email', input.guestEmail),
-      fact('notes', 'Special requests', input.notes),
-    ),
-    primaryAction: { url: input.replyUrl, label: 'Open in dashboard' },
-    category: 'reservations_bookings',
-    emailPurpose: 'transactional',
-    emailReason: `You received this email because a reservation with ${input.organizationName} was canceled and you receive its reservation notifications.`,
-    organizationName: input.organizationName,
-  }
+/** What was booked, and where: the offering and its place, as one fact. */
+function bookedWhat(input: Pick<BookingEventInput, 'productTitle' | 'locationName'>): string {
+  return [input.productTitle, input.locationName].filter(Boolean).join(' · ')
 }
 
 /** A stay a guest booked: paid for on the site, or sent by a channel such as Airbnb. */
@@ -234,22 +192,18 @@ export function stayTurnoverAlert<T extends Pick<StayEventInput, 'guestName' | '
   return { ...input, ...money, guestName, guestEmail: null, guestPhone: null, replyUrl: stayUrl }
 }
 
-export interface BookingEventInput extends ReservationEventInput {
-  productTitle: string
-  presentation: BookingPresentation
-  partyLabel?: string
-  counterpartyLabel?: string
-}
-
-export function bookingCreatedMessage(input: BookingEventInput): MemberAlertMessage {
+export function bookingCreatedMessage(input: BookingEventInput & { status: 'pending' | 'confirmed' }): MemberAlertMessage {
   const counterparty = input.counterpartyLabel ?? input.presentation.counterpartyLabel
   const partyLabel = input.partyLabel ?? input.presentation.partyLabel
   return {
-    title: `${input.presentation.label} request from ${input.guestName} for ${input.day}`,
+    // A booking that arrived confirmed says so; one waiting for the business is a request.
+    title: input.status === 'confirmed'
+      ? `${input.presentation.label} confirmed - ${input.guestName}, ${input.day}`
+      : `${input.presentation.label} request from ${input.guestName} for ${input.day}`,
     preheader: `${input.productTitle} · ${input.date} at ${input.time}`,
     hero: input.heroImageUrl ? { imageUrl: input.heroImageUrl, alt: input.productTitle } : null,
     facts: facts(
-      fact('context', input.presentation.label, input.productTitle, true),
+      fact('context', input.presentation.label, bookedWhat(input), true),
       fact('guestName', counterparty, input.guestName, true),
       fact('date', 'Date', input.date, true),
       fact('time', 'Time', input.time, true),
@@ -277,7 +231,7 @@ export function bookingCancelledMessage(input: BookingEventInput & { wasConfirme
     preheader: `${input.productTitle} · ${input.date} at ${input.time}`,
     hero: input.heroImageUrl ? { imageUrl: input.heroImageUrl, alt: input.productTitle } : null,
     facts: facts(
-      fact('context', 'What was canceled', `${standing} · ${input.productTitle}`, true),
+      fact('context', 'What was canceled', `${standing} · ${bookedWhat(input)}`, true),
       fact('guestName', counterparty, input.guestName, true),
       fact('date', 'Date', input.date, true),
       fact('time', 'Time', input.time, true),

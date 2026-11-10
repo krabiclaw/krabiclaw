@@ -20,7 +20,6 @@
 import DashboardListItemDialog from '~/components/dashboard/DashboardListItemDialog.vue'
 import type { FormQuestionsOwner } from '~/composables/useFormQuestionsOwner'
 import type { Product } from '~/server/types/products'
-import type { LocationReservationConfig } from '~/server/utils/reservations'
 import type { FormQuestion } from '~/shared/form-questions'
 import { formQuestionCopy, formQuestionsSummary } from '~/utils/form-question-editing'
 import { getErrorMessage } from '~/utils/errors'
@@ -30,7 +29,6 @@ const open = defineModel<boolean>('open', { default: false })
 interface Source { key: string; label: string; description: string; questions: FormQuestion[] }
 
 const dashboardApi = useDashboardApi()
-const dashboard = useDashboardOrganization()
 const organizationId = useDashboardOrganizationId()
 const sources = ref<Source[]>([])
 const chosenKey = ref<string | undefined>()
@@ -46,13 +44,9 @@ watch(open, async (isOpen) => {
   error.value = null
   loading.value = true
   try {
-    const [settings, catalog, reservations] = await Promise.all([
+    const [settings, catalog] = await Promise.all([
       dashboardApi<{ settings: { inquiry_questions: FormQuestion[] } }>('/api/dashboard/settings', { validate: (value: unknown): value is { settings: { inquiry_questions: FormQuestion[] } } => isRecord(value) && isRecord(value.settings) && Array.isArray(value.settings.inquiry_questions) }),
       dashboardApi<{ products: Product[] }>(`/api/editor/organizations/${organizationId}/products`, { validate: (value: unknown): value is { products: Product[] } => isRecord(value) && Array.isArray(value.products) }),
-      Promise.all(dashboard.locations.value.map(async location => ({
-        location,
-        config: (await dashboardApi<{ config: LocationReservationConfig | null }>(`/api/editor/organizations/${organizationId}/locations/${location.id}/reservation-config`, { validate: (value: unknown): value is { config: LocationReservationConfig | null } => isRecord(value) && (value.config === null || isRecord(value.config)) })).config,
-      }))),
     ])
     sources.value = [
       { key: 'inquiry', label: 'Website inquiry form', description: formQuestionsSummary(settings.settings.inquiry_questions), questions: settings.settings.inquiry_questions },
@@ -60,7 +54,6 @@ watch(open, async (isOpen) => {
         ...(product.booking ? [{ key: `booking:${product.id}`, label: product.name, description: `Booking · ${formQuestionsSummary(product.booking.questions)}`, questions: product.booking.questions }] : []),
         ...(product.stay ? [{ key: `stay:${product.id}`, label: product.name, description: `Home · ${formQuestionsSummary(product.stay.questions)}`, questions: product.stay.questions }] : []),
       ]),
-      ...reservations.flatMap(({ location, config }) => config ? [{ key: `reservations:${location.id}`, label: location.title, description: `Reservations · ${formQuestionsSummary(config.questions)}`, questions: config.questions }] : []),
     ].filter(source => source.key !== props.owner.key && source.questions.length)
   } catch (failure) {
     error.value = getErrorMessage(failure, 'Your other forms could not be read')

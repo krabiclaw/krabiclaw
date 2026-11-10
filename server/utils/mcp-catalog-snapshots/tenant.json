@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:11e4418e8c5ac2de62373c3a0def4b12969cb7009044e1c22bbadcc398e56e24",
-  "documentationFingerprint": "sha256:4843bc53a39b4e947ce124a28600cf2ca40001b506851290d53eaa65b25f98d8",
+  "fingerprint": "sha256:22b1ba72303b685a01dea1abf4c184ebb8efb45dd9934d5df0c544c5a903d67a",
+  "documentationFingerprint": "sha256:ac77b204fcf36f33730bcb92dbd2e75f65ee6a3e1b95d69b2539a2d1082a9564",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -9083,12 +9083,13 @@
                   "type": "object"
                 },
                 "kind": {
-                  "description": "The customer-facing kind: dish (food or drink), experience (experience or class), service (practice area or consultation), or stay (place to stay). Determines the allowed descriptive fields; booking and stock remain separate capabilities.",
+                  "description": "The customer-facing kind: dish (food or drink), experience (experience or class), service (practice area or consultation), stay (place to stay), or table (a restaurant location’s tables, booked as a reservation). Determines the allowed descriptive fields; booking and stock remain separate capabilities.",
                   "enum": [
                     "dish",
                     "experience",
                     "service",
-                    "stay"
+                    "stay",
+                    "table"
                   ],
                   "type": "string"
                 },
@@ -9939,6 +9940,10 @@
                 },
                 "booking": {
                   "properties": {
+                    "accessibility_contact_required": {
+                      "description": "Ask guests needing accessibility support to contact the business before booking.",
+                      "type": "boolean"
+                    },
                     "advance_notice_minutes": {
                       "description": "Minimum notice in minutes (1440 is 1 day, 2880 is 2 days): clients cannot book or cancel online a session that starts sooner, and no booking is moved into one. Free cancellation closes at least 24 hours before the start either way. Null means no notice.",
                       "minimum": 0,
@@ -9981,6 +9986,14 @@
                       "description": "True holds the offering online: its times are its provider's working hours, in the provider's timezone. Requires scheduling_mode provider with an assigned member.",
                       "type": "boolean"
                     },
+                    "minimum_guest_age": {
+                      "description": "Youngest guest admitted, stated to guests before booking; null states none.",
+                      "minimum": 0,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
                     "online_payment_required": {
                       "default": false,
                       "description": "True requires online payment when booking; false is the default and does not collect online.",
@@ -9988,6 +10001,38 @@
                     },
                     "organization_id": {
                       "type": "string"
+                    },
+                    "party_size_max": {
+                      "description": "Largest party one booking takes; null is limited only by the session's places. A larger party contacts the business.",
+                      "minimum": 1,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "party_size_min": {
+                      "description": "Smallest party one booking takes; null has no minimum.",
+                      "minimum": 1,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "payment_basis": {
+                      "description": "What the online price is charged for: per_guest (each place, a class seat) or per_booking (the booking as a whole, a table's deposit).",
+                      "enum": [
+                        "per_guest",
+                        "per_booking"
+                      ],
+                      "type": "string"
+                    },
+                    "payment_min_party_size": {
+                      "description": "Smallest party that pays online, for example a deposit for parties of 6 or more; smaller parties book without paying. Null means every party pays when online_payment_required is true.",
+                      "minimum": 1,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
                     },
                     "product_id": {
                       "type": "string"
@@ -10087,6 +10132,12 @@
                     "online_payment_required",
                     "held_online",
                     "advance_notice_minutes",
+                    "party_size_min",
+                    "party_size_max",
+                    "minimum_guest_age",
+                    "accessibility_contact_required",
+                    "payment_basis",
+                    "payment_min_party_size",
                     "questions",
                     "questions_revision"
                   ],
@@ -10750,7 +10801,8 @@
                     "dish",
                     "experience",
                     "service",
-                    "stay"
+                    "stay",
+                    "table"
                   ],
                   "type": "string"
                 },
@@ -12232,7 +12284,7 @@
     {
       "name": "block_dates",
       "title": "Block dates",
-      "description": "Close a location for a whole-day date range when the user wants to prevent bookings on those dates. Both endpoints are inclusive. Adds a closure to special hours while retaining existing closures and dated hours. Returns the saved hours; existing bookings and reservations are not cancelled or messaged.",
+      "description": "Close a location for a whole-day date range when the user wants to prevent bookings on those dates. Both endpoints are inclusive. Adds a closure to special hours while retaining existing closures and dated hours. Returns the saved hours; existing bookings are not cancelled or messaged.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -12312,7 +12364,6 @@
                 },
                 "kind": {
                   "enum": [
-                    "reservation",
                     "booking",
                     "post",
                     "stay"
@@ -12332,12 +12383,6 @@
                   ]
                 },
                 "operationalBookingId": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "operationalReservationId": {
                   "type": [
                     "string",
                     "null"
@@ -12439,7 +12484,6 @@
                 "kind",
                 "requestId",
                 "operationalBookingId",
-                "operationalReservationId",
                 "stayId",
                 "productId",
                 "stayChannel",
@@ -12591,13 +12635,6 @@
                   "null"
                 ]
               },
-              "assigned_member_id": {
-                "description": "Responsible Better Auth membership ID from list_organization_members, not userId. Null is unassigned.",
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
               "canonical_url": {
                 "type": [
                   "string",
@@ -12642,13 +12679,6 @@
               "maps_url": {
                 "type": [
                   "string",
-                  "null"
-                ]
-              },
-              "max_capacity": {
-                "description": "Stored location capacity metadata; does not limit reservations. Reservation capacity uses location_reservation_configs.slot_capacity.",
-                "type": [
-                  "number",
                   "null"
                 ]
               },
@@ -13204,8 +13234,7 @@
               },
               "kind": {
                 "enum": [
-                  "booking",
-                  "reservation"
+                  "booking"
                 ],
                 "type": "string"
               },
@@ -13224,6 +13253,17 @@
                   "string",
                   "null"
                 ]
+              },
+              "product_kind": {
+                "description": "What was booked: an experience, a consultation (service) or a restaurant table.",
+                "enum": [
+                  "dish",
+                  "experience",
+                  "service",
+                  "stay",
+                  "table"
+                ],
+                "type": "string"
               },
               "product_name": {
                 "type": [
@@ -13259,6 +13299,7 @@
               "assigned_member_id",
               "location_id",
               "product_id",
+              "product_kind",
               "product_name"
             ],
             "type": "object"
@@ -13278,8 +13319,7 @@
               },
               "kind": {
                 "enum": [
-                  "booking",
-                  "reservation"
+                  "booking"
                 ],
                 "type": "string"
               }
@@ -13710,186 +13750,6 @@
         }
       ],
       "domain": "stays",
-      "minimumRole": "admin",
-      "requiredEntitlement": null,
-      "fileParams": [],
-      "uiResourceUri": null
-    },
-    {
-      "name": "cancel_table_reservation",
-      "title": "Cancel table reservation",
-      "description": "Cancel a table reservation, release its capacity and email the guest. A required refund returns financial_action_required and a dashboard URL before cancellation.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "idempotency_key": {
-            "description": "Caller-supplied durable idempotency key. Reuse only for the identical operation.",
-            "maxLength": 200,
-            "minLength": 1,
-            "type": "string"
-          },
-          "operational_reservation_id": {
-            "description": "operational_reservation_id from list_table_reservations. Distinct from request_id, the inbox conversation ID.",
-            "type": "string"
-          },
-          "organization_id": {
-            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
-            "minLength": 1,
-            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
-            "type": "string"
-          }
-        },
-        "required": [
-          "operational_reservation_id",
-          "idempotency_key"
-        ],
-        "type": "object"
-      },
-      "outputSchema": {
-        "$defs": {},
-        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
-        "properties": {
-          "availableActions": {
-            "items": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "ok": {
-            "const": true
-          },
-          "record": {
-            "properties": {
-              "assigned_member_id": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "ends_at": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "id": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "kind": {
-                "enum": [
-                  "booking",
-                  "reservation"
-                ],
-                "type": "string"
-              },
-              "location_id": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "party_size": {
-                "minimum": 1,
-                "type": "integer"
-              },
-              "product_id": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "product_name": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "starts_at": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "status": {
-                "enum": [
-                  "pending",
-                  "confirmed",
-                  "cancelled"
-                ],
-                "type": "string"
-              },
-              "timezone": {
-                "minLength": 1,
-                "type": "string"
-              }
-            },
-            "required": [
-              "id",
-              "kind",
-              "status",
-              "party_size",
-              "starts_at",
-              "ends_at",
-              "timezone",
-              "assigned_member_id",
-              "location_id",
-              "product_id",
-              "product_name"
-            ],
-            "type": "object"
-          },
-          "request_id": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "status": {
-            "const": 200
-          },
-          "thread": {
-            "properties": {
-              "id": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "kind": {
-                "enum": [
-                  "booking",
-                  "reservation"
-                ],
-                "type": "string"
-              }
-            },
-            "required": [
-              "id",
-              "kind"
-            ],
-            "type": "object"
-          }
-        },
-        "required": [
-          "ok",
-          "status",
-          "request_id",
-          "record",
-          "availableActions",
-          "thread"
-        ],
-        "type": "object"
-      },
-      "annotations": {
-        "destructiveHint": true,
-        "idempotentHint": true,
-        "openWorldHint": true,
-        "readOnlyHint": false,
-        "title": "Cancel table reservation"
-      },
-      "securitySchemes": [
-        {
-          "scopes": [
-            "tenant"
-          ],
-          "type": "oauth2"
-        }
-      ],
-      "domain": "bookings",
       "minimumRole": "admin",
       "requiredEntitlement": null,
       "fileParams": [],
@@ -14389,8 +14249,7 @@
               },
               "kind": {
                 "enum": [
-                  "booking",
-                  "reservation"
+                  "booking"
                 ],
                 "type": "string"
               },
@@ -14409,6 +14268,17 @@
                   "string",
                   "null"
                 ]
+              },
+              "product_kind": {
+                "description": "What was booked: an experience, a consultation (service) or a restaurant table.",
+                "enum": [
+                  "dish",
+                  "experience",
+                  "service",
+                  "stay",
+                  "table"
+                ],
+                "type": "string"
               },
               "product_name": {
                 "type": [
@@ -14444,6 +14314,7 @@
               "assigned_member_id",
               "location_id",
               "product_id",
+              "product_kind",
               "product_name"
             ],
             "type": "object"
@@ -14463,8 +14334,7 @@
               },
               "kind": {
                 "enum": [
-                  "booking",
-                  "reservation"
+                  "booking"
                 ],
                 "type": "string"
               }
@@ -20800,7 +20670,7 @@
     {
       "name": "create_message_template",
       "title": "Create message template",
-      "description": "Create an automatic guest message, sent into the conversation of every stay, product booking (experience or consultation) or table reservation on the named offerings, at the scheduled time in each booking’s own timezone. A cancelled booking’s pending messages are cancelled and a moved one’s follow it. It plans only eligible future events; ambiguous or nonexistent local times fail visibly. Every confirmed stay is already sent its home’s check-in instructions at 10:00 the day before arrival, so the name “Check-in instructions” is reserved.",
+      "description": "Create an automatic guest message, sent into the conversation of every stay, product booking (experience, consultation or restaurant table) on the named offerings, at the scheduled time in each booking’s own timezone. A cancelled booking’s pending messages are cancelled and a moved one’s follow it. It plans only eligible future events; ambiguous or nonexistent local times fail visibly. Every confirmed stay is already sent its home’s check-in instructions at 10:00 the day before arrival, so the name “Check-in instructions” is reserved.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -20827,7 +20697,7 @@
                   "productIds": {
                     "description": "The offerings whose bookings get this message.",
                     "items": {
-                      "description": "A canonical product ID of a home, experience or consultation (list_products), or the location ID of a place that takes table reservations (list_locations); never a provider property ID.",
+                      "description": "A canonical product ID of a home, experience, consultation or restaurant table product (list_products); never a provider property ID.",
                       "minLength": 1,
                       "type": "string"
                     },
@@ -20863,7 +20733,7 @@
                   "productIds": {
                     "description": "The offerings whose bookings get this message.",
                     "items": {
-                      "description": "A canonical product ID of a home, experience or consultation (list_products), or the location ID of a place that takes table reservations (list_locations); never a provider property ID.",
+                      "description": "A canonical product ID of a home, experience, consultation or restaurant table product (list_products); never a provider property ID.",
                       "minLength": 1,
                       "type": "string"
                     },
@@ -20873,7 +20743,7 @@
                     "uniqueItems": true
                   },
                   "trigger": {
-                    "description": "check_in is when the booking starts: a stay’s check-in, or a consultation’s, class’s or table reservation’s start time. check_out is when it ends.",
+                    "description": "check_in is when the booking starts: a stay’s check-in, or a consultation’s, class’s or table booking’s start time. check_out is when it ends.",
                     "enum": [
                       "check_in",
                       "check_out"
@@ -20901,7 +20771,7 @@
                   "productIds": {
                     "description": "The offerings whose bookings get this message.",
                     "items": {
-                      "description": "A canonical product ID of a home, experience or consultation (list_products), or the location ID of a place that takes table reservations (list_locations); never a provider property ID.",
+                      "description": "A canonical product ID of a home, experience, consultation or restaurant table product (list_products); never a provider property ID.",
                       "minLength": 1,
                       "type": "string"
                     },
@@ -20911,7 +20781,7 @@
                     "uniqueItems": true
                   },
                   "trigger": {
-                    "description": "check_in is when the booking starts: a stay’s check-in, or a consultation’s, class’s or table reservation’s start time. check_out is when it ends.",
+                    "description": "check_in is when the booking starts: a stay’s check-in, or a consultation’s, class’s or table booking’s start time. check_out is when it ends.",
                     "enum": [
                       "check_in",
                       "check_out"
@@ -20975,7 +20845,7 @@
                       "productIds": {
                         "description": "The offerings whose bookings get this message.",
                         "items": {
-                          "description": "A canonical product ID of a home, experience or consultation (list_products), or the location ID of a place that takes table reservations (list_locations); never a provider property ID.",
+                          "description": "A canonical product ID of a home, experience, consultation or restaurant table product (list_products); never a provider property ID.",
                           "minLength": 1,
                           "type": "string"
                         },
@@ -21011,7 +20881,7 @@
                       "productIds": {
                         "description": "The offerings whose bookings get this message.",
                         "items": {
-                          "description": "A canonical product ID of a home, experience or consultation (list_products), or the location ID of a place that takes table reservations (list_locations); never a provider property ID.",
+                          "description": "A canonical product ID of a home, experience, consultation or restaurant table product (list_products); never a provider property ID.",
                           "minLength": 1,
                           "type": "string"
                         },
@@ -21021,7 +20891,7 @@
                         "uniqueItems": true
                       },
                       "trigger": {
-                        "description": "check_in is when the booking starts: a stay’s check-in, or a consultation’s, class’s or table reservation’s start time. check_out is when it ends.",
+                        "description": "check_in is when the booking starts: a stay’s check-in, or a consultation’s, class’s or table booking’s start time. check_out is when it ends.",
                         "enum": [
                           "check_in",
                           "check_out"
@@ -21049,7 +20919,7 @@
                       "productIds": {
                         "description": "The offerings whose bookings get this message.",
                         "items": {
-                          "description": "A canonical product ID of a home, experience or consultation (list_products), or the location ID of a place that takes table reservations (list_locations); never a provider property ID.",
+                          "description": "A canonical product ID of a home, experience, consultation or restaurant table product (list_products); never a provider property ID.",
                           "minLength": 1,
                           "type": "string"
                         },
@@ -21059,7 +20929,7 @@
                         "uniqueItems": true
                       },
                       "trigger": {
-                        "description": "check_in is when the booking starts: a stay’s check-in, or a consultation’s, class’s or table reservation’s start time. check_out is when it ends.",
+                        "description": "check_in is when the booking starts: a stay’s check-in, or a consultation’s, class’s or table booking’s start time. check_out is when it ends.",
                         "enum": [
                           "check_in",
                           "check_out"
@@ -21717,7 +21587,7 @@
     {
       "name": "create_product",
       "title": "Create product",
-      "description": "Add food or drink, an experience or class, a practice area or consultation, or a place to stay. An experience can start as a private draft without booking setup. To make it public, configure its booking flow or supply an external booking URL. Supplying booking creates its configuration, offering, schedule and public page together, using instant confirmation and no online collection by default. A place to stay needs stay (its location and stay settings), keeps its public house rules in details, and is priced per night by its variant price; guests book it on the site and pay in full, so it takes no order_url and publishes only once it has a nightly price and online payments are set up. Repeat the same idempotency key on retry.",
+      "description": "Add food or drink, an experience or class, a practice area or consultation, a restaurant location's tables (kind table, one per location, booked like any offering), or a place to stay. An experience can start as a private draft without booking setup. To make it public, configure its booking flow or supply an external booking URL. Supplying booking creates its configuration, offering, schedule and public page together, using instant confirmation and no online collection by default. A place to stay needs stay (its location and stay settings), keeps its public house rules in details, and is priced per night by its variant price; guests book it on the site and pay in full, so it takes no order_url and publishes only once it has a nightly price and online payments are set up. Repeat the same idempotency key on retry.",
       "inputSchema": {
         "$defs": {
           "content_ai_assistance": {
@@ -23522,8 +23392,12 @@
           },
           "booking": {
             "additionalProperties": false,
-            "description": "Complete booking setup for a published offering. Legal consultations require provider scheduling and an explicitly selected attorney. At a location, provide weekly_slots or dated sessions; an update can retain its saved weekly times. location_id null holds it online: it needs scheduling_mode provider with an assigned member, takes no weekly_slots or sessions, and is booked in that provider's working hours. Runtime validation requires actual future availability before publication.",
+            "description": "Complete booking setup for a published offering. Legal consultations require provider scheduling and an explicitly selected attorney. A restaurant's tables are one table product per location: weekly_slots repeat a seating every interval_minutes through each service, default_capacity is the guests seatable per start time, and a deposit is the variant's price with payment_basis per_booking (price zero for no deposit). At a location, provide weekly_slots or dated sessions; an update can retain its saved weekly times. location_id null holds it online: it needs scheduling_mode provider with an assigned member, takes no weekly_slots or sessions, and is booked in that provider's working hours. Runtime validation requires actual future availability before publication.",
             "properties": {
+              "accessibility_contact_required": {
+                "description": "Ask guests needing accessibility support to contact the business before booking.",
+                "type": "boolean"
+              },
               "assigned_member_id": {
                 "description": "Host membership ID from list_organization_members → members[].id or get_member_scheduling → members[].id, not userId. Every bookable offering has one: it handles all its bookings. Guests see this member’s approved public profile. Read get_member_public_profile; publication requires an approved profile with a nonblank public_name.",
                 "type": "string"
@@ -23556,10 +23430,50 @@
                   "null"
                 ]
               },
+              "minimum_guest_age": {
+                "description": "Youngest guest admitted, stated to guests before booking; null states none.",
+                "minimum": 0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
               "online_payment_required": {
                 "default": false,
                 "description": "True requires online payment when booking; false is the default and does not collect online.",
                 "type": "boolean"
+              },
+              "party_size_max": {
+                "description": "Largest party one booking takes; null is limited only by the session's places. A larger party contacts the business.",
+                "minimum": 1,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "party_size_min": {
+                "description": "Smallest party one booking takes; null has no minimum.",
+                "minimum": 1,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "payment_basis": {
+                "description": "What the online price is charged for: per_guest (each place, a class seat) or per_booking (the booking as a whole, a table's deposit).",
+                "enum": [
+                  "per_guest",
+                  "per_booking"
+                ],
+                "type": "string"
+              },
+              "payment_min_party_size": {
+                "description": "Smallest party that pays online, for example a deposit for parties of 6 or more; smaller parties book without paying. Null means every party pays when online_payment_required is true.",
+                "minimum": 1,
+                "type": [
+                  "integer",
+                  "null"
+                ]
               },
               "scheduling_mode": {
                 "description": "Legal consultations require provider scheduling with an explicitly assigned attorney. business: the business publishes its own sessions; the assigned member hosts them, but their working hours do not set the times. Experiences may use it. provider: times come from the assigned member’s working hours. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
@@ -23602,7 +23516,25 @@
               "weekly_slots": {
                 "items": {
                   "additionalProperties": false,
+                  "description": "One weekly start time, or with end_time and interval_minutes a start every interval from start_time through end_time — a restaurant's seatings through one service.",
                   "properties": {
+                    "end_time": {
+                      "description": "Local HH:mm of the last start, same day and after start_time. Given with interval_minutes.",
+                      "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "interval_minutes": {
+                      "description": "Minutes between starts from start_time through end_time. Given with end_time.",
+                      "maximum": 1440,
+                      "minimum": 5,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
                     "start_time": {
                       "description": "Local HH:mm start time; visit duration is configured separately.",
                       "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
@@ -24099,12 +24031,13 @@
             "type": "string"
           },
           "kind": {
-            "description": "The customer-facing kind: dish (food or drink), experience (experience or class), service (practice area or consultation), or stay (place to stay). Determines the allowed descriptive fields; booking and stock remain separate capabilities.",
+            "description": "The customer-facing kind: dish (food or drink), experience (experience or class), service (practice area or consultation), stay (place to stay), or table (a restaurant location’s tables, booked as a reservation). Determines the allowed descriptive fields; booking and stock remain separate capabilities.",
             "enum": [
               "dish",
               "experience",
               "service",
-              "stay"
+              "stay",
+              "table"
             ],
             "type": "string"
           },
@@ -26946,6 +26879,10 @@
               },
               "booking": {
                 "properties": {
+                  "accessibility_contact_required": {
+                    "description": "Ask guests needing accessibility support to contact the business before booking.",
+                    "type": "boolean"
+                  },
                   "advance_notice_minutes": {
                     "description": "Minimum notice in minutes (1440 is 1 day, 2880 is 2 days): clients cannot book or cancel online a session that starts sooner, and no booking is moved into one. Free cancellation closes at least 24 hours before the start either way. Null means no notice.",
                     "minimum": 0,
@@ -26988,6 +26925,14 @@
                     "description": "True holds the offering online: its times are its provider's working hours, in the provider's timezone. Requires scheduling_mode provider with an assigned member.",
                     "type": "boolean"
                   },
+                  "minimum_guest_age": {
+                    "description": "Youngest guest admitted, stated to guests before booking; null states none.",
+                    "minimum": 0,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
                   "online_payment_required": {
                     "default": false,
                     "description": "True requires online payment when booking; false is the default and does not collect online.",
@@ -26995,6 +26940,38 @@
                   },
                   "organization_id": {
                     "type": "string"
+                  },
+                  "party_size_max": {
+                    "description": "Largest party one booking takes; null is limited only by the session's places. A larger party contacts the business.",
+                    "minimum": 1,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "party_size_min": {
+                    "description": "Smallest party one booking takes; null has no minimum.",
+                    "minimum": 1,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "payment_basis": {
+                    "description": "What the online price is charged for: per_guest (each place, a class seat) or per_booking (the booking as a whole, a table's deposit).",
+                    "enum": [
+                      "per_guest",
+                      "per_booking"
+                    ],
+                    "type": "string"
+                  },
+                  "payment_min_party_size": {
+                    "description": "Smallest party that pays online, for example a deposit for parties of 6 or more; smaller parties book without paying. Null means every party pays when online_payment_required is true.",
+                    "minimum": 1,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
                   },
                   "product_id": {
                     "type": "string"
@@ -27094,6 +27071,12 @@
                   "online_payment_required",
                   "held_online",
                   "advance_notice_minutes",
+                  "party_size_min",
+                  "party_size_max",
+                  "minimum_guest_age",
+                  "accessibility_contact_required",
+                  "payment_basis",
+                  "payment_min_party_size",
                   "questions",
                   "questions_revision"
                 ],
@@ -27757,7 +27740,8 @@
                   "dish",
                   "experience",
                   "service",
-                  "stay"
+                  "stay",
+                  "table"
                 ],
                 "type": "string"
               },
@@ -29237,7 +29221,7 @@
     {
       "name": "create_product_booking",
       "title": "Create product booking",
-      "description": "Book the named guest at a returned product session; for a legal practice this books a client consultation. Review offerings start pending and instant offerings confirmed. Notifies the business’s staff and, when guest_acknowledgement is true, emails the guest. Required online payment returns financial_action_required and a dashboard URL before any booking is created.",
+      "description": "Book the named guest at a returned product session; for a legal practice this books a client consultation, and for a restaurant a table at a location (the location's table product). Review offerings start pending and instant offerings confirmed. Notifies the business’s staff and, when guest_acknowledgement is true, emails the guest. Required online payment returns financial_action_required and a dashboard URL before any booking is created.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -29291,7 +29275,7 @@
             "type": "string"
           },
           "guest_phone": {
-            "description": "Optional. International number with its country calling code, e.g. +66812345678.",
+            "description": "Required for a table; optional otherwise. International number with its country calling code, e.g. +66812345678.",
             "type": "string"
           },
           "idempotency_key": {
@@ -37628,179 +37612,6 @@
         }
       ],
       "domain": "stays",
-      "minimumRole": "admin",
-      "requiredEntitlement": null,
-      "fileParams": [],
-      "uiResourceUri": null
-    },
-    {
-      "name": "create_table_reservation",
-      "title": "Create table reservation",
-      "description": "Reserve a table for a named guest at a location’s local date and time under its saved reservation policy. Required deposits return financial_action_required and a dashboard URL before confirmation.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "answers": {
-            "description": "Answers to the configured questions by question ID: text for short_text/long_text, a choice ID for single_choice, choice IDs for multiple_choice, true or false for yes_no. Required questions must be answered. Questions come from get_reservation_policy.",
-            "items": {
-              "additionalProperties": false,
-              "properties": {
-                "question_id": {
-                  "type": "string"
-                },
-                "value": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "items": {
-                        "type": "string"
-                      },
-                      "type": "array"
-                    },
-                    {
-                      "type": "boolean"
-                    }
-                  ]
-                }
-              },
-              "required": [
-                "question_id",
-                "value"
-              ],
-              "type": "object"
-            },
-            "maxItems": 20,
-            "type": "array"
-          },
-          "date": {
-            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-            "type": "string"
-          },
-          "external_reference": {
-            "type": "string"
-          },
-          "guest_acknowledgement": {
-            "description": "Explicit choice to email the guest; owner alerts, inbox and audit are always recorded.",
-            "type": "boolean"
-          },
-          "guest_email": {
-            "type": "string"
-          },
-          "guest_name": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "guest_phone": {
-            "description": "International number with its country calling code, e.g. +66812345678.",
-            "type": "string"
-          },
-          "idempotency_key": {
-            "description": "Caller-supplied durable idempotency key. Reuse only for the identical operation.",
-            "maxLength": 200,
-            "minLength": 1,
-            "type": "string"
-          },
-          "locale": {
-            "description": "Guest confirmation language code; defaults to the website language.",
-            "type": "string"
-          },
-          "location_id": {
-            "type": "string"
-          },
-          "notes": {
-            "maxLength": 1000,
-            "type": "string"
-          },
-          "organization_id": {
-            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
-            "minLength": 1,
-            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
-            "type": "string"
-          },
-          "party_size": {
-            "maximum": 99,
-            "minimum": 1,
-            "type": "integer"
-          },
-          "questions_revision": {
-            "description": "The questions_revision the answers were collected against. Required with answers; a changed revision returns questions_changed with the current questions.",
-            "type": "string"
-          },
-          "source": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "time": {
-            "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
-            "type": "string"
-          }
-        },
-        "required": [
-          "location_id",
-          "date",
-          "time",
-          "party_size",
-          "guest_name",
-          "guest_email",
-          "guest_phone",
-          "idempotency_key",
-          "source",
-          "guest_acknowledgement"
-        ],
-        "type": "object"
-      },
-      "outputSchema": {
-        "$defs": {},
-        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
-        "properties": {
-          "http_status": {
-            "type": "integer"
-          },
-          "operational_reservation_id": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "replayed": {
-            "type": "boolean"
-          },
-          "request_id": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
-          },
-          "success": {
-            "const": true
-          }
-        },
-        "required": [
-          "success",
-          "request_id",
-          "operational_reservation_id",
-          "status",
-          "http_status"
-        ],
-        "type": "object"
-      },
-      "annotations": {
-        "destructiveHint": true,
-        "idempotentHint": true,
-        "openWorldHint": true,
-        "readOnlyHint": false,
-        "title": "Create table reservation"
-      },
-      "securitySchemes": [
-        {
-          "scopes": [
-            "tenant"
-          ],
-          "type": "oauth2"
-        }
-      ],
-      "domain": "bookings",
       "minimumRole": "admin",
       "requiredEntitlement": null,
       "fileParams": [],
@@ -47420,7 +47231,7 @@
     {
       "name": "get_calendar",
       "title": "Get calendar",
-      "description": "Read the business’s reservations, bookings, consultations, guest arrivals and departures, published posts and unavailable dates when the user wants to review its calendar. Dates are inclusive local calendar days, with at most 62 days per call. Use kinds to filter the agenda.",
+      "description": "Read the business’s bookings (table reservations, classes and consultations), guest arrivals and departures, published posts and unavailable dates when the user wants to review its calendar. Dates are inclusive local calendar days, with at most 62 days per call. Use kinds to filter the agenda.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -47437,7 +47248,6 @@
             "description": "Limit to these kinds. Defaults to every kind the location offers. A stay appears on its arrival and its departure day.",
             "items": {
               "enum": [
-                "reservation",
                 "booking",
                 "post",
                 "stay"
@@ -47582,7 +47392,6 @@
                 },
                 "kind": {
                   "enum": [
-                    "reservation",
                     "booking",
                     "post",
                     "stay"
@@ -47602,12 +47411,6 @@
                   ]
                 },
                 "operationalBookingId": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "operationalReservationId": {
                   "type": [
                     "string",
                     "null"
@@ -47709,7 +47512,6 @@
                 "kind",
                 "requestId",
                 "operationalBookingId",
-                "operationalReservationId",
                 "stayId",
                 "productId",
                 "stayChannel",
@@ -48127,7 +47929,7 @@
     {
       "name": "get_guest_conversation",
       "title": "Get guest conversation",
-      "description": "Read the entire guest conversation, including the guest's answers to the tenant's questions, messages, booking/reservation, proposals, attachments and delivery receipts. Requires request_id from the inbox or booking read.",
+      "description": "Read the entire guest conversation, including the guest's answers to the tenant's questions, messages, booking, proposals, attachments and delivery receipts. Requires request_id from the inbox or booking read.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -48520,7 +48322,6 @@
                   "kind": {
                     "enum": [
                       "booking",
-                      "reservation",
                       "stay"
                     ],
                     "type": "string"
@@ -48582,7 +48383,6 @@
               "type": {
                 "enum": [
                   "contact",
-                  "reservation",
                   "booking",
                   "stay"
                 ],
@@ -48638,7 +48438,7 @@
     {
       "name": "get_guest_messaging_context",
       "title": "Get guest messaging context",
-      "description": "Read what a canonical guest conversation is about: its booked record (a stay, booking or table reservation: what, where, for how many and when, in its own timezone), and for a home its listing and stay, including private check-in instructions the host may choose to share. An inquiry has no record; a channel inquiry can have a home without a booked stay.",
+      "description": "Read what a canonical guest conversation is about: its booked record (a stay or booking: what, where, for how many and when, in its own timezone), and for a home its listing and stay, including private check-in instructions the host may choose to share. An inquiry has no record; a channel inquiry can have a home without a booked stay.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -48758,7 +48558,7 @@
             ]
           },
           "record": {
-            "description": "The stay, booking or table reservation the conversation is about, as its guest reads it; null for an inquiry. starts and ends are local to timezone: a date, or a date and time.",
+            "description": "The stay or booking (a class, consultation or table) the conversation is about, as its guest reads it; null for an inquiry. starts and ends are local to timezone: a date, or a date and time.",
             "properties": {
               "address": {
                 "type": [
@@ -48773,8 +48573,7 @@
               "kind": {
                 "enum": [
                   "stay",
-                  "booking",
-                  "reservation"
+                  "booking"
                 ],
                 "type": "string"
               },
@@ -49003,13 +48802,6 @@
                   "null"
                 ]
               },
-              "assigned_member_id": {
-                "description": "Responsible Better Auth membership ID from list_organization_members, not userId. Null is unassigned.",
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
               "canonical_url": {
                 "type": [
                   "string",
@@ -49054,13 +48846,6 @@
               "maps_url": {
                 "type": [
                   "string",
-                  "null"
-                ]
-              },
-              "max_capacity": {
-                "description": "Stored location capacity metadata; does not limit reservations. Reservation capacity uses location_reservation_configs.slot_capacity.",
-                "type": [
-                  "number",
                   "null"
                 ]
               },
@@ -49411,7 +49196,6 @@
               "id",
               "slug",
               "title",
-              "assigned_member_id",
               "stay_map_sharing",
               "latitude",
               "longitude",
@@ -52855,6 +52639,10 @@
               },
               "booking": {
                 "properties": {
+                  "accessibility_contact_required": {
+                    "description": "Ask guests needing accessibility support to contact the business before booking.",
+                    "type": "boolean"
+                  },
                   "advance_notice_minutes": {
                     "description": "Minimum notice in minutes (1440 is 1 day, 2880 is 2 days): clients cannot book or cancel online a session that starts sooner, and no booking is moved into one. Free cancellation closes at least 24 hours before the start either way. Null means no notice.",
                     "minimum": 0,
@@ -52897,6 +52685,14 @@
                     "description": "True holds the offering online: its times are its provider's working hours, in the provider's timezone. Requires scheduling_mode provider with an assigned member.",
                     "type": "boolean"
                   },
+                  "minimum_guest_age": {
+                    "description": "Youngest guest admitted, stated to guests before booking; null states none.",
+                    "minimum": 0,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
                   "online_payment_required": {
                     "default": false,
                     "description": "True requires online payment when booking; false is the default and does not collect online.",
@@ -52904,6 +52700,38 @@
                   },
                   "organization_id": {
                     "type": "string"
+                  },
+                  "party_size_max": {
+                    "description": "Largest party one booking takes; null is limited only by the session's places. A larger party contacts the business.",
+                    "minimum": 1,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "party_size_min": {
+                    "description": "Smallest party one booking takes; null has no minimum.",
+                    "minimum": 1,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "payment_basis": {
+                    "description": "What the online price is charged for: per_guest (each place, a class seat) or per_booking (the booking as a whole, a table's deposit).",
+                    "enum": [
+                      "per_guest",
+                      "per_booking"
+                    ],
+                    "type": "string"
+                  },
+                  "payment_min_party_size": {
+                    "description": "Smallest party that pays online, for example a deposit for parties of 6 or more; smaller parties book without paying. Null means every party pays when online_payment_required is true.",
+                    "minimum": 1,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
                   },
                   "product_id": {
                     "type": "string"
@@ -53003,6 +52831,12 @@
                   "online_payment_required",
                   "held_online",
                   "advance_notice_minutes",
+                  "party_size_min",
+                  "party_size_max",
+                  "minimum_guest_age",
+                  "accessibility_contact_required",
+                  "payment_basis",
+                  "payment_min_party_size",
                   "questions",
                   "questions_revision"
                 ],
@@ -53666,7 +53500,8 @@
                   "dish",
                   "experience",
                   "service",
-                  "stay"
+                  "stay",
+                  "table"
                 ],
                 "type": "string"
               },
@@ -55146,7 +54981,7 @@
     {
       "name": "get_product_booking",
       "title": "Get product booking",
-      "description": "Read one product booking or consultation when the user wants its guest details, answers to the offering's questions, status or current session. Use updated_at when proposing a change.",
+      "description": "Read one booking — an experience, consultation or table — when the user wants its guest details, answers to the offering's questions, status or current session. Use operational_updated_at when proposing a change.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -55321,8 +55156,7 @@
               },
               "kind": {
                 "enum": [
-                  "booking",
-                  "reservation"
+                  "booking"
                 ],
                 "type": "string"
               },
@@ -55341,6 +55175,17 @@
                   "string",
                   "null"
                 ]
+              },
+              "product_kind": {
+                "description": "What was booked: an experience, a consultation (service) or a restaurant table.",
+                "enum": [
+                  "dish",
+                  "experience",
+                  "service",
+                  "stay",
+                  "table"
+                ],
+                "type": "string"
               },
               "product_name": {
                 "type": [
@@ -55376,6 +55221,7 @@
               "assigned_member_id",
               "location_id",
               "product_id",
+              "product_kind",
               "product_name"
             ],
             "type": "object"
@@ -55531,7 +55377,8 @@
                     "dish",
                     "experience",
                     "service",
-                    "stay"
+                    "stay",
+                    "table"
                   ],
                   "type": "string"
                 },
@@ -56430,258 +56277,6 @@
         }
       ],
       "domain": "locales",
-      "minimumRole": "admin",
-      "requiredEntitlement": null,
-      "fileParams": [],
-      "uiResourceUri": null
-    },
-    {
-      "name": "get_reservation_policy",
-      "title": "Get reservation policy",
-      "description": "Read one location’s table reservation settings and guest-facing policy summary. Product session bookings use get_product for their separate configuration.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "locale": {
-            "type": "string"
-          },
-          "location_id": {
-            "type": "string"
-          },
-          "organization_id": {
-            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
-            "minLength": 1,
-            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
-            "type": "string"
-          }
-        },
-        "required": [
-          "location_id"
-        ],
-        "type": "object"
-      },
-      "outputSchema": {
-        "$defs": {},
-        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
-        "properties": {
-          "policy": {
-            "properties": {
-              "accessibility_contact_required": {
-                "type": "boolean"
-              },
-              "advance_notice_minutes": {
-                "type": [
-                  "number",
-                  "null"
-                ]
-              },
-              "created_at": {
-                "type": "string"
-              },
-              "deposit_amount": {
-                "description": "Total deposit per reservation, in deposit_currency minor units.",
-                "minimum": 1,
-                "type": [
-                  "integer",
-                  "null"
-                ]
-              },
-              "deposit_currency": {
-                "description": "ISO 4217 currency code.",
-                "pattern": "^[A-Z]{3}$",
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "deposit_required": {
-                "type": "boolean"
-              },
-              "deposit_tax_behavior": {
-                "enum": [
-                  "inclusive",
-                  "exclusive",
-                  null
-                ],
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "deposit_trigger_party_size": {
-                "type": [
-                  "number",
-                  "null"
-                ]
-              },
-              "duration_minutes": {
-                "minimum": 1,
-                "type": "integer"
-              },
-              "location_id": {
-                "type": "string"
-              },
-              "minimum_guest_age": {
-                "type": [
-                  "number",
-                  "null"
-                ]
-              },
-              "questions": {
-                "description": "The tenant's own questions asked beside the required reservation fields; create_table_reservation answers them by ID.",
-                "items": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "choices": {
-                      "items": {
-                        "additionalProperties": false,
-                        "properties": {
-                          "id": {
-                            "description": "Stable choice ID.",
-                            "maxLength": 64,
-                            "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
-                            "type": "string"
-                          },
-                          "label": {
-                            "maxLength": 120,
-                            "minLength": 1,
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "id",
-                          "label"
-                        ],
-                        "type": "object"
-                      },
-                      "maxItems": 20,
-                      "type": "array"
-                    },
-                    "help_text": {
-                      "maxLength": 500,
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "id": {
-                      "description": "Stable question ID; submissions answer by this ID.",
-                      "maxLength": 64,
-                      "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
-                      "type": "string"
-                    },
-                    "label": {
-                      "maxLength": 200,
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "required": {
-                      "type": "boolean"
-                    },
-                    "type": {
-                      "enum": [
-                        "short_text",
-                        "long_text",
-                        "single_choice",
-                        "multiple_choice",
-                        "yes_no"
-                      ],
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "label",
-                    "type",
-                    "required",
-                    "help_text",
-                    "choices"
-                  ],
-                  "type": "object"
-                },
-                "maxItems": 20,
-                "type": "array"
-              },
-              "questions_revision": {
-                "description": "Send as expected_questions_revision when replacing questions, and as questions_revision when submitting answers.",
-                "type": "string"
-              },
-              "slot_capacity": {
-                "description": "Guests seatable at one start time. Null means unlimited.",
-                "type": [
-                  "number",
-                  "null"
-                ]
-              },
-              "updated_at": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "location_id",
-              "duration_minutes",
-              "deposit_required",
-              "accessibility_contact_required",
-              "questions",
-              "questions_revision",
-              "created_at",
-              "updated_at"
-            ],
-            "type": "object"
-          },
-          "summary": {
-            "properties": {
-              "heading": {
-                "type": "string"
-              },
-              "items": {
-                "items": {
-                  "properties": {
-                    "id": {
-                      "type": "string"
-                    },
-                    "text": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "text"
-                  ],
-                  "type": "object"
-                },
-                "type": "array"
-              }
-            },
-            "required": [
-              "heading",
-              "items"
-            ],
-            "type": "object"
-          }
-        },
-        "required": [
-          "policy",
-          "summary"
-        ],
-        "type": "object"
-      },
-      "annotations": {
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false,
-        "readOnlyHint": true,
-        "title": "Get reservation policy"
-      },
-      "securitySchemes": [
-        {
-          "scopes": [
-            "tenant"
-          ],
-          "type": "oauth2"
-        }
-      ],
-      "domain": "content",
       "minimumRole": "admin",
       "requiredEntitlement": null,
       "fileParams": [],
@@ -58633,28 +58228,6 @@
                           },
                           "description": {
                             "type": "string"
-                          },
-                          "reservation_questions": {
-                            "additionalProperties": {
-                              "additionalProperties": false,
-                              "properties": {
-                                "choices": {
-                                  "additionalProperties": {
-                                    "type": "string"
-                                  },
-                                  "type": "object"
-                                },
-                                "help_text": {
-                                  "type": "string"
-                                },
-                                "label": {
-                                  "type": "string"
-                                }
-                              },
-                              "type": "object"
-                            },
-                            "description": "Translated question wording keyed by question ID: { label?, help_text?, choices?: { <choice ID>: label } }.",
-                            "type": "object"
                           },
                           "seo_description": {
                             "type": "string"
@@ -67989,7 +67562,7 @@
     {
       "name": "list_guest_conversations",
       "title": "List guest conversations",
-      "description": "Read the business inbox for contacts, table reservations, bookings and stay conversations. Filter by type, current/past and whether a reply is needed. Follow page_info. Use request_id with get_guest_conversation to read messages and guest contact details.",
+      "description": "Read the business inbox for contacts, bookings (classes, consultations and restaurant tables) and stay conversations. Filter by type, current/past and whether a reply is needed. Follow page_info. Use request_id with get_guest_conversation to read messages and guest contact details.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -68026,7 +67599,6 @@
           "type": {
             "enum": [
               "contact",
-              "reservation",
               "booking",
               "stay"
             ],
@@ -68176,7 +67748,8 @@
               "dish",
               "experience",
               "service",
-              "stay"
+              "stay",
+              "table"
             ],
             "type": "string"
           },
@@ -68230,13 +67803,18 @@
                   "stay": {
                     "minimum": 0,
                     "type": "integer"
+                  },
+                  "table": {
+                    "minimum": 0,
+                    "type": "integer"
                   }
                 },
                 "required": [
                   "dish",
                   "experience",
                   "service",
-                  "stay"
+                  "stay",
+                  "table"
                 ],
                 "type": "object"
               },
@@ -68304,7 +67882,8 @@
                     "dish",
                     "experience",
                     "service",
-                    "stay"
+                    "stay",
+                    "table"
                   ],
                   "type": "string"
                 },
@@ -68443,6 +68022,7 @@
                   "experience",
                   "service",
                   "stay",
+                  "table",
                   "all"
                 ],
                 "type": "string"
@@ -69163,7 +68743,7 @@
     {
       "name": "list_message_templates",
       "title": "List message templates",
-      "description": "Read the workspace’s automatic guest messages: text the server sends every guest or client booked on the named homes, experiences, consultations or table-reservation locations, on its own schedule. Follow page_info for every page.",
+      "description": "Read the workspace’s automatic guest messages: text the server sends every guest or client booked on the named homes, experiences, consultations or restaurant table products, on its own schedule. Follow page_info for every page.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -69240,7 +68820,7 @@
                         "productIds": {
                           "description": "The offerings whose bookings get this message.",
                           "items": {
-                            "description": "A canonical product ID of a home, experience or consultation (list_products), or the location ID of a place that takes table reservations (list_locations); never a provider property ID.",
+                            "description": "A canonical product ID of a home, experience, consultation or restaurant table product (list_products); never a provider property ID.",
                             "minLength": 1,
                             "type": "string"
                           },
@@ -69276,7 +68856,7 @@
                         "productIds": {
                           "description": "The offerings whose bookings get this message.",
                           "items": {
-                            "description": "A canonical product ID of a home, experience or consultation (list_products), or the location ID of a place that takes table reservations (list_locations); never a provider property ID.",
+                            "description": "A canonical product ID of a home, experience, consultation or restaurant table product (list_products); never a provider property ID.",
                             "minLength": 1,
                             "type": "string"
                           },
@@ -69286,7 +68866,7 @@
                           "uniqueItems": true
                         },
                         "trigger": {
-                          "description": "check_in is when the booking starts: a stay’s check-in, or a consultation’s, class’s or table reservation’s start time. check_out is when it ends.",
+                          "description": "check_in is when the booking starts: a stay’s check-in, or a consultation’s, class’s or table booking’s start time. check_out is when it ends.",
                           "enum": [
                             "check_in",
                             "check_out"
@@ -69314,7 +68894,7 @@
                         "productIds": {
                           "description": "The offerings whose bookings get this message.",
                           "items": {
-                            "description": "A canonical product ID of a home, experience or consultation (list_products), or the location ID of a place that takes table reservations (list_locations); never a provider property ID.",
+                            "description": "A canonical product ID of a home, experience, consultation or restaurant table product (list_products); never a provider property ID.",
                             "minLength": 1,
                             "type": "string"
                           },
@@ -69324,7 +68904,7 @@
                           "uniqueItems": true
                         },
                         "trigger": {
-                          "description": "check_in is when the booking starts: a stay’s check-in, or a consultation’s, class’s or table reservation’s start time. check_out is when it ends.",
+                          "description": "check_in is when the booking starts: a stay’s check-in, or a consultation’s, class’s or table booking’s start time. check_out is when it ends.",
                           "enum": [
                             "check_in",
                             "check_out"
@@ -71069,7 +70649,7 @@
     {
       "name": "list_product_bookings",
       "title": "List product bookings",
-      "description": "Read product bookings and consultations with guest names, session times, assigned members and status; use operational_booking_id to manage a booking. Use get_product_booking for one booking’s guest contact details. Restaurant table reservations use list_table_reservations.",
+      "description": "Read bookings — experiences, consultations and restaurant table reservations — with guest names, session times, assigned members and status; use operational_booking_id to manage a booking. Use get_product_booking for one booking’s guest contact details.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -71177,6 +70757,17 @@
                   "minLength": 1,
                   "type": "string"
                 },
+                "product_kind": {
+                  "description": "What was booked: an experience, a consultation (service) or a restaurant table.",
+                  "enum": [
+                    "dish",
+                    "experience",
+                    "service",
+                    "stay",
+                    "table"
+                  ],
+                  "type": "string"
+                },
                 "product_session_id": {
                   "minLength": 1,
                   "type": "string"
@@ -71244,6 +70835,7 @@
                 "operational_booking_id",
                 "request_id",
                 "product_id",
+                "product_kind",
                 "product_variant_id",
                 "product_session_id",
                 "status",
@@ -71327,7 +70919,8 @@
               "dish",
               "experience",
               "service",
-              "stay"
+              "stay",
+              "table"
             ],
             "type": "string"
           },
@@ -71376,13 +70969,18 @@
                   "stay": {
                     "minimum": 0,
                     "type": "integer"
+                  },
+                  "table": {
+                    "minimum": 0,
+                    "type": "integer"
                   }
                 },
                 "required": [
                   "dish",
                   "experience",
                   "service",
-                  "stay"
+                  "stay",
+                  "table"
                 ],
                 "type": "object"
               },
@@ -71450,7 +71048,8 @@
                     "dish",
                     "experience",
                     "service",
-                    "stay"
+                    "stay",
+                    "table"
                   ],
                   "type": "string"
                 },
@@ -71589,6 +71188,7 @@
                   "experience",
                   "service",
                   "stay",
+                  "table",
                   "all"
                 ],
                 "type": "string"
@@ -71647,7 +71247,7 @@
     {
       "name": "list_scheduled_guest_messages",
       "title": "List scheduled guest messages",
-      "description": "Read automatic guest-message snapshots and visible failure reasons for stays, bookings and table reservations (stayId, bookingId or reservationId names which), optionally for one canonical guest conversation, including each stay’s built-in check-in message (templateId null, title “Check-in instructions”). Read provider delivery receipts through get_guest_conversation; no provider result is inferred from a scheduled time.",
+      "description": "Read automatic guest-message snapshots and visible failure reasons for stays and bookings (subjectType and subjectId name which), optionally for one canonical guest conversation, including each stay’s built-in check-in message (templateId null, title “Check-in instructions”). Read provider delivery receipts through get_guest_conversation; no provider result is inferred from a scheduled time.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -71777,8 +71377,7 @@
                 "subjectType": {
                   "enum": [
                     "stay",
-                    "booking",
-                    "reservation"
+                    "booking"
                   ],
                   "type": "string"
                 },
@@ -72492,206 +72091,6 @@
       "uiResourceUri": null
     },
     {
-      "name": "list_table_reservations",
-      "title": "List table reservations",
-      "description": "Read table reservations for the selected site, optionally filtered by location and creation window of up to 90 days. Returns guest contact details, reservation details and status counts. Use list_product_bookings to read product session bookings and consultations.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "cursor": {
-            "description": "Opaque next_cursor from the previous page.",
-            "type": "string"
-          },
-          "days": {
-            "description": "Optional: only include reservations made in the last N days (max 90).",
-            "type": "number"
-          },
-          "limit": {
-            "description": "Page size. Defaults to 50; maximum 100.",
-            "maximum": 100,
-            "minimum": 1,
-            "type": "number"
-          },
-          "location_id": {
-            "description": "Optional location id to list only that location's reservations.",
-            "type": "string"
-          },
-          "organization_id": {
-            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
-            "minLength": 1,
-            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
-            "type": "string"
-          }
-        },
-        "required": [],
-        "type": "object"
-      },
-      "outputSchema": {
-        "$defs": {},
-        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
-        "properties": {
-          "page_info": {
-            "properties": {
-              "has_more": {
-                "type": "boolean"
-              },
-              "next_cursor": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              }
-            },
-            "required": [
-              "has_more",
-              "next_cursor"
-            ],
-            "type": "object"
-          },
-          "submissions": {
-            "items": {
-              "properties": {
-                "created_at": {
-                  "type": "string"
-                },
-                "date": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "email": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "guests": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "id": {
-                  "description": "Inbox request ID.",
-                  "type": "string"
-                },
-                "location_id": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "location_title": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "name": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "operational_reservation_id": {
-                  "description": "Use this ID to manage the reservation.",
-                  "type": "string"
-                },
-                "phone": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "request_id": {
-                  "type": "string"
-                },
-                "requests": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "status": {
-                  "enum": [
-                    "confirmed",
-                    "cancelled"
-                  ],
-                  "type": "string"
-                },
-                "time": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "updated_at": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "id",
-                "request_id",
-                "operational_reservation_id",
-                "updated_at",
-                "status",
-                "created_at",
-                "guests",
-                "date",
-                "time",
-                "location_id"
-              ],
-              "type": "object"
-            },
-            "type": "array"
-          },
-          "summary": {
-            "properties": {
-              "by_status": {
-                "description": "Count of reservations per status.",
-                "type": "object"
-              },
-              "total": {
-                "type": "number"
-              }
-            },
-            "required": [
-              "total",
-              "by_status"
-            ],
-            "type": "object"
-          }
-        },
-        "required": [
-          "submissions",
-          "summary",
-          "page_info"
-        ],
-        "type": "object"
-      },
-      "annotations": {
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false,
-        "readOnlyHint": true,
-        "title": "List table reservations"
-      },
-      "securitySchemes": [
-        {
-          "scopes": [
-            "tenant"
-          ],
-          "type": "oauth2"
-        }
-      ],
-      "domain": "submissions",
-      "minimumRole": "admin",
-      "requiredEntitlement": null,
-      "fileParams": [],
-      "uiResourceUri": null
-    },
-    {
       "name": "list_tasks",
       "title": "List tasks",
       "description": "Read Today or Upcoming as stored tasks: turnovers, guest questions awaiting a reply, scheduled messages that did not send, accepted opportunities and tasks people added. Today is open work starting or due today or earlier plus what was done today; Upcoming is later open work by day. A member sees the tasks given to them and the turnovers at homes they look after. assignees lists who a manager can give work to.",
@@ -73362,7 +72761,7 @@
                   "type": "boolean"
                 },
                 "job": {
-                  "description": "The job for the conversation’s booked record (a turnover or home-ready job for a stay, the prep or follow-up for a booking or reservation) as list_tasks presents it; null when there is none the caller may see.",
+                  "description": "The job for the conversation’s booked record (a turnover or home-ready job for a stay, the prep or follow-up for a booking) as list_tasks presents it; null when there is none the caller may see.",
                   "properties": {
                     "action": {
                       "type": [
@@ -73821,15 +73220,14 @@
                   "type": "array"
                 },
                 "record": {
-                  "description": "The booking or table reservation the conversation is about: who booked, else what.",
+                  "description": "The booking (a class, consultation or table) the conversation is about: who booked, else what.",
                   "properties": {
                     "id": {
                       "type": "string"
                     },
                     "kind": {
                       "enum": [
-                        "booking",
-                        "reservation"
+                        "booking"
                       ],
                       "type": "string"
                     },
@@ -73902,7 +73300,6 @@
                   "enum": [
                     "stay",
                     "booking",
-                    "reservation",
                     null
                   ],
                   "type": [
@@ -74357,7 +73754,6 @@
                 },
                 "kind": {
                   "enum": [
-                    "reservation",
                     "booking",
                     "post",
                     "stay"
@@ -74377,12 +73773,6 @@
                   ]
                 },
                 "operationalBookingId": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "operationalReservationId": {
                   "type": [
                     "string",
                     "null"
@@ -74484,7 +73874,6 @@
                 "kind",
                 "requestId",
                 "operationalBookingId",
-                "operationalReservationId",
                 "stayId",
                 "productId",
                 "stayChannel",
@@ -74636,13 +74025,6 @@
                   "null"
                 ]
               },
-              "assigned_member_id": {
-                "description": "Responsible Better Auth membership ID from list_organization_members, not userId. Null is unassigned.",
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
               "canonical_url": {
                 "type": [
                   "string",
@@ -74687,13 +74069,6 @@
               "maps_url": {
                 "type": [
                   "string",
-                  "null"
-                ]
-              },
-              "max_capacity": {
-                "description": "Stored location capacity metadata; does not limit reservations. Reservation capacity uses location_reservation_configs.slot_capacity.",
-                "type": [
-                  "number",
                   "null"
                 ]
               },
@@ -77563,28 +76938,6 @@
                   },
                   "description": {
                     "type": "string"
-                  },
-                  "reservation_questions": {
-                    "additionalProperties": {
-                      "additionalProperties": false,
-                      "properties": {
-                        "choices": {
-                          "additionalProperties": {
-                            "type": "string"
-                          },
-                          "type": "object"
-                        },
-                        "help_text": {
-                          "type": "string"
-                        },
-                        "label": {
-                          "type": "string"
-                        }
-                      },
-                      "type": "object"
-                    },
-                    "description": "Translated question wording keyed by question ID: { label?, help_text?, choices?: { <choice ID>: label } }.",
-                    "type": "object"
                   },
                   "seo_description": {
                     "type": "string"
@@ -80547,28 +79900,6 @@
                 "description": "Translated question wording keyed by question ID: { label?, help_text?, choices?: { <choice ID>: label } }.",
                 "type": "object"
               },
-              "reservation_questions": {
-                "additionalProperties": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "choices": {
-                      "additionalProperties": {
-                        "type": "string"
-                      },
-                      "type": "object"
-                    },
-                    "help_text": {
-                      "type": "string"
-                    },
-                    "label": {
-                      "type": "string"
-                    }
-                  },
-                  "type": "object"
-                },
-                "description": "Translated question wording keyed by question ID: { label?, help_text?, choices?: { <choice ID>: label } }.",
-                "type": "object"
-              },
               "seo_description": {
                 "type": "string"
               },
@@ -82583,28 +81914,6 @@
                           },
                           "description": {
                             "type": "string"
-                          },
-                          "reservation_questions": {
-                            "additionalProperties": {
-                              "additionalProperties": false,
-                              "properties": {
-                                "choices": {
-                                  "additionalProperties": {
-                                    "type": "string"
-                                  },
-                                  "type": "object"
-                                },
-                                "help_text": {
-                                  "type": "string"
-                                },
-                                "label": {
-                                  "type": "string"
-                                }
-                              },
-                              "type": "object"
-                            },
-                            "description": "Translated question wording keyed by question ID: { label?, help_text?, choices?: { <choice ID>: label } }.",
-                            "type": "object"
                           },
                           "seo_description": {
                             "type": "string"
@@ -86877,12 +86186,13 @@
                   "type": "object"
                 },
                 "kind": {
-                  "description": "The customer-facing kind: dish (food or drink), experience (experience or class), service (practice area or consultation), or stay (place to stay). Determines the allowed descriptive fields; booking and stock remain separate capabilities.",
+                  "description": "The customer-facing kind: dish (food or drink), experience (experience or class), service (practice area or consultation), stay (place to stay), or table (a restaurant location’s tables, booked as a reservation). Determines the allowed descriptive fields; booking and stock remain separate capabilities.",
                   "enum": [
                     "dish",
                     "experience",
                     "service",
-                    "stay"
+                    "stay",
+                    "table"
                   ],
                   "type": "string"
                 },
@@ -87736,6 +87046,10 @@
                 },
                 "booking": {
                   "properties": {
+                    "accessibility_contact_required": {
+                      "description": "Ask guests needing accessibility support to contact the business before booking.",
+                      "type": "boolean"
+                    },
                     "advance_notice_minutes": {
                       "description": "Minimum notice in minutes (1440 is 1 day, 2880 is 2 days): clients cannot book or cancel online a session that starts sooner, and no booking is moved into one. Free cancellation closes at least 24 hours before the start either way. Null means no notice.",
                       "minimum": 0,
@@ -87778,6 +87092,14 @@
                       "description": "True holds the offering online: its times are its provider's working hours, in the provider's timezone. Requires scheduling_mode provider with an assigned member.",
                       "type": "boolean"
                     },
+                    "minimum_guest_age": {
+                      "description": "Youngest guest admitted, stated to guests before booking; null states none.",
+                      "minimum": 0,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
                     "online_payment_required": {
                       "default": false,
                       "description": "True requires online payment when booking; false is the default and does not collect online.",
@@ -87785,6 +87107,38 @@
                     },
                     "organization_id": {
                       "type": "string"
+                    },
+                    "party_size_max": {
+                      "description": "Largest party one booking takes; null is limited only by the session's places. A larger party contacts the business.",
+                      "minimum": 1,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "party_size_min": {
+                      "description": "Smallest party one booking takes; null has no minimum.",
+                      "minimum": 1,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "payment_basis": {
+                      "description": "What the online price is charged for: per_guest (each place, a class seat) or per_booking (the booking as a whole, a table's deposit).",
+                      "enum": [
+                        "per_guest",
+                        "per_booking"
+                      ],
+                      "type": "string"
+                    },
+                    "payment_min_party_size": {
+                      "description": "Smallest party that pays online, for example a deposit for parties of 6 or more; smaller parties book without paying. Null means every party pays when online_payment_required is true.",
+                      "minimum": 1,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
                     },
                     "product_id": {
                       "type": "string"
@@ -87884,6 +87238,12 @@
                     "online_payment_required",
                     "held_online",
                     "advance_notice_minutes",
+                    "party_size_min",
+                    "party_size_max",
+                    "minimum_guest_age",
+                    "accessibility_contact_required",
+                    "payment_basis",
+                    "payment_min_party_size",
                     "questions",
                     "questions_revision"
                   ],
@@ -88589,7 +87949,8 @@
                     "dish",
                     "experience",
                     "service",
-                    "stay"
+                    "stay",
+                    "table"
                   ],
                   "type": "string"
                 },
@@ -90314,8 +89675,7 @@
               },
               "kind": {
                 "enum": [
-                  "booking",
-                  "reservation"
+                  "booking"
                 ],
                 "type": "string"
               },
@@ -90334,6 +89694,17 @@
                   "string",
                   "null"
                 ]
+              },
+              "product_kind": {
+                "description": "What was booked: an experience, a consultation (service) or a restaurant table.",
+                "enum": [
+                  "dish",
+                  "experience",
+                  "service",
+                  "stay",
+                  "table"
+                ],
+                "type": "string"
               },
               "product_name": {
                 "type": [
@@ -90369,6 +89740,7 @@
               "assigned_member_id",
               "location_id",
               "product_id",
+              "product_kind",
               "product_name"
             ],
             "type": "object"
@@ -90388,8 +89760,7 @@
               },
               "kind": {
                 "enum": [
-                  "booking",
-                  "reservation"
+                  "booking"
                 ],
                 "type": "string"
               }
@@ -98354,7 +97725,7 @@
     {
       "name": "replace_product_weekly_schedule",
       "title": "Replace product weekly schedule",
-      "description": "Replace a product’s weekly time slots at one location when the user wants to change its recurring schedule. Times are in that location’s timezone and use the product duration/capacity. An online offering has no weekly slots: it is booked in its provider’s working hours (set_member_scheduling). An empty slots array clears that schedule. Sessions with any booking history are preserved; removed future sessions without bookings are cancelled, and re-added unbooked slots can reopen with current defaults.",
+      "description": "Replace a product’s weekly time slots at one location when the user wants to change its recurring schedule. Times are in that location’s timezone and use the product duration/capacity; a restaurant table product repeats a seating every interval_minutes through end_time. An online offering has no weekly slots: it is booked in its provider’s working hours (set_member_scheduling). An empty slots array clears that schedule. Sessions with any booking history are preserved; removed future sessions without bookings are cancelled, and re-added unbooked slots can reopen with current defaults.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -98374,9 +97745,28 @@
           "slots": {
             "items": {
               "additionalProperties": false,
+              "description": "One weekly start time, or with end_time and interval_minutes a start every interval from start_time through end_time — a restaurant's seatings through one service.",
               "properties": {
+                "end_time": {
+                  "description": "Local HH:mm of the last start, same day and after start_time. Given with interval_minutes.",
+                  "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "interval_minutes": {
+                  "description": "Minutes between starts from start_time through end_time. Given with end_time.",
+                  "maximum": 1440,
+                  "minimum": 5,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
                 "start_time": {
-                  "description": "Local HH:mm time.",
+                  "description": "Local HH:mm start time; visit duration is configured separately.",
+                  "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
                   "type": "string"
                 },
                 "weekday": {
@@ -98413,8 +97803,26 @@
             "items": {
               "additionalProperties": false,
               "properties": {
+                "capacity": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "end_time": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "id": {
                   "type": "string"
+                },
+                "interval_minutes": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
                 },
                 "location_id": {
                   "type": "string"
@@ -98444,7 +97852,10 @@
                 "location_id",
                 "timezone",
                 "weekday",
-                "start_time"
+                "start_time",
+                "end_time",
+                "interval_minutes",
+                "capacity"
               ],
               "type": "object"
             },
@@ -98644,28 +98055,6 @@
                         },
                         "description": {
                           "type": "string"
-                        },
-                        "reservation_questions": {
-                          "additionalProperties": {
-                            "additionalProperties": false,
-                            "properties": {
-                              "choices": {
-                                "additionalProperties": {
-                                  "type": "string"
-                                },
-                                "type": "object"
-                              },
-                              "help_text": {
-                                "type": "string"
-                              },
-                              "label": {
-                                "type": "string"
-                              }
-                            },
-                            "type": "object"
-                          },
-                          "description": "Translated question wording keyed by question ID: { label?, help_text?, choices?: { <choice ID>: label } }.",
-                          "type": "object"
                         },
                         "seo_description": {
                           "type": "string"
@@ -99568,28 +98957,6 @@
                       "description": "Translated question wording keyed by question ID: { label?, help_text?, choices?: { <choice ID>: label } }.",
                       "type": "object"
                     },
-                    "reservation_questions": {
-                      "additionalProperties": {
-                        "additionalProperties": false,
-                        "properties": {
-                          "choices": {
-                            "additionalProperties": {
-                              "type": "string"
-                            },
-                            "type": "object"
-                          },
-                          "help_text": {
-                            "type": "string"
-                          },
-                          "label": {
-                            "type": "string"
-                          }
-                        },
-                        "type": "object"
-                      },
-                      "description": "Translated question wording keyed by question ID: { label?, help_text?, choices?: { <choice ID>: label } }.",
-                      "type": "object"
-                    },
                     "seo_description": {
                       "type": "string"
                     },
@@ -99908,7 +99275,7 @@
     {
       "name": "request_product_booking_change",
       "title": "Request product booking change",
-      "description": "Email the guest a proposal to change a booking’s session or party size. The current booking and places remain unchanged until guest acceptance, which requires availability and preserves its review status. Consultation time changes always require client acceptance. For other booking kinds, apply moves the booking now and emails the guest; a paid quantity or location change is refused.",
+      "description": "Email the guest a proposal to change a booking’s session or party size. A table booking may move to a session of the business’s tables at another location (list_product_booking_sessions on that location’s table product). The current booking and places remain unchanged until guest acceptance, which requires availability and preserves its review status. Consultation time changes always require client acceptance. For other booking kinds, apply moves the booking now and emails the guest; a paid quantity or location change is refused.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -99917,7 +99284,7 @@
             "type": "boolean"
           },
           "expected_updated_at": {
-            "description": "Thread updated_at from get_product_booking.",
+            "description": "operational_updated_at from get_product_booking: the booking's own version. A guest message in the conversation does not change it.",
             "type": "string"
           },
           "idempotency_key": {
@@ -99942,6 +99309,7 @@
             "type": "integer"
           },
           "session_id": {
+            "description": "Destination session ID from list_product_booking_sessions.",
             "type": "string"
           }
         },
@@ -99985,8 +99353,7 @@
               },
               "kind": {
                 "enum": [
-                  "booking",
-                  "reservation"
+                  "booking"
                 ],
                 "type": "string"
               },
@@ -100005,6 +99372,17 @@
                   "string",
                   "null"
                 ]
+              },
+              "product_kind": {
+                "description": "What was booked: an experience, a consultation (service) or a restaurant table.",
+                "enum": [
+                  "dish",
+                  "experience",
+                  "service",
+                  "stay",
+                  "table"
+                ],
+                "type": "string"
               },
               "product_name": {
                 "type": [
@@ -100040,6 +99418,7 @@
               "assigned_member_id",
               "location_id",
               "product_id",
+              "product_kind",
               "product_name"
             ],
             "type": "object"
@@ -100077,192 +99456,6 @@
       ],
       "domain": "bookings",
       "minimumRole": "member",
-      "requiredEntitlement": null,
-      "fileParams": [],
-      "uiResourceUri": null
-    },
-    {
-      "name": "request_table_reservation_change",
-      "title": "Request table reservation change",
-      "description": "Email the guest a proposal to change a table reservation’s location, local date, time or party size. The current reservation remains unchanged until the guest accepts. With apply, move the reservation now and email the guest only when their consent is not required.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "apply": {
-            "description": "Move the reservation now instead of asking the guest. The guest is emailed the new time.",
-            "type": "boolean"
-          },
-          "date": {
-            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-            "type": "string"
-          },
-          "expected_updated_at": {
-            "description": "Conversation updated_at from list_table_reservations or get_guest_conversation, not an operational reservation timestamp.",
-            "type": "string"
-          },
-          "idempotency_key": {
-            "description": "Caller-supplied durable idempotency key. Reuse only for the identical operation.",
-            "maxLength": 200,
-            "minLength": 1,
-            "type": "string"
-          },
-          "location_id": {
-            "type": "string"
-          },
-          "operational_reservation_id": {
-            "description": "operational_reservation_id from list_table_reservations. Distinct from request_id, the inbox conversation ID.",
-            "type": "string"
-          },
-          "organization_id": {
-            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
-            "minLength": 1,
-            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
-            "type": "string"
-          },
-          "party_size": {
-            "maximum": 99,
-            "minimum": 1,
-            "type": "integer"
-          },
-          "time": {
-            "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
-            "type": "string"
-          }
-        },
-        "required": [
-          "operational_reservation_id",
-          "location_id",
-          "date",
-          "time",
-          "party_size",
-          "expected_updated_at",
-          "idempotency_key"
-        ],
-        "type": "object"
-      },
-      "outputSchema": {
-        "$defs": {},
-        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
-        "properties": {
-          "change_status": {
-            "enum": [
-              "awaiting_guest_acceptance",
-              "accepted",
-              "declined",
-              "moved"
-            ],
-            "type": "string"
-          },
-          "record": {
-            "properties": {
-              "assigned_member_id": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "ends_at": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "id": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "kind": {
-                "enum": [
-                  "booking",
-                  "reservation"
-                ],
-                "type": "string"
-              },
-              "location_id": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "party_size": {
-                "minimum": 1,
-                "type": "integer"
-              },
-              "product_id": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "product_name": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "starts_at": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "status": {
-                "enum": [
-                  "pending",
-                  "confirmed",
-                  "cancelled"
-                ],
-                "type": "string"
-              },
-              "timezone": {
-                "minLength": 1,
-                "type": "string"
-              }
-            },
-            "required": [
-              "id",
-              "kind",
-              "status",
-              "party_size",
-              "starts_at",
-              "ends_at",
-              "timezone",
-              "assigned_member_id",
-              "location_id",
-              "product_id",
-              "product_name"
-            ],
-            "type": "object"
-          },
-          "request_id": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "success": {
-            "const": true
-          }
-        },
-        "required": [
-          "success",
-          "request_id",
-          "change_status",
-          "record"
-        ],
-        "type": "object"
-      },
-      "annotations": {
-        "destructiveHint": true,
-        "idempotentHint": true,
-        "openWorldHint": true,
-        "readOnlyHint": false,
-        "title": "Request table reservation change"
-      },
-      "securitySchemes": [
-        {
-          "scopes": [
-            "tenant"
-          ],
-          "type": "oauth2"
-        }
-      ],
-      "domain": "bookings",
-      "minimumRole": "admin",
       "requiredEntitlement": null,
       "fileParams": [],
       "uiResourceUri": null
@@ -101783,7 +100976,8 @@
                     "dish",
                     "experience",
                     "service",
-                    "stay"
+                    "stay",
+                    "table"
                   ],
                   "type": "string"
                 },
@@ -102025,7 +101219,7 @@
     {
       "name": "set_guest_conversation_archived",
       "title": "Set guest conversation archived",
-      "description": "Archive or restore the inbox conversation identified by request_id from list_guest_conversations or a booking read. Returns its saved archive state without conversation history. Does not cancel a booking or reservation and does not send the guest a message.",
+      "description": "Archive or restore the inbox conversation identified by request_id from list_guest_conversations or a booking read. Returns its saved archive state without conversation history. Does not cancel a booking and does not send the guest a message.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -103342,10 +102536,14 @@
     {
       "name": "set_product_booking_config",
       "title": "Set product booking config",
-      "description": "Configure booking duration, capacity, scheduling, minimum notice and the questions asked with each booking (for example an assessment visit's property questions). New settings default to instant confirmation and no online collection. Omitted fields retain saved settings; existing sessions keep their times and capacity. Read settings with get_product.",
+      "description": "Configure booking duration, capacity, scheduling, minimum notice, party limits, guest terms, what an online payment is charged for, and the questions asked with each booking (for example an assessment visit's property questions or a restaurant table's occasion). New settings default to instant confirmation and no online collection. Omitted fields retain saved settings; existing sessions keep their times and capacity. Read settings with get_product.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
+          "accessibility_contact_required": {
+            "description": "Ask guests needing accessibility support to contact the business before booking.",
+            "type": "boolean"
+          },
           "advance_notice_minutes": {
             "description": "Minimum notice in minutes (1440 is 1 day, 2880 is 2 days): clients cannot book or cancel online a session that starts sooner, and no booking is moved into one. Free cancellation closes at least 24 hours before the start either way. Null means no notice.",
             "minimum": 0,
@@ -103391,6 +102589,14 @@
             "description": "True holds the offering online: its times are its provider's working hours, in the provider's timezone. Requires scheduling_mode provider with an assigned member.",
             "type": "boolean"
           },
+          "minimum_guest_age": {
+            "description": "Youngest guest admitted, stated to guests before booking; null states none.",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "online_payment_required": {
             "default": false,
             "description": "True requires online payment when booking; false is the default and does not collect online.",
@@ -103401,6 +102607,38 @@
             "minLength": 1,
             "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
             "type": "string"
+          },
+          "party_size_max": {
+            "description": "Largest party one booking takes; null is limited only by the session's places. A larger party contacts the business.",
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "party_size_min": {
+            "description": "Smallest party one booking takes; null has no minimum.",
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "payment_basis": {
+            "description": "What the online price is charged for: per_guest (each place, a class seat) or per_booking (the booking as a whole, a table's deposit).",
+            "enum": [
+              "per_guest",
+              "per_booking"
+            ],
+            "type": "string"
+          },
+          "payment_min_party_size": {
+            "description": "Smallest party that pays online, for example a deposit for parties of 6 or more; smaller parties book without paying. Null means every party pays when online_payment_required is true.",
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "product_id": {
             "type": "string"
@@ -103496,6 +102734,10 @@
         "properties": {
           "config": {
             "properties": {
+              "accessibility_contact_required": {
+                "description": "Ask guests needing accessibility support to contact the business before booking.",
+                "type": "boolean"
+              },
               "advance_notice_minutes": {
                 "description": "Minimum notice in minutes (1440 is 1 day, 2880 is 2 days): clients cannot book or cancel online a session that starts sooner, and no booking is moved into one. Free cancellation closes at least 24 hours before the start either way. Null means no notice.",
                 "minimum": 0,
@@ -103538,6 +102780,14 @@
                 "description": "True holds the offering online: its times are its provider's working hours, in the provider's timezone. Requires scheduling_mode provider with an assigned member.",
                 "type": "boolean"
               },
+              "minimum_guest_age": {
+                "description": "Youngest guest admitted, stated to guests before booking; null states none.",
+                "minimum": 0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
               "online_payment_required": {
                 "default": false,
                 "description": "True requires online payment when booking; false is the default and does not collect online.",
@@ -103545,6 +102795,38 @@
               },
               "organization_id": {
                 "type": "string"
+              },
+              "party_size_max": {
+                "description": "Largest party one booking takes; null is limited only by the session's places. A larger party contacts the business.",
+                "minimum": 1,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "party_size_min": {
+                "description": "Smallest party one booking takes; null has no minimum.",
+                "minimum": 1,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "payment_basis": {
+                "description": "What the online price is charged for: per_guest (each place, a class seat) or per_booking (the booking as a whole, a table's deposit).",
+                "enum": [
+                  "per_guest",
+                  "per_booking"
+                ],
+                "type": "string"
+              },
+              "payment_min_party_size": {
+                "description": "Smallest party that pays online, for example a deposit for parties of 6 or more; smaller parties book without paying. Null means every party pays when online_payment_required is true.",
+                "minimum": 1,
+                "type": [
+                  "integer",
+                  "null"
+                ]
               },
               "product_id": {
                 "type": "string"
@@ -103644,6 +102926,12 @@
               "online_payment_required",
               "held_online",
               "advance_notice_minutes",
+              "party_size_min",
+              "party_size_max",
+              "minimum_guest_age",
+              "accessibility_contact_required",
+              "payment_basis",
+              "payment_min_party_size",
               "questions",
               "questions_revision"
             ],
@@ -111888,7 +111176,7 @@
     {
       "name": "update_location",
       "title": "Update location",
-      "description": "Update a location's own details: its name and descriptions, regular opening hours, temporary closures/special hours, contact info, saved map coordinates, and map sharing for its places to stay. Renaming keeps the saved public address. To change its hero media, call set_media with { owner_type: \"business_location\", owner_id: <location.id>, slot: \"hero\" }. Only provided fields are changed. Returns the updated location; website details can change immediately. This does not change reservation capacity or a product’s session schedule.",
+      "description": "Update a location's own details: its name and descriptions, regular opening hours, temporary closures/special hours, contact info, saved map coordinates, and map sharing for its places to stay. Renaming keeps the saved public address. To change its hero media, call set_media with { owner_type: \"business_location\", owner_id: <location.id>, slot: \"hero\" }. Only provided fields are changed. Returns the updated location; website details can change immediately. This does not change a product’s session schedule, including a restaurant’s table seatings (replace_product_weekly_schedule on its table product).",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -111939,13 +111227,6 @@
               "null"
             ]
           },
-          "assigned_member_id": {
-            "description": "Responsible Better Auth membership ID from list_organization_members, not userId. Null is unassigned.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "description": {
             "description": "Long description shown on the location page. Pass null to clear it.",
             "type": [
@@ -111954,7 +111235,7 @@
             ]
           },
           "email": {
-            "description": "Public email shown to guests on the website and in booking/reservation confirmation emails. Pass null to clear it.",
+            "description": "Public email shown to guests on the website and in booking confirmation emails. Pass null to clear it.",
             "type": [
               "string",
               "null"
@@ -111977,13 +111258,6 @@
             "description": "Saved map longitude. Supply latitude in the same call; both null clears the coordinates. Omit both to keep the saved coordinates.",
             "maximum": 180,
             "minimum": -180,
-            "type": [
-              "number",
-              "null"
-            ]
-          },
-          "max_capacity": {
-            "description": "Stored location capacity metadata; does not limit reservation availability. Reservation seats per start time are controlled by update_reservation_policy.slot_capacity. Pass null to clear the metadata.",
             "type": [
               "number",
               "null"
@@ -112111,7 +111385,7 @@
             "type": "string"
           },
           "phone": {
-            "description": "Public phone number shown to guests on the website and in booking/reservation confirmation emails. International number with its country calling code, e.g. +66812345678.",
+            "description": "Public phone number shown to guests on the website and in booking confirmation emails. International number with its country calling code, e.g. +66812345678.",
             "type": "string"
           },
           "short_description": {
@@ -112405,13 +111679,6 @@
                   "null"
                 ]
               },
-              "assigned_member_id": {
-                "description": "Responsible Better Auth membership ID from list_organization_members, not userId. Null is unassigned.",
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
               "canonical_url": {
                 "type": [
                   "string",
@@ -112456,13 +111723,6 @@
               "maps_url": {
                 "type": [
                   "string",
-                  "null"
-                ]
-              },
-              "max_capacity": {
-                "description": "Stored location capacity metadata; does not limit reservations. Reservation capacity uses location_reservation_configs.slot_capacity.",
-                "type": [
-                  "number",
                   "null"
                 ]
               },
@@ -114026,7 +113286,7 @@
                   "productIds": {
                     "description": "The offerings whose bookings get this message.",
                     "items": {
-                      "description": "A canonical product ID of a home, experience or consultation (list_products), or the location ID of a place that takes table reservations (list_locations); never a provider property ID.",
+                      "description": "A canonical product ID of a home, experience, consultation or restaurant table product (list_products); never a provider property ID.",
                       "minLength": 1,
                       "type": "string"
                     },
@@ -114062,7 +113322,7 @@
                   "productIds": {
                     "description": "The offerings whose bookings get this message.",
                     "items": {
-                      "description": "A canonical product ID of a home, experience or consultation (list_products), or the location ID of a place that takes table reservations (list_locations); never a provider property ID.",
+                      "description": "A canonical product ID of a home, experience, consultation or restaurant table product (list_products); never a provider property ID.",
                       "minLength": 1,
                       "type": "string"
                     },
@@ -114072,7 +113332,7 @@
                     "uniqueItems": true
                   },
                   "trigger": {
-                    "description": "check_in is when the booking starts: a stay’s check-in, or a consultation’s, class’s or table reservation’s start time. check_out is when it ends.",
+                    "description": "check_in is when the booking starts: a stay’s check-in, or a consultation’s, class’s or table booking’s start time. check_out is when it ends.",
                     "enum": [
                       "check_in",
                       "check_out"
@@ -114100,7 +113360,7 @@
                   "productIds": {
                     "description": "The offerings whose bookings get this message.",
                     "items": {
-                      "description": "A canonical product ID of a home, experience or consultation (list_products), or the location ID of a place that takes table reservations (list_locations); never a provider property ID.",
+                      "description": "A canonical product ID of a home, experience, consultation or restaurant table product (list_products); never a provider property ID.",
                       "minLength": 1,
                       "type": "string"
                     },
@@ -114110,7 +113370,7 @@
                     "uniqueItems": true
                   },
                   "trigger": {
-                    "description": "check_in is when the booking starts: a stay’s check-in, or a consultation’s, class’s or table reservation’s start time. check_out is when it ends.",
+                    "description": "check_in is when the booking starts: a stay’s check-in, or a consultation’s, class’s or table booking’s start time. check_out is when it ends.",
                     "enum": [
                       "check_in",
                       "check_out"
@@ -114180,7 +113440,7 @@
                       "productIds": {
                         "description": "The offerings whose bookings get this message.",
                         "items": {
-                          "description": "A canonical product ID of a home, experience or consultation (list_products), or the location ID of a place that takes table reservations (list_locations); never a provider property ID.",
+                          "description": "A canonical product ID of a home, experience, consultation or restaurant table product (list_products); never a provider property ID.",
                           "minLength": 1,
                           "type": "string"
                         },
@@ -114216,7 +113476,7 @@
                       "productIds": {
                         "description": "The offerings whose bookings get this message.",
                         "items": {
-                          "description": "A canonical product ID of a home, experience or consultation (list_products), or the location ID of a place that takes table reservations (list_locations); never a provider property ID.",
+                          "description": "A canonical product ID of a home, experience, consultation or restaurant table product (list_products); never a provider property ID.",
                           "minLength": 1,
                           "type": "string"
                         },
@@ -114226,7 +113486,7 @@
                         "uniqueItems": true
                       },
                       "trigger": {
-                        "description": "check_in is when the booking starts: a stay’s check-in, or a consultation’s, class’s or table reservation’s start time. check_out is when it ends.",
+                        "description": "check_in is when the booking starts: a stay’s check-in, or a consultation’s, class’s or table booking’s start time. check_out is when it ends.",
                         "enum": [
                           "check_in",
                           "check_out"
@@ -114254,7 +113514,7 @@
                       "productIds": {
                         "description": "The offerings whose bookings get this message.",
                         "items": {
-                          "description": "A canonical product ID of a home, experience or consultation (list_products), or the location ID of a place that takes table reservations (list_locations); never a provider property ID.",
+                          "description": "A canonical product ID of a home, experience, consultation or restaurant table product (list_products); never a provider property ID.",
                           "minLength": 1,
                           "type": "string"
                         },
@@ -114264,7 +113524,7 @@
                         "uniqueItems": true
                       },
                       "trigger": {
-                        "description": "check_in is when the booking starts: a stay’s check-in, or a consultation’s, class’s or table reservation’s start time. check_out is when it ends.",
+                        "description": "check_in is when the booking starts: a stay’s check-in, or a consultation’s, class’s or table booking’s start time. check_out is when it ends.",
                         "enum": [
                           "check_in",
                           "check_out"
@@ -116127,8 +115387,12 @@
           },
           "booking": {
             "additionalProperties": false,
-            "description": "Complete booking setup for a published offering. Legal consultations require provider scheduling and an explicitly selected attorney. At a location, provide weekly_slots or dated sessions; an update can retain its saved weekly times. location_id null holds it online: it needs scheduling_mode provider with an assigned member, takes no weekly_slots or sessions, and is booked in that provider's working hours. Runtime validation requires actual future availability before publication.",
+            "description": "Complete booking setup for a published offering. Legal consultations require provider scheduling and an explicitly selected attorney. A restaurant's tables are one table product per location: weekly_slots repeat a seating every interval_minutes through each service, default_capacity is the guests seatable per start time, and a deposit is the variant's price with payment_basis per_booking (price zero for no deposit). At a location, provide weekly_slots or dated sessions; an update can retain its saved weekly times. location_id null holds it online: it needs scheduling_mode provider with an assigned member, takes no weekly_slots or sessions, and is booked in that provider's working hours. Runtime validation requires actual future availability before publication.",
             "properties": {
+              "accessibility_contact_required": {
+                "description": "Ask guests needing accessibility support to contact the business before booking.",
+                "type": "boolean"
+              },
               "assigned_member_id": {
                 "description": "Host membership ID from list_organization_members → members[].id or get_member_scheduling → members[].id, not userId. Every bookable offering has one: it handles all its bookings. Guests see this member’s approved public profile. Read get_member_public_profile; publication requires an approved profile with a nonblank public_name.",
                 "type": "string"
@@ -116161,10 +115425,50 @@
                   "null"
                 ]
               },
+              "minimum_guest_age": {
+                "description": "Youngest guest admitted, stated to guests before booking; null states none.",
+                "minimum": 0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
               "online_payment_required": {
                 "default": false,
                 "description": "True requires online payment when booking; false is the default and does not collect online.",
                 "type": "boolean"
+              },
+              "party_size_max": {
+                "description": "Largest party one booking takes; null is limited only by the session's places. A larger party contacts the business.",
+                "minimum": 1,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "party_size_min": {
+                "description": "Smallest party one booking takes; null has no minimum.",
+                "minimum": 1,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "payment_basis": {
+                "description": "What the online price is charged for: per_guest (each place, a class seat) or per_booking (the booking as a whole, a table's deposit).",
+                "enum": [
+                  "per_guest",
+                  "per_booking"
+                ],
+                "type": "string"
+              },
+              "payment_min_party_size": {
+                "description": "Smallest party that pays online, for example a deposit for parties of 6 or more; smaller parties book without paying. Null means every party pays when online_payment_required is true.",
+                "minimum": 1,
+                "type": [
+                  "integer",
+                  "null"
+                ]
               },
               "scheduling_mode": {
                 "description": "Legal consultations require provider scheduling with an explicitly assigned attorney. business: the business publishes its own sessions; the assigned member hosts them, but their working hours do not set the times. Experiences may use it. provider: times come from the assigned member’s working hours. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
@@ -116207,7 +115511,25 @@
               "weekly_slots": {
                 "items": {
                   "additionalProperties": false,
+                  "description": "One weekly start time, or with end_time and interval_minutes a start every interval from start_time through end_time — a restaurant's seatings through one service.",
                   "properties": {
+                    "end_time": {
+                      "description": "Local HH:mm of the last start, same day and after start_time. Given with interval_minutes.",
+                      "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "interval_minutes": {
+                      "description": "Minutes between starts from start_time through end_time. Given with end_time.",
+                      "maximum": 1440,
+                      "minimum": 5,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
                     "start_time": {
                       "description": "Local HH:mm start time; visit duration is configured separately.",
                       "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
@@ -117090,12 +116412,13 @@
             "type": "string"
           },
           "kind": {
-            "description": "The customer-facing kind: dish (food or drink), experience (experience or class), service (practice area or consultation), or stay (place to stay). Determines the allowed descriptive fields; booking and stock remain separate capabilities.",
+            "description": "The customer-facing kind: dish (food or drink), experience (experience or class), service (practice area or consultation), stay (place to stay), or table (a restaurant location’s tables, booked as a reservation). Determines the allowed descriptive fields; booking and stock remain separate capabilities.",
             "enum": [
               "dish",
               "experience",
               "service",
-              "stay"
+              "stay",
+              "table"
             ],
             "type": "string"
           },
@@ -118021,6 +117344,10 @@
               },
               "booking": {
                 "properties": {
+                  "accessibility_contact_required": {
+                    "description": "Ask guests needing accessibility support to contact the business before booking.",
+                    "type": "boolean"
+                  },
                   "advance_notice_minutes": {
                     "description": "Minimum notice in minutes (1440 is 1 day, 2880 is 2 days): clients cannot book or cancel online a session that starts sooner, and no booking is moved into one. Free cancellation closes at least 24 hours before the start either way. Null means no notice.",
                     "minimum": 0,
@@ -118063,6 +117390,14 @@
                     "description": "True holds the offering online: its times are its provider's working hours, in the provider's timezone. Requires scheduling_mode provider with an assigned member.",
                     "type": "boolean"
                   },
+                  "minimum_guest_age": {
+                    "description": "Youngest guest admitted, stated to guests before booking; null states none.",
+                    "minimum": 0,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
                   "online_payment_required": {
                     "default": false,
                     "description": "True requires online payment when booking; false is the default and does not collect online.",
@@ -118070,6 +117405,38 @@
                   },
                   "organization_id": {
                     "type": "string"
+                  },
+                  "party_size_max": {
+                    "description": "Largest party one booking takes; null is limited only by the session's places. A larger party contacts the business.",
+                    "minimum": 1,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "party_size_min": {
+                    "description": "Smallest party one booking takes; null has no minimum.",
+                    "minimum": 1,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "payment_basis": {
+                    "description": "What the online price is charged for: per_guest (each place, a class seat) or per_booking (the booking as a whole, a table's deposit).",
+                    "enum": [
+                      "per_guest",
+                      "per_booking"
+                    ],
+                    "type": "string"
+                  },
+                  "payment_min_party_size": {
+                    "description": "Smallest party that pays online, for example a deposit for parties of 6 or more; smaller parties book without paying. Null means every party pays when online_payment_required is true.",
+                    "minimum": 1,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
                   },
                   "product_id": {
                     "type": "string"
@@ -118169,6 +117536,12 @@
                   "online_payment_required",
                   "held_online",
                   "advance_notice_minutes",
+                  "party_size_min",
+                  "party_size_max",
+                  "minimum_guest_age",
+                  "accessibility_contact_required",
+                  "payment_basis",
+                  "payment_min_party_size",
                   "questions",
                   "questions_revision"
                 ],
@@ -118874,7 +118247,8 @@
                   "dish",
                   "experience",
                   "service",
-                  "stay"
+                  "stay",
+                  "table"
                 ],
                 "type": "string"
               },
@@ -120683,335 +120057,6 @@
         }
       ],
       "domain": "qa",
-      "minimumRole": "admin",
-      "requiredEntitlement": null,
-      "fileParams": [],
-      "uiResourceUri": null
-    },
-    {
-      "name": "update_reservation_policy",
-      "title": "Update reservation policy",
-      "description": "Enable or update table reservations using the location’s saved hours, including the questions asked with each reservation. New setup defaults to two hours, unlimited capacity, no advance notice and no deposit. Use the current updated_at when amending it; omitted fields keep their value. Deposits need an amount, currency, tax treatment and ready Payments. Cancellation is not a setting: every reservation is free to cancel until 24 hours before the start. A class or consultation closes free cancellation at 24 hours or its own minimum notice, if longer (set_product_booking_config).",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "accessibility_contact_required": {
-            "type": "boolean"
-          },
-          "advance_notice_minutes": {
-            "description": "Required notice before the start. Defaults to zero on setup; null removes the rule.",
-            "minimum": 0,
-            "type": [
-              "number",
-              "null"
-            ]
-          },
-          "deposit_amount": {
-            "description": "Total deposit per reservation, in deposit_currency minor units.",
-            "minimum": 1,
-            "type": [
-              "integer",
-              "null"
-            ]
-          },
-          "deposit_currency": {
-            "description": "ISO 4217 currency code.",
-            "pattern": "^[A-Z]{3}$",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "deposit_required": {
-            "description": "Defaults to false on setup. Omit to keep the current requirement.",
-            "type": "boolean"
-          },
-          "deposit_tax_behavior": {
-            "enum": [
-              "inclusive",
-              "exclusive",
-              null
-            ],
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "deposit_trigger_party_size": {
-            "minimum": 1,
-            "type": [
-              "number",
-              "null"
-            ]
-          },
-          "duration_minutes": {
-            "default": 120,
-            "description": "Minutes per reservation. Defaults to 120 on setup; null restores that default. Omit to keep the current duration.",
-            "minimum": 1,
-            "type": [
-              "integer",
-              "null"
-            ]
-          },
-          "expected_questions_revision": {
-            "description": "policy.questions_revision from get_reservation_policy; required with questions.",
-            "type": "string"
-          },
-          "expected_updated_at": {
-            "description": "Current policy updated_at; null when creating.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "locale": {
-            "type": "string"
-          },
-          "location_id": {
-            "type": "string"
-          },
-          "minimum_guest_age": {
-            "minimum": 0,
-            "type": [
-              "number",
-              "null"
-            ]
-          },
-          "organization_id": {
-            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
-            "minLength": 1,
-            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
-            "type": "string"
-          },
-          "questions": {
-            "description": "Replace the questions asked with each reservation. Read get_reservation_policy first and keep existing question IDs.",
-            "items": {
-              "additionalProperties": false,
-              "properties": {
-                "choices": {
-                  "items": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "id": {
-                        "description": "Existing choice ID to keep. Omit for a new choice; one is assigned from its label.",
-                        "maxLength": 64,
-                        "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
-                        "type": "string"
-                      },
-                      "label": {
-                        "maxLength": 120,
-                        "minLength": 1,
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "label"
-                    ],
-                    "type": "object"
-                  },
-                  "maxItems": 20,
-                  "type": "array"
-                },
-                "help_text": {
-                  "maxLength": 500,
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "id": {
-                  "description": "Existing question ID to keep. Omit for a new question; one is assigned from its label.",
-                  "maxLength": 64,
-                  "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
-                  "type": "string"
-                },
-                "label": {
-                  "maxLength": 200,
-                  "minLength": 1,
-                  "type": "string"
-                },
-                "required": {
-                  "type": "boolean"
-                },
-                "type": {
-                  "enum": [
-                    "short_text",
-                    "long_text",
-                    "single_choice",
-                    "multiple_choice",
-                    "yes_no"
-                  ],
-                  "type": "string"
-                }
-              },
-              "required": [
-                "label",
-                "type",
-                "required"
-              ],
-              "type": "object"
-            },
-            "maxItems": 20,
-            "type": "array"
-          },
-          "slot_capacity": {
-            "description": "Guests per start time. Defaults to unlimited on setup; null removes the limit.",
-            "minimum": 0,
-            "type": [
-              "number",
-              "null"
-            ]
-          }
-        },
-        "required": [
-          "location_id",
-          "expected_updated_at"
-        ],
-        "type": "object"
-      },
-      "outputSchema": {
-        "$defs": {},
-        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
-        "properties": {
-          "changed_fields": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "context": {
-            "additionalProperties": false,
-            "description": "The business this call acted on, its public website origin, and the location the call named, or null location fields when it named none.",
-            "properties": {
-              "location_id": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "location_slug": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "location_title": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "organization_id": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "organization_name": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "organization_public_url": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "organization_slug": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "organization_subdomain": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              }
-            },
-            "required": [
-              "organization_id",
-              "organization_name",
-              "organization_slug",
-              "organization_subdomain",
-              "organization_public_url",
-              "location_id",
-              "location_slug",
-              "location_title"
-            ],
-            "type": "object"
-          },
-          "entity": {
-            "enum": [
-              "reservation_policy"
-            ],
-            "type": "string"
-          },
-          "location_id": {
-            "type": "string"
-          },
-          "ok": {
-            "type": "boolean"
-          },
-          "summary": {
-            "properties": {
-              "heading": {
-                "type": "string"
-              },
-              "items": {
-                "items": {
-                  "properties": {
-                    "id": {
-                      "type": "string"
-                    },
-                    "text": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "text"
-                  ],
-                  "type": "object"
-                },
-                "type": "array"
-              }
-            },
-            "required": [
-              "heading",
-              "items"
-            ],
-            "type": "object"
-          },
-          "updated_at": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "ok",
-          "entity",
-          "location_id"
-        ],
-        "type": "object"
-      },
-      "annotations": {
-        "destructiveHint": true,
-        "openWorldHint": true,
-        "readOnlyHint": false,
-        "title": "Update reservation policy"
-      },
-      "securitySchemes": [
-        {
-          "scopes": [
-            "tenant"
-          ],
-          "type": "oauth2"
-        }
-      ],
-      "domain": "content",
       "minimumRole": "admin",
       "requiredEntitlement": null,
       "fileParams": [],
@@ -129965,18 +129010,18 @@
         "text": "Update the catalog from: <items_description> Use get_workspace_context, list_organizations and list_locations to resolve the business and explicit location. Read every relevant list_location_products and list_collections page before matching existing IDs. For a restaurant menu, use update_menu with a stable idempotency_key, the stated sections and prices. Match existing product, variant, price and collection IDs. Omitted items and order remain; use set_collection_products or reorder_collections only when the user requests a complete new order. For other products, use create_product for new entries or update_product for partial edits. Use reconcile_products only when the user requests complete replacement of the supplied entries. Ask for missing prices or booking facts. Use get_product and list_location_products to read back the result, then open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "create_product": "sha256:20982c9950d16a9f00c1b6205672d2a4902ab42ba397a85d6980b6afc60e370b",
-        "get_product": "sha256:1851f02b03ea33aae46ecd57db939e180639dced6c1004e3219443dba38c4f0e",
+        "create_product": "sha256:6524cf2df05e3005cf841d0429c90192c20b4818cc833bde52a611db800fc30e",
+        "get_product": "sha256:ba1303e192c6daf5e6baa873ab9e5438e80608cbd361ed7cecfb5f789d8e7b86",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_collections": "sha256:7eb8f62291a619df46fa146bc6142f898aac1de8bda513b7a0bf92182faff563",
-        "list_location_products": "sha256:2015626d39e62ce848fe36e9f0b99ac1e50b9afb915d67d7ce067553afb700b6",
+        "list_location_products": "sha256:7c79f573c07df88cb92d7506531a53fd493d7b5e6480511e4fb98e5dd331886b",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_organizations": "sha256:9edf9d564e3c56a28961d41b27d0694753b5c31e889b63ebc171b6478336e901",
-        "reconcile_products": "sha256:df009848c8e8be81c68a5308b412ed3377f90553def0ef82efafa4d710b91116",
+        "reconcile_products": "sha256:190161262117d8ca59305fbb6e89195d6f0068e79d985ba3b66188de2222e9b5",
         "reorder_collections": "sha256:c8ad3c90e1fe802222fc5c184e33daa7f2f71b24f6161eddc408f1b1e485a59b",
-        "set_collection_products": "sha256:124140d2c1f17f41c466ca886c7fcabdfa4d9f34d9b6f0da8a1299548ae49289",
+        "set_collection_products": "sha256:7d92dda53c08f4ebcf2f11cfc3a4c2cc6f7465ad97b9190d9997fea30e0cc81d",
         "update_menu": "sha256:947551eb104f6be470aeaab3b3570d0ab9924d01450192f8ac88a77f91de7433",
-        "update_product": "sha256:36595ad15590850ba8b47a495e6cf49f5790c5d46009837f9a780e3095b67b5f"
+        "update_product": "sha256:7cd58fd4ab7279a63853812c8aad71fbd8ed004b0585da74a96874700354fd88"
       }
     },
     {
@@ -130020,12 +129065,12 @@
       },
       "toolContracts": {
         "attach_media": "sha256:b6f84ecad030ec9ec81a253682c86d6f8a10dc0c3b35564c873c21bbdbace35a",
-        "create_product": "sha256:20982c9950d16a9f00c1b6205672d2a4902ab42ba397a85d6980b6afc60e370b",
-        "get_product": "sha256:1851f02b03ea33aae46ecd57db939e180639dced6c1004e3219443dba38c4f0e",
+        "create_product": "sha256:6524cf2df05e3005cf841d0429c90192c20b4818cc833bde52a611db800fc30e",
+        "get_product": "sha256:ba1303e192c6daf5e6baa873ab9e5438e80608cbd361ed7cecfb5f789d8e7b86",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_product_booking_sessions": "sha256:c3feed62de11467bd12a6fd7885907eba84c469608e6bc20735c686887df971f",
-        "list_products": "sha256:d586cfff763528e260cc3f640a44ab69c1e6a41d4cc4c28edac2d1cfee1aa837",
+        "list_products": "sha256:bd6b30cee8a405d0bcdf6313fa20396a2e287bb3285b977fdc1c27baed9c48f0",
         "save_media_attachment": "sha256:dd3e83b857a53f97fa3f6a27e1788dc247133a954108a09e5f7c200b4a1e3a93"
       }
     },
@@ -130035,26 +129080,24 @@
       "arguments": [],
       "rendered": {
         "description": "Summarize guest and team conversations, pending bookings, and unreplied reviews",
-        "text": "Use get_workspace_context to resolve the requested business. Read all relevant list_guest_conversations pages and get_guest_conversation for full contact messages, table reservation and product booking details, proposals and delivery receipts. For internal team messages use list_team_conversations and get_team_conversation. Select actual teammates with list_team_conversation_recipients. start_team_conversation reuses direct and explicit stay/location conversations; manual groups of at least three people are distinct and require a stable idempotency_key. update_team_group changes only manual internal groups: obey canManage/canLeave; preserve buyer/guest and stay/location participants. New members can read group history; removal and leaving end access while retaining messages. Use send_team_message only for the requested internal message, then read it back. Reading does not mark a thread read; mark_team_conversation_read changes only the caller’s read position. Team chat is separate from guest replies. Summarize unanswered messages and pending bookings. Use reply_to_guest with a stable idempotency_key only for the message or photo the user requests. Use get_product_booking before confirm_product_booking, reject_product_booking, cancel_product_booking or request_product_booking_change; use cancel_table_reservation or request_table_reservation_change for an explicitly requested table reservation action. Booking changes email a proposal and leave the existing allocation unchanged until guest acceptance. Financial actions requiring the dashboard remain incomplete; report the returned handoff instead of claiming completion. Use list_locations and list_location_reviews to read reviews separately; provider reviews and imported Google Q&A remain managed in Google. Report failed deliveries and actions awaiting guest acceptance accurately."
+        "text": "Use get_workspace_context to resolve the requested business. Read all relevant list_guest_conversations pages and get_guest_conversation for full contact messages, booking details (classes, consultations and restaurant tables), proposals and delivery receipts. For internal team messages use list_team_conversations and get_team_conversation. Select actual teammates with list_team_conversation_recipients. start_team_conversation reuses direct and explicit stay/location conversations; manual groups of at least three people are distinct and require a stable idempotency_key. update_team_group changes only manual internal groups: obey canManage/canLeave; preserve buyer/guest and stay/location participants. New members can read group history; removal and leaving end access while retaining messages. Use send_team_message only for the requested internal message, then read it back. Reading does not mark a thread read; mark_team_conversation_read changes only the caller’s read position. Team chat is separate from guest replies. Summarize unanswered messages and pending bookings. Use reply_to_guest with a stable idempotency_key only for the message or photo the user requests. Use get_product_booking before confirm_product_booking, reject_product_booking, cancel_product_booking or request_product_booking_change; a table reservation is a product booking and uses the same tools. Booking changes email a proposal and leave the existing allocation unchanged until guest acceptance. Financial actions requiring the dashboard remain incomplete; report the returned handoff instead of claiming completion. Use list_locations and list_location_reviews to read reviews separately; provider reviews and imported Google Q&A remain managed in Google. Report failed deliveries and actions awaiting guest acceptance accurately."
       },
       "toolContracts": {
-        "cancel_product_booking": "sha256:28d9c2c6be574b460d8711e4040fed5162c439aae2b37e95ca79ea08cd24e62d",
-        "cancel_table_reservation": "sha256:9f69a68d495da67c14718dff9208b98d7c28e5a4b8eba2849ded151ad293312a",
-        "confirm_product_booking": "sha256:373f9f84360e37716dc1476d28b8f6b47c14001642ebaff8d713d74a7d3a8eaa",
-        "get_guest_conversation": "sha256:bbc45bf9bdc9097c8aad98e871de2e959a34fbfaf24635f8d2490185732bab59",
-        "get_product_booking": "sha256:d99e0c935e9aa1fa0a9e16e00a3c406ba2c6cd7092a44aad426e66b75d2fbb4f",
+        "cancel_product_booking": "sha256:9132f28c04c19aa948b3578f28f9322c936ff71a75cbeed53801cb87bdb059d2",
+        "confirm_product_booking": "sha256:f607d38686b388e7f7e86fc1b48de40b19a4942d61ef9b9a3af62294c0d42ea2",
+        "get_guest_conversation": "sha256:298b550b69fcfcceaa35d37a34041114724f2337e1d8186fd0ff1736c002d46b",
+        "get_product_booking": "sha256:85c94818b185d69bf957831bd9a8cfab0484f73c25386df6d79a7f92f43f9739",
         "get_team_conversation": "sha256:c1a1ddcd761b6cefc0e9395feced48cc3c7710936c7ffe918e3c816cf4fe6afd",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
-        "list_guest_conversations": "sha256:2094e77b9c0524ea5996a63d5feff72271e44d4d38e6dab9ac469766844cf693",
+        "list_guest_conversations": "sha256:50390b145e98c0892f08ba8952486018f0dc25912f51f17d01e9a964af9139cd",
         "list_location_reviews": "sha256:95068cff21ac3fea416a9fa8ec3a8ad2d01db79ea0825274c0295b89f15f5d92",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_team_conversation_recipients": "sha256:764e248b3773ad9ba0fc2a8d90b03b36dd29bae06c7f988f1def582f50c9a0ac",
-        "list_team_conversations": "sha256:0c012a840db1073709b16e30f3e307d3cfdfe94ce190003558eb322d1146fbdf",
+        "list_team_conversations": "sha256:f41c3fa5af630fa0e493ea4e48fa07732f81597d4e908497883f7ef0d1c7647b",
         "mark_team_conversation_read": "sha256:0860e470941b83825d36099843eb4a8218b6894fc02b13f26d96c734d40537c2",
-        "reject_product_booking": "sha256:91a5bee34d02b729a3dacb01885157ce63b443594116d8710ca90313fb76e357",
+        "reject_product_booking": "sha256:a3c2fba812200e703c50d145e1622656a10af85f7bbf6ad50fe67589ff8e966b",
         "reply_to_guest": "sha256:25c1e77ff9ef3f712ea7e9671dd942c63f69a64b91c216f327488210021447f8",
-        "request_product_booking_change": "sha256:6468bdd6e44a875f7ea9b01728b6cb4ff504d2396e4bfff74aae3fe68b25b58e",
-        "request_table_reservation_change": "sha256:f9a5a6f7a2da6dca328fa041f90cda5ece2f777db64e70a9f3568da1046a6795",
+        "request_product_booking_change": "sha256:bd9af8ee041ca1ce9dbc834e1fcc89026bad04c909b84a9074c1e15538643aa4",
         "send_team_message": "sha256:ca932c062c753f93a740b7124f6aa5546273697a19b233e55dbb807c98c84dae",
         "start_team_conversation": "sha256:57e5de3d26585e9aa2b94df9fbe7c341672638dd0d6eafab12118fcd734cda06",
         "update_team_group": "sha256:a6b9711ed29b2b12b9e1079cc339a1b655b5d526b323dd9dad264970b36b134b"
@@ -130090,9 +129133,9 @@
       },
       "toolContracts": {
         "attach_media": "sha256:b6f84ecad030ec9ec81a253682c86d6f8a10dc0c3b35564c873c21bbdbace35a",
-        "get_location": "sha256:bae756970ad92d73d440a9d7a99f85f9c59550786008a5203d79c24c87b64c6a",
+        "get_location": "sha256:eeb473e44df629a24ceb82a2db6873a6b1f108dd852c2fa923f605a637439f34",
         "get_post": "sha256:084fd73ea9efe150fe8e7812e02a80394a52477719bdab8ed3c33beae8225df8",
-        "get_product": "sha256:1851f02b03ea33aae46ecd57db939e180639dced6c1004e3219443dba38c4f0e",
+        "get_product": "sha256:ba1303e192c6daf5e6baa873ab9e5438e80608cbd361ed7cecfb5f789d8e7b86",
         "get_site_page": "sha256:4991f484621a89a5c664386fca8d24faea4ce852a275059de9ec33ba04e3ea51",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "save_media_attachment": "sha256:dd3e83b857a53f97fa3f6a27e1788dc247133a954108a09e5f7c200b4a1e3a93",
@@ -130108,14 +129151,14 @@
         "text": "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft ID and revision. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Check for missing brand assets like logo, favicon, social card, palette colors, hero media, and about page story. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result."
       },
       "toolContracts": {
-        "create_product": "sha256:20982c9950d16a9f00c1b6205672d2a4902ab42ba397a85d6980b6afc60e370b",
+        "create_product": "sha256:6524cf2df05e3005cf841d0429c90192c20b4818cc833bde52a611db800fc30e",
         "get_organization": "sha256:7659406922dc74826fdfd890dc16fb069dbc35c3af276860b62306848b471f06",
         "get_site_page": "sha256:4991f484621a89a5c664386fca8d24faea4ce852a275059de9ec33ba04e3ea51",
         "get_website_draft": "sha256:3fc96867bd2ccb2dbd9ece2124b0b7250cce1219a6da69d014dc81985d1bba23",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_organizations": "sha256:9edf9d564e3c56a28961d41b27d0694753b5c31e889b63ebc171b6478336e901",
-        "list_products": "sha256:d586cfff763528e260cc3f640a44ab69c1e6a41d4cc4c28edac2d1cfee1aa837",
+        "list_products": "sha256:bd6b30cee8a405d0bcdf6313fa20396a2e287bb3285b977fdc1c27baed9c48f0",
         "list_site_pages": "sha256:5a49aa342807192ee45d329880f2f459d1914154e9a04a43562c0ea3587879cc",
         "publish_website": "sha256:6ba702a3293b004e38bcc734ff0b74c3073caaeb12cd831f0f78ddec1a1efaa4",
         "save_website_draft": "sha256:6a7e9c21393133afa96ef5bd80d3ca08ced43fc89e669394496d8d4785ed82ab",
@@ -130130,20 +129173,18 @@
       "arguments": [],
       "rendered": {
         "description": "Review guest booking",
-        "text": "Use get_workspace_context, list_products, get_product and list_product_booking_sessions to read the public offering, booking readiness and actual availability. Use list_locations, get_location and get_reservation_policy for location hours and table reservation setup. Identify what prevents guests from booking and ask for missing business facts. Use update_product with booking setup, set_product_booking_config, replace_product_weekly_schedule or update_reservation_policy for the changes the user requests. Read back readiness, available times and the public result."
+        "text": "Use get_workspace_context, list_products, get_product and list_product_booking_sessions to read the public offering, booking readiness and actual availability. Use list_locations and get_location for location hours; a restaurant's tables are a table product at each location, read with get_product like any offering. Identify what prevents guests from booking and ask for missing business facts. Use update_product with booking setup, set_product_booking_config or replace_product_weekly_schedule (a table's seatings are a start every interval through each service) for the changes the user requests. Read back readiness, available times and the public result."
       },
       "toolContracts": {
-        "get_location": "sha256:bae756970ad92d73d440a9d7a99f85f9c59550786008a5203d79c24c87b64c6a",
-        "get_product": "sha256:1851f02b03ea33aae46ecd57db939e180639dced6c1004e3219443dba38c4f0e",
-        "get_reservation_policy": "sha256:1e70aca37a43c0512b2249b7c26e37844b0c04959bd40d3fbb5a73d711238943",
+        "get_location": "sha256:eeb473e44df629a24ceb82a2db6873a6b1f108dd852c2fa923f605a637439f34",
+        "get_product": "sha256:ba1303e192c6daf5e6baa873ab9e5438e80608cbd361ed7cecfb5f789d8e7b86",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_product_booking_sessions": "sha256:c3feed62de11467bd12a6fd7885907eba84c469608e6bc20735c686887df971f",
-        "list_products": "sha256:d586cfff763528e260cc3f640a44ab69c1e6a41d4cc4c28edac2d1cfee1aa837",
-        "replace_product_weekly_schedule": "sha256:cc5f48fb054661e70ce26d988fc12a29f4325c7fc59b5b20852fb98d0e0e2451",
-        "set_product_booking_config": "sha256:3a44508013c743bb8db52ea87844bf1e72cf232c016841557988c78f4264c3cb",
-        "update_product": "sha256:36595ad15590850ba8b47a495e6cf49f5790c5d46009837f9a780e3095b67b5f",
-        "update_reservation_policy": "sha256:bba55ab3d0be1e0ea20d68f78438e4ad6b30cfa6a991ad2ba2d723c9e99a843a"
+        "list_products": "sha256:bd6b30cee8a405d0bcdf6313fa20396a2e287bb3285b977fdc1c27baed9c48f0",
+        "replace_product_weekly_schedule": "sha256:dbe8f704642aa84a2505f148f33943dd56c5febbc489eee55a4e62b397d3e05e",
+        "set_product_booking_config": "sha256:5fc8fc5dac4805d6c9d7453b1e0b29f7a04075696b53e3b5e34656ffeff44bc1",
+        "update_product": "sha256:7cd58fd4ab7279a63853812c8aad71fbd8ed004b0585da74a96874700354fd88"
       }
     },
     {
@@ -130159,10 +129200,10 @@
         "get_site_page": "sha256:4991f484621a89a5c664386fca8d24faea4ce852a275059de9ec33ba04e3ea51",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_media_assets": "sha256:97b5782d44d8cf6d41886665ca3b9eb4c48d0f6bedd95989ec2f671c4a651ee7",
-        "list_products": "sha256:d586cfff763528e260cc3f640a44ab69c1e6a41d4cc4c28edac2d1cfee1aa837",
+        "list_products": "sha256:bd6b30cee8a405d0bcdf6313fa20396a2e287bb3285b977fdc1c27baed9c48f0",
         "list_site_pages": "sha256:5a49aa342807192ee45d329880f2f459d1914154e9a04a43562c0ea3587879cc",
         "set_media": "sha256:79e758a2b687c65350fa364dd1169fb47edc54c166f71d2c1ccee5a380a1295b",
-        "update_product": "sha256:36595ad15590850ba8b47a495e6cf49f5790c5d46009837f9a780e3095b67b5f",
+        "update_product": "sha256:7cd58fd4ab7279a63853812c8aad71fbd8ed004b0585da74a96874700354fd88",
         "update_site_page": "sha256:1a5471900a3203b0215956f65d00b00a18459bf28b204542377bbdf93af009a1"
       }
     },
@@ -130176,16 +129217,16 @@
       },
       "toolContracts": {
         "create_post": "sha256:e800e3c19ecf887d09aa70d80dcbe66d985196d2138620b369cb9e1f9cace67a",
-        "get_guest_conversation": "sha256:bbc45bf9bdc9097c8aad98e871de2e959a34fbfaf24635f8d2490185732bab59",
+        "get_guest_conversation": "sha256:298b550b69fcfcceaa35d37a34041114724f2337e1d8186fd0ff1736c002d46b",
         "get_organization_analytics": "sha256:06e0bfe504a9b9183d0429a06162e4af2d760695c842396608752a8f107cb4d9",
-        "get_product": "sha256:1851f02b03ea33aae46ecd57db939e180639dced6c1004e3219443dba38c4f0e",
+        "get_product": "sha256:ba1303e192c6daf5e6baa873ab9e5438e80608cbd361ed7cecfb5f789d8e7b86",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
-        "list_guest_conversations": "sha256:2094e77b9c0524ea5996a63d5feff72271e44d4d38e6dab9ac469766844cf693",
+        "list_guest_conversations": "sha256:50390b145e98c0892f08ba8952486018f0dc25912f51f17d01e9a964af9139cd",
         "list_product_booking_sessions": "sha256:c3feed62de11467bd12a6fd7885907eba84c469608e6bc20735c686887df971f",
-        "list_products": "sha256:d586cfff763528e260cc3f640a44ab69c1e6a41d4cc4c28edac2d1cfee1aa837",
+        "list_products": "sha256:bd6b30cee8a405d0bcdf6313fa20396a2e287bb3285b977fdc1c27baed9c48f0",
         "publish_post": "sha256:fbfd1f5ff6cbdc02ecba0e29e88a7efc5bedb5e6b60ad98eca33b6e99016f1b2",
         "reply_to_guest": "sha256:25c1e77ff9ef3f712ea7e9671dd942c63f69a64b91c216f327488210021447f8",
-        "update_product": "sha256:36595ad15590850ba8b47a495e6cf49f5790c5d46009837f9a780e3095b67b5f"
+        "update_product": "sha256:7cd58fd4ab7279a63853812c8aad71fbd8ed004b0585da74a96874700354fd88"
       }
     }
   ]

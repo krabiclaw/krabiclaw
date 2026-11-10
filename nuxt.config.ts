@@ -322,8 +322,6 @@ export default defineNuxtConfig({
           '/contact/confirmed',
           '/forgot-password',
           '/login',
-          '/reservations/cancel',
-          '/reservations/confirmed',
           '/reset-password',
           '/signup',
           '/tenant-404',

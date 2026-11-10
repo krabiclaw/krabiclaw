@@ -185,7 +185,7 @@ const isReview = (value: unknown): value is Review => isRecord(value) && typeof 
 const isConfirmation = (value: unknown): value is Confirmation => isRecord(value) && typeof value.status === 'string' && typeof value.requires_action === 'boolean'
 const isReturn = (value: unknown): value is PaymentReturn => isRecord(value) && (value.state === 'processing' || value.state === 'refunded' || value.state === 'expired' || (value.state === 'paid' && (
   (value.kind === 'stay' && typeof value.activity_id === 'string' && typeof value.receipt_token === 'string')
-  || ((value.kind === 'booking' || value.kind === 'reservation') && typeof value.request_id === 'string' && typeof value.cancellation_token === 'string'))))
+  || (value.kind === 'booking' && typeof value.request_id === 'string' && typeof value.cancellation_token === 'string'))))
 
 const { data: handoff, status, error } = await useAsyncData(`payment-handoff:${paymentId}`, () => publicApiRequest<Handoff>(`/api/public/payments/${encodeURIComponent(paymentId)}`, { query: { claim: claim.value }, validate: isHandoff }), { server: false, immediate: Boolean(claim.value) })
 // The fragment never reaches the server, so a missing claim is known only once mounted.
@@ -228,7 +228,8 @@ const guests = computed(() => {
   const value = handoff.value
   if (!value) return ''
   if (value.stay) return guestsLabel(value.stay.adults + value.stay.children)
-  return value.kind === 'experience' || value.kind === 'reservation' ? guestsLabel(value.quantity) : ''
+  // A table's deposit is paid once for the booking, so its quantity is not its party.
+  return value.kind === 'experience' ? guestsLabel(value.quantity) : ''
 })
 const stayPolicy = computed(() => {
   const policy = handoff.value?.stay?.cancellation_policy
@@ -245,7 +246,8 @@ const policySummary = computed(() => {
 // The offering's own page: where what was picked can be changed.
 const offeringPath = computed(() => {
   const value = handoff.value
-  if (!value?.product_slug || !value.kind || value.kind === 'reservation') return ''
+  // A table is reserved from the reservations page, not a page of its own.
+  if (!value?.product_slug || !value.kind || value.kind === 'table') return ''
   // Only an experience's and a stay's page is the site's; any other offering's is its location's.
   if (value.kind !== 'experience' && value.kind !== 'stay' && !value.location_slug) return ''
   return localePath(presentationForProduct({ kind: value.kind as ProductKind }).productPath(value.location_slug ?? '', value.product_slug))
@@ -406,7 +408,7 @@ async function complete() {
     const done = await publicApiMutation<PaymentReturn>(`/api/public/payments/${encodeURIComponent(paymentId)}/return`, { method: 'POST', body: { claim: claim.value }, validate: isReturn })
     if (done.state !== 'paid') outcome.value = done.state
     else if (done.kind === 'stay') await navigateTo({ path: localePath('/bookings/stay'), query: { id: done.activity_id }, hash: `#${done.receipt_token}` }, { replace: true })
-    else await navigateTo({ path: localePath(done.kind === 'booking' ? '/bookings/confirmed' : '/reservations/confirmed'), query: { id: done.request_id }, hash: `#${done.cancellation_token}` }, { replace: true })
+    else await navigateTo({ path: localePath('/bookings/confirmed'), query: { id: done.request_id }, hash: `#${done.cancellation_token}` }, { replace: true })
   } catch (cause) {
     actionError.value = getErrorMessage(cause, t('payment.unavailable'))
   } finally {

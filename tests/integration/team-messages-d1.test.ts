@@ -6,7 +6,7 @@ import sharp from 'sharp'
 import * as schema from '../../server/db/schema.ts'
 import { createDb } from '../../server/db/index.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
-import { getLocation, updateLocation } from '../../server/utils/location-management.ts'
+import { createTables } from './support/table-product.ts'
 import { assertAssignedBookingAccess, listOrganizationNotificationMembers, memberAccessPrincipal, reconcileResponsibilities } from '../../server/utils/member-access.ts'
 import { createStay, listStayHomes, stayAccessFor, updateStayHome, type StayAccess } from '../../server/domain/stays.ts'
 import { receiveMemberEmail } from '../../server/domain/guest-threads/inbound-email.ts'
@@ -124,23 +124,6 @@ test('members talk in team conversations, see unread state and receive recorded 
     // A stay's guest conversation is owners' and admins': the member looking after the home reads its turnover.
     await assert.rejects(assertAssignedBookingAccess(db, { ...principal('cleaner', 'member'), requestId: stay.request_id }), refused(404, 'THREAD_NOT_FOUND', 'threadId'))
     assert.deepEqual((await listOrganizationNotificationMembers(env, ORG, { requestId: stay.request_id })).map(member => member.userId).sort(), ['owner'], 'a stay conversation alerts owner oversight, not the member looking after the home')
-    const unassignedLocation = (await getLocation(db, ORG, 'cabin-site'))!
-    assert.equal((await updateLocation(db, ORG, 'cabin-site', { assigned_member_id: 'm-cook' }, 'owner', env)).status, 200)
-    const assignedLocation = (await getLocation(db, ORG, 'cabin-site'))!
-    assert.equal(assignedLocation.assigned_member_id, 'm-cook')
-    assert.deepEqual(await updateLocation(db, ORG, 'cabin-site', {
-      assigned_member_id: 'm-cleaner', expected_updated_at: unassignedLocation.updated_at!,
-    }, 'owner', env), { status: 409, data: { error: 'The location changed since it was read. Reload it and try again.', code: 'LOCATION_VERSION_CONFLICT', field: 'expected_updated_at' } },
-    'an explicit stale revision keeps its version conflict instead of rebasing a responsibility change')
-    const assignmentActivity = await db.prepare("SELECT actor_user_id, payload_json FROM activity_entries WHERE scope_kind = 'organization' AND organization_id = ? AND event_name = 'location.updated' AND json_extract(payload_json, '$.entityId') = 'cabin-site'").bind(ORG).all<{ actor_user_id: string | null; payload_json: string }>()
-    assert.deepEqual(assignmentActivity.results.map(entry => ({ actorId: entry.actor_user_id, payload: JSON.parse(entry.payload_json) })), [{
-      actorId: 'owner', payload: {
-        entityType: 'business_location', entityId: 'cabin-site', actorType: 'member',
-        beforeState: { updated_at: unassignedLocation.updated_at }, afterState: { updated_at: assignedLocation.updated_at },
-        metadata: { title: 'Pine Cabin', changed_fields: ['assigned_member_id'], evidence_basis: 'persisted_change' },
-      },
-    }], 'only the saved assignment records its actual actor, field change and persisted revision')
-    assert.equal((await updateLocation(db, ORG, 'cabin-site', { assigned_member_id: null }, 'owner', env)).status, 200)
     await updateStayHome(env, db, manager, cabin.id, { assigned_member_id: 'm-cleaner' })
     const about = await createTeamThread(env, db, cleaner, { memberIds: ['owner'], stayId: stay.id })
     assert.equal(about.created, true)
@@ -148,17 +131,17 @@ test('members talk in team conversations, see unread state and receive recorded 
 
     // A location conversation needs a location the caller can see, and reuses the existing thread.
     await assert.rejects(createTeamThread(env, db, cleaner, { memberIds: ['owner'], locationId: 'nonexistent-location' }), refused(404, 'LOCATION_NOT_FOUND', 'locationId'))
-    // cook is not yet assigned to cabin-site, so cook cannot start a location conversation for it
+    // cook handles nothing at cabin-site yet, so cook cannot start a location conversation for it
     await assert.rejects(createTeamThread(env, db, cook, { memberIds: ['owner'], locationId: 'cabin-site' }), refused(404, 'LOCATION_NOT_FOUND', 'locationId'))
     const floorChat = await createTeamThread(env, db, owner, { memberIds: ['cook'], locationId: 'cabin-site' })
     assert.equal(floorChat.created, true)
     assert.notEqual(floorChat.id, direct.id)
     assert.notEqual(floorChat.id, about.id)
 
-    // Assigning cook to cabin-site gives cook access to reuse and view the location conversation
-    await db.prepare('UPDATE business_locations SET assigned_member_id = ? WHERE id = ?').bind('m-cook', 'cabin-site').run()
+    // Giving cook the site's tables gives cook access to reuse and view the location conversation
+    await createTables(db, env, { organizationId: ORG, locationId: 'cabin-site', actorId: 'owner', memberId: 'm-cook', name: 'Cabin tables', durationMinutes: 90, seats: 12, open: '18:00', lastSeating: '20:00', idempotencyKey: 'cabin-tables' })
     await assert.rejects(assertAssignedBookingAccess(db, { ...principal('cook', 'member'), requestId: stay.request_id }), refused(404, 'THREAD_NOT_FOUND', 'threadId'))
-    assert.deepEqual((await listOrganizationNotificationMembers(env, ORG, { requestId: stay.request_id })).map(member => member.userId).sort(), ['owner'], 'a location assignment does not reach a lodging conversation either')
+    assert.deepEqual((await listOrganizationNotificationMembers(env, ORG, { requestId: stay.request_id })).map(member => member.userId).sort(), ['owner'], 'handling the site\'s tables does not reach a lodging conversation either')
     assert.deepEqual(await createTeamThread(env, db, cook, { memberIds: ['owner'], locationId: 'cabin-site' }), { id: floorChat.id, created: false })
     const cookFloorView = (await listTeamThreads(env, db, cook, { locationId: 'cabin-site' })).find(thread => thread.id === floorChat.id)!
     assert.equal(cookFloorView.locationId, 'cabin-site')
@@ -494,9 +477,9 @@ test('members talk in team conversations, see unread state and receive recorded 
     const promotedMember = await auth.api.updateMemberRole({ headers, body: { organizationId: ORG, memberId: 'm-cook', role: 'admin' } })
     assert.equal(promotedMember.role, 'admin')
     assert.equal(await assignee(), 'm-cook')
-    // Each departure releases the home, the open turnover that followed the home's assignee, and the site the cook looked after.
+    // Each departure releases the home, the open turnover that followed the home's assignee, and the tables the cook handled.
     assert.deepEqual((await db.prepare("SELECT json_extract(payload_json, '$.entityType') AS entity, COUNT(*) AS n FROM activity_entries WHERE event_name = 'member.access_scope_revoked' AND actor_kind = 'system' AND organization_id = ? GROUP BY entity ORDER BY entity").bind(ORG).all()).results,
-      [{ entity: 'business_locations', n: 1 }, { entity: 'product_booking_configs', n: 2 }, { entity: 'tasks', n: 2 }])
+      [{ entity: 'product_booking_configs', n: 3 }, { entity: 'tasks', n: 2 }])
   } finally {
     await runtime.dispose()
   }

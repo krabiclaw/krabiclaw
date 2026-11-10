@@ -33,7 +33,7 @@ export async function publishScheduledGuestMessageChange(
     await publishGuestInboxThreadEvent(env, db, { threadId: row.request_id, type })
     return
   }
-  // A booking or reservation without a conversation has no open view of its messages beyond the scheduled list, which reads them fresh.
+  // A booking without a conversation has no open view of its messages beyond the scheduled list, which reads them fresh.
   if (row.subject_type !== 'stay' || row.product_id === null) return
   const stay = await readBookedRecord(db, row.organization_id, messageSubject(row))
   if (!stay?.location_id) messagingError(500, 'INVALID_MESSAGE_STAY', 'The scheduled message’s stay or home is missing; open apps could not be updated', 'subjectId')

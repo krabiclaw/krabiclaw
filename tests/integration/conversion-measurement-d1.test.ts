@@ -12,7 +12,12 @@ import { getAnalyticsReport } from '../../server/utils/analytics-report.ts'
 import { recordTenantPageview, type TenantPageviewInput } from '../../server/utils/pageview-tracking.ts'
 import { completeOnboarding } from '../../server/utils/organization-provisioning.ts'
 import { hashEmail } from '../../server/utils/email-delivery.ts'
-import { requestInsertQueries, threadPayloadForGuest } from '../../server/domain/requests.ts'
+import { H3Event } from 'h3'
+import { createProductBooking } from '../../server/domain/product-bookings.ts'
+import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
+import { listSessions } from '../../server/utils/availability.ts'
+import { addLocalDays, localDateAt, localDateTimeToInstant } from '../../utils/timezone.ts'
+import { createTables } from './support/table-product.ts'
 import { listBusinessOutcomes } from '../../server/utils/business-outcomes.ts'
 import { memberAccessPrincipal, resolveMembership } from '../../server/utils/member-access.ts'
 import { createQa } from '../../server/utils/location-qa.ts'
@@ -28,8 +33,9 @@ const browser = { headers: new Headers({ cookie: `kc_session_id=${SESSION}; kc_v
 async function openDb() {
   const runtime = new Miniflare({ workers: [{ config: {
     name: 'conversion-proof', compatibilityDate: '2024-11-01',
-    manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export default { fetch() { return new Response("ok") } }' } } },
-    env: { DB: { type: 'd1' } },
+    manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export class Hub { fetch() { return new Response(null, { status: 204 }) } } export default { fetch() { return new Response("ok") } }' } } },
+    exports: { Hub: { type: 'durable-object', storage: 'sqlite' } },
+    env: { DB: { type: 'd1' }, ORGANIZATION_CACHE: { type: 'kv' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'conversion-proof', exportName: 'Hub' } },
   } }] })
   const db = await runtime.getD1Database('DB')
   const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
@@ -200,9 +206,28 @@ test('conversion measurement: contract, values, idempotency, report and cohort o
 test('the funnel joins a business site from visit to payment, by source and by location', { timeout: 60_000 }, async () => {
   const { runtime, db } = await openDb()
   try {
-    await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, default_currency, timezone, analytics_data_start_at) VALUES ('org-funnel', 'Funnel', 'funnel', 'funnel', '{}', 'THB', 'Asia/Bangkok', '2000-01-01T00:00:00.000Z')`).run()
-    for (const id of ['loc-beach', 'loc-town']) {
-      await db.prepare(`INSERT INTO business_locations (id, organization_id, slug, title, timezone) VALUES (?, 'org-funnel', ?, ?, 'Asia/Bangkok')`).bind(id, id, id).run()
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://funnel.example', STRIPE_SECRET_KEY: 'sk_test_no_provider_requests', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://funnel.example',
+      EMAIL_REPLY_SECRET: 'local-reply-proof', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' } as CloudflareEnv
+    const occurredAt = new Date().toISOString()
+    const open = JSON.stringify({ periods: [{ open: { day: 0, hour: 0, minute: 0 } }] })
+    await db.batch([
+      db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, timezone, analytics_data_start_at)
+        VALUES ('org-funnel', 'Funnel', 'funnel', 'funnel', '{}', 'tenant-theme-v1', 'THB', 'active', 'active', 'flat', 'restaurant', 'Asia/Bangkok', '2000-01-01T00:00:00.000Z')`),
+      db.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('funnel-en', 'org-funnel', 'en', 1, 'published')"),
+      db.prepare("INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES ('funnel-owner', 'Owner', 'owner@funnel.example', 1, 0, 0)"),
+      db.prepare(`INSERT INTO member (id, "organizationId", "userId", role, "createdAt") VALUES ('m-funnel-owner', 'org-funnel', 'funnel-owner', 'owner', 0)`),
+      ...['loc-beach', 'loc-town'].map(id => db.prepare(`INSERT INTO business_locations (id, organization_id, slug, title, status, timezone, opening_hours, created_at, updated_at) VALUES (?, 'org-funnel', ?, ?, 'active', 'Asia/Bangkok', ?, ?, ?)`)
+        .bind(id, id, id, open, occurredAt, occurredAt)),
+    ])
+    // Each location's tables, set up the way the dashboard sets them up.
+    const tables = Object.fromEntries(await Promise.all(['loc-beach', 'loc-town'].map(async locationId => [locationId, await createTables(db, env, {
+      organizationId: 'org-funnel', locationId, actorId: 'funnel-owner', memberId: 'm-funnel-owner', name: `Tables ${locationId}`, durationMinutes: 120, seats: 10, open: '18:00', lastSeating: '21:00', currency: 'THB' })])))
+    const dinnerDate = localDateAt(new Date(Date.now() + 2 * 86_400_000), 'Asia/Bangkok')
+    const seating = async (locationId: string) => {
+      const at = localDateTimeToInstant(dinnerDate, '19:00', 'Asia/Bangkok', 'reject').toISOString()
+      const [found] = await listSessions(db, { env, organizationId: 'org-funnel', productId: tables[locationId]!.id, fromInstant: at, toInstant: new Date(Date.parse(at) + 60_000).toISOString() })
+      assert.equal(found?.starts_at, at)
+      return found!.id
     }
     // Two visitors: one from a Google ad at the beach, one typing the address in town.
     const visitor = (n: number) => ({ session: `3333333${n}-3333-4333-8333-333333333333`, visitor: `4444444${n}-4444-4444-8444-444444444444` })
@@ -211,41 +236,43 @@ test('the funnel joins a business site from visit to payment, by source and by l
       await recordTenantPageview(db, {
         eventId: `pv-funnel-${index}`, organizationId: 'org-funnel', pagePath: '/', locale: 'en', referrerHost: null, attribution: arrival.attribution,
         internalHosts: ['funnel.example'], userAgent: 'Desktop', ipHash: 'h', sessionId: arrival.session, visitorId: arrival.visitor,
-        country: 'th', region: null, city: null, locationId: arrival.locationId, pageId: null, pageType: 'home', recipe: null, now: '2026-09-10T03:00:00.000Z',
+        country: 'th', region: null, city: null, locationId: arrival.locationId, pageId: null, pageType: 'home', recipe: null, now: occurredAt,
       })
     }
     const [ad, direct] = arrivals.map(arrival => ({ headers: new Headers({ cookie: `kc_session_id=${arrival.session}; kc_visitor_id=${arrival.visitor}`, 'user-agent': 'Desktop' }) }))
-    const view = { organizationId: 'org-funnel', eventName: 'product_view', stage: 'viewed', surface: 'website', entityType: 'product', entityId: 'dinner' } as const
-    await recordOrganizationConversionEvent(db, ad, { ...view, locationId: 'loc-beach' })
-    await recordOrganizationConversionEvent(db, direct, { ...view, locationId: 'loc-town' })
-    await recordOrganizationConversionEvent(db, ad, { organizationId: 'org-funnel', eventName: 'checkout_start', stage: 'started', surface: 'website', entityType: null, entityId: null, locationId: 'loc-beach' })
-    // Both visitors reserve; the town reservation is later cancelled, so only the beach one is confirmed.
-    for (const [requestId, origin, locationId, status] of [['req-beach', ad, 'loc-beach', 'confirmed'], ['req-town', direct, 'loc-town', 'cancelled']] as const) {
-      const now = '2026-09-10T05:00:00.000Z'
-      const thread = requestInsertQueries({ id: requestId, kind: 'reservation', organization_id: 'org-funnel', location_id: locationId, user_id: null, review_id: null,
-        payload: threadPayloadForGuest({ name: 'Guest', email: 'guest@funnel.example', phone: '+66812345678' }), created_at: now, updated_at: now })
-      await db.batch(thread.map(write => db.prepare(write.query).bind(...write.params)))
-      await db.prepare(`INSERT INTO reservations (id, organization_id, location_id, request_id, timezone, starts_at, ends_at, party_size, status, cancelled_at)
-        VALUES (?, 'org-funnel', ?, ?, 'Asia/Bangkok', '2026-09-20T12:00:00.000Z', '2026-09-20T14:00:00.000Z', 2, ?, ?)`)
-        .bind(`reservation-${requestId}`, locationId, requestId, status, status === 'cancelled' ? now : null).run()
-      await recordOrganizationConversionEvent(db, origin, { organizationId: 'org-funnel', eventName: 'reservation_submit', stage: 'submitted', surface: 'website', entityType: 'request', entityId: requestId, locationId })
+    const view = { organizationId: 'org-funnel', eventName: 'product_view', stage: 'viewed', surface: 'website', entityType: 'product', entityId: 'dinner', occurredAt } as const
+    await recordAt(db, ad, { ...view, locationId: 'loc-beach' })
+    await recordAt(db, direct, { ...view, locationId: 'loc-town' })
+    await recordAt(db, ad, { organizationId: 'org-funnel', eventName: 'checkout_start', stage: 'started', surface: 'website', entityType: 'product', entityId: tables['loc-beach']!.id, locationId: 'loc-beach', occurredAt })
+    // Each visitor books a table on the site, which records its own submission.
+    const guestEvent = (origin: { headers: Headers }) => new H3Event(Object.assign(new Request('https://funnel.example/api/products', { headers: origin.headers }), { runtime: { cloudflare: { env } } }))
+    const book = async (origin: { headers: Headers } | null, locationId: string, email: string, key: string) => {
+      const result = await createProductBooking(origin ? guestEvent(origin) : new H3Event(Object.assign(new Request('https://funnel.example/api/mcp'), { runtime: { cloudflare: { env } } })), {
+        organizationId: 'org-funnel', slug: tables[locationId]!.slug, financialWritesAllowed: false,
+        ...(origin ? {} : { operator: { userId: 'funnel-owner', idempotencyKey: key, source: 'operator', externalReference: null, guestAcknowledgement: false } }),
+        body: { guest_name: 'Guest', guest_email: email, guest_phone: '+66812345678', session_id: await seating(locationId), party_size: 2, ...(origin ? { idempotency_key: key } : {}) } })
+      assert.equal(result.status, 201, JSON.stringify(result.body))
+      return { requestId: String(result.body.request_id), bookingId: String(result.body.operational_booking_id) }
     }
-    // A request made through checkout records no submit event: its payment is how it was made.
-    const now = '2026-09-10T06:00:00.000Z'
-    const checkout = requestInsertQueries({ id: 'req-checkout', kind: 'reservation', organization_id: 'org-funnel', location_id: 'loc-beach', user_id: null, review_id: null,
-      payload: threadPayloadForGuest({ name: 'Guest', email: 'paid@funnel.example', phone: '+66812345678' }), created_at: now, updated_at: now })
-    await db.batch(checkout.map(write => db.prepare(write.query).bind(...write.params)))
-    await db.prepare(`INSERT INTO reservations (id, organization_id, location_id, request_id, timezone, starts_at, ends_at, party_size, status)
-      VALUES ('reservation-req-checkout', 'org-funnel', 'loc-beach', 'req-checkout', 'Asia/Bangkok', '2026-09-21T12:00:00.000Z', '2026-09-21T14:00:00.000Z', 2, 'confirmed')`).run()
-    // One payment made the checkout request; the other pays for a request already submitted, which is not submitted twice.
-    for (const [paymentId, reservationId, collected] of [['pay-checkout', 'reservation-req-checkout', 160500], ['pay-beach', 'reservation-req-beach', 53500]] as const) {
+    const beach = await book(ad, 'loc-beach', 'beach@funnel.example', 'beach')
+    const town = await book(direct, 'loc-town', 'town@funnel.example', 'town')
+    assert.deepEqual(await db.prepare(`SELECT payload_json ->> '$.entity_id' AS request_id, location_id FROM analytics_events WHERE kind = 'conversion' AND (payload_json ->> '$.event_name') = 'reservation_submit' ORDER BY location_id`).all().then(r => r.results),
+      [{ request_id: beach.requestId, location_id: 'loc-beach' }, { request_id: town.requestId, location_id: 'loc-town' }])
+    // The town booking is later cancelled, so only the beach one stands confirmed.
+    const cancelled = await executeGuestThreadOperation(db, { threadId: town.requestId, organizationId: 'org-funnel', action: 'cancel', actorUserId: 'funnel-owner', idempotencyKey: 'cancel-town', env, financialWritesAllowed: false })
+    assert.equal(cancelled.ok, true, JSON.stringify(cancelled))
+    // A booking nobody submitted on the site (the owner entered it) is made by its payment: that payment is its submission.
+    const entered = await book(null, 'loc-beach', 'paid@funnel.example', 'entered')
+    // One payment pays for that booking; the other pays for the beach booking already submitted, which is not submitted twice.
+    for (const [paymentId, bookingId, collected] of [['pay-checkout', entered.bookingId, 160500], ['pay-beach', beach.bookingId, 53500]] as const) {
       await db.prepare(`INSERT INTO payments (id, organization_id, stripe_account_id, livemode, subject_type, subject_id, location_id, currency, amount, price_snapshot_json, created_at, updated_at)
-        VALUES (?, 'org-funnel', 'acct_funnel', 0, 'reservation', ?, 'loc-beach', 'THB', ?, '{}', ?, ?)`).bind(paymentId, reservationId, collected, now, now).run()
-      await recordOrganizationConversionEvent(db, ad, { organizationId: 'org-funnel', eventName: 'payment_paid', stage: 'completed', surface: 'stripe', entityType: 'payment', entityId: paymentId, locationId: 'loc-beach',
+        VALUES (?, 'org-funnel', 'acct_funnel', 0, 'booking', ?, 'loc-beach', 'THB', ?, '{}', ?, ?)`).bind(paymentId, bookingId, collected, occurredAt, occurredAt).run()
+      await recordAt(db, ad, { organizationId: 'org-funnel', eventName: 'payment_paid', stage: 'completed', surface: 'stripe', entityType: 'payment', entityId: paymentId, locationId: 'loc-beach', occurredAt,
         value: { basis: 'purchase', amount_minor: collected - 100, collected_minor: collected, currency: 'THB', transaction_id: `pi_${paymentId}` } })
     }
 
-    const { funnel } = await getAnalyticsReport(db, { organizationId: 'org-funnel', startDate: '2026-09-10', endDate: '2026-09-12', now: new Date('2026-09-13T00:00:00Z') })
+    const today = localDateAt(new Date(), 'Asia/Bangkok')
+    const { funnel } = await getAnalyticsReport(db, { organizationId: 'org-funnel', startDate: addLocalDays(today, -1), endDate: addLocalDays(today, 1), now: new Date(Date.now() + 3 * 86_400_000) })
     const steps = (counts: Omit<typeof funnel, 'bySource' | 'byLocation'>) => [counts.visits, counts.viewed, counts.intent, counts.submitted, counts.confirmed, counts.paid]
     assert.deepEqual(steps(funnel), [2, 2, 1, 3, 2, 2])
     assert.deepEqual(funnel.paidCollected, [{ currency: 'THB', collectedMinor: 214000 }])

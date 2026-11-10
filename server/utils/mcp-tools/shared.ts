@@ -2,9 +2,7 @@ import { contentBlockDataSchema, contentBlockSchemaDefinitions, CONTENT_BLOCK_TY
 import { timezoneSchema } from '~/utils/timezone'
 import { POSTAL_REGION_CODE_PATTERN } from '~/utils/postal-address'
 import { openingHoursSchema, specialHoursSchema } from '~/shared/reservation-hours'
-import { formQuestionsJsonSchema } from '~/shared/form-questions'
 import type { McpToolRole } from '~/server/utils/mcp-auth'
-import { RESERVATION_STATUSES } from '~/shared/bookings'
 import { STAY_MAP_SHARING_MODES } from '~/shared/stay-listing'
 import { INDEXED_MEDIA_PLACEMENT_SLOTS, MEDIA_PLACEMENT_SLOTS, isEditableMediaPlacement, isSingleMediaPlacement, type EditableMediaPlacementOwnerType } from '~/shared/media-placement-contract'
 
@@ -110,7 +108,6 @@ export const locationObject = {
     id: { type: 'string', minLength: 1 },
     slug: { type: 'string', minLength: 1 },
     title: { type: 'string' },
-    assigned_member_id: { type: ['string', 'null'], description: 'Responsible Better Auth membership ID from list_organization_members, not userId. Null is unassigned.' },
     stay_map_sharing: { type: 'string', enum: [...STAY_MAP_SHARING_MODES], description: 'Public map precision for places to stay at this location; both choices keep their street address private.' },
     phone: { type: ['string', 'null'] },
     email: { type: ['string', 'null'] },
@@ -127,7 +124,6 @@ export const locationObject = {
     short_description: { type: ['string', 'null'] },
     status: { type: 'string', enum: ['active', 'inactive'], description: 'Operational state. Inactive locations are hidden. Active locations follow the website’s publication rules; business locations and live homes are counted separately for billing.' },
     timezone: timezoneSchema,
-    max_capacity: { type: ['number', 'null'], description: 'Stored location capacity metadata; does not limit reservations. Reservation capacity uses location_reservation_configs.slot_capacity.' },
     seo_title: { type: ['string', 'null'] },
     seo_description: { type: ['string', 'null'] },
     canonical_url: { type: ['string', 'null'] },
@@ -149,7 +145,7 @@ export const locationObject = {
     created_at: { type: 'string' },
     updated_at: { type: 'string' },
   },
-  required: ['id', 'slug', 'title', 'assigned_member_id', 'stay_map_sharing', 'latitude', 'longitude', 'status', 'timezone', 'created_at', 'updated_at', 'media'],
+  required: ['id', 'slug', 'title', 'stay_map_sharing', 'latitude', 'longitude', 'status', 'timezone', 'created_at', 'updated_at', 'media'],
 }
 
 export const locationMutationResultObject = {
@@ -568,69 +564,6 @@ export const resolvedMediaAssetObject = {
   required: ['asset_id', 'kind', 'public_url', 'status'],
 }
 
-export const renderedBookingPolicySummaryObject = {
-  type: 'object',
-  properties: {
-    heading: { type: 'string' },
-    items: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          id: { type: 'string' },
-          text: { type: 'string' },
-        },
-        required: ['id', 'text'],
-      },
-    },
-  },
-  required: ['heading', 'items'],
-}
-
-/**
- * One location's reservation policy.
- *
- * No scope_type and no policy_type: a reservation policy belongs to a
- * location and nothing else, so there is no scope to choose and no cascade to
- * explain. Product booking terms are typed details on the product.
- */
-export const locationReservationConfigObject = {
-  type: 'object',
-  properties: {
-    location_id: { type: 'string' },
-    duration_minutes: { type: 'integer', minimum: 1 },
-    slot_capacity: { type: ['number', 'null'], description: 'Guests seatable at one start time. Null means unlimited.' },
-    advance_notice_minutes: { type: ['number', 'null'] },
-    deposit_required: { type: 'boolean' },
-    deposit_amount: { type: ['integer', 'null'], minimum: 1, description: 'Total deposit per reservation, in deposit_currency minor units.' },
-    deposit_currency: { ...currencyCodeSchema, type: ['string', 'null'] },
-    deposit_tax_behavior: { type: ['string', 'null'], enum: ['inclusive', 'exclusive', null] },
-    deposit_trigger_party_size: { type: ['number', 'null'] },
-    minimum_guest_age: { type: ['number', 'null'] },
-    accessibility_contact_required: { type: 'boolean' },
-    questions: { ...formQuestionsJsonSchema('read'), description: 'The tenant\'s own questions asked beside the required reservation fields; create_table_reservation answers them by ID.' },
-    questions_revision: { type: 'string', description: 'Send as expected_questions_revision when replacing questions, and as questions_revision when submitting answers.' },
-    created_at: { type: 'string' },
-    updated_at: { type: 'string' },
-  },
-  required: ['location_id', 'duration_minutes', 'deposit_required', 'accessibility_contact_required', 'questions', 'questions_revision', 'created_at', 'updated_at'],
-} as const
-
-export const locationReservationConfigWriteSchema = {
-  duration_minutes: { type: ['integer', 'null'], minimum: 1 },
-  slot_capacity: { type: ['number', 'null'], minimum: 0 },
-  advance_notice_minutes: { type: ['number', 'null'], minimum: 0 },
-  deposit_required: { type: 'boolean' },
-  deposit_amount: { type: ['integer', 'null'], minimum: 1, description: 'Total deposit per reservation, in deposit_currency minor units.' },
-    deposit_currency: { ...currencyCodeSchema, type: ['string', 'null'] },
-  deposit_tax_behavior: { type: ['string', 'null'], enum: ['inclusive', 'exclusive', null] },
-  deposit_trigger_party_size: { type: ['number', 'null'], minimum: 1 },
-  minimum_guest_age: { type: ['number', 'null'], minimum: 0 },
-  accessibility_contact_required: { type: 'boolean' },
-  questions: { ...formQuestionsJsonSchema('write'), description: 'Replace the questions asked with each reservation. Read get_reservation_policy first and keep existing question IDs.' },
-  expected_questions_revision: { type: 'string', description: 'policy.questions_revision from get_reservation_policy; required with questions.' },
-} as const
-
 export const qaItemObject = {
   type: 'object',
   properties: {
@@ -686,28 +619,6 @@ export const submissionObject = {
     message: { type: ['string', 'null'] },
     created_at: { type: 'string' },
   },
-}
-
-export const reservationSubmissionObject = {
-  type: 'object',
-  properties: {
-    id: { type: 'string', description: 'Inbox request ID.' },
-    request_id: { type: 'string' },
-    operational_reservation_id: { type: 'string', description: 'Use this ID to manage the reservation.' },
-    updated_at: { type: 'string' },
-    name: { type: ['string', 'null'] },
-    email: { type: ['string', 'null'] },
-    phone: { type: ['string', 'null'] },
-    guests: { type: ['string', 'null'] },
-    date: { type: ['string', 'null'] },
-    time: { type: ['string', 'null'] },
-    requests: { type: ['string', 'null'] },
-    status: { type: 'string', enum: [...RESERVATION_STATUSES] },
-    created_at: { type: 'string' },
-    location_id: { type: ['string', 'null'] },
-    location_title: { type: ['string', 'null'] },
-  },
-  required: ['id', 'request_id', 'operational_reservation_id', 'updated_at', 'status', 'created_at', 'guests', 'date', 'time', 'location_id'],
 }
 
 export const organizationSummaryItem = {
@@ -850,7 +761,6 @@ export const EXPECTED_TOOL_ANNOTATIONS = {
   delete_product_booking_config: { ...D, openWorldHint: true },
   replace_product_weekly_schedule: { ...D, openWorldHint: true },
   create_product_session: { ...W, openWorldHint: true, idempotentHint: true },
-  create_table_reservation: { ...D, openWorldHint: true, idempotentHint: true },
   create_inquiry: { ...D, openWorldHint: true, idempotentHint: true },
   update_product_session: { ...D, openWorldHint: true },
   create_product_booking: { ...D, openWorldHint: true, idempotentHint: true },
@@ -861,8 +771,6 @@ export const EXPECTED_TOOL_ANNOTATIONS = {
   reject_product_booking: { ...D, openWorldHint: true, idempotentHint: true },
   cancel_product_booking: { ...D, openWorldHint: true, idempotentHint: true },
   request_product_booking_change: { ...D, openWorldHint: true, idempotentHint: true },
-  cancel_table_reservation: { ...D, openWorldHint: true, idempotentHint: true },
-  request_table_reservation_change: { ...D, openWorldHint: true, idempotentHint: true },
   list_stays: R,
   get_stay: R,
   get_stay_calendar: R,
@@ -924,7 +832,6 @@ export const EXPECTED_TOOL_ANNOTATIONS = {
   get_location: R,
   get_post: R,
   get_product: R,
-  list_table_reservations: R,
   get_resource_localization: R,
   get_organization: R,
   get_organization_analytics: R,
@@ -1005,8 +912,6 @@ export const EXPECTED_TOOL_ANNOTATIONS = {
   reorder_article_categories: { ...D, openWorldHint: true },
   get_product_catalog_localization: R,
   replace_resource_localizations: { ...D, openWorldHint: true },
-  get_reservation_policy: R,
-  update_reservation_policy: { ...D, openWorldHint: true },
   list_google_ads_campaigns: R,
   get_google_ads_campaign: R,
   query_google_ads_report: R,

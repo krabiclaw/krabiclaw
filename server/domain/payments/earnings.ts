@@ -21,13 +21,12 @@ export async function paymentPictures(db: DbClient, organizationId: string, paym
   const ids = payments.map(payment => payment.id)
   if (!ids.length) return new Map()
   const json = JSON.stringify(ids)
-  const [bookings, reservations, lines] = await Promise.all([
+  const [bookings, lines] = await Promise.all([
     queryAll<{ payment_id: string; product_id: string; title: string; starts_at: string; ends_at: string; timezone: string }>(db, `SELECT p.id AS payment_id, b.product_id, pr.name AS title, s.starts_at, s.ends_at, s.timezone FROM payments p JOIN bookings b ON b.id = p.subject_id AND b.organization_id = p.organization_id JOIN product_sessions s ON s.id = b.product_session_id JOIN products pr ON pr.id = b.product_id WHERE p.subject_type = 'booking' AND p.id IN (SELECT value FROM json_each(?))`, [json]),
-    queryAll<{ payment_id: string; location_id: string; title: string; starts_at: string; ends_at: string; timezone: string }>(db, `SELECT p.id AS payment_id, v.location_id, l.title, v.starts_at, v.ends_at, v.timezone FROM payments p JOIN reservations v ON v.id = p.subject_id AND v.organization_id = p.organization_id JOIN business_locations l ON l.id = v.location_id WHERE p.subject_type = 'reservation' AND p.id IN (SELECT value FROM json_each(?))`, [json]),
     queryAll<{ payment_id: string; product_id: string | null }>(db, `SELECT o.payment_id, (SELECT l.product_id FROM payment_order_lines l WHERE l.order_id = o.id ORDER BY l.rowid LIMIT 1) AS product_id FROM payment_orders o WHERE o.payment_id IN (SELECT value FROM json_each(?))`, [json]),
   ])
   const productIds = [...bookings.map(row => row.product_id), ...lines.map(row => row.product_id).filter((id): id is string => !!id)]
-  const locationIds = [...reservations.map(row => row.location_id), ...payments.map(payment => payment.location_id).filter((id): id is string => !!id)]
+  const locationIds = payments.map(payment => payment.location_id).filter((id): id is string => !!id)
   const [products, locations] = await Promise.all([
     loadOwnerPictures(db, organizationId, 'product', productIds),
     loadOwnerPictures(db, organizationId, 'business_location', locationIds),
@@ -37,16 +36,14 @@ export async function paymentPictures(db: DbClient, organizationId: string, paym
     const snapshot: unknown = JSON.parse(payment.price_snapshot_json)
     if (!snapshot || typeof snapshot !== 'object' || !('title' in snapshot) || typeof snapshot.title !== 'string' || !snapshot.title.trim()) throw new Error(`Payment ${payment.id} has no immutable title`)
     const booking = bookings.find(row => row.payment_id === payment.id)
-    const reservation = reservations.find(row => row.payment_id === payment.id)
     const line = lines.find(row => row.payment_id === payment.id)
     // Use only the image of the payment's actual subject; an absent image is optional.
     const imageUrl = booking ? products.get(booking.product_id)?.imageUrl
-      : reservation ? locations.get(reservation.location_id)?.imageUrl
       : line?.product_id ? products.get(line.product_id)?.imageUrl
       : payment.subject_type === 'stay' && payment.location_id ? locations.get(payment.location_id)?.imageUrl
       : null
 
-    const visit = booking ?? reservation ?? null
+    const visit = booking ?? null
     result.set(payment.id, { title: snapshot.title, imageUrl: imageUrl ?? null, subjectTitle: visit?.title ?? null, startsAt: visit?.starts_at ?? null, endsAt: visit?.ends_at ?? null, timeZone: visit?.timezone ?? null })
   }
   return result
@@ -171,7 +168,7 @@ export async function paymentTransactions(db: DbClient, principal: FinancialPrin
     ? await Promise.all([
         paymentPictures(db, principal.organizationId, page.payments),
         queryAll<{ id: string; name: string | null }>(db, `SELECT p.id, COALESCE(json_extract(r.payload_json, '$.guest.name'), u.name) AS name FROM payments p LEFT JOIN user u ON u.id = p.buyer_user_id LEFT JOIN payment_checkout_holds h ON h.payment_id = p.id LEFT JOIN requests r ON r.id = h.request_id WHERE p.id IN (SELECT value FROM json_each(?))`, [json]),
-        queryAll<{ payment_id: string; request_id: string | null }>(db, `SELECT p.id AS payment_id, b.request_id FROM payments p JOIN bookings b ON b.id = p.subject_id AND b.organization_id = p.organization_id WHERE p.subject_type = 'booking' AND p.id IN (SELECT value FROM json_each(?)) UNION ALL SELECT p.id, r.request_id FROM payments p JOIN reservations r ON r.id = p.subject_id AND r.organization_id = p.organization_id WHERE p.subject_type = 'reservation' AND p.id IN (SELECT value FROM json_each(?))`, [json,json]),
+        queryAll<{ payment_id: string; request_id: string | null }>(db, `SELECT p.id AS payment_id, b.request_id FROM payments p JOIN bookings b ON b.id = p.subject_id AND b.organization_id = p.organization_id WHERE p.subject_type = 'booking' AND p.id IN (SELECT value FROM json_each(?))`, [json]),
         queryAll<{ payment_id: string }>(db, `SELECT payment_id FROM payment_orders WHERE payment_id IN (SELECT value FROM json_each(?))`, [json]),
       ])
     : [new Map<string, PaymentPicture>(), [], [], []]

@@ -3,12 +3,12 @@ import { STAY_SAFETY_DETAIL_FIELDS, STAY_SAFETY_FIELDS, STAY_SAFETY_DETAIL_KEYS 
 import { STAY_ALARM_AMENITIES, STAY_ALARM_DETAIL_KEYS, stayAmenityAvailability, type StayAmenityAnswer } from './stay-listing.ts'
 
 /** Named product facts shared by validation, CMS, MCP, localization and templates. */
-export const PRODUCT_KINDS = ['dish', 'experience', 'service', 'stay'] as const
-export const PRODUCT_KIND_LABELS = { dish: 'Food or drink', experience: 'Experience or class', service: 'Practice area or consultation', stay: 'Place to stay' } as const
+export const PRODUCT_KINDS = ['dish', 'experience', 'service', 'stay', 'table'] as const
+export const PRODUCT_KIND_LABELS = { dish: 'Food or drink', experience: 'Experience or class', service: 'Practice area or consultation', stay: 'Place to stay', table: 'Table reservation' } as const
 export type ProductKind = typeof PRODUCT_KINDS[number]
 /** The recognizable kind choices used by the CMS. */
 export const PRODUCT_KIND_ICONS = {
-  dish: 'i-lucide-utensils', experience: 'i-lucide-compass', service: 'i-lucide-scale', stay: 'i-lucide-house',
+  dish: 'i-lucide-utensils', experience: 'i-lucide-compass', service: 'i-lucide-scale', stay: 'i-lucide-house', table: 'i-lucide-armchair',
 } as const satisfies Record<ProductKind, string>
 export type ProductDetailValue = string | string[] | boolean
 export type ProductDetails = Partial<Record<ProductDetailKey, ProductDetailValue>>
@@ -92,7 +92,7 @@ export function productDetailFields(kind: ProductKind): ProductDetailField[] {
 export function productDetailKey(field: Pick<ProductDetailField, 'key'>): ProductDetailKey { return field.key }
 export function isProductDetailLocalizable(field: ProductDetailField): boolean { return field.localizable }
 export function assertProductKind(value: unknown): ProductKind {
-  if (typeof value !== 'string' || !PRODUCT_KINDS.includes(value as ProductKind)) throw new ProductDetailError('kind must be dish, experience, service or stay')
+  if (typeof value !== 'string' || !PRODUCT_KINDS.includes(value as ProductKind)) throw new ProductDetailError('kind must be dish, experience, service, stay or table')
   return value as ProductKind
 }
 export function validateProductDetails(kind: ProductKind, value: unknown, localizableOnly = false): ProductDetails {

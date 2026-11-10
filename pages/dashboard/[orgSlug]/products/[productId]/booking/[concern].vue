@@ -30,10 +30,37 @@
         </UFormField>
         <SettingRow v-model="hostHours" :disabled="!p.form.assigned_member_id || p.form.held_online || legal && hostHours" :label="workingHoursLabel" :description="legal ? 'Each consultation is booked in the attorney’s working hours, and every consultation of this practice area is theirs.' : `${peopleLabel} choose from the ${p.bookingCopy.value.assigneeNoun}’s own hours instead of the weekly schedule.`" />
       </div>
-      <UFormField v-else-if="concern === 'payment'" name="online_payment_required">
-        <SettingRow v-model="p.form.online_payment_required" :disabled="!paymentEntitled && !p.form.online_payment_required" :label="`Require online payment for paid ${occurrence}s`" />
-        <OfferCard v-if="!paymentEntitled" class="mt-4" :offer="offer('payments')" :summary="`Paid ${occurrence}s can be booked without online payment while this is off. Online payments come with Business.`" />
-      </UFormField>
+      <div v-else-if="concern === 'payment'" class="space-y-6">
+        <UFormField name="online_payment_required">
+          <SettingRow v-model="p.form.online_payment_required" :disabled="!paymentEntitled && !p.form.online_payment_required" :label="`Require online payment for paid ${occurrence}s`" />
+          <OfferCard v-if="!paymentEntitled" class="mt-4" :offer="offer('payments')" :summary="`Paid ${occurrence}s can be booked without online payment while this is off. Online payments come with Business.`" />
+        </UFormField>
+        <template v-if="p.form.online_payment_required">
+          <!-- A seat's price is paid by each guest; a table's deposit once for the whole party. -->
+          <UFormField name="payment_basis" label="The price is paid">
+            <URadioGroup v-model="p.form.payment_basis" :items="[{ value: 'per_guest', label: `Per ${p.bookingCopy.value.guestLabel}` }, { value: 'per_booking', label: 'Once per booking', description: 'A deposit for the whole party' }]" variant="card" />
+          </UFormField>
+          <UFormField name="payment_min_party_size" label="Only for parties of at least" description="Leave empty to take payment from every party.">
+            <UInput v-model="p.form.payment_min_party_size" inputmode="numeric" pattern="[0-9]*" class="w-full" />
+          </UFormField>
+        </template>
+      </div>
+      <div v-else-if="concern === 'party'" class="grid grid-cols-2 gap-4">
+        <UFormField name="party_size_min" :label="`Fewest ${p.bookingCopy.value.guestsLabelPlural}`" description="Optional">
+          <UInput v-model="p.form.party_size_min" inputmode="numeric" pattern="[0-9]*" class="w-full" />
+        </UFormField>
+        <UFormField name="party_size_max" :label="`Most ${p.bookingCopy.value.guestsLabelPlural}`" description="Optional">
+          <UInput v-model="p.form.party_size_max" inputmode="numeric" pattern="[0-9]*" class="w-full" />
+        </UFormField>
+      </div>
+      <div v-else-if="concern === 'guest-terms'" class="space-y-6">
+        <UFormField name="minimum_guest_age" label="Minimum age" description="Leave empty for all ages.">
+          <UInput v-model="p.form.minimum_guest_age" inputmode="numeric" pattern="[0-9]*" class="w-full" />
+        </UFormField>
+        <UFormField name="accessibility_contact_required">
+          <SettingRow v-model="p.form.accessibility_contact_required" :label="`Ask ${p.bookingCopy.value.guestsLabelPlural} who need access support to contact you first`" />
+        </UFormField>
+      </div>
       <UFormField v-else-if="concern === 'location'" name="held_online">
         <SettingRow v-model="p.form.held_online" :disabled="p.form.scheduling_mode !== 'provider' && !p.form.held_online" label="Held online" />
         <UButton v-if="p.form.scheduling_mode !== 'provider'" class="mt-4" variant="outline" :to="p.sectionPath('booking/assignment')">{{ workingHoursLabel }}</UButton>
@@ -68,6 +95,8 @@ const settings = computed(() => ({
   confirmation: { title: 'Confirmation', lead: `Confirm ${legal.value ? 'consultations' : 'bookings'} as soon as ${p.bookingCopy.value.guestsLabelPlural} ${legal.value ? 'request a time' : 'reserve'}, or review each request before confirming.` },
   assignment: { title: p.bookingCopy.value.assigneeLabel, lead: legal.value ? 'Choose an attorney for new consultations. Clients book the attorney’s working hours and see their published profile. Existing consultations keep their booked attorney.' : `Who runs it. ${peopleLabel.value} see the ${p.bookingCopy.value.assigneeNoun}’s published profile on the page. A published host profile is required before publishing this offering. Existing bookings keep their assigned host.` },
   payment: { title: 'Payment', lead: `${peopleLabel.value} pay before their booking is made. Free ${occurrence.value}s remain bookable.` },
+  party: { title: 'Party size', lead: `The smallest and largest party one booking takes. Larger parties are asked to contact you. Existing bookings keep their party.` },
+  'guest-terms': { title: 'Guest requirements', lead: `Shown to ${p.bookingCopy.value.guestsLabelPlural} before they book, and kept with each booking as they read them.` },
   location: { title: 'Meeting format', lead: `Enable online ${legal.value ? 'consultations' : 'booking'} in the ${p.bookingCopy.value.assigneeNoun}’s working hours. Edit physical availability and repeating times at each saved ${legal.value ? 'office' : 'location'}.` },
 }))
 const dashboard = useDashboardOrganization()
@@ -119,9 +148,16 @@ const valid = computed(() => {
   if (concern.value === 'duration') return Number.isSafeInteger(Number(p.form.booking_duration)) && Number(p.form.booking_duration) > 0
   if (concern.value === 'capacity') return capacityChoice.value !== 'group' || (Number.isSafeInteger(Number(p.form.booking_capacity)) && Number(p.form.booking_capacity) >= 2)
   if (concern.value === 'location') return !p.form.held_online || p.form.scheduling_mode === 'provider'
-  if (concern.value === 'payment') return !p.form.online_payment_required || paymentEntitled.value
+  if (concern.value === 'payment') return (!p.form.online_payment_required || paymentEntitled.value) && optionalCountValid(p.form.payment_min_party_size, 1)
+  if (concern.value === 'party') return optionalCountValid(p.form.party_size_min, 1) && optionalCountValid(p.form.party_size_max, 1)
+    && (!p.form.party_size_min.trim() || !p.form.party_size_max.trim() || Number(p.form.party_size_max) >= Number(p.form.party_size_min))
+  if (concern.value === 'guest-terms') return optionalCountValid(p.form.minimum_guest_age, 0)
   return true
 })
+/** Empty, or a whole number no smaller than the least it may be. */
+function optionalCountValid(value: string, least: number) {
+  return !value.trim() || (Number.isSafeInteger(Number(value)) && Number(value) >= least)
+}
 const form = useTemplateRef('form')
 function save() { return p.save(level.to.value ?? undefined, concern.value as BookingConcern) }
 onBeforeRouteLeave(() => { p.revert() })

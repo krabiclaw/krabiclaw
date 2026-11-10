@@ -5,7 +5,7 @@ import { Miniflare } from 'miniflare'
 
 const NOW = '2026-09-27T00:00:00.000Z'
 
-/** One tenant's guest graph: a booked session, a reserved table, and the threads, review request, review and product page that hang off them. */
+/** One tenant's guest graph: a booked session, a booked table, and the threads, review request, review and product page that hang off them. */
 function tenantGraph(org: string): string[] {
   const location = `${org}-location`
   const product = `${org}-product`
@@ -29,11 +29,16 @@ function tenantGraph(org: string): string[] {
     `INSERT INTO product_availability_rules (id,organization_id,product_id,location_id,timezone,weekday,start_time,created_by,updated_by) VALUES ('${rule}','${org}','${product}','${location}','Asia/Bangkok',1,'10:00','t','t')`,
     `INSERT INTO product_sessions (id,organization_id,product_id,location_id,availability_rule_id,timezone,starts_at,ends_at,capacity,status,created_by,updated_by)
       VALUES ('${session}','${org}','${product}','${location}','${rule}','Asia/Bangkok','2099-01-05T03:00:00.000Z','2099-01-05T04:00:00.000Z',4,'scheduled','t','t')`,
-    `INSERT INTO location_reservation_configs (location_id,organization_id,slot_capacity,created_by,updated_by) VALUES ('${location}','${org}',2,'t','t')`,
+    `INSERT INTO products (kind, id,organization_id,name,slug,created_by,updated_by) VALUES ('table', '${org}-tables','${org}','Tables','tables','t','t')`,
+    `INSERT INTO product_variants (id,organization_id,product_id,name,created_by,updated_by) VALUES ('${org}-table','${org}','${org}-tables','Table','t','t')`,
+    `INSERT INTO product_locations (organization_id,product_id,location_id,active,published,created_by,updated_by) VALUES ('${org}','${org}-tables','${location}',1,1,'t','t')`,
+    `INSERT INTO product_booking_configs (product_id,organization_id,unit,duration_minutes,default_capacity,scheduling_mode,payment_basis,assigned_member_id,created_by,updated_by) VALUES ('${org}-tables','${org}','slot',120,2,'business','per_booking','${org}-member','t','t')`,
+    `INSERT INTO product_sessions (id,organization_id,product_id,location_id,timezone,starts_at,ends_at,capacity,status,created_by,updated_by)
+      VALUES ('${org}-seating','${org}','${org}-tables','${location}','Asia/Bangkok','2099-01-06T09:00:00.000Z','2099-01-06T11:00:00.000Z',2,'scheduled','t','t')`,
     `INSERT INTO requests (id,kind,organization_id,location_id,user_id,payload_json,created_at,updated_at) VALUES ('${bookingThread}','booking','${org}','${location}','${guest}',${payload},'${NOW}','${NOW}')`,
-    `INSERT INTO requests (id,kind,organization_id,location_id,user_id,payload_json,created_at,updated_at) VALUES ('${reservationThread}','reservation','${org}','${location}','${guest}',${payload},'${NOW}','${NOW}')`,
-    `INSERT INTO bookings (id,organization_id,product_id,product_session_id,product_variant_id,user_id,request_id,party_size,status) VALUES ('${org}-booking','${org}','${product}','${session}','${variant}','${guest}','${bookingThread}',1,'confirmed')`,
-    `INSERT INTO reservations (id,organization_id,location_id,user_id,request_id,timezone,starts_at,ends_at,party_size,status) VALUES ('${org}-reservation','${org}','${location}','${guest}','${reservationThread}','Asia/Bangkok','2099-01-06T09:00:00.000Z','2099-01-06T11:00:00.000Z',2,'confirmed')`,
+    `INSERT INTO requests (id,kind,organization_id,location_id,user_id,payload_json,created_at,updated_at) VALUES ('${reservationThread}','booking','${org}','${location}','${guest}',${payload},'${NOW}','${NOW}')`,
+    `INSERT INTO bookings (id,organization_id,product_id,product_session_id,product_variant_id,user_id,request_id,party_size,policy_json,status) VALUES ('${org}-booking','${org}','${product}','${session}','${variant}','${guest}','${bookingThread}',1,'{"advance_notice_minutes":null,"party_size_min":null,"party_size_max":null,"minimum_guest_age":null,"accessibility_contact_required":false,"payment":null}','confirmed')`,
+    `INSERT INTO bookings (id,organization_id,product_id,product_session_id,product_variant_id,user_id,request_id,party_size,policy_json,status) VALUES ('${org}-reservation','${org}','${org}-tables','${org}-seating','${org}-table','${guest}','${reservationThread}',2,'{"advance_notice_minutes":null,"party_size_min":null,"party_size_max":null,"minimum_guest_age":null,"accessibility_contact_required":false,"payment":null}','confirmed')`,
     `INSERT INTO review_requests (id,organization_id,location_id,user_id,booking_type,booking_id,token_hash,expires_at) VALUES ('${org}-review-request','${org}','${location}','${guest}','booking','${bookingThread}','${org}-token','2099-02-01T00:00:00.000Z')`,
     `INSERT INTO reviews (id,organization_id,location_id,user_id,review_request_id,booking_id,booking_type,product_id,rating,status) VALUES ('${org}-review','${org}','${location}','${guest}','${org}-review-request','${bookingThread}','booking','${product}',5,'published')`,
     `UPDATE requests SET review_id = '${org}-review' WHERE id = '${bookingThread}'`,
@@ -81,7 +86,7 @@ async function rowsOwnedBy(db: D1Database, org: string): Promise<Record<string, 
 }
 
 /**
- * A booking or reservation pins the session, variant and thread it holds, a
+ * A booking — a class seat or a table — pins the session, variant and thread it holds, a
  * product page and a product review pin their product, and a session pins the
  * rule that generated it, so deleting any of those parents alone is refused.
  * Deleting the organization removes both sides in one statement and must
@@ -110,7 +115,8 @@ test('guest records refuse an ordinary parent delete and cascade away with their
       ['product session', "DELETE FROM product_sessions WHERE id = 'doomed-session'"],
       ['product variant', "DELETE FROM product_variants WHERE id = 'doomed-variant'"],
       ['booking thread', "DELETE FROM requests WHERE id = 'doomed-booking-thread'"],
-      ['reservation thread', "DELETE FROM requests WHERE id = 'doomed-reservation-thread'"],
+      ['table booking thread', "DELETE FROM requests WHERE id = 'doomed-reservation-thread'"],
+      ['table seating', "DELETE FROM product_sessions WHERE id = 'doomed-seating'"],
       // The same pins hold for what a product page, a product review and a
       // generated session name.
       ['product', "DELETE FROM products WHERE id = 'doomed-product'"],
@@ -121,7 +127,7 @@ test('guest records refuse an ordinary parent delete and cascade away with their
       await assert.rejects(db.prepare(statement).run(), /FOREIGN KEY constraint failed/, `deleting the ${parent} alone must be refused`)
     }
     assert.equal(await db.prepare("SELECT count(*) AS n FROM bookings WHERE id = 'doomed-booking'").first('n'), 1)
-    assert.equal(await db.prepare("SELECT count(*) AS n FROM reservations WHERE id = 'doomed-reservation'").first('n'), 1)
+    assert.equal(await db.prepare("SELECT count(*) AS n FROM bookings WHERE id = 'doomed-reservation'").first('n'), 1)
 
     await db.prepare("DELETE FROM organization WHERE id = 'doomed'").run()
 

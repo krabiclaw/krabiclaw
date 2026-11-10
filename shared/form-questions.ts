@@ -5,8 +5,8 @@ import { z } from 'zod'
  * inquiry, reservation, consultation, experience or stay form.
  *
  * One definition contract for every owner: the organization's inquiry
- * settings, a location's reservation policy, a product's booking setup and a
- * home's stay settings each hold one ordered collection of these. The writer
+ * settings and a product's booking setup (a table's, a class's, a home's) each
+ * hold one ordered collection of these. The writer
  * of each owner validates it here; submissions are checked here against the
  * collection the visitor's form was built from, and what is stored with the
  * submission is a snapshot of the wording the visitor answered, so a later

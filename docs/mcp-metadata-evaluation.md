@@ -29,7 +29,6 @@ unpaid substitutes, or publish to an unrequested social audience.
 | `batch_create_products` | Add these three new dishes to our catalog. | Here's a new lunch menu. Create all three dishes together. | Change just the price of this existing dish. |
 | `block_dates` | Close this location for reservations from Friday through Sunday. | We're away this weekend, so people shouldn't be able to reserve tables then. | Show me our weekend reservations; don't close anything. |
 | `cancel_product_booking` | Cancel this confirmed pottery booking and tell the guest. | The guest can't make the class anymore. End their booking. | Approve this pending booking; don't cancel it. |
-| `cancel_table_reservation` | Cancel this dinner table reservation and tell the guest. | This party is no longer coming for dinner. Remove their reservation. | Move the dinner reservation to tomorrow, subject to the guest agreeing. |
 | `confirm_product_booking` | Approve this pending pottery booking and tell the guest. | We've reviewed the request and can take them for the class. | Decline the pending booking; don't approve it. |
 | `create_article_category` | Add a new Blog category called Local Tips. | We need a separate section for local advice in the blog. | Add a product menu section called Lunch. |
 | `create_blog_post` | Draft a blog article about our cooking class. | Write a longer guide with headings and photos for our blog, ready for me to review. | Add a short opening-hours announcement post to the website. |
@@ -69,7 +68,6 @@ unpaid substitutes, or publish to an unrequested social audience.
 | `get_product` | Show this product's variants, prices and booking settings. | What are all the choices and prices for this item right now? | Change one price without me approving any edit. |
 | `get_product_booking` | Show this class booking's guest, status and session. | What exactly is Maya booked into right now? | Change Maya's session without proposing it to her. |
 | `get_product_catalog_localization` | Show catalog source fields and their Thai translations. | Which product descriptions still need Thai wording? | Automatically translate and save the catalog. |
-| `get_reservation_policy` | Show this venue's table reservation settings and guest policy. | How many guests can book a table at once, and what does our policy say? | Change the class product's booking capacity. |
 | `get_resource_localization` | Show this resource's Thai translation. | What Thai wording do we already have for this collection? | Show English content as though it were a missing Thai translation. |
 | `get_site_page` | Show this Thai About page and its ordered sections. | I want to review this translated page before editing it. | Create a Thai version by translating the English page automatically. |
 | `get_social_connections` | Show our connected social accounts and their publishing status. | Where can we publish this post, and are those accounts working? | Connect a new Facebook account inside chat. |
@@ -90,9 +88,8 @@ unpaid substitutes, or publish to an unrequested social audience.
 | `list_payments` | List customer payments from last month. | Which customers paid us during that period? | Issue refunds for those payments. |
 | `list_posts` | List our draft and published short website posts. | Which announcements are on the website or waiting for review? | Show live Instagram posts instead. |
 | `list_product_booking_sessions` | Find scheduled sessions and remaining places for this class next week. | When could Maya come to this class, and how many spots are left? | Create a new class session or change the recurring schedule. |
-| `list_product_bookings` | List our product bookings and consultations. | Who is booked into our classes and appointments? | List restaurant table reservations instead. |
+| `list_product_bookings` | List our bookings, table reservations and consultations. | Who is booked into our classes, tables and appointments? | List stays at our homes instead. |
 | `list_products` | List products across our whole business. | What's in our catalog, including items we're keeping off the website? | Narrow the result to only this location's offerings. |
-| `list_table_reservations` | List our restaurant table reservations. | Who's coming for dinner, and how many guests are in each party? | List people booked into product sessions or consultations instead. |
 | `list_site_pages` | List the website pages authored in Thai. | Which Thai page versions already exist for this site? | List Blog articles instead. |
 | `open_dates` | Remove the temporary closure for this location on Saturday. | We've decided to reopen on Saturday after all. Remove that closure. | Open regularly closed Sundays without changing regular hours. |
 | `publish_blog_post` | Publish this reviewed Blog article on our website. | The long guide looks good. Make it public on the blog. | Post it to Facebook as well without me requesting that. |
@@ -116,7 +113,6 @@ unpaid substitutes, or publish to an unrequested social audience.
 | `replace_product_weekly_schedule` | Replace this product's recurring weekly slots with this schedule. | From now on, these are the weekly times we offer the class. | Move one guest's existing booking to another session. |
 | `replace_resource_localizations` | Save these complete translations together for this resource type and language. | Here's the finished translated batch for these catalog records. Apply them together. | Delete translations of resources omitted from the batch. |
 | `request_product_booking_change` | Propose moving Maya's booking to this session and email her for acceptance. | Ask Maya whether she agrees to this new class time. Keep her current booking until she agrees. | Move the booking immediately without guest acceptance. |
-| `request_table_reservation_change` | Propose changing this table reservation to tomorrow and email the guest. | Ask the dinner party if this new time works. Keep their current reservation until they agree. | Confirm a pending class booking or change the reservation immediately. |
 | `save_media_attachment` | Save this attached image to our site's media library. | I'd like to use this picture from our conversation on the website later. Save it first. | Invent a download link when ChatGPT has not supplied a usable attachment. |
 | `set_collection_products` | Replace this menu section's complete list of products with this order. | This is exactly what belongs in the Desserts section now. Keep the other items in the catalog. | Delete the omitted products from the catalog. |
 | `set_consultation_mode` | Enable native consultation booking on our website. | Let visitors book our existing online services directly from the site. | Connect a calendar or payment provider in chat. |
@@ -137,7 +133,6 @@ unpaid substitutes, or publish to an unrequested social audience.
 | `update_post` | Change this short website post's caption, keeping its existing social posts. | Fix the website announcement wording. Leave Facebook and Instagram alone. | Edit the already published Facebook caption or replace a Blog article. |
 | `update_product` | Change only this named variant's existing price, keeping every other variant and price. | The small serving now costs 150 baht. Leave all the other choices and details alone. | Treat a partial price list as permission to delete omitted variants or prices. |
 | `update_qa` | Change this authored FAQ answer to the supplied wording. | Our parking answer is outdated. Replace just that answer. | Edit an imported Google answer or a translation through this tool. |
-| `update_reservation_policy` | Set this location's table capacity and reservation advance notice. | We can take 20 dinner guests at one start time and need a day's notice. Save that policy. | Change a class's session defaults or collect a reservation deposit in chat. |
 | `update_site_page` | Replace this page with the supplied complete version, retaining all unrequested sections. | Here's the revised About page. Keep every section we didn't ask to remove. | Remove omitted blocks without the page's explicit removal confirmation. |
 
 ## Lodging cases

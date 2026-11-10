@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { HTTPError } from 'nitro'
 import { z } from 'zod'
 import { formatFormAnswer, type FormAnswerSnapshot } from '~/shared/form-questions'
-import { formatCalendarDate, formatTime, formatTimestamp, localPartsAt } from '~/utils/timezone'
+import { formatCalendarDate, formatTime, formatTimestamp } from '~/utils/timezone'
 import { getGuestRequest, getThreadOperationalRecord, requestSummary, type cancelBookingRequest, type GuestRequest } from '~/server/domain/requests'
 import { execute, queryAll, queryFirst, type DbClient } from '~/server/db'
 import { organizationEventQuery } from '~/server/utils/organization-events'
@@ -29,8 +29,6 @@ import {
   guestBookingCancelledMessage,
   guestBookingReceivedMessage,
   guestContactReceivedMessage,
-  guestReservationCancelledMessage,
-  guestReservationReceivedMessage,
   guestStayConfirmedMessage,
   organizationInviteMessage,
   reviewRequestMessage,
@@ -48,8 +46,6 @@ import {
   contactReceivedMessage,
   inquiryReceivedMessage,
   messageReceived,
-  reservationCancelledMessage,
-  reservationCreatedMessage,
   reviewReceivedMessage,
   stayBookedMessage,
   stayCancelledMessage,
@@ -76,6 +72,7 @@ import { resolveLocationContact } from '~/server/utils/contact-resolution'
 import { formatMinorAmount } from '~/shared/prices'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
+import type { ProductKind } from '~/shared/product-details'
 import { STAY_CHANNEL_LABELS } from '~/shared/bookings'
 import type { AirbnbInquiry } from '~/server/integrations/channex/live-feed'
 import type { ChannelStayTerms } from '~/server/domain/stays'
@@ -103,28 +100,6 @@ interface OrganizationContext {
   organizationId: string
   organizationName?: string | null
   locale?: string
-}
-
-interface ReservationNotificationInput extends OrganizationContext {
-  guestAcknowledgement?: boolean
-  locationId?: string | null
-  locationName?: string | null
-  reservationId: string
-  guestName: string
-  email: string
-  /** A guest who gave no phone number has none to show; the template says so. */
-  phone: string | null
-  date: string
-  time: string
-  guests: string
-  requests?: string | null
-  wasConfirmed?: boolean
-  receiptUrl?: string | null
-  /** What the guest paid on the site for it; null when nothing was paid online. */
-  paid?: { amount: number; currency: CurrencyCode } | null
-  contactPhone?: string | null
-  contactEmail?: string | null
-  ownerInboxUrl?: string
 }
 
 interface ContactNotificationInput extends OrganizationContext {
@@ -155,7 +130,8 @@ interface BookingNotificationInput extends OrganizationContext {
   email: string
   guestPhone?: string | null
   productTitle: string
-  /** The site's vertical decides what the owner calls this booking. */
+  /** What was booked and the site's vertical decide what the guest and the owner call it: a table is a reservation. */
+  productKind: ProductKind
   vertical: string | null
   /**
    * The session instant and the zone it belongs to.
@@ -167,6 +143,8 @@ interface BookingNotificationInput extends OrganizationContext {
   startsAt: string
   timezone: string
   partySize: number
+  /** The guest asked for this many or more ("8+"). */
+  partySizeIsMinimum: boolean
   notes?: string | null
   wasConfirmed?: boolean
   receiptUrl?: string | null
@@ -195,7 +173,7 @@ interface ReviewNotificationInput extends OrganizationContext {
 interface ReviewRequestNotificationInput extends OrganizationContext {
   locationId?: string | null
   requestId: string
-  bookingType: 'reservation' | 'booking' | 'stay'
+  bookingType: 'booking' | 'stay'
   bookingId: string
   guestName: string
   email: string
@@ -226,7 +204,7 @@ interface GuestThreadReplyNotificationInput extends Omit<OrganizationContext, 'o
   locationId?: string | null
   threadId: string
   sourceEntryId: string
-  submissionType: 'contact' | 'reservation' | 'booking' | 'stay'
+  submissionType: 'contact' | 'booking' | 'stay'
   submissionId: string
   /** Who the conversation is with: the contact's recorded name, or the channel's title for a channel thread. */
   participantLabel: string
@@ -288,11 +266,11 @@ async function buildOwnerInboxUrl(
   opts: {
     organizationId: string
     locationId?: string | null
-    tab: 'contact' | 'reservations' | 'bookings'
+    tab: 'contact' | 'bookings'
     submissionId: string
   }
 ): Promise<string> {
-  const submissionType = opts.tab === 'contact' ? 'contact' : opts.tab === 'reservations' ? 'reservation' : 'booking'
+  const submissionType = opts.tab === 'contact' ? 'contact' : 'booking'
   const thread = await getGuestRequest(db, opts.submissionId, opts.organizationId, submissionType)
   if (!thread) throw destinationUnavailable('submission_id', opts.submissionId)
   await publishGuestInboxThreadEvent(env, db, { threadId: thread.id, type: 'thread.created' })
@@ -663,7 +641,7 @@ function memberNotificationSends(
 
 async function getOpeningThreadContext(
   db: DbClient,
-  submissionType: 'contact' | 'reservation' | 'booking' | 'stay',
+  submissionType: 'contact' | 'booking' | 'stay',
   submissionId: string,
 ): Promise<{ guestThreadId: string; sourceEntryId: string; answers: FormAnswerSnapshot[] }> {
   const thread = await getGuestRequest(db, submissionId, undefined, submissionType)
@@ -699,7 +677,7 @@ function threadDelivery(
 async function recordGuestCancellation(
   db: DbClient,
   input: {
-    submissionType: 'reservation' | 'booking'
+    submissionType: 'booking'
     submissionId: string
     organizationId: string
     subject: string
@@ -790,7 +768,7 @@ export async function notifyOwner(
     message: MemberAlertMessage
     /** The approved template the same facts are mapped onto. */
     whatsappTemplate?: WhatsAppTemplate
-    submissionType?: 'contact' | 'reservation' | 'booking' | 'invitation' | null
+    submissionType?: 'contact' | 'booking' | 'invitation' | null
     submissionId?: string | null
     notificationSource?: { threadId: string; entryId: string }
     /** Keys the in-app notification for an event that has no guest thread. */
@@ -826,7 +804,7 @@ export async function notifyOwner(
   if (schedule) {
     const { orgSlug } = await resolveDashboardSlugs(env, db, { organizationId: opts.organizationId })
     if (stayId) scheduleUrl = bookingEditorPath(orgSlug, 'stay', stayId)
-    else if (threadContext && (opts.submissionType === 'booking' || opts.submissionType === 'reservation')) {
+    else if (threadContext && opts.submissionType === 'booking') {
       scheduleUrl = bookingEditorPath(orgSlug, opts.submissionType, threadContext.guestThreadId)
     } else throw new Error(`Schedule notification ${opts.template} has no booking destination`)
     scheduleUrl = new URL(scheduleUrl, dashboardOrigin(env, { orgSlug, locationSlug: null })).href
@@ -991,182 +969,6 @@ export async function notifyFinancialNotification(
 // inject additional headers, independent of the HTML-body escaping used elsewhere.
 function sanitizeEmailHeaderValue(value: string): string {
   return value.replace(/[\r\n]+/g, ' ').trim()
-}
-
-export async function notifyReservationCreated(
-  env: NotificationEnv,
-  db: DbClient,
-  opts: ReservationNotificationInput
-) {
-  const restaurant = organizationName(opts)
-  const prettyDate = formatCalendarDate(opts.date, 'en')
-  const prettyTime = formatTime(opts.time, 'en')
-  const platformDomain = getPlatformDomain(env)
-  const inboxUrl = opts.ownerInboxUrl !== undefined
-    ? opts.ownerInboxUrl
-    : await buildOwnerInboxUrl(env, db, {
-        organizationId: opts.organizationId,
-        locationId: opts.locationId,
-        tab: 'reservations',
-        submissionId: opts.reservationId,
-      })
-  const threadContext = await getOpeningThreadContext(db, 'reservation', opts.reservationId)
-
-  const payload = {
-    reservation_id: opts.reservationId,
-    guest_name: opts.guestName,
-    email: opts.email,
-    phone: opts.phone ?? '',
-    date: opts.date,
-    time: opts.time,
-    guests: opts.guests,
-    requests: opts.requests ?? '',
-    location_name: opts.locationName ?? '',
-    organization_name: restaurant,
-    deep_link: inboxUrl ?? '',
-  }
-
-  const [hero, logoUrl] = await Promise.all([
-    messageHero(db, opts.organizationId, { type: 'business_location', id: opts.locationId }),
-    organizationLogo(db, opts.organizationId),
-  ])
-  const presentation = resolveBookingPresentation('reservation', 'restaurant')
-  const formattedGuests = presentation.formatCount(opts.guests)
-  const ownerMessage = reservationCreatedMessage({
-    guestName: opts.guestName, guestEmail: opts.email, guestPhone: opts.phone ?? null,
-    date: prettyDate, day: formatCalendarDate(opts.date, 'en-US', { month: 'short', day: 'numeric' }), time: prettyTime, partySize: formattedGuests,
-    locationName: opts.locationName ?? null, organizationName: restaurant,
-    notes: opts.requests ?? null, heroImageUrl: hero?.imageUrl ?? null, replyUrl: inboxUrl,
-    paid: opts.paid ? formatMinorAmount(opts.paid.amount, opts.paid.currency, 'en-US') : null,
-    answers: threadContext.answers,
-  })
-  const guest = await guestPresentation(db, opts)
-  const guestMessage = guestReservationReceivedMessage({
-    ...guest, manageUrl: await buildBuyerRequestActivityUrl(env, db, { organizationId: opts.organizationId, threadId: opts.reservationId }),
-    guestName: opts.guestName, organizationLogoUrl: logoUrl,
-    date: formatCalendarDate(opts.date, guest.locale), time: formatTime(opts.time, guest.locale), partySize: formattedGuests, notes: opts.requests,
-    contactPhone: opts.contactPhone, contactEmail: opts.contactEmail,
-    receiptUrl: opts.receiptUrl, heroImageUrl: hero?.imageUrl ?? null,
-    paid: opts.paid ? formatMinorAmount(opts.paid.amount, opts.paid.currency, guest.locale) : null,
-  })
-  const guestEmail = await renderNotificationEmail(guestMessage, { platformDomain })
-
-  const results = await Promise.allSettled([
-    notifyOwner(env, db, {
-      ...opts,
-      submissionType: 'reservation',
-      submissionId: opts.reservationId,
-      template: 'new_reservation',
-      title: ownerMessage.title,
-      payload,
-      message: ownerMessage,
-      whatsappTemplate: 'new_reservation',
-    }),
-    ...(opts.guestAcknowledgement === false ? [] : [sendEmailNotification(env, db, {
-      ...opts,
-      to: opts.email,
-      replyAs: { kind: 'guest' },
-      template: 'reservation_customer_received',
-      title: guestMessage.title,
-      payload,
-      email: { subject: guestMessage.title, ...guestEmail },
-      buyerAlert: true,
-      delivery: threadDelivery(threadContext, 'guest_acknowledgement', 'email', 'reservation_customer_received', opts.email),
-    })]),
-  ])
-
-  raiseSettledFailures('notifyReservationCreated', `reservationId ${opts.reservationId}`, results)
-}
-
-export async function notifyReservationCancelled(
-  env: NotificationEnv,
-  db: DbClient,
-  opts: ReservationNotificationInput
-) {
-  const confirmed = Boolean(opts.wasConfirmed)
-  const restaurant = organizationName(opts)
-  const prettyDate = formatCalendarDate(opts.date, 'en')
-  const prettyTime = formatTime(opts.time, 'en')
-  const platformDomain = getPlatformDomain(env)
-  const [inboxUrl, logoUrl] = await Promise.all([
-    buildOwnerInboxUrl(env, db, {
-      organizationId: opts.organizationId,
-      locationId: opts.locationId,
-      tab: 'reservations',
-      submissionId: opts.reservationId,
-    }),
-    organizationLogo(db, opts.organizationId),
-  ])
-
-  const payload = {
-    reservation_id: opts.reservationId,
-    guest_name: opts.guestName,
-    email: opts.email,
-    phone: opts.phone ?? '',
-    date: opts.date,
-    time: opts.time,
-    guests: opts.guests,
-    reservation_was_confirmed: confirmed ? 'true' : 'false',
-    location_name: opts.locationName ?? '',
-    organization_name: restaurant,
-    deep_link: inboxUrl ?? '',
-  }
-
-  const presentation = resolveBookingPresentation('reservation', 'restaurant')
-  const formattedGuests = presentation.formatCount(opts.guests)
-  const ownerMessage = reservationCancelledMessage({
-    guestName: opts.guestName, guestEmail: opts.email, guestPhone: opts.phone ?? null,
-    date: prettyDate, day: formatCalendarDate(opts.date, 'en-US', { month: 'short', day: 'numeric' }), time: prettyTime, partySize: formattedGuests,
-    locationName: opts.locationName ?? null, organizationName: restaurant,
-    notes: opts.requests ?? null, heroImageUrl: null, replyUrl: inboxUrl,
-    wasConfirmed: confirmed,
-  })
-  const guest = await guestPresentation(db, opts)
-  const guestMessage = guestReservationCancelledMessage({
-    ...guest, manageUrl: await buildBuyerRequestActivityUrl(env, db, { organizationId: opts.organizationId, threadId: opts.reservationId }),
-    guestName: opts.guestName, date: formatCalendarDate(opts.date, guest.locale), time: formatTime(opts.time, guest.locale),
-    partySize: formattedGuests, notes: opts.requests, wasConfirmed: confirmed,
-    organizationLogoUrl: logoUrl,
-  })
-  const guestEmail = await renderNotificationEmail(guestMessage, { platformDomain })
-  const threadContext = await recordGuestCancellation(db, {
-    submissionType: 'reservation',
-    submissionId: opts.reservationId,
-    organizationId: opts.organizationId,
-    subject: guestMessage.title,
-    body: guestEmail.text,
-    wasConfirmed: confirmed,
-  })
-
-  const results = await Promise.allSettled([
-    notifyOwner(env, db, {
-      ...opts,
-      submissionType: 'reservation',
-      submissionId: opts.reservationId,
-      // The opening entry already carries the new_reservation alert and a source
-      // entry holds one notification, so this one hangs off the cancellation
-      // entry recorded above.
-      notificationSource: { threadId: threadContext.guestThreadId, entryId: threadContext.sourceEntryId },
-      template: 'reservation_cancelled',
-      title: ownerMessage.title,
-      payload,
-      message: ownerMessage,
-      whatsappTemplate: 'reservation_cancelled',
-    }),
-    sendEmailNotification(env, db, {
-      ...opts,
-      to: opts.email,
-      replyAs: { kind: 'guest' },
-      template: 'reservation_customer_cancelled',
-      title: guestMessage.title,
-      payload,
-      email: { subject: guestMessage.title, ...guestEmail },
-      buyerAlert: true,
-      delivery: threadDelivery(threadContext, 'status_update', 'email', 'reservation_customer_cancelled', opts.email),
-    }),
-  ])
-
-  raiseSettledFailures('notifyReservationCancelled', `reservationId ${opts.reservationId}`, results)
 }
 
 export async function notifyContactSubmitted(
@@ -1343,6 +1145,25 @@ export async function notifyReviewRequest(
   })
 }
 
+/**
+ * What a booking is called and pictured as, from what was booked: a table is a
+ * reservation led by its place's picture, anything else a booking led by the
+ * offering's own. The owner reads where it is in English, from the location.
+ */
+async function bookingFrame(db: DbClient, opts: BookingNotificationInput) {
+  const presentation = resolveBookingPresentation(opts.productKind, opts.vertical)
+  const [hero, location] = await Promise.all([
+    messageHero(db, opts.organizationId, opts.productKind === 'table' ? { type: 'business_location', id: opts.locationId } : { type: 'product', id: opts.productId }),
+    opts.locationId ? queryFirst<{ title: string }>(db, 'SELECT title FROM business_locations WHERE organization_id = ? AND id = ?', [opts.organizationId, opts.locationId]) : null,
+  ])
+  if (opts.locationId && !location) throw new Error(`Booking ${opts.bookingId} names a missing location`)
+  return {
+    presentation, hero, locationName: location?.title ?? null,
+    partySize: presentation.formatCount(opts.partySize, opts.partySizeIsMinimum),
+    wording: presentation.noun === 'reservation' ? 'reservation' as const : 'booking' as const,
+  }
+}
+
 export async function notifyBookingCreated(
   env: NotificationEnv,
   db: DbClient,
@@ -1369,23 +1190,21 @@ export async function notifyBookingCreated(
     experience: opts.productTitle,
     starts_at: opts.startsAt,
     timezone: opts.timezone,
-    party_size: String(opts.partySize),
+    party_size: `${opts.partySize}${opts.partySizeIsMinimum ? '+' : ''}`,
     requests: opts.notes ?? '',
     organization_name: studio,
     deep_link: inboxUrl ?? '',
   }
 
-  const [hero, logoUrl] = await Promise.all([
-    messageHero(db, opts.organizationId, { type: 'product', id: opts.productId }),
+  const [{ presentation, hero, locationName, partySize: formattedPartySize, wording }, logoUrl] = await Promise.all([
+    bookingFrame(db, opts),
     organizationLogo(db, opts.organizationId),
   ])
-  const presentation = resolveBookingPresentation('booking', opts.vertical)
-  const formattedPartySize = presentation.formatCount(opts.partySize)
   const ownerMessage = bookingCreatedMessage({
     guestName: opts.guestName, guestEmail: opts.email, guestPhone: opts.guestPhone ?? null,
     date: prettyDate, day: formatTimestamp(opts.startsAt, 'en-US', opts.timezone, { month: 'short', day: 'numeric' }), time: prettyTime, partySize: formattedPartySize,
-    locationName: null, organizationName: studio, productTitle: opts.productTitle,
-    presentation,
+    locationName, organizationName: studio, productTitle: opts.productTitle,
+    presentation, status: opts.status,
     notes: opts.notes ?? null, heroImageUrl: hero?.imageUrl ?? null, replyUrl: inboxUrl,
     paid: opts.paid ? formatMinorAmount(opts.paid.amount, opts.paid.currency, 'en-US') : null,
     answers: threadContext.answers,
@@ -1394,7 +1213,7 @@ export async function notifyBookingCreated(
   const copy = getVerticalCopy(opts.vertical, guest.locale)
   const guestMessage = guestBookingReceivedMessage({
     ...guest, manageUrl: await buildBuyerRequestActivityUrl(env, db, { organizationId: opts.organizationId, threadId: opts.bookingId }),
-    guestName: opts.guestName, organizationLogoUrl: logoUrl, status: opts.status,
+    guestName: opts.guestName, organizationLogoUrl: logoUrl, status: opts.status, wording,
     productTitle: guest.productTitle!,
     date: formatTimestamp(opts.startsAt, guest.locale, opts.timezone, { dateStyle: 'medium' }),
     time: formatTimestamp(opts.startsAt, guest.locale, opts.timezone, { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }),
@@ -1651,7 +1470,7 @@ export async function notifyStayCancelled(env: NotificationEnv, db: DbClient, or
       manageUrl: await buildBuyerRequestActivityUrl(env, db, { organizationId, threadId: stay.request_id }),
       locale: guest.locale, guestName: stay.guest_name, organizationName: guest.organizationName, organizationLogoUrl: logoUrl, productTitle: guest.productTitle ?? home.name,
       date: `${day(stay.check_in_date, guest.locale)} – ${day(stay.check_out_date, guest.locale)}`, time: home.check_in_time ? formatTime(home.check_in_time, guest.locale) : '',
-      partySize: String(stay.adults + stay.children), contactPhone: contact.contactPhone ?? null, contactEmail: contact.contactEmail ?? null, wasConfirmed: true,
+      partySize: String(stay.adults + stay.children), contactPhone: contact.contactPhone ?? null, contactEmail: contact.contactEmail ?? null, wasConfirmed: true, wording: 'booking',
     })
     const guestEmail = await renderNotificationEmail(guestMessage, { platformDomain: getPlatformDomain(env) })
     const guestTitle = `${guestMessage.title} — ${guestMessage.preheader?.split(' · ')[0] ?? home.name}`
@@ -1721,7 +1540,7 @@ export async function notifyBookingCancelled(
   const prettyDate = new Intl.DateTimeFormat('en-US', { timeZone: opts.timezone, dateStyle: 'medium' }).format(new Date(opts.startsAt))
   const prettyTime = formatTimestamp(opts.startsAt, 'en', opts.timezone, { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })
   const platformDomain = getPlatformDomain(env)
-  const [inboxUrl, logoUrl] = await Promise.all([
+  const [inboxUrl, logoUrl, { presentation, locationName, partySize: formattedPartySize, wording }] = await Promise.all([
     buildOwnerInboxUrl(env, db, {
       organizationId: opts.organizationId,
       locationId: opts.locationId,
@@ -1729,6 +1548,7 @@ export async function notifyBookingCancelled(
       submissionId: opts.bookingId,
     }),
     organizationLogo(db, opts.organizationId),
+    bookingFrame(db, opts),
   ])
 
   const payload = {
@@ -1738,18 +1558,16 @@ export async function notifyBookingCancelled(
     experience: opts.productTitle,
     starts_at: opts.startsAt,
     timezone: opts.timezone,
-    party_size: String(opts.partySize),
+    party_size: `${opts.partySize}${opts.partySizeIsMinimum ? '+' : ''}`,
     booking_was_confirmed: confirmed ? 'true' : 'false',
     organization_name: studio,
     deep_link: inboxUrl ?? '',
   }
 
-  const presentation = resolveBookingPresentation('booking', opts.vertical)
-  const formattedPartySize = presentation.formatCount(opts.partySize)
   const ownerMessage = bookingCancelledMessage({
     guestName: opts.guestName, guestEmail: opts.email, guestPhone: opts.guestPhone ?? null,
     date: prettyDate, day: formatTimestamp(opts.startsAt, 'en-US', opts.timezone, { month: 'short', day: 'numeric' }), time: prettyTime, partySize: formattedPartySize,
-    locationName: null, organizationName: studio, productTitle: opts.productTitle,
+    locationName, organizationName: studio, productTitle: opts.productTitle,
     presentation,
     notes: opts.notes ?? null, heroImageUrl: null, replyUrl: inboxUrl,
     wasConfirmed: confirmed,
@@ -1763,7 +1581,7 @@ export async function notifyBookingCancelled(
     time: formatTimestamp(opts.startsAt, guest.locale, opts.timezone, { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }),
     partySize: formattedPartySize,
     partyLabel: copy.guestsLabel,
-    notes: opts.notes, wasConfirmed: confirmed,
+    notes: opts.notes, wasConfirmed: confirmed, wording,
     organizationLogoUrl: logoUrl,
   })
   const guestEmail = await renderNotificationEmail(guestMessage, { platformDomain })
@@ -1813,7 +1631,7 @@ export async function notifyBookingChangeOwner(
   db: DbClient,
   opts: OrganizationContext & {
     threadId: string
-    submissionType: 'reservation' | 'booking' | 'stay'
+    submissionType: 'booking' | 'stay'
     submissionId: string
     sourceEntryId: string
     locationId: string | null
@@ -1829,11 +1647,10 @@ export async function notifyBookingChangeOwner(
   // A stay's members read its changes without money; the projection needs the stay.
   if (submissionType === 'stay' && !opts.stay) throw new HTTPError({ statusCode: 500, message: 'A stay change alert needs its stay to tell the members who look after the home', data: { code: 'STAY_REQUIRED', field: 'stay', thread_id: opts.threadId } })
   const replyUrl = await buildOwnerThreadInboxUrl(env, db, opts)
+  // The record's own noun, which its presentation resolved from what was booked: a table's is a reservation.
   const presentation = change.recordKind === 'consultation' || opts.vertical === 'service'
-    ? resolveBookingPresentation('booking', 'service')
-    : submissionType === 'reservation'
-      ? resolveBookingPresentation('reservation', opts.vertical ?? 'restaurant')
-      : resolveBookingPresentation('booking', opts.vertical ?? 'experience')
+    ? resolveBookingPresentation('service', 'service')
+    : resolveBookingPresentation(change.recordKind === 'reservation' ? 'table' : 'experience', opts.vertical ?? 'experience')
   const input: BookingChangeEventInput = {
     ...change, replyUrl, organizationName: organizationName(opts),
     counterpartyLabel: presentation.counterpartyLabel,
@@ -1870,7 +1687,7 @@ export async function notifyCalendarSyncOwner(
   opts: OrganizationContext & {
     kind: 'event_deleted' | 'move_refused'
     threadId: string
-    submissionType: 'reservation' | 'booking'
+    submissionType: 'booking'
     sourceEntryId: string
     locationId: string | null
     guestName: string
@@ -2289,40 +2106,19 @@ export async function notifyGuestCancellation(env: NotificationEnv, db: DbClient
   const request = cancelled.request
   const record = cancelled.record
   const organizationId = request.organization_id
-  if (record.kind === 'booking' && !record.product_name?.trim()) throw new Error('Booking cancellation delivery requires its canonical offering')
+  if (record.kind !== 'booking' || !record.product_name?.trim()) throw new Error('Booking cancellation delivery requires its canonical offering')
   await publishGuestInboxThreadEvent(env, db, { threadId: request.id, type: 'thread.changed' })
 
   const organization = await queryFirst<{ name: string | null; vertical: string | null }>(db, 'SELECT name, vertical FROM organization WHERE id = ? LIMIT 1', [organizationId])
-
-  if (record.kind === 'booking') {
-    await notifyBookingCancelled(env, db, {
-      organizationId: request.organization_id, organizationName: organization?.name, vertical: organization?.vertical ?? null,
-      locale: request.payload.guest.locale,
-      locationId: record.location_id, bookingId: request.id, guestName: request.payload.guest.name,
-      email: request.payload.guest.email, guestPhone: request.payload.guest.phone,
-      productId: record.product_id, productTitle: record.product_name!,
-      startsAt: record.starts_at, timezone: record.timezone, partySize: record.party_size,
-      notes: request.payload.notes, wasConfirmed: cancelled.wasConfirmed,
-    })
-  } else {
-    const summary = await requestSummary(db, request)
-    // The reservation email states a calendar date and a clock time, so the
-    // instant is read back in the reservation's own zone rather than the
-    // worker's.
-    const parts = localPartsAt(new Date(record.starts_at), record.timezone)
-    const localDate = `${String(parts.year).padStart(4, '0')}-${String(parts.month).padStart(2, '0')}-${String(parts.day).padStart(2, '0')}`
-    const localTime = `${String(parts.hour).padStart(2, '0')}:${String(parts.minute).padStart(2, '0')}`
-    await notifyReservationCancelled(env, db, {
-      organizationId: request.organization_id, organizationName: organization?.name,
-      locale: request.payload.guest.locale,
-      locationId: record.location_id, locationName: summary.locationTitle, reservationId: request.id,
-      guestName: request.payload.guest.name, email: request.payload.guest.email, phone: request.payload.guest.phone,
-      date: localDate, time: localTime,
-      guests: `${record.party_size}${request.payload.party_size_is_minimum ? '+' : ''}`,
-      requests: request.payload.notes, wasConfirmed: cancelled.wasConfirmed,
-    })
-  }
-
+  await notifyBookingCancelled(env, db, {
+    organizationId: request.organization_id, organizationName: organization?.name, vertical: organization?.vertical ?? null,
+    locale: request.payload.guest.locale,
+    locationId: record.location_id, bookingId: request.id, guestName: request.payload.guest.name,
+    email: request.payload.guest.email, guestPhone: request.payload.guest.phone,
+    productId: record.product_id, productKind: record.product_kind, productTitle: record.product_name,
+    startsAt: record.starts_at, timezone: record.timezone, partySize: record.party_size, partySizeIsMinimum: request.payload.party_size_is_minimum,
+    notes: request.payload.notes, wasConfirmed: cancelled.wasConfirmed,
+  })
 }
 
 /**

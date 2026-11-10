@@ -6,9 +6,6 @@ export type ProductSessionStatus = typeof PRODUCT_SESSION_STATUSES[number]
 export const BOOKING_STATUSES = ['pending', 'confirmed', 'cancelled'] as const
 export type BookingStatus = typeof BOOKING_STATUSES[number]
 
-export const RESERVATION_STATUSES = ['confirmed', 'cancelled'] as const
-export type ReservationStatus = typeof RESERVATION_STATUSES[number]
-
 /** Channex's Airbnb availability-settings schema caps stay lengths at 1125 nights.
  * A published home may have no stay inside its current inventory window.
  * @see https://docs.channex.io/api-v.1-documentation/airbnb-api.md
@@ -86,9 +83,6 @@ export const STAY_PAYMENT_METHODS = ['cash', 'bank_transfer', 'card_external', '
 export type StayPaymentMethod = typeof STAY_PAYMENT_METHODS[number]
 export const STAY_PAYMENT_METHOD_LABELS: Record<StayPaymentMethod, string> = { cash: 'Cash', bank_transfer: 'Bank transfer', card_external: 'Card (outside KrabiClaw)', other: 'Other' }
 
-export const LOCATION_RESERVATION_OVERRIDE_STATUSES = ['open', 'closed'] as const
-export type LocationReservationOverrideStatus = typeof LOCATION_RESERVATION_OVERRIDE_STATUSES[number]
-
 /** Pending review requests and confirmed bookings both hold capacity. */
 export function bookingConsumesCapacity(booking: { status: BookingStatus }): boolean {
   return booking.status === 'pending' || booking.status === 'confirmed'
@@ -96,8 +90,6 @@ export function bookingConsumesCapacity(booking: { status: BookingStatus }): boo
 
 /** The same rule as SQL, for use inside a capacity-claim predicate. */
 export const CAPACITY_CONSUMING_SQL = `b.status IN ('pending', 'confirmed')`
-
-export const RESERVATION_CAPACITY_CONSUMING_SQL = `r.status = 'confirmed'`
 
 /**
  * Done is a fact about the clock, not a stored state: a booking that was not

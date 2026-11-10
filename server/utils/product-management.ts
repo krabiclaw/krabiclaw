@@ -3,7 +3,7 @@ import { outsideNotice } from '~/shared/availability-settings'
 import { getSourceLocale } from '~/server/utils/organization-locales'
 import { assertResponsibleMember, ASSIGNED_SERVICE_SQL, memberAccessPrincipal, resolveMembership } from '~/server/utils/member-access'
 import { assertPublishedHost, hasPublishedHost } from '~/server/utils/public-provider'
-import type { ProductBookingSetupInput, SessionAvailability } from '~/server/utils/availability'
+import type { PaymentBasis, ProductBookingSetupInput, SessionAvailability } from '~/server/utils/availability'
 import { HTTPError } from 'nitro'
 import { MAX_STAY_NIGHTS, parseStayCalendarRules } from '~/shared/bookings'
 import { d1JsonArray, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
@@ -87,6 +87,12 @@ import {
  */
 
 const MAX_SLUG_SUFFIX_ATTEMPTS = 100
+
+/** A stored payment basis; anything else is a corrupt row, never a default. */
+function paymentBasis(value: unknown, productId: string): PaymentBasis {
+  if (value !== 'per_guest' && value !== 'per_booking') throw new Error(`Product ${productId} has an unknown payment basis`)
+  return value
+}
 
 /** Coarse publication gate; public catalogue readers also require booking readiness. */
 export const PUBLIC_PRODUCT_SQL = `pub.published = 1 AND (p.kind <> 'experience' OR NULLIF(trim(p.order_url), '') IS NOT NULL
@@ -265,7 +271,8 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
     { query: `SELECT product_id, collection_id, sort_order FROM collection_products
       WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?)) ORDER BY collection_id`, params: [organizationId, ids] },
     // A session offering's booking; a home's is presented with its stay settings below.
-    { query: `SELECT product_id, duration_minutes, default_capacity, confirmation_mode, online_payment_required, held_online, scheduling_mode, assigned_member_id, advance_notice_minutes, questions FROM product_booking_configs
+    { query: `SELECT product_id, duration_minutes, default_capacity, confirmation_mode, online_payment_required, held_online, scheduling_mode, assigned_member_id, advance_notice_minutes, questions,
+        party_size_min, party_size_max, minimum_guest_age, accessibility_contact_required, payment_basis, payment_min_party_size FROM product_booking_configs
       WHERE organization_id = ? AND unit = 'slot' AND product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
     // The page each product owns: the source row that carries its product_id.
     { query: `SELECT product_id, id, path, title FROM content_documents
@@ -319,6 +326,12 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
       held_online: Number(row.held_online) === 1,
       scheduling_mode: row.scheduling_mode as 'business' | 'provider', assigned_member_id: row.assigned_member_id === null ? null : String(row.assigned_member_id),
       advance_notice_minutes: row.advance_notice_minutes === null ? null : Number(row.advance_notice_minutes),
+      party_size_min: row.party_size_min === null ? null : Number(row.party_size_min),
+      party_size_max: row.party_size_max === null ? null : Number(row.party_size_max),
+      minimum_guest_age: row.minimum_guest_age === null ? null : Number(row.minimum_guest_age),
+      accessibility_contact_required: Number(row.accessibility_contact_required) === 1,
+      payment_basis: paymentBasis(row.payment_basis, String(row.product_id)),
+      payment_min_party_size: row.payment_min_party_size === null ? null : Number(row.payment_min_party_size),
       ...storedQuestions(row.questions),
     }
   }
@@ -898,7 +911,16 @@ function plannedAmenityAnswers(current: ProductStayConfig['amenity_answers'], pa
 }
 
 async function assertBookableOffering(db: DbClient, organizationId: string, product: PlannedProduct, locationId: string | null): Promise<void> {
-  if (!['experience', 'service'].includes(product.kind)) invalid('Only experiences and services take scheduled bookings')
+  if (!['experience', 'service', 'table'].includes(product.kind)) invalid('Only experiences, services and tables take scheduled bookings')
+  if (product.kind === 'table') {
+    // A location's tables are one product: guests book them, and a booking moves between locations' tables, by location.
+    if (locationId === null) invalid('Tables are booked at a location')
+    if (product.variants.filter(variant => variant.active).length !== 1) invalid('A location\'s tables are booked as one option, priced zero or at the deposit charged per booking')
+    if (await queryFirst(db, `SELECT 1 FROM product_locations pl JOIN products p ON p.id = pl.product_id AND p.organization_id = pl.organization_id
+      WHERE pl.organization_id = ? AND pl.location_id = ? AND p.kind = 'table' AND p.id <> ?`, [organizationId, locationId, product.id])) {
+      throw new HTTPError({ statusCode: 409, statusMessage: 'This location already takes table bookings; change that table product instead', data: { code: 'TABLE_PRODUCT_EXISTS', field: 'booking.location_id' } })
+    }
+  }
   if (!product.active) invalid('Enable this offering before publishing its bookings')
   const currency = await organizationDefaultCurrency(db, organizationId)
   const variants = product.variants.filter(variant => variant.active)

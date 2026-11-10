@@ -1,6 +1,6 @@
 // A form's questions are edited by one set of screens, written once under
-// Website › Inquiry form. The booking of a product, a home and a location's
-// reservations hold questions of the same shape, so the same files are mounted
+// Website › Inquiry form. The booking of a product (a class, a consultation, a
+// table) and a home hold questions of the same shape, so the same files are mounted
 // beneath each of those records as `questions`. The `formQuestions` meta names
 // the record a mount edits; useFormQuestionsOwner reads it.
 import { nodeAt, renamed, type PageNode } from './booking-routes'
@@ -10,7 +10,6 @@ const SOURCE_NAME = 'dashboard-orgSlug-website-inquiry-form'
 const MOUNTS = [
   { owner: 'booking', parent: '/dashboard/:orgSlug()/products/:productId()/booking', name: 'dashboard-orgSlug-products-productId-booking-questions' },
   { owner: 'stay', parent: '/dashboard/:orgSlug()/products/:productId()', name: 'dashboard-orgSlug-products-productId-questions' },
-  { owner: 'reservations', parent: '/dashboard/:orgSlug()/calendar/settings/availability', name: 'dashboard-orgSlug-calendar-settings-availability-questions' },
 ] as const
 
 function owned(node: PageNode, owner: string): PageNode {

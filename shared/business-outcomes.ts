@@ -17,7 +17,7 @@ export const BUSINESS_ACTIVITY_EVENTS = [
   'google_ads.campaign_created', 'google_ads.campaign_updated', 'google_ads.campaign_change_unconfirmed', 'google_ads.campaign_change_failed',
   'thread.member_reply', 'thread.scheduled_message', 'thread.archived', 'thread.unarchived',
   'booking.confirm', 'booking.reject', 'booking.cancel', 'booking.no_show',
-  'reservation.confirm', 'reservation.reject', 'reservation.cancel', 'reservation.no_show', 'stay.no_show',
+  'stay.no_show',
   'booking_change.requested', 'booking_change.accepted', 'booking_change.declined', 'booking_change.withdrawn', 'booking_change.moved',
   'review.requested',
   // Work the business recorded doing: a turnover or task done or skipped, an opportunity taken on.
@@ -143,7 +143,7 @@ export interface BusinessProgressReference {
     configurationUpdatedAt: string
   } | {
     kind: 'booking_welcome'
-    record: { kind: 'booking' | 'reservation' | 'stay'; id: string; status: string; startsAt: string }
+    record: { kind: 'booking' | 'stay'; id: string; status: string; startsAt: string }
     message: string
   } | {
     kind: 'guest_thread'
@@ -152,7 +152,7 @@ export interface BusinessProgressReference {
     latestGuestEntryId: string | null
     latestReplyEntryId: string | null
     latestMemberEntryId: string | null
-    commitment: { kind: 'booking' | 'reservation' | 'stay'; id: string; status: string; startsAt: string; endsAt: string } | null
+    commitment: { kind: 'booking' | 'stay'; id: string; status: string; startsAt: string; endsAt: string } | null
   }
 }
 

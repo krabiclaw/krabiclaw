@@ -71,7 +71,7 @@ export async function buildReplyToken(secret: string, entryId: string, as: Reply
  * The reply-to of an email about a conversation entry:
  * r<g|m><entry uuid without hyphens><24-hex-hmac>@reply.<domain>, 58 characters
  * before the @. The entry, not the conversation, is addressed because a
- * booking's or reservation's conversation id is a 64-character hash, which does
+ * booking's conversation id is a 64-character hash, which does
  * not fit SMTP's 64-character local part. Entries are UUIDs.
  */
 export async function buildReplyToAddress(env: ReplyAddressEnv, entryId: string, as: ReplyAs): Promise<string> {

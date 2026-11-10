@@ -144,7 +144,7 @@ export async function getGuestThreadDetail(
     submissionId: thread.id,
     locationLabel: summary.locationTitle,
     needsReply,
-    operationalRecord: record ? { id: record.id, kind: record.kind, status: record.status, starts_at: record.starts_at, ends_at: record.ends_at, timezone: record.timezone, party_size: record.party_size, check_in_date: record.check_in_date, check_out_date: record.check_out_date } : null,
+    operationalRecord: record ? { id: record.id, kind: record.kind, product_kind: record.product_kind, status: record.status, starts_at: record.starts_at, ends_at: record.ends_at, timezone: record.timezone, party_size: record.party_size, check_in_date: record.check_in_date, check_out_date: record.check_out_date } : null,
     source: {
       submissionType: thread.kind,
       submissionId: thread.id,

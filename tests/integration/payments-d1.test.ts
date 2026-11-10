@@ -1,4 +1,5 @@
 import {createCanonicalNotification} from '../../server/utils/notification-center.ts'
+import { OPEN_TERMS, OPEN_TERMS_JSON } from './support/booking-terms.ts'
 import assert from 'node:assert/strict'
 import test, { type TestContext } from 'node:test'
 import Stripe from 'stripe'
@@ -8,12 +9,13 @@ import { HTTPError } from 'nitro'
 import { Miniflare } from 'miniflare'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import * as schema from '../../server/db/schema.ts'
-import { claimSessionCapacity } from '../../server/utils/availability.ts'
+import { claimSessionCapacity, setProductBookingConfig } from '../../server/utils/availability.ts'
+import { createProductBooking } from '../../server/domain/product-bookings.ts'
+import { H3Event } from 'h3'
 import { ingestStripeFeeReport, stripeFeeMinor, stripeFeeScaled } from '../../server/domain/payments/costs.ts'
 import { buyerActivities, buyerPaymentActivityPath, claimCheckoutReturn, tokenHash } from '../../server/domain/payments/buyer.ts'
 import { loadBuyerBookingDetails } from '../../server/utils/dashboard-booking-details.ts'
 import { cancelBookingRequest, requestInsertQueries, threadPayloadForGuest } from '../../server/domain/requests.ts'
-import { claimReservation, listReservationSlots, upsertLocationReservationConfig } from '../../server/utils/reservations.ts'
 import { appendEntry } from '../../server/domain/guest-threads/entries.ts'
 import { getGuestThreadDetail } from '../../server/domain/guest-threads/detail.ts'
 import { getInboxThread } from '../../server/domain/guest-threads/inbox.ts'
@@ -77,24 +79,39 @@ async function boot(){
  }catch(error){await runtime.dispose();throw error}
 }
 async function payable(db:D1Database,id:string,expires='2099-09-30T00:00:00.000Z'){
- await db.prepare("INSERT INTO payments(id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,currency,amount,price_snapshot_json,created_at,updated_at) VALUES(?,?,'guest','acct_seller',0,'booking','USD',10000,?,?,?)").bind(id,ORG,JSON.stringify({title:'Consultation',tax_code:null,price:{unit_amount:10000,currency:'USD',tax_behavior:'exclusive'},quantity:1,automatic_tax:false,method_configuration_id:'pmc_seller'}),NOW,NOW).run()
+ await db.prepare("INSERT INTO payments(id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,currency,amount,price_snapshot_json,created_at,updated_at) VALUES(?,?,'guest','acct_seller',0,'booking','USD',10000,?,?,?)").bind(id,ORG,JSON.stringify({title:'Consultation',tax_code:null,price:{unit_amount:10000,currency:'USD',tax_behavior:'exclusive'},quantity:1,automatic_tax:false,method_configuration_id:'pmc_seller',policy:{...OPEN_TERMS,payment:{basis:'per_guest',unit_amount:10000,currency:'USD',tax_behavior:'exclusive',min_party_size:null}}}),NOW,NOW).run()
  await db.prepare("UPDATE payments SET stripe_payment_intent_id=?,idempotency_key=?,return_token='test-return-proof',checkout_expires_at=? WHERE id=?").bind(`pi_${id}`,`checkout:${id}`,expires,id).run()
  await db.prepare("INSERT INTO payment_checkout_holds(id,organization_id,product_id,variant_id,price_id,session_id,buyer_user_id,payment_id,quantity,amount,currency,starts_at,ends_at,status,expires_at,created_at) VALUES(?,?,'product','variant','price','session','guest',?,1,10000,'USD','2099-10-01T13:00:00.000Z','2099-10-01T14:00:00.000Z','active',?,?)").bind(`h:${id}`,ORG,id,expires,NOW).run()
 }
 
-async function paidReservation(db: D1Database, env: CloudflareEnv) {
- const startsAt = '2099-10-01T13:00:00.000Z', endsAt = '2099-10-01T15:00:00.000Z'
+/**
+ * The dining room's tables as their booking setup leaves them: one table product at the location,
+ * a deposit of $100 charged once per booking, and one 2099 seating with room for one party.
+ */
+const TABLE_TERMS = { ...OPEN_TERMS, payment: { basis: 'per_booking', unit_amount: 10000, currency: 'USD', tax_behavior: 'exclusive', min_party_size: null } }
+async function diningTables(db: D1Database) {
  await db.prepare("INSERT INTO business_locations(id,organization_id,slug,title,status,timezone,opening_hours) VALUES('dining',?,'dining','Dining','active','UTC',?)").bind(ORG, JSON.stringify({ periods: [{ open: { day: 0, hour: 0, minute: 0 } }] })).run()
- await upsertLocationReservationConfig(db, { organizationId: ORG, locationId: 'dining', patch: { slot_capacity: 1 }, actorId: 'verified', env })
- const opening = { id: 'deposit-request', kind: 'reservation' as const, organization_id: ORG, location_id: 'dining', user_id: 'verified', review_id: null, payload: { ...threadPayloadForGuest({ name: 'Verified', email: 'verified@example.com', phone: '+12025550123' }), cancellation: { token_hash: 'deposit-token-hash', expires_at: '2100-01-01T00:00:00.000Z', used_at: null } }, created_at: NOW, updated_at: NOW }
+ await db.batch([
+  db.prepare("INSERT INTO products(kind,id,organization_id,name,slug,created_by,updated_by) VALUES('table','tables',?,'Dining tables','tables','host','host')").bind(ORG),
+  db.prepare("INSERT INTO product_variants(id,organization_id,product_id,name,created_by,updated_by) VALUES('table-variant',?,'tables','Table','host','host')").bind(ORG),
+  db.prepare("INSERT INTO prices(id,organization_id,product_variant_id,currency,unit_amount,tax_behavior,created_by,updated_by) VALUES('table-price',?,'table-variant','USD',10000,'exclusive','host','host')").bind(ORG),
+  db.prepare("INSERT INTO product_locations(organization_id,product_id,location_id,active,published,created_by,updated_by) VALUES(?,'tables','dining',1,1,'host','host')").bind(ORG),
+  db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,unit,duration_minutes,default_capacity,confirmation_mode,held_online,scheduling_mode,assigned_member_id,online_payment_required,payment_basis,created_by,updated_by) VALUES('tables',?,'slot',120,1,'instant',0,'business','host-member',1,'per_booking','host','host')").bind(ORG),
+  db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,location_id,timezone,starts_at,ends_at,capacity,status,created_by,updated_by) VALUES('seating',?,'tables','dining','UTC','2099-10-01T13:00:00.000Z','2099-10-01T15:00:00.000Z',1,'scheduled','host','host')").bind(ORG),
+ ])
+}
+const seatingRemaining = async (db: D1Database) => db.prepare("SELECT s.capacity - COALESCE((SELECT SUM(b.party_size) FROM bookings b WHERE b.product_session_id = s.id AND b.status IN ('pending','confirmed')), 0) AS remaining FROM product_sessions s WHERE s.id = 'seating'").first<number>('remaining')
+
+/** A table booked with its deposit captured: the guest's request, the deposit Stripe charged, and the booking it made. */
+async function paidTable(db: D1Database, env: CloudflareEnv) {
+ await diningTables(db)
+ const opening = { id: 'deposit-request', kind: 'booking' as const, organization_id: ORG, location_id: 'dining', user_id: 'verified', review_id: null, payload: { ...threadPayloadForGuest({ name: 'Verified', email: 'verified@example.com', phone: '+12025550123' }), cancellation: { token_hash: 'deposit-token-hash', expires_at: '2100-01-01T00:00:00.000Z', used_at: null } }, created_at: NOW, updated_at: NOW }
  await db.batch(requestInsertQueries(opening).map(write => db.prepare(write.query).bind(...write.params)))
- const terms = { policy_type: 'reservation', free_cancellation_until_minutes: 1440, reschedule_allowed: true, reschedule_cutoff_minutes: 1440, deposit_required: true, deposit_amount: 10000, deposit_currency: 'USD', deposit_tax_behavior: 'exclusive' }
- await db.prepare("INSERT INTO payments(id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,location_id,currency,amount,tax_amount,captured_amount,stripe_payment_intent_id,stripe_charge_id,price_snapshot_json,created_at,updated_at) VALUES('deposit',?,'verified','acct_seller',0,'reservation','dining','USD',10000,500,10500,'pi_deposit','ch_deposit',?,?,?)").bind(ORG, JSON.stringify({ title: 'Dining reservation deposit', reservation: terms }), NOW, NOW).run()
- await db.prepare("INSERT INTO payment_checkout_holds(id,organization_id,location_id,timezone,buyer_user_id,request_id,payment_id,quantity,amount,currency,starts_at,ends_at,status,expires_at,created_at) VALUES('deposit-hold',?,'dining','UTC','verified','deposit-request','deposit',1,10000,'USD',?,?,'active','2100-01-01T00:00:00.000Z',?)").bind(ORG, startsAt, endsAt, NOW).run()
- await claimReservation(db, { organizationId: ORG, locationId: 'dining', reservationId: 'deposit-reservation', requestId: opening.id, userId: 'verified', timezone: 'UTC', startsAt, endsAt, date: '2099-10-01', timeSlot: '13:00', partySize: 1, chargedPaymentId: 'deposit', chargedAt: NOW })
- await db.prepare("UPDATE payments SET subject_id='deposit-reservation' WHERE id='deposit'").run()
- await db.prepare("UPDATE payment_checkout_holds SET status='converted',converted_reservation_id='deposit-reservation' WHERE id='deposit-hold'").run()
- return { id: opening.id, organizationId: ORG, kind: 'reservation' as const, env }
+ const booking = await claimSessionCapacity(db, { policyJson: JSON.stringify(TABLE_TERMS), env, organizationId: ORG, productId: 'tables', sessionId: 'seating', productVariantId: 'table-variant', partySize: 1, userId: 'verified', requestId: opening.id })
+ await db.prepare("INSERT INTO payments(id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,subject_id,location_id,currency,amount,tax_amount,captured_amount,stripe_payment_intent_id,stripe_charge_id,price_snapshot_json,created_at,updated_at) VALUES('deposit',?,'verified','acct_seller',0,'booking',?,'dining','USD',10000,500,10500,'pi_deposit','ch_deposit',?,?,?)")
+  .bind(ORG, booking.bookingId, JSON.stringify({ title: 'Dining tables', tax_code: null, price: { unit_amount: 10000, currency: 'USD', tax_behavior: 'exclusive' }, quantity: 1, automatic_tax: false, method_configuration_id: 'pmc_seller', policy: TABLE_TERMS }), NOW, NOW).run()
+ await db.prepare("INSERT INTO payment_checkout_holds(id,organization_id,product_id,variant_id,price_id,session_id,location_id,timezone,buyer_user_id,request_id,payment_id,quantity,amount,currency,starts_at,ends_at,status,expires_at,created_at,converted_booking_id) VALUES('deposit-hold',?,'tables','table-variant','table-price','seating','dining','UTC','verified','deposit-request','deposit',1,10000,'USD','2099-10-01T13:00:00.000Z','2099-10-01T15:00:00.000Z','converted','2100-01-01T00:00:00.000Z',?,?)").bind(ORG, NOW, booking.bookingId).run()
+ return { id: opening.id, organizationId: ORG, kind: 'booking' as const, env, bookingId: booking.bookingId }
 }
 
 test('guest table cancellation refunds until 24 hours before the start, through Stripe full remaining refund for both buyer and token credentials', { timeout: 120_000 }, async t => {
@@ -103,7 +120,8 @@ test('guest table cancellation refunds until 24 hours before the start, through 
    const { db, runtime } = await boot()
    try {
     const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-proof-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only', STRIPE_SECRET_KEY: 'sk_test_local_boundary' }
-    const input = { ...await paidReservation(db, env), ...credentials, now: policy.now }
+    const paid = await paidTable(db, env)
+    const input = { ...paid, ...credentials, now: policy.now }
     const originalFetch = globalThis.fetch
     let creations = 0
     const fetchMock = t.mock.method(globalThis, 'fetch', async (request, init) => {
@@ -115,7 +133,7 @@ test('guest table cancellation refunds until 24 hours before the start, through 
       const params = new URLSearchParams(String(init.body))
       assert.equal(params.get('payment_intent'), 'pi_deposit')
       assert.equal(params.has('amount'), false)
-      assert.equal(new Headers(init.headers).get('idempotency-key'), 'krabiclaw-refund:deposit:guest-cancelled-reservation:deposit-reservation')
+      assert.equal(new Headers(init.headers).get('idempotency-key'), `krabiclaw-refund:deposit:guest-cancelled-booking:${paid.bookingId}`)
       return Response.json({ id: 're_deposit', object: 'refund', amount: 10500, currency: 'usd', status: 'succeeded', payment_intent: 'pi_deposit', reason: 'requested_by_customer', metadata: { krabiclaw_refund_id: params.get('metadata[krabiclaw_refund_id]') } })
      }
      assert.equal(init?.method, 'GET')
@@ -123,20 +141,70 @@ test('guest table cancellation refunds until 24 hours before the start, through 
      return Response.json({ id: 'ch_deposit', object: 'charge', livemode: false, amount: 10500, amount_refunded: 10500, currency: 'usd', payment_intent: 'pi_deposit', billing_details: { email: 'verified@example.com' } })
     })
     try {
-     const before = await listReservationSlots(db, { organizationId: ORG, locationId: 'dining', date: '2099-10-01' })
-     assert.equal(before.slots.find(slot => slot.time_slot === '13:00')?.remaining, 0)
+     assert.equal(await seatingRemaining(db), 0)
      assert.equal((await cancelBookingRequest(db, input))?.changed, true)
-     assert.deepEqual(await db.prepare("SELECT status,cancellation_reason FROM reservations WHERE id='deposit-reservation'").first(), { status: 'cancelled', cancellation_reason: 'guest_cancelled' })
+     assert.deepEqual(await db.prepare('SELECT status,cancellation_reason FROM bookings WHERE id=?').bind(paid.bookingId).first(), { status: 'cancelled', cancellation_reason: 'guest_cancelled' })
      assert.equal(await db.prepare("SELECT json_extract(payload_json,'$.cancellation.used_at') used_at FROM requests WHERE id='deposit-request'").first('used_at'), policy.now)
      assert.deepEqual(await db.prepare("SELECT refunded_amount FROM payments WHERE id='deposit'").first(), { refunded_amount: policy.refundable ? 10500 : 0 })
      assert.deepEqual((await db.prepare("SELECT amount,status,created_by FROM payment_refunds WHERE payment_id='deposit'").all()).results, policy.refundable ? [{ amount: 10500, status: 'succeeded', created_by: 'buyerUserId' in credentials ? 'verified' : null }] : [])
      assert.equal(creations, Number(policy.refundable))
-     const after = await listReservationSlots(db, { organizationId: ORG, locationId: 'dining', date: '2099-10-01' })
-     assert.equal(after.slots.find(slot => slot.time_slot === '13:00')?.remaining, 1)
+     assert.equal(await seatingRemaining(db), 1)
     } finally { fetchMock.mock.restore() }
    } finally { await runtime.dispose() }
   }
  }
+})
+
+test('a table deposit is the table price once, only for parties at its threshold, and a booking keeps the terms it was made with', { timeout: 120_000 }, async () => {
+ const { db, runtime } = await boot()
+ try {
+  const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_URL: 'https://payments.proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-proof-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only', STRIPE_SECRET_KEY: 'sk_test_local_boundary' } as CloudflareEnv
+  await diningTables(db)
+  // Tables for twenty, a $100 deposit from parties of six, and a seating tomorrow.
+  const soon = new Date(Date.now() + 26 * 3_600_000)
+  soon.setUTCMinutes(0, 0, 0)
+  await db.batch([
+   db.prepare("UPDATE product_booking_configs SET default_capacity=20,payment_min_party_size=6 WHERE product_id='tables'"),
+   db.prepare("INSERT INTO product_publications(organization_id,product_id,published,created_by,updated_by) VALUES(?,'tables',1,'host','host')").bind(ORG),
+   db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,location_id,timezone,starts_at,ends_at,capacity,status,created_by,updated_by) VALUES('soon',?,'tables','dining','UTC',?,?,20,'scheduled','host','host')").bind(ORG, soon.toISOString(), new Date(soon.getTime() + 7_200_000).toISOString()),
+  ])
+  const event = (path: string) => new H3Event(Object.assign(new Request(`https://payments.proof.example${path}`), { runtime: { cloudflare: { env } } }))
+  const counts = async () => db.prepare('SELECT (SELECT COUNT(*) FROM bookings) bookings,(SELECT COUNT(*) FROM requests) requests,(SELECT COUNT(*) FROM payments) payments,(SELECT COUNT(*) FROM payment_checkout_holds) holds').first()
+
+  // A party of six pays the deposit: the business's assistant cannot take that money and books nothing.
+  const before = await counts()
+  await assert.rejects(createProductBooking(event('/api/mcp'), { organizationId: ORG, slug: 'tables', financialWritesAllowed: false,
+   operator: { userId: 'host', idempotencyKey: 'six', source: 'operator', externalReference: null, guestAcknowledgement: false },
+   body: { guest_name: 'Six', guest_email: 'six@example.com', guest_phone: '+12025550123', session_id: 'soon', party_size: 6 } }),
+  (error: HTTPError) => error.statusCode === 409 && (error.data as { code?: string }).code === 'financial_action_required')
+  assert.deepEqual(await counts(), before)
+
+  // A party of five books on the site without paying, told the deposit it would owe as a party of six: the price once, not per guest.
+  const five = await createProductBooking(event('/api/public/products/tables/bookings'), { organizationId: ORG, slug: 'tables',
+   body: { guest_name: 'Five', guest_email: 'five@example.com', guest_phone: '+12025550123', session_id: 'soon', party_size: 5, idempotency_key: 'five' } })
+  assert.equal(five.status, 201, JSON.stringify(five.body))
+  const booked = five.body.policy_summary as { heading: string; items: Array<{ id: string; text: string }> }
+  assert.deepEqual(booked.items.map(item => item.id), ['cancellation', 'deposit', 'deposit_amount'])
+  assert.match(booked.items[1]!.text, /\b6\b/u)
+  assert.match(booked.items[2]!.text, /\$100\.00/u)
+  assert.deepEqual(await db.prepare('SELECT COUNT(*) n FROM payments').first('n'), 0)
+
+  // The business later asks two days' notice and caps parties at four.
+  await setProductBookingConfig(db, { organizationId: ORG, productId: 'tables', actorId: 'host', env, patch: { advance_notice_minutes: 2880, party_size_max: 4 } })
+
+  // The guest's receipt, read back through the business's receipt endpoint, still states the terms they booked.
+  const app = new H3()
+  app.use((event) => { event.context.organizationId = ORG })
+  app.get('/api/public/booking-requests/:requestId', bookingReceiptRoute)
+  const read = await app.request(Object.assign(new Request(`https://payments.proof.example/api/public/booking-requests/${String(five.body.request_id)}`, { headers: { authorization: `Bearer ${String(five.body.cancellation_token)}` } }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
+  assert.equal(read.status, 200, await read.clone().text())
+  const receipt = (await read.json() as { booking: { guests: string; policy_summary: unknown; advance_notice_minutes: number | null } }).booking
+  assert.deepEqual([receipt.guests, receipt.policy_summary, receipt.advance_notice_minutes], ['5', booked, null])
+  // And they can still cancel it online tomorrow's seating, as the terms they booked allow.
+  const cancelled = await cancelBookingRequest(db, { id: String(five.body.request_id), organizationId: ORG, kind: 'booking', now: new Date().toISOString(), env, tokenHash: await hashReservationCancelToken(String(five.body.cancellation_token)) })
+  assert.equal(cancelled?.changed, true)
+  assert.equal(await db.prepare('SELECT status FROM bookings WHERE id=?').bind(String(five.body.operational_booking_id)).first('status'), 'cancelled')
+ } finally { await runtime.dispose() }
 })
 
 test('a checkout thread stays out of Messages until payment creates its booking', { timeout: 120_000 }, async () => {
@@ -148,7 +216,7 @@ test('a checkout thread stays out of Messages until payment creates its booking'
   const owner = async () => (await listGuestThreads(db, ORG, { userId: 'owner-reader' })).map(row => row.id)
   const buyer = async () => (await listGuestThreads(db, null, { userId: 'verified', buyerAudience: true })).map(row => row.id)
   assert.deepEqual([await owner(), await buyer()], [[], []])
-  await claimSessionCapacity(db, { env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1, userId: 'verified', requestId: opening.id })
+  await claimSessionCapacity(db, { policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1, userId: 'verified', requestId: opening.id })
   assert.deepEqual([await owner(), await buyer()], [[opening.id], [opening.id]])
  } finally { await runtime.dispose() }
 })
@@ -160,7 +228,7 @@ test('guest class cancellation refunds through Stripe until 24 hours before the 
    const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-proof-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only', STRIPE_SECRET_KEY: 'sk_test_local_boundary' }
    const opening = { id: 'class-request', kind: 'booking' as const, organization_id: ORG, location_id: null, user_id: 'verified', review_id: null, payload: threadPayloadForGuest({ name: 'Verified', email: 'verified@example.com' }), created_at: NOW, updated_at: NOW }
    await db.batch(requestInsertQueries(opening).map(write => db.prepare(write.query).bind(...write.params)))
-   const booking = await claimSessionCapacity(db, { env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1, userId: 'verified', requestId: opening.id })
+   const booking = await claimSessionCapacity(db, { policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1, userId: 'verified', requestId: opening.id })
    await payable(db, 'class-payment')
    await db.prepare("UPDATE payments SET buyer_user_id='verified',subject_id=?,captured_amount=10000,stripe_payment_intent_id='pi_class',stripe_charge_id='ch_class' WHERE id='class-payment'").bind(booking.bookingId).run()
    await db.prepare("UPDATE payment_checkout_holds SET buyer_user_id='verified',request_id=?,status='converted',converted_booking_id=? WHERE payment_id='class-payment'").bind(opening.id, booking.bookingId).run()
@@ -203,11 +271,11 @@ test('an advance notice closes a guest\'s own class cancellation at the notice, 
    const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-proof-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only', STRIPE_SECRET_KEY: 'sk_test_local_boundary' }
    const opening = { id: 'notice-request', kind: 'booking' as const, organization_id: ORG, location_id: null, user_id: 'verified', review_id: null, payload: threadPayloadForGuest({ name: 'Verified', email: 'verified@example.com' }), created_at: NOW, updated_at: NOW }
    await db.batch(requestInsertQueries(opening).map(write => db.prepare(write.query).bind(...write.params)))
-   const booking = await claimSessionCapacity(db, { env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1, userId: 'verified', requestId: opening.id })
+   // The notice is part of the terms the guest booked under, frozen on the booking.
+   const booking = await claimSessionCapacity(db, { policyJson: JSON.stringify({ ...OPEN_TERMS, advance_notice_minutes: notice }), env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1, userId: 'verified', requestId: opening.id })
    await payable(db, 'notice-payment')
    await db.prepare("UPDATE payments SET buyer_user_id='verified',subject_id=?,captured_amount=10000,stripe_payment_intent_id='pi_notice',stripe_charge_id='ch_notice' WHERE id='notice-payment'").bind(booking.bookingId).run()
    await db.prepare("UPDATE payment_checkout_holds SET buyer_user_id='verified',request_id=?,status='converted',converted_booking_id=? WHERE payment_id='notice-payment'").bind(opening.id, booking.bookingId).run()
-   await db.prepare("UPDATE product_booking_configs SET advance_notice_minutes=? WHERE product_id='product'").bind(notice).run()
    const startsAt = await db.prepare("SELECT starts_at FROM product_sessions WHERE id='session'").first<string>('starts_at')
    assert(startsAt)
    const now = new Date(Date.parse(startsAt) + offset).toISOString()
@@ -241,7 +309,8 @@ test('authorized guest cancellation replay recovers an interrupted Stripe refund
   const { db, runtime } = await boot()
   try {
    const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-proof-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only', STRIPE_SECRET_KEY: 'sk_test_local_boundary' }
-   const scope = { ...await paidReservation(db, env), now: '2099-09-30T13:00:00.000Z' }
+   const { bookingId, ...paid } = await paidTable(db, env)
+   const scope = { ...paid, now: '2099-09-30T13:00:00.000Z' }
    const input = { ...scope, ...credentials }
    const originalFetch = globalThis.fetch
    let creations = 0
@@ -268,29 +337,29 @@ test('authorized guest cancellation replay recovers an interrupted Stripe refund
     return Response.json({ id: 'ch_deposit', object: 'charge', livemode: false, amount: 10500, amount_captured: 10500, amount_refunded: creations > 1 ? 10500 : 0, currency: 'usd', payment_intent: 'pi_deposit', billing_details: { email: 'verified@example.com' } })
    })
    try {
-    const protectedTables = ['reservations', 'requests', 'activity_entries', 'payments', 'payment_refunds']
+    const protectedTables = ['bookings', 'requests', 'activity_entries', 'payments', 'payment_refunds']
     const before = await Promise.all(protectedTables.map(async table => (await db.prepare(`SELECT * FROM ${table} ORDER BY id`).all()).results))
     for (const wrong of [{ buyerUserId: 'other' }, { tokenHash: 'wrong-token' }, { tokenHash: 'deposit-token-hash', now: '2100-01-01T00:00:00.000Z' }]) assert.equal(await cancelBookingRequest(db, { ...scope, ...wrong }), null)
     assert.deepEqual(await Promise.all(protectedTables.map(async table => (await db.prepare(`SELECT * FROM ${table} ORDER BY id`).all()).results)), before)
     assert.equal(creations, 0)
     await assert.rejects(() => cancelBookingRequest(db, input), /Native response interrupted/u)
-    assert.equal(await db.prepare("SELECT status FROM reservations WHERE id='deposit-reservation'").first('status'), 'cancelled')
+    assert.equal(await db.prepare('SELECT status FROM bookings WHERE id=?').bind(bookingId).first('status'), 'cancelled')
     const intent = await db.prepare("SELECT id,idempotency_key,amount,status,error,attempted_at FROM payment_refunds WHERE payment_id='deposit'").first<{ id: string; idempotency_key: string; amount: number | null; status: string; error: string; attempted_at: string }>()
     assert(intent)
     assert.equal(intent.amount, null)
     assert.equal(intent.status, 'creating')
     assert.match(intent.error, /Native response interrupted/u)
     assert.ok(intent.attempted_at)
-    const cancellation = await db.prepare("SELECT * FROM activity_entries WHERE request_id='deposit-request' AND event_name='reservation.cancel'").first()
+    const cancellation = await db.prepare("SELECT * FROM activity_entries WHERE request_id='deposit-request' AND event_name='booking.cancel'").first()
     assert(cancellation)
-    const interruptedDetails = await loadBuyerBookingDetails(db, env, 'verified', 'reservation', scope.id)
+    const interruptedDetails = await loadBuyerBookingDetails(db, env, 'verified', 'booking', scope.id)
     assert.equal(interruptedDetails.status, 'cancelled')
     assert.equal(interruptedDetails.guestCanCancel, false)
     assert.equal(interruptedDetails.guestCanRetryCancellation, true)
-    await assert.rejects(() => loadBuyerBookingDetails(db, env, 'other', 'reservation', scope.id), error => error instanceof HTTPError && error.statusCode === 404)
-    const tokenScope = { organizationId: ORG, subjectType: 'reservation' as const, subjectId: 'deposit-reservation', requestId: scope.id }
+    await assert.rejects(() => loadBuyerBookingDetails(db, env, 'other', 'booking', scope.id), error => error instanceof HTTPError && error.statusCode === 404)
+    const tokenScope = { organizationId: ORG, subjectType: 'booking' as const, subjectId: bookingId, requestId: scope.id }
     assert.equal(await canRetryGuestVisitRefund(db, tokenScope), true)
-    for (const foreign of [{ organizationId: 'another-org' }, { subjectId: 'another-reservation' }, { requestId: 'another-request' }, { buyerUserId: 'other' }]) assert.equal(await canRetryGuestVisitRefund(db, { ...tokenScope, ...foreign }), false)
+    for (const foreign of [{ organizationId: 'another-org' }, { subjectId: 'another-booking' }, { requestId: 'another-request' }, { buyerUserId: 'other' }]) assert.equal(await canRetryGuestVisitRefund(db, { ...tokenScope, ...foreign }), false)
     assert.equal(await cancelBookingRequest(db, { ...scope, buyerUserId: 'other' }), null)
     assert.equal(await cancelBookingRequest(db, { ...scope, tokenHash: 'wrong-token' }), null)
     assert.equal(await cancelBookingRequest(db, { ...scope, tokenHash: 'deposit-token-hash', now: '2100-01-01T00:00:00.000Z' }), null)
@@ -300,16 +369,16 @@ test('authorized guest cancellation replay recovers an interrupted Stripe refund
     assert.equal((await cancelBookingRequest(db, retry))?.changed, false)
     assert.equal((await cancelBookingRequest(db, retry))?.changed, false)
     assert.equal(creations, 2)
-    assert.deepEqual([...keys], ['krabiclaw-refund:deposit:guest-cancelled-reservation:deposit-reservation'])
+    assert.deepEqual([...keys], [`krabiclaw-refund:deposit:guest-cancelled-booking:${bookingId}`])
     assert.deepEqual((await db.prepare("SELECT id,idempotency_key,stripe_refund_id,amount,status,error FROM payment_refunds WHERE payment_id='deposit'").all()).results, [{ id: intent.id, idempotency_key: intent.idempotency_key, stripe_refund_id: 're_recovered', amount: 10500, status: 'succeeded', error: null }])
     assert.deepEqual(await db.prepare("SELECT refunded_amount FROM payments WHERE id='deposit'").first(), { refunded_amount: 10500 })
-    const refundedDetails = await loadBuyerBookingDetails(db, env, 'verified', 'reservation', scope.id)
+    const refundedDetails = await loadBuyerBookingDetails(db, env, 'verified', 'booking', scope.id)
     assert.equal(refundedDetails.guestCanRetryCancellation, false)
     assert.equal(await canRetryGuestVisitRefund(db, tokenScope), false)
     assert.deepEqual(refundedDetails.payments?.flatMap(payment => payment.refunds.map(refund => ({ amount: refund.amount, status: refund.status }))), [{ amount: 10500, status: 'succeeded' }])
-    assert.deepEqual((await db.prepare("SELECT * FROM activity_entries WHERE request_id='deposit-request' AND event_name='reservation.cancel'").all()).results, [cancellation])
+    assert.deepEqual((await db.prepare("SELECT * FROM activity_entries WHERE request_id='deposit-request' AND event_name='booking.cancel'").all()).results, [cancellation])
     assert.equal(await db.prepare("SELECT COUNT(*) n FROM activity_entries WHERE request_id='deposit-request' AND event_name='payment.refund_succeeded'").first('n'), 1)
-    assert.equal((await listReservationSlots(db, { organizationId: ORG, locationId: 'dining', date: '2099-10-01' })).slots.find(slot => slot.time_slot === '13:00')?.remaining, 1)
+    assert.equal(await seatingRemaining(db), 1)
    } finally { fetchMock.mock.restore() }
   } finally { await runtime.dispose() }
  }
@@ -318,10 +387,10 @@ test('an active payment hold consumes the canonical session capacity until relea
  const { db, runtime, env } = await boot()
  try {
   await payable(db, 'held')
-  await assert.rejects(() => claimSessionCapacity(db, { env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1 }), /no longer has room/u)
+  await assert.rejects(() => claimSessionCapacity(db, { policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1 }), /no longer has room/u)
   assert.equal(await db.prepare('SELECT COUNT(*) n FROM bookings').first('n'), 0)
   await db.prepare("UPDATE payment_checkout_holds SET status='released' WHERE payment_id='held'").run()
-  const booking = await claimSessionCapacity(db, { env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1 })
+  const booking = await claimSessionCapacity(db, { policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1 })
   assert.equal(await db.prepare('SELECT party_size FROM bookings WHERE id=?').bind(booking.bookingId).first('party_size'), 1)
  } finally { await runtime.dispose() }
 })
@@ -333,7 +402,7 @@ test('MCP paid booking cancellation and rejection hand off without preparing mon
    await db.prepare("INSERT INTO member(id,organizationId,userId,role) VALUES('owner',?,'verified','owner')").bind(ORG).run()
    const opening = { id: 'paid-request', kind: 'booking' as const, organization_id: ORG, location_id: null, user_id: 'guest', review_id: null, payload: threadPayloadForGuest({ name: 'Guest', email: 'guest@example.com' }), created_at: NOW, updated_at: NOW }
    await db.batch(requestInsertQueries(opening).map(write => db.prepare(write.query).bind(...write.params)))
-   const booking = await claimSessionCapacity(db, { env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1, userId: 'guest', requestId: opening.id })
+   const booking = await claimSessionCapacity(db, { policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1, userId: 'guest', requestId: opening.id })
    await payable(db, 'paid')
    await db.prepare("UPDATE payments SET subject_id=?,captured_amount=10000,stripe_payment_intent_id='pi_paid',stripe_charge_id='ch_paid' WHERE id='paid'").bind(booking.bookingId).run()
    await db.prepare("UPDATE payment_checkout_holds SET request_id=?,status='converted',converted_booking_id=? WHERE payment_id='paid'").bind(opening.id,booking.bookingId).run()
@@ -605,16 +674,16 @@ test('a payment back on the business’s site claims for that site’s buyer and
   const buyer = signedIn.response!.user.id
   const cookie = signedIn.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
   // A table deposit checkout as the site's booking made it, owned by the anonymous guest that booking created: the request waiting
-  // on payment, its hold, and no reservation yet. The return claims all of it for the signed-in buyer.
-  const startsAt = '2099-10-01T13:00:00.000Z', endsAt = '2099-10-01T15:00:00.000Z'
-  await db.prepare("INSERT INTO business_locations(id,organization_id,slug,title,status,timezone,opening_hours) VALUES('dining',?,'dining','Dining','active','UTC',?)").bind(ORG, JSON.stringify({ periods: [{ open: { day: 0, hour: 0, minute: 0 } }] })).run()
-  await upsertLocationReservationConfig(db, { organizationId: ORG, locationId: 'dining', patch: { slot_capacity: 1 }, actorId: 'verified', env })
+  // on payment, its hold, and no booking yet. The return claims all of it for the signed-in buyer.
+  await diningTables(db)
   const receipt = await createReplayableReservationCancelToken(env.EMAIL_REPLY_SECRET, 'deposit-request')
-  const opening = { id: 'deposit-request', kind: 'reservation' as const, organization_id: ORG, location_id: 'dining', user_id: 'guest', review_id: null, payload: { ...threadPayloadForGuest({ name: 'Verified', email: 'verified@example.com', phone: '+12025550123' }), cancellation: { token_hash: await hashReservationCancelToken(receipt.token), expires_at: receipt.expiresAt, used_at: null } }, created_at: NOW, updated_at: NOW }
+  const provenance = { source: 'website', external_reference: null, actor_user_id: null, idempotency_key: 'deposit-key', fingerprint: 'deposit-fingerprint', guest_acknowledgement: true, creation_kind: 'checkout' as const, creation_status: 'confirmed' as const, followups_completed: false }
+  const opening = { id: 'deposit-request', kind: 'booking' as const, organization_id: ORG, location_id: 'dining', user_id: 'guest', review_id: null, payload: { ...threadPayloadForGuest({ name: 'Verified', email: 'verified@example.com', phone: '+12025550123' }), provenance, cancellation: { token_hash: await hashReservationCancelToken(receipt.token), expires_at: receipt.expiresAt, used_at: null } }, created_at: NOW, updated_at: NOW }
   await db.batch(requestInsertQueries(opening).map(write => db.prepare(write.query).bind(...write.params)))
-  const terms = { policy_type: 'reservation', free_cancellation_until_minutes: null, reschedule_allowed: true, reschedule_cutoff_minutes: null, deposit_required: true, deposit_amount: 10000, deposit_currency: 'USD', deposit_tax_behavior: 'exclusive' }
-  await db.prepare("INSERT INTO payments(id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,location_id,currency,amount,price_snapshot_json,created_at,updated_at) VALUES('deposit',?,?,'acct_seller',0,'reservation','dining','USD',10000,?,?,?)").bind(ORG, 'guest', JSON.stringify({ title: 'Dining reservation deposit', reservation: terms }), NOW, NOW).run()
-  await db.prepare("INSERT INTO payment_checkout_holds(id,organization_id,location_id,timezone,buyer_user_id,request_id,payment_id,quantity,amount,currency,starts_at,ends_at,status,expires_at,created_at) VALUES('deposit-hold',?,'dining','UTC',?,'deposit-request','deposit',1,10000,'USD',?,?,'active','2099-09-30T00:00:00.000Z',?)").bind(ORG, 'guest', startsAt, endsAt, NOW).run()
+  // The deposit is the table's price once, for the whole party, with the terms the guest was shown.
+  await db.prepare("INSERT INTO payments(id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,location_id,currency,amount,price_snapshot_json,created_at,updated_at) VALUES('deposit',?,?,'acct_seller',0,'booking','dining','USD',10000,?,?,?)")
+   .bind(ORG, 'guest', JSON.stringify({ title: 'Dining tables', tax_code: null, price: { unit_amount: 10000, currency: 'USD', tax_behavior: 'exclusive' }, quantity: 1, automatic_tax: false, method_configuration_id: 'pmc_seller', product_id: 'tables', variant_id: 'table-variant', session_id: 'seating', policy: TABLE_TERMS }), NOW, NOW).run()
+  await db.prepare("INSERT INTO payment_checkout_holds(id,organization_id,product_id,variant_id,price_id,session_id,location_id,timezone,buyer_user_id,request_id,payment_id,quantity,amount,currency,starts_at,ends_at,status,expires_at,created_at) VALUES('deposit-hold',?,'tables','table-variant','table-price','seating','dining','UTC',?,'deposit-request','deposit',1,10000,'USD','2099-10-01T13:00:00.000Z','2099-10-01T15:00:00.000Z','active','2099-09-30T00:00:00.000Z',?)").bind(ORG, 'guest', NOW).run()
   const claims: Record<string, string> = {}
   for (const id of ['deposit', 'clearing', 'declined']) {
    claims[id] = crypto.randomUUID() + crypto.randomUUID()
@@ -672,17 +741,17 @@ test('a payment back on the business’s site claims for that site’s buyer and
   assert.equal(foreign.status, 404)
   assert.equal(await db.prepare("SELECT claimed_at FROM payments WHERE id='deposit'").first('claimed_at'), null)
 
-  // Paid: Stripe's capture makes the reservation, the purchase is claimed for the browser's own buyer,
+  // Paid: Stripe's capture makes the booking, the purchase is claimed for the browser's own buyer,
   // and the receipt is the business's confirmation, not the platform's.
   const paid = await back('deposit', { cookie })
   assert.equal(paid.status, 200, await paid.clone().text())
-  assert.deepEqual(await paid.json(), { state: 'paid', kind: 'reservation', request_id: 'deposit-request', cancellation_token: receipt.token })
+  assert.deepEqual(await paid.json(), { state: 'paid', kind: 'booking', request_id: 'deposit-request', cancellation_token: receipt.token })
   assert.deepEqual(paid.headers.getSetCookie(), [])
   assert.deepEqual(await db.prepare("SELECT claimed_user_id FROM payments WHERE id='deposit'").first(), { claimed_user_id: buyer })
-  const reservationId = await db.prepare("SELECT converted_reservation_id FROM payment_checkout_holds WHERE id='deposit-hold' AND status='converted'").first<string>('converted_reservation_id')
-  assert.equal(typeof reservationId, 'string')
-  assert.deepEqual(await db.prepare("SELECT buyer_user_id,amount,tax_amount,captured_amount,receipt_url,subject_id FROM payments WHERE id='deposit'").first(), { buyer_user_id: buyer, amount: 10000, tax_amount: 800, captured_amount: 10800, receipt_url: 'https://pay.stripe.com/receipts/deposit', subject_id: reservationId })
-  assert.deepEqual(await db.prepare('SELECT request_id,user_id,status FROM reservations WHERE id=?').bind(reservationId).first(), { request_id: 'deposit-request', user_id: buyer, status: 'confirmed' })
+  const bookingId = await db.prepare("SELECT converted_booking_id FROM payment_checkout_holds WHERE id='deposit-hold' AND status='converted'").first<string>('converted_booking_id')
+  assert.equal(typeof bookingId, 'string')
+  assert.deepEqual(await db.prepare("SELECT buyer_user_id,amount,tax_amount,captured_amount,receipt_url,subject_id FROM payments WHERE id='deposit'").first(), { buyer_user_id: buyer, amount: 10000, tax_amount: 800, captured_amount: 10800, receipt_url: 'https://pay.stripe.com/receipts/deposit', subject_id: bookingId })
+  assert.deepEqual(await db.prepare('SELECT request_id,user_id,status,product_id,product_session_id,party_size FROM bookings WHERE id=?').bind(bookingId).first(), { request_id: 'deposit-request', user_id: buyer, status: 'confirmed', product_id: 'tables', product_session_id: 'seating', party_size: 1 })
   // The capture alert went to the buyer who proved the purchase, once.
   assert.equal(await db.prepare("SELECT count(*) n FROM activity_entries WHERE request_id='deposit-request' AND event_name='payment.payment_captured'").first('n'), 1)
 
@@ -691,12 +760,12 @@ test('a payment back on the business’s site claims for that site’s buyer and
   assert.equal(read.status, 200)
   const booking = (await read.json() as { booking: Record<string, unknown> }).booking
   assert.deepEqual({ kind: booking.kind, status: booking.status, name: booking.name, email: booking.email, starts_at: booking.starts_at, timezone: booking.timezone, guests: booking.guests, location_id: booking.location_id },
-   { kind: 'reservation', status: 'confirmed', name: 'Verified', email: 'verified@example.com', starts_at: '2099-10-01T13:00:00.000Z', timezone: 'UTC', guests: '1', location_id: 'dining' })
+   { kind: 'booking', status: 'confirmed', name: 'Verified', email: 'verified@example.com', starts_at: '2099-10-01T13:00:00.000Z', timezone: 'UTC', guests: '1', location_id: 'dining' })
 
   // Returning again, as a reload of the pay page does, names the same receipt and changes nothing.
   const before = await db.prepare("SELECT return_token_hash,claimed_at,claimed_user_id FROM payments WHERE id='deposit'").first()
   const again = await back('deposit', { cookie })
-  assert.deepEqual(await again.json(), { state: 'paid', kind: 'reservation', request_id: 'deposit-request', cancellation_token: receipt.token })
+  assert.deepEqual(await again.json(), { state: 'paid', kind: 'booking', request_id: 'deposit-request', cancellation_token: receipt.token })
   assert.deepEqual(await db.prepare("SELECT return_token_hash,claimed_at,claimed_user_id FROM payments WHERE id='deposit'").first(), before)
   assert.equal(await db.prepare("SELECT count(*) n FROM activity_entries WHERE request_id='deposit-request' AND event_name='payment.payment_captured'").first('n'), 1)
  } finally {
@@ -708,7 +777,7 @@ test('buyer Activity groups exact owned visits and immutable orders without manu
  const {db,runtime,env}=await boot();try{
   const opening={id:'booking-request',kind:'booking' as const,organization_id:ORG,location_id:null,user_id:'verified',review_id:null,payload:threadPayloadForGuest({name:'Verified',email:'verified@example.com',notes:'My booking note',ipHash:'private-ip-hash'}),created_at:NOW,updated_at:NOW}
   await db.batch(requestInsertQueries(opening).map(write=>db.prepare(write.query).bind(...write.params)))
-  const booking=await claimSessionCapacity(db,{env,organizationId:ORG,productId:'product',sessionId:'session',productVariantId:'variant',partySize:1,userId:'verified',requestId:opening.id})
+  const booking=await claimSessionCapacity(db,{policyJson: OPEN_TERMS_JSON, env,organizationId:ORG,productId:'product',sessionId:'session',productVariantId:'variant',partySize:1,userId:'verified',requestId:opening.id})
   assert.notEqual(booking.bookingId,opening.id)
   assert.equal(await db.prepare('SELECT request_id FROM bookings WHERE id=?').bind(booking.bookingId).first('request_id'),opening.id)
   await payable(db,'visit-payment')
@@ -859,7 +928,7 @@ test('tenant deletion refuses a connected account retained for another tenant wi
 test('an expired payment hold no longer consumes session capacity', {timeout:120000},async()=>{
  const {db,runtime,env}=await boot();try{
   await payable(db,'expired','2000-01-01T00:00:00.000Z')
-  const booking=await claimSessionCapacity(db,{env,organizationId:ORG,productId:'product',sessionId:'session',productVariantId:'variant',partySize:1})
+  const booking=await claimSessionCapacity(db,{policyJson: OPEN_TERMS_JSON, env,organizationId:ORG,productId:'product',sessionId:'session',productVariantId:'variant',partySize:1})
   assert.equal(await db.prepare('SELECT party_size FROM bookings WHERE id=?').bind(booking.bookingId).first('party_size'),1)
   assert.equal(await db.prepare("SELECT status FROM payment_checkout_holds WHERE payment_id='expired'").first('status'),'active')
  }finally{await runtime.dispose()}
@@ -1003,7 +1072,7 @@ test('a stay purchase claim cancels Stripe before releasing only its held nights
     assert.deepEqual(open, {
       payment_id: 'changing', state: 'open', title: 'Cabin', quantity: 1, unit_amount: 20000,
       stay: { product_id: 'cabin', check_in_date: '2099-10-01', check_out_date: '2099-10-03', nights: 2, nightly: [10000, 10000], adults: 1, children: 0, infants: 0, cancellation_policy: 'flexible' },
-      kind: 'stay', image_url: null, starts_at: null, ends_at: null, timezone: null, product_slug: 'cabin', location_slug: 'cabin-site', free_cancellation_until: null,
+      kind: 'stay', image_url: null, starts_at: null, ends_at: null, timezone: null, party_size: null, product_slug: 'cabin', location_slug: 'cabin-site', free_cancellation_until: null,
       subtotal: 20000, currency: 'USD', expires_at: '2099-09-30T00:00:00.000Z', stripe_account_id: 'acct_seller', publishable_key: 'pk_test_local_boundary',
       payment_method_types: ['card'], customer_session_client_secret: null, bank_verification_url: null, surcharge_basis_points: null,
     })
@@ -1291,7 +1360,7 @@ test('processing webhooks extend only active checkout holds and preserve capacit
       assert.equal((await requirePayment(db, ORG, id)).captured_amount, 0)
       if (status === 'active') {
         assert.ok(Date.parse(hold!.expires_at) >= Date.now() + 13 * 86400_000)
-        await assert.rejects(claimSessionCapacity(db, { env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1 }), /no longer has room/u)
+        await assert.rejects(claimSessionCapacity(db, { policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1 }), /no longer has room/u)
       } else {
         assert.equal(hold?.expires_at, expires)
       }
@@ -1387,7 +1456,7 @@ test('a card is authorized, booked, then captured, and a hold that has lapsed st
   const authenticating = await confirmable(db, 'authenticating', inMinutes(1), inMinutes(1))
   assert.deepEqual(await confirm('authenticating', authenticating), { status: 'requires_action', client_secret: 'pi_authenticating_secret', requires_action: true, bank_verification_url: null })
   assert.ok(Date.parse((await holdOf(db, 'authenticating'))!.expires_at) >= Date.now() + 55 * 60_000)
-  await assert.rejects(claimSessionCapacity(db, { env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1 }), /no longer has room/u)
+  await assert.rejects(claimSessionCapacity(db, { policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1 }), /no longer has room/u)
   assert.deepEqual(calls.capture, ['direct'])
   statuses.authenticating = 'requires_capture'
   const event = { id: 'evt_authorized', type: 'payment_intent.amount_capturable_updated', account: 'acct_seller', livemode: false, data: { object: { id: 'pi_authenticating', metadata: { krabiclaw_payment_id: 'authenticating' } } } } as unknown as Stripe.Event
@@ -1423,7 +1492,7 @@ test('an authorization that lost its capacity is cancelled and never charged; ca
   // The hold lapsed and someone else took the only seat. Stripe holds an authorization; nothing has been charged.
   await confirmable(db, 'taken', inMinutes(-1))
   await db.prepare("UPDATE payment_checkout_holds SET status='released' WHERE payment_id='taken'").run()
-  const seat = await claimSessionCapacity(db, { env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1 })
+  const seat = await claimSessionCapacity(db, { policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1 })
   await deliver('taken')
   assert.deepEqual([calls.cancel, calls.capture, calls.refund], [['taken'], [], []])
   assert.equal(await db.prepare('SELECT count(*) n FROM bookings WHERE id<>?').bind(seat.bookingId).first('n'), 0)
@@ -1540,7 +1609,7 @@ test('a bank debit that cleared after its capacity went is refunded once and nev
   // A debit has no authorization to cancel: the hold lapsed, someone else took the only seat, and the money goes back through the ordinary refund.
   await confirmable(db, 'taken', inMinutes(-1))
   await db.prepare("UPDATE payment_checkout_holds SET status='released' WHERE payment_id='taken'").run()
-  const seat = await claimSessionCapacity(db, { env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1 })
+  const seat = await claimSessionCapacity(db, { policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1 })
   await deliver('taken')
   assert.deepEqual(calls.refund, ['pi_taken'])
   assert.equal(await db.prepare('SELECT count(*) n FROM bookings WHERE id<>?').bind(seat.bookingId).first('n'), 0)

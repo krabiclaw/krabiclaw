@@ -8,7 +8,7 @@ import { queryFirst, type DbClient } from '~/server/db'
  *
  * Past is derived, never stored. A thread is Past when a member archived it,
  * or when it has been quiet for 30 days: nobody has written for 30 days and
- * the reservation, booking or stay it refers to (if any) ended at least 30
+ * the booking or stay it refers to (if any) ended at least 30
  * days ago. Airbnb keeps an ended, read trip in the main list the same way;
  * a new message brings a thread back to Current.
  *

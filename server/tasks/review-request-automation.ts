@@ -36,11 +36,9 @@ async function sendDue(db: D1Database, env: ApiRecord): Promise<{ sent: number; 
         JOIN (
           SELECT b.request_id, b.status, b.no_show_at, ps.ends_at FROM bookings b JOIN product_sessions ps ON ps.id = b.product_session_id
           UNION ALL
-          SELECT request_id, status, no_show_at, ends_at FROM reservations
-          UNION ALL
           SELECT request_id, status, no_show_at, datetime(check_out_date, '-14 hours') FROM stays WHERE channel = 'direct'
         ) record ON record.request_id = r.id
-       WHERE r.kind IN ('reservation', 'booking', 'stay') AND record.status = 'confirmed' AND record.no_show_at IS NULL
+       WHERE r.kind IN ('booking', 'stay') AND record.status = 'confirmed' AND record.no_show_at IS NULL
          AND datetime(record.ends_at) <= datetime('now', '-${REVIEW_REQUEST_DELAY_HOURS} hours')
          AND datetime(record.ends_at) > datetime('now', '-${REVIEW_REQUEST_TTL_DAYS + 2} days')
          AND r.review_id IS NULL

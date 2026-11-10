@@ -99,7 +99,7 @@ export interface TeamThread {
   bookingId: string | null
   locationId: string | null
   stay: TeamStaySummary | null
-  /** A booking or table reservation: who booked, or what. */
+  /** A booking (a table, a class, a consultation): who booked, or what. */
   record: { kind: BookedKind; id: string; title: string } | null
   /** The stay's cleaning job (its turnover, or the job to get a home ready after a move), as the Today card draws it; null when the stay has none. */
   job: TaskView | null
@@ -214,10 +214,10 @@ export async function listTeamThreads(env: CloudflareEnv, db: DbClient, access: 
   if (!threads.length) return []
   const ids = d1JsonStringSet(threads.map(thread => thread.id))
   const stayIds = threads.flatMap(thread => thread.subject_type === 'stay' ? [thread.subject_id!] : [])
-  const recordIds = threads.flatMap(thread => thread.subject_type === 'booking' || thread.subject_type === 'reservation' ? [thread.subject_id!] : [])
-  // Who booked, else what: the offering or the reservation's place.
+  const recordIds = threads.flatMap(thread => thread.subject_type === 'booking' ? [thread.subject_id!] : [])
+  // Who booked, else what: the offering, or a table's place.
   const records = recordIds.length ? await queryAll<{ kind: BookedKind; id: string; title: string }>(db, `
-    SELECT br.kind, br.id, COALESCE(json_extract(r.payload_json, '$.guest.name'), br.product_name, l.title) AS title FROM ${BOOKED_RECORDS_SQL} br
+    SELECT br.kind, br.id, COALESCE(json_extract(r.payload_json, '$.guest.name'), CASE WHEN br.product_kind = 'table' THEN l.title END, br.product_name) AS title FROM ${BOOKED_RECORDS_SQL} br
       LEFT JOIN requests r ON r.id = br.request_id AND r.organization_id = br.organization_id
       LEFT JOIN business_locations l ON l.id = br.location_id AND l.organization_id = br.organization_id
      WHERE br.organization_id = ? AND br.kind <> 'stay' AND br.id IN (SELECT value FROM json_each(?))`, [access.organizationId, d1JsonStringSet(recordIds)]) : []

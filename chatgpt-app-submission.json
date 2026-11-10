@@ -152,18 +152,6 @@
         "open_world_justification": "Changes connected Airbnb availability, and the cancelled turnover job is posted to the team as an automatic team message."
       }
     },
-    "cancel_table_reservation": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": true,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Cancels the reservation and releases its table capacity.",
-        "destructive_justification": "Overwrites reservation state and emails the cancellation; required refunds are handed off first.",
-        "open_world_justification": "Emails the reservation’s guest."
-      }
-    },
     "complete_task": {
       "annotations": {
         "readOnlyHint": false,
@@ -327,7 +315,7 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Saves a booking, for a legal practice a client consultation, with its inbox conversation; emails the guest when acknowledgement is chosen and notifies business staff. A confirmed consultation opens the attorney’s preparation and follow-up jobs, posted to the team as an automatic team message.",
+        "read_only_justification": "Saves a booking — a class, a restaurant table, or for a legal practice a client consultation — with its inbox conversation; emails the guest when acknowledgement is chosen and notifies business staff. A confirmed consultation opens the attorney’s preparation and follow-up jobs, posted to the team as an automatic team message.",
         "destructive_justification": "Sends notifications that cannot be recalled and uses up bookable places; a booking that requires online payment is refused before it is created.",
         "open_world_justification": "Can email the supplied guest address, notify business staff and post the attorney’s jobs to the team."
       }
@@ -378,18 +366,6 @@
         "read_only_justification": "Creates a confirmed stay the host took directly, holds its nights, opens its turnover job, plans automatic guest messages and updates connected Airbnb availability; the turnover job is posted to the team as an automatic team message, and this tool takes no payment.",
         "destructive_justification": "Can queue guest messages that cannot be recalled and changes the nights available for sale; it is not only an additive private note.",
         "open_world_justification": "Queued guest messages can reach guests, connected Airbnb availability is updated and the turnover job is posted to the team."
-      }
-    },
-    "create_table_reservation": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": true,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Persists the table reservation and initiates configured guest/staff notifications.",
-        "destructive_justification": "Sends notifications and reserves capacity; required financial action is handed off before confirmation.",
-        "open_world_justification": "Can email the supplied guest address and notify business staff."
       }
     },
     "create_task": {
@@ -872,18 +848,6 @@
         "open_world_justification": "Reads only the selected business product and collection text and its saved translations."
       }
     },
-    "get_reservation_policy": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Reads an existing location reservation configuration and computes its localized policy summary.",
-        "destructive_justification": "Does not change reservation rules, collect deposits or reserve capacity.",
-        "open_world_justification": "Reads an existing policy at the selected business location and computes its summary."
-      }
-    },
     "get_resource_localization": {
       "annotations": {
         "readOnlyHint": true,
@@ -1263,7 +1227,7 @@
         "destructiveHint": false
       },
       "justifications": {
-        "read_only_justification": "Reads saved product bookings and consultations under the caller’s access scope.",
+        "read_only_justification": "Reads saved bookings, table reservations and consultations under the caller’s access scope.",
         "destructive_justification": "Does not allocate capacity, confirm, cancel or change saved bookings.",
         "open_world_justification": "Reads bookings and consultations only within the caller authorized business scope."
       }
@@ -1326,18 +1290,6 @@
         "read_only_justification": "Reads visible stays overlapping the date range, optionally one product or cancelled stays; members receive only assigned turnover fields.",
         "destructive_justification": "Does not create or cancel stays, claim nights or send guest messages.",
         "open_world_justification": "Reads only stays at homes the caller may access in the selected business."
-      }
-    },
-    "list_table_reservations": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Reads saved restaurant reservations and their status summary.",
-        "destructive_justification": "Does not reserve tables, change party sizes, cancel reservations or email guests.",
-        "open_world_justification": "Reads restaurant reservations and summaries only within the authorized business."
       }
     },
     "list_tasks": {
@@ -1743,21 +1695,9 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Persists a guest-change proposal or immediately applies an allowed non-consultation move.",
+        "read_only_justification": "Persists a guest-change proposal or immediately applies an allowed non-consultation move, including a table booking moved to another location's tables.",
         "destructive_justification": "Sends the guest a proposal or change email and can overwrite the booking’s session and party size.",
         "open_world_justification": "Emails the booking’s guest; consultations still require client acceptance."
-      }
-    },
-    "request_table_reservation_change": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": true,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Persists a reservation-change proposal or directly applies an allowed change.",
-        "destructive_justification": "Emails the guest and can overwrite saved location, date, time and party size.",
-        "open_world_justification": "Sends a proposal or changed-time email to the reservation’s guest."
       }
     },
     "save_media_attachment": {
@@ -2192,18 +2132,6 @@
         "open_world_justification": "Can immediately change public website Q&A."
       }
     },
-    "update_reservation_policy": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": true,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Upserts supplied reservation duration, capacity, notice, deposits and guest questions with revision checks.",
-        "destructive_justification": "Overwrites editable capacity, notice, deposit, guest-question and other reservation rules. The cancellation cutoff is fixed.",
-        "open_world_justification": "Changes rules and questions on the public reservation flow."
-      }
-    },
     "update_site_page": {
       "annotations": {
         "readOnlyHint": false,
@@ -2293,11 +2221,11 @@
       "expected_output_url": null
     },
     {
-      "description": "Create a regular Brooklyn table reservation, then propose a one-hour change for guest acceptance.",
+      "description": "Book a regular Brooklyn table, then propose a one-hour change for guest acceptance.",
       "user_prompt": "Find a Friday more than 24 hours away with 7 PM and 8 PM both available at Ember & Slice in Brooklyn. Book a regular table for two at 7 PM for Taylor Review, using the reviewer contact details in the review instructions. Then email the guest a proposal to move it to 8 PM. Keep 7 PM until they accept.",
       "file_attachment_urls": null,
-      "tools_triggered": "list_organizations, list_locations, get_reservation_policy, get_calendar, create_table_reservation, list_table_reservations, request_table_reservation_change",
-      "expected_output": "Uses the Brooklyn calendar and reservation availability to choose a Friday more than 24 hours away. Creates one regular table reservation using the location policy and controlled reviewer contact details. Emails one proposal for 8 PM while the reservation remains at 7 PM. Guest acceptance updates the same reservation once; reopening the accepted link preserves the accepted state. Experience bookings remain separate. Cancel the review reservation after verification.",
+      "tools_triggered": "list_organizations, list_location_products, get_product, list_product_booking_sessions, create_product_booking, get_product_booking, request_product_booking_change",
+      "expected_output": "Uses the Brooklyn table product's sessions to choose a Friday more than 24 hours away with both seatings available. Creates one regular table booking under the table product's terms with the controlled reviewer contact details. Emails one proposal for the 8 PM session while the booking remains at 7 PM. Guest acceptance moves the same booking once; reopening the accepted link preserves the accepted state. Cancel the review booking after verification.",
       "expected_output_url": null
     },
     {

@@ -1,4 +1,5 @@
 import { normalizeVertical } from '~/utils/vertical-copy'
+import type { ProductKind } from '~/shared/product-details'
 
 /**
  * What a tenant and their guest call one booking.
@@ -29,7 +30,6 @@ export interface BookingPresentation {
 	formatCount: (count: number | string, isMinimum?: boolean) => string
 }
 
-export type BookingKind = 'reservation' | 'booking'
 
 function formatPresentationCount(nounSingular: string, nounPlural: string, count: number | string, isMinimum?: boolean): string {
 	const raw = String(count).trim()
@@ -74,14 +74,14 @@ const BOOKING: BookingPresentation = {
 }
 
 /**
- * The noun is keyed by what was booked, then narrowed by the vertical. A
- * restaurant that also sells experiences takes a *reservation* for a table and
- * a *booking* for an experience, so the kind has to lead — deriving from the
- * site's vertical alone would call both of them reservations.
+ * The noun is keyed by the kind of product booked, then narrowed by the
+ * vertical. A restaurant that also sells experiences takes a *reservation* for
+ * a table and a *booking* for an experience, so the kind has to lead —
+ * deriving from the site's vertical alone would call both of them reservations.
  */
-export function resolveBookingPresentation(kind: BookingKind, vertical: string | null | undefined): BookingPresentation {
+export function resolveBookingPresentation(productKind: ProductKind, vertical: string | null | undefined): BookingPresentation {
 	if (!vertical?.trim()) throw new Error('Cannot resolve booking vocabulary: missing vertical')
-	return normalizeVertical(vertical) === 'service' ? CONSULTATION : kind === 'booking' ? BOOKING : RESERVATION
+	return normalizeVertical(vertical) === 'service' ? CONSULTATION : productKind === 'table' ? RESERVATION : BOOKING
 }
 
 /**
@@ -90,7 +90,7 @@ export function resolveBookingPresentation(kind: BookingKind, vertical: string |
  * one word that is true of all of them.
  */
 export function resolveAggregateBookingPresentation(
-	entries: Array<{ kind: BookingKind; vertical: string | null | undefined }>,
+	entries: Array<{ kind: ProductKind; vertical: string | null | undefined }>,
 ): BookingPresentation {
 	const distinct = new Map<string, BookingPresentation>()
 	for (const entry of entries) {

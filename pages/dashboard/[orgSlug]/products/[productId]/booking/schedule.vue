@@ -42,7 +42,9 @@ const groups = computed<EditorNavigationGroup[]>(() => {
   }) }]
   return [{ id: 'week', items: p.weekdays.map(day => ({
   id: day.label.toLowerCase(), label: day.label,
-  summary: p.savedSlotsFor(day.value).length ? p.savedSlotsFor(day.value).map(slot => formatTime(slot.start_time, 'en-US')).join(', ') : legal.value ? 'No consultations' : 'No sessions',
+  summary: p.savedSlotsFor(day.value).length ? p.savedSlotsFor(day.value).map(slot => slot.end_time
+    ? `${formatTime(slot.start_time, 'en-US')}–${formatTime(slot.end_time, 'en-US')} every ${slot.interval_minutes} min`
+    : formatTime(slot.start_time, 'en-US')).join(', ') : legal.value ? 'No consultations' : 'No sessions',
   to: router.resolve({ path: `${level.path.value}/${day.label.toLowerCase()}`, query: route.query }).fullPath,
   })) }]
 })

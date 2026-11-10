@@ -71,7 +71,7 @@ export function parseGuestThreadListQuery(query: Record<string, unknown>): Dashb
     limit: query.limit === undefined ? 100 : Number(query.limit),
     offset: query.offset === undefined ? 0 : Number(query.offset),
     locationId: id('location_id'),
-    type: filter<GuestThreadSubmissionType>('type', ['contact', 'reservation', 'booking', 'stay']),
+    type: filter<GuestThreadSubmissionType>('type', ['contact', 'booking', 'stay']),
     kind: kind === 'guests' ? 'guest' : kind === 'support' ? 'support' : null,
     q,
     unreadOnly: unread === '1' || unread === 'true',

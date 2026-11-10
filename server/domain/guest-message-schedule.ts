@@ -6,9 +6,9 @@ import { addLocalDays, isValidCalendarDate, isValidInstant, isValidTimezone, loc
  * check_out are the start and end of whatever was booked: a stay's first and
  * last day, a consultation's, class's or table's start and end. offsetDays and
  * localTime name a day and a clock time there; offsetHours counts from the
- * instant itself. productIds names the booked offerings: a home, experience or
- * consultation by its product, a table reservation by its location
- * (BOOKED_RECORDS_SQL offering_id).
+ * instant itself. productIds names the booked offerings by product: a home, an
+ * experience, a consultation or a restaurant's tables (BOOKED_RECORDS_SQL
+ * offering_id).
  */
 export type GuestMessageSchedule = ({
   trigger: 'booking_received'

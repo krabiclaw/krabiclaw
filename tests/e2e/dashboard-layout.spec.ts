@@ -17,6 +17,7 @@ import type { Collection, Product } from '../../server/types/products'
 import type { DashboardLocation } from '../../composables/useDashboardOrganization'
 import { countCatalog, type CatalogCounts } from '../../utils/product-presentation'
 import { seededTenant } from './seed/manifest'
+import { seededTables } from './helpers/tables'
 
 // The dashboard's pane topology is the nested route tree (DESIGN.md, Route
 // hierarchy). On a wide screen a level renders beside the parent its Back goes
@@ -1610,7 +1611,7 @@ test.describe('dashboard pane hierarchy', () => {
       if (!isAccountActivityResponse(activity)) throw new Error('Invalid account activity response')
       await expect(page.getByRole('heading', { name: 'Past activity', exact: true })).toBeVisible()
       const past = activity.activities.filter(item => item.kind === 'order' || item.kind === 'payment' || (item.status !== 'cancelled' && item.endsAt !== null && Date.parse(item.endsAt) < Date.now()))
-      const cancelled = activity.activities.filter(item => (item.kind === 'booking' || item.kind === 'reservation') && item.status === 'cancelled')
+      const cancelled = activity.activities.filter(item => item.kind === 'booking' && item.status === 'cancelled')
       await expect(page.getByTestId('account-activity-cancelled')).toHaveCount(cancelled.length ? 1 : 0)
       await expect(page.locator('[data-testid^="account-activity-"]:not([data-testid="account-activity-cancelled"])')).toHaveCount(past.length)
       for (const item of past) {
@@ -1729,9 +1730,9 @@ test.describe('dashboard pane hierarchy', () => {
   test('booking Change is one sheet beside its record on desktop and over it below lg', async ({ page }) => {
     const agenda = await page.request.get('/api/dashboard/agenda', { params: { org: 'ember-slice-demo', from: '2000-01-01', to: '2100-01-01' } })
     expect(agenda.status()).toBe(200)
-    const { items } = await agenda.json() as { items: Array<{ kind: string; to: string }> }
-    const reservation = items.find(item => item.kind === 'reservation' && item.to.includes('/bookings/'))
-    expect(reservation, 'the demo fixture carries a reservation').toBeTruthy()
+    const { items } = await agenda.json() as { items: Array<{ kind: string; productId: string | null; to: string }> }
+    const reservation = items.find(item => item.kind === 'booking' && item.productId === seededTables().id && item.to.includes('/bookings/'))
+    expect(reservation, 'the demo fixture carries a table booking').toBeTruthy()
     const change = `${reservation!.to}/change`
 
     await page.setViewportSize(WIDE)
@@ -1750,11 +1751,11 @@ test.describe('dashboard pane hierarchy', () => {
   test('a booking opened from the calendar closes to its day, and from Today to Today', async ({ page }) => {
     const agenda = await page.request.get('/api/dashboard/agenda', { params: { org: 'ember-slice-demo', from: '2000-01-01', to: '2100-01-01' } })
     expect(agenda.status()).toBe(200)
-    const { items } = await agenda.json() as { items: Array<{ kind: string; dayKey: string; to: string }> }
-    const reservation = items.find(item => item.kind === 'reservation' && item.to.includes('/bookings/'))
-    expect(reservation, 'the demo fixture carries a reservation').toBeTruthy()
+    const { items } = await agenda.json() as { items: Array<{ kind: string; productId: string | null; dayKey: string; to: string }> }
+    const reservation = items.find(item => item.kind === 'booking' && item.productId === seededTables().id && item.to.includes('/bookings/'))
+    expect(reservation, 'the demo fixture carries a table booking').toBeTruthy()
     const day = `${ORG}/calendar/${reservation!.dayKey}`
-    const fromCalendar = `${day}/reservation/${reservation!.to.split('/').at(-1)}`
+    const fromCalendar = `${day}/booking/${reservation!.to.split('/').at(-1)}`
 
     // The same record, mounted under the day: Close is the day and Calendar is the lit tab.
     await page.setViewportSize(NARROW)
@@ -1774,7 +1775,7 @@ test.describe('dashboard pane hierarchy', () => {
 
     // A direct link and reload retain Today as the actual parent, so the same
     // range and filters remain beside the record and survive mobile Close.
-    const context = '?range=upcoming&kinds=reservation'
+    const context = '?range=upcoming&kinds=booking'
     await page.setViewportSize(WIDE)
     await open(page, `${reservation!.to}${context}`)
     await expectPanes(page, ['org-today', 'booking-details'])

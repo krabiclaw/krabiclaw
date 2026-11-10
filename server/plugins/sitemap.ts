@@ -1,6 +1,6 @@
 import type { ProductKind } from '~/shared/product-details'
 import { catalogNavigation, locationSurfacePath, productSurfaceOf, presentationForProduct, resolveProductPresentation } from '~/utils/product-presentation'
-import { PUBLIC_CONTENT_SECTION_QUERIES, PUBLIC_CONTENT_SECTIONS, productCatalogRows, publicContentSectionRows, publicSections, type PublicContentSectionRow } from '~/server/utils/public-shell-query'
+import { locationTakesTablesSql, PUBLIC_CONTENT_SECTION_QUERIES, PUBLIC_CONTENT_SECTIONS, productCatalogRows, publicContentSectionRows, publicSections, type PublicContentSectionRow } from '~/server/utils/public-shell-query'
 import { publicLocationSql } from '~/server/utils/public-locations'
 import type { PublicSiteSection } from '~/utils/public-resource-contracts'
 import { publicTenantPageSql } from '~/server/utils/content/pages'
@@ -243,8 +243,7 @@ export default definePlugin((nitroApp) => {
       queryAll<ApiRecord>(
         db,
         `SELECT bl.id, bl.slug, bl.updated_at,
-                EXISTS (SELECT 1 FROM location_reservation_configs c
-                         WHERE c.organization_id = bl.organization_id AND c.location_id = bl.id) AS has_reservations
+                ${locationTakesTablesSql('bl')} AS has_reservations
          FROM business_locations bl
          WHERE bl.organization_id = ?
            AND ${publicLocationSql('bl')}`,

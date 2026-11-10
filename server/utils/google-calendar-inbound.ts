@@ -13,7 +13,6 @@ import { getGuestRequest } from '~/server/domain/requests'
 import type { GuestThreadEntryRow, GuestThreadRow } from '~/server/domain/guest-threads/types'
 import { notifyCalendarSyncOwner } from '~/server/utils/notifications'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
-import { localPartsAt } from '~/utils/timezone'
 import { describeErrorForTelemetry } from '~/shared/error-telemetry'
 
 /*
@@ -156,26 +155,19 @@ export async function pullCalendarChanges(env: CloudflareEnv, organizationId: st
     throw error
   }
 }
-/** The destination a Google event's new interval names: the same product's session that starts then, or the reservation's new date and time. */
+/** The destination a Google event's new interval names: the same product's session that starts then, at the same place. */
 async function moveFieldsFor(db: DbClient, env: CloudflareEnv, organizationId: string, subject: CalendarSubject, startsAt: string, endsAt: string) {
-  const record = await queryFirst<{ party_size: number; product_id: string | null; location_id: string | null; timezone: string }>(db, subject.booking_kind === 'booking'
-    ? 'SELECT b.party_size, b.product_id, s.location_id, s.timezone FROM bookings b JOIN product_sessions s ON s.id=b.product_session_id WHERE b.id=? AND b.organization_id=?'
-    : 'SELECT party_size, NULL AS product_id, location_id, timezone FROM reservations WHERE id=? AND organization_id=?', [subject.operational_id, organizationId])
+  const record = await queryFirst<{ party_size: number; product_id: string; location_id: string | null; timezone: string; updated_at: string }>(db,
+    'SELECT b.party_size, b.product_id, s.location_id, s.timezone, b.updated_at FROM bookings b JOIN product_sessions s ON s.id=b.product_session_id WHERE b.id=? AND b.organization_id=?', [subject.operational_id, organizationId])
   if (!record) throw new HTTPError({ statusCode: 409, message: 'The booking behind this event is gone' })
   const when = new Intl.DateTimeFormat('en-US', { timeZone: record.timezone, dateStyle: 'medium', timeStyle: 'short' }).format(new Date(startsAt))
-  if (subject.booking_kind === 'booking') {
-    const sessions = await listSessions(db, { env, organizationId, productId: record.product_id!, fromInstant: new Date(Date.parse(startsAt) - 60_000).toISOString(), toInstant: new Date(Date.parse(startsAt) + 60_000).toISOString() })
-    const exact = sessions.filter(session => Date.parse(session.starts_at) === Date.parse(startsAt) && session.location_id === record.location_id)
-    if (exact.length > 1) throw new HTTPError({ statusCode: 409, message: 'More than one consultation matches this change. Choose the exact consultation in KrabiClaw.' })
-    const target = exact[0]
-    if (!target) throw new HTTPError({ statusCode: 409, message: `Nothing can be booked at ${when}; the website offers the times that can` })
-    if (Date.parse(target.ends_at) !== Date.parse(endsAt)) throw new HTTPError({ statusCode: 409, message: 'Only the start can move; the booking keeps its length' })
-    return { kind: 'booking' as const, sessionId: target.id, partySize: record.party_size }
-  }
-  if (!record.location_id) throw new HTTPError({ statusCode: 409, message: 'The reservation has no location to move within' })
-  const parts = localPartsAt(new Date(startsAt), record.timezone)
-  const pad = (value: number) => String(value).padStart(2, '0')
-  return { kind: 'reservation' as const, locationId: record.location_id, bookingDate: `${parts.year}-${pad(parts.month)}-${pad(parts.day)}`, bookingTime: `${pad(parts.hour)}:${pad(parts.minute)}`, partySize: record.party_size }
+  const sessions = await listSessions(db, { env, organizationId, productId: record.product_id, fromInstant: new Date(Date.parse(startsAt) - 60_000).toISOString(), toInstant: new Date(Date.parse(startsAt) + 60_000).toISOString() })
+  const exact = sessions.filter(session => Date.parse(session.starts_at) === Date.parse(startsAt) && session.location_id === record.location_id)
+  if (exact.length > 1) throw new HTTPError({ statusCode: 409, message: 'More than one consultation matches this change. Choose the exact consultation in KrabiClaw.' })
+  const target = exact[0]
+  if (!target) throw new HTTPError({ statusCode: 409, message: `Nothing can be booked at ${when}; the website offers the times that can` })
+  if (Date.parse(target.ends_at) !== Date.parse(endsAt)) throw new HTTPError({ statusCode: 409, message: 'Only the start can move; the booking keeps its length' })
+  return { fields: { kind: 'booking' as const, sessionId: target.id, partySize: record.party_size }, bookingUpdatedAt: record.updated_at }
 }
 /** A consultation's invitation is its client and its assigned attorney; who handles it changes in KrabiClaw, never from its event. */
 function assertConsultationAttendees(subject: CalendarSubject, item: GoogleEvent): void {
@@ -196,7 +188,7 @@ async function flagForReview(env: CloudflareEnv, organizationId: string, link: E
   const dedupeKey = `calendar-sync:${change}`
   const existing = await findEntryByDedupeKey(db, dedupeKey)
   const organization = await queryFirst<{ name: string | null; vertical: string | null }>(db, 'SELECT name, vertical FROM organization WHERE id=?', [organizationId])
-  const noun = resolveBookingPresentation(subject.booking_kind, organization?.vertical).noun
+  const noun = resolveBookingPresentation(subject.product_kind, organization?.vertical).noun
   const whenLabel = new Intl.DateTimeFormat('en-US', { timeZone: subject.timezone, dateStyle: 'medium', timeStyle: 'short' }).format(new Date(subject.starts_at))
   const entry = existing ?? await appendEntry(db, { threadId: subject.request_id, kind: 'operation', actorKind: 'system', eventName: `calendar_sync.${kind}`, dedupeKey,
     body: kind === 'event_deleted'
@@ -205,7 +197,7 @@ async function flagForReview(env: CloudflareEnv, organizationId: string, link: E
     payloadJson: { kind, reason, event_id: link.event_id, operational_booking_id: subject.operational_id } })
   if (!existing) await updateThreadProjectionIfLatestEntry(db, subject.request_id, entry.id)
   const request = await queryFirst<{ location_id: string | null }>(db, 'SELECT location_id FROM requests WHERE id=?', [subject.request_id])
-  await notifyCalendarSyncOwner(env, db, { organizationId, organizationName: organization?.name, kind, threadId: subject.request_id, submissionType: subject.booking_kind, sourceEntryId: entry.id,
+  await notifyCalendarSyncOwner(env, db, { organizationId, organizationName: organization?.name, kind, threadId: subject.request_id, submissionType: 'booking', sourceEntryId: entry.id,
     locationId: request?.location_id ?? null, guestName: subject.guest_name ?? 'The guest', noun, whenLabel, reason,
     day: new Intl.DateTimeFormat('en-US', { timeZone: subject.timezone, month: 'short', day: 'numeric' }).format(new Date(subject.starts_at)) })
 }
@@ -275,14 +267,14 @@ async function applyCalendarEvent(env: CloudflareEnv, organizationId: string, in
       if (!Number.isFinite(start) || !Number.isFinite(end)) throw new HTTPError({ statusCode: 409, message: 'The event lost its start or end time' })
       if (!thread) throw new HTTPError({ statusCode: 409, message: 'The booking has no guest conversation to move it through' })
       if (!item.etag || !item.updated) throw new HTTPError({ statusCode: 409, message: 'Google returned no event revision; the change cannot be proposed safely.' })
-      const fields = await moveFieldsFor(db, env, organizationId, subject, new Date(start).toISOString(), new Date(end).toISOString())
+      const { fields, bookingUpdatedAt } = await moveFieldsFor(db, env, organizationId, subject, new Date(start).toISOString(), new Date(end).toISOString())
       const account = await readLinkedAccount(env, integration.account_id)
       if (!account || account.providerId !== 'google') throw new HTTPError({ statusCode: 409, message: 'The Calendar integration account is no longer linked.' })
       const connection = await readCalendarIntegration(db, organizationId)
       if (connection?.revision !== integration.revision || connection.status === 'disabled') throw new HTTPError({ statusCode: 409, message: 'The Calendar connection changed before this request could be proposed.' })
       const idempotencyKey = `google-calendar:${change}`
       const previous = await findEntryByDedupeKey(db, `booking-change-request:${thread.id}:${idempotencyKey}`)
-      const expectedUpdatedAt = previous ? JSON.parse(previous.payload_json!).updatedAt as string : thread.updated_at
+      const expectedUpdatedAt = previous ? JSON.parse(previous.payload_json!).updatedAt as string : bookingUpdatedAt
       await requestBookingChange(db, env, thread as GuestThreadRow, { source: 'google_calendar', userId: account.userId }, { ...fields, expectedUpdatedAt }, idempotencyKey)
       await logInbound(db, { organizationId, externalId: item.id, status: 'applied', detail: `client approval requested for ${new Date(start).toISOString()}; the original appointment is retained` })
       return 'applied'

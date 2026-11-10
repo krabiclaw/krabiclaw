@@ -1,6 +1,6 @@
 import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
 import { planSourceMessages } from '~/server/domain/scheduled-guest-messages'
-import { CapacityUnavailableError, claimSessionCapacity, requireBookingConfig } from '~/server/utils/availability'
+import { CapacityUnavailableError, claimSessionCapacity, partyPaysOnline, partySizeRefusal, requireBookingConfig } from '~/server/utils/availability'
 import { cloudflareEnv, cleanString } from '~/server/utils/api-response'
 import { isReservedTestDomain, shouldSendRealEmail } from '~/server/utils/email-delivery'
 import { notifyBookingCreated, raiseSettledFailures } from '~/server/utils/notifications'
@@ -8,7 +8,7 @@ import { measurementOutcome, readPageEventId, recordOrganizationConversionEvent 
 import { resolveLocationContact } from '~/server/utils/contact-resolution'
 import { toE164 } from '~/utils/phone'
 import { queryAll, queryFirst, type DbClient } from '~/server/db'
-import { renderBookingPolicySummary, visitPolicySummarySource } from '~/server/utils/reservations'
+import { bookingPolicy, formatBookingPolicySummary } from '~/server/utils/booking-policy-summary'
 import { getProduct, resolveVariantPrice } from '~/server/utils/product-management'
 import { isCurrencyCode } from '~/shared/currencies'
 import { getSourceLocale } from '~/server/utils/organization-locales'
@@ -31,6 +31,7 @@ import { pushStayHoldNights, quoteStay, readPublicStayHome, type StayQuote } fro
 import { requireChannelPush } from '~/server/integrations/channex/ari'
 import { acceptFormAnswers } from '~/server/domain/form-questions'
 import { formAnswersFingerprint } from '~/shared/form-questions'
+import type { ProductKind } from '~/shared/product-details'
 
 export interface BookingCreationContext {
   organizationId: string
@@ -74,8 +75,8 @@ export async function notifyProductBookingCreated(env: CloudflareEnv, db: DbClie
       guestAcknowledgement: request.payload.provenance?.guest_acknowledgement ?? true,
       bookingId: requestId, status: creation.status, guestName: request.payload.guest.name,
       email: request.payload.guest.email, guestPhone: request.payload.guest.phone,
-      productId: record.product_id, productTitle: record.product_name, startsAt: record.starts_at,
-      timezone: record.timezone, partySize: record.party_size, notes: request.payload.notes,
+      productId: record.product_id, productKind: record.product_kind, productTitle: record.product_name, startsAt: record.starts_at,
+      timezone: record.timezone, partySize: record.party_size, partySizeIsMinimum: request.payload.party_size_is_minimum, notes: request.payload.notes,
       receiptUrl, paid, contactPhone, contactEmail, ownerInboxUrl, locale,
     }),
   ])
@@ -179,14 +180,16 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
   }
 
   await assertPublicOrganizationLanguage(db, organizationId, locale)
-  const product = await queryFirst<{ id: string; name: string; order_url: string | null }>(db, `
-    SELECT p.id, p.name, p.order_url FROM products p
+  const product = await queryFirst<{ id: string; name: string; kind: ProductKind; order_url: string | null }>(db, `
+    SELECT p.id, p.name, p.kind, p.order_url FROM products p
       JOIN product_publications pub ON pub.product_id = p.id AND pub.organization_id = p.organization_id
       JOIN product_booking_configs cfg ON cfg.product_id = p.id AND cfg.unit = 'slot'
      WHERE pub.organization_id = ? AND pub.published = 1 AND p.slug = ? AND p.active = 1 LIMIT 1
   `, [organizationId, slug])
   if (!product) return creationResult({ error: 'Product not found' }, { status: 404 })
   if (!operator && product.order_url) return creationResult({ error: 'Book this product on its configured external website.', external_url: product.order_url }, { status: 409 })
+  // A restaurant calls a table's guest when plans change, so a table booking needs a phone number.
+  if (product.kind === 'table' && !normalizedGuestPhone) return creationResult({ error: 'Please enter your phone number.' }, { status: 400 })
   // The answers are checked and frozen here, before any seat or payment: a
   // checkout's thread carries them, and capture uses what was accepted now.
   const answers = await acceptFormAnswers(db, { kind: 'booking', organizationId, productId: product.id }, { locale, answers: body.answers, questionsRevision: body.questions_revision, revisionRequired: false })
@@ -226,14 +229,17 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
   const productVariantId = requestedVariantId || variants[0]!.id
 
   const full = await getProduct(db, organization.id, product.id)
-  const presentation = resolveBookingPresentation('booking', organization.vertical)
+  const presentation = resolveBookingPresentation(product.kind, organization.vertical)
   const config = await requireBookingConfig(db, organization.id, product.id)
+  const partyRefusal = partySizeRefusal(config, partySize)
+  if (partyRefusal) return creationResult({ error: partyRefusal, code: 'party_size_unavailable' }, { status: 400 })
   if (!isCurrencyCode(organization.default_currency)) throw new Error(`Unsupported organization currency: ${organization.default_currency}`)
   const variant = full.variants.find(candidate => candidate.id === productVariantId)
   if (!variant) throw new Error('The selected variant is missing')
   const price = resolveVariantPrice(variant, { currency: organization.default_currency, location_id: session.location_id, at: new Date().toISOString() })
   if (!price || price.type !== 'one_time') return creationResult({ error: 'A current one-time price is required for this offering', code: 'price_unavailable' }, { status: 409 })
-  const requiresPayment = config.online_payment_required && price.unit_amount > 0
+  const requiresPayment = partyPaysOnline(config, partySize) && price.unit_amount > 0
+  const policy = bookingPolicy(config, price)
   if (requiresPayment && context.financialWritesAllowed === false) {
     throw new HTTPError({ statusCode: 409, statusMessage: 'This booking requires online payment. Review the offering in the dashboard and complete its payment workflow before a booking can be created.', data: {
       code: 'financial_action_required', dashboard_url: `/dashboard/${encodeURIComponent(organization.slug)}/products/${encodeURIComponent(product.id)}/booking`,
@@ -269,7 +275,7 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
     : await queryFirst<{ title: string }>(db, 'SELECT title FROM business_locations WHERE id = ? AND organization_id = ?', [session.location_id, organizationId])
   if (session.location_id !== null && !place) throw new HTTPError({ statusCode: 404, message: 'The session location does not exist' })
   if (!organization.vertical) throw new Error('The organization has no vertical')
-  const opening = { body: openingSentence({ kind: 'booking', vertical: organization.vertical, productTitle: product.name, guestName: payload.guest.name ?? guestName, guestPhone: payload.guest.phone,
+  const opening = { body: openingSentence({ kind: 'booking', vertical: organization.vertical, productKind: product.kind, productTitle: product.name, partySizeIsMinimum: payload.party_size_is_minimum, guestName: payload.guest.name ?? guestName, guestPhone: payload.guest.phone,
     answers: payload.answers, partySize, startsAt: session.starts_at, timezone: session.timezone, placeTitle: place?.title ?? null }) }
   payload.provenance = { source: operator?.source ?? 'website', external_reference: operator?.externalReference ?? null, actor_user_id: operator?.userId ?? null,
     idempotency_key: idempotencyKey, fingerprint, guest_acknowledgement: operator?.guestAcknowledgement ?? true,
@@ -301,7 +307,7 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
     const claim = await claimSessionCapacity(db, {
       env,
       organizationId: organization.id, productId: product.id, sessionId: session.id,
-      productVariantId, partySize, userId, requestId: null,
+      productVariantId, partySize, userId, requestId: null, policyJson: JSON.stringify(policy),
       following: bookingId => [
         ...requestInsertQueries({
           kind: 'booking', id: threadId, organization_id: organization.id,
@@ -352,8 +358,17 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
   // event, and a quote that cannot be resolved is a measurement failure reported beside the
   // committed booking, never a reason the booking was not made. Seats are priced per person, as the
   // product page states, so the quoted amount is unit price x seats. A variant with no offer has an
-  // unknown value, not a zero one.
+  // unknown value, not a zero one. A table booking is the provider-side 'reservation_submit'
+  // conversion restaurants' Google Ads and GA4 already count, which carries no value.
   const recordBookingMeasurement = async () => {
+    if (product.kind === 'table') {
+      const recorded = await recordOrganizationConversionEvent(db, event.req, {
+        organizationId: organization.id, eventName: 'reservation_submit', stage: 'submitted', surface: 'website',
+        locationId: session.location_id, entityType: 'request', entityId: threadId, productId: product.id, variantId: productVariantId,
+        pageType: 'reservations', routePath: '/reservations', originEventId: pageEventId,
+      })
+      return { ...recorded, quotedValue: null }
+    }
     const quotedValue = {
       basis: 'quoted' as const,
       amount_minor: price.unit_amount * partySize,
@@ -391,7 +406,7 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
   return creationResult({
     success: true, request_id: threadId, operational_booking_id: operationalBookingId, status: record.status, replayed: false, starts_at: record.starts_at, ends_at: record.ends_at, timezone: record.timezone, presentation, ...(operator ? {} : { cancellation_token: cancellation.token, quoted_value: quotedValueOf(followUps[1]!), measurement }),
     message: record.status === 'cancelled' ? 'This booking was cancelled.' : record.status === 'pending' ? `Your request for ${record.product_name} on ${whenLabel} is awaiting review.` : `Your ${presentation.noun} for ${record.product_name} on ${whenLabel} is confirmed.`,
-    policy_summary: renderBookingPolicySummary(visitPolicySummarySource('experience', record.advance_notice_minutes), locale, full.kind),
+    policy_summary: formatBookingPolicySummary(policy, locale, full.kind),
   }, { status: 201 })
 }
 

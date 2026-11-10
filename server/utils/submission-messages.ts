@@ -18,15 +18,14 @@ export interface SubmissionMatch {
 }
 
 export async function findSubmissionByPhone(db: DbClient, phone: string, organizationId?: string): Promise<SubmissionMatch | null> {
-  // Cancellation is the booking's, reservation's or stay's, not the thread's:
+  // Cancellation is the booking's or stay's, not the thread's:
   // requests has no status of its own.
   return queryFirst<SubmissionMatch>(db, `SELECT r.kind AS submissionType, r.id AS submissionId, r.organization_id AS organizationId FROM requests r
-    WHERE r.kind IN ('reservation', 'booking', 'stay')
+    WHERE r.kind IN ('booking', 'stay')
       AND CASE WHEN r.kind = 'stay' THEN
         EXISTS (SELECT 1 FROM stays current_stay WHERE current_stay.request_id = r.id AND current_stay.organization_id = r.organization_id AND trim(current_stay.guest_phone) = ?)
         ELSE json_extract(r.payload_json, '$.guest.phone') = ? END
       AND NOT EXISTS (SELECT 1 FROM bookings b WHERE b.request_id = r.id AND b.status = 'cancelled')
-      AND NOT EXISTS (SELECT 1 FROM reservations v WHERE v.request_id = r.id AND v.status = 'cancelled')
       AND NOT EXISTS (SELECT 1 FROM stays st WHERE st.request_id = r.id AND st.status = 'cancelled')
     ${organizationId ? 'AND r.organization_id = ?' : ''}
     ORDER BY r.created_at DESC LIMIT 1`, [phone, phone, ...(organizationId ? [organizationId] : [])])

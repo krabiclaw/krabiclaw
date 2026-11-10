@@ -9,7 +9,6 @@ import { countUnreadInboxThreads, listGuestThreads, listOrganizationGuestThreads
 import { getInboxThreadDetails } from '../../server/domain/guest-threads/inbox.ts'
 import { appendEntry } from '../../server/domain/guest-threads/entries.ts'
 import { createDeliveryReceipt, recordDeliveryOutcome } from '../../server/domain/guest-threads/deliveries.ts'
-import { claimReservation, requireLocationReservationConfig, upsertLocationReservationConfig } from '../../server/utils/reservations.ts'
 import { CapacityUnavailableError, claimSessionCapacity, setBookingStatus } from '../../server/utils/availability.ts'
 import { buildCanonicalNotificationInsert } from '../../server/utils/notification-center.ts'
 import { acknowledgeNotification, acknowledgeThreadNotifications, unacknowledgeThreadNotifications } from '../../server/utils/notification-acknowledgement.ts'
@@ -27,7 +26,7 @@ const OWNER = memberAccessPrincipal({ userId: ACTOR, organizationId: ORG, role: 
 const needsReply = (db: D1Database) => listOrganizationGuestThreads(db, { organizationId: ORG, principal: OWNER, userId: ACTOR, needsReply: true })
 
 /**
- * A thread carries the conversation; a booking or reservation holds the seats.
+ * A thread carries the conversation; a booking holds the seats.
  *
  * These are the invariants of that split: the two rows commit together, the
  * seat-holding row is the only place a status lives, and a guest's
@@ -58,6 +57,8 @@ test('a thread and the record it refers to commit and cancel as one', { timeout:
       `INSERT INTO product_booking_configs (product_id,organization_id,unit,duration_minutes,default_capacity,scheduling_mode,created_by,updated_by) VALUES ('product-proof','${ORG}','slot',120,1,'business','${ACTOR}','${ACTOR}')`,
       `INSERT INTO product_sessions (id,organization_id,product_id,location_id,timezone,starts_at,ends_at,capacity,status,created_by,updated_by)
         VALUES ('session-proof','${ORG}','product-proof','${LOCATION}','Asia/Bangkok','2099-01-05T07:00:00.000Z','2099-01-05T09:00:00.000Z',1,'scheduled','${ACTOR}','${ACTOR}')`,
+      `INSERT INTO product_sessions (id,organization_id,product_id,location_id,timezone,starts_at,ends_at,capacity,status,created_by,updated_by)
+        VALUES ('session-token','${ORG}','product-proof','${LOCATION}','Asia/Bangkok','2099-01-06T09:00:00.000Z','2099-01-06T11:00:00.000Z',1,'scheduled','${ACTOR}','${ACTOR}')`,
     ].map(statement => db.prepare(statement)))
 
     // One seat, two guests: the claim carries its own capacity predicate, and
@@ -65,14 +66,15 @@ test('a thread and the record it refers to commit and cancel as one', { timeout:
     // booking route writes it — claim first, thread conditional on it, then the
     // booking takes the thread's id.
     const env = { ...await runtime.getBindings<CloudflareEnv>(), DB: db } as CloudflareEnv
-    async function bookSession(id: string) {
+    const policyJson = JSON.stringify({ advance_notice_minutes: null, party_size_min: null, party_size_max: null, minimum_guest_age: null, accessibility_contact_required: false, payment: null })
+    async function bookSession(id: string, sessionId = 'session-proof', cancellation: { token_hash: string | null; expires_at: string | null; used_at: null } = { token_hash: null, expires_at: null, used_at: null }) {
       return claimSessionCapacity(db, {
-        env, organizationId: ORG, productId: 'product-proof', sessionId: 'session-proof',
-        productVariantId: 'variant-proof', partySize: 1, userId: null, requestId: null,
+        env, organizationId: ORG, productId: 'product-proof', sessionId,
+        productVariantId: 'variant-proof', partySize: 1, userId: null, requestId: null, policyJson,
         following: bookingId => [
           ...requestInsertQueries({
             id, kind: 'booking', organization_id: ORG, location_id: LOCATION,
-            user_id: null, review_id: null, payload: threadPayloadForGuest({ name: 'Guest', email: 'guest@proof.example', phone: '+66812345678' }),
+            user_id: null, review_id: null, payload: { ...threadPayloadForGuest({ name: 'Guest', email: 'guest@proof.example', phone: '+66812345678' }), cancellation },
             created_at: NOW, updated_at: NOW,
           }, { query: 'SELECT 1 FROM bookings WHERE id = ?', params: [bookingId] }),
           {
@@ -112,80 +114,54 @@ test('a thread and the record it refers to commit and cancel as one', { timeout:
     assert.equal(await db.prepare("SELECT status FROM bookings WHERE request_id=?").bind(winner).first('status'), 'cancelled')
     assert.equal(await db.prepare("SELECT count(*) FROM activity_entries WHERE request_id=? AND kind='operation'").bind(winner).first('count(*)'), 1)
 
-    // A reservation is the other half of the same split: a location policy is
-    // what opens reservations, and the claim commits the thread with the row.
-    await assert.rejects(requireLocationReservationConfig(db, { organizationId: ORG, locationId: LOCATION }), { statusCode: 404, data: { code: 'RESERVATION_POLICY_NOT_FOUND' } })
-    const policy = await upsertLocationReservationConfig(db, { organizationId: ORG, locationId: LOCATION, patch: { slot_capacity: 1 }, actorId: ACTOR })
-    assert.deepEqual(await db.prepare('SELECT duration_minutes,slot_capacity FROM location_reservation_configs WHERE location_id=?').bind(LOCATION).first(), { duration_minutes: 120, slot_capacity: 1 }, 'ordinary table reservations retain their two-hour default')
-    await upsertLocationReservationConfig(db, { organizationId: ORG, locationId: LOCATION, patch: { slot_capacity: 1, duration_minutes: 120 }, actorId: ACTOR, expectedUpdatedAt: policy.updated_at })
-    const reservationThread = 'reservation-proof'
-    await db.batch(requestInsertQueries({
-      id: reservationThread, kind: 'reservation', organization_id: ORG, location_id: LOCATION,
-      user_id: null, review_id: null, payload: {
-        ...threadPayloadForGuest({ name: 'Guest', email: 'guest@proof.example', phone: '+66812345678' }),
-        cancellation: { token_hash: 'hash', expires_at: '2099-01-01T00:00:00.000Z', used_at: null },
-      },
-      created_at: NOW, updated_at: NOW,
-    }).map(write => db.prepare(write.query).bind(...write.params)))
-    const reserved = await claimReservation(db, {
-      organizationId: ORG, locationId: LOCATION, reservationId: 'reservation-row-proof',
-      timezone: 'Asia/Bangkok', startsAt: '2099-01-06T09:00:00.000Z', endsAt: '2099-01-06T11:00:00.000Z',
-      date: '2099-01-06', timeSlot: '16:00',
-      partySize: 1, userId: null, requestId: reservationThread,
-    }).then(() => true, () => false)
-    assert.equal(reserved, true)
-    // The location seats one party per slot, so the second claim is refused
-    // rather than silently overbooking the same start instant.
-    const secondClaim = await claimReservation(db, {
-      organizationId: ORG, locationId: LOCATION, reservationId: 'reservation-row-second',
-      timezone: 'Asia/Bangkok', startsAt: '2099-01-06T09:00:00.000Z', endsAt: '2099-01-06T11:00:00.000Z',
-      date: '2099-01-06', timeSlot: '16:00',
-      partySize: 1, userId: null, requestId: null,
-    }).then(() => true, () => false)
-    assert.equal(secondClaim, false)
-    assert.equal(await db.prepare('SELECT count(*) FROM reservations').first('count(*)'), 1)
-    await appendEntry(db, { threadId: reservationThread, kind: 'message', actorKind: 'guest', channel: 'email', body: 'Could we sit outside?', occurredAt: '2097-12-31T00:00:00.000Z' })
+    // A booking the guest holds an emailed cancellation token for: its seat and
+    // its thread commit together, and the seat it holds is the session's last.
+    const tokenThread = 'token-proof'
+    assert.equal(await bookSession(tokenThread, 'session-token', { token_hash: 'hash', expires_at: '2099-01-01T00:00:00.000Z', used_at: null }), true)
+    assert.equal(await bookSession('token-second', 'session-token'), false)
+    assert.equal(await db.prepare("SELECT count(*) FROM bookings WHERE product_session_id='session-token'").first('count(*)'), 1)
+    await appendEntry(db, { threadId: tokenThread, kind: 'message', actorKind: 'guest', channel: 'email', body: 'Could we sit outside?', occurredAt: '2097-12-31T00:00:00.000Z' })
 
     // The token is spendable exactly once, however many times it is presented.
     const cancellations = await Promise.all([1, 2].map(() => cancelBookingRequest(db, {
-      id: reservationThread, organizationId: ORG, kind: 'reservation', tokenHash: 'hash', now: '2098-01-01T00:00:00.000Z',
+      id: tokenThread, organizationId: ORG, kind: 'booking', tokenHash: 'hash', now: '2098-01-01T00:00:00.000Z', env,
     })))
     // Both authorized retries observe success; only one spends the capability
     // and changes the record. This also lets failed notification delivery retry.
     assert.equal(cancellations.filter(value => value?.changed).length, 1)
     assert.equal(cancellations.filter(value => value && !value.changed).length, 1)
-    assert.equal(await db.prepare('SELECT status FROM reservations WHERE request_id=?').bind(reservationThread).first('status'), 'cancelled')
-    const cancelledThread = await getGuestRequest(db, reservationThread)
+    assert.equal(await db.prepare('SELECT status FROM bookings WHERE request_id=?').bind(tokenThread).first('status'), 'cancelled')
+    const cancelledThread = await getGuestRequest(db, tokenThread)
     assert.equal(cancelledThread?.payload.cancellation.used_at, '2098-01-01T00:00:00.000Z')
     // The cancellation answers the question asked before it: no reply is owed.
     assert.deepEqual((await needsReply(db)).map(thread => thread.id), [])
-    assert.equal((await listOrganizationGuestThreads(db, { organizationId: ORG, principal: OWNER, userId: ACTOR })).find(thread => thread.id === reservationThread)?.operationalStatus, 'cancelled')
+    assert.equal((await listOrganizationGuestThreads(db, { organizationId: ORG, principal: OWNER, userId: ACTOR })).find(thread => thread.id === tokenThread)?.operationalStatus, 'cancelled')
 
-    const guestReply = await appendEntry(db, { threadId: reservationThread, kind: 'message', actorKind: 'guest', channel: 'email', body: 'When will my refund arrive?', occurredAt: '2098-01-02T00:00:00.000Z' })
-    await updateThreadProjectionIfLatestEntry(db, reservationThread, guestReply.id)
-    assert.deepEqual((await needsReply(db)).map(thread => thread.id), [reservationThread])
-    const retry = await cancelBookingRequest(db, { id: reservationThread, organizationId: ORG, kind: 'reservation', tokenHash: 'hash', now: '2098-01-03T00:00:00.000Z' })
+    const guestReply = await appendEntry(db, { threadId: tokenThread, kind: 'message', actorKind: 'guest', channel: 'email', body: 'When will my refund arrive?', occurredAt: '2098-01-02T00:00:00.000Z' })
+    await updateThreadProjectionIfLatestEntry(db, tokenThread, guestReply.id)
+    assert.deepEqual((await needsReply(db)).map(thread => thread.id), [tokenThread])
+    const retry = await cancelBookingRequest(db, { id: tokenThread, organizationId: ORG, kind: 'booking', tokenHash: 'hash', now: '2098-01-03T00:00:00.000Z', env })
     assert.equal(retry?.changed, false)
-    assert.deepEqual((await needsReply(db)).map(thread => thread.id), [reservationThread], 'a replayed cancellation does not answer a question asked after it')
-    assert.equal(await db.prepare("SELECT count(*) FROM activity_entries WHERE request_id=? AND event_name='reservation.cancel'").bind(reservationThread).first('count(*)'), 1)
+    assert.deepEqual((await needsReply(db)).map(thread => thread.id), [tokenThread], 'a replayed cancellation does not answer a question asked after it')
+    assert.equal(await db.prepare("SELECT count(*) FROM activity_entries WHERE request_id=? AND event_name='booking.cancel'").bind(tokenThread).first('count(*)'), 1)
 
     // A saved reply that failed to send does not answer the guest, even
     // though it is now the last message in the ledger.
-    const failedReply = await appendEntry(db, { threadId: reservationThread, kind: 'message', actorKind: 'member', actorUserId: ACTOR, channel: 'email', eventName: 'thread.member_reply', body: 'Your refund is on its way.', occurredAt: '2098-01-04T00:00:00.000Z' })
+    const failedReply = await appendEntry(db, { threadId: tokenThread, kind: 'message', actorKind: 'member', actorUserId: ACTOR, channel: 'email', eventName: 'thread.member_reply', body: 'Your refund is on its way.', occurredAt: '2098-01-04T00:00:00.000Z' })
     const receipt = await createDeliveryReceipt(db, { entryId: failedReply.id, channel: 'email', provider: 'resend', purpose: 'member_reply', idempotencyKey: 'cancelled-reply-delivery' })
     await recordDeliveryOutcome(db, { deliveryId: receipt.id, status: 'failed', error: 'Delivery refused' })
     const stillNeedsReply = await needsReply(db)
-    assert.deepEqual(stillNeedsReply.map(thread => thread.id), [reservationThread])
+    assert.deepEqual(stillNeedsReply.map(thread => thread.id), [tokenThread])
     assert.equal(stillNeedsReply[0]?.latestMessageFromGuest, false)
     await recordDeliveryOutcome(db, { deliveryId: receipt.id, status: 'sent', providerMessageId: 'delivered-cancelled-reply' })
     // The reply operation projects its entry once its delivery is recorded.
-    await updateThreadProjectionIfLatestEntry(db, reservationThread, failedReply.id)
+    await updateThreadProjectionIfLatestEntry(db, tokenThread, failedReply.id)
     assert.deepEqual((await needsReply(db)).map(thread => thread.id), [])
-    const nextQuestion = await appendEntry(db, { threadId: reservationThread, kind: 'message', actorKind: 'guest', channel: 'email', body: 'Thank you. Can you send the receipt?', occurredAt: '2098-01-05T00:00:00.000Z' })
-    await updateThreadProjectionIfLatestEntry(db, reservationThread, nextQuestion.id)
-    assert.deepEqual((await needsReply(db)).map(thread => thread.id), [reservationThread])
-    const webReply = await appendEntry(db, { threadId: reservationThread, kind: 'message', actorKind: 'member', actorUserId: ACTOR, channel: 'web', eventName: 'thread.member_reply', body: 'Here is your receipt.', occurredAt: '2098-01-06T00:00:00.000Z' })
-    await updateThreadProjectionIfLatestEntry(db, reservationThread, webReply.id)
+    const nextQuestion = await appendEntry(db, { threadId: tokenThread, kind: 'message', actorKind: 'guest', channel: 'email', body: 'Thank you. Can you send the receipt?', occurredAt: '2098-01-05T00:00:00.000Z' })
+    await updateThreadProjectionIfLatestEntry(db, tokenThread, nextQuestion.id)
+    assert.deepEqual((await needsReply(db)).map(thread => thread.id), [tokenThread])
+    const webReply = await appendEntry(db, { threadId: tokenThread, kind: 'message', actorKind: 'member', actorUserId: ACTOR, channel: 'web', eventName: 'thread.member_reply', body: 'Here is your receipt.', occurredAt: '2098-01-06T00:00:00.000Z' })
+    await updateThreadProjectionIfLatestEntry(db, tokenThread, webReply.id)
     assert.deepEqual((await needsReply(db)).map(thread => thread.id), [], 'a committed web reply needs no external delivery receipt')
 
     // A notification is acknowledged only by someone the visibility filter
@@ -230,10 +206,10 @@ test('archive and unarchive file a conversation without touching its booking, st
     await db.batch(statements.map(statement => db.prepare(statement)))
 
     // Far past and far future, so "now" is unambiguous for every row whenever
-    // this runs. The ongoing reservation started long ago and ends long after.
+    // this runs. The ongoing booking started long ago and ends long after.
     const ENDED = ['2000-01-01T19:00:00.000Z', '2000-01-01T21:00:00.000Z']
     const FUTURE = ['2099-01-01T19:00:00.000Z', '2099-01-01T21:00:00.000Z']
-    const ONGOING = ['2000-01-01T19:00:00.000Z', '2099-01-01T21:00:00.000Z']
+    const ONGOING = ['2000-01-01T19:30:00.000Z', '2099-01-01T21:00:00.000Z']
     const guest = (name: string, message?: string) => JSON.stringify({
       guest: { name, email: `${name.toLowerCase()}@proof.example`, phone: '+66812345678' },
       ...(message
@@ -244,15 +220,12 @@ test('archive and unarchive file a conversation without touching its booking, st
     const thread = (id: string, kind: string, openedAt: string) =>
       `INSERT INTO requests (id,kind,organization_id,location_id,payload_json,created_at,updated_at)
        VALUES ('${id}','${kind}','${ORG}','${LOCATION}','${guest(id, kind === 'contact' ? 'Hello' : undefined)}','${openedAt}','${openedAt}')`
-    const reservation = (id: string, [startsAt, endsAt]: string[]) =>
-      `INSERT INTO reservations (id,organization_id,location_id,request_id,timezone,starts_at,ends_at,party_size,created_at,updated_at)
-       VALUES ('row-${id}','${ORG}','${LOCATION}','${id}','Asia/Bangkok','${startsAt}','${endsAt}',2,'${NOW}','${NOW}')`
     const session = (id: string, [startsAt, endsAt]: string[]) =>
       `INSERT INTO product_sessions (id,organization_id,product_id,location_id,timezone,starts_at,ends_at,capacity,status,created_by,updated_by)
        VALUES ('${id}','${ORG}','product-proof','${LOCATION}','Asia/Bangkok','${startsAt}','${endsAt}',4,'scheduled','${ACTOR}','${ACTOR}')`
-    const booking = (id: string, sessionId: string) =>
-      `INSERT INTO bookings (id,organization_id,product_id,product_session_id,product_variant_id,request_id,party_size,created_at,updated_at)
-       VALUES ('row-${id}','${ORG}','product-proof','${sessionId}','variant-proof','${id}',1,'${NOW}','${NOW}')`
+    const booking = (id: string, sessionId: string, partySize = 1) =>
+      `INSERT INTO bookings (id,organization_id,product_id,product_session_id,product_variant_id,request_id,party_size,policy_json,created_at,updated_at)
+       VALUES ('row-${id}','${ORG}','product-proof','${sessionId}','variant-proof','${id}',${partySize},'{"advance_notice_minutes":null,"party_size_min":null,"party_size_max":null,"minimum_guest_age":null,"accessibility_contact_required":false,"payment":null}','${NOW}','${NOW}')`
     await db.batch([
       `INSERT INTO organization (id,name,slug, default_currency, timezone) VALUES ('${ORG}','Proof','proof', 'USD', 'UTC'), ('org-foreign','Foreign','foreign', 'USD', 'UTC')`,
       `INSERT INTO user (id,name,email) VALUES ('${ACTOR}','Proof','owner@proof.example')`,
@@ -264,20 +237,21 @@ test('archive and unarchive file a conversation without touching its booking, st
       `INSERT INTO product_booking_configs (product_id,organization_id,unit,duration_minutes,default_capacity,scheduling_mode,created_by,updated_by) VALUES ('product-proof','${ORG}','slot',120,4,'business','${ACTOR}','${ACTOR}')`,
       session('session-ended', ENDED),
       session('session-future', FUTURE),
+      session('session-ongoing', ONGOING),
       thread('contact', 'contact', '2026-09-01T00:00:00.000Z'),
-      thread('future', 'reservation', '2026-09-02T00:00:00.000Z'),
-      thread('ongoing', 'reservation', '2026-09-03T00:00:00.000Z'),
-      thread('ended', 'reservation', '2026-09-04T00:00:00.000Z'),
+      thread('future', 'booking', '2026-09-02T00:00:00.000Z'),
+      thread('ongoing', 'booking', '2026-09-03T00:00:00.000Z'),
+      thread('ended', 'booking', '2026-09-04T00:00:00.000Z'),
       // Quiet for over 30 days: its last activity and its end are both behind NOW by more than that.
-      thread('ended-archived', 'reservation', '2026-08-05T00:00:00.000Z'),
+      thread('ended-archived', 'booking', '2026-08-05T00:00:00.000Z'),
       thread('booking-future', 'booking', '2026-09-06T00:00:00.000Z'),
       thread('booking-ended', 'booking', '2026-09-07T00:00:00.000Z'),
       // The newest real activity in the inbox, which filing others must not overtake.
       thread('newest', 'contact', '2026-09-10T00:00:00.000Z'),
-      reservation('future', FUTURE),
-      reservation('ongoing', ONGOING),
-      reservation('ended', ENDED),
-      reservation('ended-archived', ENDED),
+      booking('future', 'session-future', 2),
+      booking('ongoing', 'session-ongoing', 2),
+      booking('ended', 'session-ended', 2),
+      booking('ended-archived', 'session-ended', 2),
       booking('booking-future', 'session-future'),
       booking('booking-ended', 'session-ended'),
       // Archived while it was still to come; it has since ended.
@@ -292,7 +266,7 @@ test('archive and unarchive file a conversation without touching its booking, st
       return { archive: details.actions.archive, unarchive: details.actions.unarchive }
     }
     const row = (id: string) => db.prepare('SELECT archived_at, archived_by_user_id, updated_at FROM requests WHERE id=?').bind(id).first()
-    const recordRow = (id: string) => db.prepare('SELECT * FROM reservations WHERE request_id=?').bind(id).first()
+    const recordRow = (id: string) => db.prepare('SELECT * FROM bookings WHERE request_id=?').bind(id).first()
     const entries = (id: string, eventName: string) => db.prepare("SELECT count(*) AS n FROM activity_entries WHERE request_id=? AND kind='operation' AND event_name=?").bind(id, eventName).first('n')
     const env = { NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-reply-proof', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' }
     const operate = (threadId: string, action: 'archive' | 'unarchive', idempotencyKey: string, organizationId = ORG) =>
@@ -332,17 +306,17 @@ test('archive and unarchive file a conversation without touching its booking, st
     assert.equal(await unacknowledgeThreadNotifications(db, visibility, 'contact'), false)
     assert.deepEqual(await ids('current', true), ['ended', 'future'])
 
-    // Archive a future reservation: Past at once, with who and when, and
-    // nothing about the reservation, the conversation state or the order moves.
+    // Archive a future booking: Past at once, with who and when, and
+    // nothing about the booking, the conversation state or the order moves.
     const before = await row('future')
-    const reservationBefore = await recordRow('future')
+    const bookingBefore = await recordRow('future')
     const archived = await Promise.all([operate('future', 'archive', 'archive-future'), operate('future', 'archive', 'archive-future')])
     assert.deepEqual(archived.map(outcome => outcome.ok), [true, true])
     const afterArchive = await row('future')
     assert.equal(typeof afterArchive?.archived_at, 'string')
     assert.equal(afterArchive?.archived_by_user_id, ACTOR)
     assert.equal(afterArchive?.updated_at, before?.updated_at)
-    assert.deepEqual(await recordRow('future'), reservationBefore)
+    assert.deepEqual(await recordRow('future'), bookingBefore)
     assert.equal(await entries('future', 'thread.archived'), 1)
     assert.equal((await ids('current')).includes('future'), false)
     assert.equal((await ids('past')).includes('future'), true)
@@ -367,7 +341,7 @@ test('archive and unarchive file a conversation without touching its booking, st
     assert.deepEqual(moved.map(outcome => outcome.ok), [true, true])
     assert.equal(await entries('future', 'thread.unarchived'), 1)
     assert.deepEqual(await row('future'), { ...before, archived_at: null, archived_by_user_id: null })
-    assert.deepEqual(await recordRow('future'), reservationBefore)
+    assert.deepEqual(await recordRow('future'), bookingBefore)
     assert.deepEqual(await ids('current'), CURRENT)
     assert.deepEqual(await filing('future'), { archive: true, unarchive: false })
     assert.deepEqual(await countUnreadInboxThreads(db, ORG, { userId: ACTOR }), { all: 2, guests: 2, support: 0 })

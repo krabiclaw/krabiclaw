@@ -13,7 +13,7 @@ test('every runtime workflow identifies valid current tools, including guest rep
     assert.ok(Object.keys(workflow.toolContracts).length, `${workflow.name} needs explicit tool dependencies`)
   }
   const triage = workflows.find(workflow => workflow.name === 'triage_inbox')!
-  for (const name of ['list_guest_conversations', 'get_guest_conversation', 'reply_to_guest', 'confirm_product_booking', 'request_table_reservation_change']) {
+  for (const name of ['list_guest_conversations', 'get_guest_conversation', 'reply_to_guest', 'confirm_product_booking', 'request_product_booking_change']) {
     assert.ok(name in triage.toolContracts, name)
   }
   assert.ok(workflows.find(workflow => workflow.name === 'set_up_products')!.toolContracts.update_menu)

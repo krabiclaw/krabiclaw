@@ -341,7 +341,7 @@ pane and Back, including on reload and deep links.
 | --- | --- |
 | Product, its variants and prices | what is sold: kind, pricing, booking, publication, locations, collections, its page |
 | A page, article or post | its own content |
-| Location | its place, hours, media and reservation policy |
+| Location | its place, hours and media; its tables are a `table` Product booked like any offering |
 | Organization member | that member's public profile and independently authored availability in the named organization |
 | Organization | the shared site: brand, domains, languages, connections |
 | User | account name, avatar, personal preferences and security |
@@ -955,8 +955,8 @@ tree, so where the same levels must render under a second parent, the
 second set of records with their own names. `build/booking-routes.ts` mounts a
 booking under its calendar day and the account's own record under its calendar
 day and Today. `build/form-question-routes.ts` mounts a form's Questions,
-written once as Website › Inquiry form, beneath a product's Booking, a home and
-a location's reservation Availability, each as `questions`; the `formQuestions`
+written once as Website › Inquiry form, beneath a product's Booking (a table's
+included) and a home, each as `questions`; the `formQuestions`
 meta names the record a mount edits. Nothing else is mounted twice: a page a
 Product owns is edited in Pages, and the Product links to it. The generated router, not the
 filesystem, is the complete tree.

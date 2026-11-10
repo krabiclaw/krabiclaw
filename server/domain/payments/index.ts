@@ -9,8 +9,8 @@ import { readPaymentOrder } from './orders'
 import { recordPaymentRefunded } from '~/server/domain/booking-analytics'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 
-/** What a guest paid on the site for one booking, reservation or stay, net of refunds; null when it was not paid online. */
-export async function paidOnline(db: DbClient, organizationId: string, subjectType: 'booking' | 'reservation' | 'stay', subjectId: string): Promise<{ amount: number; currency: CurrencyCode } | null> {
+/** What a guest paid on the site for one booking or stay, net of refunds; null when it was not paid online. */
+export async function paidOnline(db: DbClient, organizationId: string, subjectType: 'booking' | 'stay', subjectId: string): Promise<{ amount: number; currency: CurrencyCode } | null> {
   const rows = await queryAll<{ amount: number; currency: string }>(db, 'SELECT SUM(captured_amount - refunded_amount) AS amount, currency FROM payments WHERE organization_id=? AND subject_type=? AND subject_id=? AND captured_amount>0 GROUP BY currency', [organizationId, subjectType, subjectId])
   if (rows.length > 1) throw new Error('Payments for one booking are in more than one currency')
   const row = rows[0]
@@ -25,7 +25,7 @@ export interface Payment {
   buyer_user_id: string | null
   stripe_account_id: string
   livemode: number
-  subject_type: 'booking' | 'order' | 'reservation' | 'invoice' | 'stay'
+  subject_type: 'booking' | 'order' | 'invoice' | 'stay'
   subject_id: string | null
   location_id: string | null
   currency: string
@@ -92,7 +92,7 @@ export async function readPaymentDetails(db:DbClient,env:CloudflareEnv,organizat
  const [refundRows,disputeRows,booking,order,stripeFacts]=await Promise.all([
   queryAll<{id:string;amount:number;status:string;stripe_refund_id:string|null}>(db,'SELECT * FROM payment_refunds WHERE payment_id=?',[recorded.id]),
   queryAll<{id:string;stripe_dispute_id:string;amount:number;currency:string;reason:string;status:string;evidence_due_at:string|null;updated_at:string}>(db,'SELECT * FROM payment_disputes WHERE payment_id=?',[recorded.id]),
-  recorded.subject_type==='booking'||recorded.subject_type==='reservation'?queryFirst<{request_id:string|null}>(db,`SELECT request_id FROM ${recorded.subject_type==='booking'?'bookings':'reservations'} WHERE id=? AND organization_id=?`,[recorded.subject_id,organizationId]):Promise.resolve(null),
+  recorded.subject_type==='booking'?queryFirst<{request_id:string|null}>(db,`SELECT request_id FROM bookings WHERE id=? AND organization_id=?`,[recorded.subject_id,organizationId]):Promise.resolve(null),
    readPaymentOrder(db,organizationId,recorded.id),
   stripePaymentFacts(env,recorded),
  ])
@@ -136,7 +136,7 @@ export async function paymentSummary(db: DbClient, principal: FinancialPrincipal
 }
 
 /** Only an explicit authenticated dashboard or native-app approval may approve this request. MCP receives a handoff. */
-export type RefundAuthorizationAction = 'refund' | 'reject_booking' | 'cancel_booking' | 'cancel_reservation' | 'cancel_stay'
+export type RefundAuthorizationAction = 'refund' | 'reject_booking' | 'cancel_booking' | 'cancel_stay'
 /** How long a business has to approve a refund it asked for. */
 export const AUTHORIZATION_WINDOW_SECONDS = 600
 export async function requestRefundAuthorization(db: DbClient, principal: FinancialPrincipal, paymentId: string, amount: number | null, action: RefundAuthorizationAction = 'refund', note?: string) {
@@ -151,9 +151,9 @@ export async function requestRefundAuthorization(db: DbClient, principal: Financ
 export async function approveRefundAuthorization(db: DbClient, principal: FinancialPrincipal, id: string) {
   await authorizePayments(principal, 'refund')
   const now = new Date().toISOString()
-  const result = await execute(db, `UPDATE payment_authorizations SET approved_at=COALESCE(approved_at,?) WHERE id=? AND organization_id=? AND user_id=? AND action IN ('refund','reject_booking','cancel_booking','cancel_reservation','cancel_stay') AND expires_at>? AND consumed_at IS NULL`, [now,id,principal.organizationId,principal.userId,now])
+  const result = await execute(db, `UPDATE payment_authorizations SET approved_at=COALESCE(approved_at,?) WHERE id=? AND organization_id=? AND user_id=? AND action IN ('refund','reject_booking','cancel_booking','cancel_stay') AND expires_at>? AND consumed_at IS NULL`, [now,id,principal.organizationId,principal.userId,now])
   if (result.meta.changes !== 1) {
-    const replay=await queryFirst(db,`SELECT a.id FROM payment_authorizations a WHERE a.id=? AND a.organization_id=? AND a.user_id=? AND a.approved_at IS NOT NULL AND a.consumed_at IS NOT NULL AND EXISTS(SELECT 1 FROM payment_refunds r JOIN payments p ON p.id=r.payment_id WHERE r.payment_id=a.payment_id AND (r.idempotency_key='approved:'||a.id OR (a.action='reject_booking' AND r.idempotency_key='rejected:'||p.subject_id) OR (a.action='cancel_booking' AND r.idempotency_key='cancelled:'||p.subject_id) OR (a.action='cancel_reservation' AND r.idempotency_key='cancelled-reservation:'||p.subject_id) OR (a.action='cancel_stay' AND r.idempotency_key='cancelled-stay:'||p.subject_id)))`,[id,principal.organizationId,principal.userId])
+    const replay=await queryFirst(db,`SELECT a.id FROM payment_authorizations a WHERE a.id=? AND a.organization_id=? AND a.user_id=? AND a.approved_at IS NOT NULL AND a.consumed_at IS NOT NULL AND EXISTS(SELECT 1 FROM payment_refunds r JOIN payments p ON p.id=r.payment_id WHERE r.payment_id=a.payment_id AND (r.idempotency_key='approved:'||a.id OR (a.action='reject_booking' AND r.idempotency_key='rejected:'||p.subject_id) OR (a.action='cancel_booking' AND r.idempotency_key='cancelled:'||p.subject_id) OR (a.action='cancel_stay' AND r.idempotency_key='cancelled-stay:'||p.subject_id)))`,[id,principal.organizationId,principal.userId])
     if(!replay)throw new HTTPError({statusCode:409,statusMessage:'Financial authorization expired or unavailable'})
   }
 }

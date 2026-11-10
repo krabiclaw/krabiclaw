@@ -9,9 +9,7 @@ import { getSourceLocale } from '~/server/utils/organization-locales'
 import { assertExactCanonicalLocale, assertPublicOrganizationLanguage } from '~/server/utils/localization'
 import { loadExactPublicLocalizations, projectExactLocalizedResource } from '~/server/utils/public-localization'
 import { getProduct } from '~/server/utils/product-management'
-import { renderBookingPolicySummary, visitPolicySummarySource } from '~/server/utils/reservations'
-import type { BookingPolicySummarySource } from '~/server/utils/booking-policy-summary'
-import type { ProductKind } from '~/shared/product-details'
+import { formatBookingPolicySummary, parseBookingPolicy } from '~/server/utils/booking-policy-summary'
 import { freeCancellationUntil } from '~/shared/availability-settings'
 import { defineHandler } from 'nitro'
 import { getQuery, getRouterParam } from 'nitro/h3'
@@ -20,11 +18,10 @@ import { buildBuyerRequestActivityUrl } from '~/server/utils/dashboard-notificat
 /**
  * What a guest's cancellation link refers to.
  *
- * One route for both kinds: a booking and a reservation differ in what holds
- * the seats, not in what the guest is shown, and the thread's `kind` already
- * says which it is. The when and the party size are read from the operational
- * record, never from the thread — the thread stopped carrying a copy of them
- * precisely so the two could not disagree.
+ * A class, a consultation or a table: the when and the party size are read
+ * from the booking, never from the thread — the thread stopped carrying a copy
+ * of them precisely so the two could not disagree — and the terms are the
+ * ones frozen on the booking when it was made.
  */
 export default defineHandler(async (event) => {
   const organizationId = event.context.organizationId as string | null | undefined
@@ -43,7 +40,7 @@ export default defineHandler(async (event) => {
   // Cancellation writes still enforce the token's single-use boundary.
   const readable = await queryFirst<{ id: string }>(db, `
     SELECT r.id FROM requests r
-     WHERE r.id = ? AND r.organization_id = ? AND r.kind IN ('reservation', 'booking')
+     WHERE r.id = ? AND r.organization_id = ? AND r.kind = 'booking'
        AND json_extract(r.payload_json, '$.cancellation.token_hash') = ?
        AND json_extract(r.payload_json, '$.cancellation.expires_at') > ?
      LIMIT 1
@@ -52,7 +49,7 @@ export default defineHandler(async (event) => {
 
   const request = await getGuestRequest(db, requestId, organizationId)
   const record = request ? await getThreadOperationalRecord(db, request.id) : null
-  if (!request || request.kind === 'contact' || request.kind === 'stay' || !record || record.kind === 'stay' || record.organization_id !== organizationId) {
+  if (!request || request.kind !== 'booking' || !record || record.kind !== 'booking' || !record.product_id || record.organization_id !== organizationId) {
     return jsonResponse({ error: 'Booking not found' }, { status: 404 })
   }
 
@@ -68,24 +65,15 @@ export default defineHandler(async (event) => {
   const location = locationTranslation && canonicalLocation
     ? projectExactLocalizedResource('business_location', canonicalLocation, locationTranslation)
     : canonicalLocation
-  let productName = record.product_name
-  let productKind: ProductKind | null = null
-  let policy: BookingPolicySummarySource = visitPolicySummarySource('experience', record.advance_notice_minutes)
-  if (record.kind === 'booking' && record.product_id) {
-    const canonical = await getProduct(db, organizationId, record.product_id)
-    const translation = localizations.find(item => item.resourceType === 'product' && item.resourceId === record.product_id)
-    const product = translation ? projectExactLocalizedResource('product', canonical, translation) : canonical
-    productName = product.name
-    productKind = product.kind
-  } else if (record.kind === 'reservation') {
-    const saved = await queryFirst<{ policy_json: string | null }>(db, 'SELECT policy_json FROM reservations WHERE id = ? AND organization_id = ?', [record.id, organizationId])
-    if (!saved) return jsonResponse({ error: 'Booking not found' }, { status: 404 })
-    policy = saved.policy_json ? JSON.parse(saved.policy_json) as BookingPolicySummarySource : visitPolicySummarySource('reservation', null)
-  }
+  const canonical = await getProduct(db, organizationId, record.product_id)
+  const translation = localizations.find(item => item.resourceType === 'product' && item.resourceId === record.product_id)
+  const product = translation ? projectExactLocalizedResource('product', canonical, translation) : canonical
+  const saved = await queryFirst<{ policy_json: string }>(db, 'SELECT policy_json FROM bookings WHERE id = ? AND organization_id = ?', [record.id, organizationId])
+  if (!saved) return jsonResponse({ error: 'Booking not found' }, { status: 404 })
 
-  // The receipt leads with what was booked, pictured as its page pictures it: the offering's own photo, or the place's.
-  const [ownerType, ownerId] = record.product_id ? ['product', record.product_id] as const : ['business_location', record.location_id] as const
-  const picture = ownerId ? (await loadOwnerPictures(db, organizationId, ownerType, [ownerId])).get(ownerId) ?? null : null
+  // The receipt leads with what was booked, pictured as its page pictures it: a table by its place, anything else by its own photo.
+  const [ownerType, ownerId] = product.kind === 'table' && record.location_id ? ['business_location', record.location_id] as const : ['product', record.product_id] as const
+  const picture = (await loadOwnerPictures(db, organizationId, ownerType, [ownerId])).get(ownerId) ?? null
 
   const paid = await paidOnline(db, organizationId, record.kind, record.id)
 
@@ -105,12 +93,12 @@ export default defineHandler(async (event) => {
       advance_notice_minutes: record.advance_notice_minutes,
       locale,
       product_id: record.product_id,
-      product_kind: productKind,
-      product_name: productName,
+      product_kind: product.kind,
+      product_name: product.name,
       location_id: record.location_id,
       location_name: location?.title ?? null,
       location_slug: location?.slug ?? null,
-      policy_summary: renderBookingPolicySummary(policy, locale, productKind),
+      policy_summary: formatBookingPolicySummary(parseBookingPolicy(saved.policy_json), locale, product.kind),
       paid,
       image_url: picture?.imageUrl ?? null,
       manage_url: await buildBuyerRequestActivityUrl(env, db, { organizationId, threadId: request.id }),

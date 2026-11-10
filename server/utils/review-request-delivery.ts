@@ -55,8 +55,8 @@ export async function sendReviewRequestForBooking(
       email: recipientEmail,
       locationName: context.location_title,
       visitAt: context.visit_starts_at.includes('T') ? formatTimestamp(context.visit_starts_at, 'en', context.visit_timezone) : formatCalendarDate(context.visit_starts_at, 'en'),
-      partySize: resolveBookingPresentation(bookingType === 'reservation' ? 'reservation' : 'booking', context.organization_vertical).formatCount(context.party_size),
-      partyLabel: resolveBookingPresentation(bookingType === 'reservation' ? 'reservation' : 'booking', context.organization_vertical).partyLabel,
+      partySize: resolveBookingPresentation(context.product_kind, context.organization_vertical).formatCount(context.party_size),
+      partyLabel: resolveBookingPresentation(context.product_kind, context.organization_vertical).partyLabel,
       reviewUrl,
       userId: request.user_id,
       // One invitation retains its link and receipt across retries. The

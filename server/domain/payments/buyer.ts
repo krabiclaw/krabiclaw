@@ -6,15 +6,14 @@ import {localDateTimeToInstant} from '~/utils/timezone'
 import {accountActivityPath,isAccountActivityItem,isBuyerPaymentEntry,type AccountActivityItem,type AccountActivityResponse,type BuyerPaymentEntry} from '~/shared/account-activity'
 
 export async function ownedBuyerRequest(db:DbClient,userId:string,requestId:string) {
- const owned=await queryFirst<{organization_id:string;kind:'booking'|'reservation'|'stay'}>(db,`SELECT r.organization_id,r.kind FROM requests r WHERE r.id=? AND r.user_id=? AND ${REQUEST_CURRENT_BUYER_SQL} AND (
+ const owned=await queryFirst<{organization_id:string;kind:'booking'|'stay'}>(db,`SELECT r.organization_id,r.kind FROM requests r WHERE r.id=? AND r.user_id=? AND ${REQUEST_CURRENT_BUYER_SQL} AND (
   (r.kind='booking' AND EXISTS(SELECT 1 FROM bookings b WHERE b.request_id=r.id)) OR
-  (r.kind='reservation' AND EXISTS(SELECT 1 FROM reservations v WHERE v.request_id=r.id)) OR
   (r.kind='stay' AND EXISTS(SELECT 1 FROM stays s WHERE s.request_id=r.id AND s.organization_id=r.organization_id AND s.user_id=r.user_id)))`,[requestId,userId])
  if(!owned)throw new HTTPError({statusCode:404,statusMessage:'Owned booking not found'})
  return owned
 }
 type ActivityRow = {
- kind: 'booking'|'reservation'|'stay'; id:string; request_id:string|null; operational_id:string; organization_id:string;
+ kind: 'booking'|'stay'; id:string; request_id:string|null; operational_id:string; organization_id:string;
  organization_name:string; organization_slug:string; title:string; status:string;
  starts_at:string; ends_at:string; timezone:string; created_at:string; location_id:string|null;
  location_title:string|null; product_id:string|null; party_size:number
@@ -23,9 +22,7 @@ type BuyerPaymentRow = {id:string;organization_id:string;organization_name:strin
 async function buyerActivityRows(db:DbClient,userId:string) {
  const [visits,payments]=await Promise.all([
   queryAll<ActivityRow>(db,`SELECT 'booking' kind,COALESCE(r.id,b.id) id,r.id request_id,b.id operational_id,b.organization_id,o.name organization_name,o.slug organization_slug,p.name title,b.status,s.starts_at,s.ends_at,s.timezone,b.created_at,s.location_id,l.title location_title,b.product_id,b.party_size
-   FROM bookings b LEFT JOIN requests r ON r.id=b.request_id JOIN organization o ON o.id=b.organization_id JOIN product_sessions s ON s.id=b.product_session_id AND s.organization_id=b.organization_id JOIN products p ON p.id=b.product_id AND p.organization_id=b.organization_id LEFT JOIN business_locations l ON l.id=s.location_id AND l.organization_id=b.organization_id WHERE b.user_id=? AND (r.id IS NULL OR (r.organization_id=b.organization_id AND r.kind='booking' AND r.user_id=? AND ${REQUEST_CURRENT_BUYER_SQL}))
-   UNION ALL SELECT 'reservation',COALESCE(r.id,v.id),r.id,v.id,v.organization_id,o.name,o.slug,l.title,v.status,v.starts_at,v.ends_at,v.timezone,v.created_at,v.location_id,l.title,NULL,v.party_size
-   FROM reservations v LEFT JOIN requests r ON r.id=v.request_id JOIN organization o ON o.id=v.organization_id JOIN business_locations l ON l.id=v.location_id AND l.organization_id=v.organization_id WHERE v.user_id=? AND (r.id IS NULL OR (r.organization_id=v.organization_id AND r.kind='reservation' AND r.user_id=? AND ${REQUEST_CURRENT_BUYER_SQL}))`,[userId,userId,userId,userId]),
+   FROM bookings b LEFT JOIN requests r ON r.id=b.request_id JOIN organization o ON o.id=b.organization_id JOIN product_sessions s ON s.id=b.product_session_id AND s.organization_id=b.organization_id JOIN products p ON p.id=b.product_id AND p.organization_id=b.organization_id LEFT JOIN business_locations l ON l.id=s.location_id AND l.organization_id=b.organization_id WHERE b.user_id=? AND (r.id IS NULL OR (r.organization_id=b.organization_id AND r.kind='booking' AND r.user_id=? AND ${REQUEST_CURRENT_BUYER_SQL}))`,[userId,userId]),
   queryAll<BuyerPaymentRow>(db,`SELECT p.id,p.organization_id,o.name organization_name,o.slug organization_slug,p.currency,p.captured_amount,p.refunded_amount,p.subject_type,p.subject_id,p.price_snapshot_json,p.created_at,po.id order_id,r.id hold_request_id,h.starts_at hold_starts_at,h.ends_at hold_ends_at,COALESCE(s.timezone,CASE WHEN h.converted_stay_id IS NULL AND NOT (h.product_id IS NOT NULL AND h.session_id IS NULL) THEN h.timezone END) hold_timezone FROM payments p LEFT JOIN organization o ON o.id=p.organization_id LEFT JOIN payment_orders po ON po.payment_id=p.id AND po.buyer_user_id=p.buyer_user_id AND po.organization_id=p.organization_id LEFT JOIN payment_checkout_holds h ON h.payment_id=p.id AND h.organization_id=p.organization_id AND h.buyer_user_id=p.buyer_user_id LEFT JOIN requests r ON r.id=h.request_id AND r.organization_id=p.organization_id AND r.user_id=p.buyer_user_id AND ${REQUEST_CURRENT_BUYER_SQL} LEFT JOIN product_sessions s ON s.id=h.session_id AND s.organization_id=p.organization_id WHERE p.buyer_user_id=? ORDER BY p.created_at DESC`,[userId]),
  ])
  // A stay runs from check-in to checkout at the home's own times, where the home is.
@@ -129,7 +126,6 @@ export async function claimCheckoutReturn(db:DbClient,userId:string,token:string
   {query:'UPDATE payment_orders SET buyer_user_id=? WHERE payment_id=? AND EXISTS(SELECT 1 FROM payments claim WHERE claim.return_token_hash=? AND claim.claimed_user_id=? AND claim.claimed_at=?)',params:[userId,claim.payment_id,hash,userId,now]},
   {query:'UPDATE payment_checkout_holds SET buyer_user_id=? WHERE payment_id=? AND EXISTS(SELECT 1 FROM payments claim WHERE claim.return_token_hash=? AND claim.claimed_user_id=? AND claim.claimed_at=?)',params:[userId,claim.payment_id,hash,userId,now]},
   {query:"UPDATE bookings SET user_id=? WHERE id=(SELECT subject_id FROM payments WHERE id=? AND subject_type='booking') AND EXISTS(SELECT 1 FROM payments claim WHERE claim.return_token_hash=? AND claim.claimed_user_id=? AND claim.claimed_at=?)",params:[userId,claim.payment_id,hash,userId,now]},
-  {query:"UPDATE reservations SET user_id=? WHERE id=(SELECT subject_id FROM payments WHERE id=? AND subject_type='reservation') AND EXISTS(SELECT 1 FROM payments claim WHERE claim.return_token_hash=? AND claim.claimed_user_id=? AND claim.claimed_at=?)",params:[userId,claim.payment_id,hash,userId,now]},
   {query:'UPDATE requests SET user_id=? WHERE id=(SELECT request_id FROM payment_checkout_holds WHERE payment_id=?) AND EXISTS(SELECT 1 FROM payments claim WHERE claim.return_token_hash=? AND claim.claimed_user_id=? AND claim.claimed_at=?)',params:[userId,claim.payment_id,hash,userId,now]},
   {query:"UPDATE stays SET user_id=? WHERE id=(SELECT subject_id FROM payments WHERE id=? AND subject_type='stay') AND EXISTS(SELECT 1 FROM payments claim WHERE claim.return_token_hash=? AND claim.claimed_user_id=? AND claim.claimed_at=?)",params:[userId,claim.payment_id,hash,userId,now]},
   {query:"UPDATE requests SET user_id=? WHERE id=(SELECT s.request_id FROM stays s JOIN payments p ON p.subject_id=s.id AND p.subject_type='stay' AND p.organization_id=s.organization_id WHERE p.id=?) AND EXISTS(SELECT 1 FROM payments claim WHERE claim.return_token_hash=? AND claim.claimed_user_id=? AND claim.claimed_at=?)",params:[userId,claim.payment_id,hash,userId,now]},

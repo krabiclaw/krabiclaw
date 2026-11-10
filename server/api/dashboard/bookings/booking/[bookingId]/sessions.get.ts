@@ -7,5 +7,5 @@ import { listDashboardBookingChangeSessions } from '~/server/utils/dashboard-boo
 export default defineHandler(async (event) => {
   const bookingId = getRouterParam(event, 'bookingId')
   if (!bookingId) throw new HTTPError({ statusCode: 400, message: 'Booking ID is required' })
-  return jsonResponse({ sessions: await listDashboardBookingChangeSessions(event, { bookingId, date: getQuery(event).date }) })
+  return jsonResponse({ sessions: await listDashboardBookingChangeSessions(event, { bookingId, date: getQuery(event).date, locationId: getQuery(event).location_id }) })
 })

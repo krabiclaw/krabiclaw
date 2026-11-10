@@ -3,9 +3,10 @@ import { getThreadOperationalRecord } from '~/server/domain/requests'
 import { formatFormAnswer, type FormAnswerSnapshot } from '~/shared/form-questions'
 import { formatPhone } from '~/utils/phone'
 import { normalizeVertical } from '~/utils/vertical-copy'
+import type { ProductKind } from '~/shared/product-details'
 
 /*
-  How a reservation, booking, consultation request or site stay opens its
+  How a booking (a table, a class, a consultation request) or a site stay opens its
   conversation (inbox-parity.md, Revision 2026-11-06): with real messages in
   the ledger, written with the record. First the booking's own message, a
   system message stating it in plain sentences; then the guest's note, when
@@ -23,8 +24,7 @@ export type OpeningFacts = {
   guestPhone: string | null
   answers: readonly FormAnswerSnapshot[]
 } & (
-  | { kind: 'reservation'; partySize: number; partySizeIsMinimum: boolean; startsAt: string; timezone: string; placeTitle: string }
-  | { kind: 'booking'; vertical: string; productTitle: string; partySize: number; startsAt: string; timezone: string; placeTitle: string | null }
+  | { kind: 'booking'; vertical: string; productKind: ProductKind; productTitle: string; partySize: number; partySizeIsMinimum: boolean; startsAt: string; timezone: string; placeTitle: string | null }
   | { kind: 'stay'; homeTitle: string; checkIn: string; checkOut: string; guests: number }
 )
 
@@ -45,10 +45,10 @@ const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : 
  */
 export function openingSentence(facts: OpeningFacts): string {
   const who = [facts.guestName, facts.guestPhone ? formatPhone(facts.guestPhone) : null].filter(Boolean).join(', ')
-  const lead = facts.kind === 'reservation'
-    ? `Table for ${facts.partySize}${facts.partySizeIsMinimum ? '+' : ''} on ${when(facts.startsAt, facts.timezone)} at ${facts.placeTitle}.`
-    : facts.kind === 'booking'
-      ? normalizeVertical(facts.vertical) === 'service'
+  const lead = facts.kind === 'booking'
+    ? facts.productKind === 'table'
+      ? `Table for ${facts.partySize}${facts.partySizeIsMinimum ? '+' : ''} on ${when(facts.startsAt, facts.timezone)}${facts.placeTitle ? ` at ${facts.placeTitle}` : ''}.`
+      : normalizeVertical(facts.vertical) === 'service'
         ? `Consultation request: ${facts.productTitle} on ${when(facts.startsAt, facts.timezone)}${facts.placeTitle ? ` at ${facts.placeTitle}` : ''}.`
         : `${facts.productTitle} for ${count(facts.partySize, 'guest', 'guests')} on ${when(facts.startsAt, facts.timezone)}${facts.placeTitle ? ` at ${facts.placeTitle}` : ''}.`
       : `${facts.homeTitle} from ${date(facts.checkIn)} to ${date(facts.checkOut)} for ${count(facts.guests, 'guest', 'guests')}.`
@@ -104,7 +104,7 @@ export function openingMessageQueries(input: {
 }
 
 /**
- * Writes the opening messages once into reservation, booking and site-stay
+ * Writes the opening messages once into booking and site-stay
  * conversations created before they were written with the record (51 of 84
  * reservation and booking threads on production opened empty on 2026-11-06).
  * They say what the guest booked when they booked it, from what was recorded
@@ -116,11 +116,11 @@ export function openingMessageQueries(input: {
  * opening is skipped by its dedupe key.
  */
 export async function backfillOpeningMessages(db: DbClient, organizationId?: string): Promise<{ written: number; skipped: number }> {
-  const threads = await queryAll<{ id: string; kind: 'reservation' | 'booking' | 'stay'; organization_id: string; user_id: string | null; created_at: string; payload_json: string; vertical: string | null; checkout: string | null }>(db, `
+  const threads = await queryAll<{ id: string; kind: 'booking' | 'stay'; organization_id: string; user_id: string | null; created_at: string; payload_json: string; vertical: string | null; checkout: string | null }>(db, `
     SELECT r.id, r.kind, r.organization_id, r.user_id, r.created_at, r.payload_json, o.vertical,
            (SELECT substr(s.idempotency_key, 10) FROM stays s WHERE s.request_id = r.id AND s.organization_id = r.organization_id) AS checkout
       FROM requests r JOIN organization o ON o.id = r.organization_id
-     WHERE r.kind IN ('reservation', 'booking', 'stay') ${organizationId ? 'AND r.organization_id = ?' : ''}
+     WHERE r.kind IN ('booking', 'stay') ${organizationId ? 'AND r.organization_id = ?' : ''}
        AND NOT EXISTS (SELECT 1 FROM activity_entries e WHERE e.request_id = r.id AND e.event_name = '${OPENING_EVENT}')
        AND (r.kind <> 'stay' OR EXISTS (SELECT 1 FROM stays s WHERE s.request_id = r.id AND s.organization_id = r.organization_id AND s.channel = 'direct' AND s.owner = 'app' AND s.idempotency_key LIKE 'checkout:%'))
      ORDER BY r.created_at, r.id`, organizationId ? [organizationId] : [])
@@ -136,7 +136,7 @@ export async function backfillOpeningMessages(db: DbClient, organizationId?: str
   return { written, skipped }
 }
 
-type BackfillThread = { id: string; kind: 'reservation' | 'booking' | 'stay'; organization_id: string; payload_json: string; vertical: string | null; checkout: string | null }
+type BackfillThread = { id: string; kind: 'booking' | 'stay'; organization_id: string; payload_json: string; vertical: string | null; checkout: string | null }
 
 /** A site stay as its checkout bought it: the purchase frozen on its payment. */
 async function bookedStay(db: DbClient, thread: BackfillThread): Promise<{ facts: OpeningFacts; note: string | null }> {
@@ -178,11 +178,11 @@ function askedBeforeChange(threadId: string, before: ChangedFrom, now: Visit): V
   return { startsAt, partySize, timezone: before.timezone, productId: before.productId, locationId: before.locationId }
 }
 
-/** A reservation or booking as the guest asked for it. */
+/** A booking as the guest asked for it. */
 async function bookedVisit(db: DbClient, thread: BackfillThread): Promise<{ facts: OpeningFacts; note: string | null }> {
   const payload = JSON.parse(thread.payload_json) as { guest?: { name?: string | null; phone?: string | null }; notes?: string | null; answers?: FormAnswerSnapshot[]; party_size_is_minimum?: boolean }
-  // A checkout never captured left no reservation or booking, and reading one for it refuses.
-  const recorded = await queryFirst(db, `SELECT 1 FROM ${thread.kind === 'reservation' ? 'reservations' : 'bookings'} WHERE request_id = ? AND organization_id = ?`, [thread.id, thread.organization_id])
+  // A checkout never captured left no booking, and reading one for it refuses.
+  const recorded = await queryFirst(db, 'SELECT 1 FROM bookings WHERE request_id = ? AND organization_id = ?', [thread.id, thread.organization_id])
   const record = recorded ? await getThreadOperationalRecord(db, thread.id) : null
   const hold = record ? null : await queryFirst<{ starts_at: string; timezone: string | null; quantity: number; product_id: string | null; location_id: string | null }>(db,
     'SELECT starts_at, timezone, quantity, product_id, location_id FROM payment_checkout_holds WHERE request_id = ? AND organization_id = ? ORDER BY created_at LIMIT 1', [thread.id, thread.organization_id])
@@ -202,17 +202,13 @@ async function bookedVisit(db: DbClient, thread: BackfillThread): Promise<{ fact
   // The submission always records its note, null when the guest left none.
   const note = before.notes === undefined ? payload.notes : before.notes
   if (note === undefined) throw new Error(`Conversation ${thread.id} does not record the guest's note`)
-  if (thread.kind === 'reservation') {
-    if (!place) throw new Error(`Reservation conversation ${thread.id} has no location`)
-    // "4+" as asked. A change the guest accepted, or a move, sets the submission's flag
-    // to false, so a changed table reads it from its first change's own record of it;
-    // only one never changed still has it as submitted.
-    const changed = await queryFirst(db, "SELECT 1 FROM activity_entries WHERE request_id = ? AND event_name IN ('booking_change.accepted', 'booking_change.moved')", [thread.id])
-    const partySizeIsMinimum = changed ? before.partySizeIsMinimum : payload.party_size_is_minimum
-    if (typeof partySizeIsMinimum !== 'boolean') throw new Error(`Reservation conversation ${thread.id} does not record whether the party size it was booked with is a minimum`)
-    return { note, facts: { kind: 'reservation', ...common, partySizeIsMinimum, placeTitle: place.title } }
-  }
-  const product = asked.productId ? await queryFirst<{ name: string }>(db, 'SELECT name FROM products WHERE id = ? AND organization_id = ?', [asked.productId, thread.organization_id]) : null
+  const product = asked.productId ? await queryFirst<{ name: string; kind: ProductKind }>(db, 'SELECT name, kind FROM products WHERE id = ? AND organization_id = ?', [asked.productId, thread.organization_id]) : null
   if (!thread.vertical || !product) throw new Error(`Booking conversation ${thread.id} has no vertical or product`)
-  return { note, facts: { kind: 'booking', ...common, vertical: thread.vertical, productTitle: product.name, placeTitle: place?.title ?? null } }
+  // A table's "4+" as asked. A change the guest accepted, or a move, sets the submission's flag
+  // to false, so a changed table reads it from its first change's own record of it;
+  // only one never changed still has it as submitted.
+  const changed = product.kind === 'table' && await queryFirst(db, "SELECT 1 FROM activity_entries WHERE request_id = ? AND event_name IN ('booking_change.accepted', 'booking_change.moved')", [thread.id])
+  const partySizeIsMinimum = changed ? before.partySizeIsMinimum : payload.party_size_is_minimum
+  if (typeof partySizeIsMinimum !== 'boolean') throw new Error(`Booking conversation ${thread.id} does not record whether the party size it was booked with is a minimum`)
+  return { note, facts: { kind: 'booking', ...common, vertical: thread.vertical, productKind: product.kind, productTitle: product.name, partySizeIsMinimum, placeTitle: place?.title ?? null } }
 }

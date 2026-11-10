@@ -10,13 +10,13 @@ import { NOT_HANDLED, optionalString, requiredString, resolveUserUploadedMediaFi
 const text = { type: 'string' }, nullableText = { type: ['string', 'null'] }
 const participant = { type: 'object', properties: { id: text, memberId: text, name: text, image: nullableText }, required: ['id', 'memberId', 'name', 'image'] }
 const conversation = { type: 'object', properties: {
-  id: text, createdAt: text, lastMessageAt: text, subjectType: { type: ['string', 'null'], enum: ['stay', 'booking', 'reservation', null] }, subjectId: nullableText, stayId: nullableText, bookingId: nullableText, locationId: nullableText,
+  id: text, createdAt: text, lastMessageAt: text, subjectType: { type: ['string', 'null'], enum: ['stay', 'booking', null] }, subjectId: nullableText, stayId: nullableText, bookingId: nullableText, locationId: nullableText,
   name: { ...nullableText, description: 'A group’s name; a stay conversation is titled by the home the guest sleeps in.' }, isGroup: { type: 'boolean' }, createdByUserId: nullableText, canManage: { type: 'boolean' }, canLeave: { type: 'boolean' },
   participants: { type: 'array', items: participant }, unread: { type: 'boolean' }, unreadCount: { type: 'integer' },
   stay: { type: ['object', 'null'], properties: { id: text, productId: text, homeName: text, checkInDate: text, checkOutDate: text, status: { type: 'string', enum: ['pending', 'confirmed', 'cancelled'] } }, required: ['id', 'productId', 'homeName', 'checkInDate', 'checkOutDate', 'status'] },
-  job: { ...TASK_VIEW_SCHEMA, type: ['object', 'null'], description: 'The job for the conversation’s booked record (a turnover or home-ready job for a stay, the prep or follow-up for a booking or reservation) as list_tasks presents it; null when there is none the caller may see.' },
+  job: { ...TASK_VIEW_SCHEMA, type: ['object', 'null'], description: 'The job for the conversation’s booked record (a turnover or home-ready job for a stay, the prep or follow-up for a booking) as list_tasks presents it; null when there is none the caller may see.' },
   location: { type: ['object', 'null'], properties: { id: text, title: text, slug: text, timezone: text }, required: ['id', 'title', 'slug', 'timezone'] },
-  record: { type: ['object', 'null'], description: 'The booking or table reservation the conversation is about: who booked, else what.', properties: { kind: { type: 'string', enum: ['booking', 'reservation'] }, id: text, title: text }, required: ['kind', 'id', 'title'] },
+  record: { type: ['object', 'null'], description: 'The booking (a class, consultation or table) the conversation is about: who booked, else what.', properties: { kind: { type: 'string', enum: ['booking'] }, id: text, title: text }, required: ['kind', 'id', 'title'] },
   lastMessage: { type: ['object', 'null'], properties: { id: text, senderId: nullableText, body: text, attachmentCount: { type: 'integer' }, createdAt: text }, required: ['id', 'senderId', 'body', 'attachmentCount', 'createdAt'] },
 }, required: ['id', 'createdAt', 'lastMessageAt', 'subjectType', 'subjectId', 'stayId', 'bookingId', 'locationId', 'record', 'name', 'isGroup', 'createdByUserId', 'canManage', 'canLeave', 'participants', 'unread', 'unreadCount', 'stay', 'job', 'location', 'lastMessage'] }
 const message = { type: 'object', properties: {

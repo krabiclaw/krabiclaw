@@ -1,6 +1,7 @@
 import { HTTPError } from 'nitro'
+import type { ProductKind } from '~/shared/product-details'
 import { d1JsonStringSet, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
-import { assertRoleAllows, assignedGuestThreadScope, assignedMemberSql, isOrganizationWideRole, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
+import { assertRoleAllows, assignedGuestThreadScope, assignedMemberSql, isOrganizationWideRole, locationMemberSql, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import { creationDedupeKey, creationRequestHash, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
 import { publishBusinessInvalidation, publishDashboardInvalidation } from '~/server/cloudflare/guest-inbox-events'
 import { discardMessagePhotos, listMessagePhotos, messagePhotoPlacements, uploadMessagePhotos, MessagePhotoRejection, type MessagePhoto } from '~/server/domain/guest-threads/attachments'
@@ -28,7 +29,7 @@ export type TaskStatus = 'open' | 'done' | 'skipped' | 'cancelled'
 
 export interface TaskRow {
   id: string; organization_id: string; kind: TaskKind
-  subject_type: 'stay' | 'request' | 'scheduled_guest_message' | 'booking' | 'reservation' | 'article' | 'post' | 'product' | null; subject_id: string | null
+  subject_type: 'stay' | 'request' | 'scheduled_guest_message' | 'booking' | 'article' | 'post' | 'product' | null; subject_id: string | null
   product_id: string | null; location_id: string | null; opportunity_id: string | null
   title: string | null; notes: string | null
   assigned_member_id: string | null
@@ -60,7 +61,7 @@ export type JobSubject = { kind: BookedKind; id: string }
 
 /** The booked record a job is about, which its conversation is tied to. */
 export function jobSubject(row: Pick<TaskRow, 'dedupe_key' | 'subject_type' | 'subject_id'>): JobSubject {
-  if (!row.subject_id || (row.subject_type !== 'stay' && row.subject_type !== 'booking' && row.subject_type !== 'reservation')) throw new Error(`Job task ${row.dedupe_key} names no booked record`)
+  if (!row.subject_id || (row.subject_type !== 'stay' && row.subject_type !== 'booking')) throw new Error(`Job task ${row.dedupe_key} names no booked record`)
   return { kind: row.subject_type, id: row.subject_id }
 }
 
@@ -217,7 +218,7 @@ function scopeSql(viewer: TaskViewer, alias = 't'): { sql: string; params: unkno
   return {
     sql: `(${alias}.assigned_member_id = ?
       OR EXISTS (SELECT 1 FROM product_booking_configs c WHERE c.organization_id = ${alias}.organization_id AND c.product_id = ${alias}.product_id AND ${assignedMemberSql('c')})
-      OR (${alias}.product_id IS NULL AND EXISTS (SELECT 1 FROM business_locations bl WHERE bl.organization_id = ${alias}.organization_id AND bl.id = ${alias}.location_id AND ${assignedMemberSql('bl')}))
+      OR (${alias}.product_id IS NULL AND ${alias}.location_id IS NOT NULL AND ${locationMemberSql(`${alias}.organization_id`, `${alias}.location_id`)})
       OR (${alias}.kind = 'guest_reply' AND EXISTS (SELECT 1 FROM requests r WHERE r.id = ${alias}.subject_id AND r.organization_id = ${alias}.organization_id AND ${conversation.sql})))`,
     params: [viewer.memberId, ...Array(2).fill(viewer.principal.userId), ...conversation.params],
   }
@@ -331,8 +332,8 @@ interface Context {
   arrivals: Map<string, StayFacts | null>
   requests: Map<string, { guest_name: string | null; participant: string | null; preview: string | null; asked_at: string | null }>
   messages: Map<string, { title: string; status: string; request_id: string | null; subject_type: BookedKind; subject_id: string }>
-  /** A booking's or reservation's conversation and when it is. */
-  records: Map<string, { request_id: string | null; starts_at: string }>
+  /** A booking's conversation, when it is and what was booked. */
+  records: Map<string, { request_id: string | null; starts_at: string; product_kind: ProductKind }>
   /** The entry a change task is about. */
   entries: Map<string, { event_name: string; actor_kind: string; body: string | null }>
   photos: Map<string, TaskPhoto[]>
@@ -344,9 +345,9 @@ async function loadContext(db: DbClient, viewer: TaskViewer, rows: TaskRow[]): P
   const messageIds = ids(row => row.subject_type === 'scheduled_guest_message' ? row.subject_id : null)
   const messages = messageIds.length ? await queryAll<{ id: string; template_title: string; status: string; request_id: string | null; subject_type: BookedKind; subject_id: string }>(db,
     'SELECT id, template_title, status, request_id, subject_type, subject_id FROM scheduled_guest_messages WHERE organization_id = ? AND id IN (SELECT value FROM json_each(?))', [organizationId, d1JsonStringSet(messageIds)]) : []
-  const recordIds = [...new Set([...ids(row => row.subject_type === 'booking' || row.subject_type === 'reservation' ? row.subject_id : null),
+  const recordIds = [...new Set([...ids(row => row.subject_type === 'booking' ? row.subject_id : null),
     ...messages.flatMap(message => message.subject_type === 'stay' ? [] : [message.subject_id])])]
-  const records = await queryAll<{ id: string; request_id: string | null; starts_at: string }>(db, `SELECT br.id, br.request_id, br.starts_at FROM ${BOOKED_RECORDS_SQL} br
+  const records = await queryAll<{ id: string; request_id: string | null; starts_at: string; product_kind: ProductKind }>(db, `SELECT br.id, br.request_id, br.starts_at, br.product_kind FROM ${BOOKED_RECORDS_SQL} br
      WHERE br.organization_id = ? AND br.kind <> 'stay' AND br.id IN (SELECT value FROM json_each(?))`, [organizationId, d1JsonStringSet(recordIds)])
   const changeStays = rows.filter(row => row.kind === 'booking_change' && row.subject_type === 'stay').map(row => row.subject_id!)
   const changeStayRequests = changeStays.length ? await queryAll<{ request_id: string | null }>(db, 'SELECT request_id FROM stays WHERE organization_id = ? AND id IN (SELECT value FROM json_each(?))', [organizationId, d1JsonStringSet(changeStays)]) : []
@@ -421,7 +422,7 @@ async function loadContext(db: DbClient, viewer: TaskViewer, rows: TaskRow[]): P
     arrivals,
     requests: new Map(requests.map(request => [request.id, request])),
     messages: new Map(messages.map(message => [message.id, { title: message.template_title, status: message.status, request_id: message.request_id, subject_type: message.subject_type, subject_id: message.subject_id }])),
-    records: new Map(records.map(record => [record.id, { request_id: record.request_id, starts_at: record.starts_at }])),
+    records: new Map(records.map(record => [record.id, { request_id: record.request_id, starts_at: record.starts_at, product_kind: record.product_kind }])),
     entries: new Map(entries.map(entry => [entry.id, { event_name: entry.event_name, actor_kind: entry.actor_kind, body: entry.body }])),
     photos: new Map([...photos].map(([id, list]) => [id, list.map(photo => ({ id: photo.id, url: photo.url, thumbnailUrl: photo.thumbnailUrl, width: photo.width, height: photo.height }))])),
   }
@@ -556,7 +557,7 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
       } else {
         // A consultation, class or table: its time and place, and its conversation when it has one.
         const record = context.records.get(message.subject_id)
-        if (!record) throw new Error(`Delivery task ${row.id} has no booking or reservation`)
+        if (!record) throw new Error(`Delivery task ${row.id} has no booking`)
         const request = record.request_id ? context.requests.get(record.request_id) : undefined
         title = request?.guest_name ? firstName(request.guest_name) : request?.participant ?? 'Guest'
         avatar = { initial: initialOf(title), tone: 'cool' }
@@ -588,7 +589,7 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
       const request = record?.request_id ? context.requests.get(record.request_id) : undefined
       if (!record?.request_id || !request) throw new Error(`Visit job ${row.id} has no booking conversation`)
       // In the business's own words: "Prepare for consultation", a client; "Prepare for reservation", a guest.
-      const presentation = resolveBookingPresentation(row.subject_type === 'reservation' ? 'reservation' : 'booking', context.vertical)
+      const presentation = resolveBookingPresentation(record.product_kind, context.vertical)
       const heading = row.kind === 'consultation_prep' ? `Prepare for ${getVerticalCopy(context.vertical, 'en').reservationWord}` : 'Follow up'
       requestId = record.request_id
       face = 'compact'
@@ -596,7 +597,7 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
       avatar = { initial: initialOf(title), tone: 'warm' }
       statusLine = [heading, place].filter(Boolean).join(' · ')
       detail = `${day(record.starts_at)}, ${time(record.starts_at)}`
-      path = bookingEditorPath(context.slug, row.subject_type === 'reservation' ? 'reservation' : 'booking', record.request_id)
+      path = bookingEditorPath(context.slug, 'booking', record.request_id)
       sheet = { heading, title, date: null, checkout: null, checkin: null }
       break
     }

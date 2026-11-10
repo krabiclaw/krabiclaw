@@ -22,10 +22,10 @@ export async function notifyPaymentFinancialEvent(db: DbClient, stripe: Stripe, 
 }) {
   const organization = await queryFirst<{ name: string; slug: string }>(db, 'SELECT name,slug FROM organization WHERE id=?', [payment.organization_id])
   if (!organization && !await queryFirst(db, 'SELECT organization_id FROM payment_servicing_tenants WHERE organization_id=? AND stripe_account_id=? AND livemode=?', [payment.organization_id, payment.stripe_account_id, payment.livemode])) throw new Error('Payments notification has no tenant or retained servicing identity')
-  // A booking, reservation or stay paid on the site is confirmed to its guest by
+  // A booking or stay paid on the site is confirmed to its guest by
   // the confirmation email, which states what they paid. A failure is told here:
   // a bank or pay-later method can fail after the guest has left the pay page.
-  const checkout = payment.subject_type === 'booking' || payment.subject_type === 'reservation' || payment.subject_type === 'stay'
+  const checkout = payment.subject_type === 'booking' || payment.subject_type === 'stay'
   const guestKind = (input.kind.startsWith('refund_') || input.kind === 'payment_failed' || (!checkout && input.kind.startsWith('payment_'))) ? input.kind as GuestPaymentNotificationKind : null
   // A deleted merchant and an unclaimed contact have no application audience.
   // The verified return can still claim the purchase and then notify its buyer.
@@ -50,13 +50,13 @@ export async function notifyPaymentFinancialEvent(db: DbClient, stripe: Stripe, 
     }
   }
   const eventKey = `payments:${payment.stripe_account_id}:${payment.livemode}:${input.nativeId}:${input.status}:${input.kind}`
-  const visitKind = payment.subject_type === 'booking' || payment.subject_type === 'reservation' ? payment.subject_type : null
+  const visitKind = payment.subject_type === 'booking' ? payment.subject_type : null
   const hold = visitKind && organization ? await queryFirst<{ request_id: string | null }>(db, 'SELECT request_id FROM payment_checkout_holds WHERE payment_id=? AND organization_id=?', [payment.id, payment.organization_id]) : null
   if (visitKind && organization && !hold?.request_id) throw new Error('Booking payment notification has no canonical guest request')
   // A stay's conversation opens when its payment is captured; it is the stay's, not the hold's.
   const stayThread = payment.subject_type === 'stay' && payment.subject_id && organization ? await queryFirst<{ request_id: string | null }>(db, 'SELECT request_id FROM stays WHERE organization_id=? AND id=?', [payment.organization_id, payment.subject_id]) : null
   const threadId = hold?.request_id ?? stayThread?.request_id ?? null
-  const booking=visitKind&&payment.subject_id&&organization?await queryFirst<{request_id:string|null}>(db,`SELECT request_id FROM ${visitKind==='booking'?'bookings':'reservations'} WHERE organization_id=? AND id=?`,[payment.organization_id,payment.subject_id]):null
+  const booking=visitKind&&payment.subject_id&&organization?await queryFirst<{request_id:string|null}>(db,`SELECT request_id FROM bookings WHERE organization_id=? AND id=?`,[payment.organization_id,payment.subject_id]):null
   if(booking&&booking.request_id!==threadId)throw new Error('Booking payment notification request does not match its operational booking')
   const deepLink = organization ? `${dashboardOrigin(env, { orgSlug: organization.slug, locationSlug: null })}${booking?.request_id?`/bookings/${visitKind}/${encodeURIComponent(booking.request_id)}`:stayThread?`/bookings/stay/${encodeURIComponent(payment.subject_id!)}`:`/earnings/transactions/${encodeURIComponent(payment.id)}`}` : null
   // A purchase refunded because its capacity had gone is refunded without being asked, so the buyer is told why.

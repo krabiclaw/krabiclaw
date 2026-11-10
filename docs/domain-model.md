@@ -23,13 +23,13 @@ extend that model. Never add a second one beside it.
 | Onboarding draft | `onboarding_drafts` | server/utils/onboarding-drafts.ts | KrabiClaw |
 | Place (a branch or a home's address and clock) | `business_locations` | server/utils/location-management.ts | KrabiClaw |
 | Catalog | `products` `product_variants` `prices` `product_publications` `product_locations` `collections` `collection_products` | server/utils/product-management.ts | KrabiClaw (Stripe-shaped) |
-| How a product is booked, and who handles it (a session's seats or a home's nights) | `product_booking_configs` | server/utils/availability.ts | KrabiClaw |
+| How a product is booked, and who handles it (a session's seats, a table's seatings or a home's nights; party limits, guest terms and what online payment is charged for) | `product_booking_configs` | server/utils/availability.ts | KrabiClaw |
 | Home description and arrival guide | `product_stay_configs` | server/domain/stays.ts | KrabiClaw |
 | When a product can be booked | `product_availability_rules` | server/utils/availability.ts | KrabiClaw |
 | Timed inventory | `product_sessions` | server/utils/availability.ts | KrabiClaw |
 | Night inventory | `product_nights` | server/domain/stays.ts | KrabiClaw |
 | Home rooms and accessibility | `product_stay_photo_rooms` `product_stay_photo_room_memberships` `product_stay_photo_room_amenities` `product_stay_room_accessibility` `product_stay_room_accessibility_photos` `product_stay_accessibility` `product_stay_accessibility_photos` | server/domain/stays.ts | KrabiClaw |
-| Booked record | `bookings` | server/domain/product-bookings.ts | KrabiClaw |
+| Booked record (a class, consultation or table booking, with the terms frozen when it was made) | `bookings` | server/domain/product-bookings.ts | KrabiClaw |
 | Conversation and its ledger | `requests` `activity_entries` | server/domain/requests.ts | KrabiClaw |
 | Guest message delivery | `guest_thread_deliveries` | server/domain/guest-threads/deliveries.ts | KrabiClaw |
 | Guest message template | `message_templates` | server/domain/scheduled-guest-messages.ts | KrabiClaw |
@@ -65,18 +65,14 @@ Each of these tables is a second model of a concept above. The check fails until
 | Table | Concept it duplicates |
 |---|---|
 | `stays` | Booked record |
-| `reservations` | Booked record |
 | `stay_nights` | Night inventory |
-| `location_reservation_configs` | How a product is booked, and who handles it |
 | `stay_payments` | Payments |
 | `send_later_messages` | Future guest message |
 
-Two single-owner columns below still name a retiring owner, until it goes:
+One single-owner column below still names a retiring owner, until it goes:
 
 - `stays.cancellation_policy` is the policy frozen on a booked stay when it was
   taken; it goes with `stays` into the booked record.
-- `business_locations.assigned_member_id` is who handles a location's table
-  reservations; it goes with `location_reservation_configs`.
 
 ## Single-owner columns
 
@@ -84,13 +80,20 @@ Each of these columns exists on its owner table only.
 
 | Column | Owner |
 |---|---|
-| `assigned_member_id` | `product_booking_configs` `tasks` `business_locations` |
+| `assigned_member_id` | `product_booking_configs` `tasks` |
 | `party_size` | `bookings` |
 | `no_show_at` | `bookings` |
 | `cancellation_reason` | `bookings` |
 | `duration_minutes` | `product_booking_configs` |
 | `advance_notice_minutes` | `product_booking_configs` |
 | `questions` | `product_booking_configs` |
+| `party_size_min` | `product_booking_configs` |
+| `party_size_max` | `product_booking_configs` |
+| `minimum_guest_age` | `product_booking_configs` |
+| `accessibility_contact_required` | `product_booking_configs` |
+| `payment_basis` | `product_booking_configs` |
+| `payment_min_party_size` | `product_booking_configs` |
+| `policy_json` | `bookings` |
 | `check_in_time` | `product_booking_configs` |
 | `check_out_time` | `product_booking_configs` |
 | `min_nights` | `product_booking_configs` |

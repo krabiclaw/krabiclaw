@@ -18,7 +18,7 @@ interface NotificationRow {
   thread_id: string | null
   stored_link: string | null
   organization_slug: string | null
-  booking_kind: 'booking' | 'reservation' | 'stay' | null
+  booking_kind: 'booking' | 'stay' | null
   stay_id: string | null
   read_at_destination: number
   conversation: number
@@ -34,7 +34,7 @@ interface NotificationRow {
 function deepLink(row: NotificationRow): string | null {
   if (row.organization_slug && row.stay_id) return bookingEditorPath(row.organization_slug, 'stay', row.stay_id)
   if (row.thread_id && row.organization_slug) {
-    if (row.booking_kind === 'booking' || row.booking_kind === 'reservation') return bookingEditorPath(row.organization_slug, row.booking_kind, row.thread_id)
+    if (row.booking_kind === 'booking') return bookingEditorPath(row.organization_slug, row.booking_kind, row.thread_id)
     if (row.conversation) return guestConversationPath(row.organization_slug, row.thread_id)
   }
   return row.stored_link

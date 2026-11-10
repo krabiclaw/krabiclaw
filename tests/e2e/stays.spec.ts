@@ -4,8 +4,9 @@ import sharp from 'sharp'
 import { authRequestHeaders, loginAs } from './helpers/auth'
 import { mcpRequest, publishOwnHostProfile } from './helpers/mcp'
 import { waitForNuxtHydration } from './helpers'
-import { seededSiteHeaders, devLoginHeaders } from './test-env'
-import { seededTenant } from './seed/manifest'
+import { devLoginHeaders } from './test-env'
+import { bookTable, openSeating } from './helpers/tables'
+import { localDateAt } from '../../utils/timezone'
 import { isDashboardInvalidation, type DashboardInvalidation } from '../../shared/dashboard-invalidations'
 import type { Product } from '../../server/types/products'
 import type { PublicStayCalendar, StayDetail, StayQuote } from '../../server/domain/stays'
@@ -696,22 +697,9 @@ test('a host creates a stay, records its payments and arrival guide, and cancels
   const tableGuest = await watchPersonal()
   try {
     await loginAs(tableGuest.request, baseURL!, 'user-e2e-table-guest')
-    const restaurant = seededSiteHeaders('restaurant')
-    const brooklyn = seededTenant('restaurant').locations.brooklyn!.id
-    let slot: { date: string; time: string } | null = null
-    for (let offset = 1; offset <= 7 && !slot; offset++) {
-      const date = new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10)
-      const available = await tableGuest.request.get(`${baseURL}/api/public/reservations/availability`, { params: { date, location_id: brooklyn }, headers: restaurant })
-      await expectStatus(available, 200)
-      const { dates } = await available.json() as { dates: Array<{ slots: Array<{ time_slot: string; is_closed: boolean; is_full: boolean }> }> }
-      const time = dates[0]?.slots.find(candidate => !candidate.is_closed && !candidate.is_full)?.time_slot
-      if (time) slot = { date, time }
-    }
-    expect(slot, 'The seeded restaurant has a reservable time this week').not.toBeNull()
-    const booked = await tableGuest.request.post(`${baseURL}/api/public/reservations`, { headers: restaurant,
-      data: { name: 'E2E Table Guest', email: 'table-guest@playwright.example', phone: '+12025550123', ...slot!, guests: '2', location_id: brooklyn, idempotency_key: crypto.randomUUID() } })
-    await expectStatus(booked, 201)
-    const reservationId = (await booked.json() as { request_id: string }).request_id
+    const seating = await openSeating(tableGuest.request, 2, 86_400_000)
+    const slot = { date: localDateAt(new Date(seating.starts_at), seating.timezone) }
+    const { requestId: reservationId } = await bookTable(tableGuest.request, { name: 'E2E Table Guest', email: 'table-guest@playwright.example', phone: '+12025550123', partySize: 2, seating })
     const toAccount = await tableGuest.request.get(`${baseURL}/api/post-login`, { maxRedirects: 0 })
     await expectStatus(toAccount, 302)
     expect(toAccount.headers().location).toBe('/dashboard/account')
@@ -722,7 +710,7 @@ test('a host creates a stay, records its payments and arrival guide, and cancels
     await expect(personal).toHaveURL(`${baseURL}/dashboard/account`)
     await waitForNuxtHydration(personal)
     // The guest's own reservation, its conversation and calendar: the Personal pages that hold something.
-    for (const path of ['/dashboard/account/activity', `/dashboard/account/activity/reservation/${reservationId}`, `/dashboard/account/messages/${reservationId}`, `/dashboard/account/calendar/${slot!.date}`, '/dashboard/account/notifications']) {
+    for (const path of ['/dashboard/account/activity', `/dashboard/account/activity/booking/${reservationId}`, `/dashboard/account/messages/${reservationId}`, `/dashboard/account/calendar/${slot!.date}`, '/dashboard/account/notifications']) {
       const response = await personal.goto(`${baseURL}${path}`)
       expect(response?.status(), path).toBe(200)
       await waitForNuxtHydration(personal)

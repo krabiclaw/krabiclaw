@@ -11,9 +11,7 @@ function sourceMatchesSql(proposal: string, owner: string): string {
   return `(EXISTS (SELECT 1 FROM bookings b
       JOIN product_sessions s ON s.id=b.product_session_id AND s.organization_id=b.organization_id AND s.product_id=b.product_id
       WHERE b.request_id=${owner}.id AND b.organization_id=${owner}.organization_id AND ${owner}.kind='booking'
-        AND json_array('booking',b.product_session_id,b.updated_at,b.id,b.status,b.party_size,s.starts_at,s.ends_at,s.timezone,s.location_id,b.product_id,${guest})=json_array(${recorded}))
-    OR EXISTS (SELECT 1 FROM reservations v WHERE v.request_id=${owner}.id AND v.organization_id=${owner}.organization_id AND ${owner}.kind='reservation'
-        AND json_array('reservation',NULL,NULL,v.id,v.status,v.party_size,v.starts_at,v.ends_at,v.timezone,v.location_id,NULL,${guest})=json_array(${recorded})))`
+        AND json_array('booking',b.product_session_id,b.updated_at,b.id,b.status,b.party_size,s.starts_at,s.ends_at,s.timezone,s.location_id,b.product_id,${guest})=json_array(${recorded})))`
 }
 
 /**
@@ -29,8 +27,7 @@ function statusSql(proposal: string, owner: string, decision: string, now: strin
     WHEN ${decision}.id IS NOT NULL THEN json('Invalid booking change decision')
     WHEN ${owner}.kind='stay' THEN 'pending'
     WHEN julianday(${proposal}.occurred_at)+7<=julianday(${now})
-      OR EXISTS (SELECT 1 FROM bookings b JOIN product_sessions s ON s.id=b.product_session_id AND s.organization_id=b.organization_id AND s.product_id=b.product_id WHERE b.request_id=${owner}.id AND b.organization_id=${owner}.organization_id AND s.ends_at<=${now})
-      OR EXISTS (SELECT 1 FROM reservations v WHERE v.request_id=${owner}.id AND v.organization_id=${owner}.organization_id AND v.ends_at<=${now}) THEN 'expired'
+      OR EXISTS (SELECT 1 FROM bookings b JOIN product_sessions s ON s.id=b.product_session_id AND s.organization_id=b.organization_id AND s.product_id=b.product_id WHERE b.request_id=${owner}.id AND b.organization_id=${owner}.organization_id AND s.ends_at<=${now}) THEN 'expired'
     WHEN ${proposal}.id IS NOT (SELECT latest.id FROM activity_entries latest WHERE latest.request_id=${owner}.id AND latest.event_name='booking_change.requested' ORDER BY latest.sequence DESC LIMIT 1)
       OR NOT ${sourceMatchesSql(proposal, owner)} THEN 'stale'
     ELSE 'pending' END)`

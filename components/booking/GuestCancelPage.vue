@@ -19,7 +19,7 @@
           </div>
           <h2 v-if="!cancellationClosed" class="tenant-display tenant-italic text-3xl">{{ copy('cancel_visit') }}</h2>
           <div class="mt-6 space-y-2 border-y border-default py-6 text-sm">
-            <p><strong>{{ copy(kind === 'booking' ? 'booking_for' : 'reservation_for') }}</strong> {{ booking.name }}</p>
+            <p><strong>{{ copy(isTable ? 'reservation_for' : 'booking_for') }}</strong> {{ booking.name }}</p>
             <p v-if="booking.product_name"><strong>{{ booking.product_name }}</strong></p>
             <p><strong>{{ copy('date') }}</strong> {{ readableDate }}</p>
             <p><strong>{{ copy('time') }}</strong> {{ readableTime }}</p>
@@ -71,18 +71,14 @@ import { freeCancellationNoticeMinutes, noticeDuration, outsideNotice } from '~/
 import { ApiClientError } from '~/utils/api-clients'
 
 /**
- * The page a guest's cancellation link opens.
- *
- * A booking and a reservation are cancelled by the same act through the same
- * endpoint; only the words differ, so the wording is the one thing this takes
- * as a parameter.
+ * The page a guest's cancellation link opens. Every booking is cancelled by
+ * the same act through the same endpoint; a table's is worded as a reservation.
  */
-const props = defineProps<{ kind: 'reservation' | 'booking' }>()
-
 const { locale, localePath, t } = useI18n()
 const route = useRoute()
 
-const keyPrefix = computed(() => props.kind === 'booking' ? 'experience_cancel' : 'reservation_cancel')
+const isTable = computed(() => booking.value?.product_kind === 'table')
+const keyPrefix = computed(() => isTable.value ? 'reservation_cancel' : 'experience_cancel')
 const copy = (key: string) => t(`site.${keyPrefix.value}.${key}`)
 const requestId = computed(() => typeof route.query.id === 'string' ? route.query.id : '')
 const token = computed(() => route.hash ? route.hash.slice(1) : '')
@@ -96,7 +92,7 @@ useSocialMetadata(() => ({
 }))
 
 interface GuestBookingView {
-  kind: 'booking' | 'reservation'
+  kind: 'booking'
   name: string
   starts_at: string
   timezone: string
@@ -130,11 +126,9 @@ const readableTime = computed(() => booking.value
   ? formatTimestamp(booking.value.starts_at, locale.value, booking.value.timezone, { timeStyle: 'short' })
   : '')
 // Where a guest goes to start over: the catalogue they booked from, or the
-// reservations page. A site whose vertical presents no catalogue sends them
-// home rather than to a route that does not exist.
-const startOverHref = computed(() => localePath(props.kind === 'booking'
-  ? (presentation.value?.collectionPath ?? '/')
-  : '/reservations'))
+// reservations page for a table. A site whose vertical presents no catalogue
+// sends them home rather than to a route that does not exist.
+const startOverHref = computed(() => localePath(isTable.value ? '/reservations' : (presentation.value?.collectionPath ?? '/')))
 
 // The offering's advance notice closes the guest's own cancellation, as the cancel route refuses it.
 // A page left open past the cutoff learns it from the server's refusal.

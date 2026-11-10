@@ -3,7 +3,7 @@ import { SEED_SUBDOMAINS, type SeedTenant } from '../manifest.ts'
 import { seedArticle, everyDay, publishProfile, recordProduct, seedLocation, seedMedia, toolFor } from './common.ts'
 
 // Ember & Slice is KrabiClaw's fictional pizzeria: two New York locations with
-// table reservations, a menu and a kitchen blog.
+// tables to book, a menu and a kitchen blog.
 export async function seedRestaurant(createTenant: CreateTenant): Promise<SeedTenant> {
   const { owner, tenant } = await createTenant({
     key: 'restaurant', name: 'Ember & Slice', slug: 'ember-slice-demo', subdomain: SEED_SUBDOMAINS.restaurant,
@@ -15,18 +15,43 @@ export async function seedRestaurant(createTenant: CreateTenant): Promise<SeedTe
     const brooklyn = await seedLocation(tool, tenant, 'brooklyn', { title: 'Ember & Slice Brooklyn', email: 'brooklyn@ember-slice.example', phone: '+12025550123', hours: everyDay(11, 22), address: address('120 Atlantic Avenue') })
     const williamsburg = await seedLocation(tool, tenant, 'williamsburg', { title: 'Ember & Slice Williamsburg', email: 'williamsburg@ember-slice.example', phone: '+12025550124', hours: everyDay(11, 22), address: address('88 Bedford Avenue') })
 
-    // Table reservations: 90-minute seatings, flexible (two-hour) cancellation.
-    for (const place of [brooklyn, williamsburg]) {
-      await tool('update_reservation_policy', { location_id: place.id, expected_updated_at: null, duration_minutes: 90, slot_capacity: 40 })
+    // Each dining room's tables: one table product per location, a 90-minute seating every half hour
+    // from opening to the last seating before close, forty guests per start time, no deposit.
+    const chefMemberId = tenant.memberIds['user-e2e-demo-owner']
+    if (!chefMemberId) throw new Error('The Ember & Slice chef is not a member')
+    const tables: Record<string, { id: string; slug: string }> = {}
+    for (const [key, place] of [['brooklyn', brooklyn], ['williamsburg', williamsburg]] as const) {
+      const { product } = await tool<{ product: { id: string; slug: string; name: string; kind: string } }>('create_product', {
+        kind: 'table', name: `${place.title} tables`, active: true, idempotency_key: `seed-restaurant-tables-${key}`,
+        variants: [{ name: 'Table', prices: [{ unit_amount: 0, currency: 'USD' }] }],
+        booking: {
+          location_id: place.id, duration_minutes: 90, default_capacity: 40, confirmation_mode: 'instant', scheduling_mode: 'business', assigned_member_id: chefMemberId,
+          weekly_slots: [0, 1, 2, 3, 4, 5, 6].map(weekday => ({ weekday, start_time: '11:00', end_time: '20:30', interval_minutes: 30 })),
+        },
+      })
+      await tool('set_product_location', { product_id: product.id, location_id: place.id, active: true, published: true })
+      await tool('set_product_publication', { product_id: product.id, published: true })
+      tables[key] = recordProduct(tenant, `tables-${key}`, product)
+    }
+    // A seating's session, read back as the owner's assistant reads it before booking.
+    const seating = async (date: string, time: string) => {
+      // The local day lies within a day either side of its UTC midnight: two days of seatings fit one page.
+      const midnight = Date.parse(`${date}T00:00:00.000Z`)
+      const { sessions } = await tool<{ sessions: Array<{ id: string; starts_at: string; is_full: boolean }> }>('list_product_booking_sessions', {
+        product_id: tables.brooklyn!.id, from: new Date(midnight - 43_200_000).toISOString(), to: new Date(midnight + 129_600_000).toISOString(), limit: 100 })
+      const local = (instant: string) => new Intl.DateTimeFormat('en-CA', { timeZone: tenant.timezone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(instant)).replace(',', '')
+      return sessions.find(session => local(session.starts_at) === `${date} ${time}`) ?? null
     }
     // A party of four booked by phone for dinner a week from today in Brooklyn.
     const nextWeek = new Intl.DateTimeFormat('en-CA', { timeZone: tenant.timezone }).format(Date.now() + 7 * 86_400_000)
-    await tool('create_table_reservation', {
-      location_id: brooklyn.id, date: nextWeek, time: '19:00', party_size: 4, guest_name: 'Maya Chen', guest_email: 'maya.chen@playwright.example',
+    const dinner = await seating(nextWeek, '19:00')
+    if (!dinner) throw new Error('Ember & Slice Brooklyn has no 19:00 seating next week')
+    await tool('create_product_booking', {
+      product_slug: tables.brooklyn!.slug, session_id: dinner.id, party_size: 4, guest_name: 'Maya Chen', guest_email: 'maya.chen@playwright.example',
       guest_phone: '+12025550188', idempotency_key: 'seed-restaurant-reservation', source: 'phone', guest_acknowledgement: false,
     })
 
-    // Today's reservations for Brooklyn dining room: lunch and dinner services.
+    // Today's tables in the Brooklyn dining room: lunch and dinner services.
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: tenant.timezone }).format(Date.now())
     const todaySeatings = [
       { time: '12:00', party_size: 2, guest_name: 'Jordan Lee', guest_email: 'jordan.lee@playwright.example', guest_phone: '+12025550171', key: 'seed-restaurant-today-1' },
@@ -36,12 +61,11 @@ export async function seedRestaurant(createTenant: CreateTenant): Promise<SeedTe
     ]
     // A seating can only be booked while its time is ahead: a run in the evening
     // seeds the dinner times still to come, and one after closing seeds none.
-    const { days } = await owner.json<{ days: Array<{ slots: Array<{ time_slot: string; starts_at: string; is_closed: boolean; is_full: boolean }> }> }>(
-      'GET', `/api/editor/organizations/${tenant.organizationId}/locations/${brooklyn.id}/reservation-availability?from=${today}&to=${today}`)
-    const bookable = new Set(days[0]!.slots.filter(slot => !slot.is_closed && !slot.is_full && Date.parse(slot.starts_at) > Date.now() + 10 * 60_000).map(slot => slot.time_slot))
-    for (const p of todaySeatings.filter(seating => bookable.has(seating.time))) {
-      await tool('create_table_reservation', {
-        location_id: brooklyn.id, date: today, time: p.time, party_size: p.party_size, guest_name: p.guest_name, guest_email: p.guest_email,
+    for (const p of todaySeatings) {
+      const session = await seating(today, p.time)
+      if (!session || session.is_full || Date.parse(session.starts_at) <= Date.now() + 10 * 60_000) continue
+      await tool('create_product_booking', {
+        product_slug: tables.brooklyn!.slug, session_id: session.id, party_size: p.party_size, guest_name: p.guest_name, guest_email: p.guest_email,
         guest_phone: p.guest_phone, idempotency_key: p.key, source: 'phone', guest_acknowledgement: false,
       })
     }
@@ -87,8 +111,6 @@ export async function seedRestaurant(createTenant: CreateTenant): Promise<SeedTe
     await collection('brooklyn-specials', 'Brooklyn Specials', [special], brooklyn.id)
 
     // Besides its menu, Brooklyn teaches a pizza class on Saturdays at opening, hosted by its chef.
-    const chefMemberId = tenant.memberIds['user-e2e-demo-owner']
-    if (!chefMemberId) throw new Error('The Ember & Slice chef is not a member')
     await publishProfile(tool, chefMemberId, 'Rosa, head chef', 'Rosa has run the Brooklyn wood oven since it was lit.')
     const { product: pizzaClass } = await tool<{ product: { id: string; slug: string; name: string; kind: string } }>('create_product', {
       kind: 'experience', name: 'Pizza-Making Class', active: true, idempotency_key: 'seed-pizza-class',

@@ -60,11 +60,11 @@ export default defineHandler(async event=>{
   const submitted=refunded.value
   return jsonResponse(submitted)
  }
- if(authorization.action==='reject_booking'||authorization.action==='cancel_booking'||authorization.action==='cancel_reservation'){
+ if(authorization.action==='reject_booking'||authorization.action==='cancel_booking'){
   const action:VisitRefundAction=authorization.action==='reject_booking'?'reject':'cancel'
   const payment=await requirePayment(db,organization.id,authorization.payment_id)
-  if((payment.subject_type!=='booking'&&payment.subject_type!=='reservation')||!payment.subject_id || (authorization.action==='cancel_reservation')!==(payment.subject_type==='reservation')) throw new HTTPError({statusCode:409,statusMessage:'Authorization is not for a booking payment'})
-  const booking=await queryFirst<{request_id:string|null}>(db,`SELECT request_id FROM ${payment.subject_type==='booking'?'bookings':'reservations'} WHERE id=? AND organization_id=?`,[payment.subject_id,organization.id])
+  if(payment.subject_type!=='booking'||!payment.subject_id) throw new HTTPError({statusCode:409,statusMessage:'Authorization is not for a booking payment'})
+  const booking=await queryFirst<{request_id:string|null}>(db,`SELECT request_id FROM bookings WHERE id=? AND organization_id=?`,[payment.subject_id,organization.id])
   if(!booking?.request_id) throw new HTTPError({statusCode:409,statusMessage:'Paid booking request is unavailable'})
   const outcome=await executeGuestThreadOperation(db,{threadId:booking.request_id,organizationId:organization.id,action,actorUserId:userId,idempotencyKey:`paid-${action}:${body.authorization_id}`,financialAuthorizationId:body.authorization_id,...(authorization.note?{body:authorization.note}:{}),env})
   const key=visitRefundKey(action,payment.subject_type,payment.subject_id)

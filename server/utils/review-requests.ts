@@ -3,8 +3,9 @@ import { hasOrganizationEntitlement } from '~/server/utils/billing'
 import { wantsNotification } from '~/server/domain/notification-preferences'
 import { localDateTimeToInstant } from '~/utils/timezone'
 import { reviewSubject, type ReviewSubject } from '~/shared/review-questions'
+import type { ProductKind } from '~/shared/product-details'
 
-export type ReviewBookingType = 'reservation' | 'booking' | 'stay'
+export type ReviewBookingType = 'booking' | 'stay'
 
 export interface ReviewRequestRow {
   id: string
@@ -32,16 +33,16 @@ export interface ReviewBookingContext {
   booking_id: string
   organization_id: string
   location_id: string | null
-  /** The product a booking or stay was for; a reservation has none. */
+  /** The product a booking or stay was for. */
   product_id: string | null
-  product_kind: string | null
+  product_kind: ProductKind
   product_title: string | null
   user_id: string | null
   guest_name: string | null
   guest_email: string | null
   status: string
   no_show_at: string | null
-  /** When the visit ended: a reservation's or session's end, a stay's checkout in its home's zone. */
+  /** When the visit ended: a session's end, a stay's checkout in its home's zone. */
   completed_at: string | null
   review_request_sent_at: string | null
   review_submitted_at: string | null
@@ -111,7 +112,7 @@ type ReviewBookingContextRow = Omit<ReviewBookingContext, 'completed_at' | 'subj
 
 /**
  * The visit a review is about, read from the operational record that holds
- * it: a reservation, a session booking, or a stay booked on the site. A stay
+ * it: a session booking (a table, a class, a consultation), or a stay booked on the site. A stay
  * from a channel is reviewed on that channel, so it has no context here.
  */
 export async function getReviewBookingContext(
@@ -134,15 +135,13 @@ export async function getReviewBookingContext(
       SELECT b.request_id, b.status, b.no_show_at, ps.timezone, ps.starts_at, ps.ends_at, NULL AS check_out_date, NULL AS check_out_time, b.party_size, ps.product_id, NULL AS guest_email
         FROM bookings b JOIN product_sessions ps ON ps.id = b.product_session_id
       UNION ALL
-      SELECT res.request_id, res.status, res.no_show_at, res.timezone, res.starts_at, res.ends_at, NULL, NULL, res.party_size, NULL, NULL FROM reservations res
-      UNION ALL
       SELECT st.request_id, st.status, st.no_show_at, l.timezone, st.check_in_date || CASE WHEN bc.check_in_time IS NULL THEN '' ELSE 'T' || bc.check_in_time END, NULL, st.check_out_date, bc.check_out_time, st.adults + st.children, st.product_id, st.guest_email
         FROM stays st JOIN product_stay_configs c ON c.organization_id = st.organization_id AND c.product_id = st.product_id
         JOIN product_booking_configs bc ON bc.organization_id = st.organization_id AND bc.product_id = st.product_id
         JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
        WHERE st.channel = 'direct'
     ) record ON record.request_id = r.id
-    LEFT JOIN products p ON p.organization_id = r.organization_id AND p.id = record.product_id
+    JOIN products p ON p.organization_id = r.organization_id AND p.id = record.product_id
     WHERE r.id = ? AND r.kind = ?`, [bookingId, bookingType])
   if (!row) return null
   const { ends_at, check_out_date, check_out_time, ...context } = row

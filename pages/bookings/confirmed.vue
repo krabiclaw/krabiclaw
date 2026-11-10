@@ -8,18 +8,18 @@
       v-else-if="confirmation"
       :kicker="receiptTitle"
       :cancelled="confirmation.status === 'cancelled'"
-      :item-title="confirmation.title || organizationName"
-      :item-subtitle="itemSubtitle"
+      :item-title="isTable ? confirmation.locationName || organizationName : confirmation.title || organizationName"
+      :item-subtitle="isTable ? organizationName : itemSubtitle"
       :image-url="confirmation.imageUrl"
       :receipt-rows="receiptRows"
-      :next-steps-kicker="resolvedPolicySummary?.heading ?? t(confirmation.productKind === 'service' ? 'booking_policy.consultation_heading' : 'booking_policy.experience_heading')"
+      :next-steps-kicker="resolvedPolicySummary?.heading ?? t(isTable ? 'booking_policy.reservation_heading' : confirmation.productKind === 'service' ? 'booking_policy.consultation_heading' : 'booking_policy.experience_heading')"
       :next-steps="policyLines"
       :cta-label="browseLabel"
       :cta-to="browseHref"
       :guest-email="confirmation.guestEmail"
     >
       <template #title>
-        {{ confirmation.status === 'cancelled' ? t('site.experience_cancel.cancelled_title') : copy.thankYouLabel(confirmation.guestName) }}
+        {{ confirmation.status === 'cancelled' ? t(cancelledTitleKey) : copy.thankYouLabel(confirmation.guestName) }}
       </template>
       <template #subtitle>
         {{ receiptDescription }}
@@ -56,8 +56,8 @@ import { loadBookingConfirmation, type BookingConfirmation as BookingConfirmatio
 import BookingConfirmation from '~/components/booking/BookingConfirmation.vue'
 import { formatTimestamp } from '~/utils/timezone'
 import { paymentMoney } from '~/shared/payment-display'
-import { presentationForProduct } from '~/utils/product-presentation'
-import type { RenderedBookingPolicySummaryItem } from '~/server/utils/reservations'
+import { presentationForProduct, resolveProductPresentation } from '~/utils/product-presentation'
+import type { FormattedBookingPolicySummaryItem } from '~/server/utils/booking-policy-summary'
 
 definePageMeta({ layout: false })
 
@@ -71,10 +71,15 @@ const confirmation = ref<BookingConfirmationData | null>(null)
 const pending = ref(true)
 const loadError = ref<string | null>(null)
 const copy = computed(() => getVerticalCopy((organization as { vertical?: string | null } | null)?.vertical, locale.value))
-const presentation = computed(() => confirmation.value?.productKind ? presentationForProduct({ kind: confirmation.value.productKind }) : null)
+/** A table is a reservation: its receipt leads with the place and sends the guest back to the menu. */
+const isTable = computed(() => confirmation.value?.productKind === 'table')
+const presentation = computed(() => !confirmation.value?.productKind ? null
+  : isTable.value ? resolveProductPresentation((organization as { vertical?: string | null } | null)?.vertical)
+  : presentationForProduct({ kind: confirmation.value.productKind }))
 // Back to where the guest booked from: this location's own catalogue when the
-// booking names one, otherwise the site's.
+// booking names one, otherwise the site's; a table, the menu it was reserved against.
 const browseHref = computed(() => {
+  if (isTable.value && !confirmation.value?.locationSlug) return localePath(copy.value.reservationExploreRoute)
   if (!presentation.value) return localePath('/')
   if (!confirmation.value?.locationId && (isLegalPractice(organization.vertical) || confirmation.value?.productKind === 'service')) return localePath('/schedule')
   const locationSlug = confirmation.value?.locationSlug
@@ -87,14 +92,16 @@ const browseLabel = computed(() => confirmation.value?.productKind === 'experien
   : !confirmation.value?.locationId && (isLegalPractice(organization.vertical) || confirmation.value?.productKind === 'service')
     ? t('site_pages.schedule')
     : copy.value.reservationExploreLabel)
-const receiptTitle = computed(() => t(confirmation.value?.status === 'cancelled' ? 'site.experience_cancel.cancelled_title' : confirmation.value?.status === 'pending' ? 'booking.request_received' : 'booking.confirmed'))
+// The kind's own word, as its emails say it: a table is a reservation.
+const cancelledTitleKey = computed(() => isTable.value ? 'site.reservation_cancel.cancelled_title' : 'site.experience_cancel.cancelled_title')
+const receiptTitle = computed(() => t(confirmation.value?.status === 'cancelled' ? cancelledTitleKey.value : confirmation.value?.status === 'pending' ? 'booking.request_received' : isTable.value ? 'reservations.confirmed' : 'booking.confirmed'))
 const receiptDescription = computed(() => confirmation.value?.status === 'cancelled'
   ? t('site.experience_cancel.cancelled_desc', { date: readableDate.value })
   : t(confirmation.value?.status === 'pending' ? 'booking.pending_message' : 'booking.confirmed_message'))
 
 onMounted(async () => {
   try {
-    if (organizationId) confirmation.value = await loadBookingConfirmation(organizationId, 'booking', String((organization as ApiValue)?.name ?? ''), {
+    if (organizationId) confirmation.value = await loadBookingConfirmation(organizationId, String((organization as ApiValue)?.name ?? ''), {
       id: typeof route.query.id === 'string' ? route.query.id : '', token: route.hash.slice(1),
     }, { locale: locale.value, localePath, t })
   } catch (cause) {
@@ -125,6 +132,7 @@ const receiptRows = computed(() => {
   if ((organization as { vertical?: string | null } | null)?.vertical !== 'service') {
     rows.push({ label: copy.value.guestsLabel, value: String(confirmation.value.guests) })
   }
+  if (isTable.value) rows.push({ label: copy.value.nameLabel, value: confirmation.value.guestName })
   if (confirmation.value.requests) rows.push({ label: copy.value.specialRequestsLabel, value: confirmation.value.requests, wide: true })
   if (confirmation.value.paid) rows.push({ label: t('payment.paid'), value: paymentMoney(confirmation.value.paid.amount, confirmation.value.paid.currency) })
   return rows
@@ -141,11 +149,11 @@ const receiptRows = computed(() => {
 const resolvedPolicySummary = computed(() =>
   (confirmation.value?.policySummary as ApiRecord | undefined) ?? null)
 
-const policyLines = computed(() => (resolvedPolicySummary.value?.items ?? []).map((item: RenderedBookingPolicySummaryItem) => String(item.text ?? '')))
+const policyLines = computed(() => (resolvedPolicySummary.value?.items ?? []).map((item: FormattedBookingPolicySummaryItem) => String(item.text ?? '')))
 
 async function share() {
   if (!confirmation.value || confirmation.value.status === 'cancelled') return
-  const text = [receiptTitle.value, confirmation.value.title ?? confirmation.value.organizationName, readableDate.value, readableTime.value].join(' · ')
+  const text = [receiptTitle.value, (isTable.value ? confirmation.value.locationName : confirmation.value.title) ?? confirmation.value.organizationName, readableDate.value, readableTime.value].join(' · ')
   if (import.meta.client && navigator.share) {
     try {
       await navigator.share({ title: receiptTitle.value, text, url: window.location.origin + localePath('/') })

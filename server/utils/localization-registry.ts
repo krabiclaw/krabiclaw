@@ -58,8 +58,7 @@ export const RESOURCE_LOCALIZATION_REGISTRY: Readonly<Record<LocalizedResourceTy
     compliance: { service_area: 'text', disclaimer: 'text', footer_disclaimer: 'text' }, consultation: { cta_label: 'text' }, inquiry_questions: 'form_questions' }, route: 'none',
     publishedLegalPracticeFields: ['name', 'consultation.cta_label'] },
   business_location: { table: 'business_locations', tenantScope: 'organization_column', fields: { title: 'text', address: ADDRESS_FIELDS,
-    description: 'text', short_description: 'text', seo_title: 'text', seo_description: 'text',
-    reservation_questions: 'form_questions' }, route: 'stored' },
+    description: 'text', short_description: 'text', seo_title: 'text', seo_description: 'text' }, route: 'stored' },
   // Product SEO is owned by the canonical content document, so it is not
   // localized here: a second SEO source would be a second thing to keep true.
   product: { table: 'products', tenantScope: 'organization_column', fields: { name: 'text', description: 'text',

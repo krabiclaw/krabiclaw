@@ -3,7 +3,6 @@ import type { CloudflareEnv } from "~/server/utils/auth";
 import { queryAll, queryFirst } from "~/server/db";
 import { d1JsonStringSet } from '~/server/db/d1-limits'
 import { listUserOrganizations, resolveOrganizationMembership } from '~/server/utils/member-access'
-import { localPartsAt } from '~/utils/timezone'
 import { publicTenantVisibilitySql } from '~/server/utils/public-base'
 import { tenantOrganizationOrigin } from '~/utils/tenant-organization-origin'
 
@@ -74,97 +73,6 @@ export async function listContactSubmissions(
     ORDER BY created_at DESC
     LIMIT 200
   `, params);
-}
-
-export async function listReservationSubmissions(
-  db: D1Database,
-  organizationId: string,
-  opts: { locationId?: string | null; sinceDays?: number | null } = {},
-  window?: { limit: number; offset: number },
-) {
-  const params: (string | number)[] = [organizationId]
-  let where = `rs.kind = 'reservation' AND rs.organization_id = ?`
-  if (opts.locationId) {
-    where += ` AND res.location_id = ?`
-    params.push(opts.locationId)
-  }
-  if (opts.sinceDays) {
-    where += ` AND rs.created_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?)`
-    params.push(`-${opts.sinceDays} days`)
-  }
-  const rows = await queryAll<Record<string, unknown> & { starts_at: string; timezone: string }>(db, `
-    SELECT rs.id AS request_id, res.id AS operational_reservation_id, rs.id, rs.organization_id, res.location_id, rs.user_id, res.status, res.starts_at, res.timezone, CAST(res.party_size AS TEXT) || CASE json_extract(rs.payload_json, '$.party_size_is_minimum') WHEN 1 THEN '+' ELSE '' END AS guests, json_extract(rs.payload_json, '$.guest.name') AS name, json_extract(rs.payload_json, '$.guest.email') AS email, json_extract(rs.payload_json, '$.guest.phone') AS phone, json_extract(rs.payload_json, '$.notes') AS requests, rs.created_at, rs.updated_at, bl.title AS location_title
-    FROM requests rs
-    JOIN reservations res ON res.request_id = rs.id
-    LEFT JOIN business_locations bl ON bl.id = res.location_id
-    WHERE ${where}
-    ORDER BY rs.created_at DESC, rs.id DESC
-    ${window ? 'LIMIT ? OFFSET ?' : ''}
-  `, [...params, ...(window ? [window.limit, window.offset] : [])]);
-  // The tool states a date and a time, as the schema declares and as an
-  // assistant reads them back to the owner. The row holds one instant and the
-  // zone it belongs to, so both are read off it here rather than stored twice.
-  return rows.map((row) => {
-    const parts = localPartsAt(new Date(row.starts_at), row.timezone)
-    return {
-      ...row,
-      date: `${String(parts.year).padStart(4, '0')}-${String(parts.month).padStart(2, '0')}-${String(parts.day).padStart(2, '0')}`,
-      time: `${String(parts.hour).padStart(2, '0')}:${String(parts.minute).padStart(2, '0')}`,
-    }
-  });
-}
-
-export async function countReservationSubmissions(
-  db: D1Database,
-  organizationId: string,
-  opts: { locationId?: string | null; sinceDays?: number | null } = {},
-) {
-  const params: (string | number)[] = [organizationId]
-  let where = `rs.kind = 'reservation' AND rs.organization_id = ?`
-  if (opts.locationId) {
-    where += ` AND res.location_id = ?`
-    params.push(opts.locationId)
-  }
-  if (opts.sinceDays) {
-    where += ` AND rs.created_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?)`
-    params.push(`-${opts.sinceDays} days`)
-  }
-  const row = await queryFirst<{ total: number }>(db, `
-    SELECT COUNT(*) AS total
-    FROM requests rs JOIN reservations res ON res.request_id = rs.id
-    WHERE ${where}
-  `, params);
-  return row?.total ?? 0;
-}
-
-export async function getReservationSubmissionsByStatus(
-  db: D1Database,
-  organizationId: string,
-  opts: { locationId?: string | null; sinceDays?: number | null } = {},
-): Promise<Record<string, number>> {
-  const params: (string | number)[] = [organizationId]
-  let where = `rs.kind = 'reservation' AND rs.organization_id = ?`
-  if (opts.locationId) {
-    where += ` AND res.location_id = ?`
-    params.push(opts.locationId)
-  }
-  if (opts.sinceDays) {
-    where += ` AND rs.created_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?)`
-    params.push(`-${opts.sinceDays} days`)
-  }
-  // Status belongs to the reservation, which is the thing that is pending,
-  // confirmed or cancelled. The thread it answers has a conversation state.
-  const results = await queryAll<{ status: string; count: number }>(db, `
-    SELECT res.status, COUNT(*) as count
-    FROM requests rs JOIN reservations res ON res.request_id = rs.id
-    WHERE ${where}
-    GROUP BY res.status
-  `, params);
-  const byStatus: Record<string, number> = {}
-  for (const row of results ?? []) {
-    byStatus[row.status] = row.count
-  }
-  return byStatus
 }
 
 export async function listLocationReviews(

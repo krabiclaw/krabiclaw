@@ -1,5 +1,5 @@
 import { dismissPreviewToolbar } from './helpers'
-import { localDateAt, localNow, unresolvableLocalTime } from '../../utils/timezone'
+import { localDateAt, localDateTimeToInstant, localNow, unresolvableLocalTime } from '../../utils/timezone'
 import { createHmac } from 'node:crypto'
 import { expect, test, type APIRequestContext, type APIResponse } from '@playwright/test'
 import type {
@@ -11,6 +11,7 @@ import type {
 import { authRequestHeaders, loginAs } from './helpers/auth'
 import { mcpData, mcpRequest } from './helpers/mcp'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
+import { bookTable, openSeating, seededTables, tableSeatings } from './helpers/tables'
 import { seededTenant } from './seed/manifest'
 import { devLoginHeaders, seededSiteHeaders, testBaseUrl } from './test-env'
 import type { TaskPerson, TaskSection } from '../../server/domain/tasks'
@@ -46,8 +47,8 @@ interface DeliveryList {
 type BusinessToday = { tasks: TaskSection[]; opportunities: OpportunityView[]; opportunityIssues: string[]; assignees: TaskPerson[]; resolvedAt: string }
 
 const baseURL = testBaseUrl()
-// Contact threads run on the seeded experience business; reservations on the
-// restaurant's Brooklyn location.
+// Contact threads run on the seeded experience business; table bookings on the
+// restaurant's Brooklyn tables.
 const organizationId = () => seededTenant('experience').organizationId
 const organizationSlug = () => seededTenant('experience').slug
 const demoOrganizationId = () => seededTenant('restaurant').organizationId
@@ -91,19 +92,15 @@ function openableMinuteToday(local: { date: string; time: string }, taken: Reado
   return null
 }
 
-async function loadLocationDay(request: APIRequestContext, date: string) {
-  const response = await request.get(`/api/editor/organizations/${demoOrganizationId()}/locations/${demoLocationId()}/reservation-availability`, {
-    params: { from: date, to: date },
-  })
-  await expectStatus(response, 200)
-  const { days } = await response.json() as { days: Array<{ slots: Array<{ time_slot: string }> }> }
-  return new Set((days[0]?.slots ?? []).map(slot => slot.time_slot))
+/** The local start times of the Brooklyn tables' seatings on a day, as the guest's site offers them. */
+async function loadLocationDay(request: APIRequestContext, date: string, timezone: string) {
+  const local = (instant: string) => new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(instant)).replace(',', '')
+  return new Set((await tableSeatings(request)).map(session => local(session.starts_at)).filter(at => at.startsWith(`${date} `)).map(at => at.slice(11)))
 }
 
 /**
- * Dated hours replace the day's ordinary periods, and a slot is generated every
- * thirty minutes from the opening until an hour before closing — so a period
- * exactly sixty minutes wide yields precisely the one minute asked for.
+ * Dated hours replace the day's ordinary periods: a period exactly sixty minutes
+ * wide keeps the location open for precisely the one seating added at its start.
  */
 async function readSpecialHours(request: APIRequestContext): Promise<unknown> {
   const response = await request.get(`/api/organizations/${demoOrganizationId()}/locations/${demoLocationId()}`)
@@ -134,22 +131,14 @@ function setLocationSlot(request: APIRequestContext, slot: LocationSlot) {
 // The location's own special hours, read before the Today journey replaces them, so
 // cleanup puts back what the tenant had rather than clearing the field. Null is a
 // value here: it means the location had none, which is not the same as "leave it".
-let priorReservationDuration: { value: number | null } | null = null
 let priorSpecialHours: { value: unknown } | null = null
-// The Brooklyn location's hours and reservation capacity are shared with the calendar and MCP specs.
+// The Brooklyn location's hours and its tables are shared with the calendar and MCP specs.
 let releaseDemoLock: (() => Promise<void>) | null = null
 
 test.afterEach(async ({ page }) => {
   const release = releaseDemoLock
   releaseDemoLock = null
   try {
-    if (priorReservationDuration) {
-      const duration = priorReservationDuration.value
-      priorReservationDuration = null
-      const policy = await page.request.get(`/api/editor/organizations/${demoOrganizationId()}/locations/${demoLocationId()}/reservation-config`)
-      await expectStatus(policy,200)
-      await expectStatus(await page.request.put(`/api/editor/organizations/${demoOrganizationId()}/locations/${demoLocationId()}/reservation-config`, { data: { duration_minutes: duration, expected_updated_at: (await policy.json()).config.updated_at } }),200)
-    }
     if (!priorSpecialHours) return
     const previous = priorSpecialHours.value
     priorSpecialHours = null
@@ -684,110 +673,70 @@ for (const viewport of [
   })
 }
 
-test('Calendar retains confirmed reservations and their detail sends one change request', async ({ page }, testInfo) => {
+test('Calendar retains confirmed table bookings and their detail sends one change request', async ({ page }, testInfo) => {
   test.skip(!writable, 'Today writes require disposable local or preview data')
   releaseDemoLock = await acquireTenantMutationLock(testInfo, demoOrganizationId())
   await loginAs(page.request, baseURL)
-
-  const reservationConfig = `/api/editor/organizations/${demoOrganizationId()}/locations/${demoLocationId()}/reservation-config`
-  const priorPolicy = await page.request.get(reservationConfig)
-  await expectStatus(priorPolicy,200)
-  const policy = (await priorPolicy.json()).config
-  priorReservationDuration = { value: policy.duration_minutes }
-  await expectStatus(await page.request.put(reservationConfig,{data:{duration_minutes:60,expected_updated_at:policy.updated_at}}),200)
 
   const now = Date.now()
   const firstName = 'Maya'
   const guestName = `${firstName} Chen`
   const guestEmail = `maya-${now}@example.test`
-  const availability = await page.request.get('/api/public/reservations/availability', {
-    params: { date: new Date(now).toISOString().slice(0, 10), location_id: demoLocationId() },
-    headers: seededSiteHeaders('restaurant'),
-  })
-  await expectStatus(availability, 200)
-  const { timezone } = await availability.json() as { timezone: string }
-  expect(timezone).toEqual(expect.any(String))
-  // The Today tab shows only bookings whose day key equals the *location's* current
-  // local day (listTodayAgenda), and listReservationSlots drops every slot already in
-  // the past. the Brooklyn location's ordinary hours end at 22:00 America/New_York, so once a
-  // run starts after that, the location's today has no bookable
-  // slot left and a guest who "arrives today" cannot be created at all. Dated hours for
-  // the rest of today are what special hours exist for, so the test opens one instead of
-  // depending on the hour CI happens to start.
-  // One reading of the location's clock feeds both the calendar lookup and the chosen
-  // minute; reading it twice could straddle local midnight and write the hours to a
-  // different day than the one checked for collisions.
+  const timezone = seededTenant('restaurant').locations.brooklyn!.timezone
+  // The Today tab shows only bookings whose day key equals the location's current local day, and
+  // the site offers no seating already past. Brooklyn's ordinary hours end at 22:00, so once a run
+  // starts after the last seating there is nothing left to book today. The owner adds a seating for
+  // the rest of today, and dated hours keep the location open for it, rather than depending on the
+  // hour CI happens to start. One reading of the location's clock feeds both the lookup and the
+  // chosen minute; reading it twice could straddle local midnight.
   const localToday = localNow(timezone)
-  const todaySlot = openableMinuteToday(localToday, await loadLocationDay(page.request, localToday.date), timezone)
+  const todaySlot = openableMinuteToday(localToday, await loadLocationDay(page.request, localToday.date, timezone), timezone)
   test.skip(
     !todaySlot,
-    `${timezone} is within ${TODAY_SLOT_LEAD_MINUTES} minutes of midnight, so no reservation can still arrive today`,
+    `${timezone} is within ${TODAY_SLOT_LEAD_MINUTES} minutes of midnight, so no table can still be booked for today`,
   )
   priorSpecialHours = { value: await readSpecialHours(page.request) }
   await expectStatus(await setLocationSlot(page.request, todaySlot!), 200)
+  const todayStart = localDateTimeToInstant(todaySlot!.date, todaySlot!.time, timezone, 'reject')
+  const added = await page.request.post(`/api/editor/organizations/${demoOrganizationId()}/products/${seededTables().id}/sessions`, { data: {
+    location_id: demoLocationId(), starts_at: todayStart.toISOString(), ends_at: new Date(todayStart.getTime() + 60 * 60_000).toISOString(), capacity: 10, idempotency_key: crypto.randomUUID(),
+  } })
+  await expectStatus(added, 201)
+  const todaySeating = (await tableSeatings(page.request)).find(session => session.starts_at === todayStart.toISOString())
+  expect(todaySeating, 'The seating added for today is offered on the site').toBeDefined()
 
   const bookingIds: string[] = []
-  for (const [name, email, plan] of [
-    [guestName, guestEmail, todaySlot!],
-    // Two days out, so the change request below is inside the 24-hour change window whatever the hour.
-    ['Priya Patel', `priya-${now}@example.test`, now + 2 * 86_400_000],
+  // Two days out, so the change request below is inside the 24-hour change window whatever the hour.
+  for (const [name, email, seating] of [
+    [guestName, guestEmail, todaySeating!],
+    ['Priya Patel', `priya-${now}@example.test`, await openSeating(page.request, 2, 2 * 86_400_000)],
   ] as const) {
-    let date: string
-    let time: string
-    if (typeof plan === 'number') {
-      // The upcoming guest only has to land on some later day the location is open,
-      // so it takes the location's own availability and walks forward to find one.
-      let slot: { time_slot: string } | undefined
-      date = localDateAt(new Date(plan), timezone)
-      for (let dayOffset = 0; dayOffset < 4 && !slot; dayOffset += 1) {
-        date = localDateAt(new Date(plan + dayOffset * 86_400_000), timezone)
-        const day = await page.request.get('/api/public/reservations/availability', { params: { date, location_id: demoLocationId() }, headers: seededSiteHeaders('restaurant') })
-        await expectStatus(day, 200)
-        // is_closed answers whether the location serves the time, not whether anyone is
-        // left to seat: a slot at capacity comes back is_full with is_closed false, and
-        // booking it fails the POST with a 409 the loop could have avoided by trying the
-        // next slot or the next day.
-        const { dates } = await day.json() as { dates: Array<{ slots: Array<{ time_slot: string; is_closed: boolean; is_full: boolean }> }> }
-        slot = dates[0]?.slots.filter(candidate => !candidate.is_closed && !candidate.is_full).at(-1)
-      }
-      expect(slot, `The Brooklyn location offers no open slot within four days of ${localDateAt(new Date(plan), timezone)}`).toBeTruthy()
-      time = slot!.time_slot
-    } else {
-      ({ date, time } = plan)
-    }
-    const response = await page.request.post('/api/public/reservations', {
-      headers: seededSiteHeaders('restaurant'),
-      data: { name, email, phone: '+12025550123', date, time, guests: '2', location_id: demoLocationId(), idempotency_key: crypto.randomUUID() },
-    })
-    await expectStatus(response, 201)
-    const { id } = await response.json() as { id: string }
-    expect(id).toEqual(expect.any(String))
-    bookingIds.push(id)
+    bookingIds.push((await bookTable(page.request, { name, email, phone: '+12025550123', partySize: 2, seating })).requestId)
   }
   const upcomingBookingId = bookingIds[1]!
 
   await dismissPreviewToolbar(page)
 
   await page.goto(`${baseURL}/dashboard/${demoSlug()}`)
-  // Confirmed bookings are Calendar commitments, not tasks for Today: neither reservation opened one.
+  // A table is held by the member its tables name: today's is theirs to prepare for on Today.
   const todayResponse = await page.request.get('/api/dashboard/today', { params: { org: demoSlug() } })
   await expectStatus(todayResponse, 200)
   const todayFeed = await todayResponse.json() as BusinessToday
-  expect(todayFeed.tasks.flatMap(section => section.tasks).filter(task => task.requestId !== null && bookingIds.includes(task.requestId))).toEqual([])
+  expect(todayFeed.tasks.flatMap(section => section.tasks).filter(task => task.requestId === bookingIds[0]).map(task => task.kind)).toContain('consultation_prep')
   const agendaResponse = await page.request.get('/api/dashboard/agenda', { params: { org: demoSlug(), from: localToday.date, to: localDateAt(new Date(now + 5 * 86_400_000), timezone) } })
   await expectStatus(agendaResponse, 200)
   const agenda = await agendaResponse.json() as { items: Array<{ id: string; to: string; startsAt: string }> }
-  const reservation = agenda.items.find(item => item.id === `reservation:${bookingIds[0]}`)
-  expect(reservation?.to).toBe(`/dashboard/${demoSlug()}/bookings/reservation/${bookingIds[0]}`)
+  const reservation = agenda.items.find(item => item.id === `booking:${bookingIds[0]}`)
+  expect(reservation?.to).toBe(`/dashboard/${demoSlug()}/bookings/booking/${bookingIds[0]}`)
   await expect(page.getByRole('tab', { name: 'Today', exact: true })).toBeVisible()
   await expect(page.getByRole('tab', { name: 'Upcoming', exact: true })).toBeVisible()
 
   const upcomingResponse = await page.request.get('/api/dashboard/today', { params: { org: demoSlug(), range: 'upcoming' } })
   await expectStatus(upcomingResponse, 200)
   const upcomingFeed = await upcomingResponse.json() as BusinessToday
-  expect(upcomingFeed.tasks.flatMap(section => section.tasks).filter(task => task.requestId !== null && bookingIds.includes(task.requestId))).toEqual([])
-  const upcomingReservation = agenda.items.find(item => item.id === `reservation:${upcomingBookingId}`)
-  expect(upcomingReservation?.to).toBe(`/dashboard/${demoSlug()}/bookings/reservation/${upcomingBookingId}`)
+  expect(upcomingFeed.tasks.flatMap(section => section.tasks).filter(task => task.requestId === upcomingBookingId).map(task => task.kind)).toContain('consultation_prep')
+  const upcomingReservation = agenda.items.find(item => item.id === `booking:${upcomingBookingId}`)
+  expect(upcomingReservation?.to).toBe(`/dashboard/${demoSlug()}/bookings/booking/${upcomingBookingId}`)
   expect(localDateAt(new Date(upcomingReservation!.startsAt), timezone) > localToday.date).toBe(true)
 
   await page.goto(`${baseURL}${reservation!.to}`)
@@ -797,7 +746,7 @@ test('Calendar retains confirmed reservations and their detail sends one change 
   await expect(page.getByText(guestEmail, { exact: true })).toHaveCount(0)
   const detailPanel = page.locator('#dashboard-panel-booking-details')
   const body = detailPanel.locator(':scope > [data-slot="body"]')
-  const summaryResponse = await page.request.get(`/api/dashboard/bookings/reservation/${bookingIds[0]}`, { params: { org: demoSlug() } })
+  const summaryResponse = await page.request.get(`/api/dashboard/bookings/booking/${bookingIds[0]}`, { params: { org: demoSlug() } })
   await expectStatus(summaryResponse, 200)
   const summary = (await summaryResponse.json() as { booking: DashboardBookingDetails }).booking
   expect(summary).toMatchObject({ guestName, guestPhone: '+12025550123', partySize: 2 })
@@ -916,9 +865,9 @@ test('Calendar retains confirmed reservations and their detail sends one change 
   await page.goBack()
 
   const note = `Today page note ${Date.now()}`
-  const noteContext = `?range=upcoming&locationId=${demoLocationId()}&kinds=reservation`
-  const recordPath = `/dashboard/${demoSlug()}/bookings/reservation/${bookingIds[0]}`
-  const noteEndpoint = `/api/dashboard/bookings/reservation/${bookingIds[0]}/notes`
+  const noteContext = `?range=upcoming&locationId=${demoLocationId()}&kinds=booking`
+  const recordPath = `/dashboard/${demoSlug()}/bookings/booking/${bookingIds[0]}`
+  const noteEndpoint = `/api/dashboard/bookings/booking/${bookingIds[0]}/notes`
   await page.goto(`${baseURL}${recordPath}${noteContext}`)
   const noteInput = detailPanel.getByRole('textbox', { name: 'Add a note to yourself', exact: true })
   await noteInput.fill(note)
@@ -989,10 +938,10 @@ test('Calendar retains confirmed reservations and their detail sends one change 
   await expect(page.getByLabel('Date', { exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Send request', exact: true })).toBeVisible()
 
-  const changeContext = `?range=upcoming&locationId=${demoLocationId()}&kinds=reservation`
-  await page.goto(`${baseURL}/dashboard/${demoSlug()}/bookings/reservation/${upcomingBookingId}/change${changeContext}`)
+  const changeContext = `?range=upcoming&locationId=${demoLocationId()}&kinds=booking`
+  await page.goto(`${baseURL}/dashboard/${demoSlug()}/bookings/booking/${upcomingBookingId}/change${changeContext}`)
   const beforeResponse = await page.request.get(
-    `/api/dashboard/bookings/reservation/${upcomingBookingId}`,
+    `/api/dashboard/bookings/booking/${upcomingBookingId}`,
     { params: { org: demoSlug() } },
   )
   await expectStatus(beforeResponse, 200)
@@ -1004,13 +953,13 @@ test('Calendar retains confirmed reservations and their detail sends one change 
   const requestedAt = new Date().toISOString()
   const requestCompleted = page.waitForResponse(response =>
     response.request().method() === 'POST'
-    && new URL(response.url()).pathname.endsWith(`/api/dashboard/bookings/reservation/${upcomingBookingId}/changes`),
+    && new URL(response.url()).pathname.endsWith(`/api/dashboard/bookings/booking/${upcomingBookingId}/changes`),
   )
   await page.getByRole('button', { name: 'Send request', exact: true }).click()
   const changeResponse = await requestCompleted
   expect(changeResponse.status(), await changeResponse.text()).toBe(200)
   await expect(page.getByRole('heading', { name: 'Coming up', exact: true })).toBeVisible({ timeout: 30_000 })
-  await expect(page).toHaveURL(`${baseURL}/dashboard/${demoSlug()}/bookings/reservation/${upcomingBookingId}${changeContext}`)
+  await expect(page).toHaveURL(`${baseURL}/dashboard/${demoSlug()}/bookings/booking/${upcomingBookingId}${changeContext}`)
 
   const detail = await loadThreadDetail(page.request, before.booking.threadId, demoOrganizationId())
   const requests = streamChanges(detail).filter(item => item.sentAt >= requestedAt)
@@ -1036,7 +985,7 @@ test('Calendar retains confirmed reservations and their detail sends one change 
     await expect(page.getByText('Your booking has been updated.', { exact: true })).toBeVisible()
 
     const afterResponse = await page.request.get(
-      `/api/dashboard/bookings/reservation/${upcomingBookingId}`,
+      `/api/dashboard/bookings/booking/${upcomingBookingId}`,
       { params: { org: demoSlug() } },
     )
     await expectStatus(afterResponse, 200)
@@ -1048,7 +997,7 @@ test('Calendar retains confirmed reservations and their detail sends one change 
   }
 })
 
-test('buyer conversation approves and declines canonical changes without moving a pending reservation', async ({ page, playwright }, testInfo) => {
+test('buyer conversation approves and declines canonical changes without moving a pending table booking', async ({ page, playwright }, testInfo) => {
   test.skip(!local, 'Buyer decisions and log-only delivery use disposable local data')
   releaseDemoLock = await acquireTenantMutationLock(testInfo, demoOrganizationId())
   const owner = await playwright.request.newContext({ baseURL })
@@ -1056,20 +1005,8 @@ test('buyer conversation approves and declines canonical changes without moving 
   try {
     await loginAs(owner, baseURL, 'user-e2e-demo-owner')
     await loginAs(page.request, baseURL, 'user-e2e-buyer')
-    // The slot sits at least two full
-    // days out whatever the location's clock says relative to this run's.
-    let slot: { date: string; time: string } | null = null
-    for (let offset = 3; offset <= 9 && !slot; offset++) {
-      const date = new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10)
-      const available = await page.request.get('/api/public/reservations/availability', {
-        params: { date, location_id: demoLocationId() }, headers: seededSiteHeaders('restaurant'),
-      })
-      await expectStatus(available, 200)
-      const { dates } = await available.json() as { dates: Array<{ slots: Array<{ time_slot: string; is_closed: boolean; is_full: boolean }> }> }
-      const time = dates[0]?.slots.find(candidate => !candidate.is_closed && !candidate.is_full)?.time_slot
-      if (time) slot = { date, time }
-    }
-    expect(slot, 'The existing restaurant fixture has a future reservable time').not.toBeNull()
+    // The seating sits at least three full days out whatever the location's clock says relative to this run's.
+    const seating = await openSeating(page.request, 2, 3 * 86_400_000)
     // The guest's own Messages count: their conversations with a business reply they have not read.
     const guestUnread = async () => {
       const response = await page.request.get('/api/dashboard/notifications/unread-count', { params: { scope: 'personal' } })
@@ -1077,23 +1014,18 @@ test('buyer conversation approves and declines canonical changes without moving 
       return (await response.json() as { unread_conversations: number }).unread_conversations
     }
     const unreadBefore = await guestUnread()
-    const created = await page.request.post('/api/public/reservations', {
-      headers: seededSiteHeaders('restaurant'),
-      data: { name: 'E2E Buyer', email: 'buyer@playwright.example', phone: '+12025550123', ...slot!, guests: '1', location_id: demoLocationId(), idempotency_key: crypto.randomUUID() },
-    })
-    await expectStatus(created, 201)
-    threadId = (await created.json() as { request_id: string }).request_id
+    threadId = (await bookTable(page.request, { name: 'E2E Buyer', email: 'buyer@playwright.example', phone: '+12025550123', partySize: 1, seating })).requestId
     const read = async () => {
-      const response = await owner.get(`/api/dashboard/bookings/reservation/${threadId}`, { params: { org: demoSlug() } })
+      const response = await owner.get(`/api/dashboard/bookings/booking/${threadId}`, { params: { org: demoSlug() } })
       await expectStatus(response, 200)
-      return (await response.json() as { booking: { updatedAt: string; bookingDate: string; bookingTime: string; partySize: number; locationId: string } }).booking
+      return (await response.json() as { booking: { updatedAt: string; bookingDate: string; bookingTime: string; partySize: number; locationId: string; sessionId: string } }).booking
     }
     const original = await read()
     const requestChange = async (partySize: number) => {
       const current = await read()
-      const response = await owner.post(`/api/dashboard/bookings/reservation/${threadId}/changes`, {
+      const response = await owner.post(`/api/dashboard/bookings/booking/${threadId}/changes`, {
         params: { org: demoSlug() },
-        data: { kind: 'reservation', locationId: current.locationId, bookingDate: current.bookingDate, bookingTime: current.bookingTime.slice(0, 5), partySize, expectedUpdatedAt: current.updatedAt, idempotencyKey: crypto.randomUUID() },
+        data: { kind: 'booking', sessionId: current.sessionId, partySize, expectedUpdatedAt: current.updatedAt, idempotencyKey: crypto.randomUUID() },
       })
       await expectStatus(response, 200)
       const detail = await loadThreadDetail(owner, threadId!, demoOrganizationId())
@@ -1148,7 +1080,7 @@ test('buyer conversation approves and declines canonical changes without moving 
     const replayed = await loadThreadDetail(owner, threadId, demoOrganizationId())
     expect(streamChanges(replayed).find(item => item.id === second.id)?.change.status).toBe('accepted')
     expect(streamEvents(replayed, 'E2E Buyer’s change was accepted')).toHaveLength(1)
-    await page.goto(`${baseURL}/dashboard/account/activity/reservation/${threadId}`)
+    await page.goto(`${baseURL}/dashboard/account/activity/booking/${threadId}`)
     await page.getByRole('button', { name: 'Manage reservation', exact: true }).click()
     await page.getByRole('link', { name: 'Send a change request', exact: true }).click()
     await expect(page).toHaveURL(`${baseURL}/dashboard/account/messages/${threadId}?intent=booking-change`)

@@ -80,7 +80,7 @@ export type ExecuteOperationInput = {
 interface ThreadContext {
   thread: GuestThreadRow
   /**
-   * The booking or reservation this thread refers to, loaded once.
+   * The booking this thread refers to, loaded once.
    *
    * Operational status lives there, not on the thread, so every transition
    * below reads and writes that record. A contact thread has none.
@@ -89,7 +89,7 @@ interface ThreadContext {
 }
 
 interface SourceMutationPlan {
-  kind: 'reservation' | 'booking'
+  kind: 'booking'
   action: 'confirm' | 'reject' | 'cancel'
   beforeStatus: string
   afterStatus: 'confirmed' | 'cancelled'
@@ -149,7 +149,7 @@ function sourceMutationPlan(context: ThreadContext, action: string): SourceMutat
   const { kind, status: beforeStatus } = context.record
   // Pending review and confirmed appointments share the same temporal guard.
   if (context.record.ends_at <= new Date().toISOString() || isBookingComplete(context.record, new Date().toISOString())) return null
-  if (kind === 'booking' && beforeStatus === 'pending' && (action === 'confirm' || action === 'reject')) {
+  if (beforeStatus === 'pending' && (action === 'confirm' || action === 'reject')) {
     return { kind, action, beforeStatus, afterStatus: action === 'confirm' ? 'confirmed' : 'cancelled', requiresNotification: true }
   }
   if ((beforeStatus === 'confirmed' || beforeStatus === 'pending') && action === 'cancel') {
@@ -159,15 +159,12 @@ function sourceMutationPlan(context: ThreadContext, action: string): SourceMutat
 }
 
 /**
- * The record has not finished yet, as the database sees it.
- *
- * A reservation holds its own end; a booking's is on its session. The first
- * guarded ledger insert checks this once for the atomic mutation batch.
+ * The booking has not finished yet, as the database sees it: its end is on
+ * its session. The first guarded ledger insert checks this once for the atomic
+ * mutation batch.
  */
-function sourceStillRunningSql(plan: SourceMutationPlan, table: string): string {
-  return plan.kind === 'reservation'
-    ? `${table}.ends_at > strftime('%Y-%m-%dT%H:%M:%fZ','now')`
-    : `EXISTS (SELECT 1 FROM product_sessions s WHERE s.id = ${table}.product_session_id AND s.ends_at > strftime('%Y-%m-%dT%H:%M:%fZ','now'))`
+function sourceStillRunningSql(table: string): string {
+  return `EXISTS (SELECT 1 FROM product_sessions s WHERE s.id = ${table}.product_session_id AND s.ends_at > strftime('%Y-%m-%dT%H:%M:%fZ','now'))`
 }
 
 function operationEntryQuery(
@@ -192,9 +189,9 @@ function operationEntryQuery(
         -- Guarded on the state of the record that holds the seats, because the
         -- thread has no status of its own: two dashboards acting at once must
         -- not both write an entry for the same transition.
-        AND EXISTS (SELECT 1 FROM ${plan.kind === 'reservation' ? 'reservations src' : 'bookings src JOIN product_sessions occurrence ON occurrence.id=src.product_session_id AND occurrence.organization_id=src.organization_id AND occurrence.product_id=src.product_id'}
-                     WHERE src.request_id = gt.id AND src.organization_id=gt.organization_id AND src.status = ? AND ${sourceStillRunningSql(plan, 'src')}
-                       AND json_array(src.id,src.party_size,${plan.kind === 'reservation' ? 'NULL,src.starts_at,src.ends_at,src.timezone,src.location_id' : 'src.product_id,occurrence.starts_at,occurrence.ends_at,occurrence.timezone,occurrence.location_id'},json_extract(gt.payload_json,'$.party_size_is_minimum'))=json_array(?,CAST(? AS INTEGER),?,?,?,?,?,CAST(? AS INTEGER)))
+        AND EXISTS (SELECT 1 FROM bookings src JOIN product_sessions occurrence ON occurrence.id=src.product_session_id AND occurrence.organization_id=src.organization_id AND occurrence.product_id=src.product_id
+                     WHERE src.request_id = gt.id AND src.organization_id=gt.organization_id AND src.status = ? AND ${sourceStillRunningSql('src')}
+                       AND json_array(src.id,src.party_size,src.product_id,occurrence.starts_at,occurrence.ends_at,occurrence.timezone,occurrence.location_id,json_extract(gt.payload_json,'$.party_size_is_minimum'))=json_array(?,CAST(? AS INTEGER),?,?,?,?,?,CAST(? AS INTEGER)))
         AND (${financialGuard?.query ?? '1=1'})
       ON CONFLICT(dedupe_key) DO NOTHING
     `,
@@ -239,14 +236,13 @@ function operationEntryQuery(
  * confirming at once cannot both win.
  */
 function sourceUpdateQuery(context: ThreadContext, plan: SourceMutationPlan, input: ExecuteOperationInput, entryId: string, now: string): BatchQuery {
-  const table = plan.kind === 'reservation' ? 'reservations' : 'bookings'
   const stamps = plan.afterStatus === 'cancelled' ? ', cancelled_at = COALESCE(cancelled_at, ?), cancellation_reason = ?' : ''
   const stampParams = plan.afterStatus === 'cancelled' ? [now, plan.action === 'reject' ? 'host_rejected' : 'host_cancelled'] : []
   // The first ledger insert already checked the live source and end time.
   // This statement follows it in the same atomic batch, without a second clock gate.
   return {
     query: `
-      UPDATE ${table}
+      UPDATE bookings
       SET status = ?, updated_at = ?${stamps}
       WHERE id = ? AND status = ?
         AND EXISTS (SELECT 1 FROM activity_entries WHERE id = ?)
@@ -290,7 +286,6 @@ async function getOrganizationBrandName(db: DbClient, organizationId: string): P
 
 function replySubject(submissionType: GuestThreadSubmissionType, fromName: string): string {
   if (submissionType === 'contact') return `Re: your message to ${fromName}`
-  if (submissionType === 'reservation') return `Re: your reservation at ${fromName}`
   return `Re: your booking at ${fromName}`
 }
 
@@ -314,7 +309,7 @@ async function renderMemberReply(env: ReplyEmailEnv, db: DbClient, organizationI
 }
 
 async function renderStatusUpdate(env: ReplyEmailEnv, db: DbClient, context: ThreadContext, action: SourceMutationPlan['action'], to: string, locationName: string | null) {
-  if (!context.record) throw new Error('This thread has no booking or reservation')
+  if (!context.record) throw new Error('This thread has no booking')
   const fromName = await getOrganizationBrandName(db, context.thread.organization_id)
   const guest = await guestPresentation(db, {
     organizationId: context.thread.organization_id, organizationName: fromName,
@@ -323,12 +318,13 @@ async function renderStatusUpdate(env: ReplyEmailEnv, db: DbClient, context: Thr
     locationId: context.record.location_id, locationName,
   })
   const labels = platformLocale(guest.locale)!.messages
+  const table = context.record.product_kind === 'table'
   const titleKey = action === 'reject' ? 'booking.request_declined'
-    : action === 'confirm' ? context.thread.kind === 'reservation' ? 'reservations.confirmed' : 'booking.confirmed'
-      : context.thread.kind === 'reservation' ? 'site.reservation_cancel.cancelled_title' : 'site.experience_cancel.cancelled_title'
+    : action === 'confirm' ? table ? 'reservations.confirmed' : 'booking.confirmed'
+      : table ? 'site.reservation_cancel.cancelled_title' : 'site.experience_cancel.cancelled_title'
   const subject = `${labels[titleKey]} — ${guest.productTitle ?? guest.organizationName}`
   const org = await queryFirst<{ vertical: string | null }>(db, 'SELECT vertical FROM organization WHERE id = ?', [context.thread.organization_id])
-  const presentation = resolveBookingPresentation(context.thread.kind === 'reservation' ? 'reservation' : 'booking', org?.vertical)
+  const presentation = resolveBookingPresentation(context.record.product_kind, org?.vertical)
   const countStr = `${context.record.party_size}${partySizeIsMinimum(context.thread) ? '+' : ''}`
   const guests = presentation.formatCount(countStr)
   const body = [guest.locationName, formatTimestamp(context.record.starts_at, guest.locale, context.record.timezone, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }), guests].filter(Boolean).join(' · ')
@@ -435,7 +431,7 @@ async function executeSourceMutation(
   const entryId = crypto.randomUUID()
   const deliveryId = deliveryDedupeKey(input)
   const now = new Date().toISOString()
-  // A reservation or booking always has its guest's email (requests.ts `guest`); one without is broken data.
+  // A booking always has its guest's email (requests.ts `guest`); one without is broken data.
   if (plan.requiresNotification && !summary.guestEmail) throw new Error(`${plan.kind} conversation ${context.thread.id} has no guest email`)
   const email = plan.requiresNotification && summary.guestEmail
     ? await renderStatusUpdate(input.env, db, context, plan.action, summary.guestEmail, summary.locationTitle)
@@ -830,7 +826,7 @@ export async function executeGuestThreadOperation(db: DbClient, input: ExecuteOp
   return await executeSourceMutation(db, context, input)
 }
 
-const NO_SHOW_TABLES = { reservation: 'reservations', booking: 'bookings', stay: 'stays' } as const
+const NO_SHOW_TABLES = { booking: 'bookings', stay: 'stays' } as const
 
 /**
  * Record that the guest did not come. The visit keeps its status; its review

@@ -7,10 +7,9 @@ import { H3, H3Event } from 'h3'
 import * as schema from '../../server/db/schema.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
-import { createSession, setProductBookingConfig } from '../../server/utils/availability.ts'
+import { createSession, listSessions, setProductBookingConfig } from '../../server/utils/availability.ts'
 import { createProductBooking } from '../../server/domain/product-bookings.ts'
-import { createTableReservation } from '../../server/domain/table-reservations.ts'
-import { upsertLocationReservationConfig } from '../../server/utils/reservations.ts'
+import { createTables } from './support/table-product.ts'
 import { createStay, updateStayHome, type StayAccess } from '../../server/domain/stays.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
 import { listOpportunities } from '../../server/domain/opportunities.ts'
@@ -131,10 +130,14 @@ test('Today shows every booking type as a reservation card for its own business,
       adults: 2, children: 0, guest_name: 'Diana', guest_surname: 'Lee', guest_email: 'diana@proof.example', total_minor: 45_000 })
     assert.ok(stay.request_id, 'a stay with a guest email has a conversation')
 
-    // A table reservation.
-    await upsertLocationReservationConfig(db, { organizationId: 'bistro', locationId: 'bistro-site', patch: { duration_minutes: 90, slot_capacity: 20 }, actorId: OWNER })
-    const table = await createTableReservation(event(), { organizationId: 'bistro', financialWritesAllowed: false, operator: operator('nora-table'),
-      body: { name: 'Nora Park', email: 'nora@proof.example', phone: '+66812345679', date: inTwoDays, time: '18:00', guests: '4', location_id: 'bistro-site' } })
+    // A table reservation: a booking of the bistro's tables at 18:00.
+    const tables = await createTables(db, env, { organizationId: 'bistro', locationId: 'bistro-site', actorId: OWNER, memberId: 'bistro-owner', name: 'Bistro table',
+      durationMinutes: 90, seats: 20, open: '17:00', lastSeating: '20:00' })
+    const evening = localDateTimeToInstant(inTwoDays, '18:00', ZONE, 'compatible').toISOString()
+    const seating = (await listSessions(db, { env, organizationId: 'bistro', productId: tables.id, fromInstant: evening, toInstant: new Date(Date.parse(evening) + 1).toISOString() }))[0]
+    assert.equal(seating?.starts_at, evening)
+    const table = await createProductBooking(event(), { organizationId: 'bistro', slug: tables.slug, financialWritesAllowed: false, operator: operator('nora-table'),
+      body: { guest_name: 'Nora Park', guest_email: 'nora@proof.example', guest_phone: '+66812345679', session_id: seating!.id, party_size: 4 } })
     assert.equal(table.status, 201, JSON.stringify(table.body))
 
     const law = await today('law', 'upcoming'), studio = await today('studio', 'upcoming'), inn = await today('inn', 'upcoming'), bistro = await today('bistro', 'upcoming')
@@ -155,7 +158,7 @@ test('Today shows every booking type as a reservation card for its own business,
     assert.equal(inn.reservations.cards[0]!.stayId, stay.id)
     // A restaurant has no host-written preparation, so its reservation has no suggestion.
     assert.deepEqual(bistro.reservations.cards.map(shape), [
-      { kind: 'reservation', requestId: table.body.request_id, headline: 'Nora’s group of 4', resourceName: 'bistro office', suggestion: null },
+      { kind: 'booking', requestId: table.body.request_id, headline: 'Nora’s group of 4', resourceName: 'bistro office', suggestion: null },
     ])
     assert.equal(bistro.reservations.title, 'You have 1 upcoming reservation')
     // Upcoming bookings are not today's.

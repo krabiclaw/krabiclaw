@@ -63,7 +63,7 @@ export function composeBuyerActivityUrl(env: DashboardNotificationLinkEnv, kind:
 
 /** Omit account management for unowned/imported records; never guess a buyer or visit. */
 export async function buildBuyerRequestActivityUrl(env: DashboardNotificationLinkEnv, db: DbClient, opts: { organizationId: string; threadId: string }): Promise<string | null> {
-  const owner = await queryFirst<{ user_id: string }>(db, `SELECT r.user_id FROM requests r WHERE r.id=? AND r.organization_id=? AND r.kind IN ('booking','reservation','stay') AND ${REQUEST_CURRENT_BUYER_SQL}`, [opts.threadId, opts.organizationId])
+  const owner = await queryFirst<{ user_id: string }>(db, `SELECT r.user_id FROM requests r WHERE r.id=? AND r.organization_id=? AND r.kind IN ('booking','stay') AND ${REQUEST_CURRENT_BUYER_SQL}`, [opts.threadId, opts.organizationId])
   if (!owner) return null
   const path = await buyerRequestActivityPath(db, owner.user_id, opts.threadId)
   return isAccountActivityPath(path) ? new URL(path, platformOrigin(env)).href : null

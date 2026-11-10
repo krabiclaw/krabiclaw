@@ -28,13 +28,13 @@ const trigger = computed(() => schedule.value.trigger)
 const vocabulary = computed(() => scheduleVocabulary(editor.vertical.value))
 // Every offering the workspace takes bookings for; a list of homes alone keeps the homes' words.
 const homesOnly = computed(() => editor.offerings.value.length > 0 && editor.offerings.value.every(offering => offering.kind === 'stay'))
-const kindLabel = (kind: 'stay' | 'experience' | 'service' | 'reservation') => kind === 'experience' ? EXPERIENCE_PRESENTATION.itemLabel
-  : kind === 'service' ? resolveBookingPresentation('booking', 'service').label : kind === 'reservation' ? resolveBookingPresentation('reservation', editor.vertical.value).labelPlural : 'Home'
+const kindLabel = (kind: 'stay' | 'experience' | 'service' | 'table') => kind === 'experience' ? EXPERIENCE_PRESENTATION.itemLabel
+  : kind === 'service' ? resolveBookingPresentation('service', 'service').label : kind === 'table' ? resolveBookingPresentation('table', editor.vertical.value).labelPlural : 'Home'
 const offeringItems = computed(() => editor.offerings.value.map(offering => ({
   label: offering.name, value: offering.id,
   description: [homesOnly.value ? null : kindLabel(offering.kind), offering.timezone].filter(Boolean).join(' · '),
 })))
-// productIds names each offering: a product, or a location for its table reservations.
+// productIds names each offering, a location's tables included.
 const selected = computed({
   get: () => schedule.value.productIds,
   set: (values: string[]) => {

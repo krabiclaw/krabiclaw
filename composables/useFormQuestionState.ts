@@ -7,7 +7,7 @@ import { changedFormQuestions, formAnswerErrors, formAnswersInput, reconcileForm
  * A booking form's own questions while it is open: the questions and revision
  * it was built from, what the server refused, and the review a visitor is
  * asked for when the questions changed underneath them. Session, stay and
- * reservation booking all keep it the same way.
+ * table booking all keep it the same way.
  */
 export function useFormQuestionState(source: MaybeRefOrGetter<{ questions: FormQuestion[]; questions_revision: string } | null>, draft: Ref<FormAnswerDraft>) {
   const { t } = useI18n()

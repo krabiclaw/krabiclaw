@@ -10,7 +10,7 @@ export const todayCardSchema = z.object({
   id: z.string(), to: z.string(), eyebrow: z.string(), headline: z.string(), description: z.string().nullable(),
   imageUrl: z.string().nullable(), imageIcon: z.string(),
   locationId: z.string().nullable(),
-  bookingKind: z.enum(['reservation', 'booking', 'stay']),
+  bookingKind: z.enum(['booking', 'stay']),
   stayId: z.string().nullable(),
   productId: z.string().nullable(),
   occurrenceAt: z.iso.datetime({ offset: true }).nullable(), timeZone: z.string(),
@@ -21,7 +21,7 @@ export type TodayFeedPayload = z.infer<typeof todayFeedSchema>
 
 /** A guest account's visit as a Today card. */
 export function agendaToTodayCard(item: AgendaItem, input: { resolvedAt: string }): TodayCard {
-  if (item.kind !== 'reservation' && item.kind !== 'booking' && item.kind !== 'stay') throw new Error('Today cards require a booking, reservation or stay')
+  if (item.kind !== 'booking' && item.kind !== 'stay') throw new Error('Today cards require a booking or stay')
   const referenceDay = localDateAt(new Date(input.resolvedAt), item.timeZone)
   const distance = Math.round((Date.parse(`${item.dayKey}T00:00:00Z`) - Date.parse(`${referenceDay}T00:00:00Z`)) / 86_400_000)
   const when = distance <= 0 ? 'today' : distance === 1 ? 'tomorrow' : `in ${distance} days`
@@ -47,9 +47,9 @@ export const UPCOMING_RESERVATION_DAYS = 30
  * the app compose nothing. It is read from the canonical agenda.
  */
 export interface TodayReservation {
-  /** The agenda item: `booking:<request>`, `reservation:<request>`, `stay:<stay>:<arrival|departure|current>`. */
+  /** The agenda item: `booking:<request>`, `stay:<stay>:<arrival|departure|current>`. */
   id: string
-  kind: 'reservation' | 'booking' | 'stay'
+  kind: 'booking' | 'stay'
   /** The booking's own screen. */
   to: string
   requestId: string | null
@@ -75,7 +75,7 @@ export interface TodayReservation {
 
 /** A business's booking on its Today ("today") or Upcoming ("upcoming"). */
 export function agendaToTodayReservation(item: AgendaItem, input: { range: 'today' | 'upcoming'; vertical: string | null; notes: number }): Omit<TodayReservation, 'suggestion'> {
-  if (item.kind !== 'reservation' && item.kind !== 'booking' && item.kind !== 'stay') throw new Error('Reservation cards require a booking, reservation or stay')
+  if (item.kind !== 'booking' && item.kind !== 'stay') throw new Error('Reservation cards require a booking or stay')
   const timed = item.startsAt.includes('T')
   const time = timed ? formatTimestamp(item.startsAt, 'en', item.timeZone, { hour: 'numeric', minute: '2-digit' }) : 'Time not set'
   const checkIn = timed ? localDateAt(new Date(item.startsAt), item.timeZone) : item.startsAt

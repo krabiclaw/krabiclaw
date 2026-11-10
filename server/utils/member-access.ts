@@ -380,7 +380,7 @@ export async function assertResponsibleMember(db: DbClient, organizationId: stri
 export async function reconcileResponsibilities(env: GuestInboxPublicationEnv, db: DbClient, input: { organizationId: string }): Promise<void> {
   const now = new Date().toISOString()
   let changed = false
-  for (const [table, key] of [['business_locations', 'id'], ['product_booking_configs', 'product_id'], ['tasks', 'id']] as const) {
+  for (const [table, key] of [['product_booking_configs', 'product_id'], ['tasks', 'id']] as const) {
     // A closed task keeps who did it; only open work is reassigned away from a departed member.
     const open = table === 'tasks' ? " AND status = 'open'" : ''
     const memberMissing = `${table}.assigned_member_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM member m WHERE m.id = ${table}.assigned_member_id AND m.organizationId = ${table}.organization_id)`
@@ -390,7 +390,7 @@ export async function reconcileResponsibilities(env: GuestInboxPublicationEnv, d
     for (let offset = 0; offset < rows.length; offset += 400) {
       const chunk = rows.slice(offset, offset + 400)
       const results = await executeBatch(db, chunk.flatMap(row => [{
-        query: `UPDATE ${table} SET assigned_member_id = NULL, updated_at = ?${table === 'business_locations' ? '' : table === 'tasks' ? ', version = version + 1' : ", updated_by = 'system'"}
+        query: `UPDATE ${table} SET assigned_member_id = NULL, updated_at = ?${table === 'tasks' ? ', version = version + 1' : ", updated_by = 'system'"}
           WHERE organization_id = ? AND ${key} = ? AND assigned_member_id = ? AND ${memberMissing}`,
         params: [now, input.organizationId, row.resource_id, row.assigned_member_id],
       }, organizationEventQuery({ organizationId: input.organizationId, actorType: 'system', eventType: 'member.access_scope_revoked', entityType: table, entityId: row.resource_id,
@@ -410,8 +410,18 @@ export function assignedMemberSql(alias: string, userSql = '?'): string {
     WHERE m.id = ${alias}.assigned_member_id AND m.organizationId = ${alias}.organization_id AND m.userId = ${userSql})`
 }
 
+/**
+ * A member handles a location's guests when they handle a bookable product
+ * offered there: its tables, its classes, its consultations. Responsibility is
+ * the product's, never a column on the place.
+ */
+export function locationMemberSql(organizationSql: string, locationSql: string, userSql = '?'): string {
+  return `EXISTS (SELECT 1 FROM product_locations pl JOIN product_booking_configs c ON c.organization_id = pl.organization_id AND c.product_id = pl.product_id
+    WHERE pl.organization_id = ${organizationSql} AND pl.location_id = ${locationSql} AND ${assignedMemberSql('c', userSql)})`
+}
+
 /** The offering's responsibility, using the same member matching. */
-export const ASSIGNED_SERVICE_SQL = `(p.kind = 'service' OR p.kind = 'experience') AND EXISTS (
+export const ASSIGNED_SERVICE_SQL = `(p.kind = 'service' OR p.kind = 'experience' OR p.kind = 'table') AND EXISTS (
   SELECT 1 FROM product_booking_configs c
   WHERE c.organization_id = p.organization_id AND c.product_id = p.id
     AND ${assignedMemberSql('c')}
@@ -441,10 +451,7 @@ export function assignedGuestThreadScope(alias: string, user: string | { /** Tru
   const userSql = typeof user === 'string' ? '?' : user.column
   const sql = `((${alias}.kind = 'booking' AND EXISTS (SELECT 1 FROM bookings b JOIN product_booking_configs c ON c.product_id = b.product_id AND c.organization_id = b.organization_id
         WHERE b.request_id = ${alias}.id AND b.organization_id = ${alias}.organization_id AND ${assignedMemberSql('c', userSql)}))
-      OR (${alias}.kind = 'contact' AND ${alias}.location_id IS NOT NULL AND EXISTS (SELECT 1 FROM business_locations bl
-        WHERE bl.id = ${alias}.location_id AND bl.organization_id = ${alias}.organization_id AND ${assignedMemberSql('bl', userSql)}))
-      OR (${alias}.kind = 'reservation' AND EXISTS (SELECT 1 FROM reservations res JOIN business_locations bl ON bl.id = res.location_id AND bl.organization_id = res.organization_id
-        WHERE res.request_id = ${alias}.id AND res.organization_id = ${alias}.organization_id AND ${assignedMemberSql('bl', userSql)})))`
+      OR (${alias}.kind = 'contact' AND ${alias}.location_id IS NOT NULL AND ${locationMemberSql(`${alias}.organization_id`, `${alias}.location_id`, userSql)}))`
   return { sql, params: typeof user === 'string' ? Array(sql.match(/\?/g)?.length ?? 0).fill(user) : [] }
 }
 
@@ -462,7 +469,7 @@ export async function assertAssignedBookingAccess(db: DbClient, input: MemberAcc
   if (!assigned) throw new HTTPError({ statusCode: 404, message: 'Conversation not found or access denied', data: { code: 'THREAD_NOT_FOUND', field: input.requestId ? 'threadId' : 'bookingId' } })
 }
 
-/** The location must belong to the tenant the caller authorized against; reaching it is an org-wide role or location assignment. */
+/** The location must belong to the tenant the caller authorized against; reaching it is an org-wide role or handling a product offered there. */
 export async function assertLocationAccess(db: DbClient, input: MemberAccessPrincipal & { locationId: string; patch?: Record<string, unknown> }): Promise<void> {
   if (await roleAllows({ ...input, permissions: { locations: ['update'] } })) {
     const location = await findLocation(db, { organizationId: input.organizationId, locationId: input.locationId })
@@ -470,13 +477,9 @@ export async function assertLocationAccess(db: DbClient, input: MemberAccessPrin
     return
   }
   await assertRoleAllows({ ...input, permissions: { locations: ['assigned'] } })
-  const assigned = await queryFirst<{ id: string; assigned_member_id: string | null }>(db, `SELECT bl.id, bl.assigned_member_id
-    FROM business_locations bl
-    WHERE bl.organization_id = ? AND bl.id = ? AND (${assignedMemberSql('bl')})`, [input.organizationId, input.locationId, input.userId])
+  const assigned = await queryFirst<{ id: string }>(db, `SELECT bl.id FROM business_locations bl
+    WHERE bl.organization_id = ? AND bl.id = ? AND ${locationMemberSql('bl.organization_id', 'bl.id')}`, [input.organizationId, input.locationId, input.userId])
   if (!assigned) throw new HTTPError({ statusCode: 404, message: 'Location not found or access denied' })
-  if (input.patch?.assigned_member_id !== undefined && input.patch.assigned_member_id !== assigned.assigned_member_id) {
-    throw new HTTPError({ statusCode: 403, message: 'Location assignment requires admin access' })
-  }
 }
 
 /** A resource that may or may not belong to one location (e.g. a review row) — dispatches to assertOrganizationWideAccess when the row's own location_id is null, assertLocationAccess otherwise. Check the target row's location_id, never a caller-supplied param. Media authorization uses its placement owner instead. */

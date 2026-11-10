@@ -58,23 +58,20 @@ export const business_locations = sqliteTable("business_locations", {
 	google_review_url: text(),
 	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
-	// The listing's own clock: every in-person session and reservation here is
-	// offered and shown in it, whatever the guest's device says.
+	// The listing's own clock: every in-person session here is offered and
+	// shown in it, whatever the guest's device says.
 	timezone: text().notNull(),
-	max_capacity: integer(),
 	seo_title: text(),
 	seo_description: text(),
 	canonical_url: text(),
-	assigned_member_id: text(),
 }, (table) => [
 	check("business_locations_instants_check", sql`(last_synced_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', last_synced_at, '+0 days') IS last_synced_at) AND (created_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at) AND (updated_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at)`),
 	check("business_locations_address_check", sql`address IS NULL OR (json_valid(address) AND json_type(address) IS 'object' AND json_type(address, '$.regionCode') IS 'text' AND trim(address ->> '$.regionCode') <> '' AND json_type(address, '$.addressLines') IS 'array' AND json_array_length(address, '$.addressLines') > 0 AND (json_type(address, '$.languageCode') IS NULL OR json_type(address, '$.languageCode') IS 'text') AND (json_type(address, '$.locality') IS NULL OR json_type(address, '$.locality') IS 'text') AND (json_type(address, '$.sublocality') IS NULL OR json_type(address, '$.sublocality') IS 'text') AND (json_type(address, '$.administrativeArea') IS NULL OR json_type(address, '$.administrativeArea') IS 'text') AND (json_type(address, '$.postalCode') IS NULL OR json_type(address, '$.postalCode') IS 'text'))`),
 	check("business_locations_categories_check", sql`categories IS NULL OR (json_valid(categories) AND json_type(categories) IS 'array')`),
 	unique("business_locations_organization_id_slug_unique").on(table.organization_id, table.slug),
 	// Parent key for the organization-scoped catalog relations (prices,
-	// product_locations, availability rules, sessions, reservation
-	// configuration) which scope by organization + location without
-	// restating the site.
+	// product_locations, availability rules, sessions) which scope by
+	// organization + location without restating the site.
 	unique("business_locations_organization_id_id_unique").on(table.organization_id, table.id),
 	check("business_locations_opening_hours_check", sql`opening_hours IS NULL OR (json_valid(opening_hours) AND json_type(opening_hours) IS 'object' AND json_type(opening_hours, '$.periods') IS 'array')`),
 	check("business_locations_special_hours_check", sql`special_hours IS NULL OR (json_valid(special_hours) AND json_type(special_hours) IS 'array')`),
@@ -86,29 +83,29 @@ export const business_locations = sqliteTable("business_locations", {
 // Row meaning: someone contacted this site, and this is the thread.
 // Owner/scope: organization + site; location_id routes the thread to a branch.
 // This table does NOT own booking truth. The occurrence is a product_sessions
-//   row, the seat claim a bookings row, and a table reservation a
-//   reservations row; each links back here through request_id. A contact
-//   thread has neither and is not forced into the booking model.
+//   row and the seat claim a bookings row (a class, a consultation or a
+//   table), linked back here through request_id. A contact thread has neither
+//   and is not forced into the booking model.
 // Null semantics: user_id NULL is a guest with no Better Auth user. review_id NULL means
 //   no review was solicited from this thread. location_id NULL means the
 //   thread is site-wide.
-// Deletion: cascades from site; bookings and reservations survive with
+// Deletion: cascades from site; bookings survive with
 //   request_id set to NULL, because losing an inbox thread must not lose a
 //   seat allocation.
 // Read/write: server/domain/requests.ts.
 export const requests = sqliteTable("requests", {
  id: text().primaryKey(),
- // The inbox thread type. The OPERATIONAL record for a booking or a
- // reservation is the bookings / reservations row that links back here; this
+ // The inbox thread type. The OPERATIONAL record for a booking is the
+ // bookings row that links back here; this
  // column only says which kind of thread the inbox is showing. A contact
  // thread is not a degenerate booking and carries no booking columns.
- kind: text({ enum: ["contact", "booking", "reservation", "stay"] }).notNull(),
+ kind: text({ enum: ["contact", "booking", "stay"] }).notNull(),
  organization_id: text().references((): AnySQLiteColumn => organization.id, { onDelete: "cascade" }),
  location_id: text().references((): AnySQLiteColumn => business_locations.id, { onDelete: "set null" }),
  user_id: text().references((): AnySQLiteColumn => user.id, { onDelete: "set null" }),
  review_id: text().references((): AnySQLiteColumn => reviews.id, { onDelete: "set null" }),
  // The tenant's explicit archive action, and who took it. Past/Current is
- // derived from the linked reservation or session's ends_at at runtime and is
+ // derived from the linked session's ends_at at runtime and is
  // never stored. Archiving is not conversation activity: it does not move
  // updated_at.
  archived_at: text(),
@@ -299,7 +296,7 @@ export const tasks = sqliteTable('tasks', {
   id: text().primaryKey(),
   organization_id: text().notNull().references(() => organization.id, { onDelete: 'cascade' }),
   kind: text({ enum: ['turnover', 'guest_reply', 'message_delivery', 'booking_review', 'booking_change', 'opportunity', 'custom', 'stay_ready', 'consultation_prep', 'consultation_follow_up'] }).notNull(),
-  subject_type: text({ enum: ['stay', 'request', 'scheduled_guest_message', 'booking', 'reservation', 'article', 'post', 'product'] }),
+  subject_type: text({ enum: ['stay', 'request', 'scheduled_guest_message', 'booking', 'article', 'post', 'product'] }),
   subject_id: text(),
   product_id: text(),
   location_id: text(),
@@ -329,7 +326,7 @@ export const tasks = sqliteTable('tasks', {
   index('tasks_subject_idx').on(table.subject_type, table.subject_id),
   check('tasks_kind_check', sql`kind IN ('turnover', 'guest_reply', 'message_delivery', 'booking_review', 'booking_change', 'opportunity', 'custom', 'stay_ready', 'consultation_prep', 'consultation_follow_up')
     AND (subject_type IS NULL) = (subject_id IS NULL)
-    AND (subject_type IS NULL OR subject_type IN ('stay', 'request', 'scheduled_guest_message', 'booking', 'reservation', 'article', 'post', 'product'))
+    AND (subject_type IS NULL OR subject_type IN ('stay', 'request', 'scheduled_guest_message', 'booking', 'article', 'post', 'product'))
     AND (kind <> 'custom' OR subject_type IS NULL)
     AND ((kind = 'opportunity') = (opportunity_id IS NOT NULL))`),
   check('tasks_text_check', sql`(title IS NULL OR length(trim(title)) BETWEEN 1 AND 200) AND (kind NOT IN ('custom', 'opportunity') OR title IS NOT NULL)
@@ -647,7 +644,7 @@ export const product_publications = sqliteTable("product_publications", {
 //   location's surfaces. Both are independent of products.active and of site
 //   publication.
 // Authorization: a location-scoped editor may write THIS row and that
-//   location's prices, sessions and reservation configuration. It does not
+//   location's prices and sessions. It does not
 //   grant them edit rights on the organization-wide Product or on another
 //   location's rows — enforced by server/utils/organization-access.ts, not by
 //   this table.
@@ -769,6 +766,20 @@ export const product_booking_configs = sqliteTable("product_booking_configs", {
 	// The tenant's own questions asked with each booking (shared/form-questions.ts):
 	// a JSON array validated by its one writer. Question-only edits leave sessions alone.
 	questions: text().default("[]").notNull(),
+	// The smallest and largest party one booking takes; null does not limit it
+	// beyond the session's seats.
+	party_size_min: integer(),
+	party_size_max: integer(),
+	// Stated to the guest before booking: the youngest guest admitted, and
+	// whether a guest needing access support should contact the business first.
+	minimum_guest_age: integer(),
+	accessibility_contact_required: integer({ mode: "boolean" }).default(false).notNull(),
+	// What the price is charged for when the guest pays online: each guest
+	// ('per_guest', a class seat) or the booking as a whole ('per_booking', a
+	// table's deposit). payment_min_party_size: the smallest party that pays
+	// online; smaller parties book without paying. Null is every party.
+	payment_basis: text().default("per_guest").notNull(),
+	payment_min_party_size: integer(),
 	// Nights only. Local wall-clock HH:MM in the home's location timezone.
 	check_in_time: text(),
 	// The end of the check-in window, local HH:MM; null is a flexible end. Earlier than check_in_time means after midnight.
@@ -807,6 +818,9 @@ export const product_booking_configs = sqliteTable("product_booking_configs", {
 	check("product_booking_configs_calendar_rules_check", sql`calendar_rules IS NULL OR (json_valid(calendar_rules) AND json_type(calendar_rules) = 'object')`),
 	check("product_booking_configs_cancellation_check", sql`cancellation_policy IS NULL OR cancellation_policy IN ('flexible', 'moderate', 'limited', 'firm', 'strict')`),
 	check("product_booking_configs_long_term_cancellation_check", sql`long_term_cancellation_policy IS NULL OR long_term_cancellation_policy IN ('firm', 'strict')`),
+	check("product_booking_configs_party_check", sql`(party_size_min IS NULL OR party_size_min >= 1) AND (party_size_max IS NULL OR party_size_max >= COALESCE(party_size_min, 1))`),
+	check("product_booking_configs_guest_terms_check", sql`(minimum_guest_age IS NULL OR minimum_guest_age >= 0) AND accessibility_contact_required IN (0, 1)`),
+	check("product_booking_configs_payment_basis_check", sql`payment_basis IN ('per_guest', 'per_booking') AND (payment_min_party_size IS NULL OR payment_min_party_size >= 1)`),
 ]);
 
 // Typed weekly recurrence, one row per rule; recurrence is never a JSON map.
@@ -819,7 +833,8 @@ export const product_booking_configs = sqliteTable("product_booking_configs", {
 //   behavior in server/utils/availability.ts with real coverage.
 // A rule is always at a location, in that location's timezone. An online
 //   offering has no rules: its sessions come from its providers' hours.
-// Null semantics: duration_minutes / capacity NULL defer to product_booking_configs.
+// Null semantics: capacity NULL defers to product_booking_configs.default_capacity;
+//   the session length is always the configuration's duration_minutes.
 //   effective_from_date / effective_until_date NULL mean open-ended.
 // Deletion: cascades from Product and location. Sessions already generated
 //   keep their own times and capacity — deleting a rule does not delete or
@@ -839,14 +854,13 @@ export const product_availability_rules = sqliteTable("product_availability_rule
 	start_time: text().notNull(),
 	// A repeating slot: start_time, then every interval_minutes until the last
 	// start at or before end_time. Both null is a single start time, which is
-	// what a class is. A restaurant service is one row per weekday instead of
-	// one per seating.
+	// what a class is. A restaurant's tables are one row per service period
+	// instead of one per seating.
 	end_time: text(),
 	interval_minutes: integer(),
 	interval_weeks: integer().default(1).notNull(),
 	effective_from_date: text(),
 	effective_until_date: text(),
-	duration_minutes: integer(),
 	capacity: integer(),
 	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
@@ -873,7 +887,6 @@ export const product_availability_rules = sqliteTable("product_availability_rule
 	// happens to run. The anchor is the rule's own effective start.
 	check("product_availability_rules_anchor_check", sql`interval_weeks = 1 OR effective_from_date IS NOT NULL`),
 	check("product_availability_rules_dates_check", sql`(effective_from_date IS NULL OR date(effective_from_date, '+0 days') IS effective_from_date) AND (effective_until_date IS NULL OR date(effective_until_date, '+0 days') IS effective_until_date) AND (effective_from_date IS NULL OR effective_until_date IS NULL OR effective_until_date >= effective_from_date)`),
-	check("product_availability_rules_duration_check", sql`duration_minutes IS NULL OR duration_minutes > 0`),
 	check("product_availability_rules_capacity_check", sql`capacity IS NULL OR capacity >= 0`),
 	check("product_availability_rules_timezone_check", sql`timezone <> '' AND timezone NOT GLOB '*[^A-Za-z0-9/_+-]*'`),
 ]);
@@ -980,9 +993,13 @@ export const bookings = sqliteTable("bookings", {
 	// Staff recorded that the guest did not come. It suppresses the visit's
 	// review invitation and revokes an unused one; the status stays as it was.
 	no_show_at: text(),
+	// The terms the guest agreed to when booking (server/utils/booking-policy-summary.ts
+	// BookingPolicy), not the product's mutable settings.
+	policy_json: text().notNull(),
 	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 }, (table) => [
+	check("bookings_policy_check", sql`json_valid(policy_json) AND json_type(policy_json) = 'object'`),
 	// The status set is closed here, where the column is.
 	check("bookings_status_check", sql`status IN ('pending', 'confirmed', 'cancelled')`),
 	check("bookings_instants_check", sql`(cancelled_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', cancelled_at, '+0 days') IS cancelled_at) AND (created_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at) AND (updated_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at)`),
@@ -1010,110 +1027,6 @@ export const bookings = sqliteTable("bookings", {
 	index("bookings_org_created_idx").on(table.created_at),
 	index("bookings_org_user_idx").on(table.organization_id, table.user_id),
 	check("bookings_party_size_check", sql`party_size > 0`),
-]);
-
-// ---------------------------------------------------------------------------
-// Location reservations.
-//
-// A restaurant table reservation is not a product session and the restaurant
-// is not selling a catalog item by taking it. This capability is location-owned,
-// in typed columns, and is NOT a second experience-booking implementation
-// wearing the reservation name.
-//
-// Opening hours and special hours remain on business_locations as the declared
-// hours source. They are not copied into a product schedule.
-// ---------------------------------------------------------------------------
-
-// Reservation policy for one location, typed.
-// Row meaning: this location takes reservations, under this policy. The
-//   existence of the row is the capability; there is no enabled flag and no
-//   operational JSON reader.
-// Capacity contract: capacity is per START-TIME SLOT, not per overlapping
-//   interval. That choice is preserved consistently by
-//   server/utils/reservations.ts and is not re-decided per caller.
-// Null semantics: every policy field NULL means the policy does not constrain
-//   that dimension — not that a platform default applies.
-// Deletion: cascades from location; cascades to overrides. Reservations keep
-//   their own records.
-// Read/write: server/utils/reservations.ts.
-export const location_reservation_configs = sqliteTable("location_reservation_configs", {
-	duration_minutes: integer(),
-	location_id: text().primaryKey(),
-	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
-	slot_capacity: integer(),
-	advance_notice_minutes: integer(),
-	minimum_guest_age: integer(),
-	deposit_required: integer({ mode: "boolean" }).default(false).notNull(),
-	deposit_amount: integer(),
-	deposit_currency: text(),
-	deposit_tax_behavior: text().$type<'inclusive' | 'exclusive'>(),
-	deposit_trigger_party_size: integer(),
-	accessibility_contact_required: integer({ mode: "boolean" }).default(false).notNull(),
-	// The tenant's own questions asked with each reservation (shared/form-questions.ts).
-	questions: text().default("[]").notNull(),
-	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
-	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
-	created_by: text().notNull(),
-	updated_by: text().notNull(),
-}, (table) => [
-	check("location_reservation_configs_instants_check", sql`(created_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at) AND (updated_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at)`),
-	foreignKey({ columns: [table.organization_id, table.location_id], foreignColumns: [business_locations.organization_id, business_locations.id], name: "location_reservation_configs_location_scope_fk" }).onDelete("cascade"),
-	// Parent key for overrides.
-	unique("location_reservation_configs_org_location_unique").on(table.organization_id, table.location_id),
-	check("location_reservation_configs_booleans_check", sql`deposit_required IN (0, 1) AND accessibility_contact_required IN (0, 1)`),
-	check("location_reservation_configs_duration_check", sql`duration_minutes IS NULL OR duration_minutes > 0`),
-	check("location_reservation_configs_slot_capacity_check", sql`slot_capacity IS NULL OR slot_capacity >= 0`),
-	check("location_reservation_configs_minutes_check", sql`advance_notice_minutes IS NULL OR advance_notice_minutes >= 0`),
-	check("location_reservation_configs_party_check", sql`deposit_trigger_party_size IS NULL OR deposit_trigger_party_size > 0`),
-	check("location_reservation_configs_deposit_check", sql`(deposit_amount IS NULL OR deposit_amount > 0) AND (deposit_currency IS NULL OR (length(deposit_currency) = 3 AND deposit_currency = upper(deposit_currency))) AND (deposit_tax_behavior IS NULL OR deposit_tax_behavior IN ('inclusive', 'exclusive'))`),
-	check("location_reservation_configs_age_check", sql`minimum_guest_age IS NULL OR minimum_guest_age >= 0`),
-]);
-
-// A deliberate exception to a location's normal reservation availability.
-// Row meaning: on this date at this local slot, this location is closed, or
-//   seats a different number than the policy implies.
-// Null semantics: capacity NULL with status 'closed' means no seats at all;
-//   capacity set with status 'open' overrides the slot capacity. time_slot
-//   NULL applies to the whole date.
-// This is the location-side counterpart of editing a session directly. It does
-//   NOT exist on the product side: an experience override is a change to the
-//   actual product_sessions row.
-// Deletion: cascades from the config.
-// Read/write: server/utils/reservations.ts.
-export const reservations = sqliteTable("reservations", {
-	id: text().primaryKey(),
-	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
-	location_id: text().notNull(),
-	user_id: text().references((): AnySQLiteColumn => user.id, { onDelete: "set null" }),
-	request_id: text(),
-	timezone: text().notNull(),
-	starts_at: text().notNull(),
-	ends_at: text().notNull(),
-	party_size: integer().notNull(),
-	// The guest's agreement at creation, not the location's mutable policy.
-	policy_json: text(),
-	// 'pending' | 'confirmed' | 'cancelled' | 'completed' (registry in shared/).
-	status: text().default("confirmed").notNull(),
-	cancelled_at: text(),
-	cancellation_reason: text(),
-	// Staff recorded that the guest did not come. It suppresses the visit's
-	// review invitation and revokes an unused one; the status stays as it was.
-	no_show_at: text(),
-	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
-	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
-}, (table) => [
-	check("reservations_status_check", sql`status IN ('confirmed', 'cancelled')`),
-	check("reservations_policy_check", sql`policy_json IS NULL OR (json_valid(policy_json) AND json_type(policy_json) = 'object') IS 1`),
-	check("reservations_instants_check", sql`(strftime('%Y-%m-%dT%H:%M:%fZ', starts_at, '+0 days') IS starts_at) AND (strftime('%Y-%m-%dT%H:%M:%fZ', ends_at, '+0 days') IS ends_at) AND (cancelled_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', cancelled_at, '+0 days') IS cancelled_at) AND (created_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at) AND (updated_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at)`),
-	foreignKey({ columns: [table.organization_id, table.location_id], foreignColumns: [business_locations.organization_id, business_locations.id], name: "reservations_location_scope_fk" }).onDelete("cascade"),
-	foreignKey({ columns: [table.organization_id, table.request_id], foreignColumns: [requests.organization_id, requests.id], name: "reservations_request_scope_fk" }).onDelete("no action"),
-	uniqueIndex("reservations_request_unique").on(table.request_id).where(sql`request_id IS NOT NULL`),
-	index("reservations_location_start_idx").on(table.location_id, table.starts_at, table.status),
-	index("reservations_org_created_idx").on(table.created_at),
-	index("reservations_org_user_idx").on(table.organization_id, table.user_id),
-	check("reservations_interval_check", sql`ends_at > starts_at`),
-	check("reservations_party_size_check", sql`party_size > 0`),
-	check("reservations_timezone_check", sql`timezone <> '' AND timezone NOT GLOB '*[^A-Za-z0-9/_+-]*'`),
 ]);
 
 // ---------------------------------------------------------------------------
@@ -1561,10 +1474,9 @@ export const stay_payments = sqliteTable("stay_payments", {
 ]);
 
 // One plan snapshot per template and booked record (subject_type and
-// subject_id, as tasks name it: a stay, booking or reservation in
-// BOOKED_RECORDS_SQL), plus the built-in check-in message (template_id NULL)
-// every stay gets from its home's check-in instructions. product_id is the
-// booked product; a table reservation has none. The outbound activity entry
+// subject_id, as tasks name it: a stay or a booking in BOOKED_RECORDS_SQL),
+// plus the built-in check-in message (template_id NULL) every stay gets from
+// its home's check-in instructions. product_id is the booked product. The outbound activity entry
 // links to the canonical guest_thread_deliveries receipt; provider IDs and send
 // outcomes are never copied into a second receipt ledger here.
 export const scheduled_guest_messages = sqliteTable("scheduled_guest_messages", {
@@ -1603,7 +1515,7 @@ export const scheduled_guest_messages = sqliteTable("scheduled_guest_messages", 
 	check("scheduled_guest_messages_sent_check", sql`status <> 'sent' OR (entry_id IS NOT NULL AND sent_at IS NOT NULL)`),
 	check("scheduled_guest_messages_sending_check", sql`status <> 'sending' OR started_at IS NOT NULL`),
 	check("scheduled_guest_messages_text_check", sql`length(trim(template_title)) BETWEEN 1 AND 100 AND length(trim(body)) BETWEEN 1 AND 5000 AND template_version >= 1`),
-	check("scheduled_guest_messages_subject_check", sql`subject_type IN ('stay', 'booking', 'reservation') AND (product_id IS NULL) = (subject_type = 'reservation') AND (template_id IS NOT NULL OR subject_type = 'stay')`),
+	check("scheduled_guest_messages_subject_check", sql`subject_type IN ('stay', 'booking') AND product_id IS NOT NULL AND (template_id IS NOT NULL OR subject_type = 'stay')`),
 	check("scheduled_guest_messages_instants_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at AND (due_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', due_at, '+0 days') IS due_at) AND (started_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', started_at, '+0 days') IS started_at) AND (sent_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', sent_at, '+0 days') IS sent_at)`),
 ]);
 
@@ -2377,8 +2289,8 @@ export const device_tokens = sqliteTable("device_tokens", {
 export const team_threads = sqliteTable("team_threads", {
 	id: text().primaryKey(),
 	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
-	// The booked record this conversation is about (a stay, booking or
-	// reservation in BOOKED_RECORDS_SQL), as tasks and scheduled messages name it.
+	// The booked record this conversation is about (a stay or a booking in
+	// BOOKED_RECORDS_SQL), as tasks and scheduled messages name it.
 	subject_type: text(),
 	subject_id: text(),
 	location_id: text(),
@@ -2399,7 +2311,7 @@ export const team_threads = sqliteTable("team_threads", {
 	index("team_threads_org_activity_idx").on(table.organization_id, table.last_message_at),
 	index("team_threads_org_subject_idx").on(table.organization_id, table.subject_type, table.subject_id),
 	index("team_threads_org_location_idx").on(table.organization_id, table.location_id),
-	check("team_threads_subject_check", sql`(subject_type IS NULL) = (subject_id IS NULL) AND (subject_type IS NULL OR subject_type IN ('stay', 'booking', 'reservation'))`),
+	check("team_threads_subject_check", sql`(subject_type IS NULL) = (subject_id IS NULL) AND (subject_type IS NULL OR subject_type IN ('stay', 'booking'))`),
 	check("team_threads_instants_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', last_message_at, '+0 days') IS last_message_at AND strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at`),
 ]);
 
@@ -3141,7 +3053,7 @@ export const google_calendar_event_links = sqliteTable("google_calendar_event_li
  account_id: text().notNull(),
  calendar_id: text().notNull(),
  event_id: text().notNull(),
- booking_kind: text({ enum: ["booking", "reservation"] }).notNull(),
+ // The bookings row this event shows.
  operational_id: text().notNull(),
  request_id: text(),
  booking_revision: text().notNull(),
@@ -3152,9 +3064,8 @@ export const google_calendar_event_links = sqliteTable("google_calendar_event_li
  created_at: text().notNull(),
  updated_at: text().notNull(),
 }, table => [
- uniqueIndex("google_calendar_subject_unique").on(table.organization_id, table.integration_revision, table.booking_kind, table.operational_id).where(sql`state <> 'deleted'`),
+ uniqueIndex("google_calendar_subject_unique").on(table.organization_id, table.integration_revision, table.operational_id).where(sql`state <> 'deleted'`),
  uniqueIndex("google_calendar_provider_unique").on(table.calendar_id, table.event_id),
- check("google_calendar_kind_check", sql`booking_kind IN ('booking', 'reservation')`),
  check("google_calendar_state_check", sql`state IN ('pending', 'synced', 'cleanup', 'deleted', 'error')`),
 ]);
 
@@ -3183,7 +3094,7 @@ export const payments = sqliteTable("payments", {
  buyer_user_id: text().references(() => user.id, { onDelete: "set null" }),
  stripe_account_id: text().notNull(),
  livemode: integer({ mode: "boolean" }).notNull(),
- subject_type: text().$type<'booking' | 'order' | 'reservation' | 'invoice' | 'stay'>().notNull(),
+ subject_type: text().$type<'booking' | 'order' | 'invoice' | 'stay'>().notNull(),
  subject_id: text(),
  location_id: text(),
  currency: text().notNull(),
@@ -3240,16 +3151,14 @@ export const payment_checkout_holds = sqliteTable("payment_checkout_holds", {
  expires_at: text().notNull(),
  created_at: text().notNull(),
  converted_booking_id: text(),
- converted_reservation_id: text(),
  converted_stay_id: text(),
 }, t => [
  index("payment_holds_capacity_idx").on(t.session_id, t.status, t.expires_at),
- index("payment_holds_reservation_idx").on(t.organization_id, t.location_id, t.starts_at, t.status, t.expires_at),
  check("payment_holds_quantity_check", sql`quantity > 0 AND amount > 0`),
- // A session booking; a table reservation; a stay, whose starts_at and ends_at
- // are its check-in and check-out dates at the home (product_id) and whose
- // nights are claimed in stay_nights.
- check("payment_holds_subject_check", sql`(product_id IS NOT NULL AND variant_id IS NOT NULL AND price_id IS NOT NULL AND session_id IS NOT NULL AND converted_reservation_id IS NULL AND converted_stay_id IS NULL) OR (product_id IS NULL AND variant_id IS NULL AND price_id IS NULL AND session_id IS NULL AND location_id IS NOT NULL AND timezone IS NOT NULL AND converted_booking_id IS NULL AND converted_stay_id IS NULL) OR (product_id IS NOT NULL AND variant_id IS NULL AND price_id IS NULL AND session_id IS NULL AND location_id IS NOT NULL AND timezone IS NOT NULL AND converted_booking_id IS NULL AND converted_reservation_id IS NULL AND date(starts_at, '+0 days') IS starts_at AND date(ends_at, '+0 days') IS ends_at AND ends_at > starts_at)`),
+ // A session booking; a stay, whose starts_at and ends_at are its check-in and
+ // check-out dates at the home (product_id) and whose nights are claimed in
+ // stay_nights.
+ check("payment_holds_subject_check", sql`(product_id IS NOT NULL AND variant_id IS NOT NULL AND price_id IS NOT NULL AND session_id IS NOT NULL AND converted_stay_id IS NULL) OR (product_id IS NOT NULL AND variant_id IS NULL AND price_id IS NULL AND session_id IS NULL AND location_id IS NOT NULL AND timezone IS NOT NULL AND converted_booking_id IS NULL AND date(starts_at, '+0 days') IS starts_at AND date(ends_at, '+0 days') IS ends_at AND ends_at > starts_at)`),
 ]);
 
 export const payment_orders = sqliteTable("payment_orders", {

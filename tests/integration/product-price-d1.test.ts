@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { OPEN_TERMS_JSON } from './support/booking-terms.ts'
 import test from 'node:test'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
@@ -118,7 +119,7 @@ test('public experiences require a configured booking flow and retain full or te
       .bind(ORG, legacy.id, start, end, ACTOR.actorId, ACTOR.actorId).run()
     const ids = [external.id, legacy.id].sort()
     assert.deepEqual((await visible()).sort(), ids)
-    await claimSessionCapacity(db, { env, organizationId: ORG, productId: legacy.id, sessionId: 'omakase-session', productVariantId: legacy.variants[0]!.id, partySize: 8 })
+    await claimSessionCapacity(db, { policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: legacy.id, sessionId: 'omakase-session', productVariantId: legacy.variants[0]!.id, partySize: 8 })
     const sessions = await listSessions(db, { env, organizationId: ORG, productId: legacy.id, fromInstant: `${tomorrow}T00:00:00.000Z`, toInstant: `${tomorrow}T23:59:59.999Z` })
     assert.deepEqual(sessions.map(session => ({ remaining: session.remaining, full: session.is_full })), [{ remaining: 0, full: true }])
     assert.deepEqual((await visible()).sort(), ids, 'a full experience stays visible')
@@ -188,11 +189,11 @@ test('advance notice keeps sessions inside it off the public listing and refuses
     assert.deepEqual((await loadPublicProductSessions(db, detail!, env)).map(session => session.id), ['later'])
     assert.deepEqual(await productBookingReadiness(db, ORG, await getProduct(db, ORG, product.id), { requireAllocation: true, env }).then(result => result.ready), true, 'a later session still proves the offering bookable')
 
-    const claim = (sessionId: string) => claimSessionCapacity(db, { env, organizationId: ORG, productId: product.id, sessionId, productVariantId: product.variants[0]!.id, partySize: 1 })
+    const claim = (sessionId: string) => claimSessionCapacity(db, { policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: product.id, sessionId, productVariantId: product.variants[0]!.id, partySize: 1 })
     await assert.rejects(claim('soon'), CapacityUnavailableError)
     assert.equal(await db.prepare("SELECT COUNT(*) n FROM bookings WHERE product_session_id = 'soon'").first('n'), 0)
     const booking = await claim('later')
-    const move = await sessionMoveQuery(db, { env, organizationId: ORG, productId: product.id, sessionId: 'soon', partySize: 1, bookingId: booking.bookingId, now: new Date().toISOString() })
+    const move = await sessionMoveQuery(db, { env, organizationId: ORG, fromProductId: product.id, productId: product.id, productVariantId: product.variants[0]!.id, sessionId: 'soon', partySize: 1, bookingId: booking.bookingId, now: new Date().toISOString() })
     assert.equal((await db.prepare(move.query).bind(...move.params!).run()).meta.changes, 0)
     assert.equal(await db.prepare('SELECT product_session_id FROM bookings WHERE id = ?').bind(booking.bookingId).first('product_session_id'), 'later')
 
@@ -456,8 +457,8 @@ test('editing a product keeps variant identity, so bookings survive', { timeout:
       VALUES (?, ?, 'slot', 60, 5, 'business', 'a', 'a')`).bind(product.id, ORG).run()
     await db.prepare(`INSERT INTO product_sessions (id, organization_id, product_id, location_id, timezone, starts_at, ends_at, capacity, status, created_by, updated_by)
       VALUES ('s1', ?, ?, 'loc-a', 'Asia/Bangkok', '2099-01-01T00:00:00.000Z', '2099-01-01T01:00:00.000Z', 5, 'scheduled', 'a', 'a')`).bind(ORG, product.id).run()
-    await db.prepare(`INSERT INTO bookings (id, organization_id, product_id, product_session_id, product_variant_id, party_size, status)
-      VALUES ('b1', ?, ?, 's1', 'var-adult', 2, 'confirmed')`).bind(ORG, product.id).run()
+    await db.prepare(`INSERT INTO bookings (id, organization_id, product_id, product_session_id, product_variant_id, party_size, policy_json, status)
+      VALUES ('b1', ?, ?, 's1', 'var-adult', 2, '{"advance_notice_minutes":null,"party_size_min":null,"party_size_max":null,"minimum_guest_age":null,"accessibility_contact_required":false,"payment":null}', 'confirmed')`).bind(ORG, product.id).run()
 
     await updateProduct(db, { organizationId: ORG, productId: product.id, patch: { description: 'Now with clay' }, actor: ACTOR })
     assert.equal(await db.prepare("SELECT count(*) n FROM bookings WHERE id = 'b1'").first<number>('n'), 1,
