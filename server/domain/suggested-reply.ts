@@ -16,7 +16,7 @@ Output only a JSON array of the reply strings, without commentary, markdown, or 
 /**
  * One to three draft replies for the web composer's Suggested replies, the way
  * the iPhone drafts them on the device: from the whole conversation and
- * everything the business saved about the home, stay, booking or reservation behind it. Nothing is
+ * everything the business saved about the home or stay behind it. Nothing is
  * sent; nothing is stored.
  */
 export async function suggestGuestReplies(db: DbClient, env: Record<string, unknown>, principal: MemberAccessPrincipal, threadId: string): Promise<{ generationId: string; suggestions: string[] }> {
@@ -31,7 +31,7 @@ export async function suggestGuestReplies(db: DbClient, env: Record<string, unkn
   if (messages.at(-1)?.from !== 'guest') messagingError(409, 'SUGGESTION_NEEDS_GUEST_MESSAGE', 'A reply is suggested only when the guest wrote last', 'threadId')
   // Operator identity must not enter a draft addressed to the guest.
   const home = context.home ? (({ internal_name: _internalName, ...listing }) => listing)(context.home) : null
-  const facts = JSON.stringify({ now: new Date().toISOString(), guest: thread.guestName, home, stay: context.stay, booking: context.booking, messages })
+  const facts = JSON.stringify({ guest: thread.guestName, home, stay: context.stay, messages })
   const draft = await runWorkersAiText(env, [
     { role: 'system', content: INSTRUCTIONS },
     { role: 'user', content: `Write the reply using this quoted context:\n${facts}` },
