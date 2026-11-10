@@ -1,0 +1,1 @@
+ALTER TABLE `product_booking_configs` ADD `advance_notice_minutes` integer;

@@ -1,3 +1,4 @@
+import { outsideNotice } from '~/shared/availability-settings'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { HTTPError } from 'nitro'
 import { queryAll, queryFirst, type DbClient } from '~/server/db'
@@ -42,6 +43,8 @@ export async function listPublicBookingSessions(db: DbClient, organizationId: st
     product: { id: product.id, name: product.name, slug },
     sessions: sessions
       .filter(session => { const window = bookingWindow(session.timezone); return session.starts_at >= window.fromInstant && session.starts_at < window.toInstant })
+      // A start inside the offering's advance notice is not offered; the claim refuses it too.
+      .filter(session => outsideNotice(session.starts_at, product.booking?.advance_notice_minutes ?? null))
       .filter(session => onlineOnly ? session.location_id === null && product.booking?.held_online : (requestedLocation
         ? session.location_id === requestedLocation
         : session.location_id === null ? product.booking?.held_online : sellingLocations.has(session.location_id)))

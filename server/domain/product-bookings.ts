@@ -388,7 +388,7 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
   return creationResult({
     success: true, request_id: threadId, operational_booking_id: operationalBookingId, status: record.status, replayed: false, starts_at: record.starts_at, ends_at: record.ends_at, timezone: record.timezone, presentation, ...(operator ? {} : { cancellation_token: cancellation.token, quoted_value: quotedValueOf(followUps[1]!), measurement }),
     message: record.status === 'cancelled' ? 'This booking was cancelled.' : record.status === 'pending' ? `Your request for ${record.product_name} on ${whenLabel} is awaiting review.` : `Your ${presentation.noun} for ${record.product_name} on ${whenLabel} is confirmed.`,
-    policy_summary: renderBookingPolicySummary(visitPolicySummarySource('experience'), locale, full.kind),
+    policy_summary: renderBookingPolicySummary(visitPolicySummarySource('experience', record.advance_notice_minutes), locale, full.kind),
   }, { status: 201 })
 }
 

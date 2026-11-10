@@ -24,7 +24,7 @@ import {
 } from '../../server/utils/product-management.ts'
 import { AmbiguousPriceError } from '../../shared/prices.ts'
 import { groupProductsByCollection } from '../../utils/product-presentation.ts'
-import { claimSessionCapacity, listSessions } from '../../server/utils/availability.ts'
+import { CapacityUnavailableError, claimSessionCapacity, listSessions, sessionMoveQuery, setProductBookingConfig } from '../../server/utils/availability.ts'
 import { loadPublicSiteProductDetail, loadPublicProductCollection, loadPublicProductDetail, loadPublicProductSessions } from '../../server/utils/public-products.ts'
 import { listPublicBookingSessions } from '../../server/utils/public-session-booking.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
@@ -155,6 +155,49 @@ test('public experiences require a configured booking flow and retain full or te
     await assert.rejects(setProductPublication(db, { env, organizationId: ORG, productId: external.id, published: true, actor: ACTOR }),
       (error: { statusCode?: number; data?: { missing?: string[] } }) => error.statusCode === 409 && error.data?.missing?.includes('active') === true)
     assert.deepEqual(await visible(), [legacy.id], 'publishing a withheld experience still requires accepting bookings')
+  } finally { await runtime.dispose() }
+})
+
+test('advance notice keeps sessions inside it off the public listing and refuses booking or moving onto them', { timeout: 120_000 }, async () => {
+  const { runtime, db, env } = await boot()
+  try {
+    await db.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('org-en', ?, 'en', 1, 'published')").bind(ORG).run()
+    const product = await createProduct(db, { organizationId: ORG, actor: ACTOR, product: {
+      kind: 'experience', name: 'Pottery', active: true, variants: [{ name: 'Seat', prices: [{ unit_amount: 50000, currency: 'THB' }] }],
+    }, publication: { published: false } })
+    await db.prepare("INSERT INTO product_locations (organization_id, product_id, location_id, active, published, created_by, updated_by) VALUES (?, ?, 'loc-a', 1, 1, ?, ?)")
+      .bind(ORG, product.id, ACTOR.actorId, ACTOR.actorId).run()
+    await db.prepare(`INSERT INTO product_booking_configs (product_id, organization_id, duration_minutes, default_capacity, scheduling_mode, created_by, updated_by) VALUES (?, ?, 60, 8, 'business', ?, ?)`)
+      .bind(product.id, ORG, ACTOR.actorId, ACTOR.actorId).run()
+    await db.prepare('UPDATE product_publications SET published = 1 WHERE organization_id = ? AND product_id = ?').bind(ORG, product.id).run()
+    const minute = Math.ceil(Date.now() / 60_000) * 60_000
+    const sessions = { soon: minute + 86_400_000, later: minute + 3 * 86_400_000 }
+    for (const [id, start] of Object.entries(sessions)) {
+      await db.prepare("INSERT INTO product_sessions (id, organization_id, product_id, location_id, timezone, starts_at, ends_at, capacity, created_by, updated_by) VALUES (?, ?, ?, 'loc-a', 'Asia/Bangkok', ?, ?, 8, ?, ?)")
+        .bind(id, ORG, product.id, new Date(start).toISOString(), new Date(start + 3_600_000).toISOString(), ACTOR.actorId, ACTOR.actorId).run()
+    }
+    const listed = async () => (await listPublicBookingSessions(db, ORG, product.slug, env, 'loc-a')).sessions.map(session => session.id)
+    assert.deepEqual(await listed(), ['soon', 'later'], 'with no notice a session tomorrow is offered')
+
+    await setProductBookingConfig(db, { organizationId: ORG, productId: product.id, actorId: ACTOR.actorId, env, patch: { advance_notice_minutes: 2880 } })
+    assert.equal((await getProduct(db, ORG, product.id)).booking?.advance_notice_minutes, 2880)
+    assert.deepEqual(await listed(), ['later'])
+    const detail = await loadPublicProductDetail(env, db, ORG, 'experiences', false, 'loc-a', product.slug)
+    assert.deepEqual((await loadPublicProductSessions(db, detail!, env)).map(session => session.id), ['later'])
+    assert.deepEqual(await productBookingReadiness(db, ORG, await getProduct(db, ORG, product.id), { requireAllocation: true, env }).then(result => result.ready), true, 'a later session still proves the offering bookable')
+
+    const claim = (sessionId: string) => claimSessionCapacity(db, { env, organizationId: ORG, productId: product.id, sessionId, productVariantId: product.variants[0]!.id, partySize: 1 })
+    await assert.rejects(claim('soon'), CapacityUnavailableError)
+    assert.equal(await db.prepare("SELECT COUNT(*) n FROM bookings WHERE product_session_id = 'soon'").first('n'), 0)
+    const booking = await claim('later')
+    const move = await sessionMoveQuery(db, { env, organizationId: ORG, productId: product.id, sessionId: 'soon', partySize: 1, bookingId: booking.bookingId, now: new Date().toISOString() })
+    assert.equal((await db.prepare(move.query).bind(...move.params!).run()).meta.changes, 0)
+    assert.equal(await db.prepare('SELECT product_session_id FROM bookings WHERE id = ?').bind(booking.bookingId).first('product_session_id'), 'later')
+
+    await setProductBookingConfig(db, { organizationId: ORG, productId: product.id, actorId: ACTOR.actorId, env, patch: { advance_notice_minutes: 0 } })
+    assert.equal(await db.prepare('SELECT advance_notice_minutes FROM product_booking_configs WHERE product_id = ?').bind(product.id).first('advance_notice_minutes'), null, 'no notice is stored as null')
+    assert.deepEqual(await listed(), ['soon', 'later'])
+    await assert.rejects(setProductBookingConfig(db, { organizationId: ORG, productId: product.id, actorId: ACTOR.actorId, env, patch: { advance_notice_minutes: -60 } }), /advance_notice_minutes/)
   } finally { await runtime.dispose() }
 })
 

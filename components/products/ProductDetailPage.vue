@@ -503,6 +503,7 @@ import type { Accommodation, PropertyValue } from 'nuxt-schema-org/schema'
 import { useSchemaOrg } from '#imports'
 import { STAY_AMENITIES, STAY_AMENITY_GROUPS, STAY_LISTING_TYPES, STAY_PROPERTY_SIZE_UNITS, STAY_PROPERTY_TYPES } from '~/shared/stay-listing'
 import { bookedPolicyTerms } from '~/shared/stay-cancellation'
+import { changeNoticeMinutes, noticeDuration } from '~/shared/availability-settings'
 import { stayPhotoRoomName, stayPhotoTourReady } from '~/shared/stay-photos'
 import { STAY_ROOM_ACCESSIBILITY_FEATURES, STAY_HOME_ACCESSIBILITY_FEATURES } from '~/shared/stay-accessibility'
 import type { MediaGalleryGroup } from '~/components/MediaLightbox.vue'
@@ -898,7 +899,7 @@ const experienceHighlights = computed(() => {
   if (isStay.value) return []
   const recent = [...props.reviews].sort((left, right) => (right.original_review_date ?? right.created_at).localeCompare(left.original_review_date ?? left.created_at))[0]
   return [
-    ...(props.booking ? [{ key: 'cancellation', icon: 'calendar-days' as const, title: t('site.experience_detail.cancellation'), text: t('booking_policy.cancellation') }] : []),
+    ...(props.booking ? [{ key: 'cancellation', icon: 'calendar-days' as const, title: t('site.experience_detail.cancellation'), text: t('booking_policy.cancellation', { window: noticeDuration(changeNoticeMinutes(props.booking.advance_notice_minutes), locale.value) }) }] : []),
     ...(recent ? [{ key: 'review', icon: 'star' as const, title: t('site.experience_detail.recent_review'), text: `“${recent.content}” — ${recent.author_name}` }] : []),
   ]
 })

@@ -193,6 +193,46 @@ test('guest class cancellation refunds through Stripe until 24 hours before the 
  }
 })
 
+test('a two-day advance notice closes a guest\'s own class cancellation two days before, and refunds until then', { timeout: 120_000 }, async t => {
+ for (const open of [true, false]) {
+  const { db, runtime } = await boot()
+  try {
+   const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-proof-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only', STRIPE_SECRET_KEY: 'sk_test_local_boundary' }
+   const opening = { id: 'notice-request', kind: 'booking' as const, organization_id: ORG, location_id: null, user_id: 'verified', review_id: null, payload: threadPayloadForGuest({ name: 'Verified', email: 'verified@example.com' }), created_at: NOW, updated_at: NOW }
+   await db.batch(requestInsertQueries(opening).map(write => db.prepare(write.query).bind(...write.params)))
+   const booking = await claimSessionCapacity(db, { env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1, userId: 'verified', requestId: opening.id })
+   await payable(db, 'notice-payment')
+   await db.prepare("UPDATE payments SET buyer_user_id='verified',subject_id=?,captured_amount=10000,stripe_payment_intent_id='pi_notice',stripe_charge_id='ch_notice' WHERE id='notice-payment'").bind(booking.bookingId).run()
+   await db.prepare("UPDATE payment_checkout_holds SET buyer_user_id='verified',request_id=?,status='converted',converted_booking_id=? WHERE payment_id='notice-payment'").bind(opening.id, booking.bookingId).run()
+   await db.prepare("UPDATE product_booking_configs SET advance_notice_minutes=2880 WHERE product_id='product'").run()
+   const startsAt = await db.prepare("SELECT starts_at FROM product_sessions WHERE id='session'").first<string>('starts_at')
+   assert(startsAt)
+   const now = new Date(Date.parse(startsAt) - 2 * 86_400_000 + (open ? -1 : 1)).toISOString()
+   const originalFetch = globalThis.fetch
+   let creations = 0
+   const fetchMock = t.mock.method(globalThis, 'fetch', async (request, init) => {
+    const url = new URL(request instanceof Request ? request.url : String(request))
+    if (url.origin !== 'https://api.stripe.com') return originalFetch(request, init)
+    if (url.pathname === '/v1/refunds' && init?.method === 'POST') {
+     creations++
+     const params = new URLSearchParams(String(init.body))
+     return Response.json({ id: 're_notice', object: 'refund', amount: 10000, currency: 'usd', status: 'succeeded', payment_intent: 'pi_notice', reason: 'requested_by_customer', metadata: { krabiclaw_refund_id: params.get('metadata[krabiclaw_refund_id]') } })
+    }
+    return Response.json({ id: 'ch_notice', object: 'charge', livemode: false, amount: 10000, amount_refunded: 10000, currency: 'usd', payment_intent: 'pi_notice', billing_details: { email: 'verified@example.com' } })
+   })
+   try {
+    const cancel = cancelBookingRequest(db, { id: opening.id, organizationId: ORG, kind: 'booking', now, env, buyerUserId: 'verified' })
+    if (open) assert.equal((await cancel)?.changed, true)
+    else await assert.rejects(cancel, (error: HTTPError) => error.statusCode === 409 && (error.data as { code?: string }).code === 'cancellation_closed' && /closed 2 days before the start/.test(error.message))
+    assert.deepEqual(await db.prepare('SELECT status,cancellation_reason FROM bookings WHERE id=?').bind(booking.bookingId).first(), open ? { status: 'cancelled', cancellation_reason: 'guest_cancelled' } : { status: 'pending', cancellation_reason: null })
+    assert.equal(await db.prepare("SELECT json_extract(payload_json,'$.cancellation.used_at') used FROM requests WHERE id=?").bind(opening.id).first('used'), open ? now : null)
+    assert.deepEqual(await db.prepare("SELECT refunded_amount FROM payments WHERE id='notice-payment'").first(), { refunded_amount: open ? 10000 : 0 })
+    assert.equal(creations, Number(open))
+   } finally { fetchMock.mock.restore() }
+  } finally { await runtime.dispose() }
+ }
+})
+
 test('authorized guest cancellation replay recovers an interrupted Stripe refund without another cancellation or refund intent', { timeout: 120_000 }, async t => {
  for (const credentials of [{ buyerUserId: 'verified' }, { tokenHash: 'deposit-token-hash' }]) {
   const { db, runtime } = await boot()

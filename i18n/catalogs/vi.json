@@ -146,7 +146,7 @@
   "booking_policy.experience_heading": "Chính sách trải nghiệm",
   "booking_policy.consultation_heading": "Chính sách đặt lịch tư vấn",
   "booking_policy.minimum_guest_age": "Độ tuổi tối thiểu của khách là {age}.",
-  "booking_policy.reschedule": "Bạn có thể đổi lịch trước giờ bắt đầu ít nhất 24 giờ.",
+  "booking_policy.reschedule": "Bạn có thể đổi lịch trước giờ bắt đầu ít nhất {window}.",
   "booking_policy.reservation_heading": "Chính sách đặt bàn",
   "dates.date_unavailable": "Chưa có ngày",
   "dates.time_unavailable": "Chưa có giờ",
@@ -719,11 +719,12 @@
   "stay.check_in_day": "Ngày nhận phòng",
   "stay.check_out_day": "Ngày trả phòng",
   "stay.load_dates": "Tải thêm ngày",
-  "booking_policy.cancellation": "Hủy miễn phí trước giờ bắt đầu ít nhất 24 giờ. Sau thời điểm đó, khoản thanh toán sẽ không được hoàn tự động.",
+  "booking_policy.cancellation": "Hủy miễn phí trước giờ bắt đầu ít nhất {window}. Sau thời điểm đó, khoản thanh toán sẽ không được hoàn tự động.",
   "booking_policy.cancel_refund": "Bạn sẽ được hoàn tiền toàn bộ.",
-  "booking_policy.cancel_no_refund": "Chỉ còn chưa đến 24 giờ trước giờ bắt đầu nên khoản thanh toán của bạn sẽ không được hoàn lại.",
+  "booking_policy.cancel_no_refund": "Chỉ còn chưa đến {window} trước giờ bắt đầu nên khoản thanh toán của bạn sẽ không được hoàn lại.",
   "payment.free_cancellation_until": "Hủy miễn phí đến {time}. Sau thời điểm đó, khoản thanh toán này sẽ không được hoàn tự động.",
   "payment.non_refundable": "Đặt chỗ này không được hoàn tiền.",
   "site.experience_cancel.retry_refund": "Thử hoàn tiền lại",
-  "site.experience_cancel.toast_refund_failed": "Không thể thử hoàn tiền lại. Vui lòng thử lại."
+  "site.experience_cancel.toast_refund_failed": "Không thể thử hoàn tiền lại. Vui lòng thử lại.",
+  "booking_policy.cancel_closed": "Đã hết hạn hủy trực tuyến từ {window} trước giờ bắt đầu. Vui lòng liên hệ doanh nghiệp để hủy."
 }

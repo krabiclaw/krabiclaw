@@ -32,6 +32,17 @@ test('experience summaries state the same rule', () => {
   assert(summary.items.some(item => item.text.includes('6+')))
 })
 
+test('a class or consultation states its advance notice when it is longer than a day; a table keeps 24 hours', () => {
+  const consultation = formatBookingPolicySummary(reservationPolicy({ policy_type: 'experience', advance_notice_minutes: 2880, deposit_required: null }), 'en', 'service')
+  assert.equal(consultation.heading, 'Consultation policies')
+  assert.deepEqual(consultation.items, [
+    { id: 'cancellation', text: 'Cancel free up to 2 days before the start time. After that, payments aren\'t refunded automatically.' },
+    { id: 'reschedule', text: 'You can reschedule up to 2 days before the start time.' },
+  ])
+  assert.equal(formatBookingPolicySummary(reservationPolicy({ policy_type: 'experience', advance_notice_minutes: 120, deposit_required: null }), 'en').items[1]!.text, 'You can reschedule up to 24 hours before the start time.')
+  assert.equal(formatBookingPolicySummary(reservationPolicy({ advance_notice_minutes: 2880 }), 'en').items[1]!.text, 'You can reschedule up to 24 hours before the start time.')
+})
+
 test('renderBookingPolicySummary localizes Thai summaries', () => {
   const summary = formatBookingPolicySummary(reservationPolicy(), 'th')
   assert.equal(summary.heading, 'นโยบายการจอง')

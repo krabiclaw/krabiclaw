@@ -209,7 +209,7 @@
       <p v-if="personalScope" class="text-sm text-muted">
         {{ booking.organizationName }} is told the {{ noun }} was cancelled.
         <template v-if="refundable && booking.guestCancelRefunds">Your payment is refunded in full.</template>
-        <template v-else-if="refundable">It’s less than 24 hours before the start, so your payment won’t be refunded.</template>
+        <template v-else-if="refundable">Free cancellation has closed, so your payment won’t be refunded.</template>
         This cannot be undone.
       </p>
       <p v-else class="text-sm text-muted">

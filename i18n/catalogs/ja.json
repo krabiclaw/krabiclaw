@@ -146,7 +146,7 @@
   "booking_policy.experience_heading": "体験ポリシー",
   "booking_policy.consultation_heading": "相談予約ポリシー",
   "booking_policy.minimum_guest_age": "ご参加は{age}歳以上の方に限ります。",
-  "booking_policy.reschedule": "開始時刻の24時間前まで日時を変更できます。",
+  "booking_policy.reschedule": "開始時刻の{window}前まで日時を変更できます。",
   "booking_policy.reservation_heading": "予約ポリシー",
   "dates.date_unavailable": "日付不明",
   "dates.time_unavailable": "時刻不明",
@@ -719,11 +719,12 @@
   "stay.check_in_day": "チェックイン日",
   "stay.check_out_day": "チェックアウト日",
   "stay.load_dates": "さらに日付を読み込む",
-  "booking_policy.cancellation": "開始時刻の24時間前まで無料でキャンセルできます。それ以降、お支払いは自動的には返金されません。",
+  "booking_policy.cancellation": "開始時刻の{window}前まで無料でキャンセルできます。それ以降、お支払いは自動的には返金されません。",
   "booking_policy.cancel_refund": "全額返金されます。",
-  "booking_policy.cancel_no_refund": "開始時刻まで24時間を切っているため、お支払いは返金されません。",
+  "booking_policy.cancel_no_refund": "開始時刻まで{window}を切っているため、お支払いは返金されません。",
   "payment.free_cancellation_until": "{time}まで無料でキャンセルできます。それ以降、このお支払いは自動的には返金されません。",
   "payment.non_refundable": "このご予約は返金できません。",
   "site.experience_cancel.retry_refund": "返金を再試行",
-  "site.experience_cancel.toast_refund_failed": "返金を再試行できませんでした。もう一度お試しください。"
+  "site.experience_cancel.toast_refund_failed": "返金を再試行できませんでした。もう一度お試しください。",
+  "booking_policy.cancel_closed": "オンラインでのキャンセルは開始時刻の{window}前に締め切られました。キャンセルするには事業者にご連絡ください。"
 }

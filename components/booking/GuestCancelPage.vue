@@ -25,10 +25,11 @@
             <p><strong>{{ copy('time') }}</strong> {{ readableTime }}</p>
             <p><strong>{{ copy('guests') }}</strong> {{ booking.guests }}</p>
           </div>
-          <p v-if="booking.paid" class="mt-6 text-sm text-default">{{ t(booking.refund_on_cancel ? 'booking_policy.cancel_refund' : 'booking_policy.cancel_no_refund') }}</p>
+          <p v-if="cancellationClosed" class="mt-6 text-sm text-default">{{ t('booking_policy.cancel_closed', { window: noticeDuration(booking.advance_notice_minutes!, locale) }) }}</p>
+          <p v-else-if="booking.paid" class="mt-6 text-sm text-default">{{ t(booking.refund_on_cancel ? 'booking_policy.cancel_refund' : 'booking_policy.cancel_no_refund', { window: noticeDuration(changeNoticeMinutes(booking.advance_notice_minutes), locale) }) }}</p>
           <p v-if="cancelError" class="mt-4 text-sm text-error">{{ cancelError }}</p>
           <div class="mt-10 flex flex-col gap-3">
-            <TenantButton color="error" size="lg" block :loading="loading" @click="handleCancel">
+            <TenantButton v-if="!cancellationClosed" color="error" size="lg" block :loading="loading" @click="handleCancel">
               {{ copy('confirm') }}
             </TenantButton>
             <TenantButton :to="localePath('/')" variant="ghost" size="lg" block>{{ copy('keep') }}</TenantButton>
@@ -66,6 +67,7 @@ import { $fetch } from 'ofetch'
 import { formatTimestamp } from '~/utils/timezone'
 import { presentationForProduct } from '~/utils/product-presentation'
 import type { ProductKind } from '~/shared/product-details'
+import { changeNoticeMinutes, noticeDuration, outsideNotice } from '~/shared/availability-settings'
 
 /**
  * The page a guest's cancellation link opens.
@@ -101,6 +103,7 @@ interface GuestBookingView {
   status: string
   can_retry_cancellation: boolean
   refund_on_cancel: boolean
+  advance_notice_minutes: number | null
   paid: { amount: number; currency: string } | null
   product_name: string | null
   product_kind: ProductKind | null
@@ -132,6 +135,8 @@ const startOverHref = computed(() => localePath(props.kind === 'booking'
   ? (presentation.value?.collectionPath ?? '/')
   : '/reservations'))
 
+// The offering's advance notice closes the guest's own cancellation, as the cancel route refuses it.
+const cancellationClosed = computed(() => Boolean(booking.value && !outsideNotice(booking.value.starts_at, booking.value.advance_notice_minutes)))
 const cancellationSubmitted = ref(false)
 const cancelled = computed(() => cancellationSubmitted.value || booking.value?.status === 'cancelled')
 const loading = ref(false)
