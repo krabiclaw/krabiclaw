@@ -9,9 +9,6 @@ export default defineHandler(async (event) => {
   const id = getRouterParam(event, 'organizationId')
   if (!id) return jsonResponse({ error: 'Organization ID required' }, { status: 400 })
   const { env, organization } = await requireOrganizationAccess(event, id)
-  // Explicit retry also retries failed cleanup without changing its identity.
-  const { execute } = await import('~/server/db')
-  await execute(env.DB, 'UPDATE google_calendar_event_links SET next_attempt_at=NULL WHERE organization_id=?', [organization.id])
   const result=await syncCalendarOrganization(env,organization.id)
   if(result.failed)return jsonResponse({error:'Your calendar could not be synced. Try again.',...result},{status:502})
   return jsonResponse({success:true,...result})

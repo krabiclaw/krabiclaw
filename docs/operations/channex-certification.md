@@ -61,7 +61,7 @@ The write path Channex will ask to see:
 | Delivery | `deliverStayNights` in `server/integrations/channex/ari.ts`; the `channex-ari-delivery` task delivers what comes due |
 | `POST /restrictions`, `POST /availability` | `ari.ts`, one call each per home per delivery, contiguous equal nights as one date range |
 | Rate limit | 10 restrictions and 10 availability calls per property per minute, counted from `channel_sync_log` |
-| 429 and 5xx | the property pauses 1 minute, doubling to 1 hour; nights stay pending until Channex confirms them |
+| 429 and 5xx | logged as failed with Channex's answer; the nights stay pending with that reason and the next delivery sends them |
 | Mapping | `product_channel_mappings` (property, room type, rate plan per home) |
 | Task IDs | `channel_sync_log.task_id` on every ARI call |
 | Bookings | webhook `POST /api/integrations/channex/webhook` → `applyBookingRevision` (`booking-revisions.ts`) → `GET /booking_revisions/:id` is the booking, landed as a stay, then `POST /booking_revisions/:id/ack`; `channex-revision-feed` reads unacknowledged revisions every 10 minutes. Nothing reads `GET /bookings/:id`: Channex counts that as `booking_received_via_booking_find` and refuses it |
@@ -85,7 +85,7 @@ The write path Channex will ask to see:
    an owner or admin with channel sync access. It verifies canonical defaults,
    repairs differing metadata if needed, then sends one restrictions and one
    availability task. It does not reimport Airbnb content. Wait for its result;
-   if delivery is pending, read the reason and let the existing outbox retry.
+   if delivery is pending, read the reason; the next delivery sends it.
    Do this before tests 2 to 10: full sync records what Channex holds for every
    night, so each later save sends only the field the test changes. The home's
    existing connection and mapping stay in place throughout.

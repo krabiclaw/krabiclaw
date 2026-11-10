@@ -59,7 +59,9 @@ async function boot(){
  try {
  const migration=await generateSQLiteMigration(await generateSQLiteDrizzleJson({}),await generateSQLiteDrizzleJson(schema))
  await db.batch(migration.map(query=>db.prepare(query)))
- await db.prepare(`INSERT INTO organization(id,name,slug,subdomain,settings_json,theme_id,default_currency,status,onboarding_status,url_structure,vertical,updated_at, timezone) VALUES(?,'Payments','payments','payments','{}','theme','USD','active','complete','flat','experience',?, 'America/New_York')`).bind(ORG,NOW).run()
+ // A business taking payments is billed for them on its plan's Stripe customer, and the platform site records what it billed.
+ await db.prepare(`INSERT INTO organization(id,name,slug,subdomain,settings_json,theme_id,default_currency,status,onboarding_status,url_structure,vertical,updated_at, timezone, "stripeCustomerId") VALUES(?,'Payments','payments','payments','{}','theme','USD','active','complete','flat','experience',?, 'America/New_York','cus_operating')`).bind(ORG,NOW).run()
+ await db.prepare(`INSERT INTO organization(id,name,slug,subdomain,settings_json,theme_id,default_currency,status,onboarding_status,url_structure,vertical,updated_at,timezone) VALUES('platform','KrabiClaw','krabiclaw','krabiclaw','{}','krabiclaw-theme-v1','USD','active','complete','flat','service',?,'America/Los_Angeles')`).bind(NOW).run()
  await db.prepare("INSERT INTO organization_locales(id,organization_id,locale,is_source,status) VALUES('payments-en',?,'en',1,'published')").bind(ORG).run()
  for(const id of ['guest','verified','other'])await db.prepare("INSERT INTO user(id,name,email,emailVerified,isAnonymous) VALUES(?,?,?,1,?)").bind(id,id,`${id}@example.com`,Number(id==='guest')).run()
  await db.prepare("INSERT INTO products(kind,id,organization_id,name,slug,created_by,updated_by) VALUES('service','product',?,'Consultation','consultation','guest','guest')").bind(ORG).run()
@@ -818,8 +820,6 @@ test('an expired payment hold no longer consumes session capacity', {timeout:120
 
 test('Payments usage reaches its Stripe meters once, a correction as a negative value, and a rejected event keeps Stripe’s reason', {timeout:120000},async(t)=>{
  const {db,runtime}=await boot();try{
-  await db.prepare('UPDATE organization SET "stripeCustomerId"=? WHERE id=?').bind('cus_operating',ORG).run()
-  await db.prepare(`INSERT INTO organization(id,name,slug,subdomain,settings_json,theme_id,default_currency,status,onboarding_status,url_structure,vertical,updated_at,timezone) VALUES('platform','KrabiClaw','krabiclaw','krabiclaw','{}','krabiclaw-theme-v1','USD','active','complete','flat','service',?,'America/Los_Angeles')`).bind(NOW).run()
   await payable(db,'billable')
   const events=[
    ['volume','billable','captured_volume','USD',10000,'capture:billable'],
@@ -844,7 +844,7 @@ test('Payments usage reaches its Stripe meters once, a correction as a negative 
   const env={DB:db,STRIPE_SECRET_KEY:'sk_test_meter_boundary'} as CloudflareEnv
   // Stripe unavailable: the event keeps the reason and stays deliverable.
   await assert.rejects(()=>deliverPaymentsUsage(db,env,ORG),/unavailable at the test boundary/u)
-  assert.deepEqual(await db.prepare("SELECT delivery_at,dead_letter_at,error FROM payment_usage_events WHERE id='volume'").first(),{delivery_at:null,dead_letter_at:null,error:'Meter events are unavailable at the test boundary'})
+  assert.deepEqual(await db.prepare("SELECT delivery_at,error FROM payment_usage_events WHERE id='volume'").first(),{delivery_at:null,error:'Meter events are unavailable at the test boundary'})
   // Delivered: each to its meter, the correction negative, the repeat of the first under the same identifier and key.
   answer='ok'
   assert.deepEqual(await deliverPaymentsUsage(db,env,ORG),{delivered:4})
@@ -862,16 +862,23 @@ test('Payments usage reaches its Stripe meters once, a correction as a negative 
   assert.equal(await db.prepare("SELECT COUNT(*) n FROM analytics_events WHERE organization_id='platform' AND payload_json->>'$.event_name'='payments_volume_billed' AND payload_json->>'$.properties.volume_minor'=10000").first('n'),1)
   assert.deepEqual(await deliverPaymentsUsage(db,env,ORG),{delivered:0})
   assert.equal(sent.length,5)
-  // Stripe refuses an event outright: it is set aside with Stripe’s reason, not retried.
+  // Stripe refuses an event outright: it keeps Stripe’s reason, and every delivery sends it again and fails until Stripe takes it.
   answer='invalid'
   await db.prepare("INSERT INTO payment_usage_events(id,organization_id,kind,currency,amount,source_id,provider_occurred_at,created_at)VALUES('late',?,'ad_spend','USD',100,'google_ads:1234567890:2026-10-01',?,?)").bind(ORG,NOW,NOW).run()
   await assert.rejects(()=>deliverPaymentsUsage(db,env,ORG),/No active meter/u)
-  const late=await db.prepare("SELECT delivery_at,dead_letter_at,error FROM payment_usage_events WHERE id='late'").first<{delivery_at:string|null;dead_letter_at:string|null;error:string}>()
-  assert.equal(late?.delivery_at,null)
-  assert.equal(typeof late?.dead_letter_at,'string')
-  assert.equal(late?.error,'No active meter was found for event_name krabiclaw_ad_spend')
-  assert.deepEqual(await deliverPaymentsUsage(db,env,ORG),{delivered:0})
-  assert.equal(sent.length,6)
+  assert.deepEqual(await db.prepare("SELECT delivery_at,error FROM payment_usage_events WHERE id='late'").first(),{delivery_at:null,error:'No active meter was found for event_name krabiclaw_ad_spend'})
+  await assert.rejects(()=>deliverPaymentsUsage(db,env,ORG),/No active meter/u)
+  assert.equal(sent.length,7)
+  answer='ok'
+  assert.deepEqual(await deliverPaymentsUsage(db,env,ORG),{delivered:1})
+  assert.equal(sent.length,8)
+  assert.deepEqual(await db.prepare("SELECT delivery_at IS NOT NULL AS delivered,error FROM payment_usage_events WHERE id='late'").first(),{delivered:1,error:null})
+  // A business with no Stripe customer has nothing to bill usage to: the delivery fails with that reason on the event.
+  await db.prepare('UPDATE organization SET "stripeCustomerId"=NULL WHERE id=?').bind(ORG).run()
+  await db.prepare("INSERT INTO payment_usage_events(id,organization_id,kind,currency,amount,source_id,provider_occurred_at,created_at)VALUES('orphaned',?,'ad_spend','USD',100,'google_ads:1234567890:2026-10-02',?,?)").bind(ORG,NOW,NOW).run()
+  await assert.rejects(()=>deliverPaymentsUsage(db,env,ORG),/no Stripe customer to bill this usage to/u)
+  assert.deepEqual(await db.prepare("SELECT delivery_at,error FROM payment_usage_events WHERE id='orphaned'").first(),{delivery_at:null,error:'The business has no Stripe customer to bill this usage to'})
+  assert.equal(sent.length,8)
  }finally{await runtime.dispose()}
 })
 
@@ -1226,7 +1233,7 @@ test('processing webhooks extend only active checkout holds and preserve capacit
       await payable(db, id, expires)
       if (status !== 'active') await db.prepare('UPDATE payment_checkout_holds SET status=? WHERE payment_id=?').bind(status, id).run()
       const event = { id: `evt_${id}`, type: 'payment_intent.processing', account: 'acct_seller', livemode: false, data: { object: { id: `pi_${id}`, metadata: { krabiclaw_payment_id: id } } } } as Stripe.Event
-      assert.equal(await processPaymentEvent(db, getStripe(env), event, env), true)
+      await processPaymentEvent(db, getStripe(env), event, env)
       const hold = await db.prepare('SELECT status, expires_at FROM payment_checkout_holds WHERE payment_id=?').bind(id).first<{ status: string; expires_at: string }>()
       assert.equal(hold?.status, status)
       assert.equal((await requirePayment(db, ORG, id)).captured_amount, 0)
@@ -1251,13 +1258,20 @@ async function confirmable(db: D1Database, id: string, holdExpires: string, chec
  await db.prepare('UPDATE payment_checkout_holds SET expires_at=?,request_id=? WHERE payment_id=?').bind(holdExpires, opening.id, id).run()
  return claim
 }
-/** Stripe's answers for the intents, charges and refunds a confirmation and its settlement read. */
+/** Stripe's answers for the intents, charges and refunds a confirmation and its settlement read, and the platform meter its captured volume is billed on. */
 function fakeStripe(t: TestContext, handle: (url: URL, init: RequestInit | undefined) => Promise<Response | null> | Response | null, statuses: Record<string, string>) {
  const originalFetch = globalThis.fetch
- const calls = { confirm: [] as string[], capture: [] as string[], cancel: [] as string[], refund: [] as string[], read: [] as string[] }
+ const calls = { confirm: [] as string[], capture: [] as string[], cancel: [] as string[], refund: [] as string[], read: [] as string[], billed: [] as string[] }
  t.mock.method(globalThis, 'fetch', async (request: RequestInfo | URL, init?: RequestInit) => {
   const url = new URL(request instanceof Request ? request.url : String(request))
   if (url.origin !== 'https://api.stripe.com') return originalFetch(request, init)
+  if (url.pathname === '/v1/billing/meter_events') {
+   const body = new URLSearchParams(String(init?.body))
+   assert.equal(new Headers(init?.headers).get('stripe-account'), null)
+   assert.equal(body.get('payload[stripe_customer_id]'), 'cus_operating')
+   calls.billed.push(`${body.get('event_name')}:${body.get('payload[value]')}`)
+   return Response.json({ object: 'billing.meter_event', event_name: body.get('event_name'), identifier: body.get('identifier'), payload: {}, timestamp: 1, created: 1, livemode: false })
+  }
   assert.equal(new Headers(init?.headers).get('stripe-account'), 'acct_seller')
   const handled = await handle(url, init)
   if (handled) return handled
@@ -1325,9 +1339,10 @@ test('a card is authorized, booked, then captured, and a hold that has lapsed st
   assert.deepEqual(calls.capture, ['direct'])
   statuses.authenticating = 'requires_capture'
   const event = { id: 'evt_authorized', type: 'payment_intent.amount_capturable_updated', account: 'acct_seller', livemode: false, data: { object: { id: 'pi_authenticating', metadata: { krabiclaw_payment_id: 'authenticating' } } } } as unknown as Stripe.Event
-  assert.equal(await processPaymentEvent(db, stripe, event, env), true)
+  await processPaymentEvent(db, stripe, event, env)
   assert.deepEqual(bookedWhenCaptured, { direct: 1, authenticating: 1 })
   assert.equal((await requirePayment(db, ORG, 'authenticating')).captured_amount, 10000)
+  assert.deepEqual(calls.billed, ['krabiclaw_captured_volume:10000', 'krabiclaw_captured_volume:10000'], 'each capture is billed on the business’s meter')
   assert.equal(await db.prepare('SELECT count(*) n FROM bookings').first('n'), 2)
  } finally { await runtime.dispose() }
 })
@@ -1357,7 +1372,7 @@ test('an authorization that lost its capacity is cancelled and never charged; ca
   await confirmable(db, 'taken', inMinutes(-1))
   await db.prepare("UPDATE payment_checkout_holds SET status='released' WHERE payment_id='taken'").run()
   const seat = await claimSessionCapacity(db, { env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1 })
-  assert.equal(await deliver('taken'), true)
+  await deliver('taken')
   assert.deepEqual([calls.cancel, calls.capture, calls.refund], [['taken'], [], []])
   assert.equal(await db.prepare('SELECT count(*) n FROM bookings WHERE id<>?').bind(seat.bookingId).first('n'), 0)
   assert.equal(await db.prepare("SELECT count(*) n FROM payment_refunds WHERE payment_id='taken'").first('n'), 0)
@@ -1374,7 +1389,7 @@ test('an authorization that lost its capacity is cancelled and never charged; ca
   await assert.rejects(() => deliver('lost'))
   assert.equal(await bookingsOf('lost'), 1)
   assert.equal((await requirePayment(db, ORG, 'lost')).captured_amount, 0)
-  assert.equal(await deliver('lost', 'evt_lost_again'), true)
+  await deliver('lost', 'evt_lost_again')
   assert.deepEqual(calls.capture, [])
   assert.equal(await bookingsOf('lost'), 1)
   assert.equal((await requirePayment(db, ORG, 'lost')).captured_amount, 10000)
@@ -1384,14 +1399,14 @@ test('an authorization that lost its capacity is cancelled and never charged; ca
   await assert.rejects(() => deliver('refused'))
   assert.equal(await bookingsOf('refused'), 1)
   assert.equal(statuses.refused, 'requires_capture')
-  assert.equal(await deliver('refused', 'evt_refused_again'), true)
+  await deliver('refused', 'evt_refused_again')
   assert.deepEqual(calls.capture, ['refused'])
   assert.equal(await bookingsOf('refused'), 1)
   assert.equal((await requirePayment(db, ORG, 'refused')).captured_amount, 10000)
 
   // Another delivery captured first: Stripe's own status finishes this one.
   captures = 0
-  assert.equal(await deliver('raced'), true)
+  await deliver('raced')
   assert.equal(await bookingsOf('raced'), 1)
   assert.equal((await requirePayment(db, ORG, 'raced')).captured_amount, 10000)
 
@@ -1474,7 +1489,7 @@ test('a bank debit that cleared after its capacity went is refunded once and nev
   await confirmable(db, 'taken', inMinutes(-1))
   await db.prepare("UPDATE payment_checkout_holds SET status='released' WHERE payment_id='taken'").run()
   const seat = await claimSessionCapacity(db, { env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1 })
-  assert.equal(await deliver('taken'), true)
+  await deliver('taken')
   assert.deepEqual(calls.refund, ['pi_taken'])
   assert.equal(await db.prepare('SELECT count(*) n FROM bookings WHERE id<>?').bind(seat.bookingId).first('n'), 0)
   assert.equal((await db.prepare("SELECT idempotency_key FROM payment_refunds WHERE payment_id='taken'").first('idempotency_key')), 'unfulfillable:pi_taken')
@@ -1492,8 +1507,8 @@ test('a bank debit that cleared after its capacity went is refunded once and nev
   await assert.rejects(() => deliver('retried'))
   assert.equal(await db.prepare('SELECT count(*) n FROM bookings').first('n'), 0)
   assert.equal((await holdOf(db, 'retried'))?.status, 'active')
-  assert.equal(await deliver('retried'), true)
-  assert.equal(await deliver('retried', 'evt_retried_duplicate'), true)
+  await deliver('retried')
+  await deliver('retried', 'evt_retried_duplicate')
   assert.equal(await db.prepare('SELECT count(*) n FROM bookings').first('n'), 1)
   assert.equal((await holdOf(db, 'retried'))?.status, 'converted')
  } finally { await runtime.dispose() }

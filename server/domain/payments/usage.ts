@@ -1,4 +1,3 @@
-import Stripe from 'stripe'
 import { HTTPError } from 'nitro'
 import { execute, queryAll, queryFirst, type DbClient } from '~/server/db'
 import { getOrganizationBillingStatus, getStripe } from '~/server/utils/billing'
@@ -31,18 +30,17 @@ interface UsageEvent { id: string; payment_id: string | null; kind: UsageKind; c
  * Send each undelivered usage event to its meter, timestamped now so it lands
  * in the period Stripe has open; a cost correction is a negative value. The
  * identifier and idempotency key are the source's, so a repeat after a lost
- * answer is the same event. A rejected event keeps Stripe's reason and stops
- * the delivery; Stripe's own 4xx (other than rate limiting) is not retried.
+ * answer is the same event. An event that is not delivered keeps the reason
+ * and fails the delivery; the next delivery sends it again.
  */
 export async function deliverPaymentsUsage(db: DbClient, env: CloudflareEnv, organizationId: string): Promise<{ delivered: number }> {
-  const events = await queryAll<UsageEvent>(db, 'SELECT id,payment_id,kind,currency,amount,source_id,billing_basis_json FROM payment_usage_events WHERE organization_id=? AND delivery_at IS NULL AND dead_letter_at IS NULL ORDER BY created_at', [organizationId])
+  const events = await queryAll<UsageEvent>(db, 'SELECT id,payment_id,kind,currency,amount,source_id,billing_basis_json FROM payment_usage_events WHERE organization_id=? AND delivery_at IS NULL ORDER BY created_at', [organizationId])
   if (!events.length) return { delivered: 0 }
   const organization = await queryFirst<{ customer: string | null }>(db, 'SELECT "stripeCustomerId" AS customer FROM organization WHERE id=?', [organizationId])
   if (!organization?.customer) {
-    // A deleted business's late costs have no subscription left to bill them;
-    // they stay in the outbox with the reason.
-    await execute(db, 'UPDATE payment_usage_events SET error=?,dead_letter_at=? WHERE organization_id=? AND delivery_at IS NULL AND dead_letter_at IS NULL', ['The business has no Stripe customer to bill this usage to', new Date().toISOString(), organizationId])
-    return { delivered: 0 }
+    const reason = 'The business has no Stripe customer to bill this usage to'
+    await execute(db, 'UPDATE payment_usage_events SET error=? WHERE organization_id=? AND delivery_at IS NULL', [reason, organizationId])
+    throw new Error(`${reason}: ${organizationId}`)
   }
   const stripe = getStripe(env)
   let delivered = 0
@@ -57,8 +55,7 @@ export async function deliverPaymentsUsage(db: DbClient, env: CloudflareEnv, org
         payload: { stripe_customer_id: organization.customer, value: String(basis.amount) },
       }, { idempotencyKey: identifier })
     } catch (error) {
-      const permanent = error instanceof Stripe.errors.StripeError && typeof error.statusCode === 'number' && error.statusCode >= 400 && error.statusCode < 500 && error.statusCode !== 429
-      await execute(db, 'UPDATE payment_usage_events SET error=?,dead_letter_at=? WHERE id=?', [error instanceof Error ? error.message : String(error), permanent ? new Date().toISOString() : null, event.id])
+      await execute(db, 'UPDATE payment_usage_events SET error=? WHERE id=?', [error instanceof Error ? error.message : String(error), event.id])
       throw error
     }
     if (event.kind === 'captured_volume') {

@@ -66,7 +66,6 @@ test('committed consultation projection is tenant scoped, private, idempotent an
     assert.equal((await syncCalendarOrganization(env, 'org', 25, provider)).failed, 1)
     assert.equal((await db.prepare('SELECT status FROM bookings WHERE id=?').bind(bookingId).first())?.status, 'pending')
     assert.equal((await readCalendarIntegration(db, 'org'))?.status, 'error')
-    await db.prepare('UPDATE google_calendar_event_links SET next_attempt_at=NULL').run()
     await syncCalendarOrganization(env, 'org', 25, provider)
     assert.equal(events.size, 1)
     const link = await db.prepare('SELECT * FROM google_calendar_event_links').first()
@@ -95,7 +94,6 @@ test('committed consultation projection is tenant scoped, private, idempotent an
     await db.prepare("UPDATE bookings SET assigned_member_id=NULL,updated_at=? WHERE id=?").bind(new Date().toISOString(), bookingId).run()
     assert.equal((await syncCalendarOrganization(env, 'org', 25, provider)).failed, 1, 'missing attorney identity is a visible failure, never a fabricated invitation')
     await db.prepare("UPDATE bookings SET assigned_member_id='host-org',updated_at=? WHERE id=?").bind(new Date().toISOString(), bookingId).run()
-    await db.prepare('UPDATE google_calendar_event_links SET next_attempt_at=NULL').run()
     cancelDuringPut = true
     await syncCalendarOrganization(env, 'org', 25, provider)
     assert.equal(events.size, 0, 'late update is compensated after committed cancellation')
@@ -131,7 +129,6 @@ test('committed consultation projection is tenant scoped, private, idempotent an
     assert.ok((await readCalendarIntegration(db, 'org'))?.last_error)
     await assert.rejects(storeCalendarSelection(db, 'org', { account_id: 'linked-account', calendar_id: 'new', calendar_name: 'New' }), CalendarSelectionConflict)
     denyCalendar = false
-    await db.prepare('UPDATE google_calendar_event_links SET next_attempt_at=NULL').run()
     await syncCalendarOrganization(env, 'org', 25, provider)
     assert.equal(events.size, 0)
     assert.equal((await db.prepare('SELECT status FROM bookings WHERE id=?').bind(second.bookingId).first())?.status, 'pending')
@@ -157,7 +154,6 @@ test('committed consultation projection is tenant scoped, private, idempotent an
     assert.equal((await db.prepare('SELECT state FROM google_calendar_cleanup_jobs').first())?.state, 'error')
     assert.equal((await syncCalendarOrganization(env, 'org', 25, provider)).checked, 0)
     denyCalendar = false
-    await db.prepare('UPDATE google_calendar_cleanup_jobs SET next_attempt_at=NULL').run()
     assert.equal((await runCalendarCleanupJobs(env, 25, provider)).failed, 0)
     assert.equal(events.size, 0)
     assert.ok((await db.prepare('SELECT completed_at FROM google_calendar_cleanup_jobs').first())?.completed_at)

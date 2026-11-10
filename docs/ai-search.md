@@ -60,8 +60,9 @@ environment. In production it also runs `syncOrganizationSearchIndex()`, which l
 organization key segment, rebuilds its documents from D1, uploads the ones whose
 `content_hash` changed and deletes the ones that are gone. Dashboard editor responses
 and mutating MCP tool calls purge the site's caches before reporting success and never
-wait on AI Search: the scheduled task drains queued work every two minutes. A failed
-drain row is retried and then retained as failed for reconciliation. Cloudflare indexes
+wait on AI Search: the scheduled task drains queued work every two minutes. A drain
+row is processed, or it failed with its reason and the task reports it; the site's next
+change queues a row of its own. Cloudflare indexes
 an accepted upload asynchronously; nothing waits for it to finish.
 
 ## Rebuild flow

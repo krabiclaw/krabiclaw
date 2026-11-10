@@ -183,7 +183,7 @@ test('bounded migration batches resume from canonical stays and manual blocks an
     const delivery = await importStayMigration(db, env, access, { ...blocksOnly, fingerprint: blocksPreview.fingerprint })
     assert.equal(delivery.blocks[0]!.state, 'failed')
     assert.match(delivery.blocks[0]!.detail!, /CHANNEX_BASE_URL and CHANNEX_API_KEY are required/)
-    await db.prepare("INSERT INTO channel_night_pushes (organization_id, product_id, provider, date, state, sent_json, attempts, updated_at) VALUES (?, ?, 'channex', '2026-12-20', 'pushed', '{\"stop_sell\":false}', 1, ?)").bind(ORG, home.id, NOW).run()
+    await db.prepare("INSERT INTO channel_night_pushes (organization_id, product_id, provider, date, state, sent_json, updated_at) VALUES (?, ?, 'channex', '2026-12-20', 'pushed', '{\"stop_sell\":false}', ?)").bind(ORG, home.id, NOW).run()
     const stale = await importStayMigration(db, env, access, { ...blocksOnly, fingerprint: blocksPreview.fingerprint })
     assert.equal(stale.blocks[0]!.state, 'failed')
 
