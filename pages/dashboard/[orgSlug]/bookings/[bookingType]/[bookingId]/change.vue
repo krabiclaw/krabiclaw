@@ -64,7 +64,7 @@
         </template>
 
         <UFormField :label="guestsLabel">
-          <UInputNumber v-model="draft.partySize" :min="1" :max="99" class="w-full" @input="typeGuests" />
+          <UInputNumber v-model="draft.partySize" :min="1" :max="99" class="w-full" @input="typeGuests" @update:model-value="guestsTypedInvalid = false" @blur="guestsTypedInvalid = false" />
         </UFormField>
       </section>
 
@@ -98,9 +98,12 @@ const draft = reactive({ date: '', time: '', partySize: 1, locationId: '', sessi
 // Reka's number field commits a typed value only on blur, so a click on Send
 // right after typing would land on a still-disabled button. Each keystroke that
 // forms a valid count is taken at once.
+// Text that is not yet a valid count holds Send until the field settles it.
+const guestsTypedInvalid = ref(false)
 function typeGuests(event: Event) {
   const value = Number((event.target as HTMLInputElement).value)
-  if (Number.isInteger(value) && value >= 1 && value <= 99) draft.partySize = value
+  guestsTypedInvalid.value = !(Number.isInteger(value) && value >= 1 && value <= 99)
+  if (!guestsTypedInvalid.value) draft.partySize = value
 }
 function seed(record: DashboardBookingDetails | null) {
   if (!record) return
@@ -147,7 +150,7 @@ const dirty = computed(() => {
   if (b.bookingType !== 'reservation') return draft.sessionId !== (record.sessionId ?? '')
   return draft.date !== record.bookingDate || draft.time !== (record.bookingTime ?? '').slice(0, 5) || draft.locationId !== record.locationId
 })
-const valid = computed(() => Number.isInteger(draft.partySize) && draft.partySize > 0 && (b.bookingType === 'reservation'
+const valid = computed(() => !guestsTypedInvalid.value && Number.isInteger(draft.partySize) && draft.partySize > 0 && (b.bookingType === 'reservation'
   ? Boolean(draft.date && draft.time && draft.locationId)
   // Keeping the booked session needs no list of times: a guests-only change is valid whether or not they load.
   : draft.sessionId === (booking.value?.sessionId ?? '') ? Boolean(draft.sessionId) : times.value.some(slot => slot.id === draft.sessionId && !slot.disabled)))
