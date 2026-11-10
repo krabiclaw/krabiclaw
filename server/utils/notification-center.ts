@@ -1,5 +1,4 @@
 import { execute, queryFirst, type DbClient } from '~/server/db'
-import { REQUEST_CURRENT_BUYER_SQL } from '~/server/domain/requests'
 import { publishNotificationInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 import { accountActivityPath, isAccountActivityKind } from '~/shared/account-activity'
 
@@ -114,13 +113,12 @@ export async function notifyBuyerThread(db: DbClient, input: {
   message?: string | null
   conversation?: boolean
 }): Promise<void> {
-  const thread = await queryFirst<{ user_id: string | null; kind: string; current_buyer: number; event_name: string | null }>(db, `
-    SELECT r.user_id, r.kind, e.event_name, (${REQUEST_CURRENT_BUYER_SQL}) AS current_buyer
+  const thread = await queryFirst<{ user_id: string | null; kind: string; event_name: string | null }>(db, `
+    SELECT r.user_id, r.kind, e.event_name
     FROM requests r JOIN activity_entries e ON e.request_id = r.id
     WHERE r.id = ? AND e.id = ?`, [input.threadId, input.entryId])
   if (!thread) throw new Error('Buyer notification has no matching conversation event')
   if (!thread.user_id) return
-  if (!thread.current_buyer) throw new Error('Buyer notification ownership does not match its booking')
   // A proposal asks the guest to answer in the conversation. The resulting
   // booking status belongs to the booking itself.
   const destination = input.conversation || thread.kind === 'contact' || thread.event_name === 'booking_change.requested'

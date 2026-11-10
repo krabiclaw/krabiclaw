@@ -28,7 +28,7 @@
             <UAvatar :src="thread.participants.find(person => person.id !== userId)?.image ?? undefined" :alt="teamThreadName(thread, userId)" size="xl" />
             <div class="min-w-0 flex-1">
               <div class="flex items-baseline justify-between gap-3"><p class="truncate text-sm font-medium text-highlighted">{{ teamThreadName(thread, userId) }}</p><span class="shrink-0 text-xs text-muted">{{ formatRelativeTime(thread.lastMessageAt) }}</span></div>
-              <p v-if="thread.stay || thread.location" class="mt-0.5 truncate text-xs text-muted">{{ thread.stay ? `${thread.stay.homeName} · ${thread.stay.checkInDate} – ${thread.stay.checkOutDate}` : thread.location?.title }}</p>
+              <p v-if="thread.record || thread.location" class="mt-0.5 truncate text-xs text-muted">{{ thread.record ? `${thread.record.title} · ${thread.record.startDate === thread.record.endDate ? thread.record.startDate : `${thread.record.startDate} – ${thread.record.endDate}`}` : thread.location?.title }}</p>
               <p class="mt-0.5 line-clamp-2 text-sm leading-snug text-muted">{{ thread.lastMessage?.body || (thread.lastMessage?.attachmentCount ? `${thread.lastMessage.attachmentCount} photo${thread.lastMessage.attachmentCount === 1 ? '' : 's'}` : 'New conversation') }}</p>
             </div>
           </NuxtLink>

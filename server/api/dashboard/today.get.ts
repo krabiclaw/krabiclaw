@@ -6,7 +6,7 @@ import { memberAccessPrincipal } from '~/server/utils/member-access'
 import { listTaskAssignees, listTasks, parseTaskListQuery, taskViewer } from '~/server/domain/tasks'
 import { listOpportunities } from '~/server/domain/opportunities'
 import { listTodayReservations } from '~/server/utils/dashboard-agenda'
-import { todayReservationsTitle } from '~/shared/dashboard-today'
+import { todayReservationsTitle, type BusinessToday } from '~/shared/dashboard-today'
 import { finalizeRequestMetrics } from '~/server/utils/request-metrics'
 
 /**
@@ -38,7 +38,7 @@ export default defineHandler(async (event) => {
     const { reservation: _drawnByCard, ...compact } = task
     return compact
   }) }))
-  const today = {
+  const today: BusinessToday = {
     reservations: { title: todayReservationsTitle(cards.length, query.range, organization.vertical), cards },
     tasks,
     // A booking's suggestion is on its card; the rest are Today's.

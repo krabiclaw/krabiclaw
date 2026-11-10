@@ -38,7 +38,6 @@ export function isScheduledMessage(value: unknown): value is ScheduledMessage {
   return isRecord(value) && ['id', 'organizationId', 'title', 'body'].every(key => typeof value[key] === 'string' && Boolean(value[key]))
     && (value.productId === null || (typeof value.productId === 'string' && Boolean(value.productId)))
     && ['stay', 'booking', 'reservation'].includes(String(value.subjectType)) && typeof value.subjectId === 'string' && Boolean(value.subjectId)
-    && value.stayId === (value.subjectType === 'stay' ? value.subjectId : null)
     && ['pending', 'sending', 'sent', 'failed', 'needs_review', 'cancelled', 'skipped'].includes(String(value.status))
     && (value.requestId === null || typeof value.requestId === 'string') && (value.templateId === null || typeof value.templateId === 'string')
     && (value.dueAt === null || isValidInstant(value.dueAt)) && typeof value.timezone === 'string' && isValidTimezone(value.timezone)

@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:bdc338a6b144788e435e9f57b712511173cb6354de2646e5307c0801fa39af30",
-  "documentationFingerprint": "sha256:8d4932c58edbda797049b755424d1ae76d54c1e7439827225302319e8d987e54",
+  "fingerprint": "sha256:f0607903b36126889be18f268cf61b5cc81fb6612f00844ce11ff81bafc5fc62",
+  "documentationFingerprint": "sha256:3eb4a814fed62bf4d73ecace171193fafc9cb0cc547da0256e089ab90cc85a5e",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -72013,12 +72013,6 @@
                   ],
                   "type": "string"
                 },
-                "stayId": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
                 "subjectId": {
                   "minLength": 1,
                   "type": "string"
@@ -72060,7 +72054,6 @@
                 "productId",
                 "subjectType",
                 "subjectId",
-                "stayId",
                 "requestId",
                 "templateId",
                 "title",
@@ -73543,14 +73536,10 @@
     {
       "name": "list_team_conversations",
       "title": "List team conversations",
-      "description": "Read only your internal team conversations, newest activity first. Optional stay_id or location_id filters narrow their explicit context. Follow page_info; guest conversations use list_guest_conversations instead.",
+      "description": "Read only your internal team conversations, newest activity first. Optional subject_type with subject_id (a stay, booking or table reservation), or location_id, narrow their explicit context. Follow page_info; guest conversations use list_guest_conversations instead.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
-          "booking_id": {
-            "minLength": 1,
-            "type": "string"
-          },
           "cursor": {
             "description": "Opaque next_cursor from the previous page.",
             "type": "string"
@@ -73571,8 +73560,18 @@
             "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
             "type": "string"
           },
-          "stay_id": {
+          "subject_id": {
+            "description": "The stay, booking or table reservation ID (as tasks and guest conversations name it), never a guest request ID; give subject_type with it.",
             "minLength": 1,
+            "type": "string"
+          },
+          "subject_type": {
+            "description": "What the conversation is about; give subject_id with it.",
+            "enum": [
+              "stay",
+              "booking",
+              "reservation"
+            ],
             "type": "string"
           }
         },
@@ -73586,12 +73585,6 @@
           "conversations": {
             "items": {
               "properties": {
-                "bookingId": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
                 "canLeave": {
                   "type": "boolean"
                 },
@@ -74075,16 +74068,32 @@
                   "type": "array"
                 },
                 "record": {
-                  "description": "The booking or table reservation the conversation is about: who booked, else what.",
+                  "description": "The stay, booking or table reservation the conversation is about: a stay by its home, anything else by who booked, else what; with its first and last local day.",
                   "properties": {
+                    "endDate": {
+                      "type": "string"
+                    },
                     "id": {
                       "type": "string"
                     },
                     "kind": {
                       "enum": [
+                        "stay",
                         "booking",
                         "reservation"
                       ],
+                      "type": "string"
+                    },
+                    "productId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "startDate": {
+                      "type": "string"
+                    },
+                    "status": {
                       "type": "string"
                     },
                     "title": {
@@ -74094,55 +74103,14 @@
                   "required": [
                     "kind",
                     "id",
-                    "title"
-                  ],
-                  "type": [
-                    "object",
-                    "null"
-                  ]
-                },
-                "stay": {
-                  "properties": {
-                    "checkInDate": {
-                      "type": "string"
-                    },
-                    "checkOutDate": {
-                      "type": "string"
-                    },
-                    "homeName": {
-                      "type": "string"
-                    },
-                    "id": {
-                      "type": "string"
-                    },
-                    "productId": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "enum": [
-                        "pending",
-                        "confirmed",
-                        "cancelled"
-                      ],
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "id",
+                    "title",
                     "productId",
-                    "homeName",
-                    "checkInDate",
-                    "checkOutDate",
-                    "status"
+                    "status",
+                    "startDate",
+                    "endDate"
                   ],
                   "type": [
                     "object",
-                    "null"
-                  ]
-                },
-                "stayId": {
-                  "type": [
-                    "string",
                     "null"
                   ]
                 },
@@ -74177,8 +74145,6 @@
                 "lastMessageAt",
                 "subjectType",
                 "subjectId",
-                "stayId",
-                "bookingId",
                 "locationId",
                 "record",
                 "name",
@@ -74189,7 +74155,6 @@
                 "participants",
                 "unread",
                 "unreadCount",
-                "stay",
                 "job",
                 "location",
                 "lastMessage"
@@ -105658,15 +105623,10 @@
     {
       "name": "start_team_conversation",
       "title": "Start team conversation",
-      "description": "Start an internal conversation with explicitly selected workspace members. Direct and stay/location conversations reuse the same participants/context. A manual conversation with at least three people is a distinct group, can have a name, and requires a stable idempotency_key; reuse that key only for an identical retry. Maximum 50 people including you. This does not send a message, invite anyone or create a Better Auth Team. Choose actual users from list_team_conversation_recipients.",
+      "description": "Start an internal conversation with explicitly selected workspace members. Direct conversations, and conversations about a stay, booking, table reservation or location, reuse the same participants and context. A manual conversation with at least three people is a distinct group, can have a name, and requires a stable idempotency_key; reuse that key only for an identical retry. Maximum 50 people including you. This does not send a message, invite anyone or create a Better Auth Team. Choose actual users from list_team_conversation_recipients.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
-          "booking_id": {
-            "description": "Optional booking ID you may read; never a guest request ID.",
-            "minLength": 1,
-            "type": "string"
-          },
           "idempotency_key": {
             "description": "Required for a manually created group. Keep the same key for an identical retry.",
             "maxLength": 200,
@@ -105689,7 +105649,7 @@
             "uniqueItems": true
           },
           "name": {
-            "description": "Optional name for a manually created group of at least three people; unavailable for direct or stay/location conversations.",
+            "description": "Optional name for a manually created group of at least three people; unavailable for direct conversations or those about a stay, booking, reservation or location.",
             "maxLength": 100,
             "minLength": 1,
             "type": "string"
@@ -105700,9 +105660,18 @@
             "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
             "type": "string"
           },
-          "stay_id": {
-            "description": "Optional canonical stay ID you may read; never a guest request ID.",
+          "subject_id": {
+            "description": "The stay, booking or table reservation ID (as tasks and guest conversations name it), never a guest request ID; give subject_type with it.",
             "minLength": 1,
+            "type": "string"
+          },
+          "subject_type": {
+            "description": "What the conversation is about; give subject_id with it.",
+            "enum": [
+              "stay",
+              "booking",
+              "reservation"
+            ],
             "type": "string"
           }
         },
@@ -130526,7 +130495,7 @@
     {
       "name": "update_team_group",
       "title": "Update team group",
-      "description": "Rename, add people to, remove someone from, or leave a manually created internal group. The creator and participating workspace owners/admins can manage it; any participant can leave. Read canManage/canLeave from list_team_conversations. Direct chats, guest/buyer conversations and stay/location conversations are protected. No action deletes the conversation or its messages. New members can read its history; removed members lose access. Select actual member user IDs, never Better Auth Team IDs. Use a stable idempotency_key and retry exactly the same action if committed:true is returned.",
+      "description": "Rename, add people to, remove someone from, or leave a manually created internal group. The creator and participating workspace owners/admins can manage it; any participant can leave. Read canManage/canLeave from list_team_conversations. Direct chats, guest/buyer conversations and conversations about a stay, booking, reservation or location are protected. No action deletes the conversation or its messages. New members can read its history; removed members lose access. Select actual member user IDs, never Better Auth Team IDs. Use a stable idempotency_key and retry exactly the same action if committed:true is returned.",
       "inputSchema": {
         "additionalProperties": false,
         "oneOf": [
@@ -130770,15 +130739,15 @@
         "list_location_reviews": "sha256:95068cff21ac3fea416a9fa8ec3a8ad2d01db79ea0825274c0295b89f15f5d92",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_team_conversation_recipients": "sha256:1dd41b8c0a687298a77151839812ddcf99fbd5cf7283e9f5ea2a85e11a70deb0",
-        "list_team_conversations": "sha256:88b9488527690e03c33a2d12de8af89ff611fdd21be1ab0892a066da0f2617f6",
+        "list_team_conversations": "sha256:4ca0dad7f62820e420d9d9de8b76a5769b69a1bc5125dac8d49a1519d7e932bf",
         "mark_team_conversation_read": "sha256:3ad65b07c9bd78090f9f81aeffa74ac00f1c201ee8b6325cf16cd879f1e2644d",
         "reject_product_booking": "sha256:91a5bee34d02b729a3dacb01885157ce63b443594116d8710ca90313fb76e357",
         "reply_to_guest": "sha256:25c1e77ff9ef3f712ea7e9671dd942c63f69a64b91c216f327488210021447f8",
         "request_product_booking_change": "sha256:d09a9c88466237aff04465bbcffa219f28e197cfad0cb4fdd99f41484343d400",
         "request_table_reservation_change": "sha256:f9a5a6f7a2da6dca328fa041f90cda5ece2f777db64e70a9f3568da1046a6795",
         "send_team_message": "sha256:a1da8c45097286e7a2f9b5f0abcfafc9319a970eb70e6c3859e972be70beea73",
-        "start_team_conversation": "sha256:936cdcf65c7d841f0da4c5bf208573caff2204fab1481fd7f1d5dbda45d22699",
-        "update_team_group": "sha256:e58436da6c0b45816e909c58d6ff9265c364e410a5c5edf696a7c6085bb3f6cb"
+        "start_team_conversation": "sha256:56520611815152605f20e0755dd3a8e0d537ad94304d78845c4e453eaeaec090",
+        "update_team_group": "sha256:4acfbcc877a89bf9fcd7e7ef170b52dd0bd663a7e932f434c7ac8719ee9d3690"
       }
     },
     {

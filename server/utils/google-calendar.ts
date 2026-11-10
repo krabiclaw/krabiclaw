@@ -1,9 +1,9 @@
 import { MEMBER_NAME_SQL } from '~/shared/member-scheduling'
 import type { GoogleCalendarIntegration } from '~/shared/organization-settings'
 import { execute, executeBatch, queryAll, queryFirst, type DbClient } from '~/server/db'
+import { BOOKED_RECORDS_SQL } from '~/server/domain/requests'
 import { linkedAccountAccessToken, type CloudflareEnv } from './auth'
 import { composeBuyerActivityUrl } from './dashboard-notification-links'
-import { REQUEST_CURRENT_BUYER_SQL } from '~/server/domain/requests'
 import { z } from 'zod'
 
 export interface CalendarChoice { id: string; summary: string; accessRole: string; description?: string }
@@ -145,40 +145,33 @@ export async function readCalendarIntegration(db: DbClient, organizationId: stri
 // provider identity's lifecycle fences. The database bounds each result.
 export async function calendarSubjects(db: DbClient, organizationId: string, integration: GoogleCalendarIntegration, identity?: Pick<EventLink, 'booking_kind' | 'operational_id'>): Promise<CalendarSubject[]> {
   const now = new Date().toISOString()
+  // A booking is on the calendar while its session is scheduled and its offering takes bookings; a table while it is held.
+  // Each kind's revision keeps the fields its events were first written with, so an unchanged visit is never re-sent.
   return queryAll<CalendarSubject>(db, `WITH subjects AS (
-    SELECT 'booking' booking_kind, b.id operational_id, b.request_id,
-      CASE WHEN r.kind='booking' AND (${REQUEST_CURRENT_BUYER_SQL}) THEN r.user_id END buyer_user_id, b.status,
-      s.starts_at, s.ends_at, s.timezone, json_extract(r.payload_json, '$.guest.name') guest_name, member.name member_name,
-      json_extract(r.payload_json,'$.guest.email') guest_email, member.email member_email, b.assigned_member_id,
-      EXISTS(SELECT 1 FROM products p WHERE p.id=b.product_id AND p.organization_id=b.organization_id AND p.kind='service') is_consultation,
-      json_array(b.status, s.starts_at, s.ends_at, s.timezone, json_extract(r.payload_json,'$.guest.name'), member.name,
-        json_extract(r.payload_json,'$.guest.email'), member.email, b.assigned_member_id, b.request_id,
-        CASE WHEN r.kind='booking' AND (${REQUEST_CURRENT_BUYER_SQL}) THEN r.user_id END) revision
-    FROM bookings b JOIN product_sessions s ON s.id=b.product_session_id AND s.organization_id=b.organization_id
-      JOIN product_booking_configs c ON c.product_id=b.product_id AND c.organization_id=b.organization_id
-      LEFT JOIN requests r ON r.id=b.request_id AND r.organization_id=b.organization_id
+    SELECT br.kind booking_kind, br.id operational_id, br.request_id, r.user_id buyer_user_id, br.status, br.starts_at, br.ends_at, br.timezone,
+      json_extract(r.payload_json, '$.guest.name') guest_name, member.name member_name,
+      CASE br.kind WHEN 'booking' THEN json_extract(r.payload_json,'$.guest.email') END guest_email, member.email member_email, br.assigned_member_id,
+      COALESCE(br.product_kind='service', 0) is_consultation,
+      CASE br.kind WHEN 'booking'
+        THEN json_array(br.status, br.starts_at, br.ends_at, br.timezone, json_extract(r.payload_json,'$.guest.name'), member.name,
+          json_extract(r.payload_json,'$.guest.email'), member.email, br.assigned_member_id, br.request_id, r.user_id)
+        ELSE json_array(br.status, br.starts_at, br.ends_at, br.timezone, json_extract(r.payload_json,'$.guest.name'), br.request_id, r.user_id) END revision
+    FROM ${BOOKED_RECORDS_SQL} br
+      LEFT JOIN requests r ON r.id=br.request_id AND r.organization_id=br.organization_id
       LEFT JOIN (SELECT m.id, m.organizationId, ${MEMBER_NAME_SQL} name, CASE WHEN u.emailVerified=1 THEN u.email END email FROM member m JOIN user u ON u.id=m.userId
-        LEFT JOIN member_scheduling ms ON ms.member_id=m.id) member ON member.id=b.assigned_member_id AND member.organizationId=b.organization_id
-    WHERE b.organization_id=? AND b.status IN ('pending','confirmed')
-      AND s.status='scheduled' AND s.ends_at>? AND (? IS NULL OR (?='booking' AND b.id=?))
-    UNION ALL
-    SELECT 'reservation', b.id, b.request_id,
-      CASE WHEN r.kind='reservation' AND (${REQUEST_CURRENT_BUYER_SQL}) THEN r.user_id END, b.status, b.starts_at, b.ends_at, b.timezone,
-      json_extract(r.payload_json,'$.guest.name'), NULL, NULL, NULL, NULL, 0,
-      json_array(b.status, b.starts_at, b.ends_at, b.timezone, json_extract(r.payload_json,'$.guest.name'), b.request_id,
-        CASE WHEN r.kind='reservation' AND (${REQUEST_CURRENT_BUYER_SQL}) THEN r.user_id END)
-    FROM reservations b LEFT JOIN requests r ON r.id=b.request_id AND r.organization_id=b.organization_id
-    WHERE b.organization_id=? AND b.status IN ('pending','confirmed') AND b.ends_at>?
-      AND (? IS NULL OR (?='reservation' AND b.id=?))
+        LEFT JOIN member_scheduling ms ON ms.member_id=m.id) member ON member.id=br.assigned_member_id AND member.organizationId=br.organization_id
+    WHERE br.organization_id=? AND ${CALENDAR_RECORD_SQL} AND br.status IN ('pending','confirmed') AND br.ends_at>?
+      AND (? IS NULL OR (br.kind=? AND br.id=?))
   ) SELECT subjects.* FROM subjects
     LEFT JOIN google_calendar_event_links l ON l.organization_id=? AND l.integration_revision=?
       AND l.booking_kind=subjects.booking_kind AND l.operational_id=subjects.operational_id AND l.state<>'deleted'
     WHERE ? IS NOT NULL OR l.id IS NULL OR l.booking_revision<>subjects.revision
     ORDER BY COALESCE(l.updated_at,''), subjects.booking_kind, subjects.operational_id LIMIT ?`,
   [organizationId,now,identity?.operational_id??null,identity?.booking_kind??null,identity?.operational_id??null,
-    organizationId,now,identity?.operational_id??null,identity?.booking_kind??null,identity?.operational_id??null,
     organizationId,integration.revision,identity?.operational_id??null,identity?1:25])
 }
+/** A booked record that can be on the calendar: a table reservation, or a booking on a scheduled session of an offering that takes bookings. */
+const CALENDAR_RECORD_SQL = "(br.kind = 'reservation' OR (br.kind = 'booking' AND br.session_status = 'scheduled' AND br.scheduling_mode IS NOT NULL))"
 /** Persist intents before any provider I/O, including initial upcoming backfill. */
 async function reconcileIntents(db: DbClient, organizationId: string, integration: GoogleCalendarIntegration) {
   const subjects = integration.status === 'disabled' ? [] : await calendarSubjects(db, organizationId, integration)
@@ -200,19 +193,11 @@ async function reconcileIntents(db: DbClient, organizationId: string, integratio
   await execute(db, `UPDATE google_calendar_event_links SET state='cleanup'
     WHERE id IN (SELECT l.id FROM google_calendar_event_links l
       WHERE l.organization_id=? AND l.state NOT IN ('deleted','cleanup')
-        AND (?='disabled' OR l.integration_revision<>? OR NOT (
-          (l.booking_kind='booking' AND EXISTS (
-            SELECT 1 FROM bookings b JOIN product_sessions s ON s.id=b.product_session_id AND s.organization_id=b.organization_id
-              JOIN product_booking_configs c ON c.product_id=b.product_id AND c.organization_id=b.organization_id
-            WHERE b.id=l.operational_id AND b.organization_id=l.organization_id AND s.status='scheduled'
-              AND ((b.status IN ('pending','confirmed') AND s.ends_at>?)
-                OR (b.status='confirmed' AND s.ends_at<=? AND l.state='synced'))))
-          OR (l.booking_kind='reservation' AND EXISTS (
-            SELECT 1 FROM reservations b WHERE b.id=l.operational_id AND b.organization_id=l.organization_id
-              AND ((b.status IN ('pending','confirmed') AND b.ends_at>?)
-                OR (b.status='confirmed' AND b.ends_at<=? AND l.state='synced'))))))
+        AND (?='disabled' OR l.integration_revision<>? OR NOT EXISTS (
+          SELECT 1 FROM ${BOOKED_RECORDS_SQL} br WHERE br.kind=l.booking_kind AND br.id=l.operational_id AND br.organization_id=l.organization_id AND ${CALENDAR_RECORD_SQL}
+            AND ((br.status IN ('pending','confirmed') AND br.ends_at>?) OR (br.status='confirmed' AND br.ends_at<=? AND l.state='synced'))))
       ORDER BY l.updated_at,l.id LIMIT 25)`,
-  [organizationId,integration.status,integration.revision,now,now,now,now])
+  [organizationId,integration.status,integration.revision,now,now])
 }
 async function removeEvent(token: string, link: Pick<EventLink, 'calendar_id' | 'event_id'>) {
   const path = `/calendars/${encodeURIComponent(link.calendar_id)}/events/${link.event_id}`

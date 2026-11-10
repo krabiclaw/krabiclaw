@@ -9,7 +9,7 @@ import { listSessions } from '~/server/utils/availability'
 import { bookingChangeViews, requestBookingChange } from '~/server/domain/guest-threads/booking-changes'
 import { appendEntry, findEntryByDedupeKey } from '~/server/domain/guest-threads/entries'
 import { updateThreadProjectionIfLatestEntry } from '~/server/domain/guest-threads/repository'
-import { getGuestRequest } from '~/server/domain/requests'
+import { getGuestRequest, readBookedRecord } from '~/server/domain/requests'
 import type { GuestThreadEntryRow, GuestThreadRow } from '~/server/domain/guest-threads/types'
 import { notifyCalendarSyncOwner } from '~/server/utils/notifications'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
@@ -158,9 +158,7 @@ export async function pullCalendarChanges(env: CloudflareEnv, organizationId: st
 }
 /** The destination a Google event's new interval names: the same product's session that starts then, or the reservation's new date and time. */
 async function moveFieldsFor(db: DbClient, env: CloudflareEnv, organizationId: string, subject: CalendarSubject, startsAt: string, endsAt: string, assignedMemberId: string | null) {
-  const record = await queryFirst<{ party_size: number; product_id: string | null; location_id: string | null; timezone: string; assigned_member_id: string | null }>(db, subject.booking_kind === 'booking'
-    ? 'SELECT b.party_size, b.product_id, s.location_id, s.timezone, b.assigned_member_id FROM bookings b JOIN product_sessions s ON s.id=b.product_session_id WHERE b.id=? AND b.organization_id=?'
-    : 'SELECT party_size, NULL AS product_id, location_id, timezone, NULL AS assigned_member_id FROM reservations WHERE id=? AND organization_id=?', [subject.operational_id, organizationId])
+  const record = await readBookedRecord(db, organizationId, { kind: subject.booking_kind, id: subject.operational_id })
   if (!record) throw new HTTPError({ statusCode: 409, message: 'The booking behind this event is gone' })
   const when = new Intl.DateTimeFormat('en-US', { timeZone: record.timezone, dateStyle: 'medium', timeStyle: 'short' }).format(new Date(startsAt))
   if (subject.booking_kind === 'booking') {

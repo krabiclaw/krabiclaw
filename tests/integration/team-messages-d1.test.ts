@@ -10,6 +10,7 @@ import { createProduct } from '../../server/utils/product-management.ts'
 import { getLocation, updateLocation } from '../../server/utils/location-management.ts'
 import { assertAssignedBookingAccess, listOrganizationNotificationMembers, memberAccessPrincipal, reconcileResponsibilities } from '../../server/utils/member-access.ts'
 import { createStay, listStayHomes, stayAccessFor, updateStayHome, type StayAccess } from '../../server/domain/stays.ts'
+import { requestInsertQueries, threadPayloadForGuest } from '../../server/domain/requests.ts'
 import { receiveMemberEmail } from '../../server/domain/guest-threads/inbound-email.ts'
 import { InboundEmailRejection, parseReplyToAddress } from '../../server/utils/reply-address.ts'
 import { createTeamThread, listTeamMembers, listTeamMessages, listTeamThreads, markTeamThreadRead, markTeamThreadUnread, operateTeamGroup, sendTeamMessage, teamAccessFor } from '../../server/domain/team-messages.ts'
@@ -114,7 +115,7 @@ test('members talk in team conversations, see unread state and receive recorded 
     assert.equal(await db.prepare('SELECT COUNT(*) AS n FROM team_thread_members WHERE thread_id = ?').bind(raced[0].id).first('n'), 2)
 
     // A stay conversation needs a stay the caller can see: a member sees only the homes they look after.
-    await assert.rejects(createTeamThread(env, db, cleaner, { memberIds: ['owner'], stayId: stay.id }), refused(404, 'STAY_NOT_FOUND', 'stayId'))
+    await assert.rejects(createTeamThread(env, db, cleaner, { memberIds: ['owner'], subjectType: 'stay', subjectId: stay.id }), refused(404, 'SUBJECT_NOT_FOUND', 'subjectId'))
     await updateStayHome(env, db, manager, cabin.id, { assigned_member_id: 'm-owner', assigned_team_id: null })
     assert.equal((await listStayHomes(db, manager)).find(home => home.product_id === cabin.id)?.assigned_member_id, 'm-owner', 'an owner can hold explicit business responsibility')
     await assert.rejects(updateStayHome(env, db, manager, cabin.id, { assigned_member_id: 'm-outsider' }), refused(422, 'INVALID_RESPONSIBILITY', 'assigned_member_id'))
@@ -163,7 +164,7 @@ test('members talk in team conversations, see unread state and receive recorded 
     await assert.rejects(assertAssignedBookingAccess(db, { ...principal('cook', 'member'), requestId: stay.request_id }), refused(404, 'THREAD_NOT_FOUND', 'threadId'))
     assert.deepEqual((await listOrganizationNotificationMembers(env, ORG, { requestId: stay.request_id })).map(member => member.userId).sort(), ['owner'], 'a responsible Better Auth team reaches the stay conversation no more than a responsible member')
     await updateStayHome(env, db, manager, cabin.id, { assigned_member_id: 'm-cleaner', assigned_team_id: null })
-    const about = await createTeamThread(env, db, cleaner, { memberIds: ['owner'], stayId: stay.id })
+    const about = await createTeamThread(env, db, cleaner, { memberIds: ['owner'], subjectType: 'stay', subjectId: stay.id })
     assert.equal(about.created, true)
     assert.notEqual(about.id, direct.id)
 
@@ -173,6 +174,21 @@ test('members talk in team conversations, see unread state and receive recorded 
     await assert.rejects(createTeamThread(env, db, cook, { memberIds: ['owner'], locationId: 'cabin-site' }), refused(404, 'LOCATION_NOT_FOUND', 'locationId'))
     const floorChat = await createTeamThread(env, db, owner, { memberIds: ['cook'], locationId: 'cabin-site' })
     assert.equal(floorChat.created, true)
+
+    // A table reservation is a conversation subject like a stay: reached through its guest conversation, titled by who booked.
+    const table = { id: 'table-request', kind: 'reservation' as const, organization_id: ORG, location_id: 'cabin-site', user_id: null, review_id: null,
+      payload: threadPayloadForGuest({ name: 'Rae', email: 'rae@example.test' }), created_at: '2026-10-15T00:00:00.000Z', updated_at: '2026-10-15T00:00:00.000Z' }
+    await db.batch(requestInsertQueries(table).map(write => db.prepare(write.query).bind(...write.params)))
+    await db.prepare(`INSERT INTO reservations (id, organization_id, location_id, request_id, timezone, starts_at, ends_at, party_size, status)
+      VALUES ('table', ?, 'cabin-site', 'table-request', 'America/Denver', ?, ?, 2, 'confirmed')`).bind(ORG, `${day(4)}T01:30:00.000Z`, `${day(4)}T03:30:00.000Z`).run()
+    await assert.rejects(createTeamThread(env, db, cleaner, { memberIds: ['owner'], subjectType: 'reservation', subjectId: 'table' }), refused(404, 'SUBJECT_NOT_FOUND', 'subjectId'))
+    await assert.rejects(createTeamThread(env, db, owner, { memberIds: ['cook'], subjectType: 'reservation', subjectId: 'not-a-table' }), refused(404, 'SUBJECT_NOT_FOUND', 'subjectId'))
+    await assert.rejects(createTeamThread(env, db, owner, { memberIds: ['cook'], subjectType: 'reservation' }), refused(422, 'INVALID_SUBJECT_ID', 'subjectId'))
+    const tableChat = await createTeamThread(env, db, owner, { memberIds: ['cook'], subjectType: 'reservation', subjectId: 'table' })
+    assert.deepEqual(await createTeamThread(env, db, owner, { memberIds: ['cook'], subjectType: 'reservation', subjectId: 'table' }), { id: tableChat.id, created: false })
+    const tableView = (await listTeamThreads(env, db, owner, { subject: { kind: 'reservation', id: 'table' } }))
+    assert.deepEqual(tableView.map(thread => [thread.id, thread.name, thread.subjectType, thread.subjectId, thread.record]),
+      [[tableChat.id, 'Rae', 'reservation', 'table', { kind: 'reservation', id: 'table', title: 'Rae', productId: null, status: 'confirmed', startDate: day(3), endDate: day(3) }]])
     assert.notEqual(floorChat.id, direct.id)
     assert.notEqual(floorChat.id, about.id)
 
@@ -202,12 +218,12 @@ test('members talk in team conversations, see unread state and receive recorded 
 
     // Unread is the recipient's, until they read it; the sender has read their own.
     const ownerView = (await listTeamThreads(env, db, owner)).find(thread => thread.id === direct.id)!
-    assert.deepEqual({ unread: ownerView.unread, unreadCount: ownerView.unreadCount, last: ownerView.lastMessage?.body, stay: ownerView.stay },
-      { unread: true, unreadCount: 1, last: 'Towels are out', stay: null })
+    assert.deepEqual({ unread: ownerView.unread, unreadCount: ownerView.unreadCount, last: ownerView.lastMessage?.body, record: ownerView.record },
+      { unread: true, unreadCount: 1, last: 'Towels are out', record: null })
     assert.deepEqual(ownerView.participants.map(participant => participant.id).sort(), ['cleaner', 'owner'])
     assert.equal((await listTeamThreads(env, db, cleaner)).find(thread => thread.id === direct.id)?.unreadCount, 0)
     const stayView = (await listTeamThreads(env, db, owner)).find(thread => thread.id === about.id)!
-    assert.deepEqual(stayView.stay, { id: stay.id, productId: cabin.id, homeName: 'Cabin', checkInDate: day(3), checkOutDate: day(5), status: stay.status })
+    assert.deepEqual(stayView.record, { kind: 'stay', id: stay.id, title: 'Cabin', productId: cabin.id, status: stay.status, startDate: day(3), endDate: day(5) })
     await markTeamThreadRead(db, owner, direct.id)
     assert.equal((await listTeamThreads(env, db, owner)).find(thread => thread.id === direct.id)?.unreadCount, 0)
     // Marked unread from the list: the cleaner's newest message counts as new again, then read again.
@@ -291,7 +307,7 @@ test('members talk in team conversations, see unread state and receive recorded 
     // Someone without a seat cannot read or write it, and does not see it.
     await assert.rejects(listTeamMessages(db, cook, direct.id, {}), refused(404, 'TEAM_THREAD_NOT_FOUND', 'threadId'))
     await assert.rejects(sendTeamMessage(env, db, cook, direct.id, { body: 'hi', photos: [], idempotencyKey: 'cook', senderName: 'cook' }), refused(404, 'TEAM_THREAD_NOT_FOUND', 'threadId'))
-    assert.deepEqual((await listTeamThreads(env, db, cook)).map(thread => thread.id).sort(), [floorChat.id, raced[0].id].sort())
+    assert.deepEqual((await listTeamThreads(env, db, cook)).map(thread => thread.id).sort(), [floorChat.id, tableChat.id, raced[0].id].sort())
 
     // A manual group has its own identity. Its roster may shrink, without
     // becoming a direct conversation or exposing another group's history.

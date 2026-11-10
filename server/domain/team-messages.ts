@@ -10,7 +10,7 @@ import type { GuestThreadDeliveryStatus } from '~/server/domain/guest-threads/ty
 import type { NotificationChannel } from '~/shared/notification-categories'
 import { getStay, stayAccessFor } from '~/server/domain/stays'
 import { subjectJobViews, taskViewer, type JobSubject, type TaskView } from '~/server/domain/tasks'
-import { BOOKED_RECORDS_SQL, type BookedKind } from '~/server/domain/requests'
+import { BOOKED_RECORDS_SQL, bookedRecordWindow, readBookedRecord, type BookedKind, type BookedRecord } from '~/server/domain/requests'
 import {
   discardMessagePhotos,
   listMessagePhotos,
@@ -65,13 +65,15 @@ export interface TeamParticipant {
   image: string | null
 }
 
-export interface TeamStaySummary {
+/** The stay, booking or table reservation a conversation is about: who or what, and its first and last day on its own clock. */
+export interface TeamRecordSummary {
+  kind: BookedKind
   id: string
-  productId: string
-  homeName: string
-  checkInDate: string
-  checkOutDate: string
-  status: 'pending' | 'confirmed' | 'cancelled'
+  title: string
+  productId: string | null
+  status: string
+  startDate: string
+  endDate: string
 }
 
 export interface TeamLocationSummary {
@@ -94,13 +96,8 @@ export interface TeamThread {
   /** The booked record the conversation is about, as tasks name it. */
   subjectType: BookedKind | null
   subjectId: string | null
-  /** The shipped iOS app reads a stay's or booking's conversation by these. */
-  stayId: string | null
-  bookingId: string | null
   locationId: string | null
-  stay: TeamStaySummary | null
-  /** A booking or table reservation: who booked, or what. */
-  record: { kind: BookedKind; id: string; title: string } | null
+  record: TeamRecordSummary | null
   /** The stay's cleaning job (its turnover, or the job to get a home ready after a move), as the Today card draws it; null when the stay has none. */
   job: TaskView | null
   location: TeamLocationSummary | null
@@ -213,16 +210,21 @@ export async function listTeamThreads(env: CloudflareEnv, db: DbClient, access: 
      ORDER BY t.last_message_at DESC, t.id DESC`, params)
   if (!threads.length) return []
   const ids = d1JsonStringSet(threads.map(thread => thread.id))
-  const stayIds = threads.flatMap(thread => thread.subject_type === 'stay' ? [thread.subject_id!] : [])
-  const recordIds = threads.flatMap(thread => thread.subject_type === 'booking' || thread.subject_type === 'reservation' ? [thread.subject_id!] : [])
-  // Who booked, else what: the offering or the reservation's place.
-  const records = recordIds.length ? await queryAll<{ kind: BookedKind; id: string; title: string }>(db, `
-    SELECT br.kind, br.id, COALESCE(json_extract(r.payload_json, '$.guest.name'), br.product_name, l.title) AS title FROM ${BOOKED_RECORDS_SQL} br
+  const subjectIds = threads.flatMap(thread => thread.subject_id ? [thread.subject_id] : [])
+  // A stay is titled by its home; anything else by who booked, else the offering or the reservation's place.
+  const records = subjectIds.length ? (await queryAll<Pick<BookedRecord, 'kind' | 'id' | 'product_id' | 'status' | 'timezone' | 'starts_at' | 'ends_at' | 'check_in_date' | 'check_out_date' | 'check_in_time' | 'check_out_time'> & { title: string }>(db, `
+    SELECT br.kind, br.id, br.product_id, br.status, br.timezone, br.starts_at, br.ends_at, br.check_in_date, br.check_out_date, br.check_in_time, br.check_out_time,
+           CASE br.kind WHEN 'stay' THEN br.product_internal_name ELSE COALESCE(json_extract(r.payload_json, '$.guest.name'), br.product_name, l.title) END AS title
+      FROM ${BOOKED_RECORDS_SQL} br
       LEFT JOIN requests r ON r.id = br.request_id AND r.organization_id = br.organization_id
       LEFT JOIN business_locations l ON l.id = br.location_id AND l.organization_id = br.organization_id
-     WHERE br.organization_id = ? AND br.kind <> 'stay' AND br.id IN (SELECT value FROM json_each(?))`, [access.organizationId, d1JsonStringSet(recordIds)]) : []
+     WHERE br.organization_id = ? AND br.id IN (SELECT value FROM json_each(?))`, [access.organizationId, d1JsonStringSet(subjectIds)]))
+    .map((row): TeamRecordSummary => {
+      const window = bookedRecordWindow(row)
+      return { kind: row.kind, id: row.id, title: row.title, productId: row.product_id, status: row.status, startDate: window.start.date, endDate: window.end.date }
+    }) : []
   const locationIds = threads.flatMap(thread => thread.location_id ? [thread.location_id] : [])
-  const [seats, lastMessages, stays, locations, members] = await Promise.all([
+  const [seats, lastMessages, locations, members] = await Promise.all([
     queryAll<{ thread_id: string; member_id: string }>(db, `SELECT thread_id, member_id FROM team_thread_members
       WHERE organization_id = ? AND thread_id IN (SELECT value FROM json_each(?)) ORDER BY thread_id, created_at, member_id`, [access.organizationId, ids]),
     queryAll<{ id: string; thread_id: string; sender_user_id: string | null; body: string; created_at: string }>(db, `
@@ -231,10 +233,6 @@ export async function listTeamThreads(env: CloudflareEnv, db: DbClient, access: 
        WHERE m.organization_id = ? AND m.thread_id IN (SELECT value FROM json_each(?))
          AND NOT EXISTS (SELECT 1 FROM team_messages n WHERE n.thread_id = m.thread_id
            AND (n.created_at > m.created_at OR (n.created_at = m.created_at AND n.id > m.id)))`, [access.memberId, access.organizationId, ids]),
-    stayIds.length ? queryAll<{ id: string; product_id: string; home_name: string; check_in_date: string; check_out_date: string; status: TeamStaySummary['status'] }>(db, `
-      SELECT s.id, s.product_id, p.internal_name AS home_name, s.check_in_date, s.check_out_date, s.status FROM stays s
-        JOIN product_stay_configs p ON p.organization_id = s.organization_id AND p.product_id = s.product_id
-       WHERE s.organization_id = ? AND s.id IN (SELECT value FROM json_each(?))`, [access.organizationId, d1JsonStringSet(stayIds)]) : [],
     locationIds.length ? queryAll<{ id: string; title: string; slug: string; timezone: string }>(db, `
       SELECT id, title, slug, timezone FROM business_locations
        WHERE organization_id = ? AND id IN (SELECT value FROM json_each(?))`, [access.organizationId, d1JsonStringSet(locationIds)]) : [],
@@ -242,7 +240,7 @@ export async function listTeamThreads(env: CloudflareEnv, db: DbClient, access: 
   ])
   const photos = await listMessagePhotos(db, 'team_message', lastMessages.map(message => message.id))
   const managesGroups = await canManageGroups(access)
-  const jobs = stayIds.length || recordIds.length ? await subjectJobViews(db, await taskViewer(db, access.principal), [...stayIds, ...recordIds]) : new Map<string, TaskView>()
+  const jobs = subjectIds.length ? await subjectJobViews(db, await taskViewer(db, access.principal), subjectIds) : new Map<string, TaskView>()
   const currentSeats = await queryAll<{ thread_id: string }>(db, `SELECT thread_id FROM team_thread_members
     WHERE organization_id = ? AND member_id = ? AND thread_id IN (SELECT value FROM json_each(?))`, [access.organizationId, access.memberId, ids])
   const visibleIds = new Set(currentSeats.map(seat => seat.thread_id))
@@ -252,17 +250,15 @@ export async function listTeamThreads(env: CloudflareEnv, db: DbClient, access: 
       if (!member) throw new Error(`Team conversation ${thread.id} seats member ${seat.member_id}, which Better Auth does not hold`)
       return { id: member.user.id, memberId: member.id, name: member.user.name, image: member.user.image ?? null }
     })
-    const stayRow = thread.subject_type === 'stay' ? stays.find(stay => stay.id === thread.subject_id) : null
-    if (thread.subject_type === 'stay' && !stayRow) throw new Error(`Team conversation ${thread.id} names stay ${thread.subject_id}, which was not found`)
-    const recordRow = thread.subject_type !== null && thread.subject_type !== 'stay' ? records.find(record => record.kind === thread.subject_type && record.id === thread.subject_id) : null
-    if (thread.subject_type !== null && thread.subject_type !== 'stay' && !recordRow) throw new Error(`Team conversation ${thread.id} names ${thread.subject_type} ${thread.subject_id}, which was not found`)
+    const recordRow = thread.subject_type !== null ? records.find(record => record.kind === thread.subject_type && record.id === thread.subject_id) : null
+    if (thread.subject_type !== null && !recordRow) throw new Error(`Team conversation ${thread.id} names ${thread.subject_type} ${thread.subject_id}, which was not found`)
     const locationRow = thread.location_id ? locations.find(location => location.id === thread.location_id) : null
     if (thread.location_id && !locationRow) throw new Error(`Team conversation ${thread.id} names location ${thread.location_id}, which was not found`)
     const last = lastMessages.find(message => message.thread_id === thread.id)
     const unreadCount = Number(thread.unread_count)
     return {
       id: thread.id,
-      name: thread.name ?? stayRow?.home_name ?? recordRow?.title ?? null,
+      name: thread.name ?? recordRow?.title ?? null,
       isGroup: thread.is_group === 1,
       createdByUserId: thread.created_by_user_id,
       canManage: thread.is_group === 1 && !thread.subject_type && !thread.location_id && (thread.created_by_user_id === access.userId || managesGroups),
@@ -271,11 +267,8 @@ export async function listTeamThreads(env: CloudflareEnv, db: DbClient, access: 
       lastMessageAt: thread.last_message_at,
       subjectType: thread.subject_type,
       subjectId: thread.subject_id,
-      stayId: thread.subject_type === 'stay' ? thread.subject_id : null,
-      bookingId: thread.subject_type === 'booking' ? thread.subject_id : null,
       locationId: thread.location_id,
       record: recordRow ?? null,
-      stay: stayRow ? { id: stayRow.id, productId: stayRow.product_id, homeName: stayRow.home_name, checkInDate: stayRow.check_in_date, checkOutDate: stayRow.check_out_date, status: stayRow.status } : null,
       job: thread.subject_id ? jobs.get(thread.subject_id) ?? null : null,
       location: locationRow ? { id: locationRow.id, title: locationRow.title, slug: locationRow.slug, timezone: locationRow.timezone } : null,
       participants,
@@ -290,13 +283,12 @@ export async function listTeamThreads(env: CloudflareEnv, db: DbClient, access: 
  * Direct and contextual conversations reuse their initial roster. A manually
  * created group has its own identity and replays only its creation request key.
  */
-export async function createTeamThread(env: TeamEnv, db: DbClient, access: TeamAccess, input: { memberIds: unknown; stayId?: unknown; bookingId?: unknown; locationId?: unknown; name?: unknown; idempotencyKey?: unknown }): Promise<{ id: string; created: boolean }> {
-  const { memberIds, stayId, bookingId, locationId } = input
+export async function createTeamThread(env: TeamEnv, db: DbClient, access: TeamAccess, input: { memberIds: unknown; subjectType?: unknown; subjectId?: unknown; locationId?: unknown; name?: unknown; idempotencyKey?: unknown }): Promise<{ id: string; created: boolean }> {
+  const { memberIds, locationId } = input
   if (!Array.isArray(memberIds) || memberIds.length === 0 || memberIds.length > MAX_THREAD_MEMBERS || memberIds.some(id => typeof id !== 'string' || !id)) {
     fail(422, 'INVALID_TEAM_MEMBERS', `memberIds must list 1 to ${MAX_THREAD_MEMBERS} member user ids`, 'memberIds')
   }
-  if (stayId !== undefined && (typeof stayId !== 'string' || !stayId)) fail(422, 'INVALID_STAY_ID', 'stayId must name a stay', 'stayId')
-  if (bookingId !== undefined && (typeof bookingId !== 'string' || !bookingId)) fail(422, 'INVALID_BOOKING_ID', 'bookingId must name a booking', 'bookingId')
+  const subject = teamSubject(input.subjectType, input.subjectId)
   if (locationId !== undefined && (typeof locationId !== 'string' || !locationId)) fail(422, 'INVALID_LOCATION_ID', 'locationId must name a location', 'locationId')
   const members = await listAllOrganizationMembers(await organizationAdapter(env), access.organizationId)
   const byUser = new Map(members.map(member => [member.user.id, member]))
@@ -304,7 +296,7 @@ export async function createTeamThread(env: TeamEnv, db: DbClient, access: TeamA
   const others = [...new Set(memberIds as string[])].filter(id => id !== access.userId)
   if (!others.length) fail(422, 'TEAM_THREAD_MEMBERS_REQUIRED', 'Choose at least one other member', 'memberIds')
   if (others.length + 1 > MAX_THREAD_MEMBERS) fail(422, 'INVALID_TEAM_MEMBERS', `A conversation can have at most ${MAX_THREAD_MEMBERS} members including you`, 'memberIds')
-  const isGroup = others.length >= 2 && stayId === undefined && bookingId === undefined && locationId === undefined
+  const isGroup = others.length >= 2 && subject === null && locationId === undefined
   if (!isGroup && input.name !== undefined) fail(422, 'TEAM_GROUP_REQUIRED', 'Only manually created internal groups can have a group name', 'name')
   const name = input.name === undefined ? null : groupName(input.name)
   const dedupeKey = isGroup ? groupCreationKey(access, requestKey(input.idempotencyKey)) : null
@@ -322,23 +314,7 @@ export async function createTeamThread(env: TeamEnv, db: DbClient, access: TeamA
   }
   const unknown = (memberIds as string[]).filter(id => !byUser.has(id))
   if (unknown.length) fail(422, 'INVALID_TEAM_MEMBERS', `Not members of this organization: ${unknown.join(', ')}`, 'memberIds')
-  if (typeof stayId === 'string') {
-    try {
-      await getStay(db, await stayAccessFor(access.principal), stayId)
-    } catch (error) {
-      if (HTTPError.isError(error) && error.status === 404) fail(404, 'STAY_NOT_FOUND', 'That stay is not in a home you can see', 'stayId')
-      throw error
-    }
-  }
-  if (typeof bookingId === 'string') {
-    try {
-      await assertAssignedBookingAccess(db, { ...access.principal, bookingId })
-    } catch (error) {
-      if (HTTPError.isError(error) && error.status === 404) fail(404, 'BOOKING_NOT_FOUND', 'That booking is not one you can see', 'bookingId')
-      throw error
-    }
-    if (!await queryFirst(db, 'SELECT 1 FROM bookings WHERE organization_id = ? AND id = ?', [access.organizationId, bookingId])) fail(404, 'BOOKING_NOT_FOUND', 'That booking is not one you can see', 'bookingId')
-  }
+  if (subject) await assertSubjectAccess(db, access, subject)
   if (typeof locationId === 'string') {
     try {
       await assertLocationAccess(db, { ...access.principal, locationId })
@@ -348,7 +324,6 @@ export async function createTeamThread(env: TeamEnv, db: DbClient, access: TeamA
     }
   }
   const seatIds = [access.memberId, ...others.map(id => byUser.get(id)!.id)]
-  const subject = typeof stayId === 'string' ? { kind: 'stay' as const, id: stayId } : typeof bookingId === 'string' ? { kind: 'booking' as const, id: bookingId } : null
   const participantsKey = dedupeKey ?? await threadParticipantsKey(subject, locationId as string | undefined ?? null, seatIds)
   const id = crypto.randomUUID()
   const now = new Date().toISOString()
@@ -670,6 +645,28 @@ export async function sendTeamMessage(
   await publishThreadChanged(env, access.organizationId, threadId, { message_id: row.id })
   const [message] = await readMessages(db, access.organizationId, [row])
   return { message: message!, created }
+}
+
+/** A conversation's subject: a stay, booking or table reservation named by kind and id, or none. */
+export function teamSubject(subjectType: unknown, subjectId: unknown): JobSubject | null {
+  if (subjectType === undefined && subjectId === undefined) return null
+  if (subjectType !== 'stay' && subjectType !== 'booking' && subjectType !== 'reservation') fail(422, 'INVALID_SUBJECT_TYPE', 'subjectType must be stay, booking or reservation', 'subjectType')
+  if (typeof subjectId !== 'string' || !subjectId) fail(422, 'INVALID_SUBJECT_ID', 'subjectId must name the stay, booking or reservation', 'subjectId')
+  return { kind: subjectType, id: subjectId }
+}
+
+/** A member may talk about a stay they can see, or a booking or reservation whose conversation they can reach. */
+async function assertSubjectAccess(db: DbClient, access: TeamAccess, subject: JobSubject): Promise<void> {
+  const record = await readBookedRecord(db, access.organizationId, subject)
+  if (!record) fail(404, 'SUBJECT_NOT_FOUND', `That ${subject.kind} is not one you can see`, 'subjectId')
+  try {
+    if (subject.kind === 'stay') await getStay(db, await stayAccessFor(access.principal), subject.id)
+    else if (record.request_id === null) throw new Error(`The ${subject.kind} ${subject.id} has no conversation`)
+    else await assertAssignedBookingAccess(db, { ...access.principal, requestId: record.request_id })
+  } catch (error) {
+    if (HTTPError.isError(error) && error.status === 404) fail(404, 'SUBJECT_NOT_FOUND', `That ${subject.kind} is not one you can see`, 'subjectId')
+    throw error
+  }
 }
 
 /**

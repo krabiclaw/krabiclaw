@@ -5,16 +5,13 @@ import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { seededSiteHeaders } from './test-env'
 import { seededTenant } from './seed/manifest'
 import type { Product } from '../../server/types/products'
-import type { TaskPerson, TaskSection } from '../../server/domain/tasks'
-import type { OpportunityView } from '../../server/domain/opportunities'
+import type { BusinessToday } from '../../shared/dashboard-today'
 import type { DashboardBookingDetails } from '../../server/utils/dashboard-booking-details'
 
 const SLUG = 'harbor-legal-aid'
 const DASHBOARD = `/dashboard/${SLUG}`
 const ACTOR = 'user-e2e-ncls-consultation-owner'
 
-/** GET /api/dashboard/today: the business's stored tasks and, for a manager, its opportunities. */
-type BusinessToday = { tasks: TaskSection[]; opportunities: OpportunityView[]; opportunityIssues: string[]; assignees: TaskPerson[]; resolvedAt: string }
 
 async function body<T>(response: APIResponse, status: number): Promise<T> {
   expect(response.status(), await response.text()).toBe(status)

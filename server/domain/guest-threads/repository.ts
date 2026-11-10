@@ -1,5 +1,5 @@
 import { CONVERSATION_NOTIFICATION_SQL } from '~/server/utils/notification-center'
-import { BOOKED_RECORDS_SQL, REQUEST_CURRENT_BUYER_SQL, STAY_THREAD_ENDS_SQL, STAY_THREAD_STARTS_SQL, stayPreview, parseGuestRequest, participantLabel } from '~/server/domain/requests'
+import { BOOKED_RECORDS_SQL, stayPreview, parseGuestRequest, participantLabel } from '~/server/domain/requests'
 import { BUYER_UNREAD_THREAD_SQL, buyerUnreadThreadParams } from './entries'
 import { messagePreview } from './attachments'
 import { executeBatch, queryAll, type BatchQuery, type DbClient } from '~/server/db'
@@ -100,29 +100,13 @@ async function assignedThreadScope(principal?: MemberAccessPrincipal | null) {
   return { sql: ` AND ${scope.sql}`, params: scope.params }
 }
 /**
- * The operational record a thread refers to.
- *
- * A thread carries no time, party size or status of its own any more, so the
- * inbox reads them from the booking or reservation that links back to it. A
- * thread with no record yields NULLs, and the surface says the thread has no
- * booking rather than printing a fabricated slot.
+ * The booked record a thread refers to. A thread carries no time, party size
+ * or status of its own, so the inbox reads them from its stay, booking or
+ * reservation; a thread with no record yields NULLs, and the surface says the
+ * thread has no booking rather than printing a fabricated slot.
  */
-const OPERATIONAL_RECORDS_SQL = `(
-    SELECT b.request_id, b.status, b.party_size, s.starts_at, s.ends_at, s.timezone, NULL AS check_in_date, NULL AS check_out_date, b.assigned_member_id, b.product_id, NULL AS stay_channel
-      FROM bookings b JOIN product_sessions s ON s.id = b.product_session_id
-     WHERE b.request_id IS NOT NULL
-    UNION ALL
-    SELECT r.request_id, r.status, r.party_size, r.starts_at, r.ends_at, r.timezone, NULL, NULL, NULL, NULL, NULL
-      FROM reservations r WHERE r.request_id IS NOT NULL
-    UNION ALL
-    SELECT st.request_id, st.status, st.adults + st.children, ${STAY_THREAD_STARTS_SQL('st')}, ${STAY_THREAD_ENDS_SQL('st')}, l.timezone, st.check_in_date, st.check_out_date, c.assigned_member_id, st.product_id, st.channel
-      FROM stays st
-      JOIN product_stay_configs c ON c.organization_id = st.organization_id AND c.product_id = st.product_id
-      JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
-     WHERE st.request_id IS NOT NULL
-  )`
 const OPERATIONAL_RECORD_SQL = `
-  LEFT JOIN ${OPERATIONAL_RECORDS_SQL} op ON op.request_id = gt.id`
+  LEFT JOIN ${BOOKED_RECORDS_SQL} op ON op.request_id = gt.id AND op.kind = gt.kind AND op.organization_id = gt.organization_id`
 
 /** Business inbox labels use the home's private identity; buyer labels keep the location's public title. */
 function threadLocationTitleSql(buyerAudience = false): string {
@@ -163,7 +147,7 @@ function mailboxFields(row: { archived_at: string | null; blocked_at: string | n
 const SOURCE_PREVIEW_SQL = `SUBSTR(CASE WHEN gt.kind = 'contact' THEN json_extract(gt.payload_json, '$.message') ELSE NULLIF(TRIM(json_extract(gt.payload_json, '$.notes')), '') END, 1, 160)`
 
 const SOURCE_PREVIEW_COLUMNS = `op.starts_at AS record_starts_at, op.ends_at AS record_ends_at, op.timezone AS record_timezone, op.party_size AS record_party_size, op.assigned_member_id,
-      op.product_id AS record_product_id, op.stay_channel, (SELECT ct.product_id FROM channel_threads ct WHERE ct.organization_id = gt.organization_id AND ct.request_id = gt.id) AS channel_product_id,
+      op.product_id AS record_product_id, op.channel AS stay_channel, (SELECT ct.product_id FROM channel_threads ct WHERE ct.organization_id = gt.organization_id AND ct.request_id = gt.id) AS channel_product_id,
       op.check_in_date AS record_check_in_date, op.check_out_date AS record_check_out_date,
       json_extract(gt.payload_json, '$.party_size_is_minimum') AS party_size_is_minimum`
 
@@ -284,7 +268,6 @@ async function inboxWhere(organizationId: string | null, opts: ListGuestThreadsO
     where += access.sql
     params.push(...access.params)
   } else {
-    where += ` AND ${REQUEST_CURRENT_BUYER_SQL.replaceAll('r.', 'gt.')}`
     if (organizationId) { where += ' AND gt.organization_id = ?'; params.push(organizationId) }
   }
   if (opts.locationId) { where += ' AND gt.location_id = ?'; params.push(opts.locationId) }
@@ -597,9 +580,7 @@ async function listUnreadThreadIds(db: DbClient, threadIds: string[], userId: st
 /** The guest entry a reply task is about: a message, or a contact form's own words. */
 export const GUEST_QUESTION_SQL = `guest_entry.actor_kind = 'guest' AND (guest_entry.kind = 'message' OR (guest_entry.kind = 'submission' AND r.kind = 'contact'))`
 /** A cancelled booking, reservation or stay answers what the guest asked before it, by when the guest asked it. */
-export const CANCELLED_AFTER_SQL = `(EXISTS (SELECT 1 FROM bookings record WHERE record.request_id = guest_entry.request_id AND record.status = 'cancelled' AND record.cancelled_at >= ${guestEntryAskedAtSql('guest_entry')})
-  OR EXISTS (SELECT 1 FROM reservations record WHERE record.request_id = guest_entry.request_id AND record.status = 'cancelled' AND record.cancelled_at >= ${guestEntryAskedAtSql('guest_entry')})
-  OR EXISTS (SELECT 1 FROM stays record WHERE record.request_id = guest_entry.request_id AND record.status = 'cancelled' AND record.cancelled_at >= ${guestEntryAskedAtSql('guest_entry')}))`
+export const CANCELLED_AFTER_SQL = `EXISTS (SELECT 1 FROM ${BOOKED_RECORDS_SQL} record WHERE record.request_id = guest_entry.request_id AND record.status = 'cancelled' AND record.cancelled_at >= ${guestEntryAskedAtSql('guest_entry')})`
 
 /**
  * The reply tasks for one conversation as its ledger now stands: the task for
@@ -738,12 +719,11 @@ export function conversationTaskQueries(requestId: string, now: string): BatchQu
       SELECT lower(hex(randomblob(16))), r.organization_id, 'booking_change', r.kind, record.id, record.product_id, r.location_id,
           CASE WHEN p.event_name = 'booking_change.requested' AND p.actor_kind <> 'guest'
             THEN min(strftime('%Y-%m-%dT%H:%M:%fZ', p.occurred_at, '+7 days'), COALESCE(record.ends_at, strftime('%Y-%m-%dT%H:%M:%fZ', p.occurred_at, '+7 days'))) END,
-          COALESCE(record.timezone, l.timezone, o.timezone), 'open', 'booking_change:' || p.id, 1, ?, ?
-        FROM requests r JOIN organization o ON o.id = r.organization_id
-        LEFT JOIN business_locations l ON l.organization_id = r.organization_id AND l.id = r.location_id
-        JOIN (SELECT b.id, b.request_id, b.product_id, ps.ends_at, ps.timezone FROM bookings b JOIN product_sessions ps ON ps.id = b.product_session_id AND ps.organization_id = b.organization_id
-              UNION ALL SELECT v.id, v.request_id, NULL, v.ends_at, v.timezone FROM reservations v
-              UNION ALL SELECT s.id, s.request_id, s.product_id, NULL, NULL FROM stays s) record ON record.request_id = r.id
+          record.timezone, 'open', 'booking_change:' || p.id, 1, ?, ?
+        FROM requests r
+        -- A stay's ends_at is its conversation window, not a time a change answer is due by.
+        JOIN (SELECT br.id, br.kind, br.organization_id, br.request_id, br.product_id, CASE br.kind WHEN 'stay' THEN NULL ELSE br.ends_at END AS ends_at, br.timezone
+              FROM ${BOOKED_RECORDS_SQL} br) record ON record.request_id = r.id AND record.kind = r.kind AND record.organization_id = r.organization_id
         JOIN activity_entries p ON p.request_id = r.id
        WHERE r.id = ? AND ((p.event_name = 'booking_change.requested' AND NOT ${CHANGE_ANSWERED_SQL}
            AND (p.actor_kind = 'guest' OR r.kind IN ('booking', 'reservation')))

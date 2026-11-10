@@ -21,7 +21,7 @@ const templateFields = { id: text, organizationId: text, title: text, body: text
 const templateObject = { type: 'object', properties: templateFields, required: Object.keys(templateFields) }
 const templateResult = { type: 'object', properties: { template: templateObject }, required: ['template'] }
 const templateInput = { title: { ...text, maxLength: 100 }, body: { ...text, maxLength: 5000 }, schedule }
-const messageFields = { id: text, organizationId: text, productId: nullableText, subjectType: { type: 'string', enum: ['stay', 'booking', 'reservation'] }, subjectId: text, stayId: nullableText, requestId: nullableText, templateId: nullableText, title: text,
+const messageFields = { id: text, organizationId: text, productId: nullableText, subjectType: { type: 'string', enum: ['stay', 'booking', 'reservation'] }, subjectId: text, requestId: nullableText, templateId: nullableText, title: text,
   templateVersion: { type: 'integer', minimum: 1 }, body: text, dueAt: nullableText, timezone: text,
   status: { type: 'string', enum: ['pending', 'sending', 'sent', 'failed', 'needs_review', 'cancelled', 'skipped'] }, reason: nullableText, errorCode: nullableText,
   errorField: nullableText, entryId: nullableText, startedAt: nullableText, sentAt: nullableText, createdAt: text, updatedAt: text }

@@ -13,8 +13,7 @@ import { mcpData, mcpRequest } from './helpers/mcp'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { seededTenant } from './seed/manifest'
 import { devLoginHeaders, seededSiteHeaders, testBaseUrl } from './test-env'
-import type { TaskPerson, TaskSection } from '../../server/domain/tasks'
-import type { OpportunityView } from '../../server/domain/opportunities'
+import type { BusinessToday } from '../../shared/dashboard-today'
 import type { DashboardBookingDetails } from '../../server/utils/dashboard-booking-details'
 
 interface NotificationView {
@@ -42,8 +41,6 @@ interface DeliveryList {
   deliveries: DeliveryView[]
 }
 
-/** GET /api/dashboard/today: the business's stored tasks and, for a manager, its opportunities. */
-type BusinessToday = { tasks: TaskSection[]; opportunities: OpportunityView[]; opportunityIssues: string[]; assignees: TaskPerson[]; resolvedAt: string }
 
 const baseURL = testBaseUrl()
 // Contact threads run on the seeded experience business; reservations on the

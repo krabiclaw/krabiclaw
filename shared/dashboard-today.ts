@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import type { AgendaItem } from '~/server/utils/dashboard-agenda'
 import type { OpportunityView } from '~/server/domain/opportunities'
+import type { TaskPerson, TaskSection } from '~/server/domain/tasks'
 import { formatCalendarRange, formatTimestamp, localDateAt } from '~/utils/timezone'
 import { STAY_CHANNEL_LABELS } from '~/shared/bookings'
 import { getVerticalCopy } from '~/utils/vertical-copy'
@@ -35,6 +36,16 @@ export function agendaToTodayCard(item: AgendaItem, input: { resolvedAt: string 
     locationId: item.locationId, bookingKind: item.kind, stayId: item.stayId, productId: item.productId,
     occurrenceAt: item.stayMoment === 'current' || !item.startsAt.includes('T') ? null : item.startsAt, timeZone: item.timeZone,
   }
+}
+
+/** GET /api/dashboard/today: the business's reservations with each one's suggestion, the tasks the caller may see, and, for a manager on Today, the other opportunities. */
+export interface BusinessToday {
+  reservations: { title: string | null; cards: Array<TodayReservation & { suggestion: OpportunityView | null }> }
+  tasks: TaskSection[]
+  opportunities: OpportunityView[]
+  opportunityIssues: string[]
+  assignees: TaskPerson[]
+  resolvedAt: string
 }
 
 /** How far ahead the business's Upcoming reads its reservations, and so how far ahead a booked client is offered a welcome. */

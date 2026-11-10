@@ -1,4 +1,3 @@
-import { REQUEST_CURRENT_BUYER_SQL } from '~/server/domain/requests'
 import { execute, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { d1JsonStringSet } from '~/server/db/d1-limits'
 import type { GuestThreadActorKind, GuestThreadChannel, GuestThreadEntryKind, GuestThreadEntryRow } from './types'
@@ -59,7 +58,7 @@ function matchingDedupeEntry(
  * the remaining idempotent work.
  */
 export async function appendEntry(db: DbClient, input: AppendEntryInput): Promise<GuestThreadEntryRow> {
-  const ownerWhere=`EXISTS(SELECT 1 FROM requests r WHERE r.id=? AND r.user_id=? AND ${REQUEST_CURRENT_BUYER_SQL})`
+  const ownerWhere='EXISTS(SELECT 1 FROM requests r WHERE r.id=? AND r.user_id=?)'
   if(input.buyerUserId&&!await queryFirst(db,`SELECT 1 WHERE ${ownerWhere}`,[input.threadId,input.buyerUserId]))throw new GuestThreadEntryOwnershipError('Conversation is not owned by this buyer')
   const payloadJson = JSON.stringify(input.payloadJson ?? {})
   if (input.dedupeKey) {

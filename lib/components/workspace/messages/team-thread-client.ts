@@ -15,9 +15,9 @@ export function isTeamThreadsResponse(value: unknown): value is { threads: TeamT
     && nullableString(thread.name) && nullableString(thread.createdByUserId)
     && typeof thread.isGroup === 'boolean' && typeof thread.canManage === 'boolean' && typeof thread.canLeave === 'boolean'
     && (thread.subjectType === null || ['stay', 'booking', 'reservation'].includes(String(thread.subjectType))) && nullableString(thread.subjectId)
-    && nullableString(thread.stayId) && nullableString(thread.bookingId) && nullableString(thread.locationId)
-    && (thread.record === null || isRecord(thread.record) && typeof thread.record.id === 'string' && typeof thread.record.title === 'string')
-    && (thread.stay === null || isRecord(thread.stay) && typeof thread.stay.id === 'string' && typeof thread.stay.homeName === 'string' && typeof thread.stay.checkInDate === 'string' && typeof thread.stay.checkOutDate === 'string')
+    && nullableString(thread.locationId)
+    && (thread.record === null || isRecord(thread.record) && thread.record.kind === thread.subjectType && thread.record.id === thread.subjectId && typeof thread.record.title === 'string'
+      && nullableString(thread.record.productId) && typeof thread.record.status === 'string' && typeof thread.record.startDate === 'string' && typeof thread.record.endDate === 'string')
     && (thread.job === null || isRecord(thread.job) && typeof thread.job.id === 'string' && typeof thread.job.version === 'number' && isRecord(thread.job.sheet) && isRecord(thread.job.can))
     && (thread.location === null || isRecord(thread.location) && typeof thread.location.id === 'string' && typeof thread.location.title === 'string')
     && Array.isArray(thread.participants) && thread.participants.every(identity)

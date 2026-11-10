@@ -253,9 +253,7 @@ export function scheduledGuestMessage(row: ScheduledGuestMessageRow) {
   if (row.due_at === null && row.status !== 'failed' && row.status !== 'skipped') messagingError(500, 'INVALID_SCHEDULED_MESSAGE', 'The scheduled message has no due time', 'dueAt')
   if ((row.status === 'failed' || row.status === 'needs_review') && (!row.reason?.trim() || !row.error_code?.trim() || !row.error_field?.trim())) messagingError(500, 'INVALID_SCHEDULED_MESSAGE', 'The failed message has incomplete error context', 'errorCode')
   if (row.status === 'sent' && (row.sent_at === null || row.entry_id === null)) messagingError(500, 'INVALID_SCHEDULED_MESSAGE', 'The sent message has no activity entry or send time', 'entryId')
-  return { id: row.id, organizationId: row.organization_id, productId: row.product_id, subjectType: row.subject_type, subjectId: row.subject_id,
-    // The shipped iOS app reads a stay's messages by stayId.
-    stayId: row.subject_type === 'stay' ? row.subject_id : null, requestId: row.request_id,
+  return { id: row.id, organizationId: row.organization_id, productId: row.product_id, subjectType: row.subject_type, subjectId: row.subject_id, requestId: row.request_id,
     templateId: row.template_id, title: row.template_title, templateVersion: row.template_version, body: row.body, dueAt: row.due_at,
     timezone: row.timezone, status: row.status, reason: row.reason, errorCode: row.error_code, errorField: row.error_field,
     entryId: row.entry_id, startedAt: row.started_at, sentAt: row.sent_at, createdAt: row.created_at, updatedAt: row.updated_at }

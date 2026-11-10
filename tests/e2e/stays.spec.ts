@@ -14,12 +14,11 @@ import { STAY_SAFETY_DETAIL_KEYS } from '../../shared/stay-safety'
 import { formQuestionsRevision } from '../../shared/form-questions'
 import type { PublicLocationDisclosure } from '../../types/public-location'
 import type { StayPhotoRoom } from '../../shared/stay-photos'
-import type { TodayReservation } from '../../shared/dashboard-today'
+import type { BusinessToday } from '../../shared/dashboard-today'
 import type { StayHomeAccessibility } from '../../shared/stay-accessibility'
 import { formatMinorAmount } from '../../shared/prices'
-import type { TaskPerson, TaskSection, TaskView } from '../../server/domain/tasks'
+import type { TaskSection, TaskView } from '../../server/domain/tasks'
 import type { TeamMessage, TeamThread } from '../../server/domain/team-messages'
-import type { OpportunityView } from '../../server/domain/opportunities'
 
 // A host's place to stay, end to end through the surfaces that own it: the
 // one Product editor creates the home, Today adds a stay, and the stay's
@@ -28,8 +27,6 @@ import type { OpportunityView } from '../../server/domain/opportunities'
 
 const TIME_ZONE = 'Asia/Bangkok'
 
-/** GET /api/dashboard/today: the business's stored tasks and, for a manager, its opportunities. */
-type BusinessToday = { reservations: { title: string | null; cards: TodayReservation[] }; tasks: TaskSection[]; opportunities: OpportunityView[]; opportunityIssues: string[]; assignees: TaskPerson[]; resolvedAt: string }
 
 function localDay(offset: number): string {
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
@@ -486,14 +483,14 @@ test('a responsible home team reads its stays as turnovers on every surface unti
     await expect.poll(async () => {
       const threads = await memberContext.request.get(api('team/threads'))
       await expectStatus(threads, 200)
-      jobThreadId = (await threads.json() as { threads: TeamThread[] }).threads.find(thread => thread.stayId === stay.id && thread.job)?.id ?? ''
+      jobThreadId = (await threads.json() as { threads: TeamThread[] }).threads.find(thread => thread.subjectType === 'stay' && thread.subjectId === stay.id && thread.job)?.id ?? ''
       return jobThreadId
     }, { timeout: 30_000, message: 'the hub opens the turnover’s conversation after the stay write' }).not.toBe('')
-    const hosted = await memberContext.request.post(api('team/threads'), { data: { memberIds: ['user-e2e-lodging-host'], stayId: stay.id } })
+    const hosted = await memberContext.request.post(api('team/threads'), { data: { memberIds: ['user-e2e-lodging-host'], subjectType: 'stay', subjectId: stay.id } })
     await expectStatus(hosted, 200)
     expect((await hosted.json() as { id: string }).id).toBe(jobThreadId)
     const jobThread = () => memberContext.request.get(api('team/threads')).then(async response => { await expectStatus(response, 200); return (await response.json() as { threads: TeamThread[] }).threads.find(thread => thread.id === jobThreadId)! })
-    expect(await jobThread()).toMatchObject({ name: 'Cliff Cabin', stayId: stay.id, job: expect.objectContaining({ kind: 'turnover', status: 'open', title: 'Cliff Cabin', stayId: stay.id }) })
+    expect(await jobThread()).toMatchObject({ name: 'Cliff Cabin', subjectType: 'stay', subjectId: stay.id, job: expect.objectContaining({ kind: 'turnover', status: 'open', title: 'Cliff Cabin', stayId: stay.id }) })
     await expect.poll(async () => {
       const read = await memberContext.request.get(api(`team/threads/${jobThreadId}/messages`))
       await expectStatus(read, 200)
@@ -4610,8 +4607,8 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await expect.poll(async () => {
         const threads = await cleaner.request.get(api('team/threads'))
         await expectStatus(threads, 200)
-        jobThread = (await threads.json() as { threads: Array<{ id: string; stayId: string | null; unread: boolean; job: { id: string } | null }> }).threads
-          .find(item => item.stayId === stays[0]!.id && item.job?.id === turnover.id)
+        jobThread = (await threads.json() as { threads: Array<{ id: string; subjectType: string | null; subjectId: string | null; unread: boolean; job: { id: string } | null }> }).threads
+          .find(item => item.subjectType === 'stay' && item.subjectId === stays[0]!.id && item.job?.id === turnover.id)
         return jobThread?.id ?? ''
       }, { timeout: 30_000, message: 'the organization’s jobs open the cleaner’s conversation for the turnover' }).not.toBe('')
       // The job is posted once; a wake that saw the moment between unassigning and reassigning also told the

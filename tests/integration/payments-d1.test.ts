@@ -736,15 +736,6 @@ test('buyer Activity groups exact owned visits and immutable orders without manu
   assert.deepEqual(order.payments![0]!.order,{lines:[{id:'immutable-line',title:'Original item title',unit_amount:1250,quantity:2,currency:'USD'}]})
   assert.deepEqual((await db.prepare('SELECT * FROM requests ORDER BY id').all()).results,requestsBefore)
   await assert.rejects(()=>loadBuyerBookingDetails(db, env,'other','order','order-payment'),error=>error instanceof HTTPError&&error.statusCode===404)
-  await db.prepare("UPDATE bookings SET user_id='other' WHERE id=?").bind(booking.bookingId).run()
-  assert.equal((await buyerActivities(db,'verified')).activities.some(item=>item.kind==='booking'),false)
-  await assert.rejects(()=>loadBuyerBookingDetails(db, env,'verified','booking',opening.id),error=>error instanceof HTTPError&&error.statusCode===404)
-  const retainedPayment=await loadBuyerBookingDetails(db, env,'verified','payment','visit-payment')
-  assert.equal(retainedPayment.threadId,null)
-  assert.equal(retainedPayment.payments![0]!.payment.id,'visit-payment')
-  assert.equal(await db.prepare("SELECT buyer_user_id FROM payments WHERE id='visit-payment'").first('buyer_user_id'),'verified')
-  assert.equal(await getGuestThreadDetail(db,opening.id,ORG,{buyerUserId:'verified'}),null)
-  assert.deepEqual(await listGuestThreads(db,null,{userId:'verified',buyerAudience:true}),[])
  }finally{await runtime.dispose()}
 })
 

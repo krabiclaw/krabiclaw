@@ -5,7 +5,7 @@ import { d1JsonStringSet, executeBatch, queryAll, type DbClient } from '~/server
 import { assignedGuestThreadScope, assignedResponsibilitySql, roleAllows, assertRoleAllows, type ResolvedMembership } from '~/server/utils/member-access'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { loadOwnerPictures } from '~/server/notifications/hero'
-import { BOOKED_RECORDS_SQL, REQUEST_CURRENT_BUYER_SQL } from '~/server/domain/requests'
+import { BOOKED_RECORDS_SQL } from '~/server/domain/requests'
 import { postEditorPath } from '~/server/utils/dashboard-links'
 import type { Stay } from '~/server/domain/stays'
 import { STAY_CHANNEL_LABELS, stayGuestFirstName } from '~/shared/bookings'
@@ -141,13 +141,11 @@ function scopeParams(scope: AgendaScope, query: AgendaQuery): unknown[] {
   return params
 }
 
-// A buyer's row is one whose request they still own, which is the same
-// condition the account's activity and conversations read with. The condition
-// names its request `r`, so no row reading it may use that alias itself.
+// A buyer's row is one they own.
 function scopeConditions(scope: AgendaScope, query: AgendaQuery, alias: string): string {
   return [
     scope.buyerUserId
-      ? `${alias}.user_id = ? AND EXISTS (SELECT 1 FROM requests r WHERE r.id = ${alias}.id AND ${REQUEST_CURRENT_BUYER_SQL})`
+      ? `${alias}.user_id = ?`
       : `${alias}.organization_id = ?`,
     query.organizationId ? `AND ${alias}.organization_id = ?` : '',
     query.locationId ? `AND ${alias}.location_id = ?` : '',
@@ -192,7 +190,7 @@ export async function listAgenda(
   // Read configured and historical activity kinds plus the explicit locations
   // in one round trip. Template features do not establish actual activity.
   const scopeSql = scope.buyerUserId
-    ? `IN (SELECT r.organization_id FROM requests r WHERE r.user_id = ? AND ${REQUEST_CURRENT_BUYER_SQL})`
+    ? 'IN (SELECT r.organization_id FROM requests r WHERE r.user_id = ?)'
     : '= ?'
   const scopeParam = scope.buyerUserId ?? scope.organizationId
   const [bookableResult, reservingResult, locationResult, hostingResult] = await executeBatch(db, [
@@ -286,9 +284,7 @@ export async function listAgenda(
       JOIN product_stay_configs c ON c.organization_id = st.organization_id AND c.product_id = st.product_id
       JOIN products p ON p.organization_id = st.organization_id AND p.id = st.product_id
       JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
-     WHERE ${scope.buyerUserId ? `st.user_id = ? AND st.owner = 'app' AND (st.request_id IS NULL OR EXISTS (
-       SELECT 1 FROM requests r WHERE r.id = st.request_id AND r.organization_id = st.organization_id AND r.kind = 'stay' AND r.user_id = st.user_id AND ${REQUEST_CURRENT_BUYER_SQL}))`
-       : 'st.organization_id = ?'} AND st.status <> 'cancelled'
+     WHERE ${scope.buyerUserId ? "st.user_id = ? AND st.owner = 'app'" : 'st.organization_id = ?'} AND st.status <> 'cancelled'
        AND ${scope.buyerUserId || query.currentStaysAt && !staff ? 'st.check_in_date <= ? AND st.check_out_date >= ?' : '(st.check_in_date BETWEEN ? AND ? OR st.check_out_date BETWEEN ? AND ?)'}
        ${query.organizationId ? 'AND st.organization_id = ?' : ''} ${query.locationId ? 'AND c.location_id = ?' : ''} ${staff ? `AND ${assignedResponsibilitySql('c')}` : ''}`,
     [scopeParam, ...(scope.buyerUserId || query.currentStaysAt && !staff ? [query.to, query.from] : [query.from, query.to, query.from, query.to]), ...(query.organizationId ? [query.organizationId] : []), ...(query.locationId ? [query.locationId] : []), ...(staff ? [staff.userId, staff.userId] : [])])

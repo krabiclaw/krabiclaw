@@ -3,7 +3,7 @@ import { HTTPError } from 'nitro'
 import { z } from 'zod'
 import { formatFormAnswer, type FormAnswerSnapshot } from '~/shared/form-questions'
 import { formatCalendarDate, formatTime, formatTimestamp, localPartsAt } from '~/utils/timezone'
-import { getGuestRequest, getThreadOperationalRecord, requestSummary, type cancelBookingRequest, type GuestRequest } from '~/server/domain/requests'
+import { BOOKED_RECORDS_SQL, getGuestRequest, getThreadOperationalRecord, requestSummary, type cancelBookingRequest, type GuestRequest } from '~/server/domain/requests'
 import { execute, queryAll, queryFirst, type DbClient } from '~/server/db'
 import { organizationEventQuery } from '~/server/utils/organization-events'
 import { getEmailDeliveryMode, hashEmail, sendEmail, type EmailSendResult } from '~/server/utils/email-delivery'
@@ -848,9 +848,11 @@ export async function notifyOwner(
   })
   const deliveryContext = threadContext ?? { guestThreadId: null, sourceEntryId: notificationId }
 
-  // Owners and admins hear about every booking; the member it is assigned to hears about theirs.
-  const assigned = opts.memberIds === undefined && opts.submissionType === 'booking' && opts.submissionId
-    ? await queryFirst<{ assigned_member_id: string | null }>(db, 'SELECT assigned_member_id FROM bookings WHERE organization_id = ? AND (request_id = ? OR id = ?) LIMIT 1', [opts.organizationId, opts.submissionId, opts.submissionId])
+  // Owners and admins hear about every booking and reservation; the member it is assigned to hears about theirs.
+  // (A stay's alert names its audience, the home's responsible people, in memberIds.)
+  const assigned = opts.memberIds === undefined && (opts.submissionType === 'booking' || opts.submissionType === 'reservation') && opts.submissionId
+    ? await queryFirst<{ assigned_member_id: string | null }>(db, `SELECT br.assigned_member_id FROM ${BOOKED_RECORDS_SQL} br
+        WHERE br.organization_id = ? AND br.kind = ? AND (br.request_id = ? OR br.id = ?) LIMIT 1`, [opts.organizationId, opts.submissionType, opts.submissionId, opts.submissionId])
     : null
   const recipients = await resolveOwnerRecipients(env, db, {
     organizationId: opts.organizationId,

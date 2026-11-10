@@ -1,7 +1,7 @@
 import { execute, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { hasOrganizationEntitlement } from '~/server/utils/billing'
 import { wantsNotification } from '~/server/domain/notification-preferences'
-import { localDateTimeToInstant } from '~/utils/timezone'
+import { BOOKED_RECORDS_SQL, bookedRecordWindow, type BookedRecord } from '~/server/domain/requests'
 import { reviewSubject, type ReviewSubject } from '~/shared/review-questions'
 
 export type ReviewBookingType = 'reservation' | 'booking' | 'stay'
@@ -103,11 +103,8 @@ export function resolveGoogleReviewUrl(location: Pick<ReviewBookingContext, 'goo
   return placeId ? `https://search.google.com/local/writereview?placeid=${encodeURIComponent(placeId)}` : null
 }
 
-type ReviewBookingContextRow = Omit<ReviewBookingContext, 'completed_at' | 'subject'> & {
-  ends_at: string | null
-  check_out_date: string | null
-  check_out_time: string | null
-}
+type ReviewBookingContextRow = Omit<ReviewBookingContext, 'completed_at' | 'subject' | 'visit_starts_at'>
+  & Pick<BookedRecord, 'id' | 'kind' | 'starts_at' | 'ends_at' | 'check_in_date' | 'check_out_date' | 'check_in_time' | 'check_out_time'>
 
 /**
  * The visit a review is about, read from the operational record that holds
@@ -120,39 +117,24 @@ export async function getReviewBookingContext(
   bookingId: string,
 ): Promise<ReviewBookingContext | null> {
   const row = await queryFirst<ReviewBookingContextRow>(db, `SELECT r.kind AS booking_type, r.id AS booking_id, r.organization_id, r.location_id, r.user_id,
-    json_extract(r.payload_json, '$.guest.name') AS guest_name, COALESCE(record.guest_email, json_extract(r.payload_json, '$.guest.email')) AS guest_email,
-    record.status, record.no_show_at, record.ends_at, record.check_out_date, record.check_out_time,
+    json_extract(r.payload_json, '$.guest.name') AS guest_name, COALESCE(st.guest_email, json_extract(r.payload_json, '$.guest.email')) AS guest_email,
+    br.id, br.kind, br.status, br.no_show_at, br.starts_at, br.ends_at, br.check_in_date, br.check_out_date, br.check_in_time, br.check_out_time,
     -- Whether the visit was invited and answered is the review_requests record's, not the thread's.
     (SELECT MIN(rr.first_sent_at) FROM review_requests rr WHERE rr.booking_type = r.kind AND rr.booking_id = r.id) AS review_request_sent_at,
     (SELECT MIN(rr.submitted_at) FROM review_requests rr WHERE rr.booking_type = r.kind AND rr.booking_id = r.id) AS review_submitted_at, r.review_id,
     s.name AS organization_name, s.vertical AS organization_vertical, (SELECT 'https://' || domain FROM organization_domains WHERE organization_id = s.id AND role = 'canonical' AND status = 'active') AS organization_public_url,
     bl.title AS location_title, bl.google_place_id, bl.google_review_url,
-    record.starts_at AS visit_starts_at, record.timezone AS visit_timezone, record.party_size, record.product_id, p.kind AS product_kind, p.name AS product_title
+    br.timezone AS visit_timezone, br.party_size, br.product_id, br.product_kind, br.product_name AS product_title
     FROM requests r JOIN organization s ON s.id = r.organization_id LEFT JOIN business_locations bl ON bl.id = r.location_id
-    -- The visit itself lives on the operational record, never on the thread.
-    JOIN (
-      SELECT b.request_id, b.status, b.no_show_at, ps.timezone, ps.starts_at, ps.ends_at, NULL AS check_out_date, NULL AS check_out_time, b.party_size, ps.product_id, NULL AS guest_email
-        FROM bookings b JOIN product_sessions ps ON ps.id = b.product_session_id
-      UNION ALL
-      SELECT res.request_id, res.status, res.no_show_at, res.timezone, res.starts_at, res.ends_at, NULL, NULL, res.party_size, NULL, NULL FROM reservations res
-      UNION ALL
-      SELECT st.request_id, st.status, st.no_show_at, l.timezone, st.check_in_date || CASE WHEN c.check_in_time IS NULL THEN '' ELSE 'T' || c.check_in_time END, NULL, st.check_out_date, c.check_out_time, st.adults + st.children, st.product_id, st.guest_email
-        FROM stays st JOIN product_stay_configs c ON c.organization_id = st.organization_id AND c.product_id = st.product_id
-        JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
-       WHERE st.channel = 'direct'
-    ) record ON record.request_id = r.id
-    LEFT JOIN products p ON p.organization_id = r.organization_id AND p.id = record.product_id
-    WHERE r.id = ? AND r.kind = ?`, [bookingId, bookingType])
+    -- The visit itself lives on the booked record, never on the thread.
+    JOIN ${BOOKED_RECORDS_SQL} br ON br.request_id = r.id AND br.kind = r.kind AND br.organization_id = r.organization_id
+    LEFT JOIN stays st ON br.kind = 'stay' AND st.id = br.id
+    WHERE r.id = ? AND r.kind = ? AND (br.kind <> 'stay' OR br.channel = 'direct')`, [bookingId, bookingType])
   if (!row) return null
-  const { ends_at, check_out_date, check_out_time, ...context } = row
-  // A stay ends at its home's checkout time on its checkout date, in the home's own zone.
-  const completedAt = bookingType === 'stay'
-    ? check_out_time === null ? null : localDateTimeToInstant(check_out_date!, check_out_time, row.visit_timezone, 'compatible').toISOString()
-    : ends_at!
-  const visitStartsAt = bookingType === 'stay'
-    ? row.visit_starts_at.includes('T') ? localDateTimeToInstant(row.visit_starts_at.slice(0, 10), row.visit_starts_at.slice(11), row.visit_timezone, 'compatible').toISOString() : row.visit_starts_at
-    : row.visit_starts_at
-  return { ...context, visit_starts_at: visitStartsAt, completed_at: completedAt, subject: reviewSubject(bookingType, row.product_kind) }
+  const { id: _id, kind: _kind, starts_at: _startsAt, ends_at: _endsAt, check_in_date: _checkIn, check_out_date: _checkOut, check_in_time: _checkInTime, check_out_time: _checkOutTime, ...context } = row
+  // A stay runs from its check-in to its checkout at its home's times, in the home's own zone.
+  const window = bookedRecordWindow({ ...row, timezone: row.visit_timezone })
+  return { ...context, visit_starts_at: window.start.instant ?? window.start.date, completed_at: window.end.instant, subject: reviewSubject(bookingType, row.product_kind) }
 }
 
 export async function getReviewRequestByToken(

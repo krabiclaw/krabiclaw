@@ -152,14 +152,8 @@ export function participantLabel(request: GuestRequest): string {
   return request.payload.guest.name
 }
 
-/** Resource ownership belongs to the current request and every actual linked operational record. */
-export const REQUEST_CURRENT_BUYER_SQL = `r.user_id IS NOT NULL
- AND NOT EXISTS(SELECT 1 FROM bookings b WHERE b.request_id=r.id AND (b.user_id IS NULL OR b.user_id<>r.user_id OR b.organization_id<>r.organization_id OR r.kind<>'booking'))
- AND NOT EXISTS(SELECT 1 FROM reservations v WHERE v.request_id=r.id AND (v.user_id IS NULL OR v.user_id<>r.user_id OR v.organization_id<>r.organization_id OR r.kind<>'reservation'))
- AND NOT EXISTS(SELECT 1 FROM stays st WHERE st.request_id=r.id AND (st.user_id IS NULL OR st.user_id<>r.user_id OR st.organization_id<>r.organization_id OR r.kind<>'stay'))`
-
 export async function getGuestRequest(db: DbClient, id: string, organizationId?: string, kind?: GuestRequestKind, buyerUserId?:string): Promise<GuestRequest | null> {
-  const row = await queryFirst<Record<string, unknown>>(db, `SELECT r.* FROM requests r WHERE r.id = ? AND r.kind IN ('contact', 'reservation', 'booking', 'stay')${organizationId ? ' AND r.organization_id = ?' : ''}${kind ? ' AND r.kind = ?' : ''}${buyerUserId?` AND r.user_id=? AND ${REQUEST_CURRENT_BUYER_SQL}`:''}`, [id, ...(organizationId ? [organizationId] : []), ...(kind ? [kind] : []),...(buyerUserId?[buyerUserId]:[])])
+  const row = await queryFirst<Record<string, unknown>>(db, `SELECT r.* FROM requests r WHERE r.id = ? AND r.kind IN ('contact', 'reservation', 'booking', 'stay')${organizationId ? ' AND r.organization_id = ?' : ''}${kind ? ' AND r.kind = ?' : ''}${buyerUserId?' AND r.user_id=?':''}`, [id, ...(organizationId ? [organizationId] : []), ...(kind ? [kind] : []),...(buyerUserId?[buyerUserId]:[])])
   if (!row) return null
   const request = parseGuestRequest(row)
   if (request.kind === 'stay' && 'participant' in request.payload) {
@@ -184,13 +178,17 @@ export async function getGuestRequest(db: DbClient, id: string, organizationId?:
  * window (STAY_THREAD_*); its nights are check_in_date/check_out_date at its
  * home's check_in_time/check_out_time. offering_id is what a business offers:
  * the product, or the location for a table reservation. fingerprint is every
- * fact a plan made from the record depends on, for guarded writes.
+ * fact a plan made from the record depends on, for guarded writes. A booking
+ * also carries its session and offering (kind, details, scheduling mode); a
+ * reservation carries the policy the guest agreed to; a stay its channel and owner.
  */
 export const BOOKED_RECORDS_SQL = `(
     SELECT 'booking' AS kind, b.id, b.request_id, b.organization_id, b.status, b.party_size, s.starts_at, s.ends_at, s.timezone,
            s.location_id, b.product_id, b.product_id AS offering_id, p.name AS product_name, NULL AS product_internal_name, b.assigned_member_id, b.user_id,
            NULL AS check_in_date, NULL AS check_out_date, NULL AS check_in_time, NULL AS check_out_time, b.no_show_at, b.created_at, b.created_at AS received_at, b.updated_at,
-           NULL AS location_updated_at, c.advance_notice_minutes, json_array(b.status, b.request_id, b.product_session_id, s.starts_at, s.ends_at, s.timezone, b.updated_at) AS fingerprint
+           NULL AS location_updated_at, c.advance_notice_minutes, json_array(b.status, b.request_id, b.product_session_id, s.starts_at, s.ends_at, s.timezone, b.updated_at) AS fingerprint,
+           b.product_session_id, s.status AS session_status, c.scheduling_mode, p.kind AS product_kind, p.details_json AS product_details_json, NULL AS policy_json,
+           b.cancelled_at, NULL AS channel, NULL AS owner
       FROM bookings b
       JOIN product_sessions s ON s.id = b.product_session_id AND s.product_id = b.product_id AND s.organization_id = b.organization_id
       JOIN products p ON p.id = b.product_id AND p.organization_id = b.organization_id
@@ -198,13 +196,15 @@ export const BOOKED_RECORDS_SQL = `(
     UNION ALL
     SELECT 'reservation', r.id, r.request_id, r.organization_id, r.status, r.party_size, r.starts_at, r.ends_at, r.timezone,
            r.location_id, NULL, r.location_id, NULL, NULL, NULL, r.user_id, NULL, NULL, NULL, NULL, r.no_show_at, r.created_at, r.created_at, r.updated_at,
-           NULL, NULL, json_array(r.status, r.request_id, r.location_id, r.starts_at, r.ends_at, r.timezone, r.updated_at)
+           NULL, NULL, json_array(r.status, r.request_id, r.location_id, r.starts_at, r.ends_at, r.timezone, r.updated_at),
+           NULL, NULL, NULL, NULL, NULL, r.policy_json, r.cancelled_at, NULL, NULL
       FROM reservations r
     UNION ALL
     SELECT 'stay', st.id, st.request_id, st.organization_id, st.status, st.adults + st.children, ${STAY_THREAD_STARTS_SQL('st')}, ${STAY_THREAD_ENDS_SQL('st')}, l.timezone,
            c.location_id, st.product_id, st.product_id, p.name, c.internal_name, c.assigned_member_id, st.user_id, st.check_in_date, st.check_out_date,
            c.check_in_time, c.check_out_time, st.no_show_at, st.created_at, st.booking_received_at, st.updated_at,
-           l.updated_at, NULL, json_array(st.version, st.request_id, l.timezone, c.check_in_time, c.check_out_time)
+           l.updated_at, NULL, json_array(st.version, st.request_id, l.timezone, c.check_in_time, c.check_out_time),
+           NULL, NULL, NULL, p.kind, p.details_json, NULL, st.cancelled_at, st.channel, st.owner
       FROM stays st
       JOIN product_stay_configs c ON c.organization_id = st.organization_id AND c.product_id = st.product_id
       JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
@@ -224,6 +224,16 @@ export interface BookedRecord extends Omit<ThreadOperationalRecord, 'review_id'>
   updated_at: string
   location_updated_at: string | null
   fingerprint: string
+  product_session_id: string | null
+  session_status: string | null
+  scheduling_mode: string | null
+  product_kind: string | null
+  product_details_json: string | null
+  policy_json: string | null
+  cancelled_at: string | null
+  /** A stay's channel and who owns it (KrabiClaw or the channel); null for anything else. */
+  channel: 'airbnb' | 'vrbo' | 'booking_com' | 'direct' | null
+  owner: 'app' | 'channel' | null
 }
 
 /**

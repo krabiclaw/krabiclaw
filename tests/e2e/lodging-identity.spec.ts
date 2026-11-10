@@ -148,7 +148,7 @@ test.describe('lodging identity boundary', () => {
       expect(await reusedTeam.json()).toEqual({ id: threadId })
       const conversations = await teamCall<{ conversations: TeamThread[]; page_info: { has_more: boolean; next_cursor: string | null } }>('list_team_conversations')
       expect(conversations.conversations).toHaveLength(1)
-      expect(conversations.conversations[0]).toMatchObject({ id: threadId, unread: false, unreadCount: 0, stayId: null, locationId: null })
+      expect(conversations.conversations[0]).toMatchObject({ id: threadId, unread: false, unreadCount: 0, subjectType: null, subjectId: null, locationId: null })
       expect(conversations.conversations[0]!.participants.map(member => member.id).sort()).toEqual([fixture.id, invitee.id].sort())
       expect(conversations.page_info).toEqual({ has_more: false, next_cursor: null })
       const message = `The guest room is ready ${crypto.randomUUID()}`
@@ -454,7 +454,7 @@ test.describe('lodging identity boundary', () => {
         }
         for (const [bearer, canManage] of [[ownerBearer, true], [adminBearer, true], [memberBearer, false]] as const) {
           const group = (await threads(bearer)).find(thread => thread.id === threadId)!
-          expect(group).toMatchObject({ name: initialName, isGroup: true, createdByUserId: fixture.id, canManage, canLeave: true, stayId: null, locationId: null })
+          expect(group).toMatchObject({ name: initialName, isGroup: true, createdByUserId: fixture.id, canManage, canLeave: true, subjectType: null, subjectId: null, locationId: null })
           expect(group.participants.map(person => person.id).sort()).toEqual([fixture.id, invitee.id, teammate.id].sort())
         }
         const messageIds: string[] = []

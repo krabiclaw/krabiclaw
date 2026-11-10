@@ -4,8 +4,9 @@ import { dismissPreviewToolbar } from './helpers'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { seededSiteHeaders } from './test-env'
 import { seededTenant } from './seed/manifest'
-import type { TaskPerson, TaskSection, TaskView } from '../../server/domain/tasks'
+import type { TaskView } from '../../server/domain/tasks'
 import type { OpportunityView } from '../../server/domain/opportunities'
+import type { BusinessToday } from '../../shared/dashboard-today'
 import type { BusinessGoal } from '../../shared/business-progress'
 import type { AgendaPayload } from '../../server/utils/dashboard-agenda'
 import type { DashboardBookingDetails } from '../../server/utils/dashboard-booking-details'
@@ -14,8 +15,6 @@ import { isDashboardInvalidation } from '../../shared/dashboard-invalidations'
 
 const ORG = '/dashboard/ember-slice-demo'
 
-/** GET /api/dashboard/today: the business's stored tasks and, for a manager, its opportunities. */
-type BusinessToday = { tasks: TaskSection[]; opportunities: OpportunityView[]; opportunityIssues: string[]; assignees: TaskPerson[]; resolvedAt: string }
 
 test('automation remains in Inbox while Today keeps the unanswered inquiry', async ({ page, request, baseURL }, testInfo) => {
   test.setTimeout(120_000)

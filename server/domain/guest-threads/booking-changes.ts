@@ -25,7 +25,7 @@ import { bookingChangeStates, type BookingChangeStatus } from './booking-change-
 import { isStayChangeRequest, stayChangeView } from './stay-change-requests'
 import { updateThreadProjectionIfLatestEntry } from './repository'
 import { publishAccessInvalidation } from '~/server/cloudflare/guest-inbox-events'
-import { getGuestRequest, getThreadOperationalRecord, requestSummary, REQUEST_CURRENT_BUYER_SQL } from '~/server/domain/requests'
+import { getGuestRequest, getThreadOperationalRecord, requestSummary } from '~/server/domain/requests'
 import type { GuestThreadRow, GuestThreadEntryRow } from './types'
 
 /**
@@ -592,7 +592,7 @@ export async function respondToBookingChange(db: DbClient, env: ChangeEnv, input
   if ('token' in input) {
     const expected = linkToken(env, input.threadId, input.requestId)
     if (!/^[a-f0-9]{64}$/.test(input.token) || !timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(input.token, 'hex'))) throw new HTTPError({ statusCode: 404, message: 'Change request not found' })
-  } else if (!await queryFirst(db, `SELECT 1 FROM requests r WHERE r.id = ? AND r.user_id = ? AND ${REQUEST_CURRENT_BUYER_SQL}`, [input.threadId, input.buyerUserId])) {
+  } else if (!await queryFirst(db, 'SELECT 1 FROM requests r WHERE r.id = ? AND r.user_id = ?', [input.threadId, input.buyerUserId])) {
     throw new HTTPError({ statusCode: 404, message: 'Change request not found' })
   }
   const entry = await getEntryById(db, input.requestId)
@@ -620,7 +620,7 @@ export async function respondToBookingChange(db: DbClient, env: ChangeEnv, input
     // existing, so a concurrent edit makes the whole decision a no-op rather
     // than half-applying it.
     const currentGuard = sourceGuard(thread as GuestThreadRow, current)
-    const ownership: BatchQuery = 'buyerUserId' in input ? { query: `EXISTS (SELECT 1 FROM requests r WHERE r.id=? AND r.user_id=? AND ${REQUEST_CURRENT_BUYER_SQL})`, params: [thread.id, input.buyerUserId] } : { query: '1', params: [] }
+    const ownership: BatchQuery = 'buyerUserId' in input ? { query: 'EXISTS (SELECT 1 FROM requests r WHERE r.id=? AND r.user_id=?)', params: [thread.id, input.buyerUserId] } : { query: '1', params: [] }
     const entryInsert: BatchQuery = {
       query: `INSERT INTO activity_entries
         (id, request_id, kind, scope_kind, actor_kind, event_name, body, payload_json, dedupe_key, sequence, occurred_at, created_at)

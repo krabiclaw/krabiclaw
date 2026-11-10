@@ -1,4 +1,5 @@
 import { queryAll, type DbClient } from '~/server/db'
+import { BOOKED_RECORDS_SQL } from '~/server/domain/requests'
 
 export type BookingChangeStatus = 'pending' | 'accepted' | 'declined' | 'withdrawn' | 'stale' | 'expired'
 export interface BookingChangeState { status: BookingChangeStatus; decisionId: string | null; message?: string }
@@ -8,12 +9,9 @@ function sourceMatchesSql(proposal: string, owner: string): string {
   const recorded = ['recordKind', 'assignedMemberId', 'sessionId', 'operationalUpdatedAt', 'recordId', 'status', 'partySize', 'startsAt', 'endsAt', 'timezone', 'locationId', 'productId', 'partySizeIsMinimum', 'notes', 'guest.name', 'guest.email', 'guest.phone']
     .map(field => `json_extract(${proposal}.payload_json,'$.before.${field}')`).join(',')
   const guest = ['party_size_is_minimum', 'notes', 'guest.name', 'guest.email', 'guest.phone'].map(field => `json_extract(${owner}.payload_json,'$.${field}')`).join(',')
-  return `(EXISTS (SELECT 1 FROM bookings b
-      JOIN product_sessions s ON s.id=b.product_session_id AND s.organization_id=b.organization_id AND s.product_id=b.product_id
-      WHERE b.request_id=${owner}.id AND b.organization_id=${owner}.organization_id AND ${owner}.kind='booking'
-        AND json_array('booking',b.assigned_member_id,b.product_session_id,b.updated_at,b.id,b.status,b.party_size,s.starts_at,s.ends_at,s.timezone,s.location_id,b.product_id,${guest})=json_array(${recorded}))
-    OR EXISTS (SELECT 1 FROM reservations v WHERE v.request_id=${owner}.id AND v.organization_id=${owner}.organization_id AND ${owner}.kind='reservation'
-        AND json_array('reservation',NULL,NULL,NULL,v.id,v.status,v.party_size,v.starts_at,v.ends_at,v.timezone,v.location_id,NULL,${guest})=json_array(${recorded})))`
+  // A reservation records no operational update time in its source; only a booking's is compared.
+  return `EXISTS (SELECT 1 FROM ${BOOKED_RECORDS_SQL} br WHERE br.request_id=${owner}.id AND br.organization_id=${owner}.organization_id AND br.kind=${owner}.kind AND br.kind<>'stay'
+        AND json_array(br.kind,br.assigned_member_id,br.product_session_id,CASE br.kind WHEN 'booking' THEN br.updated_at END,br.id,br.status,br.party_size,br.starts_at,br.ends_at,br.timezone,br.location_id,br.product_id,${guest})=json_array(${recorded}))`
 }
 
 /**
@@ -29,8 +27,7 @@ function statusSql(proposal: string, owner: string, decision: string, now: strin
     WHEN ${decision}.id IS NOT NULL THEN json('Invalid booking change decision')
     WHEN ${owner}.kind='stay' THEN 'pending'
     WHEN julianday(${proposal}.occurred_at)+7<=julianday(${now})
-      OR EXISTS (SELECT 1 FROM bookings b JOIN product_sessions s ON s.id=b.product_session_id AND s.organization_id=b.organization_id AND s.product_id=b.product_id WHERE b.request_id=${owner}.id AND b.organization_id=${owner}.organization_id AND s.ends_at<=${now})
-      OR EXISTS (SELECT 1 FROM reservations v WHERE v.request_id=${owner}.id AND v.organization_id=${owner}.organization_id AND v.ends_at<=${now}) THEN 'expired'
+      OR EXISTS (SELECT 1 FROM ${BOOKED_RECORDS_SQL} br WHERE br.request_id=${owner}.id AND br.organization_id=${owner}.organization_id AND br.kind<>'stay' AND br.ends_at<=${now}) THEN 'expired'
     WHEN ${proposal}.id IS NOT (SELECT latest.id FROM activity_entries latest WHERE latest.request_id=${owner}.id AND latest.event_name='booking_change.requested' ORDER BY latest.sequence DESC LIMIT 1)
       OR NOT ${sourceMatchesSql(proposal, owner)} THEN 'stale'
     ELSE 'pending' END)`

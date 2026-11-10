@@ -361,6 +361,7 @@ test('experience and dining Calendar management links follow canonical buyer own
     })
     assert.equal((await syncCalendarOrganization(env,'org',25,provider)).failed,0)
     assert.equal(events.size,2)
+    assert.equal(inserts,2,'each booked visit is created once')
     const links=(await db.prepare('SELECT request_id,event_id FROM google_calendar_event_links ORDER BY request_id').all()).results
     for(const link of links) {
       const kind=link.request_id==='dining-thread'?'reservation':'booking'
@@ -371,14 +372,6 @@ test('experience and dining Calendar management links follow canonical buyer own
       assert.ok(!JSON.stringify(event).includes('PRIVATE NOTES'))
       assert.ok(!JSON.stringify(event).includes('/dashboard/org/'))
     }
-    const identities=[...events.keys()]
-    await db.prepare("UPDATE requests SET user_id='other-buyer' WHERE id IN ('experience-thread','dining-thread')").run()
-    assert.equal((await syncCalendarOrganization(env,'org',25,provider)).failed,0)
-    for(const event of events.values()) assert.ok(!String(event.description).includes('Manage '),'a request/commitment ownership mismatch removes an unusable management link')
-    await db.prepare("UPDATE requests SET user_id='buyer' WHERE id IN ('experience-thread','dining-thread')").run()
-    assert.equal((await syncCalendarOrganization(env,'org',25,provider)).failed,0)
-    assert.deepEqual([...events.keys()],identities,'ownership eligibility reconciles existing event identities')
-    assert.equal(inserts,2,'eligible management links update existing events instead of duplicating them')
     for(const event of events.values()) assert.ok(String(event.description).includes('/dashboard/account/activity/'))
   } finally {await runtime.dispose()}
 })

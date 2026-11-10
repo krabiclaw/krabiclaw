@@ -7,9 +7,9 @@
       <div v-if="error || threadError" class="py-3" :class="dashboardGutterClass">
         <UAlert color="error" title="Messages could not be loaded" :description="getErrorMessage(error || threadError, 'Team message request failed')" :actions="[{ label: 'Reload', color: 'neutral', variant: 'outline', onClick: () => refresh() }]" />
       </div>
-      <div v-if="thread.stay || thread.record || thread.location" class="pb-2 pt-3" :class="dashboardGutterClass">
-        <span v-if="thread.stay" class="text-sm text-muted">{{ thread.stay.homeName }} · {{ thread.stay.checkInDate }} – {{ thread.stay.checkOutDate }}</span>
-        <span v-else class="text-sm text-muted">{{ thread.record?.title ?? thread.location?.title }}</span>
+      <div v-if="thread.record || thread.location" class="pb-2 pt-3" :class="dashboardGutterClass">
+        <span v-if="thread.record" class="text-sm text-muted">{{ thread.record.title }} · {{ thread.record.startDate === thread.record.endDate ? thread.record.startDate : `${thread.record.startDate} – ${thread.record.endDate}` }}</span>
+        <span v-else class="text-sm text-muted">{{ thread.location?.title }}</span>
         <TaskCard v-if="thread.job" class="mt-3" :task="thread.job" data-testid="team-thread-job" @open="jobOpen = true" />
       </div>
       <div ref="scroller" class="min-h-0 flex-1 overflow-y-auto overscroll-contain">
