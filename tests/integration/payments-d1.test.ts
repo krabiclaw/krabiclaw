@@ -818,7 +818,7 @@ test('an expired payment hold no longer consumes session capacity', {timeout:120
  }finally{await runtime.dispose()}
 })
 
-test('Payments usage reaches its Stripe meters once, a correction as a negative value, and a rejected event keeps Stripe’s reason', {timeout:120000},async(t)=>{
+test('Payments usage reaches its Stripe meters once, a correction as a negative value, and a rejected event keeps Stripe’s reason without holding back the others', {timeout:120000},async(t)=>{
  const {db,runtime}=await boot();try{
   await payable(db,'billable')
   const events=[
@@ -838,47 +838,51 @@ test('Payments usage reaches its Stripe meters once, a correction as a negative 
    const body=new URLSearchParams(String(init?.body))
    sent.push({event_name:body.get('event_name'),customer:body.get('payload[stripe_customer_id]'),value:body.get('payload[value]'),identifier:body.get('identifier'),key:new Headers(init?.headers).get('idempotency-key')})
    if(answer==='unavailable')return Response.json({error:{type:'api_error',message:'Meter events are unavailable at the test boundary'}},{status:500,headers:{'stripe-should-retry':'false'}})
-   if(answer==='invalid')return Response.json({error:{type:'invalid_request_error',message:'No active meter was found for event_name krabiclaw_ad_spend'}},{status:400})
+   if(answer==='invalid'&&body.get('event_name')==='krabiclaw_ad_spend')return Response.json({error:{type:'invalid_request_error',message:'No active meter was found for event_name krabiclaw_ad_spend'}},{status:400})
    return Response.json({object:'billing.meter_event',event_name:body.get('event_name'),identifier:body.get('identifier'),payload:{},timestamp:1,created:1,livemode:false})
   })
   const env={DB:db,STRIPE_SECRET_KEY:'sk_test_meter_boundary'} as CloudflareEnv
-  // Stripe unavailable: the event keeps the reason and stays deliverable.
-  await assert.rejects(()=>deliverPaymentsUsage(db,env,ORG),/unavailable at the test boundary/u)
-  assert.deepEqual(await db.prepare("SELECT delivery_at,error FROM payment_usage_events WHERE id='volume'").first(),{delivery_at:null,error:'Meter events are unavailable at the test boundary'})
-  // Delivered: each to its meter, the correction negative, the repeat of the first under the same identifier and key.
+  // Stripe unavailable: every event is sent, each keeps the reason and stays deliverable.
+  await assert.rejects(()=>deliverPaymentsUsage(db,env,ORG),/Stripe did not take 4 of 4 usage events.*unavailable at the test boundary/u)
+  assert.equal(sent.length,4)
+  assert.equal(await db.prepare("SELECT COUNT(*) n FROM payment_usage_events WHERE delivery_at IS NULL AND error='Meter events are unavailable at the test boundary'").first('n'),4)
+  // Delivered: each to its meter, the correction negative, the repeat of each under the same identifier and key.
   answer='ok'
   assert.deepEqual(await deliverPaymentsUsage(db,env,ORG),{delivered:4})
-  assert.deepEqual(sent.slice(1).map(({identifier,key,...row})=>row),[
+  assert.deepEqual(sent.slice(4).map(({identifier,key,...row})=>row),[
    {event_name:'krabiclaw_captured_volume',customer:'cus_operating',value:'10000'},
    {event_name:'krabiclaw_stripe_cost',customer:'cus_operating',value:'320'},
    {event_name:'krabiclaw_stripe_cost',customer:'cus_operating',value:'-30'},
    {event_name:'krabiclaw_ad_spend',customer:'cus_operating',value:'50000'},
   ])
-  assert.equal(sent[1]!.identifier,sent[0]!.identifier)
-  assert.equal(sent[1]!.key,sent[1]!.identifier)
-  assert.equal(sent[1]!.identifier,`payments:${await tokenHash('capture:billable')}`)
-  assert.equal(new Set(sent.slice(1).map(row=>row.identifier)).size,4)
+  assert.deepEqual(sent.slice(4).map(row=>row.identifier),sent.slice(0,4).map(row=>row.identifier))
+  assert.equal(sent[4]!.key,sent[4]!.identifier)
+  assert.equal(sent[4]!.identifier,`payments:${await tokenHash('capture:billable')}`)
+  assert.equal(new Set(sent.slice(4).map(row=>row.identifier)).size,4)
   assert.equal(await db.prepare('SELECT COUNT(*) n FROM payment_usage_events WHERE delivery_at IS NOT NULL AND error IS NULL').first('n'),4)
   assert.equal(await db.prepare("SELECT COUNT(*) n FROM analytics_events WHERE organization_id='platform' AND payload_json->>'$.event_name'='payments_volume_billed' AND payload_json->>'$.properties.volume_minor'=10000").first('n'),1)
   assert.deepEqual(await deliverPaymentsUsage(db,env,ORG),{delivered:0})
-  assert.equal(sent.length,5)
-  // Stripe refuses an event outright: it keeps Stripe’s reason, and every delivery sends it again and fails until Stripe takes it.
+  assert.equal(sent.length,8)
+  // Stripe refuses one meter outright: that event keeps Stripe’s reason and fails every delivery until Stripe takes it; a later event on another meter is still billed.
   answer='invalid'
-  await db.prepare("INSERT INTO payment_usage_events(id,organization_id,kind,currency,amount,source_id,provider_occurred_at,created_at)VALUES('late',?,'ad_spend','USD',100,'google_ads:1234567890:2026-10-01',?,?)").bind(ORG,NOW,NOW).run()
+  await db.prepare("INSERT INTO payment_usage_events(id,organization_id,kind,currency,amount,source_id,provider_occurred_at,created_at)VALUES('late',?,'ad_spend','USD',100,'google_ads:1234567890:2026-10-01',?,?),('later',?,'stripe_cost','USD',45,'fee:txn_2:revision:1',?,?)").bind(ORG,NOW,NOW,ORG,NOW,new Date(Date.parse(NOW)+60_000).toISOString()).run()
+  await assert.rejects(()=>deliverPaymentsUsage(db,env,ORG),/Stripe did not take 1 of 2 usage events.*No active meter/u)
+  assert.deepEqual(await db.prepare("SELECT id,delivery_at IS NOT NULL AS delivered,error FROM payment_usage_events WHERE id IN ('late','later') ORDER BY id").all().then(result=>result.results),[
+   {id:'late',delivered:0,error:'No active meter was found for event_name krabiclaw_ad_spend'},
+   {id:'later',delivered:1,error:null},
+  ])
   await assert.rejects(()=>deliverPaymentsUsage(db,env,ORG),/No active meter/u)
-  assert.deepEqual(await db.prepare("SELECT delivery_at,error FROM payment_usage_events WHERE id='late'").first(),{delivery_at:null,error:'No active meter was found for event_name krabiclaw_ad_spend'})
-  await assert.rejects(()=>deliverPaymentsUsage(db,env,ORG),/No active meter/u)
-  assert.equal(sent.length,7)
+  assert.equal(sent.length,11)
   answer='ok'
   assert.deepEqual(await deliverPaymentsUsage(db,env,ORG),{delivered:1})
-  assert.equal(sent.length,8)
+  assert.equal(sent.length,12)
   assert.deepEqual(await db.prepare("SELECT delivery_at IS NOT NULL AS delivered,error FROM payment_usage_events WHERE id='late'").first(),{delivered:1,error:null})
   // A business with no Stripe customer has nothing to bill usage to: the delivery fails with that reason on the event.
   await db.prepare('UPDATE organization SET "stripeCustomerId"=NULL WHERE id=?').bind(ORG).run()
   await db.prepare("INSERT INTO payment_usage_events(id,organization_id,kind,currency,amount,source_id,provider_occurred_at,created_at)VALUES('orphaned',?,'ad_spend','USD',100,'google_ads:1234567890:2026-10-02',?,?)").bind(ORG,NOW,NOW).run()
   await assert.rejects(()=>deliverPaymentsUsage(db,env,ORG),/no Stripe customer to bill this usage to/u)
   assert.deepEqual(await db.prepare("SELECT delivery_at,error FROM payment_usage_events WHERE id='orphaned'").first(),{delivery_at:null,error:'The business has no Stripe customer to bill this usage to'})
-  assert.equal(sent.length,8)
+  assert.equal(sent.length,12)
  }finally{await runtime.dispose()}
 })
 
@@ -1761,17 +1765,18 @@ test('managed ads keeps MCP creation paused, preserves updates and billing conse
   deliveryUnavailable = false
   assert.deepEqual((await runDaily()).result, { billed: 1, skipped: 0 })
   assert.equal(googleReads, readsBeforeDelivery, 'queued spend no longer needs the old Google identity')
-  assert.equal(ingests.length, 5)
-  assert.deepEqual(ingests[0], ingests[1], 'failed delivery preserves the meter event identifier')
-  assert.deepEqual(ingests[1], ingests[2], 'concurrent failed deliveries preserve the meter event identifier')
-  assert.deepEqual(ingests[0], ingests[3], 'a failed zero-spend event retries under the same identifier')
-  assert.equal(ingests[3]?.value, '0')
-  assert.equal(ingests[4]?.value, '1250')
+  // Every delivery sends every pending day: the first failure, both concurrent failures, then the one Stripe took.
+  const zeroSpend = ingests.filter(row => row.value === '0'), spend = ingests.filter(row => row.value === '1250')
+  assert.deepEqual([ingests.length, zeroSpend.length, spend.length], [7, 4, 3])
+  assert.deepEqual(ingests[0], zeroSpend.at(-1), 'a failed zero-spend event retries under the same identifier')
+  assert.equal(new Set(zeroSpend.map(row => row.identifier)).size, 1, 'failed and concurrent deliveries preserve the meter event identifier')
+  assert.equal(new Set(spend.map(row => row.identifier)).size, 1, 'failed and concurrent deliveries preserve the meter event identifier')
+  assert.deepEqual(ingests.slice(-2).map(row => row.value), ['0', '1250'])
   const delivered = (await db.prepare("SELECT id,delivery_at FROM payment_usage_events WHERE kind='ad_spend' ORDER BY source_id").all()).results
   assert.deepEqual(delivered.map(row => row.id), captured.map(row => row.id))
   assert.ok(delivered.every(row => row.delivery_at === '2026-10-04T10:00:00.000Z'))
   assert.deepEqual((await runDaily()).result, { billed: 0, skipped: 1 })
-  assert.equal(ingests.length, 5)
+  assert.equal(ingests.length, 7)
  } finally { await runtime.dispose() }
 })
 
