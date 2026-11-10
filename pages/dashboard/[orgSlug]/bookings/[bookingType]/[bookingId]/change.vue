@@ -20,7 +20,7 @@
       </div>
 
       <section class="space-y-6 border-t border-default pt-6">
-        <h2 class="text-lg font-semibold text-highlighted">Reservation details</h2>
+        <h2 class="text-lg font-semibold text-highlighted">{{ b.noun.value.replace(/^./u, letter => letter.toUpperCase()) }} details</h2>
 
         <template v-if="b.bookingType === 'reservation'">
           <UFormField v-if="booking.locations.length > 1" label="Location">
