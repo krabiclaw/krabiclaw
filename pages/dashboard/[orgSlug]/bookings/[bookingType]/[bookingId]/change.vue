@@ -76,7 +76,7 @@
 <script setup lang="ts">
 import { bookingEditorKey } from '~/components/dashboard/BookingDetails.vue'
 import type { DashboardBookingDetails } from '~/server/utils/dashboard-booking-details'
-import { addLocalDays, formatTimestamp, localDateTimeToInstant } from '~/utils/timezone'
+import { formatTimestamp } from '~/utils/timezone'
 import { getErrorMessage } from '~/utils/errors'
 import { getVerticalCopy } from '~/utils/vertical-copy'
 
@@ -114,9 +114,7 @@ const { data: sessionData, error: sessionsError, status: sessionsStatus } = awai
   () => {
     const record = booking.value
     if (!record || b.bookingType === 'reservation' || !record.experienceId || !/^\d{4}-\d{2}-\d{2}$/.test(draft.date)) return Promise.resolve(null)
-    const from = localDateTimeToInstant(draft.date, '00:00', record.timeZone, 'compatible').toISOString()
-    const to = localDateTimeToInstant(addLocalDays(draft.date, 1), '00:00', record.timeZone, 'compatible').toISOString()
-    return api<{ sessions: SessionRow[] }>(`/api/editor/organizations/${record.organizationId}/products/${record.experienceId}/sessions`, { query: { status: 'scheduled', from, to }, validate: isSessionList })
+    return api<{ sessions: SessionRow[] }>(`/api/dashboard/bookings/booking/${encodeURIComponent(String(route.params.bookingId))}/sessions`, { query: { date: draft.date }, validate: isSessionList })
   },
   { watch: [() => draft.date] },
 )
@@ -144,7 +142,8 @@ const dirty = computed(() => {
 })
 const valid = computed(() => Number.isInteger(draft.partySize) && draft.partySize > 0 && (b.bookingType === 'reservation'
   ? Boolean(draft.date && draft.time && draft.locationId)
-  : times.value.some(slot => slot.id === draft.sessionId && !slot.disabled)))
+  // Keeping the booked session needs no list of times: a guests-only change is valid whether or not they load.
+  : draft.sessionId === (booking.value?.sessionId ?? '') ? Boolean(draft.sessionId) : times.value.some(slot => slot.id === draft.sessionId && !slot.disabled)))
 
 const saving = ref(false)
 const error = ref<string | null>(null)

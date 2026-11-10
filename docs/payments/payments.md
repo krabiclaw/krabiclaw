@@ -495,8 +495,10 @@ the 24 hours is non-refundable, and checkout says so. A class or consultation
 can set an advance notice (`product_booking_configs.advance_notice_minutes`,
 the same choices as a table's): booking and the guest's own cancellation close
 that long before the start, no booking is moved into it, and free cancellation
-closes at the longer of 24 hours and the notice. Only the business proposes a
-change, and nothing moves until the guest accepts it. Stays use the home's booked policy instead.
+closes at the longer of 24 hours and the notice. A change the business
+proposes moves nothing until the guest accepts it; a move the business applies
+itself (an eligible table reservation or a booking other than a consultation)
+happens at once and the guest is told. Stays use the home's booked policy instead.
 
 Buyer ownership uses Better Auth identity. Signing in on any device reads the same
 owned purchases. A guest acts on a business's own site as an anonymous Better Auth
