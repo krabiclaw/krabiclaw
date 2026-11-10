@@ -590,18 +590,22 @@ test('Insights reads a linked report period and preserves preset changes in its 
   expect(first.status(), await first.text()).toBe(200)
   expect((await first.json() as { report: { period: typeof range } }).report.period).toMatchObject(range)
   await expect(page.getByText('Traffic trend', { exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: '7d', exact: true })).toHaveAttribute('aria-pressed', 'false')
+  const datePill = page.getByTestId('insights-date-range-pill')
+  await expect(datePill).toBeVisible()
 
   await page.reload()
   await waitForNuxtHydration(page)
   await expect(reportPeriod.nth(0)).toHaveAttribute('datetime', range.startDate)
   await expect(reportPeriod.nth(1)).toHaveAttribute('datetime', range.endDate)
-  const presetReport = page.waitForResponse(isReport)
-  await page.getByRole('button', { name: '7d', exact: true }).click()
-  const preset = await presetReport
+  const updatedRange = { startDate: addLocalDays(today, -6), endDate: today }
+  const rangeReport = page.waitForResponse(isReport)
+  await datePill.click()
+  await page.locator('#start-date-input').fill(updatedRange.startDate)
+  await page.locator('#end-date-input').fill(updatedRange.endDate)
+  await page.getByRole('button', { name: 'Apply', exact: true }).click()
+  const preset = await rangeReport
   expect(preset.status(), await preset.text()).toBe(200)
   const period = (await preset.json() as { report: { period: typeof range } }).report.period
-  expect(period.startDate).toBe(addLocalDays(period.endDate, -6))
+  expect(period.startDate).toBe(updatedRange.startDate)
   await expect(page).toHaveURL(insightsPath(orgSlug, { startDate: period.startDate, endDate: period.endDate }))
-  await expect(page.getByRole('button', { name: '7d', exact: true })).toHaveAttribute('aria-pressed', 'true')
 })
