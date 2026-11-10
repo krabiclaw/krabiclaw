@@ -104,7 +104,6 @@ export default {
     "reservation_heading": "Reservation policies",
     "experience_heading": "Experience policies",
     "consultation_heading": "Consultation policies",
-    "reschedule": "You can reschedule up to {window} before the start time.",
     "deposit_party": "Parties of {count}+ guests require a deposit.",
     "deposit": "A deposit is required before confirmation.",
     "deposit_amount": "Deposit: {amount} per reservation.",

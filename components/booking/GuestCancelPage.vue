@@ -26,7 +26,7 @@
             <p><strong>{{ copy('guests') }}</strong> {{ booking.guests }}</p>
           </div>
           <p v-if="cancellationClosed" class="mt-6 text-sm text-default">{{ t('booking_policy.cancel_closed', { window: noticeDuration(booking.advance_notice_minutes!, locale) }) }}</p>
-          <p v-else-if="booking.paid" class="mt-6 text-sm text-default">{{ t(booking.refund_on_cancel ? 'booking_policy.cancel_refund' : 'booking_policy.cancel_no_refund', { window: noticeDuration(changeNoticeMinutes(booking.advance_notice_minutes), locale) }) }}</p>
+          <p v-else-if="booking.paid" class="mt-6 text-sm text-default">{{ t(booking.refund_on_cancel ? 'booking_policy.cancel_refund' : 'booking_policy.cancel_no_refund', { window: noticeDuration(freeCancellationNoticeMinutes(booking.advance_notice_minutes), locale) }) }}</p>
           <p v-if="cancelError" class="mt-4 text-sm text-error">{{ cancelError }}</p>
           <div class="mt-10 flex flex-col gap-3">
             <TenantButton v-if="!cancellationClosed" color="error" size="lg" block :loading="loading" @click="handleCancel">
@@ -67,7 +67,7 @@ import { $fetch } from 'ofetch'
 import { formatTimestamp } from '~/utils/timezone'
 import { presentationForProduct } from '~/utils/product-presentation'
 import type { ProductKind } from '~/shared/product-details'
-import { changeNoticeMinutes, noticeDuration, outsideNotice } from '~/shared/availability-settings'
+import { freeCancellationNoticeMinutes, noticeDuration, outsideNotice } from '~/shared/availability-settings'
 import { ApiClientError } from '~/utils/api-clients'
 
 /**

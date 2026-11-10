@@ -16,7 +16,7 @@ import { getGuestRequest, requestSummary, stayThreadQueries } from '~/server/dom
 import { isAirbnbSupportMessage, notifyGuestThreadReply, notifyAirbnbInquiry } from '~/server/utils/notifications'
 import { readAirbnbInquiry } from '~/server/integrations/channex/live-feed'
 import type { CloudflareEnv } from '~/server/utils/auth'
-import { planStayMessages } from '~/server/domain/scheduled-guest-messages'
+import { planSourceMessages } from '~/server/domain/scheduled-guest-messages'
 import type { GuestThreadEntryRow } from './types'
 
 type ChannelEnv = ChannexEnv & GuestInboxPublicationEnv & CloudflareEnv & UploadResolvedMediaInput['env']
@@ -209,7 +209,7 @@ export async function mirrorChannexThread(db: DbClient, env: ChannelEnv, threadI
     "SELECT id, version FROM stays WHERE provider = 'channex' AND external_booking_id = ? AND organization_id = ? AND product_id = ? AND request_id = ?",
     [mapping.external_booking_id, mapping.organization_id, mapping.product_id, mapping.request_id])
   if (stay) {
-    await planStayMessages(db, mapping.organization_id, stay.id)
+    await planSourceMessages(db, mapping.organization_id, { kind: 'stay', id: stay.id })
     await publishStayInvalidation(env, { type: 'stay.changed', organizationId: mapping.organization_id, locationId: home.location_id, productId: mapping.product_id, stayId: stay.id }, { version: stay.version })
   }
   return { status: 'mirrored', request_id: mapping.request_id, messages: messages.length }

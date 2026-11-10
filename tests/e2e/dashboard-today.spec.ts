@@ -140,7 +140,7 @@ test('an assigned member receives no owner work or unassigned restaurant work', 
     await loginAs(memberContext.request, baseURL!, actor!.userId)
     const memberFeed = await memberContext.request.get('/api/dashboard/today', { params: { org: 'ember-slice-demo' } })
     expect(memberFeed.status(), await memberFeed.text()).toBe(200)
-    expect(await memberFeed.json()).toEqual({ tasks: [], opportunities: [], opportunityIssues: [], assignees: [], resolvedAt: expect.any(String) })
+    expect(await memberFeed.json()).toEqual({ reservations: { title: null, cards: [] }, tasks: [], opportunities: [], opportunityIssues: [], assignees: [], resolvedAt: expect.any(String) })
     // Opportunities are the owner's decisions; the member cannot read or take one.
     const memberOpportunities = await memberContext.request.get(`/api/organizations/${seededTenant('restaurant').organizationId}/opportunities`)
     expect(memberOpportunities.status(), await memberOpportunities.text()).toBe(403)

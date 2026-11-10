@@ -1,5 +1,5 @@
 import { HTTPError } from 'nitro'
-import { changeNoticeMinutes, outsideNotice } from '~/shared/availability-settings'
+import { outsideNotice } from '~/shared/availability-settings'
 import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '../db/index.ts'
 import { generateReservationTimes, parseOpeningHours, parseSpecialHours, locationAllowsBooking } from '~/shared/reservation-hours'
 import { RESERVATION_CAPACITY_CONSUMING_SQL } from '~/shared/bookings'
@@ -346,12 +346,6 @@ export class ReservationUnavailableError extends Error {
     super(message)
     this.name = 'ReservationUnavailableError'
   }
-}
-
-/** Changes close when free cancellation does, unless the business approves an exception. A reservation's notice is null. */
-export function visitReschedulePolicyPredicate(input: { startsAt: string; advanceNoticeMinutes: number | null; overridePolicy?: boolean }): BatchQuery {
-  if (input.overridePolicy) return { query: '1', params: [] }
-  return { query: `julianday('now') <= julianday(?) - ${changeNoticeMinutes(input.advanceNoticeMinutes)} / 1440.0`, params: [input.startsAt] }
 }
 
 /** The same location, hours and capacity boundary for a seat claim and a Checkout hold. */

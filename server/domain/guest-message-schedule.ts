@@ -1,16 +1,26 @@
 import { HTTPError } from 'nitro'
-import { addLocalDays, isValidCalendarDate, isValidTimezone, localDateAt, localDateTimeToInstant, MINUTE_TIME_PATTERN } from '~/utils/timezone'
+import { addLocalDays, isValidCalendarDate, isValidInstant, isValidTimezone, localDateAt, localDateTimeToInstant, MINUTE_TIME_PATTERN } from '~/utils/timezone'
 
-export type GuestMessageSchedule = {
+/**
+ * When an automatic message is sent, and for which offerings. check_in and
+ * check_out are the start and end of whatever was booked: a stay's first and
+ * last day, a consultation's, class's or table's start and end. offsetDays and
+ * localTime name a day and a clock time there; offsetHours counts from the
+ * instant itself. productIds names the booked offerings: a home, experience or
+ * consultation by its product, a table reservation by its location
+ * (BOOKED_RECORDS_SQL offering_id).
+ */
+export type GuestMessageSchedule = ({
   trigger: 'booking_received'
   delayMinutes: 5
-  productIds: string[]
 } | {
   trigger: 'check_in' | 'check_out'
   offsetDays: number
   localTime: string
-  productIds: string[]
-}
+} | {
+  trigger: 'check_in' | 'check_out'
+  offsetHours: number
+}) & { productIds: string[] }
 
 export function messagingError(statusCode: number, code: string, message: string, field: string): never {
   throw new HTTPError({ statusCode, message, data: { code, field } })
@@ -30,34 +40,53 @@ export function messageText(value: unknown, field: string, maximum: number): str
 export function parseGuestMessageSchedule(value: unknown, stored = false): GuestMessageSchedule | null {
   const invalid = (message: string, field: string): never => messagingError(stored ? 500 : 422, stored ? 'INVALID_MESSAGE_TEMPLATE' : 'INVALID_MESSAGING_FIELD', message, field)
   if (value === null && stored) return null
-  if (value === null || value === undefined) messagingError(422, 'MESSAGE_SCHEDULE_REQUIRED', 'An automatic message needs a schedule: when it is sent, and to which homes', 'schedule')
+  if (value === null || value === undefined) messagingError(422, 'MESSAGE_SCHEDULE_REQUIRED', 'An automatic message needs a schedule: when it is sent, and for which offerings', 'schedule')
   if (!value || typeof value !== 'object' || Array.isArray(value)) invalid('Provide a schedule object', 'schedule')
   const schedule = value as Record<string, unknown>
   if (schedule.trigger !== 'booking_received' && schedule.trigger !== 'check_in' && schedule.trigger !== 'check_out') invalid('Choose booking_received, check_in, or check_out', 'schedule.trigger')
-  if (!Array.isArray(schedule.productIds) || schedule.productIds.length < 1 || schedule.productIds.length > 100
-    || schedule.productIds.some(id => typeof id !== 'string' || !id.trim() || id !== id.trim())) {
-    invalid('Select 1 to 100 canonical home product IDs', 'schedule.productIds')
-  }
-  const productIds = schedule.productIds as string[]
-  if (new Set(productIds).size !== productIds.length) invalid('Select each home only once', 'schedule.productIds')
+  const ids = schedule.productIds as unknown[]
+  if (!Array.isArray(ids) || ids.length < 1 || ids.length > 100 || ids.some(id => typeof id !== 'string' || !id.trim() || id !== id.trim())) invalid('Select 1 to 100 offerings', 'schedule.productIds')
+  if (new Set(ids).size !== ids.length) invalid('Select each offering only once', 'schedule.productIds')
+  const scope = { productIds: ids as string[] }
+  const only = (keys: string[]) => { if (Object.keys(schedule).some(key => ![...keys, 'trigger', 'productIds'].includes(key))) invalid('The schedule contains unsupported fields', 'schedule') }
   if (schedule.trigger === 'booking_received') {
-    if (schedule.delayMinutes !== 5 || Object.keys(schedule).some(key => !['trigger', 'delayMinutes', 'productIds'].includes(key))) {
-      invalid('New-reservation messages send 5 minutes after KrabiClaw receives an eligible new reservation', 'schedule.delayMinutes')
-    }
-    return { trigger: 'booking_received', delayMinutes: 5, productIds }
+    if (schedule.delayMinutes !== 5) invalid('New-booking messages send 5 minutes after KrabiClaw receives an eligible new booking', 'schedule.delayMinutes')
+    only(['delayMinutes'])
+    return { trigger: 'booking_received', delayMinutes: 5, ...scope }
   }
-  if (typeof schedule.offsetDays !== 'number' || !Number.isInteger(schedule.offsetDays) || schedule.offsetDays < -7 || schedule.offsetDays > 7) invalid('Choose from 7 days before through 7 days after the stay date', 'schedule.offsetDays')
+  const trigger = schedule.trigger as 'check_in' | 'check_out'
+  if ('offsetHours' in schedule) {
+    if (typeof schedule.offsetHours !== 'number' || !Number.isInteger(schedule.offsetHours) || schedule.offsetHours < -72 || schedule.offsetHours > 72) invalid('Choose from 72 hours before through 72 hours after', 'schedule.offsetHours')
+    only(['offsetHours'])
+    return { trigger, offsetHours: schedule.offsetHours as number, ...scope }
+  }
+  if (typeof schedule.offsetDays !== 'number' || !Number.isInteger(schedule.offsetDays) || schedule.offsetDays < -7 || schedule.offsetDays > 7) invalid('Choose from 7 days before through 7 days after', 'schedule.offsetDays')
   if (typeof schedule.localTime !== 'string' || !MINUTE_TIME_PATTERN.test(schedule.localTime)) invalid('Provide a local 24-hour HH:mm time', 'schedule.localTime')
-  if (Object.keys(schedule).some(key => !['trigger', 'offsetDays', 'localTime', 'productIds'].includes(key))) invalid('The schedule contains unsupported fields', 'schedule')
-  return { trigger: schedule.trigger as 'check_in' | 'check_out', offsetDays: schedule.offsetDays as number, localTime: schedule.localTime as string, productIds }
+  only(['offsetDays', 'localTime'])
+  return { trigger, offsetDays: schedule.offsetDays as number, localTime: schedule.localTime as string, ...scope }
 }
 
+/**
+ * The start or end a schedule counts from: its local calendar day, and its
+ * instant when the booking has one (a stay's needs its home's check-in or
+ * checkout time).
+ */
+export interface ScheduleAnchor { date: string; instant: string | null }
+
 /** The installed date library owns timezone conversion and DST rejection. */
-export function guestMessageDueAt(schedule: Exclude<GuestMessageSchedule, { trigger: 'booking_received' }>, stay: { check_in_date: string; check_out_date: string }, timezone: string): string {
-  const source = schedule.trigger === 'check_in' ? stay.check_in_date : stay.check_out_date
-  if (!isValidCalendarDate(source)) messagingError(500, 'INVALID_STAY_DATE', 'The stay has an invalid calendar date', `stay.${schedule.trigger}_date`)
-  if (!isValidTimezone(timezone) || /^[+-]/.test(timezone)) messagingError(500, 'INVALID_HOME_TIMEZONE', 'Scheduled messages require the home’s IANA timezone', 'home.timezone')
-  const day = addLocalDays(source, schedule.offsetDays)
+export function guestMessageDueAt(schedule: Exclude<GuestMessageSchedule, { trigger: 'booking_received' }>, anchors: { check_in: ScheduleAnchor; check_out: ScheduleAnchor }, timezone: string): string {
+  const anchor = anchors[schedule.trigger]
+  if (!isValidTimezone(timezone) || /^[+-]/.test(timezone)) messagingError(500, 'INVALID_HOME_TIMEZONE', 'Scheduled messages require the booking’s IANA timezone', 'timezone')
+  if ('offsetHours' in schedule) {
+    if (anchor.instant === null) {
+      messagingError(422, schedule.trigger === 'check_in' ? 'CHECK_IN_TIME_REQUIRED' : 'CHECK_OUT_TIME_REQUIRED',
+        `Set the home’s ${schedule.trigger === 'check_in' ? 'check-in' : 'checkout'} time to send a message hours ${schedule.offsetHours < 0 ? 'before' : 'after'} it`, schedule.trigger === 'check_in' ? 'home.check_in_time' : 'home.check_out_time')
+    }
+    if (!isValidInstant(anchor.instant)) messagingError(500, 'INVALID_BOOKING_TIME', 'The booking has an invalid start or end time', schedule.trigger)
+    return new Date(Date.parse(anchor.instant) + schedule.offsetHours * 3_600_000).toISOString()
+  }
+  if (!isValidCalendarDate(anchor.date)) messagingError(500, 'INVALID_STAY_DATE', 'The booking has an invalid calendar date', schedule.trigger)
+  const day = addLocalDays(anchor.date, schedule.offsetDays)
   try {
     return localDateTimeToInstant(day, schedule.localTime, timezone, 'reject').toISOString()
   } catch (error) {

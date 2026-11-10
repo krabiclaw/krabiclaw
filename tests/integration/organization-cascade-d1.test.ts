@@ -56,9 +56,9 @@ function lodgingGraph(org: string): string[] {
     `INSERT INTO channex_connections (organization_id,status,group_id) VALUES ('${org}','not_connected','${org}-group')`,
     `INSERT INTO product_channel_mappings (organization_id,product_id,provider,listing_id,channel_id,import_stage) VALUES ('${org}','${home}','channex','${org}-listing','${org}-channel','property')`,
     `INSERT INTO message_templates (id,organization_id,title,body,version,created_at,updated_at) VALUES ('${org}-template','${org}','Welcome','Hello',1,'${NOW}','${NOW}')`,
-    `INSERT INTO scheduled_guest_messages (id,organization_id,product_id,stay_id,template_id,template_title,template_version,stay_version,body,due_at,timezone,status,created_at,updated_at)
-      VALUES ('${org}-scheduled','${org}','${home}','${stay}','${org}-template','Welcome',1,1,'Hello','2099-01-05T08:00:00.000Z','Asia/Bangkok','pending','${NOW}','${NOW}')`,
-    `INSERT INTO team_threads (id,organization_id,stay_id,participants_key,last_message_at) VALUES ('${thread}','${org}','${stay}','${member}','${NOW}')`,
+    `INSERT INTO scheduled_guest_messages (id,organization_id,product_id,subject_type,subject_id,template_id,template_title,template_version,body,due_at,timezone,status,created_at,updated_at)
+      VALUES ('${org}-scheduled','${org}','${home}','stay','${stay}','${org}-template','Welcome',1,'Hello','2099-01-05T08:00:00.000Z','Asia/Bangkok','pending','${NOW}','${NOW}')`,
+    `INSERT INTO team_threads (id,organization_id,subject_type,subject_id,participants_key,last_message_at) VALUES ('${thread}','${org}','stay','${stay}','${member}','${NOW}')`,
     `INSERT INTO team_thread_members (thread_id,organization_id,member_id) VALUES ('${thread}','${org}','${member}')`,
     `INSERT INTO team_messages (id,organization_id,thread_id,sender_user_id,body,idempotency_key,request_hash) VALUES ('${org}-team-message','${org}','${thread}','${org}-guest','Cleaned','k','h')`,
   ]
@@ -114,9 +114,8 @@ test('guest records refuse an ordinary parent delete and cascade away with their
       // generated session name.
       ['product', "DELETE FROM products WHERE id = 'doomed-product'"],
       ['availability rule', "DELETE FROM product_availability_rules WHERE id = 'doomed-rule'"],
-      // A stay pins its home, and a team conversation and a scheduled message pin their stay.
+      // A stay pins its home. Conversations, tasks and scheduled messages name their stay by subject_type/subject_id and go with the organization.
       ['stay home', "DELETE FROM product_stay_configs WHERE product_id = 'doomed-home'"],
-      ['stay', "DELETE FROM stays WHERE id = 'doomed-stay'"],
     ] as const) {
       await assert.rejects(db.prepare(statement).run(), /FOREIGN KEY constraint failed/, `deleting the ${parent} alone must be refused`)
     }

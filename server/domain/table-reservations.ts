@@ -1,4 +1,5 @@
 import { getGuestRequest, getThreadOperationalRecord, requestInsertQueries, threadPayloadForGuest, type BookingOperator } from '~/server/domain/requests'
+import { planSourceMessages } from '~/server/domain/scheduled-guest-messages'
 import { openingSentence } from '~/server/domain/guest-threads/opening'
 import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
 import { execute, queryFirst, type DbClient } from '~/server/db'
@@ -58,6 +59,8 @@ export async function notifyTableReservationCreated(env: CloudflareEnv, db: DbCl
   ])
   if (!location) throw new Error('Reservation delivery location is missing')
   const local = localNow(record.timezone, new Date(record.starts_at))
+  // Its automatic messages are planned before the new conversation is announced, so it opens with them.
+  await planSourceMessages(db, organizationId, { kind: 'reservation', id: record.id })
   const outcomes = await Promise.allSettled([
     publishGuestInboxThreadEvent(env, db, { threadId: requestId, type: 'thread.created' }),
     notifyReservationCreated(env, db, { organizationId, organizationName: organization.name, locationId: record.location_id, locationName: location.title,

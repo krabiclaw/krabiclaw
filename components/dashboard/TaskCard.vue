@@ -1,5 +1,5 @@
 <template>
-  <article class="tc" :class="[`is-${face}`, { 'is-closed': task && task.status !== 'open', 'is-reservation': reservation }]" :data-testid="opportunity ? 'today-opportunity' : 'today-task'" :data-task-id="task?.id" :data-task-kind="task?.kind" :data-opportunity-id="opportunity?.id">
+  <article class="tc" :class="[`is-${face}`, { 'is-closed': task && task.status !== 'open', 'is-reservation': reservation }]" :data-testid="booking ? 'today-reservation' : opportunity ? 'today-opportunity' : 'today-task'" :data-task-id="task?.id" :data-task-kind="task?.kind" :data-opportunity-id="opportunity?.id" :data-reservation-kind="booking?.kind">
     <NuxtLink v-if="destination" :to="destination" class="tc-target" :aria-label="title" />
     <button v-else type="button" class="tc-target" :aria-label="title" @click="emit('open')" />
     <button v-if="opportunity || task?.dismiss?.card" type="button" class="tc-dismiss" :aria-label="opportunity ? 'Dismiss suggestion' : `${task!.dismiss!.label} task`" :disabled="busy" :data-testid="opportunity ? 'today-opportunity-dismiss' : 'today-task-dismiss'" @click="opportunity ? emit('dismiss') : emit('skip')">
@@ -9,9 +9,20 @@
       <span class="block text-sm font-semibold">{{ reservation.dateLabel }}</span>
       <UAvatar :src="guestAvatarSrc" alt="" icon="i-lucide-user" class="mx-auto mt-7 size-24 sm:size-28" :ui="{ icon: 'size-12' }" />
       <span class="mt-6 block text-2xl font-semibold leading-tight tracking-tight sm:text-[28px]">{{ reservation.groupHeadline }}</span>
-      <span class="mt-3 block text-base font-medium">{{ reservation.homeName }}</span>
-      <span class="mt-2 block text-sm text-muted">{{ reservation.statusLabel }}</span>
+      <span v-if="reservation.homeName" class="mt-3 block text-base font-medium">{{ reservation.homeName }}</span>
+      <span v-if="reservation.statusLabel" class="mt-2 block text-sm text-muted">{{ reservation.statusLabel }}</span>
+      <span v-if="reservation.noteLabel" class="mt-2 inline-flex items-center gap-1.5 text-sm text-muted"><UIcon name="i-lucide-square-pen" class="size-4" />{{ reservation.noteLabel }}</span>
       <span v-if="reservation.conversation?.description" class="mt-5 block text-sm text-muted">{{ reservation.conversation.description }}</span>
+    </div>
+    <!-- The suggestion for this booking: it opens the conversation with its message written for the owner to review and send. -->
+    <div v-if="booking?.suggestion" class="tc-suggest">
+      <NuxtLink :to="{ path: booking.suggestion.path, state: { draft: booking.suggestion.message } }" class="tc-suggest-link" data-testid="today-reservation-suggestion" :data-opportunity-id="booking.suggestion.id">
+        <span class="min-w-0 flex-1"><span class="block font-semibold">{{ booking.suggestion.title }}</span><span class="block text-sm text-muted">{{ booking.suggestion.detail }}</span></span>
+        <UIcon :name="booking.suggestion.icon" class="size-6 shrink-0" />
+      </NuxtLink>
+      <button type="button" class="tc-suggest-dismiss" aria-label="Dismiss suggestion" :disabled="busy" data-testid="today-reservation-suggestion-dismiss" @click="emit('dismiss')">
+        <UIcon name="i-lucide-x" class="size-4" />
+      </button>
     </div>
     <div v-else-if="task && face === 'photo' && mediaSrc" type="button" class="tc-media">
       <img :src="mediaSrc" alt="" class="size-full object-cover">
@@ -45,16 +56,21 @@
 import { NuxtLink } from '#components'
 import type { TaskView } from '~/server/domain/tasks'
 import type { OpportunityView } from '~/server/domain/opportunities'
+import type { TodayReservation } from '~/shared/dashboard-today'
 import { cfImageVariant } from '~/utils/cf-image'
 
-const props = defineProps<{ task?: TaskView; opportunity?: OpportunityView; busy?: boolean }>()
+/** A task, an opportunity, or a booking with the suggestion at its foot. */
+const props = defineProps<{ task?: TaskView; opportunity?: OpportunityView; booking?: TodayReservation; busy?: boolean }>()
 const emit = defineEmits<{ open: []; skip: []; dismiss: [] }>()
 
 const face = computed(() => props.task?.face ?? 'compact')
-const destination = computed(() => props.opportunity?.path ?? (props.task?.action?.type === 'open' ? props.task.action.path : null))
-const reservation = computed(() => props.task?.reservation)
+const destination = computed(() => props.booking?.to ?? props.opportunity?.path ?? (props.task?.action?.type === 'open' ? props.task.action.path : null))
+// A booking and a guest's reply about a stay draw the same reservation face.
+const reservation = computed(() => props.booking
+  ? { dateLabel: props.booking.dateLabel, groupHeadline: props.booking.headline, homeName: props.booking.resourceName, statusLabel: props.booking.statusLabel, guestImageUrl: props.booking.guestImageUrl, noteLabel: props.booking.noteLabel, conversation: null }
+  : props.task?.reservation ? { ...props.task.reservation, noteLabel: null } : null)
 const statusLine = computed(() => props.task?.statusLine ?? (props.opportunity ? `Suggested · ${props.opportunity.statusLine}` : null))
-const title = computed(() => props.task?.title ?? props.opportunity!.title)
+const title = computed(() => props.booking?.headline ?? props.task?.title ?? props.opportunity!.title)
 const detail = computed(() => props.task?.detail ?? props.opportunity?.detail ?? null)
 const mediaSrc = computed(() => cfImageVariant(props.task?.imageUrl, { width: 900, height: 600, fit: 'cover', format: 'auto' }) || props.task?.imageUrl || undefined)
 const avatarSrc = computed(() => cfImageVariant(props.task?.imageUrl, { width: 96, height: 96, fit: 'cover', format: 'auto' }) || props.task?.imageUrl || undefined)
@@ -92,4 +108,8 @@ const avatarClass = computed(() => props.task?.avatar ? '' : 'sq')
 .tc-who { display: flex; flex: 1; min-width: 0; align-items: center; gap: 8px; font-weight: 500; text-align: left; }
 .tc-who i { flex: none; width: 28px; height: 28px; border-radius: 50%; background: var(--ui-bg-accented); font-size: 12px; line-height: 28px; font-style: normal; font-weight: 600; text-align: center; }
 .tc button:disabled { opacity: .6; }
+.tc-suggest { position: relative; z-index: 2; display: flex; align-items: center; border-top: 1px solid var(--ui-border); background: var(--ui-bg-elevated); }
+.tc-suggest-link { display: flex; flex: 1; min-width: 0; align-items: center; gap: 16px; padding: 18px 8px 18px 24px; text-align: left; }
+.tc-suggest-link:focus-visible { outline: 2px solid var(--ui-text-highlighted); outline-offset: -3px; }
+.tc-suggest-dismiss { display: grid; flex: none; place-items: center; width: 40px; height: 40px; margin-right: 12px; border-radius: 50%; }
 </style>

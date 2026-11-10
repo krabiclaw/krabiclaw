@@ -9,21 +9,21 @@ const DAY = 24 * HOUR
 /**
  * The one cancellation rule for every reservation, class and consultation,
  * Airbnb's 1-day policy (airbnb.com/help/article/1565): a full refund until 24
- * hours before the start. Changes close at the same moment.
+ * hours before the start.
  */
 export const FREE_CANCELLATION_MINUTES = DAY
 
 /**
- * How long before the start a class's or consultation's changes and free
- * cancellation close: its advance notice, never less than the 1-day rule. A
- * table reservation passes null: its notice governs booking only.
+ * How long before the start a class's or consultation's free cancellation
+ * closes: its advance notice, never less than the 1-day rule. A table
+ * reservation passes null: its notice governs booking only.
  */
-export function changeNoticeMinutes(advanceNoticeMinutes: number | null): number {
+export function freeCancellationNoticeMinutes(advanceNoticeMinutes: number | null): number {
   return Math.max(FREE_CANCELLATION_MINUTES, advanceNoticeMinutes ?? 0)
 }
 
 export function freeCancellationUntil(startsAt: string, advanceNoticeMinutes: number | null): string {
-  return new Date(Date.parse(startsAt) - changeNoticeMinutes(advanceNoticeMinutes) * 60_000).toISOString()
+  return new Date(Date.parse(startsAt) - freeCancellationNoticeMinutes(advanceNoticeMinutes) * 60_000).toISOString()
 }
 
 /** A start inside the advance notice is not offered, and a guest's own cancellation closes there too. */

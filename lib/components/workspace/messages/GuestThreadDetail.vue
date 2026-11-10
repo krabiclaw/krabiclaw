@@ -159,6 +159,14 @@ const { data, thread, pending, error, refresh, clear } = await useGuestThread(co
 const threadPath = computed(() => props.personalScope ? `/api/account/messages/${encodeURIComponent(props.threadId)}` : `/api/dashboard/organizations/${dashboard.organizationId.value}/guest-threads/${encodeURIComponent(props.threadId)}`)
 
 const draft = ref('')
+// A suggestion on Today opens the conversation with its message written in the navigation's state; the owner reviews and sends it.
+watch(() => props.threadId, () => {
+  if (!import.meta.client || props.personalScope) return
+  const { draft: written, ...state } = (window.history.state ?? {}) as Record<string, unknown>
+  if (typeof written !== 'string') return
+  if (!draft.value.trim()) draft.value = written
+  window.history.replaceState(state, '')
+}, { immediate: true })
 const requestingChange = computed(() => props.personalScope && route.query.intent === 'booking-change' && thread.value?.recordId && thread.value.composer.channel === 'email')
 const changeRequestSent = ref(false)
 watch(() => `${props.threadId}:${String(route.query.intent)}`, () => { changeRequestSent.value = false })

@@ -146,7 +146,6 @@
   "booking_policy.experience_heading": "Chính sách trải nghiệm",
   "booking_policy.consultation_heading": "Chính sách đặt lịch tư vấn",
   "booking_policy.minimum_guest_age": "Độ tuổi tối thiểu của khách là {age}.",
-  "booking_policy.reschedule": "Bạn có thể đổi lịch trước giờ bắt đầu ít nhất {window}.",
   "booking_policy.reservation_heading": "Chính sách đặt bàn",
   "dates.date_unavailable": "Chưa có ngày",
   "dates.time_unavailable": "Chưa có giờ",

@@ -171,7 +171,7 @@ const bookingPolicyFields = {
   online_payment_required: { type: 'boolean', default: false, description: 'True requires online payment when booking; false is the default and does not collect online.' },
   held_online: { type: 'boolean', description: 'True holds the offering online: its times are its provider\'s working hours, in the provider\'s timezone. Requires scheduling_mode provider with an assigned member or team.' },
 } as const
-const advanceNoticeField = { advance_notice_minutes: { type: ['integer', 'null'], minimum: 0, description: 'Minimum notice in minutes (1440 is 1 day, 2880 is 2 days): clients cannot book, reschedule or cancel online a session that starts sooner. Changes and free cancellation close at least 24 hours before the start either way. Null means no notice.' } } as const
+const advanceNoticeField = { advance_notice_minutes: { type: ['integer', 'null'], minimum: 0, description: 'Minimum notice in minutes (1440 is 1 day, 2880 is 2 days): clients cannot book or cancel online a session that starts sooner, and no booking is moved into one. Free cancellation closes at least 24 hours before the start either way. Null means no notice.' } } as const
 // Setup states online-ness through location_id null, never a second flag beside it.
 const { held_online: _heldOnline, ...onlineSetupPolicyFields } = bookingPolicyFields
 const questionsRead = { ...formQuestionsJsonSchema('read'), description: 'The tenant\'s own questions asked beside the required booking fields; create_product_booking answers them by ID.' }

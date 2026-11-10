@@ -2051,7 +2051,7 @@ test('migrated unpaid stays occupy nights without a fresh reservation message an
     await assert.rejects(recordStayPayment(db, env, manager, imported.id, { amount_minor: 1000, method: 'cash', paid_on: '2027-06-01', idempotency_key: 'should-not-collect' }), code('STAY_NOT_EDITABLE'))
     assert.equal(await db.prepare('SELECT booking_received_at FROM stays WHERE id = ?').bind(imported.id).first('booking_received_at'), null)
     assert.deepEqual((await readStayCalendar(db, manager, { productId: cabin.id, from: '2027-06-01', to: '2027-06-03' })).nights.map(night => [night.available, night.stay_id]), [[false, imported.id], [false, imported.id]])
-    assert.deepEqual(await db.prepare('SELECT status, due_at FROM scheduled_guest_messages WHERE stay_id = ? AND template_id = ?').bind(imported.id, template.id).first(), { status: 'skipped', due_at: null })
+    assert.deepEqual(await db.prepare("SELECT status, due_at FROM scheduled_guest_messages WHERE subject_type = 'stay' AND subject_id = ? AND template_id = ?").bind(imported.id, template.id).first(), { status: 'skipped', due_at: null })
     assert.equal((await createStay(db, env, manager, input, { imported: source })).id, imported.id)
     const audit = await db.prepare("SELECT payload_json FROM activity_entries WHERE event_name = 'stay.created' AND json_extract(payload_json, '$.entityId') = ?").bind(imported.id).first<string>('payload_json')
     assert.deepEqual(JSON.parse(audit!).metadata.imported, source)

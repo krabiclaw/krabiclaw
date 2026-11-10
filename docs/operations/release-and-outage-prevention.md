@@ -139,8 +139,14 @@ on each deployed database.
 
 SQLite cannot alter a CHECK constraint in place. When a constraint on a table
 referenced by other tables must change, Drizzle generates a table rebuild whose
-`DROP TABLE` can cascade-delete D1 child rows. That case alone uses a replacement
-database. Name the constraint and affected references in the pull request. A
+`DROP TABLE` can cascade-delete D1 child rows. That case uses a replacement
+database, unless every table that references the parent is itself rebuilt and
+dropped first, so the parent is unreferenced when it is dropped and no
+foreign-key action can run; `yarn lint:migrations` replays the chain and refuses
+any other order. `0003_messages_by_booked_record.sql` is that case: it
+holds `scheduled_guest_messages` rows in a plain table, drops it, rebuilds
+`message_templates`, then recreates the child and restores its rows. Name the
+constraint and affected references in the pull request. A
 replacement gets a new generated baseline and a fresh D1 migration ledger; move
 the prior SQL and metadata intact to `migrations-history/<version>/`. Never edit
 an already deployed migration and ask D1 to replay it under the same filename.

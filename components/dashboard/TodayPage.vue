@@ -33,6 +33,15 @@
       <!-- The business's stored tasks and opportunities. -->
       <template v-else-if="business">
         <UAlert v-if="business.opportunityIssues.length" class="mb-6" color="warning" variant="soft" title="Some performance data could not be loaded" :description="business.opportunityIssues.join(' ')" />
+        <!-- Airbnb's reservations: one card per booking, its suggestion at the foot. -->
+        <template v-if="business.reservations.cards.length">
+          <h2 class="wtitle" data-testid="today-reservations-title">{{ business.reservations.title }}</h2>
+          <ul class="wgrid" role="list" data-testid="today-reservations">
+            <li v-for="card in business.reservations.cards" :key="card.id">
+              <TaskCard :booking="card" :busy="card.suggestion ? opportunityBusy[card.suggestion.id] !== undefined : false" @dismiss="card.suggestion && dismiss(card.suggestion)" />
+            </li>
+          </ul>
+        </template>
         <!-- Open work, then Opportunities full width, then Done (or Upcoming's days). -->
         <template v-for="part in parts" :key="part.key">
           <template v-if="part.section">
@@ -51,7 +60,7 @@
             </ul>
           </template>
         </template>
-        <p v-if="!business.tasks.length && !business.opportunities.length && !pending" class="text-sm text-muted" data-testid="today-empty">{{ range === 'today' ? 'Nothing to do today' : 'Nothing planned yet' }}</p>
+        <p v-if="!business.tasks.length && !business.opportunities.length && !business.reservations.cards.length && !pending" class="text-sm text-muted" data-testid="today-empty">{{ range === 'today' ? 'Nothing to do today' : 'Nothing planned yet' }}</p>
 
         <details v-if="canManage && range === 'today'" class="mt-8" role="group" aria-label="Your priority" data-testid="today-priorities">
           <summary class="cursor-pointer text-sm font-medium">Business goals</summary>
@@ -97,7 +106,7 @@ import TaskCard from './TaskCard.vue'
 import TodayTaskSheet from './TodayTaskSheet.vue'
 import TodayTaskCreate from './TodayTaskCreate.vue'
 import { getErrorMessage } from '~/utils/errors'
-import { agendaToTodayCard, todayFeedSchema, type TodayCard, type TodayFeedPayload } from '~/shared/dashboard-today'
+import { agendaToTodayCard, todayFeedSchema, type TodayCard, type TodayFeedPayload, type TodayReservation } from '~/shared/dashboard-today'
 import type { AgendaPayload } from '~/server/utils/dashboard-agenda'
 import type { TaskKind, TaskPerson, TaskSection, TaskView } from '~/server/domain/tasks'
 import type { OpportunityView } from '~/server/domain/opportunities'
@@ -110,7 +119,7 @@ useSeoMeta({ title: 'Today | KrabiClaw', robots: 'noindex, nofollow' })
 
 const props = defineProps<{ personalScope?: boolean }>()
 type Range = 'today' | 'upcoming'
-interface BusinessToday { tasks: TaskSection[]; opportunities: OpportunityView[]; opportunityIssues: string[]; assignees: TaskPerson[]; resolvedAt: string }
+interface BusinessToday { reservations: { title: string | null; cards: TodayReservation[] }; tasks: TaskSection[]; opportunities: OpportunityView[]; opportunityIssues: string[]; assignees: TaskPerson[]; resolvedAt: string }
 const ranges: Array<{ label: string; value: Range }> = [{ label: 'Today', value: 'today' }, { label: 'Upcoming', value: 'upcoming' }]
 
 const route = useRoute()
@@ -167,7 +176,7 @@ function onRangeKeydown(event: KeyboardEvent) {
   ;(event.currentTarget as HTMLElement).parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[index]?.focus()
 }
 
-const isBusinessToday = (value: unknown): value is BusinessToday => isRecord(value) && Array.isArray(value.tasks) && Array.isArray(value.opportunities) && Array.isArray(value.assignees) && typeof value.resolvedAt === 'string'
+const isBusinessToday = (value: unknown): value is BusinessToday => isRecord(value) && isRecord(value.reservations) && Array.isArray(value.reservations.cards) && Array.isArray(value.tasks) && Array.isArray(value.opportunities) && Array.isArray(value.assignees) && typeof value.resolvedAt === 'string'
 const isFeed = (value: unknown): value is TodayFeedPayload => todayFeedSchema.safeParse(value).success
 const isAgenda = (value: unknown): value is AgendaPayload => isRecord(value) && Array.isArray(value.items)
 
@@ -318,6 +327,7 @@ onBeforeUnmount(() => {
 .tog button { min-height: 46px; padding: 0 clamp(12px, 5vw, 24px); border-radius: 999px; background: var(--ui-bg-elevated); color: var(--ui-text-highlighted); font-size: 15px; font-weight: 600; }
 .tog button[aria-selected="true"] { background: var(--ui-bg-inverted); color: var(--ui-text-inverted); box-shadow: 0 3px 8px rgb(0 0 0 / 14%); }
 .tog button:focus-visible { outline: 2px solid var(--ui-text-highlighted); outline-offset: 2px; }
+.wtitle { margin: 8px 0 24px; text-align: center; font-size: 28px; line-height: 34px; font-weight: 700; letter-spacing: -.02em; color: var(--ui-text-highlighted); text-wrap: balance; }
 .wh2 { margin: 28px 2px 16px; font-size: 22px; line-height: 28px; font-weight: 700; letter-spacing: -.02em; color: var(--ui-text-highlighted); }
 .wh2 small { margin-left: 8px; font-size: 15px; line-height: 20px; font-weight: 400; letter-spacing: 0; color: var(--ui-text-muted); }
 .wgrid { display: grid; gap: 20px; }

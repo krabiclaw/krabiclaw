@@ -32,7 +32,10 @@ export const TASK_VIEW_SCHEMA = { type: 'object', properties: {
 }, required: ['id', 'kind', 'status', 'version', 'face', 'tag', 'imageUrl', 'avatar', 'statusLine', 'title', 'when', 'detail', 'error', 'note', 'person', 'assignee', 'sheet', 'startsAt', 'dueAt', 'timezone', 'notes', 'outcome', 'action', 'path', 'productId', 'locationId', 'stayId', 'requestId', 'can'] }
 const task = TASK_VIEW_SCHEMA
 const taskResult = { type: 'object', properties: { task }, required: ['task'] }
-const opportunity = { type: 'object', properties: { id: text, statusLine: text, title: text, detail: text, icon: text, path: text, productId: nullableText, locationId: nullableText }, required: ['id', 'statusLine', 'title', 'detail', 'icon', 'path', 'productId', 'locationId'] }
+const opportunity = { type: 'object', properties: { id: text, statusLine: text, title: text, detail: text, icon: text, path: text, productId: nullableText, locationId: nullableText,
+  requestId: { type: ['string', 'null'], description: 'The guest conversation a message opportunity is sent in.' },
+  message: { type: ['string', 'null'], description: 'The message it pre-writes from the business’s own records. Review it, then send it with reply_to_guest in requestId’s conversation; nothing is sent until then.' } },
+required: ['id', 'statusLine', 'title', 'detail', 'icon', 'path', 'productId', 'locationId', 'requestId', 'message'] }
 const assignee = {
   assigned_member_id: { type: ['string', 'null'], description: 'A Better Auth member id from list_tasks assignees; null to unassign.' },
   assigned_team_id: { type: ['string', 'null'], description: 'A Better Auth team id from list_tasks assignees. Give a member or a team, not both.' },
@@ -59,7 +62,7 @@ export const TASK_TOOLS: McpToolDefinition[] = [
     inputSchema: { task_id: { ...text, minLength: 1 }, note: { ...text, maxLength: 5000 } }, required: ['task_id'],
     outputSchema: taskResult,
   }),
-  organizationTool({ name: 'list_opportunities', domain: 'tasks', minimumRole: 'admin', description: 'List and save current opportunities such as drafts to finish, posts to share and calendar gaps. Reports evidence it could not read. Use a returned ID to accept, dismiss or defer an opportunity.',
+  organizationTool({ name: 'list_opportunities', domain: 'tasks', minimumRole: 'admin', description: 'List and save current opportunities such as drafts to finish, posts to share, calendar gaps and preparation to send a booked guest or client. Reports evidence it could not read. Use a returned ID to accept, dismiss or defer an opportunity.',
     inputSchema: { location_id: { ...text, minLength: 1 } },
     outputSchema: { type: 'object', properties: { opportunities: { type: 'array', items: opportunity }, issues: { type: 'array', items: text } }, required: ['opportunities', 'issues'] },
   }),

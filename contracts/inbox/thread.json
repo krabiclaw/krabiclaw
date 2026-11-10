@@ -10,32 +10,32 @@
     },
     "guestName": "Mililani",
     "home": "74 D · Sky",
-    "id": "00000000-0000-4000-8000-000000000018",
+    "id": "00000000-0000-4000-8000-000000000001",
     "kind": "guest",
     "pending": [
       {
         "body": "Enjoy your stay!",
         "cancellable": true,
-        "id": "00000000-0000-4000-8000-000000000085",
+        "id": "00000000-0000-4000-8000-000000000003",
         "label": "Enjoy your stay!",
         "sendAt": "2026-11-08T23:00:00.000Z",
         "source": "later",
         "time": "Sun, Nov 8, 4:00 PM"
       }
     ],
-    "recordId": "00000000-0000-4000-8000-000000000007",
+    "recordId": "00000000-0000-4000-8000-000000000004",
     "recordKind": "stay",
     "recordTitle": "Reservation",
     "stream": [
       {
-        "id": "day:00000000-0000-4000-8000-000000000022",
+        "id": "day:00000000-0000-4000-8000-000000000005",
         "label": "Yesterday",
         "type": "day"
       },
       {
         "author": "Mililani",
         "body": "In winter, can we park on the street?",
-        "id": "00000000-0000-4000-8000-000000000022",
+        "id": "00000000-0000-4000-8000-000000000005",
         "label": null,
         "photos": [],
         "receipt": null,
@@ -52,14 +52,14 @@
       {
         "author": "Mililani",
         "body": null,
-        "id": "00000000-0000-4000-8000-000000000027",
+        "id": "00000000-0000-4000-8000-000000000006",
         "label": null,
         "photos": [
           {
             "height": 3,
-            "id": "00000000-0000-4000-8000-000000000028",
-            "thumbnailUrl": "https://media.example.test/organizations/org-contract/media/00000000-0000-4000-8000-000000000028.avif",
-            "url": "https://media.example.test/organizations/org-contract/media/00000000-0000-4000-8000-000000000028.avif",
+            "id": "00000000-0000-4000-8000-000000000007",
+            "thumbnailUrl": "https://media.example.test/organizations/org-contract/media/00000000-0000-4000-8000-000000000007.avif",
+            "url": "https://media.example.test/organizations/org-contract/media/00000000-0000-4000-8000-000000000007.avif",
             "width": 4
           }
         ],
@@ -75,7 +75,7 @@
       {
         "author": "You",
         "body": "Yes, the street facing downhill is easiest.",
-        "id": "00000000-0000-4000-8000-000000000036",
+        "id": "00000000-0000-4000-8000-000000000008",
         "label": null,
         "photos": [],
         "receipt": null,
@@ -90,7 +90,7 @@
       {
         "author": "Mililani",
         "body": "Thank you! What time is check-in?",
-        "id": "00000000-0000-4000-8000-000000000041",
+        "id": "00000000-0000-4000-8000-000000000009",
         "label": null,
         "photos": [],
         "receipt": null,
@@ -149,18 +149,18 @@
           "type": "stay",
           "vertical": "lodging"
         },
-        "id": "00000000-0000-4000-8000-000000000057",
+        "id": "00000000-0000-4000-8000-000000000010",
         "sentAt": "2026-11-05T19:00:00.000Z",
         "type": "change"
       },
       {
-        "id": "00000000-0000-4000-8000-000000000070",
+        "id": "00000000-0000-4000-8000-000000000011",
         "sentAt": "2026-11-05T19:00:00.000Z",
         "text": "You archived this conversation",
         "type": "event"
       },
       {
-        "id": "00000000-0000-4000-8000-000000000075",
+        "id": "00000000-0000-4000-8000-000000000012",
         "sentAt": "2026-11-05T19:00:00.000Z",
         "text": "You moved this conversation back to Messages",
         "type": "event"
@@ -168,7 +168,7 @@
       {
         "author": "You",
         "body": "Check-in is from 4 PM.",
-        "id": "00000000-0000-4000-8000-000000000080",
+        "id": "00000000-0000-4000-8000-000000000013",
         "label": null,
         "photos": [],
         "receipt": "Not delivered",
