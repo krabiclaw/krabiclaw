@@ -34,7 +34,7 @@
           {{ copy.callUsLabel(formatPhone(confirmation.contactPhone)) }}
         </TenantButton>
         <TenantButton v-if="confirmation.cancelUrl" :to="confirmation.cancelUrl" color="error" variant="ghost">
-          {{ t('site.experience_cancel.title') }}
+          {{ t(confirmation.retryRefund ? 'site.experience_cancel.retry_refund' : 'site.experience_cancel.title') }}
         </TenantButton>
         <p v-if="confirmation.manageUrl" class="w-full text-sm text-muted">{{ t('booking.manage_account_help') }}</p>
       </template>

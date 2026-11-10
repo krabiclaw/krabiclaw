@@ -6,6 +6,7 @@
 import { $fetch } from 'ofetch'
 import { isValidInstant, isValidTimezone } from '~/utils/timezone'
 import { PRODUCT_KINDS, type ProductKind } from '~/shared/product-details'
+import { outsideNotice } from '~/shared/availability-settings'
 
 export interface BookingConfirmation {
   type: 'reservation' | 'booking'
@@ -32,6 +33,8 @@ export interface BookingConfirmation {
   title?: string
   requests?: string | null
   cancelUrl?: string | null
+  /** The cancellation went through but its refund failed and can be retried from the cancel page. */
+  retryRefund?: boolean
   /** Authenticated management entrypoint for the current canonical buyer, when linked. */
   manageUrl?: string | null
   contactPhone?: string | null
@@ -91,7 +94,7 @@ export async function loadBookingConfirmation(
     kind: BookingConfirmation['type']; status: 'pending' | 'confirmed' | 'cancelled'; name: string; email: string
     starts_at: string; timezone: string; guests: string; location_id: string | null; product_id: string | null; product_kind: ProductKind | null; product_name: string | null
     location_name: string | null; location_slug: string | null
-    locale: string; policy_summary: ApiRecord | null; paid: { amount: number; currency: string } | null; image_url: string | null; manage_url: string | null
+    locale: string; policy_summary: ApiRecord | null; advance_notice_minutes: number | null; can_retry_cancellation: boolean; paid: { amount: number; currency: string } | null; image_url: string | null; manage_url: string | null
   } }>(`/api/public/booking-requests/${encodeURIComponent(requestId)}`, {
     query: { locale: language.locale },
     headers: { Authorization: `Bearer ${token}` }, cache: 'no-store',
@@ -103,6 +106,7 @@ export async function loadBookingConfirmation(
     || (kind === 'booking' && (!booking.product_kind || !PRODUCT_KINDS.includes(booking.product_kind)))
     || typeof booking.guests !== 'string' || booking.locale !== language.locale || (booking.location_id !== null && typeof booking.location_id !== 'string')
     || (booking.manage_url !== null && (typeof booking.manage_url !== 'string' || !URL.canParse(booking.manage_url)))
+    || (booking.advance_notice_minutes !== null && !Number.isInteger(booking.advance_notice_minutes)) || typeof booking.can_retry_cancellation !== 'boolean'
     || (booking.paid !== null && (!Number.isInteger(booking.paid?.amount) || typeof booking.paid?.currency !== 'string'))) {
     throw new Error(language.t('booking.receipt_failed'))
   }
@@ -125,6 +129,11 @@ export async function loadBookingConfirmation(
     locationAddress: sameLocation && sameLocale ? matchingHandoff?.locationAddress : null,
     title: booking.product_name ?? (sameLocale ? matchingHandoff?.title : undefined),
     policySummary: sameLocale && sameLocation && sameProduct && matchingHandoff?.policySummary ? matchingHandoff.policySummary : booking.policy_summary,
-    cancelUrl: booking.status === 'cancelled' ? null : `${language.localePath(`/${kind === 'reservation' ? 'reservations' : 'bookings'}/cancel`)}?id=${encodeURIComponent(requestId)}#${token}`,
+    retryRefund: booking.status === 'cancelled' && booking.can_retry_cancellation,
+    // The cancel page cancels, or retries a failed refund after cancelling; no link once
+    // neither is possible, including when the offering's advance notice has closed cancellation.
+    cancelUrl: (booking.status === 'cancelled' ? booking.can_retry_cancellation : booking.advance_notice_minutes === null || outsideNotice(booking.starts_at, booking.advance_notice_minutes))
+      ? `${language.localePath(`/${kind === 'reservation' ? 'reservations' : 'bookings'}/cancel`)}?id=${encodeURIComponent(requestId)}#${token}`
+      : null,
   }
 }

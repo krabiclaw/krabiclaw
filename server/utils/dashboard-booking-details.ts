@@ -438,9 +438,11 @@ export async function listDashboardBookingChangeSessions(event: H3Event, input: 
   const row = await loadBookingRow(context.db, { organizationId: context.organization.id }, 'booking', input.bookingId)
   if (!row?.experience_id) throw new HTTPError({ statusCode: 404, message: 'Booking not found' })
   await assertBookingAccess(context, row)
-  return await listSessions(context.db, { env: context.env, organizationId: row.organization_id, productId: row.experience_id, statuses: ['scheduled'],
+  const sessions = await listSessions(context.db, { env: context.env, organizationId: row.organization_id, productId: row.experience_id, statuses: ['scheduled'],
     fromInstant: localDateTimeToInstant(input.date, '00:00', row.timezone, 'compatible').toISOString(),
     toInstant: localDateTimeToInstant(addLocalDays(input.date, 1), '00:00', row.timezone, 'compatible').toISOString() })
+  // A start inside the offering's advance notice cannot be moved into; the booked one stays shown.
+  return sessions.filter(session => session.id === row.session_id || outsideNotice(session.starts_at, row.advance_notice_minutes))
 }
 
 export async function addDashboardBookingNote(

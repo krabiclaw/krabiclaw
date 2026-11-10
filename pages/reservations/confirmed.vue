@@ -41,7 +41,7 @@
           {{ resCopy.callUsLabel(formatPhone(confirmation.contactPhone)) }}
         </TenantButton>
         <TenantButton v-if="confirmation.cancelUrl" :to="confirmation.cancelUrl" color="error" variant="ghost">
-          {{ resCopy.cancelLabel(resCopy.reservationWord) }}
+          {{ confirmation.retryRefund ? t('site.reservation_cancel.retry_refund') : resCopy.cancelLabel(resCopy.reservationWord) }}
         </TenantButton>
         <p v-if="confirmation.manageUrl" class="w-full text-sm text-muted">{{ t('booking.manage_account_help') }}</p>
       </template>
