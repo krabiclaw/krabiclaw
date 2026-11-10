@@ -176,10 +176,14 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
     await expect(assignment.getByRole('radio', { checked: true })).toHaveAccessibleName('Assigned attorney Current')
     await assignment.getByRole('button', { name: 'Cancel', exact: true }).click()
     await expect(page).toHaveURL(new URL(bookingPath, baseURL!).toString())
+    // The booked attorney may change the consultation without editing the offering: its day's times are read through the booking.
+    const timesPath = `/api/dashboard/bookings/booking/${requestId}/sessions`
+    const timesRead = memberPage.waitForResponse(response => new URL(response.url()).pathname === timesPath)
     await detail.getByRole('button', { name: 'Manage consultation', exact: true }).click()
     await memberPage.getByRole('dialog', { name: 'Manage consultation', exact: true }).getByRole('link', { name: 'Change consultation', exact: true }).click()
     const change = memberPage.locator('#dashboard-panel-booking-change')
     await expect(change.getByRole('heading', { name: 'Consultation details', exact: true })).toBeVisible()
+    expect((await body<{ sessions: Array<{ id: string }> }>(await timesRead, 200)).sessions.map(slot => slot.id)).toContain(session.id)
     await expect(change.getByRole('spinbutton', { name: 'Clients', exact: true })).toHaveValue('1')
     await expect(change.getByRole('button', { name: 'Send request', exact: true })).toBeDisabled()
     await change.getByRole('button', { name: 'Cancel', exact: true }).click()
@@ -197,6 +201,17 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
     expect(after.tasks.flatMap(section => section.tasks.map(task => ({ section: section.id, task }))).filter(item => item.task.requestId === requestId)).toEqual([{ section: 'done', task: expect.objectContaining({
       kind: 'booking_review', status: 'done', person: expect.objectContaining({ name: 'You', you: true }), outcome: expect.objectContaining({ closedBy: 'You' }),
     }) }])
+    // A change of clients alone keeps the booked time, so it is sent even when the day's times cannot be read.
+    await memberPage.route(`**${timesPath}**`, route => route.abort())
+    await memberPage.goto(new URL(`${bookingPath}/change`, baseURL!).toString())
+    await change.getByRole('spinbutton', { name: 'Clients', exact: true }).fill('2')
+    const sent = memberPage.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === `/api/dashboard/bookings/booking/${requestId}/changes`)
+    await change.getByRole('button', { name: 'Send request', exact: true }).click()
+    await body(await sent, 200)
+    await memberPage.unroute(`**${timesPath}**`)
+    const proposed = await body<{ booking: DashboardBookingDetails }>(await page.request.get(`/api/dashboard/bookings/booking/${requestId}`, { params: { org: SLUG } }), 200)
+    expect(proposed.booking.pendingChange).toMatchObject({ partySize: 2 })
+    await memberPage.goto(new URL(bookingPath, baseURL!).toString())
     await memberPage.setViewportSize({ width: 1440, height: 900 })
     await expect(todayPanel).toBeVisible()
     await memberPage.clock.setFixedTime(new Date(`${day}T13:00:00.000Z`))
