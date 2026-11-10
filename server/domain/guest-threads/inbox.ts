@@ -155,13 +155,13 @@ function receipt(entry: GuestThreadEntryViewModel, guestName: string): string | 
 
 function recordNoun(raw: GuestThreadDetailViewModel): string {
   const record = raw.operationalRecord
-  if (!record || record.kind === 'stay') return 'reservation'
+  if (!record || record.unit === 'nights') return 'reservation'
   return resolveBookingPresentation(record.product_kind, raw.organizationVertical).noun
 }
 
 /** What Show reservation calls the record, in the business's own word: a stay or a table is a reservation, a class an experience. */
 function recordTitle(record: NonNullable<GuestThreadDetailViewModel['operationalRecord']>, vertical: string | null): string {
-  if (record.kind === 'stay') return 'Reservation'
+  if (record.unit === 'nights') return 'Reservation'
   if (record.product_kind === 'experience' && normalizeVertical(vertical ?? '') !== 'service') return EXPERIENCE_PRESENTATION.itemLabel
   return resolveBookingPresentation(record.product_kind, vertical).label
 }
@@ -335,8 +335,8 @@ export async function getInboxThread(db: DbClient, threadId: string, organizatio
     home: facts.home,
     when: facts.when,
     translated: items.some(item => item.type === 'message' && item.translated !== null),
-    recordId: record ? record.kind === 'stay' ? record.id : raw.id : null,
-    recordKind: record?.kind ?? null,
+    recordId: record ? record.unit === 'nights' ? record.id : raw.id : null,
+    recordKind: record ? record.unit === 'nights' ? 'stay' : 'booking' : null,
     recordTitle: record ? recordTitle(record, raw.organizationVertical) : null,
     activityPath: raw.activityPath,
     stream: items,
@@ -371,7 +371,7 @@ export async function getInboxThreadDetails(db: DbClient, threadId: string, orga
     SELECT m.userId AS user_id, u.name, m.role FROM member m JOIN user u ON u.id = m.userId
      WHERE m.organizationId = ? AND (m.role = 'owner'
        OR m.userId IN (SELECT value FROM json_each(?))
-       OR m.id = (SELECT c.assigned_member_id FROM stays s JOIN product_booking_configs c ON c.organization_id = s.organization_id AND c.product_id = s.product_id WHERE s.request_id = ?))
+       OR m.id = (SELECT c.assigned_member_id FROM bookings b JOIN product_booking_configs c ON c.organization_id = b.organization_id AND c.product_id = b.product_id WHERE b.request_id = ?))
      ORDER BY m.role = 'owner' DESC, m.createdAt, m.id`,
   [organizationId, d1JsonStringSet(raw.entries.flatMap(entry => entry.actorKind === 'member' && entry.actorUserId ? [entry.actorUserId] : [])), raw.id])
   const photos = raw.entries.filter(entry => entry.kind === 'message')

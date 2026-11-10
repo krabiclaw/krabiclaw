@@ -12,6 +12,7 @@ function tablePolicy(overrides: Partial<BookingPolicy> = {}): BookingPolicy {
     minimum_guest_age: null,
     accessibility_contact_required: false,
     payment: { basis: 'per_booking', unit_amount: 2500, currency: 'USD', tax_behavior: 'inclusive', min_party_size: 6 },
+    cancellation: null,
     ...overrides,
   }
 }
@@ -55,12 +56,14 @@ test('the terms frozen on a booking are the offering\'s, at the price it was mad
     online_payment_required: true, payment_basis: 'per_booking' as const, payment_min_party_size: 6 }
   assert.deepEqual(bookingPolicy(config, { unit_amount: 2500, currency: 'USD', tax_behavior: 'inclusive' }), {
     advance_notice_minutes: 120, party_size_min: 1, party_size_max: 12, minimum_guest_age: null, accessibility_contact_required: false,
-    payment: { basis: 'per_booking', unit_amount: 2500, currency: 'USD', tax_behavior: 'inclusive', min_party_size: 6 },
+    payment: { basis: 'per_booking', unit_amount: 2500, currency: 'USD', tax_behavior: 'inclusive', min_party_size: 6 }, cancellation: null,
   })
   assert.equal(bookingPolicy(config, { unit_amount: 0, currency: 'USD', tax_behavior: 'inclusive' }).payment, null)
   assert.equal(bookingPolicy({ ...config, online_payment_required: false }, { unit_amount: 2500, currency: 'USD', tax_behavior: 'inclusive' }).payment, null)
   assert.deepEqual(parseBookingPolicy(JSON.stringify(tablePolicy())), tablePolicy())
   assert.throws(() => parseBookingPolicy(JSON.stringify({ ...tablePolicy(), accessibility_contact_required: 'no' })), /invalid frozen policy/)
+  assert.deepEqual(parseBookingPolicy(JSON.stringify(tablePolicy({ payment: null, cancellation: 'moderate' }))).cancellation, 'moderate')
+  assert.throws(() => parseBookingPolicy(JSON.stringify({ ...tablePolicy(), cancellation: 'lenient' })), /invalid frozen policy/)
   assert.throws(() => parseBookingPolicy(JSON.stringify({ ...tablePolicy(), payment: { basis: 'per_seat', unit_amount: 1, currency: 'USD', tax_behavior: 'inclusive', min_party_size: null } })), /invalid frozen policy/)
 })
 

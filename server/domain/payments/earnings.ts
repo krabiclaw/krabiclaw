@@ -22,7 +22,7 @@ export async function paymentPictures(db: DbClient, organizationId: string, paym
   if (!ids.length) return new Map()
   const json = JSON.stringify(ids)
   const [bookings, lines] = await Promise.all([
-    queryAll<{ payment_id: string; product_id: string; title: string; starts_at: string; ends_at: string; timezone: string }>(db, `SELECT p.id AS payment_id, b.product_id, pr.name AS title, s.starts_at, s.ends_at, s.timezone FROM payments p JOIN bookings b ON b.id = p.subject_id AND b.organization_id = p.organization_id JOIN product_sessions s ON s.id = b.product_session_id JOIN products pr ON pr.id = b.product_id WHERE p.subject_type = 'booking' AND p.id IN (SELECT value FROM json_each(?))`, [json]),
+    queryAll<{ payment_id: string; product_id: string; title: string; starts_at: string; ends_at: string; timezone: string }>(db, `SELECT p.id AS payment_id, b.product_id, pr.name AS title, b.starts_at, b.ends_at, b.timezone FROM payments p JOIN bookings b ON b.id = p.subject_id AND b.organization_id = p.organization_id JOIN products pr ON pr.id = b.product_id WHERE p.subject_type = 'booking' AND p.id IN (SELECT value FROM json_each(?))`, [json]),
     queryAll<{ payment_id: string; product_id: string | null }>(db, `SELECT o.payment_id, (SELECT l.product_id FROM payment_order_lines l WHERE l.order_id = o.id ORDER BY l.rowid LIMIT 1) AS product_id FROM payment_orders o WHERE o.payment_id IN (SELECT value FROM json_each(?))`, [json]),
   ])
   const productIds = [...bookings.map(row => row.product_id), ...lines.map(row => row.product_id).filter((id): id is string => !!id)]
@@ -40,7 +40,8 @@ export async function paymentPictures(db: DbClient, organizationId: string, paym
     // Use only the image of the payment's actual subject; an absent image is optional.
     const imageUrl = booking ? products.get(booking.product_id)?.imageUrl
       : line?.product_id ? products.get(line.product_id)?.imageUrl
-      : payment.subject_type === 'stay' && payment.location_id ? locations.get(payment.location_id)?.imageUrl
+      // A stay not yet booked shows its home's place.
+      : 'stay' in snapshot && payment.location_id ? locations.get(payment.location_id)?.imageUrl
       : null
 
     const visit = booking ?? null
@@ -168,7 +169,7 @@ export async function paymentTransactions(db: DbClient, principal: FinancialPrin
     ? await Promise.all([
         paymentPictures(db, principal.organizationId, page.payments),
         queryAll<{ id: string; name: string | null }>(db, `SELECT p.id, COALESCE(json_extract(r.payload_json, '$.guest.name'), u.name) AS name FROM payments p LEFT JOIN user u ON u.id = p.buyer_user_id LEFT JOIN payment_checkout_holds h ON h.payment_id = p.id LEFT JOIN requests r ON r.id = h.request_id WHERE p.id IN (SELECT value FROM json_each(?))`, [json]),
-        queryAll<{ payment_id: string; request_id: string | null }>(db, `SELECT p.id AS payment_id, b.request_id FROM payments p JOIN bookings b ON b.id = p.subject_id AND b.organization_id = p.organization_id WHERE p.subject_type = 'booking' AND p.id IN (SELECT value FROM json_each(?))`, [json]),
+        queryAll<{ payment_id: string; booking_id: string; request_id: string | null; nights: number }>(db, `SELECT p.id AS payment_id, b.id AS booking_id, b.request_id, b.product_session_id IS NULL AS nights FROM payments p JOIN bookings b ON b.id = p.subject_id AND b.organization_id = p.organization_id WHERE p.subject_type = 'booking' AND p.id IN (SELECT value FROM json_each(?))`, [json]),
         queryAll<{ payment_id: string }>(db, `SELECT payment_id FROM payment_orders WHERE payment_id IN (SELECT value FROM json_each(?))`, [json]),
       ])
     : [new Map<string, PaymentPicture>(), [], [], []]
@@ -177,8 +178,11 @@ export async function paymentTransactions(db: DbClient, principal: FinancialPrin
     next_cursor: page.next_cursor,
     payments: page.payments.map((payment) => {
       const picture = pictures.get(payment.id)!
-      const request = bookings.find(row => row.payment_id === payment.id)?.request_id
-      const to = request ? `${base}/${payment.subject_type}/${encodeURIComponent(request)}` : `${base}/${orders.some(row => row.payment_id === payment.id) ? 'order' : 'payment'}/${encodeURIComponent(payment.id)}`
+      const booking = bookings.find(row => row.payment_id === payment.id)
+      // A stay opens by its id, any other booking by its conversation, as the bookings pages address them.
+      const to = booking?.nights === 1 ? `${base}/stay/${encodeURIComponent(booking.booking_id)}`
+        : booking?.request_id ? `${base}/booking/${encodeURIComponent(booking.request_id)}`
+        : `${base}/${orders.some(row => row.payment_id === payment.id) ? 'order' : 'payment'}/${encodeURIComponent(payment.id)}`
       return {
         id: payment.id, created_at: payment.created_at, currency: payment.currency, amount: payment.amount, captured_amount: payment.captured_amount, refunded_amount: payment.refunded_amount,
         title: picture.title, image_url: picture.imageUrl, buyer_name: buyers.find(row => row.id === payment.id)?.name ?? null,

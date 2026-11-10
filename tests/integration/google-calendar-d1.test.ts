@@ -70,7 +70,7 @@ test('committed consultation projection is tenant scoped, private, idempotent an
     await syncCalendarOrganization(env, 'org', 25, provider)
     assert.equal(events.size, 1)
     const link = await db.prepare('SELECT * FROM google_calendar_event_links').first()
-    assert.equal(link?.operational_id, bookingId)
+    assert.equal(link?.booking_id, bookingId)
     assert.equal(link?.request_id, 'thread')
     const event = events.get(String(link?.event_id))!
     assert.equal(event.summary, 'Pending consultation')
@@ -191,11 +191,11 @@ test('bounded Calendar backfill resumes and cancelled historical Sessions are cl
       await syncCalendarOrganization(env, 'org', 0, provider)
       assert.equal((await db.prepare('SELECT count(*) n FROM google_calendar_event_links').first())?.n, expected)
     }
-    const oldest = await db.prepare('SELECT operational_id FROM google_calendar_event_links ORDER BY updated_at, operational_id LIMIT 1').first<{ operational_id: string }>()
+    const oldest = await db.prepare('SELECT booking_id FROM google_calendar_event_links ORDER BY updated_at, booking_id LIMIT 1').first<{ booking_id: string }>()
     await db.prepare("UPDATE member_scheduling SET public_name='Attorney Host' WHERE member_id='host-org'").run()
-    const previous = await db.prepare('SELECT booking_revision FROM google_calendar_event_links WHERE operational_id=?').bind(oldest!.operational_id).first()
+    const previous = await db.prepare('SELECT booking_revision FROM google_calendar_event_links WHERE booking_id=?').bind(oldest!.booking_id).first()
     await syncCalendarOrganization(env, 'org', 0, provider)
-    assert.notEqual((await db.prepare('SELECT booking_revision FROM google_calendar_event_links WHERE operational_id=?').bind(oldest!.operational_id).first())?.booking_revision, previous?.booking_revision, 'a changed participant name changes the event revision')
+    assert.notEqual((await db.prepare('SELECT booking_revision FROM google_calendar_event_links WHERE booking_id=?').bind(oldest!.booking_id).first())?.booking_revision, previous?.booking_revision, 'a changed participant name changes the event revision')
     const events = new Map<string, unknown>()
     t.mock.method(globalThis, 'fetch', async (input, init) => {
       const url = new URL(String(input))
@@ -223,7 +223,7 @@ test('bounded Calendar backfill resumes and cancelled historical Sessions are cl
     await db.prepare("UPDATE product_sessions SET status='cancelled' WHERE id='s00'").run()
     await syncCalendarOrganization(env, 'org', 25, provider)
     assert.equal(events.size, 54, 'cancelled historical Session does not retain the event')
-    assert.equal((await db.prepare('SELECT state FROM google_calendar_event_links WHERE operational_id=?').bind(bookings[0]).first())?.state, 'deleted')
+    assert.equal((await db.prepare('SELECT state FROM google_calendar_event_links WHERE booking_id=?').bind(bookings[0]).first())?.state, 'deleted')
   } finally { await mf.dispose() }
 })
 
@@ -345,7 +345,15 @@ test('experience and dining Calendar management links follow canonical buyer own
     await db.prepare("INSERT INTO product_locations(organization_id,product_id,location_id,active,published,created_by,updated_by) VALUES('org','tables','dining',1,1,'actor','actor')").run()
     await db.prepare("INSERT INTO product_variants(id,organization_id,product_id,name,created_by,updated_by) VALUES('table-variant','org','tables','Table','actor','actor')").run()
     await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,location_id,timezone,starts_at,ends_at,capacity,created_by,updated_by) VALUES('seating','org','tables','dining','UTC','2099-11-02T14:00:00.000Z','2099-11-02T15:00:00.000Z',10,'actor','actor')").run()
-    for (const id of ['experience-thread','dining-thread']) await db.prepare(`INSERT INTO requests(id,kind,organization_id,user_id,payload_json) VALUES(?,'booking','org','buyer','{"guest":{"name":"Buyer","email":"buyer@example.test","phone":null},"notes":"PRIVATE NOTES","cancellation":{"token_hash":"PRIVATE_CAPABILITY","expires_at":null,"used_at":null}}')`).bind(id).run()
+    for (const id of ['experience-thread','dining-thread','stay-thread']) await db.prepare(`INSERT INTO requests(id,kind,organization_id,user_id,payload_json) VALUES(?,'booking','org','buyer','{"guest":{"name":"Buyer","email":"buyer@example.test","phone":null},"notes":"PRIVATE NOTES","cancellation":{"token_hash":"PRIVATE_CAPABILITY","expires_at":null,"used_at":null}}')`).bind(id).run()
+    // A home booked by the night is a booking too: its check-in at the home's time, its checkout a day alone where the home has no checkout time.
+    await db.prepare("INSERT INTO products(kind,id,organization_id,name,slug,created_by,updated_by) VALUES('stay','home','org','Garden house','garden-house','actor','actor')").run()
+    await db.prepare("INSERT INTO product_locations(organization_id,product_id,location_id,active,published,created_by,updated_by) VALUES('org','home','dining',1,1,'actor','actor')").run()
+    await db.prepare("INSERT INTO product_stay_configs(product_id,organization_id,location_id,internal_name,created_by,updated_by) VALUES('home','org','dining','Garden house','actor','actor')").run()
+    await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,unit,default_capacity,min_nights,check_in_time,held_online,scheduling_mode,confirmation_mode,created_by,updated_by) VALUES('home','org','nights',4,1,'15:00',0,'business','instant','actor','actor')").run()
+    await db.prepare("INSERT INTO product_variants(id,organization_id,product_id,name,created_by,updated_by) VALUES('home-variant','org','home','Night','actor','actor')").run()
+    await db.prepare(`INSERT INTO bookings(id,organization_id,user_id,request_id,product_id,product_variant_id,location_id,starts_at,ends_at,timezone,party_size,adults,children,infants,status,policy_json,total_minor,currency)
+      VALUES('stay','org','buyer','stay-thread','home','home-variant','dining','2099-11-05T15:00:00.000Z','2099-11-08','UTC',2,2,0,0,'confirmed',?,90000,'USD')`).bind(OPEN_TERMS_JSON).run()
     const env={DB:db,NUXT_PUBLIC_PLATFORM_DOMAIN:'http://localhost:3113'} as CloudflareEnv
     await claimSessionCapacity(db,{policyJson: OPEN_TERMS_JSON, env,organizationId:'org',productId:'experience',sessionId:'session',productVariantId:'variant',partySize:1,requestId:'experience-thread',userId:'buyer'})
     await claimSessionCapacity(db,{policyJson: OPEN_TERMS_JSON, env,organizationId:'org',productId:'tables',sessionId:'seating',productVariantId:'table-variant',partySize:2,requestId:'dining-thread',userId:'buyer'})
@@ -367,27 +375,30 @@ test('experience and dining Calendar management links follow canonical buyer own
       return Response.json(event)
     })
     assert.equal((await syncCalendarOrganization(env,'org',25,provider)).failed,0)
-    assert.equal(events.size,2)
+    assert.equal(events.size,3)
     const links=(await db.prepare('SELECT request_id,event_id FROM google_calendar_event_links ORDER BY request_id').all()).results
-    assert.deepEqual(links.map(link=>link.request_id),['dining-thread','experience-thread'])
+    assert.deepEqual(links.map(link=>link.request_id),['dining-thread','experience-thread','stay-thread'])
     for(const link of links) {
-      // A table is still a reservation to its guest; every visit is managed at its booking.
-      const word=link.request_id==='dining-thread'?'reservation':'booking'
+      // A table is still a reservation to its guest, a home a stay; every visit is managed at its booking.
+      const word=link.request_id==='dining-thread'?'reservation':link.request_id==='stay-thread'?'stay':'booking'
       const event=events.get(String(link.event_id))!
-      assert.ok(String(event.description).endsWith(`Manage ${word}: http://localhost:3113/dashboard/account/activity/booking/${link.request_id}`))
+      assert.ok(String(event.description).endsWith(`Manage ${word}: http://localhost:3113/dashboard/account/activity/${word==='stay'?'stay':'booking'}/${link.request_id}`))
       assert.equal(event.attendees,undefined,'this link does not introduce consultation attendee semantics to other verticals')
       assert.ok(!JSON.stringify(event).includes('PRIVATE_'))
       assert.ok(!JSON.stringify(event).includes('PRIVATE NOTES'))
       assert.ok(!JSON.stringify(event).includes('/dashboard/org/'))
     }
+    const stayEvent=events.get(String(links.find(link=>link.request_id==='stay-thread')!.event_id))!
+    assert.equal(stayEvent.summary,'Stay — Buyer')
+    assert.deepEqual([stayEvent.start,stayEvent.end],[{date:'2099-11-05'},{date:'2099-11-08'}],'a checkout with no time spans whole days to the checkout day')
     const identities=[...events.keys()]
-    await db.prepare("UPDATE requests SET user_id='other-buyer' WHERE id IN ('experience-thread','dining-thread')").run()
+    await db.prepare("UPDATE requests SET user_id='other-buyer' WHERE id IN ('experience-thread','dining-thread','stay-thread')").run()
     assert.equal((await syncCalendarOrganization(env,'org',25,provider)).failed,0)
     for(const event of events.values()) assert.ok(!String(event.description).includes('Manage '),'a request/commitment ownership mismatch removes an unusable management link')
-    await db.prepare("UPDATE requests SET user_id='buyer' WHERE id IN ('experience-thread','dining-thread')").run()
+    await db.prepare("UPDATE requests SET user_id='buyer' WHERE id IN ('experience-thread','dining-thread','stay-thread')").run()
     assert.equal((await syncCalendarOrganization(env,'org',25,provider)).failed,0)
     assert.deepEqual([...events.keys()],identities,'ownership eligibility reconciles existing event identities')
-    assert.equal(inserts,2,'eligible management links update existing events instead of duplicating them')
+    assert.equal(inserts,3,'eligible management links update existing events instead of duplicating them')
     for(const event of events.values()) assert.ok(String(event.description).includes('/dashboard/account/activity/'))
   } finally {await runtime.dispose()}
 })

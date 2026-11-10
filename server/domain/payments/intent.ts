@@ -54,8 +54,9 @@ function snapshotOf(payment: Payment) {
   if (typeof snapshot.title !== 'string' || !Number.isSafeInteger(snapshot.quantity) || typeof snapshot.method_configuration_id !== 'string' || !Number.isSafeInteger(snapshot.price?.unit_amount)
     || typeof snapshot.automatic_tax !== 'boolean' || (snapshot.tax_code !== null && typeof snapshot.tax_code !== 'string')
     || !PRICE_TAX_BEHAVIORS.includes(snapshot.price!.tax_behavior as Price['tax_behavior'])) throw new Error('Payment purchase snapshot is invalid')
-  if (payment.subject_type === 'stay' && !isStayPurchase(snapshot.stay)) throw new Error('Stay payment has no valid stay purchase')
-  const stay = payment.subject_type === 'stay' && isStayPurchase(snapshot.stay)
+  // A booking's purchase of nights carries its stay; one of a session's seats names its session.
+  if (snapshot.stay !== undefined && !isStayPurchase(snapshot.stay)) throw new Error('Stay payment has no valid stay purchase')
+  const stay = isStayPurchase(snapshot.stay)
     ? { check_in_date: snapshot.stay.check_in_date, check_out_date: snapshot.stay.check_out_date, nights: snapshot.stay.nightly.length, nightly: snapshot.stay.nightly.map(night => night.price_minor), adults: snapshot.stay.adults, children: snapshot.stay.children, infants: snapshot.stay.infants, cancellation_policy: snapshot.stay.cancellation_policy, product_id: snapshot.stay.product_id }
     : null
   return {
@@ -70,17 +71,19 @@ function snapshotOf(payment: Payment) {
  * checkout hold's — the one the purchase reserved.
  */
 async function handoffSubject(db: DbClient, organizationId: string, payment: Payment, snapshot: ReturnType<typeof snapshotOf>) {
-  const hold = payment.subject_type === 'booking'
+  // A session's time is its hold's; a stay's nights are its purchase's.
+  const slot = payment.subject_type === 'booking' && snapshot.stay === null
+  const hold = slot
     ? await queryFirst<{ starts_at: string; ends_at: string; timezone: string; location_id: string | null; quantity: number }>(db, 'SELECT starts_at,ends_at,timezone,location_id,quantity FROM payment_checkout_holds WHERE payment_id=? AND organization_id=? ORDER BY created_at DESC LIMIT 1', [payment.id, organizationId])
     : null
-  if (payment.subject_type === 'booking' && !hold) throw new Error('Payment has no checkout hold for its time')
+  if (slot && !hold) throw new Error('Payment has no checkout hold for its time')
   const productId = snapshot.stay?.product_id ?? snapshot.product_id
   // A payment outlives its product: a deleted product leaves its kind unknown, and the summary omits what depends on it.
   const product = productId ? await queryFirst<{ kind: string; slug: string; advance_notice_minutes: number | null }>(db, 'SELECT p.kind,p.slug,c.advance_notice_minutes FROM products p LEFT JOIN product_booking_configs c ON c.product_id=p.id AND c.organization_id=p.organization_id WHERE p.id=? AND p.organization_id=?', [productId, organizationId]) : null
   const locationId = hold?.location_id ?? payment.location_id
   const location = locationId ? await queryFirst<{ slug: string }>(db, 'SELECT slug FROM business_locations WHERE id=? AND organization_id=?', [locationId, organizationId]) : null
   // Null once it has passed: paying now buys a booking that is already non-refundable. A stay's terms are its booked policy.
-  const freeUntil = hold ? freeCancellationUntil(hold.starts_at, payment.subject_type === 'booking' ? product?.advance_notice_minutes ?? null : null) : null
+  const freeUntil = hold ? freeCancellationUntil(hold.starts_at, product?.advance_notice_minutes ?? null) : null
   const [ownerType, ownerId] = productId ? ['product', productId] as const : ['business_location', hold?.location_id ?? payment.location_id] as const
   const picture = ownerId ? (await loadOwnerPictures(db, organizationId, ownerType, [ownerId])).get(ownerId) ?? null : null
   return {
@@ -122,7 +125,7 @@ export async function paymentHandoff(db: DbClient, stripe: Stripe, publishableKe
 /** The buyer goes back to change a stay only after Stripe cancels the purchase and its held nights are released. */
 export async function cancelStayPayment(db: DbClient, stripe: Stripe, env: CloudflareEnv, organizationId: string, paymentId: string, claim: string): Promise<{ status: 'canceled' }> {
   const { payment, intent: current, state } = await requireClaimedPayment(db, stripe, organizationId, paymentId, claim)
-  if (payment.subject_type !== 'stay') throw new HTTPError({ statusCode: 409, statusMessage: 'This payment does not hold a stay' })
+  if (snapshotOf(payment).stay === null) throw new HTTPError({ statusCode: 409, statusMessage: 'This payment does not hold a stay' })
   if (state === 'processing') throw new HTTPError({ statusCode: 409, statusMessage: 'This payment has started processing and cannot be changed here', data: { code: 'payment_in_progress' } })
   if (state === 'paid') throw new HTTPError({ statusCode: 409, statusMessage: 'This stay is already paid; open its booking to request a change', data: { code: 'payment_paid' } })
   if (current.livemode !== Boolean(payment.livemode) || current.currency.toUpperCase() !== payment.currency || current.metadata.krabiclaw_payment_id !== payment.id) throw new Error('Stripe PaymentIntent does not match the purchase')
@@ -245,7 +248,7 @@ export type PaymentReturn =
   | { state: 'expired' }
 
 async function paymentReceipt(db: DbClient, env: CloudflareEnv, payment: Payment): Promise<PaymentReturn> {
-  const hold = await queryFirst<{ status: string; request_id: string | null; converted_stay_id: string | null }>(db, 'SELECT status,request_id,converted_stay_id FROM payment_checkout_holds WHERE payment_id=? AND organization_id=?', [payment.id, payment.organization_id])
+  const hold = await queryFirst<{ status: string; session_id: string | null; converted_booking_id: string | null }>(db, 'SELECT status,session_id,converted_booking_id FROM payment_checkout_holds WHERE payment_id=? AND organization_id=?', [payment.id, payment.organization_id])
   if (!hold) throw new Error('Captured payment has no checkout hold')
   if (hold.status !== 'converted') {
     if (payment.refunded_amount > 0) return { state: 'refunded' }
@@ -255,18 +258,17 @@ async function paymentReceipt(db: DbClient, env: CloudflareEnv, payment: Payment
     if (refund) throw new Error(`Captured payment has no booking and its refund ${refund.status}${refund.error ? `: ${refund.error}` : ''}`)
     throw new Error('Captured payment has no booking it paid for')
   }
-  if (payment.subject_type === 'stay') {
-    // The stay is read by its activity ID, as the guest's account reads it.
-    const stay = await queryFirst<{ id: string }>(db, 'SELECT COALESCE(request_id,id) AS id FROM stays WHERE id=? AND organization_id=?', [hold.converted_stay_id, payment.organization_id])
-    if (!stay) throw new Error('Converted stay hold has no stay')
-    return { state: 'paid', kind: 'stay', activity_id: stay.id, receipt_token: (await createReplayableReservationCancelToken(env.EMAIL_REPLY_SECRET ?? '', stay.id)).token }
-  }
   if (payment.subject_type !== 'booking') throw new Error(`Payment subject ${payment.subject_type} has no guest confirmation`)
-  if (!hold.request_id) throw new Error('Captured visit payment has no guest request')
-  const request = await getGuestRequest(db, hold.request_id, payment.organization_id, payment.subject_type)
-  const cancellation = await createReplayableReservationCancelToken(env.EMAIL_REPLY_SECRET ?? '', hold.request_id)
-  if (!request || request.kind !== payment.subject_type || await hashReservationCancelToken(cancellation.token) !== request.payload.cancellation.token_hash) throw new Error('Paid booking is missing its receipt capability')
-  return { state: 'paid', kind: payment.subject_type, request_id: hold.request_id, cancellation_token: cancellation.token }
+  const booking = await queryFirst<{ request_id: string | null }>(db, 'SELECT request_id FROM bookings WHERE id=? AND organization_id=?', [hold.converted_booking_id, payment.organization_id])
+  if (!booking?.request_id) throw new Error('Converted hold has no booking conversation')
+  if (hold.session_id === null) {
+    // A stay is read by its conversation, as the guest's account reads it.
+    return { state: 'paid', kind: 'stay', activity_id: booking.request_id, receipt_token: (await createReplayableReservationCancelToken(env.EMAIL_REPLY_SECRET ?? '', booking.request_id)).token }
+  }
+  const request = await getGuestRequest(db, booking.request_id, payment.organization_id, 'booking')
+  const cancellation = await createReplayableReservationCancelToken(env.EMAIL_REPLY_SECRET ?? '', booking.request_id)
+  if (!request || request.kind !== 'booking' || await hashReservationCancelToken(cancellation.token) !== request.payload.cancellation.token_hash) throw new Error('Paid booking is missing its receipt capability')
+  return { state: 'paid', kind: 'booking', request_id: booking.request_id, cancellation_token: cancellation.token }
 }
 
 /**

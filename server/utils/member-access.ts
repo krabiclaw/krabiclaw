@@ -444,13 +444,14 @@ export async function assertProductAccess(db: DbClient, input: MemberAccessPrinc
 
 /**
  * The same assigned-conversation scope is used by lists, reads, writes and realtime.
- * A stay's guest conversation is not in it: a member looking after a home reads
- * its stays as turnovers (`stayTurnover`), never the guest's messages or contact.
+ * A stay's guest conversation (a booking with no session) is not in it: a member
+ * looking after a home reads its stays as turnovers (`stayTurnover`), never the
+ * guest's messages or contact.
  */
 export function assignedGuestThreadScope(alias: string, user: string | { /** Trusted query column, never request input. */ column: string }): { sql: string; params: string[] } {
   const userSql = typeof user === 'string' ? '?' : user.column
   const sql = `((${alias}.kind = 'booking' AND EXISTS (SELECT 1 FROM bookings b JOIN product_booking_configs c ON c.product_id = b.product_id AND c.organization_id = b.organization_id
-        WHERE b.request_id = ${alias}.id AND b.organization_id = ${alias}.organization_id AND ${assignedMemberSql('c', userSql)}))
+        WHERE b.request_id = ${alias}.id AND b.organization_id = ${alias}.organization_id AND b.product_session_id IS NOT NULL AND ${assignedMemberSql('c', userSql)}))
       OR (${alias}.kind = 'contact' AND ${alias}.location_id IS NOT NULL AND ${locationMemberSql(`${alias}.organization_id`, `${alias}.location_id`, userSql)}))`
   return { sql, params: typeof user === 'string' ? Array(sql.match(/\?/g)?.length ?? 0).fill(user) : [] }
 }

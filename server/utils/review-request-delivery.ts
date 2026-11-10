@@ -12,7 +12,6 @@ import {
   markReviewRequestSendFailure,
   markReviewRequestSendSuccess,
   reviewInvitationDue,
-  type ReviewBookingType,
 } from '~/server/utils/review-requests'
 
 /**
@@ -23,10 +22,9 @@ import {
 export async function sendReviewRequestForBooking(
   env: CloudflareEnv,
   db: DbClient,
-  bookingType: ReviewBookingType,
   bookingId: string,
 ): Promise<{ sent: boolean; requestId: string; error?: string }> {
-  const context = await getReviewBookingContext(db, bookingType, bookingId)
+  const context = await getReviewBookingContext(db, bookingId)
   if (!context) throw new Error('Booking not found')
   if (!reviewInvitationDue(context)) throw new Error('This visit is not due a review invitation')
   const recipientEmail = context.guest_email
@@ -37,8 +35,9 @@ export async function sendReviewRequestForBooking(
   const { request, token } = await createReviewRequest(env, db, context)
   if (!request.user_id) throw new Error('Review request is not linked to a guest identity')
   const reviewUrl = `${publicUrl}/review-submit?token=${encodeURIComponent(token)}`
+  const threadId = context.request_id
   const entry = await appendEntry(db, {
-    threadId: bookingId, kind: 'operation', actorKind: 'system',
+    threadId, kind: 'operation', actorKind: 'system',
     eventName: 'review.requested', body: 'Review invitation sent',
     dedupeKey: `review-request:${request.id}`,
   })
@@ -49,8 +48,8 @@ export async function sendReviewRequestForBooking(
       organizationName: context.organization_name,
       locationId: context.location_id,
       requestId: request.id,
-      bookingType,
-      bookingId,
+      bookingType: context.unit === 'nights' ? 'stay' : 'booking',
+      bookingId: threadId,
       guestName: context.guest_name || 'there',
       email: recipientEmail,
       locationName: context.location_title,
@@ -61,7 +60,7 @@ export async function sendReviewRequestForBooking(
       userId: request.user_id,
       // One invitation retains its link and receipt across retries. The
       // receipt is never sent twice once Resend accepted it.
-      delivery: { guestThreadId: bookingId, sourceEntryId: entry.id },
+      delivery: { guestThreadId: threadId, sourceEntryId: entry.id },
     })
     await markReviewRequestSendSuccess(db, request.id)
   } catch (error) {
@@ -75,7 +74,7 @@ export async function sendReviewRequestForBooking(
   // Delivery publishes before the invitation's success marker is written.
   // Open apps must read again after that write to clear its outstanding card.
   try {
-    await publishGuestInboxThreadEvent(env, db, { threadId: bookingId, type: 'thread.changed' })
+    await publishGuestInboxThreadEvent(env, db, { threadId, type: 'thread.changed' })
   } catch (cause) {
     throw new HTTPError({ statusCode: 503, message: 'The review invitation was sent, but open apps could not be updated. Reload to see its saved status.',
       data: { code: 'DASHBOARD_PUBLICATION_FAILED', field: 'realtime', committed: true, request_id: request.id }, cause })

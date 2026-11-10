@@ -8,10 +8,10 @@ import { discardMessagePhotos, listMessagePhotos, messagePhotoPlacements, upload
 import { firstName } from '~/server/domain/guest-threads/presentation'
 import { bookingEditorPath, guestConversationPath, productPaymentPath } from '~/server/utils/dashboard-links'
 import { loadOwnerPictures } from '~/server/notifications/hero'
-import { addLocalDays, formatCalendarDate, formatTime, formatTimestamp, isValidInstant, localDateAt, localDateTimeToInstant } from '~/utils/timezone'
+import { addLocalDays, formatCalendarDate, formatTimestamp, isValidInstant, localDateAt, localDateTimeToInstant } from '~/utils/timezone'
 import { STAY_CHANNEL_LABELS, type StayChannel } from '~/shared/bookings'
 import type { CloudflareEnv } from '~/server/utils/auth'
-import { BOOKED_RECORDS_SQL, type BookedKind } from '~/server/domain/requests'
+import { BOOKING_RECORDS_SQL, bookingDay, isBookingDay } from '~/server/domain/requests'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import { getVerticalCopy } from '~/utils/vertical-copy'
 
@@ -29,7 +29,7 @@ export type TaskStatus = 'open' | 'done' | 'skipped' | 'cancelled'
 
 export interface TaskRow {
   id: string; organization_id: string; kind: TaskKind
-  subject_type: 'stay' | 'request' | 'scheduled_guest_message' | 'booking' | 'article' | 'post' | 'product' | null; subject_id: string | null
+  subject_type: 'request' | 'scheduled_guest_message' | 'booking' | 'article' | 'post' | 'product' | null; subject_id: string | null
   product_id: string | null; location_id: string | null; opportunity_id: string | null
   title: string | null; notes: string | null
   assigned_member_id: string | null
@@ -57,12 +57,13 @@ export function isJobTask(row: Pick<TaskRow, 'kind'>): boolean {
   return row.kind === 'turnover' || row.kind === 'stay_ready' || row.kind === 'consultation_prep' || row.kind === 'consultation_follow_up'
 }
 
-export type JobSubject = { kind: BookedKind; id: string }
+/** The booking a job is about, and what it holds: a home's nights (a turnover or a make-ready job) or a session's seats (a consultation's jobs). */
+export type JobSubject = { id: string; unit: 'slot' | 'nights' }
 
-/** The booked record a job is about, which its conversation is tied to. */
-export function jobSubject(row: Pick<TaskRow, 'dedupe_key' | 'subject_type' | 'subject_id'>): JobSubject {
-  if (!row.subject_id || (row.subject_type !== 'stay' && row.subject_type !== 'booking')) throw new Error(`Job task ${row.dedupe_key} names no booked record`)
-  return { kind: row.subject_type, id: row.subject_id }
+/** The booking a job is about, which its conversation is tied to. */
+export function jobSubject(row: Pick<TaskRow, 'dedupe_key' | 'kind' | 'subject_type' | 'subject_id'>): JobSubject {
+  if (!row.subject_id || row.subject_type !== 'booking') throw new Error(`Job task ${row.dedupe_key} names no booking`)
+  return { id: row.subject_id, unit: row.kind === 'turnover' || row.kind === 'stay_ready' ? 'nights' : 'slot' }
 }
 
 /** Whether a job's member hears about it in a team conversation: a member who is not an owner or admin. */
@@ -82,10 +83,28 @@ export interface StayWindow { id: string; product_id: string; status: 'pending' 
 
 interface HomeClock { product_id: string; location_id: string; timezone: string; check_in_time: string | null; check_out_time: string | null; assigned_member_id: string | null }
 
-/** The batch guard: the turnover statements apply only if the stay row is what they were computed for. */
-function stayIs(organizationId: string, stay: StayWindow): BatchQuery {
-  return { query: `EXISTS (SELECT 1 FROM stays WHERE organization_id = ? AND id = ? AND product_id = ? AND status = ? AND check_in_date = ? AND check_out_date = ?)`,
-    params: [organizationId, stay.id, stay.product_id, stay.status, stay.check_in_date, stay.check_out_date] }
+/** A nights booking's stored ends read as the home's days. */
+type StoredStay = { id: string; product_id: string; status: StayWindow['status']; starts_at: string; ends_at: string; timezone: string }
+const stayWindowOf = (row: StoredStay): StayWindow => ({ id: row.id, product_id: row.product_id, status: row.status, check_in_date: bookingDay(row.starts_at, row.timezone), check_out_date: bookingDay(row.ends_at, row.timezone) })
+
+/** A stored end on this local day: the day alone, or an instant within it. */
+function storedOn(column: string, date: string, timezone: string): BatchQuery {
+  return { query: `(${column} = ? OR (${column} >= ? AND ${column} < ?))`,
+    params: [date, localDateTimeToInstant(date, '00:00', timezone, 'earlier').toISOString(), localDateTimeToInstant(addLocalDays(date, 1), '00:00', timezone, 'earlier').toISOString()] }
+}
+
+/** The batch guard: the turnover statements apply only if the booking is what they were computed for, its ends on these days in its home's clock. */
+function stayIs(organizationId: string, stay: StayWindow, timezone: string): BatchQuery {
+  const starts = storedOn('starts_at', stay.check_in_date, timezone), ends = storedOn('ends_at', stay.check_out_date, timezone)
+  return { query: `EXISTS (SELECT 1 FROM bookings WHERE organization_id = ? AND id = ? AND product_id = ? AND status = ? AND product_session_id IS NULL AND ${starts.query} AND ${ends.query})`,
+    params: [organizationId, stay.id, stay.product_id, stay.status, ...starts.params!, ...ends.params!] }
+}
+
+/** The confirmed stays at one home other than this one, checking out on or after a day (read wide, kept by their own days). */
+async function confirmedStaysAt(db: DbClient, organizationId: string, productId: string, exceptId: string, checkOutOnOrAfter: string): Promise<StayWindow[]> {
+  const rows = await queryAll<StoredStay>(db, `SELECT id, product_id, status, starts_at, ends_at, timezone FROM bookings
+    WHERE organization_id = ? AND product_id = ? AND product_session_id IS NULL AND status = 'confirmed' AND id <> ? AND ends_at >= ?`, [organizationId, productId, exceptId, addLocalDays(checkOutOnOrAfter, -1)])
+  return rows.map(stayWindowOf).filter(stay => stay.check_out_date >= checkOutOnOrAfter)
 }
 
 /**
@@ -97,12 +116,14 @@ function stayIs(organizationId: string, stay: StayWindow): BatchQuery {
  */
 export async function turnoverTaskQueries(db: DbClient, input: { organizationId: string; after: StayWindow; before: Pick<StayWindow, 'product_id' | 'check_in_date'> | null; now: string }): Promise<BatchQuery[]> {
   const { organizationId, after, before, now } = input
-  const guard = stayIs(organizationId, after)
   const homes = [...new Set([after.product_id, ...(before ? [before.product_id] : [])])]
   const clocks = await queryAll<HomeClock>(db, `SELECT c.product_id, c.location_id, l.timezone, b.check_in_time, b.check_out_time, b.assigned_member_id
     FROM product_stay_configs c JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
     JOIN product_booking_configs b ON b.organization_id = c.organization_id AND b.product_id = c.product_id
     WHERE c.organization_id = ? AND c.product_id IN (SELECT value FROM json_each(?))`, [organizationId, d1JsonStringSet(homes)])
+  const afterHome = clocks.find(clock => clock.product_id === after.product_id)
+  if (!afterHome) throw new Error(`Home ${after.product_id} has no stay settings`)
+  const guard = stayIs(organizationId, after, afterHome.timezone)
   const queries: BatchQuery[] = []
   const windows = new Map<string, { stay: StayWindow; home: HomeClock; next: string | null }>()
   for (const productId of homes) {
@@ -110,8 +131,7 @@ export async function turnoverTaskQueries(db: DbClient, input: { organizationId:
     if (!home) throw new Error(`Home ${productId} has no stay settings`)
     const anchors = [after.product_id === productId ? after.check_in_date : null, before?.product_id === productId ? before.check_in_date : null].filter((value): value is string => value !== null)
     const earliest = anchors.reduce((min, value) => value < min ? value : min, anchors[0]!)
-    const others = await queryAll<StayWindow>(db, `SELECT id, product_id, status, check_in_date, check_out_date FROM stays
-      WHERE organization_id = ? AND product_id = ? AND status = 'confirmed' AND id <> ? AND check_out_date >= date(?, '-400 days')`, [organizationId, productId, after.id, earliest])
+    const others = await confirmedStaysAt(db, organizationId, productId, after.id, addLocalDays(earliest, -400))
     const confirmed = [...others, ...(after.product_id === productId && after.status === 'confirmed' ? [after] : [])]
     const nextArrival = (stay: StayWindow) => confirmed.filter(other => other.id !== stay.id && other.check_in_date >= stay.check_out_date)
       .reduce<string | null>((min, other) => min === null || other.check_in_date < min ? other.check_in_date : min, null)
@@ -141,7 +161,7 @@ export async function turnoverTaskQueries(db: DbClient, input: { organizationId:
       queries.push({
         query: `INSERT INTO tasks (id, organization_id, kind, subject_type, subject_id, product_id, location_id, assigned_member_id,
             starts_at, due_at, timezone, status, dedupe_key, version, created_at, updated_at)
-          SELECT ?, ?, 'turnover', 'stay', ?, ?, ?, ?, ?, ?, ?, 'open', ?, 1, ?, ? WHERE (${guard.query})
+          SELECT ?, ?, 'turnover', 'booking', ?, ?, ?, ?, ?, ?, ?, 'open', ?, 1, ?, ? WHERE (${guard.query})
           ON CONFLICT (dedupe_key) DO NOTHING`,
         params: [crypto.randomUUID(), organizationId, stay.id, home.product_id, home.location_id, home.assigned_member_id,
           startsAt, dueAt, home.timezone, key, now, now, ...guard.params!],
@@ -173,7 +193,7 @@ export function messageDeliveryTaskQueries(messageId: string, now: string): Batc
     // The place is the booked record's (none for an online consultation).
     query: `INSERT INTO tasks (id, organization_id, kind, subject_type, subject_id, product_id, location_id, timezone, status, dedupe_key, version, created_at, updated_at)
       SELECT ?, m.organization_id, 'message_delivery', 'scheduled_guest_message', m.id, m.product_id,
-          (SELECT br.location_id FROM ${BOOKED_RECORDS_SQL} br WHERE br.organization_id = m.organization_id AND br.kind = m.subject_type AND br.id = m.subject_id),
+          (SELECT b.location_id FROM bookings b WHERE b.organization_id = m.organization_id AND b.id = m.booking_id),
           m.timezone, 'open', 'message_delivery:' || m.id, 1, ?, ?
         FROM scheduled_guest_messages m
        WHERE m.id = ? AND m.status IN ('failed', 'needs_review')
@@ -305,19 +325,29 @@ export interface TaskView {
 /** A run of cards: Today's open work has no header; "Done"; Upcoming's "Tomorrow" with "Sat, Nov 7" in grey. */
 export interface TaskSection { id: string; title: string | null; subtitle: string | null; tasks: TaskView[] }
 
-interface StayFacts { id: string; product_id: string; guest_name: string | null; adults: number; children: number; check_in_date: string; check_out_date: string; request_id: string | null }
+interface StayFacts { id: string; product_id: string; guest_name: string | null; adults: number; children: number; starts_at: string; ends_at: string; timezone: string; check_in_date: string; check_out_date: string; request_id: string }
 interface StayContextFacts extends StayFacts {
-  guest_surname: string | null
   guest_image_url: string | null
-  home_timezone: string | null
-  arrival_time: string | null
-  check_in_time: string | null
-  check_out_time: string | null
   status: StayWindow['status']
   no_show_at: string | null
   channel: StayChannel
   overbooked: number
-  same_day_arrival: number
+}
+
+/** A nights booking with its guest as their conversation names them; `s` is the booking. */
+const STAY_FACTS = `s.id, s.product_id, json_extract(r.payload_json, '$.guest.name') AS guest_name, s.adults, s.children, s.starts_at, s.ends_at, s.timezone, s.request_id`
+const STAY_FACTS_FROM = 'bookings s JOIN requests r ON r.organization_id = s.organization_id AND r.id = s.request_id'
+function stayFacts<T extends Omit<StayFacts, 'check_in_date' | 'check_out_date'>>(row: T): T & Pick<StayFacts, 'check_in_date' | 'check_out_date'> {
+  if (row.adults === null || row.children === null) throw new Error(`Stay ${row.id} has no party breakdown`)
+  return { ...row, check_in_date: bookingDay(row.starts_at, row.timezone), check_out_date: bookingDay(row.ends_at, row.timezone) }
+}
+
+/** The home's next guests after a stay: the confirmed stay arriving first on or after its checkout day. */
+async function nextArrival(db: DbClient, organizationId: string, stay: Pick<StayFacts, 'id' | 'product_id' | 'check_out_date'>): Promise<StayFacts | null> {
+  const rows = (await queryAll<Omit<StayFacts, 'check_in_date' | 'check_out_date'>>(db, `SELECT ${STAY_FACTS} FROM ${STAY_FACTS_FROM}
+    WHERE s.organization_id = ? AND s.product_id = ? AND s.product_session_id IS NULL AND s.status = 'confirmed' AND s.id <> ? AND s.starts_at >= ?`,
+  [organizationId, stay.product_id, stay.id, addLocalDays(stay.check_out_date, -1)])).map(stayFacts)
+  return rows.filter(row => row.check_in_date >= stay.check_out_date).sort((a, b) => a.check_in_date.localeCompare(b.check_in_date) || a.id.localeCompare(b.id))[0] ?? null
 }
 interface Context {
   slug: string
@@ -328,10 +358,10 @@ interface Context {
   products: Map<string, { name: string; imageUrl: string | null }>
   locations: Map<string, string>
   stays: Map<string, StayFacts>
-  replyStays: Map<string, StayContextFacts>
+  replyStays: Map<string, StayContextFacts & { same_day_arrival: boolean }>
   arrivals: Map<string, StayFacts | null>
   requests: Map<string, { guest_name: string | null; participant: string | null; preview: string | null; asked_at: string | null }>
-  messages: Map<string, { title: string; status: string; request_id: string | null; subject_type: BookedKind; subject_id: string }>
+  messages: Map<string, { title: string; status: string; request_id: string | null; booking_id: string }>
   /** A booking's conversation, when it is and what was booked. */
   records: Map<string, { request_id: string | null; starts_at: string; product_kind: ProductKind }>
   /** The entry a change task is about. */
@@ -343,14 +373,13 @@ async function loadContext(db: DbClient, viewer: TaskViewer, rows: TaskRow[]): P
   const organizationId = viewer.principal.organizationId
   const ids = (pick: (row: TaskRow) => string | null) => [...new Set(rows.map(pick).filter((id): id is string => id !== null))]
   const messageIds = ids(row => row.subject_type === 'scheduled_guest_message' ? row.subject_id : null)
-  const messages = messageIds.length ? await queryAll<{ id: string; template_title: string; status: string; request_id: string | null; subject_type: BookedKind; subject_id: string }>(db,
-    'SELECT id, template_title, status, request_id, subject_type, subject_id FROM scheduled_guest_messages WHERE organization_id = ? AND id IN (SELECT value FROM json_each(?))', [organizationId, d1JsonStringSet(messageIds)]) : []
-  const recordIds = [...new Set([...ids(row => row.subject_type === 'booking' ? row.subject_id : null),
-    ...messages.flatMap(message => message.subject_type === 'stay' ? [] : [message.subject_id])])]
-  const records = await queryAll<{ id: string; request_id: string | null; starts_at: string; product_kind: ProductKind }>(db, `SELECT br.id, br.request_id, br.starts_at, br.product_kind FROM ${BOOKED_RECORDS_SQL} br
-     WHERE br.organization_id = ? AND br.kind <> 'stay' AND br.id IN (SELECT value FROM json_each(?))`, [organizationId, d1JsonStringSet(recordIds)])
-  const changeStays = rows.filter(row => row.kind === 'booking_change' && row.subject_type === 'stay').map(row => row.subject_id!)
-  const changeStayRequests = changeStays.length ? await queryAll<{ request_id: string | null }>(db, 'SELECT request_id FROM stays WHERE organization_id = ? AND id IN (SELECT value FROM json_each(?))', [organizationId, d1JsonStringSet(changeStays)]) : []
+  const messages = messageIds.length ? await queryAll<{ id: string; template_title: string; status: string; request_id: string | null; booking_id: string }>(db,
+    'SELECT id, template_title, status, request_id, booking_id FROM scheduled_guest_messages WHERE organization_id = ? AND id IN (SELECT value FROM json_each(?))', [organizationId, d1JsonStringSet(messageIds)]) : []
+  const bookingIds = [...new Set([...ids(row => row.subject_type === 'booking' ? row.subject_id : null), ...messages.map(message => message.booking_id)])]
+  const booked = bookingIds.length ? await queryAll<{ id: string; request_id: string | null; starts_at: string; product_kind: ProductKind; unit: 'slot' | 'nights' }>(db, `SELECT br.id, br.request_id, br.starts_at, br.product_kind, br.unit FROM ${BOOKING_RECORDS_SQL} br
+     WHERE br.organization_id = ? AND br.id IN (SELECT value FROM json_each(?))`, [organizationId, d1JsonStringSet(bookingIds)]) : []
+  const records = booked.filter(record => record.unit === 'slot')
+  const changeStayRequests = booked.filter(record => record.unit === 'nights' && rows.some(row => row.kind === 'booking_change' && row.subject_id === record.id))
   const entryIds = rows.filter(row => row.kind === 'booking_change').map(row => row.dedupe_key.slice('booking_change:'.length))
   const entries = entryIds.length ? await queryAll<{ id: string; event_name: string; actor_kind: string; body: string | null }>(db, 'SELECT id, event_name, actor_kind, body FROM activity_entries WHERE id IN (SELECT value FROM json_each(?))', [d1JsonStringSet(entryIds)]) : []
   const requestIds = [...new Set([...ids(row => row.subject_type === 'request' ? row.subject_id : null),
@@ -373,23 +402,20 @@ async function loadContext(db: DbClient, viewer: TaskViewer, rows: TaskRow[]): P
       [organizationId, d1JsonStringSet(ids(row => row.status === 'open' ? row.opportunity_id : null))]),
   ])
   if (!organization) throw new Error(`Organization ${organizationId} is missing`)
-  const stayIds = [...new Set([...ids(row => row.subject_type === 'stay' ? row.subject_id : null), ...messages.flatMap(message => message.subject_type === 'stay' ? [message.subject_id] : [])])]
+  const stayIds = booked.filter(record => record.unit === 'nights').map(record => record.id)
   const openReplies = ids(row => row.kind === 'guest_reply' && row.status === 'open' ? row.subject_id : null)
   const replyRequests = openReplies.length && viewer.principal.role && await roleAllows({ ...viewer.principal, permissions: { operations: ['update'] } }) ? openReplies : []
-  const stays = await queryAll<StayContextFacts>(db, `
-    SELECT s.id, s.product_id, s.guest_name, s.guest_surname, s.adults, s.children, s.check_in_date, s.check_out_date,
-      s.request_id, s.status, s.no_show_at, s.channel, s.overbooked, u.image AS guest_image_url, l.timezone AS home_timezone,
-      s.arrival_time, b.check_in_time, b.check_out_time, EXISTS (
-        SELECT 1 FROM stays next WHERE next.organization_id = s.organization_id AND next.product_id = s.product_id
-          AND next.status = 'confirmed' AND next.id <> s.id AND next.check_in_date = s.check_out_date
-      ) AS same_day_arrival
-    FROM stays s
-    LEFT JOIN product_stay_configs c ON c.organization_id = s.organization_id AND c.product_id = s.product_id
-    LEFT JOIN product_booking_configs b ON b.organization_id = s.organization_id AND b.product_id = s.product_id
-    LEFT JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
+  const stays = (await queryAll<Omit<StayContextFacts, 'check_in_date' | 'check_out_date' | 'same_day_arrival'>>(db, `
+    SELECT ${STAY_FACTS}, s.status, s.no_show_at, s.channel, s.overbooked, u.image AS guest_image_url
+    FROM ${STAY_FACTS_FROM}
     LEFT JOIN user u ON u.id = s.user_id
-    WHERE s.organization_id = ? AND (s.id IN (SELECT value FROM json_each(?)) OR s.request_id IN (SELECT value FROM json_each(?)))`,
-  [organizationId, d1JsonStringSet(stayIds), d1JsonStringSet(replyRequests)])
+    WHERE s.organization_id = ? AND s.product_session_id IS NULL AND (s.id IN (SELECT value FROM json_each(?)) OR s.request_id IN (SELECT value FROM json_each(?)))`,
+  [organizationId, d1JsonStringSet(stayIds), d1JsonStringSet(replyRequests)])).map(stayFacts)
+  // Whether the home's next guests arrive the day the guest of a conversation being answered leaves.
+  const sameDay = new Set<string>()
+  for (const stay of stays.filter(item => item.request_id && replyRequests.includes(item.request_id))) {
+    if ((await nextArrival(db, organizationId, stay))?.check_in_date === stay.check_out_date) sameDay.add(stay.id)
+  }
   const productIds = [...new Set([...ids(row => row.product_id), ...stays.map(stay => stay.product_id)])]
   const [products, pictures] = await Promise.all([
     queryAll<{ id: string; name: string | null }>(db, `
@@ -403,8 +429,7 @@ async function loadContext(db: DbClient, viewer: TaskViewer, rows: TaskRow[]): P
   for (const row of rows.filter(row => row.kind === 'turnover' && row.product_id !== null)) {
     const stay = stays.find(item => item.id === row.subject_id)
     if (!stay) continue
-    arrivals.set(row.id, await queryFirst<StayFacts>(db, `SELECT id, product_id, guest_name, adults, children, check_in_date, check_out_date, request_id FROM stays WHERE organization_id = ? AND product_id = ? AND status = 'confirmed'
-      AND id <> ? AND check_in_date >= ? ORDER BY check_in_date, id LIMIT 1`, [organizationId, row.product_id, stay.id, stay.check_out_date]) ?? null)
+    arrivals.set(row.id, await nextArrival(db, organizationId, { ...stay, product_id: row.product_id! }))
   }
   return {
     slug: organization.slug,
@@ -418,10 +443,10 @@ async function loadContext(db: DbClient, viewer: TaskViewer, rows: TaskRow[]): P
     })),
     locations: new Map(locations.map(location => [location.id, location.title])),
     stays: new Map(stays.map(stay => [stay.id, stay])),
-    replyStays: new Map(stays.flatMap(stay => stay.request_id && replyRequests.includes(stay.request_id) ? [[stay.request_id, stay]] : [])),
+    replyStays: new Map(stays.flatMap(stay => stay.request_id && replyRequests.includes(stay.request_id) ? [[stay.request_id, { ...stay, same_day_arrival: sameDay.has(stay.id) }]] : [])),
     arrivals,
     requests: new Map(requests.map(request => [request.id, request])),
-    messages: new Map(messages.map(message => [message.id, { title: message.template_title, status: message.status, request_id: message.request_id, subject_type: message.subject_type, subject_id: message.subject_id }])),
+    messages: new Map(messages.map(message => [message.id, { title: message.template_title, status: message.status, request_id: message.request_id, booking_id: message.booking_id }])),
     records: new Map(records.map(record => [record.id, { request_id: record.request_id, starts_at: record.starts_at, product_kind: record.product_kind }])),
     entries: new Map(entries.map(entry => [entry.id, { event_name: entry.event_name, actor_kind: entry.actor_kind, body: entry.body }])),
     photos: new Map([...photos].map(([id, list]) => [id, list.map(photo => ({ id: photo.id, url: photo.url, thumbnailUrl: photo.thumbnailUrl, width: photo.width, height: photo.height }))])),
@@ -505,22 +530,22 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
       const stay = row.status === 'open' ? context.replyStays.get(row.subject_id!) : undefined
       if (stay) {
         const home = context.products.get(stay.product_id)
-        if (!home || !stay.home_timezone) throw new Error(`Stay ${stay.id} has no home or timezone`)
+        if (!home) throw new Error(`Stay ${stay.id} has no home`)
         stayId = stay.id
-        const localDay = localDateAt(now, stay.home_timezone)
+        const localDay = localDateAt(now, stay.timezone)
+        const clockAt = (value: string) => isBookingDay(value) ? 'Time not set' : formatTimestamp(value, 'en', stay.timezone, { hour: 'numeric', minute: '2-digit' })
         let statusLabel: string
         if (stay.status === 'cancelled') statusLabel = 'Cancelled'
         else if (stay.no_show_at !== null) statusLabel = 'No-show recorded'
         else if (stay.status === 'pending') statusLabel = 'Pending confirmation'
         else if (localDay > stay.check_out_date) statusLabel = 'Stay ended'
         else if (localDay <= stay.check_in_date) {
-          const clock = stay.arrival_time ?? stay.check_in_time
-          statusLabel = `Checking in · ${clock === null ? 'Time not set' : formatTime(clock, 'en')}`
+          statusLabel = `Checking in · ${clockAt(stay.starts_at)}`
         } else if (localDay === stay.check_out_date) {
-          const clock = stay.check_out_time === null ? 'Time not set' : formatTime(stay.check_out_time, 'en')
+          const clock = clockAt(stay.ends_at)
           statusLabel = stay.same_day_arrival ? `Checking out · Next guests arrive the same day · ${clock}` : `Checking out · ${clock}`
         } else statusLabel = 'Currently hosting'
-        const guest = [stay.guest_name, stay.guest_surname].filter(Boolean).join(' ')
+        const guest = stay.guest_name ?? ''
         const partySize = stay.adults + stay.children
         reservation = {
           dateLabel: `${formatCalendarDate(stay.check_in_date, 'en', { month: 'short', day: 'numeric' })} – ${formatCalendarDate(stay.check_out_date, 'en', { month: 'short', day: 'numeric', year: 'numeric' })}`,
@@ -541,10 +566,9 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
       // Only what our own record knows: the message, and that it did not send.
       error = `${message.title} didn’t send`
       detail = message.status === 'needs_review' ? 'Its send was already used for a different message. Check the conversation before sending it again.' : 'You can send it yourself from the conversation.'
-      if (message.subject_type === 'stay') {
-        const stay = context.stays.get(message.subject_id)
-        if (!stay) throw new Error(`Delivery task ${row.id} has no stay`)
-        stayId = message.subject_id
+      const stay = context.stays.get(message.booking_id)
+      if (stay) {
+        stayId = message.booking_id
         avatar = { initial: initialOf(who(stay.guest_name)), tone: 'cool' }
         const home = context.products.get(stay.product_id)?.name ?? null
         const arrival = stay.check_in_date > today
@@ -552,11 +576,11 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
           : stay.check_in_date === today ? 'Arriving today' : stay.check_out_date > today ? 'Staying now' : `Checked out ${calendarDay(stay.check_out_date)}`
         statusLine = [arrival, home].filter(Boolean).join(' · ')
         title = who(stay.guest_name)
-        path = conversation(message.request_id) ?? stayPath(message.subject_id)
+        path = conversation(message.request_id) ?? stayPath(message.booking_id)
         action = { type: 'open', label: message.request_id ? 'Open conversation' : 'Open stay', path }
       } else {
         // A consultation, class or table: its time and place, and its conversation when it has one.
-        const record = context.records.get(message.subject_id)
+        const record = context.records.get(message.booking_id)
         if (!record) throw new Error(`Delivery task ${row.id} has no booking`)
         const request = record.request_id ? context.requests.get(record.request_id) : undefined
         title = request?.guest_name ? firstName(request.guest_name) : request?.participant ?? 'Guest'
@@ -603,8 +627,8 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
     }
     case 'booking_change': {
       const entry = context.entries.get(row.dedupe_key.slice('booking_change:'.length))
-      const stay = row.subject_type === 'stay' ? context.stays.get(row.subject_id!) : undefined
-      const record = row.subject_type === 'stay' ? null : context.records.get(row.subject_id!)
+      const stay = context.stays.get(row.subject_id!)
+      const record = stay ? null : context.records.get(row.subject_id!)
       requestId = stay?.request_id ?? record?.request_id ?? null
       const request = requestId ? context.requests.get(requestId) : undefined
       if (!entry || !requestId || !request) throw new Error(`Change task ${row.id} has no change or conversation`)
@@ -726,16 +750,16 @@ export async function listTasks(db: DbClient, viewer: TaskViewer, query: TaskLis
   const closedSince = new Date(now.getTime() - 2 * 86_400_000).toISOString()
   const statusSql = query.status ? 't.status = ?' : `(t.status = 'open' OR (? = 'today' AND t.status IN ('done', 'skipped') AND t.closed_at >= ?))`
   const statusParams = query.status ? [query.status] : [query.range, closedSince]
-  const rows = await queryAll<TaskRow & { checkout_date: string | null }>(db, `SELECT t.*, s.check_out_date AS checkout_date FROM tasks t
-    LEFT JOIN stays s ON t.kind = 'turnover' AND t.starts_at IS NULL AND s.organization_id = t.organization_id AND s.id = t.subject_id
+  const rows = await queryAll<TaskRow & { checkout_at: string | null; checkout_timezone: string | null }>(db, `SELECT t.*, s.ends_at AS checkout_at, s.timezone AS checkout_timezone FROM tasks t
+    LEFT JOIN bookings s ON t.kind = 'turnover' AND t.starts_at IS NULL AND s.organization_id = t.organization_id AND s.id = t.subject_id
     WHERE t.organization_id = ? AND ${scope.sql} AND ${statusSql}${filters.map(sql => ` AND ${sql}`).join('')}
     ORDER BY COALESCE(t.starts_at, t.due_at, t.created_at), t.id`, [organizationId, ...scope.params, ...statusParams, ...params])
   const today = (row: TaskRow) => localDateAt(now, row.timezone)
   const dayOf = (instant: string | null, row: TaskRow) => instant === null ? null : localDateAt(new Date(instant), row.timezone)
   const startsOn = (row: typeof rows[number]) => {
     if (row.starts_at !== null || row.kind !== 'turnover') return dayOf(row.starts_at, row)
-    if (row.checkout_date === null) throw new Error(`Turnover ${row.id} has no stay`)
-    return row.checkout_date
+    if (row.checkout_at === null || row.checkout_timezone === null) throw new Error(`Turnover ${row.id} has no stay`)
+    return bookingDay(row.checkout_at, row.checkout_timezone)
   }
   const isToday = (row: typeof rows[number]) => {
     if (row.status !== 'open') return dayOf(row.closed_at, row) === today(row)
@@ -875,7 +899,7 @@ export function stayReadyTaskQueries(input: {
   const dueAt = home.check_in_time === null ? null : localDateTimeToInstant(input.checkInDate, home.check_in_time, home.timezone, 'compatible').toISOString()
   queries.push({
     query: `INSERT INTO tasks (id, organization_id, kind, subject_type, subject_id, product_id, location_id, assigned_member_id, title, notes, due_at, timezone, status, dedupe_key, version, created_at, updated_at)
-      SELECT ?, ?, 'stay_ready', 'stay', ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, 1, ?, ? WHERE ${guard.query}
+      SELECT ?, ?, 'stay_ready', 'booking', ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, 1, ?, ? WHERE ${guard.query}
       ON CONFLICT (dedupe_key) DO UPDATE SET status = 'open', closed_at = NULL, closed_by_user_id = NULL, outcome_note = NULL, due_at = excluded.due_at, title = excluded.title, notes = excluded.notes,
         assigned_member_id = excluded.assigned_member_id, version = tasks.version + 1, updated_at = excluded.updated_at`,
     params: [crypto.randomUUID(), organizationId, stayId, home.product_id, home.location_id, home.assigned_member_id, `Get ${home.internal_name} ready`.slice(0, 200),
@@ -890,13 +914,13 @@ export function stayReadyRevisionQueries(input: { organizationId: string; stayId
   const { organizationId, stayId, now, guard } = input
   if (input.cancelled) return [{
     query: `UPDATE tasks SET status = 'cancelled', closed_at = ?, closed_by_user_id = NULL, version = version + 1, updated_at = ?
-      WHERE organization_id = ? AND kind = 'stay_ready' AND subject_type = 'stay' AND subject_id = ? AND status = 'open' AND ${guard.query}`,
+      WHERE organization_id = ? AND kind = 'stay_ready' AND subject_type = 'booking' AND subject_id = ? AND status = 'open' AND ${guard.query}`,
     params: [now, now, organizationId, stayId, ...guard.params!],
   }]
   if (input.dueAt === undefined || !input.checkInDate) return []
   return [{
     query: `UPDATE tasks SET due_at = ?, notes = ?, version = version + 1, updated_at = ?
-      WHERE organization_id = ? AND kind = 'stay_ready' AND subject_type = 'stay' AND subject_id = ? AND status = 'open' AND due_at IS NOT ? AND ${guard.query}`,
+      WHERE organization_id = ? AND kind = 'stay_ready' AND subject_type = 'booking' AND subject_id = ? AND status = 'open' AND due_at IS NOT ? AND ${guard.query}`,
     params: [input.dueAt, `${input.guestName ?? 'A guest'} was moved here and arrives ${formatCalendarDate(input.checkInDate, 'en', { weekday: 'short', month: 'short', day: 'numeric' })}.`, now,
       organizationId, stayId, input.dueAt, ...guard.params!],
   }]

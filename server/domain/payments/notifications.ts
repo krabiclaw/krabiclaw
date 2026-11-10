@@ -25,7 +25,7 @@ export async function notifyPaymentFinancialEvent(db: DbClient, stripe: Stripe, 
   // A booking or stay paid on the site is confirmed to its guest by
   // the confirmation email, which states what they paid. A failure is told here:
   // a bank or pay-later method can fail after the guest has left the pay page.
-  const checkout = payment.subject_type === 'booking' || payment.subject_type === 'stay'
+  const checkout = payment.subject_type === 'booking'
   const guestKind = (input.kind.startsWith('refund_') || input.kind === 'payment_failed' || (!checkout && input.kind.startsWith('payment_'))) ? input.kind as GuestPaymentNotificationKind : null
   // A deleted merchant and an unclaimed contact have no application audience.
   // The verified return can still claim the purchase and then notify its buyer.
@@ -35,8 +35,8 @@ export async function notifyPaymentFinancialEvent(db: DbClient, stripe: Stripe, 
   let email: string | null = null
   if (guestKind && checkout) {
     // The address the guest booked with, which their confirmation went to.
-    const booked = payment.subject_type === 'stay'
-      ? snapshot.stay?.guest?.email
+    const booked = snapshot.stay
+      ? snapshot.stay.guest?.email
       : (await queryFirst<{ email: string | null }>(db, `SELECT json_extract(r.payload_json, '$.guest.email') AS email FROM payment_checkout_holds h JOIN requests r ON r.id = h.request_id AND r.organization_id = h.organization_id WHERE h.payment_id = ? AND h.organization_id = ?`, [payment.id, payment.organization_id]))?.email
     if (typeof booked !== 'string' || !booked) throw new Error('Paid checkout has no guest email to notify')
     email = booked
@@ -50,15 +50,14 @@ export async function notifyPaymentFinancialEvent(db: DbClient, stripe: Stripe, 
     }
   }
   const eventKey = `payments:${payment.stripe_account_id}:${payment.livemode}:${input.nativeId}:${input.status}:${input.kind}`
-  const visitKind = payment.subject_type === 'booking' ? payment.subject_type : null
-  const hold = visitKind && organization ? await queryFirst<{ request_id: string | null }>(db, 'SELECT request_id FROM payment_checkout_holds WHERE payment_id=? AND organization_id=?', [payment.id, payment.organization_id]) : null
-  if (visitKind && organization && !hold?.request_id) throw new Error('Booking payment notification has no canonical guest request')
-  // A stay's conversation opens when its payment is captured; it is the stay's, not the hold's.
-  const stayThread = payment.subject_type === 'stay' && payment.subject_id && organization ? await queryFirst<{ request_id: string | null }>(db, 'SELECT request_id FROM stays WHERE organization_id=? AND id=?', [payment.organization_id, payment.subject_id]) : null
-  const threadId = hold?.request_id ?? stayThread?.request_id ?? null
-  const booking=visitKind&&payment.subject_id&&organization?await queryFirst<{request_id:string|null}>(db,`SELECT request_id FROM bookings WHERE organization_id=? AND id=?`,[payment.organization_id,payment.subject_id]):null
-  if(booking&&booking.request_id!==threadId)throw new Error('Booking payment notification request does not match its operational booking')
-  const deepLink = organization ? `${dashboardOrigin(env, { orgSlug: organization.slug, locationSlug: null })}${booking?.request_id?`/bookings/${visitKind}/${encodeURIComponent(booking.request_id)}`:stayThread?`/bookings/stay/${encodeURIComponent(payment.subject_id!)}`:`/earnings/transactions/${encodeURIComponent(payment.id)}`}` : null
+  // A session booking's checkout waits in its guest's conversation; a stay's conversation opens when its payment is captured, with its booking.
+  const nights = Boolean(snapshot.stay)
+  const hold = checkout && !nights && organization ? await queryFirst<{ request_id: string | null }>(db, 'SELECT request_id FROM payment_checkout_holds WHERE payment_id=? AND organization_id=?', [payment.id, payment.organization_id]) : null
+  if (checkout && !nights && organization && !hold?.request_id) throw new Error('Booking payment notification has no canonical guest request')
+  const booking = checkout && payment.subject_id && organization ? await queryFirst<{ request_id: string | null }>(db, 'SELECT request_id FROM bookings WHERE organization_id=? AND id=?', [payment.organization_id, payment.subject_id]) : null
+  const threadId = hold?.request_id ?? booking?.request_id ?? null
+  if (booking && booking.request_id !== threadId) throw new Error('Booking payment notification request does not match its operational booking')
+  const deepLink = organization ? `${dashboardOrigin(env, { orgSlug: organization.slug, locationSlug: null })}${booking?.request_id ? (nights ? `/bookings/stay/${encodeURIComponent(payment.subject_id!)}` : `/bookings/booking/${encodeURIComponent(booking.request_id)}`) : `/earnings/transactions/${encodeURIComponent(payment.id)}`}` : null
   // A purchase refunded because its capacity had gone is refunded without being asked, so the buyer is told why.
   const refundedForCapacity = (input.kind === 'refund_pending' || input.kind === 'refund_succeeded') && await queryFirst(db, "SELECT 1 FROM payment_refunds WHERE payment_id=? AND stripe_refund_id=? AND idempotency_key LIKE 'unfulfillable:%'", [payment.id, input.nativeId])
   const refundReason = !refundedForCapacity ? null : `What you paid for was taken before your payment completed, so your booking could not be made and your payment ${input.kind === 'refund_pending' ? 'will be' : 'has been'} refunded in full.`

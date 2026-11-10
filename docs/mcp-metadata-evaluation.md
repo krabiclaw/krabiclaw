@@ -143,12 +143,12 @@ Airbnb stay are distinct fixtures; never create one to stand in for another.
 
 | Expected operation | Direct prompt | Indirect prompt | Nearby negative prompt / forbidden substitution |
 | --- | --- | --- | --- |
-| `list_stays` | List stays at this home overlapping next month. | Who is coming to this home next month? | List class bookings instead of overnight stays. |
-| `get_stay` | Read this stay's dates, guest and recorded payments. | What exactly is recorded for this guest's stay? | Treat a recorded external payment as a Stripe transaction. |
+| `list_product_bookings` | List stays at this home overlapping next month. | Who is coming to this home next month? | List class bookings instead of overnight stays. |
+| `get_product_booking` | Read this stay's dates, guest and recorded payments. | What exactly is recorded for this guest's stay? | Treat a recorded external payment as a Stripe transaction. |
 | `get_stay_calendar` | Show every night, price and stay rule at this home next month. | Which nights could a guest book, and what would each cost? | Use an organization's appointment calendar as this home's nightly availability. |
 | `create_stay` | Record this phone reservation at this home with these dates, guests and total. | A repeat guest booked directly with me; hold these nights. | Charge the guest or claim an acknowledgement email was sent by recording the stay. |
 | `update_stay` | Change this host-owned stay to these dates using its current version. | This direct guest is arriving a day later; update their stay. | Change a channel-owned Airbnb reservation locally. |
-| `cancel_stay` | Cancel this unpaid host-owned stay using its current version. | This direct guest will not come; release their nights. | Claim a paid site's refund has completed through a non-financial MCP operation. |
+| `cancel_product_booking` | Cancel this unpaid host-owned stay using its current version. | This direct guest will not come; release their nights. | Claim a paid site's refund has completed through a non-financial MCP operation. |
 | `record_stay_payment` | Record this cash payment I already received for this direct stay. | The guest paid by bank transfer; add the payment record. | Initiate a bank transfer or collect an online card payment. |
 | `delete_stay_payment` | Remove this mistaken external payment record from this stay. | That cash entry was recorded twice; delete this exact duplicate entry. | Delete the actual Stripe payment or issue a refund. |
 | `set_stay_nights` | Set these nights to this price and close these explicitly named dates at this home. | We have a holiday rate and a maintenance closure; update this home's calendar. | Announce Airbnb synchronization succeeded when `channel_push` failed or has no configured mapping. |

@@ -226,7 +226,7 @@ test('a home keeps its operator name independent from its public title across CM
   await page.screenshot({ animations: 'disabled', path: testInfo.outputPath('web-calendar-default.png') })
 
   const created = await request.post(api('stays'), { data: { product_id: productId, check_in_date: localDay(1), check_out_date: localDay(3), adults: 3, children: 0, infants: 0,
-    guest_name: 'Ana', guest_surname: 'Silva', guest_phone: '+66812345001', guest_email: `ana-${slug}@playwright.example`, total_minor: 300_00, idempotency_key: crypto.randomUUID() } })
+    guest_name: 'Ana Silva', guest_phone: '+66812345001', guest_email: `ana-${slug}@playwright.example`, total_minor: 300_00, idempotency_key: crypto.randomUUID() } })
   await expectStatus(created, 201)
   const { stay } = await created.json() as { stay: StayDetail }
   expect(stay.request_id).toBeTruthy()
@@ -341,9 +341,9 @@ test('a home keeps its operator name independent from its public title across CM
   await expect(replyCard.getByText('Checking in · Time not set', { exact: true })).toBeVisible()
   await expect(replyCard.getByText(questionText, { exact: true })).toHaveCount(1)
 
-  const cancelled = await call<{ stay: StayDetail }>('cancel_stay', { stay_id: stay.id, expected_version: clearedArrival.data!.stay.version })
+  const cancelled = await call<{ status: string }>('cancel_product_booking', { operational_booking_id: stay.id, expected_version: clearedArrival.data!.stay.version, idempotency_key: crypto.randomUUID() })
   expect(cancelled.error).toBeNull()
-  expect(cancelled.data!.stay.status).toBe('cancelled')
+  expect(cancelled.data!.status).toBe('cancelled')
   const cancelledWork = await request.get(taskPath)
   await expectStatus(cancelledWork, 200)
   expect((await cancelledWork.json() as { task: TaskView }).task).toMatchObject({ id: task.id, action: task.action, reservation: { statusLabel: 'Cancelled' } })
@@ -397,13 +397,15 @@ test('a responsible home member reads its stays as turnovers on every surface un
     const guestEmail = `${slug}@playwright.example`
     const notes = `Private note ${marker}`
     const made = await page.request.post(api('stays'), { data: { product_id: productId, check_in_date: localDay(0), check_out_date: localDay(2), arrival_time: '15:30', adults: 2, children: 1,
-      guest_name: guestName, guest_surname: surname, guest_email: guestEmail, notes, total_minor: 123_400, idempotency_key: crypto.randomUUID() } })
+      guest_name: `${guestName} ${surname}`, guest_email: guestEmail, private_notes: notes, total_minor: 123_400, idempotency_key: crypto.randomUUID() } })
     await expectStatus(made, 201)
     const { stay } = await made.json() as { stay: StayDetail }
     expect(stay.request_id).toBeTruthy()
     // Exactly the Turnovers fields, with the values the host saved.
-    const turnover = { id: stay.id, product_id: productId, location_id: stay.location_id, timezone: stay.timezone, status: stay.status, check_in_date: localDay(0), check_out_date: localDay(2),
-      arrival_time: '15:30', adults: 2, children: 1, infants: 0, guest_name: guestName, no_show_at: null }
+    // The recorded arrival is the stay's start; the member reads the guest's first name.
+    const turnover = { id: stay.id, product_id: productId, location_id: stay.location_id, timezone: stay.timezone, status: stay.status, starts_at: stay.starts_at, ends_at: stay.ends_at, check_in_date: localDay(0), check_out_date: localDay(2),
+      adults: 2, children: 1, infants: 0, guest_name: guestName, no_show_at: null }
+    expect(new Intl.DateTimeFormat('en-GB', { timeZone: stay.timezone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(stay.starts_at))).toBe('15:30')
     const leaks = (body: unknown) => [surname, guestEmail, notes, stay.request_id!].filter(secret => JSON.stringify(body).includes(secret))
     const stayPath = api(`stays/${stay.id}`)
     const memberStay = await memberContext.request.get(stayPath)
@@ -419,8 +421,11 @@ test('a responsible home member reads its stays as turnovers on every surface un
     }
     // The same projection through MCP, whose output schemas validate it.
     const memberCall = <T>(name: string, args: Record<string, unknown>) => tool<T>(memberContext.request, baseURL!, organizationId, name, args)
-    expect(await memberCall('get_stay', { stay_id: stay.id })).toEqual({ data: { stay: turnover }, error: null })
-    expect(await memberCall('list_stays', { from: localDay(0), to: localDay(3) })).toEqual({ data: { stays: [turnover] }, error: null })
+    expect(await memberCall('get_product_booking', { operational_booking_id: stay.id })).toEqual({ data: { operational_booking_id: stay.id, unit: 'nights', stay: turnover }, error: null })
+    // The one booking list names the member's stay by its guest's first name.
+    const memberList = await memberCall('list_product_bookings', { product_id: productId })
+    expect(memberList.error).toBeNull()
+    expect((memberList.data as { bookings: Array<Record<string, unknown>> }).bookings).toEqual([expect.objectContaining({ operational_booking_id: stay.id, unit: 'nights', guest: { name: guestName }, starts_at: stay.starts_at, ends_at: stay.ends_at })])
     const memberCalendar = await memberCall<{ stays: unknown[] }>('get_stay_calendar', { product_id: productId, from: localDay(0), to: localDay(3) })
     expect(memberCalendar.data!.stays).toEqual([turnover])
     // The stay checks out in two days: its turnover is the member's Upcoming work, under that day, and Today holds nothing.
@@ -481,9 +486,9 @@ test('a responsible home member reads its stays as turnovers on every surface un
     // Owners still read the whole stay.
     const ownerStay = await page.request.get(stayPath)
     await expectStatus(ownerStay, 200)
-    expect(await ownerStay.json()).toMatchObject({ manage: true, stay: { id: stay.id, guest_name: guestName, guest_surname: surname, guest_email: guestEmail, notes, total_minor: 123_400, request_id: stay.request_id, payments: [], paid_minor: 0 } })
-    const ownerMcp = await call<{ stay: StayDetail }>('get_stay', { stay_id: stay.id })
-    expect(ownerMcp.data!.stay).toMatchObject({ guest_surname: surname, guest_email: guestEmail, notes, total_minor: 123_400, request_id: stay.request_id })
+    expect(await ownerStay.json()).toMatchObject({ manage: true, stay: { id: stay.id, guest_name: `${guestName} ${surname}`, guest_email: guestEmail, private_notes: notes, total_minor: 123_400, request_id: stay.request_id, payments: [], paid_minor: 0 } })
+    const ownerMcp = await call<{ stay: StayDetail }>('get_product_booking', { operational_booking_id: stay.id })
+    expect(ownerMcp.data!.stay).toMatchObject({ guest_name: `${guestName} ${surname}`, guest_email: guestEmail, private_notes: notes, total_minor: 123_400, request_id: stay.request_id })
     await expectStatus(await page.request.get(`/api/dashboard/organizations/${organizationId}/guest-threads/${stay.request_id}`), 200)
 
     // The team's turnover is a job in the stay's conversation with the host: the
@@ -572,8 +577,7 @@ test('a host creates a stay, records its payments and arrival guide, and cancels
   await page.getByRole('option', { name: 'Cliff Cabin', exact: true }).click()
   await page.getByLabel('Check-in', { exact: true }).fill(checkIn)
   await page.getByLabel('Checkout', { exact: true }).fill(checkOut)
-  await page.getByLabel('First name', { exact: true }).fill('Ana')
-  await page.getByRole('textbox', { name: 'Last name', exact: true }).fill('Silva')
+  await page.getByLabel('Name', { exact: true }).fill('Ana Silva')
   await page.getByRole('textbox', { name: 'Email', exact: true }).fill(`ana-${slug}@playwright.example`)
   await page.getByLabel('Adults', { exact: true }).fill('2')
   await page.getByLabel('Stay total (THB)', { exact: true }).fill('300')
@@ -584,9 +588,9 @@ test('a host creates a stay, records its payments and arrival guide, and cancels
   await expectStatus(stayCreated, 201)
   const createdReceipt = await stayCreated.json() as { stay: StayDetail & { channel_push: unknown } }
   await expect(page).toHaveURL(new RegExp(`/bookings/stay/${createdReceipt.stay.id}$`))
-  const stay = await call<{ stay: StayDetail }>('get_stay', { stay_id: createdReceipt.stay.id })
+  const stay = await call<{ stay: StayDetail }>('get_product_booking', { operational_booking_id: createdReceipt.stay.id })
   expect(stay.error).toBeNull()
-  expect(stay.data!.stay).toMatchObject({ product_id: productId, status: 'confirmed', check_in_date: checkIn, check_out_date: checkOut, guest_name: 'Ana', guest_surname: 'Silva', guest_email: `ana-${slug}@playwright.example`, guest_image_url: null, adults: 2, children: 0, infants: 0, total_minor: 300_00, paid_minor: 0, payments: [] })
+  expect(stay.data!.stay).toMatchObject({ product_id: productId, status: 'confirmed', check_in_date: checkIn, check_out_date: checkOut, guest_name: 'Ana Silva', guest_email: `ana-${slug}@playwright.example`, guest_image_url: null, adults: 2, children: 0, infants: 0, total_minor: 300_00, paid_minor: 0, payments: [] })
   await expect(page.locator('#dashboard-panel-stay-details').getByText('A', { exact: true })).toHaveCount(2)
   await expect(page.locator('#dashboard-panel-stay-details img[alt="Ana Silva"]')).toHaveCount(0)
   const overlap = await call('create_stay', { product_id: productId, check_in_date: localDay(1), check_out_date: localDay(3), adults: 1, guest_name: 'Bo', total_minor: 100_00, idempotency_key: `${slug}-b` })
@@ -603,7 +607,7 @@ test('a host creates a stay, records its payments and arrival guide, and cancels
   await page.getByRole('button', { name: 'Record payment' }).click()
   // The recorded row, not the method picker: it names the amount with its method.
   await expect(page.getByRole('listitem').filter({ hasText: /100\.00 · Cash/ })).toBeVisible()
-  const paid = await call<{ stay: StayDetail }>('get_stay', { stay_id: stay.data!.stay.id })
+  const paid = await call<{ stay: StayDetail }>('get_product_booking', { operational_booking_id: stay.data!.stay.id })
   expect(paid.error).toBeNull()
   expect(paid.data!.stay).toMatchObject({ paid_minor: 100_00, payment_status: 'partial', payments: [{ method: 'cash', amount_minor: 100_00 }] })
   expect(createdReceipt.stay).toMatchObject({ id: paid.data!.stay.id, product_id: productId, request_id: paid.data!.stay.request_id, status: 'confirmed', version: 1, check_in_date: checkIn, check_out_date: checkOut, channel_push: null })
@@ -616,9 +620,10 @@ test('a host creates a stay, records its payments and arrival guide, and cancels
     record: { kind: 'stay', status: 'confirmed', offering: 'Cliff Cabin', location: 'Cliff Cabin location', address: expect.any(String), phone: null,
       partySize: paid.data!.stay.adults + paid.data!.stay.children, timezone: TIME_ZONE, starts: expect.stringMatching(new RegExp(`^${checkIn}( |$)`)), ends: expect.stringMatching(new RegExp(`^${checkOut}( |$)`)), noShow: false },
   })
-  const selectedStays = await call<{ stays: Array<Record<string, unknown>> }>('list_stays', { product_id: productId, from: checkIn, to: checkOut })
+  const selectedStays = await call<{ bookings: Array<Record<string, unknown>> }>('list_product_bookings', { product_id: productId })
   expect(selectedStays.error).toBeNull()
-  expect(selectedStays.data!.stays).toEqual([{ id: paid.data!.stay.id, product_id: productId, channel: 'direct', owner: 'app', status: 'confirmed', overbooked: false, check_in_date: checkIn, check_out_date: checkOut, arrival_time: null, adults: 2, children: 0, infants: 0, guest_name: 'Ana', guest_surname: 'Silva', location_id: location.id, timezone: TIME_ZONE, request_id: paid.data!.stay.request_id, version: 1 }])
+  expect(selectedStays.data!.bookings).toEqual([expect.objectContaining({ operational_booking_id: paid.data!.stay.id, request_id: paid.data!.stay.request_id, product_id: productId, product_kind: 'stay', product_session_id: null, unit: 'nights', status: 'confirmed', party_size: 2,
+    location_id: location.id, starts_at: paid.data!.stay.starts_at, ends_at: paid.data!.stay.ends_at, timezone: TIME_ZONE, guest: { name: 'Ana Silva' } })])
   const calendarPath = api(`stay-homes/${productId}/calendar?from=${checkIn}&to=${checkOut}`)
   const beforeInvalidCalendarResponse = await request.get(calendarPath)
   expect(beforeInvalidCalendarResponse.status()).toBe(200)
@@ -732,7 +737,7 @@ test('a host creates a stay, records its payments and arrival guide, and cancels
   await expect(page.getByText('Cancelled', { exact: true })).toBeVisible()
   const calendar = await call<{ nights: Array<{ date: string; available: boolean }> }>('get_stay_calendar', { product_id: productId, from: checkIn, to: checkOut })
   expect(calendar.data!.nights.map(night => night.available)).toEqual([true, true])
-  const cancelled = await call<{ stay: { status: string; cancelled_at: string | null } }>('get_stay', { stay_id: stay.data!.stay.id })
+  const cancelled = await call<{ stay: { status: string; cancelled_at: string | null } }>('get_product_booking', { operational_booking_id: stay.data!.stay.id })
   expect(cancelled.data!.stay.status).toBe('cancelled')
   expect(cancelled.data!.stay.cancelled_at).toBeTruthy()
 
@@ -744,7 +749,7 @@ test('a host creates a stay, records its payments and arrival guide, and cancels
   ])
   await expectStatus(offlineRefund, 201)
   await expect(page.getByRole('listitem').filter({ hasText: 'Offline refund after cancellation' })).toBeVisible()
-  const refunded = await call<{ stay: StayDetail }>('get_stay', { stay_id: stay.data!.stay.id })
+  const refunded = await call<{ stay: StayDetail }>('get_product_booking', { operational_booking_id: stay.data!.stay.id })
   expect(refunded.error).toBeNull()
   expect(refunded.data!.stay).toMatchObject({ status: 'cancelled', paid_minor: 0 })
   expect(refunded.data!.stay.payments.find(payment => payment.reference === 'Offline refund after cancellation')).toMatchObject({ amount_minor: -10000 })
@@ -755,7 +760,7 @@ test('a host creates a stay, records its payments and arrival guide, and cancels
   await expect(page.getByRole('combobox', { name: 'Home', exact: true })).toHaveCount(0)
   await expect(page.getByLabel('Check-in', { exact: true })).toHaveValue(later[0])
   await expect(page.getByLabel('Checkout', { exact: true })).toHaveValue(later[1])
-  await page.getByLabel('First name', { exact: true }).fill('Kai')
+  await page.getByLabel('Name', { exact: true }).fill('Kai')
   await page.getByLabel('Adults', { exact: true }).fill('2')
   await page.getByLabel('Stay total (THB)', { exact: true }).fill('450')
   await page.getByRole('switch', { name: 'Record a payment already received', exact: true }).click()
@@ -774,7 +779,7 @@ test('a host creates a stay, records its payments and arrival guide, and cancels
   await expect(page.getByRole('listitem').filter({ hasText: /125\.00 · Bank transfer/ })).toBeVisible()
   const edited = await request.patch(api(`stays/${native.id}`), { headers, data: { expected_version: native.version, guest_name: 'Kai Mendes' } })
   await expectStatus(edited, 200)
-  const nativeRead = await call<{ stay: StayDetail }>('get_stay', { stay_id: native.id })
+  const nativeRead = await call<{ stay: StayDetail }>('get_product_booking', { operational_booking_id: native.id })
   expect(nativeRead.error).toBeNull()
   expect(nativeRead.data!.stay).toMatchObject({ guest_name: 'Kai Mendes', check_in_date: later[0], check_out_date: later[1], total_minor: 450_00, paid_minor: 125_00, payment_status: 'partial', payments: [{ amount_minor: 125_00, method: 'bank_transfer', paid_on: checkIn, reference: 'Deposit on booking' }] })
 
@@ -792,7 +797,7 @@ test('a host creates a stay, records its payments and arrival guide, and cancels
   expect(nights.find(night => night.date === closedNight)).toMatchObject({ available: false, closed: true })
   const mcpCalendar = await call<{ nights: Array<{ date: string; closed: boolean }> }>('get_stay_calendar', { product_id: productId, from: closedNight, to: localDay(21) })
   expect(mcpCalendar.data!.nights).toEqual([expect.objectContaining({ date: closedNight, closed: true })])
-  const cancelledByMcp = await call('cancel_stay', { stay_id: native.id, expected_version: native.version + 1, reason: 'Contract cancellation' })
+  const cancelledByMcp = await call('cancel_product_booking', { operational_booking_id: native.id, expected_version: native.version + 1, reason: 'Contract cancellation', idempotency_key: crypto.randomUUID() })
   expect(cancelledByMcp.error).toBeNull()
   const cancelledRead = await request.get(api(`stays/${native.id}`))
   expect(cancelledRead.status()).toBe(200)
@@ -3863,7 +3868,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
     const stays: Array<{ id: string }> = []
     for (const [index, home] of homes.entries()) {
       const made = await page.request.post(api('stays'), { data: { product_id: home.product_id, check_in_date: localDay(0), check_out_date: localDay(2), adults: 2,
-        guest_name: index === 0 ? 'Ana' : 'Private', guest_surname: 'Silva', total_minor: 30_000, idempotency_key: crypto.randomUUID() } })
+        guest_name: index === 0 ? 'Ana Silva' : 'Private Silva', total_minor: 30_000, idempotency_key: crypto.randomUUID() } })
       await expectStatus(made, 201)
       stays.push((await made.json() as { stay: { id: string } }).stay)
     }
@@ -4682,16 +4687,16 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       // ordered later event proves that the intervening other-home event was filtered.
       // The cleaner reads the stay as its turnover: the first name and arrival
       // change in place, while the surname and the host's notes never reach them.
-      const current = await call<{ stay: { version: number } }>('get_stay', { stay_id: stays[0]!.id })
+      const current = await call<{ stay: { version: number } }>('get_product_booking', { operational_booking_id: stays[0]!.id })
       const renamed = await call<{ stay: { version: number }; saved_fields: Record<string, unknown>; channel_push: unknown }>('update_stay', { stay_id: stays[0]!.id, expected_version: current.data!.stay.version, guest_name: 'Lia' })
       expect(renamed.error).toBeNull()
       expect(renamed.data!.saved_fields).toEqual({ guest_name: 'Lia' })
       expect(renamed.data!.channel_push).toBeNull()
       await expect(cleanerPage.getByRole('heading', { name: 'Lia’s group of 2', level: 2, exact: true })).toBeVisible()
       await expect(cleanerPage.getByText('Silva')).toHaveCount(0)
-      const privateStay = await call<{ stay: { version: number } }>('get_stay', { stay_id: stays[1]!.id })
-      expect((await call('update_stay', { stay_id: stays[1]!.id, expected_version: privateStay.data!.stay.version, notes: 'Other home only' })).error).toBeNull()
-      const noted = await call<{ stay: { version: number } }>('update_stay', { stay_id: stays[0]!.id, expected_version: renamed.data!.stay.version, arrival_time: '18:30', notes: 'Host-only live note' })
+      const privateStay = await call<{ stay: { version: number } }>('get_product_booking', { operational_booking_id: stays[1]!.id })
+      expect((await call('update_stay', { stay_id: stays[1]!.id, expected_version: privateStay.data!.stay.version, private_notes: 'Other home only' })).error).toBeNull()
+      const noted = await call<{ stay: { version: number } }>('update_stay', { stay_id: stays[0]!.id, expected_version: renamed.data!.stay.version, arrival_time: '18:30', private_notes: 'Host-only live note' })
       expect(noted.error).toBeNull()
       await expect(cleanerPage.getByText(/^6:30\sPM$/u)).toBeVisible()
       await expect(cleanerPage.getByText('Host-only live note')).toHaveCount(0)
@@ -4711,7 +4716,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await expectStatus(revoked, 200)
       expect(await revoked.json()).toBeNull()
       const beforeRevokedEvent = liveEvents.length
-      const afterSignOut = await call<{ stay: { version: number } }>('update_stay', { stay_id: stays[0]!.id, expected_version: noted.data!.stay.version, notes: 'After session revocation' })
+      const afterSignOut = await call<{ stay: { version: number } }>('update_stay', { stay_id: stays[0]!.id, expected_version: noted.data!.stay.version, private_notes: 'After session revocation' })
       expect(afterSignOut.error).toBeNull()
       await signedOutClosed
       expect(liveEvents).toHaveLength(beforeRevokedEvent)
@@ -4796,7 +4801,7 @@ test('a stay socket in a service organization closes when Better Auth removes it
     const removed = await page.request.post('/api/auth/organization/remove-member', { headers, data: { organizationId, memberIdOrEmail: memberId } })
     await expectStatus(removed, 200)
     const beforeRemoval = liveEvents.length
-    const changed = await page.request.patch(api(`stays/${stay.id}`), { data: { expected_version: version, notes: 'After membership removal' } })
+    const changed = await page.request.patch(api(`stays/${stay.id}`), { data: { expected_version: version, private_notes: 'After membership removal' } })
     await expectStatus(changed, 200)
     await closed
     expect(liveEvents).toHaveLength(beforeRemoval)
@@ -4825,7 +4830,7 @@ test('a host selects nights across homes on the multi-calendar and edits them in
   const stayIds: string[] = []
   for (const [checkIn, checkOut] of [[2, 4], [7, 9]] as const) {
     const made = await request.post(api('stays'), { headers, data: { product_id: productId, check_in_date: localDay(checkIn), check_out_date: localDay(checkOut), adults: 1,
-      guest_name: 'Grid', guest_surname: 'Guest', total_minor: 0, idempotency_key: crypto.randomUUID() } })
+      guest_name: 'Grid Guest', total_minor: 0, idempotency_key: crypto.randomUUID() } })
     await expectStatus(made, 201)
     stayIds.push((await made.json() as { stay: { id: string } }).stay.id)
   }

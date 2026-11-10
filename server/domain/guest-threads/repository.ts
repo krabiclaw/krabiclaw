@@ -1,5 +1,5 @@
 import { CONVERSATION_NOTIFICATION_SQL } from '~/server/utils/notification-center'
-import { BOOKED_RECORDS_SQL, REQUEST_CURRENT_BUYER_SQL, STAY_THREAD_ENDS_SQL, STAY_THREAD_STARTS_SQL, stayPreview, parseGuestRequest, participantLabel } from '~/server/domain/requests'
+import { BOOKING_ENDS_SQL, BOOKING_RECORDS_SQL, REQUEST_CURRENT_BUYER_SQL, bookingDay, stayPreview, parseGuestRequest, participantLabel } from '~/server/domain/requests'
 import { BUYER_UNREAD_THREAD_SQL, buyerUnreadThreadParams } from './entries'
 import { messagePreview } from './attachments'
 import { executeBatch, queryAll, type BatchQuery, type DbClient } from '~/server/db'
@@ -21,7 +21,7 @@ import { mediaStillUrl } from '~/shared/media-placement-contract'
 import { HTTPError } from 'nitro'
 
 const SOURCE_GUEST_NAME_SQL = "json_extract(gt.payload_json, '$.guest.name')"
-const REPLY_CHANNEL_SQL = "CASE WHEN EXISTS (SELECT 1 FROM channel_threads ct WHERE ct.request_id = gt.id AND ct.organization_id = gt.organization_id) OR EXISTS (SELECT 1 FROM stays st WHERE st.request_id = gt.id AND st.organization_id = gt.organization_id AND st.owner = 'channel') THEN 'airbnb' ELSE 'email' END"
+const REPLY_CHANNEL_SQL = "CASE WHEN EXISTS (SELECT 1 FROM channel_threads ct WHERE ct.request_id = gt.id AND ct.organization_id = gt.organization_id) OR EXISTS (SELECT 1 FROM bookings st WHERE st.request_id = gt.id AND st.organization_id = gt.organization_id AND st.owner = 'channel') THEN 'airbnb' ELSE 'email' END"
 
 /** A message with words, a photo or a file; Airbnb records some host actions as messages with none. */
 function messageHasContentSql(entry: string): string {
@@ -100,25 +100,22 @@ async function assignedThreadScope(principal?: MemberAccessPrincipal | null) {
   return { sql: ` AND ${scope.sql}`, params: scope.params }
 }
 /**
- * The operational record a thread refers to.
+ * The booking a thread refers to.
  *
- * A thread carries no time, party size or status of its own any more, so the
- * inbox reads them from the booking or stay that links back to it. A
- * thread with no record yields NULLs, and the surface says the thread has no
- * booking rather than printing a fabricated slot.
+ * A thread carries no time, party size or status of its own, so the inbox
+ * reads them from the booking that links back to it. `ends_at` is the end SQL
+ * compares (a nights booking's end stored as a day reads as that day's last
+ * moment anywhere); `stored_starts_at`/`stored_ends_at` are as stored, read in
+ * `timezone`. A thread with no booking yields NULLs, and the surface says the
+ * thread has no booking rather than printing a fabricated slot.
  */
 const OPERATIONAL_RECORDS_SQL = `(
-    SELECT b.request_id, b.status, b.party_size, s.starts_at, s.ends_at, s.timezone, NULL AS check_in_date, NULL AS check_out_date, bc.assigned_member_id, b.product_id, NULL AS stay_channel
-      FROM bookings b JOIN product_sessions s ON s.id = b.product_session_id
+    SELECT b.request_id, b.status, b.party_size, b.party_size_is_minimum, b.starts_at, ${BOOKING_ENDS_SQL('b')} AS ends_at, b.ends_at AS stored_ends_at, b.timezone,
+           CASE WHEN b.product_session_id IS NULL THEN 'nights' ELSE 'slot' END AS unit, bc.assigned_member_id, b.product_id,
+           CASE WHEN b.product_session_id IS NULL THEN b.channel END AS stay_channel
+      FROM bookings b
       JOIN product_booking_configs bc ON bc.organization_id = b.organization_id AND bc.product_id = b.product_id
      WHERE b.request_id IS NOT NULL
-    UNION ALL
-    SELECT st.request_id, st.status, st.adults + st.children, ${STAY_THREAD_STARTS_SQL('st')}, ${STAY_THREAD_ENDS_SQL('st')}, l.timezone, st.check_in_date, st.check_out_date, bc.assigned_member_id, st.product_id, st.channel
-      FROM stays st
-      JOIN product_stay_configs c ON c.organization_id = st.organization_id AND c.product_id = st.product_id
-      JOIN product_booking_configs bc ON bc.organization_id = st.organization_id AND bc.product_id = st.product_id
-      JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
-     WHERE st.request_id IS NOT NULL
   )`
 const OPERATIONAL_RECORD_SQL = `
   LEFT JOIN ${OPERATIONAL_RECORDS_SQL} op ON op.request_id = gt.id`
@@ -126,7 +123,7 @@ const OPERATIONAL_RECORD_SQL = `
 /** Business inbox labels use the home's private identity; buyer labels keep the location's public title. */
 function threadLocationTitleSql(buyerAudience = false): string {
   if (buyerAudience) return 'bl.title'
-  return `CASE WHEN gt.kind = 'stay' OR EXISTS (SELECT 1 FROM channel_threads channel WHERE channel.organization_id = gt.organization_id AND channel.request_id = gt.id AND channel.product_id IS NOT NULL)
+  return `CASE WHEN op.unit = 'nights' OR EXISTS (SELECT 1 FROM channel_threads channel WHERE channel.organization_id = gt.organization_id AND channel.request_id = gt.id AND channel.product_id IS NOT NULL)
     THEN (SELECT home.internal_name FROM product_stay_configs home WHERE home.organization_id = gt.organization_id AND home.product_id = COALESCE(op.product_id,
       (SELECT channel.product_id FROM channel_threads channel WHERE channel.organization_id = gt.organization_id AND channel.request_id = gt.id))) ELSE bl.title END`
 }
@@ -161,10 +158,12 @@ function mailboxFields(row: { archived_at: string | null; blocked_at: string | n
 // can only concatenate the stored UTC instant.
 const SOURCE_PREVIEW_SQL = `SUBSTR(CASE WHEN gt.kind = 'contact' THEN json_extract(gt.payload_json, '$.message') ELSE NULLIF(TRIM(json_extract(gt.payload_json, '$.notes')), '') END, 1, 160)`
 
-const SOURCE_PREVIEW_COLUMNS = `op.starts_at AS record_starts_at, op.ends_at AS record_ends_at, op.timezone AS record_timezone, op.party_size AS record_party_size, op.assigned_member_id,
+/** A stay's conversation: its booking is a home's nights, or it is a channel's conversation whose guest has not booked yet (an inquiry). */
+const STAY_CONVERSATION_SQL = `(gt.kind = 'booking' AND (op.unit = 'nights' OR (op.unit IS NULL AND EXISTS (SELECT 1 FROM channel_threads stay_channel WHERE stay_channel.request_id = gt.id))))`
+
+const SOURCE_PREVIEW_COLUMNS = `op.starts_at AS record_starts_at, op.ends_at AS record_ends_at, op.stored_ends_at AS record_stored_ends_at, op.timezone AS record_timezone, op.party_size AS record_party_size, op.assigned_member_id,
       op.product_id AS record_product_id, op.stay_channel, (SELECT ct.product_id FROM channel_threads ct WHERE ct.organization_id = gt.organization_id AND ct.request_id = gt.id) AS channel_product_id,
-      op.check_in_date AS record_check_in_date, op.check_out_date AS record_check_out_date,
-      json_extract(gt.payload_json, '$.party_size_is_minimum') AS party_size_is_minimum`
+      op.unit AS record_unit, op.party_size_is_minimum, ${STAY_CONVERSATION_SQL} AS stay_conversation`
 
 /*
   The picture the row leads with: the place the thread belongs to. A thread at
@@ -188,23 +187,20 @@ const PLACE_IMAGE_COLUMNS = `COALESCE(ma_hero.kind, ma_logo.kind) AS place_image
       COALESCE(ma_hero.public_url, ma_logo.public_url) AS place_image_public_url,
       ma_hero.id IS NULL AND ma_logo.id IS NOT NULL AND COALESCE(json_extract(mp_logo.presentation_json, '$.shape'), 'original') = 'original' AS place_image_whole`
 
-/** A stay's nights, read from its dates; it has no start time to localize. */
-function stayRecordLabel(row: { record_check_in_date: string | null; record_check_out_date: string | null; record_party_size: number | null }): string | null {
-  if (!row.record_check_in_date || !row.record_check_out_date || row.record_party_size === null) return null
-  return stayPreview({ check_in_date: row.record_check_in_date, check_out_date: row.record_check_out_date, party_size: row.record_party_size })
+type StayRecordColumns = { record_unit: 'slot' | 'nights' | null; record_starts_at: string | null; record_stored_ends_at: string | null; record_timezone: string | null; record_party_size: number | null }
+
+/** A stay's nights, read as its days in its home's clock. */
+function stayRecordLabel(row: StayRecordColumns): string | null {
+  if (row.record_unit !== 'nights' || !row.record_starts_at || !row.record_stored_ends_at || !row.record_timezone || row.record_party_size === null) return null
+  return stayPreview({ starts_at: row.record_starts_at, ends_at: row.record_stored_ends_at, timezone: row.record_timezone, party_size: row.record_party_size })
 }
 
-function sourcePreviewText(row: {
+function sourcePreviewText(row: StayRecordColumns & {
   source_preview: string | null
-  record_starts_at: string | null
-  record_timezone: string | null
-  record_party_size: number | null
-  record_check_in_date: string | null
-  record_check_out_date: string | null
   party_size_is_minimum: unknown
 }): string | null {
   if (row.source_preview) return row.source_preview
-  if (row.record_check_in_date) return stayRecordLabel(row)
+  if (row.record_unit === 'nights') return stayRecordLabel(row)
   if (!row.record_starts_at || !row.record_timezone || row.record_party_size === null) return null
   const when = formatThreadWhenLabel(row.record_starts_at, row.record_timezone)
   const size = `${row.record_party_size}${row.party_size_is_minimum ? '+' : ''}`
@@ -229,10 +225,11 @@ type GuestThreadListRow = GuestThreadRow & {
   source_preview: string | null
   record_starts_at: string | null
   record_ends_at: string | null
+  record_stored_ends_at: string | null
   record_timezone: string | null
   record_party_size: number | null
-  record_check_in_date: string | null
-  record_check_out_date: string | null
+  record_unit: 'slot' | 'nights' | null
+  stay_conversation: number
   party_size_is_minimum: unknown
   operational_status: string | null
   place_image_kind: string | null
@@ -256,10 +253,10 @@ const SUPPORT_THREAD_SQL = `(EXISTS (SELECT 1 FROM activity_entries e WHERE e.re
   AND NOT EXISTS (SELECT 1 FROM activity_entries e WHERE e.request_id = gt.id AND e.kind = 'message' AND e.actor_kind = 'guest'))`
 
 /**
- * A booking lands as a stay, not as a conversation: a stay is in the inbox once someone has written.
+ * A stay lands as a booking, not as a conversation: a stay is in the inbox once someone has written.
  * A checkout's thread waits on the guest: it is a conversation once payment has created its booking.
  */
-const HAS_CONVERSATION_SQL = `(gt.kind <> 'stay' OR EXISTS (SELECT 1 FROM activity_entries e WHERE e.request_id = gt.id AND e.kind = 'message' AND ${messageHasContentSql('e')}))
+const HAS_CONVERSATION_SQL = `(op.unit IS NOT 'nights' OR EXISTS (SELECT 1 FROM activity_entries e WHERE e.request_id = gt.id AND e.kind = 'message' AND ${messageHasContentSql('e')}))
   AND (json_extract(gt.payload_json, '$.provenance.creation_kind') IS NOT 'checkout'
     OR EXISTS (SELECT 1 FROM bookings b WHERE b.request_id = gt.id))`
 
@@ -271,6 +268,12 @@ const UNREAD_FOR_MEMBER_SQL = `EXISTS (
           AND (n.target_user_id IS NULL OR n.target_user_id = ?)
           AND nr.id IS NULL AND n.kind = 'notification' AND ${CONVERSATION_NOTIFICATION_SQL}
       )`
+
+/** A conversation's type as the inbox filters it: a contact, a stay's, or any other booking's. */
+function threadTypeWhere(type: NonNullable<ListGuestThreadsOptions['type']>): { sql: string; params: string[] } {
+  if (type === 'contact') return { sql: " AND gt.kind = 'contact'", params: [] }
+  return { sql: ` AND gt.kind = 'booking' AND ${type === 'stay' ? '' : 'NOT '}${STAY_CONVERSATION_SQL}`, params: [] }
+}
 
 /** The scope every inbox read shares: whose threads, which location, which mailbox, which kind, what was searched. */
 async function inboxWhere(organizationId: string | null, opts: ListGuestThreadsOptions, now: string) {
@@ -288,7 +291,7 @@ async function inboxWhere(organizationId: string | null, opts: ListGuestThreadsO
   }
   if (opts.locationId) { where += ' AND gt.location_id = ?'; params.push(opts.locationId) }
   if (opts.assignedMemberId) { where += ' AND op.assigned_member_id = ?'; params.push(opts.assignedMemberId) }
-  if (opts.type) { where += ' AND gt.kind = ?'; params.push(opts.type) }
+  if (opts.type) { const type = threadTypeWhere(opts.type); where += type.sql; params.push(...type.params) }
   if (opts.needsReply) where += ` AND ${OPEN_REPLY_TASK_SQL}`
   if (opts.kind) where += ` AND ${opts.kind === 'support' ? '' : 'NOT '}${SUPPORT_THREAD_SQL}`
   if (opts.q) {
@@ -315,9 +318,10 @@ type InboxListRow = GuestThreadRow & {
   location_title: string | null
   time_zone: string
   airbnb_name: string | null
+  record_unit: 'slot' | 'nights' | null
   record_starts_at: string | null
-  record_check_in_date: string | null
-  record_check_out_date: string | null
+  record_stored_ends_at: string | null
+  record_timezone: string | null
   inquiry_check_in: string | null
   inquiry_check_out: string | null
   latest_message_id: string | null
@@ -346,7 +350,7 @@ export async function listGuestThreads(
       (SELECT json_extract(e.payload_json, '$.meta.name') FROM activity_entries e
         WHERE e.request_id = gt.id AND e.kind = 'message' AND e.actor_kind = 'guest' AND e.event_name = 'channel.message_mirrored'
           AND json_extract(e.payload_json, '$.meta.name') IS NOT NULL ORDER BY e.sequence DESC LIMIT 1) AS airbnb_name,
-      op.starts_at AS record_starts_at, op.check_in_date AS record_check_in_date, op.check_out_date AS record_check_out_date,
+      op.unit AS record_unit, op.starts_at AS record_starts_at, op.stored_ends_at AS record_stored_ends_at, op.timezone AS record_timezone,
       (SELECT json_extract(e.payload_json, '$.check_in_date') FROM activity_entries e WHERE e.request_id = gt.id AND e.event_name = 'channel.inquiry_received' ORDER BY e.sequence DESC LIMIT 1) AS inquiry_check_in,
       (SELECT json_extract(e.payload_json, '$.check_out_date') FROM activity_entries e WHERE e.request_id = gt.id AND e.event_name = 'channel.inquiry_received' ORDER BY e.sequence DESC LIMIT 1) AS inquiry_check_out,
       (SELECT e.id FROM activity_entries e WHERE e.request_id = gt.id AND e.kind = 'message'${visible} AND ${messageHasContentSql('e')} ORDER BY e.sequence DESC LIMIT 1) AS latest_message_id,
@@ -355,7 +359,7 @@ export async function listGuestThreads(
     FROM requests gt${OPERATIONAL_RECORD_SQL}
     JOIN organization o ON o.id = gt.organization_id
     LEFT JOIN business_locations bl ON bl.id = gt.location_id
-    WHERE gt.kind IN ('contact', 'booking', 'stay') AND ${scope.where}${unreadFilter}
+    WHERE gt.kind IN ('contact', 'booking') AND ${scope.where}${unreadFilter}
     ORDER BY latest_at DESC, gt.id
     LIMIT ? OFFSET ?
   `, [...scope.params, ...unreadParams, limit, opts.offset ?? 0])
@@ -373,7 +377,7 @@ export async function listGuestThreads(
     const shownName = opts.buyerAudience ? row.organization_name : guestName
     const message = row.latest_message_id ? latest.get(row.latest_message_id) : undefined
     if (row.latest_message_id && !message) throw new Error(`The latest message of conversation ${row.id} could not be read`)
-    const opening = request.kind === 'contact' ? request.payload.message : 'notes' in request.payload ? request.payload.notes : null
+    const opening = request.kind === 'contact' ? request.payload.message : request.payload.notes
     const sentAt = message ? message.sentAt : row.created_at
     return {
       id: row.id,
@@ -383,7 +387,8 @@ export async function listGuestThreads(
       channel: row.reply_channel === 'airbnb' ? 'airbnb' : 'direct',
       home: row.location_title,
       when: support ? null
-        : row.record_check_in_date && row.record_check_out_date ? stayWhen(row.record_check_in_date, row.record_check_out_date, now, row.time_zone)
+        : row.record_unit === 'nights' && row.record_starts_at && row.record_stored_ends_at && row.record_timezone
+          ? stayWhen(bookingDay(row.record_starts_at, row.record_timezone), bookingDay(row.record_stored_ends_at, row.record_timezone), now, row.time_zone)
           : row.record_starts_at ? `${calendarDate(localDateKey(row.record_starts_at, row.time_zone))}, ${clockTime(row.record_starts_at, row.time_zone)}`
             : row.inquiry_check_in && row.inquiry_check_out ? formatCalendarRange(row.inquiry_check_in, row.inquiry_check_out, 'en-US') : null,
       preview: message ? messagePreview(message.text, message.photos) : opening?.trim() ?? '',
@@ -438,7 +443,7 @@ export async function countUnreadInboxThreads(db: DbClient, organizationId: stri
   const rows = await queryAll<{ support: number; count: number }>(db, `
     SELECT ${SUPPORT_THREAD_SQL} AS support, COUNT(*) AS count
       FROM requests gt${OPERATIONAL_RECORD_SQL} LEFT JOIN business_locations bl ON bl.id = gt.location_id
-     WHERE gt.kind IN ('contact', 'booking', 'stay') AND ${scope.where} AND ${UNREAD_FOR_MEMBER_SQL}
+     WHERE gt.kind IN ('contact', 'booking') AND ${scope.where} AND ${UNREAD_FOR_MEMBER_SQL}
      GROUP BY 1`, [...scope.params, opts.userId, opts.userId])
   const support = rows.find(row => row.support === 1)?.count ?? 0
   const guests = rows.find(row => row.support !== 1)?.count ?? 0
@@ -469,8 +474,9 @@ export async function listOrganizationGuestThreads(
     params.push(opts.assignedMemberId)
   }
   if (opts.type) {
-    where += ' AND gt.kind = ?'
-    params.push(opts.type)
+    const type = threadTypeWhere(opts.type)
+    where += type.sql
+    params.push(...type.params)
   }
   if (opts.needsReply) where += ` AND ${OPEN_REPLY_TASK_SQL}`
   // One instant for the filter and for each row's mailbox, so a row cannot be
@@ -522,7 +528,7 @@ export async function listOrganizationGuestThreads(
       op.status AS operational_status
     FROM requests gt${OPERATIONAL_RECORD_SQL}
     LEFT JOIN business_locations bl ON bl.id = gt.location_id${PLACE_IMAGE_SQL}
-    WHERE gt.kind IN ('contact', 'booking', 'stay') AND ${where}
+    WHERE gt.kind IN ('contact', 'booking') AND ${where}
     ${unreadFilter}
     ORDER BY gt.updated_at DESC, gt.id
     LIMIT ? OFFSET ?
@@ -540,7 +546,7 @@ export async function listOrganizationGuestThreads(
       organizationId: row.organization_id,
       guestName: row.guest_name,
       participantLabel: participantLabel(parseGuestRequest(row as unknown as Record<string, unknown>)),
-      submissionType: row.kind,
+      submissionType: row.stay_conversation === 1 ? 'stay' : row.kind,
       locationLabel: row.location_title,
       locationId: row.location_id,
       assignedMemberId: row.assigned_member_id,
@@ -551,7 +557,7 @@ export async function listOrganizationGuestThreads(
       latestMessageFromGuest: row.latest_message_actor_kind === 'guest',
       needsReply: row.needs_reply === 1,
       operationalStatus: row.operational_status,
-      operationalStatusLabel: row.operational_status ? formatOperationalStatusLabel(row.kind, row.operational_status) : null,
+      operationalStatusLabel: row.operational_status ? formatOperationalStatusLabel(row.stay_conversation === 1 ? 'stay' : row.kind, row.operational_status) : null,
       unread,
       unreadCount: unread ? 1 : 0,
       preview: row.latest_message_kind === 'message'
@@ -562,7 +568,7 @@ export async function listOrganizationGuestThreads(
       // thumbnail, and an asset with no rendition yet is served at full size.
       imageUrl: mediaStillUrl({ kind: row.place_image_kind, public_url: row.place_image_public_url, thumbnail_url: row.place_image_thumbnail_url }),
       imageFit: row.place_image_whole ? 'contain' : 'cover',
-      whenLabel: row.record_check_in_date ? stayRecordLabel(row)
+      whenLabel: row.record_unit === 'nights' ? stayRecordLabel(row)
         : row.record_starts_at && row.record_timezone ? formatThreadWhenLabel(row.record_starts_at, row.record_timezone)
           : null,
       ...mailboxFields(row),
@@ -595,9 +601,8 @@ async function listUnreadThreadIds(db: DbClient, threadIds: string[], userId: st
 
 /** The guest entry a reply task is about: a message, or a contact form's own words. */
 export const GUEST_QUESTION_SQL = `guest_entry.actor_kind = 'guest' AND (guest_entry.kind = 'message' OR (guest_entry.kind = 'submission' AND r.kind = 'contact'))`
-/** A cancelled booking or stay answers what the guest asked before it, by when the guest asked it. */
-export const CANCELLED_AFTER_SQL = `(EXISTS (SELECT 1 FROM bookings record WHERE record.request_id = guest_entry.request_id AND record.status = 'cancelled' AND record.cancelled_at >= ${guestEntryAskedAtSql('guest_entry')})
-  OR EXISTS (SELECT 1 FROM stays record WHERE record.request_id = guest_entry.request_id AND record.status = 'cancelled' AND record.cancelled_at >= ${guestEntryAskedAtSql('guest_entry')}))`
+/** A cancelled booking answers what the guest asked before it, by when the guest asked it. */
+export const CANCELLED_AFTER_SQL = `EXISTS (SELECT 1 FROM bookings record WHERE record.request_id = guest_entry.request_id AND record.status = 'cancelled' AND record.cancelled_at >= ${guestEntryAskedAtSql('guest_entry')})`
 
 /**
  * The reply tasks for one conversation as its ledger now stands: the task for
@@ -652,14 +657,14 @@ const VISIT_JOBS = [
 function visitJobQueries(requestId: string, now: string): BatchQuery[] {
   return [{
     query: `UPDATE tasks SET status = 'cancelled', closed_at = ?, closed_by_user_id = NULL, version = tasks.version + 1, updated_at = ?
-      FROM ${BOOKED_RECORDS_SQL} br WHERE br.request_id = ? AND br.kind <> 'stay' AND (br.status <> 'confirmed' OR br.assigned_member_id IS NULL) AND tasks.status = 'open'
-        AND tasks.subject_type = br.kind AND tasks.subject_id = br.id AND tasks.kind IN ('consultation_prep', 'consultation_follow_up')`,
+      FROM ${BOOKING_RECORDS_SQL} br WHERE br.request_id = ? AND br.unit = 'slot' AND (br.status <> 'confirmed' OR br.assigned_member_id IS NULL) AND tasks.status = 'open'
+        AND tasks.subject_type = 'booking' AND tasks.subject_id = br.id AND tasks.kind IN ('consultation_prep', 'consultation_follow_up')`,
     params: [now, now, requestId],
   }, ...VISIT_JOBS.map(job => ({
     query: `INSERT INTO tasks (id, organization_id, kind, subject_type, subject_id, product_id, location_id, assigned_member_id, starts_at, due_at, timezone, status, dedupe_key, version, created_at, updated_at)
-      SELECT ?, br.organization_id, '${job.kind}', br.kind, br.id, br.product_id, br.location_id, br.assigned_member_id, ${job.at}, ${job.at}, br.timezone, 'open', '${job.kind}:' || br.id, 1, ?, ?
-        FROM ${BOOKED_RECORDS_SQL} br
-       WHERE br.request_id = ? AND br.kind <> 'stay' AND br.status = 'confirmed' AND br.assigned_member_id IS NOT NULL AND ${job.at} > ?
+      SELECT ?, br.organization_id, '${job.kind}', 'booking', br.id, br.product_id, br.location_id, br.assigned_member_id, ${job.at}, ${job.at}, br.timezone, 'open', '${job.kind}:' || br.id, 1, ?, ?
+        FROM ${BOOKING_RECORDS_SQL} br
+       WHERE br.request_id = ? AND br.unit = 'slot' AND br.status = 'confirmed' AND br.assigned_member_id IS NOT NULL AND ${job.at} > ?
       ON CONFLICT (dedupe_key) DO UPDATE SET status = CASE WHEN tasks.status = 'cancelled' THEN 'open' ELSE tasks.status END, closed_at = CASE WHEN tasks.status = 'cancelled' THEN NULL ELSE tasks.closed_at END,
         starts_at = excluded.starts_at, due_at = excluded.due_at, assigned_member_id = excluded.assigned_member_id, version = tasks.version + 1, updated_at = excluded.updated_at
         WHERE tasks.status = 'cancelled' OR (tasks.status = 'open' AND (tasks.starts_at IS NOT excluded.starts_at OR tasks.assigned_member_id IS NOT excluded.assigned_member_id))`,
@@ -684,7 +689,7 @@ export function conversationTaskQueries(requestId: string, now: string): BatchQu
     params: [now, now, requestId, replyTaskCutoff(now)],
   }, {
     query: `INSERT INTO tasks (id, organization_id, kind, subject_type, subject_id, product_id, location_id, timezone, status, dedupe_key, version, created_at, updated_at)
-      SELECT ?, r.organization_id, 'guest_reply', 'request', r.id, (SELECT s.product_id FROM stays s WHERE s.request_id = r.id AND s.organization_id = r.organization_id),
+      SELECT ?, r.organization_id, 'guest_reply', 'request', r.id, (SELECT s.product_id FROM bookings s WHERE s.request_id = r.id AND s.organization_id = r.organization_id AND s.product_session_id IS NULL),
         r.location_id, COALESCE(l.timezone, o.timezone), 'open', 'guest_reply:' || r.id || ':' || guest_entry.id, 1, ?, ?
         FROM requests r JOIN organization o ON o.id = r.organization_id
         LEFT JOIN business_locations l ON l.organization_id = r.organization_id AND l.id = r.location_id
@@ -714,8 +719,8 @@ export function conversationTaskQueries(requestId: string, now: string): BatchQu
     params: [now, now, requestId],
   }, {
     query: `INSERT INTO tasks (id, organization_id, kind, subject_type, subject_id, product_id, location_id, assigned_member_id, due_at, timezone, status, dedupe_key, version, created_at, updated_at)
-      SELECT ?, b.organization_id, 'booking_review', 'booking', b.id, b.product_id, ps.location_id, bc.assigned_member_id, ps.starts_at, ps.timezone, 'open', 'booking_review:' || b.id, 1, ?, ?
-        FROM bookings b JOIN product_sessions ps ON ps.id = b.product_session_id AND ps.organization_id = b.organization_id
+      SELECT ?, b.organization_id, 'booking_review', 'booking', b.id, b.product_id, b.location_id, bc.assigned_member_id, b.starts_at, b.timezone, 'open', 'booking_review:' || b.id, 1, ?, ?
+        FROM bookings b
         JOIN product_booking_configs bc ON bc.organization_id = b.organization_id AND bc.product_id = b.product_id
        WHERE b.request_id = ? AND b.status = 'pending'
       ON CONFLICT (dedupe_key) DO NOTHING`,
@@ -734,17 +739,16 @@ export function conversationTaskQueries(requestId: string, now: string): BatchQu
     // A change that needs the business: one the guest asked for (now), a business proposal on a booking
     // (from when it expires unanswered), or a Google Calendar move the booking refused.
     query: `INSERT INTO tasks (id, organization_id, kind, subject_type, subject_id, product_id, location_id, starts_at, timezone, status, dedupe_key, version, created_at, updated_at)
-      SELECT lower(hex(randomblob(16))), r.organization_id, 'booking_change', r.kind, record.id, record.product_id, r.location_id,
+      SELECT lower(hex(randomblob(16))), r.organization_id, 'booking_change', 'booking', record.id, record.product_id, r.location_id,
           CASE WHEN p.event_name = 'booking_change.requested' AND p.actor_kind <> 'guest'
-            THEN min(strftime('%Y-%m-%dT%H:%M:%fZ', p.occurred_at, '+7 days'), COALESCE(record.ends_at, strftime('%Y-%m-%dT%H:%M:%fZ', p.occurred_at, '+7 days'))) END,
-          COALESCE(record.timezone, l.timezone, o.timezone), 'open', 'booking_change:' || p.id, 1, ?, ?
-        FROM requests r JOIN organization o ON o.id = r.organization_id
-        LEFT JOIN business_locations l ON l.organization_id = r.organization_id AND l.id = r.location_id
-        JOIN (SELECT b.id, b.request_id, b.product_id, ps.ends_at, ps.timezone FROM bookings b JOIN product_sessions ps ON ps.id = b.product_session_id AND ps.organization_id = b.organization_id
-              UNION ALL SELECT s.id, s.request_id, s.product_id, NULL, NULL FROM stays s) record ON record.request_id = r.id
+            THEN min(strftime('%Y-%m-%dT%H:%M:%fZ', p.occurred_at, '+7 days'), ${BOOKING_ENDS_SQL('record')}) END,
+          record.timezone, 'open', 'booking_change:' || p.id, 1, ?, ?
+        FROM requests r
+        JOIN bookings record ON record.request_id = r.id AND record.organization_id = r.organization_id
         JOIN activity_entries p ON p.request_id = r.id
        WHERE r.id = ? AND ((p.event_name = 'booking_change.requested' AND NOT ${CHANGE_ANSWERED_SQL}
-           AND (p.actor_kind = 'guest' OR r.kind = 'booking'))
+           -- A stay's change proposed by the business waits on the guest's channel, not on the business.
+           AND (p.actor_kind = 'guest' OR record.product_session_id IS NOT NULL))
          OR p.event_name = 'calendar_sync.move_refused')
       ON CONFLICT (dedupe_key) DO NOTHING`,
     params: [now, now, requestId],

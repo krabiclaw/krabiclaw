@@ -418,8 +418,8 @@ test('a replayed status email sends its recorded content and refuses a supersede
     // the confirmation email is formatted from them, never from a server clock.
     await db.prepare(`INSERT INTO product_sessions (id,organization_id,product_id,location_id,timezone,starts_at,ends_at,capacity,status,created_by,updated_by)
       VALUES ('seating-status','org-status','table-status','location-status','Asia/Bangkok','2098-10-01T11:00:00.000Z','2098-10-01T13:00:00.000Z',10,'scheduled','user-status','user-status')`).run()
-    await db.prepare(`INSERT INTO bookings (id,organization_id,product_id,product_session_id,product_variant_id,request_id,party_size,policy_json,status)
-      VALUES ('reservation-status','org-status','table-status','seating-status','table-status-variant','booking-status',2,'{"advance_notice_minutes":null,"party_size_min":null,"party_size_max":null,"minimum_guest_age":null,"accessibility_contact_required":false,"payment":null}','confirmed')`).run()
+    await db.prepare(`INSERT INTO bookings (id,organization_id,product_id,product_session_id,product_variant_id,request_id,party_size,policy_json,status,location_id,starts_at,ends_at,timezone)
+      SELECT 'reservation-status','org-status','table-status','seating-status','table-status-variant','booking-status',2,'{"advance_notice_minutes":null,"party_size_min":null,"party_size_max":null,"minimum_guest_age":null,"accessibility_contact_required":false,"payment":null,"cancellation":null}','confirmed',location_id,starts_at,ends_at,timezone FROM product_sessions WHERE id = 'seating-status'`).run()
 
     const input = {
       threadId: 'booking-status', organizationId: 'org-status', actorUserId: 'user-status',
@@ -431,9 +431,9 @@ test('a replayed status email sends its recorded content and refuses a supersede
       message: 'Booking is cancelled, but the guest email failed. Retry with the same idempotency key.',
       mutation_applied: true, operation_completed: false, request_id: 'booking-status', retry_with_same_idempotency_key: true,
       record: {
-        kind: 'booking', id: 'reservation-status', status: 'cancelled', party_size: 2,
+        unit: 'slot', id: 'reservation-status', status: 'cancelled', party_size: 2, party_size_is_minimum: false,
         starts_at: '2098-10-01T11:00:00.000Z', ends_at: '2098-10-01T13:00:00.000Z', timezone: 'Asia/Bangkok',
-        location_id: 'location-status', product_id: 'table-status', product_kind: 'table', product_name: 'Dining room', product_internal_name: null, assigned_member_id: null, check_in_date: null, check_out_date: null, no_show_at: null, review_id: null, advance_notice_minutes: null,
+        location_id: 'location-status', product_id: 'table-status', product_kind: 'table', product_name: 'Dining room', product_internal_name: null, assigned_member_id: null, no_show_at: null, review_id: null, advance_notice_minutes: null,
         organization_id: 'org-status', user_id: null,
       },
     })
@@ -463,9 +463,9 @@ test('a replayed status email sends its recorded content and refuses a supersede
     assert.deepEqual(requests[1], original)
     assert.equal((await getDeliveryById(db, deliveryId))!.email_json, frozenRequest)
 
-    // Moving the seating is what makes the pending send stale — the thread
-    // carries no copy of the time to move.
-    await db.prepare("UPDATE product_sessions SET starts_at = '2098-10-02T11:00:00.000Z', ends_at = '2098-10-02T13:00:00.000Z' WHERE id = 'seating-status'").run()
+    // Moving the booking is what makes the pending send stale — the thread
+    // carries no copy of the time to move. The booking holds its time as a move writes it.
+    await db.prepare("UPDATE bookings SET starts_at = '2098-10-02T11:00:00.000Z', ends_at = '2098-10-02T13:00:00.000Z', version = version + 1 WHERE id = 'reservation-status'").run()
     const attemptsBefore = requests.length
     assert.equal((await executeGuestThreadOperation(db, cancel)).status, 409)
     assert.equal(requests.length, attemptsBefore)
@@ -525,7 +525,8 @@ test('a failed stay cancellation email retries its recorded content after displa
     const walkIn = await createStay(db, env, access, { product_id: home.id, idempotency_key: 'stay-walk-in', check_in_date: '2098-11-01', check_out_date: '2098-11-03',
       adults: 2, guest_name: 'Bo', guest_email: 'walkin@provider-proof.com', total_minor: 30000 })
     assert(walkIn.request_id)
-    assert.equal(await buildBuyerRequestActivityUrl(env,db,{organizationId:access.organizationId,threadId:walkIn.request_id}),null,'a host-entered stay has no buyer management link')
+    // The guest of a host-entered stay is an anonymous Better Auth user; their verified sign-in with this email joins it, so the stay has its management link.
+    assert.equal(await buildBuyerRequestActivityUrl(env,db,{organizationId:access.organizationId,threadId:walkIn.request_id}),`https://proof.example/dashboard/account/activity/stay/${walkIn.request_id}`)
     // The guest bought this one on the site; the real checkout conversion makes it theirs.
     const signed=await createAuth(env).api.signInAnonymous({headers:new Headers(),returnHeaders:true})
     const stay = await buyStay(db, { id: 'stay-cancellation-email', organizationId: access.organizationId, productId: home.id, locationId: 'location-stay-cancel', timezone: 'Asia/Bangkok',
@@ -533,7 +534,7 @@ test('a failed stay cancellation email retries its recorded content after displa
       guest: { name: 'Ana', email: 'guest@provider-proof.com', phone: null, notes: null } })
     // The host cancels it, with the full refund they approved.
     const principal = { organizationId: access.organizationId, userId: access.actorId, role: 'owner' }
-    const approval = await requestRefundAuthorization(db, principal, 'stay-cancellation-email-payment', null, 'cancel_stay')
+    const approval = await requestRefundAuthorization(db, principal, 'stay-cancellation-email-payment', null, 'cancel_booking')
     await approveRefundAuthorization(db, principal, approval.authorization_id)
     const boughtVersion = (await getStay(db, access, stay.id)).version
     await cancelStay(db, env, access, stay.id, { expected_version: boughtVersion, authorization_id: approval.authorization_id, financial_writes_allowed: true })
@@ -713,13 +714,13 @@ test('a booking move into a full session leaves the original booking exactly as 
       // The destination has room when proposed; another party fills it before acceptance.
       `INSERT INTO product_sessions (id,organization_id,product_id,location_id,timezone,starts_at,ends_at,capacity,status,created_by,updated_by) VALUES ('session-from','org-move','prod-move','loc-move','Asia/Bangkok','${soon}','${soonEnd}',4,'scheduled','user-move','user-move')`,
       `INSERT INTO product_sessions (id,organization_id,product_id,location_id,timezone,starts_at,ends_at,capacity,status,created_by,updated_by) VALUES ('session-to','org-move','prod-move','loc-move','Asia/Bangkok','${later}','${laterEnd}',2,'scheduled','user-move','user-move')`,
-      `INSERT INTO bookings (id,organization_id,product_id,product_session_id,product_variant_id,party_size,policy_json,status) VALUES ('booking-other','org-move','prod-move','session-to','var-move',1,'{"advance_notice_minutes":null,"party_size_min":null,"party_size_max":null,"minimum_guest_age":null,"accessibility_contact_required":false,"payment":null}','confirmed')`,
+      `INSERT INTO bookings (id,organization_id,product_id,product_session_id,product_variant_id,party_size,policy_json,status,location_id,starts_at,ends_at,timezone) SELECT 'booking-other','org-move','prod-move','session-to','var-move',1,'{"advance_notice_minutes":null,"party_size_min":null,"party_size_max":null,"minimum_guest_age":null,"accessibility_contact_required":false,"payment":null,"cancellation":null}','confirmed',location_id,starts_at,ends_at,timezone FROM product_sessions WHERE id = 'session-to'`,
     ]) await db.prepare(statement).run()
     const thread = requestInsertQueries({ id: 'move-proof', kind: 'booking', organization_id: 'org-move', location_id: 'loc-move',
       user_id: 'guest-move', review_id: null, payload: threadPayloadForGuest({ name: 'Guest', email: 'guest@move.example', phone: '+66812345678' }), created_at: now, updated_at: now })
     await db.batch(thread.map(write => db.prepare(write.query).bind(...write.params)))
-    await db.prepare(`INSERT INTO bookings (id,organization_id,product_id,product_session_id,product_variant_id,request_id,user_id,party_size,policy_json,status)
-      VALUES ('booking-move','org-move','prod-move','session-from','var-move','move-proof','guest-move',1,'{"advance_notice_minutes":null,"party_size_min":null,"party_size_max":null,"minimum_guest_age":null,"accessibility_contact_required":false,"payment":null}','confirmed')`).run()
+    await db.prepare(`INSERT INTO bookings (id,organization_id,product_id,product_session_id,product_variant_id,request_id,user_id,party_size,policy_json,status,location_id,starts_at,ends_at,timezone)
+      SELECT 'booking-move','org-move','prod-move','session-from','var-move','move-proof','guest-move',1,'{"advance_notice_minutes":null,"party_size_min":null,"party_size_max":null,"minimum_guest_age":null,"accessibility_contact_required":false,"payment":null,"cancellation":null}','confirmed',location_id,starts_at,ends_at,timezone FROM product_sessions WHERE id = 'session-from'`).run()
 
     await notifyBookingCreated(env,db,{organizationId:'org-move',organizationName:'Move',bookingId:'move-proof',productId:'prod-move',productKind:'experience',productTitle:'Class',vertical:'experience',locationId:'loc-move',guestName:'Guest',email:'guest@move.example',startsAt:soon,timezone:'Asia/Bangkok',partySize:1,partySizeIsMinimum:false,status:'confirmed'})
     const classMail=await db.prepare("SELECT d.status,d.email_json FROM guest_thread_deliveries d JOIN activity_entries e ON e.id=d.entry_id WHERE e.request_id='move-proof' AND d.purpose='guest_acknowledgement'").first<{status:string;email_json:string}>()
@@ -748,7 +749,7 @@ test('a booking move into a full session leaves the original booking exactly as 
       'no replacement seat was taken in the full session')
     assert.equal(await db.prepare("SELECT count(*) AS count FROM activity_entries WHERE request_id='move-proof' AND event_name='booking_change.accepted'").first('count'), 0,
       'the decision was not recorded for a move that did not happen')
-    await db.prepare("UPDATE bookings SET status='cancelled' WHERE id='booking-other'").run()
+    await db.prepare("UPDATE bookings SET status='cancelled', cancelled_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id='booking-other'").run()
     await respondToBookingChange(db, env, { threadId: 'move-proof', requestId, token, decision: 'accept' })
     await respondToBookingChange(db, env, { threadId: 'move-proof', requestId, token, decision: 'accept' })
     const moved = await db.prepare("SELECT id, product_session_id, status, request_id FROM bookings WHERE id='booking-move'").first()
@@ -815,7 +816,7 @@ test('a guest writing while the business edits a table booking does not refuse t
     const bookingId = (await getThreadOperationalRecord(db, 'table-thread'))!.id
 
     // The owner opens the booking and reads its version; then the guest writes in the conversation.
-    const read = await readBookedRecord(db, 'org-table', { kind: 'booking', id: bookingId })
+    const read = await readBookedRecord(db, 'org-table', bookingId)
     assert(read)
     const threadBefore = (await getGuestRequest(db, 'table-thread'))!.updated_at
     await receiveGuestWebReply(env, { threadId: 'table-thread', userId: 'guest-table', body: 'Could we have a window table?', photos: [], idempotencyKey: 'guest-midedit-1' })
@@ -830,7 +831,7 @@ test('a guest writing while the business edits a table booking does not refuse t
       { id: bookingId, starts_at: third.starts_at, party_size: 4, location_id: 'loc-old-town', product_id: oldTown.id })
 
     // Again for a proposal: the guest writes, and the proposal made from the version the owner read still goes to the guest.
-    const beforeProposal = await readBookedRecord(db, 'org-table', { kind: 'booking', id: bookingId })
+    const beforeProposal = await readBookedRecord(db, 'org-table', bookingId)
     assert(beforeProposal)
     await receiveGuestWebReply(env, { threadId: 'table-thread', userId: 'guest-table', body: 'Thank you!', photos: [], idempotencyKey: 'guest-midedit-2' })
     assert.deepEqual(await requestBookingChange(db, env, (await getGuestRequest(db, 'table-thread'))!, 'user-table', { kind: 'booking', sessionId: first.id, partySize: 4, expectedUpdatedAt: beforeProposal.updated_at }, 'propose-earlier'),
@@ -838,10 +839,10 @@ test('a guest writing while the business edits a table booking does not refuse t
     assert.equal((await getThreadOperationalRecord(db, 'table-thread'))?.starts_at, third.starts_at, 'a proposal leaves the booking where it is until the guest accepts')
 
     // A table moves to another branch's tables: the same booking, now at the harbour.
-    const beforeBranch = await readBookedRecord(db, 'org-table', { kind: 'booking', id: bookingId })
+    const beforeBranch = await readBookedRecord(db, 'org-table', bookingId)
     assert(beforeBranch)
     assert.deepEqual(await moveBooking(db, env, (await getGuestRequest(db, 'table-thread'))!, { userId: 'user-table' }, { kind: 'booking', sessionId: harbourSeatings[0].id, partySize: 4, expectedUpdatedAt: beforeBranch.updated_at }, 'move-harbour'), { changeStatus: 'moved' })
-    const atHarbour = await readBookedRecord(db, 'org-table', { kind: 'booking', id: bookingId })
+    const atHarbour = await readBookedRecord(db, 'org-table', bookingId)
     assert.deepEqual({ location_id: atHarbour?.location_id, product_id: atHarbour?.product_id, starts_at: atHarbour?.starts_at, party_size: atHarbour?.party_size },
       { location_id: 'loc-harbour', product_id: harbour.id, starts_at: harbourSeatings[0].starts_at, party_size: 4 })
     assert.equal(await db.prepare('SELECT product_variant_id FROM bookings WHERE id = ?').bind(bookingId).first('product_variant_id'), harbour.variants[0]!.id, 'it holds the harbour tables\' own option')
@@ -851,7 +852,7 @@ test('a guest writing while the business edits a table booking does not refuse t
       { statusCode: 409, message: 'The booking changed. Reload before moving it.' })
     await assert.rejects(requestBookingChange(db, env, (await getGuestRequest(db, 'table-thread'))!, 'user-table', { kind: 'booking', sessionId: harbourSeatings[1]!.id, partySize: 4, expectedUpdatedAt: beforeBranch.updated_at }, 'propose-stale'),
       { statusCode: 409, message: 'The booking changed. Reload before sending a request.' })
-    assert.equal((await readBookedRecord(db, 'org-table', { kind: 'booking', id: bookingId }))?.starts_at, harbourSeatings[0].starts_at, 'a refused change moved nothing')
+    assert.equal((await readBookedRecord(db, 'org-table', bookingId))?.starts_at, harbourSeatings[0].starts_at, 'a refused change moved nothing')
   } finally { await runtime.dispose() }
 })
 
@@ -886,10 +887,10 @@ test('a review request reads the visit from the record that holds it', async () 
     // The visit is the table booking's seating, in its zone. 13:00Z in
     // Asia/Bangkok is 8:00 PM, and nothing else in the system knows that.
     // Complete is the clock: confirmed, and an end that has passed.
-    await db.prepare(`INSERT INTO bookings (id,organization_id,product_id,product_session_id,product_variant_id,user_id,request_id,party_size,policy_json,status)
-      VALUES ('res-review','org-review','table-review','seating-review','table-review-variant','guest-review','reservation-review',6,'{"advance_notice_minutes":null,"party_size_min":null,"party_size_max":null,"minimum_guest_age":null,"accessibility_contact_required":false,"payment":null}','confirmed')`).run()
+    await db.prepare(`INSERT INTO bookings (id,organization_id,product_id,product_session_id,product_variant_id,user_id,request_id,party_size,policy_json,status,location_id,starts_at,ends_at,timezone)
+      SELECT 'res-review','org-review','table-review','seating-review','table-review-variant','guest-review','reservation-review',6,'{"advance_notice_minutes":null,"party_size_min":null,"party_size_max":null,"minimum_guest_age":null,"accessibility_contact_required":false,"payment":null,"cancellation":null}','confirmed',location_id,starts_at,ends_at,timezone FROM product_sessions WHERE id = 'seating-review'`).run()
 
-    const context = await getReviewBookingContext(db, 'booking', 'reservation-review')
+    const context = await getReviewBookingContext(db, 'res-review')
     assert(context, 'the thread and its table booking resolve to one context')
     assert.equal(context.subject, 'restaurant', 'a table is reviewed as the restaurant')
     assert.deepEqual(

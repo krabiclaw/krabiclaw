@@ -18,7 +18,7 @@ interface NotificationRow {
   thread_id: string | null
   stored_link: string | null
   organization_slug: string | null
-  booking_kind: 'booking' | 'stay' | null
+  booking_kind: 'booking' | null
   stay_id: string | null
   read_at_destination: number
   conversation: number
@@ -56,15 +56,15 @@ export default defineHandler(async (event) => {
       SELECT n.id, n.scope_kind AS scope, n.event_name AS template, json_extract(n.payload_json, '$.severity') AS severity, n.organization_id, n.location_id, n.target_user_id, json_extract(n.payload_json, '$.title') AS title, n.body AS message,
              json_extract(n.payload_json, '$.thread_id') AS thread_id, json_extract(n.payload_json, '$.deep_link') AS stored_link,
              (SELECT slug FROM organization WHERE id = n.organization_id) AS organization_slug,
-             CASE WHEN ${SCHEDULE_NOTIFICATION_SQL} THEN request.kind END AS booking_kind,
-             CASE WHEN ${SCHEDULE_NOTIFICATION_SQL} THEN COALESCE(stay.id, json_extract(n.payload_json, '$.stay_id')) END AS stay_id,
+             CASE WHEN ${SCHEDULE_NOTIFICATION_SQL} AND booking.product_session_id IS NOT NULL THEN 'booking' END AS booking_kind,
+             CASE WHEN ${SCHEDULE_NOTIFICATION_SQL} THEN COALESCE(CASE WHEN booking.product_session_id IS NULL THEN booking.id END, json_extract(n.payload_json, '$.stay_id')) END AS stay_id,
              CASE WHEN ${CONVERSATION_NOTIFICATION_SQL} THEN 1 ELSE 0 END AS conversation,
              CASE WHEN n.scope_kind = 'organization' AND (${SCHEDULE_NOTIFICATION_SQL} OR ${CONVERSATION_NOTIFICATION_SQL}
                OR n.event_name IN ('task_assigned', 'task_starting')) THEN 1 ELSE 0 END AS read_at_destination,
              n.created_at, nr.read_at
       FROM activity_entries n
       LEFT JOIN requests request ON request.id = json_extract(n.payload_json, '$.thread_id') AND request.organization_id = n.organization_id
-      LEFT JOIN stays stay ON request.kind = 'stay' AND stay.request_id = request.id AND stay.organization_id = n.organization_id
+      LEFT JOIN bookings booking ON booking.request_id = request.id AND booking.organization_id = n.organization_id
       LEFT JOIN (SELECT parent_id, MAX(occurred_at) AS read_at FROM activity_entries WHERE kind = 'acknowledgement' AND actor_user_id = ? GROUP BY parent_id) nr ON nr.parent_id = n.id
       WHERE ${access.whereSql}${cursor ? ' AND (n.created_at < ? OR (n.created_at = ? AND n.id < ?))' : ''}
       ORDER BY n.created_at DESC, n.id DESC

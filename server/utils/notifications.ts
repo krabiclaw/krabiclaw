@@ -3,7 +3,7 @@ import { HTTPError } from 'nitro'
 import { z } from 'zod'
 import { formatFormAnswer, type FormAnswerSnapshot } from '~/shared/form-questions'
 import { formatCalendarDate, formatTime, formatTimestamp } from '~/utils/timezone'
-import { getGuestRequest, getThreadOperationalRecord, requestSummary, type cancelBookingRequest, type GuestRequest } from '~/server/domain/requests'
+import { bookingDay, getGuestRequest, isBookingDay, requestSummary, type cancelBookingRequest, type GuestRequest } from '~/server/domain/requests'
 import { execute, queryAll, queryFirst, type DbClient } from '~/server/db'
 import { organizationEventQuery } from '~/server/utils/organization-events'
 import { getEmailDeliveryMode, hashEmail, sendEmail, type EmailSendResult } from '~/server/utils/email-delivery'
@@ -643,13 +643,12 @@ async function getOpeningThreadContext(
   db: DbClient,
   submissionType: 'contact' | 'booking' | 'stay',
   submissionId: string,
-): Promise<{ guestThreadId: string; sourceEntryId: string; answers: FormAnswerSnapshot[] }> {
-  const thread = await getGuestRequest(db, submissionId, undefined, submissionType)
+): Promise<{ guestThreadId: string; sourceEntryId: string }> {
+  const thread = await getGuestRequest(db, submissionId, undefined, submissionType === 'contact' ? 'contact' : 'booking')
   if (!thread) throw new Error('Submission notification has no canonical request')
   const entry = await findEntryByDedupeKey(db, `request:${submissionId}:submission`)
   if (!entry) throw new Error('Submission notification has no opening activity entry')
-  // A stay's answers are on the stay, not its conversation; its sender reads them there.
-  return { guestThreadId: thread.id, sourceEntryId: entry.id, answers: 'answers' in thread.payload ? thread.payload.answers : [] }
+  return { guestThreadId: thread.id, sourceEntryId: entry.id }
 }
 
 type DeliveryAnchor = { guestThreadId: string | null; sourceEntryId: string }
@@ -1167,7 +1166,8 @@ async function bookingFrame(db: DbClient, opts: BookingNotificationInput) {
 export async function notifyBookingCreated(
   env: NotificationEnv,
   db: DbClient,
-  opts: BookingNotificationInput & { status: 'pending' | 'confirmed' }
+  /** The answers the guest gave when booking, which are on the booking. */
+  opts: BookingNotificationInput & { status: 'pending' | 'confirmed'; answers: FormAnswerSnapshot[] }
 ) {
   const studio = organizationName(opts)
   const prettyDate = new Intl.DateTimeFormat('en-US', { timeZone: opts.timezone, dateStyle: 'medium' }).format(new Date(opts.startsAt))
@@ -1207,7 +1207,7 @@ export async function notifyBookingCreated(
     presentation, status: opts.status,
     notes: opts.notes ?? null, heroImageUrl: hero?.imageUrl ?? null, replyUrl: inboxUrl,
     paid: opts.paid ? formatMinorAmount(opts.paid.amount, opts.paid.currency, 'en-US') : null,
-    answers: threadContext.answers,
+    answers: opts.answers,
   })
   const guest = await guestPresentation(db, opts)
   const copy = getVerticalCopy(opts.vertical, guest.locale)
@@ -1267,14 +1267,21 @@ export async function notifyBookingCreated(
  * member or team, who read it as the turnover (`stayTurnoverAlert`) and open
  * the stay rather than its guest conversation.
  */
-async function stayTurnoverAudience(env: NotificationEnv, db: DbClient, organizationId: string, stay: { id: string; product_id: string; arrival_time: string | null }) {
+async function stayTurnoverAudience(env: NotificationEnv, db: DbClient, organizationId: string, stay: { id: string; product_id: string; starts_at: string; timezone: string }, checkInTime: string | null) {
   const responsible = await queryAll<{ id: string }>(db, `SELECT m.id FROM member m JOIN product_booking_configs c ON c.organization_id = m.organizationId
     WHERE c.organization_id = ? AND c.product_id = ? AND ${assignedMemberSql('c', 'm.userId')}`, [organizationId, stay.product_id])
+  // The arrival the host recorded: the stay's start when it is not the home's check-in time.
+  const arrival = isBookingDay(stay.starts_at) ? null : new Intl.DateTimeFormat('en-GB', { timeZone: stay.timezone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(stay.starts_at))
   return {
     memberIds: responsible.map(member => member.id),
     stayUrl: await dashboardPathUrl(env, db, organizationId, `/bookings/stay/${encodeURIComponent(stay.id)}`),
-    arrival: stay.arrival_time === null ? null : formatTime(stay.arrival_time, 'en-US'),
+    arrival: arrival === null || arrival === checkInTime ? null : formatTime(arrival, 'en-US'),
   }
+}
+
+/** The note a guest left when booking: their message in the booking's conversation. */
+async function guestNote(db: DbClient, requestId: string): Promise<string | null> {
+  return (await findEntryByDedupeKey(db, `request:${requestId}:guest-note`))?.body ?? null
 }
 
 /** Who is staying, as the host reads it: "2 adults, 1 child". */
@@ -1308,7 +1315,7 @@ export async function notifyChannelStay(env: NotificationEnv, db: DbClient, orga
   if (!isCurrencyCode(stay.currency)) throw new Error('The channel stay has an unsupported currency')
   const channel = STAY_CHANNEL_LABELS[stay.channel]
   // A channel may send a reservation without a guest name; its reservation code still names it.
-  const named = [stay.guest_name, stay.guest_surname].filter(Boolean).join(' ').trim()
+  const named = stay.guest_name?.trim() ?? ''
   const guestName = named || `${channel} reservation ${stay.channel_booking_id ?? stay.external_booking_id}`
   const guest: { name: string } | { label: string } = named ? { name: named } : { label: guestName }
   const homes = await queryAll<{ product_id: string; name: string; location_id: string; check_in_time: string | null; check_out_time: string | null }>(db, `SELECT p.id AS product_id, p.name, c.location_id, b.check_in_time, b.check_out_time
@@ -1325,7 +1332,7 @@ export async function notifyChannelStay(env: NotificationEnv, db: DbClient, orga
   const studio = organizationName({ organizationId, organizationName: organization?.name })
   const [hero, audience] = await Promise.all([
     messageHero(db, organizationId, { type: 'product', id: home.product_id }),
-    stayTurnoverAudience(env, db, organizationId, { id: stay.id, product_id: home.product_id, arrival_time: stay.arrival_time }),
+    stayTurnoverAudience(env, db, organizationId, { ...stay, product_id: home.product_id }, home.check_in_time),
   ])
   const memberName = memberGuestName(guest)
   const day = (date: string) => formatCalendarDate(date, 'en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
@@ -1376,22 +1383,23 @@ export async function notifyStayBooked(env: NotificationEnv, db: DbClient, organ
   const { paidOnline } = await import('~/server/domain/payments')
   const [organization, paid, sourceLocale] = await Promise.all([
     queryFirst<{ name: string | null; public_url: string | null }>(db, `SELECT name, (SELECT 'https://' || domain FROM organization_domains WHERE organization_id = organization.id AND role = 'canonical' AND status = 'active') AS public_url FROM organization WHERE id = ?`, [organizationId]),
-    paidOnline(db, organizationId, 'stay', stayId),
+    paidOnline(db, organizationId, stayId),
     getPersistedSourceLocale(db, organizationId),
   ])
-  if (!organization || !stay.request_id || !stay.guest_email || !stay.guest_name) throw new Error('A stay booked on the site needs its organization, guest conversation, guest name and email')
+  if (!organization || !stay.guest_email || !stay.guest_name) throw new Error('A stay booked on the site needs its organization, guest name and email')
   if (!paid) throw new Error('A stay booked on the site is confirmed only once it is paid')
   if (!isCurrencyCode(stay.currency)) throw new Error('The stay has an unsupported currency')
   const home = stay.home
   const studio = organizationName({ organizationId, organizationName: organization.name })
   const threadContext = await getOpeningThreadContext(db, 'stay', stay.request_id)
-  const [inboxUrl, hero, logoUrl, guest, contact, audience] = await Promise.all([
+  const [inboxUrl, hero, logoUrl, guest, contact, audience, notes] = await Promise.all([
     buildOwnerThreadInboxUrl(env, db, { organizationId, locationId: home.location_id, threadId: stay.request_id }),
     messageHero(db, organizationId, { type: 'product', id: home.product_id }),
     organizationLogo(db, organizationId),
     guestPresentation(db, { organizationId, organizationName: studio, productId: home.product_id, productTitle: home.name, locationId: home.location_id }),
     resolveLocationContact(db, organizationId, home.location_id),
-    stayTurnoverAudience(env, db, organizationId, stay),
+    stayTurnoverAudience(env, db, organizationId, stay, home.check_in_time),
+    guestNote(db, stay.request_id),
   ])
   const nights = stayNights(stay)
   const when = (date: string, time: string | null, locale: string) => [formatCalendarDate(date, locale, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }), time ? formatTime(time, locale) : null].filter(Boolean).join(' · ')
@@ -1401,7 +1409,7 @@ export async function notifyStayBooked(env: NotificationEnv, db: DbClient, organ
     guestName: stay.guest_name, guestEmail: stay.guest_email, guestPhone: stay.guest_phone, homeName: home.name, channel: null,
     checkIn: when(stay.check_in_date, home.check_in_time, 'en-US'), checkOut: when(stay.check_out_date, home.check_out_time, 'en-US'), arrival: audience.arrival,
     stayDates: { checkIn: stay.check_in_date, checkOut: stay.check_out_date },
-    nights: String(nights), guests: party, notes: stay.notes, answers: stay.answers, overlap: false,
+    nights: String(nights), guests: party, notes, answers: stay.answers, overlap: false,
     total: formatMinorAmount(stay.total_minor, stay.currency, 'en-US'), paid: formatMinorAmount(paid.amount, paid.currency, 'en-US'),
     balance: stay.total_minor > paid.amount ? formatMinorAmount(stay.total_minor - paid.amount, stay.currency, 'en-US') : null,
     organizationName: studio, heroImageUrl: hero?.imageUrl ?? null, replyUrl: inboxUrl,
@@ -1448,7 +1456,6 @@ export async function notifyStayBooked(env: NotificationEnv, db: DbClient, organ
 export async function notifyStayCancelled(env: NotificationEnv, db: DbClient, organizationId: string, stayId: string, by: 'guest' | 'host', refundMinor: number) {
   const { readCheckoutStay } = await import('~/server/domain/stays')
   const stay = await readCheckoutStay(db, organizationId, stayId)
-  if (!stay.request_id) throw new Error('A stay paid on the site needs its guest conversation')
   if (!isCurrencyCode(stay.currency)) throw new Error('The stay has an unsupported currency')
   const home = stay.home
   const dedupeKey = `stay-cancellation:${stayId}`
@@ -1507,7 +1514,7 @@ export async function notifyStayCancelled(env: NotificationEnv, db: DbClient, or
     }),
   }).parse(stored)
   if (recorded.refund_minor !== refundMinor || entry.body !== recorded.email.text) throw new Error('Stay cancellation notification differs from its recorded refund or email')
-  const audience = await stayTurnoverAudience(env, db, organizationId, stay)
+  const audience = await stayTurnoverAudience(env, db, organizationId, stay, home.check_in_time)
   const ownerInput = { ...recorded.owner, channel: null, arrival: audience.arrival, stayDates: { checkIn: stay.check_in_date, checkOut: stay.check_out_date } }
   const ownerMessage = stayCancelledMessage(ownerInput)
   const threadContext = { guestThreadId: stay.request_id, sourceEntryId: entry.id }
@@ -1639,7 +1646,7 @@ export async function notifyBookingChangeOwner(
     /** A booking's assignment before and after, which decides the members told; a stay's members are its home's. */
     assignment?: BookingChangeAssignment
     /** The stay changed, for its home's responsible members, who read the change without money and open the stay. */
-    stay?: { id: string; product_id: string; arrival_time: string | null }
+    stay?: { id: string; product_id: string }
     change: Omit<BookingChangeEventInput, 'replyUrl' | 'organizationName' | 'counterpartyLabel' | 'partyLabel'>
   },
 ) {
@@ -1657,7 +1664,10 @@ export async function notifyBookingChangeOwner(
     partyLabel: submissionType === 'stay' ? 'Guests' : presentation.partyLabel,
   }
   const ownerMessage = bookingChangeMessage(input)
-  const audience = opts.stay ? await stayTurnoverAudience(env, db, opts.organizationId, opts.stay) : null
+  const stay = opts.stay ? await queryFirst<{ id: string; product_id: string; starts_at: string; timezone: string; check_in_time: string | null }>(db, `SELECT b.id, b.product_id, b.starts_at, b.timezone, c.check_in_time
+    FROM bookings b JOIN product_booking_configs c ON c.organization_id = b.organization_id AND c.product_id = b.product_id WHERE b.organization_id = ? AND b.id = ? AND b.product_id = ?`, [opts.organizationId, opts.stay.id, opts.stay.product_id]) : null
+  if (opts.stay && !stay) throw new HTTPError({ statusCode: 500, message: 'The changed stay is not at its home', data: { code: 'STAY_REQUIRED', field: 'stay', thread_id: opts.threadId } })
+  const audience = stay ? await stayTurnoverAudience(env, db, opts.organizationId, stay, stay.check_in_time) : null
   await notifyOwner(env, db, {
     organizationId: opts.organizationId, organizationName: opts.organizationName, locationId: opts.locationId,
     ...(submissionType === 'stay' ? {} : { submissionType, submissionId: opts.submissionId }),
@@ -1888,14 +1898,17 @@ async function inquiryRecord(db: DbClient, thread: GuestRequest, inquiry: Inquir
  * (the latest one the conversation recorded). Other conversations have none.
  */
 async function conversationRecord(db: DbClient, thread: GuestRequest): Promise<ConversationRecord | null> {
-  if (thread.kind !== 'stay') return null
-  const record = await getThreadOperationalRecord(db, thread.id)
-  if (record?.kind === 'stay') {
-    const stay = await queryFirst<{ adults: number; children: number; infants: number }>(db, 'SELECT adults, children, infants FROM stays WHERE id = ? AND organization_id = ?', [record.id, thread.organization_id])
-    if (!stay || !record.product_id || !record.product_name || !record.check_in_date || !record.check_out_date) throw new Error(`The stay of conversation ${thread.id} could not be read`)
-    return { image: await homePicture(db, thread.organization_id, record.product_id), homeName: record.product_name,
-      checkIn: record.check_in_date, checkOut: record.check_out_date, guests: stayParty(stay), replyBy: null }
+  if (thread.kind !== 'booking') return null
+  const stay = await queryFirst<{ product_id: string; product_name: string; adults: number | null; children: number | null; infants: number | null; starts_at: string; ends_at: string; timezone: string; nights: number }>(db,
+    `SELECT b.product_id, p.name AS product_name, b.adults, b.children, b.infants, b.starts_at, b.ends_at, b.timezone, b.product_session_id IS NULL AS nights
+      FROM bookings b JOIN products p ON p.id = b.product_id AND p.organization_id = b.organization_id WHERE b.organization_id = ? AND b.request_id = ?`, [thread.organization_id, thread.id])
+  if (stay && stay.nights !== 1) return null
+  if (stay) {
+    if (stay.adults === null || stay.children === null || stay.infants === null) throw new Error(`The stay of conversation ${thread.id} has no party breakdown`)
+    return { image: await homePicture(db, thread.organization_id, stay.product_id), homeName: stay.product_name,
+      checkIn: bookingDay(stay.starts_at, stay.timezone), checkOut: bookingDay(stay.ends_at, stay.timezone), guests: stayParty({ adults: stay.adults, children: stay.children, infants: stay.infants }), replyBy: null }
   }
+  if (!thread.payload.participant) return null
   const asked = await queryFirst<GuestThreadEntryRow>(db, `SELECT * FROM activity_entries WHERE request_id = ? AND event_name = 'channel.inquiry_received'
     ORDER BY sequence DESC, occurred_at DESC, id DESC LIMIT 1`, [thread.id])
   if (!asked) return null
@@ -2106,7 +2119,8 @@ export async function notifyGuestCancellation(env: NotificationEnv, db: DbClient
   const request = cancelled.request
   const record = cancelled.record
   const organizationId = request.organization_id
-  if (record.kind !== 'booking' || !record.product_name?.trim()) throw new Error('Booking cancellation delivery requires its canonical offering')
+  if (record.unit !== 'slot' || !record.product_name.trim()) throw new Error('Booking cancellation delivery requires its canonical offering')
+  if (request.payload.guest.name === null || request.payload.guest.email === null) throw new Error(`Booking ${record.id} was cancelled through its guest token without the guest's name and email`)
   await publishGuestInboxThreadEvent(env, db, { threadId: request.id, type: 'thread.changed' })
 
   const organization = await queryFirst<{ name: string | null; vertical: string | null }>(db, 'SELECT name, vertical FROM organization WHERE id = ? LIMIT 1', [organizationId])
@@ -2116,7 +2130,7 @@ export async function notifyGuestCancellation(env: NotificationEnv, db: DbClient
     locationId: record.location_id, bookingId: request.id, guestName: request.payload.guest.name,
     email: request.payload.guest.email, guestPhone: request.payload.guest.phone,
     productId: record.product_id, productKind: record.product_kind, productTitle: record.product_name,
-    startsAt: record.starts_at, timezone: record.timezone, partySize: record.party_size, partySizeIsMinimum: request.payload.party_size_is_minimum,
+    startsAt: record.starts_at, timezone: record.timezone, partySize: record.party_size, partySizeIsMinimum: record.party_size_is_minimum,
     notes: request.payload.notes, wasConfirmed: cancelled.wasConfirmed,
   })
 }

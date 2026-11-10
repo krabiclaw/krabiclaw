@@ -158,7 +158,7 @@ export async function pullCalendarChanges(env: CloudflareEnv, organizationId: st
 /** The destination a Google event's new interval names: the same product's session that starts then, at the same place. */
 async function moveFieldsFor(db: DbClient, env: CloudflareEnv, organizationId: string, subject: CalendarSubject, startsAt: string, endsAt: string) {
   const record = await queryFirst<{ party_size: number; product_id: string; location_id: string | null; timezone: string; updated_at: string }>(db,
-    'SELECT b.party_size, b.product_id, s.location_id, s.timezone, b.updated_at FROM bookings b JOIN product_sessions s ON s.id=b.product_session_id WHERE b.id=? AND b.organization_id=?', [subject.operational_id, organizationId])
+    'SELECT b.party_size, b.product_id, s.location_id, s.timezone, b.updated_at FROM bookings b JOIN product_sessions s ON s.id=b.product_session_id WHERE b.id=? AND b.organization_id=?', [subject.booking_id, organizationId])
   if (!record) throw new HTTPError({ statusCode: 409, message: 'The booking behind this event is gone' })
   const when = new Intl.DateTimeFormat('en-US', { timeZone: record.timezone, dateStyle: 'medium', timeStyle: 'short' }).format(new Date(startsAt))
   const sessions = await listSessions(db, { env, organizationId, productId: record.product_id, fromInstant: new Date(Date.parse(startsAt) - 60_000).toISOString(), toInstant: new Date(Date.parse(startsAt) + 60_000).toISOString() })
@@ -194,7 +194,7 @@ async function flagForReview(env: CloudflareEnv, organizationId: string, link: E
     body: kind === 'event_deleted'
       ? `The ${noun}'s event was deleted in Google Calendar. The ${noun} is still booked for ${whenLabel}, and the event has been put back.`
       : `The ${noun}'s event was moved in Google Calendar, but the ${noun} could not follow${reason ? `: ${reason}` : ''}. It stays at ${whenLabel}, and the event has been moved back.`,
-    payloadJson: { kind, reason, event_id: link.event_id, operational_booking_id: subject.operational_id } })
+    payloadJson: { kind, reason, event_id: link.event_id, operational_booking_id: subject.booking_id } })
   if (!existing) await updateThreadProjectionIfLatestEntry(db, subject.request_id, entry.id)
   const request = await queryFirst<{ location_id: string | null }>(db, 'SELECT location_id FROM requests WHERE id=?', [subject.request_id])
   await notifyCalendarSyncOwner(env, db, { organizationId, organizationName: organization?.name, kind, threadId: subject.request_id, submissionType: 'booking', sourceEntryId: entry.id,
@@ -241,8 +241,12 @@ async function applyCalendarEvent(env: CloudflareEnv, organizationId: string, in
     }
     try {
       assertConsultationAttendees(subject, item)
-      if (start === Date.parse(subject.starts_at) && end === Date.parse(subject.ends_at)) {
-        if (link.state === 'error' || item.status !== calendarEvent(subject, null).status) { restoring = true; await restore() }
+      // The event says the booking's own times, or for a stay whose home lacks a time, its whole days.
+      const canonical = calendarEvent(subject, null)
+      const same = (actual: GoogleEvent['start'], expected: typeof canonical.start) => 'date' in expected ? actual?.date === expected.date
+        : actual?.dateTime !== undefined && Date.parse(actual.dateTime) === Date.parse(expected.dateTime)
+      if (same(item.start, canonical.start) && same(item.end, canonical.end)) {
+        if (link.state === 'error' || item.status !== canonical.status) { restoring = true; await restore() }
         // Google's sync feed returns current resources, not edit history. The
         // restoration has a new ETag, so a failed client delivery resumes from
         // the latest canonical proposal, never from that new provider revision.
@@ -264,6 +268,7 @@ async function applyCalendarEvent(env: CloudflareEnv, organizationId: string, in
         await logInbound(db, { organizationId, externalId: item.id, status: 'applied', detail: 'changed in Google Calendar; change requests are off, so the event is put back' })
         return 'applied'
       }
+      if (subject.product_kind === 'stay') throw new HTTPError({ statusCode: 409, message: 'A stay’s nights change in KrabiClaw, where the home’s calendar and channel follow them' })
       if (!Number.isFinite(start) || !Number.isFinite(end)) throw new HTTPError({ statusCode: 409, message: 'The event lost its start or end time' })
       if (!thread) throw new HTTPError({ statusCode: 409, message: 'The booking has no guest conversation to move it through' })
       if (!item.etag || !item.updated) throw new HTTPError({ statusCode: 409, message: 'Google returned no event revision; the change cannot be proposed safely.' })

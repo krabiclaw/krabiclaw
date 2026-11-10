@@ -113,7 +113,7 @@ test('members talk in team conversations, see unread state and receive recorded 
     assert.equal(await db.prepare('SELECT COUNT(*) AS n FROM team_thread_members WHERE thread_id = ?').bind(raced[0].id).first('n'), 2)
 
     // A stay conversation needs a stay the caller can see: a member sees only the homes they look after.
-    await assert.rejects(createTeamThread(env, db, cleaner, { memberIds: ['owner'], stayId: stay.id }), refused(404, 'STAY_NOT_FOUND', 'stayId'))
+    await assert.rejects(createTeamThread(env, db, cleaner, { memberIds: ['owner'], bookingId: stay.id }), refused(404, 'BOOKING_NOT_FOUND', 'bookingId'))
     await updateStayHome(env, db, manager, cabin.id, { assigned_member_id: 'm-owner' })
     assert.equal((await listStayHomes(db, manager)).find(home => home.product_id === cabin.id)?.assigned_member_id, 'm-owner', 'an owner can hold explicit business responsibility')
     await assert.rejects(updateStayHome(env, db, manager, cabin.id, { assigned_member_id: 'm-outsider' }), refused(422, 'INVALID_RESPONSIBILITY', 'assigned_member_id'))
@@ -125,7 +125,7 @@ test('members talk in team conversations, see unread state and receive recorded 
     await assert.rejects(assertAssignedBookingAccess(db, { ...principal('cleaner', 'member'), requestId: stay.request_id }), refused(404, 'THREAD_NOT_FOUND', 'threadId'))
     assert.deepEqual((await listOrganizationNotificationMembers(env, ORG, { requestId: stay.request_id })).map(member => member.userId).sort(), ['owner'], 'a stay conversation alerts owner oversight, not the member looking after the home')
     await updateStayHome(env, db, manager, cabin.id, { assigned_member_id: 'm-cleaner' })
-    const about = await createTeamThread(env, db, cleaner, { memberIds: ['owner'], stayId: stay.id })
+    const about = await createTeamThread(env, db, cleaner, { memberIds: ['owner'], bookingId: stay.id })
     assert.equal(about.created, true)
     assert.notEqual(about.id, direct.id)
 

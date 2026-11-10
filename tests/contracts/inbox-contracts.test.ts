@@ -17,7 +17,7 @@ import { memberInbox } from '../../server/utils/dashboard-guest-threads.ts'
 import { memberAccessPrincipal } from '../../server/utils/member-access.ts'
 import { executeBatch } from '../../server/db/index.ts'
 import { requestInsertQueries } from '../../server/domain/requests.ts'
-import { stayFromCheckoutQueries } from '../../server/domain/stays.ts'
+import { stayCheckoutPolicy, stayFromCheckoutQueries } from '../../server/domain/stays.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 
 /*
@@ -146,13 +146,13 @@ test('the inbox view model matches contracts/inbox', { timeout: 120_000 }, async
     const suggestions = await suggestGuestReplies(db, env as unknown as Record<string, unknown>, principal, threadId)
 
     // An automatic message already sent, the guest's change request, filing the conversation away and back, and a reply Airbnb refused.
-    const stay = (await db.prepare('SELECT id, version FROM stays WHERE request_id = ?').bind(threadId).first<{ id: string; version: number }>())!
+    const stay = (await db.prepare('SELECT id, version FROM bookings WHERE request_id = ?').bind(threadId).first<{ id: string; version: number }>())!
     await db.batch([
       db.prepare(`INSERT INTO activity_entries (id, request_id, kind, scope_kind, actor_kind, channel, body, event_name, payload_json, dedupe_key, sequence, occurred_at, created_at)
         SELECT 'automatic-contract', ?, 'message', 'request', 'system', 'airbnb', 'Your door code is 1106. Garage D is unlocked.', 'thread.scheduled_message', '{}', 'automatic-contract',
           (SELECT MAX(sequence) FROM activity_entries WHERE request_id = ?) + 1, ?, ?`).bind(threadId, threadId, NOW, NOW),
-      db.prepare(`INSERT INTO scheduled_guest_messages (id, organization_id, product_id, subject_type, subject_id, request_id, template_id, template_title, template_version, body, due_at, timezone, status, entry_id, sent_at, created_at, updated_at)
-        VALUES ('scheduled-contract', ?, ?, 'stay', ?, ?, NULL, 'Check-in instructions', 1, 'Your door code is 1106. Garage D is unlocked.', ?, 'America/Denver', 'sent', 'automatic-contract', ?, ?, ?)`)
+      db.prepare(`INSERT INTO scheduled_guest_messages (id, organization_id, product_id, booking_id, request_id, template_id, template_title, template_version, body, due_at, timezone, status, entry_id, sent_at, created_at, updated_at)
+        VALUES ('scheduled-contract', ?, ?, ?, ?, NULL, 'Check-in instructions', 1, 'Your door code is 1106. Garage D is unlocked.', ?, 'America/Denver', 'sent', 'automatic-contract', ?, ?, ?)`)
         .bind(ORG, home.id, stay.id, threadId, NOW, NOW, NOW, NOW),
     ])
     assert.deepEqual(await runAlterationRequestFeed(db, env, PROPERTY), { recorded: 1, reconciled: 0 })
@@ -169,11 +169,15 @@ test('the inbox view model matches contracts/inbox', { timeout: 120_000 }, async
     const purchase = { product_id: home.id, location_id: 'location', timezone: 'America/Denver', check_in_date: '2026-11-20', check_out_date: '2026-11-23', adults: 2, children: 0, infants: 0,
       total_minor: 45_000, currency: 'USD', cancellation_policy: 'moderate', nightly: ['2026-11-20', '2026-11-21', '2026-11-22'].map(date => ({ date, price_minor: 15_000 })),
       guest: { name: 'Ana Ruiz', email: 'ana@example.test', phone: '+13035550123', notes: 'We arrive late, around 9 PM.', answers: [] } }
+    // The guest who paid is the anonymous Better Auth user their checkout made.
+    await db.prepare("INSERT INTO user (id, name, email, emailVerified, isAnonymous, createdAt, updatedAt) VALUES ('site-guest', 'Anonymous', 'anon-site-guest@customers.krabiclaw.local', 0, 1, 0, 0)").run()
     await db.prepare(`INSERT INTO payments (id, organization_id, buyer_user_id, stripe_account_id, livemode, subject_type, subject_id, location_id, currency, amount, captured_amount, stripe_payment_intent_id, price_snapshot_json, created_at, updated_at)
-      VALUES ('site-pay', ?, NULL, 'acct_contract', 0, 'stay', NULL, 'location', 'USD', 45000, 45000, 'pi_site', ?, ?, ?)`).bind(ORG, JSON.stringify({ stay: purchase }), NOW, NOW).run()
-    await executeBatch(db, stayFromCheckoutQueries({ organizationId: ORG, locationId: 'location', stayId: 'site-stay', holdId: 'site-hold', paymentId: 'site-pay', buyerUserId: null, now: NOW,
-      stay: { quote: purchase, guest: purchase.guest }, homeTitle: home.name }))
-    const siteThreadId = (await db.prepare("SELECT request_id FROM stays WHERE id = 'site-stay'").first<{ request_id: string }>())!.request_id
+      VALUES ('site-pay', ?, 'site-guest', 'acct_contract', 0, 'booking', NULL, 'location', 'USD', 45000, 45000, 'pi_site', ?, ?, ?)`).bind(ORG, JSON.stringify({ stay: purchase }), NOW, NOW).run()
+    const variant = (await db.prepare('SELECT id FROM product_variants WHERE product_id = ?').bind(home.id).first<{ id: string }>())!
+    await executeBatch(db, stayFromCheckoutQueries({ organizationId: ORG, stayId: 'site-stay', holdId: 'site-hold', paymentId: 'site-pay', buyerUserId: 'site-guest', now: NOW,
+      stay: { quote: purchase, guest: purchase.guest }, policy: await stayCheckoutPolicy(db, ORG, { ...purchase, tax_behavior: 'unspecified' }),
+      home: { name: home.name, location_id: 'location', timezone: 'America/Denver', check_in_time: '16:00', check_out_time: '10:00', variant_id: variant.id } }))
+    const siteThreadId = (await db.prepare("SELECT request_id FROM bookings WHERE id = 'site-stay'").first<{ request_id: string }>())!.request_id
     // A question through the contact form that nobody has written in for 30 days: past by the rule, not archived.
     const quiet = '2026-10-01T15:00:00.000Z'
     await executeBatch(db, requestInsertQueries({ id: 'quiet-contact', kind: 'contact', organization_id: ORG, location_id: 'location', user_id: null, review_id: null, conversation_state: 'needs_attention', resolved_at: null,

@@ -79,7 +79,7 @@ async function boot(){
  }catch(error){await runtime.dispose();throw error}
 }
 async function payable(db:D1Database,id:string,expires='2099-09-30T00:00:00.000Z'){
- await db.prepare("INSERT INTO payments(id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,currency,amount,price_snapshot_json,created_at,updated_at) VALUES(?,?,'guest','acct_seller',0,'booking','USD',10000,?,?,?)").bind(id,ORG,JSON.stringify({title:'Consultation',tax_code:null,price:{unit_amount:10000,currency:'USD',tax_behavior:'exclusive'},quantity:1,automatic_tax:false,method_configuration_id:'pmc_seller',policy:{...OPEN_TERMS,payment:{basis:'per_guest',unit_amount:10000,currency:'USD',tax_behavior:'exclusive',min_party_size:null}}}),NOW,NOW).run()
+ await db.prepare("INSERT INTO payments(id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,currency,amount,price_snapshot_json,created_at,updated_at) VALUES(?,?,'guest','acct_seller',0,'booking','USD',10000,?,?,?)").bind(id,ORG,JSON.stringify({title:'Consultation',tax_code:null,price:{unit_amount:10000,currency:'USD',tax_behavior:'exclusive'},quantity:1,automatic_tax:false,method_configuration_id:'pmc_seller',policy:{...OPEN_TERMS,payment:{basis:'per_guest',unit_amount:10000,currency:'USD',tax_behavior:'exclusive',min_party_size:null}},answers:[]}),NOW,NOW).run()
  await db.prepare("UPDATE payments SET stripe_payment_intent_id=?,idempotency_key=?,return_token='test-return-proof',checkout_expires_at=? WHERE id=?").bind(`pi_${id}`,`checkout:${id}`,expires,id).run()
  await db.prepare("INSERT INTO payment_checkout_holds(id,organization_id,product_id,variant_id,price_id,session_id,buyer_user_id,payment_id,quantity,amount,currency,starts_at,ends_at,status,expires_at,created_at) VALUES(?,?,'product','variant','price','session','guest',?,1,10000,'USD','2099-10-01T13:00:00.000Z','2099-10-01T14:00:00.000Z','active',?,?)").bind(`h:${id}`,ORG,id,expires,NOW).run()
 }
@@ -357,9 +357,9 @@ test('authorized guest cancellation replay recovers an interrupted Stripe refund
     assert.equal(interruptedDetails.guestCanCancel, false)
     assert.equal(interruptedDetails.guestCanRetryCancellation, true)
     await assert.rejects(() => loadBuyerBookingDetails(db, env, 'other', 'booking', scope.id), error => error instanceof HTTPError && error.statusCode === 404)
-    const tokenScope = { organizationId: ORG, subjectType: 'booking' as const, subjectId: bookingId, requestId: scope.id }
+    const tokenScope = { organizationId: ORG, bookingId, requestId: scope.id }
     assert.equal(await canRetryGuestVisitRefund(db, tokenScope), true)
-    for (const foreign of [{ organizationId: 'another-org' }, { subjectId: 'another-booking' }, { requestId: 'another-request' }, { buyerUserId: 'other' }]) assert.equal(await canRetryGuestVisitRefund(db, { ...tokenScope, ...foreign }), false)
+    for (const foreign of [{ organizationId: 'another-org' }, { bookingId: 'another-booking' }, { requestId: 'another-request' }, { buyerUserId: 'other' }]) assert.equal(await canRetryGuestVisitRefund(db, { ...tokenScope, ...foreign }), false)
     assert.equal(await cancelBookingRequest(db, { ...scope, buyerUserId: 'other' }), null)
     assert.equal(await cancelBookingRequest(db, { ...scope, tokenHash: 'wrong-token' }), null)
     assert.equal(await cancelBookingRequest(db, { ...scope, tokenHash: 'deposit-token-hash', now: '2100-01-01T00:00:00.000Z' }), null)
@@ -682,7 +682,7 @@ test('a payment back on the business’s site claims for that site’s buyer and
   await db.batch(requestInsertQueries(opening).map(write => db.prepare(write.query).bind(...write.params)))
   // The deposit is the table's price once, for the whole party, with the terms the guest was shown.
   await db.prepare("INSERT INTO payments(id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,location_id,currency,amount,price_snapshot_json,created_at,updated_at) VALUES('deposit',?,?,'acct_seller',0,'booking','dining','USD',10000,?,?,?)")
-   .bind(ORG, 'guest', JSON.stringify({ title: 'Dining tables', tax_code: null, price: { unit_amount: 10000, currency: 'USD', tax_behavior: 'exclusive' }, quantity: 1, automatic_tax: false, method_configuration_id: 'pmc_seller', product_id: 'tables', variant_id: 'table-variant', session_id: 'seating', policy: TABLE_TERMS }), NOW, NOW).run()
+   .bind(ORG, 'guest', JSON.stringify({ title: 'Dining tables', tax_code: null, price: { unit_amount: 10000, currency: 'USD', tax_behavior: 'exclusive' }, quantity: 1, automatic_tax: false, method_configuration_id: 'pmc_seller', product_id: 'tables', variant_id: 'table-variant', session_id: 'seating', policy: TABLE_TERMS, answers: [] }), NOW, NOW).run()
   await db.prepare("INSERT INTO payment_checkout_holds(id,organization_id,product_id,variant_id,price_id,session_id,location_id,timezone,buyer_user_id,request_id,payment_id,quantity,amount,currency,starts_at,ends_at,status,expires_at,created_at) VALUES('deposit-hold',?,'tables','table-variant','table-price','seating','dining','UTC',?,'deposit-request','deposit',1,10000,'USD','2099-10-01T13:00:00.000Z','2099-10-01T15:00:00.000Z','active','2099-09-30T00:00:00.000Z',?)").bind(ORG, 'guest', NOW).run()
   const claims: Record<string, string> = {}
   for (const id of ['deposit', 'clearing', 'declined']) {
@@ -787,10 +787,13 @@ test('buyer Activity groups exact owned visits and immutable orders without manu
   const visits=(await buyerActivities(db,'verified')).activities
   assert.deepEqual(visits.map(({kind,id,requestId,operationalId})=>({kind,id,requestId,operationalId})),[{kind:'booking',id:opening.id,requestId:opening.id,operationalId:booking.bookingId}])
   assert.equal(await buyerPaymentActivityPath(db,'verified','visit-payment'),`/dashboard/account/activity/booking/${opening.id}`)
+  // The team's private note on the booking is never the buyer's to read.
+  await db.prepare("UPDATE bookings SET private_notes='Team-only note' WHERE id=?").bind(booking.bookingId).run()
   const detail=await loadBuyerBookingDetails(db, env,'verified','booking',opening.id)
   assert.deepEqual(detail.payments!.map(item=>item.payment.id),['visit-payment'])
   assert.equal(detail.threadId,opening.id)
-  assert.deepEqual(detail.notes,[])
+  assert.equal(detail.privateNotes,null)
+  assert.doesNotMatch(JSON.stringify(detail),/Team-only note/u)
   assert.equal(detail.assignedMemberName,null)
   await assert.rejects(()=>loadBuyerBookingDetails(db, env,'verified','booking',booking.bookingId),error=>error instanceof HTTPError&&error.statusCode===404)
   await assert.rejects(()=>loadBuyerBookingDetails(db, env,'other','booking',opening.id),error=>error instanceof HTTPError&&error.statusCode===404)
@@ -1012,10 +1015,12 @@ test('a stay purchase claim cancels Stripe before releasing only its held nights
     await db.prepare("INSERT INTO product_locations(organization_id,product_id,location_id,created_by,updated_by) VALUES(?,'cabin','cabin-site','host','host')").bind(ORG).run()
     await db.prepare("INSERT INTO product_stay_configs(product_id,organization_id,internal_name,location_id,created_by,updated_by) VALUES('cabin',?,'Cabin','cabin-site','host','host')").bind(ORG).run()
     await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,unit,scheduling_mode,online_payment_required,check_in_time,check_out_time,default_capacity,min_nights,created_by,updated_by) VALUES('cabin',?,'nights','business',1,'15:00','11:00',4,1,'host','host')").bind(ORG).run()
+    // A home's one variant is its nightly offer, which every booking of it names.
+    await db.prepare("INSERT INTO product_variants(id,organization_id,product_id,name,created_by,updated_by) VALUES('cabin-night',?,'cabin','Night','host','host')").bind(ORG).run()
     const claims = new Map<string, string>()
     for (const [id, from, to] of [['changing', '2099-10-01', '2099-10-03'], ['other-stay', '2099-10-03', '2099-10-04']]) {
       await payable(db, id!)
-      await db.prepare("UPDATE payments SET subject_type='stay',location_id='cabin-site' WHERE id=?").bind(id).run()
+      await db.prepare("UPDATE payments SET location_id='cabin-site' WHERE id=?").bind(id).run()
       await db.prepare("UPDATE payment_checkout_holds SET product_id='cabin',variant_id=NULL,price_id=NULL,session_id=NULL,location_id='cabin-site',timezone='UTC',starts_at=?,ends_at=? WHERE payment_id=?").bind(from, to, id).run()
       const claim = crypto.randomUUID() + crypto.randomUUID()
       claims.set(id!, claim)

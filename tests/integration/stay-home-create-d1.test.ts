@@ -109,7 +109,10 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     const created = await call(owner, 'POST', keyedCabin)
     assert.equal(created.status, 201)
     const made = created.body.home as { product_id: string; location_id: string }
-    assert.deepEqual(created.body, { home: { product_id: made.product_id, product_updated_at: (await getProduct(db, ORG, made.product_id)).updated_at, location_id: made.location_id, ...home } })
+    // The home's one variant, its nightly offer, as the catalog reads it.
+    const catalogHome = await getProduct(db, ORG, made.product_id)
+    assert.equal(catalogHome.variants.length, 1)
+    assert.deepEqual(created.body, { home: { product_id: made.product_id, variant_id: catalogHome.variants[0]!.id, product_updated_at: catalogHome.updated_at, location_id: made.location_id, ...home } })
     // The same key returns the same home; nothing new is made.
     assert.deepEqual(await call(owner, 'POST', keyedCabin), created)
     assert.deepEqual(await call(owner, 'POST', { ...keyedCabin, idempotency_key: ` ${keyedCabin.idempotency_key} ` }), created)
@@ -163,7 +166,7 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     })
     assert.equal(edited.status, 200)
     const changed = {
-      product_id: made.product_id, product_updated_at: (await getProduct(db, ORG, made.product_id)).updated_at, location_id: made.location_id, name: 'Cliff Cabin North', internal_name: 'Cliff Cabin', timezone: 'America/Los_Angeles', currency: 'USD', base_price_minor: 210_00, base_price_tax_behavior: 'unspecified',
+      product_id: made.product_id, variant_id: catalogHome.variants[0]!.id, product_updated_at: (await getProduct(db, ORG, made.product_id)).updated_at, location_id: made.location_id, name: 'Cliff Cabin North', internal_name: 'Cliff Cabin', timezone: 'America/Los_Angeles', currency: 'USD', base_price_minor: 210_00, base_price_tax_behavior: 'unspecified',
       check_in_time: '16:00', check_in_end_time: '21:00', check_out_time: '10:00', max_guests: 6, min_nights: 3, calendar_rules: null, check_in_instructions: null, assigned_member_id: 'm-helper', channel: null, photos: [], photo_rooms: [], stay_map_sharing: 'general',
       accessibility: home.accessibility, questions: home.questions, questions_revision: home.questions_revision,
       address: home.address, latitude: null, longitude: null, description: '', published: false, live: false, airbnb_listing_id: null, airbnb_editor_url: null, property_type_group: null, property_type: null, ...unspecifiedPropertyDetails, bedrooms: null, beds: null, bathrooms: null, amenities: [], amenity_answers: [], smoke_detector_details: null, carbon_monoxide_detector_details: null, cancellation_policy: 'flexible', long_term_cancellation_policy: 'firm', check_in_method: null, wifi_network: null, wifi_password: null, directions: null, house_manual: null, checkout_instructions: [],

@@ -3,6 +3,7 @@ import { isCurrencyCode } from '~/shared/currencies'
 import { formatMinorAmount, type Price } from '~/shared/prices'
 import { freeCancellationNoticeMinutes, noticeDuration } from '~/shared/availability-settings'
 import { isRecord } from '~/server/utils/type-guards'
+import { STAY_BOOKED_POLICIES, type StayBookedPolicy } from '~/shared/stay-cancellation'
 import type { PaymentBasis, ProductBookingConfigRecord } from '~/server/utils/availability'
 
 /**
@@ -25,6 +26,8 @@ export interface BookingPolicy {
     /** The smallest party that pays; null is every party. */
     min_party_size: number | null
   } | null
+  /** The cancellation policy a guest paying for nights on the site booked under (shared/stay-cancellation.ts); null for any other booking. */
+  cancellation: StayBookedPolicy | null
 }
 
 /** The offering's terms as they stand now, at the price this booking is made at. */
@@ -38,6 +41,7 @@ export function bookingPolicy(config: Pick<ProductBookingConfigRecord, 'advance_
     payment: config.online_payment_required && price && price.unit_amount > 0
       ? { basis: config.payment_basis, unit_amount: price.unit_amount, currency: price.currency, tax_behavior: price.tax_behavior, min_party_size: config.payment_min_party_size }
       : null,
+    cancellation: null,
   }
 }
 
@@ -50,7 +54,8 @@ export function parseBookingPolicy(json: string): BookingPolicy {
   if (!isRecord(value) || !nullableCount(value.advance_notice_minutes) || !nullableCount(value.party_size_min) || !nullableCount(value.party_size_max)
     || !nullableCount(value.minimum_guest_age) || typeof value.accessibility_contact_required !== 'boolean'
     || !(payment === null || (isRecord(payment) && (payment.basis === 'per_guest' || payment.basis === 'per_booking') && Number.isSafeInteger(payment.unit_amount)
-      && isCurrencyCode(payment.currency) && (payment.tax_behavior === 'inclusive' || payment.tax_behavior === 'exclusive' || payment.tax_behavior === 'unspecified') && nullableCount(payment.min_party_size)))) {
+      && isCurrencyCode(payment.currency) && (payment.tax_behavior === 'inclusive' || payment.tax_behavior === 'exclusive' || payment.tax_behavior === 'unspecified') && nullableCount(payment.min_party_size)))
+    || !(value.cancellation === null || STAY_BOOKED_POLICIES.includes(value.cancellation as StayBookedPolicy))) {
     throw new Error('A booking has an invalid frozen policy')
   }
   return value as unknown as BookingPolicy

@@ -285,13 +285,15 @@ export const TARGET_INVARIANT_QUERIES = {
   localized_resource_owner_scope: `SELECT r.id FROM resource_localizations r WHERE NOT (
     ${Object.entries(LOCALIZED_OWNER_TABLES).map(([type, table]) => `(r.resource_type = '${type}' AND EXISTS (SELECT 1 FROM ${table} o WHERE o.id = r.resource_id AND ${type === 'organization' ? 'o.id' : 'o.organization_id'} = r.organization_id))`).join(' OR ')})`,
   activity_request_scope: `SELECT e.id FROM activity_entries e WHERE e.scope_kind = 'request' AND NOT EXISTS (
-    SELECT 1 FROM requests r WHERE r.id = e.request_id AND r.kind IN ('contact','reservation','booking','stay'))`,
+    SELECT 1 FROM requests r WHERE r.id = e.request_id AND r.kind IN ('contact','reservation','booking'))`,
   channel_thread_scope: `SELECT t.external_thread_id FROM channel_threads t JOIN requests r ON r.id = t.request_id
     JOIN product_stay_configs c ON c.product_id = t.product_id AND c.organization_id = t.organization_id
-    WHERE r.kind <> 'stay' OR r.organization_id <> t.organization_id OR r.location_id IS NOT c.location_id`,
+    WHERE r.kind <> 'booking' OR r.organization_id <> t.organization_id OR r.location_id IS NOT c.location_id`,
+  // A conversation titled by its channel is a channel's thread, or a channel reservation's that named no guest.
   channel_participant_addressable: `SELECT r.id FROM requests r WHERE json_type(r.payload_json, '$.participant') IS NOT NULL
-    AND NOT EXISTS (SELECT 1 FROM channel_threads t WHERE t.request_id = r.id AND t.organization_id = r.organization_id)`,
-  channel_booking_thread_scope: `SELECT t.external_thread_id FROM channel_threads t JOIN stays s
+    AND NOT EXISTS (SELECT 1 FROM channel_threads t WHERE t.request_id = r.id AND t.organization_id = r.organization_id)
+    AND NOT EXISTS (SELECT 1 FROM bookings b WHERE b.request_id = r.id AND b.organization_id = r.organization_id AND b.owner = 'channel')`,
+  channel_booking_thread_scope: `SELECT t.external_thread_id FROM channel_threads t JOIN bookings s
     ON s.provider = t.provider AND s.external_booking_id = t.external_booking_id
     WHERE s.organization_id <> t.organization_id OR s.product_id <> t.product_id OR s.request_id IS NOT t.request_id`,
   // The retired model must leave no trace.

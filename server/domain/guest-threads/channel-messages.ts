@@ -1,5 +1,5 @@
 import { HTTPError } from 'nitro'
-import { execute, executeBatch, queryFirst, type DbClient } from '~/server/db'
+import { execute, executeBatch, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { publishGuestInboxThreadEvent, publishStayInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 import { ChannexError, type ChannexEnv } from '~/server/integrations/channex/client'
 import { landBookingRevision, pendingBookingRevisions } from '~/server/integrations/channex/booking-revisions'
@@ -12,7 +12,7 @@ import type { UploadResolvedMediaInput } from '~/server/utils/media-upload'
 import { getMediaAsset, readMediaPlacements } from '~/server/utils/media-asset-manager'
 import { MAX_IMAGE_BYTES } from '~/server/utils/media-mime'
 import { downloadImageBuffer } from '~/server/utils/cloudflare-images'
-import { getGuestRequest, requestSummary, stayThreadQueries } from '~/server/domain/requests'
+import { getGuestRequest, requestSummary } from '~/server/domain/requests'
 import { isAirbnbSupportMessage, notifyGuestThreadReply, notifyAirbnbInquiry } from '~/server/utils/notifications'
 import { readAirbnbInquiry } from '~/server/integrations/channex/live-feed'
 import type { CloudflareEnv } from '~/server/utils/auth'
@@ -37,7 +37,7 @@ async function homeMapping(db: DbClient, propertyId: string): Promise<HomeMappin
     WHERE m.provider = 'channex' AND m.property_id = ?`, [propertyId])
 }
 
-type ThreadStay = { id: string; request_id: string | null; organization_id: string; product_id: string }
+type ThreadStay = { id: string; request_id: string; organization_id: string; product_id: string }
 
 /**
  * The stay of the booking a conversation names. A booking whose revision
@@ -48,11 +48,40 @@ type ThreadStay = { id: string; request_id: string | null; organization_id: stri
  * before the import's reservations) has no stay.
  */
 async function threadStay(db: DbClient, env: ChannelEnv, home: HomeMapping, bookingId: string): Promise<ThreadStay | null> {
-  const stay = () => queryFirst<ThreadStay>(db, "SELECT id, request_id, organization_id, product_id FROM stays WHERE provider = 'channex' AND external_booking_id = ?", [bookingId])
+  const stay = () => queryFirst<ThreadStay>(db, "SELECT id, request_id, organization_id, product_id FROM bookings WHERE provider = 'channex' AND external_booking_id = ? AND request_id IS NOT NULL", [bookingId])
   const landed = await stay()
   if (landed) return landed
   for (const revision of await pendingBookingRevisions(env, home.property_id, bookingId)) await landBookingRevision(db, env, revision)
   return stay()
+}
+
+/**
+ * A channel's reservation opens its own conversation when it lands; when the
+ * guest had already written before booking, that inquiry's conversation is
+ * the stay's. The reservation's own conversation joins it: every entry and
+ * everything that names it moves to the inquiry's, after its entries, and the
+ * guest it recorded becomes the inquiry's guest. Nothing is discarded.
+ */
+export async function joinBookingConversationQueries(db: DbClient, input: { organizationId: string; bookingId: string; from: string; into: string; now: string }): Promise<BatchQuery[]> {
+  const last = await queryFirst<{ sequence: number }>(db, 'SELECT COALESCE(MAX(sequence), 0) AS sequence FROM activity_entries WHERE request_id = ?', [input.into])
+  if (!last) throw new Error(`Conversation ${input.into} has no ledger to read`)
+  const owned = 'EXISTS (SELECT 1 FROM bookings WHERE id = ? AND organization_id = ? AND request_id = ?)'
+  const ownedParams = [input.bookingId, input.organizationId, input.from]
+  return [
+    // The inquiry's ledger is as read, and it has no booking of its own, or the batch fails here.
+    { query: `SELECT CASE WHEN (SELECT COALESCE(MAX(sequence), 0) FROM activity_entries WHERE request_id = ?) = ? AND NOT EXISTS (SELECT 1 FROM bookings WHERE request_id = ?) THEN NULL ELSE json('CHANNEL_CONVERSATION_CHANGED') END`, params: [input.into, last.sequence, input.into] },
+    { query: `UPDATE requests SET user_id = COALESCE(user_id, (SELECT user_id FROM requests WHERE id = ?)),
+        payload_json = json_set(payload_json, '$.guest', json((SELECT json_extract(payload_json, '$.guest') FROM requests WHERE id = ?))), updated_at = ?
+        WHERE id = ? AND organization_id = ? AND ${owned}`, params: [input.from, input.from, input.now, input.into, input.organizationId, ...ownedParams] },
+    { query: `UPDATE activity_entries SET request_id = ?, sequence = sequence + ? WHERE request_id = ? AND ${owned}`, params: [input.into, last.sequence, input.from, ...ownedParams] },
+    ...['scheduled_guest_messages', 'send_later_messages', 'content_reports', 'google_calendar_event_links', 'payment_checkout_holds'].map(table => ({
+      query: `UPDATE ${table} SET request_id = ? WHERE request_id = ? AND ${owned}`, params: [input.into, input.from, ...ownedParams],
+    })),
+    { query: `UPDATE tasks SET subject_id = ?, dedupe_key = 'guest_reply:' || ? || substr(dedupe_key, length('guest_reply:' || ?) + 1)
+        WHERE kind = 'guest_reply' AND subject_type = 'request' AND subject_id = ? AND ${owned}`, params: [input.into, input.into, input.from, input.from, ...ownedParams] },
+    { query: 'UPDATE bookings SET request_id = ? WHERE id = ? AND organization_id = ? AND request_id = ?', params: [input.into, input.bookingId, input.organizationId, input.from] },
+    { query: 'DELETE FROM requests WHERE id = ? AND organization_id = ? AND NOT EXISTS (SELECT 1 FROM bookings WHERE request_id = ?) AND NOT EXISTS (SELECT 1 FROM activity_entries WHERE request_id = ?)', params: [input.from, input.organizationId, input.from, input.from] },
+  ]
 }
 
 /**
@@ -68,44 +97,49 @@ async function adoptThread(db: DbClient, env: ChannelEnv, home: HomeMapping, thr
   if (thread.bookingId && await queryFirst(db, "SELECT request_id FROM channel_threads WHERE provider = 'channex' AND external_booking_id = ? AND external_thread_id <> ?", [thread.bookingId, thread.id])) fail(409, 'CHANNEL_THREAD_ASSOCIATION_CONFLICT', 'The booking is already associated with another provider conversation', 'relationships.booking')
   const stay = thread.bookingId === null ? null : await threadStay(db, env, home, thread.bookingId)
   if (stay && (stay.organization_id !== home.organization_id || stay.product_id !== home.product_id)) fail(409, 'CHANNEL_THREAD_ASSOCIATION_CONFLICT', 'The provider booking belongs to another home', 'relationships.booking')
-  if (mapped && stay?.request_id && mapped.request_id !== stay.request_id) fail(409, 'CHANNEL_THREAD_ASSOCIATION_CONFLICT', 'The inquiry and stay already have separate conversations; reconcile them without discarding either timeline', 'request_id')
+  // The conversation the reservation opened when it landed joins the inquiry's, while nobody has written in it.
+  // Any other timeline of the stay is its own, and two are reconciled by a person, never merged here.
+  const joining = mapped && stay && mapped.request_id !== stay.request_id ? stay : null
+  if (joining && !await queryFirst(db, `SELECT 1 FROM activity_entries opened WHERE opened.request_id = ? AND opened.kind = 'submission'
+      AND json_extract(opened.payload_json, '$.booking_id') = ? AND NOT EXISTS (SELECT 1 FROM activity_entries written WHERE written.request_id = opened.request_id AND written.kind = 'message')
+      AND NOT EXISTS (SELECT 1 FROM channel_threads WHERE request_id = opened.request_id)`, [joining.request_id, joining.id])) {
+    fail(409, 'CHANNEL_THREAD_ASSOCIATION_CONFLICT', 'The inquiry and stay already have separate conversations; reconcile them without discarding either timeline', 'request_id')
+  }
   const requestId = mapped?.request_id ?? stay?.request_id ?? crypto.randomUUID()
   const addressed = await queryFirst<ChannelThreadMapping>(db, "SELECT * FROM channel_threads WHERE request_id = ? AND external_thread_id <> ?", [requestId, thread.id])
   const retired = !mapped && stay?.request_id === requestId && addressed?.external_booking_id != null && addressed.external_booking_id !== thread.bookingId ? addressed : null
   if (addressed && !retired) fail(409, 'CHANNEL_THREAD_ASSOCIATION_CONFLICT', 'The stay conversation already has another provider address', 'request_id')
   const now = new Date().toISOString()
-  await executeBatch(db, [...(retired ? [{
+  const joined = joining ? await joinBookingConversationQueries(db, { organizationId: home.organization_id, bookingId: joining.id, from: joining.request_id, into: requestId, now }) : []
+  await executeBatch(db, [...joined, ...(retired ? [{
     query: `UPDATE channel_threads SET external_thread_id = ?, external_booking_id = ?, moved_from_thread_id = external_thread_id, provider_updated_at = ?, updated_at = ?
       WHERE provider = 'channex' AND external_thread_id = ? AND request_id = ? AND organization_id = ? AND product_id = ?`,
     params: [thread.id, thread.bookingId, thread.updatedAt, now, retired.external_thread_id, requestId, home.organization_id, home.product_id],
   }] : []), {
     query: `INSERT INTO requests (id, kind, organization_id, location_id, user_id, review_id, payload_json, created_at, updated_at)
-      SELECT ?, 'stay', ?, ?, NULL, NULL, ?, ?, ?
+      SELECT ?, 'booking', ?, ?, NULL, NULL, ?, ?, ?
       WHERE NOT EXISTS (SELECT 1 FROM requests WHERE id = ?)
         AND NOT EXISTS (SELECT 1 FROM channel_threads WHERE provider = 'channex' AND external_thread_id = ?)`,
-    params: [requestId, home.organization_id, home.location_id, JSON.stringify({ participant: { kind: 'channel', title: thread.title }, guest: { name: null, email: null, phone: null } }), now, now, requestId, thread.id],
+    params: [requestId, home.organization_id, home.location_id, JSON.stringify({ participant: { kind: 'channel', title: thread.title }, guest: { name: null, email: null, phone: null }, notes: null, ip_hash: null, cancellation: { token_hash: null, expires_at: null, used_at: null } }), now, now, requestId, thread.id],
   }, {
     query: `INSERT INTO channel_threads (provider, external_thread_id, organization_id, product_id, request_id, external_booking_id, provider_updated_at, created_at, updated_at)
-      SELECT 'channex', ?, ?, ?, r.id, ?, ?, ?, ? FROM requests r WHERE r.id = ? AND r.organization_id = ? AND r.kind = 'stay' AND r.location_id = ?
+      SELECT 'channex', ?, ?, ?, r.id, ?, ?, ?, ? FROM requests r WHERE r.id = ? AND r.organization_id = ? AND r.kind = 'booking' AND r.location_id = ?
       ON CONFLICT (provider, external_thread_id) DO UPDATE SET external_booking_id = excluded.external_booking_id,
         provider_updated_at = excluded.provider_updated_at, updated_at = excluded.updated_at
       WHERE channel_threads.organization_id = excluded.organization_id AND channel_threads.product_id = excluded.product_id
         AND channel_threads.request_id = excluded.request_id`,
     params: [thread.id, home.organization_id, home.product_id, thread.bookingId, thread.updatedAt, now, now, requestId, home.organization_id, home.location_id],
   }, {
-    query: `UPDATE requests SET payload_json = json_set(payload_json, '$.participant.title', ?)
-      WHERE id = ? AND organization_id = ? AND json_extract(payload_json, '$.participant.kind') = 'channel'
+    // The channel's title is its conversation's participant, added to the stay's own conversation as it is adopted.
+    query: `UPDATE requests SET payload_json = json_set(payload_json, '$.participant', json_object('kind', 'channel', 'title', ?))
+      WHERE id = ? AND organization_id = ? AND (json_type(payload_json, '$.participant') IS NULL OR json_extract(payload_json, '$.participant.kind') = 'channel')
         AND EXISTS (SELECT 1 FROM channel_threads WHERE provider = 'channex' AND external_thread_id = ? AND request_id = requests.id)`,
     params: [thread.title, requestId, home.organization_id, thread.id],
-  }, {
-    query: `UPDATE stays SET request_id = ? WHERE provider = 'channex' AND external_booking_id = ? AND organization_id = ? AND product_id = ?
-      AND (request_id IS NULL OR request_id = ?) AND EXISTS (SELECT 1 FROM channel_threads WHERE provider = 'channex' AND external_thread_id = ? AND request_id = ?)`,
-    params: [requestId, thread.bookingId, home.organization_id, home.product_id, requestId, thread.id, requestId],
-  }, ...(stay ? stayThreadQueries({ organizationId: home.organization_id, stayId: stay.id, now, openedBy: 'channel' }) : [])], { operation: 'Adopt channel guest conversation' })
+  }], { operation: 'Adopt channel guest conversation' })
   const saved = await queryFirst<ChannelThreadMapping>(db, "SELECT * FROM channel_threads WHERE provider = 'channex' AND external_thread_id = ?", [thread.id])
   if (!saved || saved.organization_id !== home.organization_id || saved.product_id !== home.product_id) fail(409, 'CHANNEL_THREAD_ASSOCIATION_CONFLICT', 'The channel conversation could not be associated atomically', 'request_id')
   if (stay) {
-    const linked = await queryFirst<{ request_id: string | null }>(db, 'SELECT request_id FROM stays WHERE id = ?', [stay.id])
+    const linked = await queryFirst<{ request_id: string | null }>(db, 'SELECT request_id FROM bookings WHERE id = ?', [stay.id])
     if (linked?.request_id !== saved.request_id) fail(409, 'CHANNEL_THREAD_ASSOCIATION_CONFLICT', 'The stay conversation changed during association', 'request_id')
   }
   return saved
@@ -206,10 +240,10 @@ export async function mirrorChannexThread(db: DbClient, env: ChannelEnv, threadI
   // A booked conversation is the stay's conversation: its scheduled messages
   // follow the adopted request, and an open stay screen learns of the link.
   const stay = mapping.external_booking_id === null ? null : await queryFirst<{ id: string; version: number }>(db,
-    "SELECT id, version FROM stays WHERE provider = 'channex' AND external_booking_id = ? AND organization_id = ? AND product_id = ? AND request_id = ?",
+    "SELECT id, version FROM bookings WHERE provider = 'channex' AND external_booking_id = ? AND organization_id = ? AND product_id = ? AND request_id = ?",
     [mapping.external_booking_id, mapping.organization_id, mapping.product_id, mapping.request_id])
   if (stay) {
-    await planSourceMessages(db, mapping.organization_id, { kind: 'stay', id: stay.id })
+    await planSourceMessages(db, mapping.organization_id, stay.id)
     await publishStayInvalidation(env, { type: 'stay.changed', organizationId: mapping.organization_id, locationId: home.location_id, productId: mapping.product_id, stayId: stay.id }, { version: stay.version })
   }
   return { status: 'mirrored', request_id: mapping.request_id, messages: messages.length }

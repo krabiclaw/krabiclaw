@@ -152,7 +152,7 @@ test('lapsed hold failures retain their claims and report every failure after in
     const now = new Date().toISOString()
     for (const [id, productId, offset] of [['00-channel-failure', connected, 60], ['01-delete-failure', connected, 61], ['02-independent', local, 62]] as const) {
       await db.prepare(`INSERT INTO payments (id, organization_id, stripe_account_id, livemode, subject_type, currency, amount, price_snapshot_json, created_at, updated_at)
-        VALUES (?, ?, 'acct_hold_proof', 0, 'stay', 'USD', 15000, '{}', ?, ?)`).bind(id, ORG, now, now).run()
+        VALUES (?, ?, 'acct_hold_proof', 0, 'booking', 'USD', 15000, '{}', ?, ?)`).bind(id, ORG, now, now).run()
       await db.prepare(`INSERT INTO payment_checkout_holds (id, organization_id, product_id, location_id, timezone, payment_id, quantity, amount, currency, starts_at, ends_at, status, expires_at, created_at)
         VALUES (?, ?, ?, 'site', ?, ?, 1, 15000, 'USD', ?, ?, 'active', '2000-01-01T00:00:00.000Z', ?)`).bind(id, ORG, productId, TZ, id, day(offset), day(offset + 1), now).run()
       await db.prepare('INSERT INTO stay_nights (organization_id, product_id, date, hold_id) VALUES (?, ?, ?, ?)').bind(ORG, productId, day(offset), id).run()
@@ -240,7 +240,7 @@ test('night changes on a connected home reach Channex, and what it took is on ea
     assert.deepEqual(channex.take(), [
       { path: '/availability', values: [{ property_id: 'prop-1', room_type_id: 'room-1', date_from: day(10), date_to: day(11), availability: 1 }] },
     ])
-    const cancelledRow = await db.prepare('SELECT * FROM stays WHERE id = ?').bind(stay.id).first()
+    const cancelledRow = await db.prepare('SELECT * FROM bookings WHERE id = ?').bind(stay.id).first()
     const cancellationEvents = await db.prepare("SELECT * FROM activity_entries WHERE organization_id = ? AND event_name = 'stay.cancelled' AND json_extract(payload_json, '$.entityId') = ? ORDER BY id").bind(ORG, stay.id).all()
     assert.equal(cancellationEvents.results.length, 1)
     const cancellationNights = await db.prepare('SELECT * FROM stay_nights WHERE organization_id = ? AND product_id = ? AND date >= ? AND date < ? ORDER BY date').bind(ORG, connected, day(10), day(12)).all()
@@ -252,13 +252,13 @@ test('night changes on a connected home reach Channex, and what it took is on ea
     })
     assert.deepEqual(channex.take(), [])
     assert.deepEqual(await log(), cancellationLog)
-    assert.deepEqual(await db.prepare('SELECT * FROM stays WHERE id = ?').bind(stay.id).first(), cancelledRow)
+    assert.deepEqual(await db.prepare('SELECT * FROM bookings WHERE id = ?').bind(stay.id).first(), cancelledRow)
     assert.deepEqual((await db.prepare('SELECT * FROM stay_nights WHERE organization_id = ? AND product_id = ? AND date >= ? AND date < ? ORDER BY date').bind(ORG, connected, day(10), day(12)).all()).results, cancellationNights.results)
     // A replay repairs completion; Channex already confirmed these nights, so nothing is sent again.
     const replayedCancellation = await cancelStay(db, env, manager, stay.id, { expected_version: cancelled.version })
     assert.deepEqual(replayedCancellation.channel_push, { state: 'pushed', detail: null })
     assert.deepEqual(channex.take(), [])
-    assert.deepEqual(await db.prepare('SELECT * FROM stays WHERE id = ?').bind(stay.id).first(), cancelledRow)
+    assert.deepEqual(await db.prepare('SELECT * FROM bookings WHERE id = ?').bind(stay.id).first(), cancelledRow)
     assert.deepEqual((await db.prepare("SELECT * FROM activity_entries WHERE organization_id = ? AND event_name = 'stay.cancelled' AND json_extract(payload_json, '$.entityId') = ? ORDER BY id").bind(ORG, stay.id).all()).results, cancellationEvents.results)
     assert.deepEqual((await readStayCalendar(db, manager, { productId: connected, from: day(10), to: day(12) })).nights.map(night => [night.date, night.stay_id, night.available, night.channel]),
       [10, 11].map(offset => [day(offset), null, true, { state: 'pushed', detail: null }]))

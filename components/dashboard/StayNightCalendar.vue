@@ -90,7 +90,7 @@
             <p v-if="!listedStays.length" class="py-10 text-center text-sm text-muted">No stays in {{ placeholder?.year }}.</p>
             <NuxtLink v-for="stay in listedStays" :key="stay.id" :to="{ path: `/dashboard/${route.params.orgSlug}/calendar/stay/${encodeURIComponent(stay.id)}`, query: route.query }" class="flex items-center justify-between gap-4 py-5">
               <div>
-                <p class="font-medium text-highlighted">{{ [stay.guest_name, stay.guest_surname].filter(Boolean).join(' ') || 'Guest name not provided' }}</p>
+                <p class="font-medium text-highlighted">{{ stay.guest_name || 'Guest name not provided' }}</p>
                 <p class="mt-1 text-sm text-muted">{{ formatCalendarDate(stay.check_in_date, 'en', { month: 'short', day: 'numeric' }) }} – {{ formatCalendarDate(stay.check_out_date, 'en', { month: 'short', day: 'numeric', year: 'numeric' }) }}</p>
               </div>
               <span v-if="stay.channel" class="text-sm text-muted">{{ channels[stay.channel] }}</span>
@@ -154,8 +154,8 @@ import { CHANNEL_MARKS, channelNote, isStayNight, stayNightSource, useStayNightE
 import { getErrorMessage } from '~/utils/errors'
 
 type Home = Pick<StayHome, 'product_id' | 'name' | 'internal_name' | 'timezone' | 'currency' | 'base_price_minor' | 'min_nights' | 'calendar_rules' | 'cancellation_policy' | 'long_term_cancellation_policy'>
-// A manager reads each stay's surname and channel; a member's turnover has neither.
-type CalendarStay = Pick<StayTurnover, 'id' | 'product_id' | 'check_in_date' | 'check_out_date' | 'guest_name' | 'status'> & Partial<Pick<Stay, 'guest_surname' | 'channel'>>
+// A manager reads each stay's channel; a member's turnover has none.
+type CalendarStay = Pick<StayTurnover, 'id' | 'product_id' | 'check_in_date' | 'check_out_date' | 'guest_name' | 'status'> & Partial<Pick<Stay, 'channel'>>
 interface CalendarPayload { home: Home; nights: StayNight[]; stays: CalendarStay[]; channel_push?: SuccessfulChannelPush | null }
 const props = defineProps<{ productId: string; homes: Pick<StayHome, 'product_id' | 'name' | 'internal_name' | 'timezone'>[]; manage: boolean; homeError: string; offeringItems: { label: string; value: string }[]; offeringsError?: string }>()
 const route = useRoute()
@@ -225,7 +225,7 @@ function isCalendar(value: unknown): value is CalendarPayload {
   parseStayCalendarRules(home.calendar_rules)
   if (!value.stays.every(stay => isRecord(stay) && typeof stay.id === 'string' && stay.product_id === props.productId
     && isValidCalendarDate(stay.check_in_date) && isValidCalendarDate(stay.check_out_date) && stay.check_out_date > stay.check_in_date
-    && nullableText(stay.guest_name) && (props.manage ? nullableText(stay.guest_surname) && Object.hasOwn(channels, String(stay.channel)) : !('guest_surname' in stay) && !('channel' in stay)) && typeof stay.status === 'string')) return false
+    && nullableText(stay.guest_name) && (props.manage ? Object.hasOwn(channels, String(stay.channel)) : !('channel' in stay)) && typeof stay.status === 'string')) return false
   return (value.channel_push === undefined || isSuccessfulChannelPush(value.channel_push)) && value.nights.every(isStayNight)
 }
 const { data, error, status, refresh } = await useAsyncData(
@@ -269,7 +269,7 @@ function stayLabel(day: DateValue) {
   const value = night(day)
   if (value?.stay_id) {
     const stay = staysById.value.get(value.stay_id)
-    return stay ? [[stay.guest_name, stay.guest_surname].filter(Boolean).join(' ') || 'Guest name not provided', ...(stay.channel ? [channels[stay.channel]] : [])].join(' · ') : 'Reserved'
+    return stay ? [stay.guest_name || 'Guest name not provided', ...(stay.channel ? [channels[stay.channel]] : [])].join(' · ') : 'Reserved'
   }
   return value?.calendar ? `Unavailable from ${channels[value.calendar]}` : 'Checkout hold'
 }

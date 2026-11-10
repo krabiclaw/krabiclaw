@@ -111,9 +111,9 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Changes the selected booking to cancelled and releases its places; for a legal practice it also cancels the attorney’s preparation and follow-up jobs, posted to the team as an automatic team message.",
+        "read_only_justification": "Changes the selected booking to cancelled and releases its places, or a stay's nights under its version; for a legal practice it also cancels the attorney’s preparation and follow-up jobs, posted to the team as an automatic team message.",
         "destructive_justification": "Cancels the booking and emails the guest; a required refund is handed off to the dashboard first.",
-        "open_world_justification": "Sends the selected booking’s guest an email; for a legal practice the cancelled jobs are posted to the team."
+        "open_world_justification": "Sends the selected booking’s guest an email and, for a stay at a home connected to Airbnb, updates its availability through Channex; for a legal practice the cancelled jobs are posted to the team."
       }
     },
     "cancel_scheduled_guest_message": {
@@ -138,18 +138,6 @@
         "read_only_justification": "Changes the caller’s pending scheduled reply to cancelled.",
         "destructive_justification": "Cancels a queued reply before it starts sending.",
         "open_world_justification": "Changes only the caller’s private queued reply and does not send an external message."
-      }
-    },
-    "cancel_stay": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": true,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Checks the stay’s version, then cancels it, frees its nights, cancels its turnover job and pending guest messages and updates Airbnb availability; a required website refund returns a dashboard handoff before cancellation.",
-        "destructive_justification": "Cancels a saved stay, its turnover job and its pending outgoing messages.",
-        "open_world_justification": "Changes connected Airbnb availability, and the cancelled turnover job is posted to the team as an automatic team message."
       }
     },
     "complete_task": {
@@ -831,7 +819,7 @@
         "destructiveHint": false
       },
       "justifications": {
-        "read_only_justification": "Reads the booking’s saved guest details, answers, provenance and operational record.",
+        "read_only_justification": "Reads the booking’s saved guest details, answers, provenance and operational record, or a stay with its offline and online paid totals; member access to a stay returns turnover fields only.",
         "destructive_justification": "Does not confirm, cancel, reassign or change the booking or send guest notifications.",
         "open_world_justification": "Reads one operational booking and its private guest snapshot in the authorized business scope."
       }
@@ -882,18 +870,6 @@
         "read_only_justification": "Reads saved connections and probes Meta or Discord access; Better Auth may refresh existing linked-account credentials without changing the connection selection.",
         "destructive_justification": "Does not remove connections, revoke account access or publish social content.",
         "open_world_justification": "Checks only the business saved Meta and Discord connections and their current access."
-      }
-    },
-    "get_stay": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Reads one authorized stay and computes offline/online paid totals; member access returns turnover fields only.",
-        "destructive_justification": "Does not edit the stay, record payments, refund money or send guest messages.",
-        "open_world_justification": "Reads one authorized stay and its private payment records in the selected business."
       }
     },
     "get_stay_calendar": {
@@ -1227,7 +1203,7 @@
         "destructiveHint": false
       },
       "justifications": {
-        "read_only_justification": "Reads saved bookings, table reservations and consultations under the caller’s access scope.",
+        "read_only_justification": "Reads saved bookings, table reservations, consultations and stays under the caller’s access scope.",
         "destructive_justification": "Does not allocate capacity, confirm, cancel or change saved bookings.",
         "open_world_justification": "Reads bookings and consultations only within the caller authorized business scope."
       }
@@ -1278,18 +1254,6 @@
         "read_only_justification": "Reads authored language variants plus built-in routes computed from the site template.",
         "destructive_justification": "Does not create documents, alter content or publish pages.",
         "open_world_justification": "Reads authored pages and the fixed template routes belonging to the selected business."
-      }
-    },
-    "list_stays": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Reads visible stays overlapping the date range, optionally one product or cancelled stays; members receive only assigned turnover fields.",
-        "destructive_justification": "Does not create or cancel stays, claim nights or send guest messages.",
-        "open_world_justification": "Reads only stays at homes the caller may access in the selected business."
       }
     },
     "list_tasks": {

@@ -17,7 +17,7 @@ const nullableText = { type: ['string', 'null'] }
 const agendaItem = { type: 'object', properties: {
   id: text, kind: { type: 'string', enum: [...AGENDA_KINDS] }, requestId: nullableText,
   operationalBookingId: nullableText,
-  stayId: { ...nullableText, description: 'For a stay row, the stay to read with get_stay; one stay is its arrival and its departure.' },
+  stayId: { ...nullableText, description: 'For a stay row, the stay to read with get_product_booking; one stay is its arrival and its departure.' },
   productId: nullableText,
   stayChannel: { type: ['string', 'null'], enum: [...STAY_CHANNELS, null] },
   stayMoment: { type: ['string', 'null'], enum: ['arrival', 'departure', 'turnover', 'current', null] },

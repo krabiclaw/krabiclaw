@@ -1,6 +1,6 @@
 import type { D1Database } from '@cloudflare/workers-types'
 import { queryAllPages } from '~/server/db'
-import { getReviewBookingContext, reviewInvitationDue, REVIEW_REQUEST_DELAY_HOURS, REVIEW_REQUEST_TTL_DAYS, type ReviewBookingType } from '~/server/utils/review-requests'
+import { getReviewBookingContext, reviewInvitationDue, REVIEW_REQUEST_DELAY_HOURS, REVIEW_REQUEST_TTL_DAYS } from '~/server/utils/review-requests'
 import { sendReviewRequestForBooking } from '~/server/utils/review-request-delivery'
 import { defineScheduledTask } from '~/server/utils/scheduled-task'
 import { filterEntitledRows } from '~/server/utils/billing-access'
@@ -15,7 +15,6 @@ interface ReviewRequestTaskContext {
 interface SendDueRow {
   id: string
   organization_id: string
-  booking_type: ReviewBookingType
 }
 
 interface TaskResult {
@@ -26,41 +25,35 @@ interface TaskResult {
 
 async function sendDue(db: D1Database, env: ApiRecord): Promise<{ sent: number; failures: string[] }> {
   const wantsReviewRequests = wantsCategoryEmailSql('r.user_id', 'review_requests')
-  // A day after the visit ended and within the request window, read off the
-  // record that holds it. A stay ends at its checkout in its home's zone, which
-  // SQL cannot place; its earliest possible instant (midnight at UTC+14)
-  // admits it here, and reviewInvitationDue decides on the exact one.
+  // A day after the visit ended and within the request window, read off its
+  // booking's end. A stay whose home had no checkout time ends on a day alone and
+  // is never invited (reviewInvitationDue); SQL leaves it out by its length.
   const candidates = await queryAllPages<SendDueRow>(db, `
-      SELECT r.id, r.organization_id, r.kind AS booking_type
-        FROM requests r
-        JOIN (
-          SELECT b.request_id, b.status, b.no_show_at, ps.ends_at FROM bookings b JOIN product_sessions ps ON ps.id = b.product_session_id
-          UNION ALL
-          SELECT request_id, status, no_show_at, datetime(check_out_date, '-14 hours') FROM stays WHERE channel = 'direct'
-        ) record ON record.request_id = r.id
-       WHERE r.kind IN ('booking', 'stay') AND record.status = 'confirmed' AND record.no_show_at IS NULL
-         AND datetime(record.ends_at) <= datetime('now', '-${REVIEW_REQUEST_DELAY_HOURS} hours')
-         AND datetime(record.ends_at) > datetime('now', '-${REVIEW_REQUEST_TTL_DAYS + 2} days')
+      SELECT b.id, b.organization_id
+        FROM bookings b JOIN requests r ON r.id = b.request_id AND r.organization_id = b.organization_id AND r.kind = 'booking'
+       WHERE b.channel = 'direct' AND b.status = 'confirmed' AND b.no_show_at IS NULL AND length(b.ends_at) > 10
+         AND datetime(b.ends_at) <= datetime('now', '-${REVIEW_REQUEST_DELAY_HOURS} hours')
+         AND datetime(b.ends_at) > datetime('now', '-${REVIEW_REQUEST_TTL_DAYS + 2} days')
          AND r.review_id IS NULL
-         AND NOT EXISTS (SELECT 1 FROM review_requests rr WHERE rr.booking_type = r.kind AND rr.booking_id = r.id AND rr.first_sent_at IS NOT NULL)
+         AND NOT EXISTS (SELECT 1 FROM review_requests rr WHERE rr.booking_id = b.id AND rr.first_sent_at IS NOT NULL)
          AND r.user_id IS NOT NULL
          AND ${wantsReviewRequests.sql}
-       ORDER BY booking_type, r.id
+       ORDER BY b.id
     `, wantsReviewRequests.params)
   const rows = await filterEntitledRows(env as CloudflareEnv, candidates, 'review_requests')
 
   let sent = 0
   const failures: string[] = []
   for (const row of rows) {
-    const context = await getReviewBookingContext(db, row.booking_type, row.id)
+    const context = await getReviewBookingContext(db, row.id)
     if (!context || !reviewInvitationDue(context) || !context.guest_email) continue
-    const result = await sendReviewRequestForBooking(env as CloudflareEnv, db, row.booking_type, row.id).catch((error) => ({
+    const result = await sendReviewRequestForBooking(env as CloudflareEnv, db, row.id).catch((error) => ({
       sent: false,
       requestId: '',
       error: error instanceof Error ? error.message : String(error),
     }))
     if (result.sent) sent += 1
-    else failures.push(`${row.booking_type}/${row.id}: ${result.error ?? 'not sent'}`)
+    else failures.push(`booking/${row.id}: ${result.error ?? 'not sent'}`)
   }
   return { sent, failures }
 }

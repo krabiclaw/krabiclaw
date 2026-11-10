@@ -66,7 +66,7 @@ test('a thread and the record it refers to commit and cancel as one', { timeout:
     // booking route writes it — claim first, thread conditional on it, then the
     // booking takes the thread's id.
     const env = { ...await runtime.getBindings<CloudflareEnv>(), DB: db } as CloudflareEnv
-    const policyJson = JSON.stringify({ advance_notice_minutes: null, party_size_min: null, party_size_max: null, minimum_guest_age: null, accessibility_contact_required: false, payment: null })
+    const policyJson = JSON.stringify({ advance_notice_minutes: null, party_size_min: null, party_size_max: null, minimum_guest_age: null, accessibility_contact_required: false, payment: null, cancellation: null })
     async function bookSession(id: string, sessionId = 'session-proof', cancellation: { token_hash: string | null; expires_at: string | null; used_at: null } = { token_hash: null, expires_at: null, used_at: null }) {
       return claimSessionCapacity(db, {
         env, organizationId: ORG, productId: 'product-proof', sessionId,
@@ -96,7 +96,7 @@ test('a thread and the record it refers to commit and cancel as one', { timeout:
     assert.ok(winner)
     // The thread holds no copy of when or for how many; the booking does.
     const record = await getThreadOperationalRecord(db, winner)
-    assert.equal(record?.kind, 'booking')
+    assert.equal(record?.unit, 'slot')
     assert.equal(record?.party_size, 1)
     assert.equal(record?.starts_at, '2099-01-05T07:00:00.000Z')
 
@@ -214,7 +214,7 @@ test('archive and unarchive file a conversation without touching its booking, st
       guest: { name, email: `${name.toLowerCase()}@proof.example`, phone: '+66812345678' },
       ...(message
         ? { subject: null, message, consent_at: null, ip_hash: null }
-        : { party_size_is_minimum: false, notes: null, ip_hash: null, cancellation: { token_hash: null, expires_at: null, used_at: null } }),
+        : { notes: null, ip_hash: null, cancellation: { token_hash: null, expires_at: null, used_at: null } }),
     })
     // A conversation's activity is its last message, or its opening when nobody has written since.
     const thread = (id: string, kind: string, openedAt: string) =>
@@ -224,8 +224,9 @@ test('archive and unarchive file a conversation without touching its booking, st
       `INSERT INTO product_sessions (id,organization_id,product_id,location_id,timezone,starts_at,ends_at,capacity,status,created_by,updated_by)
        VALUES ('${id}','${ORG}','product-proof','${LOCATION}','Asia/Bangkok','${startsAt}','${endsAt}',4,'scheduled','${ACTOR}','${ACTOR}')`
     const booking = (id: string, sessionId: string, partySize = 1) =>
-      `INSERT INTO bookings (id,organization_id,product_id,product_session_id,product_variant_id,request_id,party_size,policy_json,created_at,updated_at)
-       VALUES ('row-${id}','${ORG}','product-proof','${sessionId}','variant-proof','${id}',${partySize},'{"advance_notice_minutes":null,"party_size_min":null,"party_size_max":null,"minimum_guest_age":null,"accessibility_contact_required":false,"payment":null}','${NOW}','${NOW}')`
+      `INSERT INTO bookings (id,organization_id,product_id,product_session_id,product_variant_id,location_id,starts_at,ends_at,timezone,request_id,party_size,policy_json,created_at,updated_at)
+       SELECT 'row-${id}','${ORG}','product-proof',id,'variant-proof',location_id,starts_at,ends_at,timezone,'${id}',${partySize},'{"advance_notice_minutes":null,"party_size_min":null,"party_size_max":null,"minimum_guest_age":null,"accessibility_contact_required":false,"payment":null,"cancellation":null}','${NOW}','${NOW}'
+         FROM product_sessions WHERE id = '${sessionId}'`
     await db.batch([
       `INSERT INTO organization (id,name,slug, default_currency, timezone) VALUES ('${ORG}','Proof','proof', 'USD', 'UTC'), ('org-foreign','Foreign','foreign', 'USD', 'UTC')`,
       `INSERT INTO user (id,name,email) VALUES ('${ACTOR}','Proof','owner@proof.example')`,

@@ -162,8 +162,8 @@ import { CHANNEL_MARKS, channelNote, isBookedNight, isPlaceDay, isStayNight, nig
 import StayNightInspector from './StayNightInspector.vue'
 
 type Home = Pick<StayHome, 'product_id' | 'name' | 'internal_name' | 'timezone' | 'currency' | 'base_price_minor' | 'min_nights' | 'calendar_rules' | 'address'>
-// A manager reads each stay's surname and channel; a member's turnover has neither.
-type GridStay = Pick<StayTurnover, 'id' | 'product_id' | 'guest_name' | 'adults' | 'children' | 'check_in_date' | 'check_out_date'> & Partial<Pick<Stay, 'guest_surname' | 'channel'>>
+// A manager reads each stay's channel; a member's turnover has none.
+type GridStay = Pick<StayTurnover, 'id' | 'product_id' | 'guest_name' | 'adults' | 'children' | 'check_in_date' | 'check_out_date'> & Partial<Pick<Stay, 'channel'>>
 interface HomesPayload { from: string; to: string; homes: { home: Home; nights: StayNight[] }[]; stays: GridStay[]; manage: boolean }
 interface PlacesPayload { from: string; to: string; places: { place: Place; days: PlaceDay[] }[]; manage: boolean }
 interface GridBar { key: string; date: string; column: number; span: number; label: string; title: string; to: RouteLocationRaw; stayId: string | null; channel: StayChannel | null }
@@ -235,7 +235,7 @@ const isHomesPayload = (value: unknown): value is HomesPayload => isWindow(value
   && value.homes.every(entry => isRecord(entry) && isHome(entry.home) && Array.isArray(entry.nights) && entry.nights.length === SPAN
     && entry.nights.every((night, index) => isStayNight(night) && night.date === dates.value[index]))
   && value.stays.every(stay => isRecord(stay) && typeof stay.id === 'string' && typeof stay.product_id === 'string' && isText(stay.guest_name) && isCount(stay.adults) && isCount(stay.children)
-    && (value.manage ? isText(stay.guest_surname) && Object.hasOwn(STAY_CHANNEL_LABELS, String(stay.channel)) : !('guest_surname' in stay) && !('channel' in stay)) && isValidCalendarDate(stay.check_in_date) && isValidCalendarDate(stay.check_out_date))
+    && (value.manage ? Object.hasOwn(STAY_CHANNEL_LABELS, String(stay.channel)) : !('channel' in stay)) && isValidCalendarDate(stay.check_in_date) && isValidCalendarDate(stay.check_out_date))
 const isPlacesPayload = (value: unknown): value is PlacesPayload => isWindow(value) && Array.isArray(value.places)
   && value.places.every(entry => isRecord(entry) && isPlace(entry.place) && Array.isArray(entry.days) && entry.days.length === SPAN && entry.days.every((day, index) => isPlaceDay(day) && day.date === dates.value[index]))
 
@@ -265,7 +265,7 @@ if (import.meta.client) {
 const CHANNEL_BARS: Record<StayChannel, { color: string; mark: string }> = {
   airbnb: { color: '#FF385C', mark: '' }, vrbo: { color: '#245ABC', mark: 'V' }, booking_com: { color: '#003580', mark: 'B.' }, direct: { color: 'var(--kc-navy)', mark: '' },
 }
-const guestName = (stay: GridStay) => [stay.guest_name, stay.guest_surname].filter(Boolean).join(' ') || 'Guest name not provided'
+const guestName = (stay: GridStay) => stay.guest_name || 'Guest name not provided'
 // Adults and children count as guests; infants do not, as Airbnb counts them.
 const guestCount = (stay: GridStay) => `${stay.adults + stay.children} ${stay.adults + stay.children === 1 ? 'guest' : 'guests'}`
 const addressOf = (home: Home) => home.address ? [home.address.address, home.address.city].filter(Boolean).join(', ') : 'No address'

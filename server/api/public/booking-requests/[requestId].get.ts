@@ -49,7 +49,7 @@ export default defineHandler(async (event) => {
 
   const request = await getGuestRequest(db, requestId, organizationId)
   const record = request ? await getThreadOperationalRecord(db, request.id) : null
-  if (!request || request.kind !== 'booking' || !record || record.kind !== 'booking' || !record.product_id || record.organization_id !== organizationId) {
+  if (!request || request.kind !== 'booking' || !record || record.unit !== 'slot' || record.organization_id !== organizationId) {
     return jsonResponse({ error: 'Booking not found' }, { status: 404 })
   }
 
@@ -75,19 +75,19 @@ export default defineHandler(async (event) => {
   const [ownerType, ownerId] = product.kind === 'table' && record.location_id ? ['business_location', record.location_id] as const : ['product', record.product_id] as const
   const picture = (await loadOwnerPictures(db, organizationId, ownerType, [ownerId])).get(ownerId) ?? null
 
-  const paid = await paidOnline(db, organizationId, record.kind, record.id)
+  const paid = await paidOnline(db, organizationId, record.id)
 
   return jsonResponse({
     success: true,
     booking: {
-      kind: record.kind,
+      kind: 'booking',
       name: request.payload.guest.name,
       email: request.payload.guest.email,
       starts_at: record.starts_at,
       timezone: record.timezone,
-      guests: `${record.party_size}${request.payload.party_size_is_minimum ? '+' : ''}`,
+      guests: `${record.party_size}${record.party_size_is_minimum ? '+' : ''}`,
       status: record.status,
-      can_retry_cancellation: await canRetryGuestVisitRefund(db, { organizationId, subjectType: record.kind, subjectId: record.id, requestId: request.id }),
+      can_retry_cancellation: await canRetryGuestVisitRefund(db, { organizationId, bookingId: record.id, requestId: request.id }),
       refund_on_cancel: paid !== null && new Date().toISOString() <= freeCancellationUntil(record.starts_at, record.advance_notice_minutes),
       // The guest's own cancellation closes at the offering's advance notice; null is no notice.
       advance_notice_minutes: record.advance_notice_minutes,

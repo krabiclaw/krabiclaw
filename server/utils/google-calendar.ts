@@ -3,15 +3,20 @@ import type { GoogleCalendarIntegration } from '~/shared/organization-settings'
 import { execute, executeBatch, queryAll, queryFirst, type DbClient } from '~/server/db'
 import { linkedAccountAccessToken, type CloudflareEnv } from './auth'
 import { composeBuyerActivityUrl } from './dashboard-notification-links'
-import { REQUEST_CURRENT_BUYER_SQL } from '~/server/domain/requests'
+import { BOOKING_ENDS_SQL, bookingDay, isBookingDay, REQUEST_CURRENT_BUYER_SQL } from '~/server/domain/requests'
 import type { ProductKind } from '~/shared/product-details'
 import { z } from 'zod'
 
 export interface CalendarChoice { id: string; summary: string; accessRole: string; description?: string }
 export class CalendarSelectionConflict extends Error {}
+/**
+ * A booking as its Google event shows it: any kind, a stay included. Its
+ * starts_at/ends_at are the booking's; a stay whose home has no check-in or
+ * checkout time stores that end as a day, and its event spans whole days.
+ */
 export interface CalendarSubject {
-  operational_id: string
-  /** What was booked: a table reads as a reservation, a consultation as a consultation. */
+  booking_id: string
+  /** What was booked: a table reads as a reservation, a consultation as a consultation, a home as a stay. */
   product_kind: ProductKind
   request_id: string | null
   buyer_user_id: string | null
@@ -39,7 +44,7 @@ export interface GoogleEvent {
 }
 export interface EventLink {
   id: string; organization_id: string; integration_revision: string; account_id: string
-  calendar_id: string; event_id: string; operational_id: string
+  calendar_id: string; event_id: string; booking_id: string
   request_id: string | null; booking_revision: string; synced_revision: string | null
   state: string; updated_at: string
 }
@@ -113,10 +118,13 @@ async function requireWriter(token: string, calendarId: string) {
   return calendar
 }
 export function calendarEvent(subject: CalendarSubject, managementUrl: string | null, previous?: GoogleEvent) {
-  if (!Number.isFinite(Date.parse(subject.starts_at)) || !Number.isFinite(Date.parse(subject.ends_at)) || subject.ends_at <= subject.starts_at) throw new Error('Invalid canonical booking interval')
   new Intl.DateTimeFormat('en', { timeZone: subject.timezone }).format()
+  // An end known only as a day makes the event whole days: the stay's check-in day to its checkout day, Google's end being exclusive.
+  const allDay = isBookingDay(subject.starts_at) || isBookingDay(subject.ends_at)
+  const [start, end] = allDay ? [bookingDay(subject.starts_at, subject.timezone), bookingDay(subject.ends_at, subject.timezone)] : [subject.starts_at, subject.ends_at]
+  if (!Number.isFinite(Date.parse(start)) || !Number.isFinite(Date.parse(end)) || end <= start) throw new Error('Invalid canonical booking interval')
   const consultation = Boolean(subject.is_consultation)
-  const noun = consultation ? 'Consultation' : subject.product_kind === 'table' ? 'Reservation' : 'Booking'
+  const noun = consultation ? 'Consultation' : subject.product_kind === 'table' ? 'Reservation' : subject.product_kind === 'stay' ? 'Stay' : 'Booking'
   const attendees: Array<{ email: string; responseStatus: string }> = []
   if (consultation && subject.status === 'confirmed' && !subject.request_id) throw new Error('The confirmed consultation is missing its client conversation; Calendar invitations cannot be sent.')
   // An allocation without its request is a private hold, not a client invitation.
@@ -132,8 +140,8 @@ export function calendarEvent(subject: CalendarSubject, managementUrl: string | 
   return {
     summary: `${subject.status === 'pending' ? 'Pending ' + noun.toLowerCase() : noun}${!consultation && subject.guest_name ? ' — ' + subject.guest_name : ''}`,
     description: `Status: ${subject.status}${subject.member_name ? `\n${consultation ? 'Attorney' : 'Team member'}: ${subject.member_name}` : ''}${subject.buyer_user_id && subject.request_id && managementUrl ? `\nManage ${noun.toLowerCase()}: ${managementUrl}` : ''}`,
-    start: { dateTime: subject.starts_at, timeZone: subject.timezone },
-    end: { dateTime: subject.ends_at, timeZone: subject.timezone },
+    start: allDay ? { date: start } : { dateTime: start, timeZone: subject.timezone },
+    end: allDay ? { date: end } : { dateTime: end, timeZone: subject.timezone },
     visibility: 'private',
     // Stated, so that rewriting an event someone deleted in Google brings it back.
     status: consultation && subject.status === 'pending' ? 'tentative' : 'confirmed',
@@ -145,31 +153,31 @@ export async function readCalendarIntegration(db: DbClient, organizationId: stri
 }
 // The canonical subject query serves both changed-subject batches and one
 // provider identity's lifecycle fences. The database bounds each result.
-export async function calendarSubjects(db: DbClient, organizationId: string, integration: GoogleCalendarIntegration, identity?: Pick<EventLink, 'operational_id'>): Promise<CalendarSubject[]> {
+export async function calendarSubjects(db: DbClient, organizationId: string, integration: GoogleCalendarIntegration, identity?: Pick<EventLink, 'booking_id'>): Promise<CalendarSubject[]> {
   const now = new Date().toISOString()
   return queryAll<CalendarSubject>(db, `WITH subjects AS (
-    SELECT b.id operational_id, (SELECT p.kind FROM products p WHERE p.id=b.product_id AND p.organization_id=b.organization_id) product_kind, b.request_id,
+    SELECT b.id booking_id, (SELECT p.kind FROM products p WHERE p.id=b.product_id AND p.organization_id=b.organization_id) product_kind, b.request_id,
       CASE WHEN r.kind='booking' AND (${REQUEST_CURRENT_BUYER_SQL}) THEN r.user_id END buyer_user_id, b.status,
-      s.starts_at, s.ends_at, s.timezone, json_extract(r.payload_json, '$.guest.name') guest_name, member.name member_name,
+      b.starts_at, b.ends_at, b.timezone, json_extract(r.payload_json, '$.guest.name') guest_name, member.name member_name,
       json_extract(r.payload_json,'$.guest.email') guest_email, member.email member_email, c.assigned_member_id,
       EXISTS(SELECT 1 FROM products p WHERE p.id=b.product_id AND p.organization_id=b.organization_id AND p.kind='service') is_consultation,
-      json_array(b.status, s.starts_at, s.ends_at, s.timezone, json_extract(r.payload_json,'$.guest.name'), member.name,
+      json_array(b.status, b.starts_at, b.ends_at, b.timezone, json_extract(r.payload_json,'$.guest.name'), member.name,
         json_extract(r.payload_json,'$.guest.email'), member.email, c.assigned_member_id, b.request_id,
         CASE WHEN r.kind='booking' AND (${REQUEST_CURRENT_BUYER_SQL}) THEN r.user_id END) revision
-    FROM bookings b JOIN product_sessions s ON s.id=b.product_session_id AND s.organization_id=b.organization_id
+    FROM bookings b LEFT JOIN product_sessions s ON s.id=b.product_session_id AND s.organization_id=b.organization_id
       JOIN product_booking_configs c ON c.product_id=b.product_id AND c.organization_id=b.organization_id
       LEFT JOIN requests r ON r.id=b.request_id AND r.organization_id=b.organization_id
       LEFT JOIN (SELECT m.id, m.organizationId, ${MEMBER_NAME_SQL} name, CASE WHEN u.emailVerified=1 THEN u.email END email FROM member m JOIN user u ON u.id=m.userId
         LEFT JOIN member_scheduling ms ON ms.member_id=m.id) member ON member.id=c.assigned_member_id AND member.organizationId=b.organization_id
     WHERE b.organization_id=? AND b.status IN ('pending','confirmed')
-      AND s.status='scheduled' AND s.ends_at>? AND (? IS NULL OR b.id=?)
+      AND (b.product_session_id IS NULL OR s.status='scheduled') AND ${BOOKING_ENDS_SQL('b')}>? AND (? IS NULL OR b.id=?)
   ) SELECT subjects.* FROM subjects
     LEFT JOIN google_calendar_event_links l ON l.organization_id=? AND l.integration_revision=?
-      AND l.operational_id=subjects.operational_id AND l.state<>'deleted'
+      AND l.booking_id=subjects.booking_id AND l.state<>'deleted'
     WHERE ? IS NOT NULL OR l.id IS NULL OR l.booking_revision<>subjects.revision
-    ORDER BY COALESCE(l.updated_at,''), subjects.operational_id LIMIT ?`,
-  [organizationId,now,identity?.operational_id??null,identity?.operational_id??null,
-    organizationId,integration.revision,identity?.operational_id??null,identity?1:25])
+    ORDER BY COALESCE(l.updated_at,''), subjects.booking_id LIMIT ?`,
+  [organizationId,now,identity?.booking_id??null,identity?.booking_id??null,
+    organizationId,integration.revision,identity?.booking_id??null,identity?1:25])
 }
 /** Persist intents before any provider I/O, including initial upcoming backfill. */
 async function reconcileIntents(db: DbClient, organizationId: string, integration: GoogleCalendarIntegration) {
@@ -179,13 +187,13 @@ async function reconcileIntents(db: DbClient, organizationId: string, integratio
     const revision = subject.revision
     const id = crypto.randomUUID()
     await execute(db, `INSERT INTO google_calendar_event_links
-      (id, organization_id, integration_revision, account_id, calendar_id, event_id, operational_id, request_id, booking_revision, created_at, updated_at)
+      (id, organization_id, integration_revision, account_id, calendar_id, event_id, booking_id, request_id, booking_revision, created_at, updated_at)
       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? FROM organization_integrations WHERE organization_id = ? AND provider='google_calendar' AND revision = ? AND status <> 'disabled'
-      ON CONFLICT(organization_id, integration_revision, operational_id) WHERE state <> 'deleted' DO UPDATE SET
+      ON CONFLICT(organization_id, integration_revision, booking_id) WHERE state <> 'deleted' DO UPDATE SET
       request_id = excluded.request_id, booking_revision = excluded.booking_revision,
       state = CASE WHEN google_calendar_event_links.booking_revision <> excluded.booking_revision THEN 'pending' ELSE google_calendar_event_links.state END,
       updated_at = excluded.updated_at WHERE google_calendar_event_links.booking_revision <> excluded.booking_revision`,
-    [id, organizationId, integration.revision, integration.account_id, integration.calendar_id, 'kc' + id.replaceAll('-', ''), subject.operational_id, subject.request_id, revision, now, now, organizationId, integration.revision])
+    [id, organizationId, integration.revision, integration.account_id, integration.calendar_id, 'kc' + id.replaceAll('-', ''), subject.booking_id, subject.request_id, revision, now, now, organizationId, integration.revision])
   }
   // Select only stale identities. Unchanged and historical successful events
   // receive no writes; cleanup also has a database batch limit.
@@ -193,11 +201,11 @@ async function reconcileIntents(db: DbClient, organizationId: string, integratio
     WHERE id IN (SELECT l.id FROM google_calendar_event_links l
       WHERE l.organization_id=? AND l.state NOT IN ('deleted','cleanup')
         AND (?='disabled' OR l.integration_revision<>? OR NOT EXISTS (
-            SELECT 1 FROM bookings b JOIN product_sessions s ON s.id=b.product_session_id AND s.organization_id=b.organization_id
+            SELECT 1 FROM bookings b LEFT JOIN product_sessions s ON s.id=b.product_session_id AND s.organization_id=b.organization_id
               JOIN product_booking_configs c ON c.product_id=b.product_id AND c.organization_id=b.organization_id
-            WHERE b.id=l.operational_id AND b.organization_id=l.organization_id AND s.status='scheduled'
-              AND ((b.status IN ('pending','confirmed') AND s.ends_at>?)
-                OR (b.status='confirmed' AND s.ends_at<=? AND l.state='synced'))))
+            WHERE b.id=l.booking_id AND b.organization_id=l.organization_id AND (b.product_session_id IS NULL OR s.status='scheduled')
+              AND ((b.status IN ('pending','confirmed') AND ${BOOKING_ENDS_SQL('b')}>?)
+                OR (b.status='confirmed' AND ${BOOKING_ENDS_SQL('b')}<=? AND l.state='synced'))))
       ORDER BY l.updated_at,l.id LIMIT 25)`,
   [organizationId,integration.status,integration.revision,now,now])
 }
@@ -247,7 +255,7 @@ export async function syncCalendarOrganization(env: CloudflareEnv, organizationI
         continue
       }
       await requireWriter(token, link.calendar_id)
-      const url = subject.request_id && subject.buyer_user_id ? composeBuyerActivityUrl(env, 'booking', subject.request_id) : null
+      const url = subject.request_id && subject.buyer_user_id ? composeBuyerActivityUrl(env, subject.product_kind === 'stay' ? 'stay' : 'booking', subject.request_id) : null
       const path = `/calendars/${encodeURIComponent(link.calendar_id)}/events`
       let existing: GoogleEvent | undefined
       try { existing = await google<GoogleEvent>(token, `${path}/${link.event_id}`) }

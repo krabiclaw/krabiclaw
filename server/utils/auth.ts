@@ -1116,3 +1116,20 @@ export async function ensureInteractionUser(event: H3Event, env: CloudflareEnv):
   }
   return response.user.id
 }
+
+/**
+ * The Better Auth user of a guest the business knows only by what a host or a
+ * channel gave it: Better Auth's anonymous user, carrying that name. Nobody is
+ * signed in as it, so the session the sign-in opens is closed at once. The
+ * guest's own verified sign-in later joins it to their account
+ * (server/utils/guest-accounts.ts).
+ */
+export async function createGuestUser(env: CloudflareEnv, name: string): Promise<string> {
+  const auth = createAuth(env)
+  const { response } = await auth.api.signInAnonymous({ headers: new Headers(), returnHeaders: true })
+  if (!response?.user?.id || !response.token) throw new Error('Better Auth did not return an anonymous user')
+  const context = await auth.$context
+  await context.internalAdapter.updateUser(response.user.id, { name })
+  await context.internalAdapter.deleteSession(response.token)
+  return response.user.id
+}

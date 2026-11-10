@@ -76,20 +76,12 @@
           </template>
 
           <UCard v-if="!personalScope && !purchase" variant="record">
-            <h3 class="text-base font-semibold text-highlighted">Your notes</h3>
-            <div v-if="booking.notes.length" class="mt-4 divide-y divide-default">
-              <NuxtLink v-for="note in booking.notes" :key="note.id" :to="{ path: `${editorPath}/notes/${note.id}`, query: route.query }" class="block py-3 first:pt-0" :aria-label="`Edit note: ${note.body}`">
-                <span class="block whitespace-pre-wrap text-sm text-highlighted">{{ note.body }}</span>
-                <span class="mt-1 block text-xs text-dimmed">{{ formatCreatedAt(note.createdAt) }}</span>
-              </NuxtLink>
-            </div>
-            <div v-if="!selectedNote" class="group mt-4">
-              <div class="flex items-center gap-3">
-                <span class="flex size-12 shrink-0 items-center justify-center rounded-xl bg-muted" aria-hidden="true"><UIcon name="i-lucide-circle-plus" class="size-5" /></span>
-                <UTextarea v-model="noteDraft" aria-label="Add a note to yourself" placeholder="Add a note to yourself" variant="none" :rows="1" autoresize maxlength="2000" :disabled="noteSaving" class="min-w-0 flex-1" @blur="saveNewNote" />
-              </div>
+            <h3 class="text-base font-semibold text-highlighted">Private note</h3>
+            <p class="mt-1 text-sm text-muted">Only your team sees this.</p>
+            <div class="group mt-4">
+              <UTextarea v-model="noteDraft" aria-label="Private note" placeholder="Add a note for your team" :rows="2" autoresize maxlength="2000" :disabled="noteSaving" class="w-full" @blur="saveNote" />
               <p class="mt-2 hidden text-right text-xs text-muted group-focus-within:block">{{ 2000 - noteDraft.length }} characters available</p>
-              <UAlert v-if="noteError" class="mt-3" color="error" variant="soft" :description="noteError" :actions="[{ label: 'Retry', color: 'neutral' as const, loading: noteSaving, onClick: saveNewNote }]" />
+              <UAlert v-if="noteError" class="mt-3" color="error" variant="soft" :description="noteError" :actions="[{ label: 'Retry', color: 'neutral' as const, loading: noteSaving, onClick: saveNote }]" />
             </div>
           </UCard>
 
@@ -228,7 +220,7 @@
 import type { ComputedRef, InjectionKey, Ref } from 'vue'
 import type { DashboardBookingDetails, DashboardRecordType } from '~/server/utils/dashboard-booking-details'
 
-/** The record and the note draft its levels edit; the change request keeps its own draft. */
+/** The record its levels edit; the change request keeps its own draft. */
 export interface BookingEditor {
   bookingType: DashboardRecordType
   refresh: () => Promise<void>
@@ -237,14 +229,6 @@ export interface BookingEditor {
   messageTo: ComputedRef<string | null>
   callTo: ComputedRef<string | null>
   firstName: (name: string) => string
-  // notes
-  noteDraft: Ref<string>
-  noteSaving: Ref<boolean>
-  noteError: Ref<string | null>
-  selectedNote: ComputedRef<{ id: string; body: string } | undefined>
-  /** Points the note draft at one note, or at a new one. */
-  openNote: (noteId: string | null) => void
-  saveNote: () => Promise<boolean>
   formatCreatedAt: (value: string) => string
 }
 
@@ -286,9 +270,6 @@ const editorPath = computed(() => props.editorPath)
 const chrome = computed(() => (props.embedded
   ? {}
   : { id: props.personalScope ? 'account-booking-details' : 'booking-details', title: pageTitle.value, column: 'record' as const }))
-/** Which note a leaf is editing, or none for a new one. */
-const openNoteId = ref<string | null>(null)
-const selectedNote = computed(() => booking.value?.notes.find(note => note.id === openNoteId.value))
 
 const { resource, booking, error, presentation, noun, pageTitle, orgSlug, purchase, refresh: refreshDetails } = await useBookingDetails(props.bookingType, props.bookingId, props.personalScope)
 const notificationReadError = useAcknowledgeScheduleNotifications(() =>
@@ -375,21 +356,11 @@ const cancelNote = ref('')
 const refundable = computed(() => (booking.value?.payments ?? []).reduce((sum, entry) => sum + entry.payment.captured_amount - entry.payment.refunded_amount, 0))
 const pendingAction = ref<string | null>(null)
 const actionAttempt = ref<{ draft: string; key: string } | null>(null)
+// The team's one private note on the booking, saved as a whole when the field is left.
 const noteDraft = ref('')
-const noteRevisionId = ref<string>()
 const noteSaving = ref(false)
-const noteAttemptKey = ref<string | null>(null)
-const noteAttemptDraft = ref<string | null>(null)
 const noteError = ref<string | null>(null)
-
-function openNote(noteId: string | null) {
-  openNoteId.value = noteId
-  noteDraft.value = selectedNote.value?.body ?? ''
-  noteRevisionId.value = selectedNote.value?.revisionId
-  noteAttemptKey.value = null
-  noteAttemptDraft.value = null
-  noteError.value = null
-}
+watch(() => booking.value?.privateNotes, (saved) => { if (!noteSaving.value) noteDraft.value = saved ?? '' }, { immediate: true })
 
 // Nothing to approve and nothing to mark done: a booking arrives confirmed and
 // is complete once its end passes. Cancelling is the one thing left to decide,
@@ -446,22 +417,17 @@ watch(realtime.connectionEpoch, (epoch) => {
 })
 
 // A blur save and the navigation it caused share one write. Failed text stays
-// visible on the record rather than being replaced by the next note's draft.
-let pendingNewNote: Promise<boolean> | null = null
-function saveNewNote(): Promise<boolean> {
-  if (pendingNewNote) return pendingNewNote
-  if (selectedNote.value || !noteDraft.value.trim()) return Promise.resolve(true)
-  pendingNewNote = saveNote().then((saved) => {
-    if (saved) openNote(null)
-    return saved
-  }).finally(() => { pendingNewNote = null })
-  return pendingNewNote
+// visible on the record.
+let pendingNote: Promise<boolean> | null = null
+function saveNote(): Promise<boolean> {
+  if (pendingNote) return pendingNote
+  const current = booking.value
+  if (!current || noteDraft.value.trim() === (current.privateNotes ?? '')) return Promise.resolve(true)
+  pendingNote = writeNote(current).finally(() => { pendingNote = null })
+  return pendingNote
 }
-function saveBeforeNavigation() {
-  return selectedNote.value ? !noteSaving.value : saveNewNote()
-}
-onBeforeRouteUpdate(saveBeforeNavigation)
-onBeforeRouteLeave(saveBeforeNavigation)
+onBeforeRouteUpdate(saveNote)
+onBeforeRouteLeave(saveNote)
 
 function selectAction(action: string) {
   if (action === 'cancel' && !booking.value?.guestCanRetryCancellation) {
@@ -474,12 +440,7 @@ function selectAction(action: string) {
   } else void runAction(action)
 }
 
-async function saveNote() {
-  if (!noteDraft.value.trim()) return false
-  if (noteAttemptDraft.value !== noteDraft.value) {
-    noteAttemptKey.value = crypto.randomUUID()
-    noteAttemptDraft.value = noteDraft.value
-  }
+async function writeNote(current: DashboardBookingDetails) {
   noteSaving.value = true
   noteError.value = null
   try {
@@ -487,7 +448,8 @@ async function saveNote() {
       `/api/dashboard/bookings/${props.bookingType}/${encodeURIComponent(props.bookingId)}/notes`,
       {
         method: 'POST',
-        body: { note: noteDraft.value, idempotencyKey: noteAttemptKey.value, noteId: selectedNote.value?.id, revisionId: noteRevisionId.value },
+        // Guarded by the booking as it was read: an edit since then is not overwritten.
+        body: { note: noteDraft.value, operationalUpdatedAt: current.operationalUpdatedAt },
         validate: isBookingDetailsResponse,
       },
     )
@@ -544,12 +506,6 @@ provide(bookingEditorKey, {
   messageTo,
   callTo,
   firstName,
-  noteDraft,
-  noteSaving,
-  noteError,
-  selectedNote,
-  openNote,
-  saveNote,
   formatCreatedAt,
 })
 </script>

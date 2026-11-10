@@ -33,10 +33,14 @@ test('inbox publication failures are visible and table booking receipts reflect 
             const action = await this.ctx.storage.get('bookingAction')
             if (action && (action === 'cancel' || action === 'delete-created' ? event.type === 'delivery.changed' : event.type === 'thread.created')) {
               await this.ctx.storage.delete('bookingAction')
-              if (action === 'cancel') await this.env.DB.prepare("UPDATE bookings SET status='cancelled',updated_at=? WHERE request_id=?").bind(new Date().toISOString(), event.threadId).run()
+              if (action === 'cancel') await this.env.DB.prepare("UPDATE bookings SET status='cancelled',cancelled_at=?1,updated_at=?1 WHERE request_id=?2").bind(new Date().toISOString(), event.threadId).run()
               // The table's seating an hour later.
-              if (action === 'move') await this.env.DB.prepare(\`UPDATE bookings SET product_session_id=(SELECT later.id FROM product_sessions later JOIN product_sessions booked ON booked.id=bookings.product_session_id
+              if (action === 'move') {
+                await this.env.DB.prepare(\`UPDATE bookings SET product_session_id=(SELECT later.id FROM product_sessions later JOIN product_sessions booked ON booked.id=bookings.product_session_id
                   WHERE later.product_id=bookings.product_id AND later.starts_at=strftime('%Y-%m-%dT%H:%M:%fZ',booked.starts_at,'+1 hour')),updated_at=? WHERE request_id=?\`).bind(new Date().toISOString(), event.threadId).run()
+                // A move takes the seating's time and place with it.
+                await this.env.DB.prepare('UPDATE bookings SET starts_at=s.starts_at,ends_at=s.ends_at,timezone=s.timezone,location_id=s.location_id,version=bookings.version+1 FROM product_sessions s WHERE s.id=bookings.product_session_id AND bookings.request_id=?').bind(event.threadId).run()
+              }
               if (action.startsWith('delete')) await this.env.DB.prepare('DELETE FROM bookings WHERE request_id=?').bind(event.threadId).run()
             }
           }

@@ -1,6 +1,6 @@
 import { HTTPError } from 'nitro'
 import { d1JsonStringSet, queryAll, queryFirst, type DbClient } from '~/server/db'
-import { BOOKED_RECORDS_SQL, getGuestRequest, getThreadOperationalRecord, type BookedKind } from '~/server/domain/requests'
+import { BOOKING_RECORDS_SQL, bookedRecordWindow, getGuestRequest, getThreadOperationalRecord } from '~/server/domain/requests'
 import { isDeliverySent } from '~/server/domain/guest-threads/deliveries'
 import type { GuestThreadDeliveryRow } from '~/server/domain/guest-threads/types'
 import { assertOrganizationWideAccess, type MemberAccessPrincipal } from '~/server/utils/member-access'
@@ -19,7 +19,7 @@ import { experiencePublicationBlocker, getProduct } from '~/server/utils/product
 import { readIntegration } from '~/server/utils/organization-integrations'
 import { getSessionAvailability } from '~/server/utils/availability'
 import { MAX_HOMES_CALENDAR_DAYS, readStayGapCandidates, stayAccessFor } from '~/server/domain/stays'
-import { addLocalDays, formatCalendarRange, formatTimestamp, isValidCalendarDate, localDateAt, localDateTimeToInstant } from '~/utils/timezone'
+import { addLocalDays, formatCalendarRange, formatTimestamp, isValidCalendarDate, localDateAt } from '~/utils/timezone'
 import { PRODUCT_DETAIL_FIELDS, type ProductKind } from '~/shared/product-details'
 import { platformLocale } from '~/shared/platform-locales'
 import { stayGuestFirstName } from '~/shared/bookings'
@@ -97,9 +97,9 @@ export async function listBusinessOutcomes(
              CASE WHEN review.source = 'direct' THEN review.user_id ELSE review.entered_by_user_id END,
              review_thread.id, review_thread.kind, NULL,
              json_object('entityType', 'review', 'entityId', review.id, 'state', review.status, 'source', review.source,
-               'reviewRequestId', review.review_request_id, 'bookingId', review.booking_id, 'bookingType', review.booking_type, 'publicationAuthorized', review.publication_authorized, 'revision', review.updated_at), review.created_at
-      FROM reviews review LEFT JOIN requests review_thread ON review_thread.id = review.booking_id
-        AND review_thread.organization_id = review.organization_id AND review_thread.kind = review.booking_type
+               'reviewRequestId', review.review_request_id, 'bookingId', review.booking_id, 'publicationAuthorized', review.publication_authorized, 'revision', review.updated_at), review.created_at
+      FROM reviews review LEFT JOIN bookings visit ON visit.id = review.booking_id AND visit.organization_id = review.organization_id
+        LEFT JOIN requests review_thread ON review_thread.id = visit.request_id AND review_thread.organization_id = review.organization_id
       WHERE review.organization_id = ? AND review.source IN ('direct', 'owner_entered')
       UNION ALL
       SELECT 'analytics_events', measured.id, 'measurement.' || json_extract(measured.payload_json, '$.event_name'),
@@ -142,10 +142,8 @@ export async function listBusinessOutcomes(
     } else if (row.request_id && row.source_table === 'activity_entries') {
       const operationalId = text(payload.operational_booking_id)
       if (operationalId) {
-        if (row.request_kind !== 'booking' && row.request_kind !== 'stay') {
-          invalidEvidence(row, 'Operational activity has no valid recorded request kind')
-        }
-        subject = { kind: row.request_kind, id: operationalId }
+        if (row.request_kind !== 'booking') invalidEvidence(row, 'Operational activity has no valid recorded request kind')
+        subject = { kind: 'booking', id: operationalId }
       } else subject = { kind: 'guest_thread', id: row.request_id }
     } else {
       const kind = text(payload.entityType), id = text(payload.entityId)
@@ -198,7 +196,7 @@ export async function listBusinessOutcomes(
     const financialPaymentId = text(payload.payment_id)
     if (financialPaymentId) outcome.references.push({ kind: 'payment', id: financialPaymentId })
     const paymentId = text(metadata.payment_id)
-    if (paymentId) outcome.references.push({ kind: 'stay_payment', id: paymentId })
+    if (paymentId) outcome.references.push({ kind: 'offline_payment', id: paymentId })
     if (metadata.provider === 'google_ads') {
       outcome.verification.receipts.push({ id: row.source_id, channel: 'google_ads', provider: 'google_ads', status, providerMessageId: text(metadata.provider_request_id) })
     }
@@ -287,12 +285,13 @@ export async function readArticleDistribution(db: DbClient, principal: MemberAcc
  */
 export interface BookingWelcome {
   requestId: string
-  kind: BookedKind
+  /** A stay at a home, or any other booking. */
+  kind: 'booking' | 'stay'
   /** What was booked: an experience, a consultation, a table or a stay's home. */
   productKind: ProductKind
   recordId: string
   status: string
-  /** The booked instant, or a stay's check-in date. */
+  /** The booked instant, or a stay's check-in day. */
   startsAt: string
   timezone: string
   productId: string
@@ -303,7 +302,7 @@ export interface BookingWelcome {
 }
 
 interface WelcomeRow {
-  kind: BookedKind; product_kind: ProductKind; record_id: string; request_id: string; status: string; starts_at: string; check_in_date: string | null; check_out_date: string | null; check_in_time: string | null
+  unit: 'slot' | 'nights'; product_kind: ProductKind; record_id: string; request_id: string; status: string; starts_at: string; ends_at: string
   timezone: string; product_id: string; product_name: string; location_id: string | null; guest_name: string | null
   details_json: string | null; directions: string | null; wifi_network: string | null; wifi_password: string | null; house_manual: string | null
 }
@@ -319,7 +318,7 @@ const filled = (value: unknown): value is string => typeof value === 'string' &&
 function welcomeMessage(row: WelcomeRow): string | null {
   const first = stayGuestFirstName(row.guest_name)
   const sections: string[] = []
-  if (row.kind !== 'stay') {
+  if (row.unit === 'slot') {
     const details = JSON.parse(row.details_json ?? '{}') as Record<string, unknown>
     if (filled(details.preparation)) sections.push(`${fieldName('preparation')}:\n${details.preparation.trim()}`)
     const items = Array.isArray(details.what_to_bring) ? details.what_to_bring.filter(filled) : []
@@ -332,10 +331,11 @@ function welcomeMessage(row: WelcomeRow): string | null {
     if (filled(row.house_manual)) sections.push(`${labels['stay.house_manual']}:\n${row.house_manual.trim()}`)
   }
   if (!sections.length) return null
-  const when = row.kind === 'stay'
-    ? `from ${formatCalendarRange(row.check_in_date!, row.check_out_date!, 'en-US')}`
+  const window = bookedRecordWindow({ id: row.record_id, ...row })
+  const when = row.unit === 'nights'
+    ? `from ${formatCalendarRange(window.start.date, window.end.date, 'en-US')}`
     : `on ${formatTimestamp(row.starts_at, 'en-US', row.timezone, { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })}`
-  const opening = row.kind === 'stay' ? `Looking forward to hosting you at ${row.product_name} ${when}.` : `Looking forward to seeing you for ${row.product_name} ${when}.`
+  const opening = row.unit === 'nights' ? `Looking forward to hosting you at ${row.product_name} ${when}.` : `Looking forward to seeing you for ${row.product_name} ${when}.`
   return [`Hi${first ? ` ${first}` : ''},`, opening, ...sections].join('\n\n')
 }
 
@@ -347,14 +347,13 @@ export async function readBookingWelcomes(db: DbClient, organizationId: string, 
   const now = input.now.toISOString(), until = new Date(input.now.getTime() + UPCOMING_RESERVATION_DAYS * 86_400_000).toISOString()
   const only = (column: string, value: string | undefined) => value === undefined ? '' : `AND ${column} = ?`
   const rows = await queryAll<WelcomeRow>(db, `
-    SELECT br.kind, br.product_kind, br.id AS record_id, br.request_id, br.status, br.starts_at, br.check_in_date, br.check_out_date, br.check_in_time, br.timezone,
-      br.product_id, br.product_name, br.location_id, COALESCE(st.guest_name, json_extract(r.payload_json, '$.guest.name')) AS guest_name,
+    SELECT br.unit, br.product_kind, br.id AS record_id, br.request_id, br.status, br.starts_at, br.ends_at, br.timezone,
+      br.product_id, br.product_name, br.location_id, json_extract(r.payload_json, '$.guest.name') AS guest_name,
       p.details_json, c.directions, c.wifi_network, c.wifi_password, c.house_manual
-    FROM ${BOOKED_RECORDS_SQL} br
+    FROM ${BOOKING_RECORDS_SQL} br
     JOIN requests r ON r.id = br.request_id AND r.organization_id = br.organization_id
     JOIN products p ON p.id = br.product_id AND p.organization_id = br.organization_id
-    LEFT JOIN stays st ON br.kind = 'stay' AND st.organization_id = br.organization_id AND st.id = br.id
-    LEFT JOIN product_stay_configs c ON br.kind = 'stay' AND c.organization_id = br.organization_id AND c.product_id = br.product_id
+    LEFT JOIN product_stay_configs c ON br.unit = 'nights' AND c.organization_id = br.organization_id AND c.product_id = br.product_id
     WHERE br.organization_id = ? AND br.status = 'confirmed' AND br.starts_at BETWEEN ? AND ?
       AND (json_extract(p.details_json, '$.preparation') IS NOT NULL OR json_array_length(p.details_json, '$.what_to_bring') > 0
         OR COALESCE(c.directions, c.wifi_network, c.wifi_password, c.house_manual) IS NOT NULL)
@@ -366,14 +365,15 @@ export async function readBookingWelcomes(db: DbClient, organizationId: string, 
   [organizationId, new Date(input.now.getTime() - 2 * 86_400_000).toISOString(), until, ...[input.requestId, input.locationId].filter((value): value is string => value !== undefined)])
   return rows.flatMap((row) => {
     // A stay is upcoming in its home's own calendar until its guests arrive; anything else until it starts.
-    const today = localDateAt(input.now, row.timezone)
-    if (row.check_in_date !== null) {
-      if (row.check_in_date < today || row.check_in_date > addLocalDays(today, UPCOMING_RESERVATION_DAYS)) return []
-      if (row.check_in_date === today && row.check_in_time !== null && localDateTimeToInstant(row.check_in_date, row.check_in_time, row.timezone, 'compatible').toISOString() <= now) return []
+    const arrival = bookedRecordWindow({ id: row.record_id, ...row }).start
+    if (row.unit === 'nights') {
+      const today = localDateAt(input.now, row.timezone)
+      if (arrival.date < today || arrival.date > addLocalDays(today, UPCOMING_RESERVATION_DAYS)) return []
+      if (arrival.instant !== null && arrival.instant <= now) return []
     } else if (row.starts_at <= now) return []
     const message = welcomeMessage(row)
     if (message === null) return []
-    return [{ requestId: row.request_id, kind: row.kind, productKind: row.product_kind, recordId: row.record_id, status: row.status, startsAt: row.check_in_date ?? row.starts_at, timezone: row.timezone,
+    return [{ requestId: row.request_id, kind: row.unit === 'nights' ? 'stay' as const : 'booking' as const, productKind: row.product_kind, recordId: row.record_id, status: row.status, startsAt: row.unit === 'nights' ? arrival.date : row.starts_at, timezone: row.timezone,
       productId: row.product_id, locationId: row.location_id, guestFirstName: stayGuestFirstName(row.guest_name), message }]
   })
 }
@@ -484,7 +484,7 @@ export async function readBusinessProgressReference(
     if (!gap) throw missing()
     const [overrides, claims, pushes] = await Promise.all([
       queryAll(db, 'SELECT * FROM product_nights WHERE product_id = ? AND organization_id = ? ORDER BY date', [product.id, principal.organizationId]),
-      queryAll(db, `SELECT n.date,n.stay_id,n.hold_id,n.calendar_link_id,h.status AS hold_status,h.expires_at,
+      queryAll(db, `SELECT n.date,n.booking_id AS stay_id,n.hold_id,n.calendar_link_id,h.status AS hold_status,h.expires_at,
         CASE WHEN h.status = 'active' AND h.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now') THEN 1 ELSE 0 END AS hold_active
         FROM stay_nights n LEFT JOIN payment_checkout_holds h ON h.id=n.hold_id AND h.organization_id=n.organization_id
         WHERE n.product_id = ? AND n.organization_id = ? ORDER BY n.date`, [product.id, principal.organizationId]),
@@ -533,7 +533,7 @@ export async function readBusinessProgressReference(
     kind: 'guest_thread' as const, archivedAt: request.archived_at, blockedAt: request.blocked_at,
     latestGuestEntryId: latestGuest?.id ?? null, latestReplyEntryId: latestReply?.id ?? null,
     latestMemberEntryId: latestMember?.id ?? null,
-    commitment: commitment ? { kind: commitment.kind, id: commitment.id, status: commitment.status, startsAt: commitment.starts_at, endsAt: commitment.ends_at } : null,
+    commitment: commitment ? { kind: commitment.unit === 'nights' ? 'stay' as const : 'booking' as const, id: commitment.id, status: commitment.status, startsAt: commitment.starts_at, endsAt: commitment.ends_at } : null,
   }
   return { ...input, evidenceRevision: await creationRequestHash({ operation: input.operation, evidence, commitment, deliveries }), evidence }
 }

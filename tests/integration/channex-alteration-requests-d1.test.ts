@@ -11,6 +11,7 @@ import { mirrorChannexThread } from '../../server/domain/guest-threads/channel-m
 import { runAlterationRequestFeed } from '../../server/domain/guest-threads/stay-change-requests.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
 import { getGuestThreadDetail } from '../../server/domain/guest-threads/detail.ts'
+import { getStay } from '../../server/domain/stays.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 import todayRoute from '../../server/api/dashboard/today.get.ts'
 import type { TaskSection } from '../../server/domain/tasks.ts'
@@ -153,12 +154,17 @@ async function boot() {
 async function airbnbStay(db: D1Database, env: CloudflareEnv, channex: FakeChannex, conversation = true) {
   await applyBookingRevision(db, env, channex.revise('bk-1', { arrival: '2027-01-10', departure: '2027-01-13', adults: 2, amount: '450.00' }, 'new'))
   if (conversation) assert.equal((await mirrorChannexThread(db, env, 'thread', PROPERTY)).status, 'mirrored')
-  const stay = await db.prepare("SELECT id, request_id FROM stays WHERE external_booking_id = 'bk-1'").first<{ id: string; request_id: string | null }>()
-  assert.equal(stay!.request_id === null, !conversation)
+  // Every booking has its conversation; Airbnb's thread is addressed to it once mirrored.
+  const stay = await db.prepare("SELECT b.id, b.request_id, EXISTS (SELECT 1 FROM channel_threads t WHERE t.request_id = b.request_id) AS mirrored FROM bookings b WHERE b.external_booking_id = 'bk-1'").first<{ id: string; request_id: string; mirrored: number }>()
+  assert.equal(stay!.mirrored === 1, conversation)
   return stay!
 }
 
-const stayRow = (db: D1Database, id: string) => db.prepare('SELECT check_in_date, check_out_date, adults, total_minor, version FROM stays WHERE id = ?').bind(id).first()
+/** The stay as the host's stay screen reads it. */
+const stayRow = async (db: D1Database, id: string) => {
+  const { check_in_date, check_out_date, adults, total_minor, version } = await getStay(db, { organizationId: ORG, actorId: OWNER, manage: true }, id)
+  return { check_in_date, check_out_date, adults, total_minor, version }
+}
 const requests = (db: D1Database, threadId: string) => db.prepare("SELECT id, actor_kind, channel, json_extract(payload_json, '$.live_feed_event_id') AS event FROM activity_entries WHERE request_id = ? AND event_name = 'booking_change.requested' ORDER BY sequence").bind(threadId).all<{ id: string; actor_kind: string; channel: string; event: string }>().then(rows => rows.results)
 const decision = (db: D1Database, requestId: string) => db.prepare("SELECT event_name, actor_kind, actor_user_id, body FROM activity_entries WHERE dedupe_key = ?").bind(`booking-change-decision:${requestId}`).first()
 const alerts = (db: D1Database, requestId: string) => db.prepare("SELECT purpose, channel, status FROM guest_thread_deliveries WHERE entry_id = ? ORDER BY channel").bind(requestId).all().then(rows => rows.results)
@@ -177,7 +183,7 @@ test('a guest change request lands once in the stay conversation, survives a rel
     const { id: stayId } = await airbnbStay(db, env, channex, false)
     channex.requests.set('alt-1', { booking: 'bk-1', after: { arrival: '2027-01-10', departure: '2027-01-14', adults: 3, amount: '600.00' }, status: null })
     assert.deepEqual(await runAlterationRequestFeed(db, env, PROPERTY), { recorded: 1, reconciled: 0 })
-    const stay = (await db.prepare('SELECT id, request_id FROM stays WHERE id = ?').bind(stayId).first<{ id: string; request_id: string }>())!
+    const stay = (await db.prepare('SELECT id, request_id FROM bookings WHERE id = ?').bind(stayId).first<{ id: string; request_id: string }>())!
     assert.equal(typeof stay.request_id, 'string')
     // A repeated webhook or feed run records nothing twice and alerts nobody twice.
     assert.deepEqual(await runAlterationRequestFeed(db, env), { recorded: 0, reconciled: 0 })

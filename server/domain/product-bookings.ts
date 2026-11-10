@@ -30,7 +30,7 @@ import { isRecord } from '~/server/utils/type-guards'
 import { pushStayHoldNights, quoteStay, readPublicStayHome, type StayQuote } from '~/server/domain/stays'
 import { requireChannelPush } from '~/server/integrations/channex/ari'
 import { acceptFormAnswers } from '~/server/domain/form-questions'
-import { formAnswersFingerprint } from '~/shared/form-questions'
+import { formAnswerSnapshotsSchema, formAnswersFingerprint } from '~/shared/form-questions'
 import type { ProductKind } from '~/shared/product-details'
 
 export interface BookingCreationContext {
@@ -50,7 +50,9 @@ export async function notifyProductBookingCreated(env: CloudflareEnv, db: DbClie
     getThreadOperationalRecord(db, requestId),
     queryFirst<{ name: string | null; vertical: string | null; public_url: string | null }>(db, `SELECT name, vertical, (SELECT 'https://' || domain FROM organization_domains WHERE organization_id = organization.id AND role = 'canonical' AND status = 'active') AS public_url FROM organization WHERE id = ?`, [organizationId]),
   ])
-  if (!request || request.kind !== 'booking' || !record || record.kind !== 'booking' || record.organization_id !== organizationId || !record.product_id || !record.product_name || !organization) throw new Error('Booking creation delivery requires its canonical tenant, request and offering')
+  if (!request || request.kind !== 'booking' || !record || record.unit !== 'slot' || record.organization_id !== organizationId || !organization) throw new Error('Booking creation delivery requires its canonical tenant, request and offering')
+  const { name: guestName, email: guestEmail } = request.payload.guest
+  if (guestName === null || guestEmail === null) throw new Error('A booking made on the site or by its operator has its guest\'s name and email')
   const creation = await queryFirst<{ status: string }>(db, `SELECT json_extract(payload_json, '$.afterStatus') AS status FROM activity_entries WHERE request_id = ? AND event_name = 'booking.created' AND dedupe_key = ?`, [requestId, `booking:${record.id}:created`])
   if (creation?.status !== 'pending' && creation?.status !== 'confirmed') throw new Error('Booking creation status is missing or invalid')
   const sourceLocale = await getSourceLocale(db, organizationId)
@@ -61,26 +63,28 @@ export async function notifyProductBookingCreated(env: CloudflareEnv, db: DbClie
   const receiptUrl = tokenMatches && organization.public_url
     ? `${organization.public_url.replace(/\/$/, '')}${formatTenantLocalePath('/bookings/confirmed', locale, sourceLocale)}?id=${requestId}#${token}`
     : null
-  const [{ contactPhone, contactEmail }, ownerInboxUrl, paid] = await Promise.all([
+  const [{ contactPhone, contactEmail }, ownerInboxUrl, paid, booking] = await Promise.all([
     resolveLocationContact(db, organizationId, record.location_id),
     buildOwnerThreadInboxUrl(env, db, { organizationId, locationId: record.location_id ?? undefined, threadId: requestId }),
-    paidOnline(db, organizationId, 'booking', record.id),
+    paidOnline(db, organizationId, record.id),
+    queryFirst<{ answers: string }>(db, 'SELECT answers FROM bookings WHERE organization_id = ? AND id = ?', [organizationId, record.id]),
   ])
+  if (!booking) throw new Error(`Booking ${record.id} could not be read for its creation delivery`)
   // Its automatic messages are planned before the new conversation is announced, so it opens with them.
-  await planSourceMessages(db, organizationId, { kind: 'booking', id: record.id })
+  await planSourceMessages(db, organizationId, record.id)
   const results = await Promise.allSettled([
     publishGuestInboxThreadEvent(env, db, { threadId: requestId, type: 'thread.created' }),
     notifyBookingCreated(env, db, {
       organizationId, organizationName: organization.name, vertical: organization.vertical, locationId: record.location_id,
       guestAcknowledgement: request.payload.provenance?.guest_acknowledgement ?? true,
-      bookingId: requestId, status: creation.status, guestName: request.payload.guest.name,
-      email: request.payload.guest.email, guestPhone: request.payload.guest.phone,
+      bookingId: requestId, status: creation.status, guestName,
+      email: guestEmail, guestPhone: request.payload.guest.phone,
       productId: record.product_id, productKind: record.product_kind, productTitle: record.product_name, startsAt: record.starts_at,
-      timezone: record.timezone, partySize: record.party_size, partySizeIsMinimum: request.payload.party_size_is_minimum, notes: request.payload.notes,
-      receiptUrl, paid, contactPhone, contactEmail, ownerInboxUrl, locale,
+      timezone: record.timezone, partySize: record.party_size, partySizeIsMinimum: record.party_size_is_minimum, notes: request.payload.notes,
+      receiptUrl, paid, contactPhone, contactEmail, ownerInboxUrl, locale, answers: formAnswerSnapshotsSchema.parse(JSON.parse(booking.answers)),
     }),
   ])
-  raiseSettledFailures('booking creation delivery', `bookingId ${requestId}`, results)
+  raiseSettledFailures('booking creation delivery', `bookingId ${requestId}`, results, ['publishGuestInboxThreadEvent', 'notifyBookingCreated'])
   return creation.status
 }
 
@@ -142,7 +146,7 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
       await db.prepare(`UPDATE requests SET payload_json=json_set(payload_json,'$.provenance.followups_completed',json('true')) WHERE id=? AND organization_id=?`).bind(threadId, organizationId).run()
     }
     const record = await getThreadOperationalRecord(db, threadId)
-    if (!record || record.kind !== 'booking' || record.organization_id !== organizationId || record.id !== existing.id) throw new Error('Committed booking is missing its operational receipt')
+    if (!record || record.organization_id !== organizationId || record.id !== existing.id) throw new Error('Committed booking is missing its operational receipt')
     if (!operator) {
       if (record.status !== 'pending' && record.status !== 'confirmed') return creationResult({ error: 'This booking has already been cancelled', code: 'booking_cancelled', operational_booking_id: record.id, request_id: threadId }, { status: 409 })
       const cancellation = await createReplayableReservationCancelToken(env.EMAIL_REPLY_SECRET ?? '', threadId)
@@ -172,8 +176,9 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
     }
     if (context.financialWritesAllowed === false) throw new HTTPError({ statusCode: 409, statusMessage: 'Continue this purchase through the business’s payment workflow', data: { code: 'financial_action_required', dashboard_url: `/dashboard/${encodeURIComponent(organization.slug)}/products/${encodeURIComponent(snapshot.product_id)}/booking` } })
     const checkout = await createPaymentCheckout(db, env, {
-      subjectType: 'booking', organizationId, buyerUserId: operator ? null : await ensureInteractionUser(event, env), productId: snapshot.product_id, variantId: snapshot.variant_id,
-      sessionId, requestId: threadId, requestFingerprint: await hashIdentifier(JSON.stringify({ guestName, guestEmail, phone: normalizedGuestPhone, notes })), quantity: partySize,
+      // A retry is held to the answers its purchase froze; it does not read them again.
+      unit: 'slot', organizationId, buyerUserId: operator ? null : await ensureInteractionUser(event, env), productId: snapshot.product_id, variantId: snapshot.variant_id,
+      sessionId, answers: null, requestId: threadId, requestFingerprint: await hashIdentifier(JSON.stringify({ guestName, guestEmail, phone: normalizedGuestPhone, notes })), quantity: partySize,
       idempotencyKey, following: () => [], origin: operator ? null : { request: event.req, pageEventId },
     })
     return creationResult({ success: true, status: 'checkout', replayed: true, ...checkout }, { status: 200 })
@@ -269,14 +274,14 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
   const userId = operator ? null : await ensureInteractionUser(event, env)
 
   const now = new Date().toISOString()
-  const payload = threadPayloadForGuest({ name: guestName, email: guestEmail, phone: normalizedGuestPhone, locale, notes, ipHash, answers })
+  const payload = threadPayloadForGuest({ name: guestName, email: guestEmail, phone: normalizedGuestPhone, locale, notes, ipHash })
   // The booking's own message opens its conversation, stated where and when it is.
   const place = session.location_id === null ? null
     : await queryFirst<{ title: string }>(db, 'SELECT title FROM business_locations WHERE id = ? AND organization_id = ?', [session.location_id, organizationId])
   if (session.location_id !== null && !place) throw new HTTPError({ statusCode: 404, message: 'The session location does not exist' })
   if (!organization.vertical) throw new Error('The organization has no vertical')
-  const opening = { body: openingSentence({ kind: 'booking', vertical: organization.vertical, productKind: product.kind, productTitle: product.name, partySizeIsMinimum: payload.party_size_is_minimum, guestName: payload.guest.name ?? guestName, guestPhone: payload.guest.phone,
-    answers: payload.answers, partySize, startsAt: session.starts_at, timezone: session.timezone, placeTitle: place?.title ?? null }) }
+  const opening = { body: openingSentence({ kind: 'booking', vertical: organization.vertical, productKind: product.kind, productTitle: product.name, partySizeIsMinimum: false, guestName, guestPhone: payload.guest.phone,
+    answers, partySize, startsAt: session.starts_at, timezone: session.timezone, placeTitle: place?.title ?? null }) }
   payload.provenance = { source: operator?.source ?? 'website', external_reference: operator?.externalReference ?? null, actor_user_id: operator?.userId ?? null,
     idempotency_key: idempotencyKey, fingerprint, guest_acknowledgement: operator?.guestAcknowledgement ?? true,
     creation_kind: requiresPayment ? 'checkout' : 'ordinary', creation_status: config.confirmation_mode === 'review' ? 'pending' : 'confirmed', followups_completed: false }
@@ -287,8 +292,8 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
     // Contact stays on the guest thread. A checkout thread waits on the guest;
     // authenticated capture alone creates its operational Booking and activity.
     const checkout = await createPaymentCheckout(db, env, {
-      subjectType: 'booking', organizationId, buyerUserId: userId, productId: product.id, variantId: productVariantId,
-      sessionId: session.id, requestId: threadId, requestFingerprint: await hashIdentifier(JSON.stringify({ guestName, guestEmail, phone: normalizedGuestPhone, notes })), quantity: partySize, idempotencyKey: checkoutKey,
+      unit: 'slot', organizationId, buyerUserId: userId, productId: product.id, variantId: productVariantId,
+      sessionId: session.id, answers, requestId: threadId, requestFingerprint: await hashIdentifier(JSON.stringify({ guestName, guestEmail, phone: normalizedGuestPhone, notes })), quantity: partySize, idempotencyKey: checkoutKey,
       origin: operator ? null : { request: event.req, pageEventId },
       following: paymentId => requestInsertQueries({
         kind: 'booking', id: threadId, organization_id: organizationId, location_id: session.location_id,
@@ -307,7 +312,7 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
     const claim = await claimSessionCapacity(db, {
       env,
       organizationId: organization.id, productId: product.id, sessionId: session.id,
-      productVariantId, partySize, userId, requestId: null, policyJson: JSON.stringify(policy),
+      productVariantId, partySize, userId, requestId: null, policyJson: JSON.stringify(policy), answers,
       following: bookingId => [
         ...requestInsertQueries({
           kind: 'booking', id: threadId, organization_id: organization.id,
@@ -397,7 +402,7 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
     ['notifyProductBookingCreated'])
   await db.prepare(`UPDATE requests SET payload_json = json_set(payload_json, '$.provenance.followups_completed', json('true')) WHERE id = ? AND organization_id = ?`).bind(threadId, organizationId).run()
   const record = await getThreadOperationalRecord(db, threadId)
-  if (!record || record.kind !== 'booking' || record.organization_id !== organizationId || record.id !== operationalBookingId) throw new Error('Created booking is missing its operational receipt')
+  if (!record || record.organization_id !== organizationId || record.id !== operationalBookingId) throw new Error('Created booking is missing its operational receipt')
   if (!operator && record.status === 'cancelled') return creationResult({ error: 'This booking has already been cancelled', code: 'booking_cancelled', operational_booking_id: record.id, request_id: threadId }, { status: 409 })
   const whenLabel = new Intl.DateTimeFormat(locale, { timeZone: record.timezone, dateStyle: 'medium', timeStyle: 'short' }).format(new Date(record.starts_at)) + (record.location_id === null ? ` (${record.timezone})` : '')
   const measurement = measurementOutcome(followUps[1]!)
@@ -469,7 +474,7 @@ export async function createStayBooking(event: H3Event, context: { organizationI
     ? { product_id: quoted.product_id, check_in_date: quoted.check_in_date, check_out_date: quoted.check_out_date, adults: quoted.adults, children: quoted.children, infants: quoted.infants }
     : { product_id: home.product_id, check_in_date: String(request.check_in_date), check_out_date: String(request.check_out_date), adults: Number(request.adults), children: Number(request.children), infants: Number(request.infants) }
   const checkout = await createPaymentCheckout(db, env, {
-    subjectType: 'stay', organizationId, buyerUserId: await ensureInteractionUser(event, env), requestId: null, requestFingerprint: fingerprint,
+    unit: 'nights', organizationId, buyerUserId: await ensureInteractionUser(event, env), requestId: null, requestFingerprint: fingerprint,
     quantity: stay.adults + stay.children, idempotencyKey, following: () => [],
     origin: { request: event.req, pageEventId: readPageEventId(body.page_event_id) },
     stay, guest, quote,

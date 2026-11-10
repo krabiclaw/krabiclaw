@@ -1,7 +1,7 @@
 import { buyerRequestActivityPath } from '~/server/domain/payments/buyer'
 import { OPEN_REPLY_TASK_SQL } from './repository'
 import { d1JsonStringSet, queryAll, queryFirst, type DbClient } from '~/server/db'
-import { getGuestRequest, getThreadOperationalRecord, requestSummary, requestActions, stayPreview } from '~/server/domain/requests'
+import { bookingDay, getGuestRequest, getThreadOperationalRecord, requestSummary, requestActions, stayPreview } from '~/server/domain/requests'
 import { formatOperationalStatusLabel } from './status-labels'
 import { readMailboxActivity, resolveGuestThreadMailbox } from './mailbox'
 import { listThreadEntries, parseEntryPayload, isBuyerVisibleThreadEntry } from './entries'
@@ -13,11 +13,11 @@ import { providerTimestamp } from '~/server/integrations/channex/messages'
 import { bookingChangeViews } from './booking-changes'
 import { formAnswerSnapshotsSchema, type FormAnswerSnapshot } from '~/shared/form-questions'
 
-/** What the guest answered when they wrote in or booked: on the thread, or on the stay the thread is about. */
+/** What the guest answered when they wrote in or booked: on a contact's thread, or on the booking the thread is about (none before a checkout's payment makes it). */
 async function threadAnswers(db: DbClient, thread: NonNullable<Awaited<ReturnType<typeof getGuestRequest>>>): Promise<FormAnswerSnapshot[]> {
-  if (thread.kind !== 'stay') return thread.payload.answers
-  const stay = await queryFirst<{ answers: string }>(db, 'SELECT answers FROM stays WHERE organization_id = ? AND request_id = ?', [thread.organization_id, thread.id])
-  return stay ? formAnswerSnapshotsSchema.parse(JSON.parse(stay.answers)) : []
+  if (thread.kind === 'contact') return thread.payload.answers
+  const booking = await queryFirst<{ answers: string }>(db, 'SELECT answers FROM bookings WHERE organization_id = ? AND request_id = ?', [thread.organization_id, thread.id])
+  return booking ? formAnswerSnapshotsSchema.parse(JSON.parse(booking.answers)) : []
 }
 
 function deliveryRecipient(emailJson: string | null): string | null {
@@ -43,11 +43,11 @@ export async function getGuestThreadDetail(
     listThreadEntries(db, threadId),
     listThreadDeliveries(db, threadId),
     queryFirst<{ request_id: string; product_id: string | null }>(db, `SELECT request_id, product_id FROM channel_threads WHERE organization_id = ? AND request_id = ?
-      UNION ALL SELECT request_id, product_id FROM stays WHERE organization_id = ? AND request_id = ? AND owner = 'channel' LIMIT 1`, [organizationId, threadId, organizationId, threadId]),
+      UNION ALL SELECT request_id, product_id FROM bookings WHERE organization_id = ? AND request_id = ? AND owner = 'channel' LIMIT 1`, [organizationId, threadId, organizationId, threadId]),
     audience ? false : queryFirst(db, `SELECT 1 AS open FROM requests gt WHERE gt.id = ? AND ${OPEN_REPLY_TASK_SQL}`, [threadId]).then(Boolean),
   ])
   if (!thread || (audience && thread.user_id !== audience.buyerUserId)) return null
-  if (audience && record && (record.user_id !== audience.buyerUserId || record.organization_id !== organizationId || record.kind !== thread.kind)) return null
+  if (audience && record && (record.user_id !== audience.buyerUserId || record.organization_id !== organizationId)) return null
   if (!organization) throw new Error('Conversation has no organization')
 
   // One read of the deliveries answers both questions the thread asks of them:
@@ -72,7 +72,7 @@ export async function getGuestThreadDetail(
     bookingChangeViews(db, thread, entryRows, now),
     threadAnswers(db, thread),
     requestSummary(db, thread, record),
-    audience || record?.kind === 'stay' || !channelThread?.product_id ? null
+    audience || record?.unit === 'nights' || !channelThread?.product_id ? null
       : queryFirst<{ internal_name: string }>(db, 'SELECT internal_name FROM product_stay_configs WHERE organization_id = ? AND product_id = ?', [organizationId, channelThread.product_id]),
     readMailboxActivity(db, thread.id),
     audience && thread.kind !== 'contact' ? buyerRequestActivityPath(db, audience.buyerUserId, thread.id) : null,
@@ -125,10 +125,12 @@ export async function getGuestThreadDetail(
   })
 
   if (!audience) {
-    const named = record?.kind === 'stay' ? { internal_name: record.product_internal_name } : home
+    const named = record?.unit === 'nights' ? { internal_name: record.product_internal_name } : home
     if (named) { summary.productTitle = named.internal_name; summary.locationTitle = named.internal_name }
   }
   const mailbox = resolveGuestThreadMailbox(thread, record, now, mailboxActivity, audience?'buyer':'member')
+  // A stay's conversation is presented as a stay: the booking is its nights, or a channel's guest has not booked yet.
+  const submissionType = thread.kind === 'booking' && (record ? record.unit === 'nights' : channelThread !== null) ? 'stay' : thread.kind
 
   return {
     id: thread.id,
@@ -140,22 +142,23 @@ export async function getGuestThreadDetail(
     conversationChannel: channelThread ? 'airbnb' : 'direct',
     guestEmail: summary.guestEmail,
     guestPhone: summary.guestPhone,
-    submissionType: thread.kind,
+    submissionType,
     submissionId: thread.id,
     locationLabel: summary.locationTitle,
     needsReply,
-    operationalRecord: record ? { id: record.id, kind: record.kind, product_kind: record.product_kind, status: record.status, starts_at: record.starts_at, ends_at: record.ends_at, timezone: record.timezone, party_size: record.party_size, check_in_date: record.check_in_date, check_out_date: record.check_out_date } : null,
+    operationalRecord: record ? { id: record.id, unit: record.unit, product_kind: record.product_kind, status: record.status, starts_at: record.starts_at, ends_at: record.ends_at, timezone: record.timezone, party_size: record.party_size,
+      check_in_date: record.unit === 'nights' ? bookingDay(record.starts_at, record.timezone) : null, check_out_date: record.unit === 'nights' ? bookingDay(record.ends_at, record.timezone) : null } : null,
     source: {
-      submissionType: thread.kind,
+      submissionType,
       submissionId: thread.id,
       operationalStatus: record?.status ?? null,
-      operationalStatusLabel: record ? formatOperationalStatusLabel(thread.kind, record.status) : null,
+      operationalStatusLabel: record ? formatOperationalStatusLabel(submissionType, record.status) : null,
       fields: thread.kind === 'contact'
         ? { subject: thread.payload.subject, message: thread.payload.message, locationTitle: summary.locationTitle, productTitle: summary.productTitle, answers }
-        : thread.kind === 'stay'
+        : submissionType === 'stay'
           ? {
-              // A stay is its nights in its own dates; it has no start time to localize.
-              whenLabel: record?.check_in_date && record.check_out_date ? stayPreview({ check_in_date: record.check_in_date, check_out_date: record.check_out_date, party_size: record.party_size }) : null,
+              // A stay is its nights in its own days.
+              whenLabel: record ? stayPreview(record) : null,
               startsAt: null, endsAt: null, timezone: record?.timezone ?? null,
               guests: record ? String(record.party_size) : null, partySize: record?.party_size ?? null,
               notes: null, locationTitle: summary.locationTitle, productTitle: summary.productTitle, answers,
@@ -165,7 +168,7 @@ export async function getGuestThreadDetail(
             startsAt: record?.starts_at ?? null,
             endsAt: record?.ends_at ?? null,
             timezone: record?.timezone ?? null,
-            guests: record ? `${record.party_size}${thread.payload.party_size_is_minimum ? '+' : ''}` : null,
+            guests: record ? `${record.party_size}${record.party_size_is_minimum ? '+' : ''}` : null,
             partySize: record?.party_size ?? null,
             notes: thread.payload.notes,
             locationTitle: summary.locationTitle,

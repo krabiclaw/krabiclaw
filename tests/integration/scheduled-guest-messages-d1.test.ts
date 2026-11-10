@@ -57,7 +57,7 @@ test('the cron sends due messages, leaves future ones pending and records failur
     const dee = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'dee', check_in_date: day(10), check_out_date: day(11), adults: 1, guest_name: 'Dee', guest_phone: '+61491570151', total_minor: 15_000 })
     const cy = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'cy', check_in_date: day(20), check_out_date: day(21), adults: 1, guest_name: 'Cy', guest_email: 'cy@example.test', total_minor: 15_000 })
     const eve = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'eve', check_in_date: day(30), check_out_date: day(31), adults: 1, guest_name: 'Eve', guest_email: 'eve@example.test', total_minor: 15_000 })
-    const planned = (stayId: string, templateId: string) => db.prepare("SELECT * FROM scheduled_guest_messages WHERE subject_type = 'stay' AND subject_id = ? AND template_id = ?").bind(stayId, templateId).first<Record<string, string | null>>()
+    const planned = (stayId: string, templateId: string) => db.prepare('SELECT * FROM scheduled_guest_messages WHERE booking_id = ? AND template_id = ?').bind(stayId, templateId).first<Record<string, string | null>>()
     for (const stay of [ana, dee, cy, eve]) {
       assert.equal((await planned(stay.id, welcome.id))?.status, 'pending')
       assert.equal((await planned(stay.id, arrival.id))?.status, 'pending')

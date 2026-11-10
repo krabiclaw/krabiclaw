@@ -123,7 +123,7 @@ test('public experiences require a configured booking flow and retain full or te
     const sessions = await listSessions(db, { env, organizationId: ORG, productId: legacy.id, fromInstant: `${tomorrow}T00:00:00.000Z`, toInstant: `${tomorrow}T23:59:59.999Z` })
     assert.deepEqual(sessions.map(session => ({ remaining: session.remaining, full: session.is_full })), [{ remaining: 0, full: true }])
     assert.deepEqual((await visible()).sort(), ids, 'a full experience stays visible')
-    await db.prepare("UPDATE bookings SET status = 'cancelled' WHERE product_session_id = 'omakase-session'").run()
+    await db.prepare("UPDATE bookings SET status = 'cancelled', cancelled_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE product_session_id = 'omakase-session'").run()
     await db.prepare("UPDATE business_locations SET special_hours = ? WHERE id = 'loc-a'")
       .bind(JSON.stringify([{ kind: 'closure', starts_on: tomorrow, ends_on: tomorrow, note: 'Private event' }])).run()
     assert.deepEqual(await productBookingReadiness(db, ORG, await getProduct(db, ORG, legacy.id), { env }), { ready: true, missing: [] })
@@ -457,8 +457,8 @@ test('editing a product keeps variant identity, so bookings survive', { timeout:
       VALUES (?, ?, 'slot', 60, 5, 'business', 'a', 'a')`).bind(product.id, ORG).run()
     await db.prepare(`INSERT INTO product_sessions (id, organization_id, product_id, location_id, timezone, starts_at, ends_at, capacity, status, created_by, updated_by)
       VALUES ('s1', ?, ?, 'loc-a', 'Asia/Bangkok', '2099-01-01T00:00:00.000Z', '2099-01-01T01:00:00.000Z', 5, 'scheduled', 'a', 'a')`).bind(ORG, product.id).run()
-    await db.prepare(`INSERT INTO bookings (id, organization_id, product_id, product_session_id, product_variant_id, party_size, policy_json, status)
-      VALUES ('b1', ?, ?, 's1', 'var-adult', 2, '{"advance_notice_minutes":null,"party_size_min":null,"party_size_max":null,"minimum_guest_age":null,"accessibility_contact_required":false,"payment":null}', 'confirmed')`).bind(ORG, product.id).run()
+    await db.prepare(`INSERT INTO bookings (id, organization_id, product_id, product_session_id, product_variant_id, party_size, policy_json, status,location_id,starts_at,ends_at,timezone)
+      SELECT 'b1', ?, ?, 's1', 'var-adult', 2, '{"advance_notice_minutes":null,"party_size_min":null,"party_size_max":null,"minimum_guest_age":null,"accessibility_contact_required":false,"payment":null,"cancellation":null}', 'confirmed',location_id,starts_at,ends_at,timezone FROM product_sessions WHERE id = 's1'`).bind(ORG, product.id).run()
 
     await updateProduct(db, { organizationId: ORG, productId: product.id, patch: { description: 'Now with clay' }, actor: ACTOR })
     assert.equal(await db.prepare("SELECT count(*) n FROM bookings WHERE id = 'b1'").first<number>('n'), 1,

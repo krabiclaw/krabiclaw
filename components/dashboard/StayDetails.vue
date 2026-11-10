@@ -61,9 +61,9 @@
           <p v-if="recordHome?.check_out_time" class="mt-1 text-sm text-muted">By {{ formatTime(recordHome.check_out_time, 'en') }}</p>
         </div>
       </div>
-      <div v-if="stay.arrival_time" class="mt-6 border-t border-default pt-4">
+      <div v-if="arrivalTime" class="mt-6 border-t border-default pt-4">
         <p class="text-base font-medium text-highlighted">Arriving</p>
-        <p class="mt-1 text-base text-muted">{{ formatTime(stay.arrival_time, 'en') }}</p>
+        <p class="mt-1 text-base text-muted">{{ arrivalTime }}</p>
       </div>
       <!-- A member's turnover says the guest never arrived; managers read it with the stay's payments below. -->
       <p v-if="!personalScope && !detail && stay.no_show_at" class="mt-6 border-t border-default pt-4 text-base text-muted" data-testid="stay-no-show">No-show recorded {{ formatCalendarDate(stay.no_show_at.slice(0, 10), 'en') }}.</p>
@@ -101,9 +101,9 @@
       </UCard>
       <template v-if="detail">
       <FormAnswersCard :answers="detail.answers" :title="personalScope ? 'Your answers' : undefined" />
-      <UCard v-if="detail.notes" variant="record">
-        <h3 class="text-base font-semibold text-highlighted">{{ personalScope ? 'Your requests' : 'Guest requests' }}</h3>
-        <p class="mt-3 whitespace-pre-wrap text-base text-muted">{{ detail.notes }}</p>
+      <UCard v-if="!personalScope && detail.private_notes" variant="record">
+        <h3 class="text-base font-semibold text-highlighted">Private note</h3>
+        <p class="mt-3 whitespace-pre-wrap text-base text-muted">{{ detail.private_notes }}</p>
       </UCard>
 
       <!-- The policy the guest booked under, in Airbnb's words: what their own cancellation returns. -->
@@ -248,7 +248,7 @@ import { bookedPolicyTerms } from '~/shared/stay-cancellation'
 import { GUEST_NOT_MESSAGED_WARNING, isMovedStayResponse } from '~/shared/stay-move'
 import { isCurrencyCode } from '~/shared/currencies'
 import { formatMinorAmount, majorAmountToMinor } from '~/shared/prices'
-import { formatCalendarDate, formatTime, localDateAt, localDateTimeToInstant } from '~/utils/timezone'
+import { formatCalendarDate, formatTime, localDateAt } from '~/utils/timezone'
 import { formatPostalAddress } from '~/utils/postal-address'
 import { getErrorMessage } from '~/utils/errors'
 import { ApiClientError } from '~/utils/api-clients'
@@ -311,6 +311,13 @@ const homeImageUrl = computed(() => home.value ? home.value.image_url : hostHome
 const checkInTime = computed(() => recordHome.value?.check_in_time
   ? stayCheckInWindow(formatTime(recordHome.value.check_in_time, 'en'), hostHome.value?.check_in_end_time ? formatTime(hostHome.value.check_in_end_time, 'en') : null)
   : null)
+/** When the guest said they arrive, where that is not the home's check-in time: the stay's stored start in the home's clock. */
+const arrivalTime = computed(() => {
+  const value = stay.value
+  if (!value || value.starts_at.length === 10) return null
+  const local = new Intl.DateTimeFormat('en-GB', { timeZone: value.timezone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(value.starts_at))
+  return local === recordHome.value?.check_in_time ? null : formatTime(local, 'en')
+})
 const messagePath = computed(() => detail.value?.request_id
   ? props.personalScope ? `/dashboard/account/messages/${encodeURIComponent(detail.value.request_id)}`
     : `/dashboard/${encodeURIComponent(String(route.params.orgSlug))}/messages/${encodeURIComponent(detail.value.request_id)}`
@@ -319,7 +326,7 @@ const callPhone = computed(() => !props.personalScope ? detail.value?.guest_phon
 const guestAddress = computed(() => home.value?.location?.address ? formatPostalAddress(home.value.location.address) : '')
 const cancellation = computed(() => data.value && 'cancellation' in data.value ? data.value.cancellation : null)
 const canRequestChange = computed(() => props.personalScope && detail.value !== null && !isChannelManagedStay(detail.value) && Boolean(messagePath.value) && ['pending', 'confirmed'].includes(detail.value.status)
-  && Boolean(recordHome.value) && (recordHome.value!.check_out_time ? localDateTimeToInstant(detail.value.check_out_date, recordHome.value!.check_out_time, detail.value.timezone, 'compatible').getTime() > Date.now() : detail.value.check_out_date >= localDateAt(new Date(), detail.value.timezone)))
+  && (detail.value.ends_at.length === 10 ? detail.value.check_out_date >= localDateAt(new Date(), detail.value.timezone) : Date.parse(detail.value.ends_at) > Date.now()))
 const policy = computed(() => detail.value?.cancellation_policy ? bookedPolicyTerms(detail.value.cancellation_policy) : null)
 const paymentPath = computed(() => detail.value?.online_payment ? `/dashboard/${route.params.orgSlug}/bookings/payment/${encodeURIComponent(detail.value.online_payment.payment_id)}` : '')
 watch(realtime.event, event => {
@@ -348,8 +355,7 @@ const guest = computed<GuestIdentity>(() => {
   // A turnover carries the guest's first name and nothing about who booked it.
   if (!value) return !stay.value ? { state: 'loading' } : stay.value.guest_name ? { state: 'named', name: stay.value.guest_name } : { state: 'unnamed' }
   if (value.owner === 'app' && !value.guest_name) return { state: 'missing' }
-  const name = [value.guest_name, value.guest_surname].filter(Boolean).join(' ')
-  return name ? { state: 'named', name } : { state: 'not-provided' }
+  return value.guest_name ? { state: 'named', name: value.guest_name } : { state: 'not-provided' }
 })
 const title = computed(() => props.personalScope ? 'Your stay' : statusLabel.value)
 const nights = computed(() => stay.value ? Math.round((Date.parse(`${stay.value.check_out_date}T00:00:00Z`) - Date.parse(`${stay.value.check_in_date}T00:00:00Z`)) / 86_400_000) : 0)

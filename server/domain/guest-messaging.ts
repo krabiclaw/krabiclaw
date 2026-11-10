@@ -2,7 +2,7 @@ import { HTTPError } from 'nitro'
 import { executeBatch, queryAll, queryAllPages, queryFirst, type DbClient } from '~/server/db'
 import { assertAssignedBookingAccess, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import { organizationEventQuery } from '~/server/utils/organization-events'
-import { BOOKED_RECORDS_SQL, bookedRecordWindow, getGuestRequest, type BookedKind, type BookedRecord } from '~/server/domain/requests'
+import { BOOKING_RECORDS_SQL, bookedRecordWindow, getGuestRequest, type BookedRecord } from '~/server/domain/requests'
 import { formatPostalAddress, parsePostalAddress } from '~/utils/postal-address'
 import { getStay, readStayHome, stayAccessFor, type StayAccess } from '~/server/domain/stays'
 import { isValidInstant, localNow } from '~/utils/timezone'
@@ -168,13 +168,13 @@ export async function deleteMessageTemplate(db: DbClient, env: GuestInboxPublica
     query: `UPDATE scheduled_guest_messages SET status = CASE WHEN status = 'pending' THEN 'cancelled' ELSE status END,
       reason = CASE WHEN status = 'pending' THEN 'The automatic message was deleted.' ELSE reason END,
       template_id = NULL, updated_at = ? WHERE organization_id = ? AND template_id = ?
-      AND EXISTS (SELECT 1 FROM message_templates WHERE id = ? AND organization_id = ? AND version = ?) RETURNING organization_id, product_id, subject_type, subject_id, request_id, updated_at`,
+      AND EXISTS (SELECT 1 FROM message_templates WHERE id = ? AND organization_id = ? AND version = ?) RETURNING organization_id, product_id, booking_id, request_id, updated_at`,
     params: [now, access.organizationId, templateId, templateId, access.organizationId, current.version],
   }, {
     query: 'DELETE FROM message_templates WHERE organization_id = ? AND id = ? AND version = ?', params: [access.organizationId, templateId, current.version],
   }, organizationEventQuery({ organizationId: access.organizationId, actorId: access.actorId, eventType: 'message_template.deleted', entityType: 'message_template', entityId: templateId, onlyIfPreviousChangedOneRow: true })], { operation: 'Delete message template' })
   if (results[1]?.meta.changes !== 1) messagingError(409, 'MESSAGE_TEMPLATE_VERSION_CONFLICT', 'This automatic message changed; reload it before deleting', 'expectedVersion')
-  const messages = results[0]?.results as Array<Pick<ScheduledGuestMessageRow, 'organization_id' | 'product_id' | 'subject_type' | 'subject_id' | 'request_id' | 'updated_at'>>
+  const messages = results[0]?.results as Array<Pick<ScheduledGuestMessageRow, 'organization_id' | 'product_id' | 'booking_id' | 'request_id' | 'updated_at'>>
   try {
     for (const message of messages) await publishScheduledGuestMessageChange(db, env, message)
   } catch (cause) {
@@ -190,7 +190,7 @@ export async function guestThreadMessagingContext(db: DbClient, principal: Membe
   await assertAssignedBookingAccess(db, { ...principal, requestId })
   const access = await stayAccessFor(principal)
   const [stay, channel] = await Promise.all([
-    queryFirst<{ id: string; product_id: string }>(db, 'SELECT id, product_id FROM stays WHERE organization_id = ? AND request_id = ?', [principal.organizationId, requestId]),
+    queryFirst<{ id: string; product_id: string }>(db, 'SELECT id, product_id FROM bookings WHERE organization_id = ? AND request_id = ? AND product_session_id IS NULL', [principal.organizationId, requestId]),
     queryFirst<{ product_id: string }>(db, 'SELECT product_id FROM channel_threads WHERE organization_id = ? AND request_id = ?', [principal.organizationId, requestId]),
   ])
   if (stay && channel && stay.product_id !== channel.product_id) messagingError(409, 'CHANNEL_THREAD_ASSOCIATION_CONFLICT', 'The stay and provider conversation name different homes', 'productId')
@@ -206,22 +206,21 @@ export async function guestThreadMessagingContext(db: DbClient, principal: Membe
  */
 async function conversationRecord(db: DbClient, organizationId: string, requestId: string) {
   const record = await queryFirst<BookedRecord & { location: string | null; address: string | null; phone: string | null }>(db, `
-    SELECT br.*, l.title AS location, l.address, l.phone FROM ${BOOKED_RECORDS_SQL} br
+    SELECT br.*, l.title AS location, l.address, l.phone FROM ${BOOKING_RECORDS_SQL} br
       LEFT JOIN business_locations l ON l.organization_id = br.organization_id AND l.id = br.location_id
      WHERE br.organization_id = ? AND br.request_id = ?`, [organizationId, requestId])
   if (!record) return null
   const window = bookedRecordWindow(record)
   const local = (at: { date: string; instant: string | null }) => at.instant === null ? at.date : (({ date, time }) => `${date} ${time}`)(localNow(record.timezone, new Date(at.instant)))
-  return { kind: record.kind, status: record.status, offering: record.product_name, location: record.location, address: record.address ? formatPostalAddress(parsePostalAddress(record.address)) : null,
+  return { unit: record.unit, status: record.status, offering: record.product_name, location: record.location, address: record.address ? formatPostalAddress(parsePostalAddress(record.address)) : null,
     phone: record.phone, partySize: record.party_size, timezone: record.timezone, starts: local(window.start), ends: local(window.end), noShow: record.no_show_at !== null }
 }
 
 export interface ScheduledGuestMessageRow {
   id: string
   organization_id: string
-  product_id: string | null
-  subject_type: BookedKind
-  subject_id: string
+  product_id: string
+  booking_id: string
   request_id: string | null
   template_id: string | null
   template_title: string
@@ -247,9 +246,7 @@ export function scheduledGuestMessage(row: ScheduledGuestMessageRow) {
   if (row.due_at === null && row.status !== 'failed' && row.status !== 'skipped') messagingError(500, 'INVALID_SCHEDULED_MESSAGE', 'The scheduled message has no due time', 'dueAt')
   if ((row.status === 'failed' || row.status === 'needs_review') && (!row.reason?.trim() || !row.error_code?.trim() || !row.error_field?.trim())) messagingError(500, 'INVALID_SCHEDULED_MESSAGE', 'The failed message has incomplete error context', 'errorCode')
   if (row.status === 'sent' && (row.sent_at === null || row.entry_id === null)) messagingError(500, 'INVALID_SCHEDULED_MESSAGE', 'The sent message has no activity entry or send time', 'entryId')
-  return { id: row.id, organizationId: row.organization_id, productId: row.product_id, subjectType: row.subject_type, subjectId: row.subject_id,
-    // The shipped iOS app reads a stay's messages by stayId.
-    stayId: row.subject_type === 'stay' ? row.subject_id : null, requestId: row.request_id,
+  return { id: row.id, organizationId: row.organization_id, productId: row.product_id, bookingId: row.booking_id, requestId: row.request_id,
     templateId: row.template_id, title: row.template_title, templateVersion: row.template_version, body: row.body, dueAt: row.due_at,
     timezone: row.timezone, status: row.status, reason: row.reason, errorCode: row.error_code, errorField: row.error_field,
     entryId: row.entry_id, startedAt: row.started_at, sentAt: row.sent_at, createdAt: row.created_at, updatedAt: row.updated_at }

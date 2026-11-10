@@ -7,11 +7,10 @@ export interface BookingChangeState { status: BookingChangeStatus; decisionId: s
 function sourceMatchesSql(proposal: string, owner: string): string {
   const recorded = ['recordKind', 'sessionId', 'operationalUpdatedAt', 'recordId', 'status', 'partySize', 'startsAt', 'endsAt', 'timezone', 'locationId', 'productId', 'partySizeIsMinimum', 'notes', 'guest.name', 'guest.email', 'guest.phone']
     .map(field => `json_extract(${proposal}.payload_json,'$.before.${field}')`).join(',')
-  const guest = ['party_size_is_minimum', 'notes', 'guest.name', 'guest.email', 'guest.phone'].map(field => `json_extract(${owner}.payload_json,'$.${field}')`).join(',')
+  const guest = ['notes', 'guest.name', 'guest.email', 'guest.phone'].map(field => `json_extract(${owner}.payload_json,'$.${field}')`).join(',')
   return `(EXISTS (SELECT 1 FROM bookings b
-      JOIN product_sessions s ON s.id=b.product_session_id AND s.organization_id=b.organization_id AND s.product_id=b.product_id
-      WHERE b.request_id=${owner}.id AND b.organization_id=${owner}.organization_id AND ${owner}.kind='booking'
-        AND json_array('booking',b.product_session_id,b.updated_at,b.id,b.status,b.party_size,s.starts_at,s.ends_at,s.timezone,s.location_id,b.product_id,${guest})=json_array(${recorded})))`
+      WHERE b.request_id=${owner}.id AND b.organization_id=${owner}.organization_id AND ${owner}.kind='booking' AND b.product_session_id IS NOT NULL
+        AND json_array('booking',b.product_session_id,b.updated_at,b.id,b.status,b.party_size,b.starts_at,b.ends_at,b.timezone,b.location_id,b.product_id,b.party_size_is_minimum,${guest})=json_array(${recorded})))`
 }
 
 /**
@@ -25,9 +24,9 @@ function statusSql(proposal: string, owner: string, decision: string, now: strin
     WHEN ${decision}.event_name='booking_change.declined' THEN 'declined'
     WHEN ${decision}.event_name='booking_change.withdrawn' THEN 'withdrawn'
     WHEN ${decision}.id IS NOT NULL THEN json('Invalid booking change decision')
-    WHEN ${owner}.kind='stay' THEN 'pending'
+    WHEN EXISTS (SELECT 1 FROM bookings b WHERE b.request_id=${owner}.id AND b.organization_id=${owner}.organization_id AND b.product_session_id IS NULL) THEN 'pending'
     WHEN julianday(${proposal}.occurred_at)+7<=julianday(${now})
-      OR EXISTS (SELECT 1 FROM bookings b JOIN product_sessions s ON s.id=b.product_session_id AND s.organization_id=b.organization_id AND s.product_id=b.product_id WHERE b.request_id=${owner}.id AND b.organization_id=${owner}.organization_id AND s.ends_at<=${now}) THEN 'expired'
+      OR EXISTS (SELECT 1 FROM bookings b WHERE b.request_id=${owner}.id AND b.organization_id=${owner}.organization_id AND b.ends_at<=${now}) THEN 'expired'
     WHEN ${proposal}.id IS NOT (SELECT latest.id FROM activity_entries latest WHERE latest.request_id=${owner}.id AND latest.event_name='booking_change.requested' ORDER BY latest.sequence DESC LIMIT 1)
       OR NOT ${sourceMatchesSql(proposal, owner)} THEN 'stale'
     ELSE 'pending' END)`

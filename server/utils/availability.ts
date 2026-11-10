@@ -23,7 +23,7 @@ import {
   type StayCalendarRules,
   type ProductSessionStatus,
 } from '~/shared/bookings'
-import { formQuestionsRevision, parseStoredFormQuestions, type FormQuestion } from '~/shared/form-questions'
+import { formQuestionsRevision, parseStoredFormQuestions, type FormAnswerSnapshot, type FormQuestion } from '~/shared/form-questions'
 import type { StayCancellationPolicy, StayLongTermCancellationPolicy } from '~/shared/stay-listing'
 import { prepareFormQuestionsWrite } from '~/server/domain/form-questions'
 import { addLocalDays, assertCalendarDate, isValidTimezone, localDateAt, localDateTimeToInstant, localNow, MINUTE_TIME_PATTERN, unresolvableLocalTime } from '~/utils/timezone'
@@ -1147,13 +1147,15 @@ export async function sessionAllocationPredicate(db: DbClient, input: SessionAll
 export async function sessionMoveQuery(db: DbClient, input: SessionAllocationInput & { bookingId: string; fromProductId: string; productVariantId: string; writeGuard?: BatchQuery }): Promise<BatchQuery> {
   const allocation = await sessionAllocationPredicate(db, { ...input, replacingBookingId: input.bookingId })
   return {
-    query: `UPDATE bookings SET product_id = ?, product_variant_id = ?, product_session_id = ?, party_size = ?, updated_at = ?
+    query: `UPDATE bookings SET product_id = ?, product_variant_id = ?, product_session_id = ?, party_size = ?, updated_at = ?, version = version + 1,
+        location_id = (SELECT location_id FROM product_sessions WHERE id = ?), starts_at = (SELECT starts_at FROM product_sessions WHERE id = ?),
+        ends_at = (SELECT ends_at FROM product_sessions WHERE id = ?), timezone = (SELECT timezone FROM product_sessions WHERE id = ?)
       WHERE ${input.writeGuard ? `(${input.writeGuard.query}) AND ` : ''}id = ? AND organization_id = ? AND product_id = ? AND status IN ('pending', 'confirmed')
         AND EXISTS (SELECT 1 FROM product_sessions current_session WHERE current_session.id=bookings.product_session_id AND current_session.ends_at>strftime('%Y-%m-%dT%H:%M:%fZ','now'))
         AND ${allocation.query}
         AND (NOT EXISTS (SELECT 1 FROM payments p WHERE p.organization_id=bookings.organization_id AND p.subject_type='booking' AND p.subject_id=bookings.id AND p.captured_amount>p.refunded_amount)
           OR (party_size=? AND (SELECT location_id FROM product_sessions WHERE id=bookings.product_session_id) IS (SELECT location_id FROM product_sessions WHERE id=? AND organization_id=bookings.organization_id)))`,
-    params: [input.productId, input.productVariantId, input.sessionId, input.partySize, input.now, ...(input.writeGuard?.params ?? []), input.bookingId, input.organizationId, input.fromProductId, ...allocation.params!, input.partySize, input.sessionId],
+    params: [input.productId, input.productVariantId, input.sessionId, input.partySize, input.now, input.sessionId, input.sessionId, input.sessionId, input.sessionId, ...(input.writeGuard?.params ?? []), input.bookingId, input.organizationId, input.fromProductId, ...allocation.params!, input.partySize, input.sessionId],
   }
 }
 
@@ -1191,26 +1193,36 @@ export async function sessionClaimQuery(db: DbClient, input: {
   chargedAt?: string
   /** The terms the guest agreed to (BookingPolicy), frozen on the booking. */
   policyJson: string
+  /** The guest's answers to the product's questions, as accepted when they booked. */
+  answers?: FormAnswerSnapshot[]
+  /** The guest said "this many or more". */
+  partySizeIsMinimum?: boolean
   now: string
 }): Promise<BatchQuery> {
   const allocation = await sessionAllocationPredicate(db, input)
   return {
     query: `
       INSERT INTO bookings (
-        id, organization_id, product_id, product_session_id, product_variant_id,
-        user_id, request_id, party_size, policy_json, status, created_at, updated_at
+        id, organization_id, product_id, product_session_id, product_variant_id, location_id, starts_at, ends_at, timezone,
+        user_id, request_id, party_size, party_size_is_minimum, answers, policy_json, status, received_at, created_at, updated_at
       )
-      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?,
+      SELECT ?, ?, ?, ?, ?,
+        (SELECT location_id FROM product_sessions WHERE id = ? AND organization_id = ?),
+        (SELECT starts_at FROM product_sessions WHERE id = ? AND organization_id = ?),
+        (SELECT ends_at FROM product_sessions WHERE id = ? AND organization_id = ?),
+        (SELECT timezone FROM product_sessions WHERE id = ? AND organization_id = ?),
+        ?, ?, ?, ?, ?, ?,
         COALESCE((SELECT status FROM bookings WHERE id = ?),
           (SELECT CASE WHEN confirmation_mode = 'review' THEN 'pending' ELSE 'confirmed' END
-           FROM product_booking_configs WHERE product_id = ? AND organization_id = ?)), ?, ?
+           FROM product_booking_configs WHERE product_id = ? AND organization_id = ?)), ?, ?, ?
       WHERE ${allocation.query}
         AND EXISTS(SELECT 1 FROM product_variants v WHERE v.id=? AND v.product_id=? AND v.organization_id=? AND v.active=1)
       ON CONFLICT (id) DO NOTHING
     `,
     params: [
       input.bookingId, input.organizationId, input.productId, input.sessionId, input.productVariantId,
-      input.userId ?? null, input.requestId ?? null, input.partySize, input.policyJson, input.replacingBookingId ?? null, input.productId, input.organizationId, input.now, input.now,
+      ...[0, 1, 2, 3].flatMap(() => [input.sessionId, input.organizationId]),
+      input.userId ?? null, input.requestId ?? null, input.partySize, input.partySizeIsMinimum ?? false, JSON.stringify(input.answers ?? []), input.policyJson, input.replacingBookingId ?? null, input.productId, input.organizationId, input.now, input.now, input.now,
       ...allocation.params!, input.productVariantId,input.productId,input.organizationId,
     ],
   }
@@ -1240,6 +1252,8 @@ export async function claimSessionCapacity(db: DbClient, input: {
   requestId?: string | null
   /** The terms the guest agreed to (BookingPolicy), frozen on the booking. */
   policyJson: string
+  answers?: FormAnswerSnapshot[]
+  partySizeIsMinimum?: boolean
   /**
    * The writes that belong to this claim, given the id it minted.
    *
@@ -1290,7 +1304,7 @@ export async function setBookingStatus(db: DbClient, input: {
         status = ?,
         cancelled_at = CASE WHEN ? = 'cancelled' THEN COALESCE(cancelled_at, ?) ELSE NULL END,
         cancellation_reason = CASE WHEN ? = 'cancelled' THEN ? ELSE NULL END,
-        updated_at = ?
+        version = version + 1, updated_at = ?
       WHERE organization_id = ? AND id = ?
         AND (status = ? OR (status = 'pending' AND ? = 'confirmed') OR (? = 'cancelled' AND status IN ('pending', 'confirmed')))
     `,

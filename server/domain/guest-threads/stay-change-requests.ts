@@ -1,6 +1,7 @@
 import { HTTPError } from 'nitro'
 import { z } from 'zod'
 import { queryFirst, type DbClient } from '~/server/db'
+import { bookingDay } from '~/server/domain/requests'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import type { ChannexEnv } from '~/server/integrations/channex/client'
 import { notifyBookingChangeOwner, stayParty } from '~/server/utils/notifications'
@@ -75,7 +76,7 @@ async function recordOutcome(db: DbClient, env: AnswerEnv, entry: GuestThreadEnt
 
 /** Whether the stay was written after an outcome was recorded: the accepted revision, or a later one. */
 async function stayChangedSince(db: DbClient, proposal: Proposal, decision: GuestThreadEntryRow): Promise<boolean> {
-  const stay = await queryFirst<{ updated_at: string }>(db, 'SELECT updated_at FROM stays WHERE id = ?', [proposal.stay_id])
+  const stay = await queryFirst<{ updated_at: string }>(db, 'SELECT updated_at FROM bookings WHERE id = ?', [proposal.stay_id])
   if (!stay) throw new Error(`Stay ${proposal.stay_id} disappeared under its change request`)
   return stay.updated_at > decision.created_at
 }
@@ -87,8 +88,8 @@ async function landAcceptedChange(db: DbClient, env: AnswerEnv, proposal: Propos
 
 async function alertOwners(db: DbClient, env: CloudflareEnv, thread: { id: string; organization_id: string; guest_name: string | null }, entry: GuestThreadEntryRow, proposal: Proposal, status: 'requested' | 'withdrawn') {
   if (!thread.guest_name) throw new Error(`Conversation ${thread.id} has no guest name to alert its owners with`)
-  const home = await queryFirst<{ name: string; location_id: string; product_id: string; arrival_time: string | null; organization_name: string }>(db, `SELECT p.name, c.location_id, s.product_id, s.arrival_time, o.name AS organization_name
-    FROM stays s JOIN products p ON p.id = s.product_id AND p.organization_id = s.organization_id
+  const home = await queryFirst<{ name: string; location_id: string; product_id: string; organization_name: string }>(db, `SELECT p.name, c.location_id, s.product_id, o.name AS organization_name
+    FROM bookings s JOIN products p ON p.id = s.product_id AND p.organization_id = s.organization_id
     JOIN product_stay_configs c ON c.product_id = s.product_id AND c.organization_id = s.organization_id
     JOIN organization o ON o.id = s.organization_id WHERE s.id = ? AND s.organization_id = ?`, [proposal.stay_id, thread.organization_id])
   if (!home) throw new Error(`Stay ${proposal.stay_id} has no home to name in its change request alert`)
@@ -102,7 +103,7 @@ async function alertOwners(db: DbClient, env: CloudflareEnv, thread: { id: strin
   const counts = (side: Terms) => ({ checkIn: side.check_in_date, checkOut: side.check_out_date, guests: side.adults + side.children, infants: side.infants, totalMinor: side.total_minor })
   await notifyBookingChangeOwner(env, db, {
     organizationId: thread.organization_id, organizationName: home.organization_name, threadId: thread.id, submissionType: 'stay', submissionId: thread.id, sourceEntryId: entry.id,
-    locationId: home.location_id, vertical: 'lodging', stay: { id: proposal.stay_id, product_id: home.product_id, arrival_time: home.arrival_time },
+    locationId: home.location_id, vertical: 'lodging', stay: { id: proposal.stay_id, product_id: home.product_id },
     change: {
       recordKind: 'stay', channel: 'Airbnb', guestName: thread.guest_name, requestedBy: { kind: 'guest' }, status, locationLabel: 'Home',
       current: terms(proposal.before), requested: terms(proposal.after),
@@ -125,22 +126,29 @@ export async function takeAlterationRequest(db: DbClient, env: CloudflareEnv, re
   let entry = await findEntryByDedupeKey(db, dedupeKey)
   if (!entry && request.outcome) return 'ignored'
   if (!entry) {
-    type StayRow = Terms & { id: string; request_id: string | null }
-    const read = () => queryFirst<StayRow>(db, `SELECT id, request_id, check_in_date, check_out_date, adults, children, infants, total_minor, currency
-      FROM stays WHERE provider = 'channex' AND external_booking_id = ? AND organization_id = ? AND product_id = ?`, [request.bookingId, mapping.organization_id, mapping.product_id])
+    type StayRow = Omit<Terms, 'check_in_date' | 'check_out_date'> & { id: string; request_id: string; starts_at: string; ends_at: string; timezone: string; mirrored: number }
+    const read = async (): Promise<(Terms & { id: string; request_id: string; mirrored: boolean }) | null> => {
+      const row = await queryFirst<StayRow>(db, `SELECT id, request_id, starts_at, ends_at, timezone, adults, children, infants, total_minor, currency,
+          EXISTS (SELECT 1 FROM channel_threads t WHERE t.request_id = bookings.request_id) AS mirrored
+        FROM bookings WHERE provider = 'channex' AND external_booking_id = ? AND organization_id = ? AND product_id = ? AND product_session_id IS NULL`, [request.bookingId, mapping.organization_id, mapping.product_id])
+      if (!row) return null
+      const { starts_at, ends_at, timezone, mirrored, ...terms } = row
+      return { ...terms, check_in_date: bookingDay(starts_at, timezone), check_out_date: bookingDay(ends_at, timezone), mirrored: mirrored === 1 }
+    }
     let stay = await read()
     if (!stay) {
       for (const revision of await pendingBookingRevisions(env, request.propertyId, request.bookingId)) await landBookingRevision(db, env, revision)
       stay = await read()
     }
     if (!stay) throw new HTTPError({ statusCode: 409, message: `Airbnb change request ${request.id} names booking ${request.bookingId}, which Channex has not sent as a stay`, data: { code: 'CHANNEL_BOOKING_NOT_LANDED', field: 'bms.booking_id' } })
-    // The booking's conversation, mirrored from the thread the request names when it has not arrived yet.
-    if (!stay.request_id && request.messageThreadId) {
+    // The booking's Airbnb conversation, mirrored from the thread the request names when it has not arrived yet.
+    if (!stay.mirrored && request.messageThreadId) {
       await mirrorChannexThread(db, env, request.messageThreadId, request.propertyId)
       stay = await read()
     }
-    if (!stay?.request_id) throw new HTTPError({ statusCode: 409, message: `Airbnb change request ${request.id} is for a stay whose Airbnb conversation has not arrived yet`, data: { code: 'STAY_CONVERSATION_MISSING', field: 'request_id' } })
-    const { id: stayId, request_id: threadId, ...before } = stay
+    if (!stay) throw new HTTPError({ statusCode: 409, message: `Airbnb change request ${request.id} names a stay that changed while its conversation was mirrored`, data: { code: 'CHANNEL_BOOKING_NOT_LANDED', field: 'bms.booking_id' } })
+    const { id: stayId, request_id: threadId } = stay
+    const before: Terms = { check_in_date: stay.check_in_date, check_out_date: stay.check_out_date, adults: stay.adults, children: stay.children, infants: stay.infants, total_minor: stay.total_minor, currency: stay.currency }
     const proposal: Proposal = { source: 'airbnb', initiated_by: request.initiatedBy, live_feed_event_id: request.id, property_id: request.propertyId, booking_id: request.bookingId, stay_id: stayId, before, after: request.after }
     const guest = request.initiatedBy === 'guest'
     entry = await appendEntry(db, {
@@ -234,13 +242,13 @@ export async function respondToStayChangeRequest(db: DbClient, env: AnswerEnv, i
 export async function stayChangeView(db: DbClient, thread: GuestThreadRow, entry: GuestThreadEntryRow, status: BookingChangeStatus): Promise<BookingChangeView> {
   const proposal = proposalSchema.parse(JSON.parse(entry.payload_json || '{}'))
   const organization = await queryFirst<{ vertical: string | null }>(db, 'SELECT vertical FROM organization WHERE id = ?', [thread.organization_id])
-  const home = await queryFirst<{ name: string }>(db, 'SELECT p.name FROM stays s JOIN products p ON p.id = s.product_id AND p.organization_id = s.organization_id WHERE s.id = ? AND s.organization_id = ?', [proposal.stay_id, thread.organization_id])
+  const home = await queryFirst<{ name: string }>(db, 'SELECT p.name FROM bookings s JOIN products p ON p.id = s.product_id AND p.organization_id = s.organization_id WHERE s.id = ? AND s.organization_id = ?', [proposal.stay_id, thread.organization_id])
   if (!organization || !home) throw new Error(`Change request ${entry.id} has no organization or home to show`)
   if (!thread.payload.guest.name) throw new Error(`Change request ${entry.id} is in a conversation with no guest name`)
   const { locale } = await getPersistedSourceLocale(db, thread.organization_id)
   const side = (terms: Terms) => ({ whenLabel: nightsLabel(terms, locale), partySize: terms.adults + terms.children, totalLabel: formatMinorAmount(terms.total_minor, terms.currency, locale), assignedMemberId: null, assignedMemberName: null })
   return {
-    type: thread.kind, noun: 'stay', guestName: thread.payload.guest.name, locale, vertical: organization.vertical, requestedBy: proposal.initiated_by === 'guest' ? 'guest' : 'business', channel: 'airbnb',
+    type: 'stay', noun: 'stay', guestName: thread.payload.guest.name, locale, vertical: organization.vertical, requestedBy: proposal.initiated_by === 'guest' ? 'guest' : 'business', channel: 'airbnb',
     before: side(proposal.before), after: side(proposal.after), locationTitle: home.name, originalLocationTitle: home.name, status,
   }
 }

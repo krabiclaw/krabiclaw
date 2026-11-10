@@ -128,7 +128,7 @@ export async function unreadScheduleNotificationIds(
 ): Promise<string[]> {
   const recordMatch = kind === 'stay'
     ? `(json_extract(n.payload_json, '$.stay_id') = ?
-        OR EXISTS (SELECT 1 FROM stays s JOIN activity_entries source ON source.request_id = s.request_id
+        OR EXISTS (SELECT 1 FROM bookings s JOIN activity_entries source ON source.request_id = s.request_id
           WHERE s.id = ? AND s.organization_id = n.organization_id AND source.id = n.parent_id)
         OR substr(json_extract(n.payload_json, '$.deep_link'), -length(?)) = ?)`
     : `EXISTS (SELECT 1 FROM requests r WHERE r.id = json_extract(n.payload_json, '$.thread_id')

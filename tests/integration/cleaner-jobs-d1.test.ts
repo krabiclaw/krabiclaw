@@ -84,9 +84,9 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
     assert.deepEqual(await runOrganizationJobs(env, db, ORG, now).then(run => [run.next?.toISOString(), run.failures]), [at(day(2), '18:00').toISOString(), []], 'the next wake is the evening-before reminder')
     // Lee's own turnover is the cleaner's too, so they have one conversation per job.
     const threads = await listTeamThreads(env, db, cleaner)
-    assert.deepEqual(threads.map(item => item.stayId).sort(), [dee.id, lee.id].sort())
-    const thread = threads.find(item => item.stayId === dee.id)!
-    assert.deepEqual([thread.name, thread.stayId, thread.participants.map(person => person.id).sort(), thread.unread, thread.job?.id, thread.job?.status], ['Cabin', dee.id, ['admin', 'cleaner', 'owner'], false, turnover.id, 'open'])
+    assert.deepEqual(threads.map(item => item.stay?.id).sort(), [dee.id, lee.id].sort())
+    const thread = threads.find(item => item.stay?.id === dee.id)!
+    assert.deepEqual([thread.name, thread.stay?.id, thread.participants.map(person => person.id).sort(), thread.unread, thread.job?.id, thread.job?.status], ['Cabin', dee.id, ['admin', 'cleaner', 'owner'], false, turnover.id, 'open'])
     const [job] = await automatic(thread.id)
     assert.equal(job!.key, jobKey(turnover))
     assert.match(job!.body, /^Turnover: Cabin\n/)
@@ -99,7 +99,7 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
     const alerted = (key: string) => db.prepare(`SELECT COUNT(*) AS n FROM guest_thread_deliveries d JOIN activity_entries a ON a.id = d.entry_id WHERE a.dedupe_key = ? AND d.purpose = 'owner_alert' AND d.channel = 'email'`).bind(key).first<number>('n')
     assert.equal(await alerted(`team-message:${messages[0]!.id}`), 1)
     // The app's "Message host" lands in the same conversation.
-    assert.deepEqual(await createTeamThread(env, db, cleaner, { memberIds: ['owner', 'admin'], stayId: dee.id }), { id: thread.id, created: false })
+    assert.deepEqual(await createTeamThread(env, db, cleaner, { memberIds: ['owner', 'admin'], bookingId: dee.id }), { id: thread.id, created: false })
     // A second wake posts nothing twice.
     await runOrganizationJobs(env, db, ORG, now)
     assert.equal((await automatic(thread.id)).length, 1)
@@ -125,7 +125,7 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
     assert.equal((await taskRow(`turnover:${dee.id}`))!.assigned_member_id, 'm-cook')
     await runOrganizationJobs(env, db, ORG, at(day(3), '13:10'))
     assert.match((await automatic(thread.id)).find(message => message.key === `released:${turnover.id}`)!.body, /^No longer yours: turnover at Cabin, /)
-    const cookThreads = (await listTeamThreads(env, db, cook)).filter(item => item.stayId === dee.id)
+    const cookThreads = (await listTeamThreads(env, db, cook)).filter(item => item.stay?.id === dee.id)
     assert.equal(cookThreads.length, 1)
     assert.deepEqual([cookThreads[0]!.participants.map(person => person.id).sort(), cookThreads[0]!.job?.id], [['admin', 'cook', 'owner'], turnover.id])
     assert.equal((await automatic(cookThreads[0]!.id)).find(message => message.key === jobKey(turnover))?.body.split('\n')[0], 'Turnover: Cabin')
@@ -147,7 +147,7 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
     // A cancelled stay cancels its job in the conversation at once.
     const may = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'may', check_in_date: day(6), check_out_date: day(8), adults: 1, guest_name: 'May', total_minor: 30_000 })
     await runOrganizationJobs(env, db, ORG, at(day(3), '14:00'))
-    const mayThread = (await listTeamThreads(env, db, cook)).find(item => item.stayId === may.id)!
+    const mayThread = (await listTeamThreads(env, db, cook)).find(item => item.stay?.id === may.id)!
     assert.equal((await automatic(mayThread.id)).length, 1)
     await cancelStay(db, env, manager, may.id, { expected_version: may.version, reason: 'Guest asked', financial_writes_allowed: false })
     await runOrganizationJobs(env, db, ORG, at(day(3), '14:05'))
@@ -162,7 +162,7 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
     const alerts = await db.prepare("SELECT dedupe_key FROM activity_entries WHERE kind = 'notification' AND dedupe_key = ?").bind(`notification:task-starting:${leeTurnover.id}:${day(5)}:owner`).all()
     assert.equal(alerts.results.length, 1)
     // The cook, who had it, is told; no conversation of hosts alone is opened.
-    const leeThreads = (await listTeamThreads(env, db, owner)).filter(item => item.stayId === lee.id)
+    const leeThreads = (await listTeamThreads(env, db, owner)).filter(item => item.stay?.id === lee.id)
     assert.ok(leeThreads.every(item => item.participants.some(person => person.id === 'cook' || person.id === 'cleaner')))
     assert.ok((await automatic(leeThreads.find(item => item.participants.some(person => person.id === 'cook'))!.id)).some(message => message.key === `released:${leeTurnover.id}`))
 
@@ -201,7 +201,7 @@ test('a consultation gives its attorney jobs that follow the booking and an aler
     const booking = await claimSessionCapacity(db, { policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1, requestId: opening.id })
     const jobs = async () => (await db.prepare("SELECT kind, subject_type, subject_id, assigned_member_id, starts_at, status FROM tasks WHERE kind IN ('consultation_prep', 'consultation_follow_up') ORDER BY kind").all<{ kind: string; status: string }>()).results
     const recompute = () => executeBatch(db, conversationTaskQueries(opening.id, new Date().toISOString()), { operation: 'Recompute consultation jobs' })
-    await db.prepare("UPDATE bookings SET status = 'confirmed' WHERE id = ?").bind(booking.bookingId).run()
+    await db.prepare("UPDATE bookings SET status = 'confirmed', cancelled_at = NULL WHERE id = ?").bind(booking.bookingId).run()
     await recompute()
     assert.deepEqual(await jobs(), [
       { kind: 'consultation_follow_up', subject_type: 'booking', subject_id: booking.bookingId, assigned_member_id: 'host-member', starts_at: '2099-10-02T14:00:00.000Z', status: 'open' },
@@ -238,10 +238,10 @@ test('a consultation gives its attorney jobs that follow the booking and an aler
     assert.equal(await db.prepare("SELECT count(*) n FROM activity_entries WHERE kind = 'notification' AND dedupe_key = 'notification:task-starting:plain:2099-10-01:host'").first('n'), 1)
 
     // Cancelling the consultation closes both jobs; confirming it again reopens them.
-    await db.prepare("UPDATE bookings SET status = 'cancelled' WHERE id = ?").bind(booking.bookingId).run()
+    await db.prepare("UPDATE bookings SET status = 'cancelled', cancelled_at = ? WHERE id = ?").bind(NOW, booking.bookingId).run()
     await recompute()
     assert.deepEqual((await jobs()).map(job => job.status), ['cancelled', 'cancelled'])
-    await db.prepare("UPDATE bookings SET status = 'confirmed' WHERE id = ?").bind(booking.bookingId).run()
+    await db.prepare("UPDATE bookings SET status = 'confirmed', cancelled_at = NULL WHERE id = ?").bind(booking.bookingId).run()
     await recompute()
     assert.deepEqual((await jobs()).map(job => job.status), ['open', 'open'])
   } finally { await runtime.dispose() }

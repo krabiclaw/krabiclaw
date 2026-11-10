@@ -15,7 +15,7 @@ export default defineHandler(async (event) => {
 
   const results = await queryAll<ApiValue>(db, `
     SELECT r.id, r.author_name, r.rating, r.title, r.content, r.owner_reply, r.owner_reply_at,
-      r.source, r.status, r.helpful_count, r.user_id, r.booking_id, r.booking_type, r.review_request_id, r.created_at, r.updated_at
+      r.source, r.status, r.helpful_count, r.user_id, r.booking_id, r.review_request_id, r.created_at, r.updated_at
     FROM reviews r
     WHERE r.organization_id = ? AND r.location_id = ?
     ORDER BY r.created_at DESC

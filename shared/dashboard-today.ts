@@ -67,7 +67,7 @@ export interface TodayReservation {
   resourceName: string | null
   /** "Pending confirmation", "Currently hosting", "Overbooked · Next guests arrive the same day". */
   statusLabel: string | null
-  /** The team’s private notes on the booking: "1 note". */
+  /** Whether the team left its private note on the booking: "1 note". */
   noteLabel: string | null
   /** The opportunity for this booking, shown at the bottom of its card. */
   suggestion: OpportunityView | null

@@ -14,7 +14,7 @@ import { listOrganizationReviews, setReviewStatus } from '../../server/utils/org
 import reviewTask from '../../server/tasks/review-request-automation.ts'
 import validateRoute from '../../server/api/public/review-requests/validate.get.ts'
 import submitRoute from '../../server/api/public/review-requests/submit.post.ts'
-import { localDateAt } from '../../utils/timezone.ts'
+import { localDateAt, localDateTimeToInstant } from '../../utils/timezone.ts'
 import { memberAccessPrincipal, resolveMembership } from '../../server/utils/member-access.ts'
 import { listBusinessOutcomes } from '../../server/utils/business-outcomes.ts'
 
@@ -38,7 +38,7 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
           await this.storage.put('publications', (await this.storage.get('publications') ?? 0) + 1)
         }
         if (event.type === 'thread.changed') {
-          const review = await this.db.prepare('SELECT first_sent_at FROM review_requests WHERE booking_id = ?').bind(event.threadId).first()
+          const review = await this.db.prepare('SELECT rr.first_sent_at FROM review_requests rr JOIN bookings b ON b.id = rr.booking_id WHERE b.request_id = ?').bind(event.threadId).first()
           if (review) {
             if (await this.storage.get('failSuccess')) { await this.storage.delete('failSuccess'); return new Response('controlled success publication failure', { status: 503 }) }
             await this.storage.put('successPublications', [...await this.storage.get('successPublications') ?? [], { threadId: event.threadId, firstSentAt: review.first_sent_at }])
@@ -77,7 +77,7 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
       "INSERT INTO products (id, organization_id, kind, name, slug, created_by, updated_by) VALUES ('consult', 'org', 'service', 'Initial Consultation', 'consult', 'owner', 'owner')",
       "INSERT INTO products (id, organization_id, kind, name, slug, created_by, updated_by) VALUES ('class', 'org', 'experience', 'Pasta Class', 'class', 'owner', 'owner')",
       "INSERT INTO products (id, organization_id, kind, name, slug, created_by, updated_by) VALUES ('home', 'org', 'stay', 'Garden Cottage', 'home', 'owner', 'owner')",
-      ...['consult', 'class'].map(id => `INSERT INTO product_variants (id, organization_id, product_id, name, created_by, updated_by) VALUES ('${id}-v', 'org', '${id}', 'Standard', 'owner', 'owner')`),
+      ...['consult', 'class', 'home'].map(id => `INSERT INTO product_variants (id, organization_id, product_id, name, created_by, updated_by) VALUES ('${id}-v', 'org', '${id}', 'Standard', 'owner', 'owner')`),
       "INSERT INTO product_booking_configs (product_id, organization_id, unit, duration_minutes, default_capacity, scheduling_mode, created_by, updated_by) VALUES ('class', 'org', 'slot', 120, 8, 'business', 'owner', 'owner')",
       "INSERT INTO product_booking_configs (product_id, organization_id, unit, duration_minutes, default_capacity, scheduling_mode, created_by, updated_by) VALUES ('consult', 'org', 'slot', 30, 1, 'business', 'owner', 'owner')",
       "INSERT INTO product_locations (organization_id, product_id, location_id, created_by, updated_by) VALUES ('org', 'home', 'room', 'owner', 'owner')",
@@ -90,29 +90,32 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
     // Conversation ids are UUIDs, as everywhere: a reply address encodes one.
     const T: Record<string, string> = {}
     const name = (requestId: unknown) => Object.keys(T).find(key => T[key] === requestId)
-    const thread = async (key: string, kind: 'booking' | 'stay', userId: string, locationId: string | null, name: string) => {
+    // Every booking's conversation, a stay's included, carries its guest's contact.
+    const thread = async (key: string, userId: string, locationId: string | null, name: string) => {
       const id = T[key] ??= crypto.randomUUID()
-      const writes = requestInsertQueries({ id, kind, organization_id: 'org', location_id: locationId, user_id: userId, review_id: null, // A stay's conversation carries only its guest; a booking's carries the thread's own facts too.
-        payload: kind === 'stay' ? { guest: { name, email: `${key}@guests.example`, phone: '+66812345678' } } : threadPayloadForGuest({ name, email: `${key}@guests.example`, phone: '+66812345678' }),
-        created_at: now, updated_at: now } as Parameters<typeof requestInsertQueries>[0])
+      const writes = requestInsertQueries({ id, kind: 'booking', organization_id: 'org', location_id: locationId, user_id: userId, review_id: null,
+        payload: threadPayloadForGuest({ name, email: `${key}@guests.example`, phone: '+66812345678' }),
+        created_at: now, updated_at: now })
       await db.batch(writes.map(write => db.prepare(write.query).bind(...(write.params ?? []))))
     }
     // A table booked at a place: a seating of that place's tables, and the party's booking of it.
     const reservation = async (id: string, guest: string, locationId: string, endsAt: string, status = 'confirmed') => {
-      await thread(id, 'booking', guest, locationId, `Guest ${id}`)
+      await thread(id, guest, locationId, `Guest ${id}`)
+      const startsAt = at(Date.parse(endsAt) - Date.now() - 2 * HOUR)
       await db.prepare(`INSERT INTO product_sessions (id, organization_id, product_id, location_id, timezone, starts_at, ends_at, capacity, created_by, updated_by)
-        VALUES (?, 'org', ?, ?, 'Asia/Bangkok', ?, ?, 40, 'owner', 'owner')`).bind(`${id}-seating`, `${locationId}-tables`, locationId, at(Date.parse(endsAt) - Date.now() - 2 * HOUR), endsAt).run()
-      await db.prepare(`INSERT INTO bookings (id, organization_id, product_id, product_session_id, product_variant_id, user_id, request_id, party_size, policy_json, status, cancelled_at)
-        VALUES (?, 'org', ?, ?, ?, ?, ?, 2, '{"advance_notice_minutes":null,"party_size_min":null,"party_size_max":null,"minimum_guest_age":null,"accessibility_contact_required":false,"payment":null}', ?, ?)`).bind(`${id}-record`, `${locationId}-tables`, `${id}-seating`, `${locationId}-tables-v`, guest, T[id], status, status === 'cancelled' ? now : null).run()
+        VALUES (?, 'org', ?, ?, 'Asia/Bangkok', ?, ?, 40, 'owner', 'owner')`).bind(`${id}-seating`, `${locationId}-tables`, locationId, startsAt, endsAt).run()
+      await db.prepare(`INSERT INTO bookings (id, organization_id, product_id, product_session_id, product_variant_id, location_id, starts_at, ends_at, timezone, user_id, request_id, party_size, policy_json, status, cancelled_at)
+        VALUES (?, 'org', ?, ?, ?, ?, ?, ?, 'Asia/Bangkok', ?, ?, 2, '{"advance_notice_minutes":null,"party_size_min":null,"party_size_max":null,"minimum_guest_age":null,"accessibility_contact_required":false,"payment":null,"cancellation":null}', ?, ?)`).bind(`${id}-record`, `${locationId}-tables`, `${id}-seating`, `${locationId}-tables-v`, locationId, startsAt, endsAt, guest, T[id], status, status === 'cancelled' ? now : null).run()
     }
     const booking = async (id: string, guest: string, product: 'consult' | 'class', endsAt: string) => {
-      await thread(id, 'booking', guest, null, `Guest ${id}`)
+      await thread(id, guest, null, `Guest ${id}`)
       // The class meets on the patio; the consultation is held online with the owner.
       const locationId = product === 'class' ? 'patio' : null
+      const startsAt = at(Date.parse(endsAt) - Date.now() - HOUR)
       await db.prepare(`INSERT INTO product_sessions (id, organization_id, product_id, location_id, timezone, starts_at, ends_at, capacity, created_by, updated_by)
-        VALUES (?, 'org', ?, ?, 'Asia/Bangkok', ?, ?, 8, 'owner', 'owner')`).bind(`${id}-session`, product, locationId, at(Date.parse(endsAt) - Date.now() - HOUR), endsAt).run()
-      await db.prepare(`INSERT INTO bookings (id, organization_id, product_id, product_session_id, product_variant_id, user_id, request_id, party_size, policy_json, status)
-        VALUES (?, 'org', ?, ?, ?, ?, ?, 1, '{"advance_notice_minutes":null,"party_size_min":null,"party_size_max":null,"minimum_guest_age":null,"accessibility_contact_required":false,"payment":null}', 'confirmed')`).bind(`${id}-record`, product, `${id}-session`, `${product}-v`, guest, T[id]).run()
+        VALUES (?, 'org', ?, ?, 'Asia/Bangkok', ?, ?, 8, 'owner', 'owner')`).bind(`${id}-session`, product, locationId, startsAt, endsAt).run()
+      await db.prepare(`INSERT INTO bookings (id, organization_id, product_id, product_session_id, product_variant_id, location_id, starts_at, ends_at, timezone, user_id, request_id, party_size, policy_json, status)
+        VALUES (?, 'org', ?, ?, ?, ?, ?, ?, 'Asia/Bangkok', ?, ?, 1, '{"advance_notice_minutes":null,"party_size_min":null,"party_size_max":null,"minimum_guest_age":null,"accessibility_contact_required":false,"payment":null,"cancellation":null}', 'confirmed')`).bind(`${id}-record`, product, `${id}-session`, `${product}-v`, locationId, startsAt, endsAt, guest, T[id]).run()
     }
 
     await reservation('dinner', 'g-dinner', 'room', at(-25 * HOUR))
@@ -124,14 +127,17 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
     await booking('lesson', 'g-class', 'class', at(-26 * HOUR))
     // The cottage's checkout was two days ago at 11:00 in Bangkok.
     const checkout = localDateAt(new Date(Date.now() - 2 * 24 * HOUR), 'Asia/Bangkok')
-    await thread('cottage', 'stay', 'g-stay', 'room', 'Guest cottage')
-    await db.prepare(`INSERT INTO stays (id, organization_id, product_id, channel, owner, status, check_in_date, check_out_date, adults, guest_name, guest_email, user_id, request_id, total_minor, currency)
-      VALUES ('cottage-record', 'org', 'home', 'direct', 'app', 'confirmed', date(?, '-3 days'), ?, 2, 'Guest', 'cottage@guests.example', 'g-stay', ?, 30000, 'USD')`).bind(checkout, checkout, T.cottage).run()
+    await thread('cottage', 'g-stay', 'room', 'Guest cottage')
+    // A stay is a booking of the home's nights: its check-in and checkout at the home's times in the home's zone.
+    const checkIn = localDateAt(new Date(Date.now() - 5 * 24 * HOUR), 'Asia/Bangkok')
+    await db.prepare(`INSERT INTO bookings (id, organization_id, product_id, product_variant_id, location_id, starts_at, ends_at, timezone, party_size, adults, children, infants, channel, owner, status, user_id, request_id, total_minor, currency, policy_json)
+      VALUES ('cottage-record', 'org', 'home', 'home-v', 'room', ?, ?, 'Asia/Bangkok', 2, 2, 0, 0, 'direct', 'app', 'confirmed', 'g-stay', ?, 30000, 'USD', '{"advance_notice_minutes":null,"party_size_min":null,"party_size_max":null,"minimum_guest_age":null,"accessibility_contact_required":false,"payment":null,"cancellation":null}')`)
+      .bind(localDateTimeToInstant(checkIn, '15:00', 'Asia/Bangkok').toISOString(), localDateTimeToInstant(checkout, '11:00', 'Asia/Bangkok').toISOString(), T.cottage).run()
 
     // Each visit is reviewed as what it was.
-    assert.deepEqual(await Promise.all([['booking', 'dinner'], ['booking', 'consultation'], ['booking', 'lesson'], ['stay', 'cottage']].map(async ([kind, id]) =>
-      (await getReviewBookingContext(db, kind as 'booking', T[id!]!))?.subject)), ['restaurant', 'legal_consultation', 'experience', 'lodging'])
-    const stayContext = await getReviewBookingContext(db, 'stay', T.cottage!)
+    assert.deepEqual(await Promise.all(['dinner', 'consultation', 'lesson', 'cottage'].map(async id =>
+      (await getReviewBookingContext(db, `${id}-record`))?.subject)), ['restaurant', 'legal_consultation', 'experience', 'lodging'])
+    const stayContext = await getReviewBookingContext(db, 'cottage-record')
     assert.equal(stayContext?.completed_at, new Date(`${checkout}T04:00:00.000Z`).toISOString(), 'a stay ends at its home\'s checkout time in the home\'s zone')
 
     // No-show on a visit whose invitation has not gone out yet: it is never sent.
@@ -146,7 +152,9 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
     }
 
     const run = await reviewTask.run!({ context: { cloudflare: { env } }, payload: {}, name: 'review-request-automation' } as never) as { result: { sent: number } }
-    const invited = (await db.prepare('SELECT booking_type, booking_id, first_sent_at IS NOT NULL AS sent FROM review_requests').all<{ booking_type: string; booking_id: string; sent: number }>()).results
+    // Read back through the bookings each invitation names.
+    const invited = (await db.prepare(`SELECT CASE WHEN b.product_session_id IS NULL THEN 'stay' ELSE 'booking' END AS booking_type, b.request_id AS booking_id, rr.first_sent_at IS NOT NULL AS sent
+      FROM review_requests rr JOIN bookings b ON b.id = rr.booking_id`).all<{ booking_type: string; booking_id: string; sent: number }>()).results
       .map(row => ({ ...row, booking_id: name(row.booking_id) })).sort((a, b) => a.booking_id!.localeCompare(b.booking_id!))
     assert.deepEqual(invited, [
       { booking_type: 'booking', booking_id: 'consultation', sent: 1 },
@@ -201,7 +209,7 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
     })
     try {
       const providerEnv = { ...env, EMAIL_DELIVERY_MODE: 'provider', RESEND_API_KEY: 'controlled-provider-only', EMAIL_FROM: 'Proof <hello@krabiclaw.com>' }
-      const send = () => sendReviewRequestForBooking(providerEnv, db, 'booking', T['retry-metadata']!)
+      const send = () => sendReviewRequestForBooking(providerEnv, db, 'retry-metadata-record')
       // Resend's answer with the email id sends the invitation; a sent invitation is not due again.
       const first = await send()
       assert.equal(first.sent, true, JSON.stringify(first))
@@ -218,7 +226,7 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
         const key = `retry-${boundary}`
         await reservation(key, 'g-dinner', 'room', at(-25 * HOUR))
         await db.prepare("UPDATE requests SET payload_json = json_set(payload_json, '$.guest.email', 'guest@provider-proof.com') WHERE id = ?").bind(T[key]).run()
-        const invitation = () => sendReviewRequestForBooking(providerEnv, db, 'booking', T[key]!)
+        const invitation = () => sendReviewRequestForBooking(providerEnv, db, `${key}-record`)
         const before = accepted.length
         const attemptsBefore = sendAttempts
         if (boundary === 'preparation') await db.prepare(`CREATE TRIGGER fail_review_preparation BEFORE INSERT ON guest_thread_deliveries
@@ -227,7 +235,7 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
           WHEN NEW.provider_message_id IS NOT NULL AND NEW.entry_id IN (SELECT id FROM activity_entries WHERE request_id = '${T[key]}') BEGIN SELECT RAISE(FAIL, 'controlled acceptance persistence failure'); END`).run()
         if (boundary === 'publication') await hub.fetch('https://hub/fail-next-delivery')
         if (boundary === 'persistence') await db.prepare(`CREATE TRIGGER fail_review_completion BEFORE UPDATE OF first_sent_at ON review_requests
-          WHEN NEW.booking_id = '${T[key]}' BEGIN SELECT RAISE(FAIL, 'controlled completion failure'); END`).run()
+          WHEN NEW.booking_id = '${key}-record' BEGIN SELECT RAISE(FAIL, 'controlled completion failure'); END`).run()
         rejectSend = boundary === 'unsent'
         if (boundary === 'concurrent') {
           const concurrent = await Promise.all([invitation(), invitation(), invitation()])
@@ -253,7 +261,7 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
         if (boundary !== 'concurrent') assert.equal(sendAttempts, attemptsBefore + (['unsent', 'acceptance-write'].includes(boundary) ? 2 : 1), `${boundary}: only an unsent or unknown outcome repeats the idempotent provider request`)
         const invitationToken = tokenOf(accepted.at(-1)!.body.html)
         assert.ok(await getReviewRequestByToken(db, invitationToken), `${boundary}: emailed link validates`)
-        assert.deepEqual(await db.prepare('SELECT send_count, last_error, first_sent_at IS NOT NULL AS sent FROM review_requests WHERE booking_id = ?').bind(T[key]).first(), { send_count: 1, last_error: null, sent: 1 })
+        assert.deepEqual(await db.prepare('SELECT send_count, last_error, first_sent_at IS NOT NULL AS sent FROM review_requests WHERE booking_id = ?').bind(`${key}-record`).first(), { send_count: 1, last_error: null, sent: 1 })
         assert.equal(await db.prepare('SELECT count(*) n FROM guest_thread_deliveries d JOIN activity_entries e ON e.id = d.entry_id WHERE e.request_id = ?').bind(T[key]).first('n'), 1)
       }
 
@@ -263,14 +271,14 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
       await db.prepare("UPDATE requests SET payload_json = json_set(payload_json, '$.guest.email', 'guest@provider-proof.com') WHERE id = ?").bind(T['retry-success-publication']).run()
       const acceptedBefore = accepted.length
       await hub.fetch('https://hub/fail-next-success')
-      await assert.rejects(sendReviewRequestForBooking(providerEnv, db, 'booking', T['retry-success-publication']!),
+      await assert.rejects(sendReviewRequestForBooking(providerEnv, db, 'retry-success-publication-record'),
         error => {
           const data = (error as { data?: { code: string; field: string; committed: boolean } }).data
           assert.deepEqual(data && { code: data.code, field: data.field, committed: data.committed }, { code: 'DASHBOARD_PUBLICATION_FAILED', field: 'realtime', committed: true })
           return true
         })
       assert.equal(accepted.length, acceptedBefore + 1)
-      assert.deepEqual(await db.prepare('SELECT send_count, last_error, first_sent_at IS NOT NULL AS sent FROM review_requests WHERE booking_id = ?').bind(T['retry-success-publication']).first(), { send_count: 1, last_error: null, sent: 1 })
+      assert.deepEqual(await db.prepare('SELECT send_count, last_error, first_sent_at IS NOT NULL AS sent FROM review_requests WHERE booking_id = ?').bind('retry-success-publication-record').first(), { send_count: 1, last_error: null, sent: 1 })
       assert.ok(await getReviewRequestByToken(db, tokenOf(accepted.at(-1)!.body.html)), 'the one delivered invitation retains its usable link')
       const afterFailure = await reviewTask.run!({ context: { cloudflare: { env: providerEnv } }, payload: {}, name: 'review-request-automation' } as never) as { result: { sent: number; failed: number } }
       assert.deepEqual(afterFailure.result, { sent: 0, failed: 0 })

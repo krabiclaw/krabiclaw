@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:22b1ba72303b685a01dea1abf4c184ebb8efb45dd9934d5df0c544c5a903d67a",
-  "documentationFingerprint": "sha256:ac77b204fcf36f33730bcb92dbd2e75f65ee6a3e1b95d69b2539a2d1082a9564",
+  "fingerprint": "sha256:0b861ccb77bb8f904dd6e68861373c1cb2b3cffa27b80bb0dca923f3c5b26a9d",
+  "documentationFingerprint": "sha256:6fad6f67b843d724008c1dc0d200f7e68ddceca185c7026e44e74d6a29158892",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -12444,7 +12444,7 @@
                   ]
                 },
                 "stayId": {
-                  "description": "For a stay row, the stay to read with get_stay; one stay is its arrival and its departure.",
+                  "description": "For a stay row, the stay to read with get_product_booking; one stay is its arrival and its departure.",
                   "type": [
                     "string",
                     "null"
@@ -13175,10 +13175,15 @@
     {
       "name": "cancel_product_booking",
       "title": "Cancel product booking",
-      "description": "Cancel a pending or confirmed product booking or consultation before it ends, release its places and email the guest. A required refund returns financial_action_required and a dashboard URL before status changes.",
+      "description": "Cancel a pending or confirmed booking before it ends and tell the guest: a product booking or consultation releases its places; a stay the host entered frees its nights, cancels its pending automatic messages and updates the home's connected Airbnb availability through Channex (a channel's stay is cancelled on its channel). A required refund returns financial_action_required and a dashboard URL before status changes.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
+          "expected_version": {
+            "description": "Required for a stay: stay.version from get_product_booking. A stale version is refused.",
+            "minimum": 1,
+            "type": "integer"
+          },
           "idempotency_key": {
             "description": "Caller-supplied durable idempotency key. Reuse only for the identical operation.",
             "maxLength": 200,
@@ -13194,6 +13199,11 @@
             "minLength": 1,
             "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
             "type": "string"
+          },
+          "reason": {
+            "description": "For a stay: why it was cancelled, kept with it.",
+            "maxLength": 500,
+            "type": "string"
           }
         },
         "required": [
@@ -13204,142 +13214,226 @@
       },
       "outputSchema": {
         "$defs": {},
-        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
-        "properties": {
-          "availableActions": {
-            "items": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "ok": {
-            "const": true
-          },
-          "record": {
+        "anyOf": [
+          {
             "properties": {
-              "assigned_member_id": {
-                "type": [
-                  "string",
-                  "null"
-                ]
+              "availableActions": {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
               },
-              "ends_at": {
-                "minLength": 1,
-                "type": "string"
+              "ok": {
+                "const": true
               },
-              "id": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "kind": {
-                "enum": [
-                  "booking"
+              "record": {
+                "properties": {
+                  "assigned_member_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "ends_at": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "id": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "kind": {
+                    "enum": [
+                      "booking"
+                    ],
+                    "type": "string"
+                  },
+                  "location_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "party_size": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "product_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "product_kind": {
+                    "description": "What was booked: an experience, a consultation (service) or a restaurant table.",
+                    "enum": [
+                      "dish",
+                      "experience",
+                      "service",
+                      "stay",
+                      "table"
+                    ],
+                    "type": "string"
+                  },
+                  "product_name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "starts_at": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "status": {
+                    "enum": [
+                      "pending",
+                      "confirmed",
+                      "cancelled"
+                    ],
+                    "type": "string"
+                  },
+                  "timezone": {
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "kind",
+                  "status",
+                  "party_size",
+                  "starts_at",
+                  "ends_at",
+                  "timezone",
+                  "assigned_member_id",
+                  "location_id",
+                  "product_id",
+                  "product_kind",
+                  "product_name"
                 ],
-                "type": "string"
+                "type": "object"
               },
-              "location_id": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "party_size": {
-                "minimum": 1,
-                "type": "integer"
-              },
-              "product_id": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "product_kind": {
-                "description": "What was booked: an experience, a consultation (service) or a restaurant table.",
-                "enum": [
-                  "dish",
-                  "experience",
-                  "service",
-                  "stay",
-                  "table"
-                ],
-                "type": "string"
-              },
-              "product_name": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "starts_at": {
+              "request_id": {
                 "minLength": 1,
                 "type": "string"
               },
               "status": {
-                "enum": [
-                  "pending",
-                  "confirmed",
-                  "cancelled"
-                ],
-                "type": "string"
+                "const": 200
               },
-              "timezone": {
-                "minLength": 1,
-                "type": "string"
+              "thread": {
+                "properties": {
+                  "id": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "kind": {
+                    "enum": [
+                      "booking"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "kind"
+                ],
+                "type": "object"
               }
             },
             "required": [
-              "id",
-              "kind",
+              "ok",
               "status",
-              "party_size",
-              "starts_at",
-              "ends_at",
-              "timezone",
-              "assigned_member_id",
-              "location_id",
-              "product_id",
-              "product_kind",
-              "product_name"
+              "request_id",
+              "record",
+              "availableActions",
+              "thread"
             ],
             "type": "object"
           },
-          "request_id": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "status": {
-            "const": 200
-          },
-          "thread": {
+          {
+            "additionalProperties": false,
             "properties": {
-              "id": {
+              "cancellation_reason": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "cancelled_at": {
                 "minLength": 1,
                 "type": "string"
               },
-              "kind": {
-                "enum": [
-                  "booking"
+              "channel_push": {
+                "anyOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "properties": {
+                      "detail": {
+                        "type": "null"
+                      },
+                      "state": {
+                        "const": "pushed"
+                      }
+                    },
+                    "required": [
+                      "state",
+                      "detail"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "detail": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "state": {
+                        "const": "pending"
+                      }
+                    },
+                    "required": [
+                      "state",
+                      "detail"
+                    ],
+                    "type": "object"
+                  }
                 ],
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "operational_booking_id": {
+                "minLength": 1,
                 "type": "string"
+              },
+              "status": {
+                "const": "cancelled"
+              },
+              "unit": {
+                "const": "nights"
+              },
+              "version": {
+                "type": "integer"
               }
             },
             "required": [
-              "id",
-              "kind"
+              "operational_booking_id",
+              "unit",
+              "status",
+              "version",
+              "cancelled_at",
+              "cancellation_reason",
+              "channel_push"
             ],
             "type": "object"
           }
-        },
-        "required": [
-          "ok",
-          "status",
-          "request_id",
-          "record",
-          "availableActions",
-          "thread"
         ],
-        "type": "object"
+        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema."
       },
       "annotations": {
         "destructiveHint": true,
@@ -13575,182 +13669,6 @@
       ],
       "domain": "guest_messaging",
       "minimumRole": "member",
-      "requiredEntitlement": null,
-      "fileParams": [],
-      "uiResourceUri": null
-    },
-    {
-      "name": "cancel_stay",
-      "title": "Cancel stay",
-      "description": "Cancel a host-entered stay under its current version, free its nights, cancel pending automatic guest messages and update availability on the home’s connected Airbnb listing through Channex. A failed channel update reports that cancellation was saved. If a website payment needs a refund, returns financial_action_required with an authenticated dashboard link before cancellation or financial writes. Offline refunds can be recorded separately with record_stay_payment; that record moves no money.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "expected_version": {
-            "description": "stay.version from the latest get_stay call; a stale version is refused.",
-            "minimum": 1,
-            "type": "integer"
-          },
-          "organization_id": {
-            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
-            "minLength": 1,
-            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
-            "type": "string"
-          },
-          "reason": {
-            "maxLength": 500,
-            "type": "string"
-          },
-          "stay_id": {
-            "description": "Stay ID from list_stays.",
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "stay_id",
-          "expected_version"
-        ],
-        "type": "object"
-      },
-      "outputSchema": {
-        "$defs": {},
-        "additionalProperties": false,
-        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
-        "properties": {
-          "channel_push": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "properties": {
-                  "detail": {
-                    "type": "null"
-                  },
-                  "state": {
-                    "const": "pushed"
-                  }
-                },
-                "required": [
-                  "state",
-                  "detail"
-                ],
-                "type": "object"
-              },
-              {
-                "properties": {
-                  "detail": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "state": {
-                    "const": "pending"
-                  }
-                },
-                "required": [
-                  "state",
-                  "detail"
-                ],
-                "type": "object"
-              }
-            ],
-            "description": "What the home's connected channel took from this change: null when no channel push is needed; pushed when delivery completed; pending, with the reason, while it waits out Channex's rate limit or an unconfirmed attempt it sends again. A refused channel update returns a committed error.",
-            "type": [
-              "object",
-              "null"
-            ]
-          },
-          "stay": {
-            "additionalProperties": false,
-            "properties": {
-              "cancellation_reason": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "cancelled_at": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "check_in_date": {
-                "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-                "type": "string"
-              },
-              "check_out_date": {
-                "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-                "type": "string"
-              },
-              "id": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "product_id": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "request_id": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "status": {
-                "enum": [
-                  "pending",
-                  "confirmed",
-                  "cancelled"
-                ],
-                "type": "string"
-              },
-              "updated_at": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "version": {
-                "type": "integer"
-              }
-            },
-            "required": [
-              "id",
-              "product_id",
-              "request_id",
-              "status",
-              "version",
-              "updated_at",
-              "check_in_date",
-              "check_out_date",
-              "cancelled_at",
-              "cancellation_reason"
-            ],
-            "type": "object"
-          }
-        },
-        "required": [
-          "stay",
-          "channel_push"
-        ],
-        "type": "object"
-      },
-      "annotations": {
-        "destructiveHint": true,
-        "openWorldHint": true,
-        "readOnlyHint": false,
-        "title": "Cancel stay"
-      },
-      "securitySchemes": [
-        {
-          "scopes": [
-            "tenant"
-          ],
-          "type": "oauth2"
-        }
-      ],
-      "domain": "stays",
-      "minimumRole": "admin",
       "requiredEntitlement": null,
       "fileParams": [],
       "uiResourceUri": null
@@ -37349,7 +37267,7 @@
     {
       "name": "create_stay",
       "title": "Create stay",
-      "description": "Add a stay the host took directly and hold its nights. Read get_product for the home’s ID, capacity and currency. Children and infants default to zero; omitted arrival time, surname, contacts and notes remain unset. Another stay or checkout hold refuses overlapping nights. Takes no payment. Applies automatic guest-message schedules and updates connected Airbnb availability through Channex. Returns the saved stay’s identity, dates, version and channel completion; use get_stay for full details. Retry identical arguments with the same key. The retry checks current saved details, so later edits can cause IDEMPOTENCY_CONFLICT; read get_stay before another change.",
+      "description": "Add a stay the host took directly and hold its nights. Read get_product for the home’s ID, capacity and currency. Children and infants default to zero; omitted arrival time, contacts and private notes remain unset. The guest gets a guest account under their name and a conversation, as every booking does. Another stay or checkout hold refuses overlapping nights. Takes no payment. Applies automatic guest-message schedules and updates connected Airbnb availability through Channex. Returns the saved stay’s identity, dates, version and channel completion; use get_product_booking for full details. Retry identical arguments with the same key. The retry checks current saved details, so later edits can cause IDEMPOTENCY_CONFLICT; read get_product_booking before another change.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -37393,6 +37311,7 @@
             "type": "array"
           },
           "arrival_time": {
+            "description": "The local time the guest said they arrive; the stay starts then instead of at the home's check-in time. Null or omitted is the check-in time.",
             "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
             "type": [
               "string",
@@ -37420,19 +37339,13 @@
             ]
           },
           "guest_name": {
+            "description": "The guest's full name.",
             "maxLength": 200,
             "minLength": 1,
             "type": "string"
           },
           "guest_phone": {
             "description": "International number with its country calling code, e.g. +66812345678.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "guest_surname": {
-            "maxLength": 200,
             "type": [
               "string",
               "null"
@@ -37449,18 +37362,19 @@
             "minimum": 0,
             "type": "integer"
           },
-          "notes": {
-            "maxLength": 2000,
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "organization_id": {
             "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
             "minLength": 1,
             "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
             "type": "string"
+          },
+          "private_notes": {
+            "description": "The host's own note, never shown to the guest.",
+            "maxLength": 2000,
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "product_id": {
             "description": "The place to stay: a product of kind stay, from list_products.",
@@ -37556,10 +37470,8 @@
                 "type": "string"
               },
               "request_id": {
-                "type": [
-                  "string",
-                  "null"
-                ]
+                "minLength": 1,
+                "type": "string"
               },
               "status": {
                 "enum": [
@@ -42982,7 +42894,7 @@
     {
       "name": "delete_stay_payment",
       "title": "Delete stay payment",
-      "description": "Remove one offline payment record entered by mistake. First call get_stay for its payment ID. Returns the removed payment ID and current paid amount/status. Does not refund or move money, and cannot remove the guest’s Stripe payment.",
+      "description": "Remove one offline payment record entered by mistake. First call get_product_booking for its payment ID. Returns the removed payment ID and current paid amount/status. Does not refund or move money, and cannot remove the guest’s Stripe payment.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -42993,12 +42905,12 @@
             "type": "string"
           },
           "payment_id": {
-            "description": "ID from get_stay → stay.payments[].id, or record_stay_payment → payment.id. Removes an offline record, not a Stripe payment or actual money.",
+            "description": "ID from get_product_booking → stay.payments[].id, or record_stay_payment → payment.id. Removes an offline record, not a Stripe payment or actual money.",
             "minLength": 1,
             "type": "string"
           },
           "stay_id": {
-            "description": "Stay ID from list_stays.",
+            "description": "Stay ID: operational_booking_id from list_product_bookings.",
             "minLength": 1,
             "type": "string"
           }
@@ -47472,7 +47384,7 @@
                   ]
                 },
                 "stayId": {
-                  "description": "For a stay row, the stay to read with get_stay; one stay is its arrival and its departure.",
+                  "description": "For a stay row, the stay to read with get_product_booking; one stay is its arrival and its departure.",
                   "type": [
                     "string",
                     "null"
@@ -48299,7 +48211,7 @@
                 "type": "boolean"
               },
               "operational_record": {
-                "description": "For a stay, check_in_date and check_out_date are its nights and id is the stay for get_stay; its starts_at and ends_at only order and archive the conversation.",
+                "description": "The booking the conversation is about. unit nights is a stay: check_in_date and check_out_date are its nights in its home’s clock, and starts_at/ends_at hold a day alone where the home has no check-in or checkout time.",
                 "properties": {
                   "check_in_date": {
                     "type": [
@@ -48319,15 +48231,11 @@
                   "id": {
                     "type": "string"
                   },
-                  "kind": {
-                    "enum": [
-                      "booking",
-                      "stay"
-                    ],
-                    "type": "string"
-                  },
                   "party_size": {
                     "type": "integer"
+                  },
+                  "product_kind": {
+                    "type": "string"
                   },
                   "starts_at": {
                     "type": "string"
@@ -48337,11 +48245,19 @@
                   },
                   "timezone": {
                     "type": "string"
+                  },
+                  "unit": {
+                    "enum": [
+                      "slot",
+                      "nights"
+                    ],
+                    "type": "string"
                   }
                 },
                 "required": [
                   "id",
-                  "kind",
+                  "unit",
+                  "product_kind",
                   "status",
                   "starts_at",
                   "ends_at",
@@ -48570,13 +48486,6 @@
                 "minLength": 1,
                 "type": "string"
               },
-              "kind": {
-                "enum": [
-                  "stay",
-                  "booking"
-                ],
-                "type": "string"
-              },
               "location": {
                 "type": [
                   "string",
@@ -48612,10 +48521,18 @@
               "timezone": {
                 "minLength": 1,
                 "type": "string"
+              },
+              "unit": {
+                "description": "nights is a stay at a home; slot is a class, consultation or table.",
+                "enum": [
+                  "slot",
+                  "nights"
+                ],
+                "type": "string"
               }
             },
             "required": [
-              "kind",
+              "unit",
               "status",
               "offering",
               "location",
@@ -54981,7 +54898,7 @@
     {
       "name": "get_product_booking",
       "title": "Get product booking",
-      "description": "Read one booking — an experience, consultation or table — when the user wants its guest details, answers to the offering's questions, status or current session. Use operational_updated_at when proposing a change.",
+      "description": "Read one booking — an experience, consultation, table or stay at a home — when the user wants its guest details, answers to the offering's questions, status or current session. Use operational_updated_at when proposing a change.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -55003,249 +54920,872 @@
       },
       "outputSchema": {
         "$defs": {},
-        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
-        "properties": {
-          "answers": {
-            "description": "Answers to the tenant's own questions, with the wording the guest answered. Later edits to the questions do not change them.",
-            "items": {
-              "additionalProperties": false,
-              "properties": {
-                "help_text": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
+        "anyOf": [
+          {
+            "properties": {
+              "answers": {
+                "description": "Answers to the tenant's own questions, with the wording the guest answered. Later edits to the questions do not change them.",
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "help_text": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "question_id": {
+                      "type": "string"
+                    },
+                    "selected_choices": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "label"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "type": {
+                      "enum": [
+                        "short_text",
+                        "long_text",
+                        "single_choice",
+                        "multiple_choice",
+                        "yes_no"
+                      ],
+                      "type": "string"
+                    },
+                    "value": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        {
+                          "type": "boolean"
+                        }
+                      ],
+                      "description": "Text, the selected choice ID, the selected choice IDs, or true/false for yes/no."
+                    }
+                  },
+                  "required": [
+                    "question_id",
+                    "label",
+                    "type",
+                    "help_text",
+                    "value",
+                    "selected_choices"
+                  ],
+                  "type": "object"
                 },
-                "label": {
-                  "type": "string"
+                "type": "array"
+              },
+              "guest": {
+                "properties": {
+                  "email": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "name": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "phone": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
                 },
-                "question_id": {
-                  "type": "string"
+                "required": [
+                  "name",
+                  "email"
+                ],
+                "type": "object"
+              },
+              "operational_booking_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "operational_updated_at": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "provenance": {
+                "properties": {
+                  "external_reference": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "guest_acknowledgement": {
+                    "type": "boolean"
+                  },
+                  "source": {
+                    "minLength": 1,
+                    "type": "string"
+                  }
                 },
-                "selected_choices": {
-                  "items": {
-                    "additionalProperties": false,
+                "required": [
+                  "source",
+                  "external_reference",
+                  "guest_acknowledgement"
+                ],
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "record": {
+                "properties": {
+                  "assigned_member_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "ends_at": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "id": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "kind": {
+                    "enum": [
+                      "booking"
+                    ],
+                    "type": "string"
+                  },
+                  "location_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "party_size": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "product_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "product_kind": {
+                    "description": "What was booked: an experience, a consultation (service) or a restaurant table.",
+                    "enum": [
+                      "dish",
+                      "experience",
+                      "service",
+                      "stay",
+                      "table"
+                    ],
+                    "type": "string"
+                  },
+                  "product_name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "starts_at": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "status": {
+                    "enum": [
+                      "pending",
+                      "confirmed",
+                      "cancelled"
+                    ],
+                    "type": "string"
+                  },
+                  "timezone": {
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "kind",
+                  "status",
+                  "party_size",
+                  "starts_at",
+                  "ends_at",
+                  "timezone",
+                  "assigned_member_id",
+                  "location_id",
+                  "product_id",
+                  "product_kind",
+                  "product_name"
+                ],
+                "type": "object"
+              },
+              "request_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "updated_at": {
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "operational_booking_id",
+              "request_id",
+              "updated_at",
+              "operational_updated_at",
+              "guest",
+              "answers",
+              "provenance",
+              "record"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "description": "A stay: its guest, nights, payments and version, or, for a member who looks after the home, its turnover.",
+            "properties": {
+              "operational_booking_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "stay": {
+                "anyOf": [
+                  {
                     "properties": {
-                      "id": {
+                      "adults": {
+                        "type": "integer"
+                      },
+                      "answers": {
+                        "description": "The guest's answers to the home's questions, worded as they answered them. The stay keeps them even when its conversation is deleted.",
+                        "items": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "help_text": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "label": {
+                              "type": "string"
+                            },
+                            "question_id": {
+                              "type": "string"
+                            },
+                            "selected_choices": {
+                              "items": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "label": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "label"
+                                ],
+                                "type": "object"
+                              },
+                              "type": "array"
+                            },
+                            "type": {
+                              "enum": [
+                                "short_text",
+                                "long_text",
+                                "single_choice",
+                                "multiple_choice",
+                                "yes_no"
+                              ],
+                              "type": "string"
+                            },
+                            "value": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                {
+                                  "type": "boolean"
+                                }
+                              ],
+                              "description": "Text, the selected choice ID, the selected choice IDs, or true/false for yes/no."
+                            }
+                          },
+                          "required": [
+                            "question_id",
+                            "label",
+                            "type",
+                            "help_text",
+                            "value",
+                            "selected_choices"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      },
+                      "booked_home_name": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "booked_product_id": {
+                        "description": "The listing a channel reservation is booked on when the host moved the guest to another home; null when they sleep where they booked.",
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "cancellation_policy": {
+                        "description": "The home cancellation policy the guest booked under on the site; it decides what their own cancellation refunds. Null for a stay not paid on the site.",
+                        "enum": [
+                          "flexible",
+                          "moderate",
+                          "limited",
+                          "firm",
+                          "strict",
+                          "long_term_firm",
+                          "long_term_strict",
+                          null
+                        ],
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "cancellation_reason": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "cancelled_at": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "channel": {
+                        "enum": [
+                          "airbnb",
+                          "vrbo",
+                          "booking_com",
+                          "direct"
+                        ],
                         "type": "string"
                       },
-                      "label": {
+                      "channel_booking_id": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "channel_booking_url": {
+                        "description": "The reservation on its channel (Airbnb's host reservation page), where a channel stay is changed or cancelled. Null for other stays.",
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "channel_push": {
+                        "anyOf": [
+                          {
+                            "type": "null"
+                          },
+                          {
+                            "properties": {
+                              "detail": {
+                                "type": "null"
+                              },
+                              "state": {
+                                "const": "pushed"
+                              }
+                            },
+                            "required": [
+                              "state",
+                              "detail"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "properties": {
+                              "detail": {
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "state": {
+                                "const": "pending"
+                              }
+                            },
+                            "required": [
+                              "state",
+                              "detail"
+                            ],
+                            "type": "object"
+                          }
+                        ],
+                        "description": "What the home's connected channel took from this change: null when no channel push is needed; pushed when delivery completed; pending, with the reason, while it waits out Channex's rate limit or an unconfirmed attempt it sends again. A refused channel update returns a committed error.",
+                        "type": [
+                          "object",
+                          "null"
+                        ]
+                      },
+                      "check_in_date": {
+                        "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                        "type": "string"
+                      },
+                      "check_out_date": {
+                        "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                        "type": "string"
+                      },
+                      "children": {
+                        "type": "integer"
+                      },
+                      "created_at": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "currency": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "ends_at": {
+                        "description": "Checkout: an ISO instant at the home's checkout time, or the day alone when the home has no checkout time.",
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "external_booking_id": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "guest_email": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "guest_image_url": {
+                        "description": "The linked Better Auth account’s current portrait. Null for guests without an account portrait.",
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "guest_name": {
+                        "description": "The guest as their conversation names them; null for a channel conversation that names no one.",
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "guest_phone": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "id": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "infants": {
+                        "type": "integer"
+                      },
+                      "location_id": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "no_show_at": {
+                        "description": "When the host recorded that the guest never arrived; null otherwise.",
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "online_payment": {
+                        "description": "The Stripe payment the guest made when booking this stay on the site; null for a stay booked any other way. paid_minor counts it net of refunds.",
+                        "properties": {
+                          "amount_minor": {
+                            "type": "integer"
+                          },
+                          "captured_minor": {
+                            "type": "integer"
+                          },
+                          "created_at": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "currency": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "payment_id": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "receipt_url": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "refunded_minor": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "payment_id",
+                          "currency",
+                          "amount_minor",
+                          "captured_minor",
+                          "refunded_minor",
+                          "receipt_url",
+                          "created_at"
+                        ],
+                        "type": [
+                          "object",
+                          "null"
+                        ]
+                      },
+                      "overbooked": {
+                        "type": "boolean"
+                      },
+                      "owner": {
+                        "enum": [
+                          "app",
+                          "channel"
+                        ],
+                        "type": "string"
+                      },
+                      "paid_minor": {
+                        "type": "integer"
+                      },
+                      "party_size": {
+                        "description": "Adults and children; infants are extra.",
+                        "type": "integer"
+                      },
+                      "payment_status": {
+                        "enum": [
+                          "unpaid",
+                          "partial",
+                          "paid",
+                          "overpaid",
+                          null
+                        ],
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "payments": {
+                        "items": {
+                          "properties": {
+                            "amount_minor": {
+                              "type": "integer"
+                            },
+                            "booking_id": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "created_at": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "created_by": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "currency": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "id": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "method": {
+                              "enum": [
+                                "cash",
+                                "bank_transfer",
+                                "card_external",
+                                "other"
+                              ],
+                              "type": "string"
+                            },
+                            "note": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "paid_on": {
+                              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                              "type": "string"
+                            },
+                            "reference": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "booking_id",
+                            "amount_minor",
+                            "currency",
+                            "method",
+                            "paid_on",
+                            "reference",
+                            "note",
+                            "created_at",
+                            "created_by"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      },
+                      "private_notes": {
+                        "description": "The host's own note, never shown to the guest.",
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "product_id": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "provider": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "request_id": {
+                        "description": "The guest conversation about this stay, for get_guest_conversation and reply_to_guest. Every stay has one.",
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "starts_at": {
+                        "description": "Check-in: an ISO instant at the home's check-in time (or the arrival the host recorded), or the day alone when the home has no check-in time.",
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "status": {
+                        "enum": [
+                          "pending",
+                          "confirmed",
+                          "cancelled"
+                        ],
+                        "type": "string"
+                      },
+                      "timezone": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "total_minor": {
+                        "type": "integer"
+                      },
+                      "updated_at": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "user_id": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "version": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "product_id",
+                      "booked_product_id",
+                      "booked_home_name",
+                      "location_id",
+                      "timezone",
+                      "channel",
+                      "owner",
+                      "status",
+                      "overbooked",
+                      "starts_at",
+                      "ends_at",
+                      "check_in_date",
+                      "check_out_date",
+                      "adults",
+                      "children",
+                      "infants",
+                      "party_size",
+                      "guest_name",
+                      "guest_email",
+                      "guest_phone",
+                      "user_id",
+                      "total_minor",
+                      "currency",
+                      "private_notes",
+                      "provider",
+                      "external_booking_id",
+                      "channel_booking_id",
+                      "channel_booking_url",
+                      "request_id",
+                      "cancelled_at",
+                      "cancellation_reason",
+                      "cancellation_policy",
+                      "no_show_at",
+                      "answers",
+                      "version",
+                      "created_at",
+                      "updated_at",
+                      "guest_image_url",
+                      "payments",
+                      "online_payment",
+                      "paid_minor",
+                      "payment_status"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "description": "A member’s view of a stay at a home they look after: dates, arrival time, the guest’s first name and party. Owners and admins read the whole stay.",
+                    "properties": {
+                      "adults": {
+                        "type": "integer"
+                      },
+                      "check_in_date": {
+                        "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                        "type": "string"
+                      },
+                      "check_out_date": {
+                        "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                        "type": "string"
+                      },
+                      "children": {
+                        "type": "integer"
+                      },
+                      "ends_at": {
+                        "description": "Checkout: an ISO instant at the home's checkout time, or the day alone when the home has no checkout time.",
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "guest_name": {
+                        "description": "The guest as their conversation names them; null for a channel conversation that names no one.",
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "id": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "infants": {
+                        "type": "integer"
+                      },
+                      "location_id": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "no_show_at": {
+                        "description": "When the host recorded that the guest never arrived; null otherwise.",
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "product_id": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "starts_at": {
+                        "description": "Check-in: an ISO instant at the home's check-in time (or the arrival the host recorded), or the day alone when the home has no check-in time.",
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "status": {
+                        "enum": [
+                          "pending",
+                          "confirmed",
+                          "cancelled"
+                        ],
+                        "type": "string"
+                      },
+                      "timezone": {
+                        "minLength": 1,
                         "type": "string"
                       }
                     },
                     "required": [
                       "id",
-                      "label"
+                      "product_id",
+                      "location_id",
+                      "timezone",
+                      "status",
+                      "starts_at",
+                      "ends_at",
+                      "check_in_date",
+                      "check_out_date",
+                      "adults",
+                      "children",
+                      "infants",
+                      "guest_name",
+                      "no_show_at"
                     ],
                     "type": "object"
-                  },
-                  "type": "array"
-                },
-                "type": {
-                  "enum": [
-                    "short_text",
-                    "long_text",
-                    "single_choice",
-                    "multiple_choice",
-                    "yes_no"
-                  ],
-                  "type": "string"
-                },
-                "value": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "items": {
-                        "type": "string"
-                      },
-                      "type": "array"
-                    },
-                    {
-                      "type": "boolean"
-                    }
-                  ],
-                  "description": "Text, the selected choice ID, the selected choice IDs, or true/false for yes/no."
-                }
-              },
-              "required": [
-                "question_id",
-                "label",
-                "type",
-                "help_text",
-                "value",
-                "selected_choices"
-              ],
-              "type": "object"
-            },
-            "type": "array"
-          },
-          "guest": {
-            "properties": {
-              "email": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "name": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "phone": {
-                "type": [
-                  "string",
-                  "null"
+                  }
                 ]
+              },
+              "unit": {
+                "const": "nights"
               }
             },
             "required": [
-              "name",
-              "email"
+              "operational_booking_id",
+              "unit",
+              "stay"
             ],
             "type": "object"
-          },
-          "operational_booking_id": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "operational_updated_at": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "provenance": {
-            "properties": {
-              "external_reference": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "guest_acknowledgement": {
-                "type": "boolean"
-              },
-              "source": {
-                "minLength": 1,
-                "type": "string"
-              }
-            },
-            "required": [
-              "source",
-              "external_reference",
-              "guest_acknowledgement"
-            ],
-            "type": [
-              "object",
-              "null"
-            ]
-          },
-          "record": {
-            "properties": {
-              "assigned_member_id": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "ends_at": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "id": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "kind": {
-                "enum": [
-                  "booking"
-                ],
-                "type": "string"
-              },
-              "location_id": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "party_size": {
-                "minimum": 1,
-                "type": "integer"
-              },
-              "product_id": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "product_kind": {
-                "description": "What was booked: an experience, a consultation (service) or a restaurant table.",
-                "enum": [
-                  "dish",
-                  "experience",
-                  "service",
-                  "stay",
-                  "table"
-                ],
-                "type": "string"
-              },
-              "product_name": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "starts_at": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "status": {
-                "enum": [
-                  "pending",
-                  "confirmed",
-                  "cancelled"
-                ],
-                "type": "string"
-              },
-              "timezone": {
-                "minLength": 1,
-                "type": "string"
-              }
-            },
-            "required": [
-              "id",
-              "kind",
-              "status",
-              "party_size",
-              "starts_at",
-              "ends_at",
-              "timezone",
-              "assigned_member_id",
-              "location_id",
-              "product_id",
-              "product_kind",
-              "product_name"
-            ],
-            "type": "object"
-          },
-          "request_id": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "updated_at": {
-            "minLength": 1,
-            "type": "string"
           }
-        },
-        "required": [
-          "operational_booking_id",
-          "request_id",
-          "updated_at",
-          "operational_updated_at",
-          "guest",
-          "answers",
-          "provenance",
-          "record"
         ],
-        "type": "object"
+        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema."
       },
       "annotations": {
         "destructiveHint": false,
@@ -64790,657 +65330,9 @@
       "uiResourceUri": null
     },
     {
-      "name": "get_stay",
-      "title": "Get stay",
-      "description": "Read one stay with its guest details and, for a stay the host took, the payments recorded against it. A member reads a stay at a home they look after as its dates, arrival time, guest first name and party only.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "organization_id": {
-            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
-            "minLength": 1,
-            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
-            "type": "string"
-          },
-          "stay_id": {
-            "description": "Stay ID from list_stays.",
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "stay_id"
-        ],
-        "type": "object"
-      },
-      "outputSchema": {
-        "$defs": {},
-        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
-        "properties": {
-          "stay": {
-            "anyOf": [
-              {
-                "properties": {
-                  "adults": {
-                    "type": "integer"
-                  },
-                  "answers": {
-                    "description": "The guest's answers to the home's questions, worded as they answered them. The stay keeps them even when its conversation is deleted.",
-                    "items": {
-                      "additionalProperties": false,
-                      "properties": {
-                        "help_text": {
-                          "type": [
-                            "string",
-                            "null"
-                          ]
-                        },
-                        "label": {
-                          "type": "string"
-                        },
-                        "question_id": {
-                          "type": "string"
-                        },
-                        "selected_choices": {
-                          "items": {
-                            "additionalProperties": false,
-                            "properties": {
-                              "id": {
-                                "type": "string"
-                              },
-                              "label": {
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "id",
-                              "label"
-                            ],
-                            "type": "object"
-                          },
-                          "type": "array"
-                        },
-                        "type": {
-                          "enum": [
-                            "short_text",
-                            "long_text",
-                            "single_choice",
-                            "multiple_choice",
-                            "yes_no"
-                          ],
-                          "type": "string"
-                        },
-                        "value": {
-                          "anyOf": [
-                            {
-                              "type": "string"
-                            },
-                            {
-                              "items": {
-                                "type": "string"
-                              },
-                              "type": "array"
-                            },
-                            {
-                              "type": "boolean"
-                            }
-                          ],
-                          "description": "Text, the selected choice ID, the selected choice IDs, or true/false for yes/no."
-                        }
-                      },
-                      "required": [
-                        "question_id",
-                        "label",
-                        "type",
-                        "help_text",
-                        "value",
-                        "selected_choices"
-                      ],
-                      "type": "object"
-                    },
-                    "type": "array"
-                  },
-                  "arrival_time": {
-                    "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "booked_home_name": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "booked_product_id": {
-                    "description": "The listing a channel reservation is booked on when the host moved the guest to another home; null when they sleep where they booked.",
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "cancellation_policy": {
-                    "description": "The home cancellation policy the guest booked under on the site; it decides what their own cancellation refunds. Null for a stay not paid on the site.",
-                    "enum": [
-                      "flexible",
-                      "moderate",
-                      "limited",
-                      "firm",
-                      "strict",
-                      "long_term_firm",
-                      "long_term_strict",
-                      null
-                    ],
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "cancellation_reason": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "cancelled_at": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "channel": {
-                    "enum": [
-                      "airbnb",
-                      "vrbo",
-                      "booking_com",
-                      "direct"
-                    ],
-                    "type": "string"
-                  },
-                  "channel_booking_id": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "channel_booking_url": {
-                    "description": "The reservation on its channel (Airbnb's host reservation page), where a channel stay is changed or cancelled. Null for other stays.",
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "channel_push": {
-                    "anyOf": [
-                      {
-                        "type": "null"
-                      },
-                      {
-                        "properties": {
-                          "detail": {
-                            "type": "null"
-                          },
-                          "state": {
-                            "const": "pushed"
-                          }
-                        },
-                        "required": [
-                          "state",
-                          "detail"
-                        ],
-                        "type": "object"
-                      },
-                      {
-                        "properties": {
-                          "detail": {
-                            "minLength": 1,
-                            "type": "string"
-                          },
-                          "state": {
-                            "const": "pending"
-                          }
-                        },
-                        "required": [
-                          "state",
-                          "detail"
-                        ],
-                        "type": "object"
-                      }
-                    ],
-                    "description": "What the home's connected channel took from this change: null when no channel push is needed; pushed when delivery completed; pending, with the reason, while it waits out Channex's rate limit or an unconfirmed attempt it sends again. A refused channel update returns a committed error.",
-                    "type": [
-                      "object",
-                      "null"
-                    ]
-                  },
-                  "check_in_date": {
-                    "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-                    "type": "string"
-                  },
-                  "check_out_date": {
-                    "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-                    "type": "string"
-                  },
-                  "children": {
-                    "type": "integer"
-                  },
-                  "created_at": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "currency": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "external_booking_id": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "guest_email": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "guest_image_url": {
-                    "description": "The linked Better Auth account’s current portrait. Null for guests without an account portrait.",
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "guest_name": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "guest_phone": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "guest_surname": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "id": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "infants": {
-                    "type": "integer"
-                  },
-                  "location_id": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "no_show_at": {
-                    "description": "When the host recorded that the guest never arrived; null otherwise.",
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "notes": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "online_payment": {
-                    "description": "The Stripe payment the guest made when booking this stay on the site; null for a stay booked any other way. paid_minor counts it net of refunds.",
-                    "properties": {
-                      "amount_minor": {
-                        "type": "integer"
-                      },
-                      "captured_minor": {
-                        "type": "integer"
-                      },
-                      "created_at": {
-                        "minLength": 1,
-                        "type": "string"
-                      },
-                      "currency": {
-                        "minLength": 1,
-                        "type": "string"
-                      },
-                      "payment_id": {
-                        "minLength": 1,
-                        "type": "string"
-                      },
-                      "receipt_url": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      },
-                      "refunded_minor": {
-                        "type": "integer"
-                      }
-                    },
-                    "required": [
-                      "payment_id",
-                      "currency",
-                      "amount_minor",
-                      "captured_minor",
-                      "refunded_minor",
-                      "receipt_url",
-                      "created_at"
-                    ],
-                    "type": [
-                      "object",
-                      "null"
-                    ]
-                  },
-                  "overbooked": {
-                    "type": "boolean"
-                  },
-                  "owner": {
-                    "enum": [
-                      "app",
-                      "channel"
-                    ],
-                    "type": "string"
-                  },
-                  "paid_minor": {
-                    "type": "integer"
-                  },
-                  "payment_status": {
-                    "enum": [
-                      "unpaid",
-                      "partial",
-                      "paid",
-                      "overpaid",
-                      null
-                    ],
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "payments": {
-                    "items": {
-                      "properties": {
-                        "amount_minor": {
-                          "type": "integer"
-                        },
-                        "created_at": {
-                          "minLength": 1,
-                          "type": "string"
-                        },
-                        "created_by": {
-                          "minLength": 1,
-                          "type": "string"
-                        },
-                        "currency": {
-                          "minLength": 1,
-                          "type": "string"
-                        },
-                        "id": {
-                          "minLength": 1,
-                          "type": "string"
-                        },
-                        "method": {
-                          "enum": [
-                            "cash",
-                            "bank_transfer",
-                            "card_external",
-                            "other"
-                          ],
-                          "type": "string"
-                        },
-                        "note": {
-                          "type": [
-                            "string",
-                            "null"
-                          ]
-                        },
-                        "paid_on": {
-                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-                          "type": "string"
-                        },
-                        "reference": {
-                          "type": [
-                            "string",
-                            "null"
-                          ]
-                        },
-                        "stay_id": {
-                          "minLength": 1,
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "id",
-                        "stay_id",
-                        "amount_minor",
-                        "currency",
-                        "method",
-                        "paid_on",
-                        "reference",
-                        "note",
-                        "created_at",
-                        "created_by"
-                      ],
-                      "type": "object"
-                    },
-                    "type": "array"
-                  },
-                  "product_id": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "provider": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "request_id": {
-                    "description": "The guest conversation about this stay, for get_guest_conversation and reply_to_guest. Null until a named guest with email or phone opens one; an existing conversation is retained.",
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "status": {
-                    "enum": [
-                      "pending",
-                      "confirmed",
-                      "cancelled"
-                    ],
-                    "type": "string"
-                  },
-                  "timezone": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "total_minor": {
-                    "type": "integer"
-                  },
-                  "updated_at": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "user_id": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "version": {
-                    "type": "integer"
-                  }
-                },
-                "required": [
-                  "id",
-                  "product_id",
-                  "booked_product_id",
-                  "booked_home_name",
-                  "location_id",
-                  "timezone",
-                  "channel",
-                  "owner",
-                  "status",
-                  "overbooked",
-                  "check_in_date",
-                  "check_out_date",
-                  "arrival_time",
-                  "adults",
-                  "children",
-                  "infants",
-                  "guest_name",
-                  "guest_surname",
-                  "guest_email",
-                  "guest_phone",
-                  "user_id",
-                  "total_minor",
-                  "currency",
-                  "notes",
-                  "provider",
-                  "external_booking_id",
-                  "channel_booking_id",
-                  "channel_booking_url",
-                  "request_id",
-                  "cancelled_at",
-                  "cancellation_reason",
-                  "cancellation_policy",
-                  "no_show_at",
-                  "answers",
-                  "version",
-                  "created_at",
-                  "updated_at",
-                  "guest_image_url",
-                  "payments",
-                  "online_payment",
-                  "paid_minor",
-                  "payment_status"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "description": "A member’s view of a stay at a home they look after: dates, arrival time, the guest’s first name and party. Owners and admins read the whole stay.",
-                "properties": {
-                  "adults": {
-                    "type": "integer"
-                  },
-                  "arrival_time": {
-                    "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "check_in_date": {
-                    "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-                    "type": "string"
-                  },
-                  "check_out_date": {
-                    "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-                    "type": "string"
-                  },
-                  "children": {
-                    "type": "integer"
-                  },
-                  "guest_name": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "id": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "infants": {
-                    "type": "integer"
-                  },
-                  "location_id": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "no_show_at": {
-                    "description": "When the host recorded that the guest never arrived; null otherwise.",
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "product_id": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "status": {
-                    "enum": [
-                      "pending",
-                      "confirmed",
-                      "cancelled"
-                    ],
-                    "type": "string"
-                  },
-                  "timezone": {
-                    "minLength": 1,
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "id",
-                  "product_id",
-                  "location_id",
-                  "timezone",
-                  "status",
-                  "check_in_date",
-                  "check_out_date",
-                  "arrival_time",
-                  "adults",
-                  "children",
-                  "infants",
-                  "guest_name",
-                  "no_show_at"
-                ],
-                "type": "object"
-              }
-            ]
-          }
-        },
-        "required": [
-          "stay"
-        ],
-        "type": "object"
-      },
-      "annotations": {
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false,
-        "readOnlyHint": true,
-        "title": "Get stay"
-      },
-      "securitySchemes": [
-        {
-          "scopes": [
-            "tenant"
-          ],
-          "type": "oauth2"
-        }
-      ],
-      "domain": "stays",
-      "minimumRole": "member",
-      "requiredEntitlement": null,
-      "fileParams": [],
-      "uiResourceUri": null
-    },
-    {
       "name": "get_stay_calendar",
       "title": "Get stay calendar",
-      "description": "Read every night of a date range at one home: availability, nightly price, booking restrictions and the stays holding those nights. Returns scheduling details; members read each stay as its dates, arrival time, guest first name and party. Owners and admins use get_stay for one booking’s contact and payment details, or get_product for the home’s photos and room groups.",
+      "description": "Read every night of a date range at one home: availability, nightly price, booking restrictions and the stays holding those nights. Returns scheduling details; members read each stay as its dates, arrival time, guest first name and party. Owners and admins use get_product_booking for one booking’s contact and payment details, or get_product for the home’s photos and room groups.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -65794,13 +65686,6 @@
                     "adults": {
                       "type": "integer"
                     },
-                    "arrival_time": {
-                      "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
                     "channel": {
                       "enum": [
                         "airbnb",
@@ -65821,13 +65706,13 @@
                     "children": {
                       "type": "integer"
                     },
-                    "guest_name": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                    "ends_at": {
+                      "description": "Checkout: an ISO instant at the home's checkout time, or the day alone when the home has no checkout time.",
+                      "minLength": 1,
+                      "type": "string"
                     },
-                    "guest_surname": {
+                    "guest_name": {
+                      "description": "The guest as their conversation names them; null for a channel conversation that names no one.",
                       "type": [
                         "string",
                         "null"
@@ -65854,6 +65739,11 @@
                       "minLength": 1,
                       "type": "string"
                     },
+                    "starts_at": {
+                      "description": "Check-in: an ISO instant at the home's check-in time (or the arrival the host recorded), or the day alone when the home has no check-in time.",
+                      "minLength": 1,
+                      "type": "string"
+                    },
                     "status": {
                       "enum": [
                         "pending",
@@ -65870,14 +65760,14 @@
                     "owner",
                     "status",
                     "overbooked",
+                    "starts_at",
+                    "ends_at",
                     "check_in_date",
                     "check_out_date",
-                    "arrival_time",
                     "adults",
                     "children",
                     "infants",
-                    "guest_name",
-                    "guest_surname"
+                    "guest_name"
                   ],
                   "type": "object"
                 },
@@ -65887,13 +65777,6 @@
                   "properties": {
                     "adults": {
                       "type": "integer"
-                    },
-                    "arrival_time": {
-                      "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
-                      "type": [
-                        "string",
-                        "null"
-                      ]
                     },
                     "check_in_date": {
                       "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
@@ -65906,7 +65789,13 @@
                     "children": {
                       "type": "integer"
                     },
+                    "ends_at": {
+                      "description": "Checkout: an ISO instant at the home's checkout time, or the day alone when the home has no checkout time.",
+                      "minLength": 1,
+                      "type": "string"
+                    },
                     "guest_name": {
+                      "description": "The guest as their conversation names them; null for a channel conversation that names no one.",
                       "type": [
                         "string",
                         "null"
@@ -65934,6 +65823,11 @@
                       "minLength": 1,
                       "type": "string"
                     },
+                    "starts_at": {
+                      "description": "Check-in: an ISO instant at the home's check-in time (or the arrival the host recorded), or the day alone when the home has no check-in time.",
+                      "minLength": 1,
+                      "type": "string"
+                    },
                     "status": {
                       "enum": [
                         "pending",
@@ -65953,9 +65847,10 @@
                     "location_id",
                     "timezone",
                     "status",
+                    "starts_at",
+                    "ends_at",
                     "check_in_date",
                     "check_out_date",
-                    "arrival_time",
                     "adults",
                     "children",
                     "infants",
@@ -70769,8 +70664,11 @@
                   "type": "string"
                 },
                 "product_session_id": {
-                  "minLength": 1,
-                  "type": "string"
+                  "description": "The session a slot booking holds; null for a stay, which holds nights.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 },
                 "product_variant_id": {
                   "type": [
@@ -70826,6 +70724,14 @@
                   "minLength": 1,
                   "type": "string"
                 },
+                "unit": {
+                  "description": "What the booking holds: a session's places (slot) or a home's nights (nights).",
+                  "enum": [
+                    "slot",
+                    "nights"
+                  ],
+                  "type": "string"
+                },
                 "updated_at": {
                   "minLength": 1,
                   "type": "string"
@@ -70838,6 +70744,7 @@
                 "product_kind",
                 "product_variant_id",
                 "product_session_id",
+                "unit",
                 "status",
                 "is_complete",
                 "party_size",
@@ -71247,7 +71154,7 @@
     {
       "name": "list_scheduled_guest_messages",
       "title": "List scheduled guest messages",
-      "description": "Read automatic guest-message snapshots and visible failure reasons for stays and bookings (subjectType and subjectId name which), optionally for one canonical guest conversation, including each stay’s built-in check-in message (templateId null, title “Check-in instructions”). Read provider delivery receipts through get_guest_conversation; no provider result is inferred from a scheduled time.",
+      "description": "Read automatic guest-message snapshots and visible failure reasons for every booking (bookingId names it, a stay’s included), optionally for one canonical guest conversation, including each stay’s built-in check-in message (templateId null, title “Check-in instructions”). Read provider delivery receipts through get_guest_conversation; no provider result is inferred from a scheduled time.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -71283,6 +71190,11 @@
             "items": {
               "properties": {
                 "body": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "bookingId": {
+                  "description": "The booking the message is about, a stay’s included.",
                   "minLength": 1,
                   "type": "string"
                 },
@@ -71323,10 +71235,8 @@
                   "type": "string"
                 },
                 "productId": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
+                  "minLength": 1,
+                  "type": "string"
                 },
                 "reason": {
                   "type": [
@@ -71364,23 +71274,6 @@
                   ],
                   "type": "string"
                 },
-                "stayId": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "subjectId": {
-                  "minLength": 1,
-                  "type": "string"
-                },
-                "subjectType": {
-                  "enum": [
-                    "stay",
-                    "booking"
-                  ],
-                  "type": "string"
-                },
                 "templateId": {
                   "type": [
                     "string",
@@ -71408,9 +71301,7 @@
                 "id",
                 "organizationId",
                 "productId",
-                "subjectType",
-                "subjectId",
-                "stayId",
+                "bookingId",
                 "requestId",
                 "templateId",
                 "title",
@@ -71813,279 +71704,6 @@
       ],
       "domain": "content",
       "minimumRole": "admin",
-      "requiredEntitlement": null,
-      "fileParams": [],
-      "uiResourceUri": null
-    },
-    {
-      "name": "list_stays",
-      "title": "List stays",
-      "description": "Read guests staying at the organization’s homes overlapping a date range, with dates, party, channel and status. Members see only the homes they look after, and only each stay’s dates, arrival time, guest first name and party. Owners and admins use get_stay for one stay’s contact, notes and payment details.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "from": {
-            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-            "type": "string"
-          },
-          "include_cancelled": {
-            "type": "boolean"
-          },
-          "organization_id": {
-            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
-            "minLength": 1,
-            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
-            "type": "string"
-          },
-          "product_id": {
-            "description": "The place to stay: a product of kind stay, from list_products.",
-            "minLength": 1,
-            "type": "string"
-          },
-          "to": {
-            "description": "Exclusive; at most 400 days after from.",
-            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-            "type": "string"
-          }
-        },
-        "required": [
-          "from",
-          "to"
-        ],
-        "type": "object"
-      },
-      "outputSchema": {
-        "$defs": {},
-        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
-        "properties": {
-          "stays": {
-            "items": {
-              "anyOf": [
-                {
-                  "additionalProperties": false,
-                  "properties": {
-                    "adults": {
-                      "type": "integer"
-                    },
-                    "arrival_time": {
-                      "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "channel": {
-                      "enum": [
-                        "airbnb",
-                        "vrbo",
-                        "booking_com",
-                        "direct"
-                      ],
-                      "type": "string"
-                    },
-                    "check_in_date": {
-                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-                      "type": "string"
-                    },
-                    "check_out_date": {
-                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-                      "type": "string"
-                    },
-                    "children": {
-                      "type": "integer"
-                    },
-                    "guest_name": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "guest_surname": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "id": {
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "infants": {
-                      "type": "integer"
-                    },
-                    "location_id": {
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "overbooked": {
-                      "type": "boolean"
-                    },
-                    "owner": {
-                      "enum": [
-                        "app",
-                        "channel"
-                      ],
-                      "type": "string"
-                    },
-                    "product_id": {
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "request_id": {
-                      "description": "The guest conversation about this stay, for get_guest_conversation and reply_to_guest. Null until a named guest with email or phone opens one; an existing conversation is retained.",
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "status": {
-                      "enum": [
-                        "pending",
-                        "confirmed",
-                        "cancelled"
-                      ],
-                      "type": "string"
-                    },
-                    "timezone": {
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "version": {
-                      "type": "integer"
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "product_id",
-                    "channel",
-                    "owner",
-                    "status",
-                    "overbooked",
-                    "check_in_date",
-                    "check_out_date",
-                    "arrival_time",
-                    "adults",
-                    "children",
-                    "infants",
-                    "guest_name",
-                    "guest_surname",
-                    "location_id",
-                    "timezone",
-                    "request_id",
-                    "version"
-                  ],
-                  "type": "object"
-                },
-                {
-                  "additionalProperties": false,
-                  "description": "A member’s view of a stay at a home they look after: dates, arrival time, the guest’s first name and party. Owners and admins read the whole stay.",
-                  "properties": {
-                    "adults": {
-                      "type": "integer"
-                    },
-                    "arrival_time": {
-                      "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "check_in_date": {
-                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-                      "type": "string"
-                    },
-                    "check_out_date": {
-                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-                      "type": "string"
-                    },
-                    "children": {
-                      "type": "integer"
-                    },
-                    "guest_name": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "id": {
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "infants": {
-                      "type": "integer"
-                    },
-                    "location_id": {
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "no_show_at": {
-                      "description": "When the host recorded that the guest never arrived; null otherwise.",
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "product_id": {
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "status": {
-                      "enum": [
-                        "pending",
-                        "confirmed",
-                        "cancelled"
-                      ],
-                      "type": "string"
-                    },
-                    "timezone": {
-                      "minLength": 1,
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "product_id",
-                    "location_id",
-                    "timezone",
-                    "status",
-                    "check_in_date",
-                    "check_out_date",
-                    "arrival_time",
-                    "adults",
-                    "children",
-                    "infants",
-                    "guest_name",
-                    "no_show_at"
-                  ],
-                  "type": "object"
-                }
-              ]
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "stays"
-        ],
-        "type": "object"
-      },
-      "annotations": {
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false,
-        "readOnlyHint": true,
-        "title": "List stays"
-      },
-      "securitySchemes": [
-        {
-          "scopes": [
-            "tenant"
-          ],
-          "type": "oauth2"
-        }
-      ],
-      "domain": "stays",
-      "minimumRole": "member",
       "requiredEntitlement": null,
       "fileParams": [],
       "uiResourceUri": null
@@ -72690,11 +72308,12 @@
     {
       "name": "list_team_conversations",
       "title": "List team conversations",
-      "description": "Read only your internal team conversations, newest activity first. Optional stay_id or location_id filters narrow their explicit context. Follow page_info; guest conversations use list_guest_conversations instead.",
+      "description": "Read only your internal team conversations, newest activity first. Optional booking_id or location_id filters narrow their explicit context. Follow page_info; guest conversations use list_guest_conversations instead.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "booking_id": {
+            "description": "A booking ID, a stay’s included.",
             "minLength": 1,
             "type": "string"
           },
@@ -72717,10 +72336,6 @@
             "minLength": 1,
             "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
             "type": "string"
-          },
-          "stay_id": {
-            "minLength": 1,
-            "type": "string"
           }
         },
         "required": [],
@@ -72734,6 +72349,7 @@
             "items": {
               "properties": {
                 "bookingId": {
+                  "description": "The booking the conversation is about: a stay (see stay) or a class, consultation or table (see record).",
                   "type": [
                     "string",
                     "null"
@@ -73225,18 +72841,11 @@
                     "id": {
                       "type": "string"
                     },
-                    "kind": {
-                      "enum": [
-                        "booking"
-                      ],
-                      "type": "string"
-                    },
                     "title": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "kind",
                     "id",
                     "title"
                   ],
@@ -73284,29 +72893,6 @@
                     "null"
                   ]
                 },
-                "stayId": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "subjectId": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "subjectType": {
-                  "enum": [
-                    "stay",
-                    "booking",
-                    null
-                  ],
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
                 "unread": {
                   "type": "boolean"
                 },
@@ -73318,9 +72904,6 @@
                 "id",
                 "createdAt",
                 "lastMessageAt",
-                "subjectType",
-                "subjectId",
-                "stayId",
                 "bookingId",
                 "locationId",
                 "record",
@@ -73512,12 +73095,12 @@
     {
       "name": "move_stay",
       "title": "Move stay",
-      "description": "Move a guest to another of the host’s homes, for example after a double booking. The nights, turnover and later messages follow the guest, a channel reservation such as an Airbnb one stays on the listing it was booked on, and the new home gets a job to be made ready. Updates availability on both homes’ connected Airbnb listings through Channex. A failed channel update raises CHANNEL_PUSH_FAILED with committed:true: the move is saved; read get_stay before retrying. The guest is sent the new address and check-in instructions only when the response’s guest_notified is true. Moving back to the booked listing undoes the move. The new home must be free for every night and have check-in instructions.",
+      "description": "Move a guest to another of the host’s homes, for example after a double booking. The nights, turnover and later messages follow the guest, a channel reservation such as an Airbnb one stays on the listing it was booked on, and the new home gets a job to be made ready. Updates availability on both homes’ connected Airbnb listings through Channex. A failed channel update raises CHANNEL_PUSH_FAILED with committed:true: the move is saved; read get_product_booking before retrying. The guest is sent the new address and check-in instructions only when the response’s guest_notified is true. Moving back to the booked listing undoes the move. The new home must be free for every night and have check-in instructions.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "expected_version": {
-            "description": "stay.version from the latest get_stay call; a stale version is refused.",
+            "description": "stay.version from the latest get_product_booking call; a stale version is refused.",
             "minimum": 1,
             "type": "integer"
           },
@@ -73533,7 +73116,7 @@
             "type": "string"
           },
           "stay_id": {
-            "description": "Stay ID from list_stays.",
+            "description": "Stay ID: operational_booking_id from list_product_bookings.",
             "minLength": 1,
             "type": "string"
           }
@@ -73594,7 +73177,7 @@
             ]
           },
           "guest_notified": {
-            "description": "True when the move message was queued in the stay’s guest conversation. False when the stay has no guest conversation to send through; tell the host to message the guest on the channel.",
+            "description": "True when the move message was queued in the stay’s guest conversation; every stay has one.",
             "type": "boolean"
           },
           "stay": {
@@ -73617,10 +73200,8 @@
                 "type": "string"
               },
               "request_id": {
-                "type": [
-                  "string",
-                  "null"
-                ]
+                "minLength": 1,
+                "type": "string"
               },
               "status": {
                 "enum": [
@@ -73834,7 +73415,7 @@
                   ]
                 },
                 "stayId": {
-                  "description": "For a stay row, the stay to read with get_stay; one stay is its arrival and its departure.",
+                  "description": "For a stay row, the stay to read with get_product_booking; one stay is its arrival and its departure.",
                   "type": [
                     "string",
                     "null"
@@ -89433,12 +89014,12 @@
     {
       "name": "record_stay_payment",
       "title": "Record stay payment",
-      "description": "Record money received outside KrabiClaw for a host-entered stay, such as cash or a bank transfer. Read get_stay for the stay ID and currency. A negative amount records an offline refund. Returns the exact recorded payment and current paid amount/status, without unrelated guest details or payment history. Moves no money.",
+      "description": "Record money received outside KrabiClaw for a host-entered stay, such as cash or a bank transfer. Read get_product_booking for the stay ID and currency. A negative amount records an offline refund. Returns the exact recorded payment and current paid amount/status, without unrelated guest details or payment history. Moves no money.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "amount_minor": {
-            "description": "Whole minor units of the stay’s currency from get_stay; negative records an offline refund, never zero.",
+            "description": "Whole minor units of the stay’s currency from get_product_booking; negative records an offline refund, never zero.",
             "not": {
               "const": 0
             },
@@ -89478,7 +89059,7 @@
             "type": "string"
           },
           "stay_id": {
-            "description": "Stay ID from list_stays.",
+            "description": "Stay ID: operational_booking_id from list_product_bookings.",
             "minLength": 1,
             "type": "string"
           }
@@ -89509,6 +89090,10 @@
             "properties": {
               "amount_minor": {
                 "type": "integer"
+              },
+              "booking_id": {
+                "minLength": 1,
+                "type": "string"
               },
               "created_at": {
                 "minLength": 1,
@@ -89546,15 +89131,11 @@
                   "string",
                   "null"
                 ]
-              },
-              "stay_id": {
-                "minLength": 1,
-                "type": "string"
               }
             },
             "required": [
               "id",
-              "stay_id",
+              "booking_id",
               "amount_minor",
               "currency",
               "method",
@@ -103547,13 +103128,6 @@
                     "adults": {
                       "type": "integer"
                     },
-                    "arrival_time": {
-                      "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
                     "channel": {
                       "enum": [
                         "airbnb",
@@ -103574,13 +103148,13 @@
                     "children": {
                       "type": "integer"
                     },
-                    "guest_name": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                    "ends_at": {
+                      "description": "Checkout: an ISO instant at the home's checkout time, or the day alone when the home has no checkout time.",
+                      "minLength": 1,
+                      "type": "string"
                     },
-                    "guest_surname": {
+                    "guest_name": {
+                      "description": "The guest as their conversation names them; null for a channel conversation that names no one.",
                       "type": [
                         "string",
                         "null"
@@ -103607,6 +103181,11 @@
                       "minLength": 1,
                       "type": "string"
                     },
+                    "starts_at": {
+                      "description": "Check-in: an ISO instant at the home's check-in time (or the arrival the host recorded), or the day alone when the home has no check-in time.",
+                      "minLength": 1,
+                      "type": "string"
+                    },
                     "status": {
                       "enum": [
                         "pending",
@@ -103623,14 +103202,14 @@
                     "owner",
                     "status",
                     "overbooked",
+                    "starts_at",
+                    "ends_at",
                     "check_in_date",
                     "check_out_date",
-                    "arrival_time",
                     "adults",
                     "children",
                     "infants",
-                    "guest_name",
-                    "guest_surname"
+                    "guest_name"
                   ],
                   "type": "object"
                 },
@@ -103640,13 +103219,6 @@
                   "properties": {
                     "adults": {
                       "type": "integer"
-                    },
-                    "arrival_time": {
-                      "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
-                      "type": [
-                        "string",
-                        "null"
-                      ]
                     },
                     "check_in_date": {
                       "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
@@ -103659,7 +103231,13 @@
                     "children": {
                       "type": "integer"
                     },
+                    "ends_at": {
+                      "description": "Checkout: an ISO instant at the home's checkout time, or the day alone when the home has no checkout time.",
+                      "minLength": 1,
+                      "type": "string"
+                    },
                     "guest_name": {
+                      "description": "The guest as their conversation names them; null for a channel conversation that names no one.",
                       "type": [
                         "string",
                         "null"
@@ -103687,6 +103265,11 @@
                       "minLength": 1,
                       "type": "string"
                     },
+                    "starts_at": {
+                      "description": "Check-in: an ISO instant at the home's check-in time (or the arrival the host recorded), or the day alone when the home has no check-in time.",
+                      "minLength": 1,
+                      "type": "string"
+                    },
                     "status": {
                       "enum": [
                         "pending",
@@ -103706,9 +103289,10 @@
                     "location_id",
                     "timezone",
                     "status",
+                    "starts_at",
+                    "ends_at",
                     "check_in_date",
                     "check_out_date",
-                    "arrival_time",
                     "adults",
                     "children",
                     "infants",
@@ -104363,12 +103947,12 @@
     {
       "name": "start_team_conversation",
       "title": "Start team conversation",
-      "description": "Start an internal conversation with explicitly selected workspace members. Direct and stay/location conversations reuse the same participants/context. A manual conversation with at least three people is a distinct group, can have a name, and requires a stable idempotency_key; reuse that key only for an identical retry. Maximum 50 people including you. This does not send a message or invite anyone. Choose actual users from list_team_conversation_recipients.",
+      "description": "Start an internal conversation with explicitly selected workspace members. Direct and booking/location conversations reuse the same participants/context. A manual conversation with at least three people is a distinct group, can have a name, and requires a stable idempotency_key; reuse that key only for an identical retry. Maximum 50 people including you. This does not send a message or invite anyone. Choose actual users from list_team_conversation_recipients.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "booking_id": {
-            "description": "Optional booking ID you may read; never a guest request ID.",
+            "description": "Optional booking ID you may read, a stay’s included; never a guest request ID.",
             "minLength": 1,
             "type": "string"
           },
@@ -104394,7 +103978,7 @@
             "uniqueItems": true
           },
           "name": {
-            "description": "Optional name for a manually created group of at least three people; unavailable for direct or stay/location conversations.",
+            "description": "Optional name for a manually created group of at least three people; unavailable for direct or booking/location conversations.",
             "maxLength": 100,
             "minLength": 1,
             "type": "string"
@@ -104403,11 +103987,6 @@
             "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
             "minLength": 1,
             "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
-            "type": "string"
-          },
-          "stay_id": {
-            "description": "Optional canonical stay ID you may read; never a guest request ID.",
-            "minLength": 1,
             "type": "string"
           }
         },
@@ -127734,7 +127313,7 @@
     {
       "name": "update_stay",
       "title": "Update stay",
-      "description": "Change a host-entered stay’s dates, party, guest details, total or notes using stay.version from get_stay. Supply at least one changed field; empty and unchanged edits are refused. Omitted fields keep their values. Returns a compact stay receipt and the saved values of supplied fields. Replans pending automatic guest messages and updates connected Airbnb availability through Channex. A failed channel update reports the committed edit; read get_stay before retrying. Channel-owned stays must be edited on their channel.",
+      "description": "Change a host-entered stay’s dates, party, guest details, total or notes using stay.version from get_product_booking. Supply at least one changed field; empty and unchanged edits are refused. Omitted fields keep their values. Returns a compact stay receipt and the saved values of supplied fields. Replans pending automatic guest messages and updates connected Airbnb availability through Channex. A failed channel update reports the committed edit; read get_product_booking before retrying. Channel-owned stays must be edited on their channel.",
       "inputSchema": {
         "additionalProperties": false,
         "anyOf": [
@@ -127775,11 +127354,6 @@
           },
           {
             "required": [
-              "guest_surname"
-            ]
-          },
-          {
-            "required": [
               "guest_email"
             ]
           },
@@ -127795,7 +127369,7 @@
           },
           {
             "required": [
-              "notes"
+              "private_notes"
             ]
           }
         ],
@@ -127806,6 +127380,7 @@
             "type": "integer"
           },
           "arrival_time": {
+            "description": "The local time the guest said they arrive; the stay starts then instead of at the home's check-in time. Null or omitted is the check-in time.",
             "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
             "type": [
               "string",
@@ -127827,7 +127402,7 @@
             "type": "integer"
           },
           "expected_version": {
-            "description": "stay.version from the latest get_stay call; a stale version is refused.",
+            "description": "stay.version from the latest get_product_booking call; a stale version is refused.",
             "minimum": 1,
             "type": "integer"
           },
@@ -127838,6 +127413,7 @@
             ]
           },
           "guest_name": {
+            "description": "The guest's full name.",
             "maxLength": 200,
             "minLength": 1,
             "type": "string"
@@ -127849,24 +127425,10 @@
               "null"
             ]
           },
-          "guest_surname": {
-            "maxLength": 200,
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "infants": {
             "maximum": 99,
             "minimum": 0,
             "type": "integer"
-          },
-          "notes": {
-            "maxLength": 2000,
-            "type": [
-              "string",
-              "null"
-            ]
           },
           "organization_id": {
             "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
@@ -127874,8 +127436,16 @@
             "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
             "type": "string"
           },
+          "private_notes": {
+            "description": "The host's own note, never shown to the guest.",
+            "maxLength": 2000,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "stay_id": {
-            "description": "Stay ID from list_stays.",
+            "description": "Stay ID: operational_booking_id from list_product_bookings.",
             "minLength": 1,
             "type": "string"
           },
@@ -127941,17 +127511,11 @@
           },
           "saved_fields": {
             "additionalProperties": false,
+            "description": "The saved value of each supplied field; a supplied arrival_time is saved as starts_at.",
             "minProperties": 1,
             "properties": {
               "adults": {
                 "type": "integer"
-              },
-              "arrival_time": {
-                "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
-                "type": [
-                  "string",
-                  "null"
-                ]
               },
               "check_in_date": {
                 "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
@@ -127971,6 +127535,7 @@
                 ]
               },
               "guest_name": {
+                "description": "The guest as their conversation names them; null for a channel conversation that names no one.",
                 "type": [
                   "string",
                   "null"
@@ -127982,20 +127547,20 @@
                   "null"
                 ]
               },
-              "guest_surname": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
               "infants": {
                 "type": "integer"
               },
-              "notes": {
+              "private_notes": {
+                "description": "The host's own note, never shown to the guest.",
                 "type": [
                   "string",
                   "null"
                 ]
+              },
+              "starts_at": {
+                "description": "Check-in: an ISO instant at the home's check-in time (or the arrival the host recorded), or the day alone when the home has no check-in time.",
+                "minLength": 1,
+                "type": "string"
               },
               "total_minor": {
                 "type": "integer"
@@ -128023,10 +127588,8 @@
                 "type": "string"
               },
               "request_id": {
-                "type": [
-                  "string",
-                  "null"
-                ]
+                "minLength": 1,
+                "type": "string"
               },
               "status": {
                 "enum": [
@@ -129083,23 +128646,23 @@
         "text": "Use get_workspace_context to resolve the requested business. Read all relevant list_guest_conversations pages and get_guest_conversation for full contact messages, booking details (classes, consultations and restaurant tables), proposals and delivery receipts. For internal team messages use list_team_conversations and get_team_conversation. Select actual teammates with list_team_conversation_recipients. start_team_conversation reuses direct and explicit stay/location conversations; manual groups of at least three people are distinct and require a stable idempotency_key. update_team_group changes only manual internal groups: obey canManage/canLeave; preserve buyer/guest and stay/location participants. New members can read group history; removal and leaving end access while retaining messages. Use send_team_message only for the requested internal message, then read it back. Reading does not mark a thread read; mark_team_conversation_read changes only the caller’s read position. Team chat is separate from guest replies. Summarize unanswered messages and pending bookings. Use reply_to_guest with a stable idempotency_key only for the message or photo the user requests. Use get_product_booking before confirm_product_booking, reject_product_booking, cancel_product_booking or request_product_booking_change; a table reservation is a product booking and uses the same tools. Booking changes email a proposal and leave the existing allocation unchanged until guest acceptance. Financial actions requiring the dashboard remain incomplete; report the returned handoff instead of claiming completion. Use list_locations and list_location_reviews to read reviews separately; provider reviews and imported Google Q&A remain managed in Google. Report failed deliveries and actions awaiting guest acceptance accurately."
       },
       "toolContracts": {
-        "cancel_product_booking": "sha256:9132f28c04c19aa948b3578f28f9322c936ff71a75cbeed53801cb87bdb059d2",
+        "cancel_product_booking": "sha256:2dbb504336a7ddb03a996a148f283df69094360aa6ef878c616d7cfbe5faeab7",
         "confirm_product_booking": "sha256:f607d38686b388e7f7e86fc1b48de40b19a4942d61ef9b9a3af62294c0d42ea2",
-        "get_guest_conversation": "sha256:298b550b69fcfcceaa35d37a34041114724f2337e1d8186fd0ff1736c002d46b",
-        "get_product_booking": "sha256:85c94818b185d69bf957831bd9a8cfab0484f73c25386df6d79a7f92f43f9739",
+        "get_guest_conversation": "sha256:e9d1beb79532d15e381220b7e4fb8acc1a2353be3876562bd1c915cfc80f3d0a",
+        "get_product_booking": "sha256:bb343c91679cbe0c5312885ef014a3d81ee4c0bd4fbef08785af4f5a2cf7e86c",
         "get_team_conversation": "sha256:c1a1ddcd761b6cefc0e9395feced48cc3c7710936c7ffe918e3c816cf4fe6afd",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_guest_conversations": "sha256:50390b145e98c0892f08ba8952486018f0dc25912f51f17d01e9a964af9139cd",
         "list_location_reviews": "sha256:95068cff21ac3fea416a9fa8ec3a8ad2d01db79ea0825274c0295b89f15f5d92",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_team_conversation_recipients": "sha256:764e248b3773ad9ba0fc2a8d90b03b36dd29bae06c7f988f1def582f50c9a0ac",
-        "list_team_conversations": "sha256:f41c3fa5af630fa0e493ea4e48fa07732f81597d4e908497883f7ef0d1c7647b",
+        "list_team_conversations": "sha256:0698ad58558003437d92e9ae37663793808eb0a74283cf52ad620ef33dbf939e",
         "mark_team_conversation_read": "sha256:0860e470941b83825d36099843eb4a8218b6894fc02b13f26d96c734d40537c2",
         "reject_product_booking": "sha256:a3c2fba812200e703c50d145e1622656a10af85f7bbf6ad50fe67589ff8e966b",
         "reply_to_guest": "sha256:25c1e77ff9ef3f712ea7e9671dd942c63f69a64b91c216f327488210021447f8",
         "request_product_booking_change": "sha256:bd9af8ee041ca1ce9dbc834e1fcc89026bad04c909b84a9074c1e15538643aa4",
         "send_team_message": "sha256:ca932c062c753f93a740b7124f6aa5546273697a19b233e55dbb807c98c84dae",
-        "start_team_conversation": "sha256:57e5de3d26585e9aa2b94df9fbe7c341672638dd0d6eafab12118fcd734cda06",
+        "start_team_conversation": "sha256:4160321dd99abf3c83434b245db28b63760e5326b697d2ac6b40c6acd53943d0",
         "update_team_group": "sha256:a6b9711ed29b2b12b9e1079cc339a1b655b5d526b323dd9dad264970b36b134b"
       }
     },
@@ -129217,7 +128780,7 @@
       },
       "toolContracts": {
         "create_post": "sha256:e800e3c19ecf887d09aa70d80dcbe66d985196d2138620b369cb9e1f9cace67a",
-        "get_guest_conversation": "sha256:298b550b69fcfcceaa35d37a34041114724f2337e1d8186fd0ff1736c002d46b",
+        "get_guest_conversation": "sha256:e9d1beb79532d15e381220b7e4fb8acc1a2353be3876562bd1c915cfc80f3d0a",
         "get_organization_analytics": "sha256:06e0bfe504a9b9183d0429a06162e4af2d760695c842396608752a8f107cb4d9",
         "get_product": "sha256:ba1303e192c6daf5e6baa873ab9e5438e80608cbd361ed7cecfb5f789d8e7b86",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",

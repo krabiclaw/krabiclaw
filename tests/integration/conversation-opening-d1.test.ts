@@ -46,11 +46,11 @@ test('a table booking opens with its own message and the guest note, written onc
     const principal = memberAccessPrincipal({ userId: OWNER, organizationId: ORG, role: 'owner' }, { env })
     const viewer = { audience: 'member' as const, userId: OWNER, principal }
     const reservation = async (id: string, notes: string | null, opening?: { body: string }) => {
-      const payload = threadPayloadForGuest({ name: 'Filip Heurckmans', email: 'filip@example.test', phone: '+32475699444', locale: 'en', notes, ipHash: null, partySizeIsMinimum: false, answers: [] })
+      const payload = threadPayloadForGuest({ name: 'Filip Heurckmans', email: 'filip@example.test', phone: '+32475699444', locale: 'en', notes, ipHash: null })
       await db.batch([
         ...requestInsertQueries({ id, kind: 'booking', organization_id: ORG, location_id: 'loc', user_id: null, review_id: null, payload, created_at: CREATED, updated_at: CREATED }, undefined, opening),
-        { query: `INSERT INTO bookings (id, request_id, organization_id, product_id, product_session_id, product_variant_id, party_size, policy_json, status, created_at, updated_at)
-            VALUES (?, ?, ?, 'tables', 'seating', 'tables-v', 4, '{"advance_notice_minutes":null,"party_size_min":null,"party_size_max":null,"minimum_guest_age":null,"accessibility_contact_required":false,"payment":null}', 'confirmed', ?, ?)`, params: [`res-${id}`, id, ORG, CREATED, CREATED] },
+        { query: `INSERT INTO bookings (id, request_id, organization_id, product_id, product_session_id, product_variant_id, party_size, policy_json, status, created_at, updated_at,location_id,starts_at,ends_at,timezone)
+            SELECT ?, ?, ?, 'tables', 'seating', 'tables-v', 4, '{"advance_notice_minutes":null,"party_size_min":null,"party_size_max":null,"minimum_guest_age":null,"accessibility_contact_required":false,"payment":null,"cancellation":null}', 'confirmed', ?, ?,location_id,starts_at,ends_at,timezone FROM product_sessions WHERE id = 'seating'`, params: [`res-${id}`, id, ORG, CREATED, CREATED] },
       ].map(query => db.prepare(query.query).bind(...(query.params ?? []))))
     }
     const sentence = openingSentence({ kind: 'booking', vertical: 'restaurant', productKind: 'table', productTitle: 'Krabi tables', guestName: 'Filip Heurckmans', guestPhone: '+32475699444', answers: [], partySize: 4, partySizeIsMinimum: false,
@@ -99,11 +99,11 @@ test('a table booking opens with its own message and the guest note, written onc
       VALUES ('move', 'moved', 'operation', 'request', 'member', 'booking_change.moved', ?, 'move-moved', 2, '2026-11-03T10:00:00.000Z', '2026-11-03T10:00:00.000Z')`)
       .bind(JSON.stringify({ before: { recordKind: 'booking', partySize: 2, partySizeIsMinimum: true, startsAt: '2026-11-04T05:00:00.000Z', endsAt: '2026-11-04T07:00:00.000Z', timezone: 'Asia/Bangkok', locationId: 'loc', productId: 'tables', notes: null, guest: { name: 'Filip Heurckmans', phone: '+32475699444' } } })).run()
     // A checkout never captured has no booking; its hold says what was asked.
-    const held = threadPayloadForGuest({ name: 'Ana Ruiz', email: 'ana@example.test', phone: null, locale: 'en', notes: null, ipHash: null, partySizeIsMinimum: false, answers: [] })
+    const held = threadPayloadForGuest({ name: 'Ana Ruiz', email: 'ana@example.test', phone: null, locale: 'en', notes: null, ipHash: null })
     await db.batch([
       ...requestInsertQueries({ id: 'held', kind: 'booking', organization_id: ORG, location_id: 'loc', user_id: null, review_id: null, payload: held, created_at: CREATED, updated_at: CREATED }),
       { query: `INSERT INTO payments (id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,subject_id,location_id,currency,amount,captured_amount,stripe_payment_intent_id,price_snapshot_json,created_at,updated_at)
-          VALUES ('held-pay', ?, NULL, 'acct', 0, 'booking', NULL, 'loc', 'THB', 50000, 0, 'pi_held', '{}', ?, ?)`, params: [ORG, CREATED, CREATED] },
+          VALUES ('held-pay', ?, NULL, 'acct', 0, 'booking', NULL, 'loc', 'THB', 50000, 0, 'pi_held', '{"answers":[]}', ?, ?)`, params: [ORG, CREATED, CREATED] },
       { query: `INSERT INTO payment_checkout_holds (id, organization_id, product_id, variant_id, price_id, session_id, location_id, timezone, request_id, payment_id, quantity, amount, currency, starts_at, ends_at, status, expires_at, created_at)
           VALUES ('hold', ?, 'tables', 'tables-v', 'tables-price', 'held-seating', 'loc', 'Asia/Bangkok', 'held', 'held-pay', 3, 50000, 'THB', '2026-11-06T11:00:00.000Z', '2026-11-06T13:00:00.000Z', 'released', ?, ?)`, params: [ORG, CREATED, CREATED] },
     ].map(query => db.prepare(query.query).bind(...(query.params ?? []))))

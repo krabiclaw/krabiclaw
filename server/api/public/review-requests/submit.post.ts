@@ -91,7 +91,6 @@ export default defineHandler(async (event) => {
       AND rr.token_hash = ?
       AND rr.organization_id = ?
       AND rr.user_id IS ?
-      AND rr.booking_type = ?
       AND rr.booking_id = ?
       AND rr.revoked_at IS NULL
       AND rr.submitted_at IS NULL
@@ -101,18 +100,18 @@ export default defineHandler(async (event) => {
       )
   )`
   const requestGuardParams = [
-    result.request.id, tokenHash, result.context.organization_id, reviewUserId, result.request.booking_type, result.request.booking_id, now, ]
+    result.request.id, tokenHash, result.context.organization_id, reviewUserId, result.request.booking_id, now, ]
   const batch: BatchQuery[] = [
     batchAssertion(
       requestIsSubmittable, requestGuardParams, 'review request state changed during submission', ), batchAssertion(
       `EXISTS (
         SELECT 1 FROM requests
-        WHERE id = ? AND kind = ?
+        WHERE id = ? AND kind = 'booking'
           AND organization_id = ?
           AND user_id IS ?
           AND review_id IS NULL
       )`, [
-        result.request.booking_id, result.request.booking_type, result.context.organization_id, reviewUserId, ], 'review booking state changed during submission', ), ]
+        result.context.request_id, result.context.organization_id, reviewUserId, ], 'review booking state changed during submission', ), ]
 
   if (mediaCount) {
     batch.push(batchAssertion(
@@ -130,11 +129,11 @@ export default defineHandler(async (event) => {
   batch.push(
     {
       query: `INSERT INTO reviews (
-        id, organization_id, location_id, product_id, booking_id, booking_type, review_request_id, user_id, author_name, rating, title, content, private_feedback, publication_authorized, status, source, ip_hash, user_agent, created_at, updated_at
+        id, organization_id, location_id, product_id, booking_id, review_request_id, user_id, author_name, rating, title, content, private_feedback, publication_authorized, status, source, ip_hash, user_agent, created_at, updated_at
       )
-      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'direct', ?, ?, ?, ?
+      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'direct', ?, ?, ?, ?
       WHERE ${requestIsSubmittable}`, params: [
-        reviewId, result.context.organization_id, result.context.location_id, result.context.product_id, result.request.booking_id, result.request.booking_type, result.request.id, reviewUserId, authorName, rating,
+        reviewId, result.context.organization_id, result.context.location_id, result.context.product_id, result.request.booking_id, result.request.id, reviewUserId, authorName, rating,
         publish ? title : null, publish ? content : null, privateFeedback, publish ? 1 : 0,
         // A private review is never moderated or published; a public one waits for the owner.
         publish ? 'pending' : 'private',
@@ -149,7 +148,6 @@ export default defineHandler(async (event) => {
           AND token_hash = ?
           AND organization_id = ?
           AND user_id IS ?
-          AND booking_type = ?
           AND booking_id = ?
           AND submitted_at IS NULL
           AND revoked_at IS NULL
@@ -157,11 +155,11 @@ export default defineHandler(async (event) => {
         now, now, ...requestGuardParams, ], }, batchAssertion('changes() = 1', [], 'review request submission compare-and-set failed'), {
       query: `UPDATE requests
         SET review_id = ?, updated_at = ?
-        WHERE id = ? AND kind = ?
+        WHERE id = ? AND kind = 'booking'
           AND organization_id = ?
           AND user_id IS ?
           AND review_id IS NULL`, params: [
-        reviewId, now, result.request.booking_id, result.request.booking_type, result.context.organization_id, reviewUserId, ], }, batchAssertion('changes() = 1', [], 'review booking submission compare-and-set failed'), )
+        reviewId, now, result.context.request_id, result.context.organization_id, reviewUserId, ], }, batchAssertion('changes() = 1', [], 'review booking submission compare-and-set failed'), )
 
   if (mediaCount) {
     batch.push(
@@ -177,7 +175,7 @@ export default defineHandler(async (event) => {
 
   await notifyReviewReceived(env, db, {
     organizationId: result.context.organization_id, organizationName: result.context.organization_name, locationId: result.context.location_id, reviewId, authorName, rating,
-    content: publish ? content : null, hasPrivateFeedback: privateFeedback !== null, visitRequestId: result.request.booking_id, })
+    content: publish ? content : null, hasPrivateFeedback: privateFeedback !== null, visitRequestId: result.context.request_id, })
 
   return jsonResponse({ success: true, reviewId, status: publish ? 'pending' : 'private' }, { status: 201 })
 })

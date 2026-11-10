@@ -214,7 +214,8 @@ export interface GuestThreadDetailViewModel {
   /** An open guest_reply task: the guest asked something nobody has answered. */
   needsReply: boolean
   source: ThreadDetailSourceModel
-  operationalRecord: Pick<ThreadOperationalRecord, 'id' | 'kind' | 'product_kind' | 'status' | 'starts_at' | 'ends_at' | 'timezone' | 'party_size' | 'check_in_date' | 'check_out_date'> | null
+  /** A stay's check-in and checkout days in its home's clock; null for any other booking. */
+  operationalRecord: (Pick<ThreadOperationalRecord, 'id' | 'unit' | 'product_kind' | 'status' | 'starts_at' | 'ends_at' | 'timezone' | 'party_size'> & { check_in_date: string | null; check_out_date: string | null }) | null
   entries: GuestThreadEntryViewModel[]
   /** What can be done to the booking. Where the conversation lives is below, separately. */
   availableActions: string[]

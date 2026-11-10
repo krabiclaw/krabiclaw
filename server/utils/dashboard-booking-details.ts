@@ -5,7 +5,7 @@ import { getGuestRequest, REQUEST_CURRENT_BUYER_SQL } from '~/server/domain/requ
 import { resolveLocationContact } from '~/server/utils/contact-resolution'
 import type { H3Event } from 'nitro'
 import { HTTPError } from 'nitro'
-import { queryAll, queryFirst, type DbClient } from '~/server/db'
+import { execute, queryAll, queryFirst, type DbClient } from '~/server/db'
 import { getDashboardMemberContext } from '~/server/utils/dashboard-context'
 import { assertAssignedBookingAccess, memberAccessPrincipal, roleAllows } from '~/server/utils/member-access'
 import { formatBookingPolicySummary, parseBookingPolicy, type FormattedBookingPolicySummary } from '~/server/utils/booking-policy-summary'
@@ -16,7 +16,6 @@ import { loadOwnerPictures } from '~/server/notifications/hero'
 import { addLocalDays, isValidCalendarDate, localDateTimeToInstant, localPartsAt } from '~/utils/timezone'
 import { listSessions } from '~/server/utils/availability'
 import { formatPostalAddress, parsePostalAddress } from '~/utils/postal-address'
-import { appendEntry, getEntryById, GuestThreadEntryDedupeConflictError } from '~/server/domain/guest-threads/entries'
 import { moveBooking, requestBookingChange, bookingChangeViews } from '~/server/domain/guest-threads/booking-changes'
 import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
 import { isBookingComplete, type BookingStatus } from '~/shared/bookings'
@@ -58,7 +57,7 @@ interface BookingRow {
   scheduling_mode: string | null
   session_status: string | null
   request_id: string | null
-  answers_json: string | null
+  answers_json: string
   cancellation_used_at: string | null
   created_at: string
   updated_at: string
@@ -69,14 +68,9 @@ interface BookingRow {
   product_details_json: string | null
   no_show_at: string | null
   review_id: string | null
+  private_notes: string | null
 }
 
-export interface DashboardBookingNote {
-  id: string
-  revisionId: string
-  body: string
-  createdAt: string
-}
 
 export interface DashboardBookingDetails {
   id: string
@@ -131,7 +125,8 @@ export interface DashboardBookingDetails {
   createdAt: string
   updatedAt: string
   policy: FormattedBookingPolicySummary | null
-  notes: DashboardBookingNote[]
+  /** The team's private note on the booking (bookings.private_notes), never shown to the guest; null when there is none or the reader is the guest. */
+  privateNotes: string | null
   /** The guest's answers to the business's own questions, in the wording they answered. A request made before questions has none. */
   answers: FormAnswerSnapshot[]
   /** A change the business proposed that the guest has not answered; Airbnb's "Change requested". */
@@ -192,11 +187,11 @@ async function loadBookingRow(
     json_extract(r.payload_json, '$.guest.name') AS guest_name, json_extract(r.payload_json, '$.guest.email') AS guest_email, json_extract(r.payload_json, '$.guest.phone') AS guest_phone,
     (SELECT u.image FROM user u WHERE u.id = r.user_id) AS guest_image_url, record.party_size, record.starts_at, record.ends_at, record.timezone, record.status, json_extract(r.payload_json, '$.notes') AS requests,
     record.product_id AS experience_id, record.product_name AS experience_title, record.product_session_id AS session_id,
-    r.id AS request_id, json_extract(r.payload_json, '$.answers') AS answers_json, json_extract(r.payload_json, '$.cancellation.used_at') AS cancellation_used_at, r.created_at, r.updated_at, record.no_show_at, r.review_id
+    r.id AS request_id, record.answers AS answers_json, json_extract(r.payload_json, '$.cancellation.used_at') AS cancellation_used_at, r.created_at, r.updated_at, record.no_show_at, r.review_id, record.private_notes
     FROM requests r
     JOIN organization s ON s.id = r.organization_id
     JOIN (
-      SELECT b.id, b.request_id, b.status, b.party_size, ps.starts_at, ps.ends_at, ps.timezone, ps.location_id, b.product_id, p.name AS product_name, ps.id AS product_session_id, cfg.assigned_member_id, b.updated_at AS operational_updated_at, b.policy_json, p.kind AS product_kind, p.details_json AS product_details_json, cfg.scheduling_mode, cfg.advance_notice_minutes, ps.status AS session_status, b.no_show_at
+      SELECT b.id, b.request_id, b.status, b.party_size, b.starts_at, b.ends_at, b.timezone, b.location_id, b.product_id, p.name AS product_name, ps.id AS product_session_id, cfg.assigned_member_id, b.updated_at AS operational_updated_at, b.policy_json, p.kind AS product_kind, p.details_json AS product_details_json, cfg.scheduling_mode, cfg.advance_notice_minutes, ps.status AS session_status, b.no_show_at, b.answers, b.private_notes
         FROM bookings b JOIN product_sessions ps ON ps.id = b.product_session_id JOIN products p ON p.id = b.product_id
         LEFT JOIN product_booking_configs cfg ON cfg.product_id = b.product_id AND cfg.organization_id = b.organization_id
     ) record ON record.request_id = r.id
@@ -229,19 +224,6 @@ async function pendingBookingChange(db: DbClient, threadId: string | null): Prom
   if (!proposal || proposal.status !== 'pending') return null
   return { requestId: row.id, requestedAt: row.created_at, beforeLabel: proposal.before.whenLabel, afterLabel: proposal.after.whenLabel, partySize: proposal.after.partySize,
     beforeAssignedMemberName: proposal.before.assignedMemberName, afterAssignedMemberName: proposal.after.assignedMemberName }
-}
-
-async function listInternalNotes(db: DbClient, threadId: string | null): Promise<DashboardBookingNote[]> {
-  if (!threadId) return []
-  const rows = await queryAll<{ id: string; revisionId: string; body: string; occurred_at: string }>(db, `
-    SELECT note_id AS id, id AS revisionId, body, occurred_at FROM (
-      SELECT *, COALESCE(json_extract(payload_json, '$.noteId'), id) AS note_id,
-        ROW_NUMBER() OVER (PARTITION BY COALESCE(json_extract(payload_json, '$.noteId'), id) ORDER BY sequence DESC) AS revision
-      FROM activity_entries WHERE request_id = ? AND kind = 'operation'
-        AND event_name IN ('internal_note.added', 'internal_note.updated') AND body IS NOT NULL
-    ) WHERE revision = 1 ORDER BY sequence DESC
-  `, [threadId])
-  return rows.map(note => ({ id: note.id, revisionId: note.revisionId, body: note.body, createdAt: note.occurred_at }))
 }
 
 export async function loadDashboardBookingDetails(
@@ -304,9 +286,8 @@ async function composeBookingDetails(
     : 'SELECT id, title FROM business_locations WHERE organization_id = ? AND id IS ? ORDER BY title', row.product_kind === 'table' ? [row.organization_id] : [row.organization_id, row.location_id])
   const locationPictures = await loadOwnerPictures(db, row.organization_id, 'business_location', visibleLocations.map(location => location.id))
   const policy = parseBookingPolicy(row.policy_json)
-  const [policyLocale, notes, timeZone, contact] = await Promise.all([
+  const [policyLocale, timeZone, contact] = await Promise.all([
     getSourceLocale(db,row.organization_id),
-    reader.buyerUserId ? Promise.resolve([]) : listInternalNotes(db, row.request_id),
     Promise.resolve(row.timezone),
     row.location_id
       ? resolveLocationContact(db, row.organization_id, row.location_id)
@@ -321,14 +302,14 @@ async function composeBookingDetails(
     ? (await memberBusyIntervals(db,reader.env,row.organization_id,row.assigned_member_id,{from:row.starts_at,until:row.ends_at})).some(busy=>busy.start<row.ends_at&&busy.end>row.starts_at)
     : false
   const paymentIds=reader.buyerUserId
-    ?await queryAll<{id:string}>(db,'SELECT id FROM payments WHERE organization_id=? AND subject_type=? AND subject_id=? AND buyer_user_id=? ORDER BY created_at,id',[row.organization_id,type,row.operational_id,reader.buyerUserId])
-    :reader.canReadPayments?await queryAll<{id:string}>(db,'SELECT id FROM payments WHERE organization_id=? AND subject_type=? AND subject_id=? ORDER BY created_at,id',[row.organization_id,type,row.operational_id]):[]
+    ?await queryAll<{id:string}>(db,"SELECT id FROM payments WHERE organization_id=? AND subject_type='booking' AND subject_id=? AND buyer_user_id=? ORDER BY created_at,id",[row.organization_id,row.operational_id,reader.buyerUserId])
+    :reader.canReadPayments?await queryAll<{id:string}>(db,"SELECT id FROM payments WHERE organization_id=? AND subject_type='booking' AND subject_id=? ORDER BY created_at,id",[row.organization_id,row.operational_id]):[]
   const payments=await Promise.all(paymentIds.map(async ({id})=>{
     const detail=await readPaymentDetails(db,reader.env,row.organization_id,id)
     return {payment:paymentDisplay(detail.payment),refunds:paymentRefundsDisplay(detail.refunds),order:paymentOrderDisplay(detail.order)}
   }))
   const guestCanRetryCancellation = Boolean(reader.buyerUserId && row.status === 'cancelled' && row.cancellation_used_at
-    && await canRetryGuestVisitRefund(db, { organizationId: row.organization_id, subjectType: type, subjectId: row.operational_id, requestId: row.id, buyerUserId: reader.buyerUserId }))
+    && await canRetryGuestVisitRefund(db, { organizationId: row.organization_id, bookingId: row.operational_id, requestId: row.id, buyerUserId: reader.buyerUserId }))
   return {
     assignedMemberId: row.assigned_member_id, assignedMemberName:provider?.name??null,providerConflict,operationalUpdatedAt:row.operational_updated_at,
     id: row.id,
@@ -369,8 +350,8 @@ async function composeBookingDetails(
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     policy: formatBookingPolicySummary(policy, policyLocale, row.product_kind),
-    notes,
-    answers: row.answers_json === null ? [] : formAnswerSnapshotsSchema.parse(JSON.parse(row.answers_json)),
+    privateNotes: reader.buyerUserId ? null : row.private_notes,
+    answers: formAnswerSnapshotsSchema.parse(JSON.parse(row.answers_json)),
     pendingChange: await pendingBookingChange(db, row.request_id),
     locations: visibleLocations.map(location => ({ ...location, imageUrl: locationPictures.get(location.id)?.imageUrl ?? null })),
     payments:reader.buyerUserId||reader.canReadPayments?payments:null,
@@ -382,14 +363,14 @@ async function composeBookingDetails(
     contactPhone: contact?.contactPhone ?? null,
     noShowAt: row.no_show_at,
     canMarkNoShow: !reader.buyerUserId && row.status === 'confirmed' && row.no_show_at === null && row.review_id === null && row.starts_at <= now,
-    reviewInvitation: reader.buyerUserId || !row.request_id ? null : await reviewInvitationState(db, type, row.request_id, now),
+    reviewInvitation: reader.buyerUserId ? null : await reviewInvitationState(db, row.operational_id, now),
   }
 }
 
 /** The latest invitation minted for the visit, as the team reads it. */
-async function reviewInvitationState(db: DbClient, type: DashboardBookingType, requestId: string, now: string): Promise<DashboardBookingDetails['reviewInvitation']> {
+async function reviewInvitationState(db: DbClient, bookingId: string, now: string): Promise<DashboardBookingDetails['reviewInvitation']> {
   const request = await queryFirst<{ first_sent_at: string | null; submitted_at: string | null; revoked_at: string | null; expires_at: string }>(db,
-    'SELECT first_sent_at, submitted_at, revoked_at, expires_at FROM review_requests WHERE booking_type = ? AND booking_id = ? ORDER BY created_at DESC LIMIT 1', [type, requestId])
+    'SELECT first_sent_at, submitted_at, revoked_at, expires_at FROM review_requests WHERE booking_id = ? ORDER BY created_at DESC LIMIT 1', [bookingId])
   if (!request?.first_sent_at) return null
   if (request.submitted_at) return { state: 'submitted', at: request.submitted_at }
   if (request.revoked_at) return { state: 'revoked', at: request.revoked_at }
@@ -448,7 +429,12 @@ export async function listDashboardBookingChangeSessions(event: H3Event, input: 
   return sessions.filter(session => session.id === row.session_id || outsideNotice(session.starts_at, row.advance_notice_minutes))
 }
 
-export async function addDashboardBookingNote(
+/**
+ * The team's private note on a booking: one text on the booking itself
+ * (bookings.private_notes), replaced as a whole and guarded by the booking as
+ * the member read it. An empty note removes it.
+ */
+export async function setDashboardBookingNote(
   event: H3Event,
   input: { type: DashboardBookingType; bookingId: string; body: unknown },
 ): Promise<DashboardBookingDetails> {
@@ -456,38 +442,17 @@ export async function addDashboardBookingNote(
   const row = await loadBookingRow(context.db, { organizationId: context.organization.id }, input.type, input.bookingId)
   if (!row) throw new HTTPError({ statusCode: 404, message: 'Booking not found' })
   await assertBookingAccess(context, row)
-  if (!input.body || typeof input.body !== 'object' || Array.isArray(input.body)) {
-    throw new HTTPError({ statusCode: 400, message: 'Note is required' })
-  }
+  if (!input.body || typeof input.body !== 'object' || Array.isArray(input.body)) throw new HTTPError({ statusCode: 400, message: 'note and operationalUpdatedAt are required' })
   const payload = input.body as Record<string, unknown>
-  const note = typeof payload.note === 'string' ? payload.note.trim() : ''
-  const idempotencyKey = typeof payload.idempotencyKey === 'string' ? payload.idempotencyKey.trim() : ''
-  if (!note || note.length > 2000) throw new HTTPError({ statusCode: 400, message: 'Note must be between 1 and 2000 characters' })
-  if (!idempotencyKey || idempotencyKey.length > 100) throw new HTTPError({ statusCode: 400, message: 'idempotencyKey is required' })
-
-  const threadId = row.id
-  const noteId = typeof payload.noteId === 'string' ? payload.noteId : null
-  const revisionId = typeof payload.revisionId === 'string' ? payload.revisionId : null
-  if (noteId) {
-    const original = await getEntryById(context.db, noteId)
-    const revision = revisionId ? await getEntryById(context.db, revisionId) : null
-    if (!original || original.request_id !== threadId || original.event_name !== 'internal_note.added' || !revision || revision.request_id !== threadId || !['internal_note.added', 'internal_note.updated'].includes(revision.event_name || '') || (revision.id !== noteId && JSON.parse(revision.payload_json || '{}').noteId !== noteId)) throw new HTTPError({ statusCode: 404, message: 'Note not found' })
-  }
-  await appendEntry(context.db, {
-    threadId: threadId,
-    kind: 'operation',
-    actorKind: 'member',
-    actorUserId: context.userId,
-    channel: 'system',
-    body: note,
-    eventName: noteId ? 'internal_note.updated' : 'internal_note.added',
-    payloadJson: { private: true, ...(noteId ? { noteId, revisionId, idempotencyKey } : {}) },
-    dedupeKey: noteId ? `dashboard-booking-note-revision:${threadId}:${revisionId}` : `dashboard-booking-note:${threadId}:${idempotencyKey}`,
-  }).catch((error: unknown) => {
-    if (noteId && error instanceof GuestThreadEntryDedupeConflictError) throw new HTTPError({ statusCode: 409, message: 'This note was edited elsewhere. Reload and try again.' })
-    throw error
-  })
-  await publishGuestInboxThreadEvent(context.env, context.db, { threadId: threadId, type: 'thread.changed' })
+  if (typeof payload.note !== 'string') throw new HTTPError({ statusCode: 400, message: 'note must be text' })
+  const note = payload.note.trim()
+  if (note.length > 2000) throw new HTTPError({ statusCode: 400, message: 'Note must be at most 2000 characters' })
+  if (typeof payload.operationalUpdatedAt !== 'string' || !payload.operationalUpdatedAt) throw new HTTPError({ statusCode: 400, message: 'operationalUpdatedAt is required' })
+  const now = new Date().toISOString()
+  const written = await execute(context.db, `UPDATE bookings SET private_notes = ?, version = version + 1, updated_at = ?
+    WHERE organization_id = ? AND id = ? AND updated_at = ?`, [note || null, now, row.organization_id, row.operational_id, payload.operationalUpdatedAt])
+  if (written.meta.changes !== 1) throw new HTTPError({ statusCode: 409, message: 'This booking changed since you opened it. Reload and try again.' })
+  await publishGuestInboxThreadEvent(context.env, context.db, { threadId: row.id, type: 'thread.changed' })
   return await loadDashboardBookingDetails(event, { type: input.type, bookingId: row.id })
 }
 
@@ -562,7 +527,7 @@ async function composePurchaseDetails(db: DbClient, env: CloudflareEnv, scope: B
     createdAt: payment.created_at,
     updatedAt: payment.updated_at,
     policy: null,
-    notes: [],
+    privateNotes: null,
     pendingChange: null,
     locations: [],
     payments: [{ payment: paymentDisplay(detail.payment), refunds: paymentRefundsDisplay(detail.refunds), order: paymentOrderDisplay(detail.order) }],

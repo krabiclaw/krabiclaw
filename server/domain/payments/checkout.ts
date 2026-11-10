@@ -5,7 +5,7 @@ import { HTTPError } from 'nitro'
 import { execute, executeBatch, queryAll, queryFirst, type DbClient, type BatchQuery } from '~/server/db'
 import { assertPriceShape, PRICE_TAX_BEHAVIORS, selectPrice, type Price } from '~/shared/prices'
 import { isRecord } from '~/server/utils/type-guards'
-import { formAnswerSnapshotsSchema } from '~/shared/form-questions'
+import { formAnswerSnapshotsSchema, type FormAnswerSnapshot } from '~/shared/form-questions'
 import { paidQuantity, partyPaysOnline, requireBookingConfig, sessionAllocationPredicate } from '~/server/utils/availability'
 import { paymentsStripe, requireStripeCheckoutAcceptance, type StripeConnectedAccount } from '~/server/utils/stripe-connect'
 import type { CloudflareEnv } from '~/server/utils/auth'
@@ -15,7 +15,7 @@ import { assertMinorAmount, requirePayment } from './index'
 import { recordCheckoutStarted } from '~/server/domain/booking-analytics'
 import { isCurrencyCode } from '~/shared/currencies'
 import { quotePaymentsBillingFx, requireBillingFxQuote } from './fx'
-import { isStayNightConflict, stayHoldClaimQueries, stayHoldPredicate, type CheckoutStay, type StayQuote } from '~/server/domain/stays'
+import { isStayNightConflict, stayCheckoutPolicy, stayHoldClaimQueries, stayHoldPredicate, type CheckoutStay, type StayQuote } from '~/server/domain/stays'
 
 interface CheckoutInputBase {
   organizationId: string
@@ -33,10 +33,12 @@ interface CheckoutInputBase {
    */
   origin: { request: { headers: Headers }; pageEventId: string | null } | null
 }
+/** What a booking checkout holds while the guest pays: a session's seats ('slot') or a home's nights ('nights'). Either becomes a booking when paid. */
 export type CheckoutInput = CheckoutInputBase & (
-  | { subjectType: 'booking'; productId: string; variantId: string; sessionId: string }
+  /** `answers` are the guest's answers accepted for a new checkout, frozen with its purchase; null on a retry, which is held to the ones it froze. */
+  | { unit: 'slot'; productId: string; variantId: string; sessionId: string; answers: FormAnswerSnapshot[] | null }
   /** `quote` is read only for a new checkout; a retry is held to the stay it froze, whose nights it already holds. */
-  | { subjectType: 'stay'; stay: StayRequest; guest: CheckoutStay['guest']; quote: () => Promise<StayQuote> }
+  | { unit: 'nights'; stay: StayRequest; guest: CheckoutStay['guest']; quote: () => Promise<StayQuote> }
 )
 
 /** Which stay a guest asked for: the home, the nights and the party. */
@@ -76,9 +78,10 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
   let price: Pick<Price, 'unit_amount' | 'currency' | 'tax_behavior'> | undefined
   let catalogPriceId: string | null = null
   let stay: StayPurchase | null = null
-  let policy: BookingPolicy | null = null
+  let policy: BookingPolicy
+  let answers: FormAnswerSnapshot[] = []
   // A seat is paid per guest; a table's deposit once for the booking; a stay once for its nights.
-  const purchaseQuantity = input.subjectType === 'booking' ? paidQuantity(await requireBookingConfig(db, input.organizationId, input.productId), input.quantity) : 1
+  const purchaseQuantity = input.unit === 'slot' ? paidQuantity(await requireBookingConfig(db, input.organizationId, input.productId), input.quantity) : 1
   let connected: Pick<StripeConnectedAccount, 'stripeAccountId' | 'livemode'> | undefined
   let projectionTitle: string
   let projectionTaxCode: string | null
@@ -88,7 +91,7 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
   if (previous) {
     const frozen = await requirePayment(db,input.organizationId,previous.id)
     const snapshot: unknown = JSON.parse(frozen.price_snapshot_json)
-    if (frozen.subject_type !== input.subjectType || !isRecord(snapshot) || typeof snapshot.title !== 'string' || !snapshot.title.trim()
+    if (frozen.subject_type !== 'booking' || !isRecord(snapshot) || isRecord(snapshot.stay) !== (input.unit === 'nights') || typeof snapshot.title !== 'string' || !snapshot.title.trim()
       || (snapshot.tax_code !== null && (typeof snapshot.tax_code !== 'string' || !snapshot.tax_code.trim()))
       || snapshot.quantity !== purchaseQuantity || typeof snapshot.automatic_tax !== 'boolean'
       || typeof snapshot.method_configuration_id !== 'string' || !snapshot.method_configuration_id.trim()
@@ -100,18 +103,22 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
     const frozenPrice = snapshot.price as Pick<Price, 'unit_amount' | 'currency' | 'tax_behavior'>
     if (frozenPrice.unit_amount * purchaseQuantity !== frozen.amount || frozenPrice.currency !== frozen.currency) throw new HTTPError({statusCode:409,statusMessage:'Stored checkout snapshot does not match its payment'})
     if (input.buyerUserId !== null && frozen.buyer_user_id !== input.buyerUserId) throw new HTTPError({statusCode:403,statusMessage:'Checkout belongs to another buyer'})
-    if (input.subjectType === 'booking') {
+    if (input.unit === 'slot') {
       if (snapshot.product_id !== input.productId || snapshot.variant_id !== input.variantId || snapshot.session_id !== input.sessionId
         || typeof snapshot.price.id !== 'string' || !snapshot.price.id.trim() || snapshot.price.organization_id !== input.organizationId
         || snapshot.price.product_variant_id !== input.variantId || snapshot.price.type !== 'one_time' || !isRecord(snapshot.policy)) throw new HTTPError({ statusCode: 409, statusMessage: 'Stored booking purchase is invalid' })
+      const frozenAnswers = formAnswerSnapshotsSchema.safeParse(snapshot.answers)
+      if (!frozenAnswers.success || (input.answers !== null && JSON.stringify(input.answers) !== JSON.stringify(frozenAnswers.data))) throw new HTTPError({ statusCode: 409, statusMessage: 'Stored booking purchase is invalid', data: { code: 'idempotency_conflict', field: 'answers' } })
       assertPriceShape(snapshot.price as unknown as Price)
       policy = snapshot.policy as unknown as BookingPolicy
+      answers = frozenAnswers.data
     } else {
       const frozenStay = snapshot.stay
       if (!isStayPurchase(frozenStay) || frozenStay.product_id !== input.stay.product_id || frozenStay.check_in_date !== input.stay.check_in_date
         || frozenStay.check_out_date !== input.stay.check_out_date || frozenStay.adults !== input.stay.adults || frozenStay.children !== input.stay.children
-        || frozenStay.infants !== input.stay.infants || frozenStay.total_minor !== frozen.amount) throw new HTTPError({ statusCode: 409, statusMessage: 'Stored stay purchase is invalid', data: { code: 'idempotency_conflict', field: 'idempotency_key' } })
+        || frozenStay.infants !== input.stay.infants || frozenStay.total_minor !== frozen.amount || !isRecord(snapshot.policy)) throw new HTTPError({ statusCode: 409, statusMessage: 'Stored stay purchase is invalid', data: { code: 'idempotency_conflict', field: 'idempotency_key' } })
       stay = frozenStay
+      policy = snapshot.policy as unknown as BookingPolicy
     }
     connected = { stripeAccountId: frozen.stripe_account_id, livemode: frozen.livemode === 1 }
     projectionTitle=snapshot.title
@@ -120,7 +127,7 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
     requireBillingFxQuote(snapshot.billing_fx, frozenPrice.currency)
     automaticTax = snapshot.automatic_tax
     methodConfigurationId=snapshot.method_configuration_id
-  } else if (input.subjectType === 'booking') {
+  } else if (input.unit === 'slot') {
     const product = await queryFirst<{name:string;tax_code:string|null;currency:string}>(db,`SELECT p.name,p.tax_code,o.default_currency AS currency FROM products p JOIN organization o ON o.id=p.organization_id JOIN product_variants v ON v.product_id=p.id AND v.organization_id=p.organization_id WHERE p.organization_id=? AND p.id=? AND v.id=? AND p.active=1 AND v.active=1`,[input.organizationId,input.productId,input.variantId])
     if (!product || !isCurrencyCode(product.currency)) throw new HTTPError({statusCode:409,statusMessage:'An active offering with a supported currency is required'})
     session = await queryFirst(db,`SELECT s.* FROM product_sessions s WHERE s.organization_id=? AND s.id=? AND s.product_id=?`,[input.organizationId,input.sessionId,input.productId])
@@ -133,6 +140,8 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
     if (price.unit_amount === 0) throw new HTTPError({statusCode:409,statusMessage:'Free offerings use the canonical booking flow without checkout'})
     catalogPriceId = (price as Price).id
     policy = bookingPolicy(config, price)
+    if (input.answers === null) throw new Error('A new checkout carries the answers the guest gave')
+    answers = input.answers
     projectionTitle = product.name
     projectionTaxCode = product.tax_code
   } else {
@@ -148,6 +157,8 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
       product_id: quote.product_id, location_id: quote.location_id, timezone: quote.timezone, check_in_date: quote.check_in_date, check_out_date: quote.check_out_date,
       adults: quote.adults, children: quote.children, infants: quote.infants, nightly: quote.nightly, total_minor: quote.total_minor, currency: quote.currency, cancellation_policy: quote.cancellation_policy, guest,
     }
+    // The terms the guest booked under are frozen with the purchase, as a session booking's are.
+    policy = JSON.parse(await stayCheckoutPolicy(db, input.organizationId, { ...stay, tax_behavior: quote.tax_behavior })) as BookingPolicy
   }
   if (!previous) {
     const acceptance = await requireStripeCheckoutAcceptance(db, env, input.organizationId)
@@ -174,7 +185,7 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
     let hold: BatchQuery
     const preceding: BatchQuery[] = []
     const following: BatchQuery[] = []
-    if (input.subjectType === 'booking') {
+    if (input.unit === 'slot') {
       if (!session || !catalogPriceId) throw new Error('The selected session or price is missing')
       const allocation = await sessionAllocationPredicate(db, { env, organizationId: input.organizationId, productId: input.productId, sessionId: session.id, partySize: input.quantity, now })
       hold = { query: `INSERT INTO payment_checkout_holds(id,organization_id,product_id,variant_id,price_id,session_id,buyer_user_id,request_id,payment_id,quantity,amount,currency,starts_at,ends_at,status,expires_at,created_at,location_id,timezone)
@@ -193,9 +204,9 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
       following.push(claim!)
     }
     const purchase = { title: projectionTitle, tax_code: projectionTaxCode, price, quantity: purchaseQuantity, automatic_tax: automaticTax, method_configuration_id: methodConfigurationId, request_fingerprint: input.requestFingerprint, billing_fx: billingFx,
-      ...(input.subjectType === 'booking' ? { product_id: input.productId, variant_id: input.variantId, session_id: input.sessionId, policy } : { stay }) }
+      policy, ...(input.unit === 'slot' ? { product_id: input.productId, variant_id: input.variantId, session_id: input.sessionId, answers } : { stay }) }
     try { await executeBatch(db,[
-      { query: `INSERT INTO payments(id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,subject_id,location_id,currency,amount,price_snapshot_json,idempotency_key,checkout_expires_at,return_token,return_token_hash,return_expires_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, params:[id,input.organizationId,input.buyerUserId,connected.stripeAccountId,Number(connected.livemode),input.subjectType,null,input.subjectType === 'booking' ? session!.location_id : stay!.location_id,price.currency,amount,JSON.stringify(purchase),key,expiresAt,returnToken,returnHash,new Date(Date.now()+86400000).toISOString(),now,now] },
+      { query: `INSERT INTO payments(id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,subject_id,location_id,currency,amount,price_snapshot_json,idempotency_key,checkout_expires_at,return_token,return_token_hash,return_expires_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, params:[id,input.organizationId,input.buyerUserId,connected.stripeAccountId,Number(connected.livemode),'booking',null,input.unit === 'slot' ? session!.location_id : stay!.location_id,price.currency,amount,JSON.stringify(purchase),key,expiresAt,returnToken,returnHash,new Date(Date.now()+86400000).toISOString(),now,now] },
       ...preceding, hold, ...following,
       ...input.following(id),
       // No capacity, no purchase: without a hold nothing refers to this row.
@@ -204,11 +215,11 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
     } catch(error) {
       const raced=await queryFirst(db,'SELECT id FROM payments WHERE idempotency_key=?',[key])
       if(raced && !retry) return await createPaymentCheckout(db,env,input,true)
-      if (input.subjectType === 'stay' && isStayNightConflict(error)) throw new HTTPError({ statusCode: 409, statusMessage: 'Some of these nights are no longer available', data: { code: 'STAY_NIGHTS_UNAVAILABLE', field: 'check_in_date' }, cause: error })
+      if (input.unit === 'nights' && isStayNightConflict(error)) throw new HTTPError({ statusCode: 409, statusMessage: 'Some of these nights are no longer available', data: { code: 'STAY_NIGHTS_UNAVAILABLE', field: 'check_in_date' }, cause: error })
       throw error
     }
     if (!await queryFirst(db,'SELECT id FROM payments WHERE id=?',[id])) {
-      if (input.subjectType === 'stay') throw new HTTPError({ statusCode: 409, statusMessage: 'This place to stay is no longer open for these nights', data: { code: 'STAY_NIGHTS_UNAVAILABLE', field: 'check_in_date' } })
+      if (input.unit === 'nights') throw new HTTPError({ statusCode: 409, statusMessage: 'This place to stay is no longer open for these nights', data: { code: 'STAY_NIGHTS_UNAVAILABLE', field: 'check_in_date' } })
       throw new HTTPError({statusCode:409,statusMessage:'This time no longer has capacity for your party'})
     }
   }

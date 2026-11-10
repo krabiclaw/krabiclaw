@@ -28,8 +28,9 @@ extend that model. Never add a second one beside it.
 | When a product can be booked | `product_availability_rules` | server/utils/availability.ts | KrabiClaw |
 | Timed inventory | `product_sessions` | server/utils/availability.ts | KrabiClaw |
 | Night inventory | `product_nights` | server/domain/stays.ts | KrabiClaw |
+| Night claim (the nights a booking, a checkout hold or a linked calendar holds at a home, as a session's seats are a slot booking's claim) | `stay_nights` | server/domain/stays.ts | KrabiClaw |
 | Home rooms and accessibility | `product_stay_photo_rooms` `product_stay_photo_room_memberships` `product_stay_photo_room_amenities` `product_stay_room_accessibility` `product_stay_room_accessibility_photos` `product_stay_accessibility` `product_stay_accessibility_photos` | server/domain/stays.ts | KrabiClaw |
-| Booked record (a class, consultation or table booking, with the terms frozen when it was made) | `bookings` | server/domain/product-bookings.ts | KrabiClaw |
+| Booked record (a class seat, a consultation, a table or a stay at a home, with the terms frozen when it was made) | `bookings` | server/domain/product-bookings.ts | KrabiClaw |
 | Conversation and its ledger | `requests` `activity_entries` | server/domain/requests.ts | KrabiClaw |
 | Guest message delivery | `guest_thread_deliveries` | server/domain/guest-threads/deliveries.ts | KrabiClaw |
 | Guest message template | `message_templates` | server/domain/scheduled-guest-messages.ts | KrabiClaw |
@@ -46,7 +47,7 @@ extend that model. Never add a second one beside it.
 | Social post publication | `post_publications` | server/utils/social-publication.ts | Meta |
 | Article email | `broadcasts` | server/domain/article-broadcast.ts | Resend |
 | Reviews | `reviews` `review_requests` `review_category_ratings` | server/utils/review-requests.ts | KrabiClaw |
-| Payments | `payments` `payment_refunds` `payment_disputes` `payment_orders` `payment_order_lines` `payment_authorizations` `payment_checkout_holds` `payment_fee_reports` `payment_cost_snapshots` `payment_servicing_tenants` `stripe_connected_accounts` `stripe_connected_customers` `stripe_webhook_events` `payment_usage_events` | server/domain/payments | Stripe |
+| Payments | `payments` `payment_refunds` `payment_disputes` `payment_orders` `payment_order_lines` `payment_authorizations` `payment_checkout_holds` `offline_payments` `payment_fee_reports` `payment_cost_snapshots` `payment_servicing_tenants` `stripe_connected_accounts` `stripe_connected_customers` `stripe_webhook_events` `payment_usage_events` | server/domain/payments | Stripe |
 | Channex channel | `channex_connections` `product_channel_mappings` `channel_threads` `channel_night_pushes` `channel_sync_log` `airbnb_sync_jobs` | server/integrations/channex | Channex |
 | Imported iCal calendar | `stay_calendar_links` | server/domain/stays.ts | KrabiClaw |
 | Google Calendar | `google_calendar_setup` `google_calendar_sync` `google_calendar_event_links` `google_calendar_cleanup_jobs` | server/utils/google-calendar.ts | Google |
@@ -64,15 +65,7 @@ Each of these tables is a second model of a concept above. The check fails until
 
 | Table | Concept it duplicates |
 |---|---|
-| `stays` | Booked record |
-| `stay_nights` | Night inventory |
-| `stay_payments` | Payments |
 | `send_later_messages` | Future guest message |
-
-One single-owner column below still names a retiring owner, until it goes:
-
-- `stays.cancellation_policy` is the policy frozen on a booked stay when it was
-  taken; it goes with `stays` into the booked record.
 
 ## Single-owner columns
 
@@ -97,7 +90,7 @@ Each of these columns exists on its owner table only.
 | `check_in_time` | `product_booking_configs` |
 | `check_out_time` | `product_booking_configs` |
 | `min_nights` | `product_booking_configs` |
-| `cancellation_policy` | `product_booking_configs` `stays` |
+| `cancellation_policy` | `product_booking_configs` |
 | `guest_name` | (none) |
 | `guest_email` | (none) |
 | `guest_phone` | (none) |

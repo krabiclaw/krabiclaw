@@ -127,7 +127,7 @@ test('Today shows every booking type as a reservation card for its own business,
     const directions = 'Take the coast road past the lighthouse; the cottage is the blue door.'
     await updateStayHome(env, db, manager, home.id, { directions, wifi_network: 'Seaview', wifi_password: 'saltwater' })
     const stay = await createStay(db, env, manager, { product_id: home.id, idempotency_key: 'diana-stay', check_in_date: inTwoDays, check_out_date: addLocalDays(inTwoDays, 3),
-      adults: 2, children: 0, guest_name: 'Diana', guest_surname: 'Lee', guest_email: 'diana@proof.example', total_minor: 45_000 })
+      adults: 2, children: 0, guest_name: 'Diana Lee', guest_email: 'diana@proof.example', total_minor: 45_000 })
     assert.ok(stay.request_id, 'a stay with a guest email has a conversation')
 
     // A table reservation: a booking of the bistro's tables at 18:00.

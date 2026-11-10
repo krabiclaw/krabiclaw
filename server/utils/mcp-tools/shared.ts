@@ -771,8 +771,6 @@ export const EXPECTED_TOOL_ANNOTATIONS = {
   reject_product_booking: { ...D, openWorldHint: true, idempotentHint: true },
   cancel_product_booking: { ...D, openWorldHint: true, idempotentHint: true },
   request_product_booking_change: { ...D, openWorldHint: true, idempotentHint: true },
-  list_stays: R,
-  get_stay: R,
   get_stay_calendar: R,
   create_home_room: { ...W, openWorldHint: true },
   update_home_room: { ...D, openWorldHint: true },
@@ -783,7 +781,6 @@ export const EXPECTED_TOOL_ANNOTATIONS = {
   create_stay: { ...D, openWorldHint: true, idempotentHint: true },
   update_stay: { ...D, openWorldHint: true },
   move_stay: { ...D, openWorldHint: true },
-  cancel_stay: { ...D, openWorldHint: true },
   record_stay_payment: { ...W, idempotentHint: true },
   delete_stay_payment: D,
   // A percent price change compounds when repeated, so the tool is not idempotent.

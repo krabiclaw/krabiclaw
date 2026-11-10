@@ -1,4 +1,4 @@
-import type { GuestRequest, ThreadOperationalRecord } from '~/server/domain/requests'
+import { bookingEndsInstant, type GuestRequest, type ThreadOperationalRecord } from '~/server/domain/requests'
 import { queryFirst, type DbClient } from '~/server/db'
 
 /**
@@ -47,7 +47,8 @@ export function resolveGuestThreadMailbox(
   audience: 'member' | 'buyer' = 'member',
 ): GuestThreadMailboxState {
   const manuallyArchived = audience === 'member' && thread.archived_at !== null
-  const quietFrom = record !== null && record.ends_at > activity.lastMessageAt ? record.ends_at : activity.lastMessageAt
+  const ended = record === null ? null : bookingEndsInstant(record.ends_at)
+  const quietFrom = ended !== null && ended > activity.lastMessageAt ? ended : activity.lastMessageAt
   const pastByRule = quietFrom < quietSince(now)
   // The guest's own view never shows that the host blocked them.
   const blocked = audience === 'member' && thread.blocked_at !== null

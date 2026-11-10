@@ -7,13 +7,18 @@ import { queryAll, queryFirst } from '~/server/db'
 import { createSession, listSessions, requireBookingConfig, updateSession } from '~/server/utils/availability'
 import { mcpPageInfo, mcpPageWindow, paginateMcpCollection } from '~/server/utils/mcp-pagination'
 import { createProductBooking } from '~/server/domain/product-bookings'
-import { getGuestRequest, getThreadOperationalRecord, type ThreadOperationalRecord, type ThreadPayload } from '~/server/domain/requests'
+import { BOOKING_ENDS_SQL, BOOKING_STARTS_SQL, getGuestRequest, getThreadOperationalRecord, isBookingDay, type ThreadOperationalRecord, type ThreadPayload } from '~/server/domain/requests'
+import { localDateAt } from '~/utils/timezone'
+import { stayGuestFirstName } from '~/shared/bookings'
+import { cancelStay, getStay, stayAccessFor } from '~/server/domain/stays'
+import { stayDetail, stayTurnover } from './stays'
+import { CHANNEL_PUSH_SCHEMA } from '~/shared/channel-push'
 import { executeGuestThreadOperation } from '~/server/domain/guest-threads/operations'
 import { moveBooking, requestBookingChange } from '~/server/domain/guest-threads/booking-changes'
 import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
 import { NOT_HANDLED, requiredString, optionalString, type McpExecutorContext } from './execution'
 import { BOOKING_STATUSES, isBookingComplete, type BookingStatus } from '~/shared/bookings'
-import { formAnswerInputJsonSchema, formAnswerSnapshotsJsonSchema } from '~/shared/form-questions'
+import { formAnswerInputJsonSchema, formAnswerSnapshotsJsonSchema, formAnswerSnapshotsSchema } from '~/shared/form-questions'
 
 const key = { type: 'string', minLength: 1, maxLength: 200, description: 'Caller-supplied durable idempotency key. Reuse only for the identical operation.' }
 const bookingId = { type: 'string', description: 'Booking ID returned by list_product_bookings or create_product_booking. Distinct from request_id, which identifies the inbox conversation.' }
@@ -24,14 +29,15 @@ const answersInput = formAnswerInputJsonSchema()
 const questionsRevision = { type: 'string', description: 'The questions_revision the answers were collected against. Required with answers; a changed revision returns questions_changed with the current questions.' }
 const productKind = { type: 'string', enum: [...PRODUCT_KINDS], description: 'What was booked: an experience, a consultation (service) or a restaurant table.' }
 const record = { type: 'object', properties: { id: text, kind: { type: 'string', enum: ['booking'] }, status: { type: 'string', enum: [...BOOKING_STATUSES] }, party_size: { type: 'integer', minimum: 1 }, starts_at: text, ends_at: text, timezone: text, assigned_member_id: nullableText, location_id: nullableText, product_id: nullableText, product_kind: productKind, product_name: nullableText }, required: ['id', 'kind', 'status', 'party_size', 'starts_at', 'ends_at', 'timezone', 'assigned_member_id', 'location_id', 'product_id', 'product_kind', 'product_name'] }
-const booking = { type: 'object', properties: { operational_booking_id: text, request_id: nullableText, product_id: text, product_kind: productKind, product_variant_id: nullableText, product_session_id: text, status: { type: 'string', enum: [...BOOKING_STATUSES] }, is_complete: { type: 'boolean' }, party_size: { type: 'integer' }, updated_at: text, assigned_member_id: nullableText, location_id: nullableText, starts_at: text, ends_at: text, timezone: text, guest: { type: ['object', 'null'], properties: { name: nullableText }, required: ['name'], additionalProperties: false }, provenance: { type: ['object', 'null'], properties: { source: text, external_reference: nullableText, guest_acknowledgement: { type: 'boolean' } }, required: ['source', 'external_reference', 'guest_acknowledgement'] } }, required: ['operational_booking_id', 'request_id', 'product_id', 'product_kind', 'product_variant_id', 'product_session_id', 'status', 'is_complete', 'party_size', 'updated_at', 'assigned_member_id', 'location_id', 'starts_at', 'ends_at', 'timezone', 'guest', 'provenance'] }
+const booking = { type: 'object', properties: { operational_booking_id: text, request_id: nullableText, product_id: text, product_kind: productKind, product_variant_id: nullableText, product_session_id: { ...nullableText, description: 'The session a slot booking holds; null for a stay, which holds nights.' }, unit: { type: 'string', enum: ['slot', 'nights'], description: 'What the booking holds: a session\'s places (slot) or a home\'s nights (nights).' }, status: { type: 'string', enum: [...BOOKING_STATUSES] }, is_complete: { type: 'boolean' }, party_size: { type: 'integer' }, updated_at: text, assigned_member_id: nullableText, location_id: nullableText, starts_at: text, ends_at: text, timezone: text, guest: { type: ['object', 'null'], properties: { name: nullableText }, required: ['name'], additionalProperties: false }, provenance: { type: ['object', 'null'], properties: { source: text, external_reference: nullableText, guest_acknowledgement: { type: 'boolean' } }, required: ['source', 'external_reference', 'guest_acknowledgement'] } }, required: ['operational_booking_id', 'request_id', 'product_id', 'product_kind', 'product_variant_id', 'product_session_id', 'unit', 'status', 'is_complete', 'party_size', 'updated_at', 'assigned_member_id', 'location_id', 'starts_at', 'ends_at', 'timezone', 'guest', 'provenance'] }
 const session = { type: 'object', properties: { id: text, organization_id: text, product_id: text, location_id: nullableText, timezone: text, starts_at: text, ends_at: text, updated_at: text, capacity: { type: ['integer', 'null'] }, status: text, claimed: { type: 'integer' }, remaining: { type: ['integer', 'null'] }, is_full: { type: 'boolean' } }, required: ['id', 'organization_id', 'product_id', 'location_id', 'assigned_member_id', 'starts_at', 'ends_at', 'timezone', 'capacity', 'status', 'claimed', 'remaining', 'is_full', 'updated_at'] }
 const operationResult = { type: 'object', properties: { ok: { const: true }, status: { const: 200 }, request_id: text, record, availableActions: { type: 'array', items: text }, thread: { type: 'object', properties: { id: text, kind: { type: 'string', enum: ['booking'] } }, required: ['id', 'kind'] } }, required: ['ok', 'status', 'request_id', 'record', 'availableActions', 'thread'] }
+const nightsCancelResult = { type: 'object', properties: { operational_booking_id: text, unit: { const: 'nights' }, status: { const: 'cancelled' }, version: { type: 'integer' }, cancelled_at: text, cancellation_reason: nullableText, channel_push: { ...CHANNEL_PUSH_SCHEMA } }, required: ['operational_booking_id', 'unit', 'status', 'version', 'cancelled_at', 'cancellation_reason', 'channel_push'], additionalProperties: false }
 const changeResult = { type: 'object', properties: { success: { const: true }, request_id: text, change_status: { type: 'string', enum: ['awaiting_guest_acceptance', 'accepted', 'declined', 'moved'] }, record }, required: ['success', 'request_id', 'change_status', 'record'] }
 
 function mcpBookingRecord(record: ThreadOperationalRecord) {
-  const { id, kind, status, party_size, starts_at, ends_at, timezone, assigned_member_id, location_id, product_id, product_kind, product_name } = record
-  return { id, kind, status, party_size, starts_at, ends_at, timezone, assigned_member_id, location_id, product_id, product_kind, product_name }
+  const { id, status, party_size, starts_at, ends_at, timezone, assigned_member_id, location_id, product_id, product_kind, product_name } = record
+  return { id, kind: 'booking' as const, status, party_size, starts_at, ends_at, timezone, assigned_member_id, location_id, product_id, product_kind, product_name }
 }
 
 function mcpBookingProvenance(provenance: ThreadPayload['provenance'] | null) {
@@ -66,15 +72,18 @@ export const BOOKINGS_TOOLS: McpToolDefinition[] = [
       guest_acknowledgement: { type: 'boolean', description: 'Explicit choice to send the guest creation email. Owner alerts, inbox, and audit always remain.' },
     }, required: ['product_slug', 'session_id', 'party_size', 'guest_name', 'guest_email', 'idempotency_key', 'source', 'guest_acknowledgement'],
   }),
-  organizationTool({ name: 'get_product_booking', outputSchema: { type: 'object', properties: { operational_booking_id: text, request_id: text, updated_at: text, operational_updated_at: text, guest, answers: formAnswerSnapshotsJsonSchema(), provenance: booking.properties.provenance, record }, required: ['operational_booking_id', 'request_id', 'updated_at', 'operational_updated_at', 'guest', 'answers', 'provenance', 'record'] }, domain: 'bookings', minimumRole: 'member', description: 'Read one booking — an experience, consultation or table — when the user wants its guest details, answers to the offering\'s questions, status or current session. Use operational_updated_at when proposing a change.', inputSchema: { operational_booking_id: bookingId }, required: ['operational_booking_id'],
+  organizationTool({ name: 'get_product_booking', outputSchema: { anyOf: [
+    { type: 'object', properties: { operational_booking_id: text, request_id: text, updated_at: text, operational_updated_at: text, guest, answers: formAnswerSnapshotsJsonSchema(), provenance: booking.properties.provenance, record }, required: ['operational_booking_id', 'request_id', 'updated_at', 'operational_updated_at', 'guest', 'answers', 'provenance', 'record'] },
+    { type: 'object', description: 'A stay: its guest, nights, payments and version, or, for a member who looks after the home, its turnover.', properties: { operational_booking_id: text, unit: { const: 'nights' }, stay: { anyOf: [stayDetail, stayTurnover] } }, required: ['operational_booking_id', 'unit', 'stay'], additionalProperties: false },
+  ] }, domain: 'bookings', minimumRole: 'member', description: 'Read one booking — an experience, consultation, table or stay at a home — when the user wants its guest details, answers to the offering\'s questions, status or current session. Use operational_updated_at when proposing a change.', inputSchema: { operational_booking_id: bookingId }, required: ['operational_booking_id'],
   }),
   ...([
     ['confirm', 'Confirm a pending product booking or consultation after staff review and email the guest, keeping its session and places. No payment is collected.'],
     ['reject', 'Decline a pending product booking or consultation, release its places and email the guest. A required refund returns financial_action_required and a dashboard URL before status changes.'],
-    ['cancel', 'Cancel a pending or confirmed product booking or consultation before it ends, release its places and email the guest. A required refund returns financial_action_required and a dashboard URL before status changes.'],
+    ['cancel', 'Cancel a pending or confirmed booking before it ends and tell the guest: a product booking or consultation releases its places; a stay the host entered frees its nights, cancels its pending automatic messages and updates the home\'s connected Airbnb availability through Channex (a channel\'s stay is cancelled on its channel). A required refund returns financial_action_required and a dashboard URL before status changes.'],
   ] as const).map(([action, purpose]) => organizationTool({
-    name: `${action}_product_booking`, outputSchema: operationResult, domain: 'bookings', minimumRole: 'member', description: purpose,
-    inputSchema: { operational_booking_id: bookingId, idempotency_key: key }, required: ['operational_booking_id', 'idempotency_key'],
+    name: `${action}_product_booking`, outputSchema: action === 'cancel' ? { anyOf: [operationResult, nightsCancelResult] } : operationResult, domain: 'bookings', minimumRole: 'member', description: purpose,
+    inputSchema: { operational_booking_id: bookingId, idempotency_key: key, ...(action === 'cancel' ? { expected_version: { type: 'integer', minimum: 1, description: 'Required for a stay: stay.version from get_product_booking. A stale version is refused.' }, reason: { type: 'string', maxLength: 500, description: 'For a stay: why it was cancelled, kept with it.' } } : {}) }, required: ['operational_booking_id', 'idempotency_key'],
   })),
   organizationTool({ name: 'request_product_booking_change', outputSchema: changeResult, domain: 'bookings', minimumRole: 'member', description: 'Email the guest a proposal to change a booking’s session or party size. A table booking may move to a session of the business’s tables at another location (list_product_booking_sessions on that location’s table product). The current booking and places remain unchanged until guest acceptance, which requires availability and preserves its review status. Consultation time changes always require client acceptance. For other booking kinds, apply moves the booking now and emails the guest; a paid quantity or location change is refused.',
     inputSchema: { operational_booking_id: bookingId, session_id: { type: 'string', description: 'Destination session ID from list_product_booking_sessions.' }, party_size: { type: 'integer', minimum: 1, maximum: 99 }, expected_updated_at: { type: 'string', description: 'operational_updated_at from get_product_booking: the booking\'s own version. A guest message in the conversation does not change it.' }, apply: { type: 'boolean', description: 'For bookings other than consultations, move immediately and email the guest. Consultations always require client acceptance.' }, idempotency_key: key }, required: ['operational_booking_id', 'session_id', 'party_size', 'expected_updated_at', 'idempotency_key'],
@@ -127,26 +136,31 @@ export async function handleBookingsTools(ctx: McpExecutorContext): Promise<unkn
     for (const [argument, column] of [['assigned_member_id', 'c.assigned_member_id'], ['product_id', 'b.product_id']] as const) {
       if (typeof args[argument] === 'string') { filters.push(`${column} = ?`); params.push(args[argument] as string) }
     }
-    if (args.status === 'completed') filters.push("b.status = 'confirmed' AND s.ends_at < strftime('%Y-%m-%dT%H:%M:%fZ','now')")
+    if (args.status === 'completed') filters.push(`b.status = 'confirmed' AND ${BOOKING_ENDS_SQL('b')} < strftime('%Y-%m-%dT%H:%M:%fZ','now')`)
     else if (typeof args.status === 'string') {
       filters.push('b.status = ?'); params.push(args.status)
-      if (args.status === 'confirmed') filters.push("s.ends_at >= strftime('%Y-%m-%dT%H:%M:%fZ','now')")
+      if (args.status === 'confirmed') filters.push(`${BOOKING_ENDS_SQL('b')} >= strftime('%Y-%m-%dT%H:%M:%fZ','now')`)
     }
-    if (Object.hasOwn(args, 'location_id')) { filters.push('s.location_id IS ?'); params.push(args.location_id as string | null) }
+    if (Object.hasOwn(args, 'location_id')) { filters.push('b.location_id IS ?'); params.push(args.location_id as string | null) }
     for (const [argument, operator] of [['from', '>='], ['to', '<']] as const) {
       if (args[argument] !== undefined) {
         const instant = new Date(requiredString(args, argument))
         if (!Number.isFinite(instant.getTime())) throw new HTTPError({ statusCode: 400, message: `${argument} must be an ISO instant` })
-        filters.push(`s.starts_at ${operator} ?`); params.push(instant.toISOString())
+        filters.push(`${BOOKING_STARTS_SQL('b')} ${operator} ?`); params.push(instant.toISOString())
       }
     }
     const resource = { resource: `product-bookings:${JSON.stringify({ filters, params })}` }
     const window = mcpPageWindow(args, resource)
-    const rows = await queryAll<Record<string, unknown> & { status: BookingStatus; ends_at: string; guest_json: string | null; provenance_json: string | null }>(db, `SELECT b.id AS operational_booking_id, b.request_id, b.product_id, p.kind AS product_kind, b.product_variant_id, b.product_session_id, b.status, b.party_size, b.user_id, b.updated_at, c.assigned_member_id, s.location_id, s.starts_at, s.ends_at, s.timezone, json_extract(r.payload_json, '$.guest') AS guest_json, json_extract(r.payload_json, '$.provenance') AS provenance_json FROM bookings b JOIN product_sessions s ON s.id = b.product_session_id AND s.organization_id = b.organization_id JOIN product_booking_configs c ON c.product_id = b.product_id AND c.organization_id = b.organization_id JOIN products p ON p.id = b.product_id AND p.organization_id = b.organization_id LEFT JOIN requests r ON r.id = b.request_id AND r.organization_id = b.organization_id WHERE ${filters.join(' AND ')} ORDER BY s.starts_at DESC, b.id LIMIT ? OFFSET ?`, [...params, window.limit + 1, window.offset])
+    const rows = await queryAll<Record<string, unknown> & { status: BookingStatus; ends_at: string; guest_json: string | null; provenance_json: string | null }>(db, `SELECT b.id AS operational_booking_id, b.request_id, b.product_id, p.kind AS product_kind, b.product_variant_id, b.product_session_id, CASE WHEN b.product_session_id IS NULL THEN 'nights' ELSE 'slot' END AS unit, b.status, b.party_size, b.user_id, b.updated_at, c.assigned_member_id, b.location_id, b.starts_at, b.ends_at, b.timezone, json_extract(r.payload_json, '$.guest') AS guest_json, json_extract(r.payload_json, '$.provenance') AS provenance_json FROM bookings b JOIN product_booking_configs c ON c.product_id = b.product_id AND c.organization_id = b.organization_id JOIN products p ON p.id = b.product_id AND p.organization_id = b.organization_id LEFT JOIN requests r ON r.id = b.request_id AND r.organization_id = b.organization_id WHERE ${filters.join(' AND ')} ORDER BY b.starts_at DESC, b.id LIMIT ? OFFSET ?`, [...params, window.limit + 1, window.offset])
     const now = new Date().toISOString()
     const bookings = rows.slice(0, window.limit).map(({ guest_json, provenance_json, user_id: _userId, ...booking }) => {
       const guest = guest_json === null ? null : JSON.parse(guest_json) as ThreadPayload['guest']
-      return { ...booking, is_complete: isBookingComplete(booking, now), guest: guest === null ? null : { name: guest.name }, provenance: mcpBookingProvenance(provenance_json === null ? null : JSON.parse(provenance_json)) }
+      // A member reads a stay's guest by first name, as its turnover names them.
+      const name = guest === null ? null : booking.unit === 'nights' && !managesBookings ? stayGuestFirstName(guest.name) : guest.name
+      // A checkout stored as its day alone is complete once that day has passed where the home is.
+      const complete = isBookingDay(booking.ends_at) ? booking.status === 'confirmed' && booking.ends_at < localDateAt(new Date(now), String(booking.timezone)) : isBookingComplete(booking, now)
+      return { ...booking, is_complete: complete,
+        guest: guest === null ? null : { name }, provenance: mcpBookingProvenance(provenance_json === null ? null : JSON.parse(provenance_json)) }
     })
     return { bookings, page_info: mcpPageInfo(window, bookings.length, rows.length > window.limit, resource) }
   }
@@ -161,7 +175,16 @@ export async function handleBookingsTools(ctx: McpExecutorContext): Promise<unkn
   if (!['get_product_booking', 'confirm_product_booking', 'reject_product_booking', 'cancel_product_booking', 'request_product_booking_change'].includes(toolName)) return NOT_HANDLED
   const id = requiredString(args, 'operational_booking_id')
   await assertAssignedBookingAccess(db, { ...principal, bookingId: id })
-  const row = await queryFirst<{ request_id: string | null; updated_at: string }>(db, 'SELECT request_id, updated_at FROM bookings WHERE id = ? AND organization_id = ?', [id, organizationId])
+  // A stay is read and cancelled here as every booking is; only its nights are its own.
+  if (await queryFirst(db, 'SELECT 1 FROM bookings WHERE id = ? AND organization_id = ? AND product_session_id IS NULL', [id, organizationId])) {
+    const access = await stayAccessFor(principal)
+    if (toolName === 'get_product_booking') return { operational_booking_id: id, unit: 'nights', stay: await getStay(db, access, id) }
+    if (toolName !== 'cancel_product_booking') throw new HTTPError({ statusCode: 409, message: 'A stay is not confirmed, declined or changed by session. Change it with update_stay or move_stay.', data: { code: 'STAY_ACTION_UNAVAILABLE', field: 'operational_booking_id' } })
+    const stay = await cancelStay(db, env, access, id, { expected_version: args.expected_version, reason: args.reason, financial_writes_allowed: false })
+    if (stay.cancelled_at === null) throw new Error(`Cancelled stay ${id} reads back without its cancellation time`)
+    return { operational_booking_id: id, unit: 'nights', status: 'cancelled', version: stay.version, cancelled_at: stay.cancelled_at, cancellation_reason: stay.cancellation_reason, channel_push: stay.channel_push }
+  }
+  const row = await queryFirst<{ request_id: string | null; updated_at: string; answers: string }>(db, 'SELECT request_id, updated_at, answers FROM bookings WHERE id = ? AND organization_id = ? AND product_session_id IS NOT NULL', [id, organizationId])
   if (!row?.request_id) {
     throw new HTTPError({
       statusCode: 404,
@@ -178,7 +201,7 @@ export async function handleBookingsTools(ctx: McpExecutorContext): Promise<unkn
     })
   }
   let operationalRecord = await getThreadOperationalRecord(db, thread.id)
-  if (!operationalRecord || operationalRecord.id !== id || operationalRecord.kind !== thread.kind || operationalRecord.organization_id !== organizationId) {
+  if (!operationalRecord || operationalRecord.id !== id || operationalRecord.unit !== 'slot' || operationalRecord.organization_id !== organizationId) {
     throw new HTTPError({
       statusCode: 404,
       message: `Operational record '${id}' not found in this organization`,
@@ -187,7 +210,7 @@ export async function handleBookingsTools(ctx: McpExecutorContext): Promise<unkn
   }
   if (toolName === 'get_product_booking') {
     const provenance = thread.payload.provenance
-    return { operational_booking_id: id, request_id: thread.id, updated_at: thread.updated_at, operational_updated_at: row.updated_at, guest: thread.payload.guest, answers: thread.payload.answers,
+    return { operational_booking_id: id, request_id: thread.id, updated_at: thread.updated_at, operational_updated_at: row.updated_at, guest: thread.payload.guest, answers: formAnswerSnapshotsSchema.parse(JSON.parse(row.answers)),
       provenance: mcpBookingProvenance(provenance),
       record: mcpBookingRecord(operationalRecord) }
   }
@@ -199,7 +222,7 @@ export async function handleBookingsTools(ctx: McpExecutorContext): Promise<unkn
       : await requestBookingChange(db, env, thread, organization.userId, { ...fields, expectedUpdatedAt: requiredString(args, 'expected_updated_at') }, key)
     await publishGuestInboxThreadEvent(env, db, { threadId: thread.id, type: 'thread.changed' })
     operationalRecord = await getThreadOperationalRecord(db, thread.id)
-    if (!operationalRecord || operationalRecord.id !== id || operationalRecord.kind !== thread.kind || operationalRecord.organization_id !== organizationId) throw new HTTPError({ statusCode: 404, message: 'Operational booking record not found in this organization' })
+    if (!operationalRecord || operationalRecord.id !== id || operationalRecord.unit !== 'slot' || operationalRecord.organization_id !== organizationId) throw new HTTPError({ statusCode: 404, message: 'Operational booking record not found in this organization' })
     return { success: true, request_id: thread.id, change_status: proposal.changeStatus, record: mcpBookingRecord(operationalRecord) }
   }
   const outcome = await executeGuestThreadOperation(db, { threadId: thread.id, organizationId, action: toolName.split('_')[0]!, actorUserId: organization.userId, idempotencyKey: key, env, financialWritesAllowed: false })
@@ -208,7 +231,7 @@ export async function handleBookingsTools(ctx: McpExecutorContext): Promise<unkn
     ? { ...outcome, record: mcpBookingRecord(outcome.record) }
     : outcome, undefined, undefined, true)
   operationalRecord = await getThreadOperationalRecord(db, thread.id)
-  if (!operationalRecord || operationalRecord.id !== id || operationalRecord.kind !== thread.kind || operationalRecord.organization_id !== organizationId) throw new HTTPError({ statusCode: 404, message: 'Operational booking record not found in this organization' })
+  if (!operationalRecord || operationalRecord.id !== id || operationalRecord.unit !== 'slot' || operationalRecord.organization_id !== organizationId) throw new HTTPError({ statusCode: 404, message: 'Operational booking record not found in this organization' })
   return renderStructuredResponse({
     ok: outcome.ok, status: outcome.status, request_id: outcome.thread.id,
     record: mcpBookingRecord(operationalRecord), availableActions: outcome.availableActions,

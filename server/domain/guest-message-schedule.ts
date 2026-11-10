@@ -7,7 +7,7 @@ import { addLocalDays, isValidCalendarDate, isValidInstant, isValidTimezone, loc
  * last day, a consultation's, class's or table's start and end. offsetDays and
  * localTime name a day and a clock time there; offsetHours counts from the
  * instant itself. productIds names the booked offerings by product: a home, an
- * experience, a consultation or a restaurant's tables (BOOKED_RECORDS_SQL
+ * experience, a consultation or a restaurant's tables (BOOKING_RECORDS_SQL
  * offering_id).
  */
 export type GuestMessageSchedule = ({

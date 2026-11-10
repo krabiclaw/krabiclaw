@@ -59,8 +59,9 @@ async function boot() {
     for (const [id, location, at, status] of [['r1', 'brooklyn', '2026-11-10T23:00:00.000Z', 'confirmed'], ['r2', 'brooklyn', '2026-11-11T00:30:00.000Z', 'confirmed'], ['r3', 'brooklyn', '2026-11-11T01:00:00.000Z', 'cancelled'], ['r4', 'williamsburg', '2026-11-14T23:00:00.000Z', 'confirmed']]) {
       await db.prepare(`INSERT INTO product_sessions (id, organization_id, product_id, location_id, timezone, starts_at, ends_at, capacity, status, created_by, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, 40, 'scheduled', ?, ?)`)
         .bind(`${id}-seating`, ORG, `${location}-tables`, location, ZONE, at, new Date(Date.parse(at!) + 5_400_000).toISOString(), OWNER, OWNER).run()
-      await db.prepare(`INSERT INTO bookings (id, organization_id, product_id, product_session_id, product_variant_id, party_size, policy_json, status) VALUES (?, ?, ?, ?, ?, 2, '{"advance_notice_minutes":null,"party_size_min":null,"party_size_max":null,"minimum_guest_age":null,"accessibility_contact_required":false,"payment":null}', ?)`)
-        .bind(id, ORG, `${location}-tables`, `${id}-seating`, `${location}-table`, status).run()
+      await db.prepare(`INSERT INTO bookings (id, organization_id, product_id, product_session_id, product_variant_id, location_id, starts_at, ends_at, timezone, party_size, policy_json, status, cancelled_at)
+        SELECT ?, organization_id, product_id, id, ?, location_id, starts_at, ends_at, timezone, 2, '{"advance_notice_minutes":null,"party_size_min":null,"party_size_max":null,"minimum_guest_age":null,"accessibility_contact_required":false,"payment":null,"cancellation":null}', ?, CASE WHEN ? = 'cancelled' THEN ? END FROM product_sessions WHERE id = ?`)
+        .bind(id, `${location}-table`, status, status, NOW, `${id}-seating`).run()
     }
     // The pizza class at Brooklyn: a session each weekday evening, Wednesday's booked. The family-law consultation is Dana's hours: two slots on weekdays.
     for (const [id, name, kind] of [['class', 'Pizza Class', 'experience'], ['family', 'Family Law', 'service']]) {
@@ -83,8 +84,10 @@ async function boot() {
       await session(`family-${offset}-a`, 'family', day, 10)
       await session(`family-${offset}-b`, 'family', day, 14)
     }
-    await db.prepare(`INSERT INTO bookings (id, organization_id, product_id, product_session_id, product_variant_id, party_size, policy_json, status) VALUES ('b1', ?, 'class', 'class-2', 'class-seat', 3, '{"advance_notice_minutes":null,"party_size_min":null,"party_size_max":null,"minimum_guest_age":null,"accessibility_contact_required":false,"payment":null}', 'confirmed')`).bind(ORG).run()
-    await db.prepare(`INSERT INTO bookings (id, organization_id, product_id, product_session_id, product_variant_id, party_size, policy_json, status) VALUES ('b2', ?, 'family', 'family-1-a', 'family-seat', 1, '{"advance_notice_minutes":null,"party_size_min":null,"party_size_max":null,"minimum_guest_age":null,"accessibility_contact_required":false,"payment":null}', 'pending')`).bind(ORG).run()
+    await db.prepare(`INSERT INTO bookings (id, organization_id, product_id, product_session_id, product_variant_id, location_id, starts_at, ends_at, timezone, party_size, policy_json, status)
+      SELECT 'b1', organization_id, product_id, id, 'class-seat', location_id, starts_at, ends_at, timezone, 3, '{"advance_notice_minutes":null,"party_size_min":null,"party_size_max":null,"minimum_guest_age":null,"accessibility_contact_required":false,"payment":null,"cancellation":null}', 'confirmed' FROM product_sessions WHERE id = 'class-2' AND organization_id = ?`).bind(ORG).run()
+    await db.prepare(`INSERT INTO bookings (id, organization_id, product_id, product_session_id, product_variant_id, location_id, starts_at, ends_at, timezone, party_size, policy_json, status)
+      SELECT 'b2', organization_id, product_id, id, 'family-seat', location_id, starts_at, ends_at, timezone, 1, '{"advance_notice_minutes":null,"party_size_min":null,"party_size_max":null,"minimum_guest_age":null,"accessibility_contact_required":false,"payment":null,"cancellation":null}', 'pending' FROM product_sessions WHERE id = 'family-1-a' AND organization_id = ?`).bind(ORG).run()
     const principal = (userId: string, role: string) => memberAccessPrincipal({ userId, organizationId: ORG, role } as never, { env })
     return { runtime, db, owner: principal(OWNER, 'owner'), staff: principal(STAFF, 'member') }
   } catch (error) {

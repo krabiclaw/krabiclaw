@@ -16,8 +16,7 @@
       </fieldset>
       <fieldset class="space-y-5">
         <legend class="mb-5 text-lg font-semibold text-highlighted">Guest</legend>
-        <UFormField label="First name" name="guest_name" required><UInput v-model="draft.guest_name" :maxlength="200" autocomplete="given-name" class="w-full" /></UFormField>
-        <UFormField label="Last name" name="guest_surname"><UInput v-model="draft.guest_surname" :maxlength="200" autocomplete="family-name" class="w-full" /></UFormField>
+        <UFormField label="Name" name="guest_name" required><UInput v-model="draft.guest_name" :maxlength="200" autocomplete="name" class="w-full" /></UFormField>
         <UFormField label="Email" name="guest_email"><UInput v-model="draft.guest_email" type="email" :maxlength="254" autocomplete="email" class="w-full" /></UFormField>
         <UFormField label="Phone" name="guest_phone"><UInput v-model="draft.guest_phone" type="tel" placeholder="+66812345678" :maxlength="40" autocomplete="tel" class="w-full" /></UFormField>
         <div class="grid gap-5 sm:grid-cols-3">
@@ -30,7 +29,7 @@
       <fieldset v-if="home" class="space-y-5">
         <legend class="mb-5 text-lg font-semibold text-highlighted">Total</legend>
         <UFormField :label="`Stay total (${home.currency})`" name="total" required><UInput v-model="draft.total" inputmode="decimal" class="w-full" /></UFormField>
-        <UFormField label="Notes" name="notes"><UTextarea v-model="draft.notes" :maxlength="2000" class="w-full" /></UFormField>
+        <UFormField label="Private note" name="private_notes" help="Only your team sees this."><UTextarea v-model="draft.private_notes" :maxlength="2000" class="w-full" /></UFormField>
         <USwitch v-model="draft.record_payment" label="Record a payment already received" />
         <template v-if="draft.record_payment">
           <p class="text-sm text-muted">Record money you received outside KrabiClaw. This does not charge your guest.</p>
@@ -85,8 +84,8 @@ const loadError = computed(() => queryError.value || (error.value ? getErrorMess
 function initialDraft() {
   return {
     product_id: suppliedHome, check_in_date: suppliedCheckIn, check_out_date: suppliedCheckOut, arrival_time: '',
-    guest_name: '', guest_surname: '', guest_email: '', guest_phone: '', adults: 1 as number | undefined, children: 0 as number | undefined, infants: 0 as number | undefined,
-    total: '', notes: '', record_payment: false, payment_amount: '', payment_method: undefined as StayPaymentMethod | undefined, payment_date: '', payment_reference: '',
+    guest_name: '', guest_email: '', guest_phone: '', adults: 1 as number | undefined, children: 0 as number | undefined, infants: 0 as number | undefined,
+    total: '', private_notes: '', record_payment: false, payment_amount: '', payment_method: undefined as StayPaymentMethod | undefined, payment_date: '', payment_reference: '',
     key: crypto.randomUUID(), attempt: null as Record<string, unknown> | null,
   }
 }
@@ -134,8 +133,8 @@ async function commit() {
   try {
     draft.value.attempt ??= {
       product_id: draft.value.product_id, check_in_date: draft.value.check_in_date, check_out_date: draft.value.check_out_date, arrival_time: draft.value.arrival_time || null,
-      adults: draft.value.adults, children: draft.value.children, infants: draft.value.infants, guest_name: draft.value.guest_name.trim(), guest_surname: draft.value.guest_surname.trim() || null,
-      guest_email: draft.value.guest_email.trim() || null, guest_phone: draft.value.guest_phone.trim() || null, total_minor: amount(draft.value.total), notes: draft.value.notes.trim() || null, idempotency_key: draft.value.key,
+      adults: draft.value.adults, children: draft.value.children, infants: draft.value.infants, guest_name: draft.value.guest_name.trim(),
+      guest_email: draft.value.guest_email.trim() || null, guest_phone: draft.value.guest_phone.trim() || null, total_minor: amount(draft.value.total), private_notes: draft.value.private_notes.trim() || null, idempotency_key: draft.value.key,
       ...(draft.value.record_payment ? { payment: { amount_minor: amount(draft.value.payment_amount), method: draft.value.payment_method, paid_on: draft.value.payment_date, reference: draft.value.payment_reference.trim() || null } } : {}),
     }
     const result = await api('/api/dashboard/stays', { method: 'POST', body: draft.value.attempt, signal: mutation.signal, validate: (value): value is { stay: { id: string } } => isRecord(value) && isRecord(value.stay) && typeof value.stay.id === 'string' && Boolean(value.stay.id) && Object.hasOwn(value.stay, 'channel_push') && isSuccessfulChannelPush(value.stay.channel_push) })

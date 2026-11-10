@@ -123,7 +123,7 @@ export async function receiveGuestWebReply(env:CloudflareEnv,input:{threadId:str
   const thread=await getGuestRequest(env.DB,input.threadId,undefined,undefined,input.userId)
   if(!thread||thread.user_id!==input.userId)throw new HTTPError({statusCode:404,statusMessage:'Conversation not found'})
   const record=await getThreadOperationalRecord(env.DB,thread.id)
-  if(record&&(record.user_id!==input.userId||record.organization_id!==thread.organization_id||record.kind!==thread.kind))throw new HTTPError({statusCode:404,statusMessage:'Conversation not found'})
+  if(record&&(record.user_id!==input.userId||record.organization_id!==thread.organization_id))throw new HTTPError({statusCode:404,statusMessage:'Conversation not found'})
   const body=input.body.trim()
   if(!body&&!input.photos.length)throw new HTTPError({statusCode:400,statusMessage:'Write a message or add a photo'})
   // The upload's bytes and name are immutable input, so a reused key cannot

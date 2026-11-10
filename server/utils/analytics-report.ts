@@ -310,23 +310,20 @@ const FUNNEL_SUBMIT_SQL_LIST = FUNNEL_EVENTS.filter(({ step }) => step === 'subm
 async function loadFunnel(db: DbClient, organizationId: string, start: string, end: string, visits: { total: number; bySource: Array<{ source: string; medium: string; sessions: number }> }) {
   const [eventRows, locationVisitRows] = await Promise.all([
     queryAll<Record<string, unknown>>(db, `SELECT location_id, source, medium, step, currency, COUNT(*) events, SUM(submits) submitted,
-        SUM(submits AND (
-          EXISTS (SELECT 1 FROM bookings b WHERE b.request_id = thread_id AND b.organization_id = ? AND b.status = 'confirmed')
-          OR EXISTS (SELECT 1 FROM stays st WHERE st.request_id = thread_id AND st.organization_id = ? AND st.status = 'confirmed'))) confirmed,
+        SUM(submits AND EXISTS (SELECT 1 FROM bookings b WHERE b.request_id = thread_id AND b.organization_id = ? AND b.status = 'confirmed')) confirmed,
         SUM(collected_minor) collected_minor
       FROM (SELECT *, step = 'submitted' OR (step = 'paid' AND thread_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM analytics_events s
             WHERE s.organization_id = ? AND s.kind = 'conversion' AND (s.payload_json ->> '$.event_name') IN (${FUNNEL_SUBMIT_SQL_LIST})
               AND (s.payload_json ->> '$.entity_type') = 'request' AND (s.payload_json ->> '$.entity_id') = thread_id)) submits
         FROM (SELECT location_id, (payload_json ->> '$.attribution.source') source, (payload_json ->> '$.attribution.medium') medium,
             ${FUNNEL_STEP_SQL} step, (payload_json ->> '$.value.currency') currency, (payload_json ->> '$.value.collected_minor') collected_minor,
-            CASE WHEN (payload_json ->> '$.event_name') = 'payment_paid' THEN (SELECT COALESCE(b.request_id, st.request_id) FROM payments p
+            CASE WHEN (payload_json ->> '$.event_name') = 'payment_paid' THEN (SELECT b.request_id FROM payments p
                 LEFT JOIN bookings b ON p.subject_type = 'booking' AND b.id = p.subject_id AND b.organization_id = p.organization_id
-                LEFT JOIN stays st ON p.subject_type = 'stay' AND st.id = p.subject_id AND st.organization_id = p.organization_id
                 WHERE p.id = (payload_json ->> '$.entity_id') AND p.organization_id = analytics_events.organization_id)
               ELSE (payload_json ->> '$.entity_id') END thread_id
           FROM analytics_events WHERE kind IN ('conversion', 'interaction') AND organization_id = ? AND created_at >= ? AND created_at < ?
             AND (payload_json ->> '$.event_name') IN (${FUNNEL_EVENT_SQL_LIST})))
-      GROUP BY 1,2,3,4,5`, [organizationId, organizationId, organizationId, organizationId, start, end]),
+      GROUP BY 1,2,3,4,5`, [organizationId, organizationId, organizationId, start, end]),
     queryAll<{ location_id: string | null; sessions: number }>(db, `SELECT location_id, COUNT(DISTINCT session_id) sessions FROM analytics_events
       WHERE organization_id = ? AND kind = 'pageview' AND created_at >= ? AND created_at < ? GROUP BY 1`, [organizationId, start, end]),
   ])

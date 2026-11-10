@@ -84,7 +84,10 @@ type ChangeEnv = CloudflareEnv
 
 async function sourceSummary(db: DbClient, thread: GuestThreadRow) {
   if (thread.kind !== 'booking') throw new HTTPError({ statusCode: 400, message: 'This conversation has no changeable booking', data: { code: 'BOOKING_CHANGE_UNSUPPORTED', field: 'kind' } })
-  return { ...await requestSummary(db, thread), guestName: thread.payload.guest.name }
+  const summary = await requestSummary(db, thread)
+  const { name, email } = thread.payload.guest
+  if (name === null || email === null) throw new HTTPError({ statusCode: 400, message: 'This conversation has no changeable booking', data: { code: 'BOOKING_CHANGE_UNSUPPORTED', field: 'guest' } })
+  return { ...summary, guestName: name, guestEmail: email }
 }
 
 function localLabel(instant: string, timezone: string): string {
@@ -119,11 +122,12 @@ function localParts(instant: string, timezone: string): { label: string; date: s
  */
 async function loadSource(db: DbClient, thread: GuestThreadRow): Promise<Source> {
   if (thread.kind === 'contact') throw new HTTPError({ statusCode: 400, message: 'This conversation is not a booking' })
-  // A stay's dates and party are changed on the stay itself, not proposed through its thread.
-  if (thread.kind === 'stay') throw new HTTPError({ statusCode: 400, message: 'Change a stay from the stay itself' })
   const record = await getThreadOperationalRecord(db, thread.id)
-  if (!record || record.kind !== 'booking') throw new HTTPError({ statusCode: 409, message: 'This conversation has no booking to change' })
-  const payload = thread.payload as { party_size_is_minimum: boolean; notes: string | null; guest: { name: string; email: string; phone: string | null } }
+  if (!record) throw new HTTPError({ statusCode: 409, message: 'This conversation has no booking to change' })
+  // A stay's dates and party are changed on the stay itself, not proposed through its thread.
+  if (record.unit === 'nights') throw new HTTPError({ statusCode: 400, message: 'Change a stay from the stay itself' })
+  const { name, email, phone } = thread.payload.guest
+  if (name === null || email === null) throw new HTTPError({ statusCode: 409, message: 'This conversation has no booking to change' })
   const booking = await queryFirst<{ product_session_id: string; updated_at: string }>(db, 'SELECT product_session_id, updated_at FROM bookings WHERE id=? AND organization_id=?', [record.id, thread.organization_id])
   if (!booking) throw new HTTPError({ statusCode: 409, message: 'The booking changed while its current state was being read. Reload and try again.' })
   return {
@@ -131,7 +135,7 @@ async function loadSource(db: DbClient, thread: GuestThreadRow): Promise<Source>
     recordKind: 'booking', recordId: record.id, status: record.status, partySize: record.party_size,
     startsAt: record.starts_at, endsAt: record.ends_at, timezone: record.timezone,
     locationId: record.location_id, productId: record.product_id,
-    updatedAt: booking.updated_at, partySizeIsMinimum: payload.party_size_is_minimum, notes: payload.notes, guest: payload.guest,
+    updatedAt: booking.updated_at, partySizeIsMinimum: record.party_size_is_minimum, notes: thread.payload.notes, guest: { name, email, phone },
   }
 }
 
@@ -498,7 +502,11 @@ export async function moveBooking(db: DbClient, env: CloudflareEnv, thread: Gues
         `Moved to ${destination.label} for ${after.partySize} guests${destination.title ? ` at ${destination.title}` : ''}.`,
         JSON.stringify(payload), dedupeKey, thread.id, now, now, thread.id, thread.organization_id],
     }, {
-      query: `UPDATE requests SET updated_at = ?, payload_json = json_set(payload_json, '$.party_size_is_minimum', json('false'))
+      // A moved booking is the party it moved with, no longer "this many or more".
+      query: 'UPDATE bookings SET party_size_is_minimum = 0 WHERE id = ? AND organization_id = ? AND EXISTS (SELECT 1 FROM activity_entries WHERE id = ?)',
+      params: [before.recordId, thread.organization_id, id],
+    }, {
+      query: `UPDATE requests SET updated_at = ?
                WHERE id = ? AND organization_id = ? AND EXISTS (SELECT 1 FROM activity_entries WHERE id = ?)`,
       params: [now, thread.id, thread.organization_id, id],
     }]
@@ -507,7 +515,7 @@ export async function moveBooking(db: DbClient, env: CloudflareEnv, thread: Gues
     if (!entry) throw new HTTPError({ statusCode: 409, message: 'That session filled up or the booking changed; it has not moved' })
   }
   // Its automatic messages move with it.
-  await (await import('~/server/domain/scheduled-guest-messages')).planSourceMessages(db, thread.organization_id, { kind: before.recordKind, id: before.recordId })
+  await (await import('~/server/domain/scheduled-guest-messages')).planSourceMessages(db, thread.organization_id, before.recordId)
   const noun = await bookingNoun(db, thread)
   await deliverEmail(db, env, thread, entry.id, entry.id, 'moved', proposalSchema.parse(JSON.parse(entry.payload_json || '{}')), noun)
   await updateThreadProjectionIfLatestEntry(db, thread.id, entry.id)
@@ -516,7 +524,8 @@ export async function moveBooking(db: DbClient, env: CloudflareEnv, thread: Gues
 
 type ChangeSide = { whenLabel: string; partySize: number; assignedMemberId: string | null; assignedMemberName: string | null; totalLabel?: string }
 export type BookingChangeView = {
-  type: GuestThreadRow['kind']; noun: string; guestName: string; locale: string; vertical: string | null
+  /** A stay's change (its channel's request) or any other booking's. */
+  type: 'booking' | 'stay'; noun: string; guestName: string; locale: string; vertical: string | null
   /** The business proposes and the guest answers; a guest's request on their channel is answered by the business. */
   requestedBy: 'business' | 'guest'; channel?: 'airbnb'
   before: ChangeSide
@@ -528,7 +537,7 @@ export type BookingChangeView = {
 async function proposalView(db: DbClient, thread: GuestThreadRow, proposal: z.infer<typeof proposalSchema>, state: Pick<BookingChangeView, 'status' | 'message'>): Promise<BookingChangeView> {
   const guest = await changePresentation(db, thread, proposal)
   const summary = await sourceSummary(db, thread)
-  return { type: thread.kind, noun: await bookingNoun(db, thread), guestName: summary.guestName, locale: guest.locale, vertical: guest.vertical, requestedBy: 'business',
+  return { type: 'booking', noun: await bookingNoun(db, thread), guestName: summary.guestName, locale: guest.locale, vertical: guest.vertical, requestedBy: 'business',
     before: guest.before, after: guest.after, locationTitle: guest.locationTitle, originalLocationTitle: guest.originalLocationTitle, ...state }
 }
 
@@ -614,7 +623,10 @@ export async function respondToBookingChange(db: DbClient, env: ChangeEnv, input
     queries.push(entryInsert)
     if (destination) {
       queries.push({
-        query: `UPDATE requests SET updated_at = ?, payload_json = json_set(payload_json, '$.party_size_is_minimum', json('false'))
+        query: `UPDATE bookings SET party_size_is_minimum = 0 WHERE id = ? AND organization_id = ? AND ${guard}`,
+        params: [current.recordId, thread.organization_id, id],
+      }, {
+        query: `UPDATE requests SET updated_at = ?
                  WHERE id = ? AND organization_id = ? AND ${guard}`,
         params: [now, thread.id, thread.organization_id, id],
       })
@@ -633,7 +645,7 @@ export async function respondToBookingChange(db: DbClient, env: ChangeEnv, input
   if (result && input.decision) {
     const accepted = result.event_name === 'booking_change.accepted'
     // An accepted move takes its automatic messages with it.
-    if (accepted) await (await import('~/server/domain/scheduled-guest-messages')).planSourceMessages(db, thread.organization_id, { kind: current.recordKind, id: current.recordId })
+    if (accepted) await (await import('~/server/domain/scheduled-guest-messages')).planSourceMessages(db, thread.organization_id, current.recordId)
     await updateThreadProjectionIfLatestEntry(db, thread.id, result.id)
     if (!result.payload_json) throw new Error('A booking change answer has no recorded payload')
     const answered = JSON.parse(result.payload_json) as { operational_booking_id?: unknown }

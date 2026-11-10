@@ -16,6 +16,7 @@ import { executeBatch, queryAll, type DbClient } from '../server/db/index.ts'
 import { businessReplyAfterSql, CANCELLED_AFTER_SQL, conversationTaskQueries, GUEST_QUESTION_SQL } from '../server/domain/guest-threads/repository.ts'
 import { messageDeliveryTaskQueries, turnoverTaskQueries, type StayWindow } from '../server/domain/tasks.ts'
 import { localDateAt } from '../utils/timezone.ts'
+import { bookingDay } from '../server/domain/requests.ts'
 
 const { values } = parseArgs({ options: { staging: { type: 'boolean', default: false }, production: { type: 'boolean', default: false }, 'dry-run': { type: 'boolean', default: false } }, strict: true })
 if (values.staging === values.production) throw new Error('Pass exactly one of --staging or --production.')
@@ -27,13 +28,13 @@ async function backfill(db: DbClient) {
   const migrated = (await queryAll(db, "SELECT name FROM sqlite_schema WHERE type = 'table' AND name = 'tasks'")).length === 1
   if (!migrated && !dryRun) throw new Error('This database has no tasks table: run against the v24 replacement.')
   const absent = (sql: string) => migrated ? `AND NOT EXISTS (${sql})` : ''
-  const stays = (await queryAll<StayWindow & { organization_id: string; timezone: string }>(db, `
-    SELECT s.id, s.organization_id, s.product_id, s.status, s.check_in_date, s.check_out_date, l.timezone
-      FROM stays s JOIN product_stay_configs c ON c.organization_id = s.organization_id AND c.product_id = s.product_id
-      JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
-     WHERE s.status = 'confirmed' AND s.check_out_date >= date('now', '-1 day')
+  const stays = (await queryAll<{ id: string; organization_id: string; product_id: string; status: StayWindow['status']; starts_at: string; ends_at: string; timezone: string }>(db, `
+    SELECT s.id, s.organization_id, s.product_id, s.status, s.starts_at, s.ends_at, s.timezone
+      FROM bookings s
+     WHERE s.product_session_id IS NULL AND s.status = 'confirmed' AND s.ends_at >= date('now', '-2 days')
        ${absent("SELECT 1 FROM tasks t WHERE t.dedupe_key = 'turnover:' || s.id")}
-     ORDER BY s.check_out_date, s.id`)).filter(stay => stay.check_out_date >= localDateAt(now, stay.timezone))
+     ORDER BY s.ends_at, s.id`)).map(stay => ({ ...stay, check_in_date: bookingDay(stay.starts_at, stay.timezone), check_out_date: bookingDay(stay.ends_at, stay.timezone) }))
+    .filter(stay => stay.check_out_date >= localDateAt(now, stay.timezone))
   const conversations = await queryAll<{ id: string }>(db, `
     SELECT DISTINCT r.id
       FROM requests r JOIN activity_entries guest_entry ON guest_entry.request_id = r.id

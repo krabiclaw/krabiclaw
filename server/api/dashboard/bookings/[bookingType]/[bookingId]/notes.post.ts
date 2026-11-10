@@ -1,7 +1,7 @@
 import { defineHandler, HTTPError } from 'nitro'
 import { getRouterParam, readBody } from 'nitro/h3'
 import { apiErrorResponse, jsonResponse } from '~/server/utils/api-response'
-import { addDashboardBookingNote, isDashboardBookingType } from '~/server/utils/dashboard-booking-details'
+import { setDashboardBookingNote, isDashboardBookingType } from '~/server/utils/dashboard-booking-details'
 
 export default defineHandler(async (event) => {
   const bookingType = getRouterParam(event, 'bookingType')
@@ -10,7 +10,7 @@ export default defineHandler(async (event) => {
     throw new HTTPError({ statusCode: 400, message: 'Valid booking type and ID are required' })
   }
   try {
-    const booking = await addDashboardBookingNote(event, {
+    const booking = await setDashboardBookingNote(event, {
       type: bookingType,
       bookingId,
       body: await readBody(event),

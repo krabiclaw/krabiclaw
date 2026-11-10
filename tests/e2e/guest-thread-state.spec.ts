@@ -864,69 +864,33 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
   await expect(page.getByText(guestEmail, { exact: true })).toBeVisible()
   await page.goBack()
 
+  // The team's one private note lives on the booking, saved as a whole when the field is left; it never enters the conversation.
   const note = `Today page note ${Date.now()}`
   const noteContext = `?range=upcoming&locationId=${demoLocationId()}&kinds=booking`
   const recordPath = `/dashboard/${demoSlug()}/bookings/booking/${bookingIds[0]}`
   const noteEndpoint = `/api/dashboard/bookings/booking/${bookingIds[0]}/notes`
+  const readBooking = async () => {
+    const read = await page.request.get(`/api/dashboard/bookings/booking/${bookingIds[0]}`, { params: { org: demoSlug() } })
+    await expectStatus(read, 200)
+    return (await read.json() as { booking: DashboardBookingDetails }).booking
+  }
   await page.goto(`${baseURL}${recordPath}${noteContext}`)
-  const noteInput = detailPanel.getByRole('textbox', { name: 'Add a note to yourself', exact: true })
-  await noteInput.fill(note)
-  const noteWrite = page.waitForResponse(response => new URL(response.url()).pathname === noteEndpoint && response.request().method() === 'POST')
-  await detailPanel.getByText('Your notes', { exact: true }).click()
-  const noteResponse = await noteWrite
-  await expectStatus(noteResponse, 200)
-  expect(noteResponse.request().postDataJSON()).toMatchObject({ note, idempotencyKey: expect.any(String) })
-  expect(noteResponse.request().postDataJSON()).not.toHaveProperty('noteId')
-  await expect(noteInput).toHaveValue('')
-  // The member's conversation says the note in its own words, once; the ledger keeps it private.
-  const notedThread = await loadThreadDetail(page.request, summary.threadId!, demoOrganizationId())
-  const addedNotes = streamEvents(notedThread, note)
-  expect(addedNotes).toHaveLength(1)
-  expect((await loadLedger(page.request, summary.threadId!, demoOrganizationId())).entries.filter(entry => entry.id === addedNotes[0]!.id))
-    .toMatchObject([{ kind: 'operation', channel: 'system', event: 'internal_note.added', body: note, payload: { private: true } }])
-  const notePath = `${recordPath}/notes/${addedNotes[0]!.id}${noteContext}`
-  const editNote = detailPanel.getByRole('link', { name: `Edit note: ${note}`, exact: true })
-  await expect(editNote).toHaveAttribute('href', notePath)
-  const secondNote = `${note} added while opening the saved note`
-  await noteInput.fill(secondNote)
-  const secondWrite = page.waitForResponse(response => new URL(response.url()).pathname === noteEndpoint
-    && response.request().method() === 'POST' && response.request().postDataJSON().note === secondNote)
-  // Clicking the saved note causes blur and navigation together, without an
-  // artificial pause between the real writer and the route transition.
-  await editNote.click()
-  const secondResponse = await secondWrite
-  await expectStatus(secondResponse, 200)
-  expect(secondResponse.request().postDataJSON()).toMatchObject({ note: secondNote, idempotencyKey: expect.any(String) })
-  const secondThread = await loadThreadDetail(page.request, summary.threadId!, demoOrganizationId())
-  const secondNotes = streamEvents(secondThread, secondNote)
-  expect(secondNotes).toHaveLength(1)
-  expect((await loadLedger(page.request, summary.threadId!, demoOrganizationId())).entries.filter(entry => entry.id === secondNotes[0]!.id))
-    .toMatchObject([{ kind: 'operation', channel: 'system', event: 'internal_note.added', body: secondNote, payload: { private: true } }])
-  await expect(page).toHaveURL(`${baseURL}${notePath}`)
-  await expect(page.getByLabel('Note', { exact: true })).toHaveValue(note)
-  await expect(noteInput).toHaveCount(0)
-  // Beside its index a leaf carries only Save — Airbnb's shape at two columns,
-  // measured 2026-09-21 — so leaving one here is the index's own Back. Cancel
-  // belongs to the sheet the leaf becomes below `lg`. The rule is the leaf's, so
-  // it is asserted inside the leaf. The record is its direct parent.
-  await expect(page.locator('#dashboard-panel-booking-note').getByRole('button', { name: 'Cancel', exact: true })).toBeHidden()
-  await expect(page.locator('#dashboard-panel-booking-note').getByRole('button', { name: 'Save', exact: true })).toBeVisible()
-  const revisedNote = `${note} revised`
-  await page.getByLabel('Note', { exact: true }).fill(revisedNote)
-  const noteRevisionWrite = page.waitForResponse(response => new URL(response.url()).pathname === noteEndpoint && response.request().method() === 'POST')
-  await page.locator('#dashboard-panel-booking-note').getByRole('button', { name: 'Save', exact: true }).click()
-  const noteRevisionResponse = await noteRevisionWrite
-  await expectStatus(noteRevisionResponse, 200)
-  expect(noteRevisionResponse.request().postDataJSON()).toEqual({ note: revisedNote, idempotencyKey: expect.any(String), noteId: addedNotes[0]!.id, revisionId: addedNotes[0]!.id })
-  await expect(page).toHaveURL(`${baseURL}${recordPath}${noteContext}`)
-  await expect(noteInput).toHaveValue('')
-  const revisedThread = await loadThreadDetail(page.request, summary.threadId!, demoOrganizationId())
-  const revisedNotes = streamEvents(revisedThread, revisedNote)
-  expect(revisedNotes).toHaveLength(1)
-  expect((await loadLedger(page.request, summary.threadId!, demoOrganizationId())).entries.filter(entry => entry.id === revisedNotes[0]!.id))
-    .toMatchObject([{ kind: 'operation', channel: 'system', event: 'internal_note.updated', body: revisedNote,
-      payload: { private: true, noteId: addedNotes[0]!.id, revisionId: addedNotes[0]!.id } }])
-  await expect(detailPanel.getByRole('link', { name: `Edit note: ${revisedNote}`, exact: true })).toHaveAttribute('href', notePath)
+  const noteInput = detailPanel.getByRole('textbox', { name: 'Private note', exact: true })
+  for (const [written, expectedUpdatedAt] of [[note, summary.operationalUpdatedAt], [`${note} revised`, null]] as const) {
+    const before = await readBooking()
+    if (expectedUpdatedAt) expect(before.operationalUpdatedAt).toBe(expectedUpdatedAt)
+    await noteInput.fill(written)
+    const noteWrite = page.waitForResponse(response => new URL(response.url()).pathname === noteEndpoint && response.request().method() === 'POST')
+    await detailPanel.getByText('Private note', { exact: true }).click()
+    const noteResponse = await noteWrite
+    await expectStatus(noteResponse, 200)
+    expect(noteResponse.request().postDataJSON()).toEqual({ note: written, operationalUpdatedAt: before.operationalUpdatedAt })
+    // Read back through the booking, not the write's own answer.
+    expect((await readBooking()).privateNotes).toBe(written)
+    await expect(noteInput).toHaveValue(written)
+    // Nothing in the conversation carries it: no message, event or preview.
+    expect(JSON.stringify(await loadThreadDetail(page.request, summary.threadId!, demoOrganizationId()))).not.toContain(written)
+  }
 
   // Change is one sheet beneath the record, as Airbnb's: the details are edited
   // in place and one footer commit sends the request the guest confirms.

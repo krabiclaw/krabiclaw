@@ -43,6 +43,7 @@ for (const field of ['stayId', 'locationId']) {
   const value = route.query[field]
   if (value !== undefined && (typeof value !== 'string' || !value.trim())) throw createError({ statusCode: 400, statusMessage: `${field} must name one explicit context` })
 }
+// A stay's conversation names its booking.
 const stayId = typeof route.query.stayId === 'string' ? route.query.stayId : null
 const locationId = typeof route.query.locationId === 'string' ? route.query.locationId : null
 const location = locationId ? dashboard.locations.value.find(location => location.id === locationId) : null
@@ -59,7 +60,7 @@ async function start() {
   saving.value = true
   actionError.value = ''
   try {
-    const body = { memberIds: [...selected.value].sort(), ...(selected.value.length >= 2 && !stayId && !locationId && name.value.trim() ? { name: name.value.trim() } : {}), ...(stayId ? { stayId } : {}), ...(locationId ? { locationId } : {}) }
+    const body = { memberIds: [...selected.value].sort(), ...(selected.value.length >= 2 && !stayId && !locationId && name.value.trim() ? { name: name.value.trim() } : {}), ...(stayId ? { bookingId: stayId } : {}), ...(locationId ? { locationId } : {}) }
     const identity = JSON.stringify(body)
     if (attempt?.identity !== identity) attempt = { identity, key: crypto.randomUUID() }
     const thread = await api('/api/dashboard/team/threads', {
