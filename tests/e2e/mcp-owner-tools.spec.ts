@@ -419,7 +419,7 @@ test.describe('stateless MCP server', () => {
       const inboxReservation = mcpData<{ conversations: Array<{ request_id: string }> }>(await reservationInbox.json())
         .conversations.find(row => row.request_id === reservationThreadId)
       expect(inboxReservation).toMatchObject({ guest_name: 'MCP Reservation', type: 'reservation' })
-      expect(Object.keys(inboxReservation!).sort()).toEqual(['guest_name', 'needs_reply', 'operational_status', 'participant_label', 'reply_channel', 'reply_not_possible', 'request_id', 'type', 'updated_at'])
+      expect(Object.keys(inboxReservation!).sort()).toEqual(['guest_name', 'needs_reply', 'operational_status', 'participant_label', 'reply_channel', 'reply_not_possible', 'request_id', 'type', 'unread', 'updated_at'])
 
       const listContacts = await mcpRequest(request, baseURL!, {
         method: 'tools/call',
@@ -451,6 +451,17 @@ test.describe('stateless MCP server', () => {
       expect(unchangedContact.status()).toBe(200)
       const unchangedContactState = (await unchangedContact.json() as { thread: InboxThread }).thread
       expect(unchangedContactState.stream.filter(item => item.type === 'message')).toMatchObject([{ side: 'guest', body: 'hello from MCP e2e' }])
+      // Opening it above read it; MCP marks it unread and read again, and the inbox list reads each back.
+      const contactUnread = async () => mcpData<{ conversations: Array<{ request_id: string; unread: boolean }> }>(await (await mcpRequest(request, baseURL!, {
+        method: 'tools/call', toolName: 'list_guest_conversations', args: { organization_id: organizationId, type: 'contact', limit: 100 },
+      })).json()).conversations.find(row => row.request_id === contactSubmission!.request_id)?.unread
+      expect(await contactUnread()).toBe(false)
+      for (const read of [false, true]) {
+        const marked = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'set_guest_conversation_read', args: { organization_id: organizationId, request_id: contactSubmission!.request_id, read } })
+        expect(marked.status()).toBe(200)
+        expect(mcpData<{ request_id: string; unread: boolean }>(await marked.json())).toEqual({ request_id: contactSubmission!.request_id, unread: !read })
+        expect(await contactUnread()).toBe(!read)
+      }
       for (const archived of [true, false]) {
         const archive = await mcpRequest(request,baseURL!,{method:'tools/call',toolName:'set_guest_conversation_archived',args:{organization_id:organizationId,request_id:contactSubmission!.request_id,archived,idempotency_key:crypto.randomUUID()}})
         expect(archive.status()).toBe(200)
