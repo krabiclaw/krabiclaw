@@ -372,6 +372,10 @@ test('experience and dining Calendar management links follow canonical buyer own
       assert.ok(!JSON.stringify(event).includes('PRIVATE NOTES'))
       assert.ok(!JSON.stringify(event).includes('/dashboard/org/'))
     }
+    const identities=[...events.keys()]
+    assert.equal((await syncCalendarOrganization(env,'org',25,provider)).failed,0)
+    assert.deepEqual([...events.keys()],identities,'a second sync keeps each event identity')
+    assert.equal(inserts,2,'a second sync updates the events instead of creating more')
     for(const event of events.values()) assert.ok(String(event.description).includes('/dashboard/account/activity/'))
   } finally {await runtime.dispose()}
 })
