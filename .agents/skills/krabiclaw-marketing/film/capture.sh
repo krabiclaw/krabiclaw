@@ -40,5 +40,6 @@ done
 [[ $r == true:* && ${r#true:} -gt 80 ]] || { echo "$name: $want never finished loading ($r)" >&2; exit 1; }
 sleep 2.5
 js "document.documentElement.outerHTML" > $out/html/$name.html
-node $here/render-capture.mjs $out/html/$name.html $out/$name.png "$sel" "$top"
+origin=${url%%://*}://${${url#*://}%%/*}/
+node $here/render-capture.mjs $out/html/$name.html $out/$name.png $origin "$sel" "$top"
 echo $out/$name.png
