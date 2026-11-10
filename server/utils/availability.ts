@@ -962,7 +962,7 @@ export async function sessionAllocationPredicate(db: DbClient, input: SessionAll
             WHERE c.product_id=s.product_id AND c.organization_id=s.organization_id AND c.duration_minutes>0
               ${input.chargedPaymentId || input.requireActive === false ? '' : 'AND p.active=1'} AND (s.location_id IS NOT NULL OR c.held_online=1)
               -- Advance notice: a start inside it is not booked or moved onto. A paid hold already passed it when it was taken.
-              ${input.chargedPaymentId ? '' : "AND julianday(s.starts_at) > julianday(?) + COALESCE(c.advance_notice_minutes, 0) / 1440.0"})
+              ${input.chargedPaymentId ? '' : "AND julianday(s.starts_at) > julianday('now') + COALESCE(c.advance_notice_minutes, 0) / 1440.0"})
           AND (${location.query})
           -- The location's own sale switch is part of being bookable: a branch
           -- that has stopped selling this does not take seats for it.
@@ -983,7 +983,7 @@ export async function sessionAllocationPredicate(db: DbClient, input: SessionAll
       ...(input.requireUndecided
         ? [input.requireUndecided.requestId, input.requireUndecided.organizationId, input.requireUndecided.updatedAt, input.requireUndecided.decisionDedupeKey]
         : []),
-      input.sessionId, input.organizationId, input.productId, ...(input.chargedPaymentId ? [] : [input.now]), ...location.params!, input.now, ...providerAvailabilityParams(availability), input.replacingBookingId ?? null, input.chargedPaymentId ?? null, ...(input.chargedPaymentId ? [input.chargedPaymentId] : []), input.partySize, input.chargedPaymentId ?? null, input.replacingBookingId ?? null,
+      input.sessionId, input.organizationId, input.productId, ...location.params!, input.now, ...providerAvailabilityParams(availability), input.replacingBookingId ?? null, input.chargedPaymentId ?? null, ...(input.chargedPaymentId ? [input.chargedPaymentId] : []), input.partySize, input.chargedPaymentId ?? null, input.replacingBookingId ?? null,
   ] }
 }
 

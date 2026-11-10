@@ -193,8 +193,11 @@ test('guest class cancellation refunds through Stripe until 24 hours before the 
  }
 })
 
-test('a two-day advance notice closes a guest\'s own class cancellation two days before, and refunds until then', { timeout: 120_000 }, async t => {
- for (const open of [true, false]) {
+test('an advance notice closes a guest\'s own class cancellation at the notice, refunds until the longer of it and 24 hours, and no notice keeps cancellation open until the end', { timeout: 120_000 }, async t => {
+ const HOUR = 3_600_000
+ // [notice minutes, now relative to the start, cancelled, refunded]
+ const cases: Array<[number | null, number, boolean, boolean]> = [[2880, -48 * HOUR - 1, true, true], [2880, -48 * HOUR + 1, false, false], [120, -12 * HOUR, true, false], [120, -2 * HOUR + 1, false, false], [null, 30 * 60_000, true, false]]
+ for (const [notice, offset, open, refunded] of cases) {
   const { db, runtime } = await boot()
   try {
    const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-proof-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only', STRIPE_SECRET_KEY: 'sk_test_local_boundary' }
@@ -204,10 +207,10 @@ test('a two-day advance notice closes a guest\'s own class cancellation two days
    await payable(db, 'notice-payment')
    await db.prepare("UPDATE payments SET buyer_user_id='verified',subject_id=?,captured_amount=10000,stripe_payment_intent_id='pi_notice',stripe_charge_id='ch_notice' WHERE id='notice-payment'").bind(booking.bookingId).run()
    await db.prepare("UPDATE payment_checkout_holds SET buyer_user_id='verified',request_id=?,status='converted',converted_booking_id=? WHERE payment_id='notice-payment'").bind(opening.id, booking.bookingId).run()
-   await db.prepare("UPDATE product_booking_configs SET advance_notice_minutes=2880 WHERE product_id='product'").run()
+   await db.prepare("UPDATE product_booking_configs SET advance_notice_minutes=? WHERE product_id='product'").bind(notice).run()
    const startsAt = await db.prepare("SELECT starts_at FROM product_sessions WHERE id='session'").first<string>('starts_at')
    assert(startsAt)
-   const now = new Date(Date.parse(startsAt) - 2 * 86_400_000 + (open ? -1 : 1)).toISOString()
+   const now = new Date(Date.parse(startsAt) + offset).toISOString()
    const originalFetch = globalThis.fetch
    let creations = 0
    const fetchMock = t.mock.method(globalThis, 'fetch', async (request, init) => {
@@ -223,11 +226,11 @@ test('a two-day advance notice closes a guest\'s own class cancellation two days
    try {
     const cancel = cancelBookingRequest(db, { id: opening.id, organizationId: ORG, kind: 'booking', now, env, buyerUserId: 'verified' })
     if (open) assert.equal((await cancel)?.changed, true)
-    else await assert.rejects(cancel, (error: HTTPError) => error.statusCode === 409 && (error.data as { code?: string }).code === 'cancellation_closed' && /closed 2 days before the start/.test(error.message))
+    else await assert.rejects(cancel, (error: HTTPError) => error.statusCode === 409 && (error.data as { code?: string }).code === 'cancellation_closed' && error.message.includes(`closed ${notice === 2880 ? '2 days' : '2 hours'} before the start`))
     assert.deepEqual(await db.prepare('SELECT status,cancellation_reason FROM bookings WHERE id=?').bind(booking.bookingId).first(), open ? { status: 'cancelled', cancellation_reason: 'guest_cancelled' } : { status: 'pending', cancellation_reason: null })
     assert.equal(await db.prepare("SELECT json_extract(payload_json,'$.cancellation.used_at') used FROM requests WHERE id=?").bind(opening.id).first('used'), open ? now : null)
-    assert.deepEqual(await db.prepare("SELECT refunded_amount FROM payments WHERE id='notice-payment'").first(), { refunded_amount: open ? 10000 : 0 })
-    assert.equal(creations, Number(open))
+    assert.deepEqual(await db.prepare("SELECT refunded_amount FROM payments WHERE id='notice-payment'").first(), { refunded_amount: refunded ? 10000 : 0 })
+    assert.equal(creations, Number(refunded))
    } finally { fetchMock.mock.restore() }
   } finally { await runtime.dispose() }
  }

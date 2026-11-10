@@ -412,8 +412,8 @@ export async function cancelBookingRequest(db: DbClient, input: {
   if (record.status === 'cancelled') return await readCancelled()
   if (!canCancelBookingRequest(record, input.now)) return null
   // The offering's advance notice closes the guest's own cancellation as it closes booking; the business can still cancel.
-  if (!outsideNotice(record.starts_at, record.advance_notice_minutes, Date.parse(input.now))) {
-    throw new HTTPError({ statusCode: 409, message: `Online cancellation closed ${noticeDuration(record.advance_notice_minutes!, 'en')} before the start. Contact the business to cancel.`, data: { code: 'cancellation_closed' } })
+  if (record.advance_notice_minutes !== null && !outsideNotice(record.starts_at, record.advance_notice_minutes, Date.parse(input.now))) {
+    throw new HTTPError({ statusCode: 409, message: `Online cancellation closed ${noticeDuration(record.advance_notice_minutes, 'en')} before the start. Contact the business to cancel.`, data: { code: 'cancellation_closed' } })
   }
 
   // Two writes, one batch, each carrying the other's condition: the token is

@@ -139,7 +139,7 @@ const startOverHref = computed(() => localePath(props.kind === 'booking'
 // The offering's advance notice closes the guest's own cancellation, as the cancel route refuses it.
 // A page left open past the cutoff learns it from the server's refusal.
 const closedByServer = ref(false)
-const cancellationClosed = computed(() => closedByServer.value || Boolean(booking.value && !outsideNotice(booking.value.starts_at, booking.value.advance_notice_minutes)))
+const cancellationClosed = computed(() => closedByServer.value || Boolean(booking.value && booking.value.advance_notice_minutes !== null && !outsideNotice(booking.value.starts_at, booking.value.advance_notice_minutes)))
 const cancellationSubmitted = ref(false)
 const cancelled = computed(() => cancellationSubmitted.value || booking.value?.status === 'cancelled')
 const loading = ref(false)

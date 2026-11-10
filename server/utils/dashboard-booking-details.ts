@@ -385,7 +385,7 @@ async function composeBookingDetails(
     payments:reader.buyerUserId||reader.canReadPayments?payments:null,
     // The same rule the public cancel route applies, read here so the screen
     // does not offer a cancellation the write would refuse.
-    guestCanCancel: ['pending', 'confirmed'].includes(row.status) && row.ends_at > now && !complete && !row.cancellation_used_at && outsideNotice(row.starts_at, row.advance_notice_minutes, Date.parse(now)),
+    guestCanCancel: ['pending', 'confirmed'].includes(row.status) && row.ends_at > now && !complete && !row.cancellation_used_at && (row.advance_notice_minutes === null || outsideNotice(row.starts_at, row.advance_notice_minutes, Date.parse(now))),
     guestCanRetryCancellation,
     guestCancelRefunds: now <= freeCancellationUntil(row.starts_at, row.advance_notice_minutes),
     contactPhone: contact?.contactPhone ?? null,
