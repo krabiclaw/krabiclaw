@@ -1019,6 +1019,10 @@ export const EXPECTED_TOOL_ANNOTATIONS = {
   query_google_ads_report: R,
   create_google_ads_search_campaign: { ...W, openWorldHint: true },
   update_google_ads_campaign: { ...D, openWorldHint: true },
+  list_meta_ads_campaigns: R,
+  query_meta_ads_report: R,
+  create_meta_ads_campaign: { ...W, openWorldHint: true },
+  update_meta_ads_campaign: { ...D, openWorldHint: true },
   list_tasks: R,
   // Tells the assignee by their own notification settings.
   create_task: { ...D, openWorldHint: true, idempotentHint: true },
@@ -1059,7 +1063,7 @@ export function validateToolAnnotations(name: string, annotations: McpToolAnnota
 }
 
 // Proper nouns and abbreviations in tool names, as the derived title spells them.
-const TOOL_TITLE_WORDS: Record<string, string> = { google: 'Google', ads: 'Ads', qa: 'Q&A' }
+const TOOL_TITLE_WORDS: Record<string, string> = { google: 'Google', meta: 'Meta', ads: 'Ads', qa: 'Q&A' }
 
 export function withToolAnnotations(definition: RawMcpToolDefinition): McpToolDefinition {
   const annotations = TOOL_ANNOTATIONS_BY_NAME.get(definition.name)

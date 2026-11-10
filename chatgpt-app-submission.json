@@ -284,6 +284,18 @@
         "open_world_justification": "Plans messages for guests through their email, Airbnb or guest-inbox channel."
       }
     },
+    "create_meta_ads_campaign": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Creates a new paused campaign in the connected Meta Ad Account and records its result.",
+        "destructive_justification": "Adds new paused advertising resources without replacing existing campaigns or serving ads.",
+        "open_world_justification": "Submits campaign details to Meta's ad platform in PAUSED status."
+      }
+    },
     "create_post": {
       "annotations": {
         "readOnlyHint": false,
@@ -1148,6 +1160,18 @@
         "open_world_justification": "Reads saved automatic-message text and schedules in the selected business."
       }
     },
+    "list_meta_ads_campaigns": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Reads campaigns and status in the organization’s connected Meta Ad Account.",
+        "destructive_justification": "Does not create campaigns, enable delivery or change advertising budgets.",
+        "open_world_justification": "Reads campaigns and status only in the business configured Meta Ad Account."
+      }
+    },
     "list_opportunities": {
       "annotations": {
         "readOnlyHint": false,
@@ -1518,6 +1542,18 @@
         "read_only_justification": "Runs a report on the organization’s already-selected Google Analytics property.",
         "destructive_justification": "Does not edit the Google Analytics property, its events or its settings.",
         "open_world_justification": "Queries only the Google Analytics property already selected by the business."
+      }
+    },
+    "query_meta_ads_report": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Reads an advertising performance summary report in the connected Meta Ad Account.",
+        "destructive_justification": "Does not edit campaigns, enable advertising or change budgets.",
+        "open_world_justification": "Queries performance only within the business configured Meta Ad Account."
       }
     },
     "query_organization_analytics": {
@@ -2130,6 +2166,18 @@
         "read_only_justification": "Replaces the saved automatic message and its future schedule.",
         "destructive_justification": "Overwrites message text and schedule and changes future automatic sends.",
         "open_world_justification": "Changes scheduled communications to guests."
+      }
+    },
+    "update_meta_ads_campaign": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Saves campaign status or daily budget changes in Meta Ads and records the provider result.",
+        "destructive_justification": "Overwrites existing advertising settings and can enable advertising spend.",
+        "open_world_justification": "Can enable ad delivery on Facebook and Instagram; changes to daily budget affect campaign spend."
       }
     },
     "update_organization_member_role": {

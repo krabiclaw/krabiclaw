@@ -13,6 +13,7 @@ export type IntegrationKey =
   | 'google-maps'
   | 'google-analytics'
   | 'google-ads'
+  | 'meta-ads'
   | 'google-search-console'
   | 'google-calendar'
   | 'airbnb'
@@ -64,6 +65,10 @@ export const INTEGRATIONS: readonly IntegrationDefinition[] = [
   {
     key: 'google-ads', name: 'Google Ads', logo: 'i-logos-google-ads', group: 'connection', items: { noun: 'account', selection: 'one' },
     purpose: 'Run Search campaigns from your dashboard and ChatGPT, and see what they bring in.',
+  },
+  {
+    key: 'meta-ads', name: 'Meta Ads', logo: 'i-logos-meta-icon', group: 'connection', items: { noun: 'account', selection: 'one' },
+    purpose: 'Run Facebook & Instagram ad campaigns from your dashboard and ChatGPT, and measure conversions.',
   },
   {
     key: 'facebook', name: 'Facebook', logo: 'i-logos-facebook', group: 'connection', entitlement: 'managed_service',

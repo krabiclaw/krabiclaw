@@ -23,13 +23,14 @@ export const INTEGRATION_SCOPES = {
   // the Page permissions and Meta rejects any scope sent beside it, so nothing
   // is requested and a linked Facebook account is matched by provider alone.
   'facebook': [],
+  'meta-ads': ['ads_management', 'ads_read'],
   // `bot` adds the KrabiClaw bot to the server the owner picks on Discord's
   // consent screen; `guilds` lets the linked account say which servers it manages.
   'discord': ['guilds', 'bot'],
 } as const satisfies Record<string, readonly string[]>
 
 /** The providers an organization connects, one of each. */
-export const INTEGRATION_PROVIDERS = ['facebook', 'instagram', 'discord', 'google_analytics', 'google_ads', 'google_search_console', 'google_calendar'] as const
+export const INTEGRATION_PROVIDERS = ['facebook', 'instagram', 'discord', 'google_analytics', 'google_ads', 'meta_ads', 'google_search_console', 'google_calendar'] as const
 export type IntegrationProvider = typeof INTEGRATION_PROVIDERS[number]
 
 /** One row of `organization_integrations`. */

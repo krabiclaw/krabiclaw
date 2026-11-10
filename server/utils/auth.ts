@@ -516,10 +516,10 @@ function buildAuth(env: CloudflareEnv) {
         const callback = new URL(state.callbackURL, authBaseUrl)
         // Only a successful integration link continues to resource selection.
         if (new URL(location, authBaseUrl).href !== callback.href) return
-        const integration = callback.pathname.match(/^\/dashboard\/[^/]+\/integrations\/(facebook|instagram|discord|google-analytics|google-search-console|google-calendar|google-ads)$/)?.[1]
+        const integration = callback.pathname.match(/^\/dashboard\/[^/]+\/integrations\/(facebook|instagram|discord|google-analytics|google-search-console|google-calendar|google-ads|meta-ads)$/)?.[1]
           ?? (/^\/dashboard\/[^/]+\/calendar\/settings\/availability\/google-calendar$/.test(callback.pathname) || /^\/dashboard\/account\/profile\/calendar\/[^/]+\/google-calendar$/.test(callback.pathname) ? 'google-calendar' : undefined)
         if (!integration) return
-        const provider = integration.startsWith('google-') ? 'google' : integration
+        const provider = integration.startsWith('google-') ? 'google' : integration === 'meta-ads' ? 'facebook' : integration
         if (ctx.params?.id !== provider) return
         const accountId = (ctx.context as IntegrationCallbackContext).integrationAccountId
         if (accountId) callback.searchParams.set('account_id', accountId)
@@ -850,7 +850,13 @@ function buildAuth(env: CloudflareEnv) {
           clientId: env.INSTAGRAM_APP_ID ?? '',
           clientSecret: env.INSTAGRAM_APP_SECRET,
           authorizationUrl: 'https://www.instagram.com/oauth/authorize',
-          scopes: ['instagram_business_basic', 'instagram_business_content_publish', 'instagram_business_manage_insights'],
+          scopes: [
+            'instagram_business_basic',
+            'instagram_business_content_publish',
+            'instagram_business_manage_insights',
+            'instagram_business_manage_comments',
+            'instagram_business_manage_messages',
+          ],
           pkce: false,
           disableSignUp: true,
           getToken: async ({ code, redirectURI }) => {
