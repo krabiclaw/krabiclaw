@@ -1089,14 +1089,14 @@ test.describe('stateless MCP server', () => {
         const enabled = await request.put(`${productUrl}/booking`, { data: { duration_minutes: 60, default_capacity: 9 } })
         expect(enabled.status(), await enabled.text()).toBe(200)
         let product = mcpData<{ product: { booking: unknown } }>(await call('get_product', { product_id: productId })).product
-        expect(product.booking).toEqual({ duration_minutes: 60, default_capacity: 9, confirmation_mode: 'instant', online_payment_required: false, held_online: false, scheduling_mode: 'business', assigned_member_id: null, assigned_team_id: null, ...noQuestions })
+        expect(product.booking).toEqual({ duration_minutes: 60, default_capacity: 9, confirmation_mode: 'instant', online_payment_required: false, held_online: false, scheduling_mode: 'business', assigned_member_id: null, assigned_team_id: null, advance_notice_minutes: null, ...noQuestions })
         expect((await call('set_product_booking_config', { product_id: productId, default_capacity: 0 })).result.isError).not.toBe(true)
         const httpProduct = await request.get(`${baseURL}/api/editor/organizations/${organizationId}/products`)
         expect(httpProduct.status(), await httpProduct.text()).toBe(200)
-        expect((await httpProduct.json()).products.find((row: { id: string }) => row.id === productId).booking).toEqual({ duration_minutes: 60, default_capacity: 0, confirmation_mode: 'instant', online_payment_required: false, held_online: false, scheduling_mode: 'business', assigned_member_id: null, assigned_team_id: null, ...noQuestions })
+        expect((await httpProduct.json()).products.find((row: { id: string }) => row.id === productId).booking).toEqual({ duration_minutes: 60, default_capacity: 0, confirmation_mode: 'instant', online_payment_required: false, held_online: false, scheduling_mode: 'business', assigned_member_id: null, assigned_team_id: null, advance_notice_minutes: null, ...noQuestions })
         expect((await call('set_product_booking_config', { product_id: productId, default_capacity: null })).result.isError).not.toBe(true)
         product = mcpData<{ product: { booking: unknown } }>(await call('get_product', { product_id: productId })).product
-        expect(product.booking).toEqual({ duration_minutes: 60, default_capacity: null, confirmation_mode: 'instant', online_payment_required: false, held_online: false, scheduling_mode: 'business', assigned_member_id: null, assigned_team_id: null, ...noQuestions })
+        expect(product.booking).toEqual({ duration_minutes: 60, default_capacity: null, confirmation_mode: 'instant', online_payment_required: false, held_online: false, scheduling_mode: 'business', assigned_member_id: null, assigned_team_id: null, advance_notice_minutes: null, ...noQuestions })
         expect((await request.put(`${productUrl}/booking`, { data: { duration_minutes: 0 } })).status()).toBe(400)
         expect((await call('set_product_booking_config', { product_id: productId, duration_minutes: 0 })).result.isError).toBe(true)
         const schedule = { location_id: locationId, slots: [{ weekday: 2, start_time: '10:00' }] }
@@ -1133,7 +1133,7 @@ test.describe('stateless MCP server', () => {
         expect((await call('set_product_booking_config', { product_id: productId, ...policy })).result.isError).not.toBe(true)
         const policyRead = await request.get(productUrl)
         expect(policyRead.status()).toBe(200)
-        expect((await policyRead.json()).product.booking).toEqual({ duration_minutes: 60, default_capacity: null, ...policy, held_online: false, scheduling_mode: 'business', assigned_member_id: null, assigned_team_id: null, ...noQuestions })
+        expect((await policyRead.json()).product.booking).toEqual({ duration_minutes: 60, default_capacity: null, ...policy, held_online: false, scheduling_mode: 'business', assigned_member_id: null, assigned_team_id: null, advance_notice_minutes: null, ...noQuestions })
         // Weekly times belong to a location. Online, the provider's hours are the schedule, so neither surface takes online weekly times.
         const online = { location_id: null, slots: [{ weekday: 3, start_time: '11:30' }] }
         expect((await call('replace_product_weekly_schedule', { product_id: productId, ...online })).result.isError).toBe(true)
@@ -1142,7 +1142,7 @@ test.describe('stateless MCP server', () => {
         expect((await request.put(`${productUrl}/booking`, { data: { held_online: true } })).status()).toBe(400)
         const updatedPolicy = await request.put(`${productUrl}/booking`, { data: { confirmation_mode: 'instant', online_payment_required: false } })
         expect(updatedPolicy.status()).toBe(200)
-        expect(mcpData<{ product: { booking: unknown } }>(await call('get_product', { product_id: productId })).product.booking).toEqual({ duration_minutes: 60, default_capacity: null, confirmation_mode: 'instant', online_payment_required: false, held_online: false, scheduling_mode: 'business', assigned_member_id: null, assigned_team_id: null, ...noQuestions })
+        expect(mcpData<{ product: { booking: unknown } }>(await call('get_product', { product_id: productId })).product.booking).toEqual({ duration_minutes: 60, default_capacity: null, confirmation_mode: 'instant', online_payment_required: false, held_online: false, scheduling_mode: 'business', assigned_member_id: null, assigned_team_id: null, advance_notice_minutes: null, ...noQuestions })
 
         const viaHttp = await request.post(qaUrl, { data: { question: '  Shared HTTP question  ', answer: 'HTTP answer', page_path: '/parity-check' } })
         expect(viaHttp.status(), await viaHttp.text()).toBe(201)
