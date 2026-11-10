@@ -420,6 +420,7 @@ async function executeSourceMutation(
   const existing = await findEntryByDedupeKey(db, dedupeKey)
   if (existing) {
     if (!entryMatchesRequest(existing, eventName)) return conflict()
+    await (await import('~/server/domain/scheduled-guest-messages')).planSourceMessages(db, context.thread.organization_id, { kind: context.record.kind, id: context.record.id })
     const delivery = await getDeliveryById(db, deliveryDedupeKey(input))
     if (!delivery) throw new Error('Status update delivery receipt was not created')
     const outcome = await sendStatusUpdate(db, context, input, existing, delivery)
@@ -458,6 +459,8 @@ async function executeSourceMutation(
   const applied = await findEntryByDedupeKey(db, dedupeKey)
   if (!applied) return conflict(`"${input.action}" is not a valid action for the current state`)
   if (!entryMatchesRequest(applied, eventName)) return conflict()
+  // A confirmed, declined or cancelled visit's automatic messages follow it.
+  await (await import('~/server/domain/scheduled-guest-messages')).planSourceMessages(db, context.thread.organization_id, { kind: context.record.kind, id: context.record.id })
   if (plan.requiresNotification) {
     const delivery = await getDeliveryById(db, deliveryId)
     if (!delivery) throw new Error('Status update delivery receipt was not created')

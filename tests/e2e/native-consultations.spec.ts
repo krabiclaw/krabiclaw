@@ -675,6 +675,14 @@ test('native online review uses canonical Products, holds capacity, and releases
     }
     const confirmedDetails = await page.request.get(`/api/dashboard/bookings/booking/${browserBooking.request_id}?org=${legal.slug}`)
     expect((await confirmedDetails.json()).booking).toMatchObject({ status: 'confirmed', operationalBookingId: browserBooking.operational_booking_id })
+    // The day counts the party in the practice's own noun, and the change
+    // picker names the current consultation by its date and time, read off the booking.
+    await page.goto(`${dashboard}/calendar/${day}`)
+    const dayRow = page.locator('#dashboard-panel-calendar-day').getByRole('link').filter({ hasText: 'Browser review guest' })
+    await expect(dayRow.getByText('1 client', { exact: true })).toBeVisible()
+    await page.goto(`${dashboard}/calendar/${day}/booking/${browserBooking.request_id}/change/session`)
+    const [weekday, month] = [['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][tomorrow.getUTCDay()], ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][tomorrow.getUTCMonth()]]
+    await expect(page.getByRole('combobox', { name: 'Date and time', exact: true })).toHaveText(`${weekday}, ${month} ${tomorrow.getUTCDate()}, 2:00 PM · Current`)
     await page.goto(`${dashboard}/bookings/booking/${browserBooking.request_id}`)
     await page.getByRole('button', { name: `Cancellation policy ${cancellationTerms}`, exact: true }).click()
     const policyDialog = page.getByRole('dialog', { name: browserBooking.policy_summary.heading, exact: true })

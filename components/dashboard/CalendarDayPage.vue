@@ -71,6 +71,7 @@
 import { closureOnDate, datedHours, getDateIntervals, parseOpeningHours, parseSpecialHours, type SpecialHours } from '~/shared/reservation-hours'
 import { addLocalDays, formatCalendarDate } from '~/utils/timezone'
 import { getErrorMessage } from '~/utils/errors'
+import { getVerticalCopy } from '~/utils/vertical-copy'
 import type { AgendaItem, AgendaPayload } from '~/server/utils/dashboard-agenda'
 import { calendarLocationKey, calendarRecordPath, calendarSessionsKey, type CalendarItem } from './CalendarPage.vue'
 
@@ -83,6 +84,7 @@ const dashboardApi = props.personalScope ? applicationFetch : useDashboardApi()
 const apiBase = props.personalScope ? '/api/account' : '/api/dashboard'
 const organizationId = props.personalScope ? null : useDashboardOrganizationId()
 const calendarSessions = inject(calendarSessionsKey, null)
+const { organization } = useDashboardOrganization()
 const sessionProduct = computed(() => calendarSessions?.product.value)
 const day = computed(() => String(route.params.day ?? ''))
 const locationId = computed(() => typeof route.query.locationId === 'string' ? route.query.locationId : null)
@@ -152,7 +154,8 @@ const availability = computed<{ open: boolean; reason: string; action: 'open' | 
   if (intervals !== null && intervals.length === 0) {
     return { open: false, reason: `Closed on ${formatCalendarDate(day.value, 'en', { weekday: 'long' })}s in your hours.`, action: 'hours' }
   }
-  return { open: true, reason: 'Guests can book this date.', action: 'block' }
+  const party = getVerticalCopy(organization.value?.vertical).guestsLabelPlural
+  return { open: true, reason: `${party.charAt(0).toUpperCase()}${party.slice(1)} can book this date.`, action: 'block' }
 })
 
 const saving = ref(false)

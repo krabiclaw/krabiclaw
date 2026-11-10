@@ -2,14 +2,15 @@ import { HTTPError } from 'nitro'
 import { executeBatch, queryAll, queryAllPages, queryFirst, type DbClient } from '~/server/db'
 import { assertOrganizationWideAccess, assertRoleAllows, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import { creationDedupeKey, creationRequestHash, isUniqueDedupeConflict, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
-import { listBusinessOutcomes, readArticleDistribution, readBusinessProgressReference } from '~/server/utils/business-outcomes'
+import { listBusinessOutcomes, readArticleDistribution, readBookingWelcomes, readBusinessProgressReference } from '~/server/utils/business-outcomes'
 import type { BusinessProgressOperation, BusinessProgressReference } from '~/shared/business-outcomes'
 import { businessGoalStrategySchema, createBusinessGoalSchema, updateBusinessGoalSchema, type BusinessGoal, type BusinessGoalStrategy } from '~/shared/business-progress'
 import { publishBusinessInvalidation } from '~/server/cloudflare/guest-inbox-events'
 import { queryOrganizationAnalytics } from '~/server/utils/analytics-query'
 import { addLocalDays, formatCalendarRange, formatTimestamp, localDateAt } from '~/utils/timezone'
-import { articleSocialPostPath, blogCreatePath, blogEditorPath, postEditorPath, productEditorPath, productPaymentPath } from '~/server/utils/dashboard-links'
+import { articleSocialPostPath, blogCreatePath, blogEditorPath, guestConversationPath, postEditorPath, productEditorPath, productPaymentPath } from '~/server/utils/dashboard-links'
 import { listSessions } from '~/server/utils/availability'
+import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import { listReservationSlots } from '~/server/utils/reservations'
 import { readStayGapCandidates, stayAccessFor } from '~/server/domain/stays'
 import { readStripeCheckoutSetup } from '~/server/utils/stripe-connect'
@@ -135,6 +136,10 @@ export interface BusinessRecommendation {
   icon: string
   locationId: string | null
   productId: string | null
+  /** The conversation a message opportunity is sent in. */
+  requestId: string | null
+  /** The message it pre-writes for the owner to review and send. */
+  message: string | null
   goal: BusinessGoal | null
   reference: BusinessProgressReference
 }
@@ -246,9 +251,9 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
   type Candidate = Omit<BusinessRecommendation, 'reference'> & { rank: number; recency: string }
   const candidates: Candidate[] = []
   const offer = (operation: BusinessProgressOperation, subjectId: string, headline: string, reason: string, to: string, rank: number,
-    options: Partial<Pick<Candidate, 'locationId' | 'productId' | 'goal' | 'icon' | 'recency'>> = {}) => {
+    options: Partial<Pick<Candidate, 'locationId' | 'productId' | 'requestId' | 'message' | 'goal' | 'icon' | 'recency'>> = {}) => {
     candidates.push({ operation, subjectId, headline, reason, to, rank, icon: 'i-lucide-sprout', locationId: input.locationId ?? null,
-      productId: null, goal: null, recency: '', ...options })
+      productId: null, requestId: null, message: null, goal: null, recency: '', ...options })
   }
   const pageEvidence = (slug: string | null) => slug ? marketing.pages.filter(page => page.path.split('/').filter(Boolean).at(-1) === slug) : []
   const sourceOrder = enabled('google_ads') ? ['Google Ads clicks', 'recorded website sessions', 'organic Google clicks'] : ['recorded website sessions', 'organic Google clicks', 'Google Ads clicks']
@@ -413,6 +418,15 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
         postEditorPath(organization.slug, 'new', location.id), 85, { goal: goalFor('social'), locationId: location.id, icon: 'i-lucide-camera' })
     }
   }
+  // A booked client who has not heard from the business since booking is sent the host's own preparation.
+  if (await roleAllows({ ...principal, permissions: { operations: ['reply'] } })) {
+    for (const welcome of await readBookingWelcomes(db, organizationId, { now, locationId: input.locationId })) {
+      offer('booking.welcome', welcome.requestId, welcome.kind === 'stay' ? 'Share info about your place' : 'Share how to prepare',
+        `Help ${welcome.guestFirstName ?? `your ${resolveBookingPresentation(welcome.kind === 'reservation' ? 'reservation' : 'booking', organization.vertical).counterpartyNoun}`} get ready`,
+        guestConversationPath(organization.slug, welcome.requestId), 90,
+        { productId: welcome.productId, locationId: welcome.locationId, requestId: welcome.requestId, message: welcome.message, recency: welcome.startsAt, icon: 'i-lucide-messages-square' })
+    }
+  }
   const unique = new Map<string, Candidate>()
   for (const candidate of candidates) {
     const key = candidate.operation === 'post.create' ? 'post.create' : candidate.operation === 'stay.gap' ? `stay.gap:${candidate.productId}` : `${candidate.operation}:${candidate.subjectId}`, previous = unique.get(key)
@@ -426,7 +440,7 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
     if (!reference) return []
     return [{ operation: candidate.operation, subjectId: candidate.subjectId, headline: candidate.headline, to: candidate.to, icon: candidate.icon,
       reason: [candidate.reason, candidate.goal ? `Your strategy: ${candidate.goal.intent}` : null].filter(Boolean).join(' '), locationId: candidate.locationId, productId: candidate.productId,
-      goal: candidate.goal, reference }]
+      requestId: candidate.requestId, message: candidate.message, goal: candidate.goal, reference }]
   })
   return { recommendations, goals, issues, marketingEvidenceUnavailable, socialEvidenceUnavailable }
 }

@@ -36,12 +36,16 @@ export interface OpportunityView {
   path: string
   productId: string | null
   locationId: string | null
+  /** The guest conversation a message opportunity is sent in; null for every other opportunity. */
+  requestId: string | null
+  /** The message it pre-writes from the business's own records, for the owner to review and send. */
+  message: string | null
 }
 
 const AREA: Record<BusinessProgressOperation, string> = {
   'article.create': 'Website', 'article.update': 'Website', 'article.publish': 'Website', 'article.distribute': 'Social',
   'post.create': 'Social', 'post.publish': 'Social', 'social.connect': 'Social', 'google_ads.connect': 'Marketing',
-  'payments.connect': 'Payments', 'product.payment': 'Payments', 'product.readiness': 'Catalog', 'stay.gap': 'Calendar', 'guest_thread.reply': 'Messages',
+  'payments.connect': 'Payments', 'product.payment': 'Payments', 'product.readiness': 'Catalog', 'stay.gap': 'Calendar', 'guest_thread.reply': 'Messages', 'booking.welcome': 'Messages',
 }
 
 function fail(statusCode: number, code: string, message: string, field?: string): never {
@@ -76,7 +80,7 @@ async function refreshOpportunities(db: DbClient, principal: MemberAccessPrincip
 }
 
 function view(row: OpportunityRow, item: BusinessRecommendation, homes: Map<string, string>): OpportunityView {
-  return { id: row.id, statusLine: [AREA[item.operation], item.productId ? homes.get(item.productId) ?? null : null].filter(Boolean).join(' · '), title: item.headline, detail: item.reason, icon: item.icon, path: item.to, productId: item.productId, locationId: item.locationId }
+  return { id: row.id, statusLine: [AREA[item.operation], item.productId ? homes.get(item.productId) ?? null : null].filter(Boolean).join(' · '), title: item.headline, detail: item.reason, icon: item.icon, path: item.to, productId: item.productId, locationId: item.locationId, requestId: item.requestId, message: item.message }
 }
 
 /** The open opportunities available now, in the selector's order. */
@@ -86,7 +90,7 @@ export async function listOpportunities(db: DbClient, principal: MemberAccessPri
   const { plan, rows, changed } = await refreshOpportunities(db, principal, { now, locationId: input.locationId })
   if (changed) await publishBusinessInvalidation(principal.env as CloudflareEnv, principal.organizationId)
   const byKey = new Map(rows.filter(row => row.available_at === null || row.available_at <= now.toISOString()).map(row => [rowKey(row), row]))
-  const productIds = [...new Set(plan.recommendations.flatMap(item => item.productId && item.operation === 'stay.gap' ? [item.productId] : []))]
+  const productIds = [...new Set(plan.recommendations.flatMap(item => item.productId && (item.operation === 'stay.gap' || item.operation === 'booking.welcome') ? [item.productId] : []))]
   const homes = new Map((await queryAll<{ id: string; name: string }>(db, 'SELECT id, name FROM products WHERE organization_id = ? AND id IN (SELECT value FROM json_each(?))',
     [principal.organizationId, JSON.stringify(productIds)])).map(product => [product.id, product.name]))
   return {
@@ -111,7 +115,7 @@ function eventQuery(principal: MemberAccessPrincipal, row: OpportunityRow, event
 }
 
 const SUBJECT: Partial<Record<BusinessProgressOperation, TaskRow['subject_type']>> = {
-  'article.update': 'article', 'article.publish': 'article', 'article.distribute': 'article', 'post.publish': 'post', 'product.payment': 'product', 'stay.gap': 'product',
+  'article.update': 'article', 'article.publish': 'article', 'article.distribute': 'article', 'post.publish': 'post', 'product.payment': 'product', 'stay.gap': 'product', 'booking.welcome': 'request',
 }
 
 /**

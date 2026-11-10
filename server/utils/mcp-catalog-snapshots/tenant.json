@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:2db94147eaebdf81760ffcd8b1edec1d491cb4622fdc6cbc438f15087be47987",
-  "documentationFingerprint": "sha256:f4ddc1229d24ec660ee9b4b0ba5dc82033eee94f8ba18044e26eb174200991cc",
+  "fingerprint": "sha256:8fee0a81f71bd1ac8a8aab462e5d66c9ab83654a49767caa08aea8d5e0dd1231",
+  "documentationFingerprint": "sha256:127bfe2bda32e91c15681275aafbe1a77c4a030d73cc03024776a34fc8c7e9d5",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -20842,7 +20842,7 @@
     {
       "name": "create_message_template",
       "title": "Create message template",
-      "description": "Create an automatic guest message, sent to every guest at the named homes at the scheduled time in each home’s own timezone. It plans only eligible future events; ambiguous or nonexistent local times fail visibly. Every confirmed stay is already sent its home’s check-in instructions at 10:00 the day before arrival, so the name “Check-in instructions” is reserved.",
+      "description": "Create an automatic guest message, sent into the conversation of every stay, product booking (experience or consultation) or table reservation on the named offerings, at the scheduled time in each booking’s own timezone. A cancelled booking’s pending messages are cancelled and a moved one’s follow it. It plans only eligible future events; ambiguous or nonexistent local times fail visibly. Every confirmed stay is already sent its home’s check-in instructions at 10:00 the day before arrival, so the name “Check-in instructions” is reserved.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -20861,13 +20861,15 @@
             "oneOf": [
               {
                 "additionalProperties": false,
+                "description": "Five minutes after KrabiClaw receives a new booking.",
                 "properties": {
                   "delayMinutes": {
                     "const": 5
                   },
                   "productIds": {
+                    "description": "The offerings whose bookings get this message.",
                     "items": {
-                      "description": "Canonical home product ID, never a provider property ID.",
+                      "description": "A canonical product ID of a home, experience or consultation (list_products), or the location ID of a place that takes table reservations (list_locations); never a provider property ID.",
                       "minLength": 1,
                       "type": "string"
                     },
@@ -20889,6 +20891,7 @@
               },
               {
                 "additionalProperties": false,
+                "description": "A number of days before or after the start or end, at a local time in the booking’s own timezone (the home’s, location’s, or an online consultation’s attorney’s).",
                 "properties": {
                   "localTime": {
                     "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
@@ -20900,8 +20903,9 @@
                     "type": "integer"
                   },
                   "productIds": {
+                    "description": "The offerings whose bookings get this message.",
                     "items": {
-                      "description": "Canonical home product ID, never a provider property ID.",
+                      "description": "A canonical product ID of a home, experience or consultation (list_products), or the location ID of a place that takes table reservations (list_locations); never a provider property ID.",
                       "minLength": 1,
                       "type": "string"
                     },
@@ -20911,6 +20915,7 @@
                     "uniqueItems": true
                   },
                   "trigger": {
+                    "description": "check_in is when the booking starts: a stay’s check-in, or a consultation’s, class’s or table reservation’s start time. check_out is when it ends.",
                     "enum": [
                       "check_in",
                       "check_out"
@@ -20922,6 +20927,43 @@
                   "trigger",
                   "offsetDays",
                   "localTime",
+                  "productIds"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "description": "A number of hours before (negative) or after (positive) the start or end itself. A home needs its check-in or checkout time.",
+                "properties": {
+                  "offsetHours": {
+                    "maximum": 72,
+                    "minimum": -72,
+                    "type": "integer"
+                  },
+                  "productIds": {
+                    "description": "The offerings whose bookings get this message.",
+                    "items": {
+                      "description": "A canonical product ID of a home, experience or consultation (list_products), or the location ID of a place that takes table reservations (list_locations); never a provider property ID.",
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "maxItems": 100,
+                    "minItems": 1,
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  "trigger": {
+                    "description": "check_in is when the booking starts: a stay’s check-in, or a consultation’s, class’s or table reservation’s start time. check_out is when it ends.",
+                    "enum": [
+                      "check_in",
+                      "check_out"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "trigger",
+                  "offsetHours",
                   "productIds"
                 ],
                 "type": "object"
@@ -20967,13 +21009,15 @@
                 "oneOf": [
                   {
                     "additionalProperties": false,
+                    "description": "Five minutes after KrabiClaw receives a new booking.",
                     "properties": {
                       "delayMinutes": {
                         "const": 5
                       },
                       "productIds": {
+                        "description": "The offerings whose bookings get this message.",
                         "items": {
-                          "description": "Canonical home product ID, never a provider property ID.",
+                          "description": "A canonical product ID of a home, experience or consultation (list_products), or the location ID of a place that takes table reservations (list_locations); never a provider property ID.",
                           "minLength": 1,
                           "type": "string"
                         },
@@ -20995,6 +21039,7 @@
                   },
                   {
                     "additionalProperties": false,
+                    "description": "A number of days before or after the start or end, at a local time in the booking’s own timezone (the home’s, location’s, or an online consultation’s attorney’s).",
                     "properties": {
                       "localTime": {
                         "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
@@ -21006,8 +21051,9 @@
                         "type": "integer"
                       },
                       "productIds": {
+                        "description": "The offerings whose bookings get this message.",
                         "items": {
-                          "description": "Canonical home product ID, never a provider property ID.",
+                          "description": "A canonical product ID of a home, experience or consultation (list_products), or the location ID of a place that takes table reservations (list_locations); never a provider property ID.",
                           "minLength": 1,
                           "type": "string"
                         },
@@ -21017,6 +21063,7 @@
                         "uniqueItems": true
                       },
                       "trigger": {
+                        "description": "check_in is when the booking starts: a stay’s check-in, or a consultation’s, class’s or table reservation’s start time. check_out is when it ends.",
                         "enum": [
                           "check_in",
                           "check_out"
@@ -21028,6 +21075,43 @@
                       "trigger",
                       "offsetDays",
                       "localTime",
+                      "productIds"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "description": "A number of hours before (negative) or after (positive) the start or end itself. A home needs its check-in or checkout time.",
+                    "properties": {
+                      "offsetHours": {
+                        "maximum": 72,
+                        "minimum": -72,
+                        "type": "integer"
+                      },
+                      "productIds": {
+                        "description": "The offerings whose bookings get this message.",
+                        "items": {
+                          "description": "A canonical product ID of a home, experience or consultation (list_products), or the location ID of a place that takes table reservations (list_locations); never a provider property ID.",
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "maxItems": 100,
+                        "minItems": 1,
+                        "type": "array",
+                        "uniqueItems": true
+                      },
+                      "trigger": {
+                        "description": "check_in is when the booking starts: a stay’s check-in, or a consultation’s, class’s or table reservation’s start time. check_out is when it ends.",
+                        "enum": [
+                          "check_in",
+                          "check_out"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "trigger",
+                      "offsetHours",
                       "productIds"
                     ],
                     "type": "object"
@@ -69168,7 +69252,7 @@
     {
       "name": "list_message_templates",
       "title": "List message templates",
-      "description": "Read the workspace’s automatic guest messages: text the server sends every guest at the named homes on its own schedule. Follow page_info for every page.",
+      "description": "Read the workspace’s automatic guest messages: text the server sends every guest or client booked on the named homes, experiences, consultations or table-reservation locations, on its own schedule. Follow page_info for every page.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -69237,13 +69321,15 @@
                   "oneOf": [
                     {
                       "additionalProperties": false,
+                      "description": "Five minutes after KrabiClaw receives a new booking.",
                       "properties": {
                         "delayMinutes": {
                           "const": 5
                         },
                         "productIds": {
+                          "description": "The offerings whose bookings get this message.",
                           "items": {
-                            "description": "Canonical home product ID, never a provider property ID.",
+                            "description": "A canonical product ID of a home, experience or consultation (list_products), or the location ID of a place that takes table reservations (list_locations); never a provider property ID.",
                             "minLength": 1,
                             "type": "string"
                           },
@@ -69265,6 +69351,7 @@
                     },
                     {
                       "additionalProperties": false,
+                      "description": "A number of days before or after the start or end, at a local time in the booking’s own timezone (the home’s, location’s, or an online consultation’s attorney’s).",
                       "properties": {
                         "localTime": {
                           "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
@@ -69276,8 +69363,9 @@
                           "type": "integer"
                         },
                         "productIds": {
+                          "description": "The offerings whose bookings get this message.",
                           "items": {
-                            "description": "Canonical home product ID, never a provider property ID.",
+                            "description": "A canonical product ID of a home, experience or consultation (list_products), or the location ID of a place that takes table reservations (list_locations); never a provider property ID.",
                             "minLength": 1,
                             "type": "string"
                           },
@@ -69287,6 +69375,7 @@
                           "uniqueItems": true
                         },
                         "trigger": {
+                          "description": "check_in is when the booking starts: a stay’s check-in, or a consultation’s, class’s or table reservation’s start time. check_out is when it ends.",
                           "enum": [
                             "check_in",
                             "check_out"
@@ -69298,6 +69387,43 @@
                         "trigger",
                         "offsetDays",
                         "localTime",
+                        "productIds"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "description": "A number of hours before (negative) or after (positive) the start or end itself. A home needs its check-in or checkout time.",
+                      "properties": {
+                        "offsetHours": {
+                          "maximum": 72,
+                          "minimum": -72,
+                          "type": "integer"
+                        },
+                        "productIds": {
+                          "description": "The offerings whose bookings get this message.",
+                          "items": {
+                            "description": "A canonical product ID of a home, experience or consultation (list_products), or the location ID of a place that takes table reservations (list_locations); never a provider property ID.",
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "maxItems": 100,
+                          "minItems": 1,
+                          "type": "array",
+                          "uniqueItems": true
+                        },
+                        "trigger": {
+                          "description": "check_in is when the booking starts: a stay’s check-in, or a consultation’s, class’s or table reservation’s start time. check_out is when it ends.",
+                          "enum": [
+                            "check_in",
+                            "check_out"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "trigger",
+                        "offsetHours",
                         "productIds"
                       ],
                       "type": "object"
@@ -69362,7 +69488,7 @@
     {
       "name": "list_opportunities",
       "title": "List opportunities",
-      "description": "List and save current opportunities such as drafts to finish, posts to share and calendar gaps. Reports evidence it could not read. Use a returned ID to accept, dismiss or defer an opportunity.",
+      "description": "List and save current opportunities such as drafts to finish, posts to share, calendar gaps and preparation to send a booked guest or client. Reports evidence it could not read. Use a returned ID to accept, dismiss or defer an opportunity.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -69408,10 +69534,24 @@
                     "null"
                   ]
                 },
+                "message": {
+                  "description": "The message it pre-writes from the business’s own records. Review it, then send it with reply_to_guest in requestId’s conversation; nothing is sent until then.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "path": {
                   "type": "string"
                 },
                 "productId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "requestId": {
+                  "description": "The guest conversation a message opportunity is sent in.",
                   "type": [
                     "string",
                     "null"
@@ -69432,7 +69572,9 @@
                 "icon",
                 "path",
                 "productId",
-                "locationId"
+                "locationId",
+                "requestId",
+                "message"
               ],
               "type": "object"
             },
@@ -71514,7 +71656,7 @@
     {
       "name": "list_scheduled_guest_messages",
       "title": "List scheduled guest messages",
-      "description": "Read automatic guest-message snapshots and visible failure reasons, optionally for one canonical guest conversation, including each stay’s built-in check-in message (templateId null, title “Check-in instructions”). Read provider delivery receipts through get_guest_conversation; no provider result is inferred from a scheduled time.",
+      "description": "Read automatic guest-message snapshots and visible failure reasons for stays, bookings and table reservations (stayId, bookingId or reservationId names which), optionally for one canonical guest conversation, including each stay’s built-in check-in message (templateId null, title “Check-in instructions”). Read provider delivery receipts through get_guest_conversation; no provider result is inferred from a scheduled time.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -71590,8 +71732,10 @@
                   "type": "string"
                 },
                 "productId": {
-                  "minLength": 1,
-                  "type": "string"
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 },
                 "reason": {
                   "type": [
@@ -71630,7 +71774,21 @@
                   "type": "string"
                 },
                 "stayId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "subjectId": {
                   "minLength": 1,
+                  "type": "string"
+                },
+                "subjectType": {
+                  "enum": [
+                    "stay",
+                    "booking",
+                    "reservation"
+                  ],
                   "type": "string"
                 },
                 "templateId": {
@@ -71660,6 +71818,8 @@
                 "id",
                 "organizationId",
                 "productId",
+                "subjectType",
+                "subjectId",
                 "stayId",
                 "requestId",
                 "templateId",
@@ -113956,13 +114116,15 @@
             "oneOf": [
               {
                 "additionalProperties": false,
+                "description": "Five minutes after KrabiClaw receives a new booking.",
                 "properties": {
                   "delayMinutes": {
                     "const": 5
                   },
                   "productIds": {
+                    "description": "The offerings whose bookings get this message.",
                     "items": {
-                      "description": "Canonical home product ID, never a provider property ID.",
+                      "description": "A canonical product ID of a home, experience or consultation (list_products), or the location ID of a place that takes table reservations (list_locations); never a provider property ID.",
                       "minLength": 1,
                       "type": "string"
                     },
@@ -113984,6 +114146,7 @@
               },
               {
                 "additionalProperties": false,
+                "description": "A number of days before or after the start or end, at a local time in the booking’s own timezone (the home’s, location’s, or an online consultation’s attorney’s).",
                 "properties": {
                   "localTime": {
                     "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
@@ -113995,8 +114158,9 @@
                     "type": "integer"
                   },
                   "productIds": {
+                    "description": "The offerings whose bookings get this message.",
                     "items": {
-                      "description": "Canonical home product ID, never a provider property ID.",
+                      "description": "A canonical product ID of a home, experience or consultation (list_products), or the location ID of a place that takes table reservations (list_locations); never a provider property ID.",
                       "minLength": 1,
                       "type": "string"
                     },
@@ -114006,6 +114170,7 @@
                     "uniqueItems": true
                   },
                   "trigger": {
+                    "description": "check_in is when the booking starts: a stay’s check-in, or a consultation’s, class’s or table reservation’s start time. check_out is when it ends.",
                     "enum": [
                       "check_in",
                       "check_out"
@@ -114017,6 +114182,43 @@
                   "trigger",
                   "offsetDays",
                   "localTime",
+                  "productIds"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "description": "A number of hours before (negative) or after (positive) the start or end itself. A home needs its check-in or checkout time.",
+                "properties": {
+                  "offsetHours": {
+                    "maximum": 72,
+                    "minimum": -72,
+                    "type": "integer"
+                  },
+                  "productIds": {
+                    "description": "The offerings whose bookings get this message.",
+                    "items": {
+                      "description": "A canonical product ID of a home, experience or consultation (list_products), or the location ID of a place that takes table reservations (list_locations); never a provider property ID.",
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "maxItems": 100,
+                    "minItems": 1,
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  "trigger": {
+                    "description": "check_in is when the booking starts: a stay’s check-in, or a consultation’s, class’s or table reservation’s start time. check_out is when it ends.",
+                    "enum": [
+                      "check_in",
+                      "check_out"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "trigger",
+                  "offsetHours",
                   "productIds"
                 ],
                 "type": "object"
@@ -114068,13 +114270,15 @@
                 "oneOf": [
                   {
                     "additionalProperties": false,
+                    "description": "Five minutes after KrabiClaw receives a new booking.",
                     "properties": {
                       "delayMinutes": {
                         "const": 5
                       },
                       "productIds": {
+                        "description": "The offerings whose bookings get this message.",
                         "items": {
-                          "description": "Canonical home product ID, never a provider property ID.",
+                          "description": "A canonical product ID of a home, experience or consultation (list_products), or the location ID of a place that takes table reservations (list_locations); never a provider property ID.",
                           "minLength": 1,
                           "type": "string"
                         },
@@ -114096,6 +114300,7 @@
                   },
                   {
                     "additionalProperties": false,
+                    "description": "A number of days before or after the start or end, at a local time in the booking’s own timezone (the home’s, location’s, or an online consultation’s attorney’s).",
                     "properties": {
                       "localTime": {
                         "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
@@ -114107,8 +114312,9 @@
                         "type": "integer"
                       },
                       "productIds": {
+                        "description": "The offerings whose bookings get this message.",
                         "items": {
-                          "description": "Canonical home product ID, never a provider property ID.",
+                          "description": "A canonical product ID of a home, experience or consultation (list_products), or the location ID of a place that takes table reservations (list_locations); never a provider property ID.",
                           "minLength": 1,
                           "type": "string"
                         },
@@ -114118,6 +114324,7 @@
                         "uniqueItems": true
                       },
                       "trigger": {
+                        "description": "check_in is when the booking starts: a stay’s check-in, or a consultation’s, class’s or table reservation’s start time. check_out is when it ends.",
                         "enum": [
                           "check_in",
                           "check_out"
@@ -114129,6 +114336,43 @@
                       "trigger",
                       "offsetDays",
                       "localTime",
+                      "productIds"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "description": "A number of hours before (negative) or after (positive) the start or end itself. A home needs its check-in or checkout time.",
+                    "properties": {
+                      "offsetHours": {
+                        "maximum": 72,
+                        "minimum": -72,
+                        "type": "integer"
+                      },
+                      "productIds": {
+                        "description": "The offerings whose bookings get this message.",
+                        "items": {
+                          "description": "A canonical product ID of a home, experience or consultation (list_products), or the location ID of a place that takes table reservations (list_locations); never a provider property ID.",
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "maxItems": 100,
+                        "minItems": 1,
+                        "type": "array",
+                        "uniqueItems": true
+                      },
+                      "trigger": {
+                        "description": "check_in is when the booking starts: a stay’s check-in, or a consultation’s, class’s or table reservation’s start time. check_out is when it ends.",
+                        "enum": [
+                          "check_in",
+                          "check_out"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "trigger",
+                      "offsetHours",
                       "productIds"
                     ],
                     "type": "object"

@@ -485,6 +485,8 @@ const isAgendaPayload = (value: unknown): value is AgendaPayload =>
   && Array.isArray(value.availableKinds) && value.availableKinds.every(kind => AGENDA_KINDS.includes(kind as AgendaKind))
   && Array.isArray(value.locations) && value.locations.every(isLocation)
 
+const places = (count: number) => `${count} ${count === 1 ? 'place' : 'places'}`
+
 async function loadMonth(key: string, signal?: AbortSignal): Promise<void> {
   const first = firstOf(key)
   const last = first.add({ months: 1 }).subtract({ days: 1 })
@@ -511,7 +513,7 @@ async function loadMonth(key: string, signal?: AbortSignal): Promise<void> {
           id: session.id, kind: 'session', dayKey, session,
           startsAt: session.starts_at, timeZone: session.timezone, showTimeZone: true,
           title: product.name,
-          subtitle: `${session.claimed} places reserved${session.capacity === null ? '' : ` · ${session.capacity} places`}`,
+          subtitle: `${places(session.claimed)} reserved${session.capacity === null ? '' : ` · ${places(session.capacity)}`}`,
           status: session.status, locationTitle: location?.title ?? 'Online', guestImageUrl: null,
           resourceImageUrl: mediaStillUrl(product.image),
           to: router.resolve({ path: `${level.path.value}/sessions/${session.id}`, query: { product_id: product.id, locationId: session.location_id ? productLocations.value.some(entry => entry.id === session.location_id) ? session.location_id : undefined : product.booking?.held_online ? 'online' : undefined, date: dayKey, month: key } }).fullPath,

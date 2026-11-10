@@ -549,6 +549,8 @@ export async function moveBooking(db: DbClient, env: CloudflareEnv, thread: Gues
     entry = await findEntryByDedupeKey(db, dedupeKey)
     if (!entry) throw new HTTPError({ statusCode: 409, message: before.recordKind === 'booking' ? 'That session filled up or the booking changed; it has not moved' : 'This reservation changed or that time is no longer available' })
   }
+  // Its automatic messages move with it.
+  await (await import('~/server/domain/scheduled-guest-messages')).planSourceMessages(db, thread.organization_id, { kind: before.recordKind, id: before.recordId })
   const noun = await bookingNoun(db, thread)
   await deliverEmail(db, env, thread, entry.id, entry.id, 'moved', proposalSchema.parse(JSON.parse(entry.payload_json || '{}')), noun)
   await updateThreadProjectionIfLatestEntry(db, thread.id, entry.id)
@@ -682,6 +684,8 @@ export async function respondToBookingChange(db: DbClient, env: ChangeEnv, input
   const noun = await bookingNoun(db, thread as GuestThreadRow)
   if (result && input.decision) {
     const accepted = result.event_name === 'booking_change.accepted'
+    // An accepted move takes its automatic messages with it.
+    if (accepted) await (await import('~/server/domain/scheduled-guest-messages')).planSourceMessages(db, thread.organization_id, { kind: current.recordKind, id: current.recordId })
     await updateThreadProjectionIfLatestEntry(db, thread.id, result.id)
     if (!result.payload_json) throw new Error('A booking change answer has no recorded payload')
     const answered = JSON.parse(result.payload_json) as { operational_booking_id?: unknown; before?: { assigned_member_id?: string | null }; after?: { assigned_member_id?: string | null } | null }

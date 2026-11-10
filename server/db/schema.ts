@@ -1325,7 +1325,12 @@ export const product_stay_accessibility_photos = sqliteTable("product_stay_acces
 	index("product_stay_accessibility_photos_asset_idx").on(table.organization_id, table.asset_id),
 ]);
 
-// Workspace-owned reply text, optionally scheduled for explicitly named homes.
+// Workspace-owned reply text, scheduled for explicitly named offerings
+// (productIds): a home, experience or consultation by its product, a table
+// reservation by its location. check_in and check_out
+// are the start and end of whatever was booked: a stay's nights, a session, a
+// table. offsetDays/localTime anchors to that day in its own clock;
+// offsetHours to the instant itself.
 // A schedule's activation time is a local receipt baseline, never a provider
 // creation timestamp. Edits increase version so stale planners cannot win.
 export const message_templates = sqliteTable("message_templates", {
@@ -1343,7 +1348,7 @@ export const message_templates = sqliteTable("message_templates", {
 	index("message_templates_org_updated_idx").on(table.organization_id, table.updated_at, table.id),
 	check("message_templates_text_check", sql`length(trim(title)) BETWEEN 1 AND 100 AND length(trim(body)) BETWEEN 1 AND 5000`),
 	check("message_templates_version_check", sql`version >= 1`),
-	check("message_templates_schedule_check", sql`(schedule_json IS NULL AND schedule_enabled_at IS NULL) OR (schedule_json IS NOT NULL AND schedule_enabled_at IS NOT NULL AND json_valid(schedule_json) AND json_type(schedule_json) IS 'object' AND json_type(schedule_json, '$.productIds') IS 'array' AND json_array_length(schedule_json, '$.productIds') BETWEEN 1 AND 100 AND ((json_extract(schedule_json, '$.trigger') = 'booking_received' AND json_extract(schedule_json, '$.delayMinutes') = 5) OR (json_extract(schedule_json, '$.trigger') IN ('check_in', 'check_out') AND json_type(schedule_json, '$.offsetDays') IS 'integer' AND json_extract(schedule_json, '$.offsetDays') BETWEEN -7 AND 7 AND json_extract(schedule_json, '$.localTime') GLOB '[0-2][0-9]:[0-5][0-9]' AND json_extract(schedule_json, '$.localTime') < '24:00'))) IS TRUE`),
+	check("message_templates_schedule_check", sql`(schedule_json IS NULL AND schedule_enabled_at IS NULL) OR (schedule_json IS NOT NULL AND schedule_enabled_at IS NOT NULL AND json_valid(schedule_json) AND json_type(schedule_json) IS 'object' AND json_type(schedule_json, '$.productIds') IS 'array' AND json_array_length(schedule_json, '$.productIds') BETWEEN 1 AND 100 AND ((json_extract(schedule_json, '$.trigger') = 'booking_received' AND json_extract(schedule_json, '$.delayMinutes') = 5) OR (json_extract(schedule_json, '$.trigger') IN ('check_in', 'check_out') AND ((json_type(schedule_json, '$.offsetHours') IS NULL AND json_type(schedule_json, '$.offsetDays') IS 'integer' AND json_extract(schedule_json, '$.offsetDays') BETWEEN -7 AND 7 AND json_extract(schedule_json, '$.localTime') GLOB '[0-2][0-9]:[0-5][0-9]' AND json_extract(schedule_json, '$.localTime') < '24:00') OR (json_type(schedule_json, '$.offsetDays') IS NULL AND json_type(schedule_json, '$.localTime') IS NULL AND json_type(schedule_json, '$.offsetHours') IS 'integer' AND json_extract(schedule_json, '$.offsetHours') BETWEEN -72 AND 72))))) IS TRUE`),
 	check("message_templates_instants_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at AND (schedule_enabled_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', schedule_enabled_at, '+0 days') IS schedule_enabled_at)`),
 ]);
 
@@ -1578,21 +1583,23 @@ export const stay_payments = sqliteTable("stay_payments", {
 	check("stay_payments_created_at_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at`),
 ]);
 
-// One plan snapshot per actual stay and template, plus the built-in check-in
-// message (template_id NULL) every stay gets from its home's check-in
-// instructions. The outbound activity entry
+// One plan snapshot per template and booked record (subject_type and
+// subject_id, as tasks name it: a stay, booking or reservation in
+// BOOKED_RECORDS_SQL), plus the built-in check-in message (template_id NULL)
+// every stay gets from its home's check-in instructions. product_id is the
+// booked product; a table reservation has none. The outbound activity entry
 // links to the canonical guest_thread_deliveries receipt; provider IDs and send
 // outcomes are never copied into a second receipt ledger here.
 export const scheduled_guest_messages = sqliteTable("scheduled_guest_messages", {
 	id: text().primaryKey(),
 	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
-	product_id: text().notNull(),
-	stay_id: text().notNull(),
+	product_id: text(),
+	subject_type: text().notNull(),
+	subject_id: text().notNull(),
 	request_id: text(),
 	template_id: text(),
 	template_title: text().notNull(),
 	template_version: integer().notNull(),
-	stay_version: integer().notNull(),
 	body: text().notNull(),
 	due_at: text(),
 	timezone: text().notNull(),
@@ -1606,12 +1613,11 @@ export const scheduled_guest_messages = sqliteTable("scheduled_guest_messages", 
 	created_at: text().notNull(),
 	updated_at: text().notNull(),
 }, (table) => [
-	foreignKey({ columns: [table.organization_id, table.stay_id], foreignColumns: [stays.organization_id, stays.id], name: "scheduled_guest_messages_stay_scope_fk" }).onDelete("cascade"),
 	foreignKey({ columns: [table.organization_id, table.request_id], foreignColumns: [requests.organization_id, requests.id], name: "scheduled_guest_messages_request_scope_fk" }).onDelete("no action"),
 	foreignKey({ columns: [table.organization_id, table.template_id], foreignColumns: [message_templates.organization_id, message_templates.id], name: "scheduled_guest_messages_template_scope_fk" }).onDelete("no action"),
-	uniqueIndex("scheduled_guest_messages_template_stay_unique").on(table.template_id, table.stay_id),
+	uniqueIndex("scheduled_guest_messages_template_subject_unique").on(table.template_id, table.subject_type, table.subject_id),
 	// The built-in check-in message: one per stay, with no template.
-	uniqueIndex("scheduled_guest_messages_check_in_stay_unique").on(table.stay_id).where(sql`template_id IS NULL AND template_title = 'Check-in instructions'`),
+	uniqueIndex("scheduled_guest_messages_check_in_unique").on(table.subject_type, table.subject_id).where(sql`template_id IS NULL AND template_title = 'Check-in instructions'`),
 	index("scheduled_guest_messages_due_idx").on(table.status, table.due_at),
 	index("scheduled_guest_messages_org_created_idx").on(table.organization_id, table.created_at, table.id),
 	check("scheduled_guest_messages_status_check", sql`status IN ('pending', 'sending', 'sent', 'failed', 'needs_review', 'cancelled', 'skipped')`),
@@ -1619,7 +1625,8 @@ export const scheduled_guest_messages = sqliteTable("scheduled_guest_messages", 
 	check("scheduled_guest_messages_error_check", sql`status NOT IN ('failed', 'needs_review') OR (length(trim(reason)) > 0 AND length(trim(error_code)) > 0 AND length(trim(error_field)) > 0)`),
 	check("scheduled_guest_messages_sent_check", sql`status <> 'sent' OR (entry_id IS NOT NULL AND sent_at IS NOT NULL)`),
 	check("scheduled_guest_messages_sending_check", sql`status <> 'sending' OR started_at IS NOT NULL`),
-	check("scheduled_guest_messages_text_check", sql`length(trim(template_title)) BETWEEN 1 AND 100 AND length(trim(body)) BETWEEN 1 AND 5000 AND template_version >= 1 AND stay_version >= 1`),
+	check("scheduled_guest_messages_text_check", sql`length(trim(template_title)) BETWEEN 1 AND 100 AND length(trim(body)) BETWEEN 1 AND 5000 AND template_version >= 1`),
+	check("scheduled_guest_messages_subject_check", sql`subject_type IN ('stay', 'booking', 'reservation') AND (product_id IS NULL) = (subject_type = 'reservation') AND (template_id IS NOT NULL OR subject_type = 'stay')`),
 	check("scheduled_guest_messages_instants_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at AND (due_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', due_at, '+0 days') IS due_at) AND (started_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', started_at, '+0 days') IS started_at) AND (sent_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', sent_at, '+0 days') IS sent_at)`),
 ]);
 

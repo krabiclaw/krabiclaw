@@ -34,7 +34,7 @@ import { stayThreadQueries } from '~/server/domain/requests'
 import { openingMessageQueries, openingSentence } from '~/server/domain/guest-threads/opening'
 import { ownedBuyerRequest } from '~/server/domain/payments/buyer'
 import { publishBusinessInvalidation, publishGuestInboxThreadEvent, publishStayInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
-import { planHomeMessages, planStayMessages } from '~/server/domain/scheduled-guest-messages'
+import { planHomeMessages, planSourceMessages } from '~/server/domain/scheduled-guest-messages'
 import { listingCalendar } from '~/server/integrations/channex/airbnb-listing'
 import { toE164 } from '~/utils/phone'
 import { arrangeProductPhotos, readProductPhotos, readStayHomeAccessibility, readStayPhotoRooms, type MediaPlacementItem } from '~/server/utils/media-placement'
@@ -1686,7 +1686,7 @@ export interface HostawayStaySource {
 }
 
 async function publishCreatedStay(db: DbClient, env: StayMutationEnv, access: StayAccess & { manage: true }, stay: StayDetail): Promise<StayDetail & { channel_push: SuccessfulChannelPush | null }> {
-  await planStayMessages(db, access.organizationId, stay.id)
+  await planSourceMessages(db, access.organizationId, { kind: 'stay', id: stay.id })
   const channelPush = await pushNights(db, env, access, stay.product_id, [[stay.check_in_date, stay.check_out_date]])
   return completeChannelPush(channelPush, { product_id: stay.product_id, stay_id: stay.id, version: stay.version, ranges: [[stay.check_in_date, stay.check_out_date]] }, async () => {
     await publishStayChange(env, db, access.organizationId, stay, true)
@@ -1823,7 +1823,7 @@ export async function updateStay(db: DbClient, env: StayMutationEnv, access: Sta
     throw error
   }
   if (!versionChanged(results)) fail(409, 'STAY_VERSION_CONFLICT', 'This stay changed since you opened it; reload it and try again', 'expected_version')
-  await planStayMessages(db, access.organizationId, stayId)
+  await planSourceMessages(db, access.organizationId, { kind: 'stay', id: stayId })
   const stay = await getStay(db, access, stayId)
   // The nights it released and the nights it now holds.
   const ranges = [[current.check_in_date, current.check_out_date], [stay.check_in_date, stay.check_out_date]] as const
@@ -1948,7 +1948,7 @@ export async function moveStay(db: DbClient, env: StayMutationEnv, access: StayA
         metadata: { from_product_id: from.product_id, to_product_id: to.product_id, booked_product_id: booked } }),
       ...bookedListingGuardQueries(access.organizationId, to.product_id, stayId, current, current),
       ...reconcileNightsQueries(access.organizationId, stayId),
-      { query: `UPDATE scheduled_guest_messages SET product_id = ?, updated_at = ? WHERE organization_id = ? AND stay_id = ? AND status <> 'sent' AND ${moved}`,
+      { query: `UPDATE scheduled_guest_messages SET product_id = ?, updated_at = ? WHERE organization_id = ? AND subject_type = 'stay' AND subject_id = ? AND status <> 'sent' AND ${moved}`,
         params: [to.product_id, now, access.organizationId, stayId, ...movedParams] },
       ...stayThreadQueries({ organizationId: access.organizationId, stayId, now, openedBy: { userId: access.actorId } }),
       ...turnovers,
@@ -1956,9 +1956,9 @@ export async function moveStay(db: DbClient, env: StayMutationEnv, access: StayA
         home: backOnListing ? null : { product_id: to.product_id, location_id: to.location_id, timezone: to.timezone, check_in_time: to.check_in_time, internal_name: to.internal_name, assigned_member_id: config.assigned_member_id, assigned_team_id: config.assigned_team_id },
         guestName: stayGuestFirstName(current.guest_name), checkInDate: current.check_in_date }),
       ...(current.request_id === null ? [] : [{
-        query: `INSERT INTO scheduled_guest_messages (id, organization_id, product_id, stay_id, request_id, template_id, template_title, template_version, stay_version, body, due_at, timezone, status, created_at, updated_at)
-                SELECT ?, ?, ?, ?, ?, NULL, ?, 1, ?, ?, ?, ?, 'pending', ?, ? WHERE ${moved}`,
-        params: [crypto.randomUUID(), access.organizationId, to.product_id, stayId, current.request_id, STAY_MOVED_MESSAGE_TITLE, next, body, now, to.timezone, now, now, ...movedParams],
+        query: `INSERT INTO scheduled_guest_messages (id, organization_id, product_id, subject_type, subject_id, request_id, template_id, template_title, template_version, body, due_at, timezone, status, created_at, updated_at)
+                SELECT ?, ?, ?, 'stay', ?, ?, NULL, ?, 1, ?, ?, ?, 'pending', ?, ? WHERE ${moved}`,
+        params: [crypto.randomUUID(), access.organizationId, to.product_id, stayId, current.request_id, STAY_MOVED_MESSAGE_TITLE, body, now, to.timezone, now, now, ...movedParams],
       }]),
     ], { operation: 'Move stay' })
   } catch (error) {
@@ -1966,7 +1966,7 @@ export async function moveStay(db: DbClient, env: StayMutationEnv, access: StayA
     throw error
   }
   if (results[1]?.meta.changes !== 1) fail(409, 'STAY_VERSION_CONFLICT', 'This stay changed since you opened it; reload it and try again', 'expected_version')
-  await planStayMessages(db, access.organizationId, stayId)
+  await planSourceMessages(db, access.organizationId, { kind: 'stay', id: stayId })
   const range = [[current.check_in_date, current.check_out_date]] as const
   const released = await pushNights(db, env, access, from.product_id, range)
   const held = await pushNights(db, env, access, to.product_id, range)
@@ -1998,7 +1998,7 @@ export async function cancelStay(db: DbClient, env: StayMutationEnv, access: Sta
   const complete = async (version: number) => {
     const channelPush = await pushNights(db, env, access, current.product_id, [[current.check_in_date, current.check_out_date]])
     return completeChannelPush(channelPush, { product_id: current.product_id, stay_id: stayId, version, ranges: [[current.check_in_date, current.check_out_date]] }, async () => {
-      await planStayMessages(db, access.organizationId, stayId)
+      await planSourceMessages(db, access.organizationId, { kind: 'stay', id: stayId })
       await publishStayChange(env, db, access.organizationId, await getStay(db, access, stayId), true)
       return getStay(db, access, stayId)
     })
@@ -2148,7 +2148,7 @@ export async function cancelStayAsGuest(db: DbClient, env: StayMutationEnv & Clo
   const access: StayAccess = { organizationId, actorId: 'system', manage: true }
   const channelPush = await pushNights(db, env, access, stay.product_id, [[stay.check_in_date, stay.check_out_date]])
   return completeChannelPush(channelPush, { product_id: stay.product_id, stay_id: stayId, version: stay.status === 'cancelled' ? stay.version : stay.version + 1, ranges: [[stay.check_in_date, stay.check_out_date]] }, async () => {
-    await planStayMessages(db, organizationId, stayId)
+    await planSourceMessages(db, organizationId, { kind: 'stay', id: stayId })
     await publishStayChange(env, db, organizationId, await storedStay(db, organizationId, stayId), true)
     const refund = await queryFirst<{ amount: number | null }>(db, 'SELECT amount FROM payment_refunds WHERE payment_id = ? AND idempotency_key = ?', [payment.id, key])
     let refundMinor = 0
@@ -2530,7 +2530,7 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
     await publishStayChange(env, db, organizationId, stored, true)
   }
   if (existing && existing.provider_updated_at !== null && existing.provider_updated_at >= booking.provider_updated_at) {
-    await planStayMessages(db, organizationId, existing.id)
+    await planSourceMessages(db, organizationId, { kind: 'stay', id: existing.id })
     const stored = await storedStay(db, organizationId, existing.id)
     await publish(stored, existing.revision_id)
     return { ...await storedStay(db, organizationId, existing.id), applied: false, change: existing.revision_id === booking.revision_id ? await recordedChange() : null }
@@ -2633,7 +2633,7 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
   if (linked?.mapped_request_id && linked.request_id !== linked.mapped_request_id) {
     throw new HTTPError({ statusCode: 409, message: 'The stay conversation changed during association', data: { code: 'CHANNEL_THREAD_ASSOCIATION_CONFLICT', field: 'request_id' } })
   }
-  await planStayMessages(db, organizationId, stored.id)
+  await planSourceMessages(db, organizationId, { kind: 'stay', id: stored.id })
   await publish(stored, current.revision_id)
   return { ...await storedStay(db, organizationId, stored.id), applied: changed === 1, change: changed === 1 ? await recordedChange() : null }
 }
@@ -2923,7 +2923,7 @@ export function stayFromCheckoutQueries(input: { organizationId: string; locatio
 /** After a stay is made from a checkout: its scheduled messages, its channel and the screens showing it. */
 export async function completeStayFromCheckout(db: DbClient, env: StayMutationEnv, organizationId: string, stayId: string): Promise<{ stay: Stay; channel_push: SuccessfulChannelPush | null }> {
   const stay = await storedStay(db, organizationId, stayId)
-  await planStayMessages(db, organizationId, stayId)
+  await planSourceMessages(db, organizationId, { kind: 'stay', id: stayId })
   const access: StayAccess = { organizationId, actorId: 'system', manage: true }
   const channelPush = await pushNights(db, env, access, stay.product_id, [[stay.check_in_date, stay.check_out_date]])
   return completeChannelPush(channelPush, { product_id: stay.product_id, stay_id: stayId, version: stay.version, ranges: [[stay.check_in_date, stay.check_out_date]] }, async () => {

@@ -15,7 +15,7 @@
         <USelect v-model="b.changeDraft.value.locationId" :items="b.booking.value.locations.map(location => ({ label: location.title, value: location.id }))" class="w-full" />
       </UFormField>
       <!-- A consultation moves to another open time of its service; the list is the service's own sessions with a place left. -->
-      <UFormField v-else-if="field === 'session'" label="Date and time" :hint="`${sessionItems.length} open times`">
+      <UFormField v-else-if="field === 'session'" label="Date and time" :hint="`${openSessions.length} open times`">
         <USelect v-model="b.changeDraft.value.sessionId" :items="sessionItems" class="w-full" @update:model-value="rememberSessionLabel" />
       </UFormField>
       <UAlert v-if="sessionsError" class="mt-4" color="error" variant="soft" :description="getErrorMessage(sessionsError, 'Open times could not be loaded')" />
@@ -50,9 +50,21 @@ const { data: sessionData, error: sessionsError } = await useAsyncData(
     ? api<{ sessions: SessionRow[] }>(`/api/editor/organizations/${b.booking.value.organizationId}/products/${b.booking.value.experienceId}/sessions`, { query: { status: 'scheduled' }, validate: isSessionList })
     : Promise.resolve(null),
 )
-const sessionItems = computed(() => (sessionData.value?.sessions ?? [])
-  .filter(row => row.id === b.booking.value?.sessionId || row.remaining === null || row.remaining > 0)
-  .map(row => ({ value: row.id, label: `${formatTimestamp(row.starts_at, 'en', row.timezone, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}${row.id === b.booking.value?.sessionId ? ' · Current' : ''}` })))
+const sessionLabel = (startsAt: string, timeZone: string) => formatTimestamp(startsAt, 'en', timeZone, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+// The open times run from now, so a session that has passed or lies past the
+// window is not among them. The booking is the record of its own session: the
+// current item is read off it, and the list adds the other times with a place left.
+const openSessions = computed(() => (sessionData.value?.sessions ?? [])
+  .filter(row => row.id !== b.booking.value?.sessionId && (row.remaining === null || row.remaining > 0)))
+const sessionItems = computed(() => {
+  const booking = b.booking.value
+  if (!booking) return []
+  if (!booking.sessionId || !booking.startsAt) throw createError({ statusCode: 500, statusMessage: 'This booking has no session to change' })
+  return [
+    { value: booking.sessionId, startsAt: booking.startsAt, label: `${sessionLabel(booking.startsAt, booking.timeZone)} · Current` },
+    ...openSessions.value.map(row => ({ value: row.id, startsAt: row.starts_at, label: sessionLabel(row.starts_at, row.timezone) })),
+  ].sort((left, right) => Date.parse(left.startsAt) - Date.parse(right.startsAt))
+})
 function rememberSessionLabel(id: unknown) {
   const item = sessionItems.value.find(row => row.value === id)
   b.changeDraft.value.sessionLabel = item && id !== b.booking.value?.sessionId ? item.label : ''
