@@ -100,7 +100,7 @@
           <UAlert v-else-if="outcome === 'processing' || handoff.state === 'processing'" color="info" :title="t('payment.processing')" :description="t('payment.processing_help')" />
           <UAlert v-else-if="outcome === 'refunded'" color="warning" :title="t('payment.refunded')" :description="t('payment.refunded_help')" />
           <UAlert v-else-if="outcome === 'expired'" color="warning" :title="t('payment.expired')" :description="t('payment.expired_help')" />
-          <UAlert v-else-if="paid || handoff.state === 'paid'" color="success" :title="t('payment.already_paid')" />
+          <UAlert v-else-if="!completing && (paid || handoff.state === 'paid')" color="success" :title="t('payment.already_paid')" />
           <UAlert v-else-if="handoff.state !== 'open'" color="warning" :title="t('payment.expired')" :description="t('payment.expired_help')" />
           <template v-else>
             <!-- Airbnb's own choice of when to pay, above the methods: paying later is Klarna's (or Affirm's, Afterpay's) method, and its terms are theirs. -->
