@@ -16,6 +16,7 @@ const NAMES: Record<IntegrationProvider, string> = {
   discord: 'Discord connection',
   google_analytics: 'Google Analytics connection',
   google_ads: 'Google Ads connection',
+  meta_ads: 'Meta Ads connection',
   google_search_console: 'Search Console connection',
 }
 
@@ -26,6 +27,7 @@ const TARGETS: Record<IntegrationProvider, string> = {
   discord: 'That Discord channel',
   google_analytics: 'That Google Analytics property',
   google_ads: 'That Google Ads account',
+  meta_ads: 'That Meta Ad Account',
   google_search_console: 'That Search Console site',
 }
 

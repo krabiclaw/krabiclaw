@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:a7c115c4a478ef608e24f1e56822542f5906b64e4448a7af916307a6e4f06dfe",
-  "documentationFingerprint": "sha256:a9254b0212e4d7da8d1fe8732f5ab418fc156c096f3934f1034dd9c50769acb6",
+  "fingerprint": "sha256:bdc338a6b144788e435e9f57b712511173cb6354de2646e5307c0801fa39af30",
+  "documentationFingerprint": "sha256:8d4932c58edbda797049b755424d1ae76d54c1e7439827225302319e8d987e54",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -21166,6 +21166,78 @@
       "domain": "guest_messaging",
       "minimumRole": "admin",
       "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
+      "name": "create_meta_ads_campaign",
+      "title": "Create Meta Ads campaign",
+      "description": "Create a new campaign in PAUSED status in the connected Meta Ad Account.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "daily_budget_cents": {
+            "description": "Daily budget in cents (e.g. 1000 for $10.00)",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "name": {
+            "description": "Campaign name",
+            "type": "string"
+          },
+          "objective": {
+            "description": "Campaign objective (default: OUTCOME_TRAFFIC)",
+            "enum": [
+              "OUTCOME_TRAFFIC",
+              "OUTCOME_LEADS",
+              "OUTCOME_AWARENESS"
+            ],
+            "type": "string"
+          },
+          "organization_id": {
+            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
+            "minLength": 1,
+            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
+        "properties": {
+          "campaign_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "campaign_id",
+          "status"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false,
+        "title": "Create Meta Ads campaign"
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "meta_ads",
+      "minimumRole": "admin",
+      "requiredEntitlement": "google_ads_management",
       "fileParams": [],
       "uiResourceUri": null
     },
@@ -69568,6 +69640,92 @@
       "uiResourceUri": null
     },
     {
+      "name": "list_meta_ads_campaigns",
+      "title": "List Meta Ads campaigns",
+      "description": "List up to 100 campaigns in the connected Meta Ad Account, with status, objective, and daily budget.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "organization_id": {
+            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
+            "minLength": 1,
+            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
+        "properties": {
+          "ad_account_id": {
+            "type": "string"
+          },
+          "campaigns": {
+            "items": {
+              "properties": {
+                "daily_budget": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "objective": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "status": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "status"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "ad_account_id",
+          "campaigns"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "List Meta Ads campaigns"
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "meta_ads",
+      "minimumRole": "admin",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
       "name": "list_opportunities",
       "title": "List opportunities",
       "description": "List and save current opportunities such as drafts to finish, posts to share, calendar gaps and preparation to send a booked guest or client. Reports evidence it could not read. Use a returned ID to accept, dismiss or defer an opportunity.",
@@ -85738,6 +85896,98 @@
         }
       ],
       "domain": "analytics",
+      "minimumRole": "admin",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
+      "name": "query_meta_ads_report",
+      "title": "Query Meta Ads report",
+      "description": "Query Meta Ads performance summary (spend, impressions, reach, clicks, conversions) for a given date range.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "end_date": {
+            "description": "End date YYYY-MM-DD.",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "type": "string"
+          },
+          "organization_id": {
+            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
+            "minLength": 1,
+            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
+            "type": "string"
+          },
+          "start_date": {
+            "description": "Start date YYYY-MM-DD.",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
+        "properties": {
+          "ad_account_id": {
+            "type": "string"
+          },
+          "clicks": {
+            "type": "number"
+          },
+          "conversions": {
+            "type": "number"
+          },
+          "cost_cents": {
+            "type": "number"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "end_date": {
+            "type": "string"
+          },
+          "impressions": {
+            "type": "number"
+          },
+          "reach": {
+            "type": "number"
+          },
+          "start_date": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ad_account_id",
+          "start_date",
+          "end_date",
+          "cost_cents",
+          "impressions",
+          "reach",
+          "clicks",
+          "conversions"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Query Meta Ads report"
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "meta_ads",
       "minimumRole": "admin",
       "requiredEntitlement": null,
       "fileParams": [],
@@ -114676,6 +114926,78 @@
       "domain": "guest_messaging",
       "minimumRole": "admin",
       "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
+      "name": "update_meta_ads_campaign",
+      "title": "Update Meta Ads campaign",
+      "description": "Update the status or daily budget of an existing Meta Ads campaign.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "campaign_id": {
+            "description": "Meta campaign ID",
+            "pattern": "^\\d+$",
+            "type": "string"
+          },
+          "daily_budget_cents": {
+            "description": "New daily budget in cents",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "organization_id": {
+            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
+            "minLength": 1,
+            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
+            "type": "string"
+          },
+          "status": {
+            "description": "Campaign status",
+            "enum": [
+              "ACTIVE",
+              "PAUSED"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
+        "properties": {
+          "campaign_id": {
+            "type": "string"
+          },
+          "success": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "campaign_id",
+          "success"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false,
+        "title": "Update Meta Ads campaign"
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "meta_ads",
+      "minimumRole": "admin",
+      "requiredEntitlement": "google_ads_management",
       "fileParams": [],
       "uiResourceUri": null
     },

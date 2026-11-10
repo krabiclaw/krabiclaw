@@ -21,6 +21,7 @@ import { TEAM_MESSAGING_TOOLS, handleTeamMessagingTools } from './team-messaging
 import { TASK_TOOLS, handleTaskTools } from './tasks'
 import { SUBMISSIONS_TOOLS, handleSubmissionsTools } from './submissions'
 import { GOOGLE_ADS_TOOLS, handleGoogleAdsTools } from './google-ads'
+import { META_ADS_TOOLS, handleMetaAdsTools } from './meta-ads'
 import { HTTPError } from 'nitro';
 import type { H3Event } from 'nitro'
 import { queryFirst } from '~/server/db'
@@ -70,6 +71,7 @@ export const MCP_PUBLIC_TOOLS: McpToolDefinition[] = [
   ...TEAM_MESSAGING_TOOLS,
   ...TASK_TOOLS,
   ...GOOGLE_ADS_TOOLS,
+  ...META_ADS_TOOLS,
 ].sort((a, b) => a.name.localeCompare(b.name))
 
 export const MCP_INTERNAL_TOOLS: McpToolDefinition[] = []
@@ -141,6 +143,7 @@ export const DOMAIN_HANDLERS: Record<string, (_ctx: McpExecutorContext) => Promi
   team_messaging: handleTeamMessagingTools,
   tasks: handleTaskTools,
   google_ads: handleGoogleAdsTools,
+  meta_ads: handleMetaAdsTools,
 }
 
 export async function executeMcpToolCall(

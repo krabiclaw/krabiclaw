@@ -46,6 +46,7 @@ export interface IntegrationsSummary {
   google_calendar: { account_id: string; calendar_name: string; status: 'active' | 'disabled' | 'error'; last_error: string | null; connected_at: string; connected_through: { email: string | null; name: string | null } | null } | null
   google_analytics: ConnectedIntegration | null
   google_ads: ConnectedIntegration | null
+  meta_ads: ConnectedIntegration | null
   google_search_console: ConnectedIntegration | null
   facebook: ConnectedIntegration | null
   instagram: ConnectedIntegration | null
@@ -100,6 +101,7 @@ const rows = computed<Record<IntegrationKey, Pick<EditorNavigationItem, 'summary
       : { summary: 'No locations yet' },
     'google-analytics': connection(s?.google_analytics ?? null),
     'google-ads': connection(s?.google_ads ?? null),
+    'meta-ads': connection(s?.meta_ads ?? null),
     'google-search-console': connection(s?.google_search_console ?? null),
     'google-calendar': calendar
       ? { summary: calendar.status === 'error' ? `${calendar.calendar_name} · Needs attention` : calendar.calendar_name, status: calendar.status === 'active' ? 'success' : 'error' }

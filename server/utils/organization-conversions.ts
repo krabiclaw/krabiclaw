@@ -3,6 +3,7 @@ import type { DbClient } from '~/server/db'
 import { execute, queryFirst } from '~/server/db'
 import { getClientIp } from '~/server/utils/hourly-rate-limit'
 import { deliverForVisitor, type MeasurementProtocolEnv } from '~/server/utils/ga4-delivery'
+import { deliverMetaCapiForEvent } from '~/server/utils/meta-capi-delivery'
 import { projectConversionToGa4 } from '~/utils/ga4-projection'
 import { SESSION_COOKIE, VISITOR_COOKIE, hashIp, isCanonicalEventId } from '~/server/utils/pageview-tracking'
 import type { AttributionTouch, ObservedAttribution } from '~/utils/analytics-attribution'
@@ -259,6 +260,9 @@ export async function recordAndDeliverConversion(env: MeasurementProtocolEnv, db
     await deliverForVisitor(env, db, {
       eventId: recorded.id, organizationId: input.organizationId, origin,
       projection: projectConversionToGa4({ eventName: input.eventName, value: input.value }),
+    })
+    await deliverMetaCapiForEvent(env as never, db, {
+      eventId: recorded.id, organizationId: input.organizationId, origin, input,
     })
   }
   return recorded

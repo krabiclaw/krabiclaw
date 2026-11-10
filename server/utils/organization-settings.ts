@@ -246,6 +246,7 @@ async function integrationsSummary(db: DbClient, env: CloudflareEnv, organizatio
     google_calendar: (() => { const row = integrations.find(row => row.provider === 'google_calendar'); return row ? { account_id: row.account_id, calendar_name: row.target_name, status: row.status, last_error: row.last_error, connected_at: row.created_at, connected_through: owners.get(row.account_id) ?? null } : null })(),
     google_analytics: connected('google_analytics'),
     google_ads: connected('google_ads'),
+    meta_ads: connected('meta_ads'),
     google_search_console: connected('google_search_console'),
     facebook: connected('facebook'),
     instagram: connected('instagram'),
