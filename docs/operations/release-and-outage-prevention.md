@@ -910,10 +910,19 @@ finish, run the verified final delta:
 node --experimental-strip-types scripts/pull-production-snapshot.ts --staging --source krabiclaw-staging-v25 --out staging-v26-final.sqlite --delta-from ~/krabiclaw-db-replacements/v26/staging-v26-initial.sqlite
 ```
 
-Production, development and E2E move together immediately before promotion,
-in their own change. In it, apply the baseline to production v26 through the
-native ledger, then run the initial load from `krabiclaw-production-v25`
-after checking the deployed Worker's actual source binding, and the final
-delta after the repoint. Read back schema drift, the native baseline ledger,
-`PRAGMA foreign_key_check` and a representative booking journey on each
-before retiring either v25 database.
+Production, development and E2E moved to `krabiclaw-production-v26` in this
+change, immediately before promotion. On 2026-11-10 the baseline was applied to
+it through the native ledger and its initial copy loaded from
+`krabiclaw-production-v25` through the repointed configuration: 112 tables,
+219,855 rows; `scheduling_mode_legacy_to_business` 16,
+`payment_attempts_and_claims_folded_into_payments` 12,
+`superseded_opportunities_removed` 22; `PRAGMA foreign_key_check` empty. The
+artifacts are under `~/krabiclaw-db-replacements/v26/`. After the production
+deploy and old writers finish, run the verified final delta:
+
+```
+node --experimental-strip-types scripts/pull-production-snapshot.ts --production --source krabiclaw-production-v25 --out production-v26-final.sqlite --delta-from ~/krabiclaw-db-replacements/v26/production-v26-initial.sqlite
+```
+
+Read back schema drift, the native baseline ledger, `PRAGMA foreign_key_check`
+and a representative booking journey before retiring either v25 database.
