@@ -135,9 +135,9 @@ export async function acceptOpportunity(db: DbClient, principal: MemberAccessPri
       // Re-read the target when its revision can still be proved independently of the failed provider.
       const current = row.operation === 'social.connect' || (await readRecommendationReference(db, principal, { operation: row.operation, subjectId: row.subject_id }))?.evidenceRevision === row.evidence_revision
       if (current) throw new HTTPError({ statusCode: 503, message: 'Could not verify what this opportunity was based on. Reload Today and try again.',
-        data: { code: 'OPPORTUNITY_EVIDENCE_UNAVAILABLE', field: 'id', operation_completed: false, issues: plan.issues } })
+        data: { code: 'OPPORTUNITY_EVIDENCE_UNAVAILABLE', field: 'opportunity_id', operation_completed: false, issues: plan.issues } })
     }
-    fail(409, 'OPPORTUNITY_CHANGED', 'What this opportunity was based on has changed. Reload Today to see what is current.', 'id')
+    fail(409, 'OPPORTUNITY_CHANGED', 'What this opportunity was based on has changed. Reload Today to see what is current.', 'opportunity_id')
   }
   const viewer = await taskViewer(db, principal)
   const assigned = body.assignedMemberId === undefined && body.assignedTeamId === undefined
