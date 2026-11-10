@@ -425,9 +425,10 @@ export async function handleMediaTools(ctx: McpExecutorContext): Promise<unknown
       if (!Object.hasOwn(args, 'alt_text') && !Object.hasOwn(args, 'category')) {
         throw new HTTPError({ statusCode: 400, statusMessage: 'Provide alt_text or category' });
       }
+      const assetId = requiredString(args, "asset_id");
       const updated = await updateMediaAssetMetadata(
         organization.db,
-        requiredString(args, "asset_id"),
+        assetId,
         organization.organizationId,
         {
           ...(Object.hasOwn(args, 'alt_text') ? { alt_text: args.alt_text as string | null } : {}),
@@ -435,7 +436,11 @@ export async function handleMediaTools(ctx: McpExecutorContext): Promise<unknown
         },
       );
       if (!updated) {
-        throw new HTTPError({ statusCode: 404, statusMessage: 'Media asset not found' });
+        throw new HTTPError({
+          statusCode: 404,
+          statusMessage: `Media asset '${assetId}' not found in this organization. Call list_media_assets to inspect valid assets.`,
+          data: { code: 'MEDIA_ASSET_NOT_FOUND', asset_id: assetId, hint: 'Call list_media_assets to inspect valid assets.' },
+        });
       }
       return {
         updated,

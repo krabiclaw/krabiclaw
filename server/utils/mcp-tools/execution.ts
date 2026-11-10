@@ -106,11 +106,12 @@ export function toolFileReference(value: unknown, key: string): ToolFileReferenc
     throw mcpProtocolError(
       MCP_ERROR.invalidParams,
       `${key} must be sent as a ChatGPT file argument so the host rewrites the local path into an authorized file reference before KrabiClaw receives it.`,
+      { field: key, expected: 'file attachment' },
     );
   }
 
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw mcpProtocolError(MCP_ERROR.invalidParams, `Invalid ${key}`);
+    throw mcpProtocolError(MCP_ERROR.invalidParams, `Invalid ${key}: an object with file_id and download_url is required`, { field: key, expected: 'file object' });
   }
 
   const record = value as Record<string, unknown>;
@@ -119,11 +120,12 @@ export function toolFileReference(value: unknown, key: string): ToolFileReferenc
   if (typeof downloadUrl !== "string" || !downloadUrl.trim()) {
     throw mcpProtocolError(
       MCP_ERROR.invalidParams,
-      `Invalid ${key}.download_url`,
+      `Invalid ${key}.download_url: a non-empty string URL is required`,
+      { field: `${key}.download_url`, expected: 'url string' },
     );
   }
   if (typeof fileId !== "string" || !fileId.trim()) {
-    throw mcpProtocolError(MCP_ERROR.invalidParams, `Invalid ${key}.file_id`);
+    throw mcpProtocolError(MCP_ERROR.invalidParams, `Invalid ${key}.file_id: a non-empty string file_id is required`, { field: `${key}.file_id`, expected: 'string' });
   }
 
   return {
@@ -506,7 +508,7 @@ export async function normalizeWorkspaceArguments(
     // anyOf/oneOf. The SDK validates whether this tool accepts it.
     if (args[key] === null) continue
     if (typeof args[key] !== 'string' || !args[key].trim()) {
-      throw mcpProtocolError(MCP_ERROR.invalidParams, `Invalid ${key}`, { status: 400, invalid_fields: [key] })
+      throw mcpProtocolError(MCP_ERROR.invalidParams, `Invalid ${key}: a non-empty string is required`, { status: 400, field: key, invalid_fields: [key], expected: 'non-empty string' })
     }
     args[key] = args[key].trim()
   }
@@ -567,7 +569,7 @@ export function humanizeEntitlement(entitlement: string) {
 export function requiredString(source: Record<string, unknown>, key: string) {
   const value = source[key];
   if (typeof value !== "string" || !value.trim()) {
-    throw mcpProtocolError(MCP_ERROR.invalidParams, `Invalid ${key}`);
+    throw mcpProtocolError(MCP_ERROR.invalidParams, `Invalid ${key}: a non-empty string is required`, { field: key, expected: 'non-empty string' });
   }
   return value.trim();
 }
@@ -575,7 +577,7 @@ export function requiredString(source: Record<string, unknown>, key: string) {
 export function requiredBoolean(source: Record<string, unknown>, key: string) {
   const value = source[key];
   if (typeof value !== "boolean") {
-    throw mcpProtocolError(MCP_ERROR.invalidParams, `Invalid ${key}`);
+    throw mcpProtocolError(MCP_ERROR.invalidParams, `Invalid ${key}: a boolean (true or false) is required`, { field: key, expected: 'boolean' });
   }
   return value;
 }
@@ -590,7 +592,7 @@ export function optionalDaysWindow(source: Record<string, unknown>, key: string,
   if (value === undefined || value === null) return null;
   const num = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(num) || num <= 0) {
-    throw mcpProtocolError(MCP_ERROR.invalidParams, `${key} must be a positive number of days`);
+    throw mcpProtocolError(MCP_ERROR.invalidParams, `${key} must be a positive number of days (1-${max})`, { field: key, expected: `integer (1-${max})` });
   }
   return Math.max(1, Math.min(Math.floor(num), max));
 }
@@ -600,14 +602,14 @@ export function requiredStringArray(value: unknown, key: string) {
     !Array.isArray(value) ||
     value.some((item) => typeof item !== "string" || !item.trim())
   ) {
-    throw mcpProtocolError(MCP_ERROR.invalidParams, `Invalid ${key}`);
+    throw mcpProtocolError(MCP_ERROR.invalidParams, `Invalid ${key}: an array of non-empty strings is required`, { field: key, expected: 'string[]' });
   }
   return value.map((item) => item.trim());
 }
 
 export function objectRecord(value: unknown, key: string) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw mcpProtocolError(MCP_ERROR.invalidParams, `Invalid ${key}`);
+    throw mcpProtocolError(MCP_ERROR.invalidParams, `Invalid ${key}: an object is required`, { field: key, expected: 'object' });
   }
   return value as Record<string, unknown>;
 }
@@ -633,7 +635,7 @@ export function rethrowAsInvalidParams(error: unknown): never {
 
 export function objectArray(value: unknown, key: string) {
   if (!Array.isArray(value)) {
-    throw mcpProtocolError(MCP_ERROR.invalidParams, `Invalid ${key}`);
+    throw mcpProtocolError(MCP_ERROR.invalidParams, `Invalid ${key}: an array of objects is required`, { field: key, expected: 'object[]' });
   }
   if (
     value.some(
@@ -643,6 +645,7 @@ export function objectArray(value: unknown, key: string) {
     throw mcpProtocolError(
       MCP_ERROR.invalidParams,
       `Invalid ${key}: each element must be an object`,
+      { field: key, expected: 'object[]' },
     );
   }
   return value as Record<string, unknown>[];

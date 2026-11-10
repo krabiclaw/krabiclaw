@@ -56,7 +56,7 @@ export function mcpToolErrorResult(message: string, data?: unknown, platformOrig
     } catch { dashboardUrlError = 'invalid_destination' }
   }
   const recovery = mcpErrorRecoveryDetails(details)
-  const action = status || code || Object.keys(recovery).length ? { ...(status ? { status } : {}), message, ...recovery, ...(dashboardUrl ? { dashboard_url: dashboardUrl } : {}), ...(dashboardUrlError ? { dashboard_url_error: dashboardUrlError } : {}) } : undefined
+  const action = status || code || Object.keys(recovery).length ? { ...(status ? { status } : {}), ...(code ? { code } : {}), message, ...recovery, ...(dashboardUrl ? { dashboard_url: dashboardUrl } : {}), ...(dashboardUrlError ? { dashboard_url_error: dashboardUrlError } : {}) } : undefined
   // Structured content must match the tool's success schema; errors use content.
   return {
     isError: true,

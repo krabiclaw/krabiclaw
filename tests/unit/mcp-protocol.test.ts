@@ -6,6 +6,14 @@ import {
   MCP_ERROR,
   mcpProtocolError,
 } from '../../server/utils/mcp-protocol.ts'
+import { mcpToolErrorResult } from '../../server/utils/mcp-route-helpers.ts'
+import {
+  objectArray,
+  objectRecord,
+  requiredBoolean,
+  requiredString,
+  requiredStringArray,
+} from '../../server/utils/mcp-tools/execution.ts'
 
 // JSON-RPC envelope parsing, protocol-version negotiation, and JSON-RPC
 // argument-shape validation moved to @modelcontextprotocol/server (see
@@ -102,4 +110,94 @@ test('asMcpError maps statusCode 403 to forbidden rather than auth', () => {
   const mapped = asMcpError(forbidden)
   assert.equal(mapped.kind, 'forbidden')
   assert.equal(mapped.code, MCP_ERROR.internal)
+})
+
+test('asMcpError and mcpToolErrorResult preserve structured field, hint, and entity recovery IDs', () => {
+  const error = Object.assign(new Error("Operational booking 'book_123' not found"), {
+    statusCode: 404,
+    data: {
+      code: 'BOOKING_NOT_FOUND',
+      booking_id: 'book_123',
+      field: 'operational_booking_id',
+      hint: 'Call list_product_bookings to view valid records.',
+      private_token: 'secret-leaked',
+    },
+  })
+  const mapped = asMcpError(error)
+  assert.equal(mapped.kind, 'tool_execution')
+  assert.deepEqual(mapped.data, {
+    status: 404,
+    code: 'BOOKING_NOT_FOUND',
+    booking_id: 'book_123',
+    field: 'operational_booking_id',
+    hint: 'Call list_product_bookings to view valid records.',
+  })
+
+  const toolError = mcpToolErrorResult("Operational booking 'book_123' not found", mapped.data)
+  assert.equal(toolError.isError, true)
+  assert.deepEqual(JSON.parse(toolError.content[0].text), {
+    status: 404,
+    code: 'BOOKING_NOT_FOUND',
+    message: "Operational booking 'book_123' not found",
+    booking_id: 'book_123',
+    field: 'operational_booking_id',
+    hint: 'Call list_product_bookings to view valid records.',
+  })
+})
+
+test('execution validation helpers throw structured mcpProtocolError with field and expected', () => {
+  assert.throws(
+    () => requiredString({}, 'organization_id'),
+    (err: unknown) => {
+      const mcp = (err as { mcp: { code: number; message: string; data: unknown } }).mcp
+      assert.equal(mcp.code, MCP_ERROR.invalidParams)
+      assert.match(mcp.message, /Invalid organization_id: a non-empty string is required/)
+      assert.deepEqual(mcp.data, { field: 'organization_id', expected: 'non-empty string' })
+      return true
+    },
+  )
+
+  assert.throws(
+    () => requiredBoolean({ active: 'yes' }, 'active'),
+    (err: unknown) => {
+      const mcp = (err as { mcp: { code: number; message: string; data: unknown } }).mcp
+      assert.equal(mcp.code, MCP_ERROR.invalidParams)
+      assert.match(mcp.message, /Invalid active: a boolean \(true or false\) is required/)
+      assert.deepEqual(mcp.data, { field: 'active', expected: 'boolean' })
+      return true
+    },
+  )
+
+  assert.throws(
+    () => requiredStringArray(['valid', ''], 'tags'),
+    (err: unknown) => {
+      const mcp = (err as { mcp: { code: number; message: string; data: unknown } }).mcp
+      assert.equal(mcp.code, MCP_ERROR.invalidParams)
+      assert.match(mcp.message, /Invalid tags: an array of non-empty strings is required/)
+      assert.deepEqual(mcp.data, { field: 'tags', expected: 'string[]' })
+      return true
+    },
+  )
+
+  assert.throws(
+    () => objectRecord('not-an-object', 'payload'),
+    (err: unknown) => {
+      const mcp = (err as { mcp: { code: number; message: string; data: unknown } }).mcp
+      assert.equal(mcp.code, MCP_ERROR.invalidParams)
+      assert.match(mcp.message, /Invalid payload: an object is required/)
+      assert.deepEqual(mcp.data, { field: 'payload', expected: 'object' })
+      return true
+    },
+  )
+
+  assert.throws(
+    () => objectArray([{ ok: true }, 'invalid'], 'items'),
+    (err: unknown) => {
+      const mcp = (err as { mcp: { code: number; message: string; data: unknown } }).mcp
+      assert.equal(mcp.code, MCP_ERROR.invalidParams)
+      assert.match(mcp.message, /Invalid items: each element must be an object/)
+      assert.deepEqual(mcp.data, { field: 'items', expected: 'object[]' })
+      return true
+    },
+  )
 })

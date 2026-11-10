@@ -286,17 +286,31 @@ export async function requireMcpOrganization(
   )
 
   if (!organization) {
-    throw new HTTPError({ statusCode: 404, statusMessage: 'Organization not found or access denied' })
+    throw new HTTPError({
+      statusCode: 404,
+      statusMessage: `Organization not found or access denied for '${organizationId}'. Call list_organizations to view accessible organizations.`,
+      data: { code: 'ORGANIZATION_NOT_FOUND', organization_id: organizationId, hint: 'Call list_organizations to view accessible organizations.' },
+    })
   }
   const membership = await resolveOrganizationMembership(user.env, {
     organizationId: organization.id,
     userId: user.userId,
   })
-  if (!membership) throw new HTTPError({ statusCode: 404, statusMessage: 'Organization not found or access denied' })
+  if (!membership) {
+    throw new HTTPError({
+      statusCode: 404,
+      statusMessage: `Organization not found or access denied for '${organizationId}'. Call list_organizations to view accessible organizations.`,
+      data: { code: 'ORGANIZATION_NOT_FOUND', organization_id: organizationId, hint: 'Call list_organizations to view accessible organizations.' },
+    })
+  }
 
   const role = normalizeRole(membership.role)
   if (!role || !await roleSatisfies(organization.id, membership.role, minimumRole)) {
-    throw new HTTPError({ statusCode: 403, statusMessage: 'Insufficient permissions' })
+    throw new HTTPError({
+      statusCode: 403,
+      statusMessage: `Insufficient permissions: '${minimumRole}' role required for organization '${organizationId}'.`,
+      data: { code: 'INSUFFICIENT_PERMISSIONS', organization_id: organizationId, required_role: minimumRole, current_role: role ?? 'none' },
+    })
   }
 
   // Member tools check their own scheduling, service or appointment target.

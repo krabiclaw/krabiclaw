@@ -121,7 +121,13 @@ export async function handleBookingsTools(ctx: McpExecutorContext): Promise<unkn
     const productId = requiredString(args, 'product_id')
     await assertProductAccess(db, { ...principal, productId })
     const product = await queryFirst(db, 'SELECT id FROM products WHERE id = ? AND organization_id = ?', [productId, organizationId])
-    if (!product) throw new HTTPError({ statusCode: 404, message: 'Product not found in this organization' })
+    if (!product) {
+      throw new HTTPError({
+        statusCode: 404,
+        message: `Product '${productId}' not found in this organization. Call list_products to inspect valid offerings.`,
+        data: { code: 'PRODUCT_NOT_FOUND', product_id: productId, hint: 'Call list_products to inspect valid offerings.' },
+      })
+    }
     await requireBookingConfig(db, organizationId, productId)
     const sessions = await listSessions(db, { env, organizationId, productId, fromInstant: new Date(start).toISOString(), toInstant: new Date(end).toISOString() })
     const page = paginateMcpCollection(sessions, args, { resource: `booking-sessions:${organizationId}:${productId}:${from}:${to}` })
@@ -181,11 +187,29 @@ export async function handleBookingsTools(ctx: McpExecutorContext): Promise<unkn
   const id = requiredString(args, reservation ? 'operational_reservation_id' : 'operational_booking_id')
   if (!reservation) await assertAssignedBookingAccess(db, { ...principal, bookingId: id })
   const row = await queryFirst<{ request_id: string | null; updated_at: string }>(db, `SELECT request_id, updated_at FROM ${reservation ? 'reservations' : 'bookings'} WHERE id = ? AND organization_id = ?`, [id, organizationId])
-  if (!row?.request_id) throw new HTTPError({ statusCode: 404, message: 'Operational booking with an inbox thread not found in this organization' })
+  if (!row?.request_id) {
+    throw new HTTPError({
+      statusCode: 404,
+      message: `Operational ${reservation ? 'reservation' : 'booking'} '${id}' not found in this organization. Call ${reservation ? 'list_table_reservations' : 'list_product_bookings'} to view valid records.`,
+      data: { code: reservation ? 'RESERVATION_NOT_FOUND' : 'BOOKING_NOT_FOUND', booking_id: id, hint: `Call ${reservation ? 'list_table_reservations' : 'list_product_bookings'} to view valid records.` },
+    })
+  }
   const thread = await getGuestRequest(db, row.request_id, organizationId, reservation ? 'reservation' : 'booking')
-  if (!thread || (thread.kind !== 'booking' && thread.kind !== 'reservation')) throw new HTTPError({ statusCode: 404, message: 'Booking thread not found' })
+  if (!thread || (thread.kind !== 'booking' && thread.kind !== 'reservation')) {
+    throw new HTTPError({
+      statusCode: 404,
+      message: `Booking thread '${row.request_id}' not found for ${reservation ? 'reservation' : 'booking'} '${id}'`,
+      data: { code: 'THREAD_NOT_FOUND', request_id: row.request_id, booking_id: id },
+    })
+  }
   let operationalRecord = await getThreadOperationalRecord(db, thread.id)
-  if (!operationalRecord || operationalRecord.id !== id || operationalRecord.kind !== thread.kind || operationalRecord.organization_id !== organizationId) throw new HTTPError({ statusCode: 404, message: 'Operational booking record not found in this organization' })
+  if (!operationalRecord || operationalRecord.id !== id || operationalRecord.kind !== thread.kind || operationalRecord.organization_id !== organizationId) {
+    throw new HTTPError({
+      statusCode: 404,
+      message: `Operational record '${id}' not found in this organization`,
+      data: { code: 'RECORD_NOT_FOUND', booking_id: id },
+    })
+  }
   if (toolName === 'get_product_booking') {
     const provenance = thread.kind === 'booking' ? thread.payload.provenance : undefined
     return { operational_booking_id: id, request_id: thread.id, updated_at: thread.updated_at, operational_updated_at: row.updated_at, guest: thread.payload.guest, answers: thread.payload.answers,

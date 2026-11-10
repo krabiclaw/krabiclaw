@@ -402,7 +402,11 @@ function assertTenantPageRemovedBlockIds(
 async function requireOrganizationDocument(ctx: McpExecutorContext, documentId: string) {
   const document = await getContentDocumentById(ctx.organization.db, documentId)
   if (!document || document.organization_id !== ctx.organization.organizationId) {
-    throw new HTTPError({ statusCode: 404, statusMessage: 'Content document not found' })
+    throw new HTTPError({
+      statusCode: 404,
+      statusMessage: `Content document '${documentId}' not found in this organization. Call list_site_pages or list_articles to inspect valid document IDs.`,
+      data: { code: 'CONTENT_DOCUMENT_NOT_FOUND', document_id: documentId, hint: 'Call list_site_pages or list_articles to inspect valid document IDs.' },
+    })
   }
   return document
 }

@@ -258,7 +258,11 @@ export async function executeMcpToolCall(
 
   if (toolName === "set_workspace_context") {
     if (!Object.hasOwn(normalizedArguments, 'organization_id') && !Object.hasOwn(normalizedArguments, 'location_id')) {
-      throw new HTTPError({ statusCode: 400, statusMessage: 'Select an organization or location' })
+      throw new HTTPError({
+        statusCode: 400,
+        statusMessage: 'Select an organization or location. Call list_organizations to view accessible organizations.',
+        data: { code: 'INVALID_WORKSPACE_ARGUMENTS', missing_fields: ['organization_id', 'location_id'], hint: 'Call list_organizations to view accessible organizations.' },
+      })
     }
     const user = authenticatedUser ?? await requireMcpUser(event);
     const organizationId = optionalString(normalizedArguments, "organization_id");
@@ -323,7 +327,11 @@ export async function executeMcpToolCall(
       LIMIT 1
     `, [explicitLocationId, organization.organizationId]);
     if (!location) {
-      throw new HTTPError({ statusCode: 404, statusMessage: 'Location not found for this organization' });
+      throw new HTTPError({
+        statusCode: 404,
+        statusMessage: `Location '${explicitLocationId}' not found for this organization. Call list_locations to inspect valid locations.`,
+        data: { code: 'LOCATION_NOT_FOUND', location_id: explicitLocationId, hint: 'Call list_locations to inspect valid locations.' },
+      });
     }
   }
 
