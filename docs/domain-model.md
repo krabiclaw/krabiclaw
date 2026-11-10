@@ -50,7 +50,7 @@ extend that model. Never add a second one beside it.
 | Payments | `payments` `payment_refunds` `payment_disputes` `payment_orders` `payment_order_lines` `payment_authorizations` `payment_checkout_holds` `offline_payments` `payment_fee_reports` `payment_cost_snapshots` `payment_servicing_tenants` `stripe_connected_accounts` `stripe_connected_customers` `stripe_webhook_events` `payment_usage_events` | server/domain/payments | Stripe |
 | Channex channel | `channex_connections` `product_channel_mappings` `channel_threads` `channel_night_pushes` `channel_sync_log` `airbnb_sync_jobs` | server/integrations/channex | Channex |
 | Imported iCal calendar | `stay_calendar_links` | server/domain/stays.ts | KrabiClaw |
-| Google Calendar | `google_calendar_setup` `google_calendar_sync` `google_calendar_event_links` `google_calendar_cleanup_jobs` | server/utils/google-calendar.ts | Google |
+| Google Calendar | `google_calendar_setup` `google_calendar_event_links` `google_calendar_cleanup_jobs` | server/utils/google-calendar.ts | Google |
 | Connected service selection | `organization_integrations` `organization_services` | server/utils/organization-integrations.ts | Better Auth linked accounts |
 | Push device | `device_tokens` | server/domain/devices.ts | APNs / Web Push |
 | Notification preference | `user_notification_preferences` | server/domain/notification-preferences.ts | KrabiClaw |

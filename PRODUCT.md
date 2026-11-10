@@ -29,10 +29,8 @@ retains its nightly calendar.
 
 Google Calendar sync is a Business feature. Connecting the business creates or
 reuses its KrabiClaw calendar and projects upcoming pending and confirmed
-bookings and reservations; an event moved there moves its booking through the
-same booking-move operation the dashboard and ChatGPT use, with its
-availability checks and guest email, while a deleted event is put back and the
-booking is raised for the owner's decision. Connecting a member's personal
+bookings and reservations, each event following its booking and carrying its
+Manage link. Editing an event in Google does not change the booking. Connecting a member's personal
 account excludes busy times from new availability. Personal event titles and
 descriptions are not imported.
 

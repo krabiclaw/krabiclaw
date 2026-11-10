@@ -2,11 +2,10 @@ import type { WhatsAppTemplate } from '~/server/utils/whatsapp'
 import { reviewEditorPath } from '~/server/utils/dashboard-links'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import type { NotificationMessage } from './messages'
-import { guestPaymentMessage, ownerPaymentMessage, stripeAccountAttentionMessage } from './payment-events'
+import { guestPaymentMessage, ownerPaymentMessage, subscriptionPlanMessage } from './payment-events'
 import type { GuestPaymentNotificationEvent, PaymentNotificationEvent } from './payment-events'
 import {
   bookingCancelledMessage,
-  calendarSyncMessage,
   bookingChangeMessage,
   bookingCreatedMessage,
   occurrenceChangeDifferences,
@@ -182,8 +181,6 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
   { id: 'reservation-cancelled', audience: 'owner', title: 'Owner — table reservation cancelled', whatsappTemplate: 'reservation_cancelled', message: ownerAlert(bookingCancelledMessage({ ...reservation, wasConfirmed: true })) },
   { id: 'booking-created', audience: 'owner', title: 'Owner — new experience booking request', whatsappTemplate: 'new_reservation', message: ownerAlert(bookingCreatedMessage({ ...booking, status: 'pending' })) },
   { id: 'booking-cancelled', audience: 'owner', title: 'Owner — booking cancelled', whatsappTemplate: 'reservation_cancelled', message: ownerAlert(bookingCancelledMessage({ ...booking, wasConfirmed: false })) },
-  { id: 'calendar-event-deleted', audience: 'owner', title: 'Owner — booking event deleted in Google Calendar', message: ownerAlert(calendarSyncMessage({ kind: 'event_deleted', recordKind: 'consultation', guestName: 'Mina Park', whenLabel: 'Mon, Jul 20, 2026, 10:00 AM', day: 'Jul 20', reason: null, replyUrl: 'https://demo.krabiclaw.com/dashboard/demo/bookings/booking/preview-1', organizationName: studio })) },
-  { id: 'calendar-move-refused', audience: 'owner', title: 'Owner — booking could not follow its Google Calendar event', message: ownerAlert(calendarSyncMessage({ kind: 'move_refused', recordKind: 'consultation', guestName: 'Mina Park', whenLabel: 'Mon, Jul 20, 2026, 10:00 AM', day: 'Jul 20', reason: 'That time is outside Elena’s working hours', replyUrl: 'https://demo.krabiclaw.com/dashboard/demo/bookings/booking/preview-1', organizationName: studio })) },
   {
     id: 'stay-booked',
     audience: 'owner',
@@ -353,17 +350,6 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
     ))),
   },
   {
-    id: 'stripe-account-attention',
-    audience: 'owner',
-    title: 'Owner — Stripe needs something from the business',
-    whatsappTemplate: 'guest_thread_reply_whatsapp',
-    message: ownerAlert(stripeAccountAttentionMessage({
-      organizationName: 'Ember & Slice', status: 'action_required',
-      reasons: ['Information on the account doesn\'t match information on the document. Verify the account and upload the document again.'],
-      action: { url: 'https://demo.krabiclaw.com/dashboard/ember-slice/payments/payout-method', label: 'Review payout setup' },
-    })),
-  },
-  {
     id: 'domain-update',
     audience: 'owner',
     title: 'Owner — custom domain updated',
@@ -443,4 +429,12 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
     return { id: `owner-${event.kind}`, audience: 'owner' as const, title: `Owner — ${message.title}`, message }
   }),
   ...guestPayments.map(event => ({ id: `guest-${event.kind}`, audience: 'guest' as const, title: `Guest — ${guestPaymentMessage(event).title}`, message: guestPaymentMessage(event) })),
+  ...([
+    { kind: 'started', plan: 'Business', date: 'Nov 24, 2026' },
+    { kind: 'changed', plan: 'Business', previousPlan: 'Growth' },
+    { kind: 'ending', plan: 'Business', date: 'Dec 10, 2026' },
+  ] as const).map((input) => {
+    const message = ownerAlert(subscriptionPlanMessage({ ...input, organizationName: studio, action: { url: 'https://demo.krabiclaw.com/dashboard/pottery-house/billing', label: 'Open Plan and billing' } }))
+    return { id: `owner-plan-${input.kind}`, audience: 'owner' as const, title: `Owner — ${message.title}`, message }
+  }),
 ]

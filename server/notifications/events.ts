@@ -605,44 +605,6 @@ export function bookingChangeMessage(input: BookingChangeEventInput): MemberAler
   }
 }
 
-export interface CalendarSyncEventInput {
-  kind: 'event_deleted' | 'move_refused'
-  recordKind: string
-  guestName: string
-  whenLabel: string
-  /** The booked day as the subject names it, "Jul 20". */
-  day: string
-  /** Why the move could not be applied; absent for a deletion. */
-  reason: string | null
-  replyUrl: string
-  organizationName: string
-}
-
-/** Something changed on the business's Google calendar that the booking did not follow. */
-export function calendarSyncMessage(input: CalendarSyncEventInput): MemberAlertMessage {
-  const deleted = input.kind === 'event_deleted'
-  const summary = deleted
-    ? `${input.guestName}'s ${input.recordKind} is still booked for ${input.whenLabel}. Deleting its event in Google Calendar never cancels it or refunds anyone, and the event has been put back. Cancel the ${input.recordKind} in KrabiClaw if you meant to.`
-    : `${input.guestName}'s ${input.recordKind} stays at ${input.whenLabel}${input.reason ? `: ${input.reason}` : '.'} The event has been moved back in Google Calendar. Change the ${input.recordKind} in KrabiClaw to pick a time that works.`
-  return {
-    title: `${deleted ? 'Calendar event deleted' : 'Calendar change not applied'} - ${input.guestName}, ${input.day}`,
-    preheader: summary,
-    hero: null,
-    intro: summary,
-    facts: facts(
-      fact('recordKind', 'Type', input.recordKind, true),
-      fact('guestName', 'Guest', input.guestName, true),
-      fact('when', 'Still booked for', input.whenLabel, true),
-      fact('reason', 'Reason', input.reason),
-    ),
-    primaryAction: { url: input.replyUrl, label: 'Open in dashboard' },
-    category: 'reservations_bookings',
-    emailPurpose: 'transactional',
-    emailReason: `You received this email because ${input.guestName}'s ${input.recordKind} with ${input.organizationName} changed on the business's Google Calendar and you receive its booking notifications.`,
-    organizationName: input.organizationName,
-  }
-}
-
 export interface DomainEventInput {
   event: 'added' | 'synced' | 'deleted'
   domain: string

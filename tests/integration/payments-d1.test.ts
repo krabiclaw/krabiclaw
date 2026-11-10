@@ -1,5 +1,6 @@
 import {createCanonicalNotification} from '../../server/utils/notification-center.ts'
 import { OPEN_TERMS, OPEN_TERMS_JSON } from './support/booking-terms.ts'
+import { publishedCatalogResponse } from './support/stripe-published-catalog.ts'
 import assert from 'node:assert/strict'
 import test, { type TestContext } from 'node:test'
 import Stripe from 'stripe'
@@ -1417,6 +1418,32 @@ function fakeStripe(t: TestContext, handle: (url: URL, init: RequestInit | undef
 const inMinutes = (minutes: number) => new Date(Date.now() + minutes * 60_000).toISOString()
 const holdOf = (db: D1Database, id: string) => db.prepare('SELECT status, expires_at FROM payment_checkout_holds WHERE payment_id=?').bind(id).first<{ status: string; expires_at: string }>()
 const stripeEnv = async (runtime: Miniflare, env: CloudflareEnv) => ({ ...env, ...await runtime.getBindings<CloudflareEnv>(), STRIPE_SECRET_KEY: 'sk_test_local_boundary', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only', EMAIL_REPLY_SECRET: 'local-proof-reply' } as CloudflareEnv)
+/** Email goes to Resend, as in production. */
+const resendEnv = (env: CloudflareEnv) => ({ ...env, EMAIL_DELIVERY_MODE: 'provider', RESEND_API_KEY: 're_test_local', EMAIL_FROM: 'KrabiClaw <proof@example.com>' } as CloudflareEnv)
+/** Resend's API: every email it is asked to send, as the request body sent it, and each one read back as sent. */
+function resendOutbox(t: TestContext): string[] {
+ const emails: string[] = []
+ const realFetch = globalThis.fetch
+ t.mock.method(globalThis, 'fetch', async (request: RequestInfo | URL, init?: RequestInit) => {
+  const url = new URL(request instanceof Request ? request.url : String(request))
+  if (url.hostname !== 'api.resend.com') return realFetch(request, init)
+  if (init?.method === 'POST') {
+   emails.push(String(init.body))
+   return Response.json({ id: `email-${emails.length}` })
+  }
+  const sent = JSON.parse(emails[Number(url.pathname.split('-').at(-1)) - 1]!) as { to: string[]; subject: string }
+  return Response.json({ object: 'email', id: url.pathname.split('/').at(-1), message_id: '<email-proof@resend.example>', to: sent.to, subject: sent.subject, last_event: 'sent' })
+ })
+ return emails
+}
+/** The business's owner and administrator, who hear about its payouts and plan; its member does not. */
+async function ownersAndAdmins(db: D1Database) {
+ for (const role of ['owner', 'admin']) {
+  await db.prepare('INSERT INTO user(id,name,email,emailVerified) VALUES(?,?,?,1)').bind(role, role, `${role}@krabiclaw-proof.com`).run()
+  await db.prepare('INSERT INTO member(id,organizationId,userId,role,createdAt) VALUES(?,?,?,?,1)').bind(`${role}-member`, ORG, role, role).run()
+ }
+}
+const sentMail = (emails: string[]) => emails.map(body => JSON.parse(body) as { to: string[]; subject: string; html: string })
 
 test('a card is authorized, booked, then captured, and a hold that has lapsed stops the confirmation before Stripe is asked', { timeout: 120_000 }, async t => {
  const { db, runtime, env: bootEnv } = await boot()
@@ -1588,19 +1615,9 @@ test('a bank debit waiting on microdeposits keeps its capacity, sends the buyer 
 test('a bank debit that cleared after its capacity went is refunded once and never booked; a failed delivery books once when Stripe redelivers', { timeout: 120_000 }, async t => {
  const { db, runtime, env: bootEnv } = await boot()
  try {
-  const env = { ...await stripeEnv(runtime, bootEnv), EMAIL_DELIVERY_MODE: 'provider', RESEND_API_KEY: 're_test_local', EMAIL_FROM: 'KrabiClaw <proof@example.com>' } as CloudflareEnv
+  const env = resendEnv(await stripeEnv(runtime, bootEnv))
   await db.prepare("INSERT INTO stripe_connected_accounts(id,organization_id,stripe_account_id,livemode,country,status,created_at,updated_at) VALUES('connected',?,'acct_seller',0,'US','ready',?,?)").bind(ORG, NOW, NOW).run()
-  const emails: string[] = []
-  const realFetch = globalThis.fetch
-  t.mock.method(globalThis, 'fetch', async (request: RequestInfo | URL, init?: RequestInit) => {
-   if (new URL(request instanceof Request ? request.url : String(request)).hostname !== 'api.resend.com') return realFetch(request, init)
-   if (init?.method === 'POST') {
-    emails.push(String(init.body))
-    return Response.json({ id: `email-${emails.length}` })
-   }
-   const sent = JSON.parse(emails[Number(new URL(request instanceof Request ? request.url : String(request)).pathname.split('-').at(-1)) - 1]!) as { to: string[]; subject: string }
-   return Response.json({ object: 'email', id: new URL(request instanceof Request ? request.url : String(request)).pathname.split('/').at(-1), message_id: '<email-proof@resend.example>', to: sent.to, subject: sent.subject, last_event: 'sent' })
-  })
+  const emails = resendOutbox(t)
   const statuses: Record<string, string> = { taken: 'succeeded', retried: 'succeeded' }
   let chargeFailures = 0
   const calls = fakeStripe(t, (url) => {
@@ -2021,5 +2038,128 @@ test('native Google unlink and full-user deletion require canonical Ads disconne
   const endedSession = await auth.api.getSession({ headers, query: { disableCookieCache: true }, asResponse: true })
   assert.equal(endedSession.status, 200)
   assert.equal(await endedSession.json(), null)
+ } finally { await runtime.dispose() }
+})
+
+test('a payout sent and a payout failed are emailed to the business owner and administrator once each', { timeout: 120_000 }, async t => {
+ const { db, runtime, env: bootEnv } = await boot()
+ try {
+  const env = resendEnv(await stripeEnv(runtime, bootEnv))
+  await db.prepare("INSERT INTO stripe_connected_accounts(id,organization_id,stripe_account_id,livemode,country,status,created_at,updated_at) VALUES('connected',?,'acct_seller',0,'US','ready',?,?)").bind(ORG, NOW, NOW).run()
+  await ownersAndAdmins(db)
+  const emails = resendOutbox(t)
+  fakeStripe(t, (url) => {
+   const payout = /^\/v1\/payouts\/po_(paid|failed)$/u.exec(url.pathname)?.[1]
+   return payout ? Response.json({ id: `po_${payout}`, object: 'payout', livemode: false, amount: 25000, currency: 'usd', status: payout, arrival_date: 1_791_209_600 }) : null
+  }, {})
+  const stripe = getStripe(env)
+  const deliver = (status: 'paid' | 'failed') => processPaymentEvent(db, stripe, { id: `evt_payout_${status}`, type: `payout.${status}`, account: 'acct_seller', livemode: false, data: { object: { id: `po_${status}`, object: 'payout' } } } as unknown as Stripe.Event, env)
+
+  await deliver('paid')
+  await deliver('failed')
+  // Stripe delivers an event again; nobody is emailed twice.
+  await deliver('paid')
+  const mail = sentMail(emails)
+  assert.deepEqual(mail.map(sent => [sent.subject, String(sent.to)]).sort(), [
+   ['Payout failed', 'admin@krabiclaw-proof.com'], ['Payout failed', 'owner@krabiclaw-proof.com'],
+   ['Payout paid', 'admin@krabiclaw-proof.com'], ['Payout paid', 'owner@krabiclaw-proof.com'],
+  ], 'owners and admins hear; the business\'s member does not')
+  for (const sent of mail) {
+   assert.match(sent.html, /\$250\.00 USD/u)
+   assert.match(sent.html, /href="https:\/\/proof\.example\/dashboard\/payments\/earnings\/payouts"/u)
+  }
+  assert.match(mail.find(sent => sent.subject === 'Payout paid')!.html, /Oct 5, 2026/u)
+  assert.match(mail.find(sent => sent.subject === 'Payout failed')!.html, /Review your payout details in Stripe\./u)
+  // Each send is recorded as sent by Resend, to the person it went to.
+  const receipts = (await db.prepare("SELECT provider, status, json_extract(email_json, '$.message.subject') subject, json_extract(email_json, '$.message.to') recipient FROM guest_thread_deliveries WHERE channel = 'email' ORDER BY subject, recipient").all()).results
+  assert.deepEqual(receipts, [
+   { provider: 'resend', status: 'sent', subject: 'Payout failed', recipient: 'admin@krabiclaw-proof.com' },
+   { provider: 'resend', status: 'sent', subject: 'Payout failed', recipient: 'owner@krabiclaw-proof.com' },
+   { provider: 'resend', status: 'sent', subject: 'Payout paid', recipient: 'admin@krabiclaw-proof.com' },
+   { provider: 'resend', status: 'sent', subject: 'Payout paid', recipient: 'owner@krabiclaw-proof.com' },
+  ])
+ } finally { await runtime.dispose() }
+})
+
+test('Better Auth Stripe tells the business its new plan, its change of plan and a plan that will not renew, once each', { timeout: 120_000 }, async t => {
+ const { db, runtime, env: bootEnv } = await boot()
+ try {
+  const secret = 'whsec_plan_proof'
+  const env = { ...resendEnv(await stripeEnv(runtime, bootEnv)), STRIPE_WEBHOOK_SECRET: secret } as CloudflareEnv
+  await ownersAndAdmins(db)
+  // Better Auth's upgrade wrote the subscription before Checkout opened.
+  await db.prepare("INSERT INTO subscription(id,plan,referenceId,stripeCustomerId,status,seats) VALUES('sub-row','growth',?,'cus_operating','incomplete',1)").bind(ORG).run()
+  const emails = resendOutbox(t)
+  const period = { current_period_start: 1_790_000_000, current_period_end: 1_792_592_000 }
+  const item = (plan: 'growth' | 'business') => ({ id: `si_${plan}`, object: 'subscription_item', quantity: 1, ...period,
+   price: { id: `price_${plan}`, object: 'price', product: `prod_${plan}`, recurring: { interval: 'month', interval_count: 1, usage_type: 'licensed' } } })
+  const subscription = (plan: 'growth' | 'business', fields: Record<string, unknown> = {}) => ({
+   id: 'sub_plan', object: 'subscription', customer: 'cus_operating', status: 'active', metadata: { subscriptionId: 'sub-row', referenceId: ORG },
+   items: { object: 'list', data: [item(plan)] }, cancel_at_period_end: false, cancel_at: null, canceled_at: null, ended_at: null, trial_start: null, trial_end: null, schedule: null, ...fields,
+  })
+  // Stripe's catalog: the two plans beside the published metered prices.
+  const plans = (['growth', 'business'] as const).map(plan => ({
+   product: { object: 'product', id: `prod_${plan}`, active: true, metadata: { plan_id: plan, monthly_price_id: `price_${plan}` } },
+   price: { object: 'price', id: `price_${plan}`, product: `prod_${plan}`, active: true, currency: 'usd', type: 'recurring', billing_scheme: 'per_unit', unit_amount: plan === 'growth' ? 4900 : 14900, recurring: { interval: 'month', interval_count: 1, usage_type: 'licensed' } },
+  }))
+  const trialing = subscription('growth', { status: 'trialing', trial_start: 1_790_000_000, trial_end: 1_791_209_600 })
+  const realFetch = globalThis.fetch
+  t.mock.method(globalThis, 'fetch', async (request: RequestInfo | URL, init?: RequestInit) => {
+   const url = new URL(request instanceof Request ? request.url : String(request))
+   if (url.hostname !== 'api.stripe.com') return realFetch(request, init)
+   const catalog = publishedCatalogResponse(url)
+   if (catalog) {
+    const list = await catalog.json() as { data: unknown[] }
+    const extra = url.pathname === '/v1/products' ? plans.map(plan => plan.product) : url.pathname === '/v1/prices' ? plans.map(plan => plan.price) : []
+    return Response.json({ ...list, data: [...list.data, ...extra] })
+   }
+   if (url.pathname === '/v1/subscriptions/sub_plan') return Response.json(trialing)
+   if (url.pathname === '/v1/billing/meter_events') return Response.json({ object: 'billing.meter_event', event_name: 'krabiclaw_homes', identifier: crypto.randomUUID(), payload: {}, timestamp: 1, created: 1, livemode: false })
+   throw new Error(`Unexpected Stripe request ${init?.method} ${url.pathname}`)
+  })
+  const auth = createAuth(env)
+  const signer = new Stripe('sk_test_signer')
+  const deliver = async (event: Record<string, unknown>) => {
+   const payload = JSON.stringify({ object: 'event', api_version: '2025-10-29.clover', created: 1_790_000_000, livemode: false, ...event })
+   const response = await auth.handler(new Request('https://proof.example/api/auth/stripe/webhook', {
+    method: 'POST', headers: { 'content-type': 'application/json', 'stripe-signature': await signer.webhooks.generateTestHeaderStringAsync({ payload, secret }) }, body: payload,
+   }))
+   assert.equal(response.status, 200)
+  }
+  const subjects = () => sentMail(emails).map(sent => [sent.subject, String(sent.to)]).sort()
+
+  // Checkout completes with a free trial.
+  await deliver({ id: 'evt_checkout', type: 'checkout.session.completed', data: { object: { id: 'cs_plan', object: 'checkout.session', mode: 'subscription', subscription: 'sub_plan', client_reference_id: ORG, metadata: { subscriptionId: 'sub-row', referenceId: ORG } } } })
+  assert.deepEqual(subjects(), [['Your new plan: Growth', 'admin@krabiclaw-proof.com'], ['Your new plan: Growth', 'owner@krabiclaw-proof.com']])
+  const started = sentMail(emails)[0]!.html
+  assert.match(started, /Payments is on Growth\./u)
+  assert.match(started, /Free trial ends/u)
+  assert.match(started, /Oct 5, 2026/u)
+  assert.match(started, /href="https:\/\/proof\.example\/dashboard\/payments\/billing"/u)
+
+  // The business moves to Business; Stripe redelivers that event, and nobody hears twice.
+  const changed = { id: 'evt_changed', type: 'customer.subscription.updated', data: { object: subscription('business'), previous_attributes: { items: { object: 'list', data: [item('growth')] } } } }
+  await deliver(changed)
+  await deliver(changed)
+  // A renewal changes the subscription without changing its plan.
+  await deliver({ id: 'evt_renewed', type: 'customer.subscription.updated', data: { object: subscription('business'), previous_attributes: { latest_invoice: 'in_previous' } } })
+  assert.equal(emails.length, 4)
+  assert.deepEqual(subjects().slice(2), [['Your plan changed to Business', 'admin@krabiclaw-proof.com'], ['Your plan changed to Business', 'owner@krabiclaw-proof.com']])
+  assert.match(sentMail(emails)[2]!.html, /Payments moved from Growth to Business\./u)
+
+  // The owner cancels at the end of the period; Stripe redelivers that event too.
+  const ending = { id: 'evt_ending', type: 'customer.subscription.updated', data: { object: subscription('business', { cancel_at_period_end: true }), previous_attributes: { cancel_at_period_end: false } } }
+  await deliver(ending)
+  await deliver(ending)
+  assert.equal(emails.length, 6)
+  const notRenewing = sentMail(emails).slice(4)
+  assert.deepEqual(notRenewing.map(sent => [sent.subject, String(sent.to)]).sort(), [['Your Business plan will not renew', 'admin@krabiclaw-proof.com'], ['Your Business plan will not renew', 'owner@krabiclaw-proof.com']])
+  assert.match(notRenewing[0]!.html, /Business stays on until Oct 21, 2026\. After that, Payments is on Basic\./u)
+
+  // Read back apart from the sends: Better Auth's subscription, and each email Resend accepted.
+  assert.deepEqual(await db.prepare("SELECT plan, status, cancelAtPeriodEnd FROM subscription WHERE id='sub-row'").first(), { plan: 'business', status: 'active', cancelAtPeriodEnd: 1 })
+  assert.deepEqual((await db.prepare("SELECT json_extract(email_json, '$.message.subject') subject, count(*) n FROM guest_thread_deliveries WHERE channel='email' AND provider='resend' AND status='sent' GROUP BY subject ORDER BY subject").all()).results, [
+   { subject: 'Your Business plan will not renew', n: 2 }, { subject: 'Your new plan: Growth', n: 2 }, { subject: 'Your plan changed to Business', n: 2 },
+  ])
  } finally { await runtime.dispose() }
 })

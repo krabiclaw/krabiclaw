@@ -33,7 +33,7 @@ export interface CalendarSubject {
   is_consultation: number
   revision: string
 }
-export interface GoogleEvent {
+interface GoogleEvent {
   id: string; etag?: string; status?: string; updated?: string
   summary?: string; description?: string; visibility?: string
   start?: { dateTime?: string; date?: string; timeZone?: string }
@@ -42,13 +42,13 @@ export interface GoogleEvent {
   attendeesOmitted?: boolean
   guestsCanInviteOthers?: boolean; guestsCanModify?: boolean; guestsCanSeeOtherGuests?: boolean
 }
-export interface EventLink {
+interface EventLink {
   id: string; organization_id: string; integration_revision: string; account_id: string
   calendar_id: string; event_id: string; booking_id: string
   request_id: string | null; booking_revision: string; synced_revision: string | null
   state: string; updated_at: string
 }
-export class CalendarError extends Error {
+class CalendarError extends Error {
   readonly status: number
   constructor(status: number) {
     super(`Google Calendar returned ${status}. Check the account grant and calendar writer access.`)
@@ -56,7 +56,7 @@ export class CalendarError extends Error {
   }
 }
 const BASE = 'https://www.googleapis.com/calendar/v3'
-export async function google<T>(token: string, path: string, init?: RequestInit): Promise<T> {
+async function google<T>(token: string, path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${BASE}${path}`, {
     ...init,
     headers: { Authorization: `Bearer ${token}`, 'content-type': 'application/json', ...init?.headers },
@@ -227,17 +227,17 @@ async function currentSubject(db: DbClient, organizationId: string, link: EventL
 export interface CalendarProvider {
   token(accountId: string): Promise<string>
 }
-export function defaultProvider(env: CloudflareEnv): CalendarProvider {
+function defaultProvider(env: CloudflareEnv): CalendarProvider {
   return { token: async accountId => (await linkedAccountAccessToken(env, accountId)).accessToken }
 }
-export async function syncCalendarOrganization(env: CloudflareEnv, organizationId: string, limit = 25, provider: CalendarProvider = defaultProvider(env), eventLinkId?: string, expectedEtag?: string | null) {
+export async function syncCalendarOrganization(env: CloudflareEnv, organizationId: string, limit = 25, provider: CalendarProvider = defaultProvider(env)) {
   const db = env.DB
   const integration = await readCalendarIntegration(db, organizationId)
   if (!integration) return { checked: 0, failed: 0 }
   await reconcileIntents(db, organizationId, integration)
   // A failure moves its link's updated_at on, so it waits behind the others rather than starving them.
   const links = await queryAll<EventLink>(db, `SELECT * FROM google_calendar_event_links WHERE organization_id = ?
-    AND state IN ('pending', 'cleanup', 'error') AND (? IS NULL OR id=?) ORDER BY updated_at, id LIMIT ?`, [organizationId, eventLinkId ?? null, eventLinkId ?? null, limit])
+    AND state IN ('pending', 'cleanup', 'error') ORDER BY updated_at, id LIMIT ?`, [organizationId, limit])
   let checked = 0; let failed = 0
   for (const link of links) {
     checked++
@@ -260,7 +260,6 @@ export async function syncCalendarOrganization(env: CloudflareEnv, organizationI
       let existing: GoogleEvent | undefined
       try { existing = await google<GoogleEvent>(token, `${path}/${link.event_id}`) }
       catch (error) { if (!(error instanceof CalendarError) || ![404, 410].includes(error.status)) throw error }
-      if (expectedEtag !== undefined && (existing?.etag ?? null) !== expectedEtag) throw new Error('The Google event changed again before reconciliation. The newer change must be reviewed before restoring the appointment.')
       if (existing?.attendeesOmitted) throw new Error('Google omitted consultation attendees; the complete event is required before updating invitations.')
       const payload = calendarEvent(subject, url, existing)
       const beforeUpdate = await currentSubject(db, organizationId, link)

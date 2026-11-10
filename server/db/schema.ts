@@ -3271,25 +3271,3 @@ export const google_calendar_setup = sqliteTable("google_calendar_setup", {
  account_id: text().notNull(),
  started_at: text().notNull(),
 });
-
-// The inbound side of the business calendar: Google's push channel on it and
-// the position in its change list. One row per connection revision; Google's
-// `syncToken` is the replay feed, the channel only says "look now".
-export const google_calendar_sync = sqliteTable("google_calendar_sync", {
- organization_id: text().primaryKey().references(() => organization.id, { onDelete: "cascade" }),
- integration_revision: text().notNull(),
- channel_id: text().notNull(),
- // Sent back by Google on every notification; a notification without it is not Google's.
- channel_token: text().notNull(),
- resource_id: text(),
- channel_expires_at: text(),
- sync_token: text(),
- // Whether an event moved in Google moves its booking. Deletions are never applied.
- reschedules: integer({ mode: "boolean" }).default(true).notNull(),
- last_pulled_at: text(),
- last_error: text(),
- created_at: text().notNull(),
- updated_at: text().notNull(),
-}, table => [
- uniqueIndex("google_calendar_sync_channel_unique").on(table.channel_id),
-]);
