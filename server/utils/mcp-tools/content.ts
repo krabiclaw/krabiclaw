@@ -294,7 +294,7 @@ export const CONTENT_TOOLS: McpToolDefinition[] = [
     }),
   organizationTool({
       name: 'update_reservation_policy',
-      description: 'Enable or update table reservations using the location’s saved hours, including the questions asked with each reservation. New setup defaults to two hours, unlimited capacity, no advance notice and no deposit. Use the current updated_at when amending it; omitted fields keep their value. Deposits need an amount, currency, tax treatment and ready Payments. Cancellation is not a setting: every reservation is free to cancel until 24 hours before the start. A class or consultation closes changes and free cancellation at 24 hours or its own minimum notice, if longer (set_product_booking_config).',
+      description: 'Enable or update table reservations using the location’s saved hours, including the questions asked with each reservation. New setup defaults to two hours, unlimited capacity, no advance notice and no deposit. Use the current updated_at when amending it; omitted fields keep their value. Deposits need an amount, currency, tax treatment and ready Payments. Cancellation is not a setting: every reservation is free to cancel until 24 hours before the start. A class or consultation closes free cancellation at 24 hours or its own minimum notice, if longer (set_product_booking_config).',
       domain: 'content',
       minimumRole: 'admin',
       inputSchema: {

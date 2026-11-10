@@ -1,5 +1,4 @@
-import { changeNoticeMinutes, noticeDuration } from '~/shared/availability-settings'
-import { reservationAllocationPredicate, requireLocationReservationConfig, visitReschedulePolicyPredicate } from '~/server/utils/reservations'
+import { reservationAllocationPredicate, requireLocationReservationConfig } from '~/server/utils/reservations'
 import { recordBookingChangeAnswer } from '~/server/domain/booking-analytics'
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { HTTPError } from 'nitro'
@@ -50,7 +49,7 @@ async function bookingNoun(db: DbClient, thread: Pick<GuestThreadRow, 'organizat
  * the proposal names it. A reservation has no occurrence row, so it moves to a
  * location, date and time.
  */
-const bookingFieldsSchema = z.object({ kind: z.literal('booking'), sessionId: z.string().min(1), partySize: z.number().int().min(1).max(99), overridePolicy: z.boolean().optional(), assignedMemberId: z.string().min(1).optional() })
+const bookingFieldsSchema = z.object({ kind: z.literal('booking'), sessionId: z.string().min(1), partySize: z.number().int().min(1).max(99), assignedMemberId: z.string().min(1).optional() })
 const reservationFieldsSchema = z.object({
   kind: z.literal('reservation'),
   locationId: z.string().min(1),
@@ -60,7 +59,6 @@ const reservationFieldsSchema = z.object({
   }),
   bookingTime: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/),
   partySize: z.number().int().min(1).max(99),
-  overridePolicy: z.boolean().optional(),
 })
 const fieldsSchema = z.discriminatedUnion('kind', [bookingFieldsSchema, reservationFieldsSchema])
 const requestSchema = z.intersection(fieldsSchema, z.object({ expectedUpdatedAt: z.string().min(1), expectedOperationalUpdatedAt: z.string().min(1).optional() }))
@@ -174,12 +172,6 @@ interface Destination { assignedMemberId?: string | null; locationId: string | n
  * capacity for that start time.
  */
 async function validateDestination(db: DbClient, env: CloudflareEnv, thread: GuestThreadRow, before: Source, after: Fields, decisionDedupeKey?: string): Promise<Destination> {
-  // A class's or consultation's advance notice closes its changes when it is longer than the 1-day rule.
-  const notice = before.recordKind === 'booking' && before.productId
-    ? (await queryFirst<{ advance_notice_minutes: number | null }>(db, 'SELECT advance_notice_minutes FROM product_booking_configs WHERE product_id=? AND organization_id=?', [before.productId, thread.organization_id]))?.advance_notice_minutes ?? null
-    : null
-  const reschedulePolicy = visitReschedulePolicyPredicate({ startsAt: before.startsAt, advanceNoticeMinutes: notice, overridePolicy: after.overridePolicy })
-  if (!await queryFirst(db, `SELECT 1 WHERE ${reschedulePolicy.query}`, reschedulePolicy.params)) throw new HTTPError({ statusCode: 409, message: `Changes close ${noticeDuration(changeNoticeMinutes(notice), 'en')} before the start. The business can explicitly approve an exception.`, data: { code: 'policy_exception_required' } })
   if (after.kind === 'booking') {
     if (before.recordKind !== 'booking' || !before.productId) throw new HTTPError({ statusCode: 409, message: 'This conversation is a reservation, not a booking' })
     const [target] = await listSessions(db, {
@@ -255,13 +247,13 @@ async function validateDestination(db: DbClient, env: CloudflareEnv, thread: Gue
       return { query: `UPDATE reservations SET starts_at = ?, ends_at = ?, timezone = ?, party_size = ?, location_id = ?, updated_at = ?
         WHERE ${writeGuard ? `(${writeGuard.query}) AND ` : ''}id = ? AND organization_id = ? AND status = 'confirmed' AND ${currentAllocation.query}
           AND ends_at>strftime('%Y-%m-%dT%H:%M:%fZ','now')
-          AND ${reschedulePolicy.query} AND starts_at = ? AND ends_at = ? AND location_id = ? AND party_size = ?
+          AND starts_at = ? AND ends_at = ? AND location_id = ? AND party_size = ?
           AND (NOT EXISTS (SELECT 1 FROM payments p WHERE p.organization_id=reservations.organization_id AND p.subject_type='reservation' AND p.subject_id=reservations.id AND p.captured_amount>p.refunded_amount) OR (party_size=? AND location_id=?))
           AND (EXISTS (SELECT 1 FROM payments p WHERE p.organization_id=reservations.organization_id AND p.subject_type='reservation' AND p.subject_id=reservations.id AND p.captured_amount>p.refunded_amount)
             OR EXISTS (SELECT 1 FROM location_reservation_configs c WHERE c.organization_id=reservations.organization_id AND c.location_id=? AND (c.deposit_required=0 OR c.deposit_trigger_party_size>?)))
           AND EXISTS (SELECT 1 FROM requests WHERE id = ? AND organization_id = ? AND updated_at = ?)
           AND NOT EXISTS (SELECT 1 FROM activity_entries WHERE dedupe_key = ?)`,
-        params: [startsAt, endsAt, location.timezone!, after.partySize, location.id, now, ...(writeGuard?.params ?? []), reservationId, thread.organization_id, ...currentAllocation.params!, ...reschedulePolicy.params!, before.startsAt, before.endsAt, before.locationId, before.partySize, after.partySize, location.id, location.id, after.partySize, thread.id, thread.organization_id, before.updatedAt, decisionDedupeKey ?? ''] }
+        params: [startsAt, endsAt, location.timezone!, after.partySize, location.id, now, ...(writeGuard?.params ?? []), reservationId, thread.organization_id, ...currentAllocation.params!, before.startsAt, before.endsAt, before.locationId, before.partySize, after.partySize, location.id, location.id, after.partySize, thread.id, thread.organization_id, before.updatedAt, decisionDedupeKey ?? ''] }
     },
   }
 }

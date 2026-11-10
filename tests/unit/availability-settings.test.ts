@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { changeNoticeMinutes, freeCancellationUntil, hoursSummary, noticeDuration, noticeSummary, outsideNotice, seatsSummary } from '../../shared/availability-settings.ts'
+import { freeCancellationNoticeMinutes, freeCancellationUntil, hoursSummary, noticeDuration, noticeSummary, outsideNotice, seatsSummary } from '../../shared/availability-settings.ts'
 
 test('free cancellation closes exactly 24 hours before the start, or at a longer advance notice', () => {
   assert.equal(freeCancellationUntil('2099-10-02T13:00:00.000Z', null), '2099-10-01T13:00:00.000Z')
   assert.equal(freeCancellationUntil('2099-10-02T13:00:00.000Z', 120), '2099-10-01T13:00:00.000Z')
   assert.equal(freeCancellationUntil('2099-10-03T13:00:00.000Z', 2880), '2099-10-01T13:00:00.000Z')
-  assert.deepEqual([null, 0, 120, 1440, 2880, 10080].map(minutes => changeNoticeMinutes(minutes)), [1440, 1440, 1440, 1440, 2880, 10080])
+  assert.deepEqual([null, 0, 120, 1440, 2880, 10080].map(minutes => freeCancellationNoticeMinutes(minutes)), [1440, 1440, 1440, 1440, 2880, 10080])
 })
 
 test('a start inside the advance notice is closed; one exactly at its edge is too', () => {

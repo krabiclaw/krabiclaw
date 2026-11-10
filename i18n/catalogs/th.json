@@ -146,7 +146,6 @@
   "booking_policy.experience_heading": "นโยบายประสบการณ์",
   "booking_policy.consultation_heading": "นโยบายการนัดปรึกษา",
   "booking_policy.minimum_guest_age": "อายุขั้นต่ำสำหรับผู้เข้าร่วมคือ {age} ปี",
-  "booking_policy.reschedule": "สามารถเปลี่ยนเวลาได้ล่วงหน้าไม่น้อยกว่า {window} ก่อนเวลาเริ่ม",
   "booking_policy.reservation_heading": "นโยบายการจอง",
   "dates.date_unavailable": "ไม่ระบุวันที่",
   "dates.time_unavailable": "ไม่ระบุเวลา",

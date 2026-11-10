@@ -49,7 +49,7 @@ test('MCP Product booking uses public capacity, durable replay, guest identity a
     }
     const ids: string[] = []
     try {
-      // Two days out: the booking below is changed, and changes close 24 hours before the start.
+      // Two days out, clear of any advance notice: the booking below is changed.
       const from = new Date(Date.now() + 2 * 86400000).toISOString()
       const to = new Date(Date.now() + 28 * 86400000).toISOString()
       await configure('instant')
