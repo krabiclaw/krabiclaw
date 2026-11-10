@@ -40,7 +40,7 @@
 <script setup lang="ts">
 import { usePointerSwipe } from '@vueuse/core'
 
-// A list whose read state is not the member's own (a guest's inbox) draws its rows without the actions.
+// A row with nothing to mark (a guest's own inbox, or a read conversation that never alerted anyone) is drawn without the actions.
 const props = withDefaults(defineProps<{ unread: boolean; name: string; enabled?: boolean }>(), { enabled: true })
 const emit = defineEmits<{ toggle: [] }>()
 

@@ -22,7 +22,7 @@
         </div>
       </div>
       <div v-for="thread in threads" :key="thread.id" class="-mx-3">
-        <MessageRowActions :unread="thread.unread" :name="teamThreadName(thread, userId)" @toggle="toggleRead(thread)">
+        <MessageRowActions :unread="thread.unread" :name="teamThreadName(thread, userId)" :enabled="thread.unread || thread.canMarkUnread" @toggle="toggleRead(thread)">
           <NuxtLink :to="target(thread.id)" :data-team-thread="thread.id" class="flex items-start gap-3 rounded-xl px-3 py-4 transition hover:bg-elevated/60" :class="route.params.teamThreadId === thread.id ? 'bg-elevated' : undefined">
             <div class="flex h-12 w-2 shrink-0 items-center justify-center"><span v-if="thread.unread" class="size-2 rounded-full bg-primary" aria-label="Unread" /></div>
             <UAvatar :src="thread.participants.find(person => person.id !== userId)?.image ?? undefined" :alt="teamThreadName(thread, userId)" size="xl" />

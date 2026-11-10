@@ -8,6 +8,7 @@
   "threads": [
     {
       "avatarInitial": "M",
+      "canMarkUnread": true,
       "channel": "airbnb",
       "guestName": "Mililani",
       "home": "74 D · Sky",
@@ -21,6 +22,7 @@
     },
     {
       "avatarInitial": "A",
+      "canMarkUnread": false,
       "channel": "direct",
       "guestName": "Ana Ruiz",
       "home": "74 D · Sky",

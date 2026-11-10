@@ -22,7 +22,7 @@ export function isTeamThreadsResponse(value: unknown): value is { threads: TeamT
     && (thread.location === null || isRecord(thread.location) && typeof thread.location.id === 'string' && typeof thread.location.title === 'string')
     && Array.isArray(thread.participants) && thread.participants.every(identity)
     && (thread.lastMessage === null || isRecord(thread.lastMessage) && typeof thread.lastMessage.id === 'string' && typeof thread.lastMessage.body === 'string' && typeof thread.lastMessage.attachmentCount === 'number')
-    && typeof thread.unread === 'boolean' && typeof thread.unreadCount === 'number')
+    && typeof thread.unread === 'boolean' && typeof thread.unreadCount === 'number' && typeof thread.canMarkUnread === 'boolean')
 }
 
 function isTeamMessage(value: unknown): value is TeamMessage {

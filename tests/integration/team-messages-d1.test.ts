@@ -217,6 +217,8 @@ test('members talk in team conversations, see unread state and receive recorded 
     assert.equal((await listTeamThreads(env, db, owner)).find(thread => thread.id === direct.id)?.unreadCount, 0)
     // Nobody else has written to the cleaner here, so there is nothing to be unread.
     await assert.rejects(markTeamThreadUnread(db, cleaner, direct.id), refused(409, 'NO_TEAM_MESSAGE', 'threadId'))
+    // The lists offer it exactly there: the owner can mark the cleaner's conversation unread, the cleaner cannot.
+    assert.deepEqual([(await listTeamThreads(env, db, owner)).find(thread => thread.id === direct.id)?.canMarkUnread, (await listTeamThreads(env, db, cleaner)).find(thread => thread.id === direct.id)?.canMarkUnread], [true, false])
 
     // A member switched team pushes off gets none, and nothing is recorded for them.
     await setNotificationPreference(db, env as never, 'owner', 'messages', { email: false, whatsapp: false, push: false })

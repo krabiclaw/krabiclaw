@@ -361,8 +361,10 @@ export async function listGuestThreads(
     LIMIT ? OFFSET ?
   `, [...scope.params, ...unreadParams, limit, opts.offset ?? 0])
 
-  const [unreadIds, latest] = await Promise.all([
-    opts.userId ? listUnreadThreadIds(db, rows.map(row => row.id), opts.userId, opts.buyerAudience).then(ids => new Set(ids)) : new Set<string>(),
+  // A member's alerts say both which rows are unread and which can be marked unread; a guest's own inbox has no alerts.
+  const [alerted, unreadIds, latest] = await Promise.all([
+    opts.userId && !opts.buyerAudience ? memberThreadAlerts(db, rows.map(row => row.id), opts.userId) : new Map<string, boolean>(),
+    opts.userId && opts.buyerAudience ? listUnreadThreadIds(db, rows.map(row => row.id), opts.userId, true).then(ids => new Set(ids)) : null,
     latestMessages(db, rows.flatMap(row => row.latest_message_id ? [row.latest_message_id] : [])),
   ])
   return rows.map(row => {
@@ -391,7 +393,8 @@ export async function listGuestThreads(
       previewFrom: message ? previewFrom(message, { guestName: row.reply_channel === 'airbnb' ? guestName : firstName(guestName), viewerId: opts.userId, buyer: Boolean(opts.buyerAudience), business: row.organization_name })
         : !opening?.trim() ? null : opts.buyerAudience ? 'You' : firstName(guestName),
       time: listTime(sentAt, row.time_zone, now),
-      unread: unreadIds.has(row.id),
+      unread: unreadIds ? unreadIds.has(row.id) : alerted.get(row.id) === true,
+      canMarkUnread: alerted.has(row.id),
     } satisfies InboxRow
   })
 }
@@ -578,20 +581,27 @@ async function listUnreadThreadIds(db: DbClient, threadIds: string[], userId: st
     const rows=await queryAll<{request_id:string}>(db,`SELECT gt.id request_id FROM requests gt WHERE gt.user_id=? AND gt.id IN (SELECT value FROM json_each(?)) AND ${BUYER_UNREAD_THREAD_SQL}`,[userId,d1JsonStringSet(threadIds),...buyerUnreadThreadParams(userId)])
     return rows.map(row=>row.request_id)
   }
-  const rows = await queryAll<{ request_id: string }>(db, `
-    SELECT gt.id AS request_id
-    FROM requests gt${OPERATIONAL_RECORD_SQL}
-    WHERE gt.id IN (SELECT value FROM json_each(?))
-      AND EXISTS (
-        SELECT 1 FROM activity_entries n
-        JOIN activity_entries notification_entry ON notification_entry.id = n.parent_id
-        LEFT JOIN activity_entries nr ON nr.parent_id = n.id AND nr.actor_user_id = ? AND nr.kind = 'acknowledgement'
-        WHERE notification_entry.request_id = gt.id
-          AND ${buyerAudience ? 'n.target_user_id = ?' : '(n.target_user_id IS NULL OR n.target_user_id = ?)'}
-          AND nr.id IS NULL AND n.kind = 'notification' AND ${CONVERSATION_NOTIFICATION_SQL}
-      )
-  `, [d1JsonStringSet(threadIds), userId, userId])
-  return (rows ?? []).map(row => row.request_id)
+  return [...(await memberThreadAlerts(db, threadIds, userId))].flatMap(([id, unread]) => unread ? [id] : [])
+}
+
+/**
+ * The listed conversations a guest message alerted this member about, each with whether one of
+ * those alerts is still unacknowledged: the unread dot, and whether the conversation can be
+ * marked unread at all (`unacknowledgeThreadNotifications` withdraws the same alerts' acknowledgement).
+ */
+async function memberThreadAlerts(db: DbClient, threadIds: string[], userId: string): Promise<Map<string, boolean>> {
+  if (threadIds.length === 0) return new Map()
+  const rows = await queryAll<{ request_id: string; unread: number }>(db, `
+    SELECT notification_entry.request_id, MAX(nr.id IS NULL) AS unread
+      FROM activity_entries n
+      JOIN activity_entries notification_entry ON notification_entry.id = n.parent_id
+      LEFT JOIN activity_entries nr ON nr.parent_id = n.id AND nr.actor_user_id = ? AND nr.kind = 'acknowledgement'
+     WHERE notification_entry.request_id IN (SELECT value FROM json_each(?))
+       AND (n.target_user_id IS NULL OR n.target_user_id = ?)
+       AND n.kind = 'notification' AND ${CONVERSATION_NOTIFICATION_SQL}
+     GROUP BY notification_entry.request_id
+  `, [userId, d1JsonStringSet(threadIds), userId])
+  return new Map(rows.map(row => [row.request_id, row.unread === 1]))
 }
 
 /** The guest entry a reply task is about: a message, or a contact form's own words. */

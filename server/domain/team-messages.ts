@@ -108,6 +108,8 @@ export interface TeamThread {
   lastMessage: { id: string; senderId: string | null; body: string; attachmentCount: number; createdAt: string } | null
   unread: boolean
   unreadCount: number
+  /** Someone else has written, so marking it unread can show their newest message as new (markTeamThreadUnread). */
+  canMarkUnread: boolean
 }
 
 export interface TeamMessage {
@@ -193,7 +195,7 @@ export async function listTeamThreads(env: CloudflareEnv, db: DbClient, access: 
     't.organization_id = ?',
     's.member_id = ?',
   ]
-  const params: unknown[] = [access.userId, access.organizationId, access.memberId]
+  const params: unknown[] = [access.userId, access.userId, access.organizationId, access.memberId]
   if (filter?.locationId) {
     whereClauses.push('t.location_id = ?')
     params.push(filter.locationId)
@@ -202,11 +204,13 @@ export async function listTeamThreads(env: CloudflareEnv, db: DbClient, access: 
     whereClauses.push('t.subject_type = ? AND t.subject_id = ?')
     params.push(filter.subject.kind, filter.subject.id)
   }
-  const threads = await queryAll<{ id: string; name: string | null; is_group: number; created_by_user_id: string | null; subject_type: BookedKind | null; subject_id: string | null; location_id: string | null; last_message_at: string; created_at: string; unread_count: number }>(db, `
+  const threads = await queryAll<{ id: string; name: string | null; is_group: number; created_by_user_id: string | null; subject_type: BookedKind | null; subject_id: string | null; location_id: string | null; last_message_at: string; created_at: string; unread_count: number; others_wrote: number }>(db, `
     SELECT t.id, t.name, t.is_group, t.created_by_user_id, t.subject_type, t.subject_id, t.location_id, t.last_message_at, t.created_at,
            (SELECT COUNT(*) FROM team_messages m
              WHERE m.organization_id = t.organization_id AND m.thread_id = t.id AND m.sender_user_id IS NOT ? AND m.automatic = 0
-               AND (s.last_read_at IS NULL OR m.created_at > s.last_read_at)) AS unread_count
+               AND (s.last_read_at IS NULL OR m.created_at > s.last_read_at)) AS unread_count,
+           EXISTS (SELECT 1 FROM team_messages m
+             WHERE m.organization_id = t.organization_id AND m.thread_id = t.id AND m.sender_user_id IS NOT ? AND m.automatic = 0) AS others_wrote
       FROM team_threads t
       JOIN team_thread_members s ON s.organization_id = t.organization_id AND s.thread_id = t.id
      WHERE ${whereClauses.join(' AND ')}
@@ -282,6 +286,7 @@ export async function listTeamThreads(env: CloudflareEnv, db: DbClient, access: 
       lastMessage: last ? { id: last.id, senderId: last.sender_user_id, body: last.body, attachmentCount: photos.get(last.id)?.length ?? 0, createdAt: last.created_at } : null,
       unread: unreadCount > 0,
       unreadCount,
+      canMarkUnread: thread.others_wrote === 1,
     }
   })
 }

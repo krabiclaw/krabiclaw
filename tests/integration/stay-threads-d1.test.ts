@@ -138,7 +138,7 @@ test('a stay opens its guest conversation in the one inbox', async () => {
     const homeToday = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver' }).format(new Date())
     const arrivalIn = Math.round((Date.parse(`${day(3)}T00:00:00Z`) - Date.parse(`${homeToday}T00:00:00Z`)) / 86_400_000)
     assert.deepEqual({ ...listed[0]!, time: undefined }, { id: ana.request_id, kind: 'guest', guestName: 'Ana Silva', avatarInitial: 'A', channel: 'direct', home: 'Cabin',
-      when: `In ${arrivalIn} days`, preview: 'The gate code is in your confirmation.', previewFrom: 'You', time: undefined, unread: false })
+      when: `In ${arrivalIn} days`, preview: 'The gate code is in your confirmation.', previewFrom: 'You', time: undefined, unread: false, canMarkUnread: false })
     assert.deepEqual(await db.prepare('SELECT product_id, channel, request_id FROM stays WHERE id = ?').bind(ana.id).first(), { product_id: cabin.id, channel: 'direct', request_id: ana.request_id })
     assert.equal((await getGuestThreadDetail(db, ana.request_id, ORG))?.mailbox, 'current')
     assert.deepEqual(await listGuestThreads(db, ORG, { userId: CLEANER, principal: principal(CLEANER, 'member') }), [])

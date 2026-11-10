@@ -77,16 +77,18 @@ export async function acknowledgeThreadNotifications(
  */
 export async function unacknowledgeThreadNotifications(
   db: DbClient,
-  visibility: NotificationVisibility,
+  userId: string,
   threadId: string,
 ): Promise<boolean> {
+  // The alerts the list reads for this member's dot and canMarkUnread (repository memberThreadAlerts).
   const newest = await queryFirst<{ id: string }>(db, `
     SELECT n.id FROM activity_entries n
      WHERE n.kind = 'notification' AND ${CONVERSATION_NOTIFICATION_SQL}
-       AND n.parent_id IN (SELECT id FROM activity_entries WHERE request_id = ?) AND ${visibility.whereSql}
-     ORDER BY n.created_at DESC, n.id DESC LIMIT 1`, [threadId, ...visibility.whereParams])
+       AND n.parent_id IN (SELECT id FROM activity_entries WHERE request_id = ?)
+       AND (n.target_user_id IS NULL OR n.target_user_id = ?)
+     ORDER BY n.created_at DESC, n.id DESC LIMIT 1`, [threadId, userId])
   if (!newest) return false
-  await execute(db, "DELETE FROM activity_entries WHERE kind = 'acknowledgement' AND parent_id = ? AND actor_user_id = ?", [newest.id, visibility.userId])
+  await execute(db, "DELETE FROM activity_entries WHERE kind = 'acknowledgement' AND parent_id = ? AND actor_user_id = ?", [newest.id, userId])
   return true
 }
 
@@ -109,7 +111,7 @@ export async function setConversationRead(
   }
   const changed = read
     ? await acknowledgeThreadNotifications(db, visibility, thread.id) > 0
-    : await unacknowledgeThreadNotifications(db, visibility, thread.id)
+    : await unacknowledgeThreadNotifications(db, principal.userId, thread.id)
   if (!read && !changed) {
     throw new HTTPError({ statusCode: 409, message: 'Nothing in this conversation has alerted you, so it cannot be marked unread', data: { code: 'NO_CONVERSATION_ALERT', field: 'threadId' } })
   }

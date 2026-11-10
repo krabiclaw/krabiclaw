@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:bdc338a6b144788e435e9f57b712511173cb6354de2646e5307c0801fa39af30",
-  "documentationFingerprint": "sha256:8d4932c58edbda797049b755424d1ae76d54c1e7439827225302319e8d987e54",
+  "fingerprint": "sha256:d743d544a65803f6f2dbda0377f241deb9cd75d54f3a59bcd51b5cb5f8623991",
+  "documentationFingerprint": "sha256:7c40c0da728894050b86d929ec214602f308062dcbf5676826ca16f347680b76",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -73598,6 +73598,10 @@
                 "canManage": {
                   "type": "boolean"
                 },
+                "canMarkUnread": {
+                  "description": "Someone else has written, so mark_team_conversation_unread can show their newest message as new.",
+                  "type": "boolean"
+                },
                 "createdAt": {
                   "type": "string"
                 },
@@ -74189,6 +74193,7 @@
                 "participants",
                 "unread",
                 "unreadCount",
+                "canMarkUnread",
                 "stay",
                 "job",
                 "location",
@@ -130770,7 +130775,7 @@
         "list_location_reviews": "sha256:95068cff21ac3fea416a9fa8ec3a8ad2d01db79ea0825274c0295b89f15f5d92",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_team_conversation_recipients": "sha256:1dd41b8c0a687298a77151839812ddcf99fbd5cf7283e9f5ea2a85e11a70deb0",
-        "list_team_conversations": "sha256:88b9488527690e03c33a2d12de8af89ff611fdd21be1ab0892a066da0f2617f6",
+        "list_team_conversations": "sha256:dfcd919c70d2abdb11853ad0dba10c92b627ea3473333e5a27c0f98c34b0ddff",
         "mark_team_conversation_read": "sha256:3ad65b07c9bd78090f9f81aeffa74ac00f1c201ee8b6325cf16cd879f1e2644d",
         "reject_product_booking": "sha256:91a5bee34d02b729a3dacb01885157ce63b443594116d8710ca90313fb76e357",
         "reply_to_guest": "sha256:25c1e77ff9ef3f712ea7e9671dd942c63f69a64b91c216f327488210021447f8",

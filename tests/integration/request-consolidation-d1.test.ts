@@ -324,12 +324,14 @@ test('archive and unarchive file a conversation without touching its booking, st
     const visibility = { userId: ACTOR, ...buildNotificationVisibilityFilter({ userId: ACTOR, platformAdmin: false, organization: { id: ORG, role: 'owner' } }) }
     assert.equal(await acknowledgeThreadNotifications(db, visibility, 'ended'), 1)
     assert.deepEqual([await ids('current', true), await countUnreadInboxThreads(db, ORG, { userId: ACTOR })], [['future'], { all: 1, guests: 1, support: 0 }])
-    assert.equal(await unacknowledgeThreadNotifications(db, visibility, 'ended'), true)
+    assert.equal(await unacknowledgeThreadNotifications(db, ACTOR, 'ended'), true)
     assert.deepEqual([await ids('current', true), await countUnreadInboxThreads(db, ORG, { userId: ACTOR })], [['ended', 'future'], { all: 2, guests: 2, support: 0 }])
     // Unread twice is still one unread conversation; one nothing ever alerted about cannot be made unread.
-    assert.equal(await unacknowledgeThreadNotifications(db, visibility, 'ended'), true)
+    assert.equal(await unacknowledgeThreadNotifications(db, ACTOR, 'ended'), true)
     assert.deepEqual(await ids('current', true), ['ended', 'future'])
-    assert.equal(await unacknowledgeThreadNotifications(db, visibility, 'contact'), false)
+    assert.equal(await unacknowledgeThreadNotifications(db, ACTOR, 'contact'), false)
+    // The list offers Mark as unread exactly where it can be done: the conversations a guest message alerted.
+    assert.deepEqual((await listGuestThreads(db, ORG, { userId: ACTOR, mailbox: 'current' })).filter(row => row.canMarkUnread).map(row => row.id), ['ended', 'future'])
     assert.deepEqual(await ids('current', true), ['ended', 'future'])
 
     // Archive a future reservation: Past at once, with who and when, and

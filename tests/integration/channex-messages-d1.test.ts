@@ -207,7 +207,7 @@ test('empty greenfield collections are valid; inquiries mirror into the canonica
     // An unbooked Airbnb conversation with no guest name reads as the title Airbnb gave it, on the home it was asked about, with no dates invented.
     // Unread follows the owner alerts, and a backfilled history raises none.
     assert.deepEqual({ ...rows[0]!, time: undefined }, { id: rows[0]!.id, kind: 'guest', guestName: 'Conversation supplied by Airbnb', avatarInitial: 'C', channel: 'airbnb', home: 'Cabin', when: null,
-      preview: 'Sent a photo', previewFrom: 'Airbnb Support', time: undefined, unread: false })
+      preview: 'Sent a photo', previewFrom: 'Airbnb Support', time: undefined, unread: false, canMarkUnread: false })
     assert.deepEqual(await listGuestThreads(db, ORG, { userId: OWNER, type: 'stay', mailbox: 'past' }), [])
     assert.equal(await db.prepare('SELECT product_id FROM channel_threads WHERE request_id = ?').bind(rows[0]!.id).first('product_id'), productId)
     const detail = (await getGuestThreadDetail(db, rows[0]!.id, ORG))!

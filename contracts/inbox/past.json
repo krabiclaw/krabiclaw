@@ -8,6 +8,7 @@
   "threads": [
     {
       "avatarInitial": "J",
+      "canMarkUnread": false,
       "channel": "direct",
       "guestName": "Jo Park",
       "home": "74 D · Sky",

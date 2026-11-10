@@ -262,6 +262,9 @@ export interface InboxRow {
   /** The last message's time in the home's timezone: "2:33 PM", "Yesterday", "Mon", "Nov 2". */
   time: string
   unread: boolean
+  /** Whether marking it unread can show it as new: a guest message alerted this member. A
+   * conversation nothing in it ever alerted (a booking nobody has written about) was never unread. */
+  canMarkUnread: boolean
 }
 
 /** Unread conversations per kind, for the filter menu. */

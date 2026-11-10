@@ -34,7 +34,7 @@
           :key="thread.id"
           :unread="thread.unread"
           :name="thread.guestName"
-          :enabled="!personalScope"
+          :enabled="!personalScope && (thread.unread || thread.canMarkUnread)"
           @toggle="toggleRead(thread)"
         >
           <NuxtLink
