@@ -12,7 +12,8 @@ import { createDeliveryReceipt, recordDeliveryOutcome } from '../../server/domai
 import { claimReservation, requireLocationReservationConfig, upsertLocationReservationConfig } from '../../server/utils/reservations.ts'
 import { CapacityUnavailableError, claimSessionCapacity, setBookingStatus } from '../../server/utils/availability.ts'
 import { buildCanonicalNotificationInsert } from '../../server/utils/notification-center.ts'
-import { acknowledgeNotification, acknowledgeThreadNotifications } from '../../server/utils/notification-acknowledgement.ts'
+import { acknowledgeNotification, acknowledgeThreadNotifications, unacknowledgeThreadNotifications } from '../../server/utils/notification-acknowledgement.ts'
+import { buildNotificationVisibilityFilter } from '../../server/utils/notification-access.ts'
 import { memberAccessPrincipal } from '../../server/utils/member-access.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 
@@ -318,6 +319,18 @@ test('archive and unarchive file a conversation without touching its booking, st
     assert.deepEqual(await ids('current'), CURRENT)
     assert.deepEqual([await ids('current', true), await ids('past', true)], [['ended', 'future'], []])
     assert.deepEqual(await countUnreadInboxThreads(db, ORG, { userId: ACTOR }), { all: 2, guests: 2, support: 0 })
+
+    // Marked read and unread from the list, without opening it: the list and its counts read the same state back.
+    const visibility = { userId: ACTOR, ...buildNotificationVisibilityFilter({ userId: ACTOR, platformAdmin: false, organization: { id: ORG, role: 'owner' } }) }
+    assert.equal(await acknowledgeThreadNotifications(db, visibility, 'ended'), 1)
+    assert.deepEqual([await ids('current', true), await countUnreadInboxThreads(db, ORG, { userId: ACTOR })], [['future'], { all: 1, guests: 1, support: 0 }])
+    assert.equal(await unacknowledgeThreadNotifications(db, visibility, 'ended'), true)
+    assert.deepEqual([await ids('current', true), await countUnreadInboxThreads(db, ORG, { userId: ACTOR })], [['ended', 'future'], { all: 2, guests: 2, support: 0 }])
+    // Unread twice is still one unread conversation; one nothing ever alerted about cannot be made unread.
+    assert.equal(await unacknowledgeThreadNotifications(db, visibility, 'ended'), true)
+    assert.deepEqual(await ids('current', true), ['ended', 'future'])
+    assert.equal(await unacknowledgeThreadNotifications(db, visibility, 'contact'), false)
+    assert.deepEqual(await ids('current', true), ['ended', 'future'])
 
     // Archive a future reservation: Past at once, with who and when, and
     // nothing about the reservation, the conversation state or the order moves.

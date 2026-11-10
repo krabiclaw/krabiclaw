@@ -2,6 +2,10 @@ import { REQUEST_CURRENT_BUYER_SQL } from '~/server/domain/requests'
 import { listThreadEntries, isBuyerVisibleThreadEntry } from '~/server/domain/guest-threads/entries'
 import { d1JsonStringSet, execute, queryAll, queryFirst, type DbClient } from '~/server/db'
 import { CONVERSATION_NOTIFICATION_SQL, SCHEDULE_NOTIFICATION_SQL } from '~/server/utils/notification-center'
+import { buildNotificationVisibilityFilter } from '~/server/utils/notification-access'
+import { publishNotificationInvalidation } from '~/server/cloudflare/guest-inbox-events'
+import type { MemberAccessPrincipal } from '~/server/utils/member-access'
+import { HTTPError } from 'nitro'
 
 interface NotificationVisibility {
   userId: string
@@ -62,6 +66,57 @@ export async function acknowledgeThreadNotifications(
     `${CONVERSATION_NOTIFICATION_SQL} AND n.parent_id IN (SELECT id FROM activity_entries WHERE request_id = ?)`,
     [threadId],
   )
+}
+
+/**
+ * Mark a conversation unread for this member: their acknowledgement of its
+ * newest alert is withdrawn, which is exactly what the unread dot reads. Opening
+ * the conversation or marking it read acknowledges the alert again.
+ * `false` when the conversation has no alert this member can see: nothing in it
+ * was ever unread for them, so there is nothing to make unread again.
+ */
+export async function unacknowledgeThreadNotifications(
+  db: DbClient,
+  visibility: NotificationVisibility,
+  threadId: string,
+): Promise<boolean> {
+  const newest = await queryFirst<{ id: string }>(db, `
+    SELECT n.id FROM activity_entries n
+     WHERE n.kind = 'notification' AND ${CONVERSATION_NOTIFICATION_SQL}
+       AND n.parent_id IN (SELECT id FROM activity_entries WHERE request_id = ?) AND ${visibility.whereSql}
+     ORDER BY n.created_at DESC, n.id DESC LIMIT 1`, [threadId, ...visibility.whereParams])
+  if (!newest) return false
+  await execute(db, "DELETE FROM activity_entries WHERE kind = 'acknowledgement' AND parent_id = ? AND actor_user_id = ?", [newest.id, visibility.userId])
+  return true
+}
+
+/**
+ * Mark one conversation read or unread for the member, from the Messages list
+ * (a swipe, a row's menu) or MCP, without opening it. The caller has checked the
+ * member may see the conversation. Their other apps and tabs re-read their
+ * counts and list on `notification.read`, the reader-only event every client
+ * already answers that way.
+ */
+export async function setConversationRead(
+  principal: MemberAccessPrincipal,
+  db: DbClient,
+  thread: { id: string; organization_id: string; location_id: string | null },
+  read: boolean,
+): Promise<{ unread: boolean }> {
+  const visibility = {
+    userId: principal.userId,
+    ...buildNotificationVisibilityFilter({ userId: principal.userId, platformAdmin: false, organization: { id: principal.organizationId, role: principal.role } }),
+  }
+  const changed = read
+    ? await acknowledgeThreadNotifications(db, visibility, thread.id) > 0
+    : await unacknowledgeThreadNotifications(db, visibility, thread.id)
+  if (!read && !changed) {
+    throw new HTTPError({ statusCode: 409, message: 'Nothing in this conversation has alerted you, so it cannot be marked unread', data: { code: 'NO_CONVERSATION_ALERT', field: 'threadId' } })
+  }
+  if (changed) {
+    await publishNotificationInvalidation(principal.env, { type: 'notification.read', organizationId: thread.organization_id, locationId: thread.location_id, targetUserId: principal.userId })
+  }
+  return { unread: !read }
 }
 
 /** Snapshot before loading the detail so later changes cannot be cleared by this visit. */

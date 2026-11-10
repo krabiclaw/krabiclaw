@@ -3,7 +3,7 @@ import { d1JsonStringSet, executeBatch, queryAll, queryFirst, type BatchQuery, t
 import { announceContentReport, assertSameReport, contentReportId, contentReportInsert, reportReason, type ContentReport, type ContentReportEnv } from '~/server/domain/content-reports'
 import { assertAssignedBookingAccess, assertLocationAccess, assertRoleAllows, listAllOrganizationMembers, organizationAdapter, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import { creationRequestHash, isUniqueDedupeConflict, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
-import { publishDashboardInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
+import { publishDashboardInvalidation, publishNotificationInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 import { notifyTeamMessage } from '~/server/utils/notifications'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import type { GuestThreadDeliveryStatus } from '~/server/domain/guest-threads/types'
@@ -830,5 +830,33 @@ export async function markTeamThreadRead(db: DbClient, access: TeamAccess, threa
     query: 'UPDATE team_thread_members SET last_read_at = ? WHERE organization_id = ? AND thread_id = ? AND member_id = ?',
     params: [now, access.organizationId, threadId, access.memberId],
   }], { operation: 'Mark a team conversation read' })
+  await publishReadPosition(access)
   return { status: 'read', lastReadAt: now }
+}
+
+/**
+ * Mark a team conversation unread: the member's read position moves to just
+ * before the newest message someone else wrote, so that message counts as new
+ * again, as `listTeamThreads` counts it. A conversation nobody else has written
+ * in has nothing to be unread.
+ */
+export async function markTeamThreadUnread(db: DbClient, access: TeamAccess, threadId: string): Promise<{ status: 'unread'; lastReadAt: string }> {
+  await requireSeat(db, access, threadId)
+  const newest = await queryFirst<{ before: string }>(db, `
+    SELECT strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '-0.001 seconds') AS before FROM team_messages
+     WHERE organization_id = ? AND thread_id = ? AND sender_user_id IS NOT ? AND automatic = 0
+     ORDER BY created_at DESC LIMIT 1`, [access.organizationId, threadId, access.userId])
+  if (!newest) fail(409, 'NO_TEAM_MESSAGE', 'Nobody else has written in this conversation, so it cannot be marked unread', 'threadId')
+  await executeBatch(db, [{
+    query: 'UPDATE team_thread_members SET last_read_at = ? WHERE organization_id = ? AND thread_id = ? AND member_id = ?',
+    params: [newest.before, access.organizationId, threadId, access.memberId],
+  }], { operation: 'Mark a team conversation unread' })
+  await publishReadPosition(access)
+  return { status: 'unread', lastReadAt: newest.before }
+}
+
+// The reader's other tabs and devices re-read their counts and lists. notification.read is the
+// reader-only event every client already answers that way; team_thread.changed would reload the conversation.
+async function publishReadPosition(access: TeamAccess) {
+  await publishNotificationInvalidation(access.principal.env, { type: 'notification.read', organizationId: access.organizationId, locationId: null, targetUserId: access.userId })
 }

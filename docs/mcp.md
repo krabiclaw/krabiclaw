@@ -107,7 +107,7 @@ This neither invites someone nor creates a Better Auth Team.
 `send_team_message` sends the requested text and/or supplied photo as the actual
 caller under a stable `idempotency_key`. Read its message and push receipts back;
 a saved message does not prove device delivery. `mark_team_conversation_read`
-changes only the caller's read position. These tools use the same team messaging
+and `mark_team_conversation_unread` change only the caller's read position. These tools use the same team messaging
 operations, Better Auth memberships and participant seats as CMS and iOS. They
 never reply to a guest or turn team conversations into permission groups.
 

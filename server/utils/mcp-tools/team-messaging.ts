@@ -1,6 +1,6 @@
 import { HTTPError } from 'nitro'
 import { TASK_VIEW_SCHEMA } from '~/server/utils/mcp-tools/tasks'
-import { createTeamThread, listTeamMembers, listTeamMessages, listTeamThreads, markTeamThreadRead, operateTeamGroup, sendTeamMessage, teamAccessFor } from '~/server/domain/team-messages'
+import { createTeamThread, listTeamMembers, listTeamMessages, listTeamThreads, markTeamThreadRead, markTeamThreadUnread, operateTeamGroup, sendTeamMessage, teamAccessFor } from '~/server/domain/team-messages'
 import { memberAccessPrincipal, resolveMemberId } from '~/server/utils/member-access'
 import { paginateMcpCollection } from '~/server/utils/mcp-pagination'
 import { MAX_IMAGE_BYTES } from '~/server/utils/media-mime'
@@ -59,6 +59,10 @@ export const TEAM_MESSAGING_TOOLS: McpToolDefinition[] = [
     inputSchema: { thread_id: threadId }, required: ['thread_id'],
     outputSchema: { type: 'object', properties: { status: { const: 'read' }, lastReadAt: text }, required: ['status', 'lastReadAt'] },
   }),
+  organizationTool({ name: 'mark_team_conversation_unread', domain: 'team_messaging', minimumRole: 'member', description: 'Mark one of your internal conversations unread: its newest message from someone else counts as new again. Changes only your own read position; does not send a message or change another participant’s unread state.',
+    inputSchema: { thread_id: threadId }, required: ['thread_id'],
+    outputSchema: { type: 'object', properties: { status: { const: 'unread' }, lastReadAt: text }, required: ['status', 'lastReadAt'] },
+  }),
 ]
 
 export async function handleTeamMessagingTools(ctx: McpExecutorContext): Promise<unknown> {
@@ -83,6 +87,7 @@ export async function handleTeamMessagingTools(ctx: McpExecutorContext): Promise
     case 'update_team_group': return await operateTeamGroup(env, db, access, requiredString(args, 'thread_id'), { action: args.action, idempotencyKey: args.idempotency_key, ...(args.name !== undefined ? { name: args.name } : {}), ...(args.member_user_ids !== undefined ? { memberIds: args.member_user_ids } : {}), ...(args.user_id !== undefined ? { userId: args.user_id } : {}) })
     case 'get_team_conversation': return await listTeamMessages(db, access, requiredString(args, 'thread_id'), { limit: args.limit, before: args.before, beforeId: args.before_id })
     case 'mark_team_conversation_read': return await markTeamThreadRead(db, access, requiredString(args, 'thread_id'))
+    case 'mark_team_conversation_unread': return await markTeamThreadUnread(db, access, requiredString(args, 'thread_id'))
     case 'send_team_message': {
       const sender = (await listTeamMembers(env, access)).find(member => member.id === organization.userId)
       if (!sender) throw new HTTPError({ statusCode: 404, statusMessage: 'Organization membership not found' })

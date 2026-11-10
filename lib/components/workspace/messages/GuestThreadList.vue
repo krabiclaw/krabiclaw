@@ -29,26 +29,33 @@
         leave-to-class="opacity-0"
         leave-active-class="absolute inset-x-0 transition-opacity duration-200 motion-reduce:transition-none"
       >
-        <NuxtLink
+        <MessageRowActions
           v-for="thread in threads"
           :key="thread.id"
-          :to="{ path: threadRoute(thread), query: route.query }"
-          :data-thread-row="thread.id"
-          :aria-current="thread.id === openThreadId ? 'page' : undefined"
-          class="relative flex items-start gap-4 rounded-xl py-4 pl-7 pr-3 transition duration-200 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-          :class="thread.id === openThreadId ? 'bg-elevated' : 'hover:bg-elevated/60'"
+          :unread="thread.unread"
+          :name="thread.guestName"
+          :enabled="!personalScope"
+          @toggle="toggleRead(thread)"
         >
-          <span v-if="thread.unread" class="absolute left-2.5 top-[38px] size-2 rounded-full bg-primary" :aria-label="`${thread.guestName}: unread`" />
-          <InboxAvatar :name="thread.guestName" :initial="thread.avatarInitial" :support="thread.kind === 'support'" :channel="thread.channel" size="lg" />
-          <span class="min-w-0 flex-1">
-            <span class="flex items-baseline justify-between gap-3 text-sm text-muted">
-              <span class="min-w-0 truncate">{{ [thread.when, thread.home].filter(Boolean).join(' · ') }}</span>
-              <span class="shrink-0">{{ thread.time }}</span>
+          <NuxtLink
+            :to="{ path: threadRoute(thread), query: route.query }"
+            :data-thread-row="thread.id"
+            :aria-current="thread.id === openThreadId ? 'page' : undefined"
+            class="relative flex items-start gap-4 rounded-xl py-4 pl-7 pr-3 transition duration-200 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            :class="thread.id === openThreadId ? 'bg-elevated' : 'hover:bg-elevated/60'"
+          >
+            <span v-if="thread.unread" class="absolute left-2.5 top-[38px] size-2 rounded-full bg-primary" :aria-label="`${thread.guestName}: unread`" />
+            <InboxAvatar :name="thread.guestName" :initial="thread.avatarInitial" :support="thread.kind === 'support'" :channel="thread.channel" size="lg" />
+            <span class="min-w-0 flex-1">
+              <span class="flex items-baseline justify-between gap-3 text-sm text-muted">
+                <span class="min-w-0 truncate">{{ [thread.when, thread.home].filter(Boolean).join(' · ') }}</span>
+                <span class="shrink-0">{{ thread.time }}</span>
+              </span>
+              <span class="block truncate text-base text-highlighted" :class="thread.unread ? 'font-semibold' : 'font-medium'">{{ thread.guestName }}</span>
+              <span v-if="thread.preview" class="mt-0.5 line-clamp-2 text-sm" :class="thread.unread ? 'text-default' : 'text-muted'">{{ thread.previewFrom }}: {{ thread.preview }}</span>
             </span>
-            <span class="block truncate text-base text-highlighted" :class="thread.unread ? 'font-semibold' : 'font-medium'">{{ thread.guestName }}</span>
-            <span v-if="thread.preview" class="mt-0.5 line-clamp-2 text-sm" :class="thread.unread ? 'text-default' : 'text-muted'">{{ thread.previewFrom }}: {{ thread.preview }}</span>
-          </span>
-        </NuxtLink>
+          </NuxtLink>
+        </MessageRowActions>
       </TransitionGroup>
 
       <div v-if="pending && !threads.length" class="-mx-3 space-y-1" role="status" aria-label="Loading messages...">
@@ -93,6 +100,7 @@ import { isThreadListResponse, type ThreadListItem, type ThreadListPage } from '
 import { useDashboardInvalidations } from '~/composables/useDashboardInvalidations'
 import { dashboardGutterClass } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
 import InboxAvatar from './InboxAvatar.vue'
+import MessageRowActions from './MessageRowActions.vue'
 import { useInboxUnread } from './inbox-unread'
 
 /*
@@ -286,11 +294,41 @@ function threadRoute(thread: ThreadListItem) {
   return `${listRoute.value}/${encodeURIComponent(thread.id)}`
 }
 
+// Read or unread without opening it: the row changes at once, and the list and
+// its counts are read again from the server once it has saved.
+const toast = useToast()
+// A row being saved takes no second toggle, so a failure cannot put back a state the member has since changed.
+const toggling = new Set<string>()
+async function toggleRead(thread: ThreadListItem) {
+  if (toggling.has(thread.id)) return
+  toggling.add(thread.id)
+  try { await saveRead(thread) } finally { toggling.delete(thread.id) }
+}
+async function saveRead(thread: ThreadListItem) {
+  const read = thread.unread
+  const mark = (unread: boolean) => {
+    if (data.value) data.value = { ...data.value, threads: data.value.threads.map(row => row.id === thread.id ? { ...row, unread } : row) }
+  }
+  mark(!read)
+  try {
+    await dashboardApi(`/api/dashboard/organizations/${organizationId.value}/guest-threads/${encodeURIComponent(thread.id)}/${read ? 'read' : 'unread'}`, {
+      method: 'POST',
+      validate: (value: unknown): value is { unread: boolean } => typeof value === 'object' && value !== null && Reflect.get(value, 'unread') === !read,
+    })
+  } catch (error) {
+    mark(read)
+    toast.add({ color: 'error', title: read ? 'Could not mark as read' : 'Could not mark as unread', description: getErrorMessage(error, 'Try again') })
+  }
+  // Saved or not, the server says what the row is now: a save can land while telling other devices fails.
+  await refresh()
+}
+
 // The menu's counts are the list's, read with it.
 watch(data, page => { if (page?.unread) unreadCounts.value = page.unread }, { immediate: true })
 
 watch(realtime.event, (event) => {
-  if (props.personalScope || !event || (event.type !== 'access.changed' && !('threadId' in event))) return
+  // notification.read: this member read or marked a conversation on another device or tab.
+  if (props.personalScope || !event || (event.type !== 'access.changed' && event.type !== 'notification.read' && !('threadId' in event))) return
   if (organizationId.value && event.organizationId !== organizationId.value) return
   void refresh()
 })

@@ -15,6 +15,7 @@ import { NOT_HANDLED, optionalDaysWindow, optionalString, requiredString, resolv
 import { MAX_IMAGE_BYTES } from '~/server/utils/media-mime'
 import { formAnswerInputJsonSchema, formAnswerSnapshotsJsonSchema } from '~/shared/form-questions'
 import { createInquiry } from '~/server/domain/inquiries'
+import { setConversationRead } from '~/server/utils/notification-acknowledgement'
 
 const nullableString = { type: ['string', 'null'] }
 const changeSide = { type: 'object', properties: { whenLabel: { type: 'string' }, partySize: { type: 'integer' }, assignedMemberId: nullableString, assignedMemberName: nullableString }, required: ['whenLabel', 'partySize', 'assignedMemberId', 'assignedMemberName'] }
@@ -55,7 +56,7 @@ async function readConversation(ctx: McpExecutorContext, requestId: string) {
 export const SUBMISSIONS_TOOLS: McpToolDefinition[] = [
   organizationTool({ name: 'list_guest_conversations', domain: 'submissions', minimumRole: 'member', description: 'Read the business inbox for contacts, table reservations, bookings and stay conversations. Filter by type, current/past and whether a reply is needed. Follow page_info. Use request_id with get_guest_conversation to read messages and guest contact details.',
     inputSchema: { type: { type: 'string', enum: ['contact', 'reservation', 'booking', 'stay'] }, needs_reply: { type: 'boolean', description: 'Only conversations with an open reply task: a guest question nobody has answered yet.' }, mailbox: { type: 'string', enum: ['current', 'past'] }, location_id: { type: 'string' }, ...paginationInputSchema },
-    outputSchema: { type: 'object', properties: { conversations: { type: 'array', items: { type: 'object', properties: { request_id: { type: 'string' }, guest_name: nullableString, participant_label: { type: 'string' }, reply_channel: { type: ['string', 'null'], enum: ['airbnb', 'email', 'account', null], description: 'Where reply_to_guest sends; null when the guest cannot be replied to, and reply_not_possible says why.' }, reply_not_possible: nullableString, type: { type: 'string' }, needs_reply: { type: 'boolean' }, operational_status: { type: ['string', 'null'] }, updated_at: { type: 'string' } }, required: ['request_id', 'guest_name', 'participant_label', 'reply_channel', 'reply_not_possible', 'type', 'needs_reply', 'operational_status', 'updated_at'], additionalProperties: false } }, page_info: pageInfoObject }, required: ['conversations', 'page_info'] },
+    outputSchema: { type: 'object', properties: { conversations: { type: 'array', items: { type: 'object', properties: { request_id: { type: 'string' }, guest_name: nullableString, participant_label: { type: 'string' }, reply_channel: { type: ['string', 'null'], enum: ['airbnb', 'email', 'account', null], description: 'Where reply_to_guest sends; null when the guest cannot be replied to, and reply_not_possible says why.' }, reply_not_possible: nullableString, type: { type: 'string' }, needs_reply: { type: 'boolean' }, unread: { type: 'boolean', description: 'Unread for you, as the Messages list shows it.' }, operational_status: { type: ['string', 'null'] }, updated_at: { type: 'string' } }, required: ['request_id', 'guest_name', 'participant_label', 'reply_channel', 'reply_not_possible', 'type', 'needs_reply', 'unread', 'operational_status', 'updated_at'], additionalProperties: false } }, page_info: pageInfoObject }, required: ['conversations', 'page_info'] },
   }),
   organizationTool({ name: 'create_inquiry', domain: 'submissions', minimumRole: 'admin', description: 'Record an inquiry, quote request or lead in the inbox for a named person, as the website\'s inquiry form does: their contact details, an optional message, and answers to the organization\'s inquiry questions (get_organization_settings → inquiry_questions). No appointment, capacity or payment is involved; to book a time use create_product_booking. Legal practices also require the person\'s consent acknowledgement. Reuse the same idempotency key for an identical retry; read the saved answers with get_guest_conversation.',
     inputSchema: {
@@ -79,6 +80,10 @@ export const SUBMISSIONS_TOOLS: McpToolDefinition[] = [
   }),
   organizationTool({ name: 'set_guest_conversation_archived', domain: 'submissions', minimumRole: 'admin', description: 'Archive or restore the inbox conversation identified by request_id from list_guest_conversations or a booking read. Returns its saved archive state without conversation history. Does not cancel a booking or reservation and does not send the guest a message.',
     inputSchema: { request_id: { type: 'string', description: 'Conversation request_id from list_guest_conversations or a booking read.' }, archived: { type: 'boolean' }, idempotency_key: { type: 'string', minLength: 1, maxLength: 200 } }, required: ['request_id', 'archived', 'idempotency_key'], outputSchema: conversationMutationResult,
+  }),
+  organizationTool({ name: 'set_guest_conversation_read', domain: 'submissions', minimumRole: 'member', description: 'Mark the inbox conversation identified by request_id read or unread for you, as swiping it in Messages does, without reading it. Changes only your own unread state; does not message the guest or change anyone else\'s. Marking unread needs an alert from the conversation that you can see; otherwise it is refused with NO_CONVERSATION_ALERT.',
+    inputSchema: { request_id: { type: 'string', description: 'Conversation request_id from list_guest_conversations or a booking read.' }, read: { type: 'boolean' } }, required: ['request_id', 'read'],
+    outputSchema: { type: 'object', properties: { request_id: { type: 'string' }, unread: { type: 'boolean' } }, required: ['request_id', 'unread'], additionalProperties: false },
   }),
   organizationTool({
       name: 'list_table_reservations',
@@ -132,17 +137,23 @@ export async function handleSubmissionsTools(ctx: McpExecutorContext): Promise<u
         if (!request) throw new HTTPError({ statusCode: 404, message: 'Guest conversation not found' })
         const destination = await guestReplyDestination(organization.db, request)
         return { request_id: row.id, guest_name: row.guestName, participant_label: row.participantLabel, reply_channel: destination.channel, reply_not_possible: destination.channel === null ? destination.reason : null,
-          type: row.submissionType, needs_reply: row.needsReply, operational_status: row.operationalStatus, updated_at: row.lastActivityAt }
+          type: row.submissionType, needs_reply: row.needsReply, unread: row.unread, operational_status: row.operationalStatus, updated_at: row.lastActivityAt }
       }))
       return { conversations, page_info: mcpPageInfo(window, conversations.length, rows.length > window.limit, resource) }
     }
     case 'get_guest_conversation':
     case 'reply_to_guest':
+    case 'set_guest_conversation_read':
     case 'set_guest_conversation_archived': {
       const requestId = requiredString(args, 'request_id')
       const thread = await getGuestRequest(organization.db, requestId, organization.organizationId)
       if (!thread) throw new HTTPError({ statusCode: 404, message: 'Guest conversation not found' })
-      await assertAssignedBookingAccess(organization.db, { ...memberAccessPrincipal(organization.membership, { env: organization.env, event: ctx.event }), requestId: thread.id })
+      const principal = memberAccessPrincipal(organization.membership, { env: organization.env, event: ctx.event })
+      await assertAssignedBookingAccess(organization.db, { ...principal, requestId: thread.id })
+      if (toolName === 'set_guest_conversation_read') {
+        if (typeof args.read !== 'boolean') throw new HTTPError({ statusCode: 400, message: 'read must be true or false', data: { code: 'VALIDATION_ERROR', field: 'read' } })
+        return { request_id: thread.id, ...await setConversationRead(principal, organization.db, thread, args.read) }
+      }
       if (toolName === 'get_guest_conversation') return { conversation: await readConversation(ctx, requestId) }
       const file = toolName === 'reply_to_guest' && args.file !== undefined ? toolFileReference(args.file, 'file') : null
       const outcome = await executeGuestThreadOperation(organization.db, { threadId: requestId, organizationId: organization.organizationId,

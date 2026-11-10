@@ -106,6 +106,22 @@ test('booking alerts open details while guest messages count on Messages until r
     expect(read.unread_conversations).toBe(before.unread_conversations)
     expect(read.unread_count).toBeLessThan(arrived.unread_count)
     expect(await badge()).toBeLessThanOrEqual(arrivedBadge - (arrived.unread_count - read.unread_count))
+
+    // From the Messages list: the row's envelope marks it unread, and its menu marks it read
+    // again. Each is read back through the count Messages and the icon use. The conversation is
+    // open beside the list (as the wide list opens its newest), so opening adds no read of its own.
+    await openTenantPage(page, `${baseURL}/dashboard/${restaurant.slug}/messages/${encodeURIComponent(threadId)}`, {})
+    const row = page.locator(`[data-thread-row="${threadId}"]`)
+    await expect(row).toBeVisible()
+    await expect(row.getByLabel('Unread badge proof: unread')).toHaveCount(0)
+    await row.hover()
+    await page.getByRole('button', { name: 'Mark as unread: Unread badge proof' }).click()
+    await expect(row.getByLabel('Unread badge proof: unread')).toBeVisible()
+    await expect.poll(async () => (await unread(owner)).unread_conversations).toBe(before.unread_conversations + 1)
+    await row.click({ button: 'right' })
+    await page.getByRole('menuitem', { name: 'Mark as read' }).click()
+    await expect(row.getByLabel('Unread badge proof: unread')).toHaveCount(0)
+    await expect.poll(async () => (await unread(owner)).unread_conversations).toBe(before.unread_conversations)
   } finally {
     await dashboard.close()
     await owner.dispose()
