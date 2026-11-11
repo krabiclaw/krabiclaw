@@ -808,6 +808,7 @@ export interface OwnerWelcomeInput {
   vertical: string | null | undefined
 }
 
+/** Selects vertical-tailored greeting prompts for new business onboarding. */
 function welcomeVerticalPrompt(vertical: string | null | undefined, organizationName: string): string {
   const v = vertical?.trim().toLowerCase()
   switch (v) {
