@@ -311,7 +311,8 @@ test('members talk in team conversations, see unread state and receive recorded 
     const hubs = env.GUEST_INBOX_HUBS!
     env.GUEST_INBOX_HUBS = { idFromName: (name: string) => hubs.idFromName(name), get: () => ({ fetch: () => Promise.resolve(new Response(null, { status: 500 })) }) } as unknown as typeof hubs
     const unfinished = { ...emailedReply, body: 'Keys are in the box', messageId: '<team-reply-unfinished@mail.example.test>' }
-    await assert.rejects(receiveMemberEmail(env, unfinished, unexpectedReport), (error: unknown) => (error as { data?: { code?: string } }).data?.code === 'DASHBOARD_PUBLICATION_FAILED')
+    // The send's own receipt is the first to tell open apps, so the failure arrives as that send's.
+    await assert.rejects(receiveMemberEmail(env, unfinished, unexpectedReport), (error: unknown) => (error as { cause?: { data?: { code?: string } } }).cause?.data?.code === 'DASHBOARD_PUBLICATION_FAILED')
     env.GUEST_INBOX_HUBS = hubs
     await receiveMemberEmail(env, unfinished, unexpectedReport)
     assert.deepEqual((await listTeamMessages(db, owner, contextualGroup.id, {})).messages.filter(message => message.body === 'Keys are in the box').map(message => message.senderId), ['cleaner'])
