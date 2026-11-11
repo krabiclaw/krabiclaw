@@ -1426,11 +1426,11 @@ test('members see only the homes they look after and change nothing; a home with
     const ownerToday = (now: string) => listTodayAgenda(db, { organizationId: ORG }, { principal: { env, membership: ownerMembership }, organizationSlug: 'org' }, new Date(now))
     const cleanerToday = (now: string) => listTodayAgenda(db, { organizationId: ORG }, { principal: { env, membership: cleanerMembership }, organizationSlug: 'org' }, new Date(now))
     const hosting = await ownerToday('2026-11-02T18:00:00.000Z')
-    assert.deepEqual(hosting.items.map(item => [item.stayId, item.stayMoment]).sort(), [[cabinStay.id, 'current'], [lakeStay.id, 'current']].sort())
+    assert.deepEqual(hosting.items.map(item => [item.booking_id, item.stay_moment]).sort(), [[cabinStay.id, 'current'], [lakeStay.id, 'current']].sort())
     assert.equal((await cleanerToday('2026-11-02T18:00:00.000Z')).items.length, 0)
     for (const [now, moment] of [['2026-11-01T18:00:00.000Z', 'arrival'], ['2026-11-03T18:00:00.000Z', 'departure']] as const) {
-      assert.deepEqual((await ownerToday(now)).items.map(item => item.stayMoment), [moment, moment])
-      assert.deepEqual((await cleanerToday(now)).items.map(item => [item.stayId, item.stayMoment]), [[cabinStay.id, moment]])
+      assert.deepEqual((await ownerToday(now)).items.map(item => item.stay_moment), [moment, moment])
+      assert.deepEqual((await cleanerToday(now)).items.map(item => [item.booking_id, item.stay_moment]), [[cabinStay.id, moment]])
     }
     // The cleaner's Today is the turnover tasks at the homes they look after.
     const cleanerTasks = async (now: string) => (await listTasks(db, await taskViewer(db, memberAccessPrincipal(cleanerMembership!, { env })), parseTaskListQuery({}), new Date(now)))
@@ -1438,11 +1438,11 @@ test('members see only the homes they look after and change nothing; a home with
     assert.deepEqual(await cleanerTasks('2026-11-03T18:00:00.000Z'), [['turnover', cabinStay.id, 'Ana out']])
     const next = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'next', check_in_date: '2026-11-03', check_out_date: '2026-11-05', ...guest })
     const turnover = await cleanerToday('2026-11-03T18:00:00.000Z')
-    const departure = turnover.items.find(item => item.stayId === cabinStay.id)!
-    assert.equal(departure.stayMoment, 'turnover')
+    const departure = turnover.items.find(item => item.booking_id === cabinStay.id)!
+    assert.equal(departure.stay_moment, 'turnover')
     assert.deepEqual(await cleanerTasks('2026-11-03T18:00:00.000Z'), [['turnover', cabinStay.id, 'Ana out · Ana in']])
     await cancelStay(db, env, manager, next.id, { expected_version: next.version })
-    assert.equal((await cleanerToday('2026-11-03T18:00:00.000Z')).items.find(item => item.stayId === cabinStay.id)!.stayMoment, 'departure')
+    assert.equal((await cleanerToday('2026-11-03T18:00:00.000Z')).items.find(item => item.booking_id === cabinStay.id)!.stay_moment, 'departure')
     assert.deepEqual(await cleanerTasks('2026-11-03T18:00:00.000Z'), [['turnover', cabinStay.id, 'Ana out']])
     assert.deepEqual((await listStays(db, cleaner, { from: '2026-11-01', to: '2026-11-30' })).map(stay => stay.id), [cabinStay.id])
     assert.deepEqual(await listStays(db, outsider, { from: '2026-11-01', to: '2026-11-30' }), [])
@@ -1511,8 +1511,8 @@ test('a member reads a stay at a home they look after as its turnover on every r
 
     // Today names the guest by first name for the member and in full for the owner.
     const today = (membership: typeof ownerMembership) => listTodayAgenda(db, { organizationId: ORG }, { principal: { env, membership }, organizationSlug: 'org' }, new Date('2026-11-01T18:00:00.000Z'))
-    assert.deepEqual((await today(cleanerMembership)).items.map(item => [item.stayId, item.title]), [[stay.id, 'Ana']])
-    assert.deepEqual((await today(ownerMembership)).items.map(item => [item.stayId, item.title]), [[stay.id, 'Ana Silva']])
+    assert.deepEqual((await today(cleanerMembership)).items.map(item => [item.booking_id, item.title]), [[stay.id, 'Ana']])
+    assert.deepEqual((await today(ownerMembership)).items.map(item => [item.booking_id, item.title]), [[stay.id, 'Ana Silva']])
 
     // MCP returns the same projection, and each tool's output schema admits both views.
     const ajv = new Ajv({ strict: false })
@@ -1590,7 +1590,7 @@ test('a business’s site shows a guest the stay its signed link names, from any
         cancellation: { policy: 'moderate', paid_minor: 45_000, refund_minor: 7_500, currency: 'USD' } })
     assert.deepEqual(arrivalGuide, { product_id: cabin.id, ...guide })
     const midStay = await listAgenda(db, { buyerUserId: booker.id }, { from: '2026-11-02', to: '2026-11-02', kinds: ['stay'] })
-    assert.deepEqual(midStay.items.map(item => ({ kind: item.kind, title: item.title, requestId: item.requestId, to: item.to, startsAt: item.startsAt, endsAt: item.endsAt })), [
+    assert.deepEqual(midStay.items.map(item => ({ kind: item.kind, title: item.title, requestId: item.conversation_id, to: item.to, startsAt: item.starts_at, endsAt: item.ends_at })), [
       { kind: 'stay', title: 'Cabin', requestId: activityId, to: `/dashboard/account/activity/stay/${activityId}`, startsAt: '2026-11-01T23:00:00.000Z', endsAt: '2026-11-04T17:00:00.000Z' },
     ])
     assert.deepEqual((await listTodayAgenda(db, { buyerUserId: booker.id }, {}, new Date('2026-11-02T19:00:00.000Z'))).items.map(item => item.to), [`/dashboard/account/activity/stay/${activityId}`])

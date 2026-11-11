@@ -67,7 +67,7 @@ const face = computed(() => props.task?.face ?? 'compact')
 const destination = computed(() => props.booking?.to ?? props.opportunity?.path ?? (props.task?.action?.type === 'open' ? props.task.action.path : null))
 // A booking and a guest's reply about a stay draw the same reservation face.
 const reservation = computed(() => props.booking
-  ? { dateLabel: props.booking.dateLabel, groupHeadline: props.booking.headline, homeName: props.booking.resourceName, statusLabel: props.booking.statusLabel, guestImageUrl: props.booking.guestImageUrl, noteLabel: props.booking.noteLabel, conversation: null }
+  ? { dateLabel: props.booking.date_label, groupHeadline: props.booking.headline, homeName: props.booking.name, statusLabel: props.booking.status_label, guestImageUrl: props.booking.guest_image_url, noteLabel: props.booking.note_label, conversation: null }
   : props.task?.reservation ? { ...props.task.reservation, noteLabel: null } : null)
 const statusLine = computed(() => props.task?.statusLine ?? (props.opportunity ? `Suggested · ${props.opportunity.statusLine}` : null))
 const title = computed(() => props.booking?.headline ?? props.task?.title ?? props.opportunity!.title)

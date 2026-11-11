@@ -30,9 +30,9 @@ export default defineHandler(async (event) => {
       principal: { env, membership: organization }, locationId: query.locationId }, now),
   ])
   const suggestions = new Map((opportunities?.opportunities ?? []).flatMap(opportunity => opportunity.requestId ? [[opportunity.requestId, opportunity]] : []))
-  const cards = reservations.map(card => ({ ...card, suggestion: card.requestId ? suggestions.get(card.requestId) ?? null : null }))
+  const cards = reservations.map(card => ({ ...card, suggestion: card.conversation_id ? suggestions.get(card.conversation_id) ?? null : null }))
   // A guest's reply about a stay on a card here is drawn once, by the card.
-  const carded = new Set(cards.flatMap(card => card.stayId ? [card.stayId] : []))
+  const carded = new Set(cards.flatMap(card => card.kind === 'stay' && card.booking_id ? [card.booking_id] : []))
   const tasks = list.sections.map(section => ({ ...section, tasks: section.tasks.map(task => {
     if (!task.reservation || !task.stayId || !carded.has(task.stayId)) return task
     const { reservation: _drawnByCard, ...compact } = task

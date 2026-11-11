@@ -15,18 +15,17 @@ import { NOT_HANDLED, assertDomainSuccess, mutationContextPayload, omit, optiona
 const text = { type: 'string' }
 const nullableText = { type: ['string', 'null'] }
 const agendaItem = { type: 'object', properties: {
-  id: text, kind: { type: 'string', enum: [...AGENDA_KINDS] }, requestId: nullableText,
-  operationalBookingId: nullableText,
-  stayId: { ...nullableText, description: 'For a stay row, the stay to read with get_product_booking; one stay is its arrival and its departure.' },
-  productId: nullableText,
-  stayChannel: { type: ['string', 'null'], enum: [...STAY_CHANNELS, null] },
-  stayMoment: { type: ['string', 'null'], enum: ['arrival', 'departure', 'turnover', 'current', null] },
-  assignedMemberId: nullableText, assignedMemberName: nullableText,
-  startsAt: text, endsAt: nullableText, dayKey: text, timeZone: text, showTimeZone: { type: 'boolean' },
-  title: text, subtitle: nullableText, status: text, organizationId: text,
-  locationId: nullableText, locationTitle: nullableText, guestImageUrl: nullableText,
-  resourceImageUrl: nullableText, resourceTitle: nullableText, partySize: { type: ['integer', 'null'] }, to: text,
-}, required: ['id', 'kind', 'requestId', 'operationalBookingId', 'stayId', 'productId', 'stayChannel', 'stayMoment', 'startsAt', 'endsAt', 'dayKey', 'timeZone', 'title', 'status', 'organizationId', 'locationId', 'partySize'] }
+  id: text, kind: { type: 'string', enum: [...AGENDA_KINDS] }, conversation_id: nullableText,
+  booking_id: { ...nullableText, description: 'The booking to read with get_product_booking. A stay may have a row for its arrival and for its departure.' },
+  product_id: nullableText,
+  stay_channel: { type: ['string', 'null'], enum: [...STAY_CHANNELS, null] },
+  stay_moment: { type: ['string', 'null'], enum: ['arrival', 'departure', 'turnover', 'current', null] },
+  assigned_member_id: nullableText, assigned_member_name: nullableText,
+  starts_at: text, ends_at: nullableText, day_key: text, timezone: text, show_time_zone: { type: 'boolean' },
+  title: text, subtitle: nullableText, status: text, organization_id: text,
+  location_id: nullableText, location_title: nullableText, guest_image_url: nullableText,
+  resource_image_url: nullableText, name: nullableText, party_size: { type: ['integer', 'null'] }, to: text,
+}, required: ['id', 'kind', 'conversation_id', 'booking_id', 'product_id', 'stay_channel', 'stay_moment', 'starts_at', 'ends_at', 'day_key', 'timezone', 'title', 'status', 'organization_id', 'location_id', 'party_size'] }
 const locationMutation = { ...locationMutationSummaryObject, properties: { ...locationMutationSummaryObject.properties, saved_fields: { ...locationObject, required: [], description: 'Persisted values of the fields named in changed_fields.' } }, required: [...locationMutationSummaryObject.required, 'saved_fields'] }
 const calendarMutation = { ...locationMutation, properties: { ...locationMutation.properties, affected_commitments: { type: 'array', items: agendaItem } }, required: [...locationMutation.required, 'affected_commitments'] }
 
@@ -291,7 +290,7 @@ export async function handleLocationsTools(ctx: McpExecutorContext): Promise<unk
       }))
       return {
         items: agenda.items,
-        available_kinds: agenda.availableKinds,
+        available_kinds: agenda.available_kinds,
         unavailable_dates: unavailable,
         context: await mutationContextPayload(organization, location ? { locationId: location.id } : undefined),
       };

@@ -3,14 +3,14 @@
   <NuxtLink :to="to ?? item.to" :data-session-id="item.kind === 'session' ? item.id : undefined" class="group flex items-center gap-4 py-3" :class="cancelled ? 'text-muted' : 'text-highlighted'">
     <div class="relative size-12 shrink-0" aria-hidden="true">
       <UAvatar
-        :src="item.guestImageUrl || undefined"
+        :src="item.guest_image_url || undefined"
         alt=""
         :icon="item.kind === 'session' ? 'i-lucide-calendar-clock' : 'i-lucide-user'"
         class="size-12"
         :ui="{ icon: 'size-6' }"
       />
       <div class="absolute -bottom-1 -right-1 flex size-6 items-center justify-center overflow-hidden rounded-lg border-2 border-default bg-default">
-        <img v-if="item.resourceImageUrl" :src="item.resourceImageUrl" alt="" class="size-full object-cover">
+        <img v-if="item.resource_image_url" :src="item.resource_image_url" alt="" class="size-full object-cover">
         <UIcon v-else :name="item.kind === 'session' || item.kind === 'booking' ? 'i-lucide-ticket' : item.kind === 'post' ? 'i-lucide-newspaper' : 'i-lucide-map-pin'" class="size-3 text-muted" />
       </div>
     </div>
@@ -20,7 +20,7 @@
     </div>
     <div class="shrink-0 text-right text-sm tabular-nums" :class="cancelled ? 'line-through' : ''">
       {{ formattedTime }}
-      <span v-if="item.showTimeZone" class="block text-xs font-normal text-muted">{{ item.timeZone }}</span>
+      <span v-if="item.show_time_zone" class="block text-xs font-normal text-muted">{{ item.timezone }}</span>
     </div>
     <UIcon name="i-lucide-chevron-right" class="size-4 shrink-0 text-dimmed group-hover:text-highlighted" />
   </NuxtLink>
@@ -30,7 +30,7 @@
 import type { AgendaItem } from '~/server/utils/dashboard-agenda'
 
 /** A row presents a scheduled record without treating an offered time as a guest booking. */
-export type CalendarRowItem = Pick<AgendaItem, 'id' | 'startsAt' | 'timeZone' | 'showTimeZone' | 'title' | 'subtitle' | 'status' | 'locationTitle' | 'guestImageUrl' | 'resourceImageUrl' | 'to'> & { kind: AgendaItem['kind'] | 'session' }
+export type CalendarRowItem = Pick<AgendaItem, 'id' | 'starts_at' | 'timezone' | 'show_time_zone' | 'title' | 'subtitle' | 'status' | 'location_title' | 'guest_image_url' | 'resource_image_url' | 'to'> & { kind: AgendaItem['kind'] | 'session' }
 </script>
 
 <script setup lang="ts">
@@ -40,6 +40,6 @@ import { formatTimestamp } from '~/utils/timezone'
 // own screen, under a calendar day the same record as a leaf of that day.
 const props = defineProps<{ item: CalendarRowItem; to?: string }>()
 const cancelled = computed(() => props.item.status === 'cancelled')
-const formattedTime = computed(() => formatTimestamp(props.item.startsAt, 'en', props.item.timeZone, { hour: 'numeric', minute: '2-digit' }))
-const details = computed(() => [cancelled.value ? 'Cancelled' : null, !cancelled.value || props.item.kind === 'session' ? props.item.subtitle : null, props.item.locationTitle].filter(Boolean).join(' · '))
+const formattedTime = computed(() => formatTimestamp(props.item.starts_at, 'en', props.item.timezone, { hour: 'numeric', minute: '2-digit' }))
+const details = computed(() => [cancelled.value ? 'Cancelled' : null, !cancelled.value || props.item.kind === 'session' ? props.item.subtitle : null, props.item.location_title].filter(Boolean).join(' · '))
 </script>

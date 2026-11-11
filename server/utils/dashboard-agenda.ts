@@ -17,44 +17,42 @@ export const AGENDA_KINDS = ['booking', 'post', 'stay'] as const
 export type AgendaKind = typeof AGENDA_KINDS[number]
 
 export interface AgendaItem {
-  assignedMemberId: string | null
-  assignedMemberName: string | null
+  assigned_member_id: string | null
+  assigned_member_name: string | null
   id: string
-  requestId: string | null
-  operationalBookingId: string | null
-  /** The stay a lodging occurrence belongs to. */
-  stayId: string | null
-  productId: string | null
-  stayChannel: Stay['channel'] | null
+  conversation_id: string | null
+  booking_id: string | null
+  product_id: string | null
+  stay_channel: Stay['channel'] | null
   /** Current stays appear only on a manager's Today, never as another cleaning. */
-  stayMoment: 'arrival' | 'departure' | 'turnover' | 'current' | null
+  stay_moment: 'arrival' | 'departure' | 'turnover' | 'current' | null
   kind: AgendaKind
-  startsAt: string
-  endsAt: string | null
-  dayKey: string
-  timeZone: string
-  showTimeZone: boolean
+  starts_at: string
+  ends_at: string | null
+  day_key: string
+  timezone: string
+  show_time_zone: boolean
   title: string
   subtitle: string | null
   status: string
-  organizationId: string
-  locationId: string | null
-  locationTitle: string | null
-  guestImageUrl: string | null
+  organization_id: string
+  location_id: string | null
+  location_title: string | null
+  guest_image_url: string | null
   /** The guest's first name as the business reads it; null for a buyer's own visit or a guest a channel did not name. */
-  guestFirstName: string | null
+  guest_first_name: string | null
   /** A channel stay that landed on held nights, for the managers who resolve it. */
   overbooked: boolean
   /** A stay's checkout date, so its whole interval can be named. */
-  checkOutDate: string | null
-  resourceImageUrl: string | null
-  resourceTitle: string | null
-  partySize: number | null
+  check_out_date: string | null
+  resource_image_url: string | null
+  name: string | null
+  party_size: number | null
   to: string
 }
 
 export interface TodayAgendaPayload extends AgendaPayload {
-  resolvedAt: string
+  resolved_at: string
 }
 
 export interface AgendaPrincipal {
@@ -86,14 +84,14 @@ export interface AgendaQuery {
 
 export interface AgendaLocation {
   id: string
-  organizationId: string
+  organization_id: string
   title: string
-  imageUrl: string | null
+  image_url: string | null
 }
 
 export interface AgendaPayload {
   items: AgendaItem[]
-  availableKinds: AgendaKind[]
+  available_kinds: AgendaKind[]
   locations: AgendaLocation[]
 }
 
@@ -219,7 +217,7 @@ export async function listAgenda(
   const requestedKinds = new Set((query.kinds?.length ? query.kinds : availableKinds).filter(kind => available.has(kind)))
   if (requestedKinds.size === 0) {
     return {
-      items: [], availableKinds,
+      items: [], available_kinds: availableKinds,
       locations: [],
     }
   }
@@ -313,12 +311,12 @@ export async function listAgenda(
     for (const id of ownerIds) pictures.set(`${group}\n${id}`, loaded.get(id)?.imageUrl ?? null)
   }))
   const items = rows.filter(row=>!query.assignedMemberId || row.assigned_member_id===query.assignedMemberId).flatMap<AgendaItem>((row) => {
-    const timeZone = row.timezone
-    if (!isValidTimezone(timeZone)) throw new Error(`Timezone is not configured for agenda item ${row.id}`)
+    const timezone = row.timezone
+    if (!isValidTimezone(timezone)) throw new Error(`Timezone is not configured for agenda item ${row.id}`)
     if (!row.starts_at) throw new Error(`Start time is missing for agenda item ${row.id}`)
-    const startsAt = instantDate(row.starts_at).toISOString()
-    const dayKey = localDateAt(instantDate(startsAt), timeZone)
-    if (dayKey < query.from || dayKey > query.to) return []
+    const starts_at = instantDate(row.starts_at).toISOString()
+    const day_key = localDateAt(instantDate(starts_at), timezone)
+    if (day_key < query.from || day_key > query.to) return []
     // The business reads who is coming; the buyer reads where they are going.
     const to = scope.buyerUserId !== undefined
       ? `/dashboard/account/activity/${row.kind}/${encodeURIComponent(row.id)}`
@@ -326,18 +324,18 @@ export async function listAgenda(
         ? postEditorPath(query.organizationSlug ?? scope.organizationId, row.id)
         : `/dashboard/${query.organizationSlug ?? scope.organizationId}/bookings/${row.kind}/${encodeURIComponent(row.id)}`
     return [{
-      assignedMemberId:row.assigned_member_id,assignedMemberName:row.assigned_member_name,
-      id: `${row.kind}:${row.id}`, requestId: row.kind === 'post' ? null : row.id, operationalBookingId: row.kind === 'booking' ? row.operational_id : null, stayId: null, productId: row.product_id, stayChannel: null, stayMoment: null, kind: row.kind, startsAt,
-      endsAt: row.ends_at === null ? null : instantDate(row.ends_at).toISOString(),
-      dayKey, timeZone, showTimeZone: false,
+      assigned_member_id:row.assigned_member_id,assigned_member_name:row.assigned_member_name,
+      id: `${row.kind}:${row.id}`, conversation_id: row.kind === 'post' ? null : row.id, booking_id: row.kind === 'booking' ? row.operational_id : null, product_id: row.product_id, stay_channel: null, stay_moment: null, kind: row.kind, starts_at,
+      ends_at: row.ends_at === null ? null : instantDate(row.ends_at).toISOString(),
+      day_key, timezone, show_time_zone: false,
       title: scope.buyerUserId ? row.resource_title ?? row.title : row.title,
       subtitle: scope.buyerUserId ? row.organization_name : row.party_size === null ? null : partyLabel(row.vertical, row.party_size, row.party_size_is_minimum === 1),
-      status: row.status, organizationId: row.organization_id,
-      locationId: row.location_id, locationTitle: row.location_title,
-      guestImageUrl: row.guest_image_url,
-      guestFirstName: scope.buyerUserId ? null : stayGuestFirstName(row.title), overbooked: false, checkOutDate: null,
-      resourceImageUrl: pictures.get(`${row.organization_id}\n${row.picture_owner_type}\n${row.picture_owner_id}`) ?? null,
-      resourceTitle: row.resource_title, partySize: row.party_size, to,
+      status: row.status, organization_id: row.organization_id,
+      location_id: row.location_id, location_title: row.location_title,
+      guest_image_url: row.guest_image_url,
+      guest_first_name: scope.buyerUserId ? null : stayGuestFirstName(row.title), overbooked: false, check_out_date: null,
+      resource_image_url: pictures.get(`${row.organization_id}\n${row.picture_owner_type}\n${row.picture_owner_id}`) ?? null,
+      name: row.resource_title, party_size: row.party_size, to,
     }]
   })
   const organizationPath = query.organizationSlug ?? scope.organizationId
@@ -366,21 +364,20 @@ export async function listAgenda(
     for (const [moment, day, instant] of moments) {
       if (!scope.buyerUserId && (day < query.from || day > query.to)) continue
       items.push({
-        assignedMemberId: null, assignedMemberName: null, id: scope.buyerUserId ? `stay:${stay.id}` : `stay:${stay.id}:${moment}`, requestId: staff ? null : stay.conversation_id, operationalBookingId: null,
-        stayId: stay.id, productId: stay.product_id, stayChannel: stay.channel, stayMoment: moment === 'departure' && turnover ? 'turnover' : moment, kind: 'stay', startsAt: instant, endsAt: scope.buyerUserId || moment === 'current' ? stay.ends_at : null, dayKey: day, timeZone: stay.timezone, showTimeZone: false,
+        assigned_member_id: null, assigned_member_name: null, id: scope.buyerUserId ? `stay:${stay.id}` : `stay:${stay.id}:${moment}`, conversation_id: staff ? null : stay.conversation_id, booking_id: stay.id, product_id: stay.product_id, stay_channel: stay.channel, stay_moment: moment === 'departure' && turnover ? 'turnover' : moment, kind: 'stay', starts_at: instant, ends_at: scope.buyerUserId || moment === 'current' ? stay.ends_at : null, day_key: day, timezone: stay.timezone, show_time_zone: false,
         title: scope.buyerUserId ? stay.product_name : title, subtitle: scope.buyerUserId ? stay.organization_name : [moment === 'arrival' ? 'Checking in' : moment === 'departure' ? 'Checking out' : 'Currently hosting', partyLabel(stay.vertical, stay.party_size, false), moment === 'departure' && turnover ? 'Next guests arrive the same day' : null].filter(Boolean).join(' · '),
-        status: stay.status, organizationId: stay.organization_id, locationId: stay.location_id, locationTitle: stay.location_title,
-        guestImageUrl: stay.guest_image_url, guestFirstName: scope.buyerUserId ? null : stayGuestFirstName(stay.guest_name), overbooked: !staff && Number(stay.overbooked) === 1, checkOutDate: stay.check_out_date,
-        resourceImageUrl: pictures.get(`${stay.organization_id}\nproduct\n${stay.product_id}`) ?? null, resourceTitle: stay.product_name, partySize: stay.party_size,
+        status: stay.status, organization_id: stay.organization_id, location_id: stay.location_id, location_title: stay.location_title,
+        guest_image_url: stay.guest_image_url, guest_first_name: scope.buyerUserId ? null : stayGuestFirstName(stay.guest_name), overbooked: !staff && Number(stay.overbooked) === 1, check_out_date: stay.check_out_date,
+        resource_image_url: pictures.get(`${stay.organization_id}\nproduct\n${stay.product_id}`) ?? null, name: stay.product_name, party_size: stay.party_size,
         to: scope.buyerUserId ? `/dashboard/account/activity/stay/${encodeURIComponent(stay.conversation_id)}` : `/dashboard/${organizationPath}/bookings/stay/${encodeURIComponent(stay.id)}`,
       })
     }
   }
-  items.sort((left, right) => left.startsAt.localeCompare(right.startsAt) || left.id.localeCompare(right.id))
+  items.sort((left, right) => left.starts_at.localeCompare(right.starts_at) || left.id.localeCompare(right.id))
 
   return {
-    items, availableKinds,
-    locations: locations.map(location => ({ id: location.id, organizationId: location.organization_id, title: location.title, imageUrl: locationPictures.get(location.id)?.imageUrl ?? null })),
+    items, available_kinds: availableKinds,
+    locations: locations.map(location => ({ id: location.id, organization_id: location.organization_id, title: location.title, image_url: locationPictures.get(location.id)?.imageUrl ?? null })),
   }
 }
 
@@ -402,13 +399,13 @@ export async function listTodayAgenda(
   })
   return {
     ...nearby,
-    availableKinds: nearby.availableKinds.filter(kind => kind === 'booking' || kind === 'stay'),
+    available_kinds: nearby.available_kinds.filter(kind => kind === 'booking' || kind === 'stay'),
     items: nearby.items.filter(item => {
-      const today = todayKeyForTimeZone(now, item.timeZone)
-      return item.dayKey === today || (scope.buyerUserId && item.kind === 'stay' && item.endsAt !== null
-        && item.dayKey <= today && bookingDay(item.endsAt, item.timeZone) >= today)
+      const today = todayKeyForTimeZone(now, item.timezone)
+      return item.day_key === today || (scope.buyerUserId && item.kind === 'stay' && item.ends_at !== null
+        && item.day_key <= today && bookingDay(item.ends_at, item.timezone) >= today)
     }),
-    resolvedAt: now.toISOString(),
+    resolved_at: now.toISOString(),
   }
 }
 
@@ -434,12 +431,12 @@ export async function listTodayReservations(
     : (await listAgenda(db, scope, { from: now.toISOString().slice(0, 10), to: addLocalDays(now.toISOString().slice(0, 10), UPCOMING_RESERVATION_DAYS + 1),
         kinds: ['booking', 'stay'], organizationSlug: input.organizationSlug, principal: input.principal, locationId: input.locationId })).items
       .filter((item) => {
-        const today = localDateAt(now, item.timeZone)
-        return item.dayKey > today && item.dayKey <= addLocalDays(today, UPCOMING_RESERVATION_DAYS) && (item.kind !== 'stay' || item.stayMoment === 'arrival')
+        const today = localDateAt(now, item.timezone)
+        return item.day_key > today && item.day_key <= addLocalDays(today, UPCOMING_RESERVATION_DAYS) && (item.kind !== 'stay' || item.stay_moment === 'arrival')
       })
-  const requestIds = [...new Set(items.flatMap(item => item.requestId ? [item.requestId] : []))]
+  const requestIds = [...new Set(items.flatMap(item => item.conversation_id ? [item.conversation_id] : []))]
   // The team's note is the booking's one private note.
   const notes = new Map((requestIds.length ? await queryAll<{ conversation_id: string }>(db, `SELECT c.id AS conversation_id FROM conversations c JOIN bookings b ON b.id = c.booking_id AND b.organization_id = c.organization_id
     WHERE c.id IN (SELECT value FROM json_each(?)) AND b.private_notes IS NOT NULL`, [d1JsonStringSet(requestIds)]) : []).map(row => [row.conversation_id, 1]))
-  return items.map(item => agendaToTodayReservation(item, { range: input.range, vertical: input.vertical, notes: item.requestId ? notes.get(item.requestId) ?? 0 : 0 }))
+  return items.map(item => agendaToTodayReservation(item, { range: input.range, vertical: input.vertical, notes: item.conversation_id ? notes.get(item.conversation_id) ?? 0 : 0 }))
 }

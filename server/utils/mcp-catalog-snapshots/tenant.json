@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:bcaa55bbf0474aea0f1b9012e29ec6068579288f846e27b049f2a4e5ceffc4d6",
-  "documentationFingerprint": "sha256:46a21457cd5ac5e65efaf0fd0ada02d2a10402c9ad6982ce709a1e08cec12152",
+  "fingerprint": "sha256:fdf9e3af009554bf36255de9c6afe751b5a594064f2ab90236e7bf1122ace280",
+  "documentationFingerprint": "sha256:daf6852ec53f2b65aea96d2be932d534e94442027e31f1d140d5f8203092e745",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -12342,28 +12342,41 @@
           "affected_commitments": {
             "items": {
               "properties": {
-                "assignedMemberId": {
+                "assigned_member_id": {
                   "type": [
                     "string",
                     "null"
                   ]
                 },
-                "assignedMemberName": {
+                "assigned_member_name": {
                   "type": [
                     "string",
                     "null"
                   ]
                 },
-                "dayKey": {
+                "booking_id": {
+                  "description": "The booking to read with get_product_booking. A stay may have a row for its arrival and for its departure.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "conversation_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "day_key": {
                   "type": "string"
                 },
-                "endsAt": {
+                "ends_at": {
                   "type": [
                     "string",
                     "null"
                   ]
                 },
-                "guestImageUrl": {
+                "guest_image_url": {
                   "type": [
                     "string",
                     "null"
@@ -12380,67 +12393,55 @@
                   ],
                   "type": "string"
                 },
-                "locationId": {
+                "location_id": {
                   "type": [
                     "string",
                     "null"
                   ]
                 },
-                "locationTitle": {
+                "location_title": {
                   "type": [
                     "string",
                     "null"
                   ]
                 },
-                "operationalBookingId": {
+                "name": {
                   "type": [
                     "string",
                     "null"
                   ]
                 },
-                "organizationId": {
+                "organization_id": {
                   "type": "string"
                 },
-                "partySize": {
+                "party_size": {
                   "type": [
                     "integer",
                     "null"
                   ]
                 },
-                "productId": {
+                "product_id": {
                   "type": [
                     "string",
                     "null"
                   ]
                 },
-                "requestId": {
+                "resource_image_url": {
                   "type": [
                     "string",
                     "null"
                   ]
                 },
-                "resourceImageUrl": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "resourceTitle": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "showTimeZone": {
+                "show_time_zone": {
                   "type": "boolean"
                 },
-                "startsAt": {
+                "starts_at": {
                   "type": "string"
                 },
                 "status": {
                   "type": "string"
                 },
-                "stayChannel": {
+                "stay_channel": {
                   "enum": [
                     "airbnb",
                     "vrbo",
@@ -12453,14 +12454,7 @@
                     "null"
                   ]
                 },
-                "stayId": {
-                  "description": "For a stay row, the stay to read with get_product_booking; one stay is its arrival and its departure.",
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "stayMoment": {
+                "stay_moment": {
                   "enum": [
                     "arrival",
                     "departure",
@@ -12479,7 +12473,7 @@
                     "null"
                   ]
                 },
-                "timeZone": {
+                "timezone": {
                   "type": "string"
                 },
                 "title": {
@@ -12492,21 +12486,20 @@
               "required": [
                 "id",
                 "kind",
-                "requestId",
-                "operationalBookingId",
-                "stayId",
-                "productId",
-                "stayChannel",
-                "stayMoment",
-                "startsAt",
-                "endsAt",
-                "dayKey",
-                "timeZone",
+                "conversation_id",
+                "booking_id",
+                "product_id",
+                "stay_channel",
+                "stay_moment",
+                "starts_at",
+                "ends_at",
+                "day_key",
+                "timezone",
                 "title",
                 "status",
-                "organizationId",
-                "locationId",
-                "partySize"
+                "organization_id",
+                "location_id",
+                "party_size"
               ],
               "type": "object"
             },
@@ -47137,28 +47130,41 @@
           "items": {
             "items": {
               "properties": {
-                "assignedMemberId": {
+                "assigned_member_id": {
                   "type": [
                     "string",
                     "null"
                   ]
                 },
-                "assignedMemberName": {
+                "assigned_member_name": {
                   "type": [
                     "string",
                     "null"
                   ]
                 },
-                "dayKey": {
+                "booking_id": {
+                  "description": "The booking to read with get_product_booking. A stay may have a row for its arrival and for its departure.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "conversation_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "day_key": {
                   "type": "string"
                 },
-                "endsAt": {
+                "ends_at": {
                   "type": [
                     "string",
                     "null"
                   ]
                 },
-                "guestImageUrl": {
+                "guest_image_url": {
                   "type": [
                     "string",
                     "null"
@@ -47175,67 +47181,55 @@
                   ],
                   "type": "string"
                 },
-                "locationId": {
+                "location_id": {
                   "type": [
                     "string",
                     "null"
                   ]
                 },
-                "locationTitle": {
+                "location_title": {
                   "type": [
                     "string",
                     "null"
                   ]
                 },
-                "operationalBookingId": {
+                "name": {
                   "type": [
                     "string",
                     "null"
                   ]
                 },
-                "organizationId": {
+                "organization_id": {
                   "type": "string"
                 },
-                "partySize": {
+                "party_size": {
                   "type": [
                     "integer",
                     "null"
                   ]
                 },
-                "productId": {
+                "product_id": {
                   "type": [
                     "string",
                     "null"
                   ]
                 },
-                "requestId": {
+                "resource_image_url": {
                   "type": [
                     "string",
                     "null"
                   ]
                 },
-                "resourceImageUrl": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "resourceTitle": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "showTimeZone": {
+                "show_time_zone": {
                   "type": "boolean"
                 },
-                "startsAt": {
+                "starts_at": {
                   "type": "string"
                 },
                 "status": {
                   "type": "string"
                 },
-                "stayChannel": {
+                "stay_channel": {
                   "enum": [
                     "airbnb",
                     "vrbo",
@@ -47248,14 +47242,7 @@
                     "null"
                   ]
                 },
-                "stayId": {
-                  "description": "For a stay row, the stay to read with get_product_booking; one stay is its arrival and its departure.",
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "stayMoment": {
+                "stay_moment": {
                   "enum": [
                     "arrival",
                     "departure",
@@ -47274,7 +47261,7 @@
                     "null"
                   ]
                 },
-                "timeZone": {
+                "timezone": {
                   "type": "string"
                 },
                 "title": {
@@ -47287,21 +47274,20 @@
               "required": [
                 "id",
                 "kind",
-                "requestId",
-                "operationalBookingId",
-                "stayId",
-                "productId",
-                "stayChannel",
-                "stayMoment",
-                "startsAt",
-                "endsAt",
-                "dayKey",
-                "timeZone",
+                "conversation_id",
+                "booking_id",
+                "product_id",
+                "stay_channel",
+                "stay_moment",
+                "starts_at",
+                "ends_at",
+                "day_key",
+                "timezone",
                 "title",
                 "status",
-                "organizationId",
-                "locationId",
-                "partySize"
+                "organization_id",
+                "location_id",
+                "party_size"
               ],
               "type": "object"
             },
@@ -72997,28 +72983,41 @@
           "affected_commitments": {
             "items": {
               "properties": {
-                "assignedMemberId": {
+                "assigned_member_id": {
                   "type": [
                     "string",
                     "null"
                   ]
                 },
-                "assignedMemberName": {
+                "assigned_member_name": {
                   "type": [
                     "string",
                     "null"
                   ]
                 },
-                "dayKey": {
+                "booking_id": {
+                  "description": "The booking to read with get_product_booking. A stay may have a row for its arrival and for its departure.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "conversation_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "day_key": {
                   "type": "string"
                 },
-                "endsAt": {
+                "ends_at": {
                   "type": [
                     "string",
                     "null"
                   ]
                 },
-                "guestImageUrl": {
+                "guest_image_url": {
                   "type": [
                     "string",
                     "null"
@@ -73035,67 +73034,55 @@
                   ],
                   "type": "string"
                 },
-                "locationId": {
+                "location_id": {
                   "type": [
                     "string",
                     "null"
                   ]
                 },
-                "locationTitle": {
+                "location_title": {
                   "type": [
                     "string",
                     "null"
                   ]
                 },
-                "operationalBookingId": {
+                "name": {
                   "type": [
                     "string",
                     "null"
                   ]
                 },
-                "organizationId": {
+                "organization_id": {
                   "type": "string"
                 },
-                "partySize": {
+                "party_size": {
                   "type": [
                     "integer",
                     "null"
                   ]
                 },
-                "productId": {
+                "product_id": {
                   "type": [
                     "string",
                     "null"
                   ]
                 },
-                "requestId": {
+                "resource_image_url": {
                   "type": [
                     "string",
                     "null"
                   ]
                 },
-                "resourceImageUrl": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "resourceTitle": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "showTimeZone": {
+                "show_time_zone": {
                   "type": "boolean"
                 },
-                "startsAt": {
+                "starts_at": {
                   "type": "string"
                 },
                 "status": {
                   "type": "string"
                 },
-                "stayChannel": {
+                "stay_channel": {
                   "enum": [
                     "airbnb",
                     "vrbo",
@@ -73108,14 +73095,7 @@
                     "null"
                   ]
                 },
-                "stayId": {
-                  "description": "For a stay row, the stay to read with get_product_booking; one stay is its arrival and its departure.",
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "stayMoment": {
+                "stay_moment": {
                   "enum": [
                     "arrival",
                     "departure",
@@ -73134,7 +73114,7 @@
                     "null"
                   ]
                 },
-                "timeZone": {
+                "timezone": {
                   "type": "string"
                 },
                 "title": {
@@ -73147,21 +73127,20 @@
               "required": [
                 "id",
                 "kind",
-                "requestId",
-                "operationalBookingId",
-                "stayId",
-                "productId",
-                "stayChannel",
-                "stayMoment",
-                "startsAt",
-                "endsAt",
-                "dayKey",
-                "timeZone",
+                "conversation_id",
+                "booking_id",
+                "product_id",
+                "stay_channel",
+                "stay_moment",
+                "starts_at",
+                "ends_at",
+                "day_key",
+                "timezone",
                 "title",
                 "status",
-                "organizationId",
-                "locationId",
-                "partySize"
+                "organization_id",
+                "location_id",
+                "party_size"
               ],
               "type": "object"
             },

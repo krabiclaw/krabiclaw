@@ -92,8 +92,8 @@ const title = computed(() => formatCalendarDate(day.value, 'en', { weekday: 'lon
 
 const isAgendaItem = (value: unknown): value is AgendaItem =>
   isRecord(value) && typeof value.id === 'string' && typeof value.kind === 'string'
-  && typeof value.startsAt === 'string' && typeof value.dayKey === 'string'
-  && typeof value.timeZone === 'string' && typeof value.title === 'string'
+  && typeof value.starts_at === 'string' && typeof value.day_key === 'string'
+  && typeof value.timezone === 'string' && typeof value.title === 'string'
   && typeof value.status === 'string' && typeof value.to === 'string'
 const isAgendaPayload = (value: unknown): value is AgendaPayload =>
   isRecord(value) && Array.isArray(value.items) && value.items.every(isAgendaItem)

@@ -22,18 +22,18 @@ export type TodayFeedPayload = z.infer<typeof todayFeedSchema>
 /** A guest account's visit as a Today card. */
 export function agendaToTodayCard(item: AgendaItem, input: { resolvedAt: string }): TodayCard {
   if (item.kind !== 'booking' && item.kind !== 'stay') throw new Error('Today cards require a booking or stay')
-  const referenceDay = localDateAt(new Date(input.resolvedAt), item.timeZone)
-  const distance = Math.round((Date.parse(`${item.dayKey}T00:00:00Z`) - Date.parse(`${referenceDay}T00:00:00Z`)) / 86_400_000)
+  const referenceDay = localDateAt(new Date(input.resolvedAt), item.timezone)
+  const distance = Math.round((Date.parse(`${item.day_key}T00:00:00Z`) - Date.parse(`${referenceDay}T00:00:00Z`)) / 86_400_000)
   const when = distance <= 0 ? 'today' : distance === 1 ? 'tomorrow' : `in ${distance} days`
-  const guests = item.partySize && item.partySize > 0 ? `${item.partySize} ${item.partySize === 1 ? 'guest' : 'guests'}` : ''
+  const guests = item.party_size && item.party_size > 0 ? `${item.party_size} ${item.party_size === 1 ? 'guest' : 'guests'}` : ''
   return {
     id: item.id, to: item.to.replace(/^\/dashboard\/account\/activity\//, '/dashboard/account/bookings/'),
-    eyebrow: item.stayMoment === 'current' ? 'Currently hosting' : !item.startsAt.includes('T') ? 'Time not set' : formatTimestamp(item.startsAt, 'en', item.timeZone, { hour: 'numeric', minute: '2-digit' }),
+    eyebrow: item.stay_moment === 'current' ? 'Currently hosting' : !item.starts_at.includes('T') ? 'Time not set' : formatTimestamp(item.starts_at, 'en', item.timezone, { hour: 'numeric', minute: '2-digit' }),
     headline: `${item.title} ${when}${guests ? ` for ${guests}` : ''}`,
-    description: [...new Set([item.subtitle, item.locationTitle].filter((part): part is string => !!part && part !== item.title))].join(' · ') || null,
-    imageUrl: item.resourceImageUrl, imageIcon: item.kind === 'booking' ? 'i-lucide-ticket' : item.kind === 'stay' ? 'i-lucide-house' : 'i-lucide-map-pin',
-    locationId: item.locationId, bookingKind: item.kind, stayId: item.stayId, productId: item.productId,
-    occurrenceAt: item.stayMoment === 'current' || !item.startsAt.includes('T') ? null : item.startsAt, timeZone: item.timeZone,
+    description: [...new Set([item.subtitle, item.location_title].filter((part): part is string => !!part && part !== item.title))].join(' · ') || null,
+    imageUrl: item.resource_image_url, imageIcon: item.kind === 'booking' ? 'i-lucide-ticket' : item.kind === 'stay' ? 'i-lucide-house' : 'i-lucide-map-pin',
+    locationId: item.location_id, bookingKind: item.kind, stayId: item.kind === 'stay' ? item.booking_id : null, productId: item.product_id,
+    occurrenceAt: item.stay_moment === 'current' || !item.starts_at.includes('T') ? null : item.starts_at, timeZone: item.timezone,
   }
 }
 
@@ -52,23 +52,23 @@ export interface TodayReservation {
   kind: 'booking' | 'stay'
   /** The booking's own screen. */
   to: string
-  requestId: string | null
-  stayId: string | null
-  productId: string | null
-  locationId: string | null
-  startsAt: string
-  timeZone: string
+  conversation_id: string | null
+  booking_id: string | null
+  product_id: string | null
+  location_id: string | null
+  starts_at: string
+  timezone: string
   /** "3:00 PM" today; "Oct 26 – 29" for a stay; "Thu, Nov 12 · 3:00 PM" for a visit. */
-  dateLabel: string
-  guestImageUrl: string | null
+  date_label: string
+  guest_image_url: string | null
   /** "Eva’s group of 4 checks in", "Bruno’s group of 3", "Ana’s consultation". */
   headline: string
   /** The home, offering or location booked. */
-  resourceName: string | null
+  name: string | null
   /** "Pending confirmation", "Currently hosting", "Overbooked · Next guests arrive the same day". */
-  statusLabel: string | null
+  status_label: string | null
   /** Whether the team left its private note on the booking: "1 note". */
-  noteLabel: string | null
+  note_label: string | null
   /** The opportunity for this booking, shown at the bottom of its card. */
   suggestion: OpportunityView | null
 }
@@ -76,26 +76,26 @@ export interface TodayReservation {
 /** A business's booking on its Today ("today") or Upcoming ("upcoming"). */
 export function agendaToTodayReservation(item: AgendaItem, input: { range: 'today' | 'upcoming'; vertical: string | null; notes: number }): Omit<TodayReservation, 'suggestion'> {
   if (item.kind !== 'booking' && item.kind !== 'stay') throw new Error('Reservation cards require a booking or stay')
-  const timed = item.startsAt.includes('T')
-  const time = timed ? formatTimestamp(item.startsAt, 'en', item.timeZone, { hour: 'numeric', minute: '2-digit' }) : 'Time not set'
-  const checkIn = timed ? localDateAt(new Date(item.startsAt), item.timeZone) : item.startsAt
+  const timed = item.starts_at.includes('T')
+  const time = timed ? formatTimestamp(item.starts_at, 'en', item.timezone, { hour: 'numeric', minute: '2-digit' }) : 'Time not set'
+  const checkIn = timed ? localDateAt(new Date(item.starts_at), item.timezone) : item.starts_at
   const stayRange = () => {
-    if (item.checkOutDate === null) throw new Error(`Stay ${item.stayId} has no checkout date`)
-    return formatCalendarRange(item.stayMoment === 'current' ? checkIn : item.dayKey, item.checkOutDate, 'en-US')
+    if (item.check_out_date === null) throw new Error(`Stay ${item.booking_id} has no checkout date`)
+    return formatCalendarRange(item.stay_moment === 'current' ? checkIn : item.day_key, item.check_out_date, 'en-US')
   }
-  const dateLabel = item.kind === 'stay' && (input.range === 'upcoming' || item.stayMoment === 'current') ? stayRange()
-    : input.range === 'today' ? time : `${formatTimestamp(item.startsAt, 'en', item.timeZone, { weekday: 'short', month: 'short', day: 'numeric' })} · ${time}`
-  const party = item.partySize ?? 0
-  const guest = item.guestFirstName ?? (item.kind === 'stay' && item.stayChannel ? `Name not provided by ${STAY_CHANNEL_LABELS[item.stayChannel]}` : item.title)
-  const group = item.guestFirstName && party > 1 ? `${guest}’s group of ${party}` : item.kind === 'stay' ? guest : `${guest}’s ${getVerticalCopy(input.vertical, 'en').reservationWord}`
-  const moment = input.range === 'today' && item.kind === 'stay' ? item.stayMoment : null
+  const date_label = item.kind === 'stay' && (input.range === 'upcoming' || item.stay_moment === 'current') ? stayRange()
+    : input.range === 'today' ? time : `${formatTimestamp(item.starts_at, 'en', item.timezone, { weekday: 'short', month: 'short', day: 'numeric' })} · ${time}`
+  const party = item.party_size ?? 0
+  const guest = item.guest_first_name ?? (item.kind === 'stay' && item.stay_channel ? `Name not provided by ${STAY_CHANNEL_LABELS[item.stay_channel]}` : item.title)
+  const group = item.guest_first_name && party > 1 ? `${guest}’s group of ${party}` : item.kind === 'stay' ? guest : `${guest}’s ${getVerticalCopy(input.vertical, 'en').reservationWord}`
+  const moment = input.range === 'today' && item.kind === 'stay' ? item.stay_moment : null
   const headline = moment === 'arrival' ? `${group} checks in` : moment === 'departure' || moment === 'turnover' ? `${group} checks out` : group
-  const statusLabel = [item.overbooked ? 'Overbooked' : null, item.status === 'pending' ? 'Pending confirmation' : null,
+  const status_label = [item.overbooked ? 'Overbooked' : null, item.status === 'pending' ? 'Pending confirmation' : null,
     moment === 'current' ? 'Currently hosting' : null, moment === 'turnover' ? 'Next guests arrive the same day' : null].filter(Boolean).join(' · ') || null
   return {
-    id: item.id, kind: item.kind, to: item.to, requestId: item.requestId, stayId: item.stayId, productId: item.productId, locationId: item.locationId,
-    startsAt: item.startsAt, timeZone: item.timeZone, dateLabel, guestImageUrl: item.guestImageUrl, headline,
-    resourceName: item.resourceTitle, statusLabel, noteLabel: input.notes > 0 ? `${input.notes} ${input.notes === 1 ? 'note' : 'notes'}` : null,
+    id: item.id, kind: item.kind, to: item.to, conversation_id: item.conversation_id, booking_id: item.booking_id, product_id: item.product_id, location_id: item.location_id,
+    starts_at: item.starts_at, timezone: item.timezone, date_label, guest_image_url: item.guest_image_url, headline,
+    name: item.name, status_label, note_label: input.notes > 0 ? `${input.notes} ${input.notes === 1 ? 'note' : 'notes'}` : null,
   }
 }
 

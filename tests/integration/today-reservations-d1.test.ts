@@ -141,7 +141,7 @@ test('Today shows every booking type as a reservation card for its own business,
     assert.equal(table.status, 201, JSON.stringify(table.body))
 
     const law = await today('law', 'upcoming'), studio = await today('studio', 'upcoming'), inn = await today('inn', 'upcoming'), bistro = await today('bistro', 'upcoming')
-    const shape = (card: TodayReservation) => ({ kind: card.kind, requestId: card.requestId, headline: card.headline, resourceName: card.resourceName, suggestion: card.suggestion?.title ?? null })
+    const shape = (card: TodayReservation) => ({ kind: card.kind, requestId: card.conversation_id, headline: card.headline, resourceName: card.name, suggestion: card.suggestion?.title ?? null })
 
     // Each business sees its own bookings and nothing of another's.
     assert.deepEqual(law.reservations.cards.map(shape), [
@@ -155,7 +155,7 @@ test('Today shows every booking type as a reservation card for its own business,
     assert.deepEqual(inn.reservations.cards.map(shape), [
       { kind: 'stay', requestId: stay.conversation_id, headline: 'Diana’s group of 2', resourceName: 'Seaview Cottage', suggestion: 'Share info about your place' },
     ])
-    assert.equal(inn.reservations.cards[0]!.stayId, stay.id)
+    assert.equal(inn.reservations.cards[0]!.booking_id, stay.id)
     // A restaurant has no host-written preparation, so its reservation has no suggestion.
     assert.deepEqual(bistro.reservations.cards.map(shape), [
       { kind: 'booking', requestId: table.body.conversation_id, headline: 'Nora’s group of 4', resourceName: 'bistro office', suggestion: null },
