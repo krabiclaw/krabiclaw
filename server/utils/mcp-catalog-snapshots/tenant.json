@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:0b861ccb77bb8f904dd6e68861373c1cb2b3cffa27b80bb0dca923f3c5b26a9d",
-  "documentationFingerprint": "sha256:6fad6f67b843d724008c1dc0d200f7e68ddceca185c7026e44e74d6a29158892",
+  "fingerprint": "sha256:ae9dc8b936ea0adb07571f8b6f8498434e3133fc1316cf3132b7c13ac2009421",
+  "documentationFingerprint": "sha256:f9e4efa15f56bccdb5564e7ac7ec6e45a5c3a310a09bee0b2d1ea4c12ea05560",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -20204,7 +20204,7 @@
     {
       "name": "create_inquiry",
       "title": "Create inquiry",
-      "description": "Record an inquiry, quote request or lead in the inbox for a named person, as the website's inquiry form does: their contact details, an optional message, and answers to the organization's inquiry questions (get_organization_settings → inquiry_questions). No appointment, capacity or payment is involved; to book a time use create_product_booking. Legal practices also require the person's consent acknowledgement. Reuse the same idempotency key for an identical retry; read the saved answers with get_guest_conversation.",
+      "description": "Record an inquiry, quote request or lead in the inbox for a named person, as the website's inquiry form does: their contact details, an optional message, and answers to the organization's inquiry questions (get_organization_settings → inquiry_questions). No appointment, capacity or payment is involved; to book a time use create_product_booking. Legal practices also require the person's consent acknowledgement. Reuse the same idempotency key for an identical retry; read the saved answers with get_conversation.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -47664,6 +47664,1251 @@
       "uiResourceUri": null
     },
     {
+      "name": "get_conversation",
+      "title": "Get conversation",
+      "description": "Read one conversation. A guest conversation returns the guest, their answers to the business’s questions, the booking and every message with proposals, attachments and delivery receipts. A team conversation returns its people and context and its messages newest first (default 20, maximum 100; page back with before and before_id from the oldest loaded message’s createdAt and id). Reading does not mark the conversation read: use mark_conversation_read.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "before": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "before_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "conversation_id": {
+            "description": "A conversation_id from list_conversations, start_conversation or a booking read.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "limit": {
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "organization_id": {
+            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
+            "minLength": 1,
+            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "conversation_id"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
+        "properties": {
+          "conversation_id": {
+            "type": "string"
+          },
+          "guest": {
+            "description": "A guest conversation: its guest, answers, booking and every message.",
+            "properties": {
+              "answers": {
+                "description": "Answers to the tenant's own questions, with the wording the guest answered. Later edits to the questions do not change them.",
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "help_text": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "question_id": {
+                      "type": "string"
+                    },
+                    "selected_choices": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "label"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "type": {
+                      "enum": [
+                        "short_text",
+                        "long_text",
+                        "single_choice",
+                        "multiple_choice",
+                        "yes_no"
+                      ],
+                      "type": "string"
+                    },
+                    "value": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        {
+                          "type": "boolean"
+                        }
+                      ],
+                      "description": "Text, the selected choice ID, the selected choice IDs, or true/false for yes/no."
+                    }
+                  },
+                  "required": [
+                    "question_id",
+                    "label",
+                    "type",
+                    "help_text",
+                    "value",
+                    "selected_choices"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "archived": {
+                "description": "Archived by you.",
+                "type": "boolean"
+              },
+              "guest": {
+                "properties": {
+                  "email": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "phone": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "name",
+                  "email",
+                  "phone"
+                ],
+                "type": "object"
+              },
+              "last_message_at": {
+                "type": "string"
+              },
+              "messages": {
+                "items": {
+                  "properties": {
+                    "actor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "attachments": {
+                      "items": {
+                        "properties": {
+                          "alt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "height": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "url": {
+                            "type": "string"
+                          },
+                          "width": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "url",
+                          "alt",
+                          "width",
+                          "height"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "author": {
+                      "description": "krabiclaw: written by KrabiClaw — an automatic message, a booking’s opening, Airbnb Support relayed, or an event such as a cancellation or payment.",
+                      "enum": [
+                        "guest",
+                        "member",
+                        "krabiclaw"
+                      ],
+                      "type": "string"
+                    },
+                    "body": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "booking_change": {
+                      "description": "Canonical proposal details and current response state. A pending proposal does not change the operational record.",
+                      "properties": {
+                        "after": {
+                          "properties": {
+                            "assignedMemberId": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "assignedMemberName": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "partySize": {
+                              "type": "integer"
+                            },
+                            "whenLabel": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "whenLabel",
+                            "partySize",
+                            "assignedMemberId",
+                            "assignedMemberName"
+                          ],
+                          "type": "object"
+                        },
+                        "before": {
+                          "properties": {
+                            "assignedMemberId": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "assignedMemberName": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "partySize": {
+                              "type": "integer"
+                            },
+                            "whenLabel": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "whenLabel",
+                            "partySize",
+                            "assignedMemberId",
+                            "assignedMemberName"
+                          ],
+                          "type": "object"
+                        },
+                        "locationTitle": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "originalLocationTitle": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "enum": [
+                            "pending",
+                            "accepted",
+                            "declined",
+                            "withdrawn",
+                            "stale",
+                            "expired"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "status",
+                        "before",
+                        "after",
+                        "locationTitle",
+                        "originalLocationTitle"
+                      ],
+                      "type": [
+                        "object",
+                        "null"
+                      ]
+                    },
+                    "channel": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "deliveries": {
+                      "items": {
+                        "properties": {
+                          "channel": {
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "provider": {
+                            "description": "log_only records the message locally without sending it through a provider.",
+                            "type": "string"
+                          },
+                          "purpose": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "channel",
+                          "provider",
+                          "purpose",
+                          "status"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "event": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "occurred_at": {
+                      "type": "string"
+                    },
+                    "payload": {
+                      "type": [
+                        "object",
+                        "null"
+                      ]
+                    },
+                    "provider_timestamp": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "author",
+                    "actor",
+                    "channel",
+                    "body",
+                    "event",
+                    "occurred_at",
+                    "provider_timestamp",
+                    "booking_change",
+                    "deliveries",
+                    "attachments"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "needs_reply": {
+                "type": "boolean"
+              },
+              "operational_record": {
+                "description": "The booking the conversation is about. unit nights is a stay: check_in_date and check_out_date are its nights in its home’s clock, and starts_at/ends_at hold a day alone where the home has no check-in or checkout time.",
+                "properties": {
+                  "check_in_date": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "check_out_date": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "ends_at": {
+                    "type": "string"
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "party_size": {
+                    "type": "integer"
+                  },
+                  "product_kind": {
+                    "type": "string"
+                  },
+                  "starts_at": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string"
+                  },
+                  "timezone": {
+                    "type": "string"
+                  },
+                  "unit": {
+                    "enum": [
+                      "slot",
+                      "nights"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "unit",
+                  "product_kind",
+                  "status",
+                  "starts_at",
+                  "ends_at",
+                  "timezone",
+                  "party_size",
+                  "check_in_date",
+                  "check_out_date"
+                ],
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "participant_label": {
+                "type": "string"
+              },
+              "reply_channel": {
+                "description": "Where send_message sends: Airbnb’s conversation, the guest’s email, or their KrabiClaw account inbox. Null when the guest cannot be replied to; reply_not_possible says why.",
+                "enum": [
+                  "airbnb",
+                  "email",
+                  "account",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "reply_not_possible": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "type": {
+                "enum": [
+                  "contact",
+                  "booking",
+                  "stay"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "needs_reply",
+              "archived",
+              "last_message_at",
+              "participant_label",
+              "reply_channel",
+              "reply_not_possible",
+              "guest",
+              "answers",
+              "operational_record",
+              "messages"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "kind": {
+            "enum": [
+              "contact",
+              "booking",
+              "team"
+            ],
+            "type": "string"
+          },
+          "team": {
+            "properties": {
+              "hasMore": {
+                "type": "boolean"
+              },
+              "messages": {
+                "items": {
+                  "properties": {
+                    "attachments": {
+                      "items": {
+                        "properties": {
+                          "height": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "url": {
+                            "type": "string"
+                          },
+                          "width": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "url",
+                          "width",
+                          "height"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "automatic": {
+                      "description": "Written by KrabiClaw (a cleaning job, a reminder, a move), not by a member. It is unread until read, like any message from someone else.",
+                      "type": "boolean"
+                    },
+                    "body": {
+                      "type": "string"
+                    },
+                    "createdAt": {
+                      "type": "string"
+                    },
+                    "deliveries": {
+                      "items": {
+                        "properties": {
+                          "channel": {
+                            "enum": [
+                              "email",
+                              "whatsapp",
+                              "push"
+                            ],
+                            "type": "string"
+                          },
+                          "error": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string"
+                          },
+                          "updatedAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "channel",
+                          "status",
+                          "error",
+                          "updatedAt"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "senderId": {
+                      "description": "The sender; null for an automatic message, or once a person’s account was deleted.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "threadId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "threadId",
+                    "senderId",
+                    "automatic",
+                    "body",
+                    "createdAt",
+                    "attachments",
+                    "deliveries"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "thread": {
+                "description": "A team conversation: its people, what it is about and its newest message.",
+                "properties": {
+                  "bookingId": {
+                    "description": "The booking the conversation is about: a stay (see stay) or a class, consultation or table (see record).",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "canLeave": {
+                    "type": "boolean"
+                  },
+                  "canManage": {
+                    "type": "boolean"
+                  },
+                  "createdAt": {
+                    "type": "string"
+                  },
+                  "createdByUserId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "isGroup": {
+                    "type": "boolean"
+                  },
+                  "job": {
+                    "description": "The job for the conversation’s booked record (a turnover or home-ready job for a stay, the prep or follow-up for a booking) as list_tasks presents it; null when there is none the caller may see.",
+                    "properties": {
+                      "action": {
+                        "type": [
+                          "object",
+                          "null"
+                        ]
+                      },
+                      "assignee": {
+                        "anyOf": [
+                          {
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "initial": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "type": {
+                                "enum": [
+                                  "member"
+                                ],
+                                "type": "string"
+                              },
+                              "you": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "type",
+                              "id",
+                              "name",
+                              "initial",
+                              "you"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "avatar": {
+                        "type": [
+                          "object",
+                          "null"
+                        ]
+                      },
+                      "can": {
+                        "properties": {
+                          "assign": {
+                            "type": "boolean"
+                          },
+                          "complete": {
+                            "type": "boolean"
+                          },
+                          "edit": {
+                            "type": "boolean"
+                          },
+                          "reopen": {
+                            "type": "boolean"
+                          },
+                          "skip": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "complete",
+                          "skip",
+                          "reopen",
+                          "assign",
+                          "edit"
+                        ],
+                        "type": "object"
+                      },
+                      "detail": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "dueAt": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "error": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "face": {
+                        "enum": [
+                          "photo",
+                          "compact"
+                        ],
+                        "type": "string"
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "imageUrl": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "kind": {
+                        "enum": [
+                          "turnover",
+                          "guest_reply",
+                          "message_delivery",
+                          "booking_review",
+                          "booking_change",
+                          "opportunity",
+                          "custom",
+                          "stay_ready",
+                          "consultation_prep",
+                          "consultation_follow_up"
+                        ],
+                        "type": "string"
+                      },
+                      "locationId": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "note": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "notes": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "outcome": {
+                        "type": [
+                          "object",
+                          "null"
+                        ]
+                      },
+                      "path": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "person": {
+                        "anyOf": [
+                          {
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "initial": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "type": {
+                                "enum": [
+                                  "member"
+                                ],
+                                "type": "string"
+                              },
+                              "you": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "type",
+                              "id",
+                              "name",
+                              "initial",
+                              "you"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "productId": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "requestId": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "reservation": {
+                        "properties": {
+                          "conversation": {
+                            "anyOf": [
+                              {
+                                "properties": {
+                                  "description": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "label": {
+                                    "type": "string"
+                                  },
+                                  "to": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "label",
+                                  "description",
+                                  "to"
+                                ],
+                                "type": "object"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "dateLabel": {
+                            "type": "string"
+                          },
+                          "groupHeadline": {
+                            "type": "string"
+                          },
+                          "guestImageUrl": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "homeName": {
+                            "type": "string"
+                          },
+                          "statusLabel": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "dateLabel",
+                          "groupHeadline",
+                          "homeName",
+                          "statusLabel",
+                          "guestImageUrl",
+                          "conversation"
+                        ],
+                        "type": "object"
+                      },
+                      "sheet": {
+                        "type": "object"
+                      },
+                      "startsAt": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "status": {
+                        "enum": [
+                          "open",
+                          "done",
+                          "skipped",
+                          "cancelled"
+                        ],
+                        "type": "string"
+                      },
+                      "statusLine": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "stayId": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "tag": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "timezone": {
+                        "type": "string"
+                      },
+                      "title": {
+                        "type": "string"
+                      },
+                      "version": {
+                        "type": "integer"
+                      },
+                      "when": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "kind",
+                      "status",
+                      "version",
+                      "face",
+                      "tag",
+                      "imageUrl",
+                      "avatar",
+                      "statusLine",
+                      "title",
+                      "when",
+                      "detail",
+                      "error",
+                      "note",
+                      "person",
+                      "assignee",
+                      "sheet",
+                      "startsAt",
+                      "dueAt",
+                      "timezone",
+                      "notes",
+                      "outcome",
+                      "action",
+                      "path",
+                      "productId",
+                      "locationId",
+                      "stayId",
+                      "requestId",
+                      "can"
+                    ],
+                    "type": [
+                      "object",
+                      "null"
+                    ]
+                  },
+                  "lastMessage": {
+                    "properties": {
+                      "attachmentCount": {
+                        "type": "integer"
+                      },
+                      "body": {
+                        "type": "string"
+                      },
+                      "createdAt": {
+                        "type": "string"
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "senderId": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "senderId",
+                      "body",
+                      "attachmentCount",
+                      "createdAt"
+                    ],
+                    "type": [
+                      "object",
+                      "null"
+                    ]
+                  },
+                  "lastMessageAt": {
+                    "type": "string"
+                  },
+                  "location": {
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "slug": {
+                        "type": "string"
+                      },
+                      "timezone": {
+                        "type": "string"
+                      },
+                      "title": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "title",
+                      "slug",
+                      "timezone"
+                    ],
+                    "type": [
+                      "object",
+                      "null"
+                    ]
+                  },
+                  "locationId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "name": {
+                    "description": "A group’s name; a stay conversation is titled by the home the guest sleeps in.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "participants": {
+                    "items": {
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "image": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "memberId": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "memberId",
+                        "name",
+                        "image"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "record": {
+                    "description": "The booking (a class, consultation or table) the conversation is about: who booked, else what.",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "title": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "title"
+                    ],
+                    "type": [
+                      "object",
+                      "null"
+                    ]
+                  },
+                  "stay": {
+                    "properties": {
+                      "checkInDate": {
+                        "type": "string"
+                      },
+                      "checkOutDate": {
+                        "type": "string"
+                      },
+                      "homeName": {
+                        "type": "string"
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "productId": {
+                        "type": "string"
+                      },
+                      "status": {
+                        "enum": [
+                          "pending",
+                          "confirmed",
+                          "cancelled"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "productId",
+                      "homeName",
+                      "checkInDate",
+                      "checkOutDate",
+                      "status"
+                    ],
+                    "type": [
+                      "object",
+                      "null"
+                    ]
+                  },
+                  "unread": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "id",
+                  "createdAt",
+                  "lastMessageAt",
+                  "bookingId",
+                  "locationId",
+                  "record",
+                  "name",
+                  "isGroup",
+                  "createdByUserId",
+                  "canManage",
+                  "canLeave",
+                  "participants",
+                  "unread",
+                  "stay",
+                  "job",
+                  "location",
+                  "lastMessage"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "thread",
+              "messages",
+              "hasMore"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "conversation_id",
+          "kind",
+          "guest",
+          "team"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Get conversation"
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "conversations",
+      "minimumRole": "member",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
       "name": "get_google_ads_campaign",
       "title": "Get Google Ads campaign",
       "description": "Read a campaign in the connected Google Ads account when inspecting its status, budget, ad groups, keywords, responsive search ad copy or destination URLs.",
@@ -47839,538 +49084,25 @@
       "uiResourceUri": null
     },
     {
-      "name": "get_guest_conversation",
-      "title": "Get guest conversation",
-      "description": "Read the entire guest conversation, including the guest's answers to the tenant's questions, messages, booking, proposals, attachments and delivery receipts. Requires request_id from the inbox or booking read.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "organization_id": {
-            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
-            "minLength": 1,
-            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
-            "type": "string"
-          },
-          "request_id": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "request_id"
-        ],
-        "type": "object"
-      },
-      "outputSchema": {
-        "$defs": {},
-        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
-        "properties": {
-          "conversation": {
-            "properties": {
-              "answers": {
-                "description": "Answers to the tenant's own questions, with the wording the guest answered. Later edits to the questions do not change them.",
-                "items": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "help_text": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "label": {
-                      "type": "string"
-                    },
-                    "question_id": {
-                      "type": "string"
-                    },
-                    "selected_choices": {
-                      "items": {
-                        "additionalProperties": false,
-                        "properties": {
-                          "id": {
-                            "type": "string"
-                          },
-                          "label": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "id",
-                          "label"
-                        ],
-                        "type": "object"
-                      },
-                      "type": "array"
-                    },
-                    "type": {
-                      "enum": [
-                        "short_text",
-                        "long_text",
-                        "single_choice",
-                        "multiple_choice",
-                        "yes_no"
-                      ],
-                      "type": "string"
-                    },
-                    "value": {
-                      "anyOf": [
-                        {
-                          "type": "string"
-                        },
-                        {
-                          "items": {
-                            "type": "string"
-                          },
-                          "type": "array"
-                        },
-                        {
-                          "type": "boolean"
-                        }
-                      ],
-                      "description": "Text, the selected choice ID, the selected choice IDs, or true/false for yes/no."
-                    }
-                  },
-                  "required": [
-                    "question_id",
-                    "label",
-                    "type",
-                    "help_text",
-                    "value",
-                    "selected_choices"
-                  ],
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              "archived": {
-                "type": "boolean"
-              },
-              "entries": {
-                "items": {
-                  "properties": {
-                    "actor": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "attachments": {
-                      "items": {
-                        "properties": {
-                          "alt": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          },
-                          "height": {
-                            "type": [
-                              "integer",
-                              "null"
-                            ]
-                          },
-                          "id": {
-                            "type": "string"
-                          },
-                          "url": {
-                            "type": "string"
-                          },
-                          "width": {
-                            "type": [
-                              "integer",
-                              "null"
-                            ]
-                          }
-                        },
-                        "required": [
-                          "id",
-                          "url",
-                          "alt",
-                          "width",
-                          "height"
-                        ],
-                        "type": "object"
-                      },
-                      "type": "array"
-                    },
-                    "body": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "booking_change": {
-                      "description": "Canonical proposal details and current response state. A pending proposal does not change the operational record.",
-                      "properties": {
-                        "after": {
-                          "properties": {
-                            "assignedMemberId": {
-                              "type": [
-                                "string",
-                                "null"
-                              ]
-                            },
-                            "assignedMemberName": {
-                              "type": [
-                                "string",
-                                "null"
-                              ]
-                            },
-                            "partySize": {
-                              "type": "integer"
-                            },
-                            "whenLabel": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "whenLabel",
-                            "partySize",
-                            "assignedMemberId",
-                            "assignedMemberName"
-                          ],
-                          "type": "object"
-                        },
-                        "before": {
-                          "properties": {
-                            "assignedMemberId": {
-                              "type": [
-                                "string",
-                                "null"
-                              ]
-                            },
-                            "assignedMemberName": {
-                              "type": [
-                                "string",
-                                "null"
-                              ]
-                            },
-                            "partySize": {
-                              "type": "integer"
-                            },
-                            "whenLabel": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "whenLabel",
-                            "partySize",
-                            "assignedMemberId",
-                            "assignedMemberName"
-                          ],
-                          "type": "object"
-                        },
-                        "locationTitle": {
-                          "type": "string"
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "originalLocationTitle": {
-                          "type": "string"
-                        },
-                        "status": {
-                          "enum": [
-                            "pending",
-                            "accepted",
-                            "declined",
-                            "withdrawn",
-                            "stale",
-                            "expired"
-                          ],
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "status",
-                        "before",
-                        "after",
-                        "locationTitle",
-                        "originalLocationTitle"
-                      ],
-                      "type": [
-                        "object",
-                        "null"
-                      ]
-                    },
-                    "channel": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "deliveries": {
-                      "items": {
-                        "properties": {
-                          "channel": {
-                            "type": "string"
-                          },
-                          "id": {
-                            "type": "string"
-                          },
-                          "provider": {
-                            "description": "log_only records the message locally without sending it through a provider.",
-                            "type": "string"
-                          },
-                          "purpose": {
-                            "type": "string"
-                          },
-                          "status": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "id",
-                          "channel",
-                          "provider",
-                          "purpose",
-                          "status"
-                        ],
-                        "type": "object"
-                      },
-                      "type": "array"
-                    },
-                    "event": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "id": {
-                      "type": "string"
-                    },
-                    "kind": {
-                      "type": "string"
-                    },
-                    "occurred_at": {
-                      "type": "string"
-                    },
-                    "payload": {
-                      "type": [
-                        "object",
-                        "null"
-                      ]
-                    },
-                    "provider_timestamp": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "kind",
-                    "actor",
-                    "channel",
-                    "body",
-                    "event",
-                    "occurred_at",
-                    "provider_timestamp",
-                    "booking_change",
-                    "deliveries",
-                    "attachments"
-                  ],
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              "guest": {
-                "properties": {
-                  "email": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "name": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "phone": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  }
-                },
-                "required": [
-                  "name",
-                  "email",
-                  "phone"
-                ],
-                "type": "object"
-              },
-              "inquiry_message": {
-                "description": "The original contact-form message. Present for contact inquiries; later messages are in entries.",
-                "type": "string"
-              },
-              "needs_reply": {
-                "type": "boolean"
-              },
-              "operational_record": {
-                "description": "The booking the conversation is about. unit nights is a stay: check_in_date and check_out_date are its nights in its home’s clock, and starts_at/ends_at hold a day alone where the home has no check-in or checkout time.",
-                "properties": {
-                  "check_in_date": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "check_out_date": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "ends_at": {
-                    "type": "string"
-                  },
-                  "id": {
-                    "type": "string"
-                  },
-                  "party_size": {
-                    "type": "integer"
-                  },
-                  "product_kind": {
-                    "type": "string"
-                  },
-                  "starts_at": {
-                    "type": "string"
-                  },
-                  "status": {
-                    "type": "string"
-                  },
-                  "timezone": {
-                    "type": "string"
-                  },
-                  "unit": {
-                    "enum": [
-                      "slot",
-                      "nights"
-                    ],
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "id",
-                  "unit",
-                  "product_kind",
-                  "status",
-                  "starts_at",
-                  "ends_at",
-                  "timezone",
-                  "party_size",
-                  "check_in_date",
-                  "check_out_date"
-                ],
-                "type": [
-                  "object",
-                  "null"
-                ]
-              },
-              "participant_label": {
-                "type": "string"
-              },
-              "reply_channel": {
-                "description": "Where reply_to_guest sends: Airbnb’s conversation, the guest’s email, or their KrabiClaw account inbox. Null when the guest cannot be replied to; reply_not_possible says why.",
-                "enum": [
-                  "airbnb",
-                  "email",
-                  "account",
-                  null
-                ],
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "reply_not_possible": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "request_id": {
-                "type": "string"
-              },
-              "type": {
-                "enum": [
-                  "contact",
-                  "booking",
-                  "stay"
-                ],
-                "type": "string"
-              },
-              "updated_at": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "request_id",
-              "type",
-              "needs_reply",
-              "archived",
-              "updated_at",
-              "participant_label",
-              "reply_channel",
-              "reply_not_possible",
-              "guest",
-              "answers",
-              "operational_record",
-              "entries"
-            ],
-            "type": "object"
-          }
-        },
-        "required": [
-          "conversation"
-        ],
-        "type": "object"
-      },
-      "annotations": {
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false,
-        "readOnlyHint": true,
-        "title": "Get guest conversation"
-      },
-      "securitySchemes": [
-        {
-          "scopes": [
-            "tenant"
-          ],
-          "type": "oauth2"
-        }
-      ],
-      "domain": "submissions",
-      "minimumRole": "member",
-      "requiredEntitlement": null,
-      "fileParams": [],
-      "uiResourceUri": null
-    },
-    {
       "name": "get_guest_messaging_context",
       "title": "Get guest messaging context",
       "description": "Read what a canonical guest conversation is about: its booked record (a stay or booking: what, where, for how many and when, in its own timezone), and for a home its listing and stay, including private check-in instructions the host may choose to share. An inquiry has no record; a channel inquiry can have a home without a booked stay.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
+          "conversation_id": {
+            "minLength": 1,
+            "type": "string"
+          },
           "organization_id": {
             "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
             "minLength": 1,
             "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
             "type": "string"
-          },
-          "request_id": {
-            "minLength": 1,
-            "type": "string"
           }
         },
         "required": [
-          "request_id"
+          "conversation_id"
         ],
         "type": "object"
       },
@@ -48378,6 +49110,10 @@
         "$defs": {},
         "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
         "properties": {
+          "conversationId": {
+            "minLength": 1,
+            "type": "string"
+          },
           "home": {
             "additionalProperties": false,
             "properties": {
@@ -48549,10 +49285,6 @@
               "null"
             ]
           },
-          "requestId": {
-            "minLength": 1,
-            "type": "string"
-          },
           "stay": {
             "additionalProperties": false,
             "properties": {
@@ -48610,7 +49342,7 @@
           }
         },
         "required": [
-          "requestId",
+          "conversationId",
           "home",
           "stay",
           "record"
@@ -55147,16 +55879,11 @@
               "request_id": {
                 "minLength": 1,
                 "type": "string"
-              },
-              "updated_at": {
-                "minLength": 1,
-                "type": "string"
               }
             },
             "required": [
               "operational_booking_id",
               "request_id",
-              "updated_at",
               "operational_updated_at",
               "guest",
               "answers",
@@ -55598,7 +56325,7 @@
                         ]
                       },
                       "request_id": {
-                        "description": "The guest conversation about this stay, for get_guest_conversation and reply_to_guest. Every stay has one.",
+                        "description": "The guest conversation about this stay, for get_conversation and send_message. Every stay has one.",
                         "minLength": 1,
                         "type": "string"
                       },
@@ -65893,189 +66620,6 @@
       "uiResourceUri": null
     },
     {
-      "name": "get_team_conversation",
-      "title": "Get team conversation",
-      "description": "Read messages, photos and notification receipts from one of your internal conversations, newest first. Defaults to 20, maximum 100. When hasMore is true, page back with both before and before_id from the oldest loaded message’s createdAt and id. Reading does not mark the conversation read.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "before": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "before_id": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "limit": {
-            "maximum": 100,
-            "minimum": 1,
-            "type": "integer"
-          },
-          "organization_id": {
-            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
-            "minLength": 1,
-            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
-            "type": "string"
-          },
-          "thread_id": {
-            "description": "Team conversation ID from list_team_conversations or start_team_conversation; never a guest request ID.",
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "thread_id"
-        ],
-        "type": "object"
-      },
-      "outputSchema": {
-        "$defs": {},
-        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
-        "properties": {
-          "hasMore": {
-            "type": "boolean"
-          },
-          "messages": {
-            "items": {
-              "properties": {
-                "attachments": {
-                  "items": {
-                    "properties": {
-                      "height": {
-                        "type": [
-                          "number",
-                          "null"
-                        ]
-                      },
-                      "id": {
-                        "type": "string"
-                      },
-                      "url": {
-                        "type": "string"
-                      },
-                      "width": {
-                        "type": [
-                          "number",
-                          "null"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "id",
-                      "url",
-                      "width",
-                      "height"
-                    ],
-                    "type": "object"
-                  },
-                  "type": "array"
-                },
-                "automatic": {
-                  "description": "Written by KrabiClaw (a cleaning job, a reminder, a move), not by a member; never counted as unread.",
-                  "type": "boolean"
-                },
-                "body": {
-                  "type": "string"
-                },
-                "createdAt": {
-                  "type": "string"
-                },
-                "deliveries": {
-                  "items": {
-                    "properties": {
-                      "channel": {
-                        "enum": [
-                          "email",
-                          "whatsapp",
-                          "push"
-                        ],
-                        "type": "string"
-                      },
-                      "error": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      },
-                      "id": {
-                        "type": "string"
-                      },
-                      "status": {
-                        "type": "string"
-                      },
-                      "updatedAt": {
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "id",
-                      "channel",
-                      "status",
-                      "error",
-                      "updatedAt"
-                    ],
-                    "type": "object"
-                  },
-                  "type": "array"
-                },
-                "id": {
-                  "type": "string"
-                },
-                "senderId": {
-                  "description": "The sender; null for an automatic message, or once a person’s account was deleted.",
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "threadId": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "id",
-                "threadId",
-                "senderId",
-                "automatic",
-                "body",
-                "createdAt",
-                "attachments",
-                "deliveries"
-              ],
-              "type": "object"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "messages",
-          "hasMore"
-        ],
-        "type": "object"
-      },
-      "annotations": {
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false,
-        "readOnlyHint": true,
-        "title": "Get team conversation"
-      },
-      "securitySchemes": [
-        {
-          "scopes": [
-            "tenant"
-          ],
-          "type": "oauth2"
-        }
-      ],
-      "domain": "team_messaging",
-      "minimumRole": "member",
-      "requiredEntitlement": null,
-      "fileParams": [],
-      "uiResourceUri": null
-    },
-    {
       "name": "get_website_draft",
       "title": "Get website draft",
       "description": "Read your saved website setup. Omit draft_id to resume your unfinished website.",
@@ -67308,6 +67852,308 @@
       "uiResourceUri": null
     },
     {
+      "name": "list_conversation_recipients",
+      "title": "List conversation recipients",
+      "description": "Read the current organization members you can start a team conversation with. Select actual user IDs from these results; current_user_id identifies you. It does not include guests.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "organization_id": {
+            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
+            "minLength": 1,
+            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
+        "properties": {
+          "current_user_id": {
+            "type": "string"
+          },
+          "members": {
+            "items": {
+              "properties": {
+                "email": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "image": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "memberId": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "role": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "memberId",
+                "name",
+                "image",
+                "email",
+                "role"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "current_user_id",
+          "members"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "List conversation recipients"
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "conversations",
+      "minimumRole": "member",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
+      "name": "list_conversations",
+      "title": "List conversations",
+      "description": "Read Messages: every conversation you can see, newest first — guests (contacts and bookings: classes, consultations, tables and stays), Airbnb Support and your team conversations — with unread counts per kind as the filter menu shows them. Filter by kind, current/past/blocked, unread, type and words. Follow page_info. Read one with get_conversation.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "description": "Opaque next_cursor from the previous page.",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "all",
+              "guests",
+              "support",
+              "team"
+            ],
+            "type": "string"
+          },
+          "limit": {
+            "description": "Page size. Defaults to 50; maximum 100.",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "number"
+          },
+          "location_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "mailbox": {
+            "enum": [
+              "current",
+              "past",
+              "blocked"
+            ],
+            "type": "string"
+          },
+          "organization_id": {
+            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
+            "minLength": 1,
+            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
+            "type": "string"
+          },
+          "q": {
+            "description": "Words in the guest’s name, the home or the messages.",
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": {
+            "description": "Guest conversations of this kind only.",
+            "enum": [
+              "contact",
+              "booking",
+              "stay"
+            ],
+            "type": "string"
+          },
+          "unread": {
+            "description": "Only conversations with a message from someone else you have not read.",
+            "type": "boolean"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
+        "properties": {
+          "conversations": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "channel": {
+                  "enum": [
+                    "airbnb",
+                    "direct"
+                  ],
+                  "type": "string"
+                },
+                "conversation_id": {
+                  "type": "string"
+                },
+                "home": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "kind": {
+                  "description": "guest: a contact or a booking’s guest; support: Airbnb Support; team: members of this business.",
+                  "enum": [
+                    "guest",
+                    "support",
+                    "team"
+                  ],
+                  "type": "string"
+                },
+                "preview": {
+                  "type": "string"
+                },
+                "preview_from": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "time": {
+                  "type": "string"
+                },
+                "title": {
+                  "description": "Who the conversation is with: the guest, Airbnb Support, or the team conversation’s name or people.",
+                  "type": "string"
+                },
+                "unread": {
+                  "description": "A message from someone else you have not read, as Messages shows it.",
+                  "type": "boolean"
+                },
+                "when": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "conversation_id",
+                "kind",
+                "title",
+                "channel",
+                "home",
+                "when",
+                "preview",
+                "preview_from",
+                "time",
+                "unread"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "page_info": {
+            "properties": {
+              "has_more": {
+                "type": "boolean"
+              },
+              "next_cursor": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "has_more",
+              "next_cursor"
+            ],
+            "type": "object"
+          },
+          "unread": {
+            "properties": {
+              "all": {
+                "type": "integer"
+              },
+              "guests": {
+                "type": "integer"
+              },
+              "support": {
+                "type": "integer"
+              },
+              "team": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "all",
+              "guests",
+              "support",
+              "team"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "conversations",
+          "unread",
+          "page_info"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "List conversations"
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "conversations",
+      "minimumRole": "member",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
       "name": "list_google_ads_campaigns",
       "title": "List Google Ads campaigns",
       "description": "List up to 100 campaigns in the connected Google Ads account, most spend first, with status, daily budget, spend, impressions, clicks and conversions. With start_date and end_date the metrics cover those days in the account time zone and include campaigns removed since; without them they are all-time for campaigns not removed. Reading is free with the connection.",
@@ -67450,176 +68296,6 @@
       ],
       "domain": "google_ads",
       "minimumRole": "admin",
-      "requiredEntitlement": null,
-      "fileParams": [],
-      "uiResourceUri": null
-    },
-    {
-      "name": "list_guest_conversations",
-      "title": "List guest conversations",
-      "description": "Read the business inbox for contacts, bookings (classes, consultations and restaurant tables) and stay conversations. Filter by type, current/past and whether a reply is needed. Follow page_info. Use request_id with get_guest_conversation to read messages and guest contact details.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "cursor": {
-            "description": "Opaque next_cursor from the previous page.",
-            "type": "string"
-          },
-          "limit": {
-            "description": "Page size. Defaults to 50; maximum 100.",
-            "maximum": 100,
-            "minimum": 1,
-            "type": "number"
-          },
-          "location_id": {
-            "type": "string"
-          },
-          "mailbox": {
-            "enum": [
-              "current",
-              "past"
-            ],
-            "type": "string"
-          },
-          "needs_reply": {
-            "description": "Only conversations with an open reply task: a guest question nobody has answered yet.",
-            "type": "boolean"
-          },
-          "organization_id": {
-            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
-            "minLength": 1,
-            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
-            "type": "string"
-          },
-          "type": {
-            "enum": [
-              "contact",
-              "booking",
-              "stay"
-            ],
-            "type": "string"
-          }
-        },
-        "required": [],
-        "type": "object"
-      },
-      "outputSchema": {
-        "$defs": {},
-        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
-        "properties": {
-          "conversations": {
-            "items": {
-              "additionalProperties": false,
-              "properties": {
-                "guest_name": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "needs_reply": {
-                  "type": "boolean"
-                },
-                "operational_status": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "participant_label": {
-                  "type": "string"
-                },
-                "reply_channel": {
-                  "description": "Where reply_to_guest sends; null when the guest cannot be replied to, and reply_not_possible says why.",
-                  "enum": [
-                    "airbnb",
-                    "email",
-                    "account",
-                    null
-                  ],
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "reply_not_possible": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "request_id": {
-                  "type": "string"
-                },
-                "type": {
-                  "type": "string"
-                },
-                "unread": {
-                  "description": "Unread for you, as the Messages list shows it.",
-                  "type": "boolean"
-                },
-                "updated_at": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "request_id",
-                "guest_name",
-                "participant_label",
-                "reply_channel",
-                "reply_not_possible",
-                "type",
-                "needs_reply",
-                "unread",
-                "operational_status",
-                "updated_at"
-              ],
-              "type": "object"
-            },
-            "type": "array"
-          },
-          "page_info": {
-            "properties": {
-              "has_more": {
-                "type": "boolean"
-              },
-              "next_cursor": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              }
-            },
-            "required": [
-              "has_more",
-              "next_cursor"
-            ],
-            "type": "object"
-          }
-        },
-        "required": [
-          "conversations",
-          "page_info"
-        ],
-        "type": "object"
-      },
-      "annotations": {
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false,
-        "readOnlyHint": true,
-        "title": "List guest conversations"
-      },
-      "securitySchemes": [
-        {
-          "scopes": [
-            "tenant"
-          ],
-          "type": "oauth2"
-        }
-      ],
-      "domain": "submissions",
-      "minimumRole": "member",
       "requiredEntitlement": null,
       "fileParams": [],
       "uiResourceUri": null
@@ -69007,7 +69683,7 @@
                   ]
                 },
                 "message": {
-                  "description": "The message it pre-writes from the business’s own records. Review it, then send it with reply_to_guest in requestId’s conversation; nothing is sent until then.",
+                  "description": "The message it pre-writes from the business’s own records. Review it, then send it with send_message in requestId’s conversation; nothing is sent until then.",
                   "type": [
                     "string",
                     "null"
@@ -71154,10 +71830,14 @@
     {
       "name": "list_scheduled_guest_messages",
       "title": "List scheduled guest messages",
-      "description": "Read automatic guest-message snapshots and visible failure reasons for every booking (bookingId names it, a stay’s included), optionally for one canonical guest conversation, including each stay’s built-in check-in message (templateId null, title “Check-in instructions”). Read provider delivery receipts through get_guest_conversation; no provider result is inferred from a scheduled time.",
+      "description": "Read automatic guest-message snapshots and visible failure reasons for every booking (bookingId names it, a stay’s included), optionally for one canonical guest conversation, including each stay’s built-in check-in message (templateId null, title “Check-in instructions”). Read provider delivery receipts through get_conversation; no provider result is inferred from a scheduled time.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
+          "conversation_id": {
+            "minLength": 1,
+            "type": "string"
+          },
           "cursor": {
             "description": "Opaque next_cursor from the previous page.",
             "type": "string"
@@ -71172,10 +71852,6 @@
             "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
             "minLength": 1,
             "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
-            "type": "string"
-          },
-          "request_id": {
-            "minLength": 1,
             "type": "string"
           }
         },
@@ -71376,14 +72052,14 @@
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
+          "conversation_id": {
+            "minLength": 1,
+            "type": "string"
+          },
           "organization_id": {
             "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
             "minLength": 1,
             "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
-            "type": "string"
-          },
-          "request_id": {
-            "minLength": 1,
             "type": "string"
           }
         },
@@ -72217,117 +72893,18 @@
       "uiResourceUri": null
     },
     {
-      "name": "list_team_conversation_recipients",
-      "title": "List team conversation recipients",
-      "description": "Read the current organization members available for internal conversations. Select actual user IDs from these results; current_user_id identifies you. It does not include guests.",
+      "name": "mark_conversation_read",
+      "title": "Mark conversation read",
+      "description": "Mark a conversation read for you, through its newest message or through message_id (the newest one you were shown). Needs a message from someone else (409 NOTHING_TO_MARK). Changes only your own read position; sends nothing and changes nobody else’s unread state.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
-          "organization_id": {
-            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
-            "minLength": 1,
-            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
-            "type": "string"
-          }
-        },
-        "required": [],
-        "type": "object"
-      },
-      "outputSchema": {
-        "$defs": {},
-        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
-        "properties": {
-          "current_user_id": {
-            "type": "string"
-          },
-          "members": {
-            "items": {
-              "properties": {
-                "email": {
-                  "type": "string"
-                },
-                "id": {
-                  "type": "string"
-                },
-                "image": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "memberId": {
-                  "type": "string"
-                },
-                "name": {
-                  "type": "string"
-                },
-                "role": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "id",
-                "memberId",
-                "name",
-                "image",
-                "email",
-                "role"
-              ],
-              "type": "object"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "current_user_id",
-          "members"
-        ],
-        "type": "object"
-      },
-      "annotations": {
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false,
-        "readOnlyHint": true,
-        "title": "List team conversation recipients"
-      },
-      "securitySchemes": [
-        {
-          "scopes": [
-            "tenant"
-          ],
-          "type": "oauth2"
-        }
-      ],
-      "domain": "team_messaging",
-      "minimumRole": "member",
-      "requiredEntitlement": null,
-      "fileParams": [],
-      "uiResourceUri": null
-    },
-    {
-      "name": "list_team_conversations",
-      "title": "List team conversations",
-      "description": "Read only your internal team conversations, newest activity first. Optional booking_id or location_id filters narrow their explicit context. Follow page_info; guest conversations use list_guest_conversations instead.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "booking_id": {
-            "description": "A booking ID, a stay’s included.",
+          "conversation_id": {
+            "description": "A conversation_id from list_conversations, start_conversation or a booking read.",
             "minLength": 1,
             "type": "string"
           },
-          "cursor": {
-            "description": "Opaque next_cursor from the previous page.",
-            "type": "string"
-          },
-          "limit": {
-            "description": "Page size. Defaults to 50; maximum 100.",
-            "maximum": 100,
-            "minimum": 1,
-            "type": "number"
-          },
-          "location_id": {
+          "message_id": {
             "minLength": 1,
             "type": "string"
           },
@@ -72338,684 +72915,42 @@
             "type": "string"
           }
         },
-        "required": [],
+        "required": [
+          "conversation_id"
+        ],
         "type": "object"
       },
       "outputSchema": {
         "$defs": {},
-        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
-        "properties": {
-          "conversations": {
-            "items": {
-              "properties": {
-                "bookingId": {
-                  "description": "The booking the conversation is about: a stay (see stay) or a class, consultation or table (see record).",
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "canLeave": {
-                  "type": "boolean"
-                },
-                "canManage": {
-                  "type": "boolean"
-                },
-                "createdAt": {
-                  "type": "string"
-                },
-                "createdByUserId": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "id": {
-                  "type": "string"
-                },
-                "isGroup": {
-                  "type": "boolean"
-                },
-                "job": {
-                  "description": "The job for the conversation’s booked record (a turnover or home-ready job for a stay, the prep or follow-up for a booking) as list_tasks presents it; null when there is none the caller may see.",
-                  "properties": {
-                    "action": {
-                      "type": [
-                        "object",
-                        "null"
-                      ]
-                    },
-                    "assignee": {
-                      "anyOf": [
-                        {
-                          "properties": {
-                            "id": {
-                              "type": "string"
-                            },
-                            "initial": {
-                              "type": "string"
-                            },
-                            "name": {
-                              "type": "string"
-                            },
-                            "type": {
-                              "enum": [
-                                "member"
-                              ],
-                              "type": "string"
-                            },
-                            "you": {
-                              "type": "boolean"
-                            }
-                          },
-                          "required": [
-                            "type",
-                            "id",
-                            "name",
-                            "initial",
-                            "you"
-                          ],
-                          "type": "object"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "avatar": {
-                      "type": [
-                        "object",
-                        "null"
-                      ]
-                    },
-                    "can": {
-                      "properties": {
-                        "assign": {
-                          "type": "boolean"
-                        },
-                        "complete": {
-                          "type": "boolean"
-                        },
-                        "edit": {
-                          "type": "boolean"
-                        },
-                        "reopen": {
-                          "type": "boolean"
-                        },
-                        "skip": {
-                          "type": "boolean"
-                        }
-                      },
-                      "required": [
-                        "complete",
-                        "skip",
-                        "reopen",
-                        "assign",
-                        "edit"
-                      ],
-                      "type": "object"
-                    },
-                    "detail": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "dueAt": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "error": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "face": {
-                      "enum": [
-                        "photo",
-                        "compact"
-                      ],
-                      "type": "string"
-                    },
-                    "id": {
-                      "type": "string"
-                    },
-                    "imageUrl": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "kind": {
-                      "enum": [
-                        "turnover",
-                        "guest_reply",
-                        "message_delivery",
-                        "booking_review",
-                        "booking_change",
-                        "opportunity",
-                        "custom",
-                        "stay_ready",
-                        "consultation_prep",
-                        "consultation_follow_up"
-                      ],
-                      "type": "string"
-                    },
-                    "locationId": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "note": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "notes": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "outcome": {
-                      "type": [
-                        "object",
-                        "null"
-                      ]
-                    },
-                    "path": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "person": {
-                      "anyOf": [
-                        {
-                          "properties": {
-                            "id": {
-                              "type": "string"
-                            },
-                            "initial": {
-                              "type": "string"
-                            },
-                            "name": {
-                              "type": "string"
-                            },
-                            "type": {
-                              "enum": [
-                                "member"
-                              ],
-                              "type": "string"
-                            },
-                            "you": {
-                              "type": "boolean"
-                            }
-                          },
-                          "required": [
-                            "type",
-                            "id",
-                            "name",
-                            "initial",
-                            "you"
-                          ],
-                          "type": "object"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "productId": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "requestId": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "reservation": {
-                      "properties": {
-                        "conversation": {
-                          "anyOf": [
-                            {
-                              "properties": {
-                                "description": {
-                                  "type": [
-                                    "string",
-                                    "null"
-                                  ]
-                                },
-                                "label": {
-                                  "type": "string"
-                                },
-                                "to": {
-                                  "type": "string"
-                                }
-                              },
-                              "required": [
-                                "label",
-                                "description",
-                                "to"
-                              ],
-                              "type": "object"
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "dateLabel": {
-                          "type": "string"
-                        },
-                        "groupHeadline": {
-                          "type": "string"
-                        },
-                        "guestImageUrl": {
-                          "type": [
-                            "string",
-                            "null"
-                          ]
-                        },
-                        "homeName": {
-                          "type": "string"
-                        },
-                        "statusLabel": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "dateLabel",
-                        "groupHeadline",
-                        "homeName",
-                        "statusLabel",
-                        "guestImageUrl",
-                        "conversation"
-                      ],
-                      "type": "object"
-                    },
-                    "sheet": {
-                      "type": "object"
-                    },
-                    "startsAt": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "status": {
-                      "enum": [
-                        "open",
-                        "done",
-                        "skipped",
-                        "cancelled"
-                      ],
-                      "type": "string"
-                    },
-                    "statusLine": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "stayId": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "tag": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "timezone": {
-                      "type": "string"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "version": {
-                      "type": "integer"
-                    },
-                    "when": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "kind",
-                    "status",
-                    "version",
-                    "face",
-                    "tag",
-                    "imageUrl",
-                    "avatar",
-                    "statusLine",
-                    "title",
-                    "when",
-                    "detail",
-                    "error",
-                    "note",
-                    "person",
-                    "assignee",
-                    "sheet",
-                    "startsAt",
-                    "dueAt",
-                    "timezone",
-                    "notes",
-                    "outcome",
-                    "action",
-                    "path",
-                    "productId",
-                    "locationId",
-                    "stayId",
-                    "requestId",
-                    "can"
-                  ],
-                  "type": [
-                    "object",
-                    "null"
-                  ]
-                },
-                "lastMessage": {
-                  "properties": {
-                    "attachmentCount": {
-                      "type": "integer"
-                    },
-                    "body": {
-                      "type": "string"
-                    },
-                    "createdAt": {
-                      "type": "string"
-                    },
-                    "id": {
-                      "type": "string"
-                    },
-                    "senderId": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "senderId",
-                    "body",
-                    "attachmentCount",
-                    "createdAt"
-                  ],
-                  "type": [
-                    "object",
-                    "null"
-                  ]
-                },
-                "lastMessageAt": {
-                  "type": "string"
-                },
-                "location": {
-                  "properties": {
-                    "id": {
-                      "type": "string"
-                    },
-                    "slug": {
-                      "type": "string"
-                    },
-                    "timezone": {
-                      "type": "string"
-                    },
-                    "title": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "title",
-                    "slug",
-                    "timezone"
-                  ],
-                  "type": [
-                    "object",
-                    "null"
-                  ]
-                },
-                "locationId": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "name": {
-                  "description": "A group’s name; a stay conversation is titled by the home the guest sleeps in.",
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "participants": {
-                  "items": {
-                    "properties": {
-                      "id": {
-                        "type": "string"
-                      },
-                      "image": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      },
-                      "memberId": {
-                        "type": "string"
-                      },
-                      "name": {
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "id",
-                      "memberId",
-                      "name",
-                      "image"
-                    ],
-                    "type": "object"
-                  },
-                  "type": "array"
-                },
-                "record": {
-                  "description": "The booking (a class, consultation or table) the conversation is about: who booked, else what.",
-                  "properties": {
-                    "id": {
-                      "type": "string"
-                    },
-                    "title": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "title"
-                  ],
-                  "type": [
-                    "object",
-                    "null"
-                  ]
-                },
-                "stay": {
-                  "properties": {
-                    "checkInDate": {
-                      "type": "string"
-                    },
-                    "checkOutDate": {
-                      "type": "string"
-                    },
-                    "homeName": {
-                      "type": "string"
-                    },
-                    "id": {
-                      "type": "string"
-                    },
-                    "productId": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "enum": [
-                        "pending",
-                        "confirmed",
-                        "cancelled"
-                      ],
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "productId",
-                    "homeName",
-                    "checkInDate",
-                    "checkOutDate",
-                    "status"
-                  ],
-                  "type": [
-                    "object",
-                    "null"
-                  ]
-                },
-                "unread": {
-                  "type": "boolean"
-                },
-                "unreadCount": {
-                  "type": "integer"
-                }
-              },
-              "required": [
-                "id",
-                "createdAt",
-                "lastMessageAt",
-                "bookingId",
-                "locationId",
-                "record",
-                "name",
-                "isGroup",
-                "createdByUserId",
-                "canManage",
-                "canLeave",
-                "participants",
-                "unread",
-                "unreadCount",
-                "stay",
-                "job",
-                "location",
-                "lastMessage"
-              ],
-              "type": "object"
-            },
-            "type": "array"
-          },
-          "page_info": {
-            "properties": {
-              "has_more": {
-                "type": "boolean"
-              },
-              "next_cursor": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              }
-            },
-            "required": [
-              "has_more",
-              "next_cursor"
-            ],
-            "type": "object"
-          }
-        },
-        "required": [
-          "conversations",
-          "page_info"
-        ],
-        "type": "object"
-      },
-      "annotations": {
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false,
-        "readOnlyHint": true,
-        "title": "List team conversations"
-      },
-      "securitySchemes": [
-        {
-          "scopes": [
-            "tenant"
-          ],
-          "type": "oauth2"
-        }
-      ],
-      "domain": "team_messaging",
-      "minimumRole": "member",
-      "requiredEntitlement": null,
-      "fileParams": [],
-      "uiResourceUri": null
-    },
-    {
-      "name": "mark_team_conversation_read",
-      "title": "Mark team conversation read",
-      "description": "Mark one of your internal conversations read through now. Changes only your own read position; does not send a message or change another participant’s unread state.",
-      "inputSchema": {
         "additionalProperties": false,
-        "properties": {
-          "organization_id": {
-            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
-            "minLength": 1,
-            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
-            "type": "string"
-          },
-          "thread_id": {
-            "description": "Team conversation ID from list_team_conversations or start_team_conversation; never a guest request ID.",
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "thread_id"
-        ],
-        "type": "object"
-      },
-      "outputSchema": {
-        "$defs": {},
         "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
         "properties": {
-          "lastReadAt": {
+          "conversation_id": {
             "type": "string"
           },
-          "status": {
-            "const": "read"
+          "last_read_message_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "unread": {
+            "type": "boolean"
           }
         },
         "required": [
-          "status",
-          "lastReadAt"
+          "conversation_id",
+          "unread",
+          "last_read_message_id"
         ],
         "type": "object"
       },
       "annotations": {
         "destructiveHint": true,
+        "idempotentHint": true,
         "openWorldHint": false,
         "readOnlyHint": false,
-        "title": "Mark team conversation read"
+        "title": "Mark conversation read"
       },
       "securitySchemes": [
         {
@@ -73025,58 +72960,67 @@
           "type": "oauth2"
         }
       ],
-      "domain": "team_messaging",
+      "domain": "conversations",
       "minimumRole": "member",
       "requiredEntitlement": null,
       "fileParams": [],
       "uiResourceUri": null
     },
     {
-      "name": "mark_team_conversation_unread",
-      "title": "Mark team conversation unread",
-      "description": "Mark one of your internal conversations unread: its newest message from someone else counts as new again. Changes only your own read position; does not send a message or change another participant’s unread state.",
+      "name": "mark_conversation_unread",
+      "title": "Mark conversation unread",
+      "description": "Mark a conversation unread for you: its newest message from someone else is unread again. Needs a message from someone else (409 NOTHING_TO_MARK). Changes only your own read position.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
+          "conversation_id": {
+            "description": "A conversation_id from list_conversations, start_conversation or a booking read.",
+            "minLength": 1,
+            "type": "string"
+          },
           "organization_id": {
             "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
             "minLength": 1,
             "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
             "type": "string"
-          },
-          "thread_id": {
-            "description": "Team conversation ID from list_team_conversations or start_team_conversation; never a guest request ID.",
-            "minLength": 1,
-            "type": "string"
           }
         },
         "required": [
-          "thread_id"
+          "conversation_id"
         ],
         "type": "object"
       },
       "outputSchema": {
         "$defs": {},
+        "additionalProperties": false,
         "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
         "properties": {
-          "lastReadAt": {
+          "conversation_id": {
             "type": "string"
           },
-          "status": {
-            "const": "unread"
+          "last_read_message_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "unread": {
+            "type": "boolean"
           }
         },
         "required": [
-          "status",
-          "lastReadAt"
+          "conversation_id",
+          "unread",
+          "last_read_message_id"
         ],
         "type": "object"
       },
       "annotations": {
         "destructiveHint": true,
+        "idempotentHint": true,
         "openWorldHint": false,
         "readOnlyHint": false,
-        "title": "Mark team conversation unread"
+        "title": "Mark conversation unread"
       },
       "securitySchemes": [
         {
@@ -73086,7 +73030,7 @@
           "type": "oauth2"
         }
       ],
-      "domain": "team_messaging",
+      "domain": "conversations",
       "minimumRole": "member",
       "requiredEntitlement": null,
       "fileParams": [],
@@ -98715,145 +98659,6 @@
       "uiResourceUri": null
     },
     {
-      "name": "reply_to_guest",
-      "title": "Reply to guest",
-      "description": "Reply through this conversation’s reply_channel and save the reply. Airbnb replies accept text or one photo, sent separately; email replies accept text, a photo or both. A stay guest without an email is reached in their KrabiClaw inbox when they have an account; with neither, the reply is refused with GUEST_UNREACHABLE. Reuse the same key for an identical retry. A failed Airbnb attempt may retry only when retry_with_same_idempotency_key is true. Sending, uncertain or review-required attempts need review and are never blindly resent. Returns saved conversation state; use get_guest_conversation for history and delivery receipts.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "anyOf": [
-          {
-            "required": [
-              "message"
-            ]
-          },
-          {
-            "required": [
-              "file"
-            ]
-          }
-        ],
-        "properties": {
-          "file": {
-            "description": "Photo attachment; required when no reply text is supplied.",
-            "properties": {
-              "download_url": {
-                "type": "string"
-              },
-              "file_id": {
-                "type": "string"
-              },
-              "file_name": {
-                "type": "string"
-              },
-              "mime_type": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "download_url",
-              "file_id"
-            ],
-            "type": "object"
-          },
-          "idempotency_key": {
-            "maxLength": 200,
-            "minLength": 1,
-            "type": "string"
-          },
-          "message": {
-            "description": "Reply text; required when no photo is attached.",
-            "minLength": 1,
-            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
-            "type": "string"
-          },
-          "organization_id": {
-            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
-            "minLength": 1,
-            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
-            "type": "string"
-          },
-          "request_id": {
-            "description": "Conversation request_id from list_guest_conversations or a booking read.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "request_id",
-          "idempotency_key"
-        ],
-        "type": "object"
-      },
-      "outputSchema": {
-        "$defs": {},
-        "additionalProperties": false,
-        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
-        "properties": {
-          "conversation": {
-            "additionalProperties": false,
-            "properties": {
-              "archived": {
-                "type": "boolean"
-              },
-              "needs_reply": {
-                "type": "boolean"
-              },
-              "request_id": {
-                "type": "string"
-              },
-              "updated_at": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "request_id",
-              "needs_reply",
-              "archived",
-              "updated_at"
-            ],
-            "type": "object"
-          },
-          "outcome": {
-            "properties": {
-              "ok": {
-                "const": true
-              }
-            },
-            "required": [
-              "ok"
-            ],
-            "type": "object"
-          }
-        },
-        "required": [
-          "outcome",
-          "conversation"
-        ],
-        "type": "object"
-      },
-      "annotations": {
-        "destructiveHint": true,
-        "idempotentHint": true,
-        "openWorldHint": true,
-        "readOnlyHint": false,
-        "title": "Reply to guest"
-      },
-      "securitySchemes": [
-        {
-          "scopes": [
-            "tenant"
-          ],
-          "type": "oauth2"
-        }
-      ],
-      "domain": "submissions",
-      "minimumRole": "member",
-      "requiredEntitlement": null,
-      "fileParams": [
-        "file"
-      ],
-      "uiResourceUri": null
-    },
-    {
       "name": "request_product_booking_change",
       "title": "Request product booking change",
       "description": "Email the guest a proposal to change a booking’s session or party size. A table booking may move to a session of the business’s tables at another location (list_product_booking_sessions on that location’s table product). The current booking and places remain unchanged until guest acceptance, which requires availability and preserves its review status. Consultation time changes always require client acceptance. For other booking kinds, apply moves the booking now and emails the guest; a paid quantity or location change is refused.",
@@ -100069,10 +99874,14 @@
     {
       "name": "schedule_guest_reply",
       "title": "Schedule guest reply",
-      "description": "Send your own text reply in a guest conversation later, at send_at (an ISO 8601 instant within the next year). It is sent through the conversation’s reply_channel as your reply, if you can still reach the conversation then. Only you see it pending; cancel it with cancel_scheduled_reply. Text only: send photos now with reply_to_guest.",
+      "description": "Send your own text reply in a guest conversation later, at send_at (an ISO 8601 instant within the next year). It is sent through the conversation’s reply_channel as your reply, if you can still reach the conversation then. Only you see it pending; cancel it with cancel_scheduled_reply. Text only: send photos now with send_message.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
+          "conversation_id": {
+            "minLength": 1,
+            "type": "string"
+          },
           "message": {
             "maxLength": 5000,
             "minLength": 1,
@@ -100085,17 +99894,13 @@
             "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
             "type": "string"
           },
-          "request_id": {
-            "minLength": 1,
-            "type": "string"
-          },
           "send_at": {
             "format": "date-time",
             "type": "string"
           }
         },
         "required": [
-          "request_id",
+          "conversation_id",
           "message",
           "send_at"
         ],
@@ -100226,9 +100031,9 @@
       "uiResourceUri": null
     },
     {
-      "name": "send_team_message",
-      "title": "Send team message",
-      "description": "Send the text and/or supplied photo to an internal team conversation you belong to. Sends as the authenticated member and records notification outcomes; a saved message does not prove delivery to a participant. Reuse the same idempotency_key for an identical retry; a failed realtime publication may report committed:true and must retry that same request. This never replies to a guest.",
+      "name": "send_message",
+      "title": "Send message",
+      "description": "Send text and/or one photo in a conversation, as you. In a guest conversation it is your reply through its reply_channel (get_conversation): Airbnb replies accept text or one photo, sent separately; email replies accept text, a photo or both; a guest with neither email nor account is refused with GUEST_UNREACHABLE. In a team conversation it reaches its participants by their notification choices. Reuse the same idempotency_key for an identical retry. A failed Airbnb attempt may retry only when retry_with_same_idempotency_key is true; a realtime failure may report committed:true and must retry that same request. A saved message does not prove delivery.",
       "inputSchema": {
         "additionalProperties": false,
         "anyOf": [
@@ -100244,6 +100049,11 @@
           }
         ],
         "properties": {
+          "conversation_id": {
+            "description": "A conversation_id from list_conversations, start_conversation or a booking read.",
+            "minLength": 1,
+            "type": "string"
+          },
           "file": {
             "description": "Optional photo supplied as a ChatGPT file attachment.",
             "properties": {
@@ -100274,6 +100084,7 @@
           "message": {
             "maxLength": 5000,
             "minLength": 1,
+            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
             "type": "string"
           },
           "organization_id": {
@@ -100281,15 +100092,10 @@
             "minLength": 1,
             "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
             "type": "string"
-          },
-          "thread_id": {
-            "description": "Team conversation ID from list_team_conversations or start_team_conversation; never a guest request ID.",
-            "minLength": 1,
-            "type": "string"
           }
         },
         "required": [
-          "thread_id",
+          "conversation_id",
           "idempotency_key"
         ],
         "type": "object"
@@ -100298,120 +100104,26 @@
         "$defs": {},
         "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
         "properties": {
+          "conversation_id": {
+            "type": "string"
+          },
           "created": {
             "type": "boolean"
           },
-          "message": {
-            "properties": {
-              "attachments": {
-                "items": {
-                  "properties": {
-                    "height": {
-                      "type": [
-                        "number",
-                        "null"
-                      ]
-                    },
-                    "id": {
-                      "type": "string"
-                    },
-                    "url": {
-                      "type": "string"
-                    },
-                    "width": {
-                      "type": [
-                        "number",
-                        "null"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "url",
-                    "width",
-                    "height"
-                  ],
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              "automatic": {
-                "description": "Written by KrabiClaw (a cleaning job, a reminder, a move), not by a member; never counted as unread.",
-                "type": "boolean"
-              },
-              "body": {
-                "type": "string"
-              },
-              "createdAt": {
-                "type": "string"
-              },
-              "deliveries": {
-                "items": {
-                  "properties": {
-                    "channel": {
-                      "enum": [
-                        "email",
-                        "whatsapp",
-                        "push"
-                      ],
-                      "type": "string"
-                    },
-                    "error": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "id": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "string"
-                    },
-                    "updatedAt": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "channel",
-                    "status",
-                    "error",
-                    "updatedAt"
-                  ],
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              "id": {
-                "type": "string"
-              },
-              "senderId": {
-                "description": "The sender; null for an automatic message, or once a person’s account was deleted.",
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "threadId": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "id",
-              "threadId",
-              "senderId",
-              "automatic",
-              "body",
-              "createdAt",
-              "attachments",
-              "deliveries"
-            ],
+          "message_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "outcome": {
             "type": "object"
           }
         },
         "required": [
-          "message",
+          "conversation_id",
+          "outcome",
+          "message_id",
           "created"
         ],
         "type": "object"
@@ -100421,7 +100133,7 @@
         "idempotentHint": true,
         "openWorldHint": true,
         "readOnlyHint": false,
-        "title": "Send team message"
+        "title": "Send message"
       },
       "securitySchemes": [
         {
@@ -100431,7 +100143,7 @@
           "type": "oauth2"
         }
       ],
-      "domain": "team_messaging",
+      "domain": "conversations",
       "minimumRole": "member",
       "requiredEntitlement": null,
       "fileParams": [
@@ -100798,17 +100510,17 @@
       "uiResourceUri": null
     },
     {
-      "name": "set_guest_conversation_archived",
-      "title": "Set guest conversation archived",
-      "description": "Archive or restore the inbox conversation identified by request_id from list_guest_conversations or a booking read. Returns its saved archive state without conversation history. Does not cancel a booking and does not send the guest a message.",
+      "name": "set_conversation_archived",
+      "title": "Set conversation archived",
+      "description": "Archive a conversation for yourself (it moves to Past until someone else writes in it) or restore it. Archiving a guest conversation also dismisses its open reply task. It cancels no booking, sends nothing and leaves everyone else’s Messages unchanged. A conversation quiet for 30 days stays in Past; a blocked one is in Blocked.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "archived": {
             "type": "boolean"
           },
-          "idempotency_key": {
-            "maxLength": 200,
+          "conversation_id": {
+            "description": "A conversation_id from list_conversations, start_conversation or a booking read.",
             "minLength": 1,
             "type": "string"
           },
@@ -100817,16 +100529,11 @@
             "minLength": 1,
             "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
             "type": "string"
-          },
-          "request_id": {
-            "description": "Conversation request_id from list_guest_conversations or a booking read.",
-            "type": "string"
           }
         },
         "required": [
-          "request_id",
-          "archived",
-          "idempotency_key"
+          "conversation_id",
+          "archived"
         ],
         "type": "object"
       },
@@ -100835,45 +100542,16 @@
         "additionalProperties": false,
         "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
         "properties": {
-          "conversation": {
-            "additionalProperties": false,
-            "properties": {
-              "archived": {
-                "type": "boolean"
-              },
-              "needs_reply": {
-                "type": "boolean"
-              },
-              "request_id": {
-                "type": "string"
-              },
-              "updated_at": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "request_id",
-              "needs_reply",
-              "archived",
-              "updated_at"
-            ],
-            "type": "object"
+          "archived": {
+            "type": "boolean"
           },
-          "outcome": {
-            "properties": {
-              "ok": {
-                "const": true
-              }
-            },
-            "required": [
-              "ok"
-            ],
-            "type": "object"
+          "conversation_id": {
+            "type": "string"
           }
         },
         "required": [
-          "outcome",
-          "conversation"
+          "conversation_id",
+          "archived"
         ],
         "type": "object"
       },
@@ -100882,7 +100560,7 @@
         "idempotentHint": true,
         "openWorldHint": false,
         "readOnlyHint": false,
-        "title": "Set guest conversation archived"
+        "title": "Set conversation archived"
       },
       "securitySchemes": [
         {
@@ -100892,73 +100570,7 @@
           "type": "oauth2"
         }
       ],
-      "domain": "submissions",
-      "minimumRole": "admin",
-      "requiredEntitlement": null,
-      "fileParams": [],
-      "uiResourceUri": null
-    },
-    {
-      "name": "set_guest_conversation_read",
-      "title": "Set guest conversation read",
-      "description": "Mark the inbox conversation identified by request_id read or unread for you, as swiping it in Messages does, without reading it. Changes only your own unread state; does not message the guest or change anyone else's. Marking unread needs an alert from the conversation that you can see; otherwise it is refused with NO_CONVERSATION_ALERT.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "organization_id": {
-            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
-            "minLength": 1,
-            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
-            "type": "string"
-          },
-          "read": {
-            "type": "boolean"
-          },
-          "request_id": {
-            "description": "Conversation request_id from list_guest_conversations or a booking read.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "request_id",
-          "read"
-        ],
-        "type": "object"
-      },
-      "outputSchema": {
-        "$defs": {},
-        "additionalProperties": false,
-        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
-        "properties": {
-          "request_id": {
-            "type": "string"
-          },
-          "unread": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "request_id",
-          "unread"
-        ],
-        "type": "object"
-      },
-      "annotations": {
-        "destructiveHint": true,
-        "idempotentHint": true,
-        "openWorldHint": false,
-        "readOnlyHint": false,
-        "title": "Set guest conversation read"
-      },
-      "securitySchemes": [
-        {
-          "scopes": [
-            "tenant"
-          ],
-          "type": "oauth2"
-        }
-      ],
-      "domain": "submissions",
+      "domain": "conversations",
       "minimumRole": "member",
       "requiredEntitlement": null,
       "fileParams": [],
@@ -103945,14 +103557,14 @@
       "uiResourceUri": null
     },
     {
-      "name": "start_team_conversation",
-      "title": "Start team conversation",
-      "description": "Start an internal conversation with explicitly selected workspace members. Direct and booking/location conversations reuse the same participants/context. A manual conversation with at least three people is a distinct group, can have a name, and requires a stable idempotency_key; reuse that key only for an identical retry. Maximum 50 people including you. This does not send a message or invite anyone. Choose actual users from list_team_conversation_recipients.",
+      "name": "start_conversation",
+      "title": "Start conversation",
+      "description": "Start a team conversation with explicitly selected workspace members. Direct and booking/location conversations reuse the same participants and context. A manual conversation with at least three people is a distinct group, can have a name, and requires a stable idempotency_key; reuse that key only for an identical retry. Maximum 50 people including you. This sends no message and invites nobody. Choose actual users from list_conversation_recipients. Guests are never added; a guest conversation starts when the guest writes or books.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "booking_id": {
-            "description": "Optional booking ID you may read, a stay’s included; never a guest request ID.",
+            "description": "Optional booking ID you may read, a stay’s included.",
             "minLength": 1,
             "type": "string"
           },
@@ -103999,15 +103611,15 @@
         "$defs": {},
         "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
         "properties": {
+          "conversation_id": {
+            "type": "string"
+          },
           "created": {
             "type": "boolean"
-          },
-          "id": {
-            "type": "string"
           }
         },
         "required": [
-          "id",
+          "conversation_id",
           "created"
         ],
         "type": "object"
@@ -104017,7 +103629,7 @@
         "idempotentHint": true,
         "openWorldHint": false,
         "readOnlyHint": false,
-        "title": "Start team conversation"
+        "title": "Start conversation"
       },
       "securitySchemes": [
         {
@@ -104027,7 +103639,7 @@
           "type": "oauth2"
         }
       ],
-      "domain": "team_messaging",
+      "domain": "conversations",
       "minimumRole": "member",
       "requiredEntitlement": null,
       "fileParams": [],
@@ -109682,6 +109294,152 @@
       ],
       "domain": "products",
       "minimumRole": "admin",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
+      "name": "update_conversation_group",
+      "title": "Update conversation group",
+      "description": "Rename, add people to, remove someone from, or leave a manually created team group. The creator and participating workspace owners/admins can manage it; any participant can leave. Read canManage/canLeave from get_conversation. Direct chats, guest conversations and booking/location conversations are protected. No action deletes the conversation or its messages. New members can read its history; removed members lose access. Use a stable idempotency_key and retry exactly the same action if committed:true is returned.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "oneOf": [
+          {
+            "properties": {
+              "action": {
+                "const": "rename"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          },
+          {
+            "properties": {
+              "action": {
+                "const": "add"
+              }
+            },
+            "required": [
+              "member_user_ids"
+            ]
+          },
+          {
+            "properties": {
+              "action": {
+                "const": "remove"
+              }
+            },
+            "required": [
+              "user_id"
+            ]
+          },
+          {
+            "properties": {
+              "action": {
+                "const": "leave"
+              }
+            }
+          }
+        ],
+        "properties": {
+          "action": {
+            "enum": [
+              "rename",
+              "add",
+              "remove",
+              "leave"
+            ],
+            "type": "string"
+          },
+          "conversation_id": {
+            "description": "A conversation_id from list_conversations, start_conversation or a booking read.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "idempotency_key": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "member_user_ids": {
+            "description": "Add only: current workspace users to add.",
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 49,
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "name": {
+            "description": "Rename only: a name, or null to clear it.",
+            "maxLength": 100,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "organization_id": {
+            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
+            "minLength": 1,
+            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
+            "type": "string"
+          },
+          "user_id": {
+            "description": "Remove only: the participant to remove. Use leave to remove yourself.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "conversation_id",
+          "action",
+          "idempotency_key"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
+        "properties": {
+          "conversation_id": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "updated",
+              "left"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "conversation_id"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Update conversation group"
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "conversations",
+      "minimumRole": "member",
       "requiredEntitlement": null,
       "fileParams": [],
       "uiResourceUri": null
@@ -128409,152 +128167,6 @@
       "requiredEntitlement": null,
       "fileParams": [],
       "uiResourceUri": null
-    },
-    {
-      "name": "update_team_group",
-      "title": "Update team group",
-      "description": "Rename, add people to, remove someone from, or leave a manually created internal group. The creator and participating workspace owners/admins can manage it; any participant can leave. Read canManage/canLeave from list_team_conversations. Direct chats, guest/buyer conversations and stay/location conversations are protected. No action deletes the conversation or its messages. New members can read its history; removed members lose access. Select actual member user IDs. Use a stable idempotency_key and retry exactly the same action if committed:true is returned.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "oneOf": [
-          {
-            "properties": {
-              "action": {
-                "const": "rename"
-              }
-            },
-            "required": [
-              "name"
-            ]
-          },
-          {
-            "properties": {
-              "action": {
-                "const": "add"
-              }
-            },
-            "required": [
-              "member_user_ids"
-            ]
-          },
-          {
-            "properties": {
-              "action": {
-                "const": "remove"
-              }
-            },
-            "required": [
-              "user_id"
-            ]
-          },
-          {
-            "properties": {
-              "action": {
-                "const": "leave"
-              }
-            }
-          }
-        ],
-        "properties": {
-          "action": {
-            "enum": [
-              "rename",
-              "add",
-              "remove",
-              "leave"
-            ],
-            "type": "string"
-          },
-          "idempotency_key": {
-            "maxLength": 200,
-            "minLength": 1,
-            "type": "string"
-          },
-          "member_user_ids": {
-            "description": "Add only: current workspace users to add.",
-            "items": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "maxItems": 49,
-            "minItems": 1,
-            "type": "array",
-            "uniqueItems": true
-          },
-          "name": {
-            "description": "Rename only: a name, or null to clear it.",
-            "maxLength": 100,
-            "minLength": 1,
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "organization_id": {
-            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
-            "minLength": 1,
-            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
-            "type": "string"
-          },
-          "thread_id": {
-            "description": "Team conversation ID from list_team_conversations or start_team_conversation; never a guest request ID.",
-            "minLength": 1,
-            "type": "string"
-          },
-          "user_id": {
-            "description": "Remove only: the participant to remove. Use leave to remove yourself.",
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "thread_id",
-          "action",
-          "idempotency_key"
-        ],
-        "type": "object"
-      },
-      "outputSchema": {
-        "$defs": {},
-        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
-        "properties": {
-          "status": {
-            "enum": [
-              "updated",
-              "left"
-            ],
-            "type": "string"
-          },
-          "threadId": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "status",
-          "threadId"
-        ],
-        "type": "object"
-      },
-      "annotations": {
-        "destructiveHint": true,
-        "idempotentHint": true,
-        "openWorldHint": false,
-        "readOnlyHint": false,
-        "title": "Update team group"
-      },
-      "securitySchemes": [
-        {
-          "scopes": [
-            "tenant"
-          ],
-          "type": "oauth2"
-        }
-      ],
-      "domain": "team_messaging",
-      "minimumRole": "member",
-      "requiredEntitlement": null,
-      "fileParams": [],
-      "uiResourceUri": null
     }
   ],
   "prompts": [
@@ -128643,27 +128255,25 @@
       "arguments": [],
       "rendered": {
         "description": "Summarize guest and team conversations, pending bookings, and unreplied reviews",
-        "text": "Use get_workspace_context to resolve the requested business. Read all relevant list_guest_conversations pages and get_guest_conversation for full contact messages, booking details (classes, consultations and restaurant tables), proposals and delivery receipts. For internal team messages use list_team_conversations and get_team_conversation. Select actual teammates with list_team_conversation_recipients. start_team_conversation reuses direct and explicit stay/location conversations; manual groups of at least three people are distinct and require a stable idempotency_key. update_team_group changes only manual internal groups: obey canManage/canLeave; preserve buyer/guest and stay/location participants. New members can read group history; removal and leaving end access while retaining messages. Use send_team_message only for the requested internal message, then read it back. Reading does not mark a thread read; mark_team_conversation_read changes only the caller’s read position. Team chat is separate from guest replies. Summarize unanswered messages and pending bookings. Use reply_to_guest with a stable idempotency_key only for the message or photo the user requests. Use get_product_booking before confirm_product_booking, reject_product_booking, cancel_product_booking or request_product_booking_change; a table reservation is a product booking and uses the same tools. Booking changes email a proposal and leave the existing allocation unchanged until guest acceptance. Financial actions requiring the dashboard remain incomplete; report the returned handoff instead of claiming completion. Use list_locations and list_location_reviews to read reviews separately; provider reviews and imported Google Q&A remain managed in Google. Report failed deliveries and actions awaiting guest acceptance accurately."
+        "text": "Use get_workspace_context to resolve the requested business. Read all relevant list_conversations pages (guests, Airbnb Support and team conversations, with unread counts) and get_conversation for full contact messages, booking details (classes, consultations and restaurant tables), proposals and delivery receipts. Select actual teammates with list_conversation_recipients. start_conversation reuses direct and explicit stay/location team conversations; manual groups of at least three people are distinct and require a stable idempotency_key. update_conversation_group changes only manual team groups: obey canManage/canLeave; preserve stay/location participants. New members can read group history; removal and leaving end access while retaining messages. Reading does not mark a conversation read; mark_conversation_read and mark_conversation_unread change only the caller’s read position. Summarize unanswered messages and pending bookings. Use send_message with a stable idempotency_key only for the message or photo the user requests, then read it back. Use get_product_booking before confirm_product_booking, reject_product_booking, cancel_product_booking or request_product_booking_change; a table reservation is a product booking and uses the same tools. Booking changes email a proposal and leave the existing allocation unchanged until guest acceptance. Financial actions requiring the dashboard remain incomplete; report the returned handoff instead of claiming completion. Use list_locations and list_location_reviews to read reviews separately; provider reviews and imported Google Q&A remain managed in Google. Report failed deliveries and actions awaiting guest acceptance accurately."
       },
       "toolContracts": {
         "cancel_product_booking": "sha256:2dbb504336a7ddb03a996a148f283df69094360aa6ef878c616d7cfbe5faeab7",
         "confirm_product_booking": "sha256:f607d38686b388e7f7e86fc1b48de40b19a4942d61ef9b9a3af62294c0d42ea2",
-        "get_guest_conversation": "sha256:e9d1beb79532d15e381220b7e4fb8acc1a2353be3876562bd1c915cfc80f3d0a",
-        "get_product_booking": "sha256:bb343c91679cbe0c5312885ef014a3d81ee4c0bd4fbef08785af4f5a2cf7e86c",
-        "get_team_conversation": "sha256:c1a1ddcd761b6cefc0e9395feced48cc3c7710936c7ffe918e3c816cf4fe6afd",
+        "get_conversation": "sha256:fa22383698e276d0efc4454f3b8be5eb7db4638ead676645a7058d7136ac1910",
+        "get_product_booking": "sha256:85db93c5b23b6416501ab4d2d42d85cdab95d16fee8c9187efe66d9517af2124",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
-        "list_guest_conversations": "sha256:50390b145e98c0892f08ba8952486018f0dc25912f51f17d01e9a964af9139cd",
+        "list_conversation_recipients": "sha256:1fffa00253eb826213bb628a3b8b2d933dcea441c1385e03262c5ca18b562ef4",
+        "list_conversations": "sha256:24cf21b535c6689cb04bc7188bec604110c207a960c8ba5e69e9505150dceca7",
         "list_location_reviews": "sha256:95068cff21ac3fea416a9fa8ec3a8ad2d01db79ea0825274c0295b89f15f5d92",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
-        "list_team_conversation_recipients": "sha256:764e248b3773ad9ba0fc2a8d90b03b36dd29bae06c7f988f1def582f50c9a0ac",
-        "list_team_conversations": "sha256:0698ad58558003437d92e9ae37663793808eb0a74283cf52ad620ef33dbf939e",
-        "mark_team_conversation_read": "sha256:0860e470941b83825d36099843eb4a8218b6894fc02b13f26d96c734d40537c2",
+        "mark_conversation_read": "sha256:4284ca380f9c4245e346ef2952bbb3d0e49719491d6a3ada129bf55a681672a4",
+        "mark_conversation_unread": "sha256:93abd5acbb4e271d1a1bf843bc1c9a3ef04a44e20b3252461c089d612ab69161",
         "reject_product_booking": "sha256:a3c2fba812200e703c50d145e1622656a10af85f7bbf6ad50fe67589ff8e966b",
-        "reply_to_guest": "sha256:25c1e77ff9ef3f712ea7e9671dd942c63f69a64b91c216f327488210021447f8",
         "request_product_booking_change": "sha256:bd9af8ee041ca1ce9dbc834e1fcc89026bad04c909b84a9074c1e15538643aa4",
-        "send_team_message": "sha256:ca932c062c753f93a740b7124f6aa5546273697a19b233e55dbb807c98c84dae",
-        "start_team_conversation": "sha256:4160321dd99abf3c83434b245db28b63760e5326b697d2ac6b40c6acd53943d0",
-        "update_team_group": "sha256:a6b9711ed29b2b12b9e1079cc339a1b655b5d526b323dd9dad264970b36b134b"
+        "send_message": "sha256:8636238ba370bd243b7a3f2d4c1f6a5993223e916e3695bfd8f2a3696f80e6e2",
+        "start_conversation": "sha256:a39d46341c069673d967628f78638bb7ddbcf94a8689796860962531e8d2192d",
+        "update_conversation_group": "sha256:c59f8ba58ee8c2feeb2418da95b0691ff6b0140861b2f20cbf79b774ac3492bf"
       }
     },
     {
@@ -128776,19 +128386,19 @@
       "arguments": [],
       "rendered": {
         "description": "Review booking demand",
-        "text": "Use get_workspace_context and get_organization_analytics to read recent traffic. Use list_products, get_product and list_product_booking_sessions for bookable offerings and availability, and list_guest_conversations plus get_guest_conversation for current guest demand. Recommend the most useful action supported by those records. Use reply_to_guest, update_product or create_post and publish_post for the action the user requests, then read back its actual outcome and report any incomplete delivery or dashboard handoff."
+        "text": "Use get_workspace_context and get_organization_analytics to read recent traffic. Use list_products, get_product and list_product_booking_sessions for bookable offerings and availability, and list_conversations plus get_conversation for current guest demand. Recommend the most useful action supported by those records. Use send_message, update_product or create_post and publish_post for the action the user requests, then read back its actual outcome and report any incomplete delivery or dashboard handoff."
       },
       "toolContracts": {
         "create_post": "sha256:e800e3c19ecf887d09aa70d80dcbe66d985196d2138620b369cb9e1f9cace67a",
-        "get_guest_conversation": "sha256:e9d1beb79532d15e381220b7e4fb8acc1a2353be3876562bd1c915cfc80f3d0a",
+        "get_conversation": "sha256:fa22383698e276d0efc4454f3b8be5eb7db4638ead676645a7058d7136ac1910",
         "get_organization_analytics": "sha256:06e0bfe504a9b9183d0429a06162e4af2d760695c842396608752a8f107cb4d9",
         "get_product": "sha256:ba1303e192c6daf5e6baa873ab9e5438e80608cbd361ed7cecfb5f789d8e7b86",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
-        "list_guest_conversations": "sha256:50390b145e98c0892f08ba8952486018f0dc25912f51f17d01e9a964af9139cd",
+        "list_conversations": "sha256:24cf21b535c6689cb04bc7188bec604110c207a960c8ba5e69e9505150dceca7",
         "list_product_booking_sessions": "sha256:c3feed62de11467bd12a6fd7885907eba84c469608e6bc20735c686887df971f",
         "list_products": "sha256:bd6b30cee8a405d0bcdf6313fa20396a2e287bb3285b977fdc1c27baed9c48f0",
         "publish_post": "sha256:fbfd1f5ff6cbdc02ecba0e29e88a7efc5bedb5e6b60ad98eca33b6e99016f1b2",
-        "reply_to_guest": "sha256:25c1e77ff9ef3f712ea7e9671dd942c63f69a64b91c216f327488210021447f8",
+        "send_message": "sha256:8636238ba370bd243b7a3f2d4c1f6a5993223e916e3695bfd8f2a3696f80e6e2",
         "update_product": "sha256:7cd58fd4ab7279a63853812c8aad71fbd8ed004b0585da74a96874700354fd88"
       }
     }
