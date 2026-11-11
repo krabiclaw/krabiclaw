@@ -74,10 +74,14 @@ test('automation remains in Inbox while Today keeps the unanswered inquiry', asy
     const replyTask = todayReplies[0]!.tasks[0]!
     expect(await replyTasks('upcoming')).toEqual([])
     // The replies are in the one outbox, as the member's own.
-    const outbox = () => page.request.get('/api/dashboard/scheduled-guest-messages', { params: { org: 'ember-slice-demo', request_id: threadId } })
+    const outbox = () => page.request.get('/api/dashboard/scheduled-guest-messages', { params: { org: 'ember-slice-demo', conversation_id: threadId } })
     const pending = await outbox()
     expect(pending.status(), await pending.text()).toBe(200)
-    expect((await pending.json() as { messages: Array<{ id: string; status: string }> }).messages).toEqual(expect.arrayContaining([expect.objectContaining({ id: messageId, status: 'pending', authorUserId: expect.any(String), bookingId: null })]))
+    const pendingMessages = (await pending.json() as { messages: Array<{ id: string; status: string }> }).messages
+    expect(pendingMessages).toHaveLength(2)
+    for (const id of [messageId, futureMessageId]) {
+      expect(pendingMessages.find(message => message.id === id)).toMatchObject({ id, conversationId: threadId, status: 'pending', authorUserId: expect.any(String), bookingId: null })
+    }
     // Cancellation is verified in Inbox's persisted schedule. Healthy sends no
     // longer have a feed card or a feed invalidation to assert against here.
     const response = await page.request.post(`/api/dashboard/scheduled-guest-messages/${messageId}/cancel`, { params: { org: 'ember-slice-demo' } })
