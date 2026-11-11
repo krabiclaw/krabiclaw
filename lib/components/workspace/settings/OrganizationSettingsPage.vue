@@ -717,8 +717,9 @@ function postSubtitle(post: PostSummaryItem) {
   } else {
     parts.push('Published')
   }
-  const channels = Array.isArray(post.channels) ? post.channels.filter(Boolean) : []
-  if (channels.length === 1) parts.push(channels[0])
+  const channels = Array.isArray(post.channels) ? post.channels.filter((c): c is string => typeof c === 'string' && c.length > 0) : []
+  const firstChannel = channels[0]
+  if (channels.length === 1 && firstChannel) parts.push(firstChannel)
   else if (channels.length > 1) parts.push(`${channels.length} channels`)
   return parts.join(' · ')
 }
