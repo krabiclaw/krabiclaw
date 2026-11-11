@@ -1016,7 +1016,7 @@ test.describe('stateless MCP server', () => {
         expect(repeated.sessions.created).toBe(0)
         const rules = await request.get(`${productUrl}/availability?location_id=${locationId}`)
         expect((await rules.json()).rules).toEqual(repeated.rules)
-        expect(repeated.rules[0]).not.toHaveProperty('capacity')
+        expect(repeated.rules[0]).toHaveProperty('capacity', null)
         const retiredSlots = { ...schedule, slots: [{ weekday: 2, start_time: '10:00', capacity: 0 }] }
         expect((await request.put(`${productUrl}/availability`, { data: retiredSlots })).status()).toBe(400)
         expect((await call('replace_product_weekly_schedule', { product_id: productId, ...retiredSlots })).result.isError).toBe(true)

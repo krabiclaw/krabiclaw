@@ -112,7 +112,7 @@ test('public discovery resolves translations through current publication owners'
     // Creating a translation through the page editor/MCP page boundary must not
     // charge the existing source page's custom-page capability again.
     await createTenantPage(createDb(db), { env, organizationId: 'tenant', userId: 'discovery-owner',
-      data: { pageId: 'home', locale: 'ja', path: '/', title: 'ご来店をお待ちしています',
+      data: { page_id: 'home', locale: 'ja', path: '/', title: 'ご来店をお待ちしています',
         blocks: [{ id: 'home-ja-body', type: 'markdown', data: { markdown: '旬の料理をお楽しみください。', editor_mode: 'rich' } }],
       },
     })

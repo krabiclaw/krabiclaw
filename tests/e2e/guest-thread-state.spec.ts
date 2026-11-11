@@ -721,7 +721,7 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
     await expect(paymentInfo).toHaveCount(summary.payments?.length ?? 0)
     const sections = [
       detailPanel.getByText('Date', { exact: true }),
-      detailPanel.getByText('Your notes', { exact: true }),
+      detailPanel.getByRole('heading', { name: 'Private note', exact: true }),
       detailPanel.getByRole('link', { name: `Guests ${summary.guest_name} · ${summary.party_size} guests`, exact: true }),
       detailPanel.getByRole('button', { name: /^Cancellation policy/ }),
       ...await paymentInfo.all(),

@@ -123,7 +123,7 @@ test.describe('stateless MCP server', () => {
         expect(refusal.result?.structuredContent).toBeUndefined()
         expect(JSON.parse(refusal.result.content[0].text)).toMatchObject({ status: 400, message })
         const editorRefusal = await request.post(`${editor}/pages`, { data: {
-          pageId: home!.page_id, locale, path: '/', title: translatedTitle, blocks: translationArgs.blocks, ...change,
+          page_id: home!.page_id, locale, path: '/', title: translatedTitle, blocks: translationArgs.blocks, ...change,
         } })
         expect(editorRefusal.status()).toBe(400)
         expect(await editorRefusal.text()).toContain(message)

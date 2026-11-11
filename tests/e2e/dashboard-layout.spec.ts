@@ -194,19 +194,23 @@ test.describe('dashboard pane hierarchy', () => {
     }
   })
 
-  test('location assignments survive reload and let assigned staff discover and edit their branch', async ({ page, baseURL, browser }, testInfo) => {
+  test('product assignments survive reload and let assigned staff discover and edit their branch', async ({ page, baseURL, browser }, testInfo) => {
     test.setTimeout(120_000)
-    test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Location assignments and role changes use disposable local data only.')
+    test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Product assignments and role changes use disposable local data only.')
     const organizationId = seededTenant('restaurant').organizationId
     const org = 'ember-slice-demo'
     const locationId = seededTenant('restaurant').locations.brooklyn.id
+    const productId = seededTables().id
+    const productEndpoint = `/api/editor/organizations/${organizationId}/products/${productId}`
+    const assignmentEndpoint = `${productEndpoint}/booking`
     const endpoint = `/api/dashboard/locations/${locationId}`
     const independentEndpoint = `/api/organizations/${organizationId}/locations/${locationId}`
     const release = await acquireTenantMutationLock(testInfo, organizationId)
     let memberContext: BrowserContext | null = null
-    type Location = { id: string; slug: string; title: string; email: string | null; assigned_member_id: string | null }
+    type Location = { id: string; slug: string; title: string; email: string | null }
     type Member = { id: string; userId: string; role: string; user: { name: string } }
     let original: Location | null = null
+    let originalAssignee: string | null = null
     let actor: Member | undefined
     let roleChanged = false
     let originalProfile: MemberSchedule = null
@@ -217,9 +221,17 @@ test.describe('dashboard pane hierarchy', () => {
       expect(response.status(), await response.text()).toBe(200)
       return (await response.json() as { location: Location }).location
     }
+    const readAssignment = async () => {
+      const response = await page.request.get(productEndpoint)
+      expect(response.status(), await response.text()).toBe(200)
+      const { product } = await response.json() as { product: Product }
+      expect(product.booking).toBeTruthy()
+      return product.booking!.assigned_member_id
+    }
     try {
       memberContext = await browser.newContext({ baseURL, viewport: PHONE })
       original = await readLocation()
+      originalAssignee = await readAssignment()
       expect(original).toMatchObject({ id: locationId })
       const otherTenant = await page.request.get(`/api/dashboard/locations/${seededTenant('experience').locations['ao-nang'].id}`, { params: { org: 'clayhouse-studio' } })
       expect(otherTenant.status(), await otherTenant.text()).toBe(200)
@@ -230,10 +242,10 @@ test.describe('dashboard pane hierarchy', () => {
       actor = members.find(member => member.userId === 'user-e2e-demo-role-owner')
       expect(actor, 'The canonical role actor already belongs to the demo tenant').toBeDefined()
       if (!actor) throw new Error('The canonical demo role actor is missing')
-      // The branch keeps the tenant's own responsibility; the actor holds none of it.
-      expect(original.assigned_member_id).not.toBe(actor.id)
-      const responsible = original.assigned_member_id ? members.find(member => member.id === original!.assigned_member_id) : null
-      if (original.assigned_member_id) expect(responsible, 'The branch is assigned to a current member').toBeDefined()
+      // The tables name a current member, and the actor handles no offering at this branch.
+      const responsible = members.find(member => member.id === originalAssignee)
+      expect(responsible, 'The tables are assigned to a current member').toBeDefined()
+      expect(originalAssignee).not.toBe(actor.id)
       expect(actor.role).toBe('owner')
       const changed = await page.request.post('/api/auth/organization/update-member-role', {
         headers: authRequestHeaders(baseURL!), data: { organizationId, memberId: actor.id, role: 'member' },
@@ -247,22 +259,27 @@ test.describe('dashboard pane hierarchy', () => {
       const unassigned = await memberContext.request.get(endpoint, { params: { org } })
       expect(unassigned.status(), await unassigned.text()).toBe(404)
 
-      const assignmentPath = `${ORG}/locations/${original.slug}/settings/assignment`
+      const schedulingList = await page.request.get(`/api/organizations/${organizationId}/members/scheduling`)
+      expect(schedulingList.status(), await schedulingList.text()).toBe(200)
+      const { members: people } = await schedulingList.json() as { members: Array<{ id: string; name: string }> }
+      const priorPerson = people.find(member => member.id === originalAssignee)
+      const nextPerson = people.find(member => member.id === actor!.id)
+      expect(priorPerson).toBeDefined()
+      expect(nextPerson).toBeDefined()
+      const assignmentPath = `${ORG}/products/${productId}/booking/assignment`
       await page.setViewportSize(WIDE)
       await open(page, assignmentPath)
-      const leaf = page.locator('#dashboard-panel-location-assignment')
-      await expect(leaf.getByRole('radio', { name: responsible ? responsible.user.name : 'Unassigned No person is assigned.', exact: true })).toBeChecked()
-      const memberChoice = leaf.getByRole('radio', { name: actor.user.name, exact: true })
+      const leaf = page.locator('#dashboard-panel-booking-assignment')
+      await expect(leaf.getByRole('radio', { name: priorPerson!.name })).toBeChecked()
+      const memberChoice = leaf.getByRole('radio', { name: nextPerson!.name })
       await memberChoice.click()
-      const saved = page.waitForResponse(response => new URL(response.url()).pathname === endpoint && response.request().method() === 'PATCH')
+      const saved = page.waitForResponse(response => new URL(response.url()).pathname === assignmentEndpoint && response.request().method() === 'PUT')
       await leaf.getByRole('button', { name: 'Save', exact: true }).click()
       expect((await saved).status()).toBe(200)
-      await expect(leaf.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
-      await page.reload()
-      await waitForNuxtHydration(page)
+      await open(page, assignmentPath)
       await expect(memberChoice).toBeChecked()
-      await expect(page.locator('#dashboard-panel-location-settings').getByRole('link', { name: /Team assignment/ })).toContainText(actor.user.name)
-      expect(await readLocation()).toMatchObject({ assigned_member_id: actor.id })
+      await expect(leaf.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
+      expect(await readAssignment()).toBe(actor.id)
 
       const memberPage = await memberContext.newPage()
       await dismissPreviewToolbar(memberPage)
@@ -283,10 +300,10 @@ test.describe('dashboard pane hierarchy', () => {
       await memberPage.reload()
       await waitForNuxtHydration(memberPage)
       await expect(contact.getByRole('textbox', { name: 'Email', exact: true })).toHaveValue(email)
-      expect(await readLocation()).toMatchObject({ email, assigned_member_id: actor.id })
-      const forbidden = await memberContext.request.patch(endpoint, { params: { org }, data: { assigned_member_id: null } })
+      expect(await readLocation()).toMatchObject({ email })
+      const forbidden = await memberContext.request.put(assignmentEndpoint, { data: { assigned_member_id: originalAssignee } })
       expect(forbidden.status(), await forbidden.text()).toBe(403)
-      expect(await readLocation()).toMatchObject({ email, assigned_member_id: actor.id })
+      expect(await readAssignment()).toBe(actor.id)
       const wrongTenant = await memberContext.request.get(`/api/organizations/${organizationId}/locations/${seededTenant('experience').locations['ao-nang'].id}`)
       expect(wrongTenant.status(), await wrongTenant.text()).toBe(404)
 
@@ -404,11 +421,14 @@ test.describe('dashboard pane hierarchy', () => {
       } catch (error) { failures.push(error) }
       try {
         if (original) {
-          const restored = await page.request.patch(endpoint, { params: { org }, data: {
-            email: original.email, assigned_member_id: original.assigned_member_id,
-          } })
+          const restored = await page.request.patch(endpoint, { params: { org }, data: { email: original.email } })
           expect(restored.status(), await restored.text()).toBe(200)
-          expect(await readLocation()).toMatchObject({ email: original.email, assigned_member_id: original.assigned_member_id })
+          expect(await readLocation()).toMatchObject({ email: original.email })
+          if (originalAssignee) {
+            const reassigned = await page.request.put(assignmentEndpoint, { data: { assigned_member_id: originalAssignee } })
+            expect(reassigned.status(), await reassigned.text()).toBe(200)
+            expect(await readAssignment()).toBe(originalAssignee)
+          }
           if (roleChanged && memberContext) {
             const restoredAccess = await memberContext.request.get(endpoint, { params: { org } })
             expect(restoredAccess.status(), await restoredAccess.text()).toBe(404)
@@ -431,7 +451,7 @@ test.describe('dashboard pane hierarchy', () => {
         await release()
       } catch (error) { failures.push(error) }
     }
-    if (failures.length) throw new AggregateError(failures, 'Location assignment workflow or restoration failed')
+    if (failures.length) throw new AggregateError(failures, 'Product assignment workflow or restoration failed')
   })
   })
 

@@ -163,7 +163,7 @@ test.describe('lodging identity boundary', () => {
       const sentReceipt = await teamCall<{ conversation_id: string; outcome: { ok: boolean }; message_id: string; created: boolean }>('send_message', { conversation_id: threadId, message, idempotency_key: idempotencyKey })
       expect(sentReceipt).toMatchObject({ conversation_id: threadId, outcome: { ok: true }, created: true })
       const sent = { message: (await teamRead({ limit: 1 })).messages[0]! }
-      expect(sent.message).toMatchObject({ id: sentReceipt.message_id, threadId, author_user_id: fixture.id, body: message, attachments: [] })
+      expect(sent.message).toMatchObject({ id: sentReceipt.message_id, conversation_id: threadId, author_user_id: fixture.id, body: message, attachments: [] })
       const replay = await teamCall<{ message_id: string; created: boolean }>('send_message', { conversation_id: threadId, message, idempotency_key: idempotencyKey })
       expect(replay).toMatchObject({ message_id: sentReceipt.message_id, created: false })
       const changedRetry = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'send_message', args: { organization_id: organization.id, conversation_id: threadId, message: 'Different content', idempotency_key: idempotencyKey } })
@@ -475,7 +475,7 @@ test.describe('lodging identity boundary', () => {
           const sent = await api.post(`${teamPath}/messages?org=${slug}`, { headers: bearer, data: { body, idempotencyKey: crypto.randomUUID() } })
           expect(sent.status, await sent.text()).toBe(201)
           const { message } = await sent.json() as { message: TeamMessage }
-          expect(message).toMatchObject({ threadId, body, author_user_id: actor.id })
+          expect(message).toMatchObject({ conversation_id: threadId, body, author_user_id: actor.id })
           messageIds.push(message.id)
           bodies.push(body)
           await expect(page.locator(`[data-team-message="${message.id}"]`)).toContainText(body)
@@ -543,7 +543,7 @@ test.describe('lodging identity boundary', () => {
         expect((await api.post(`${teamPath}/messages?org=${slug}`, { headers: memberBearer, data: { body: 'After leaving', idempotencyKey: crypto.randomUUID() } })).status).toBe(404)
 
         // The participating admin can manage; an owner's role cannot replace a lost seat.
-        const adminRename = await mcpRequest(memberMcp, baseURL!, { method: 'tools/call', toolName: 'update_team_group', args: { organization_id: organization.id, thread_id: threadId, action: 'rename', name: 'Admin handover', idempotency_key: crypto.randomUUID() } })
+        const adminRename = await mcpRequest(memberMcp, baseURL!, { method: 'tools/call', toolName: 'update_conversation_group', args: { organization_id: organization.id, conversation_id: threadId, action: 'rename', name: 'Admin handover', idempotency_key: crypto.randomUUID() } })
         expect(adminRename.status(), await adminRename.text()).toBe(200)
         expect(mcpData<{ status: 'updated'; threadId: string }>(await adminRename.json())).toEqual({ status: 'updated', threadId })
         expect((await threads(ownerBearer)).find(thread => thread.id === threadId)?.name).toBe('Admin handover')

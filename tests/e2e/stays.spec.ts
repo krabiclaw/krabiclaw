@@ -721,12 +721,13 @@ test('a host creates a stay, records its payments and arrival guide, and cancels
     await expect(personal).toHaveURL(`${baseURL}/dashboard/account`)
     await waitForNuxtHydration(personal)
     // The guest's own reservation, its conversation and calendar: the Personal pages that hold something.
-    for (const path of ['/dashboard/account/activity', `/dashboard/account/activity/booking/${reservationId}`, `/dashboard/account/messages/${reservationId}`, `/dashboard/account/calendar/${slot!.date}`, '/dashboard/account/notifications']) {
+    for (const path of ['/dashboard/account/activity', `/dashboard/account/activity/booking/${reservationId}`, `/dashboard/account/messages/${reservationId}`, `/dashboard/account/calendar/${slot!.date}`]) {
       const response = await personal.goto(`${baseURL}${path}`)
       expect(response?.status(), path).toBe(200)
       await waitForNuxtHydration(personal)
       await expect(personal).toHaveURL(`${baseURL}${path}`)
     }
+    expect((await personal.goto(`${baseURL}/dashboard/account/notifications`))?.status()).toBe(404)
     await personal.goto(`${baseURL}/dashboard/account/messages/${reservationId}`)
     await expect(personal.getByText(/Table for 2 on /u).first()).toBeVisible()
   } finally {
@@ -780,7 +781,7 @@ test('a host creates a stay, records its payments and arrival guide, and cancels
     page.getByRole('button', { name: 'Create stay', exact: true }).click(),
   ])
   await expectStatus(made, 201)
-  const native = (await made.json() as { stay: { id: string; version: number } }).stay
+  const native = (await made.json() as { stay: StayDetail }).stay
   await expect(page).toHaveURL(new RegExp(`/bookings/stay/${native.id}$`))
   await expect(page.getByRole('listitem').filter({ hasText: /125\.00 · Bank transfer/ })).toBeVisible()
   const edited = await request.patch(api(`stays/${native.id}`), { headers, data: { expected_version: native.version, guest_name: 'Kai Mendes' } })
@@ -808,7 +809,10 @@ test('a host creates a stay, records its payments and arrival guide, and cancels
   const cancelledRead = await request.get(api(`stays/${native.id}`))
   expect(cancelledRead.status()).toBe(200)
   const savedCancellation = (await cancelledRead.json() as { stay: StayDetail }).stay
-  expect(cancelledByMcp.data).toEqual({ stay: { id: native.id, product_id: productId, conversation_id: savedCancellation.conversation_id, status: 'cancelled', version: savedCancellation.version, updated_at: savedCancellation.updated_at, check_in_date: later[0], check_out_date: later[1], cancelled_at: savedCancellation.cancelled_at, cancellation_reason: 'Contract cancellation' }, channel_push: null })
+  expect(cancelledByMcp.data).toEqual({ booking_id: native.id, unit: 'nights', status: 'cancelled', version: savedCancellation.version,
+    cancelled_at: savedCancellation.cancelled_at, cancellation_reason: 'Contract cancellation', channel_push: null })
+  expect(savedCancellation).toMatchObject({ id: native.id, product_id: productId, status: 'cancelled', conversation_id: native.conversation_id,
+    check_in_date: later[0], check_out_date: later[1], cancellation_reason: 'Contract cancellation' })
 })
 
 // What the property journey authors through the UI, and what the description,
