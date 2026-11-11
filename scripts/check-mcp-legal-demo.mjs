@@ -369,12 +369,12 @@ async function main() {
 
     const updateRes = await mcp(headers, 'update_site_page', {
       variant_id: pageSummary.id,
-      expected_updated_at: pageData.updated_at,
+      updated_at: pageData.updated_at,
       path,
       title,
-      pageType: pageSummary.page_type,
+      page_type: pageSummary.page_type,
       recipe: pageSummary.recipe,
-      sortOrder: pageSummary.sort_order,
+      sort_order: pageSummary.sort_order,
       removed_block_ids: removedBlockIds,
       blocks,
     })

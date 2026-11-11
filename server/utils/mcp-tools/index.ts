@@ -224,18 +224,18 @@ export async function executeMcpToolCall(
       id: entry.id,
       name: entry.name ?? entry.slug,
       subdomain: entry.subdomain,
-      orgSlug: entry.slug,
-      publicUrl: resolveOrganizationPublicOrigin({ public_url: entry.public_url }),
+      slug: entry.slug,
+      public_url: resolveOrganizationPublicOrigin({ public_url: entry.public_url }),
       status: entry.status,
       active: entry.id === workspace.organization?.id,
     }));
     const currentUser = {
       id: user.userId,
-      isPlatformAdmin: user.isPlatformAdmin,
+      is_platform_admin: user.isPlatformAdmin,
     };
     const page = paginateMcpCollection(organizations, rawArguments, { resource: `organizations:${user.userId}` });
     return renderStructuredResponse(
-      { organizations: page.items, currentUser, page_info: page.page_info },
+      { organizations: page.items, current_user: currentUser, page_info: page.page_info },
       organizations.length === 0
         ? "You have no websites yet. Use save_website_draft to start your business website."
         : `You have ${organizations.length} organization${organizations.length > 1 ? "s" : ""}: ${organizations.map((entry) => entry.name).join(", ")}.`,

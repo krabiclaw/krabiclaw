@@ -112,7 +112,7 @@ test.describe('stateless MCP server', () => {
       }
       for (const [change, message] of [
         [{ recipe: null }, 'A translated tenant-page variant must use the source page identity'],
-        [{ sortOrder: originalSource.page.sort_order + 1 }, 'Set sortOrder on the source page, not a translation'],
+        [{ sort_order: originalSource.page.sort_order + 1 }, 'Set sort_order on the source page, not a translation'],
       ] as const) {
         const refused = await mcpRequest(request, baseURL!, {
           method: 'tools/call', toolName: 'create_site_page', args: { ...translationArgs, ...change },

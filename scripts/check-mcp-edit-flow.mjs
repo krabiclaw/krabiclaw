@@ -52,11 +52,11 @@ async function main() {
   // and identity that were just read rather than leaving them to be filled in.
   const save = await mcp(headers, 'update_site_page', {
     variant_id: homeVariant.id,
-    expected_updated_at: pageBefore.document.updated_at,
+    updated_at: pageBefore.document.updated_at,
     path: pageBefore.path,
     title: pageBefore.title,
-    sortOrder: pageBefore.sort_order,
-    pageType: pageBefore.page_type,
+    sort_order: pageBefore.sort_order,
+    page_type: pageBefore.page_type,
     recipe: pageBefore.recipe,
     blocks: blocks.map(block => ({
       id: block.id,

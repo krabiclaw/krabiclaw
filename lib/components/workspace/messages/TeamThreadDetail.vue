@@ -192,7 +192,7 @@ async function markRead() {
   markingRead = true
   try {
     await api(`/api/dashboard/organizations/${encodeURIComponent(dashboard.organizationId.value ?? '')}/conversations/${encodeURIComponent(props.threadId)}/read`, {
-      method: 'POST', body: { messageId: latest },
+      method: 'POST', body: { message_id: latest },
       validate: (value): value is { read: true; last_read_message_id: string } => isRecord(value) && value.read === true && typeof value.last_read_message_id === 'string',
     })
     readThrough = latest

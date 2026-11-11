@@ -194,7 +194,7 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
       await page.getByLabel(/Phone number/i).fill('+12025550123')
       // The dining room's tables are booked as their product: the same booking every offering takes.
       const submission = page.waitForResponse(response => response.request().method() === 'POST' && response.url().endsWith(`/api/public/products/${seededTables('brooklyn').slug}/book`))
-      await page.getByLabel('Your details').getByRole('button', { name: 'Confirm booking', exact: true }).click()
+      await page.getByRole('button', { name: 'Confirm booking', exact: true }).click()
       const response = await submission
       expect(response.status(), await response.text()).toBe(201)
       const reservation: { conversation_id?: unknown; cancellation_token?: unknown; message?: unknown } = await response.json()

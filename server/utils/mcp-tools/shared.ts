@@ -525,9 +525,9 @@ export const currentUserObject = {
   type: 'object',
   properties: {
     id: { type: 'string' },
-    isPlatformAdmin: { type: 'boolean' },
+    is_platform_admin: { type: 'boolean' },
   },
-  required: ['id', 'isPlatformAdmin'],
+  required: ['id', 'is_platform_admin'],
 }
 
 export const fileReferenceObject = {
@@ -627,8 +627,8 @@ export const organizationSummaryItem = {
     id: { type: 'string' },
     name: { type: 'string', description: 'Business name, or the subdomain slug when it has none.' },
     subdomain: { type: ['string', 'null'] },
-    orgSlug: { type: ['string', 'null'], description: 'Organization slug — combine with locationSlug from list_locations to build the dashboard URL: https://krabiclaw.com/dashboard/{orgSlug}/locations/{locationSlug}' },
-    publicUrl: { type: ['string', 'null'] },
+    slug: { type: ['string', 'null'], description: 'Organization slug. Use the location slug from list_locations for https://krabiclaw.com/dashboard/{organization_slug}/locations/{location_slug}' },
+    public_url: { type: ['string', 'null'] },
     status: { type: 'string', enum: ['active', 'inactive', 'suspended'] },
     active: { type: 'boolean', description: 'True when this is the currently active MCP organization context.' },
   },

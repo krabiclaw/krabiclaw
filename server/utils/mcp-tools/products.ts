@@ -555,7 +555,7 @@ export async function handleProductsTools(ctx: McpExecutorContext) {
       // Booking setup or an experience's external destination requests
       // publication. An experience without either starts as a private draft.
       // A supplied page is created and bound in that same batch.
-      const page = args.page === undefined ? undefined : args.page as { title: string; path?: string; summary?: string | null; pageType?: 'custom' | 'recipe' | 'legal' | 'system'; recipe?: string | null; sortOrder?: number; blocks: unknown }
+      const page = args.page === undefined ? undefined : args.page as { title: string; path?: string; summary?: string | null; page_type?: 'custom' | 'recipe' | 'legal' | 'system'; recipe?: string | null; sort_order?: number; blocks: unknown }
       const idempotencyKey = requiredString(args, 'idempotency_key')
       const booking = args.booking as ProductBookingSetupInput | undefined
       if (booking?.location_id) await authorizeLocation(ctx, booking.location_id)

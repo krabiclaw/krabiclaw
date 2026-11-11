@@ -1984,7 +1984,7 @@ async function createPage() {
   try {
     const created = await dashboardApi(`/api/editor/organizations/${organizationId}/pages`, {
       method: 'POST',
-      body: { productId: row.id, path: `/services/${row.slug}`, title: row.name, pageType: 'recipe', recipe: 'service-detail', blocks: [] },
+      body: { product_id: row.id, path: `/services/${row.slug}`, title: row.name, page_type: 'recipe', recipe: 'service-detail', blocks: [] },
       validate: (value: unknown): value is { page: { id: string } } => isRecord(value) && isRecord(value.page) && typeof value.page.id === 'string',
     })
     await reload()

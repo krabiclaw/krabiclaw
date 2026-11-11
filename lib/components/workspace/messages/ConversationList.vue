@@ -318,6 +318,7 @@ async function saveRead(thread: ThreadListItem) {
   try {
     await dashboardApi(`${conversationPath(thread)}/${read ? 'read' : 'unread'}`, {
       method: 'POST',
+      ...(read ? { body: {} } : {}),
       validate: (value: unknown): value is { read: boolean } => typeof value === 'object' && value !== null && Reflect.get(value, 'read') === read,
     })
     refreshConversationUnreadCount()

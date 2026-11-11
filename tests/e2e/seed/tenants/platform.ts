@@ -25,10 +25,10 @@ export async function seedPlatform(owner: SeedClient, platformOrganizationId: st
   }
 
   for (const [path, title] of [['/plugin', 'KrabiClaw for your AI assistant'], ['/products', 'Your website is just the beginning']]) {
-    await tool('create_site_page', { path, title, pageType: 'custom', locale: 'en', blocks: [{ type: 'hero', data: { title } }] })
+    await tool('create_site_page', { path, title, page_type: 'custom', locale: 'en', blocks: [{ type: 'hero', data: { title } }] })
   }
   await tool('create_site_page', {
-    path: '/pricing', title: 'Pricing', pageType: 'custom', locale: 'en',
+    path: '/pricing', title: 'Pricing', page_type: 'custom', locale: 'en',
     blocks: [
       { type: 'hero', data: { eyebrow: 'Simple, flexible plans', title: 'Simple, transparent pricing.' } },
       { type: 'feature_grid', data: { source: 'billing_plans', title: 'Plans' } },

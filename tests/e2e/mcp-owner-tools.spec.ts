@@ -205,7 +205,7 @@ test.describe('stateless MCP server', () => {
     }>(await pageBefore.json()).page
     const pageSnapshot = {
       path: pageBeforeData.path, title: pageBeforeData.title,
-      sortOrder: pageBeforeData.sort_order, pageType: pageBeforeData.page_type, recipe: pageBeforeData.recipe,
+      sort_order: pageBeforeData.sort_order, page_type: pageBeforeData.page_type, recipe: pageBeforeData.recipe,
       blocks: pageBeforeData.blocks.map(({ id, type, level, parent_block_id, source_block_id, data, media }) =>
         ({ id, type, level, parent_block_id, source_block_id, data, media })),
     }
@@ -215,7 +215,7 @@ test.describe('stateless MCP server', () => {
     const savedPageBefore = (await editorPageBefore.json()).page
     const pathChange = await mcpRequest(request, baseURL!, {
       method: 'tools/call', toolName: 'update_site_page', args: {
-        organization_id: organizationId, variant_id: homeVariant!.id, expected_updated_at: pageBeforeData.updated_at,
+        organization_id: organizationId, variant_id: homeVariant!.id, updated_at: pageBeforeData.updated_at,
         ...pageSnapshot, path: '/another-home-address', title: 'Must not be saved',
       },
     })
@@ -229,7 +229,7 @@ test.describe('stateless MCP server', () => {
     expect(unchangedPageRead.status()).toBe(200)
     expect((await unchangedPageRead.json()).page).toEqual(savedPageBefore)
     const httpPathChange = await request.patch(pageEditorPath, { data: {
-      ...pageSnapshot, expectedUpdatedAt: pageBeforeData.updated_at, path: '/another-home-address', title: 'Must not be saved',
+      ...pageSnapshot, updated_at: pageBeforeData.updated_at, path: '/another-home-address', title: 'Must not be saved',
     } })
     expect(httpPathChange.status()).toBe(400)
     const unchangedHttpPageRead = await request.get(pageEditorPath)
@@ -268,11 +268,11 @@ test.describe('stateless MCP server', () => {
       args: {
         organization_id: organizationId,
         variant_id: homeVariant!.id,
-        expected_updated_at: pageBeforeData.updated_at,
+        updated_at: pageBeforeData.updated_at,
         path: pageBeforeData.path,
         title: renamedPageTitle,
-        sortOrder: pageBeforeData.sort_order,
-        pageType: pageBeforeData.page_type,
+        sort_order: pageBeforeData.sort_order,
+        page_type: pageBeforeData.page_type,
         recipe: pageBeforeData.recipe,
         blocks: pageBeforeData.blocks.map(block => ({
           id: block.id,

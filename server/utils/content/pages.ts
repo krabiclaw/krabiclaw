@@ -41,17 +41,17 @@ import { listFaqBlockQa } from '~/server/utils/location-qa'
 
 export interface TenantPageEditorInput {
   id?: string
-  pageId?: string
-  productId?: string | null
+  page_id?: string
+  product_id?: string | null
   locale?: string
   path: string
   title: string
   summary?: string | null
-  pageType?: TenantPageType
+  page_type?: TenantPageType
   recipe?: string | null
-  sortOrder?: number | null
+  sort_order?: number | null
   blocks: unknown
-  expectedUpdatedAt?: string | null
+  updated_at?: string | null
 }
 
 export interface TenantPageDocument {
@@ -114,8 +114,8 @@ function asString(value: unknown, field: string, required = false): string | nul
 }
 
 function metadataForInput(input: TenantPageEditorInput, locale: string, path: string): TenantPageSnapshotMetadata {
-  const pageType = input.pageType ?? 'custom'
-  if (!TENANT_PAGE_TYPES.includes(pageType)) badRequest('pageType is invalid')
+  const pageType = input.page_type ?? 'custom'
+  if (!TENANT_PAGE_TYPES.includes(pageType)) badRequest('page_type is invalid')
   return {
     locale,
     path,
@@ -141,8 +141,8 @@ async function organizationMayHoldCustomPages(env: CloudflareEnv, db: DbClient, 
 }
 
 async function assertTenantPageSupport(env: CloudflareEnv, db: DbClient, organizationId: string, input: TenantPageEditorInput, blocks: TenantPageBlock[], options: { checkCustomPageEntitlement?: boolean } = {}) {
-  const pageType = input.pageType ?? 'custom'
-  if (!TENANT_PAGE_TYPES.includes(pageType)) badRequest('pageType is invalid')
+  const pageType = input.page_type ?? 'custom'
+  if (!TENANT_PAGE_TYPES.includes(pageType)) badRequest('page_type is invalid')
   if (pageType === 'custom' && options.checkCustomPageEntitlement !== false && !(await organizationMayHoldCustomPages(env, db, organizationId))) {
     throw new HTTPError({ statusCode: 402, statusMessage: 'Custom tenant pages require the Growth plan or higher' })
   }
@@ -592,7 +592,7 @@ export async function createTenantPagesBatch(
 
   for (const pageInput of input.pages) {
     const data = pageInput.data
-    if (data.pageId) badRequest('Batch tenant-page creation cannot include an existing page parent')
+    if (data.page_id) badRequest('Batch tenant-page creation cannot include an existing page parent')
     if (data.locale !== undefined && data.locale !== locale) badRequest('Batch page creation uses the organization primary language')
     const path = normalizeTenantPagePath(data.path)
     if (existingPaths.has(path)) continue
@@ -603,11 +603,11 @@ export async function createTenantPagesBatch(
     }
     if (redirectPaths.has(path)) conflict('A tenant redirect already owns this path')
 
-    const pageType = data.pageType ?? 'custom'
+    const pageType = data.page_type ?? 'custom'
     if (pageType === 'system' && pageInput.trustedSystemPage !== true) {
       badRequest('System pages are managed by the site')
     }
-    const effectiveData: TenantPageEditorInput = { ...data, locale, path, pageType }
+    const effectiveData: TenantPageEditorInput = { ...data, locale, path, page_type: pageType }
     const metadata = metadataForInput(effectiveData, locale, path)
     const blocks = normalizeTenantPageBlocks(effectiveData.blocks)
     await assertTenantPageSupport(input.env, db, input.organizationId, effectiveData, blocks)
@@ -700,7 +700,7 @@ export async function applyOnboardingTenantPages(
     const effectiveData: TenantPageEditorInput = {
       ...page,
       locale,
-      pageType: row.page_type,
+      page_type: row.page_type,
       recipe: row.recipe,
     }
     const metadata = metadataForInput(effectiveData, locale, page.path)
@@ -749,7 +749,7 @@ export async function applyOnboardingTenantPages(
           path: page.path,
           title: page.title,
           summary: page.summary,
-          pageType: page.pageType,
+          page_type: page.pageType,
           recipe: page.recipe,
           blocks: page.blocks,
         },
@@ -767,7 +767,7 @@ type TenantPageCreateInput = {
   trustedSystemPage?: boolean
   env: CloudflareEnv
   /**
-   * The Product named by `data.productId` is inserted earlier in the same
+   * The Product named by `data.product_id` is inserted earlier in the same
    * batch, so it cannot be read yet; its ownership is the caller's write and
    * the binding's foreign key, not a read here.
    */
@@ -788,16 +788,16 @@ type TenantPageCreateInput = {
  */
 export async function prepareTenantPageCreate(db: DbClient, input: TenantPageCreateInput): Promise<{ variantId: string; path: string; queries: BatchQuery[] }> {
   const locale = await resolveLocale(db, input.organizationId, input.data.locale)
-  const existingPage = input.data.pageId
+  const existingPage = input.data.page_id
     ? await queryFirst<{ id: string; organization_id: string; page_type: TenantPageType; recipe: string | null } | null>(db, `
         SELECT id, organization_id, json_extract(metadata_json, '$.page_type') AS page_type, json_extract(metadata_json, '$.recipe') AS recipe
           FROM content_documents
          WHERE row_role = 'root' AND kind = 'page' AND id = ? AND organization_id = ? 
          LIMIT 1
-      `, [input.data.pageId, input.organizationId])
+      `, [input.data.page_id, input.organizationId])
     : null
-  if (input.data.pageId && !existingPage) notFound('Tenant page parent not found')
-  const productId = input.data.productId == null ? null : asString(input.data.productId, 'productId')
+  if (input.data.page_id && !existingPage) notFound('Tenant page parent not found')
+  const productId = input.data.product_id == null ? null : asString(input.data.product_id, 'product_id')
   if (productId && existingPage) badRequest('Bind the Product on the source page, not a translation')
   if (productId && !input.productInSameBatch) {
     if (!await queryFirst(db, 'SELECT id FROM products WHERE id = ? AND organization_id = ?', [productId, input.organizationId])) {
@@ -815,19 +815,19 @@ export async function prepareTenantPageCreate(db: DbClient, input: TenantPageCre
   // it, but only to agree with the source; it does not get to pick a different
   // one, and omitting it does not mean "choose for me".
   if (existingPage) {
-    if (input.data.sortOrder !== undefined) badRequest('Set sortOrder on the source page, not a translation')
+    if (input.data.sort_order !== undefined) badRequest('Set sort_order on the source page, not a translation')
     const statedRecipe = input.data.recipe === undefined ? undefined : input.data.recipe?.trim() || null
-    if ((input.data.pageType !== undefined && input.data.pageType !== existingPage.page_type)
+    if ((input.data.page_type !== undefined && input.data.page_type !== existingPage.page_type)
       || (statedRecipe !== undefined && statedRecipe !== existingPage.recipe)) {
       badRequest('A translated tenant-page variant must use the source page identity')
     }
   }
   const effectiveData: TenantPageEditorInput = {
     ...input.data,
-    ...(existingPage ? { pageType: existingPage.page_type, recipe: existingPage.recipe } : {}),
+    ...(existingPage ? { page_type: existingPage.page_type, recipe: existingPage.recipe } : {}),
   }
   const existingSystemPage = existingPage?.page_type === 'system'
-  if (effectiveData.pageType === 'system' && !input.trustedSystemPage && !existingSystemPage) badRequest('System pages are managed by the site')
+  if (effectiveData.page_type === 'system' && !input.trustedSystemPage && !existingSystemPage) badRequest('System pages are managed by the site')
   const { site } = await loadOrganizationSite(db, input.organizationId)
   const path = await assertTenantPagePathAvailable(db, {
     organizationId: input.organizationId,
@@ -850,7 +850,7 @@ export async function prepareTenantPageCreate(db: DbClient, input: TenantPageCre
     // 0 and no error.
     ...(existingPage ? { rowRole: 'representation', rootId: pageId, locale } : {
       rowRole: 'root', locale, metadata: { page_type: metadata.pageType, recipe: metadata.recipe }, source: 'pages', productId,
-      ...(typeof effectiveData.sortOrder === 'number' ? { sortOrder: effectiveData.sortOrder } : {}),
+      ...(typeof effectiveData.sort_order === 'number' ? { sortOrder: effectiveData.sort_order } : {}),
     }),
     path, title: metadata.title, summary: metadata.summary, createdBy: input.userId, updatedBy: input.userId,
   }
@@ -1006,19 +1006,19 @@ export async function updateTenantPage(db: DbClient, variantId: string, input: {
   // sortOrder is the page's position in its site's page list. An update writes
   // the position the caller states; it used to be COALESCE(?, sort_order), which
   // is the same read-the-row-back fallback wearing SQL.
-  if (typeof input.data.sortOrder !== 'number') badRequest('sortOrder is required')
-  const sortOrder = input.data.sortOrder
+  if (typeof input.data.sort_order !== 'number') badRequest('sort_order is required')
+  const sortOrder = input.data.sort_order
   // Identity is stated, not inherited. Leaving it out used to mean "keep what is
   // stored" in one function and "clear it" in the next, which turned an omitted
   // recipe into `recipe is required for recipe pages`.
-  if (!input.data.pageType) badRequest('pageType is required')
+  if (!input.data.page_type) badRequest('page_type is required')
   if (input.data.recipe === undefined) badRequest('recipe is required, and may be null')
   const row = await getPageRepresentation(db, variantId, input.scope)
   if (!row) notFound('Tenant page variant not found')
   if (input.data.path !== row.path) badRequest('A page keeps its saved path')
   const document = await getContentDocumentById(db, row.id)
   if (!document) throw new HTTPError({ statusCode: 500, statusMessage: 'Tenant page content document not found' })
-  if (!input.data.expectedUpdatedAt || document.updated_at !== input.data.expectedUpdatedAt) conflict('Tenant page content was updated by another writer')
+  if (!input.data.updated_at || document.updated_at !== input.data.updated_at) conflict('Tenant page content was updated by another writer')
   const currentSnapshot = await getContentEditorSnapshotForDocument(db, document)
   if (!currentSnapshot) throw new HTTPError({ statusCode: 500, statusMessage: 'Tenant page content document not found' })
   const currentBlocks = await attachTenantPageMedia(
@@ -1027,7 +1027,7 @@ export async function updateTenantPage(db: DbClient, variantId: string, input: {
     currentSnapshot.blocks.map(block => ({ ...block, media: [] })) as TenantPageBlock[],
   )
   const identity = await canonicalTenantPageIdentity(db, row, {
-    pageType: input.data.pageType,
+    pageType: input.data.page_type,
     recipe: input.data.recipe ?? null,
   })
   const pageType = identity.pageType
@@ -1037,15 +1037,15 @@ export async function updateTenantPage(db: DbClient, variantId: string, input: {
   // one block" into a silent full-document rewrite, and made the update reject
   // a path the caller never named. pageType and recipe are the page's identity,
   // resolved above against the source-locale rule, not content the caller omits.
-  const effectiveInput = { ...input.data, summary: input.data.summary === undefined ? row.summary : input.data.summary, pageType, recipe: identity.recipe }
+  const effectiveInput = { ...input.data, summary: input.data.summary === undefined ? row.summary : input.data.summary, page_type: pageType, recipe: identity.recipe }
   const path = row.path
   const metadata = metadataForInput(effectiveInput, row.locale, path)
   const blocks = normalizeTenantPageBlocks(preserveOmittedBlockMedia(input.data.blocks, currentBlocks))
   await assertTenantPageSupport(input.env, db, row.organization_id, effectiveInput, blocks, { checkCustomPageEntitlement: row.page_type !== 'custom' && pageType === 'custom' })
   const bindingQueries: BatchQuery[] = []
-  if (input.data.productId !== undefined && input.data.productId !== row.product_id) {
+  if (input.data.product_id !== undefined && input.data.product_id !== row.product_id) {
     if (row.id !== row.page_id) badRequest('Change the Product binding on the source page, not a translation')
-    const productId = asString(input.data.productId, 'productId')
+    const productId = asString(input.data.product_id, 'product_id')
     if (productId) {
       if (!await queryFirst(db, 'SELECT id FROM products WHERE id = ? AND organization_id = ?', [productId, row.organization_id])) {
         badRequest('Product is not owned by this organization')
@@ -1088,7 +1088,7 @@ export async function updateTenantPage(db: DbClient, variantId: string, input: {
       row.page_id, input.scope.organizationId, variantId],
   }
   await updateContentDocument(db, variantId, {
-    blocks: blocksChanged ? blocksAsInputs(blocks) : undefined, expected_updated_at: input.data.expectedUpdatedAt,
+    blocks: blocksChanged ? blocksAsInputs(blocks) : undefined, expected_updated_at: input.data.updated_at,
     actorId: input.userId, changedFields,
     additionalQueriesAfter: [...placementQueries, updateVariant, updatePage, ...bindingQueries,
       publicResourceCacheInvalidationQuery(input.scope.organizationId, 'tenant-page-update')],

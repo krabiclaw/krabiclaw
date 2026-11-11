@@ -204,10 +204,10 @@ export const ORGANIZATIONS_TOOLS: McpToolDefinition[] = [
             type: 'array',
             items: organizationSummaryItem,
           },
-          currentUser: currentUserObject,
+          current_user: currentUserObject,
           page_info: pageInfoObject,
         },
-        required: ['organizations', 'currentUser', 'page_info'],
+        required: ['organizations', 'current_user', 'page_info'],
       },
     })),
   organizationTool({

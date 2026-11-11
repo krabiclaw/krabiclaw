@@ -441,7 +441,9 @@ test('archive and Move to messages file a conversation for the one member, witho
     expect((await loadMailbox(secondOwner, 'current')).some(thread => thread.id === threadId)).toBe(true)
     // Archiving dismisses the reply the owner owed, as Dismiss does.
     expect((await loadLedger(owner, threadId)).needs_reply).toBe(false)
-    expect(await loadReplyTasks(owner, organizationSlug(), threadId)).toEqual([])
+    expect(await loadReplyTasks(owner, organizationSlug(), threadId)).toEqual([{ section: 'done', tasks: [
+      expect.objectContaining({ kind: 'guest_reply', status: 'skipped', conversation_id: threadId, outcome: expect.objectContaining({ closed_by: 'You' }) }),
+    ] }])
     expect(await loadThreadActions(owner, threadId)).toMatchObject({ archive: false, unarchive: true })
 
     const unarchive = () => owner.post(archiveUrl, { data: { archived: false } })
@@ -664,28 +666,28 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
   const summaryResponse = await page.request.get(`/api/dashboard/bookings/booking/${bookingIds[0]}`, { params: { org: demoSlug() } })
   await expectStatus(summaryResponse, 200)
   const summary = (await summaryResponse.json() as { booking: DashboardBookingDetails }).booking
-  expect(summary).toMatchObject({ guestName, guestPhone: '+12025550123', partySize: 2 })
-  expect(summary.resourceImageUrl, 'This reservation has its location’s actual authored picture').not.toBeNull()
+  expect(summary).toMatchObject({ guest_name: guestName, guest_phone: '+12025550123', party_size: 2 })
+  expect(summary.resource_image_url, 'This reservation has its location’s actual authored picture').not.toBeNull()
   expect(summary.conversation_id).not.toBeNull()
   const priorViewport = page.viewportSize()!
   let desktopCountWidth: number | undefined
   for (const width of [1728, 390]) {
     await page.setViewportSize({ width, height: 940 })
-    const identity = detailPanel.getByRole('heading', { level: 2, name: `${firstName}’s group of ${summary.partySize}`, exact: true })
+    const identity = detailPanel.getByRole('heading', { level: 2, name: `${firstName}’s group of ${summary.party_size}`, exact: true })
     const message = detailPanel.getByRole('link', { name: 'Message guest', exact: true })
     const call = detailPanel.getByRole('link', { name: 'Call', exact: true })
     await expect(message).toHaveAttribute('href', `/dashboard/${demoSlug()}/messages/${encodeURIComponent(summary.conversation_id!)}`)
-    await expect(call).toHaveAttribute('href', `tel:${summary.guestPhone}`)
+    await expect(call).toHaveAttribute('href', `tel:${summary.guest_phone}`)
     await expect(identity).toBeInViewport()
     await expect(message).toBeInViewport()
     await expect(call).toBeInViewport()
-    const otherGuests = detailPanel.getByLabel(`${summary.partySize! - 1} other ${summary.partySize === 2 ? 'guest' : 'guests'}`, { exact: true })
+    const otherGuests = detailPanel.getByLabel(`${summary.party_size! - 1} other ${summary.party_size === 2 ? 'guest' : 'guests'}`, { exact: true })
     const guestGroup = otherGuests.locator('..')
     const mainAvatar = guestGroup.locator(':scope > [data-slot="root"]')
     await expect(guestGroup).toBeInViewport()
     await expect(mainAvatar).toHaveCount(1)
-    if (summary.guestImageUrl) await expect(guestGroup.getByAltText(summary.guestName!, { exact: true })).toHaveAttribute('src', summary.guestImageUrl)
-    else await expect(mainAvatar).toHaveText(summary.guestName!.trim().slice(0, 1))
+    if (summary.guest_image_url) await expect(guestGroup.getByAltText(summary.guest_name!, { exact: true })).toHaveAttribute('src', summary.guest_image_url)
+    else await expect(mainAvatar).toHaveText(summary.guest_name!.trim().slice(0, 1))
     const bodyBounds = (await body.boundingBox())!
     const guestBounds = (await guestGroup.boundingBox())!
     const avatarBounds = (await mainAvatar.boundingBox())!
@@ -702,7 +704,7 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
     if (width === 1728) desktopCountWidth = countBounds.width
     else expect(desktopCountWidth, 'The desktop guest counter is larger than the phone counter').toBeGreaterThan(countBounds.width)
     const picture = detailPanel.locator('img[alt=""]').first()
-    await expect(picture).toHaveAttribute('src', summary.resourceImageUrl!)
+    await expect(picture).toHaveAttribute('src', summary.resource_image_url!)
     await expect.poll(() => picture.evaluate(image => (image as HTMLImageElement).naturalWidth), { message: 'The resource photo loads' }).toBeGreaterThan(0)
     const pictureBounds = (await picture.boundingBox())!
     expect(pictureBounds.y, 'The photo leads the record').toBeGreaterThanOrEqual(bodyBounds.y)
@@ -720,7 +722,7 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
     const sections = [
       detailPanel.getByText('Date', { exact: true }),
       detailPanel.getByText('Your notes', { exact: true }),
-      detailPanel.getByRole('link', { name: `Guests ${summary.guestName} · ${summary.partySize} guests`, exact: true }),
+      detailPanel.getByRole('link', { name: `Guests ${summary.guest_name} · ${summary.party_size} guests`, exact: true }),
       detailPanel.getByRole('button', { name: /^Cancellation policy/ }),
       ...await paymentInfo.all(),
       detailPanel.getByRole('button', { name: 'Manage reservation', exact: true }),
@@ -775,7 +777,7 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
     await testInfo.attach(`reservation-details-${width}`, { path: capture, contentType: 'image/png' })
   }
   await page.setViewportSize(priorViewport)
-  await detailPanel.getByRole('link', { name: `Guests ${summary.guestName} · ${summary.partySize} guests`, exact: true }).click()
+  await detailPanel.getByRole('link', { name: `Guests ${summary.guest_name} · ${summary.party_size} guests`, exact: true }).click()
   await expect(page.getByText(guestEmail, { exact: true })).toBeVisible()
   await page.goBack()
 

@@ -15,7 +15,7 @@ import { renderNotificationEmail } from '~/server/emails/render'
 import { guestThreadReplyMessage, guestThreadStatusMessage } from '~/server/notifications/guest-events'
 import { organizationLogo } from '~/server/notifications/hero'
 import { getPlatformDomain, buildBuyerRequestActivityUrl } from '~/server/utils/dashboard-notification-links'
-import { isBookingComplete, STAY_CHANNEL_LABELS, type StayChannel } from '~/shared/bookings'
+import { isBookingComplete, isChannelManagedStay, STAY_CHANNEL_LABELS, type StayChannel } from '~/shared/bookings'
 import { creationRequestHash } from '~/server/utils/organization-events'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import { guestPresentation } from '~/server/utils/notifications'
@@ -621,8 +621,8 @@ export async function guestReplyDestination(db: DbClient, thread: Pick<GuestRequ
     return connected ? { channel: 'airbnb', mapping } : { channel: null, reason: GUEST_DISCONNECTED_MESSAGE }
   }
   // A channel's reservation is answered on its channel: until that conversation exists there is nowhere to reply.
-  const channelBooking = thread.kind === 'booking' && thread.booking_id ? await queryFirst<{ channel: StayChannel }>(db, "SELECT channel FROM bookings WHERE organization_id = ? AND id = ? AND owner = 'channel'", [thread.organization_id, thread.booking_id]) : null
-  if (channelBooking) return { channel: null, reason: `This ${STAY_CHANNEL_LABELS[channelBooking.channel]} stay has no conversation to reply in yet.` }
+  const channelBooking = thread.kind === 'booking' && thread.booking_id ? await queryFirst<{ channel: StayChannel; owner: 'app' | 'channel' }>(db, 'SELECT channel, owner FROM bookings WHERE organization_id = ? AND id = ?', [thread.organization_id, thread.booking_id]) : null
+  if (channelBooking && isChannelManagedStay(channelBooking)) return { channel: null, reason: `This ${STAY_CHANNEL_LABELS[channelBooking.channel]} stay has no conversation to reply in yet.` }
   const email = thread.payload.guest.email?.trim() || null
   if (email) return { channel: 'email', email }
   if (thread.user_id === null) return { channel: null, reason: GUEST_UNREACHABLE_MESSAGE }

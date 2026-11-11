@@ -359,7 +359,7 @@ test('a home keeps its operator name independent from its public title across CM
   const pastWork = await request.get(api('today'))
   await expectStatus(pastWork, 200)
   expect((await pastWork.json() as BusinessToday).tasks.flatMap(section => section.tasks).find(item => item.kind === 'guest_reply' && item.conversation_id === pastStay.conversation_id)?.reservation)
-    .toMatchObject({ homeName: internalName, groupHeadline: 'Bo', statusLabel: 'Stay ended' })
+    .toMatchObject({ name: internalName, headline: 'Bo', status_label: 'Stay ended' })
 })
 
 // A member responsible for a home reads turnover details while owners and
@@ -650,7 +650,7 @@ test('a host creates a stay, records its payments and arrival guide, and cancels
   }
   const emptyEdit = await call('update_stay', { stay_id: paid.data!.stay.id, expected_version: paid.data!.stay.version })
   expect(emptyEdit.error).toContain('Invalid arguments for tool update_stay')
-  const unchangedEdit = await call('update_stay', { stay_id: paid.data!.stay.id, expected_version: paid.data!.stay.version, guest_name: 'Ana' })
+  const unchangedEdit = await call('update_stay', { stay_id: paid.data!.stay.id, expected_version: paid.data!.stay.version, guest_name: paid.data!.stay.guest_name })
   expect(JSON.parse(unchangedEdit.error!)).toMatchObject({ status: 422, code: 'INVALID_STAY_FIELD' })
   const zeroPayment = await call('record_stay_payment', { stay_id: paid.data!.stay.id, amount_minor: 0, method: 'cash', paid_on: checkIn, idempotency_key: `${slug}-zero-payment` })
   expect(zeroPayment.error).toContain('Invalid arguments for tool record_stay_payment')

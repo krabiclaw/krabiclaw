@@ -72,7 +72,7 @@ export async function seedLegal(createTenant: CreateTenant): Promise<SeedTenant>
 
     // What consultations cost, with the questions clients ask on that page.
     await tool('create_site_page', {
-      path: '/pricing', title: 'Pricing', pageType: 'custom', locale: 'en',
+      path: '/pricing', title: 'Pricing', page_type: 'custom', locale: 'en',
       blocks: [
         { type: 'hero', data: { title: 'Pricing', subtitle: 'Free consultations for clients who qualify for legal aid.' } },
         { type: 'faq', data: { source: 'page_qa', title: 'Questions about cost' } },

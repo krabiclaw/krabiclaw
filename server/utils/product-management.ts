@@ -1287,11 +1287,11 @@ function assertVariantPricesConsistent(planned: PlannedProduct): void {
   }
 }
 
-type ProductPageInput = { data: Omit<TenantPageEditorInput, 'productId' | 'pageId' | 'locale' | 'path'> & { path?: string }; env: CloudflareEnv }
+type ProductPageInput = { data: Omit<TenantPageEditorInput, 'product_id' | 'page_id' | 'locale' | 'path'> & { path?: string }; env: CloudflareEnv }
 
 function productPageInput(product: Pick<CreateProductInput, 'kind' | 'name' | 'description'>, env?: CloudflareEnv, page?: ProductPageInput): ProductPageInput | undefined {
   return page ?? (product.kind === 'service'
-    ? { data: { title: product.name, summary: product.description ?? null, pageType: 'recipe', recipe: 'services', blocks: [] }, env: env ?? invalid('The service page requires the organization environment') }
+    ? { data: { title: product.name, summary: product.description ?? null, page_type: 'recipe', recipe: 'services', blocks: [] }, env: env ?? invalid('The service page requires the organization environment') }
     : undefined)
 }
 
@@ -1462,7 +1462,7 @@ async function prepareProductPageCreate(db: DbClient, input: {
     : invalid('page.path is required for this kind of product'))
   const page = await prepareTenantPageCreate(db, {
     organizationId: input.organizationId, userId: input.actor.actorId,
-    data: { ...pageInput.data, path, productId: input.product.id }, env: pageInput.env,
+    data: { ...pageInput.data, path, product_id: input.product.id }, env: pageInput.env,
     productInSameBatch: true, pathOwnerDeletedInSameBatch: input.replacedPages?.get(path),
   })
   input.takenPaths?.add(page.path)

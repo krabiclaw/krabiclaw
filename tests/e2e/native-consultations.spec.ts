@@ -39,7 +39,7 @@ test.afterEach(async ({ page }) => {
     const currentResponse = await cleanupRequest.get(`${editor}/pages/${restore.serviceId}`)
     expect(currentResponse.status(), await currentResponse.text()).toBe(200)
     const current = (await currentResponse.json()).page
-    const binding = await cleanupRequest.patch(`${editor}/pages/${restore.serviceId}`, { data: { path: current.path, title: current.title, summary: current.summary, pageType: current.page_type, recipe: current.recipe, sortOrder: current.sort_order, blocks: current.blocks, expectedUpdatedAt: current.document.updated_at, productId: restore.originalProductId } })
+    const binding = await cleanupRequest.patch(`${editor}/pages/${restore.serviceId}`, { data: { path: current.path, title: current.title, summary: current.summary, page_type: current.page_type, recipe: current.recipe, sort_order: current.sort_order, blocks: current.blocks, updated_at: current.document.updated_at, product_id: restore.originalProductId } })
     expect(binding.status(), await binding.text()).toBe(200)
     expect((await binding.json()).page.product_id).toBe(restore.originalProductId)
     const restoredPage = await cleanupRequest.get(`${editor}/pages/${restore.serviceId}`)
@@ -328,9 +328,9 @@ test('native online review uses canonical Products, holds capacity, and releases
     const bindViaMcp = async (productId?: string | null) => {
       const current = (await (await page.request.get(`${editor}/pages/${service.id}`)).json()).page
       const response = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'update_site_page', args: {
-        organization_id: org, variant_id: service.id, expected_updated_at: current.document.updated_at,
-        path: current.path, title: current.title, summary: current.summary, pageType: current.page_type,
-        recipe: current.recipe, sortOrder: current.sort_order,
+        organization_id: org, variant_id: service.id, updated_at: current.document.updated_at,
+        path: current.path, title: current.title, summary: current.summary, page_type: current.page_type,
+        recipe: current.recipe, sort_order: current.sort_order,
         blocks: current.blocks.map((block: { id: string; type: string; level: number | null; parent_block_id: string | null; source_block_id: string | null; data: Record<string, unknown> }) => ({
           id: block.id, type: block.type, level: block.level, parent_block_id: block.parent_block_id, source_block_id: block.source_block_id, data: block.data,
         })),

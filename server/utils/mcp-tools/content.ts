@@ -36,9 +36,9 @@ export const TENANT_PAGE_METADATA_SCHEMA = {
   path: { type: 'string', description: 'The saved page path. A page keeps this address when its content or title changes.' },
   title: { type: 'string', description: "The page's name, e.g. About. The site name is appended to the browser title. Always sent in full — an omitted title is not kept." },
   summary: { type: ['string', 'null'], description: 'Omit to preserve on update; null clears it.' },
-  pageType: { type: 'string', enum: ['custom', 'recipe', 'legal', 'system'], description: "The page's type. Send the page_type from the last read unless you are changing it." },
+  page_type: { type: 'string', enum: ['custom', 'recipe', 'legal', 'system'], description: "The page's type. Send the page_type from the last read unless you are changing it." },
   recipe: { type: ['string', 'null'], description: 'The site section this page fills, or null for a page that fills none. Send the recipe from the last read unless you are changing it; an omitted recipe is not kept.' },
-  sortOrder: { type: 'number', description: "The page's position in the site's page list. Send the sort_order from the last read unless you are reordering." },
+  sort_order: { type: 'number', description: "The page's position in the site's page list. Send the sort_order from the last read unless you are reordering." },
 }
 
 const TENANT_PAGE_BLOCK_PROPERTIES = {
@@ -215,9 +215,9 @@ export const CONTENT_TOOLS: McpToolDefinition[] = [
         ...TENANT_PAGE_METADATA_SCHEMA,
         path: { ...TENANT_PAGE_METADATA_SCHEMA.path, description: 'New unused path in this language. An occupied path or redirect is refused; creation does not move an existing page.' },
         summary: { ...TENANT_PAGE_METADATA_SCHEMA.summary, description: 'Summary of the new page; null means no summary.' },
-        pageType: { ...TENANT_PAGE_METADATA_SCHEMA.pageType, description: 'Type of a new source page. A language version inherits its source page’s type; omit this field or supply the same type.' },
+        page_type: { ...TENANT_PAGE_METADATA_SCHEMA.page_type, description: 'Type of a new source page. A language version inherits its source page’s type; omit this field or supply the same type.' },
         recipe: { ...TENANT_PAGE_METADATA_SCHEMA.recipe, description: 'Template section a new source page fills, or null for none. A language version inherits its source page’s recipe when omitted; an explicit value, including null, must match the source.' },
-        sortOrder: { ...TENANT_PAGE_METADATA_SCHEMA.sortOrder, description: 'Position of a new source page in the site’s page list. Language versions inherit the source page’s position and must omit this field.' },
+        sort_order: { ...TENANT_PAGE_METADATA_SCHEMA.sort_order, description: 'Position of a new source page in the site’s page list. Language versions inherit the source page’s position and must omit this field.' },
         blocks: { ...TENANT_PAGE_BLOCKS_SCHEMA, description: 'Ordered blocks for the new page. Existing pages and their blocks are not replaced. Block data contains no asset IDs or delivery URLs; use each block’s media field for its saved media placements.' },
       },
       required: ['path', 'title', 'blocks'],
@@ -231,12 +231,12 @@ export const CONTENT_TOOLS: McpToolDefinition[] = [
       inputSchema: {
         variant_id: { type: 'string' },
         product_id: { type: ['string', 'null'], description: 'Explicit canonical Product binding on the source page only. Omit to retain; null unbinds. Translations inherit the source binding; slugs never imply a relationship.' },
-        expected_updated_at: { type: 'string' },
+        updated_at: { type: 'string' },
         ...TENANT_PAGE_METADATA_SCHEMA,
         blocks: TENANT_PAGE_BLOCKS_SCHEMA,
         removed_block_ids: { type: 'array', items: { type: 'string' }, description: 'Exact existing block IDs omitted from the replacement; omit when none are removed.' },
       },
-      required: ['variant_id', 'expected_updated_at', 'path', 'title', 'pageType', 'recipe', 'sortOrder', 'blocks'],
+      required: ['variant_id', 'updated_at', 'path', 'title', 'page_type', 'recipe', 'sort_order', 'blocks'],
       outputSchema: TENANT_PAGE_LIFECYCLE_OUTPUT,
     }),
   organizationTool({
@@ -426,7 +426,7 @@ export async function handleContentTools(ctx: McpExecutorContext): Promise<unkno
           userId: organization.userId,
           data: {
             id: optionalString(args, "variant_id") ?? undefined,
-            pageId: optionalString(args, "page_id") ?? undefined,
+            page_id: optionalString(args, "page_id") ?? undefined,
             locale: optionalString(args, "locale") ?? undefined,
             path: requiredString(args, "path"),
             title: requiredString(args, "title"),
@@ -434,9 +434,9 @@ export async function handleContentTools(ctx: McpExecutorContext): Promise<unkno
             // Omitted is omitted: a translation takes its identity from the
             // source page, and a null here would be read as stating a
             // different one.
-            pageType: (optionalString(args, "pageType") ?? undefined) as "custom" | "recipe" | "legal" | "system" | undefined,
+            page_type: (optionalString(args, "page_type") ?? undefined) as "custom" | "recipe" | "legal" | "system" | undefined,
             recipe: args.recipe === undefined ? undefined : nullableStringArg(args, "recipe", null),
-            sortOrder: typeof args.sortOrder === 'number' ? args.sortOrder : undefined,
+            sort_order: typeof args.sort_order === 'number' ? args.sort_order : undefined,
             blocks: args.blocks,
           },
           env: organization.env,
@@ -456,15 +456,15 @@ export async function handleContentTools(ctx: McpExecutorContext): Promise<unkno
           userId: organization.userId,
           scope: { organizationId: organization.organizationId},
           data: {
-            productId: args.product_id === undefined ? undefined : requiredNullableString(args, "product_id"),
+            product_id: args.product_id === undefined ? undefined : requiredNullableString(args, "product_id"),
             path: requiredString(args, "path"),
             title: requiredString(args, "title"),
             summary: args.summary === undefined ? page.summary : nullableStringArg(args, "summary", null),
-            pageType: requiredString(args, "pageType") as "custom" | "recipe" | "legal" | "system",
+            page_type: requiredString(args, "page_type") as "custom" | "recipe" | "legal" | "system",
             recipe: requiredNullableString(args, "recipe"),
-            sortOrder: requiredNumber(args, "sortOrder"),
+            sort_order: requiredNumber(args, "sort_order"),
             blocks: args.blocks,
-            expectedUpdatedAt: requiredString(args, "expected_updated_at"),
+            updated_at: requiredString(args, "updated_at"),
           },
           env: organization.env,
         });
