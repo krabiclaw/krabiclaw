@@ -14,7 +14,7 @@ export default defineHandler(async event=>{
  const env=cloudflareEnv(event),session=await getAuthSession(event,env)
  if(!session)throw new HTTPError({statusCode:401,statusMessage:'Sign in to reply'})
  requireFinancialBrowserOrigin(event)
- const threadId=getRouterParam(event,'threadId')
+ const threadId=getRouterParam(event,'conversation_id')
  if(!threadId)throw new HTTPError({statusCode:400,statusMessage:'Conversation ID is required'})
  // The conversation is the account's before anything it sent is read.
  const request=await getGuestRequest(env.DB,threadId)

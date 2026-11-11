@@ -155,7 +155,7 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
     await runOrganizationJobs(env, db, ORG, at(day(3), '14:00'))
     const mayThread = (await teamThreads(cook)).find(item => item.stay?.id === may.id)!
     assert.equal((await automatic(mayThread.id)).length, 1)
-    await cancelStay(db, env, manager, may.id, { expected_version: may.version, reason: 'Guest asked', financial_writes_allowed: false })
+    await cancelStay(db, env, manager, may.id, { version: may.version, reason: 'Guest asked', financial_writes_allowed: false })
     await runOrganizationJobs(env, db, ORG, at(day(3), '14:05'))
     assert.deepEqual((await automatic(mayThread.id)).map(message => message.key), [jobKey({ id: (await taskRow(`turnover:${may.id}`))!.id, product_id: cabin.id }), `cancelled:${(await taskRow(`turnover:${may.id}`))!.id}`])
 

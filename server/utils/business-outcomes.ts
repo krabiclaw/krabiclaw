@@ -488,7 +488,7 @@ export async function readBusinessProgressReference(
     if (!gap) throw missing()
     const [overrides, claims, pushes] = await Promise.all([
       queryAll(db, `SELECT n.*, ${STAY_NIGHT_PRICE_SQL} AS price_minor FROM product_nights n WHERE n.product_id = ? AND n.organization_id = ? ORDER BY n.date`, [product.id, principal.organizationId]),
-      queryAll(db, `SELECT n.date,n.booking_id AS stay_id,n.hold_id,n.calendar_link_id,h.status AS hold_status,h.expires_at,
+      queryAll(db, `SELECT n.date,n.booking_id,n.hold_id,n.calendar_link_id,h.status AS hold_status,h.expires_at,
         CASE WHEN h.status = 'active' AND h.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now') THEN 1 ELSE 0 END AS hold_active
         FROM stay_nights n LEFT JOIN payment_checkout_holds h ON h.id=n.hold_id AND h.organization_id=n.organization_id
         WHERE n.product_id = ? AND n.organization_id = ? ORDER BY n.date`, [product.id, principal.organizationId]),

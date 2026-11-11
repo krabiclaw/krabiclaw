@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:295613f20d3835878ac31bd000bd10e0a6744cb1839c216367a565eebfdd0f65",
-  "documentationFingerprint": "sha256:418b9d62f14b07ddeda6bfde33e5e5e8fdb18f52bcf870c1e3f02e06c0b5c69c",
+  "fingerprint": "sha256:739f557e57942bb84be05568e864082c587cd4ed00d3a76dab8f158c1d81c14f",
+  "documentationFingerprint": "sha256:da68a37a144bc28f807a1f452350e8891d9f6fa29c1f4d8ac7311007802c071e",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -13228,11 +13228,6 @@
             "description": "Booking ID returned by list_product_bookings or create_product_booking. Distinct from conversation_id, which identifies the inbox conversation.",
             "type": "string"
           },
-          "expected_version": {
-            "description": "Required for a stay: stay.version from get_product_booking. A stale version is refused.",
-            "minimum": 1,
-            "type": "integer"
-          },
           "idempotency_key": {
             "description": "Caller-supplied durable idempotency key. Reuse only for the identical operation.",
             "maxLength": 200,
@@ -13249,6 +13244,11 @@
             "description": "For a stay: why it was cancelled, kept with it.",
             "maxLength": 500,
             "type": "string"
+          },
+          "version": {
+            "description": "Required for a stay: stay.version from get_product_booking. A stale version is refused.",
+            "minimum": 1,
+            "type": "integer"
           }
         },
         "required": [
@@ -20324,11 +20324,11 @@
             },
             "type": "array"
           },
+          "conversation_id": {
+            "type": "string"
+          },
           "replayed": {
             "type": "boolean"
-          },
-          "request_id": {
-            "type": "string"
           },
           "success": {
             "const": true
@@ -20336,7 +20336,7 @@
         },
         "required": [
           "success",
-          "request_id",
+          "conversation_id",
           "replayed",
           "answers"
         ],
@@ -42924,6 +42924,11 @@
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
+          "booking_id": {
+            "description": "Stay ID: booking_id from list_product_bookings.",
+            "minLength": 1,
+            "type": "string"
+          },
           "organization_id": {
             "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
             "minLength": 1,
@@ -42934,15 +42939,10 @@
             "description": "ID from get_product_booking → stay.payments[].id, or record_stay_payment → payment.id. Removes an offline record, not a Stripe payment or actual money.",
             "minLength": 1,
             "type": "string"
-          },
-          "stay_id": {
-            "description": "Stay ID: booking_id from list_product_bookings.",
-            "minLength": 1,
-            "type": "string"
           }
         },
         "required": [
-          "stay_id",
+          "booking_id",
           "payment_id"
         ],
         "type": "object"
@@ -42952,6 +42952,10 @@
         "additionalProperties": false,
         "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
         "properties": {
+          "booking_id": {
+            "minLength": 1,
+            "type": "string"
+          },
           "currency": {
             "minLength": 1,
             "type": "string"
@@ -42975,14 +42979,10 @@
               "string",
               "null"
             ]
-          },
-          "stay_id": {
-            "minLength": 1,
-            "type": "string"
           }
         },
         "required": [
-          "stay_id",
+          "booking_id",
           "currency",
           "paid_minor",
           "payment_status",
@@ -66391,6 +66391,12 @@
                 "available": {
                   "type": "boolean"
                 },
+                "booking_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "calendar": {
                   "description": "The linked calendar (Vrbo) that shows this night taken; null when none does. Such a night is not available.",
                   "enum": [
@@ -66473,18 +66479,12 @@
                     "string",
                     "null"
                   ]
-                },
-                "stay_id": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
                 }
               },
               "required": [
                 "date",
                 "available",
-                "stay_id",
+                "booking_id",
                 "closed",
                 "price_minor",
                 "min_stay_arrival",
@@ -73010,10 +73010,10 @@
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
-          "expected_version": {
-            "description": "stay.version from the latest get_product_booking call; a stale version is refused.",
-            "minimum": 1,
-            "type": "integer"
+          "booking_id": {
+            "description": "Stay ID: booking_id from list_product_bookings.",
+            "minLength": 1,
+            "type": "string"
           },
           "organization_id": {
             "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
@@ -73026,15 +73026,15 @@
             "minLength": 1,
             "type": "string"
           },
-          "stay_id": {
-            "description": "Stay ID: booking_id from list_product_bookings.",
-            "minLength": 1,
-            "type": "string"
+          "version": {
+            "description": "stay.version from the latest get_product_booking call; a stale version is refused.",
+            "minimum": 1,
+            "type": "integer"
           }
         },
         "required": [
-          "stay_id",
-          "expected_version",
+          "booking_id",
+          "version",
           "product_id"
         ],
         "type": "object"
@@ -88981,6 +88981,11 @@
             },
             "type": "integer"
           },
+          "booking_id": {
+            "description": "Stay ID: booking_id from list_product_bookings.",
+            "minLength": 1,
+            "type": "string"
+          },
           "idempotency_key": {
             "description": "Reuse only for the identical amount, method, date, reference and note on this stay. Returns the exact recorded payment without a second entry.",
             "maxLength": 200,
@@ -89013,15 +89018,10 @@
           "reference": {
             "maxLength": 200,
             "type": "string"
-          },
-          "stay_id": {
-            "description": "Stay ID: booking_id from list_product_bookings.",
-            "minLength": 1,
-            "type": "string"
           }
         },
         "required": [
-          "stay_id",
+          "booking_id",
           "amount_minor",
           "method",
           "paid_on",
@@ -89034,6 +89034,10 @@
         "additionalProperties": false,
         "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
         "properties": {
+          "booking_id": {
+            "minLength": 1,
+            "type": "string"
+          },
           "currency": {
             "minLength": 1,
             "type": "string"
@@ -89114,14 +89118,10 @@
               "string",
               "null"
             ]
-          },
-          "stay_id": {
-            "minLength": 1,
-            "type": "string"
           }
         },
         "required": [
-          "stay_id",
+          "booking_id",
           "currency",
           "paid_minor",
           "payment_status",
@@ -102725,6 +102725,12 @@
                 "available": {
                   "type": "boolean"
                 },
+                "booking_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "calendar": {
                   "description": "The linked calendar (Vrbo) that shows this night taken; null when none does. Such a night is not available.",
                   "enum": [
@@ -102807,18 +102813,12 @@
                     "string",
                     "null"
                   ]
-                },
-                "stay_id": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
                 }
               },
               "required": [
                 "date",
                 "available",
-                "stay_id",
+                "booking_id",
                 "closed",
                 "price_minor",
                 "min_stay_arrival",
@@ -127333,6 +127333,11 @@
               "null"
             ]
           },
+          "booking_id": {
+            "description": "Stay ID: booking_id from list_product_bookings.",
+            "minLength": 1,
+            "type": "string"
+          },
           "check_in_date": {
             "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
             "type": "string"
@@ -127345,11 +127350,6 @@
           "children": {
             "maximum": 99,
             "minimum": 0,
-            "type": "integer"
-          },
-          "expected_version": {
-            "description": "stay.version from the latest get_product_booking call; a stale version is refused.",
-            "minimum": 1,
             "type": "integer"
           },
           "guest_email": {
@@ -127390,20 +127390,20 @@
               "null"
             ]
           },
-          "stay_id": {
-            "description": "Stay ID: booking_id from list_product_bookings.",
-            "minLength": 1,
-            "type": "string"
-          },
           "total_minor": {
             "description": "Whole minor units of the organization currency, e.g. cents.",
             "minimum": 0,
             "type": "integer"
+          },
+          "version": {
+            "description": "stay.version from the latest get_product_booking call; a stale version is refused.",
+            "minimum": 1,
+            "type": "integer"
           }
         },
         "required": [
-          "stay_id",
-          "expected_version"
+          "booking_id",
+          "version"
         ],
         "type": "object"
       },
@@ -128446,7 +128446,7 @@
         "text": "Use get_workspace_context to resolve the requested business. Read all relevant list_conversations pages (guests, Airbnb Support and team conversations, with unread counts) and get_conversation for full contact messages, booking details (classes, consultations and restaurant tables), proposals and delivery receipts. Select actual teammates with list_conversation_recipients. start_conversation reuses direct and explicit stay/location team conversations; manual groups of at least three people are distinct and require a stable idempotency_key. update_conversation_group changes only manual team groups: obey can_manage/can_leave; preserve stay/location participants. New members can read group history; removal and leaving end access while retaining messages. Reading does not mark a conversation read; mark_conversation_read and mark_conversation_unread change only the caller’s read position. Summarize unanswered messages and pending bookings. Use send_message with a stable idempotency_key only for the message or photo the user requests, then read it back. Use get_product_booking before confirm_product_booking, reject_product_booking, cancel_product_booking or request_product_booking_change; a table reservation is a product booking and uses the same tools. Booking changes email a proposal and leave the existing allocation unchanged until guest acceptance. Financial actions requiring the dashboard remain incomplete; report the returned handoff instead of claiming completion. Use list_locations and list_location_reviews to read reviews separately; provider reviews and imported Google Q&A remain managed in Google. Report failed deliveries and actions awaiting guest acceptance accurately."
       },
       "toolContracts": {
-        "cancel_product_booking": "sha256:b2a0843017be63fcd40875779c9f8011ef44f322fef31b7fde19eed876414bc5",
+        "cancel_product_booking": "sha256:208a0c823b7f31153a89ffd5f63fe4d9af96f29cda1f4da0ffac35be49fb2951",
         "confirm_product_booking": "sha256:1c9695ad981f010718a3f36845717ed36a1546018f196b5f0292ac9a07f9fc8d",
         "get_conversation": "sha256:0bb638b4ce881d5db51291ff262e13633e2b2a6bcbeca21246027deb716fcd84",
         "get_product_booking": "sha256:20230c21eae72abeb5dadb0c555588a6ef1b336aa125edf5c3df38698c22982b",

@@ -105,7 +105,7 @@ test('a host moves unpaid occupancy in batches, reviews manual-only homes and re
   expect(receipts[0]).toMatchObject({ imported: 5, failed: 0, remaining: 1, has_more: true })
   const receipt = receipts[1]!
   expect(receipt).toMatchObject({ imported: 1, failed: 0, remaining: 0, has_more: false })
-  const stayId = receipt.outcomes.find(outcome => outcome.source_id === '700001')!.stay_id!
+  const stayId = receipt.outcomes.find(outcome => outcome.source_id === '700001')!.booking_id!
   expect(stayId).toBeTruthy()
   await expect(page.getByText('The handover needs attention', { exact: true })).toBeVisible()
   await expect(page.getByText('Checks complete for these homes and records', { exact: true })).toHaveCount(0)
@@ -122,13 +122,13 @@ test('a host moves unpaid occupancy in batches, reviews manual-only homes and re
   expect(await stay.json()).toMatchObject({ stay: { product_id: productId, status: 'confirmed', guest_name: 'Morgan from 1A', check_in_date: checkIn, check_out_date: checkOut, payment_status: 'unpaid', paid_minor: 0 } })
   const calendar = await page.request.get(`/api/dashboard/stay-homes/${productId}/calendar?org=${slug}&from=${day(0)}&to=${day(3)}`)
   await status(calendar, 200)
-  const nights = (await calendar.json() as { nights: Array<{ available: boolean; stay_id: string | null }> }).nights
+  const nights = (await calendar.json() as { nights: Array<{ available: boolean; booking_id: string | null }> }).nights
   expect(nights).toHaveLength(3)
-  expect(nights.map(night => ({ available: night.available, stay_id: night.stay_id }))).toEqual(Array.from({ length: 3 }, () => ({ available: false, stay_id: stayId })))
+  expect(nights.map(night => ({ available: night.available, booking_id: night.booking_id }))).toEqual(Array.from({ length: 3 }, () => ({ available: false, booking_id: stayId })))
   const manualCalendar = await page.request.get(`/api/dashboard/stay-homes/${manualProductId}/calendar?org=${slug}&from=${day(2)}&to=${day(4)}`)
   await status(manualCalendar, 200)
   expect((await manualCalendar.json() as { nights: Array<{ available: boolean; closed: boolean }> }).nights.map(night => ({ available: night.available, closed: night.closed }))).toEqual([{ available: false, closed: true }, { available: false, closed: true }])
-  const otaStayId = receipt.outcomes.find(outcome => outcome.source_id === '700006')!.stay_id!
+  const otaStayId = receipt.outcomes.find(outcome => outcome.source_id === '700006')!.booking_id!
   await page.goto(`/dashboard/${slug}/bookings/stay/${otaStayId}`)
   await expect(page.getByText('Payments, changes and cancellations for this stay are managed on', { exact: false })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Record payment', exact: true })).toHaveCount(0)
@@ -143,7 +143,7 @@ test('a host moves unpaid occupancy in batches, reviews manual-only homes and re
   await status(replay, 200)
   const repeated = await replay.json() as MigrationReceipt
   expect(repeated).toMatchObject({ imported: 0, existing: 6, failed: 0, remaining: 0 })
-  expect(repeated.outcomes.find(outcome => outcome.source_id === '700001')!.stay_id).toBe(stayId)
+  expect(repeated.outcomes.find(outcome => outcome.source_id === '700001')!.booking_id).toBe(stayId)
   await page.goto(path)
   await expect(page).toHaveURL(`${path}/upload`)
   await expect(page.getByText('Previous import', { exact: true })).toBeVisible()

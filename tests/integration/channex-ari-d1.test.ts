@@ -234,7 +234,7 @@ test('night changes on a connected home reach Channex, and what it took is on ea
     const held = channex.take()
     assert.deepEqual(held[0]!.values.map(value => [value.date_from, value.date_to, value.rate, value.min_stay_arrival, value.stop_sell]), [[day(10), day(11), '150.00', 2, false]])
     assert.deepEqual(held[1]!.values, [{ property_id: 'prop-1', room_type_id: 'room-1', date_from: day(10), date_to: day(11), availability: 0 }])
-    const cancelled = await cancelStay(db, env, manager, stay.id, { expected_version: stay.version })
+    const cancelled = await cancelStay(db, env, manager, stay.id, { version: stay.version })
     assert.deepEqual(cancelled.channel_push, { state: 'pushed', detail: null })
     // Only what changed goes: releasing a booking changes availability alone, in one call.
     assert.deepEqual(channex.take(), [
@@ -245,9 +245,9 @@ test('night changes on a connected home reach Channex, and what it took is on ea
     assert.equal(cancellationEvents.results.length, 1)
     const cancellationNights = await db.prepare('SELECT * FROM stay_nights WHERE organization_id = ? AND product_id = ? AND date >= ? AND date < ? ORDER BY date').bind(ORG, connected, day(10), day(12)).all()
     const cancellationLog = await log()
-    await assert.rejects(cancelStay(db, env, manager, stay.id, { expected_version: stay.version }), (error: { status?: number; data?: Record<string, unknown> }) => {
+    await assert.rejects(cancelStay(db, env, manager, stay.id, { version: stay.version }), (error: { status?: number; data?: Record<string, unknown> }) => {
       assert.equal(error.status, 409)
-      assert.partialDeepStrictEqual(error.data, { code: 'STAY_VERSION_CONFLICT', field: 'expected_version' })
+      assert.partialDeepStrictEqual(error.data, { code: 'STAY_VERSION_CONFLICT', field: 'version' })
       return true
     })
     assert.deepEqual(channex.take(), [])
@@ -255,12 +255,12 @@ test('night changes on a connected home reach Channex, and what it took is on ea
     assert.deepEqual(await db.prepare('SELECT * FROM bookings WHERE id = ?').bind(stay.id).first(), cancelledRow)
     assert.deepEqual((await db.prepare('SELECT * FROM stay_nights WHERE organization_id = ? AND product_id = ? AND date >= ? AND date < ? ORDER BY date').bind(ORG, connected, day(10), day(12)).all()).results, cancellationNights.results)
     // A replay repairs completion; Channex already confirmed these nights, so nothing is sent again.
-    const replayedCancellation = await cancelStay(db, env, manager, stay.id, { expected_version: cancelled.version })
+    const replayedCancellation = await cancelStay(db, env, manager, stay.id, { version: cancelled.version })
     assert.deepEqual(replayedCancellation.channel_push, { state: 'pushed', detail: null })
     assert.deepEqual(channex.take(), [])
     assert.deepEqual(await db.prepare('SELECT * FROM bookings WHERE id = ?').bind(stay.id).first(), cancelledRow)
     assert.deepEqual((await db.prepare("SELECT * FROM activity_entries WHERE organization_id = ? AND event_name = 'stay.cancelled' AND json_extract(payload_json, '$.entityId') = ? ORDER BY id").bind(ORG, stay.id).all()).results, cancellationEvents.results)
-    assert.deepEqual((await readStayCalendar(db, manager, { productId: connected, from: day(10), to: day(12) })).nights.map(night => [night.date, night.stay_id, night.available, night.channel]),
+    assert.deepEqual((await readStayCalendar(db, manager, { productId: connected, from: day(10), to: day(12) })).nights.map(night => [night.date, night.booking_id, night.available, night.channel]),
       [10, 11].map(offset => [day(offset), null, true, { state: 'pushed', detail: null }]))
 
     // A partial rejection is not success: the nights it names read needs_review; availability still goes.

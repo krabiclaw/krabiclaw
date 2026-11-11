@@ -522,7 +522,7 @@ test('a failed stay cancellation email retries its recorded content after displa
     const approval = await requestRefundAuthorization(db, principal, 'stay-cancellation-email-payment', null, 'cancel_booking')
     await approveRefundAuthorization(db, principal, approval.authorization_id)
     const boughtVersion = (await getStay(db, access, stay.id)).version
-    await cancelStay(db, env, access, stay.id, { expected_version: boughtVersion, authorization_id: approval.authorization_id, financial_writes_allowed: true })
+    await cancelStay(db, env, access, stay.id, { version: boughtVersion, authorization_id: approval.authorization_id, financial_writes_allowed: true })
     assert.equal((await getStay(db, access, stay.id)).status, 'cancelled')
     await assert.rejects(notifyStayCancelled(env, db, access.organizationId, stay.id, 'host', 0), (error: AggregateError) => {
       assert(error instanceof AggregateError)

@@ -33,7 +33,7 @@ export default defineHandler(async event=>{
   const access=await stayAccessFor(memberAccessPrincipal(organization,{env,event}))
   const failures:unknown[]=[]
   try {
-   await cancelStay(db,env,access,payment.subject_id!,{expected_version:stay.version,reason:authorization.note,authorization_id:body.authorization_id})
+   await cancelStay(db,env,access,payment.subject_id!,{version:stay.version,reason:authorization.note,authorization_id:body.authorization_id})
   } catch(error) {
    // A first cancellation must commit before money moves. An already approved
    // durable refund still completes when its cancelled stay's repair fails.
@@ -56,7 +56,7 @@ export default defineHandler(async event=>{
   if(failures.length===1&&failures[0] instanceof HTTPError&&failures[0].data?.committed===true)throw failures[0]
   if(failures.length||refunded.status==='rejected'){
    const reason=failures.map(error=>error instanceof Error?error.message:String(error)).join(' ')
-   throw new HTTPError({statusCode:503,message:`The stay was cancelled, but its completion failed. ${reason}`,data:{code:'POST_WRITE_COMPLETION_FAILED',field:'completion',committed:true,stay_id:payment.subject_id,payment_id:payment.id,reason,failures:failures.map(error=>error instanceof HTTPError&&error.data?error.data:{reason:error instanceof Error?error.message:String(error)})},cause:new AggregateError(failures,reason)})
+   throw new HTTPError({statusCode:503,message:`The stay was cancelled, but its completion failed. ${reason}`,data:{code:'POST_WRITE_COMPLETION_FAILED',field:'completion',committed:true,booking_id:payment.subject_id,payment_id:payment.id,reason,failures:failures.map(error=>error instanceof HTTPError&&error.data?error.data:{reason:error instanceof Error?error.message:String(error)})},cause:new AggregateError(failures,reason)})
   }
   const submitted=refunded.value
   return jsonResponse(submitted)

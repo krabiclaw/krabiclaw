@@ -107,34 +107,34 @@ test('a reservation re-imported under a new Channex booking id updates its stay 
   try {
     const before: Booking = { id: 'bk-staging', property_id: 'prop-1', status: 'new', arrival: '2027-02-10', departure: '2027-02-13', amount: '300.00', revision: '', code: 'HMREIMPORT' }
     channex.revise('rev-staging', before, '2026-10-15T01:00:00Z')
-    const original = await applyBookingRevision(db, env, 'rev-staging') as { stay_id: string }
+    const original = await applyBookingRevision(db, env, 'rev-staging') as { booking_id: string }
     // After the cutover the new Channex account holds the same Airbnb reservation under its own booking id.
     const after: Booking = { ...before, id: 'bk-production', departure: '2027-02-14', amount: '400.00' }
     channex.revise('rev-production', after, '2026-10-20T01:00:00Z')
     const reimported = await applyBookingRevision(db, env, 'rev-production')
-    assert.deepEqual(reimported, { status: 'acknowledged', stay_id: original.stay_id, overbooked: false })
+    assert.deepEqual(reimported, { status: 'acknowledged', booking_id: original.booking_id, overbooked: false })
     assert.deepEqual((await db.prepare("SELECT id, external_booking_id, channel_booking_id, ends_at, total_minor, overbooked, version, revision_id FROM bookings WHERE owner = 'channel'").all()).results, [
       // Checkout is the home's 10:00 in Denver.
-      { id: original.stay_id, external_booking_id: 'bk-production', channel_booking_id: 'HMREIMPORT', ends_at: '2027-02-14T17:00:00.000Z', total_minor: 40_000, overbooked: 0, version: 2, revision_id: 'rev-production' },
+      { id: original.booking_id, external_booking_id: 'bk-production', channel_booking_id: 'HMREIMPORT', ends_at: '2027-02-14T17:00:00.000Z', total_minor: 40_000, overbooked: 0, version: 2, revision_id: 'rev-production' },
     ])
-    assert.deepEqual(await nights(db, original.stay_id), ['2027-02-10', '2027-02-11', '2027-02-12', '2027-02-13'])
+    assert.deepEqual(await nights(db, original.booking_id), ['2027-02-10', '2027-02-11', '2027-02-12', '2027-02-13'])
     // A revision of the old booking delivered late does not take the stay back.
     channex.superseded('rev-staging-late', before, '2026-10-16T01:00:00Z')
     await applyBookingRevision(db, env, 'rev-staging-late')
-    assert.deepEqual(await db.prepare('SELECT external_booking_id, version FROM bookings WHERE id = ?').bind(original.stay_id).first(), { external_booking_id: 'bk-production', version: 2 })
+    assert.deepEqual(await db.prepare('SELECT external_booking_id, version FROM bookings WHERE id = ?').bind(original.booking_id).first(), { external_booking_id: 'bk-production', version: 2 })
     // Nor does an older revision of a new booking id move a newer stay onto it.
     channex.revise('rev-stale', { ...before, id: 'bk-stale' }, '2026-10-19T01:00:00Z')
-    assert.deepEqual(await applyBookingRevision(db, env, 'rev-stale'), { status: 'acknowledged', stay_id: original.stay_id, overbooked: false })
-    assert.deepEqual((await db.prepare("SELECT id, external_booking_id, version FROM bookings WHERE owner = 'channel'").all()).results, [{ id: original.stay_id, external_booking_id: 'bk-production', version: 2 }])
+    assert.deepEqual(await applyBookingRevision(db, env, 'rev-stale'), { status: 'acknowledged', booking_id: original.booking_id, overbooked: false })
+    assert.deepEqual((await db.prepare("SELECT id, external_booking_id, version FROM bookings WHERE owner = 'channel'").all()).results, [{ id: original.booking_id, external_booking_id: 'bk-production', version: 2 }])
     // Later revisions arrive under the new id and keep updating the same stay.
     channex.revise('rev-production-cancel', { ...after, status: 'cancelled' }, '2026-10-21T01:00:00Z')
     await applyBookingRevision(db, env, 'rev-production-cancel')
-    assert.deepEqual(await db.prepare('SELECT status, external_booking_id FROM bookings WHERE id = ?').bind(original.stay_id).first(), { status: 'cancelled', external_booking_id: 'bk-production' })
-    assert.deepEqual(await nights(db, original.stay_id), [])
+    assert.deepEqual(await db.prepare('SELECT status, external_booking_id FROM bookings WHERE id = ?').bind(original.booking_id).first(), { status: 'cancelled', external_booking_id: 'bk-production' })
+    assert.deepEqual(await nights(db, original.booking_id), [])
     // Another reservation on the same nights is its own stay.
     channex.revise('rev-other', { ...before, id: 'bk-other', code: 'HMOTHER' }, '2026-10-21T02:00:00Z')
-    const other = await applyBookingRevision(db, env, 'rev-other') as { stay_id: string }
-    assert.notEqual(other.stay_id, original.stay_id)
+    const other = await applyBookingRevision(db, env, 'rev-other') as { booking_id: string }
+    assert.notEqual(other.booking_id, original.booking_id)
     // The database holds one stay per channel reservation, whatever writes it.
     await assert.rejects(db.prepare(`INSERT INTO bookings (id, organization_id, product_id, product_variant_id, starts_at, ends_at, timezone, party_size, adults, children, infants, policy_json, total_minor, currency, channel, owner, status, provider, external_booking_id, channel_booking_id)
       SELECT 'duplicate', organization_id, product_id, id, '2027-03-01', '2027-03-02', 'America/Denver', 1, 1, 0, 0, '{}', 100, 'USD', 'airbnb', 'channel', 'confirmed', 'channex', 'bk-duplicate', 'HMREIMPORT'
@@ -156,7 +156,7 @@ test('a channel booking lands, repeats and stale deliveries change nothing, an o
     channex.revise('rev-1', booking, '2026-10-15T01:00:00Z')
     const landed = await applyBookingRevision(db, env, 'rev-1')
     assert.equal(landed.status, 'acknowledged')
-    const stayId = (landed as { stay_id: string }).stay_id
+    const stayId = (landed as { booking_id: string }).booking_id
     const stored = await db.prepare(`SELECT b.channel, b.owner, b.status, b.overbooked, b.total_minor, b.currency, json_extract(r.payload_json, '$.guest.name') AS guest_name, b.adults, b.children, b.version, b.provider_updated_at
       FROM bookings b JOIN conversations r ON r.booking_id = b.id AND r.kind = 'booking' WHERE b.id = ?`).bind(stayId).first()
     assert.deepEqual(stored, { channel: 'airbnb', owner: 'channel', status: 'confirmed', overbooked: 0, total_minor: 45_050, currency: 'USD', guest_name: 'Lee Park', adults: 2, children: 1, version: 1, provider_updated_at: '2026-10-15T01:00:00Z' })
@@ -186,7 +186,7 @@ test('a channel booking lands, repeats and stale deliveries change nothing, an o
     channex.revise('rev-2', { ...booking, id: 'bk-2', arrival: '2027-02-02', departure: '2027-02-04' }, '2026-10-15T02:00:00Z')
     const overlap = await applyBookingRevision(db, env, 'rev-2')
     assert.deepEqual([overlap.status, (overlap as { overbooked: boolean }).overbooked], ['acknowledged', true])
-    assert.deepEqual(await nights(db, (overlap as { stay_id: string }).stay_id), [])
+    assert.deepEqual(await nights(db, (overlap as { booking_id: string }).booking_id), [])
 
     // Cancelling the first booking frees its nights; the stay is kept, cancelled.
     channex.revise('rev-3', { ...booking, status: 'cancelled', departure: '2027-01-14' }, '2026-10-15T03:00:00Z')
@@ -248,19 +248,19 @@ test('a moved guest takes the nights, turnover and messages to the new home whil
     await db.prepare(`INSERT INTO conversations (id, kind, organization_id, payload_json, last_message_at) VALUES ('thread-move', 'booking', ?, '{"guest":{"name":"Lee","email":"lee@example.test","phone":null},"ip_hash":null,"cancellation":{"token_hash":null,"expires_at":null,"used_at":null}}', '2026-10-15T00:00:00.000Z')`).bind(ORG).run()
     await db.prepare(`INSERT INTO channel_threads (provider, external_thread_id, organization_id, product_id, conversation_id, external_booking_id, provider_updated_at) VALUES ('channex', 'ext-thread', ?, ?, 'thread-move', 'bk-move', '2026-10-15T00:00:00Z')`).bind(ORG, productId).run()
     channex.revise('rev-move', booking, '2026-10-15T01:00:00Z')
-    const stayId = (await applyBookingRevision(db, env, 'rev-move') as { stay_id: string }).stay_id
+    const stayId = (await applyBookingRevision(db, env, 'rev-move') as { booking_id: string }).booking_id
     const landed = await getStay(db, access, stayId)
     assert.ok(landed.conversation_id, 'the guest has a conversation to be told in')
 
     // Without instructions the guest could not be told how to get in, so the move is refused and nothing changes.
-    await assert.rejects(moveStay(db, env, access, stayId, { expected_version: landed.version, product_id: annex }), /Add check-in instructions/)
+    await assert.rejects(moveStay(db, env, access, stayId, { version: landed.version, product_id: annex }), /Add check-in instructions/)
     assert.equal((await getStay(db, access, stayId)).product_id, productId)
     await db.prepare('UPDATE product_stay_configs SET check_in_instructions = ? WHERE product_id = ?').bind('Door code 1234', annex).run()
 
     const [option] = await listStayMoveOptions(db, access, stayId)
     assert.deepEqual([option!.product_id, option!.taken, option!.has_instructions], [annex, [], true])
 
-    const moved = await moveStay(db, env, access, stayId, { expected_version: landed.version, product_id: annex })
+    const moved = await moveStay(db, env, access, stayId, { version: landed.version, product_id: annex })
     assert.deepEqual([moved.product_id, moved.booked_product_id], [annex, productId])
     const claims = async () => (await db.prepare('SELECT product_id, date FROM stay_nights WHERE booking_id = ? ORDER BY date').bind(stayId).all()).results
     assert.deepEqual(await claims(), ['2027-03-10', '2027-03-11', '2027-03-12'].map(date => ({ product_id: annex, date })))
@@ -291,9 +291,9 @@ test('a moved guest takes the nights, turnover and messages to the new home whil
     // A home someone else holds cannot take the guest.
     await createStay(db, env, access, { product_id: productId, idempotency_key: 'later-host', check_in_date: '2027-03-20', check_out_date: '2027-03-22', adults: 1, guest_name: 'Later', total_minor: 100 })
     channex.revise('rev-other-home', { ...booking, id: 'bk-blocked', code: 'HMBLOCKED', arrival: '2027-03-12', departure: '2027-03-15' }, '2026-10-17T01:00:00Z')
-    const blocked = (await applyBookingRevision(db, env, 'rev-other-home') as { stay_id: string }).stay_id
+    const blocked = (await applyBookingRevision(db, env, 'rev-other-home') as { booking_id: string }).booking_id
     const blockedStay = await getStay(db, access, blocked)
-    await assert.rejects(moveStay(db, env, access, blocked, { expected_version: blockedStay.version, product_id: annex }), /not free for every night/)
+    await assert.rejects(moveStay(db, env, access, blocked, { version: blockedStay.version, product_id: annex }), /not free for every night/)
 
     channex.revise('rev-other-home-cancel', { ...booking, id: 'bk-blocked', code: 'HMBLOCKED', status: 'cancelled', arrival: '2027-03-12', departure: '2027-03-15' }, '2026-10-18T01:00:00Z')
     await applyBookingRevision(db, env, 'rev-other-home-cancel')
@@ -301,14 +301,14 @@ test('a moved guest takes the nights, turnover and messages to the new home whil
     // The guest is told how to get in again, so the listing needs its instructions too.
     await db.prepare('UPDATE product_stay_configs SET check_in_instructions = ? WHERE product_id = ?').bind('Door code 5678', productId).run()
     const current = await getStay(db, access, stayId)
-    const undone = await moveStay(db, env, access, stayId, { expected_version: current.version, product_id: productId })
+    const undone = await moveStay(db, env, access, stayId, { version: current.version, product_id: productId })
     assert.deepEqual([undone.product_id, undone.booked_product_id], [productId, null])
     assert.deepEqual((await claims()).map(row => (row as { product_id: string }).product_id), Array(4).fill(productId))
     assert.equal((await db.prepare('SELECT status FROM tasks WHERE dedupe_key = ?').bind(`stay-ready:${stayId}:${annex}`).first<{ status: string }>())!.status, 'cancelled')
 
     // A stay booked directly has no listing to go back to: its new home still gets the job.
     const direct = await createStay(db, env, access, { product_id: productId, idempotency_key: 'direct-move', check_in_date: '2027-06-01', check_out_date: '2027-06-03', adults: 1, guest_name: 'Direct Guest', total_minor: 10_000 })
-    await moveStay(db, env, access, direct.id, { expected_version: direct.version, product_id: annex })
+    await moveStay(db, env, access, direct.id, { version: direct.version, product_id: annex })
     assert.equal((await db.prepare('SELECT status FROM tasks WHERE dedupe_key = ?').bind(`stay-ready:${direct.id}:${annex}`).first<{ status: string }>())?.status, 'open')
   } finally {
     globalThis.fetch = realFetch

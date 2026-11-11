@@ -1278,7 +1278,7 @@ export async function notifyChannelStay(env: NotificationEnv, db: DbClient, orga
   [organizationId, terms.product_id, previous?.product_id ?? terms.product_id])
   const homeOf = (productId: string) => {
     const found = homes.find(home => home.product_id === productId)
-    if (!found) throw new HTTPError({ statusCode: 500, message: 'The channel stay names a home that no longer exists', data: { code: 'CHANNEL_STAY_HOME_MISSING', field: 'product_id', product_id: productId, stay_id: stay.id } })
+    if (!found) throw new HTTPError({ statusCode: 500, message: 'The channel stay names a home that no longer exists', data: { code: 'CHANNEL_STAY_HOME_MISSING', field: 'product_id', product_id: productId, booking_id: stay.id } })
     return found
   }
   const home = homeOf(terms.product_id)
@@ -1300,7 +1300,7 @@ export async function notifyChannelStay(env: NotificationEnv, db: DbClient, orga
   }
   const send = (template: string, message: MemberAlertMessage, memberMessage: MemberAlertMessage, whatsappTemplate?: WhatsAppTemplate) => notifyOwner(env, db, {
     organizationId, organizationName: studio, locationId: home.location_id, template, title: message.title,
-    payload: { stay_id: stay.id, revision_id: input.revisionId, deep_link: audience.stayUrl },
+    payload: { booking_id: stay.id, revision_id: input.revisionId, deep_link: audience.stayUrl },
     message, idempotencyKey: `notification:${eventKey}`, entity: { type: 'booking', id: stay.id }, deliveryEventKey: eventKey, stayId: stay.id,
     memberIds: audience.memberIds, memberAlert: { message: memberMessage, stayId: stay.id }, whatsappTemplate,
   })
@@ -1379,7 +1379,7 @@ export async function notifyStayBooked(env: NotificationEnv, db: DbClient, organ
     receiptUrl: organization.public_url ? `${organization.public_url.replace(/\/$/, '')}${formatTenantLocalePath('/bookings/stay', guest.locale, sourceLocale.locale)}?id=${encodeURIComponent(stay.conversation_id)}#${(await createReplayableReservationCancelToken(env.EMAIL_REPLY_SECRET ?? '', stay.conversation_id)).token}` : null,
   })
   const payload = {
-    stay_id: stay.id, guest_name: stay.guest_name, email: stay.guest_email, home: home.name, check_in_date: stay.check_in_date, check_out_date: stay.check_out_date,
+    booking_id: stay.id, guest_name: stay.guest_name, email: stay.guest_email, home: home.name, check_in_date: stay.check_in_date, check_out_date: stay.check_out_date,
     party_size: String(stay.adults + stay.children), organization_name: studio, deep_link: inboxUrl ?? '',
   }
   const guestEmail = await renderNotificationEmail(guestMessage, { platformDomain: getPlatformDomain(env) })
@@ -1471,7 +1471,7 @@ export async function notifyStayCancelled(env: NotificationEnv, db: DbClient, or
   const ownerInput = { ...recorded.owner, channel: null, arrival: audience.arrival, stayDates: { checkIn: stay.check_in_date, checkOut: stay.check_out_date } }
   const ownerMessage = stayCancelledMessage(ownerInput)
   const threadContext: DeliveryAnchor = { conversationId: stay.conversation_id, subject: { messageId: entry.id } }
-  const payload = { stay_id: stay.id, organization_name: recorded.email.fromName, deep_link: recorded.owner.replyUrl ?? '' }
+  const payload = { booking_id: stay.id, organization_name: recorded.email.fromName, deep_link: recorded.owner.replyUrl ?? '' }
   const results = await Promise.allSettled([
     ...(by === 'guest' ? [notifyOwner(env, db, {
       organizationId, organizationName: recorded.email.fromName, locationId: recorded.location_id, template: 'stay_cancelled', payload,

@@ -79,7 +79,7 @@ export interface MigrationRow {
   stay: MigrationStay | null
   state: 'ready' | 'existing' | 'skipped' | 'needs_attention'
   issues: string[]
-  existing_stay_id: string | null
+  existing_booking_id: string | null
   /** True only when the canonical stay has this Hostaway idempotency key. */
   imported_source: boolean
   skip_reason: string | null
@@ -103,7 +103,7 @@ export interface MigrationReceipt {
   failed: number
   remaining: number
   has_more: boolean
-  outcomes: Array<{ source_id: string; stay_id: string | null; state: 'imported' | 'existing' | 'skipped' | 'failed' | 'pending'; detail: string | null; committed: boolean; completion_pending?: boolean }>
+  outcomes: Array<{ source_id: string; booking_id: string | null; state: 'imported' | 'existing' | 'skipped' | 'failed' | 'pending'; detail: string | null; committed: boolean; completion_pending?: boolean }>
   blocks: Array<{ product_id: string; from: string; to: string; state: 'saved' | 'failed' | 'pending'; detail: string | null; committed: boolean }>
 }
 export interface MigrationVerification {

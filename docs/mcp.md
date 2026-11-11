@@ -323,7 +323,7 @@ availability on the home's connected Airbnb listing through Channex. A failed
 channel update returns `CHANNEL_PUSH_FAILED` with `committed:true`: the stay was
 saved. Read the calendar and channel state before retrying with the same
 `idempotency_key`. `update_stay` and `cancel_product_booking` change only
-host-owned stays under their current `expected_version`; channel-owned stays
+host-owned stays under their current `version`; channel-owned stays
 change on their source channel. `record_stay_payment` records external money,
 including a negative refund record, and `delete_stay_payment` removes a mistaken
 record. Neither moves money. MCP cancellation cannot execute an online refund;

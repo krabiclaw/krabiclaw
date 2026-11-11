@@ -349,7 +349,7 @@ export async function listAgenda(
     if (!stay.product_name?.trim()) throw new Error(`Home ${stay.product_id} has no name for this agenda`)
     // Only a channel's conversation may name no guest. A member reads the guest as their turnover names them: by first name.
     const named = staff ? stayGuestFirstName(stay.guest_name) ?? '' : stay.guest_name ?? ''
-    if (!named && (stay.owner !== 'channel' || stay.channel === 'direct')) throw new HTTPError({ statusCode: 500, message: `Stay ${stay.id} has no guest name`, data: { code: 'INVALID_STAY', field: 'guest_name', stay_id: stay.id } })
+    if (!named && (stay.owner !== 'channel' || stay.channel === 'direct')) throw new HTTPError({ statusCode: 500, message: `Stay ${stay.id} has no guest name`, data: { code: 'INVALID_STAY', field: 'guest_name', booking_id: stay.id } })
     const guest = named || `Name not provided by ${STAY_CHANNEL_LABELS[stay.channel]}`
     // Rule 1: a channel stay that landed on held nights shows flagged wherever its arrival and
     // departure do, for the managers who resolve it; a member's turnover carries no booking state.

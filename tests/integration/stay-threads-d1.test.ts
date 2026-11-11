@@ -82,26 +82,26 @@ test('a stay opens its guest conversation in the one inbox', async () => {
     // With neither an email nor a phone the guest still has their conversation, by name; contact added later is its contact.
     const bo = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'bo', check_in_date: day(10), check_out_date: day(12), adults: 1, guest_name: 'Bo', total_minor: 30_000 })
     assert.deepEqual(JSON.parse((await thread(bo.conversation_id))!.payload_json), { guest: { name: 'Bo', email: null, phone: null }, ...unanswered })
-    const boWithEmail = await updateStay(db, env, manager, bo.id, { expected_version: bo.version, guest_email: 'bo@example.test' })
+    const boWithEmail = await updateStay(db, env, manager, bo.id, { version: bo.version, guest_email: 'bo@example.test' })
     assert.equal(boWithEmail.conversation_id, bo.conversation_id)
     assert.equal((await thread(boWithEmail.conversation_id))?.kind, 'booking')
     // A further edit does not open a second one, and the thread takes the stay's current guest.
-    const boAgain = await updateStay(db, env, manager, bo.id, { expected_version: boWithEmail.version, guest_name: 'Bo Lee', guest_phone: '+61491570153' })
+    const boAgain = await updateStay(db, env, manager, bo.id, { version: boWithEmail.version, guest_name: 'Bo Lee', guest_phone: '+61491570153' })
     assert.equal(boAgain.conversation_id, bo.conversation_id)
     assert.deepEqual(JSON.parse((await thread(boAgain.conversation_id))!.payload_json).guest, { name: 'Bo Lee', email: 'bo@example.test', phone: '+61491570153' })
     // Clearing a contact is reflected exactly, the last one too: the guest is known by name.
-    const boByEmail = await updateStay(db, env, manager, bo.id, { expected_version: boAgain.version, guest_phone: null })
+    const boByEmail = await updateStay(db, env, manager, bo.id, { version: boAgain.version, guest_phone: null })
     assert.deepEqual(JSON.parse((await thread(boByEmail.conversation_id))!.payload_json).guest, { name: 'Bo Lee', email: 'bo@example.test', phone: null })
-    const boByPhone = await updateStay(db, env, manager, bo.id, { expected_version: boByEmail.version, guest_email: null, guest_phone: '+61491570153' })
+    const boByPhone = await updateStay(db, env, manager, bo.id, { version: boByEmail.version, guest_email: null, guest_phone: '+61491570153' })
     assert.deepEqual(JSON.parse((await thread(boByPhone.conversation_id))!.payload_json).guest, { name: 'Bo Lee', email: null, phone: '+61491570153' })
-    const boByName = await updateStay(db, env, manager, bo.id, { expected_version: boByPhone.version, guest_phone: null })
+    const boByName = await updateStay(db, env, manager, bo.id, { version: boByPhone.version, guest_phone: null })
     assert.deepEqual(await db.prepare("SELECT json_extract(r.payload_json, '$.guest') AS guest, r.id AS conversation_id, b.version FROM bookings b JOIN conversations r ON r.booking_id = b.id AND r.kind = 'booking' WHERE b.id = ?").bind(bo.id).first(), {
       guest: JSON.stringify({ name: 'Bo Lee', email: null, phone: null }), conversation_id: bo.conversation_id, version: boByName.version,
     })
     // Two edits race on one version, one bringing an address and one not. Whichever is saved, the
     // thread follows the stay as saved, never the losing edit's.
     const cy = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'cy', check_in_date: day(14), check_out_date: day(16), adults: 1, guest_name: 'Cy', total_minor: 30_000 })
-    const raced = await Promise.allSettled([{ adults: 2 }, { guest_email: 'cy@example.test' }].map(change => updateStay(db, env, manager, cy.id, { expected_version: cy.version, ...change })))
+    const raced = await Promise.allSettled([{ adults: 2 }, { guest_email: 'cy@example.test' }].map(change => updateStay(db, env, manager, cy.id, { version: cy.version, ...change })))
     assert.deepEqual(raced.map(result => result.status).sort(), ['fulfilled', 'rejected'])
     const saved = await db.prepare("SELECT b.adults, json_extract(r.payload_json, '$.guest.email') AS guest_email, r.id AS conversation_id, b.version FROM bookings b JOIN conversations r ON r.booking_id = b.id AND r.kind = 'booking' WHERE b.id = ?").bind(cy.id).first<{ adults: number; guest_email: string | null; conversation_id: string; version: number }>()
     assert.ok(saved)
@@ -109,7 +109,7 @@ test('a stay opens its guest conversation in the one inbox', async () => {
     assert.deepEqual([saved.adults, saved.guest_email], saved.guest_email === null ? [2, null] : [1, 'cy@example.test'])
     assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM conversations WHERE json_extract(payload_json, '$.guest.name') = 'Cy'").first('n'), 1)
     // Add the address only if its racing edit lost.
-    if (saved.guest_email === null) await updateStay(db, env, manager, cy.id, { expected_version: saved.version, guest_email: 'cy@example.test' })
+    if (saved.guest_email === null) await updateStay(db, env, manager, cy.id, { version: saved.version, guest_email: 'cy@example.test' })
     assert.deepEqual(await db.prepare("SELECT json_extract(r.payload_json, '$.guest.email') AS guest_email, r.id AS conversation_id FROM bookings b JOIN conversations r ON r.booking_id = b.id AND r.kind = 'booking' WHERE b.id = ?").bind(cy.id).first(), { guest_email: 'cy@example.test', conversation_id: cy.conversation_id })
 
     // A booking lands as a stay, not as a conversation: until someone writes, the inbox does not list it.

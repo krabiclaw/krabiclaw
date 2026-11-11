@@ -443,7 +443,7 @@ async function undoMove() {
   if (!value?.booked_product_id) return
   if (!await confirmDialog.open({ title: 'Undo this move', description: `The guest goes back to ${value.booked_home_name} and a message with its address and entry details is queued.`, confirmLabel: 'Undo move', cancelLabel: 'Keep the move' })) return
   await run('undo_move', async () => {
-    await dashboardApi(`/api/dashboard/stays/${encodeURIComponent(value.id)}/move`, { method: 'POST', validate: isMovedStayResponse, body: { expected_version: value.version, product_id: value.booked_product_id } })
+    await dashboardApi(`/api/dashboard/stays/${encodeURIComponent(value.id)}/move`, { method: 'POST', validate: isMovedStayResponse, body: { version: value.version, product_id: value.booked_product_id } })
     toast.add(STAY_MOVE_MESSAGE_QUEUED)
   }, 'The move could not be undone.')
 }
@@ -483,7 +483,7 @@ async function cancel() {
   busy.value = 'cancel'
   actionError.value = null
   try {
-    await dashboardApi(`/api/dashboard/stays/${encodeURIComponent(value.id)}/cancel`, { method: 'POST', validate: isStay, body: { expected_version: value.version } })
+    await dashboardApi(`/api/dashboard/stays/${encodeURIComponent(value.id)}/cancel`, { method: 'POST', validate: isStay, body: { version: value.version } })
     await refresh()
   } catch (cause) {
     const approval = isRecord(cause) && isRecord(cause.data) && isRecord(cause.data.data) && typeof cause.data.data.financial_approval_url === 'string' ? cause.data.data.financial_approval_url : null

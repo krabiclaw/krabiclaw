@@ -20,7 +20,7 @@ export const SUBMISSIONS_TOOLS: McpToolDefinition[] = [
       idempotency_key: { type: 'string', minLength: 1, maxLength: 200 },
     },
     required: ['name', 'email', 'source', 'idempotency_key'],
-    outputSchema: { type: 'object', properties: { success: { const: true }, request_id: { type: 'string' }, replayed: { type: 'boolean' }, answers: formAnswerSnapshotsJsonSchema() }, required: ['success', 'request_id', 'replayed', 'answers'] },
+    outputSchema: { type: 'object', properties: { success: { const: true }, conversation_id: { type: 'string' }, replayed: { type: 'boolean' }, answers: formAnswerSnapshotsJsonSchema() }, required: ['success', 'conversation_id', 'replayed', 'answers'] },
   }),
 ]
 

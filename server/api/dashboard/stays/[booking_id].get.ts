@@ -10,7 +10,7 @@ import { getGuestRequest } from '~/server/domain/requests'
 export default defineHandler(async (event) => {
   const { env, db, organization } = await getDashboardMemberContext(event, {})
   const access = await stayAccessFor(memberAccessPrincipal(organization, { env, event }))
-  const stayId = getRouterParam(event, 'stayId') ?? ''
+  const stayId = getRouterParam(event, 'booking_id') ?? ''
   if (!access.manage) return jsonResponse({ stay: await getStay(db, access, stayId), manage: false })
   const stay = await getStay(db, access, stayId)
   const conversation = await getGuestRequest(db, stay.conversation_id, organization.id, 'booking')

@@ -290,19 +290,19 @@ const homeRows = computed<GridRow[]>(() => {
     .map(({ home, nights }) => {
       const bars: GridBar[] = []
       nights.forEach((night, index) => {
-        const holder = night.stay_id ?? (night.calendar ? `calendar:${night.calendar}` : null)
+        const holder = night.booking_id ?? (night.calendar ? `calendar:${night.calendar}` : null)
         if (!holder) return
         const last = bars.at(-1)
         if (last?.key.startsWith(`${holder}:`) && last.column + last.span === index + 1) { last.span += 1; return }
-        if (!night.stay_id) {
+        if (!night.booking_id) {
           const label = STAY_CHANNEL_LABELS[night.calendar!]
           bars.push({ key: `${holder}:${night.date}`, date: night.date, stayId: null, channel: night.calendar, column: index + 1, span: 1, label, title: `Unavailable from ${label}`, to: homeTo(home.product_id, night.date) })
           return
         }
-        const stay = stays.get(night.stay_id)
+        const stay = stays.get(night.booking_id)
         const label = stay ? `${guestName(stay)} · ${guestCount(stay)}` : 'Reserved'
-        bars.push({ key: `${holder}:${night.date}`, date: night.date, stayId: night.stay_id, channel: stay?.channel ?? null, column: index + 1, span: 1, label,
-          to: { path: `/dashboard/${orgSlug}/calendar/stay/${encodeURIComponent(night.stay_id)}`, query: route.query },
+        bars.push({ key: `${holder}:${night.date}`, date: night.date, stayId: night.booking_id, channel: stay?.channel ?? null, column: index + 1, span: 1, label,
+          to: { path: `/dashboard/${orgSlug}/calendar/stay/${encodeURIComponent(night.booking_id)}`, query: route.query },
           title: stay ? `${[label, ...(stay.channel ? [STAY_CHANNEL_LABELS[stay.channel]] : [])].join(' · ')} · ${formatCalendarDate(stay.check_in_date, 'en', { month: 'short', day: 'numeric' })} – ${formatCalendarDate(stay.check_out_date, 'en', { month: 'short', day: 'numeric' })}` : label })
       })
       const gaps = unbookableGaps(nights)
@@ -359,7 +359,7 @@ function freeLabel(home: Home, night: StayNight) {
 /** A night the channel has not confirmed: still queued for it, or refused and needing review. */
 const channelState = (night: StayNight) => night.channel?.state === 'pending' || night.channel?.state === 'needs_review' ? night.channel.state : null
 function nightTitle(home: Home, night: StayNight, gap?: string) {
-  const state = night.stay_id ? 'Booked' : night.held_until ? 'Checkout hold' : night.calendar ? `Unavailable from ${STAY_CHANNEL_LABELS[night.calendar]}` : night.closed ? 'Blocked' : 'Available'
+  const state = night.booking_id ? 'Booked' : night.held_until ? 'Checkout hold' : night.calendar ? `Unavailable from ${STAY_CHANNEL_LABELS[night.calendar]}` : night.closed ? 'Blocked' : 'Available'
   const note = channelNote(night)
   return `${home.internal_name} · ${formatCalendarDate(night.date, 'en', { weekday: 'short', month: 'short', day: 'numeric' })} · ${state} · ${price(home, night)}${gap ? ` · ${gap}` : ''}${note ? ` · ${note}` : night.channel?.state === 'pushed' ? ' · On Airbnb' : ''}`
 }

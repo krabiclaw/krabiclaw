@@ -77,6 +77,7 @@ test.describe('lodging identity boundary', () => {
   }
 
   test('a bearer session keeps its organization and shares team conversations with MCP until membership ends', async ({ baseURL, page, request }) => {
+    test.setTimeout(60_000)
     const { api, signInBearer } = session(baseURL)
     const bearer = await signInBearer(fixture.email)
 

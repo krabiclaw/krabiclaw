@@ -54,7 +54,7 @@ async function save() {
   error.value = ''
   try {
     await api(`/api/dashboard/stays/${encodeURIComponent(stayId)}/move`, {
-      method: 'POST', body: { expected_version: stay.version, product_id: selected.value },
+      method: 'POST', body: { version: stay.version, product_id: selected.value },
       validate: isMovedStayResponse,
     })
     toast.add(STAY_MOVE_MESSAGE_QUEUED)
