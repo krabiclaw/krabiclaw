@@ -57,6 +57,10 @@ jobs:
       github.event_name == 'pull_request'
       && !(github.base_ref == 'main' && github.head_ref == 'staging')
     runs-on: ubuntu-latest
+    container:
+      # Match @playwright/test in yarn.lock so the runner already has its browsers and libraries.
+      image: mcr.microsoft.com/playwright:v1.64.0-noble@sha256:06a9939e57531807f8d5fd76ce44b53165ffb7d7501d87ab10e285c20b1e971f
+      options: --user 1001
     timeout-minutes: 180
     permissions:
       contents: read
@@ -98,9 +102,6 @@ jobs:
           key: yarn-${{ runner.os }}-${{ hashFiles('yarn.lock') }}
           restore-keys: yarn-${{ runner.os }}-
       - run: corepack yarn install --immutable
-      - run: &install_browsers |
-          printf 'https://archive.ubuntu.com/ubuntu/\tpriority:1\nhttps://security.ubuntu.com/ubuntu/\tpriority:2\n' | sudo tee /etc/apt/apt-mirrors.txt > /dev/null
-          corepack yarn playwright install --with-deps chromium webkit
       # playwright.config.ts prepares an empty local D1 and the build, and its
       # global setup seeds the synthetic businesses through the app's own
       # boundaries (tests/e2e/seed). No production data reaches a pull request.
@@ -173,7 +174,9 @@ jobs:
           key: yarn-${{ runner.os }}-${{ hashFiles('yarn.lock') }}
           restore-keys: yarn-${{ runner.os }}-
       - run: corepack yarn install --immutable
-      - run: *install_browsers
+      - run: &install_browsers |
+          printf 'https://archive.ubuntu.com/ubuntu/\tpriority:1\nhttps://security.ubuntu.com/ubuntu/\tpriority:2\n' | sudo tee /etc/apt/apt-mirrors.txt > /dev/null
+          corepack yarn playwright install --with-deps chromium webkit
       - name: Build staging Worker
         run: yarn build
       - name: Capture Nuxt build ID
