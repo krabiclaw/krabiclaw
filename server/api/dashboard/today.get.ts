@@ -24,17 +24,17 @@ export default defineHandler(async (event) => {
   const [list, assignees, opportunities, reservations] = await Promise.all([
     listTasks(db, viewer, query, now),
     listTaskAssignees(db, viewer),
-    viewer.manage ? listOpportunities(db, principal, { now, locationId: query.locationId }) : null,
+    viewer.manage ? listOpportunities(db, principal, { now, locationId: query.location_id }) : null,
     // A task filter shows those tasks alone.
     query.kind ? [] : listTodayReservations(db, organization.id, { range: query.range, vertical: organization.vertical, organizationSlug: organization.slug,
-      principal: { env, membership: organization }, locationId: query.locationId }, now),
+      principal: { env, membership: organization }, locationId: query.location_id }, now),
   ])
-  const suggestions = new Map((opportunities?.opportunities ?? []).flatMap(opportunity => opportunity.requestId ? [[opportunity.requestId, opportunity]] : []))
-  const cards = reservations.map(card => ({ ...card, suggestion: card.requestId ? suggestions.get(card.requestId) ?? null : null }))
+  const suggestions = new Map((opportunities?.opportunities ?? []).flatMap(opportunity => opportunity.conversation_id ? [[opportunity.conversation_id, opportunity]] : []))
+  const cards = reservations.map(card => ({ ...card, suggestion: card.conversation_id ? suggestions.get(card.conversation_id) ?? null : null }))
   // A guest's reply about a stay on a card here is drawn once, by the card.
-  const carded = new Set(cards.flatMap(card => card.stayId ? [card.stayId] : []))
+  const carded = new Set(cards.flatMap(card => card.kind === 'stay' && card.booking_id ? [card.booking_id] : []))
   const tasks = list.sections.map(section => ({ ...section, tasks: section.tasks.map(task => {
-    if (!task.reservation || !task.stayId || !carded.has(task.stayId)) return task
+    if (!task.reservation || !task.booking_id || !carded.has(task.booking_id)) return task
     const { reservation: _drawnByCard, ...compact } = task
     return compact
   }) }))
@@ -42,9 +42,9 @@ export default defineHandler(async (event) => {
     reservations: { title: todayReservationsTitle(cards.length, query.range, organization.vertical), cards },
     tasks,
     // A booking's suggestion is on its card; the rest are Today's.
-    opportunities: query.range === 'today' ? (opportunities?.opportunities ?? []).filter(opportunity => opportunity.requestId === null) : [],
-    opportunityIssues: query.range === 'today' ? opportunities?.issues ?? [] : [],
-    assignees, resolvedAt: list.resolvedAt,
+    opportunities: query.range === 'today' ? (opportunities?.opportunities ?? []).filter(opportunity => opportunity.conversation_id === null) : [],
+    opportunity_issues: query.range === 'today' ? opportunities?.issues ?? [] : [],
+    assignees, resolved_at: list.resolved_at,
   }
   return jsonResponse(finalizeRequestMetrics(event, 'dashboard-today', today), { headers: { 'cache-control': 'private, no-store' } })
 })

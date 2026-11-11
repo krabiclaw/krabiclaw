@@ -1,18 +1,9 @@
-import { getSourceLocale } from '~/server/utils/organization-locales'
 import { CONTENT_BLOCK_TYPES } from '~/shared/content-registries'
 import { pageEditorPath } from '~/server/utils/dashboard-links'
 import type { McpToolDefinition } from './shared'
-import { contentBlockDataInputSchema, contentBlockMediaInputRef, contentBlockObject, contentBlockTypeBranches, contentBlockUpdatedAtInput, locationReservationConfigObject, locationReservationConfigWriteSchema, pageInfoObject, paginationInputSchema, renderedBookingPolicySummaryObject, organizationTool, workspaceContextObject } from './shared'
+import { contentBlockDataInputSchema, contentBlockMediaInputRef, contentBlockObject, contentBlockTypeBranches, contentBlockUpdatedAtInput, pageInfoObject, paginationInputSchema, organizationTool } from './shared'
 import { HTTPError } from 'nitro';
 import type { McpExecutorContext } from './execution'
-import {
-  DEFAULT_RESERVATION_DURATION_MINUTES,
-  requireLocationReservationConfig,
-  renderBookingPolicySummary,
-  reservationPolicySummarySource,
-  upsertLocationReservationConfig,
-  validateLocationReservationConfigPatch,
-} from '~/server/utils/reservations'
 import {
   createTenantPage,
   deleteTenantPage,
@@ -37,7 +28,7 @@ import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-reso
 import { refreshSocialCard } from '~/server/utils/social-card'
 import { renderStructuredResponse } from '~/server/utils/mcp-render'
 import { paginateMcpCollection } from '~/server/utils/mcp-pagination'
-import { NOT_HANDLED, omit, mutationContextPayload, optionalString, requiredString, rethrowAsInvalidParams } from './execution'
+import { NOT_HANDLED, optionalString, requiredString, rethrowAsInvalidParams } from './execution'
 
 // Page writes provide complete required metadata; omitted optional values retain
 // their stored values on update.
@@ -45,9 +36,9 @@ export const TENANT_PAGE_METADATA_SCHEMA = {
   path: { type: 'string', description: 'The saved page path. A page keeps this address when its content or title changes.' },
   title: { type: 'string', description: "The page's name, e.g. About. The site name is appended to the browser title. Always sent in full — an omitted title is not kept." },
   summary: { type: ['string', 'null'], description: 'Omit to preserve on update; null clears it.' },
-  pageType: { type: 'string', enum: ['custom', 'recipe', 'legal', 'system'], description: "The page's type. Send the page_type from the last read unless you are changing it." },
+  page_type: { type: 'string', enum: ['custom', 'recipe', 'legal', 'system'], description: "The page's type. Send the page_type from the last read unless you are changing it." },
   recipe: { type: ['string', 'null'], description: 'The site section this page fills, or null for a page that fills none. Send the recipe from the last read unless you are changing it; an omitted recipe is not kept.' },
-  sortOrder: { type: 'number', description: "The page's position in the site's page list. Send the sort_order from the last read unless you are reordering." },
+  sort_order: { type: 'number', description: "The page's position in the site's page list. Send the sort_order from the last read unless you are reordering." },
 }
 
 const TENANT_PAGE_BLOCK_PROPERTIES = {
@@ -153,11 +144,11 @@ export const CONTENT_TOOLS: McpToolDefinition[] = [
       minimumRole: 'admin',
       inputSchema: {
         block_id: { type: 'string' },
-        expected_updated_at: { type: 'string', description: 'The block\'s updated_at from the last read.' },
+        updated_at: { type: 'string', description: 'The block\'s updated_at from the last read.' },
         data: { ...CONTENT_BLOCK_WRITE_SCHEMA.data, description: 'Complete replacement data; omitted fields are removed.' },
         media: { ...CONTENT_BLOCK_WRITE_SCHEMA.media, description: 'Omit to retain existing placements; supply the complete array to replace them.' },
       },
-      required: ['block_id', 'expected_updated_at', 'data'],
+      required: ['block_id', 'updated_at', 'data'],
       outputSchema: CONTENT_BLOCKS_OUTPUT,
     }),
   organizationTool({
@@ -167,9 +158,9 @@ export const CONTENT_TOOLS: McpToolDefinition[] = [
       minimumRole: 'admin',
       inputSchema: {
         block_id: { type: 'string' },
-        expected_updated_at: { type: 'string', description: 'The block\'s updated_at from the last read.' },
+        updated_at: { type: 'string', description: 'The block\'s updated_at from the last read.' },
       },
-      required: ['block_id', 'expected_updated_at'],
+      required: ['block_id', 'updated_at'],
       outputSchema: CONTENT_BLOCKS_OUTPUT,
     }),
   organizationTool({
@@ -224,9 +215,9 @@ export const CONTENT_TOOLS: McpToolDefinition[] = [
         ...TENANT_PAGE_METADATA_SCHEMA,
         path: { ...TENANT_PAGE_METADATA_SCHEMA.path, description: 'New unused path in this language. An occupied path or redirect is refused; creation does not move an existing page.' },
         summary: { ...TENANT_PAGE_METADATA_SCHEMA.summary, description: 'Summary of the new page; null means no summary.' },
-        pageType: { ...TENANT_PAGE_METADATA_SCHEMA.pageType, description: 'Type of a new source page. A language version inherits its source page’s type; omit this field or supply the same type.' },
+        page_type: { ...TENANT_PAGE_METADATA_SCHEMA.page_type, description: 'Type of a new source page. A language version inherits its source page’s type; omit this field or supply the same type.' },
         recipe: { ...TENANT_PAGE_METADATA_SCHEMA.recipe, description: 'Template section a new source page fills, or null for none. A language version inherits its source page’s recipe when omitted; an explicit value, including null, must match the source.' },
-        sortOrder: { ...TENANT_PAGE_METADATA_SCHEMA.sortOrder, description: 'Position of a new source page in the site’s page list. Language versions inherit the source page’s position and must omit this field.' },
+        sort_order: { ...TENANT_PAGE_METADATA_SCHEMA.sort_order, description: 'Position of a new source page in the site’s page list. Language versions inherit the source page’s position and must omit this field.' },
         blocks: { ...TENANT_PAGE_BLOCKS_SCHEMA, description: 'Ordered blocks for the new page. Existing pages and their blocks are not replaced. Block data contains no asset IDs or delivery URLs; use each block’s media field for its saved media placements.' },
       },
       required: ['path', 'title', 'blocks'],
@@ -240,12 +231,12 @@ export const CONTENT_TOOLS: McpToolDefinition[] = [
       inputSchema: {
         variant_id: { type: 'string' },
         product_id: { type: ['string', 'null'], description: 'Explicit canonical Product binding on the source page only. Omit to retain; null unbinds. Translations inherit the source binding; slugs never imply a relationship.' },
-        expected_updated_at: { type: 'string' },
+        updated_at: { type: 'string' },
         ...TENANT_PAGE_METADATA_SCHEMA,
         blocks: TENANT_PAGE_BLOCKS_SCHEMA,
         removed_block_ids: { type: 'array', items: { type: 'string' }, description: 'Exact existing block IDs omitted from the replacement; omit when none are removed.' },
       },
-      required: ['variant_id', 'expected_updated_at', 'path', 'title', 'pageType', 'recipe', 'sortOrder', 'blocks'],
+      required: ['variant_id', 'updated_at', 'path', 'title', 'page_type', 'recipe', 'sort_order', 'blocks'],
       outputSchema: TENANT_PAGE_LIFECYCLE_OUTPUT,
     }),
   organizationTool({
@@ -255,9 +246,9 @@ export const CONTENT_TOOLS: McpToolDefinition[] = [
       minimumRole: 'admin',
       inputSchema: {
         variant_id: { type: 'string' },
-        expected_updated_at: { type: 'string', description: 'The document timestamp from the last read, so a page edited since is refused rather than silently removed.' },
+        updated_at: { type: 'string', description: 'The document timestamp from the last read, so a page edited since is refused rather than silently removed.' },
       },
-      required: ['variant_id', 'expected_updated_at'],
+      required: ['variant_id', 'updated_at'],
       outputSchema: {
         type: 'object',
         properties: {
@@ -271,55 +262,6 @@ export const CONTENT_TOOLS: McpToolDefinition[] = [
           },
         },
         required: ['deleted'],
-      },
-    }),
-  organizationTool({
-      name: 'get_reservation_policy',
-      description: 'Read one location’s table reservation settings and guest-facing policy summary. Product session bookings use get_product for their separate configuration.',
-      domain: 'content',
-      minimumRole: 'admin',
-      inputSchema: {
-        location_id: { type: 'string' },
-        locale: { type: 'string' },
-      },
-      required: ['location_id'],
-      outputSchema: {
-        type: 'object',
-        properties: {
-          policy: locationReservationConfigObject,
-          summary: renderedBookingPolicySummaryObject,
-        },
-        required: ['policy', 'summary'],
-      },
-    }),
-  organizationTool({
-      name: 'update_reservation_policy',
-      description: 'Enable or update table reservations using the location’s saved hours, including the questions asked with each reservation. New setup defaults to two hours, unlimited capacity, no advance notice and no deposit. Use the current updated_at when amending it; omitted fields keep their value. Deposits need an amount, currency, tax treatment and ready Payments. Cancellation is not a setting: every reservation is free to cancel until 24 hours before the start. A class or consultation closes free cancellation at 24 hours or its own minimum notice, if longer (set_product_booking_config).',
-      domain: 'content',
-      minimumRole: 'admin',
-      inputSchema: {
-        expected_updated_at: { type: ["string", "null"], description: "Current policy updated_at; null when creating." },
-        location_id: { type: 'string' },
-        locale: { type: 'string' },
-        ...locationReservationConfigWriteSchema,
-        duration_minutes: { ...locationReservationConfigWriteSchema.duration_minutes, default: DEFAULT_RESERVATION_DURATION_MINUTES, description: 'Minutes per reservation. Defaults to 120 on setup; null restores that default. Omit to keep the current duration.' },
-        slot_capacity: { ...locationReservationConfigWriteSchema.slot_capacity, description: 'Guests per start time. Defaults to unlimited on setup; null removes the limit.' },
-        advance_notice_minutes: { ...locationReservationConfigWriteSchema.advance_notice_minutes, description: 'Required notice before the start. Defaults to zero on setup; null removes the rule.' },
-        deposit_required: { ...locationReservationConfigWriteSchema.deposit_required, description: 'Defaults to false on setup. Omit to keep the current requirement.' },
-      },
-      required: ['location_id', 'expected_updated_at'],
-      outputSchema: {
-        type: 'object',
-        properties: {
-          ok: { type: 'boolean' },
-          entity: { type: 'string', enum: ['reservation_policy'] },
-          location_id: { type: 'string' },
-          changed_fields: { type: 'array', items: { type: 'string' } },
-          updated_at: { type: 'string' },
-          context: workspaceContextObject,
-          summary: renderedBookingPolicySummaryObject,
-        },
-        required: ['ok', 'entity', 'location_id'],
       },
     }),
 ]
@@ -484,7 +426,7 @@ export async function handleContentTools(ctx: McpExecutorContext): Promise<unkno
           userId: organization.userId,
           data: {
             id: optionalString(args, "variant_id") ?? undefined,
-            pageId: optionalString(args, "page_id") ?? undefined,
+            page_id: optionalString(args, "page_id") ?? undefined,
             locale: optionalString(args, "locale") ?? undefined,
             path: requiredString(args, "path"),
             title: requiredString(args, "title"),
@@ -492,9 +434,9 @@ export async function handleContentTools(ctx: McpExecutorContext): Promise<unkno
             // Omitted is omitted: a translation takes its identity from the
             // source page, and a null here would be read as stating a
             // different one.
-            pageType: (optionalString(args, "pageType") ?? undefined) as "custom" | "recipe" | "legal" | "system" | undefined,
+            page_type: (optionalString(args, "page_type") ?? undefined) as "custom" | "recipe" | "legal" | "system" | undefined,
             recipe: args.recipe === undefined ? undefined : nullableStringArg(args, "recipe", null),
-            sortOrder: typeof args.sortOrder === 'number' ? args.sortOrder : undefined,
+            sort_order: typeof args.sort_order === 'number' ? args.sort_order : undefined,
             blocks: args.blocks,
           },
           env: organization.env,
@@ -514,15 +456,15 @@ export async function handleContentTools(ctx: McpExecutorContext): Promise<unkno
           userId: organization.userId,
           scope: { organizationId: organization.organizationId},
           data: {
-            productId: args.product_id === undefined ? undefined : requiredNullableString(args, "product_id"),
+            product_id: args.product_id === undefined ? undefined : requiredNullableString(args, "product_id"),
             path: requiredString(args, "path"),
             title: requiredString(args, "title"),
             summary: args.summary === undefined ? page.summary : nullableStringArg(args, "summary", null),
-            pageType: requiredString(args, "pageType") as "custom" | "recipe" | "legal" | "system",
+            page_type: requiredString(args, "page_type") as "custom" | "recipe" | "legal" | "system",
             recipe: requiredNullableString(args, "recipe"),
-            sortOrder: requiredNumber(args, "sortOrder"),
+            sort_order: requiredNumber(args, "sort_order"),
             blocks: args.blocks,
-            expectedUpdatedAt: requiredString(args, "expected_updated_at"),
+            updated_at: requiredString(args, "updated_at"),
           },
           env: organization.env,
         });
@@ -534,50 +476,13 @@ export async function handleContentTools(ctx: McpExecutorContext): Promise<unkno
       try {
         const deleted = await deleteTenantPage(organization.db, requiredString(args, "variant_id"), {
           scope: { organizationId: organization.organizationId},
-          expectedUpdatedAt: requiredString(args, "expected_updated_at"),
+          expectedUpdatedAt: requiredString(args, "updated_at"),
           env: organization.env,
         });
         return tenantPageLifecycleResponse("Deleted", deleted, organization.organizationSlug);
       } catch (error) {
         return rethrowAsInvalidParams(error);
       }
-    case "get_reservation_policy": {
-      const locationId = requiredString(args, "location_id");
-      const locale = optionalString(args, "locale") ?? await getSourceLocale(organization.db, organization.organizationId);
-      const config = await requireLocationReservationConfig(organization.db, {
-        organizationId: organization.organizationId,
-        locationId,
-      });
-      return {
-        policy: config,
-        summary: renderBookingPolicySummary(reservationPolicySummarySource(config), locale),
-      };
-    }
-    case "update_reservation_policy": {
-      const locationId = requiredString(args, "location_id");
-      const locale = optionalString(args, "locale") ?? await getSourceLocale(organization.db, organization.organizationId);
-      const patch = await validateLocationReservationConfigPatch(omit(args as Record<string, unknown>, ["location_id", "locale", "expected_updated_at"]));
-      const config = await upsertLocationReservationConfig(organization.db, {
-        organizationId: organization.organizationId,
-        locationId,
-        patch,
-        actorId: organization.userId, env: organization.env, expectedUpdatedAt: optionalString(args, "expected_updated_at"),
-      });
-      const policyContext = await mutationContextPayload(organization, { locationId });
-      return renderStructuredResponse(
-        {
-          ok: true,
-          entity: "reservation_policy",
-          location_id: locationId,
-          changed_fields: Object.keys(patch).filter(field => field !== "expected_questions_revision"),
-          updated_at: config.updated_at,
-          context: policyContext,
-          summary: renderBookingPolicySummary(reservationPolicySummarySource(config), locale),
-        },
-        "Updated the reservation policy.",
-        { policy: config },
-      );
-    }
     case "append_content_block": {
       const document = await requireOrganizationDocument(ctx, requiredString(args, "document_id"))
       const afterBlockId = optionalString(args, "after_block_id")
@@ -601,14 +506,14 @@ export async function handleContentTools(ctx: McpExecutorContext): Promise<unkno
         organization.db, [{ id: blockId, type: existing.type, data: args.data as Record<string, unknown>, media: (args.media ?? existing.media) as ContentBlockMedia[], level: existing.level }],
         organization.organizationId,
       )
-      await replaceContentBlock(organization.db, blockId, { data: blocks[0]!.data, expected_updated_at: requiredString(args, "expected_updated_at") }, { additionalQueriesAfter: placementQueries, actorId: organization.userId })
+      await replaceContentBlock(organization.db, blockId, { data: blocks[0]!.data, updated_at: requiredString(args, "updated_at") }, { additionalQueriesAfter: placementQueries, actorId: organization.userId })
       return await contentBlocksChanged(ctx, document, blockId, `Replaced the ${existing.type} block.`)
     }
     case "delete_content_block": {
       const blockId = requiredString(args, "block_id")
       const existing = await getContentBlock(organization.db, blockId)
       const document = await requireOrganizationDocument(ctx, existing.document_id)
-      await deleteContentBlock(organization.db, blockId, { expected_updated_at: requiredString(args, "expected_updated_at"), actorId: organization.userId })
+      await deleteContentBlock(organization.db, blockId, { updated_at: requiredString(args, "updated_at"), actorId: organization.userId })
       return await contentBlocksChanged(ctx, document, null, `Deleted the ${existing.type} block.`)
     }
     default:

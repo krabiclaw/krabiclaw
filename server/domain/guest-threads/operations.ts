@@ -4,27 +4,25 @@ import { recordBookingCancelled, recordBookingDecision } from '~/server/domain/b
 import { execute, executeBatch, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { shouldSendRealEmail } from '~/server/utils/email-delivery'
 import type { ReplyEmailEnv } from '~/server/utils/submission-messages'
-import { canMarkNoShow, getGuestRequest, getThreadOperationalRecord, partySizeIsMinimum, requestActions, requestSummary, type GuestRequest, type ThreadOperationalRecord } from '~/server/domain/requests'
+import { canMarkNoShow, getGuestRequest, getThreadOperationalRecord, requestActions, requestSummary, type GuestRequest, type ThreadOperationalRecord } from '~/server/domain/requests'
 import { revokeReviewRequestQuery } from '~/server/utils/review-requests'
 import { deliverGuestThreadEmail, getDeliveryById, isDeliverySent } from './deliveries'
-import { findEntryByDedupeKey, parseEntryPayload } from './entries'
+import { MEMBER_REPLY_EVENT, SCHEDULED_MESSAGE_EVENT, findMessageByDedupeKey, messageQueries, parseMessagePayload, type MessageRow } from '~/server/domain/conversations'
 import { discardMessagePhotos, listMessagePhotos, MessagePhotoRejection, messagePhotoPlacements, uploadMessagePhotos, type MessagePhotoInput } from './attachments'
 import type { UploadResolvedMediaInput } from '~/server/utils/media-upload'
-import { conversationTaskQueries, mailboxTransitionQueries, updateThreadProjectionIfLatestEntry } from './repository'
-import { readMailboxActivity, resolveGuestThreadMailbox } from './mailbox'
+import { conversationTaskQueries, reconcileConversationTasks } from './repository'
 import { renderNotificationEmail } from '~/server/emails/render'
 import { guestThreadReplyMessage, guestThreadStatusMessage } from '~/server/notifications/guest-events'
 import { organizationLogo } from '~/server/notifications/hero'
 import { getPlatformDomain, buildBuyerRequestActivityUrl } from '~/server/utils/dashboard-notification-links'
-import { isBookingComplete, STAY_CHANNEL_LABELS, type StayChannel } from '~/shared/bookings'
+import { isBookingComplete, isChannelManagedStay, STAY_CHANNEL_LABELS, type StayChannel } from '~/shared/bookings'
 import { creationRequestHash } from '~/server/utils/organization-events'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import { guestPresentation } from '~/server/utils/notifications'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { platformLocale } from '~/shared/platform-locales'
-import { notifyBuyerThread } from '~/server/utils/notification-center'
 import { formatTimestamp } from '~/utils/timezone'
-import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
+import { publishConversationEvent } from '~/server/cloudflare/guest-inbox-events'
 import { describeErrorForTelemetry } from '~/shared/error-telemetry'
 import { assertReplyIntent, getChannelThreadMapping, replyThroughChannex, type ChannelThreadMapping } from './channel-messages'
 import { respondToStayChangeRequest } from './stay-change-requests'
@@ -33,15 +31,15 @@ import { announceContentReport, assertSameReport, contentReportId, contentReport
 import type {
   GuestThreadDeliveryProvider,
   GuestThreadDeliveryRow,
-  GuestThreadEntryRow,
   GuestThreadRow,
   GuestThreadSubmissionType,
 } from './types'
 
 // Whether the business owes a reply is its open guest_reply task
 // (server/domain/tasks.ts): a reply, a cancellation, archiving or blocking
-// closes it. There is no separate resolve or reopen.
-export const GUEST_THREAD_ACTIONS = new Set(['confirm', 'reject', 'cancel', 'no_show', 'reply', 'archive', 'unarchive', 'report', 'block', 'unblock', 'accept_change', 'decline_change', 'retry'])
+// closes it. There is no separate resolve or reopen. Archiving is each
+// person's own (conversations.ts archiveQuery), not an operation here.
+export const GUEST_THREAD_ACTIONS = new Set(['confirm', 'reject', 'cancel', 'no_show', 'reply', 'report', 'block', 'unblock', 'accept_change', 'decline_change', 'retry'])
 
 type SuccessfulOperationOutcome = { ok: true; status: 200; thread: GuestThreadRow; availableActions: string[] }
 
@@ -50,10 +48,10 @@ export type OperationOutcome =
   | { ok: false; status: 404; reason: 'thread_not_found' | 'source_not_found' }
   | { ok: false; status: 409; reason: 'invalid_transition'; message: string }
   | { ok: false; status: 400; reason: 'empty_body' }
-  | { ok: false; status: 409; reason: 'guest_unreachable'; code: 'GUEST_UNREACHABLE'; field: 'request_id'; message: string }
+  | { ok: false; status: 409; reason: 'guest_unreachable'; code: 'GUEST_UNREACHABLE'; field: 'conversation_id'; message: string }
   | { ok: false; status: 400; reason: 'missing_idempotency_key' }
   | { ok: false; status: 400; reason: 'invalid_photo'; message: string }
-  | { ok: false; status: 409 | 502; reason: 'delivery_failed'; code: string; field: string; message: string; mutation_applied?: true; operation_completed?: false; request_id?: string; record?: ThreadOperationalRecord; retry_with_same_idempotency_key?: boolean; provider_error?: ChannexError['data'] }
+  | { ok: false; status: 409 | 502; reason: 'delivery_failed'; code: string; field: string; message: string; mutation_applied?: true; operation_completed?: false; conversation_id?: string; record?: ThreadOperationalRecord; retry_with_same_idempotency_key?: boolean; provider_error?: ChannexError['data'] }
 
 type NotFoundOutcome = Extract<OperationOutcome, { status: 404 }>
 
@@ -80,7 +78,7 @@ export type ExecuteOperationInput = {
 interface ThreadContext {
   thread: GuestThreadRow
   /**
-   * The booking or reservation this thread refers to, loaded once.
+   * The booking this thread refers to, loaded once.
    *
    * Operational status lives there, not on the thread, so every transition
    * below reads and writes that record. A contact thread has none.
@@ -89,7 +87,7 @@ interface ThreadContext {
 }
 
 interface SourceMutationPlan {
-  kind: 'reservation' | 'booking'
+  kind: 'booking'
   action: 'confirm' | 'reject' | 'cancel'
   beforeStatus: string
   afterStatus: 'confirmed' | 'cancelled'
@@ -120,7 +118,7 @@ function emailProvider(env: ReplyEmailEnv): GuestThreadDeliveryProvider {
   return shouldSendRealEmail(env) ? 'resend' : 'log_only'
 }
 
-function entryMatchesRequest(entry: GuestThreadEntryRow, eventName: string, body?: string): boolean {
+function entryMatchesRequest(entry: MessageRow, eventName: string, body?: string): boolean {
   return entry.event_name === eventName && (body === undefined || (entry.body ?? '') === body)
 }
 
@@ -145,11 +143,12 @@ async function successfulOutcome(
 
 function sourceMutationPlan(context: ThreadContext, action: string): SourceMutationPlan | null {
   // A stay is changed from its own screen; its thread converses about it.
-  if (context.thread.kind === 'contact' || context.thread.kind === 'stay' || !context.record || context.record.kind === 'stay') return null
-  const { kind, status: beforeStatus } = context.record
+  if (context.thread.kind === 'contact' || !context.record || context.record.unit === 'nights') return null
+  const kind = 'booking' as const
+  const { status: beforeStatus } = context.record
   // Pending review and confirmed appointments share the same temporal guard.
   if (context.record.ends_at <= new Date().toISOString() || isBookingComplete(context.record, new Date().toISOString())) return null
-  if (kind === 'booking' && beforeStatus === 'pending' && (action === 'confirm' || action === 'reject')) {
+  if (beforeStatus === 'pending' && (action === 'confirm' || action === 'reject')) {
     return { kind, action, beforeStatus, afterStatus: action === 'confirm' ? 'confirmed' : 'cancelled', requiresNotification: true }
   }
   if ((beforeStatus === 'confirmed' || beforeStatus === 'pending') && action === 'cancel') {
@@ -158,19 +157,8 @@ function sourceMutationPlan(context: ThreadContext, action: string): SourceMutat
   return null
 }
 
-/**
- * The record has not finished yet, as the database sees it.
- *
- * A reservation holds its own end; a booking's is on its session. The first
- * guarded ledger insert checks this once for the atomic mutation batch.
- */
-function sourceStillRunningSql(plan: SourceMutationPlan, table: string): string {
-  return plan.kind === 'reservation'
-    ? `${table}.ends_at > strftime('%Y-%m-%dT%H:%M:%fZ','now')`
-    : `EXISTS (SELECT 1 FROM product_sessions s WHERE s.id = ${table}.product_session_id AND s.ends_at > strftime('%Y-%m-%dT%H:%M:%fZ','now'))`
-}
 
-function operationEntryQuery(
+function operationEntryQueries(
   context: ThreadContext,
   plan: SourceMutationPlan,
   input: ExecuteOperationInput,
@@ -179,55 +167,38 @@ function operationEntryQuery(
   now: string,
   email: Awaited<ReturnType<typeof renderStatusUpdate>> | null,
   financialGuard: BatchQuery | null = null,
-): BatchQuery {
-  return {
-    query: `
-      INSERT INTO activity_entries
-        (id, request_id, kind, scope_kind, actor_kind, actor_user_id, channel, body, event_name, payload_json, dedupe_key, sequence, occurred_at, created_at)
-      SELECT ?, gt.id, 'operation', 'request', ?, ?, NULL, ?, ?, ?, ?,
-             COALESCE((SELECT MAX(sequence) FROM activity_entries WHERE request_id = gt.id), 0) + 1,
-             ?, ?
-      FROM requests gt
-      WHERE gt.id = ? AND gt.organization_id = ? AND gt.kind = ? AND gt.updated_at = ?
-        -- Guarded on the state of the record that holds the seats, because the
-        -- thread has no status of its own: two dashboards acting at once must
-        -- not both write an entry for the same transition.
-        AND EXISTS (SELECT 1 FROM ${plan.kind === 'reservation' ? 'reservations src' : 'bookings src JOIN product_sessions occurrence ON occurrence.id=src.product_session_id AND occurrence.organization_id=src.organization_id AND occurrence.product_id=src.product_id'}
-                     WHERE src.request_id = gt.id AND src.organization_id=gt.organization_id AND src.status = ? AND ${sourceStillRunningSql(plan, 'src')}
-                       AND json_array(src.id,src.party_size,${plan.kind === 'reservation' ? 'NULL,NULL,src.starts_at,src.ends_at,src.timezone,src.location_id' : 'src.assigned_member_id,src.product_id,occurrence.starts_at,occurrence.ends_at,occurrence.timezone,occurrence.location_id'},json_extract(gt.payload_json,'$.party_size_is_minimum'))=json_array(?,CAST(? AS INTEGER),?,?,?,?,?,?,CAST(? AS INTEGER)))
-        AND (${financialGuard?.query ?? '1=1'})
-      ON CONFLICT(dedupe_key) DO NOTHING
-    `,
-    params: [
-      entryId,
-      input.actorUserId === null ? 'system' : 'member',
-      input.actorUserId,
-      email?.body ?? null,
-      `${plan.kind}.${plan.action}`,
-      JSON.stringify({
-        action: plan.action, beforeStatus: plan.beforeStatus, afterStatus: plan.afterStatus,
-        operational_booking_id: context.record!.id, request_id: context.thread.id,
-        subject: email?.subject ?? null,
-        email: email ? { to: email.to, fromName: email.fromName, locale: email.locale, ...email.email } : null,
-        booking: {
-          starts_at: context.record!.starts_at, ends_at: context.record!.ends_at,
-          timezone: context.record!.timezone, party_size: context.record!.party_size,
-          party_size_is_minimum: partySizeIsMinimum(context.thread),
-          location_id: context.record!.location_id, product_id: context.record!.product_id,
-        },
-      }),
-      dedupeKey,
-      now,
-      now,
-      context.thread.id,
-      context.thread.organization_id,
-      plan.kind,
-      context.thread.updated_at,
-      plan.beforeStatus,
-      context.record!.id, context.record!.party_size, context.record!.assigned_member_id, context.record!.product_id, context.record!.starts_at, context.record!.ends_at, context.record!.timezone, context.record!.location_id, Number(partySizeIsMinimum(context.thread)),
-      ...(financialGuard?.params ?? []),
-    ],
-  }
+): BatchQuery[] {
+  const record = context.record!
+  return messageQueries({
+    id: entryId, conversationId: context.thread.id, authorKind: 'krabiclaw', authorUserId: input.actorUserId,
+    body: email?.body ?? null, eventName: `${plan.kind}.${plan.action}`, dedupeKey, occurredAt: now,
+    payload: {
+      action: plan.action, beforeStatus: plan.beforeStatus, afterStatus: plan.afterStatus,
+      booking_id: record.id,
+      subject: email?.subject ?? null,
+      email: email ? { to: email.to, fromName: email.fromName, locale: email.locale, ...email.email } : null,
+      booking: {
+        starts_at: record.starts_at, ends_at: record.ends_at,
+        timezone: record.timezone, party_size: record.party_size,
+        party_size_is_minimum: record.party_size_is_minimum,
+        location_id: record.location_id, product_id: record.product_id,
+      },
+    },
+    // Guarded on the state of the record that holds the seats, because the
+    // conversation has no status of its own: two dashboards acting at once must
+    // not both write a message for the same transition. The booking has not
+    // finished yet, and is still the one the caller read.
+    guard: {
+      sql: `c.organization_id = ? AND c.kind = ? AND c.last_message_at = ?
+        AND EXISTS (SELECT 1 FROM bookings src
+                     WHERE src.id = c.booking_id AND src.organization_id = c.organization_id AND src.status = ? AND src.product_session_id IS NOT NULL AND src.ends_at > strftime('%Y-%m-%dT%H:%M:%fZ','now')
+                       AND json_array(src.id,src.party_size,src.product_id,src.starts_at,src.ends_at,src.timezone,src.location_id,src.party_size_is_minimum)=json_array(?,CAST(? AS INTEGER),?,?,?,?,?,CAST(? AS INTEGER)))
+        AND (${financialGuard?.query ?? '1=1'})`,
+      params: [context.thread.organization_id, plan.kind, context.thread.last_message_at, plan.beforeStatus,
+        record.id, record.party_size, record.product_id, record.starts_at, record.ends_at, record.timezone, record.location_id, Number(record.party_size_is_minimum),
+        ...(financialGuard?.params ?? [])],
+    },
+  }).queries
 }
 
 /**
@@ -239,17 +210,16 @@ function operationEntryQuery(
  * confirming at once cannot both win.
  */
 function sourceUpdateQuery(context: ThreadContext, plan: SourceMutationPlan, input: ExecuteOperationInput, entryId: string, now: string): BatchQuery {
-  const table = plan.kind === 'reservation' ? 'reservations' : 'bookings'
   const stamps = plan.afterStatus === 'cancelled' ? ', cancelled_at = COALESCE(cancelled_at, ?), cancellation_reason = ?' : ''
   const stampParams = plan.afterStatus === 'cancelled' ? [now, plan.action === 'reject' ? 'host_rejected' : 'host_cancelled'] : []
   // The first ledger insert already checked the live source and end time.
   // This statement follows it in the same atomic batch, without a second clock gate.
   return {
     query: `
-      UPDATE ${table}
-      SET status = ?, updated_at = ?${stamps}
+      UPDATE bookings
+      SET status = ?, updated_at = ?, version = version + 1${stamps}
       WHERE id = ? AND status = ?
-        AND EXISTS (SELECT 1 FROM activity_entries WHERE id = ?)
+        AND EXISTS (SELECT 1 FROM messages WHERE id = ?)
     `,
     params: [plan.afterStatus, now, ...stampParams, context.record!.id, plan.beforeStatus, entryId],
   }
@@ -265,10 +235,10 @@ function deliveryReceiptQuery(
   return {
     query: `
       INSERT INTO guest_thread_deliveries
-        (id, entry_id, channel, provider, purpose, status, created_at, updated_at)
+        (id, message_id, channel, provider, purpose, status, created_at, updated_at)
       SELECT ?, id, 'email', ?, 'status_update', 'pending', ?, ?
-      FROM activity_entries
-      WHERE id = ? AND request_id = ?
+      FROM messages
+      WHERE id = ? AND conversation_id = ?
       ON CONFLICT(id) DO NOTHING
     `,
     params: [
@@ -290,7 +260,6 @@ async function getOrganizationBrandName(db: DbClient, organizationId: string): P
 
 function replySubject(submissionType: GuestThreadSubmissionType, fromName: string): string {
   if (submissionType === 'contact') return `Re: your message to ${fromName}`
-  if (submissionType === 'reservation') return `Re: your reservation at ${fromName}`
   return `Re: your booking at ${fromName}`
 }
 
@@ -299,22 +268,22 @@ function replySubject(submissionType: GuestThreadSubmissionType, fromName: strin
  * outbound message. A member's reply leads with their own words; a status
  * update leads with what changed.
  */
-async function renderMemberReply(env: ReplyEmailEnv, db: DbClient, organizationId: string, organizationName: string, entry: GuestThreadEntryRow, locale: string | undefined) {
+async function renderMemberReply(env: ReplyEmailEnv, db: DbClient, organizationId: string, organizationName: string, entry: MessageRow, locale: string | undefined) {
   const guest = await guestPresentation(db, { organizationId, organizationName, locale })
   const organizationLogoUrl = await organizationLogo(db, organizationId)
-  const photos = (await listMessagePhotos(db, 'activity_entry', [entry.id])).get(entry.id) ?? []
+  const photos = (await listMessagePhotos(db, 'message', [entry.id])).get(entry.id) ?? []
   return renderNotificationEmail(guestThreadReplyMessage({
     locale: guest.locale,
     organizationName: guest.organizationName,
     organizationLogoUrl,
     body: entry.body ?? '',
-    manageUrl: await buildBuyerRequestActivityUrl(env, db, { organizationId, threadId: entry.request_id }),
+    manageUrl: await buildBuyerRequestActivityUrl(env, db, { organizationId, threadId: entry.conversation_id }),
     photos: photos.map(photo => ({ imageUrl: photo.url, alt: photo.alt ?? `Photo from ${organizationName}` })),
   }), { platformDomain: getPlatformDomain(env) })
 }
 
 async function renderStatusUpdate(env: ReplyEmailEnv, db: DbClient, context: ThreadContext, action: SourceMutationPlan['action'], to: string, locationName: string | null) {
-  if (!context.record) throw new Error('This thread has no booking or reservation')
+  if (!context.record) throw new Error('This thread has no booking')
   const fromName = await getOrganizationBrandName(db, context.thread.organization_id)
   const guest = await guestPresentation(db, {
     organizationId: context.thread.organization_id, organizationName: fromName,
@@ -323,13 +292,14 @@ async function renderStatusUpdate(env: ReplyEmailEnv, db: DbClient, context: Thr
     locationId: context.record.location_id, locationName,
   })
   const labels = platformLocale(guest.locale)!.messages
+  const table = context.record.product_kind === 'table'
   const titleKey = action === 'reject' ? 'booking.request_declined'
-    : action === 'confirm' ? context.thread.kind === 'reservation' ? 'reservations.confirmed' : 'booking.confirmed'
-      : context.thread.kind === 'reservation' ? 'site.reservation_cancel.cancelled_title' : 'site.experience_cancel.cancelled_title'
+    : action === 'confirm' ? table ? 'reservations.confirmed' : 'booking.confirmed'
+      : table ? 'site.reservation_cancel.cancelled_title' : 'site.experience_cancel.cancelled_title'
   const subject = `${labels[titleKey]} — ${guest.productTitle ?? guest.organizationName}`
   const org = await queryFirst<{ vertical: string | null }>(db, 'SELECT vertical FROM organization WHERE id = ?', [context.thread.organization_id])
-  const presentation = resolveBookingPresentation(context.thread.kind === 'reservation' ? 'reservation' : 'booking', org?.vertical)
-  const countStr = `${context.record.party_size}${partySizeIsMinimum(context.thread) ? '+' : ''}`
+  const presentation = resolveBookingPresentation(context.record.product_kind, org?.vertical)
+  const countStr = `${context.record.party_size}${context.record.party_size_is_minimum ? '+' : ''}`
   const guests = presentation.formatCount(countStr)
   const body = [guest.locationName, formatTimestamp(context.record.starts_at, guest.locale, context.record.timezone, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }), guests].filter(Boolean).join(' · ')
   const organizationLogoUrl = await organizationLogo(db, context.thread.organization_id)
@@ -341,7 +311,7 @@ async function sendStatusUpdate(
   db: DbClient,
   context: ThreadContext,
   input: ExecuteOperationInput,
-  entry: GuestThreadEntryRow,
+  entry: MessageRow,
   delivery: GuestThreadDeliveryRow,
 ): Promise<OperationOutcome> {
   if (!context.record) return { ok: false, status: 404, reason: 'source_not_found' }
@@ -349,9 +319,9 @@ async function sendStatusUpdate(
   let deliveryError: string | undefined
   try {
     if (!isDeliverySent(delivery)) {
-      const payload = parseEntryPayload(entry)
-      const subject = payload?.subject
-      const envelope = payload?.email
+      const payload = parseMessagePayload(entry)
+      const subject = payload.subject
+      const envelope = payload.email
       if (!entry.body || typeof subject !== 'string' || !subject.trim() || typeof envelope !== 'object' || envelope === null) return conflict('Status update has no recorded email content')
       const to = Reflect.get(envelope, 'to')
       const fromName = Reflect.get(envelope, 'fromName')
@@ -361,13 +331,13 @@ async function sendStatusUpdate(
       if (typeof to !== 'string' || !to.trim() || typeof fromName !== 'string' || !fromName.trim()
         || typeof locale !== 'string' || !platformLocale(locale)
         || typeof html !== 'string' || !html || typeof text !== 'string' || !text) return conflict('Status update has no recorded email content')
-      if (typeof payload?.action !== 'string' || !['confirm', 'reject', 'cancel'].includes(payload.action)) return conflict('Status update has no recorded action')
+      if (typeof payload.action !== 'string' || !['confirm', 'reject', 'cancel'].includes(payload.action)) return conflict('Status update has no recorded action')
       const booking = payload.booking
       if (typeof booking !== 'object' || booking === null) return conflict('Status update has no recorded booking facts')
-      if (payload.afterStatus !== context.record.status || payload.operational_booking_id !== context.record.id
+      if (payload.afterStatus !== context.record.status || payload.booking_id !== context.record.id
         || Reflect.get(booking, 'starts_at') !== context.record.starts_at || Reflect.get(booking, 'ends_at') !== context.record.ends_at
         || Reflect.get(booking, 'timezone') !== context.record.timezone || Reflect.get(booking, 'party_size') !== context.record.party_size
-        || Reflect.get(booking, 'party_size_is_minimum') !== (partySizeIsMinimum(context.thread))
+        || Reflect.get(booking, 'party_size_is_minimum') !== context.record.party_size_is_minimum
         || Reflect.get(booking, 'location_id') !== context.record.location_id || Reflect.get(booking, 'product_id') !== context.record.product_id) return conflict('Status update was superseded by a booking change')
       outcome = await deliverGuestThreadEmail(db, {
         delivery,
@@ -376,7 +346,7 @@ async function sendStatusUpdate(
         fromName,
         subject,
         email: { html, text },
-        submissionId: context.thread.id,
+        conversationId: context.thread.id,
       })
     }
   } catch (error) {
@@ -385,24 +355,23 @@ async function sendStatusUpdate(
   if (deliveryError === undefined && isDeliverySent(outcome)) {
     if (input.action === 'confirm') {
       // Confirming answers the booking request, not a separate guest message.
-      // A retry must also leave newer conversation activity on its own state.
-      await updateThreadProjectionIfLatestEntry(db, context.thread.id, entry.id)
+      await reconcileConversationTasks(db, context.thread.id)
     }
     return await successfulOutcome(db, context)
   }
-  if (deliveryError !== undefined) console.error({ event: 'guest_status_email_failed', organization_id: context.thread.organization_id, request_id: context.thread.id, error: deliveryError })
+  if (deliveryError !== undefined) console.error({ event: 'guest_status_email_failed', organization_id: context.thread.organization_id, conversation_id: context.thread.id, error: deliveryError })
   const currentRecord = await getThreadOperationalRecord(db, context.thread.id)
   if (!currentRecord) return { ok: false, status: 404, reason: 'source_not_found' }
   return {
     ok: false, status: 502, reason: 'delivery_failed', code: 'DELIVERY_FAILED', field: 'delivery',
     message: `Booking is ${currentRecord.status}, but the guest email failed. Retry with the same idempotency key.`,
-    mutation_applied: true, operation_completed: false, request_id: context.thread.id, record: currentRecord, retry_with_same_idempotency_key: true,
+    mutation_applied: true, operation_completed: false, conversation_id: context.thread.id, record: currentRecord, retry_with_same_idempotency_key: true,
   }
 }
 
 /** A business's decision on a booking, for its analytics: recorded once per booking, on the first run and on any retry. */
 async function recordBookingOutcome(db: DbClient, context: ThreadContext, input: ExecuteOperationInput, decidedAt: string) {
-  if (!context.record || context.record.kind !== 'booking') return
+  if (!context.record || context.record.unit !== 'slot') return
   const booking = { organizationId: input.organizationId, bookingId: context.record.id, actorUserId: input.actorUserId ?? null }
   if (input.action === 'confirm') await recordBookingDecision(db, { ...booking, decision: 'confirmed', decidedAt })
   else if (input.action === 'reject') await recordBookingDecision(db, { ...booking, decision: 'declined', decidedAt })
@@ -417,10 +386,10 @@ async function executeSourceMutation(
   if (!context.record) return { ok: false, status: 404, reason: 'source_not_found' }
   const dedupeKey = operationDedupeKey(input)
   const eventName = `${context.thread.kind}.${input.action}`
-  const existing = await findEntryByDedupeKey(db, dedupeKey)
+  const existing = await findMessageByDedupeKey(db, dedupeKey)
   if (existing) {
     if (!entryMatchesRequest(existing, eventName)) return conflict()
-    await (await import('~/server/domain/scheduled-guest-messages')).planSourceMessages(db, context.thread.organization_id, { kind: context.record.kind, id: context.record.id })
+    await (await import('~/server/domain/scheduled-guest-messages')).planSourceMessages(db, context.thread.organization_id, context.record.id)
     const delivery = await getDeliveryById(db, deliveryDedupeKey(input))
     if (!delivery) throw new Error('Status update delivery receipt was not created')
     const outcome = await sendStatusUpdate(db, context, input, existing, delivery)
@@ -435,32 +404,32 @@ async function executeSourceMutation(
   const entryId = crypto.randomUUID()
   const deliveryId = deliveryDedupeKey(input)
   const now = new Date().toISOString()
-  // A reservation or booking always has its guest's email (requests.ts `guest`); one without is broken data.
+  // A booking always has its guest's email (requests.ts `guest`); one without is broken data.
   if (plan.requiresNotification && !summary.guestEmail) throw new Error(`${plan.kind} conversation ${context.thread.id} has no guest email`)
   const email = plan.requiresNotification && summary.guestEmail
     ? await renderStatusUpdate(input.env, db, context, plan.action, summary.guestEmail, summary.locationTitle)
     : null
   // Declining or cancelling a paid booking returns the payment in the same batch, once the operator approved it.
   const refundPlan = (plan.action === 'reject' || plan.action === 'cancel') && context.record
-    ? await visitRefundQueries(db,{action:plan.action,organizationId:context.thread.organization_id,actorUserId:input.actorUserId,subjectType:plan.kind,subjectId:context.record.id,authorizationId:input.financialAuthorizationId,financialWritesAllowed:input.financialWritesAllowed,note:input.body,committed:{query:'EXISTS(SELECT 1 FROM activity_entries WHERE id=?)',params:[entryId]},now}) : {queries:[],guard:null}
+    ? await visitRefundQueries(db,{action:plan.action,organizationId:context.thread.organization_id,actorUserId:input.actorUserId,bookingId:context.record.id,authorizationId:input.financialAuthorizationId,financialWritesAllowed:input.financialWritesAllowed,note:input.body,committed:{query:'EXISTS(SELECT 1 FROM messages WHERE id=?)',params:[entryId]},now}) : {queries:[],guard:null}
   const queries = [
-    operationEntryQuery(context, plan, input, entryId, dedupeKey, now, email,refundPlan.guard),
+    ...operationEntryQueries(context, plan, input, entryId, dedupeKey, now, email,refundPlan.guard),
     sourceUpdateQuery(context, plan, input, entryId, now),
     ...refundPlan.queries,
     // An approval closes the booking's review; a cancellation also answers what the guest asked before it.
     ...conversationTaskQueries(context.thread.id, now),
   ]
-  if (plan.afterStatus === 'cancelled') queries.push(revokeReviewRequestQuery(plan.kind, context.thread.id, entryId, now))
+  if (plan.afterStatus === 'cancelled') queries.push(revokeReviewRequestQuery(context.record.id, entryId, now))
   if (plan.requiresNotification) {
     queries.push(deliveryReceiptQuery(context, input, entryId, deliveryId, now))
   }
 
   await executeBatch(db, queries, { operation: `guest thread ${plan.kind}.${plan.action}` })
-  const applied = await findEntryByDedupeKey(db, dedupeKey)
+  const applied = await findMessageByDedupeKey(db, dedupeKey)
   if (!applied) return conflict(`"${input.action}" is not a valid action for the current state`)
   if (!entryMatchesRequest(applied, eventName)) return conflict()
   // A confirmed, declined or cancelled visit's automatic messages follow it.
-  await (await import('~/server/domain/scheduled-guest-messages')).planSourceMessages(db, context.thread.organization_id, { kind: context.record.kind, id: context.record.id })
+  await (await import('~/server/domain/scheduled-guest-messages')).planSourceMessages(db, context.thread.organization_id, context.record.id)
   if (plan.requiresNotification) {
     const delivery = await getDeliveryById(db, deliveryId)
     if (!delivery) throw new Error('Status update delivery receipt was not created')
@@ -489,7 +458,7 @@ async function executeReply(
   if (!body && !photoCount) return { ok: false, status: 400, reason: 'empty_body' }
   const actorUserId = input.actorUserId
   if (actorUserId === null && photoCount) throw new HTTPError({ statusCode: 400, message: 'Scheduled messages carry text only', data: { code: 'SCHEDULED_MESSAGE_PHOTOS_UNSUPPORTED', field: 'photos' } })
-  const eventName = actorUserId === null ? 'thread.scheduled_message' : 'thread.member_reply'
+  const eventName = actorUserId === null ? SCHEDULED_MESSAGE_EVENT : MEMBER_REPLY_EVENT
   const purpose = actorUserId === null ? 'scheduled_message' : 'member_reply'
   const photoIdentity = Array.isArray(photoInput)
     ? await Promise.all(photoInput.map(async photo => ({ filename: photo.filename, hash: [...new Uint8Array(await crypto.subtle.digest('SHA-256', photo.bytes))].map(byte => byte.toString(16).padStart(2, '0')).join('') })))
@@ -498,13 +467,12 @@ async function executeReply(
   // Where a reply goes is the one rule every surface reads (`guestReplyDestination`);
   // nowhere is refused before anything is sent. Only a reply this key already
   // delivered replays where it went, whatever has changed since.
-  const matchesReply = (entry: GuestThreadEntryRow): boolean => {
+  const matchesReply = (entry: MessageRow): boolean => {
     if (!entryMatchesRequest(entry, eventName, body)) return false
-    const payload = JSON.parse(entry.payload_json ?? '{}') as { request_hash?: string }
-    return payload.request_hash === requestHash
+    return parseMessagePayload(entry).request_hash === requestHash
   }
   // A recorded reply continues on the channel it was recorded on; a new one goes where the rule says.
-  const recorded = await findEntryByDedupeKey(db, operationDedupeKey(input))
+  const recorded = await findMessageByDedupeKey(db, operationDedupeKey(input))
   const destination = await guestReplyDestination(db, context.thread)
   const recordedMapping = recorded?.channel === 'airbnb' ? await getChannelThreadMapping(db, context.thread.id, context.thread.organization_id) : null
   if (recorded?.channel === 'airbnb' && !recordedMapping) throw new Error(`Reply ${recorded.id} was recorded on Airbnb but its conversation has no channel mapping`)
@@ -514,7 +482,7 @@ async function executeReply(
   if (recorded?.channel === 'airbnb') assertReplyIntent(recorded, body, requestHash, eventName)
   else if (recorded && !matchesReply(recorded)) return conflict()
   const delivered = recorded ? await getDeliveryById(db, recorded.channel === 'airbnb' ? `guest-thread-channex:${context.thread.id}:${input.idempotencyKey}` : deliveryDedupeKey(input)) : null
-  if (destination.channel === null && !(delivered && isDeliverySent(delivered))) return { ok: false, status: 409, reason: 'guest_unreachable', code: 'GUEST_UNREACHABLE', field: 'request_id', message: destination.reason }
+  if (destination.channel === null && !(delivered && isDeliverySent(delivered))) return { ok: false, status: 409, reason: 'guest_unreachable', code: 'GUEST_UNREACHABLE', field: 'conversation_id', message: destination.reason }
   if (channel) {
     const sent = await replyThroughChannex(db, input.env, { mapping: channel, body, actorUserId, idempotencyKey: input.idempotencyKey!, requestHash,
       photoCount, resolvePhotos: async () => Array.isArray(photoInput) ? photoInput : await photoInput.resolve() }).catch((error: unknown) => {
@@ -527,18 +495,18 @@ async function executeReply(
   }
   const dedupeKey = operationDedupeKey(input)
   const deliveryKey = deliveryDedupeKey(input)
-  let entry = await findEntryByDedupeKey(db, dedupeKey)
+  let entry = await findMessageByDedupeKey(db, dedupeKey)
   if (entry && !matchesReply(entry)) return conflict()
   if (entry && entry.channel !== 'web') {
     const earlier = await getDeliveryById(db, deliveryKey)
-    if (!earlier || earlier.entry_id !== entry.id) throw new Error('Reply delivery receipt does not match its ledger entry')
+    if (!earlier || earlier.message_id !== entry.id) throw new Error('Reply delivery receipt does not match its message')
     if (isDeliverySent(earlier) && !earlier.error) {
-      await updateThreadProjectionIfLatestEntry(db, context.thread.id, entry.id)
+      await reconcileConversationTasks(db, context.thread.id)
       return successfulOutcome(db, context)
     }
   }
 
-  if (destination.channel === null || destination.channel === 'airbnb') return { ok: false, status: 409, reason: 'guest_unreachable', code: 'GUEST_UNREACHABLE', field: 'request_id', message: destination.channel === null ? destination.reason : GUEST_UNREACHABLE_MESSAGE }
+  if (destination.channel === null || destination.channel === 'airbnb') return { ok: false, status: 409, reason: 'guest_unreachable', code: 'GUEST_UNREACHABLE', field: 'conversation_id', message: destination.channel === null ? destination.reason : GUEST_UNREACHABLE_MESSAGE }
   const guestEmail = destination.email
 
   if (!entry) {
@@ -558,59 +526,48 @@ async function executeReply(
     if (assetIds instanceof MessagePhotoRejection) return { ok: false, status: 400, reason: 'invalid_photo', message: assetIds.message }
     try {
       await executeBatch(db, [
-        {
-          query: `
-            INSERT INTO activity_entries
-              (id, request_id, kind, scope_kind, actor_kind, actor_user_id, channel, body, event_name, payload_json, dedupe_key, sequence, occurred_at, created_at)
-            SELECT ?, id, 'message', 'request', ?, ?, ?, ?, ?, ?, ?,
-                   COALESCE((SELECT MAX(sequence) FROM activity_entries WHERE request_id = requests.id), 0) + 1,
-                   ?, ?
-            FROM requests
-            WHERE id = ? AND organization_id = ?
-            ON CONFLICT(dedupe_key) DO NOTHING
-          `,
-          params: [entryId, actorUserId === null ? 'system' : 'member', actorUserId, guestEmail ? 'email' : 'web', body || null, eventName, JSON.stringify({ request_hash: requestHash }), dedupeKey, now, now, context.thread.id, context.thread.organization_id],
-        },
+        ...messageQueries({ id: entryId, conversationId: context.thread.id, authorKind: actorUserId === null ? 'krabiclaw' : 'member', authorUserId: actorUserId,
+          channel: guestEmail ? 'email' : 'web', body: body || null, eventName, payload: { request_hash: requestHash }, dedupeKey, occurredAt: now,
+          guard: { sql: 'c.organization_id = ?', params: [context.thread.organization_id] } }).queries,
         ...guestEmail ? [{
           query: `
             INSERT INTO guest_thread_deliveries
-              (id, entry_id, channel, provider, purpose, status, created_at, updated_at)
+              (id, message_id, channel, provider, purpose, status, created_at, updated_at)
             SELECT ?, id, 'email', ?, ?, 'pending', ?, ?
-            FROM activity_entries
-            WHERE id = ? AND request_id = ?
+            FROM messages
+            WHERE id = ? AND conversation_id = ?
             ON CONFLICT(id) DO NOTHING
           `,
           params: [deliveryId, emailProvider(input.env), purpose, now, now, entryId, context.thread.id],
         }] : [],
-        ...messagePhotoPlacements(organizationId, 'activity_entry', entryId, assetIds, now),
+        ...messagePhotoPlacements(organizationId, 'message', entryId, assetIds, now),
       ], { operation: 'guest thread reply receipt' })
     } catch (error) {
-      let concurrent: GuestThreadEntryRow | null
+      let concurrent: MessageRow | null
       try {
-        concurrent = await findEntryByDedupeKey(db, dedupeKey)
+        concurrent = await findMessageByDedupeKey(db, dedupeKey)
       } catch (readError) {
         throw new AggregateError([error, readError], 'The reply commit could not be read; its photos have been retained', { cause: readError })
       }
       if (concurrent?.id !== entryId && actorUserId !== null) await discardMessagePhotos(db, input.env, organizationId, assetIds, actorUserId, error)
       if (!concurrent || !matchesReply(concurrent)) throw error
     }
-    entry = await findEntryByDedupeKey(db, dedupeKey)
+    entry = await findMessageByDedupeKey(db, dedupeKey)
   }
 
   if (!entry) return { ok: false, status: 404, reason: 'thread_not_found' }
   if (!matchesReply(entry)) return conflict()
   if (entry.channel === 'web') {
-    const fromName = await getOrganizationBrandName(db, context.thread.organization_id)
-    await notifyBuyerThread(db, { threadId: context.thread.id, entryId: entry.id, title: replySubject(context.thread.kind, fromName), message: fromName, conversation: true })
-    await updateThreadProjectionIfLatestEntry(db, context.thread.id, entry.id)
+    // The guest reads it in their own inbox, where it is unread until they open it.
+    await reconcileConversationTasks(db, context.thread.id)
     return await successfulOutcome(db, context)
   }
   // A reply saved for email whose address has since been removed is not sent anywhere else.
   if (!guestEmail) return { ok: false, status: 409, reason: 'delivery_failed', code: 'GUEST_EMAIL_REQUIRED', field: 'guest.email', message: 'This reply was saved to be emailed, but the guest no longer has an email address.' }
   const delivery = await getDeliveryById(db, deliveryKey)
-  if (!delivery || delivery.entry_id !== entry.id) throw new Error('Reply delivery receipt does not match its ledger entry')
+  if (!delivery || delivery.message_id !== entry.id) throw new Error('Reply delivery receipt does not match its message')
   if (isDeliverySent(delivery) && !delivery.error) {
-    await updateThreadProjectionIfLatestEntry(db, context.thread.id, entry.id)
+    await reconcileConversationTasks(db, context.thread.id)
     return successfulOutcome(db, context)
   }
 
@@ -622,11 +579,11 @@ async function executeReply(
     fromName,
     subject: replySubject(context.thread.kind, fromName),
     email: await renderMemberReply(input.env, db, context.thread.organization_id, fromName, entry, context.thread.payload.guest.locale),
-    submissionId: context.thread.id,
+    conversationId: context.thread.id,
   })
 
   if (isDeliverySent(outcome)) {
-    await updateThreadProjectionIfLatestEntry(db, context.thread.id, entry.id)
+    await reconcileConversationTasks(db, context.thread.id)
     return await successfulOutcome(db, context)
   }
   if (typeof outcome.error !== 'string' || !outcome.error.trim()) {
@@ -657,84 +614,24 @@ export type GuestReplyDestination =
  * (a direct stay's current contact), or their KrabiClaw account inbox, also
  * emailed when that account has a verified email.
  */
-export async function guestReplyDestination(db: DbClient, thread: Pick<GuestRequest, 'id' | 'organization_id' | 'kind' | 'user_id' | 'payload'>): Promise<GuestReplyDestination> {
+export async function guestReplyDestination(db: DbClient, thread: Pick<GuestRequest, 'id' | 'organization_id' | 'kind' | 'user_id' | 'booking_id' | 'payload'>): Promise<GuestReplyDestination> {
   const mapping = await getChannelThreadMapping(db, thread.id, thread.organization_id)
   if (mapping) {
     const connected = await queryFirst(db, "SELECT 1 FROM product_channel_mappings WHERE provider = 'channex' AND organization_id = ? AND product_id = ? AND enabled = 1", [thread.organization_id, mapping.product_id])
     return connected ? { channel: 'airbnb', mapping } : { channel: null, reason: GUEST_DISCONNECTED_MESSAGE }
   }
-  let email = thread.payload.guest.email?.trim() || null
-  if (thread.kind === 'stay') {
-    const stay = await queryFirst<{ guest_email: string | null; owner: string; channel: StayChannel }>(db, 'SELECT guest_email, owner, channel FROM stays WHERE organization_id = ? AND request_id = ?', [thread.organization_id, thread.id])
-    if (!stay) return { channel: null, reason: 'This conversation’s stay no longer exists.' }
-    if (stay.owner === 'channel') return { channel: null, reason: `This ${STAY_CHANNEL_LABELS[stay.channel]} stay has no conversation to reply in yet.` }
-    email = stay.guest_email?.trim() || null
-  }
+  // A channel's reservation is answered on its channel: until that conversation exists there is nowhere to reply.
+  const channelBooking = thread.kind === 'booking' && thread.booking_id ? await queryFirst<{ channel: StayChannel; owner: 'app' | 'channel' }>(db, 'SELECT channel, owner FROM bookings WHERE organization_id = ? AND id = ?', [thread.organization_id, thread.booking_id]) : null
+  if (channelBooking && isChannelManagedStay(channelBooking)) return { channel: null, reason: `This ${STAY_CHANNEL_LABELS[channelBooking.channel]} stay has no conversation to reply in yet.` }
+  const email = thread.payload.guest.email?.trim() || null
   if (email) return { channel: 'email', email }
   if (thread.user_id === null) return { channel: null, reason: GUEST_UNREACHABLE_MESSAGE }
-  const account = await queryFirst<{ email: string }>(db, 'SELECT email FROM user WHERE id = ? AND "emailVerified" = 1 AND COALESCE("isAnonymous", 0) = 0', [thread.user_id])
-  return { channel: 'account', email: account?.email ?? null }
-}
-
-const QUIET_CONVERSATION_MESSAGE = 'This conversation is past because it has been quiet for 30 days'
-
-/**
- * File a conversation under Past, or bring a manually archived one back.
- *
- * Whether either is allowed is `resolveGuestThreadMailbox`'s answer, and the
- * batch carries the same condition so a thread that changed after this read
- * gets no entry and no write. A retried key finds its entry and changes
- * nothing: not the timestamp, not the actor, not the order of the inbox.
- */
-async function executeMailboxTransition(
-  db: DbClient,
-  context: ThreadContext,
-  input: ExecuteOperationInput,
-  transition: 'archive' | 'unarchive',
-): Promise<OperationOutcome> {
-  const dedupeKey = operationDedupeKey(input)
-  const eventName = transition === 'archive' ? 'thread.archived' : 'thread.unarchived'
-  const existing = await findEntryByDedupeKey(db, dedupeKey)
-  if (existing) {
-    if (!entryMatchesRequest(existing, eventName) || existing.request_id !== context.thread.id) return conflict()
-    return await successfulOutcome(db, context)
-  }
-
-  const now = new Date().toISOString()
-  const state = resolveGuestThreadMailbox(context.thread, context.record, now, await readMailboxActivity(db, context.thread.id))
-  const pastBy = state.pastByRule ? QUIET_CONVERSATION_MESSAGE : null
-  if (transition === 'archive' && !state.canArchive) {
-    return conflict(pastBy ?? 'This conversation is already archived')
-  }
-  if (transition === 'unarchive' && !state.canUnarchive) {
-    return conflict(pastBy ?? 'This conversation is not archived')
-  }
-
-  const [entry, update] = await executeBatch(db, mailboxTransitionQueries({
-    transition,
-    threadId: context.thread.id,
-    organizationId: context.thread.organization_id,
-    actorUserId: input.actorUserId,
-    entryId: crypto.randomUUID(),
-    dedupeKey,
-    now,
-  // Archiving closes the open reply task; unarchiving reopens a question still unanswered.
-  }).concat(conversationTaskQueries(context.thread.id, now)), { operation: `guest thread ${eventName}` })
-  const recorded = entry?.meta?.changes ?? 0
-  const moved = update?.meta?.changes ?? 0
-  if (recorded !== moved) throw new Error(`${eventName} recorded ${recorded} entries for ${moved} thread writes`)
-  if (moved === 1) return await successfulOutcome(db, context)
-
-  // Nothing landed: either the same key won a concurrent request, or the
-  // thread moved between the read above and the batch.
-  const applied = await findEntryByDedupeKey(db, dedupeKey)
-  if (applied && entryMatchesRequest(applied, eventName) && applied.request_id === context.thread.id) {
-    return await successfulOutcome(db, context)
-  }
-  const reread = await loadThreadContext(db, input.threadId, input.organizationId)
-  if ('ok' in reread) return reread
-  const after = resolveGuestThreadMailbox(reread.thread, reread.record, new Date().toISOString(), await readMailboxActivity(db, reread.thread.id))
-  return conflict(after.pastByRule ? QUIET_CONVERSATION_MESSAGE : 'This conversation changed; reload it and try again')
+  // An account inbox is read by whoever signs in to it: a named account, or an anonymous guest's browser while it is signed in.
+  // The anonymous user a host or a channel gave a guest has never been signed in to, so nobody reads it.
+  const account = await queryFirst<{ email: string | null; readable: number }>(db, `SELECT CASE WHEN "emailVerified" = 1 AND COALESCE("isAnonymous", 0) = 0 THEN email END AS email,
+      COALESCE("isAnonymous", 0) = 0 OR EXISTS (SELECT 1 FROM session WHERE session."userId" = user.id) AS readable FROM user WHERE id = ?`, [thread.user_id])
+  if (!account?.readable) return { channel: null, reason: GUEST_UNREACHABLE_MESSAGE }
+  return { channel: 'account', email: account.email }
 }
 
 /**
@@ -747,18 +644,18 @@ async function executeReport(db: DbClient, context: ThreadContext, input: Execut
   const id = contentReportId(input.actorUserId, input.idempotencyKey as string)
   await executeBatch(db, [
     contentReportInsert({
-      id, organizationId: context.thread.organization_id, reporterUserId: input.actorUserId, subject: 'guest_thread',
-      requestId: context.thread.id, teamMessageId: null, authorUserId: context.thread.user_id, reason,
+      id, organizationId: context.thread.organization_id, reporterUserId: input.actorUserId, subject: 'conversation',
+      conversationId: context.thread.id, messageId: null, authorUserId: context.thread.user_id, reason,
       excerpt: await guestThreadExcerpt(db, context.thread.id), blocked: block,
     }),
     // Only the request that filed the report blocks: a retry of an earlier
     // block must not undo an unblock made since.
     ...(block ? [{
-      query: 'UPDATE requests SET blocked_at = COALESCE(blocked_at, ?) WHERE organization_id = ? AND id = ? AND changes() = 1',
+      query: 'UPDATE conversations SET blocked_at = COALESCE(blocked_at, ?) WHERE organization_id = ? AND id = ? AND changes() = 1',
       params: [new Date().toISOString(), context.thread.organization_id, context.thread.id],
     }, ...conversationTaskQueries(context.thread.id, new Date().toISOString())] : []),
   ], { operation: block ? 'Block and report a guest' : 'Report a guest conversation' })
-  await assertSameReport(db, id, { subject: 'guest_thread', requestId: context.thread.id, teamMessageId: null, reason, blocked: block })
+  await assertSameReport(db, id, { subject: 'conversation', conversationId: context.thread.id, messageId: null, reason, blocked: block })
   await announceContentReport(input.env, db, id)
   return await successfulOutcome(db, context)
 }
@@ -766,7 +663,7 @@ async function executeReport(db: DbClient, context: ThreadContext, input: Execut
 /** Bring a blocked guest's conversation back to the inbox; the report stays filed. */
 async function executeUnblock(db: DbClient, context: ThreadContext): Promise<OperationOutcome> {
   const [update] = await executeBatch(db, [{
-    query: 'UPDATE requests SET blocked_at = NULL WHERE organization_id = ? AND id = ? AND blocked_at IS NOT NULL',
+    query: 'UPDATE conversations SET blocked_at = NULL WHERE organization_id = ? AND id = ? AND blocked_at IS NOT NULL',
     params: [context.thread.organization_id, context.thread.id],
   }, ...conversationTaskQueries(context.thread.id, new Date().toISOString())], { operation: 'Unblock a guest' })
   if ((update?.meta?.changes ?? 0) === 0 && context.thread.blocked_at === null) return conflict('This guest is not blocked')
@@ -780,16 +677,16 @@ export async function executeGuestThreadOperation(db: DbClient, input: ExecuteOp
 
   if (input.action === 'reply') {
     const scheduled = input.idempotencyKey.startsWith('send-later:')
-      ? await queryFirst<{ id: string; status: string; entry_id: string | null; user_id: string; body: string }>(db, `SELECT id, status, entry_id, user_id, body FROM send_later_messages
-        WHERE id = ? AND organization_id = ? AND request_id = ?`,
+      ? await queryFirst<{ id: string; status: string; message_id: string | null; author_user_id: string; body: string }>(db, `SELECT id, status, message_id, author_user_id, body FROM scheduled_guest_messages
+        WHERE id = ? AND organization_id = ? AND conversation_id = ? AND author_user_id IS NOT NULL`,
       [input.idempotencyKey.slice('send-later:'.length), input.organizationId, input.threadId])
       : null
     if (input.idempotencyKey.startsWith('send-later:')) {
-      const original = await findEntryByDedupeKey(db, operationDedupeKey(input))
+      const original = await findMessageByDedupeKey(db, operationDedupeKey(input))
       if (!scheduled || !['sending', 'failed', 'needs_review', 'sent'].includes(scheduled.status)
-        || scheduled.body !== (input.body ?? '').trim() || scheduled.user_id !== (original?.actor_user_id ?? input.actorUserId)
-        || (original && (original.request_id !== input.threadId || original.event_name !== 'thread.member_reply'))
-        || (scheduled.entry_id !== null && scheduled.entry_id !== original?.id)) {
+        || scheduled.body !== (input.body ?? '').trim() || scheduled.author_user_id !== (original?.author_user_id ?? input.actorUserId)
+        || (original && (original.conversation_id !== input.threadId || original.event_name !== MEMBER_REPLY_EVENT))
+        || (scheduled.message_id !== null && scheduled.message_id !== original?.id)) {
         throw new Error('Reply does not match an already-started scheduled message')
       }
     }
@@ -797,40 +694,35 @@ export async function executeGuestThreadOperation(db: DbClient, input: ExecuteOp
     if (outcome.ok && scheduled) {
       // The original entry owns the author, even when another authorized
       // member retries it. Finish the same scheduled reply after real delivery.
-      const entry = await findEntryByDedupeKey(db, operationDedupeKey(input))
-      if (!entry || entry.actor_user_id !== scheduled.user_id || entry.body !== scheduled.body) throw new Error('Sent scheduled reply does not match its conversation entry')
+      const entry = await findMessageByDedupeKey(db, operationDedupeKey(input))
+      if (!entry || entry.author_user_id !== scheduled.author_user_id || entry.body !== scheduled.body) throw new Error('Sent scheduled reply does not match its conversation message')
       if (scheduled.status !== 'sent') {
         const now = new Date().toISOString()
-        const saved = await execute(db, `UPDATE send_later_messages SET status = 'sent', reason = NULL, error_code = NULL, error_field = NULL,
-          entry_id = ?, sent_at = ?, updated_at = ? WHERE id = ? AND status = ? AND (entry_id IS NULL OR entry_id = ?)`,
+        const saved = await execute(db, `UPDATE scheduled_guest_messages SET status = 'sent', reason = NULL, error_code = NULL, error_field = NULL,
+          message_id = ?, sent_at = ?, updated_at = ? WHERE id = ? AND status = ? AND (message_id IS NULL OR message_id = ?)`,
         [entry.id, now, now, scheduled.id, scheduled.status, entry.id])
         if (saved.meta.changes !== 1) {
-          const current = await queryFirst<{ status: string; entry_id: string | null }>(db, 'SELECT status, entry_id FROM send_later_messages WHERE id = ?', [scheduled.id])
-          if (current?.status !== 'sent' || current.entry_id !== entry.id) throw new Error('Scheduled reply changed before its sent outcome was recorded')
+          const current = await queryFirst<{ status: string; message_id: string | null }>(db, 'SELECT status, message_id FROM scheduled_guest_messages WHERE id = ?', [scheduled.id])
+          if (current?.status !== 'sent' || current.message_id !== entry.id) throw new Error('Scheduled reply changed before its sent outcome was recorded')
         }
       }
-      await publishGuestInboxThreadEvent(input.env, db, { threadId: input.threadId, type: 'entry.appended' })
+      await publishConversationEvent(input.env, db, { conversationId: input.threadId, type: 'MESSAGE_CREATE' })
     }
     return outcome
-  }
-  if (input.action === 'archive' || input.action === 'unarchive') {
-    return await executeMailboxTransition(db, context, input, input.action)
   }
   if (input.action === 'report' || input.action === 'block') return await executeReport(db, context, input, input.action === 'block')
   if (input.action === 'unblock') return await executeUnblock(db, context)
   if (input.action === 'no_show') return await executeNoShow(db, context, input)
   if (input.action === 'accept_change' || input.action === 'decline_change') {
     // A guest's request on their channel; a business's proposal is answered by its guest.
-    if (context.thread.kind !== 'stay') return conflict('Only a stay’s guest change requests are answered here')
+    if (context.record?.unit !== 'nights') return conflict('Only a stay’s guest change requests are answered here')
     if (!input.stayManager) throw new HTTPError({ statusCode: 403, message: 'Only organization owners and admins can change stays', data: { code: 'STAY_ROLE_REQUIRED', field: 'role' } })
-    if (!input.requestId) throw new HTTPError({ statusCode: 400, message: 'Name the change request to answer', data: { code: 'VALIDATION_ERROR', field: 'requestId' } })
+    if (!input.requestId) throw new HTTPError({ statusCode: 400, message: 'Name the change request to answer', data: { code: 'VALIDATION_ERROR', field: 'message_id' } })
     await respondToStayChangeRequest(db, input.env, { thread: context.thread, requestId: input.requestId, decision: input.action === 'accept_change' ? 'accept' : 'decline', actorUserId: input.actorUserId })
     return await successfulOutcome(db, context)
   }
   return await executeSourceMutation(db, context, input)
 }
-
-const NO_SHOW_TABLES = { reservation: 'reservations', booking: 'bookings', stay: 'stays' } as const
 
 /**
  * Record that the guest did not come. The visit keeps its status; its review
@@ -841,36 +733,26 @@ async function executeNoShow(db: DbClient, context: ThreadContext, input: Execut
   const record = context.record
   if (!record) return { ok: false, status: 404, reason: 'source_not_found' }
   const dedupeKey = operationDedupeKey(input)
-  const eventName = `${record.kind}.no_show`
-  const existing = await findEntryByDedupeKey(db, dedupeKey)
+  const eventName = `${record.unit === 'nights' ? 'stay' : 'booking'}.no_show`
+  const existing = await findMessageByDedupeKey(db, dedupeKey)
   if (existing) return entryMatchesRequest(existing, eventName) ? await successfulOutcome(db, context) : conflict()
   const now = new Date().toISOString()
   if (!canMarkNoShow(record, now)) return conflict('Only a confirmed visit that has started and has no review can be marked as a no-show')
-  const table = NO_SHOW_TABLES[record.kind]
   const entryId = crypto.randomUUID()
   await executeBatch(db, [
+    ...messageQueries({ id: entryId, conversationId: context.thread.id, authorKind: 'krabiclaw', authorUserId: input.actorUserId, body: 'Marked as a no-show',
+      eventName, payload: { action: 'no_show', booking_id: record.id }, dedupeKey, occurredAt: now,
+      guard: { sql: `c.organization_id = ? AND NOT EXISTS (SELECT 1 FROM reviews rv WHERE rv.organization_id = c.organization_id AND rv.booking_id = c.booking_id)
+        AND EXISTS (SELECT 1 FROM bookings src WHERE src.id = ? AND src.id = c.booking_id AND src.organization_id = c.organization_id AND src.status = 'confirmed' AND src.no_show_at IS NULL AND src.starts_at <= ?)`,
+      params: [context.thread.organization_id, record.id, now] } }).queries,
     {
-      query: `
-        INSERT INTO activity_entries
-          (id, request_id, kind, scope_kind, actor_kind, actor_user_id, channel, body, event_name, payload_json, dedupe_key, sequence, occurred_at, created_at)
-        SELECT ?, gt.id, 'operation', 'request', 'member', ?, NULL, 'Marked as a no-show', ?, ?, ?,
-               COALESCE((SELECT MAX(sequence) FROM activity_entries WHERE request_id = gt.id), 0) + 1, ?, ?
-        FROM requests gt
-        WHERE gt.id = ? AND gt.organization_id = ? AND gt.review_id IS NULL
-          AND EXISTS (SELECT 1 FROM ${table} src WHERE src.id = ? AND src.request_id = gt.id AND src.organization_id = gt.organization_id AND src.status = 'confirmed' AND src.no_show_at IS NULL)
-        ON CONFLICT(dedupe_key) DO NOTHING
-      `,
-      params: [entryId, input.actorUserId, eventName, JSON.stringify({ action: 'no_show', operational_booking_id: record.id }), dedupeKey, now, now,
-        context.thread.id, context.thread.organization_id, record.id],
-    },
-    {
-      query: `UPDATE ${table} SET no_show_at = ?, updated_at = ?${table === 'stays' ? ', version = version + 1' : ''}
-        WHERE id = ? AND no_show_at IS NULL AND EXISTS (SELECT 1 FROM activity_entries WHERE id = ?)`,
+      query: `UPDATE bookings SET no_show_at = ?, updated_at = ?, version = version + 1
+        WHERE id = ? AND no_show_at IS NULL AND EXISTS (SELECT 1 FROM messages WHERE id = ?)`,
       params: [now, now, record.id, entryId],
     },
-    revokeReviewRequestQuery(record.kind, context.thread.id, entryId, now),
+    revokeReviewRequestQuery(record.id, entryId, now),
   ], { operation: `guest thread ${eventName}` })
-  const applied = await findEntryByDedupeKey(db, dedupeKey)
+  const applied = await findMessageByDedupeKey(db, dedupeKey)
   if (!applied) return conflict('The visit changed before it could be marked as a no-show')
   if (!entryMatchesRequest(applied, eventName)) return conflict()
   return await successfulOutcome(db, context)
@@ -880,15 +762,15 @@ async function executeNoShow(db: DbClient, context: ThreadContext, input: Execut
  * A reply nobody is sending right now: an automatic message (no author), or a
  * member's send-later message, sent as that member's own reply.
  */
-export async function sendScheduledGuestReply(db: DbClient, input: { threadId: string; organizationId: string; body: string; idempotencyKey: string; actorUserId?: string; env: ExecuteOperationInput['env'] }): Promise<{ outcome: OperationOutcome; entryId: string | null }> {
+export async function sendScheduledGuestReply(db: DbClient, input: { threadId: string; organizationId: string; body: string; idempotencyKey: string; actorUserId?: string; env: ExecuteOperationInput['env'] }): Promise<{ outcome: OperationOutcome; messageId: string | null }> {
   let outcome: OperationOutcome
   if (input.actorUserId !== undefined) {
     outcome = await executeGuestThreadOperation(db, { ...input, action: 'reply', actorUserId: input.actorUserId })
   } else {
     const context = await loadThreadContext(db, input.threadId, input.organizationId)
-    if ('ok' in context) return { outcome: context, entryId: null }
+    if ('ok' in context) return { outcome: context, messageId: null }
     outcome = await executeReply(db, context, { ...input, action: 'reply', actorUserId: null })
   }
-  const entry = await findEntryByDedupeKey(db, operationDedupeKey(input))
-  return { outcome, entryId: entry?.id ?? null }
+  const entry = await findMessageByDedupeKey(db, operationDedupeKey(input))
+  return { outcome, messageId: entry?.id ?? null }
 }

@@ -46,7 +46,7 @@ from when locations were metered keeps its retired location item, which is sent
 no events and bills nothing.
 
 Captured volume, Stripe's attributable costs (a correction is a negative
-value) and managed ad spend are queued in `payment_usage_events` and delivered
+value) and managed ad spend are queued in `usage_events` and delivered
 by `deliverPaymentsUsage` (`server/domain/payments/usage.ts`) as Stripe meter
 events on the business's own customer, timestamped when they are sent so they
 land in the open period. Each event's identifier and idempotency key derive
@@ -273,11 +273,43 @@ Better Auth anonymous linking transfers purchases, notification targets and read
 acknowledgements; current purchase ownership authorizes a return-proof replay.
 Booking conversion completes before notification delivery.
 
+A business's owners and admins are emailed when Stripe pays out to its bank
+account and when a payout fails (`payout.paid`, `payout.failed`), and when a
+payment is disputed, under the same Organization and billing preference.
+
 Better Auth Stripe still owns subscriptions, and the fees are invoiced on them;
 Stripe's own invoice emails carry their status. There is no scheduled
 reconciliation: the connected-account webhook owns capture, refund, dispute and
 payout state, and Stripe's own redelivery is the retry. Nothing here issues or
 collects an invoice.
+
+## KrabiClaw plan emails
+
+KrabiClaw emails a business's owners and admins three things about its own
+plan, from Better Auth Stripe's
+[subscription hooks](https://www.better-auth.com/docs/plugins/stripe): its new
+plan (`onSubscriptionComplete`, or `onSubscriptionCreated` for a subscription
+made in Stripe), a change of plan (`onSubscriptionUpdate`, when Stripe's event
+shows the plan price changed) and a plan that will not renew
+(`onSubscriptionCancel`). Stripe sends every other email about the
+subscription. These are Stripe account settings that cannot be turned on from
+code, so the owner turns them on in the platform Stripe account, live and in
+the sandbox used for testing:
+
+- Settings → Business → [Customer emails](https://dashboard.stripe.com/settings/emails):
+  **Successful payments** and **Refunds**, the receipts for each paid
+  subscription invoice ([receipts](https://docs.stripe.com/receipts)). Add and
+  verify krabiclaw.com there so they come from our domain
+  ([custom email domain](https://docs.stripe.com/get-started/account/email-domain)).
+- Settings → Billing → [Subscriptions and emails](https://dashboard.stripe.com/settings/billing/automatic),
+  under Email notifications and customer management: **Send emails about
+  upcoming renewals**, **Send a reminder email 7 days before a free trial
+  ends** and **Send emails about expiring cards**.
+- Revenue recovery → [Emails](https://dashboard.stripe.com/revenue_recovery/emails):
+  **Send emails when card payments fail**
+  ([customer emails](https://docs.stripe.com/billing/revenue-recovery/customer-emails)).
+
+KrabiClaw sends none of these itself, so turning them on sends nothing twice.
 
 The preserved local environment intentionally has no automatic cron schedule and
 uses log-only customer mail. Its existing Stripe CLI listeners forward the native

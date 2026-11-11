@@ -59,7 +59,7 @@ const { data: members, error: membersError } = await useMemberSchedulingList(() 
 // A person is their face and a branch its picture, as the rows that list them draw it.
 const locationOptions = computed(() => [
   { label: organization.value?.vertical === 'service' ? 'All offices' : 'All locations', value: AGENDA_FILTER_ALL },
-  ...(props.locations ?? []).map(location => ({ label: location.title, value: location.id, ...(location.imageUrl ? { avatar: { src: location.imageUrl } } : { icon: 'i-lucide-map-pin' }) })),
+  ...(props.locations ?? []).map(location => ({ label: location.title, value: location.id, ...(location.image_url ? { avatar: { src: location.image_url } } : { icon: 'i-lucide-map-pin' }) })),
 ])
 const kindOptions = computed(() => [
   { label: 'All activity', value: AGENDA_FILTER_ALL },

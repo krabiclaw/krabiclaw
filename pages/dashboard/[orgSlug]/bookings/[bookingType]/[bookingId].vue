@@ -14,7 +14,7 @@ useSeoMeta({ title: 'Booking details | KrabiClaw', robots: 'noindex, nofollow' }
 const route = useRoute()
 const level = useRouteLevel()
 const rawType = typeof route.params.bookingType === 'string' ? route.params.bookingType : undefined
-const bookingType = rawType === 'reservation' || rawType === 'booking' || rawType === 'order' || rawType === 'payment' ? rawType : null
+const bookingType = rawType === 'booking' || rawType === 'order' || rawType === 'payment' ? rawType : null
 const bookingId = String(route.params.bookingId || '')
 // A stay is opened here like a booking, from Today and from its calendar day.
 const isStay = rawType === 'stay'

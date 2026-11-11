@@ -53,7 +53,6 @@
   "booking.provider_retry": "Thử lại",
   "booking_policy.deposit_amount": "Tiền đặt cọc: {amount} mỗi lượt đặt bàn.",
   "booking_policy.deposit_amount_exclusive": "Tiền đặt cọc: {amount} mỗi lượt đặt bàn, chưa bao gồm thuế áp dụng.",
-  "reservations.deposit_label": "Tiền đặt cọc đặt bàn",
   "reservations.confirmed": "Đặt bàn đã được xác nhận",
   "forms.yes": "Có",
   "forms.no": "Không",

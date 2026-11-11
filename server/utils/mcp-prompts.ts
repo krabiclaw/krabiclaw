@@ -112,7 +112,7 @@ export function renderMcpPrompt(name: string, args: Record<string, string>): { d
           `Call create_post with a new idempotency_key and this body: ${body}`,
           "If the user supplied or approved media, pass it as create_post media in the order they want it shown: the cover first, then the gallery.",
           `Publish only to: ${destinations}. For Facebook, Instagram or Discord, call get_social_connections and use the exact target_id and connection_revision it returns; if the destination is not connected or has a problem, say so instead of publishing elsewhere.`,
-          "Show the user the draft's preview_url, then call publish_post with the post's updated_at as expected_updated_at and one target per named destination.",
+          "Show the user the draft's preview_url, then call publish_post with the post's current updated_at and one target per named destination.",
           "Report each outcome exactly as returned: published, with its public_url when the destination gives one; already_published; failed with the provider's reason; or skipped.",
         ].join(" "),
       };
@@ -133,9 +133,9 @@ export function renderMcpPrompt(name: string, args: Record<string, string>): { d
       return {
         description: "Summarize guest and team conversations, pending bookings, and unreplied reviews",
         text: [
-          'Use get_workspace_context to resolve the requested business. Read all relevant list_guest_conversations pages and get_guest_conversation for full contact messages, table reservation and product booking details, proposals and delivery receipts.',
-          'For internal team messages use list_team_conversations and get_team_conversation. Select actual teammates with list_team_conversation_recipients. start_team_conversation reuses direct and explicit stay/location conversations; manual groups of at least three people are distinct and require a stable idempotency_key. update_team_group changes only manual internal groups: obey canManage/canLeave; preserve buyer/guest and stay/location participants. New members can read group history; removal and leaving end access while retaining messages. Use send_team_message only for the requested internal message, then read it back. Reading does not mark a thread read; mark_team_conversation_read changes only the caller’s read position. Team chat is separate from guest replies and Better Auth Team/group management.',
-          'Summarize unanswered messages and pending bookings. Use reply_to_guest with a stable idempotency_key only for the message or photo the user requests. Use get_product_booking before confirm_product_booking, reject_product_booking, cancel_product_booking or request_product_booking_change; use cancel_table_reservation or request_table_reservation_change for an explicitly requested table reservation action.',
+          'Use get_workspace_context to resolve the requested business. Read all relevant list_conversations pages (guests, Airbnb Support and team conversations, with unread counts) and get_conversation for full contact messages, booking details (classes, consultations and restaurant tables), proposals and delivery receipts.',
+          'Select actual teammates with list_conversation_recipients. start_conversation reuses direct and explicit stay/location team conversations; manual groups of at least three people are distinct and require a stable idempotency_key. update_conversation_group changes only manual team groups: obey can_manage/can_leave; preserve stay/location participants. New members can read group history; removal and leaving end access while retaining messages. Reading does not mark a conversation read; mark_conversation_read and mark_conversation_unread change only the caller’s read position.',
+          'Summarize unanswered messages and pending bookings. Use send_message with a stable idempotency_key only for the message or photo the user requests, then read it back. Use get_product_booking before confirm_product_booking, reject_product_booking, cancel_product_booking or request_product_booking_change; a table reservation is a product booking and uses the same tools.',
           'Booking changes email a proposal and leave the existing allocation unchanged until guest acceptance. Financial actions requiring the dashboard remain incomplete; report the returned handoff instead of claiming completion.',
           'Use list_locations and list_location_reviews to read reviews separately; provider reviews and imported Google Q&A remain managed in Google.',
           'Report failed deliveries and actions awaiting guest acceptance accurately.',
@@ -157,13 +157,13 @@ export function renderMcpPrompt(name: string, args: Record<string, string>): { d
     case "finish_my_organization_setup": {
       return {
         description: "Finish business setup",
-        text: "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft ID and revision. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Check for missing brand assets like logo, favicon, social card, palette colors, hero media, and about page story. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result.",
+        text: "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft_id and updated_at. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Check for missing brand assets like logo, favicon, social card, palette colors, hero media, and about page story. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result.",
       };
     }
     case "make_organization_more_bookable": {
       return {
         description: "Review guest booking",
-        text: "Use get_workspace_context, list_products, get_product and list_product_booking_sessions to read the public offering, booking readiness and actual availability. Use list_locations, get_location and get_reservation_policy for location hours and table reservation setup. Identify what prevents guests from booking and ask for missing business facts. Use update_product with booking setup, set_product_booking_config, replace_product_weekly_schedule or update_reservation_policy for the changes the user requests. Read back readiness, available times and the public result.",
+        text: "Use get_workspace_context, list_products, get_product and list_product_booking_sessions to read the public offering, booking readiness and actual availability. Use list_locations and get_location for location hours; a restaurant's tables are a table product at each location, read with get_product like any offering. Identify what prevents guests from booking and ask for missing business facts. Use update_product with booking setup, set_product_booking_config or replace_product_weekly_schedule (a table's seatings are a start every interval through each service) for the changes the user requests. Read back readiness, available times and the public result.",
       };
     }
     case "make_my_organization_look_better": {
@@ -175,7 +175,7 @@ export function renderMcpPrompt(name: string, args: Record<string, string>): { d
     case "grow_my_bookings": {
       return {
         description: "Review booking demand",
-        text: "Use get_workspace_context and get_organization_analytics to read recent traffic. Use list_products, get_product and list_product_booking_sessions for bookable offerings and availability, and list_guest_conversations plus get_guest_conversation for current guest demand. Recommend the most useful action supported by those records. Use reply_to_guest, update_product or create_post and publish_post for the action the user requests, then read back its actual outcome and report any incomplete delivery or dashboard handoff.",
+        text: "Use get_workspace_context and get_organization_analytics to read recent traffic. Use list_products, get_product and list_product_booking_sessions for bookable offerings and availability, and list_conversations plus get_conversation for current guest demand. Recommend the most useful action supported by those records. Use send_message, update_product or create_post and publish_post for the action the user requests, then read back its actual outcome and report any incomplete delivery or dashboard handoff.",
       };
     }
     default:

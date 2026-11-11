@@ -186,14 +186,6 @@ export function getDateIntervals(hours: OpeningHours, special: SpecialHours, dat
   }
   return merged
 }
-export function generateReservationTimes(hours: OpeningHours, date: string, { intervalMinutes = 30, lastSeatingBufferMinutes = 60, specialHours = null as SpecialHours } = {}): string[] {
-  if (!Number.isInteger(intervalMinutes) || intervalMinutes <= 0 || !Number.isInteger(lastSeatingBufferMinutes) || lastSeatingBufferMinutes < 0) throw new Error('Invalid reservation interval or last seating buffer')
-  const slots = new Set<string>()
-  for (const { start, end } of getDateIntervals(hours, specialHours, date) ?? []) {
-    for (let minute = start < 0 ? start + Math.ceil(-start / intervalMinutes) * intervalMinutes : start; minute < DAY && minute <= end - lastSeatingBufferMinutes; minute += intervalMinutes) slots.add(toTimeString(minute))
-  }
-  return [...slots].sort()
-}
 export function getTodayHoursLabel(hours: OpeningHours, closedLabel: string, timezone?: string | null, now = new Date(), special: SpecialHours = null, locale = 'en'): string | null {
   if (!timezone) return null
   const intervals = getDateIntervals(hours, special, localNow(timezone, now).date)

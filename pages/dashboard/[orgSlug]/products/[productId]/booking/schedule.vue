@@ -20,6 +20,10 @@ const route = useRoute()
 const router = useRouter()
 const legal = computed(() => p.product.value?.kind === 'service')
 const chooseLocationPath = computed(() => router.resolve({ path: level.path.value, query: { ...route.query, location_id: undefined } }).fullPath)
+// A table has no weekly times: its location's hours seat it.
+watchEffect(() => {
+  if (level.mode.value !== 'yield' && p.product.value?.kind === 'table') showError(createError({ statusCode: 404, statusMessage: 'Page not found' }))
+})
 const scopeError = computed(() => p.locationId.value
   ? p.location.value?.status !== 'active' ? `Choose an active ${legal.value ? 'office' : 'location'} for this weekly schedule.` : p.scheduleError.value
   : null)
@@ -27,7 +31,7 @@ const groups = computed<EditorNavigationGroup[]>(() => {
   if (route.query.location_id === 'online') {
     const config = p.product.value?.booking
     return [{ id: 'online', items: config?.held_online ? [{
-      id: 'hours', label: 'Bookable times', icon: 'i-lucide-clock', summary: `Online ${legal.value ? 'consultations' : 'sessions'} follow ${config.assigned_team_id ? 'each team member’s' : `the ${p.bookingCopy.value.assigneeNoun}’s`} working hours.`,
+      id: 'hours', label: 'Bookable times', icon: 'i-lucide-clock', summary: `Online ${legal.value ? 'consultations' : 'sessions'} follow the ${p.bookingCopy.value.assigneeNoun}’s working hours.`,
       to: config.assigned_member_id ? `/dashboard/${route.params.orgSlug}/team/${config.assigned_member_id}/hours` : `/dashboard/${route.params.orgSlug}/team`,
     }] : [] }]
   }

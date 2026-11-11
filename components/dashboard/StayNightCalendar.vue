@@ -51,7 +51,7 @@
                 <span class="block text-sm sm:text-base" :class="night(day)?.available === false ? 'line-through' : ''">{{ day.day }}</span>
                 <UIcon v-if="channelState(day)" :name="CHANNEL_MARKS[channelState(day)!]" class="size-3.5 shrink-0" :class="channelState(day) === 'pending' ? 'text-muted' : 'text-warning'" :data-testid="`stay-night-channel-${channelState(day)}`" aria-hidden="true" />
               </span>
-              <span v-if="night(day)?.stay_id || night(day)?.held_until || night(day)?.calendar" class="hidden truncate text-xs sm:block">{{ stayLabel(day) }}</span>
+              <span v-if="night(day)?.booking_id || night(day)?.held_until || night(day)?.calendar" class="hidden truncate text-xs sm:block">{{ stayLabel(day) }}</span>
               <span class="block break-all text-[10px] leading-tight tabular-nums sm:hidden">{{ night(day) ? night(day)!.price_minor === null ? 'No price' : compactMoney(night(day)!.price_minor!) : '…' }}</span>
               <span class="hidden truncate text-sm sm:block">{{ night(day) ? night(day)!.price_minor === null ? 'No price' : money(night(day)!.price_minor!) : '…' }}</span>
             </span>
@@ -90,7 +90,7 @@
             <p v-if="!listedStays.length" class="py-10 text-center text-sm text-muted">No stays in {{ placeholder?.year }}.</p>
             <NuxtLink v-for="stay in listedStays" :key="stay.id" :to="{ path: `/dashboard/${route.params.orgSlug}/calendar/stay/${encodeURIComponent(stay.id)}`, query: route.query }" class="flex items-center justify-between gap-4 py-5">
               <div>
-                <p class="font-medium text-highlighted">{{ [stay.guest_name, stay.guest_surname].filter(Boolean).join(' ') || 'Guest name not provided' }}</p>
+                <p class="font-medium text-highlighted">{{ stay.guest_name || 'Guest name not provided' }}</p>
                 <p class="mt-1 text-sm text-muted">{{ formatCalendarDate(stay.check_in_date, 'en', { month: 'short', day: 'numeric' }) }} – {{ formatCalendarDate(stay.check_out_date, 'en', { month: 'short', day: 'numeric', year: 'numeric' }) }}</p>
               </div>
               <span v-if="stay.channel" class="text-sm text-muted">{{ channels[stay.channel] }}</span>
@@ -154,8 +154,8 @@ import { CHANNEL_MARKS, channelNote, isStayNight, stayNightSource, useStayNightE
 import { getErrorMessage } from '~/utils/errors'
 
 type Home = Pick<StayHome, 'product_id' | 'name' | 'internal_name' | 'timezone' | 'currency' | 'base_price_minor' | 'min_nights' | 'calendar_rules' | 'cancellation_policy' | 'long_term_cancellation_policy'>
-// A manager reads each stay's surname and channel; a member's turnover has neither.
-type CalendarStay = Pick<StayTurnover, 'id' | 'product_id' | 'check_in_date' | 'check_out_date' | 'guest_name' | 'status'> & Partial<Pick<Stay, 'guest_surname' | 'channel'>>
+// A manager reads each stay's channel; a member's turnover has none.
+type CalendarStay = Pick<StayTurnover, 'id' | 'product_id' | 'check_in_date' | 'check_out_date' | 'guest_name' | 'status'> & Partial<Pick<Stay, 'channel'>>
 interface CalendarPayload { home: Home; nights: StayNight[]; stays: CalendarStay[]; channel_push?: SuccessfulChannelPush | null }
 const props = defineProps<{ productId: string; homes: Pick<StayHome, 'product_id' | 'name' | 'internal_name' | 'timezone'>[]; manage: boolean; homeError: string; offeringItems: { label: string; value: string }[]; offeringsError?: string }>()
 const route = useRoute()
@@ -225,7 +225,7 @@ function isCalendar(value: unknown): value is CalendarPayload {
   parseStayCalendarRules(home.calendar_rules)
   if (!value.stays.every(stay => isRecord(stay) && typeof stay.id === 'string' && stay.product_id === props.productId
     && isValidCalendarDate(stay.check_in_date) && isValidCalendarDate(stay.check_out_date) && stay.check_out_date > stay.check_in_date
-    && nullableText(stay.guest_name) && (props.manage ? nullableText(stay.guest_surname) && Object.hasOwn(channels, String(stay.channel)) : !('guest_surname' in stay) && !('channel' in stay)) && typeof stay.status === 'string')) return false
+    && nullableText(stay.guest_name) && (props.manage ? Object.hasOwn(channels, String(stay.channel)) : !('channel' in stay)) && typeof stay.status === 'string')) return false
   return (value.channel_push === undefined || isSuccessfulChannelPush(value.channel_push)) && value.nights.every(isStayNight)
 }
 const { data, error, status, refresh } = await useAsyncData(
@@ -267,9 +267,9 @@ const staysById = computed(() => new Map((data.value?.stays ?? []).map(stay => [
 const night = (day: DateValue) => nightsByDate.value.get(day.toString())
 function stayLabel(day: DateValue) {
   const value = night(day)
-  if (value?.stay_id) {
-    const stay = staysById.value.get(value.stay_id)
-    return stay ? [[stay.guest_name, stay.guest_surname].filter(Boolean).join(' ') || 'Guest name not provided', ...(stay.channel ? [channels[stay.channel]] : [])].join(' · ') : 'Reserved'
+  if (value?.booking_id) {
+    const stay = staysById.value.get(value.booking_id)
+    return stay ? [stay.guest_name || 'Guest name not provided', ...(stay.channel ? [channels[stay.channel]] : [])].join(' · ') : 'Reserved'
   }
   return value?.calendar ? `Unavailable from ${channels[value.calendar]}` : 'Checkout hold'
 }
@@ -286,7 +286,7 @@ const channelState = (day: DateValue) => {
 function nightTitle(day: DateValue) {
   const value = night(day)
   const note = value ? channelNote(value) : null
-  return value ? `${day.toString()} · ${value.stay_id ? stayLabel(day) : value.held_until ? 'Checkout hold' : value.calendar ? `Unavailable from ${channels[value.calendar]}` : value.closed ? 'Blocked' : 'Available'} · ${value.price_minor === null ? 'No price' : money(value.price_minor)}${note ? ` · ${note}` : ''}` : day.toString()
+  return value ? `${day.toString()} · ${value.booking_id ? stayLabel(day) : value.held_until ? 'Checkout hold' : value.calendar ? `Unavailable from ${channels[value.calendar]}` : value.closed ? 'Blocked' : 'Available'} · ${value.price_minor === null ? 'No price' : money(value.price_minor)}${note ? ` · ${note}` : ''}` : day.toString()
 }
 const dateLabel = computed(() => {
   const range = selectedRange.value
@@ -386,7 +386,7 @@ watch(() => route.query.month, value => {
 })
 const realtime = useDashboardInvalidations()
 watch(realtime.event, event => {
-  if ((event?.type === 'stay.changed' || event?.type === 'nights.changed') && event.productId === props.productId && !busy.value) void refresh()
+  if ((event?.type === 'stay.changed' || event?.type === 'nights.changed') && event.product_id === props.productId && !busy.value) void refresh()
 })
 watch(realtime.connectionEpoch, epoch => { if (epoch > 0 && !busy.value) void refresh() })
 const calendarUi = {

@@ -100,13 +100,6 @@ export default defineHandler(async (event) => {
     if (!product || !destinationHost(product.order_url)) return jsonResponse({ error: 'Product not found' }, { status: 404 })
     const destinationHostname = new URL(product.order_url).hostname.toLowerCase()
     entityType = 'product'; ctaDestination = destinationHostname; pageType = 'product'; metadata = { product_id: product.id, destination_hostname: destinationHostname }
-  } else if (eventName === 'checkout_start' && !body.product_id) {
-    stage = 'started'
-    locationId = cleanString(body.location_id, 120) || null
-    const location = locationId ? await queryFirst<{ id: string }>(db,
-      "SELECT id FROM business_locations WHERE id = ? AND organization_id = ? AND status = 'active' LIMIT 1", [locationId, organizationId]) : null
-    if (!location) return jsonResponse({ error: 'Reservation location not found' }, { status: 404 })
-    pageType = 'reservations'
   } else if (eventName === 'product_view' || eventName === 'checkout_start') {
     stage = eventName === 'product_view' ? 'viewed' : 'started'
     locationId = cleanString(body.location_id, 120) || null

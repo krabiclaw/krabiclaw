@@ -7,9 +7,9 @@ export type CmsSectionId = 'pages' | 'collections' | 'locations' | 'media' | 'or
 // Explicit module identifiers a vertical/site/site/location can turn on.
 // 'consultations' and 'appointments' are declared (not yet wired to any catalog entry below) because
 // no distinct manager/route exists for them yet, and a legal practice's practice management lives
-// entirely on the single 'services' page. Reservation policies belong to locations because every
-// reservation is location-owned. Booking is a capability of a Product, configured where the
-// Product is, so it needs no module of its own. Wire distinct manager entries only when their
+// entirely on the single 'services' page. Booking — a class, a consultation, a restaurant's
+// tables — is a capability of a Product, configured where the Product is, so it needs no
+// module of its own; 'reservations' is the public page a restaurant's tables are booked from. Wire distinct manager entries only when their
 // routes provide distinct customer-facing UX.
 export type ProductFeature =
   | 'contact' | 'locations' | 'settings'
@@ -78,7 +78,6 @@ const customerSiteCatalog: CmsSiteCatalog = {
     { key: 'organization.settings', id: 'settings', label: 'Brand', section: 'organization', route: 'settings', scope: 'organization' },
     { key: 'location.settings', id: 'settings', label: 'Location settings', section: 'organization', route: ':location/settings', scope: 'location' },
     { key: 'location.products', id: 'products', label: 'Products', section: 'collections', route: ':location/products', scope: 'location' },
-    { key: 'location.reservations', id: 'reservations', label: 'Reservations', section: 'collections', route: ':location/reservations', scope: 'location' },
   ],
   locationVocabularyDefault: 'location',
 }

@@ -4,14 +4,13 @@ import { executeBatch, queryAll, queryFirst, type DbClient } from '~/server/db'
 import { getOrgAdapter, hasPermission } from 'better-auth/plugins'
 import { parsePhoneOrThrow } from '~/utils/phone'
 import { oncePerRequest } from '~/server/utils/request-scope'
-import { sessionMemberSql } from '~/server/utils/provider-allocation'
 import { organizationEventQuery } from '~/server/utils/organization-events'
 import { publishAccessInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 import type { H3Event } from 'nitro'
 import type { CloudflareEnv, organizationOptions } from '~/server/utils/auth'
 import type { OrganizationPermissions } from '~/utils/organization-access'
 
-// Better Auth owns membership, roles and teams. Service and appointment access
+// Better Auth owns membership and roles. Service and appointment access
 // narrows those permissions using the saved provider assignment below.
 
 /**
@@ -56,7 +55,7 @@ export interface MemberAccessPrincipal {
   readonly role: string
   readonly organizationId: string
   // The request this principal was minted for, when there is one. Only used to
-  // memoize the team read the scope checks share; absent for scheduled work.
+  // memoize the membership reads the scope checks share; absent for scheduled work.
   readonly event?: H3Event
 }
 
@@ -294,7 +293,7 @@ export interface OrganizationNotificationMember {
 export async function listOrganizationNotificationMembers(
   env: CloudflareEnv,
   organizationId: string,
-  options: { /** Explicit previous/new provider notices. */ includeMemberIds?: readonly string[]; requestId?: string } = {},
+  options: { /** Explicit previous/new provider notices. */ includeMemberIds?: readonly string[]; /** The guest conversation whose handlers are told. */ requestId?: string } = {},
 ): Promise<OrganizationNotificationMember[]> {
   const adapter = await organizationAdapter(env)
   const members = await listAllOrganizationMembers(adapter, organizationId)
@@ -304,7 +303,7 @@ export async function listOrganizationNotificationMembers(
   const included = new Set(options.includeMemberIds)
   if (options.requestId) {
     const scope = assignedGuestThreadScope('r', { column: 'recipient.userId' })
-    const responsible = await queryAll<{ id: string }>(env.DB, `SELECT recipient.id FROM member recipient JOIN requests r ON r.organization_id = recipient.organizationId
+    const responsible = await queryAll<{ id: string }>(env.DB, `SELECT recipient.id FROM member recipient JOIN conversations r ON r.organization_id = recipient.organizationId
       WHERE recipient.organizationId = ? AND r.id = ? AND ${scope.sql}`, [organizationId, options.requestId])
     for (const member of responsible) included.add(member.id)
   }
@@ -362,138 +361,122 @@ export async function assertOrganizationWideAccess(_db: DbClient, input: MemberA
   throw new HTTPError({ statusCode: 404, message: 'Not found or access denied' })
 }
 
-export interface ResponsibilityTarget {
-  assigned_member_id: string | null
-  assigned_team_id: string | null
-}
-
 /**
- * Validate the effective member-or-team pair against Better Auth's own rows.
- * Only a target the patch names is checked against them: one the edit carries
- * from `current` is not re-checked, so an unrelated edit still saves after its
- * member or team has left, and reconcileResponsibilities releases that target.
+ * Validate the effective responsible member against Better Auth's own rows.
+ * Only a member the patch names is checked: one the edit carries from
+ * `current` is not re-checked, so an unrelated edit still saves after its
+ * member has left, and reconcileResponsibilities releases that member.
  */
-export async function assertResponsibilityTarget(db: DbClient, organizationId: string, patch: { assigned_member_id?: unknown; assigned_team_id?: unknown }, current?: ResponsibilityTarget): Promise<ResponsibilityTarget> {
-  const memberId = patch.assigned_member_id === undefined ? current?.assigned_member_id ?? null : patch.assigned_member_id
-  const teamId = patch.assigned_team_id === undefined ? current?.assigned_team_id ?? null : patch.assigned_team_id
-  for (const [field, value] of [['assigned_member_id', memberId], ['assigned_team_id', teamId]] as const) {
-    if (value !== null && (typeof value !== 'string' || !value.trim())) throw new HTTPError({ statusCode: 422, message: 'Choose a current member or team of this workspace, or leave responsibility unassigned', data: { code: 'INVALID_RESPONSIBILITY', field } })
-  }
-  if (memberId !== null && teamId !== null) throw new HTTPError({ statusCode: 422, message: 'Choose one responsible member or team', data: { code: 'RESPONSIBILITY_TARGET_CONFLICT', field: 'assigned_team_id' } })
+export async function assertResponsibleMember(db: DbClient, organizationId: string, patch: { assigned_member_id?: unknown }, current: string | null = null): Promise<string | null> {
+  const memberId = patch.assigned_member_id === undefined ? current : patch.assigned_member_id
+  if (memberId !== null && (typeof memberId !== 'string' || !memberId.trim())) throw new HTTPError({ statusCode: 422, message: 'Choose a current member of this workspace, or leave responsibility unassigned', data: { code: 'INVALID_RESPONSIBILITY', field: 'assigned_member_id' } })
   if (patch.assigned_member_id !== undefined && memberId !== null && !await queryFirst(db, 'SELECT id FROM member WHERE organizationId = ? AND id = ?', [organizationId, memberId])) {
     throw new HTTPError({ statusCode: 422, message: 'The responsible member must belong to this organization', data: { code: 'INVALID_RESPONSIBILITY', field: 'assigned_member_id' } })
   }
-  if (patch.assigned_team_id !== undefined && teamId !== null && !await queryFirst(db, 'SELECT id FROM team WHERE organizationId = ? AND id = ?', [organizationId, teamId])) {
-    throw new HTTPError({ statusCode: 422, message: 'The responsible team must belong to this organization', data: { code: 'INVALID_RESPONSIBILITY', field: 'assigned_team_id' } })
-  }
-  return { assigned_member_id: memberId as string | null, assigned_team_id: teamId as string | null }
+  return memberId as string | null
 }
 
 /** Clear only departed/dangling current targets; booked-person history stays. */
 export async function reconcileResponsibilities(env: GuestInboxPublicationEnv, db: DbClient, input: { organizationId: string }): Promise<void> {
   const now = new Date().toISOString()
   let changed = false
-  for (const [table, key] of [['business_locations', 'id'], ['product_booking_configs', 'product_id'], ['product_stay_configs', 'product_id'], ['tasks', 'id']] as const) {
+  for (const [table, key] of [['product_booking_configs', 'product_id'], ['tasks', 'id']] as const) {
     // A closed task keeps who did it; only open work is reassigned away from a departed member.
     const open = table === 'tasks' ? " AND status = 'open'" : ''
     const memberMissing = `${table}.assigned_member_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM member m WHERE m.id = ${table}.assigned_member_id AND m.organizationId = ${table}.organization_id)`
-    const teamMissing = `${table}.assigned_team_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM team t WHERE t.id = ${table}.assigned_team_id AND t.organizationId = ${table}.organization_id)`
-    const rows = await queryAll<ResponsibilityTarget & { resource_id: string; member_missing: number; team_missing: number }>(db,
-      `SELECT ${key} AS resource_id, assigned_member_id, assigned_team_id, (${memberMissing}) AS member_missing, (${teamMissing}) AS team_missing
-        FROM ${table} WHERE organization_id = ?${open} AND ((${memberMissing}) OR (${teamMissing}))`,
+    const rows = await queryAll<{ resource_id: string; assigned_member_id: string }>(db,
+      `SELECT ${key} AS resource_id, assigned_member_id FROM ${table} WHERE organization_id = ?${open} AND ${memberMissing}`,
       [input.organizationId])
     for (let offset = 0; offset < rows.length; offset += 400) {
       const chunk = rows.slice(offset, offset + 400)
       const results = await executeBatch(db, chunk.flatMap(row => [{
-        query: `UPDATE ${table} SET assigned_member_id = CASE WHEN ${memberMissing} THEN NULL ELSE assigned_member_id END,
-          assigned_team_id = CASE WHEN ${teamMissing} THEN NULL ELSE assigned_team_id END, updated_at = ?${table === 'business_locations' ? '' : table === 'tasks' ? ', version = version + 1' : ", updated_by = 'system'"}
-          WHERE organization_id = ? AND ${key} = ? AND assigned_member_id IS ? AND assigned_team_id IS ? AND ((${memberMissing}) OR (${teamMissing}))`,
-        params: [now, input.organizationId, row.resource_id, row.assigned_member_id, row.assigned_team_id],
+        query: `UPDATE ${table} SET assigned_member_id = NULL, updated_at = ?${table === 'tasks' ? ', version = version + 1' : ", updated_by = 'system'"}
+          WHERE organization_id = ? AND ${key} = ? AND assigned_member_id = ? AND ${memberMissing}`,
+        params: [now, input.organizationId, row.resource_id, row.assigned_member_id],
       }, organizationEventQuery({ organizationId: input.organizationId, actorType: 'system', eventType: 'member.access_scope_revoked', entityType: table, entityId: row.resource_id,
-        beforeState: { assigned_member_id: row.assigned_member_id, assigned_team_id: row.assigned_team_id },
-        afterState: { assigned_member_id: row.member_missing ? null : row.assigned_member_id, assigned_team_id: row.team_missing ? null : row.assigned_team_id },
+        beforeState: { assigned_member_id: row.assigned_member_id },
+        afterState: { assigned_member_id: null },
         onlyIfPreviousChangedOneRow: true,
       })]), { operation: 'Reconcile departed responsibility targets' })
       if (chunk.some((_row, index) => results[index * 2]?.meta.changes === 1)) changed = true
     }
   }
+  // Someone who left the organization leaves its conversations: their seats in
+  // the team's, and their read positions in the guests'. A guest keeps their own.
+  const [left] = await executeBatch(db, [{
+    query: `DELETE FROM conversation_participants WHERE organization_id = ?
+      AND NOT EXISTS (SELECT 1 FROM member m WHERE m.organizationId = conversation_participants.organization_id AND m.userId = conversation_participants.user_id)
+      AND NOT EXISTS (SELECT 1 FROM conversations c WHERE c.id = conversation_participants.conversation_id AND c.user_id = conversation_participants.user_id)`,
+    params: [input.organizationId],
+  }], { operation: 'Remove departed members from conversations' })
+  if (Number(left?.meta.changes ?? 0) > 0) changed = true
   if (changed) await publishAccessInvalidation(env, { organizationId: input.organizationId })
 }
 
-/** One predicate for a resource's explicit responsibility; user is bound twice. */
-export function assignedResponsibilitySql(alias: string, userSql = '?'): string {
-  return `((EXISTS (SELECT 1 FROM member m WHERE m.id = ${alias}.assigned_member_id AND m.organizationId = ${alias}.organization_id AND m.userId = ${userSql})
-    OR EXISTS (SELECT 1 FROM team t JOIN teamMember tm ON tm.teamId = t.id
-      JOIN member m ON m.userId = tm.userId AND m.organizationId = t.organizationId
-      WHERE t.id = ${alias}.assigned_team_id AND t.organizationId = ${alias}.organization_id AND m.userId = ${userSql}))
-    AND NOT (${alias}.assigned_member_id IS NOT NULL AND ${alias}.assigned_team_id IS NOT NULL))`
+/** One predicate for a resource's assigned member; user is bound once. */
+export function assignedMemberSql(alias: string, userSql = '?'): string {
+  return `EXISTS (SELECT 1 FROM member assigned
+    WHERE assigned.id = ${alias}.assigned_member_id AND assigned.organizationId = ${alias}.organization_id AND assigned.userId = ${userSql})`
 }
 
-/** The offering's responsibility, using the same member/team matching. */
-export const ASSIGNED_SERVICE_SQL = `(p.kind = 'service' OR p.kind = 'experience') AND EXISTS (
+/**
+ * A member handles a location's guests when they handle a bookable product
+ * offered there: its tables, its classes, its consultations. Responsibility is
+ * the product's, never a column on the place.
+ */
+export function locationMemberSql(organizationSql: string, locationSql: string, userSql = '?'): string {
+  return `EXISTS (SELECT 1 FROM product_locations pl JOIN product_booking_configs c ON c.organization_id = pl.organization_id AND c.product_id = pl.product_id
+    WHERE pl.organization_id = ${organizationSql} AND pl.location_id = ${locationSql} AND ${assignedMemberSql('c', userSql)})`
+}
+
+/** The offering's responsibility, using the same member matching. */
+export const ASSIGNED_SERVICE_SQL = `(p.kind = 'service' OR p.kind = 'experience' OR p.kind = 'table') AND EXISTS (
   SELECT 1 FROM product_booking_configs c
   WHERE c.organization_id = p.organization_id AND c.product_id = p.id
-    AND ${assignedResponsibilitySql('c')}
+    AND ${assignedMemberSql('c')}
 )`
 
 export async function assertProductAccess(db: DbClient, input: MemberAccessPrincipal & { productId: string; patch?: Record<string, unknown> }): Promise<void> {
   if (await roleAllows({ ...input, permissions: { products: ['update'] } })) return
   await assertRoleAllows({ ...input, permissions: { products: ['assigned'] } })
-  const assigned = await queryFirst<{ kind: string; scheduling_mode: string; assigned_member_id: string | null; assigned_team_id: string | null; held_online: number }>(db, `SELECT p.kind, c.scheduling_mode, c.assigned_member_id, c.assigned_team_id, c.held_online
+  const assigned = await queryFirst<{ kind: string; scheduling_mode: string; assigned_member_id: string | null; held_online: number }>(db, `SELECT p.kind, c.scheduling_mode, c.assigned_member_id, c.held_online
     FROM products p JOIN product_booking_configs c ON c.product_id = p.id AND c.organization_id = p.organization_id
-    WHERE p.organization_id = ? AND p.id = ? AND (${ASSIGNED_SERVICE_SQL})`, [input.organizationId, input.productId, input.userId, input.userId])
+    WHERE p.organization_id = ? AND p.id = ? AND (${ASSIGNED_SERVICE_SQL})`, [input.organizationId, input.productId, input.userId])
   if (!assigned) throw new HTTPError({ statusCode: 404, message: 'Offering not found or access denied' })
   if (input.patch?.kind !== undefined && input.patch.kind !== assigned.kind) throw new HTTPError({ statusCode: 403, message: 'Offering kind requires admin access' })
   const booking = input.patch?.booking && typeof input.patch.booking === 'object' ? input.patch.booking as Record<string, unknown> : input.patch
-  for (const field of ['scheduling_mode', 'assigned_member_id', 'assigned_team_id', 'held_online']) {
+  for (const field of ['scheduling_mode', 'assigned_member_id', 'held_online']) {
     if (booking?.[field] !== undefined && booking[field] !== (field === 'held_online' ? assigned[field as keyof typeof assigned] === 1 : assigned[field as keyof typeof assigned])) throw new HTTPError({ statusCode: 403, message: 'Offering assignment requires admin access' })
   }
   if (input.patch?.booking !== undefined) throw new HTTPError({ statusCode: 403, message: 'Offering creation requires admin access; edit saved booking settings and schedule separately' })
 }
 
-/** A booked provider is an individual fact, independent of current responsibility. */
-export function assignedBookingSql(alias: string, userSql = '?'): string {
-  return `EXISTS (SELECT 1 FROM member m
-    WHERE m.id = ${alias}.assigned_member_id AND m.organizationId = ${alias}.organization_id AND m.userId = ${userSql})`
-}
-
 /**
  * The same assigned-conversation scope is used by lists, reads, writes and realtime.
- * A stay's guest conversation is not in it: a member looking after a home reads
- * its stays as turnovers (`stayTurnover`), never the guest's messages or contact.
+ * A stay's guest conversation (a booking with no session) is not in it: a member
+ * looking after a home reads its stays as turnovers (`stayTurnover`), never the
+ * guest's messages or contact.
  */
 export function assignedGuestThreadScope(alias: string, user: string | { /** Trusted query column, never request input. */ column: string }): { sql: string; params: string[] } {
   const userSql = typeof user === 'string' ? '?' : user.column
-  const sql = `((${alias}.kind = 'booking' AND EXISTS (SELECT 1 FROM bookings b WHERE b.request_id = ${alias}.id AND b.organization_id = ${alias}.organization_id AND ${assignedBookingSql('b', userSql)}))
-      OR (${alias}.kind = 'booking' AND EXISTS (SELECT 1 FROM bookings b JOIN product_booking_configs c ON c.product_id = b.product_id AND c.organization_id = b.organization_id
-        WHERE b.request_id = ${alias}.id AND b.organization_id = ${alias}.organization_id AND ${assignedResponsibilitySql('c', userSql)}))
-      OR (${alias}.kind = 'contact' AND ${alias}.location_id IS NOT NULL AND EXISTS (SELECT 1 FROM business_locations bl
-        WHERE bl.id = ${alias}.location_id AND bl.organization_id = ${alias}.organization_id AND ${assignedResponsibilitySql('bl', userSql)}))
-      OR (${alias}.kind = 'reservation' AND EXISTS (SELECT 1 FROM reservations res JOIN business_locations bl ON bl.id = res.location_id AND bl.organization_id = res.organization_id
-        WHERE res.request_id = ${alias}.id AND res.organization_id = ${alias}.organization_id AND ${assignedResponsibilitySql('bl', userSql)})))`
+  const sql = `((${alias}.kind = 'booking' AND EXISTS (SELECT 1 FROM bookings b JOIN product_booking_configs c ON c.product_id = b.product_id AND c.organization_id = b.organization_id
+        WHERE b.id = ${alias}.booking_id AND b.organization_id = ${alias}.organization_id AND b.product_session_id IS NOT NULL AND ${assignedMemberSql('c', userSql)}))
+      OR (${alias}.kind = 'contact' AND ${alias}.location_id IS NOT NULL AND ${locationMemberSql(`${alias}.organization_id`, `${alias}.location_id`, userSql)}))`
   return { sql, params: typeof user === 'string' ? Array(sql.match(/\?/g)?.length ?? 0).fill(user) : [] }
 }
 
-/** Appointments retain their own member even after the service is reassigned. */
-export async function assertAssignedBookingAccess(db: DbClient, input: MemberAccessPrincipal & { bookingId?: string; requestId?: string; sessionId?: string }): Promise<void> {
+/** A booking is its product's assigned member's. Who sees a conversation is conversations.ts conversationAccessSql. */
+export async function assertAssignedBookingAccess(db: DbClient, input: MemberAccessPrincipal & { bookingId: string }): Promise<void> {
   if (await roleAllows({ ...input, permissions: { operations: ['update'] } })) return
   await assertRoleAllows({ ...input, permissions: { operations: ['assigned'] } })
-  const threadScope = assignedGuestThreadScope('r', input.userId)
-  const assigned = input.requestId && !input.bookingId
-    ? await queryFirst(db, `SELECT r.id FROM requests r WHERE r.organization_id = ? AND r.id = ? AND ${threadScope.sql}`, [input.organizationId, input.requestId, ...threadScope.params])
-    : await queryFirst(db, `SELECT b.id FROM bookings b LEFT JOIN requests r ON r.id = b.request_id AND r.organization_id = b.organization_id
-      LEFT JOIN product_booking_configs c ON c.product_id = b.product_id AND c.organization_id = b.organization_id
-      WHERE b.organization_id = ? AND b.id = ? AND (${assignedBookingSql('b')} OR ${assignedResponsibilitySql('c')} OR (r.id IS NOT NULL AND ${threadScope.sql}))`,
-    [input.organizationId, input.bookingId, input.userId, input.userId, input.userId, ...threadScope.params])
-  if (!assigned) throw new HTTPError({ statusCode: 404, message: 'Conversation not found or access denied', data: { code: 'THREAD_NOT_FOUND', field: input.requestId ? 'threadId' : 'bookingId' } })
-  if (input.sessionId) {
-    const destination = await queryFirst(db, `SELECT s.id FROM product_sessions s JOIN bookings b ON b.product_id = s.product_id AND b.organization_id = s.organization_id
-      WHERE b.organization_id = ? AND ${input.bookingId ? 'b.id' : 'b.request_id'} = ? AND s.id = ? AND ${sessionMemberSql('s')} = b.assigned_member_id`, [input.organizationId, input.bookingId ?? input.requestId, input.sessionId])
-    if (!destination) throw new HTTPError({ statusCode: 403, message: 'Changing the assigned provider requires admin access', data: { code: 'PROVIDER_ASSIGNMENT_FORBIDDEN', field: 'sessionId' } })
-  }
+  const assigned = await queryFirst(db, `SELECT b.id FROM bookings b
+      JOIN product_booking_configs c ON c.product_id = b.product_id AND c.organization_id = b.organization_id
+      WHERE b.organization_id = ? AND b.id = ? AND ${assignedMemberSql('c')}`,
+    [input.organizationId, input.bookingId, input.userId])
+  if (!assigned) throw new HTTPError({ statusCode: 404, message: 'Conversation not found or access denied', data: { code: 'THREAD_NOT_FOUND', field: 'bookingId' } })
 }
 
-/** The location must belong to the tenant the caller authorized against; reaching it is an org-wide role or location assignment. */
+/** The location must belong to the tenant the caller authorized against; reaching it is an org-wide role or handling a product offered there. */
 export async function assertLocationAccess(db: DbClient, input: MemberAccessPrincipal & { locationId: string; patch?: Record<string, unknown> }): Promise<void> {
   if (await roleAllows({ ...input, permissions: { locations: ['update'] } })) {
     const location = await findLocation(db, { organizationId: input.organizationId, locationId: input.locationId })
@@ -501,16 +484,9 @@ export async function assertLocationAccess(db: DbClient, input: MemberAccessPrin
     return
   }
   await assertRoleAllows({ ...input, permissions: { locations: ['assigned'] } })
-  const assigned = await queryFirst<{ id: string; assigned_member_id: string | null; assigned_team_id: string | null }>(db, `SELECT bl.id, bl.assigned_member_id, bl.assigned_team_id
-    FROM business_locations bl
-    WHERE bl.organization_id = ? AND bl.id = ? AND (${assignedResponsibilitySql('bl')})`, [input.organizationId, input.locationId, input.userId, input.userId])
+  const assigned = await queryFirst<{ id: string }>(db, `SELECT bl.id FROM business_locations bl
+    WHERE bl.organization_id = ? AND bl.id = ? AND ${locationMemberSql('bl.organization_id', 'bl.id')}`, [input.organizationId, input.locationId, input.userId])
   if (!assigned) throw new HTTPError({ statusCode: 404, message: 'Location not found or access denied' })
-  if (input.patch?.assigned_member_id !== undefined && input.patch.assigned_member_id !== assigned.assigned_member_id) {
-    throw new HTTPError({ statusCode: 403, message: 'Location assignment requires admin access' })
-  }
-  if (input.patch?.assigned_team_id !== undefined && input.patch.assigned_team_id !== assigned.assigned_team_id) {
-    throw new HTTPError({ statusCode: 403, message: 'Location assignment requires admin access' })
-  }
 }
 
 /** A resource that may or may not belong to one location (e.g. a review row) — dispatches to assertOrganizationWideAccess when the row's own location_id is null, assertLocationAccess otherwise. Check the target row's location_id, never a caller-supplied param. Media authorization uses its placement owner instead. */

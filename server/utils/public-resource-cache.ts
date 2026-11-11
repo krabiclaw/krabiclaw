@@ -32,13 +32,14 @@ const CACHE_INVALIDATION_TERMINAL_RETENTION_MS = 7 * 24 * 60 * 60 * 1000
 export function publicResourceCacheInvalidationQuery(
   organizationId: string,
   reason: string,
+  guard: BatchQuery = { query: '1', params: [] },
 ): BatchQuery {
   const values = [crypto.randomUUID(), organizationId, reason, new Date().toISOString()]
   return {
     query: `INSERT INTO public_resource_cache_invalidations
       (id, organization_id, reason, status, created_at)
-      VALUES (?, ?, ?, 'pending', ?)`,
-    params: values,
+      SELECT ?, ?, ?, 'pending', ? WHERE (${guard.query})`,
+    params: [...values, ...guard.params!],
   }
 }
 

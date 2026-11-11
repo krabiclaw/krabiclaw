@@ -17,29 +17,38 @@ const level = useRouteLevel()
 const route = useRoute()
 const router = useRouter()
 const legal = computed(() => p.product.value?.kind === 'service')
+const table = computed(() => p.product.value?.kind === 'table')
 const to = (name: string) => router.resolve({ path: `${level.path.value}/${name}`, query: route.query }).fullPath
 const row = (id: string, label: string, summary: string, icon?: string) => ({ id, label, summary, icon, to: to(id) })
-const availability = () => ({ id: 'availability', label: 'Availability', summary: `Add or change ${legal.value ? 'consultation' : 'bookable'} times in Calendar`, icon: 'i-lucide-calendar-days', to: router.resolve({ path: `/dashboard/${route.params.orgSlug}/calendar`, query: { product_id: p.product.value?.id, locationId: typeof route.query.location_id === 'string' ? route.query.location_id : undefined } }).fullPath })
+const availability = () => ({ id: 'availability', label: 'Availability', summary: `Add or change ${legal.value ? 'consultation' : 'bookable'} times in Calendar`, icon: 'i-lucide-calendar-days', to: router.resolve({ path: `/dashboard/${route.params.orgSlug}/calendar`, query: { product_id: p.product.value?.id, location_id: typeof route.query.location_id === 'string' ? route.query.location_id : undefined } }).fullPath })
 const groups = computed<EditorNavigationGroup[]>(() => {
   const config = p.product.value?.booking
   const copy = p.bookingCopy.value
   const occurrence = legal.value ? 'consultation' : 'session'
   const items: EditorNavigationItem[] = config ? [] : [row('enabled', legal.value ? 'Consultation calendar' : 'Booking calendar', 'Not set up', 'i-lucide-calendar-check')]
+  // A table is seated through its location's opening hours: its length and interval are its schedule.
+  const tableLocation = table.value ? p.allOrganizationLocations.value.find(entry => p.product.value?.locations.some(placement => placement.location_id === entry.id)) ?? null : null
   if (config) items.push(
-    row('duration', 'Duration', config.duration_minutes ? `${config.duration_minutes} minutes` : 'Choose a duration'),
+    table.value
+      ? row('seatings', 'Seatings', `${config.duration_minutes} minutes each · every ${config.seating_interval_minutes} minutes`, 'i-lucide-clock')
+      : row('duration', 'Duration', config.duration_minutes ? `${config.duration_minutes} minutes` : 'Choose a duration'),
     p.product.value?.kind === 'experience' || legal.value
       ? row('location', 'Meeting format', config.held_online ? legal.value ? 'Online consultations available' : 'Online booking available' : p.product.value!.locations.length ? legal.value ? 'At assigned offices' : 'At physical locations' : legal.value ? 'No offices assigned' : 'No physical locations assigned')
       : p.locationId.value ? { id: 'location', label: 'Meeting location', summary: p.location.value?.title ?? '' } : row('location', 'Meeting location', config.held_online ? 'Online' : 'Not set'),
     row('capacity', legal.value ? 'Client limit' : 'Guest limit', config.default_capacity === null ? `No ${copy.guestLabel} limit` : config.default_capacity === 1 ? `One ${copy.guestLabel} per ${occurrence}` : config.default_capacity === 0 ? `Closed to new ${copy.guestsLabelPlural}` : `Up to ${config.default_capacity} ${copy.guestsLabelPlural} per ${occurrence}`),
+    row('party', 'Party size', config.party_size_min === null && config.party_size_max === null ? 'Any party the times have room for'
+      : config.party_size_max === null ? `${config.party_size_min} or more` : `${config.party_size_min ?? 1} to ${config.party_size_max}`, 'i-lucide-users'),
+    row('guest-terms', 'Guest requirements', [config.minimum_guest_age ? `Ages ${config.minimum_guest_age}+` : null, config.accessibility_contact_required ? 'Access support by contact' : null].filter(Boolean).join(' · ') || 'None', 'i-lucide-shield-check'),
     row('assignment', copy.assigneeLabel, p.assignmentSummary.value, 'i-lucide-user-round'),
     row('confirmation', 'Confirmation', config.confirmation_mode === 'instant' ? 'Confirm automatically' : 'Review each request'),
     row('notice', 'Advance notice', noticeSummary(config.advance_notice_minutes), 'i-lucide-alarm-clock'),
     row('questions', 'Questions', formQuestionsSummary(config.questions), 'i-lucide-message-square-text'),
     ...((p.product.value?.kind === 'experience' || legal.value ? config.scheduling_mode === 'provider' : config.held_online)
-      ? [{ id: 'hours', icon: 'i-lucide-clock', label: 'Bookable times', summary: config.assigned_team_id ? 'Each team member\'s working hours' : `The ${copy.assigneeNoun}'s working hours`, to: config.assigned_member_id ? `/dashboard/${route.params.orgSlug}/team/${config.assigned_member_id}/hours` : `/dashboard/${route.params.orgSlug}/team` }]
+      ? [{ id: 'hours', icon: 'i-lucide-clock', label: 'Bookable times', summary: `The ${copy.assigneeNoun}'s working hours`, to: config.assigned_member_id ? `/dashboard/${route.params.orgSlug}/team/${config.assigned_member_id}/hours` : `/dashboard/${route.params.orgSlug}/team` }]
       : []),
+    ...(table.value && tableLocation ? [{ id: 'hours', icon: 'i-lucide-store', label: 'Bookable times', summary: `${tableLocation.title}'s opening hours, special hours and closures`, to: `/dashboard/${route.params.orgSlug}/locations/${tableLocation.slug}/hours` }] : []),
     // Defaults above belong to the offering; weekly times belong to the chosen physical location.
-    ...(route.query.location_id !== 'online' && (!config.held_online || p.product.value?.kind === 'experience' && (p.locationId.value || p.product.value.locations.length))
+    ...(!table.value && route.query.location_id !== 'online' && (!config.held_online || p.product.value?.kind === 'experience' && (p.locationId.value || p.product.value.locations.length))
       ? p.product.value?.kind === 'experience' ? [
           availability(),
         ] : [
@@ -52,7 +61,8 @@ const groups = computed<EditorNavigationGroup[]>(() => {
   // organization's setting, under Website, not this product's.
   if (config) items.push(
     row('enabled', legal.value ? 'Consultation calendar' : 'Booking calendar', 'Set up', 'i-lucide-calendar-check'),
-    row('payment', 'Payment', config.online_payment_required ? `Online payment required for paid ${occurrence}s` : 'No payment collected at booking', 'i-lucide-credit-card'),
+    row('payment', 'Payment', !config.online_payment_required ? 'No payment collected at booking'
+      : `${config.payment_basis === 'per_booking' ? 'Paid once per booking' : `Online payment required for paid ${occurrence}s`}${config.payment_min_party_size ? ` · parties of ${config.payment_min_party_size}+` : ''}`, 'i-lucide-credit-card'),
   )
   return [{ id: 'booking', items }]
 })

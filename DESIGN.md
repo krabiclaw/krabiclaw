@@ -342,11 +342,11 @@ pane and Back, including on reload and deep links.
 | --- | --- |
 | Product, its variants and prices | what is sold: kind, pricing, booking, publication, locations, collections, its page |
 | A page, article or post | its own content |
-| Location | its place, hours, media and reservation policy |
+| Location | its place, hours and media; its tables are a `table` Product booked like any offering |
 | Organization member | that member's public profile and independently authored availability in the named organization |
 | Organization | the shared site: brand, domains, languages, connections |
 | User | account name, avatar, personal preferences and security |
-| Guest messaging | organization automatic messages and their schedules for homes, experiences, consultations and table reservations at `O/messages/automatic`; immutable delivery snapshots at `O/messages/scheduled` or a conversation's `scheduled` child; each member's own send-later replies |
+| Guest messaging | organization automatic messages and their schedules for homes, experiences, consultations and table reservations at `O/messages/automatic`; the one outbox at `O/messages/scheduled`: immutable automatic delivery snapshots for managers and each member's own send-later replies |
 
 Automatic messages use the canonical message-template operations: Message edits
 its name and text, When it is sent edits its trigger, day or hours, local time
@@ -356,7 +356,7 @@ schedule. The one editor serves every vertical. Managers create, change and dele
 Every confirmed stay is also sent its home's check-in instructions by the server;
 that message has no template. In a conversation, "+" adds to the message
 (photos, or Send later), and the conversation's "⋯" holds Messaging settings:
-the person's own Suggested replies switch and their pending Send later replies.
+the person's own Suggested replies switch and the outbox (Sent and upcoming), where their Send later replies are.
 A suggested reply is the composer's placeholder until Use or Tab puts it in the
 field. Scheduled-message history reads the canonical snapshots and reasons;
 managers may cancel pending messages. Neither editor introduces a second sending or scheduling lifecycle.
@@ -957,8 +957,8 @@ tree, so where the same levels must render under a second parent, the
 second set of records with their own names. `build/booking-routes.ts` mounts a
 booking under its calendar day and the account's own record under its calendar
 day and Today. `build/form-question-routes.ts` mounts a form's Questions,
-written once as Website › Inquiry form, beneath a product's Booking, a home and
-a location's reservation Availability, each as `questions`; the `formQuestions`
+written once as Website › Inquiry form, beneath a product's Booking (a table's
+included) and a home, each as `questions`; the `formQuestions`
 meta names the record a mount edits. Nothing else is mounted twice: a page a
 Product owns is edited in Pages, and the Product links to it. The generated router, not the
 filesystem, is the complete tree.
@@ -1100,7 +1100,7 @@ a token for other unpublished pages.
 the same saved-summary cards and focused editors. A practice area without a
 booking configuration does not imply an attorney assignment or available
 consultations. Configured consultations use the existing Product booking owner,
-attorneys or legal teams, clients and offices. Page content links to the bound
+attorneys, clients and offices. Page content links to the bound
 Page editor, and Preview uses that Page's saved path; a Product slug does not
 invent a second legal page. Assigned attorneys retain their authorized Product
 work without gaining organization-wide Page editing, preview or translations.

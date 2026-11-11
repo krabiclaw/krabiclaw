@@ -74,9 +74,9 @@ export function createMemberAvailabilityEditor(organizationId: string, memberId:
     const pending = recovery.value
     if (!pending) return
     const saved = (await applicationFetch(`${base}/scheduling`, { validate: isSchedulingResponse })).scheduling
-    const matchesAttempt = saved !== null && Object.entries(pending.body).every(([key, value]) => key === 'expected_updated_at'
+    const matchesAttempt = saved !== null && Object.entries(pending.body).every(([key, value]) => key === 'updated_at'
       || JSON.stringify(key === 'public_approved' ? Boolean(saved?.public_approved) : saved?.[key as keyof NonNullable<MemberSchedule>]) === JSON.stringify(value))
-    if (!matchesAttempt && (saved?.updated_at ?? null) !== pending.body.expected_updated_at) {
+    if (!matchesAttempt && (saved?.updated_at ?? null) !== pending.body.updated_at) {
       recovery.value = { ...pending, status: 'conflict' }
       throw new Error('These settings changed after your edit. Use the saved values before editing again.')
     }
@@ -89,7 +89,7 @@ export function createMemberAvailabilityEditor(organizationId: string, memberId:
     await run(async () => {
       if (recovery.value?.status === 'conflict') throw new Error('These settings changed after your edit. Use the saved values before editing again.')
       if (recovery.value?.status === 'unread') await readFailedSave()
-      const body: Record<string, unknown> = { expected_updated_at: record.value?.updated_at ?? null }
+      const body: Record<string, unknown> = { updated_at: record.value?.updated_at ?? null }
       if (concern === 'timezone') {
         if (!draft.value.timezone) throw new Error('Choose your timezone.')
         body.timezone = draft.value.timezone

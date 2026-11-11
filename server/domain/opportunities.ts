@@ -28,16 +28,16 @@ interface OpportunityRow {
 export interface OpportunityView {
   id: string
   /** What part of the business, and where: "Calendar · 45B", "Website". */
-  statusLine: string
+  status_line: string
   title: string
   detail: string
   icon: string
   /** Where the owner does it in the dashboard. */
   path: string
-  productId: string | null
-  locationId: string | null
+  product_id: string | null
+  location_id: string | null
   /** The guest conversation a message opportunity is sent in; null for every other opportunity. */
-  requestId: string | null
+  conversation_id: string | null
   /** The message it pre-writes from the business's own records, for the owner to review and send. */
   message: string | null
 }
@@ -80,7 +80,7 @@ async function refreshOpportunities(db: DbClient, principal: MemberAccessPrincip
 }
 
 function view(row: OpportunityRow, item: BusinessRecommendation, homes: Map<string, string>): OpportunityView {
-  return { id: row.id, statusLine: [AREA[item.operation], item.productId ? homes.get(item.productId) ?? null : null].filter(Boolean).join(' · '), title: item.headline, detail: item.reason, icon: item.icon, path: item.to, productId: item.productId, locationId: item.locationId, requestId: item.requestId, message: item.message }
+  return { id: row.id, status_line: [AREA[item.operation], item.productId ? homes.get(item.productId) ?? null : null].filter(Boolean).join(' · '), title: item.headline, detail: item.reason, icon: item.icon, path: item.to, product_id: item.productId, location_id: item.locationId, conversation_id: item.requestId, message: item.message }
 }
 
 /** The open opportunities available now, in the selector's order. */
@@ -115,7 +115,7 @@ function eventQuery(principal: MemberAccessPrincipal, row: OpportunityRow, event
 }
 
 const SUBJECT: Partial<Record<BusinessProgressOperation, TaskRow['subject_type']>> = {
-  'article.update': 'article', 'article.publish': 'article', 'article.distribute': 'article', 'post.publish': 'post', 'product.payment': 'product', 'stay.gap': 'product', 'booking.welcome': 'request',
+  'article.update': 'article', 'article.publish': 'article', 'article.distribute': 'article', 'post.publish': 'post', 'product.payment': 'product', 'stay.gap': 'product', 'booking.welcome': 'conversation',
 }
 
 /**
@@ -140,16 +140,16 @@ export async function acceptOpportunity(db: DbClient, principal: MemberAccessPri
     fail(409, 'OPPORTUNITY_CHANGED', 'What this opportunity was based on has changed. Reload Today to see what is current.', 'opportunity_id')
   }
   const viewer = await taskViewer(db, principal)
-  const assigned = body.assignedMemberId === undefined && body.assignedTeamId === undefined
-    ? { member: viewer.memberId, team: null }
+  const assigned = body.assigned_member_id === undefined
+    ? viewer.memberId
     : await readTaskAssignee(db, principal.organizationId, body)
   const place = item.locationId ? await queryFirst<{ timezone: string }>(db, 'SELECT timezone FROM business_locations WHERE organization_id = ? AND id = ?', [principal.organizationId, item.locationId]) : null
   const organization = await queryFirst<{ timezone: string }>(db, 'SELECT timezone FROM organization WHERE id = ?', [principal.organizationId])
   if (!organization) throw new Error(`Organization ${principal.organizationId} is missing`)
   const timezone = place?.timezone ?? organization.timezone
-  if (body.dueAt !== undefined && body.dueAt !== null && !isValidInstant(body.dueAt)) fail(422, 'INVALID_TASK_FIELD', 'dueAt must be an instant with a timezone offset', 'dueAt')
+  if (body.due_at !== undefined && body.due_at !== null && !isValidInstant(body.due_at)) fail(422, 'INVALID_TASK_FIELD', 'due_at must be an instant with a timezone offset', 'due_at')
   const now = new Date()
-  const dueAt = body.dueAt === undefined ? localDateTimeToInstant(localDateAt(now, timezone), '23:59', timezone, 'compatible').toISOString() : body.dueAt === null ? null : new Date(body.dueAt as string).toISOString()
+  const dueAt = body.due_at === undefined ? localDateTimeToInstant(localDateAt(now, timezone), '23:59', timezone, 'compatible').toISOString() : body.due_at === null ? null : new Date(body.due_at as string).toISOString()
   const subjectType = SUBJECT[row.operation] ?? null
   const subjectId = subjectType === null ? null : row.operation === 'stay.gap' ? item.productId : row.subject_id
   const taskId = crypto.randomUUID()
@@ -159,13 +159,12 @@ export async function acceptOpportunity(db: DbClient, principal: MemberAccessPri
         WHERE c.organization_id = opportunities.organization_id AND c.product_id = opportunities.subject_id AND c.online_payment_required = 0))`,
       params: [now.toISOString(), principal.userId, now.toISOString(), principal.organizationId, id] },
     opportunityTaskInsert({ organizationId: principal.organizationId, opportunityId: id, title: item.headline, subject: subjectType && subjectId ? { type: subjectType, id: subjectId } : null,
-      productId: item.productId, locationId: item.locationId, assigned, dueAt, timezone, userId: principal.userId, now: now.toISOString(), taskId }),
-    eventQuery(principal, row, 'opportunity.accepted', { taskId, assigned_member_id: assigned.member, assigned_team_id: assigned.team, due_at: dueAt }),
+      productId: item.productId, locationId: item.locationId, assignedMemberId: assigned, dueAt, timezone, userId: principal.userId, now: now.toISOString(), taskId }),
+    eventQuery(principal, row, 'opportunity.accepted', { taskId, assigned_member_id: assigned, due_at: dueAt }),
   ], { operation: 'Accept opportunity' })
   if (results[0]?.meta.changes !== 1) fail(409, 'OPPORTUNITY_DECIDED', 'This opportunity was decided while you were looking at it', 'status')
-  const recipients = assigned.member === viewer.memberId ? [] : assigned.member
-    ? (await queryAll<{ userId: string }>(db, 'SELECT userId FROM member WHERE organizationId = ? AND id = ?', [principal.organizationId, assigned.member])).map(member => member.userId)
-    : assigned.team ? (await queryAll<{ userId: string }>(db, 'SELECT tm.userId FROM teamMember tm JOIN team t ON t.id = tm.teamId WHERE t.organizationId = ? AND t.id = ?', [principal.organizationId, assigned.team])).map(member => member.userId).filter(userId => userId !== principal.userId) : []
+  const recipients = assigned === viewer.memberId || !assigned ? []
+    : (await queryAll<{ userId: string }>(db, 'SELECT userId FROM member WHERE organizationId = ? AND id = ?', [principal.organizationId, assigned])).map(member => member.userId)
   if (recipients.length) {
     const { notifyTaskAssigned } = await import('~/server/utils/notifications')
     await notifyTaskAssigned(principal.env as CloudflareEnv, db, { organizationId: principal.organizationId, taskId, actorUserId: principal.userId, recipientUserIds: recipients })
@@ -189,7 +188,7 @@ export async function dismissOpportunity(db: DbClient, principal: MemberAccessPr
   return { id, status: 'dismissed' }
 }
 
-export async function deferOpportunity(db: DbClient, principal: MemberAccessPrincipal, id: string, body: Record<string, unknown>): Promise<{ id: string; availableAt: string }> {
+export async function deferOpportunity(db: DbClient, principal: MemberAccessPrincipal, id: string, body: Record<string, unknown>): Promise<{ id: string; available_at: string }> {
   await authorize(principal)
   const row = await openOpportunity(db, principal, id)
   if (!isValidInstant(body.until) || Date.parse(body.until as string) <= Date.now()) fail(422, 'INVALID_OPPORTUNITY_FIELD', 'until must be a future instant with a timezone offset', 'until')
@@ -200,5 +199,5 @@ export async function deferOpportunity(db: DbClient, principal: MemberAccessPrin
   ], { operation: 'Defer opportunity' })
   if (results[0]?.meta.changes !== 1) fail(409, 'OPPORTUNITY_DECIDED', 'This opportunity was decided while you were looking at it', 'status')
   await publishBusinessInvalidation(principal.env as CloudflareEnv, principal.organizationId)
-  return { id, availableAt: until }
+  return { id, available_at: until }
 }

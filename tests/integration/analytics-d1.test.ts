@@ -47,12 +47,12 @@ test('analytics preserves duplicate, attribution, summary semantics on D1', { ti
     // nothing native to report, and one that starts earlier reports from that moment.
     await assert.rejects(getAnalyticsReport(db, { ...period, startDate: '2026-08-01', endDate: '2026-09-04' }), (error: { statusCode?: number; data?: { code?: string } }) =>
       error.statusCode === 422 && error.data?.code === 'NO_NATIVE_COVERAGE')
-    assert.equal((await getAnalyticsReport(db, { ...period, startDate: '2026-09-01' })).period.nativeCoverage, 'partial')
-    assert.equal((await getAnalyticsReport(db, period)).period.nativeCoverage, 'full')
+    assert.equal((await getAnalyticsReport(db, { ...period, startDate: '2026-09-01' })).period.native_coverage, 'partial')
+    assert.equal((await getAnalyticsReport(db, period)).period.native_coverage, 'full')
     const before = await getAnalyticsReport(db, period)
-    assert.equal(before.metrics.pageViews, 4)
-    assert.equal(before.metrics.uniqueSessions, 2)
-    assert.equal(before.countries[0]?.countryCode, 'TH')
+    assert.equal(before.metrics.page_views, 4)
+    assert.equal(before.metrics.unique_sessions, 2)
+    assert.equal(before.countries[0]?.country_code, 'TH')
     for (const date of ['2026-09-05', '2026-09-06']) await aggregateOrganizationAnalyticsDate(db, 'org-proof', date)
     assert.equal(await db.prepare(`SELECT json_extract(payload_json, '$.returning_visitors') returning_count
       FROM analytics_summaries WHERE organization_id = 'org-proof' AND kind = 'organization_day' AND date = '2026-09-06'`).first('returning_count'), 1)
@@ -67,20 +67,20 @@ test('analytics preserves duplicate, attribution, summary semantics on D1', { ti
     await Promise.all(['conversion-first', 'conversion-duplicate'].map(id => db.prepare(insert).bind(id, conversion).run()))
     assert.equal(await db.prepare("SELECT count(*) FROM analytics_events WHERE kind = 'conversion'").first('count(*)'), 1)
     assert.deepEqual((await getAnalyticsReport(db, period)).conversions, [{
-      eventName: 'contact_submit', stage: 'submitted', conversionType: null, events: 1,
-      distinctEntities: 1, convertingSessions: 1, nonbrowserEvents: 0, sessionConversionRate: 50,
+      event_name: 'contact_submit', stage: 'submitted', conversion_type: null, events: 1,
+      distinct_entities: 1, converting_sessions: 1, nonbrowser_events: 0, session_conversion_rate: 50,
     }])
-    assert.deepEqual((await getAnalyticsReport(db, period)).dailyConversions, [
+    assert.deepEqual((await getAnalyticsReport(db, period)).daily_conversions, [
       { date: '2026-09-05', events: 0 },
       { date: '2026-09-06', events: 1 },
     ])
-    assert.equal((await getAnalyticsReport(db, { ...period, now: new Date('2029-01-06T12:00:00Z') })).metrics.pageViews, 4)
+    assert.equal((await getAnalyticsReport(db, { ...period, now: new Date('2029-01-06T12:00:00Z') })).metrics.page_views, 4)
     // Historical collector rows have session/visitor IDs but predate session summaries.
     await db.prepare(`INSERT INTO analytics_events (id, kind, organization_id, session_id, visitor_id, page_path, payload_json, created_at)
       VALUES ('historical-view', 'pageview', 'org-proof', 'historical-session', 'historical-visitor', '/menu', '{}', '2026-09-05T03:00:00.000Z')`).run()
     const historical = await getAnalyticsReport(db, period)
-    assert.equal(historical.metrics.uniqueSessions, 3)
-    assert.equal(historical.metrics.uniqueVisitors, 2)
+    assert.equal(historical.metrics.unique_sessions, 3)
+    assert.equal(historical.metrics.unique_visitors, 2)
     assert.equal(historical.attribution.find(row => row.source === 'Attribution not recorded')?.sessions, 1)
   } finally { await runtime.dispose() }
 })
@@ -110,11 +110,11 @@ test('distinct-entity counts agree between report and query and never synthesize
 
     const period = { organizationId: 'org-entity', startDate: '2026-09-05', endDate: '2026-09-05', now: new Date('2026-09-06T12:00:00Z') }
     const report = await getAnalyticsReport(db, period)
-    const conversion = report.conversions.find(c => c.eventName === 'checkout_start')
+    const conversion = report.conversions.find(c => c.event_name === 'checkout_start')
     assert.ok(conversion)
     assert.equal(conversion.events, 50)
-    assert.equal(conversion.distinctEntities, 1)
-    assert.equal(conversion.convertingSessions, 39)
+    assert.equal(conversion.distinct_entities, 1)
+    assert.equal(conversion.converting_sessions, 39)
 
     const query = await queryOrganizationAnalytics(db, {
       organizationId: 'org-entity',
@@ -136,10 +136,10 @@ test('distinct-entity counts agree between report and query and never synthesize
     await db.prepare(insert).bind('checkout-50', 'session-1', JSON.stringify({ event_name: 'checkout_start', stage: 'started', entity_type: null, entity_id: null, attribution: null, attributed_at: null })).run()
 
     const reportNoEntities = await getAnalyticsReport(db, period)
-    const conversionNoEntities = reportNoEntities.conversions.find(c => c.eventName === 'checkout_start')
+    const conversionNoEntities = reportNoEntities.conversions.find(c => c.event_name === 'checkout_start')
     assert.ok(conversionNoEntities)
     assert.equal(conversionNoEntities.events, 50)
-    assert.equal(conversionNoEntities.distinctEntities, 0)
+    assert.equal(conversionNoEntities.distinct_entities, 0)
 
     const queryNoEntities = await queryOrganizationAnalytics(db, {
       organizationId: 'org-entity',
@@ -160,15 +160,15 @@ test('distinct-entity counts agree between report and query and never synthesize
     await db.prepare(insert).bind('product-event', 'session-1', JSON.stringify({ event_name: 'purchase', stage: 'occurred', entity_type: 'product', entity_id: 'shared-id', value: { basis: 'purchase', currency: 'USD', amount_minor: 1000, collected_minor: 1000 }, attribution: { source: 'google', medium: 'cpc' }, attributed_at: '2026-09-05T12:00:00.000Z' })).run()
 
     const reportSharedId = await getAnalyticsReport(db, period)
-    const conversionSharedId = reportSharedId.conversions.find(c => c.eventName === 'purchase')
+    const conversionSharedId = reportSharedId.conversions.find(c => c.event_name === 'purchase')
     assert.ok(conversionSharedId)
     assert.equal(conversionSharedId.events, 2)
-    assert.equal(conversionSharedId.distinctEntities, 2)
+    assert.equal(conversionSharedId.distinct_entities, 2)
 
-    const outcomeSharedId = reportSharedId.outcomeAttribution.find(o => o.eventName === 'purchase')
+    const outcomeSharedId = reportSharedId.outcome_attribution.find(o => o.event_name === 'purchase')
     assert.ok(outcomeSharedId)
     assert.equal(outcomeSharedId.events, 2)
-    assert.equal(outcomeSharedId.distinctEntities, 2)
+    assert.equal(outcomeSharedId.distinct_entities, 2)
 
     const querySharedId = await queryOrganizationAnalytics(db, {
       organizationId: 'org-entity',

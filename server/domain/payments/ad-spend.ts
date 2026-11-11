@@ -8,6 +8,7 @@ import {readIntegration} from '~/server/utils/organization-integrations'
 import { addLocalDays, assertCalendarDate, instantDate, localDateAt } from '~/utils/timezone'
 import { listServices } from '~/server/utils/organization-services'
 import { localDateBounds } from '~/server/utils/analytics-calendar'
+import { paymentUsageEventQuery } from './usage'
 
 /** Closed managed days for one ads integration whose amount has not reached the usage outbox. */
 export async function unrecordedDaysForIntegration(
@@ -32,7 +33,7 @@ export async function unrecordedDaysForIntegration(
   const throughDate = addLocalDays(localDateAt(now, timeZone), -reportingDelayDays)
   const prefix = isMeta ? `meta_ads:${ads.target_id}:%` : `google_ads:${ads.target_id}:%`
   const keyPrefix = isMeta ? `meta_ads:${ads.target_id}:` : `google_ads:${ads.target_id}:`
-  const recorded = new Set((await queryAll<{ source_id: string }>(db, "SELECT source_id FROM payment_usage_events WHERE organization_id=? AND kind='ad_spend' AND source_id LIKE ?", [organizationId, prefix])).map(row => row.source_id))
+  const recorded = new Set((await queryAll<{ source_id: string }>(db, "SELECT idempotency_key AS source_id FROM usage_events WHERE organization_id=? AND resource='ad_spend' AND provider_occurred_at IS NOT NULL AND idempotency_key LIKE ?", [organizationId, prefix])).map(row => row.source_id))
   const missing: string[] = []
   // An agreement predating a connection still applies to its overlapping days.
   // Never charge before either consent or the current connection existed.
@@ -95,22 +96,19 @@ async function persistAdSpendReceipt(
 ): Promise<{ amount: number }> {
   const existing = await queryFirst<{ organization_id: string; amount: number; provider_occurred_at: string }>(
     db,
-    'SELECT organization_id,amount,provider_occurred_at FROM payment_usage_events WHERE source_id=?',
+    "SELECT organization_id,quantity AS amount,provider_occurred_at FROM usage_events WHERE idempotency_key=? AND resource='ad_spend' AND provider_occurred_at IS NOT NULL",
     [sourceId],
   )
   if (existing && existing.organization_id !== organizationId) throw new Error(`${providerLabel} spend receipt belongs to another organization`)
   if (existing && existing.amount !== amount) throw new Error(`${providerLabel} spend for ${date} changed after it was queued (${existing.amount} → ${amount} cents); reconcile before billing`)
   if (existing && existing.provider_occurred_at !== occurredAt) throw new Error(`${providerLabel} spend receipt does not match its account reporting day; reconcile before billing`)
   if (!existing) {
-    await execute(
-      db,
-      `INSERT INTO payment_usage_events(id,organization_id,payment_id,kind,currency,amount,source_id,provider_occurred_at,created_at) VALUES(?,?,NULL,'ad_spend','USD',?,?,?,?) ON CONFLICT(source_id) DO NOTHING`,
-      [crypto.randomUUID(), organizationId, amount, sourceId, occurredAt, new Date().toISOString()],
-    )
+    const write = paymentUsageEventQuery({ organizationId, sourceId, kind: 'ad_spend', currency: 'USD', amount, occurredAt })
+    await execute(db, write.query, write.params)
   }
   const recorded = await queryFirst<{ organization_id: string; amount: number; provider_occurred_at: string }>(
     db,
-    'SELECT organization_id,amount,provider_occurred_at FROM payment_usage_events WHERE source_id=?',
+    "SELECT organization_id,quantity AS amount,provider_occurred_at FROM usage_events WHERE idempotency_key=? AND resource='ad_spend' AND provider_occurred_at IS NOT NULL",
     [sourceId],
   )
   if (!recorded || recorded.organization_id !== organizationId || recorded.amount !== amount || recorded.provider_occurred_at !== occurredAt) {

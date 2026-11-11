@@ -50,10 +50,6 @@ Actions workflow `Production Real-Send Canaries` and choose whether to send:
 That workflow always runs production smoke first, then only sends the real canaries you
 explicitly selected for that run.
 
-See [docs/notification-testing.md](docs/notification-testing.md) for the full policy on
-log-only vs live email/WhatsApp testing, production-safe verification, and which public
-submission paths send for real in production.
-
 ---
 
 ## Local Setup

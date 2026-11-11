@@ -4,7 +4,7 @@ import {currencyFractionDigits,isCurrencyCode} from '~/shared/currencies'
 import { paymentsBillingBasis, paymentsCostBillingBasis, quotePaymentsBillingFx, readPaymentsBillingBasis } from './fx'
 import type {CloudflareEnv} from '~/server/utils/auth'
 import {stripeLivemodeFromKey} from '~/server/utils/stripe-connect'
-import {deliverPaymentsUsage} from './usage'
+import {deliverPaymentsUsage,paymentUsageEventQuery} from './usage'
 
 const REPORT_SCALE=18n
 /** Exact provider decimal at Stripe's own 18-decimal scale; the report itemizes fees below a minor unit. */
@@ -85,7 +85,11 @@ export async function ingestStripeFeeReport(db:DbClient,livemode:boolean,csv:str
   const usageBasis = tenant ? paymentsCostBillingBasis(old?.organization_id ? old.amount : 0, row.amount, row.currency, quote) : null
   const results = await executeBatch(db,[
    {query:`INSERT INTO payment_cost_snapshots(source_id,organization_id,payment_id,incurred_by,currency,amount,billing_basis_json,incurred_at,revision,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(source_id) DO UPDATE SET organization_id=excluded.organization_id,payment_id=excluded.payment_id,amount=excluded.amount,billing_basis_json=excluded.billing_basis_json,revision=excluded.revision,updated_at=excluded.updated_at WHERE payment_cost_snapshots.revision=?`,params:[source,tenant,payment?.id??null,row.incurred_by,row.currency,row.amount,billingBasis ? JSON.stringify(billingBasis) : null,row.incurred_at,revision,now,old?.revision??0]},
-   ...(tenant&&delta!==0?[{query:`INSERT INTO payment_usage_events(id,organization_id,payment_id,kind,currency,amount,billing_basis_json,source_id,provider_occurred_at,created_at) SELECT ?,?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM payment_cost_snapshots WHERE source_id=? AND revision=? AND amount=?) ON CONFLICT(source_id) DO NOTHING`,params:[crypto.randomUUID(),tenant,payment?.id??null,old?.organization_id?'stripe_cost_adjustment':'stripe_cost',row.currency,delta,JSON.stringify(usageBasis),`${source}:revision:${revision}`,row.incurred_at,now,source,revision,row.amount]}]:[]),
+   ...(tenant && delta !== 0 ? [paymentUsageEventQuery({
+     organizationId: tenant, paymentId: payment?.id, kind: old?.organization_id ? 'stripe_cost_adjustment' : 'stripe_cost',
+     currency: row.currency, amount: delta, billingBasis: usageBasis, sourceId: `${source}:revision:${revision}`,
+     occurredAt: row.incurred_at, createdAt: now,
+   }, { query: 'SELECT 1 FROM payment_cost_snapshots WHERE source_id=? AND revision=? AND amount=?', params: [source, revision, row.amount] })] : []),
   ],{operation:'Reconcile native attributable Stripe costs'})
   if (results[0]?.meta.changes !== 1) throw new Error('Stripe cost was revised concurrently; reconcile the current native receipt before processing this report')
   if(tenant)attributed++;else unattributed++

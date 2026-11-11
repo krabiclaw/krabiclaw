@@ -78,7 +78,7 @@ const scopePending = computed(() => hasProductScope.value && pending.value)
 const scopeError = computed(() => {
   if (hasProductScope.value && !productId.value) return 'Choose one offering with a non-empty product_id.'
   if (productId.value && !knownHome.value && !canReadSessions.value) return 'That offering is not available in this organization.'
-  if (Object.hasOwn(route.query, 'locationId') && (typeof route.query.locationId !== 'string' || !route.query.locationId.trim())) return 'Choose one location with a non-empty locationId.'
+  if (Object.hasOwn(route.query, 'location_id') && (typeof route.query.location_id !== 'string' || !route.query.location_id.trim())) return 'Choose one location with a non-empty location_id.'
   return productError.value ? getErrorMessage(productError.value, 'The offering could not be loaded') : ''
 })
 const stayScope = computed(() => Boolean(knownHome.value || scoped.value?.product.kind === 'stay'))

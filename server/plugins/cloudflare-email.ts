@@ -70,11 +70,11 @@ async function processEmail(message: ForwardableEmailMessage, env: unknown, repo
   const autoSubmitted = parsed.headers.find(header => header.key === 'auto-submitted')?.value.trim().toLowerCase()
   if (autoSubmitted && autoSubmitted !== 'no') return
   if (reply.kind === 'member') {
-    await receiveMemberEmail(env, { entryId: reply.entryId, token: reply.token, from, body: guestReplyText(parsed), files, messageId }, report)
+    await receiveMemberEmail(env, { entryId: reply.messageId, token: reply.token, from, body: guestReplyText(parsed), files, messageId }, report)
     return
   }
   await receiveGuestEmail(env, {
-    entryId: reply.entryId,
+    entryId: reply.messageId,
     token: reply.token,
     body: guestReplyText(parsed),
     files,

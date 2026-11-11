@@ -327,22 +327,22 @@ export function useTenantPageDraft(organizationId: string, pageId: string) {
     if (!draft.value.id && path === '/') throw new Error('Choose a more specific page title.')
     const body = {
       id: draft.value.id || undefined,
-      pageId: draft.value.page_id || undefined,
-      productId: draft.value.id && draft.value.id === draft.value.page_id ? draft.value.product_id : undefined,
+      page_id: draft.value.page_id || undefined,
+      product_id: draft.value.id && draft.value.id === draft.value.page_id ? draft.value.product_id : undefined,
       locale: draft.value.locale,
       path,
       title,
       summary: draft.value.summary,
-      pageType: draft.value.page_type,
+      page_type: draft.value.page_type,
       recipe: draft.value.recipe || null,
-      sortOrder: draft.value.sort_order,
+      sort_order: draft.value.sort_order,
       blocks,
       // Optimistic concurrency: a page another writer changed under us comes
       // back 409, which stays on screen as an error the tenant can retry.
       // The stamp the draft was seeded from, not whatever the last read left
       // in `data`: those are the same page except when a straggler read is
       // ignored above, and then only this one describes what is being edited.
-      expectedUpdatedAt: draft.value.id ? seededFrom.value : undefined,
+      updated_at: draft.value.id ? seededFrom.value : undefined,
     }
     const response = draft.value.id
       ? await dashboardApi<{ page: TenantPageResponse }>(`/api/editor/organizations/${organizationId}/pages/${draft.value.id}`, { method: 'PATCH', body, validate: isTenantPageResponse })

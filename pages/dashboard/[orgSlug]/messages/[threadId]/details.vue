@@ -34,7 +34,7 @@ if (thread.value && !thread.value.recordId) {
 }
 // A stay is shown by its own record screen, keyed by the stay; a booking or reservation by its conversation.
 const stayId = computed(() => thread.value?.recordKind === 'stay' ? thread.value.recordId : null)
-const bookingType = computed(() => thread.value?.recordKind === 'booking' || thread.value?.recordKind === 'reservation' ? thread.value.recordKind : null)
+const bookingType = computed(() => thread.value?.recordKind === 'booking' ? thread.value.recordKind : null)
 const bookingId = computed(() => bookingType.value ? thread.value!.recordId : null)
 const recordTitle = computed(() => thread.value?.recordTitle ?? 'Reservation')
 

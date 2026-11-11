@@ -4,15 +4,14 @@ import type { CloudflareEnv } from '~/server/utils/auth'
 import { formatCalendarDate, formatTimestamp } from '~/utils/timezone'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import { notifyReviewRequest } from '~/server/utils/notifications'
-import { appendEntry } from '~/server/domain/guest-threads/entries'
-import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
+import { appendMessage } from '~/server/domain/conversations'
+import { publishConversationEvent } from '~/server/cloudflare/guest-inbox-events'
 import {
   createReviewRequest,
   getReviewBookingContext,
   markReviewRequestSendFailure,
   markReviewRequestSendSuccess,
   reviewInvitationDue,
-  type ReviewBookingType,
 } from '~/server/utils/review-requests'
 
 /**
@@ -23,10 +22,9 @@ import {
 export async function sendReviewRequestForBooking(
   env: CloudflareEnv,
   db: DbClient,
-  bookingType: ReviewBookingType,
   bookingId: string,
 ): Promise<{ sent: boolean; requestId: string; error?: string }> {
-  const context = await getReviewBookingContext(db, bookingType, bookingId)
+  const context = await getReviewBookingContext(db, bookingId)
   if (!context) throw new Error('Booking not found')
   if (!reviewInvitationDue(context)) throw new Error('This visit is not due a review invitation')
   const recipientEmail = context.guest_email
@@ -37,8 +35,9 @@ export async function sendReviewRequestForBooking(
   const { request, token } = await createReviewRequest(env, db, context)
   if (!request.user_id) throw new Error('Review request is not linked to a guest identity')
   const reviewUrl = `${publicUrl}/review-submit?token=${encodeURIComponent(token)}`
-  const entry = await appendEntry(db, {
-    threadId: bookingId, kind: 'operation', actorKind: 'system',
+  const threadId = context.request_id
+  const entry = await appendMessage(db, {
+    conversationId: threadId, authorKind: 'krabiclaw', authorUserId: null,
     eventName: 'review.requested', body: 'Review invitation sent',
     dedupeKey: `review-request:${request.id}`,
   })
@@ -49,19 +48,19 @@ export async function sendReviewRequestForBooking(
       organizationName: context.organization_name,
       locationId: context.location_id,
       requestId: request.id,
-      bookingType,
-      bookingId,
+      bookingType: context.unit === 'nights' ? 'stay' : 'booking',
+      bookingId: threadId,
       guestName: context.guest_name || 'there',
       email: recipientEmail,
       locationName: context.location_title,
       visitAt: context.visit_starts_at.includes('T') ? formatTimestamp(context.visit_starts_at, 'en', context.visit_timezone) : formatCalendarDate(context.visit_starts_at, 'en'),
-      partySize: resolveBookingPresentation(bookingType === 'reservation' ? 'reservation' : 'booking', context.organization_vertical).formatCount(context.party_size),
-      partyLabel: resolveBookingPresentation(bookingType === 'reservation' ? 'reservation' : 'booking', context.organization_vertical).partyLabel,
+      partySize: resolveBookingPresentation(context.product_kind, context.organization_vertical).formatCount(context.party_size),
+      partyLabel: resolveBookingPresentation(context.product_kind, context.organization_vertical).partyLabel,
       reviewUrl,
       userId: request.user_id,
       // One invitation retains its link and receipt across retries. The
       // receipt is never sent twice once Resend accepted it.
-      delivery: { guestThreadId: bookingId, sourceEntryId: entry.id },
+      delivery: { conversationId: threadId, messageId: entry.id },
     })
     await markReviewRequestSendSuccess(db, request.id)
   } catch (error) {
@@ -75,7 +74,7 @@ export async function sendReviewRequestForBooking(
   // Delivery publishes before the invitation's success marker is written.
   // Open apps must read again after that write to clear its outstanding card.
   try {
-    await publishGuestInboxThreadEvent(env, db, { threadId: bookingId, type: 'thread.changed' })
+    await publishConversationEvent(env, db, { conversationId: threadId, type: 'MESSAGE_CREATE' })
   } catch (cause) {
     throw new HTTPError({ statusCode: 503, message: 'The review invitation was sent, but open apps could not be updated. Reload to see its saved status.',
       data: { code: 'DASHBOARD_PUBLICATION_FAILED', field: 'realtime', committed: true, request_id: request.id }, cause })

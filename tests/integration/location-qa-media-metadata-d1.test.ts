@@ -80,7 +80,7 @@ test('resuming onboarding updates the existing location without changing its his
     const beforeNoop = await db.prepare("SELECT id, payload_json FROM activity_entries WHERE organization_id = ? AND event_name = 'location.updated' ORDER BY id").bind(ORG).all()
     const purgesBefore = await db.prepare("SELECT count(*) AS n FROM public_resource_cache_invalidations WHERE organization_id = ? AND reason = 'write-through-purge'").bind(ORG).first<number>('n')
     assert.ok(purgesBefore !== null)
-    const unchangedInput = { phone: location.phone, expected_updated_at: location.updated_at }
+    const unchangedInput = { phone: location.phone, updated_at: location.updated_at }
     const guard = onboardingDraftWriteGuard(draft, ORG)
     assert.equal((await updateLocation(db, ORG, location.id, unchangedInput, userId, env, guard)).status, 200)
     assert.deepEqual(await getLocation(db, ORG, location.id), location)
@@ -88,7 +88,7 @@ test('resuming onboarding updates the existing location without changing its his
       'a current guarded no-op completes its public cache purge')
 
     const revised = await upsertActiveOnboardingDraft(db, {
-      userId, draftId: draft.id, name: payload.preview.brandName, vertical: 'restaurant', sourceType: 'manual', payload, expectedUpdatedAt: draft.updated_at,
+      userId, draftId: draft.id, name: payload.preview.brandName, vertical: 'restaurant', sourceType: 'manual', payload, updated_at: draft.updated_at,
     })
     const currentDraft = await readOnboardingDraft(db, userId, draft.id)
     assert.equal(currentDraft.row.updated_at, revised.updatedAt)
@@ -363,7 +363,7 @@ test('location edits record exact changed facts and do not manufacture an edit f
     const id = (created.data as { location: { id: string } }).location.id
     const original = await getLocation(db, ORG, id)
     assert.ok(original)
-    const changed = await updateLocation(db, ORG, id, { phone: '+66812345678', expected_updated_at: original.updated_at }, actor, env)
+    const changed = await updateLocation(db, ORG, id, { phone: '+66812345678', updated_at: original.updated_at }, actor, env)
     assert.equal(changed.status, 200)
     const read = await getLocation(db, ORG, id)
     assert.equal(read!.phone, '+66812345678')
@@ -373,11 +373,11 @@ test('location edits record exact changed facts and do not manufacture an edit f
     assert.equal(receipts.length, 1)
     assert.equal(receipts[0]!.actor_user_id, actor)
     assert.deepEqual(JSON.parse(receipts[0]!.payload_json).metadata.changed_fields, ['phone'])
-    const repeat = await updateLocation(db, ORG, id, { phone: '+66812345678', expected_updated_at: read!.updated_at }, actor, env)
+    const repeat = await updateLocation(db, ORG, id, { phone: '+66812345678', updated_at: read!.updated_at }, actor, env)
     assert.equal(repeat.status, 200)
     assert.equal((await getLocation(db, ORG, id))!.updated_at, read!.updated_at)
     assert.deepEqual(await entries(), receipts)
-    const stale = await updateLocation(db, ORG, id, { phone: '+66812345679', expected_updated_at: original.updated_at }, actor, env)
+    const stale = await updateLocation(db, ORG, id, { phone: '+66812345679', updated_at: original.updated_at }, actor, env)
     assert.equal(stale.status, 409)
     assert.equal((await getLocation(db, ORG, id))!.phone, '+66812345678')
   } finally { await runtime.dispose() }

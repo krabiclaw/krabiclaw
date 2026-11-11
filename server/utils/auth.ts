@@ -4,20 +4,22 @@ import { drizzleAdapter } from 'better-auth/adapters/drizzle'
 import { DISCORD_BOT_PERMISSIONS } from '~/server/utils/discord-bot'
 import { loginMethodForPath } from '~/shared/auth/login-method'
 import { admin, anonymous, bearer, emailOTP, genericOAuth, getOrgAdapter, hasPermission, jwt, lastLoginMethod, organization, phoneNumber, type UserWithAnonymous } from 'better-auth/plugins'
-import { stripe as betterAuthStripe } from '@better-auth/stripe'
+import { stripe as betterAuthStripe, type Subscription as StripeSubscription } from '@better-auth/stripe'
 import { oauthProvider } from '@better-auth/oauth-provider'
 import { cimd } from '@better-auth/cimd'
 import { fetchCimdMetadataResource } from '~/server/utils/cimd-metadata-fetch'
 import type { GenericEndpointContext } from '@better-auth/core'
+import type Stripe from 'stripe'
+import type { notifySubscriptionPlan } from '~/server/domain/payments/notifications'
 import { getCurrentAuthEndpointContext } from '@better-auth/core/context'
 import { HTTPError, type H3Event } from 'nitro';
-import { createDb, execute, executeBatch, queryAll, queryFirst, schema, type BatchQuery } from '~/server/db'
+import { createDb, executeBatch, queryAll, queryFirst, schema, type BatchQuery } from '~/server/db'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
 import { sendWhatsAppOtp } from '~/server/utils/whatsapp'
 import { parsePhoneOrThrow } from '~/utils/phone'
 import { isCurrencyCode } from '~/shared/currencies'
 import { isValidTimezone } from '~/utils/timezone'
-import { createCanonicalNotification, notifyNewUserSignup } from '~/server/utils/notification-center'
+import { departedParticipantsQuery } from '~/server/domain/conversations'
 import { measurementOutcome, readPageEventId, recordAndDeliverConversion } from '~/server/utils/organization-conversions'
 import { getPlatformOrganization } from '~/server/utils/platform-organization'
 import { sendPasswordResetEmail, sendSignInCodeEmail, sendVerificationEmail } from '~/server/utils/auth-email'
@@ -76,7 +78,6 @@ export function oauthSigningConfig(authBaseUrl: string) {
 export const organizationOptions = {
   ac: organizationAccessControl,
   roles: organizationRoles,
-  teams: { enabled: true, defaultTeam: { enabled: false }, allowRemovingAllTeams: true },
   // A business cannot exist without the currency it sells in and the clock it
   // reports in, so Better Auth requires both when the organization is created.
   schema: {
@@ -356,7 +357,8 @@ function buildAuth(env: CloudflareEnv) {
   // with each other, and a failure of either reaches the caller.
   const recordMemberChange = async (organizationId: string, audit: BatchQuery[] = []) => {
     await reconcileResponsibilities(env, db, { organizationId })
-    await executeBatch(db, [publicResourceCacheInvalidationQuery(organizationId, 'member-change'), ...audit])
+    // A person who left keeps no seat or read position in the organization's conversations.
+    await executeBatch(db, [publicResourceCacheInvalidationQuery(organizationId, 'member-change'), departedParticipantsQuery(organizationId), ...audit])
     await publishAccessInvalidation(env, { organizationId })
   }
   // Removed by an owner, leaving, or deleting the account: one departure, one
@@ -404,18 +406,6 @@ function buildAuth(env: CloudflareEnv) {
           metadata: { userId: member.userId, previousRole, role: member.role },
         })])
       },
-      afterAddTeamMember: async ({ team, user }: { team: { organizationId: string }; user: { id: string } }) => {
-        const { materializeMemberSessions } = await import('~/server/utils/availability')
-        await materializeMemberSessions(db, { organizationId: team.organizationId, userId: user.id, actorId: 'system' })
-        await recordMemberChange(team.organizationId)
-      },
-      afterRemoveTeamMember: async ({ team }: { team: { organizationId: string } }) => recordMemberChange(team.organizationId),
-      // A team's tasks keep their history; the deleted team stops being their assignee (tasks_team_scope_fk).
-      beforeDeleteTeam: async ({ team }: { team: { id: string; organizationId: string } }) => {
-        await executeBatch(db, [{ query: 'UPDATE tasks SET assigned_team_id = NULL, version = version + 1, updated_at = ? WHERE organization_id = ? AND assigned_team_id = ?', params: [new Date().toISOString(), team.organizationId, team.id] }], { operation: 'Unassign a deleted team' })
-      },
-      afterDeleteTeam: async ({ team }: { team: { organizationId: string } }) => recordMemberChange(team.organizationId),
-      afterUpdateTeam: async ({ organization }: { organization: { id: string } }) => recordMemberChange(organization.id),
     },
     sendInvitationEmail: async (data: {
       id: string
@@ -442,6 +432,14 @@ function buildAuth(env: CloudflareEnv) {
   if (!env.STRIPE_SECRET_KEY) throw new Error('STRIPE_SECRET_KEY is required')
   const stripeClient = createStripeClient(env.STRIPE_SECRET_KEY)
   const loadStripePlans = createStripePlanLoader(stripeClient, env)
+  // Loaded when a subscription webhook arrives, as the onEvent work below is.
+  const notifyPlan = async (input: Parameters<typeof notifySubscriptionPlan>[2]) => {
+    const notifications = await import('~/server/domain/payments/notifications')
+    await notifications.notifySubscriptionPlan(env, db, input)
+  }
+  const planStarted = async ({ event, subscription }: { event: Stripe.Event; subscription: StripeSubscription }) => {
+    await notifyPlan({ kind: 'started', eventId: event.id, organizationId: subscription.referenceId, subscriptionId: subscription.stripeSubscriptionId, plan: subscription.plan, date: subscription.status === 'trialing' ? subscription.trialEnd : null })
+  }
 
   const instance = betterAuth({
     baseURL: authBaseUrl,
@@ -589,7 +587,6 @@ function buildAuth(env: CloudflareEnv) {
           before: async (user) => {
             // A deleted account's Customer at every business it paid goes with it, and the cards saved there.
             await deleteBuyerCustomers(db, env, user.id)
-            await execute(db, "DELETE FROM activity_entries WHERE kind='notification' AND scope_kind='global' AND target_user_id=?", [user.id])
             departingMemberships.set(user.id, await queryAll<{ id: string; organizationId: string; userId: string }>(db, 'SELECT id, "organizationId", "userId" FROM member WHERE "userId" = ?', [user.id]))
           },
           // Current business responsibility ends with membership, once the
@@ -619,7 +616,6 @@ function buildAuth(env: CloudflareEnv) {
             // Signup itself must not assume why the user is here: they may be
             // accepting an invitation into an existing org, in which case a
             // personal org here would just be an orphaned, siteless duplicate.
-            await notifyNewUserSignup(db)
             // One registered account, once per user, through every way an
             // account is created (password, social, phone, an anonymous guest
             // becoming a user). Login, provider linking and invitation
@@ -656,17 +652,6 @@ function buildAuth(env: CloudflareEnv) {
         await sendPasswordResetEmail(env, {
           email: user.email,
           resetUrl: url,
-        }).catch(async (error) => {
-          // Better Auth keeps the reset response generic to prevent enumeration.
-          // Its callback failure must still be visible to platform operators.
-          await createCanonicalNotification(db, {
-            scope: 'global',
-            template: 'auth.reset_password_email_failed',
-            severity: 'error',
-            title: 'Password reset email failed',
-            message: error instanceof Error ? error.message : String(error),
-          })
-          throw error
         })
       },
       onPasswordReset: async ({ user }) => {
@@ -681,15 +666,6 @@ function buildAuth(env: CloudflareEnv) {
         await sendVerificationEmail(env, {
           email: user.email,
           verificationUrl: url,
-        }).catch(async (error) => {
-          await createCanonicalNotification(db, {
-            scope: 'global',
-            template: 'auth.verification_email_failed',
-            severity: 'error',
-            title: 'Verification email failed',
-            message: error instanceof Error ? error.message : String(error),
-          })
-          throw error
         })
       },
     },
@@ -781,6 +757,24 @@ function buildAuth(env: CloudflareEnv) {
               options: configuredOrganizationOptions,
               permissions: { billing: ['update'] },
             }, ctx)
+          },
+          // The business is told its new plan, a change of plan, and a plan
+          // that will not renew. Stripe emails everything else it bills for
+          // (docs/payments/payments.md).
+          // Through Checkout, or a subscription made in Stripe.
+          onSubscriptionComplete: planStarted,
+          onSubscriptionCreated: planStarted,
+          onSubscriptionUpdate: async ({ event, subscription }) => {
+            // Stripe names the items the subscription had before this event when they changed.
+            const before = (event.data.previous_attributes as Partial<Stripe.Subscription> | undefined)?.items?.data
+            if (!before) return
+            const previous = (await loadStripePlans()).find(plan => before.some(item => item.price.id === plan.priceId))
+            if (!previous) throw new Error(`Stripe subscription event ${event.id} names no configured plan before the change`)
+            if (previous.name === subscription.plan) return
+            await notifyPlan({ kind: 'changed', eventId: event.id, organizationId: subscription.referenceId, subscriptionId: subscription.stripeSubscriptionId, plan: subscription.plan, previousPlan: previous.name })
+          },
+          onSubscriptionCancel: async ({ event, subscription }) => {
+            await notifyPlan({ kind: 'ending', eventId: event.id, organizationId: subscription.referenceId, subscriptionId: subscription.stripeSubscriptionId, plan: subscription.plan, date: subscription.cancelAt ?? subscription.periodEnd })
           },
         },
         // The plugin's own /api/auth/stripe/webhook handlers own the
@@ -1127,5 +1121,22 @@ export async function ensureInteractionUser(event: H3Event, env: CloudflareEnv):
   for (const cookie of headers.getSetCookie()) {
     event.res.headers.append('set-cookie', cookie)
   }
+  return response.user.id
+}
+
+/**
+ * The Better Auth user of a guest the business knows only by what a host or a
+ * channel gave it: Better Auth's anonymous user, carrying that name. Nobody is
+ * signed in as it, so the session the sign-in opens is closed at once. The
+ * guest's own verified sign-in later joins it to their account
+ * (server/utils/guest-accounts.ts).
+ */
+export async function createGuestUser(env: CloudflareEnv, name: string): Promise<string> {
+  const auth = createAuth(env)
+  const { response } = await auth.api.signInAnonymous({ headers: new Headers(), returnHeaders: true })
+  if (!response?.user?.id || !response.token) throw new Error('Better Auth did not return an anonymous user')
+  const context = await auth.$context
+  await context.internalAdapter.updateUser(response.user.id, { name })
+  await context.internalAdapter.deleteSession(response.token)
   return response.user.id
 }

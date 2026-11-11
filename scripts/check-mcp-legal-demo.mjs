@@ -227,7 +227,7 @@ async function main() {
     const current = expectSuccess(`get_member_scheduling ${attorney.public_name} succeeds`, currentRes)?.scheduling
     const schedulingRes = await mcp(headers, 'set_member_scheduling', {
       member_id: attorney.member_id,
-      expected_updated_at: current?.updated_at ?? null,
+      updated_at: current?.updated_at ?? null,
       timezone: 'America/New_York',
       weekly: WEEKDAY_HOURS,
       time_off: [],
@@ -237,7 +237,7 @@ async function main() {
     const profile = expectSuccess(`get_member_public_profile ${attorney.public_name} succeeds`, profileRes)?.profile
     const profileWrite = await mcp(headers, 'update_member_public_profile', {
       member_id: attorney.member_id,
-      expected_updated_at: profile.updated_at,
+      updated_at: profile.updated_at,
       public_name: attorney.public_name,
       public_bio: attorney.public_bio,
       public_photo_url: profile?.public_photo_url ?? null,
@@ -320,7 +320,7 @@ async function main() {
         product_id: productId,
         unit_label: 'consultation',
         variants: [{ id: variant.id, prices: [{ ...(price ? { id: price.id } : {}), currency: 'USD', unit_amount: area.unit_amount, type: 'one_time', location_id: null }] }],
-        booking: { location_id: null, duration_minutes: 30, default_capacity: 1, scheduling_mode: 'provider', assigned_member_id: area.host, assigned_team_id: null, confirmation_mode: 'instant', online_payment_required: true },
+        booking: { location_id: null, duration_minutes: 30, default_capacity: 1, scheduling_mode: 'provider', assigned_member_id: area.host, confirmation_mode: 'instant', online_payment_required: true },
       }
       // The key names this exact request, so a changed consultation is a new write rather than a refused replay.
       const bookingRes = await mcp(headers, 'update_product', {
@@ -369,12 +369,12 @@ async function main() {
 
     const updateRes = await mcp(headers, 'update_site_page', {
       variant_id: pageSummary.id,
-      expected_updated_at: pageData.updated_at,
+      updated_at: pageData.updated_at,
       path,
       title,
-      pageType: pageSummary.page_type,
+      page_type: pageSummary.page_type,
       recipe: pageSummary.recipe,
-      sortOrder: pageSummary.sort_order,
+      sort_order: pageSummary.sort_order,
       removed_block_ids: removedBlockIds,
       blocks,
     })

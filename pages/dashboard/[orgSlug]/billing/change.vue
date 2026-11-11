@@ -44,8 +44,8 @@ watchEffect(() => {
   if (status && (!status.actions.changes.some(change => change.plan === GROWTH_PLAN_ID && change.timing === 'period_end'))) showError({ statusCode: 404, statusMessage: 'There is no plan change for this plan' })
 })
 
-const lead = computed(() => billing.value?.currentPeriodEnd
-  ? `${planName(BUSINESS_PLAN_ID)} continues until ${formatExactDateTime(billing.value.currentPeriodEnd)}, then ${planName(GROWTH_PLAN_ID)} at ${formatRecurring(PAID_PLAN_PRICES[GROWTH_PLAN_ID].monthly, 'USD')} without what is listed here.`
+const lead = computed(() => billing.value?.periodEnd
+  ? `${planName(BUSINESS_PLAN_ID)} continues until ${formatExactDateTime(billing.value.periodEnd)}, then ${planName(GROWTH_PLAN_ID)} at ${formatRecurring(PAID_PLAN_PRICES[GROWTH_PLAN_ID].monthly, 'USD')} without what is listed here.`
   : undefined)
 const ends: EditorNavigationItem[] = BUSINESS_ADDITIONS.map(row => ({ ...row }))
 

@@ -1,5 +1,5 @@
 <template>
-  <!-- The weekly hours reservation slots are generated from; the location's Hours index edits the same field. -->
+  <!-- The location's weekly opening hours; the location's Hours index edits the same field. -->
   <LocationHoursIndex id="calendar-settings-hours" :editor="editor" />
 </template>
 

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { OPEN_TERMS_JSON } from './support/booking-terms.ts'
 import test from 'node:test'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
@@ -46,6 +47,8 @@ async function boot() {
     VALUES (?, 'Org', 'org', 'org', '{}', 'tenant-theme-v1', 'THB', 'active', 'active', 'flat', 'restaurant', ?, 'Asia/Bangkok')`)
     .bind(ORG, NOW).run()
   await db.prepare("INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, 'Actor', 'actor@example.test', 0, 0, 0)").bind(ACTOR.actorId).run()
+  // The member who handles each offering's bookings.
+  await db.prepare("INSERT INTO member (id, organizationId, userId, role) VALUES ('actor-member', ?, ?, 'owner')").bind(ORG, ACTOR.actorId).run()
   for (const loc of ['loc-a', 'loc-b']) {
     await db.prepare(`INSERT INTO business_locations (id, organization_id, slug, title, status, timezone, created_at, updated_at)
       VALUES (?, ?, ?, ?, 'active', 'Asia/Bangkok', ?, ?)`).bind(loc, ORG, loc, loc, NOW, NOW).run()
@@ -95,7 +98,7 @@ test('public experiences require a configured booking flow and retain full or te
     // Imported legacy state can have a published duration without a schedule.
     await db.prepare("INSERT INTO product_locations (organization_id, product_id, location_id, active, published, created_by, updated_by) VALUES (?, ?, 'loc-a', 1, 1, ?, ?)")
       .bind(ORG, legacy.id, ACTOR.actorId, ACTOR.actorId).run()
-    await db.prepare(`INSERT INTO product_booking_configs (product_id, organization_id, duration_minutes, default_capacity, scheduling_mode, created_by, updated_by) VALUES (?, ?, 60, 8, 'business', ?, ?)`)
+    await db.prepare(`INSERT INTO product_booking_configs (product_id, organization_id, unit, duration_minutes, default_capacity, scheduling_mode, assigned_member_id, created_by, updated_by) VALUES (?, ?, 'slot', 60, 8, 'business', 'actor-member', ?, ?)`)
       .bind(legacy.id, ORG, ACTOR.actorId, ACTOR.actorId).run()
     await db.prepare('UPDATE product_publications SET published = 1 WHERE organization_id = ? AND product_id = ?').bind(ORG, legacy.id).run()
     const visible = async () => (await loadPublicProductCollection(db, ORG, 'experiences', false, undefined, env))!.products.map(product => product.id)
@@ -116,11 +119,11 @@ test('public experiences require a configured booking flow and retain full or te
       .bind(ORG, legacy.id, start, end, ACTOR.actorId, ACTOR.actorId).run()
     const ids = [external.id, legacy.id].sort()
     assert.deepEqual((await visible()).sort(), ids)
-    await claimSessionCapacity(db, { env, organizationId: ORG, productId: legacy.id, sessionId: 'omakase-session', productVariantId: legacy.variants[0]!.id, partySize: 8 })
+    await claimSessionCapacity(db, { policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: legacy.id, sessionId: 'omakase-session', productVariantId: legacy.variants[0]!.id, partySize: 8 })
     const sessions = await listSessions(db, { env, organizationId: ORG, productId: legacy.id, fromInstant: `${tomorrow}T00:00:00.000Z`, toInstant: `${tomorrow}T23:59:59.999Z` })
     assert.deepEqual(sessions.map(session => ({ remaining: session.remaining, full: session.is_full })), [{ remaining: 0, full: true }])
     assert.deepEqual((await visible()).sort(), ids, 'a full experience stays visible')
-    await db.prepare("UPDATE bookings SET status = 'cancelled' WHERE product_session_id = 'omakase-session'").run()
+    await db.prepare("UPDATE bookings SET status = 'cancelled', cancelled_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE product_session_id = 'omakase-session'").run()
     await db.prepare("UPDATE business_locations SET special_hours = ? WHERE id = 'loc-a'")
       .bind(JSON.stringify([{ kind: 'closure', starts_on: tomorrow, ends_on: tomorrow, note: 'Private event' }])).run()
     assert.deepEqual(await productBookingReadiness(db, ORG, await getProduct(db, ORG, legacy.id), { env }), { ready: true, missing: [] })
@@ -167,7 +170,7 @@ test('advance notice keeps sessions inside it off the public listing and refuses
     }, publication: { published: false } })
     await db.prepare("INSERT INTO product_locations (organization_id, product_id, location_id, active, published, created_by, updated_by) VALUES (?, ?, 'loc-a', 1, 1, ?, ?)")
       .bind(ORG, product.id, ACTOR.actorId, ACTOR.actorId).run()
-    await db.prepare(`INSERT INTO product_booking_configs (product_id, organization_id, duration_minutes, default_capacity, scheduling_mode, created_by, updated_by) VALUES (?, ?, 60, 8, 'business', ?, ?)`)
+    await db.prepare(`INSERT INTO product_booking_configs (product_id, organization_id, unit, duration_minutes, default_capacity, scheduling_mode, assigned_member_id, created_by, updated_by) VALUES (?, ?, 'slot', 60, 8, 'business', 'actor-member', ?, ?)`)
       .bind(product.id, ORG, ACTOR.actorId, ACTOR.actorId).run()
     await db.prepare('UPDATE product_publications SET published = 1 WHERE organization_id = ? AND product_id = ?').bind(ORG, product.id).run()
     const minute = Math.ceil(Date.now() / 60_000) * 60_000
@@ -186,11 +189,11 @@ test('advance notice keeps sessions inside it off the public listing and refuses
     assert.deepEqual((await loadPublicProductSessions(db, detail!, env)).map(session => session.id), ['later'])
     assert.deepEqual(await productBookingReadiness(db, ORG, await getProduct(db, ORG, product.id), { requireAllocation: true, env }).then(result => result.ready), true, 'a later session still proves the offering bookable')
 
-    const claim = (sessionId: string) => claimSessionCapacity(db, { env, organizationId: ORG, productId: product.id, sessionId, productVariantId: product.variants[0]!.id, partySize: 1 })
+    const claim = (sessionId: string) => claimSessionCapacity(db, { policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: product.id, sessionId, productVariantId: product.variants[0]!.id, partySize: 1 })
     await assert.rejects(claim('soon'), CapacityUnavailableError)
     assert.equal(await db.prepare("SELECT COUNT(*) n FROM bookings WHERE product_session_id = 'soon'").first('n'), 0)
     const booking = await claim('later')
-    const move = await sessionMoveQuery(db, { env, organizationId: ORG, productId: product.id, sessionId: 'soon', partySize: 1, bookingId: booking.bookingId, now: new Date().toISOString() })
+    const move = await sessionMoveQuery(db, { env, organizationId: ORG, fromProductId: product.id, productId: product.id, productVariantId: product.variants[0]!.id, sessionId: 'soon', partySize: 1, bookingId: booking.bookingId, now: new Date().toISOString() })
     assert.equal((await db.prepare(move.query).bind(...move.params!).run()).meta.changes, 0)
     assert.equal(await db.prepare('SELECT product_session_id FROM bookings WHERE id = ?').bind(booking.bookingId).first('product_session_id'), 'later')
 
@@ -450,12 +453,12 @@ test('editing a product keeps variant identity, so bookings survive', { timeout:
     const product = await createProduct(db, { organizationId: ORG, actor: ACTOR, product: { kind: 'dish',
       name: 'Class', variants: [{ id: 'var-adult', name: 'Adult', prices: [{ unit_amount: 50000, currency: 'THB' }] }],
     } })
-    await db.prepare(`INSERT INTO product_booking_configs (product_id, organization_id, duration_minutes, default_capacity, scheduling_mode, created_by, updated_by)
-      VALUES (?, ?, 60, 5, 'business', 'a', 'a')`).bind(product.id, ORG).run()
+    await db.prepare(`INSERT INTO product_booking_configs (product_id, organization_id, unit, duration_minutes, default_capacity, scheduling_mode, created_by, updated_by)
+      VALUES (?, ?, 'slot', 60, 5, 'business', 'a', 'a')`).bind(product.id, ORG).run()
     await db.prepare(`INSERT INTO product_sessions (id, organization_id, product_id, location_id, timezone, starts_at, ends_at, capacity, status, created_by, updated_by)
       VALUES ('s1', ?, ?, 'loc-a', 'Asia/Bangkok', '2099-01-01T00:00:00.000Z', '2099-01-01T01:00:00.000Z', 5, 'scheduled', 'a', 'a')`).bind(ORG, product.id).run()
-    await db.prepare(`INSERT INTO bookings (id, organization_id, product_id, product_session_id, product_variant_id, party_size, status)
-      VALUES ('b1', ?, ?, 's1', 'var-adult', 2, 'confirmed')`).bind(ORG, product.id).run()
+    await db.prepare(`INSERT INTO bookings (id, organization_id, product_id, product_session_id, product_variant_id, party_size, policy_json, status,location_id,starts_at,ends_at,timezone)
+      SELECT 'b1', ?, ?, 's1', 'var-adult', 2, '{"advance_notice_minutes":null,"party_size_min":null,"party_size_max":null,"minimum_guest_age":null,"accessibility_contact_required":false,"payment":null,"cancellation":null}', 'confirmed',location_id,starts_at,ends_at,timezone FROM product_sessions WHERE id = 's1'`).bind(ORG, product.id).run()
 
     await updateProduct(db, { organizationId: ORG, productId: product.id, patch: { description: 'Now with clay' }, actor: ACTOR })
     assert.equal(await db.prepare("SELECT count(*) n FROM bookings WHERE id = 'b1'").first<number>('n'), 1,
@@ -581,15 +584,15 @@ test('a minimal price patch preserves sibling variants, prices and unrelated fie
     }
     t.mock.timers.enable({ apis: ['Date'], now: Date.parse(previous.updated_at) })
     await updateProduct(db, { organizationId: ORG, productId: product.id, actor: ACTOR, patch: {
-      expected_updated_at: previous.updated_at,
+      updated_at: previous.updated_at,
       variants: [{ id: kept.id, prices: [{ id: priceA.id, unit_amount: 21000 }] }],
     } })
     const afterMinimal = await getProduct(db, ORG, product.id)
     assert.equal(afterMinimal.updated_at, new Date(Date.parse(previous.updated_at) + 1).toISOString(), 'a price edit advances the canonical Product version even in the same millisecond')
     await assert.rejects(updateProduct(db, { organizationId: ORG, productId: product.id, actor: ACTOR, patch: {
-      expected_updated_at: previous.updated_at, name: 'Stale dish', variants_mode: 'replace',
+      updated_at: previous.updated_at, name: 'Stale dish', variants_mode: 'replace',
       variants: [{ id: kept.id, prices_mode: 'replace', prices: [{ id: priceA.id, unit_amount: 1 }] }],
-    } }), { statusCode: 409, data: { code: 'PRODUCT_UPDATE_CONFLICT', field: 'expected_updated_at', product_id: product.id } })
+    } }), { statusCode: 409, data: { code: 'PRODUCT_UPDATE_CONFLICT', field: 'updated_at', product_id: product.id } })
     assert.deepEqual(await getProduct(db, ORG, product.id), afterMinimal, 'a stale full catalog edit changes no scalar, variant or price')
     assert.equal(afterMinimal.variants.length, 2, 'an unmentioned sibling variant is preserved')
     assert.deepEqual(afterMinimal.variants.find(variant => variant.id === 'var-large'), previous.variants.find(variant => variant.id === 'var-large'))
@@ -707,8 +710,8 @@ test('catalog edits and publication changes retain their actor without counting 
     await updateProduct(db, { organizationId: ORG, productId: made.id, patch: { name: 'New bowl' }, actor: repeatingActor, env })
     assert.deepEqual(await edits(), first)
     assert.deepEqual(await persistedEditor(), afterEdit, 'an unchanged save preserves the actual revision and the last editor')
-    await assert.rejects(updateProduct(db, { organizationId: ORG, productId: made.id, patch: { name: 'New bowl', expected_updated_at: made.updated_at }, actor: repeatingActor, env }),
-      { statusCode: 409, data: { code: 'PRODUCT_UPDATE_CONFLICT', field: 'expected_updated_at', product_id: made.id } })
+    await assert.rejects(updateProduct(db, { organizationId: ORG, productId: made.id, patch: { name: 'New bowl', updated_at: made.updated_at }, actor: repeatingActor, env }),
+      { statusCode: 409, data: { code: 'PRODUCT_UPDATE_CONFLICT', field: 'updated_at', product_id: made.id } })
     const keyed = { organizationId: ORG, productId: made.id, patch: { name: 'New bowl' }, actor: repeatingActor, env, idempotencyKey: 'unchanged-bowl' }
     await updateProduct(db, keyed)
     await updateProduct(db, keyed)

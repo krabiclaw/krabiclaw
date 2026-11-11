@@ -16,8 +16,7 @@
       </fieldset>
       <fieldset class="space-y-5">
         <legend class="mb-5 text-lg font-semibold text-highlighted">Guest</legend>
-        <UFormField label="First name" name="guest_name" required><UInput v-model="draft.guest_name" :maxlength="200" autocomplete="given-name" class="w-full" /></UFormField>
-        <UFormField label="Last name" name="guest_surname"><UInput v-model="draft.guest_surname" :maxlength="200" autocomplete="family-name" class="w-full" /></UFormField>
+        <UFormField label="Name" name="guest_name" required><UInput v-model="draft.guest_name" :maxlength="200" autocomplete="name" class="w-full" /></UFormField>
         <UFormField label="Email" name="guest_email"><UInput v-model="draft.guest_email" type="email" :maxlength="254" autocomplete="email" class="w-full" /></UFormField>
         <UFormField label="Phone" name="guest_phone"><UInput v-model="draft.guest_phone" type="tel" placeholder="+66812345678" :maxlength="40" autocomplete="tel" class="w-full" /></UFormField>
         <div class="grid gap-5 sm:grid-cols-3">
@@ -30,7 +29,7 @@
       <fieldset v-if="home" class="space-y-5">
         <legend class="mb-5 text-lg font-semibold text-highlighted">Total</legend>
         <UFormField :label="`Stay total (${home.currency})`" name="total" required><UInput v-model="draft.total" inputmode="decimal" class="w-full" /></UFormField>
-        <UFormField label="Notes" name="notes"><UTextarea v-model="draft.notes" :maxlength="2000" class="w-full" /></UFormField>
+        <UFormField label="Private note" name="private_notes" help="Only your team sees this."><UTextarea v-model="draft.private_notes" :maxlength="2000" class="w-full" /></UFormField>
         <USwitch v-model="draft.record_payment" label="Record a payment already received" />
         <template v-if="draft.record_payment">
           <p class="text-sm text-muted">Record money you received outside KrabiClaw. This does not charge your guest.</p>
@@ -51,14 +50,14 @@ import { MAX_STAY_NIGHTS, STAY_PAYMENT_METHODS, STAY_PAYMENT_METHOD_LABELS, type
 import { isCurrencyCode } from '~/shared/currencies'
 import { majorAmountToMinor } from '~/shared/prices'
 import { isSuccessfulChannelPush } from '~/shared/channel-push'
-import { isValidCalendarDate, isValidTimezone, localDateAt } from '~/utils/timezone'
+import { isValidCalendarDate, isValidTimezone, localDateAt, localDateTimeToInstant } from '~/utils/timezone'
 import { toE164 } from '~/utils/phone'
 import { ApiClientError } from '~/utils/api-clients'
 import { getErrorMessage } from '~/utils/errors'
 
 definePageMeta({ layout: 'dashboard', tab: 'today', back: 'dashboard-orgSlug', key: route => `stay-create:${String(route.params.orgSlug)}:${String(route.query.product_id ?? '')}:${String(route.query.check_in_date ?? '')}:${String(route.query.check_out_date ?? '')}` })
 const { title, action } = newRecordLabels('stay')
-type Home = Pick<StayHome, 'product_id' | 'name' | 'internal_name' | 'currency' | 'timezone' | 'max_guests'>
+type Home = Pick<StayHome, 'product_id' | 'name' | 'internal_name' | 'currency' | 'timezone' | 'max_guests' | 'check_in_time'>
 const route = useRoute()
 const nuxtApp = useNuxtApp()
 const orgSlug = String(route.params.orgSlug)
@@ -79,14 +78,14 @@ const queryError = computed(() => {
 })
 const { data, error } = await useAsyncData(`stay-create-homes:${orgSlug}`, () => api('/api/dashboard/stay-homes', {
   validate: (value): value is { homes: Home[]; manage: boolean } => isRecord(value) && typeof value.manage === 'boolean' && Array.isArray(value.homes)
-    && value.homes.every(home => isRecord(home) && typeof home.product_id === 'string' && Boolean(home.product_id) && typeof home.internal_name === 'string' && isCurrencyCode(home.currency) && typeof home.timezone === 'string' && isValidTimezone(home.timezone) && Number.isInteger(home.max_guests) && Number(home.max_guests) > 0),
+    && value.homes.every(home => isRecord(home) && typeof home.product_id === 'string' && Boolean(home.product_id) && typeof home.internal_name === 'string' && isCurrencyCode(home.currency) && typeof home.timezone === 'string' && isValidTimezone(home.timezone) && (home.check_in_time === null || typeof home.check_in_time === 'string') && Number.isInteger(home.max_guests) && Number(home.max_guests) > 0),
 }))
 const loadError = computed(() => queryError.value || (error.value ? getErrorMessage(error.value, 'Homes could not be loaded') : !data.value ? 'Homes could not be loaded.' : !data.value.manage ? 'Only owners and admins can add stays.' : suppliedHome && !data.value.homes.some(home => home.product_id === suppliedHome) ? 'That home is not available in this organization.' : !data.value.homes.length ? 'Add a home in Catalog before recording a stay.' : null))
 function initialDraft() {
   return {
     product_id: suppliedHome, check_in_date: suppliedCheckIn, check_out_date: suppliedCheckOut, arrival_time: '',
-    guest_name: '', guest_surname: '', guest_email: '', guest_phone: '', adults: 1 as number | undefined, children: 0 as number | undefined, infants: 0 as number | undefined,
-    total: '', notes: '', record_payment: false, payment_amount: '', payment_method: undefined as StayPaymentMethod | undefined, payment_date: '', payment_reference: '',
+    guest_name: '', guest_email: '', guest_phone: '', adults: 1 as number | undefined, children: 0 as number | undefined, infants: 0 as number | undefined,
+    total: '', private_notes: '', record_payment: false, payment_amount: '', payment_method: undefined as StayPaymentMethod | undefined, payment_date: '', payment_reference: '',
     key: crypto.randomUUID(), attempt: null as Record<string, unknown> | null,
   }
 }
@@ -134,15 +133,18 @@ async function commit() {
   try {
     draft.value.attempt ??= {
       product_id: draft.value.product_id, check_in_date: draft.value.check_in_date, check_out_date: draft.value.check_out_date, arrival_time: draft.value.arrival_time || null,
-      adults: draft.value.adults, children: draft.value.children, infants: draft.value.infants, guest_name: draft.value.guest_name.trim(), guest_surname: draft.value.guest_surname.trim() || null,
-      guest_email: draft.value.guest_email.trim() || null, guest_phone: draft.value.guest_phone.trim() || null, total_minor: amount(draft.value.total), notes: draft.value.notes.trim() || null, idempotency_key: draft.value.key,
+      adults: draft.value.adults, children: draft.value.children, infants: draft.value.infants, guest_name: draft.value.guest_name.trim(),
+      guest_email: draft.value.guest_email.trim() || null, guest_phone: draft.value.guest_phone.trim() || null, total_minor: amount(draft.value.total), private_notes: draft.value.private_notes.trim() || null, idempotency_key: draft.value.key,
       ...(draft.value.record_payment ? { payment: { amount_minor: amount(draft.value.payment_amount), method: draft.value.payment_method, paid_on: draft.value.payment_date, reference: draft.value.payment_reference.trim() || null } } : {}),
     }
     const result = await api('/api/dashboard/stays', { method: 'POST', body: draft.value.attempt, signal: mutation.signal, validate: (value): value is { stay: { id: string } } => isRecord(value) && isRecord(value.stay) && typeof value.stay.id === 'string' && Boolean(value.stay.id) && Object.hasOwn(value.stay, 'channel_push') && isSuccessfulChannelPush(value.stay.channel_push) })
     if (mutation.signal.aborted) return
-    const { payment, idempotency_key: _key, ...fields } = draft.value.attempt
+    const { payment, idempotency_key: _key, arrival_time, ...fields } = draft.value.attempt
+    const selectedHome = home.value!
+    const arrival = typeof arrival_time === 'string' ? arrival_time : selectedHome.check_in_time
+    const startsAt = arrival ? localDateTimeToInstant(draft.value.check_in_date, arrival, selectedHome.timezone, 'reject').toISOString() : draft.value.check_in_date
     const expected = { ...fields, guest_phone: draft.value.guest_phone.trim() ? toE164(draft.value.guest_phone.trim()) : null }
-    await api(`/api/dashboard/stays/${encodeURIComponent(result.stay.id)}`, { signal: mutation.signal, validate: (value): value is { stay: { id: string } } => isRecord(value) && isRecord(value.stay) && value.stay.id === result.stay.id && value.stay.status === 'confirmed'
+    await api(`/api/dashboard/stays/${encodeURIComponent(result.stay.id)}`, { signal: mutation.signal, validate: (value): value is { stay: { id: string } } => isRecord(value) && isRecord(value.stay) && value.stay.id === result.stay.id && value.stay.status === 'confirmed' && value.stay.starts_at === startsAt
       && Object.entries(expected).every(([field, wanted]) => (value.stay as Record<string, unknown>)[field] === wanted)
       && value.stay.currency === home.value?.currency && Array.isArray(value.stay.payments)
       && (!isRecord(payment) || value.stay.payments.some(saved => isRecord(saved) && saved.amount_minor === payment.amount_minor && saved.method === payment.method && saved.paid_on === payment.paid_on && saved.reference === payment.reference)) })

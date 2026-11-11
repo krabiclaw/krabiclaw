@@ -17,9 +17,7 @@ type Approval={id:string;action:Action;amount:number;note:string|null;currency:s
 const WORDING:Record<Action,{question:string;button:string}>={
  refund:{question:'Send a refund of',button:'Approve and send refund'},
  reject_booking:{question:'Decline the booking and refund',button:'Approve decline and full refund'},
- cancel_reservation:{question:'Cancel the reservation and refund',button:'Approve cancellation and full refund'},
  cancel_booking:{question:'Cancel the booking and refund',button:'Approve cancellation and full refund'},
- cancel_stay:{question:'Cancel the stay and refund',button:'Approve cancellation and full refund'},
 }
 const approvalId=computed(()=>{if(typeof route.query.id!=='string'||!route.query.id.trim())throw createError({statusCode:400,statusMessage:'Refund authorization ID is required'});return route.query.id})
 const {data,error}=await useAsyncData(()=>`refund-approval:${route.params.orgSlug}:${approvalId.value}`,()=>api<Approval>('/api/dashboard/payments/authorization',{query:{id:approvalId.value},validate:(v:unknown):v is Approval=>isRecord(v)&&v.id===approvalId.value&&typeof v.action==='string'&&Object.hasOwn(WORDING,v.action)&&Number.isSafeInteger(v.amount)&&Number(v.amount)>0&&(v.note===null||typeof v.note==='string')&&isCurrencyCode(v.currency)&&typeof v.payment_id==='string'}))

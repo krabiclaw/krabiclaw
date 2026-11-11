@@ -46,17 +46,17 @@ export async function loadReviewFeedback(db: DbClient, input: {
 
   const scope = input.organizationWide ? null : assignedGuestThreadScope('q', input.userId)
   const rows = await queryAll<{ id: string; author_name: string; rating: number; status: ReviewFeedback['recent'][number]['status']; title: string | null; content: string | null
-    private_feedback: string | null; created_at: string; booking_type: 'reservation' | 'booking' | 'stay'; product_kind: string | null; visit_title: string | null }>(db, `
-    SELECT r.id, r.author_name, r.rating, r.status, r.title, r.content, r.private_feedback, r.created_at, r.booking_type,
+    private_feedback: string | null; created_at: string; product_kind: string | null; visit_title: string | null }>(db, `
+    SELECT r.id, r.author_name, r.rating, r.status, r.title, r.content, r.private_feedback, r.created_at,
            p.kind AS product_kind, COALESCE(p.name, bl.title) AS visit_title
       FROM reviews r
       LEFT JOIN products p ON p.organization_id = r.organization_id AND p.id = r.product_id
       LEFT JOIN business_locations bl ON bl.id = r.location_id AND bl.organization_id = r.organization_id
-     WHERE r.organization_id = ? AND r.source = 'direct' AND r.booking_type IN ('reservation', 'booking', 'stay')
+     WHERE r.organization_id = ? AND r.source = 'direct' AND r.booking_id IS NOT NULL
        AND r.created_at >= ? AND r.created_at < ?
-       ${scope ? `AND EXISTS (SELECT 1 FROM requests q WHERE q.id = r.booking_id AND q.organization_id = r.organization_id AND ${scope.sql})` : ''}
+       ${scope ? `AND EXISTS (SELECT 1 FROM bookings visit JOIN conversations q ON q.booking_id = visit.id AND q.kind = 'booking' AND q.organization_id = visit.organization_id WHERE visit.id = r.booking_id AND visit.organization_id = r.organization_id AND ${scope.sql})` : ''}
      ORDER BY r.created_at DESC, r.id`, [input.organizationId, from, until, ...(scope?.params ?? [])])
-  const reviews = (await attachReviewCategoryRatings(db, rows)).map(row => ({ ...row, subject: reviewSubject(row.booking_type, row.product_kind) }))
+  const reviews = (await attachReviewCategoryRatings(db, rows)).map(row => ({ ...row, subject: reviewSubject(row.product_kind === 'stay' ? 'stay' : 'booking', row.product_kind) }))
 
   const subjects = REVIEW_SUBJECTS.flatMap(subject => {
     const answered = reviews.filter(review => review.subject === subject)

@@ -112,7 +112,7 @@ test('public discovery resolves translations through current publication owners'
     // Creating a translation through the page editor/MCP page boundary must not
     // charge the existing source page's custom-page capability again.
     await createTenantPage(createDb(db), { env, organizationId: 'tenant', userId: 'discovery-owner',
-      data: { pageId: 'home', locale: 'ja', path: '/', title: 'ご来店をお待ちしています',
+      data: { page_id: 'home', locale: 'ja', path: '/', title: 'ご来店をお待ちしています',
         blocks: [{ id: 'home-ja-body', type: 'markdown', data: { markdown: '旬の料理をお楽しみください。', editor_mode: 'rich' } }],
       },
     })
@@ -201,7 +201,7 @@ test('public discovery resolves translations through current publication owners'
     ])
     const source = await db.prepare("SELECT updated_at FROM content_documents WHERE id = 'tenant-story'").first<string>('updated_at')
     assert(source)
-    await updateContentDocument(db, 'tenant-story', { expected_updated_at: source, changes: { visibility: 'unlisted' } })
+    await updateContentDocument(db, 'tenant-story', { updated_at: source, changes: { visibility: 'unlisted' } })
     assert.deepEqual(await listPublishedArticles(db, env, 'tenant', 'blog', 'th'), [])
     assert(!(await buildTenantBlogDocuments(db)).some(record => record.id === 'tenant-blog:tenant-story'))
     await disableOrganizationLanguage(createDb(db), { organizationId: 'tenant', locale: 'th' })

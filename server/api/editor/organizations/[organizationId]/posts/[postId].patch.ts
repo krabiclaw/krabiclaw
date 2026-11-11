@@ -19,11 +19,11 @@ export default defineHandler(async (event) => {
   const session = await getAuthSession(event, env)
   if (!session?.user?.id) return jsonResponse({ error: 'Authentication required' }, { status: 401 })
 
-  const { expected_updated_at: expectedUpdatedAt, ...changes } = await readStrictBody<Record<string, unknown> & { expected_updated_at: string }>(event, {
-    expected_updated_at: 'string', title: 'unknown', body: 'unknown', slug: 'unknown',
+  const { updated_at: expectedUpdatedAt, ...changes } = await readStrictBody<Record<string, unknown> & { updated_at: string }>(event, {
+    updated_at: 'string', title: 'unknown', body: 'unknown', slug: 'unknown',
     location_id: 'unknown', visibility: 'unknown', call_to_action: 'unknown',
   })
-  if (!expectedUpdatedAt) return jsonResponse({ error: 'expected_updated_at is required' }, { status: 400 })
+  if (!expectedUpdatedAt) return jsonResponse({ error: 'updated_at is required' }, { status: 400 })
 
   const organization = await loadMemberOrganizationRow(event, db, env, organizationId, session.user.id)
   if (!organization) return jsonResponse({ error: 'Organization not found or access denied' }, { status: 404 })

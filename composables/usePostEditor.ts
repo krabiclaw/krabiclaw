@@ -196,7 +196,7 @@ export function usePostEditor(organizationId: string, locationId: Ref<string | n
       // Sending matching fields also completes the canonical writer's card
       // work if the previous response was lost after its content committed.
       const response = await dashboardApi(`/api/editor/organizations/${organizationId}/posts/${postId}`, {
-        method: 'PATCH', body: { expected_updated_at: updatedAt.value, ...fields(), ...(locationChanged ? { location_id: form.location_id } : {}) }, validate: isPostResponse,
+        method: 'PATCH', body: { updated_at: updatedAt.value, ...fields(), ...(locationChanged ? { location_id: form.location_id } : {}) }, validate: isPostResponse,
       })
       current = response.post
       updatedAt.value = String(current.updated_at)
@@ -232,7 +232,7 @@ export function usePostEditor(organizationId: string, locationId: Ref<string | n
     try {
       if (!updatedAt.value) throw new Error('The saved post must be read before publishing')
       const result = await dashboardApi<PublishResult>(`/api/editor/organizations/${organizationId}/posts/${postId}/publish`, {
-        method: 'POST', body: { expected_updated_at: updatedAt.value, targets }, validate: isPublishResult,
+        method: 'POST', body: { updated_at: updatedAt.value, targets }, validate: isPublishResult,
       })
       if (result.outcomes.some(outcome => outcome.status === 'published')) trackPostPublished(postId, organizationId)
       await reload(postId)

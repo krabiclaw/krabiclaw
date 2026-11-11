@@ -4,7 +4,6 @@ import { INTEGRATION_SCOPES } from '~/shared/organization-settings'
 import { jsonResponse } from '~/server/utils/api-response'
 import { linkedAccountAccessToken, requireIntegrationAccount } from '~/server/utils/auth'
 import { CalendarSelectionConflict, connectCalendar, readCalendarIntegration, syncCalendarOrganization } from '~/server/utils/google-calendar'
-import { ensureCalendarWatch } from '~/server/utils/google-calendar-inbound'
 import { hasOrganizationEntitlement } from '~/server/utils/billing'
 import { requireOrganizationAccess } from '~/server/utils/location-access'
 export default defineHandler(async event => {
@@ -20,8 +19,6 @@ export default defineHandler(async event => {
   await connectCalendar(env.DB, organization.id, body.account_id, (await linkedAccountAccessToken(env, body.account_id)).accessToken)
   const result = await syncCalendarOrganization(env, organization.id)
   if (result.failed) throw new Error('Your calendar is connected, but bookings could not be synced. Retry to finish syncing.')
-  // Google tells us when the calendar changes from now on; its change list is read from here.
-  await ensureCalendarWatch(env, organization.id)
   return jsonResponse({ success: true })
  } catch (error) { return jsonResponse({ error: error instanceof Error ? error.message : String(error) }, { status: error instanceof CalendarSelectionConflict ? 409 : 502 }) }
 })

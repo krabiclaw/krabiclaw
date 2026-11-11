@@ -155,17 +155,17 @@ export const POSTS_TOOLS: McpToolDefinition[] = [
   }),
   organizationTool({
     name: 'update_post',
-    description: 'Change at least one supplied website post field. First call get_post for its updated_at and use that as expected_updated_at. Omitted fields retain their values; null clears a nullable field. Published social posts are unchanged.',
+    description: 'Change at least one supplied website post field. Use the current updated_at from get_post. Omitted fields retain their values; null clears a nullable field. Published social posts are unchanged.',
     domain: 'posts',
     minimumRole: 'admin',
     inputSchema: {
       post_id: { type: 'string' },
-      expected_updated_at: { type: 'string', description: 'Current post.updated_at from get_post. A stale revision refuses the change.' },
+      updated_at: { type: 'string', description: 'Current post.updated_at from get_post. A stale revision refuses the change.' },
       ...postUpdateProperties,
       location_id: { ...postUpdateProperties.location_id, description: 'Omit to retain the current scope. A location ID scopes the post there; null makes it organization-wide.' },
       anyOf: Object.keys(postUpdateProperties).map(field => ({ required: [field] })),
     },
-    required: ['post_id', 'expected_updated_at'],
+    required: ['post_id', 'updated_at'],
     outputSchema: postMutationResultObject,
   }),
   organizationTool({
@@ -175,10 +175,10 @@ export const POSTS_TOOLS: McpToolDefinition[] = [
     minimumRole: 'admin',
     inputSchema: {
       post_id: { type: 'string' },
-      expected_updated_at: { type: 'string', description: 'The post\'s updated_at as you last read it.' },
+      updated_at: { type: 'string', description: 'The post\'s updated_at as you last read it.' },
       targets: { type: 'array', minItems: 1, maxItems: 1 + SOCIAL_CHANNELS.length, items: publishTargetSchema, description: 'One entry per destination, each channel at most once.' },
     },
-    required: ['post_id', 'expected_updated_at', 'targets'],
+    required: ['post_id', 'updated_at', 'targets'],
     outputSchema: postPublishResultObject,
   }),
   organizationTool({
@@ -280,7 +280,7 @@ export async function handlePostsTools(ctx: McpExecutorContext): Promise<unknown
     case 'update_post': {
       const postId = requiredString(args, 'post_id')
       const post = await asMcpValidationError(() => updatePost(organization.db, env, organization.organizationId, postId,
-        { changes: omit(args, ['post_id', 'organization_id', 'expected_updated_at']), expectedUpdatedAt: requiredString(args, 'expected_updated_at') }, organization.userId))
+        { changes: omit(args, ['post_id', 'organization_id', 'updated_at']), expectedUpdatedAt: requiredString(args, 'updated_at') }, organization.userId))
       if (!post) {
         throw new HTTPError({
           statusCode: 404,
@@ -300,7 +300,7 @@ export async function handlePostsTools(ctx: McpExecutorContext): Promise<unknown
         throw error
       }
       const result = await publishPost(env, organization.organizationId, requiredString(args, 'post_id'),
-        { expectedUpdatedAt: requiredString(args, 'expected_updated_at'), targets }, organization.userId)
+        { expectedUpdatedAt: requiredString(args, 'updated_at'), targets }, organization.userId)
       const summary = result.outcomes.map(outcome => `${outcome.channel}: ${outcome.status}${outcome.code ? ` (${outcome.code})` : ''}`).join('; ')
       return renderStructuredResponse(result as unknown as Record<string, unknown>, `${result.ok ? 'Published' : 'Not every target is published'} — ${summary}.`, undefined, !result.ok)
     }

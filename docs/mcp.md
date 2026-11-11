@@ -42,7 +42,7 @@ member's hours, time off and Calendar status. `set_member_scheduling` changes
 working hours or time off. `get_member_public_profile` and
 `update_member_public_profile` read and edit the separate authored host profile,
 including unpublished drafts. Valid memberships without settings return null.
-Both concerns use the same latest `expected_updated_at`; either edit can make a
+Both concerns use the same latest `updated_at`; either edit can make a
 previous read stale. Member IDs are organization membership IDs, not user IDs.
 
 Members can manage only their own settings; owners and admins can manage their
@@ -61,28 +61,25 @@ calendar reads block new availability rather than treating unknown time as free.
 
 The CMS selects the primary personal calendar and offers **Google Calendar
 sync** (Business). The business connection creates or reuses its **KrabiClaw**
-calendar automatically. Neither flow requires a calendar picker. An event moved
-in Google moves its booking through the booking-move operation; a deleted event
-is put back and the booking needs attention. See
-[Google Calendar](integrations/google-calendar.md) for projection, inbound sync
-and cleanup.
+calendar automatically. Neither flow requires a calendar picker. Bookings are
+changed in KrabiClaw; their events follow. See
+[Google Calendar](integrations/google-calendar.md) for projection and cleanup.
 
 ## Auth Model
 
 - AGENTS.md's "Platform and authorization boundaries" is the canonical statement
   of Better Auth authorization scope.
 - MCP uses Better Auth Organization roles and permissions through the shared
-  authorization utilities and domain services. Team membership and explicit
-  location, offering and home responsibility use the same member-or-Team pair
-  and determine access to scoped work. `assigned_member_id` names a membership,
-  not a user. `assigned_team_id` names a Better Auth Team. Choose at most one;
-  send null for the other when changing target. A booking's actual recorded
+  authorization utilities and domain services. Explicit location, offering and
+  home responsibility is one `assigned_member_id` and determines access to
+  scoped work. `assigned_member_id` names a membership, not a user. A booking's
+  actual recorded
   provider remains distinct from current resource responsibility.
 - Native organization roles are `owner`, `admin` and `member`, scoped to the
   selected tenant. `member` includes assigned product and booking operations and
   the member's own scheduling; it is not an inherently read-only role.
 - A Better Auth admin (impersonation rights) does not receive MCP access to a
-  site from that role alone. Access requires real organization/team membership or
+  site from that role alone. Access requires real organization membership or
   a Better Auth impersonation session for a member of that organization.
 - The real runtime boundary is the token `aud` claim bound to the MCP resource
   URL, plus the server-side membership checks. Never rely on scope presence or
@@ -99,7 +96,7 @@ members and identifies the caller. `start_team_conversation` reuses direct and
 stay/location conversations with exactly the selected member user IDs and
 explicit context. A manual group of at least three people is a distinct
 conversation with an optional name and required stable `idempotency_key`.
-This neither invites someone nor creates a Better Auth Team.
+This does not invite anyone.
 `list_team_conversations` reads only conversations the caller participates in;
 `get_team_conversation` pages their messages newest first with the native
 `before`/`before_id` pair. Reading does not mark a conversation read.
@@ -243,9 +240,16 @@ Telemetry stores hashed session and client identifiers. Never log raw session
 ids, OAuth client ids, bearer tokens, authorization headers, full arguments,
 article bodies, or upload URLs.
 
-## Product bookings and restaurant table Reservations
+## Product bookings, consultations and restaurant tables
 
-Consultations use Product → Variant → Price → Session → Booking. Product bookings
+Classes, consultations and restaurant tables use Product → Variant → Price → Session → Booking.
+A restaurant's tables are one `table` product per location, seated through that
+location's opening and special hours: a seating at each opening and every
+`seating_interval_minutes` after it while `duration_minutes` still ends by closing.
+`update_location`, `block_dates` and `open_dates` change when tables can be booked;
+the table takes no weekly slots or dated sessions. `default_capacity` is the guests
+seatable per seating, and a deposit is the variant price with `payment_basis`
+`per_booking` and an optional `payment_min_party_size`. Product bookings
 are managed with `list_product_booking_sessions`, `list_product_bookings`,
 `get_product_booking`, `create_product_booking`, `confirm_product_booking`,
 `reject_product_booking`, `cancel_product_booking`, and
@@ -253,11 +257,9 @@ are managed with `list_product_booking_sessions`, `list_product_bookings`,
 authorized members can read and manage their assigned bookings through the shared
 assignment and permission checks. Select a real Session ID from the canonical
 session listing; it includes pending capacity
-and tenant-scoped cross-Product online calendar exclusion. `reassign_product_booking`
-changes a whole session's assigned member after atomic availability checks and
-requires admin/owner access, the current operational timestamp and a caller
-idempotency key. Booking list results
-include `assigned_member_id` and accept that explicit member filter.
+and tenant-scoped cross-Product online calendar exclusion. A booking is handled by
+its product's assigned member (`set_product_booking_config`); booking list results
+include that `assigned_member_id` and accept it as a filter.
 
 Booking list results expose parsed `guest` and `provenance` objects (or null), matching booking detail
 readback.
@@ -288,7 +290,7 @@ imports, source-owned calendar reconciliation, or existing-payment conversion.
 An existing appointment import must have a separately supported audited contract;
 it must never be represented as a new payment or fabricated paid Stripe record.
 
-`operational_booking_id` means `bookings.id`. `request_id` means the guest inbox
+`booking_id` means `bookings.id`. `conversation_id` means the guest inbox
 thread ID. No booking tool or public booking response returns a `booking_id`.
 Review confirmation/rejection and cancellation invoke the canonical guest-thread
 operation service with durable operation keys and guest status messages. Confirm
@@ -302,16 +304,16 @@ the absolute `dashboard_url` and report the operation as incomplete. Changes
 invoke the existing immutable guest proposal flow: they do not mutate the booking
 until guest acceptance, and acceptance retains review status and operational ID.
 
-Restaurant table Reservations remain separate. `cancel_table_reservation` takes
-`operational_reservation_id` (`reservations.id`);
-`request_table_reservation_change` proposes location/date/time/party changes through
-the same guest approval flow. Restaurant Reservations have no pending review
-confirmation/rejection tools. `list_table_reservations` reads them.
+A table booking is a booking: the same tools read, cancel and change it, and
+`request_product_booking_change` may move it to a session of the business's table
+product at another location. It takes the booking's `updated_at` from `get_product_booking`; a guest message in the
+conversation does not refuse the business's change.
 
 ## Lodging homes, stays and nightly calendars
 
 Homes are Products of kind `stay`. Discover the intended home with product reads;
-`list_stays` and `get_stay` read its reservations, and `get_stay_calendar` reads
+`list_product_bookings` and `get_product_booking` read its stays as they read every
+booking, and `get_stay_calendar` reads
 nightly availability, prices and restrictions. Members read only the homes they
 are assigned to; owners and admins manage the organization's homes.
 
@@ -320,8 +322,8 @@ no payment, applies existing automatic guest-message schedules and updates
 availability on the home's connected Airbnb listing through Channex. A failed
 channel update returns `CHANNEL_PUSH_FAILED` with `committed:true`: the stay was
 saved. Read the calendar and channel state before retrying with the same
-`idempotency_key`. `update_stay` and `cancel_stay` change only
-host-owned stays under their current `expected_version`; channel-owned stays
+`idempotency_key`. `update_stay` and `cancel_product_booking` change only
+host-owned stays under their current `version`; channel-owned stays
 change on their source channel. `record_stay_payment` records external money,
 including a negative refund record, and `delete_stay_payment` removes a mistaken
 record. Neither moves money. MCP cancellation cannot execute an online refund;
@@ -359,14 +361,15 @@ and does not imply certification.
 `update_stay_arrival_guide` saves private instructions without sending or
 publishing them. Message-template tools configure automatic messages, each
 always sent on a schedule for named offerings: homes, experiences and
-consultations by product, table reservations by location. The scheduler sends
-into each stay's, booking's or reservation's own conversation, cancels pending
+consultations and restaurant tables by product. The scheduler sends
+into each stay's or booking's own conversation, cancels pending
 messages with the booking and moves them with it; every confirmed stay is also
 sent its home's check-in instructions at 10:00 the day before arrival.
-`list_scheduled_guest_messages` exposes pending messages and failures, and
-`cancel_scheduled_guest_message` cancels only a pending message.
-`schedule_guest_reply`, `list_scheduled_replies` and `cancel_scheduled_reply`
-are a member's own send-later replies, visible only to their author.
+`schedule_guest_reply` puts a member's own reply in the same outbox, to be
+sent at `due_at`, taking `conversation_id` and `body`. Only the author sees it. `list_scheduled_guest_messages`
+exposes the outbox's pending messages and failures (managers see every automatic
+message, each member their own replies), and `cancel_scheduled_guest_message`
+cancels a pending one by `scheduled_message_id`.
 Verify actual delivery through the canonical guest conversation's receipts.
 
 These tools share the dashboard and native app's domain operations. New

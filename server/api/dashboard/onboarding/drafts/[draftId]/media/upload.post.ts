@@ -51,7 +51,7 @@ export default defineHandler(async (event) => {
     const formData = await readMultipartFormData(event)
     if (!formData) return jsonResponse({ error: 'Multipart form data required' }, { status: 400 })
 
-    const revisionPart = formData.find(part => part.name === 'revision')
+    const revisionPart = formData.find(part => part.name === 'updated_at')
     const expectedRevision = revisionPart?.data ? Buffer.from(revisionPart.data).toString().trim() : ''
     if (!expectedRevision || draft.updated_at !== expectedRevision) return jsonResponse({ error: 'Website draft changed; reload before uploading', code: 'ONBOARDING_DRAFT_CHANGED', draft_id: draft.id }, { status: 409 })
 
@@ -95,7 +95,7 @@ export default defineHandler(async (event) => {
       WHERE id = ? AND user_id = ? AND status = 'active' AND updated_at = ?
     `, [JSON.stringify(payload), updatedAt, draftId, session.user.id, expectedRevision])
     if (!result.meta.changes) return jsonResponse({ error: 'Website draft changed; reload before uploading', code: 'ONBOARDING_DRAFT_CHANGED', draft_id: draft.id }, { status: 409 })
-    return jsonResponse({ success: true, image, updatedAt })
+    return jsonResponse({ success: true, image, updated_at: updatedAt })
   } catch (error) {
     rethrowHttpError(error)
     const normalized = error instanceof Error ? error : new Error('Unknown draft media upload error')

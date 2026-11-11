@@ -108,7 +108,7 @@ export const LOCALES_TOOLS: McpToolDefinition[] = [
   }),
   organizationTool({
     name: 'put_resource_localization',
-    description: "Replace an exact translation with fields allowed for its resource_type. For content_document, an existing translation requires its current expected_updated_at from get_resource_localization; a new article or page translation requires content_blocks. Omit blocks to retain an existing body. Document addresses come from the source and remain stable. Authored Q&A translations use title and summary without blocks; imported Q&A remains read-only.",
+    description: "Replace an exact translation with fields allowed for its resource_type. For content_document, an existing translation requires its current updated_at from get_resource_localization; a new article or page translation requires content_blocks. Omit blocks to retain an existing body. Document addresses come from the source and remain stable. Authored Q&A translations use title and summary without blocks; imported Q&A remains read-only.",
     domain: 'locales',
     minimumRole: 'admin',
     inputSchema: {
@@ -117,9 +117,9 @@ export const LOCALES_TOOLS: McpToolDefinition[] = [
       locale: { type: 'string' },
       values: { ...resourceValuesInput, properties: { ...resourceValuesInput.properties, ...localizedDocumentValues.properties } },
       content_blocks: TENANT_PAGE_BLOCKS_SCHEMA,
-      expected_updated_at: { type: ['string', 'null'], description: 'content_document only: required current translation updated_at when replacing an existing document. Omit or use null when creating a translation.' },
+      updated_at: { type: ['string', 'null'], description: 'content_document only: required current translation updated_at when replacing an existing document. Omit or use null when creating a translation.' },
       oneOf: [
-        ...resourceValueBranches.map(branch => ({ ...branch, not: { anyOf: [{ required: ['content_blocks'] }, { required: ['expected_updated_at'] }] } })),
+        ...resourceValueBranches.map(branch => ({ ...branch, not: { anyOf: [{ required: ['content_blocks'] }, { required: ['updated_at'] }] } })),
         { properties: { resource_type: { const: 'content_document' }, values: localizedDocumentValues } },
       ],
     },
@@ -220,7 +220,7 @@ export async function handleLocalesTools(ctx: McpExecutorContext): Promise<unkno
       locale: requiredString(args, 'locale'),
       values: args.values,
       contentBlocks: args.content_blocks ?? undefined,
-      expectedUpdatedAt: args.expected_updated_at ?? undefined,
+      expectedUpdatedAt: args.updated_at ?? undefined,
       userId: organization.userId,
     })
     return { localization: localization, context: await mutationContextPayload(organization) }

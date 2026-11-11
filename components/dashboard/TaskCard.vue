@@ -6,12 +6,12 @@
       <UIcon name="i-lucide-x" class="size-4" />
     </button>
     <div v-if="reservation" class="tc-reservation-main">
-      <span class="block text-sm font-semibold">{{ reservation.dateLabel }}</span>
+      <span class="block text-sm font-semibold">{{ reservation.date_label }}</span>
       <UAvatar :src="guestAvatarSrc" alt="" icon="i-lucide-user" class="mx-auto mt-7 size-24 sm:size-28" :ui="{ icon: 'size-12' }" />
-      <span class="mt-6 block text-2xl font-semibold leading-tight tracking-tight sm:text-[28px]">{{ reservation.groupHeadline }}</span>
-      <span v-if="reservation.homeName" class="mt-3 block text-base font-medium">{{ reservation.homeName }}</span>
-      <span v-if="reservation.statusLabel" class="mt-2 block text-sm text-muted">{{ reservation.statusLabel }}</span>
-      <span v-if="reservation.noteLabel" class="mt-2 inline-flex items-center gap-1.5 text-sm text-muted"><UIcon name="i-lucide-square-pen" class="size-4" />{{ reservation.noteLabel }}</span>
+      <span class="mt-6 block text-2xl font-semibold leading-tight tracking-tight sm:text-[28px]">{{ reservation.headline }}</span>
+      <span v-if="reservation.name" class="mt-3 block text-base font-medium">{{ reservation.name }}</span>
+      <span v-if="reservation.status_label" class="mt-2 block text-sm text-muted">{{ reservation.status_label }}</span>
+      <span v-if="reservation.note_label" class="mt-2 inline-flex items-center gap-1.5 text-sm text-muted"><UIcon name="i-lucide-square-pen" class="size-4" />{{ reservation.note_label }}</span>
       <span v-if="reservation.conversation?.description" class="mt-5 block text-sm text-muted">{{ reservation.conversation.description }}</span>
     </div>
     <!-- The suggestion for this booking: it opens the conversation with its message written for the owner to review and send. -->
@@ -67,14 +67,14 @@ const face = computed(() => props.task?.face ?? 'compact')
 const destination = computed(() => props.booking?.to ?? props.opportunity?.path ?? (props.task?.action?.type === 'open' ? props.task.action.path : null))
 // A booking and a guest's reply about a stay draw the same reservation face.
 const reservation = computed(() => props.booking
-  ? { dateLabel: props.booking.dateLabel, groupHeadline: props.booking.headline, homeName: props.booking.resourceName, statusLabel: props.booking.statusLabel, guestImageUrl: props.booking.guestImageUrl, noteLabel: props.booking.noteLabel, conversation: null }
-  : props.task?.reservation ? { ...props.task.reservation, noteLabel: null } : null)
-const statusLine = computed(() => props.task?.statusLine ?? (props.opportunity ? `Suggested · ${props.opportunity.statusLine}` : null))
+  ? { ...props.booking, conversation: null }
+  : props.task?.reservation ? { ...props.task.reservation, note_label: null } : null)
+const statusLine = computed(() => props.task?.status_line ?? (props.opportunity ? `Suggested · ${props.opportunity.status_line}` : null))
 const title = computed(() => props.booking?.headline ?? props.task?.title ?? props.opportunity!.title)
 const detail = computed(() => props.task?.detail ?? props.opportunity?.detail ?? null)
-const mediaSrc = computed(() => cfImageVariant(props.task?.imageUrl, { width: 900, height: 600, fit: 'cover', format: 'auto' }) || props.task?.imageUrl || undefined)
-const avatarSrc = computed(() => cfImageVariant(props.task?.imageUrl, { width: 96, height: 96, fit: 'cover', format: 'auto' }) || props.task?.imageUrl || undefined)
-const guestAvatarSrc = computed(() => cfImageVariant(reservation.value?.guestImageUrl, { width: 224, height: 224, fit: 'cover', format: 'auto' }) || reservation.value?.guestImageUrl || undefined)
+const mediaSrc = computed(() => cfImageVariant(props.task?.image_url, { width: 900, height: 600, fit: 'cover', format: 'auto' }) || props.task?.image_url || undefined)
+const avatarSrc = computed(() => cfImageVariant(props.task?.image_url, { width: 96, height: 96, fit: 'cover', format: 'auto' }) || props.task?.image_url || undefined)
+const guestAvatarSrc = computed(() => cfImageVariant(reservation.value?.guest_image_url, { width: 224, height: 224, fit: 'cover', format: 'auto' }) || reservation.value?.guest_image_url || undefined)
 const avatarClass = computed(() => props.task?.avatar ? '' : 'sq')
 </script>
 

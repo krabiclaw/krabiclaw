@@ -164,8 +164,7 @@ export const usePublicPageData = async (options: {
   const blogPost = computed(() => (data.value?.blogPost ?? null) as ApiRecord | null);
   const tenantPage = computed(() => data.value?.tenant_page ?? null);
 
-  const reservationPolicyByLocation = computed(() => data.value?.reservationPolicyByLocation ?? {});
-  const reservationQuestionsByLocation = computed(() => data.value?.reservationQuestionsByLocation ?? {});
+  const tablePolicySummaries = computed(() => data.value?.tablePolicySummaries ?? {});
 
   // ── Content ───────────────────────────────────────────────
   const contentMap = computed(() => {
@@ -257,8 +256,7 @@ export const usePublicPageData = async (options: {
     qaList,
     blogPost,
     tenantPage,
-    reservationPolicyByLocation,
-    reservationQuestionsByLocation,
+    tablePolicySummaries,
     getField,
     getHero,
     contentMap,

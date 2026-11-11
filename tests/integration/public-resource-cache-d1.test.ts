@@ -95,7 +95,7 @@ test('article evidence attributes meaningful persisted changes and excludes unch
     additionalQueriesAfter: [await articleCategoryMembershipQuery(db, { organizationId: 'platform', collection: 'blog', articleId: 'evidence-article', categoryId: category.id })],
   })
   const originalBlockRevision = await db.prepare("SELECT updated_at FROM content_blocks WHERE id = 'evidence-body'").first('updated_at')
-  const unchanged = await updateBlogPost(db, document.id, { expected_updated_at: document.updated_at, title: 'Original',
+  const unchanged = await updateBlogPost(db, document.id, { updated_at: document.updated_at, title: 'Original',
     excerpt: null, visibility: 'listed', seo_keywords: null, collection: 'blog', category_id: category.id,
     content_blocks: [{ id: 'evidence-body', type: 'markdown', data: { editor_mode: 'rich', markdown: 'Useful copy' } }],
   }, 'platform', 'editor', env)
@@ -104,7 +104,7 @@ test('article evidence attributes meaningful persisted changes and excludes unch
   assert.equal(await db.prepare("SELECT updated_at FROM content_blocks WHERE id = 'evidence-body'").first('updated_at'), originalBlockRevision)
   assert.equal(await db.prepare("SELECT count(*) FROM activity_entries WHERE event_name = 'article.updated'").first('count(*)'), 0)
 
-  const edited = await updateBlogPost(db, document.id, { title: 'Revised', expected_updated_at: document.updated_at }, 'platform', 'editor', env)
+  const edited = await updateBlogPost(db, document.id, { title: 'Revised', updated_at: document.updated_at }, 'platform', 'editor', env)
   assert.equal(edited.changed, true)
   const stored = await db.prepare('SELECT title, updated_at, updated_by, author_id FROM content_documents WHERE id = ?').bind(document.id).first<{ title: string; updated_at: string; updated_by: string; author_id: string }>()
   assert.equal(stored?.title, 'Revised')
@@ -117,18 +117,18 @@ test('article evidence attributes meaningful persisted changes and excludes unch
   assert.deepEqual(JSON.parse(edits[0]!.payload_json).metadata, {
     changed_fields: ['title'], evidence_basis: 'persisted_change', public_visibility: 'unverified',
   })
-  await assert.rejects(updateBlogPost(db, document.id, { title: 'Revised', expected_updated_at: document.updated_at }, 'platform', 'editor', env), { statusCode: 409 })
-  const repeated = await updateBlogPost(db, document.id, { title: 'Revised', expected_updated_at: stored!.updated_at }, 'platform', 'editor', env)
+  await assert.rejects(updateBlogPost(db, document.id, { title: 'Revised', updated_at: document.updated_at }, 'platform', 'editor', env), { statusCode: 409 })
+  const repeated = await updateBlogPost(db, document.id, { title: 'Revised', updated_at: stored!.updated_at }, 'platform', 'editor', env)
   assert.equal(repeated.changed, false)
   assert.equal(await db.prepare("SELECT count(*) FROM activity_entries WHERE event_name = 'article.updated'").first('count(*)'), 1)
 
   await db.prepare("CREATE TRIGGER reject_article_evidence BEFORE INSERT ON activity_entries WHEN NEW.event_name = 'article.updated' BEGIN SELECT RAISE(ABORT, 'reject evidence'); END").run()
-  await assert.rejects(updateBlogPost(db, document.id, { title: 'Must roll back', expected_updated_at: stored!.updated_at }, 'platform', 'editor', env), /reject evidence/)
+  await assert.rejects(updateBlogPost(db, document.id, { title: 'Must roll back', updated_at: stored!.updated_at }, 'platform', 'editor', env), /reject evidence/)
   assert.equal(await db.prepare('SELECT title FROM content_documents WHERE id = ?').bind(document.id).first('title'), 'Revised')
 
-  const publication = await updateBlogLifecycle(db, document.id, { expected_updated_at: stored!.updated_at }, 'platform', 'editor')
+  const publication = await updateBlogLifecycle(db, document.id, { updated_at: stored!.updated_at }, 'platform', 'editor')
   assert.equal(publication.changed, true)
-  assert.equal((await updateBlogLifecycle(db, document.id, { expected_updated_at: stored!.updated_at }, 'platform', 'author')).changed, false)
+  assert.equal((await updateBlogLifecycle(db, document.id, { updated_at: stored!.updated_at }, 'platform', 'author')).changed, false)
   const published = (await db.prepare("SELECT id, actor_user_id, payload_json FROM activity_entries WHERE event_name = 'article.published'").all<{ id: string; actor_user_id: string; payload_json: string }>()).results
   assert.equal(published.length, 1)
   assert.equal(published[0]?.actor_user_id, 'editor')
@@ -183,7 +183,7 @@ test('publishing a platform guide indexes its public pages and preserves another
   }, [{ id: 'calendar-body', type: 'markdown', data: { markdown: 'See your bookings in Google Calendar.', editor_mode: 'rich' } }], {
     additionalQueriesAfter: [await articleCategoryMembershipQuery(db, { organizationId: 'platform', collection: 'docs', articleId: 'calendar-guide', categoryId: category.id })],
   })
-  await updateBlogLifecycle(db, document.id, { expected_updated_at: document.updated_at }, 'platform', 'author')
+  await updateBlogLifecycle(db, document.id, { updated_at: document.updated_at }, 'platform', 'author')
   const otherKey = `dashboard/${organizationKeySegment('org')}/route/other.md`
   const items = new Map<string, { id: string; key: string; status: string; metadata: Record<string, string>; content?: string }>([
     [otherKey, { id: 'other', key: otherKey, status: 'completed', metadata: {} }],

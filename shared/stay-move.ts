@@ -1,9 +1,8 @@
 import { isRecord } from '~/utils/api-clients'
 
-/** A move or its undo answers with the stay and whether its guest was messaged the new address. */
-export function isMovedStayResponse(value: unknown): value is { stay: { guest_notified: boolean } } {
-  return isRecord(value) && isRecord(value.stay) && typeof value.stay.guest_notified === 'boolean'
+/** The move returns the outbox message that will deliver the new address. */
+export function isMovedStayResponse(value: unknown): value is { stay: { scheduled_message_id: string } } {
+  return isRecord(value) && isRecord(value.stay) && typeof value.stay.scheduled_message_id === 'string' && value.stay.scheduled_message_id.length > 0
 }
 
-/** Shown when the guest could not be messaged because the stay has no conversation here. */
-export const GUEST_NOT_MESSAGED_WARNING = { color: 'warning', title: 'Guest not messaged', description: 'This stay has no conversation here yet. Send the new address and entry details on the booking site.' } as const
+export const STAY_MOVE_MESSAGE_QUEUED = { color: 'success', title: 'Guest message queued', description: 'The guest’s new address and check-in instructions are in the scheduled messages outbox.' } as const

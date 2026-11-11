@@ -45,7 +45,7 @@
 import { normalizeVertical } from '~/utils/vertical-copy'
 import { useInboxUnread } from './inbox-unread'
 
-const props = defineProps<{ team: boolean; canReadTeam: boolean; canReadGuests: boolean }>()
+const props = defineProps<{ canReadTeam: boolean; canReadGuests: boolean }>()
 const route = useRoute()
 const router = useRouter()
 const dashboard = useDashboardOrganization()
@@ -53,16 +53,17 @@ const counts = useInboxUnread(computed(() => dashboard.organizationId.value))
 const listPath = computed(() => `/dashboard/${encodeURIComponent(String(route.params.orgSlug))}/messages`)
 const vertical = computed(() => dashboard.organization.value?.vertical ?? null)
 
-const selected = computed(() => props.team ? 'team' : route.query.kind === 'guests' || route.query.kind === 'support' ? route.query.kind : 'all')
+const selected = computed(() => route.query.kind === 'guests' || route.query.kind === 'support' || route.query.kind === 'team' ? route.query.kind : 'all')
 const unreadOnly = computed(() => route.query.unread === '1')
 
 function setQuery(patch: Record<string, string | undefined>) {
   void router.replace({ path: route.path, query: { ...route.query, ...patch } })
 }
 
+// All is every conversation this member sees, the team's included: one list, as Slack's.
 const kinds = computed(() => [
+  { value: 'all', label: 'All', icon: 'i-lucide-message-circle', count: counts.value?.all ?? 0 },
   ...(props.canReadGuests ? [
-    { value: 'all', label: 'All', icon: 'i-lucide-message-circle', count: counts.value?.all ?? 0 },
     { value: 'guests', label: vertical.value && normalizeVertical(vertical.value) === 'service' ? 'Clients' : 'Guests', icon: 'i-lucide-house', count: counts.value?.guests ?? 0 },
     // Airbnb Support writes to a business that hosts on Airbnb.
     ...(dashboard.hasFeature('stays') ? [{ value: 'support', label: 'Airbnb Support', icon: 'i-simple-icons-airbnb', count: counts.value?.support ?? 0 }] : []),
@@ -79,8 +80,8 @@ const menu = computed(() => [kinds.value.map(kind => ({
   type: 'checkbox' as const,
   checked: kind.value === selected.value,
   onSelect: () => {
-    const { kind: _kind, view: _view, ...rest } = route.query
-    void router.push({ path: listPath.value, query: kind.value === 'team' ? { ...rest, view: 'team' } : kind.value === 'all' ? rest : { ...rest, kind: kind.value } })
+    const { kind: _kind, ...rest } = route.query
+    void router.push({ path: listPath.value, query: kind.value === 'all' ? rest : { ...rest, kind: kind.value } })
   },
 }))])
 </script>

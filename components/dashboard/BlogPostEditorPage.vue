@@ -181,7 +181,7 @@ async function saveBlogLocalization(locale: string, submitted: Record<string, un
       body: {
         values,
         content_blocks: blocks,
-        ...(state.documentUpdatedAt ? { expected_updated_at: state.documentUpdatedAt } : {}),
+        ...(state.documentUpdatedAt ? { updated_at: state.documentUpdatedAt } : {}),
       },
       validate: isBlogTranslationResponse,
     },

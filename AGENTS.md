@@ -45,8 +45,15 @@ runtime state where possible. Ask only when the target cannot be determined.
 
 ## Canonical implementation
 
+A key carrying a stored value uses its column name across the domain, REST, MCP, web and iOS, and other API keys use snake_case except for provider-owned names.
+
 Every concept has one canonical implementation and every value has one canonical
 source.
+
+`docs/domain-model.md` names each concept's one table and module, and
+`yarn lint:domain-model` fails when the schema or server grows a second one. A
+change that adds a table or column names its concept there; a concept that
+already has a model is extended, never given a parallel one.
 
 Fix the canonical source rather than adding a second path around it.
 

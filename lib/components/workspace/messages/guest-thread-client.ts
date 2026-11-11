@@ -1,7 +1,5 @@
 import { isRecord } from '~/utils/api-clients'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
-import { EXPERIENCE_PRESENTATION } from '~/utils/product-presentation'
-import { normalizeVertical } from '~/utils/vertical-copy'
 import type {
   GuestThreadSubmissionType,
   InboxListPage,
@@ -13,7 +11,7 @@ import type {
 } from '~/server/domain/guest-threads/types'
 
 /*
-  What the thread list and the conversation both need from the guest-thread API.
+  What the conversation list and a guest conversation both need from the API.
   The list and the detail are separate levels of the editor frame and separate
   components, so the response shapes, their runtime validators and the action
   vocabulary live here once rather than in each.
@@ -29,32 +27,16 @@ export type ThreadDetail = InboxThread
 export type ThreadDetails = InboxThreadDetails
 export type StreamItem = InboxStreamItem
 
-/*
-  What a thread is called, in the tenant's own word.
-
-  There is no fourth list of nouns here. A reservation thread is named by
-  `booking-presentation` — Reservation for a restaurant, Consultation for a
-  legal practice — and a booking thread is a Consultation for legal practice or
-  a seat on an experience. A contact thread has no record behind it, and reads
-  the way Airbnb's inbox reads one: a direct message.
-*/
-export function threadRecordTitle(type: SubmissionType, vertical: string | null | undefined): string {
-  if (type === 'contact') return 'Message'
-  if (type === 'stay') return 'Stay'
-  if (type === 'booking' && vertical && normalizeVertical(vertical) !== 'service') {
-    return EXPERIENCE_PRESENTATION.itemLabel
-  }
-  return resolveBookingPresentation(type === 'booking' ? 'booking' : 'reservation', vertical).label
-}
-
-/** The plural, for the filter that narrows the list to this kind. */
+/**
+ * The plural, for the filter that narrows a list to this kind. A booking may be
+ * a class, a consultation or a table, so its filter uses the one word true of
+ * all of them in this vertical: Consultations for a legal practice, Bookings
+ * elsewhere.
+ */
 export function threadFilterLabel(type: SubmissionType, vertical: string | null | undefined): string {
   if (type === 'contact') return 'Direct messages'
   if (type === 'stay') return 'Stays'
-  if (type === 'booking' && vertical && normalizeVertical(vertical) !== 'service') {
-    return EXPERIENCE_PRESENTATION.itemLabelPlural
-  }
-  return resolveBookingPresentation(type === 'booking' ? 'booking' : 'reservation', vertical).labelPlural
+  return resolveBookingPresentation('experience', vertical).labelPlural
 }
 
 const isText = (value: unknown): value is string => typeof value === 'string' && value.length > 0
@@ -62,7 +44,7 @@ const isNullableText = (value: unknown) => value === null || typeof value === 's
 const isCount = (value: unknown) => Number.isSafeInteger(value) && Number(value) >= 0
 
 function isRow(value: unknown): value is InboxRow {
-  return isRecord(value) && isText(value.id) && (value.kind === 'guest' || value.kind === 'support')
+  return isRecord(value) && isText(value.id) && (value.kind === 'guest' || value.kind === 'support' || value.kind === 'team')
     && isText(value.guestName) && isText(value.avatarInitial) && (value.channel === 'airbnb' || value.channel === 'direct')
     && isNullableText(value.home) && isNullableText(value.when) && typeof value.preview === 'string' && (value.preview ? isText(value.previewFrom) : value.previewFrom === null)
     && isText(value.time) && typeof value.unread === 'boolean'
@@ -109,11 +91,11 @@ export function isThreadDetailResponse(value: unknown): value is { thread: Threa
     && isText(thread.id) && (thread.kind === 'guest' || thread.kind === 'support')
     && isText(thread.guestName) && isText(thread.avatarInitial) && (thread.channel === 'airbnb' || thread.channel === 'direct')
     && isNullableText(thread.home) && isNullableText(thread.when) && typeof thread.translated === 'boolean'
-    && isNullableText(thread.recordId) && isNullableText(thread.recordTitle) && (thread.recordKind === null || ['stay', 'booking', 'reservation'].includes(String(thread.recordKind)))
+    && isNullableText(thread.recordId) && isNullableText(thread.recordTitle) && (thread.recordKind === null || ['stay', 'booking'].includes(String(thread.recordKind)))
     && isNullableText(thread.activityPath)
     && Array.isArray(thread.stream) && thread.stream.every(isStreamItem)
     && Array.isArray(thread.pending) && thread.pending.every(item => isRecord(item) && isText(item.id) && (item.source === 'automatic' || item.source === 'later')
-      && isText(item.label) && isText(item.sendAt) && isText(item.time) && typeof item.body === 'string' && typeof item.cancellable === 'boolean')
+      && isText(item.label) && isText(item.due_at) && isText(item.time) && typeof item.body === 'string' && typeof item.cancellable === 'boolean')
     && isRecord(thread.composer) && (thread.composer.channel === 'airbnb' || thread.composer.channel === 'email') && typeof thread.composer.available === 'boolean' && (thread.composer.reason === null || typeof thread.composer.reason === 'string')
 }
 

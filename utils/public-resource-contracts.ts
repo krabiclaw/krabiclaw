@@ -1,5 +1,5 @@
 import { PRODUCT_KINDS, type ProductKind } from '~/shared/product-details'
-import type { RenderedBookingPolicySummary } from '~/server/utils/reservations'
+import type { FormattedBookingPolicySummary } from '~/server/utils/booking-policy-summary'
 import type { Collection, Product } from '~/server/types/products'
 import type { PublicTenantPage } from '~/server/utils/public-tenant-pages'
 import type { SocialImageSource } from '~/utils/social-metadata'
@@ -118,9 +118,8 @@ export interface PublicPagePayload {
   media: ApiRecord[]
   qaList: ApiRecord[]
   blogPost: ApiRecord | null
-  reservationPolicyByLocation: Record<string, RenderedBookingPolicySummary | null>
-  /** Each location's own reservation questions in the page's language, and the revision a reservation names. */
-  reservationQuestionsByLocation: Record<string, { questions: import('~/shared/form-questions').FormQuestion[]; questions_revision: string } | null>
+  /** Each table product's terms in the page's language, by product id: what the reservations page states before booking. */
+  tablePolicySummaries: Record<string, FormattedBookingPolicySummary>
   products: Product[]
   collections: Collection[]
   localeRepresentations: PublicLocaleRepresentation[]
@@ -205,10 +204,8 @@ export const isPublicPagePayload = (
   && Array.isArray(value.media)
   && Array.isArray(value.qaList)
   && (value.blogPost === null || isRecord(value.blogPost))
-  && isRecord(value.reservationPolicyByLocation)
-  && Object.values(value.reservationPolicyByLocation).every(item => item === null || isRecord(item))
-  && isRecord(value.reservationQuestionsByLocation)
-  && Object.values(value.reservationQuestionsByLocation).every(item => item === null || (isRecord(item) && Array.isArray(item.questions) && typeof item.questions_revision === 'string'))
+  && isRecord(value.tablePolicySummaries)
+  && Object.values(value.tablePolicySummaries).every(item => isRecord(item) && typeof item.heading === 'string' && Array.isArray(item.items))
   && Array.isArray(value.products)
   && value.products.every(isPublicProduct)
   && Array.isArray(value.collections)

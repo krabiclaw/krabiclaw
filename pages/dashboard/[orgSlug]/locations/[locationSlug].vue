@@ -47,7 +47,6 @@ import { getTodayHoursLabel, type OpeningHours } from '~/shared/reservation-hour
 import { normalizeVertical, type OrganizationVertical } from '~/utils/vertical-copy'
 import { catalogLabel, catalogSummary, type CatalogCounts } from '~/utils/product-presentation'
 import { formatPostalAddress } from '~/utils/postal-address'
-import type { LocationReservationConfig } from '~/server/utils/reservations'
 import { NEW_LOCATION_SECTIONS, useNewLocation } from '~/lib/components/workspace/settings/LocationSettingsPage.vue'
 import { timezoneLabel } from '~/utils/timezone'
 
@@ -79,7 +78,6 @@ interface LocationContentCounts {
 interface LocationOverviewResource {
   location: { success: boolean; location: LocationOverview }
   catalog: CatalogCounts
-  reservationConfig: LocationReservationConfig | null
   counts: LocationContentCounts
 }
 
@@ -178,7 +176,6 @@ const cards = computed<HubCard[]>(() => {
   const loc = resource.location.location
   const counts = resource.counts
   const contact = [loc.phone && formatPhone(loc.phone), loc.email].filter((value): value is string => Boolean(value?.trim())).join(' · ')
-  const policy = resource.reservationConfig
   return [
     { id: 'photos', title: 'Media', description: countSummary(counts.photos, 'item', 'Add media'), to: `${locationPath.value}/photos`, image: locationImage.value || undefined, visible: hasFeature('photos') },
     { id: 'name', title: 'Name', description: loc.title, to: `${locationPath.value}/name`, visible: true },
@@ -195,14 +192,6 @@ const cards = computed<HubCard[]>(() => {
       : []),
     { id: 'posts', icon: 'i-lucide-megaphone', title: 'Posts', description: countSummary(counts.posts, 'published post', 'Write your first post'), to: scopedToLocation(organizationLinks.value?.posts), visible: hasFeature('posts') },
     { id: 'qa', icon: 'i-lucide-message-circle-question', title: 'Reviews and Q&A', description: trustSummary(counts.qa, counts.reviews, counts.organizationQa), to: scopedToLocation(organizationLinks.value?.qa), visible: hasFeature('qa') },
-    {
-      id: 'reservations',
-      icon: 'i-lucide-calendar-check',
-      title: 'Reservations',
-      description: !policy ? 'Not taking reservations' : policy.slot_capacity === null ? 'Open, no seat limit' : `Open, ${policy.slot_capacity} guests per slot`,
-      to: `${locationPath.value}/reservations`,
-      visible: hasFeature('reservations'),
-    },
   ].filter(card => card.visible).map(({ visible: _visible, ...card }) => card)
 })
 
@@ -223,7 +212,6 @@ const isOverviewResponse = (value: unknown): value is LocationOverviewResource =
   isRecord(value)
   && isRecord(value.location) && isRecord(value.location.location)
   && isRecord(value.catalog) && typeof value.catalog.total === 'number' && typeof value.catalog.experiences === 'number' && typeof value.catalog.dishes === 'number'
-  && (value.reservationConfig === null || isRecord(value.reservationConfig))
   && isRecord(value.counts) && typeof value.counts.photos === 'number'
 
 const overviewKey = computed(() => `dashboard-location-overview:${organizationId}:${locationId.value}`)

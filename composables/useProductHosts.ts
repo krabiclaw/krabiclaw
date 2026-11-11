@@ -23,7 +23,7 @@ export function useProductHosts(input: MaybeRefOrGetter<{ organizationId: string
       return { hosts: await publicProductHosts(cloudflareEnv(event).DB, organizationId, productId, sessionId) }
     }
     return await publicApiRequest<{ hosts: PublicProvider[] }>(`/api/public/products/${encodeURIComponent(slug)}/provider`, {
-      query: sessionId ? { session_id: sessionId } : {},
+      query: sessionId ? { product_session_id: sessionId } : {},
       validate: (response): response is { hosts: PublicProvider[] } => isRecord(response) && Array.isArray(response.hosts) && response.hosts.every(isHost),
     })
   }, { watch: [() => value().sessionId] })

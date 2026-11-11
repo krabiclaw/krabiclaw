@@ -52,7 +52,8 @@ function answersFact(answers: readonly FormAnswerSnapshot[] | null | undefined):
   return fact('answers', 'Answers', answers.map(answer => `${answer.label}: ${formatFormAnswer(answer, { yes: 'Yes', no: 'No' })}`).join('\n'))
 }
 
-export interface ReservationEventInput {
+/** A class, consultation or table booking as its owner reads it, in the place's own clock. */
+export interface BookingEventInput {
   guestName: string
   guestEmail: string
   guestPhone: string | null
@@ -61,6 +62,7 @@ export interface ReservationEventInput {
   day: string
   time: string
   partySize: string
+  /** Where it happens; null for an online booking. */
   locationName: string | null
   organizationName: string
   notes: string | null
@@ -70,59 +72,15 @@ export interface ReservationEventInput {
   paid?: string | null
   /** The guest's answers to the business's own questions. */
   answers?: readonly FormAnswerSnapshot[] | null
+  productTitle: string
+  presentation: BookingPresentation
+  partyLabel?: string
+  counterpartyLabel?: string
 }
 
-export function reservationCreatedMessage(input: ReservationEventInput): MemberAlertMessage {
-  return {
-    title: `Reservation confirmed - ${input.guestName}, ${input.day}`,
-    preheader: `${input.date} at ${input.time} · ${input.partySize}`,
-    hero: input.heroImageUrl ? { imageUrl: input.heroImageUrl, alt: '' } : null,
-    facts: facts(
-      fact('guestName', 'Guest', input.guestName, true),
-      fact('date', 'Date', input.date, true),
-      fact('time', 'Time', input.time, true),
-      fact('partySize', 'Party size', input.partySize, true),
-      fact('context', 'Location', input.locationName),
-      fact('guestPhone', 'Phone', input.guestPhone && formatPhone(input.guestPhone)),
-      fact('guestEmail', 'Email', input.guestEmail, true),
-      fact('notes', 'Special requests', input.notes),
-      answersFact(input.answers),
-      fact('paid', 'Paid online', input.paid ?? null),
-    ),
-    primaryAction: { url: input.replyUrl, label: 'Reply in dashboard' },
-    category: 'reservations_bookings',
-    emailPurpose: 'transactional',
-    emailReason: `You received this email because you receive reservation notifications for ${input.organizationName}.`,
-    organizationName: input.organizationName,
-  }
-}
-
-export function reservationCancelledMessage(input: ReservationEventInput & { wasConfirmed: boolean }): MemberAlertMessage {
-  // Whether it was confirmed decides how urgently an owner acts, and the
-  // approved template has no slot of its own for it — so it leads the venue
-  // fact, which WhatsApp does carry, instead of living only in the subject.
-  const standing = input.wasConfirmed ? 'Confirmed reservation' : 'Reservation request'
-  const venue = [standing, input.locationName].filter(Boolean).join(' · ')
-  return {
-    title: `${input.wasConfirmed ? 'Reservation canceled' : 'Reservation request withdrawn'} - ${input.guestName}, ${input.day}`,
-    preheader: `${input.date} at ${input.time} · ${input.partySize}`,
-    hero: input.heroImageUrl ? { imageUrl: input.heroImageUrl, alt: '' } : null,
-    facts: facts(
-      fact('guestName', 'Guest', input.guestName, true),
-      fact('context', 'What was canceled', venue, true),
-      fact('date', 'Date', input.date, true),
-      fact('time', 'Time', input.time, true),
-      fact('partySize', 'Party size', input.partySize, true),
-      fact('guestPhone', 'Phone', input.guestPhone && formatPhone(input.guestPhone)),
-      fact('guestEmail', 'Email', input.guestEmail),
-      fact('notes', 'Special requests', input.notes),
-    ),
-    primaryAction: { url: input.replyUrl, label: 'Open in dashboard' },
-    category: 'reservations_bookings',
-    emailPurpose: 'transactional',
-    emailReason: `You received this email because a reservation with ${input.organizationName} was canceled and you receive its reservation notifications.`,
-    organizationName: input.organizationName,
-  }
+/** What was booked, and where: the offering and its place, as one fact. */
+function bookedWhat(input: Pick<BookingEventInput, 'productTitle' | 'locationName'>): string {
+  return [input.productTitle, input.locationName].filter(Boolean).join(' · ')
 }
 
 /** A stay a guest booked: paid for on the site, or sent by a channel such as Airbnb. */
@@ -234,22 +192,18 @@ export function stayTurnoverAlert<T extends Pick<StayEventInput, 'guestName' | '
   return { ...input, ...money, guestName, guestEmail: null, guestPhone: null, replyUrl: stayUrl }
 }
 
-export interface BookingEventInput extends ReservationEventInput {
-  productTitle: string
-  presentation: BookingPresentation
-  partyLabel?: string
-  counterpartyLabel?: string
-}
-
-export function bookingCreatedMessage(input: BookingEventInput): MemberAlertMessage {
+export function bookingCreatedMessage(input: BookingEventInput & { status: 'pending' | 'confirmed' }): MemberAlertMessage {
   const counterparty = input.counterpartyLabel ?? input.presentation.counterpartyLabel
   const partyLabel = input.partyLabel ?? input.presentation.partyLabel
   return {
-    title: `${input.presentation.label} request from ${input.guestName} for ${input.day}`,
+    // A booking that arrived confirmed says so; one waiting for the business is a request.
+    title: input.status === 'confirmed'
+      ? `${input.presentation.label} confirmed - ${input.guestName}, ${input.day}`
+      : `${input.presentation.label} request from ${input.guestName} for ${input.day}`,
     preheader: `${input.productTitle} · ${input.date} at ${input.time}`,
     hero: input.heroImageUrl ? { imageUrl: input.heroImageUrl, alt: input.productTitle } : null,
     facts: facts(
-      fact('context', input.presentation.label, input.productTitle, true),
+      fact('context', input.presentation.label, bookedWhat(input), true),
       fact('guestName', counterparty, input.guestName, true),
       fact('date', 'Date', input.date, true),
       fact('time', 'Time', input.time, true),
@@ -277,7 +231,7 @@ export function bookingCancelledMessage(input: BookingEventInput & { wasConfirme
     preheader: `${input.productTitle} · ${input.date} at ${input.time}`,
     hero: input.heroImageUrl ? { imageUrl: input.heroImageUrl, alt: input.productTitle } : null,
     facts: facts(
-      fact('context', 'What was canceled', `${standing} · ${input.productTitle}`, true),
+      fact('context', 'What was canceled', `${standing} · ${bookedWhat(input)}`, true),
       fact('guestName', counterparty, input.guestName, true),
       fact('date', 'Date', input.date, true),
       fact('time', 'Time', input.time, true),
@@ -651,44 +605,6 @@ export function bookingChangeMessage(input: BookingChangeEventInput): MemberAler
   }
 }
 
-export interface CalendarSyncEventInput {
-  kind: 'event_deleted' | 'move_refused'
-  recordKind: string
-  guestName: string
-  whenLabel: string
-  /** The booked day as the subject names it, "Jul 20". */
-  day: string
-  /** Why the move could not be applied; absent for a deletion. */
-  reason: string | null
-  replyUrl: string
-  organizationName: string
-}
-
-/** Something changed on the business's Google calendar that the booking did not follow. */
-export function calendarSyncMessage(input: CalendarSyncEventInput): MemberAlertMessage {
-  const deleted = input.kind === 'event_deleted'
-  const summary = deleted
-    ? `${input.guestName}'s ${input.recordKind} is still booked for ${input.whenLabel}. Deleting its event in Google Calendar never cancels it or refunds anyone, and the event has been put back. Cancel the ${input.recordKind} in KrabiClaw if you meant to.`
-    : `${input.guestName}'s ${input.recordKind} stays at ${input.whenLabel}${input.reason ? `: ${input.reason}` : '.'} The event has been moved back in Google Calendar. Change the ${input.recordKind} in KrabiClaw to pick a time that works.`
-  return {
-    title: `${deleted ? 'Calendar event deleted' : 'Calendar change not applied'} - ${input.guestName}, ${input.day}`,
-    preheader: summary,
-    hero: null,
-    intro: summary,
-    facts: facts(
-      fact('recordKind', 'Type', input.recordKind, true),
-      fact('guestName', 'Guest', input.guestName, true),
-      fact('when', 'Still booked for', input.whenLabel, true),
-      fact('reason', 'Reason', input.reason),
-    ),
-    primaryAction: { url: input.replyUrl, label: 'Open in dashboard' },
-    category: 'reservations_bookings',
-    emailPurpose: 'transactional',
-    emailReason: `You received this email because ${input.guestName}'s ${input.recordKind} with ${input.organizationName} changed on the business's Google Calendar and you receive its booking notifications.`,
-    organizationName: input.organizationName,
-  }
-}
-
 export interface DomainEventInput {
   event: 'added' | 'synced' | 'deleted'
   domain: string
@@ -755,7 +671,7 @@ export interface OnboardingCompletedInput {
 export interface ContentReportedInput {
   organizationName: string
   reporter: string
-  subject: 'guest_thread' | 'team_message'
+  subject: 'conversation' | 'message'
   blocked: boolean
   reason: string
   excerpt: string
@@ -764,7 +680,7 @@ export interface ContentReportedInput {
 
 /** A member reported a guest or a teammate; KrabiClaw acts on it within 24 hours. */
 export function contentReportedMessage(input: ContentReportedInput): MemberAlertMessage {
-  const what = input.subject === 'guest_thread' ? 'a guest conversation' : 'a team message'
+  const what = input.subject === 'conversation' ? 'a guest conversation' : 'a team message'
   return {
     title: `${input.blocked ? 'Guest blocked and reported' : 'Content reported'} in ${input.organizationName}`,
     preheader: `${input.reporter} reported ${what}. Review it within 24 hours.`,

@@ -6,7 +6,7 @@ import type { TenantPageEditorInput } from '~/server/utils/content/pages'
 import { defineHandler, HTTPError } from 'nitro'
 import { getRouterParam } from 'nitro/h3'
 
-type ProductPageIntent = Omit<TenantPageEditorInput, 'productId' | 'pageId' | 'locale' | 'path'> & { path?: string }
+type ProductPageIntent = Omit<TenantPageEditorInput, 'product_id' | 'page_id' | 'locale' | 'path'> & { path?: string }
 
 /** The page intent as the page writer takes it; anything else is the caller's mistake. */
 function pageIntent(value: unknown): ProductPageIntent | undefined {

@@ -20,7 +20,7 @@ export default defineHandler(async (event) => {
   const session = await getAuthSession(event, env)
   if (!session?.user?.id) return jsonResponse({ error: 'Authentication required' }, { status: 401 })
 
-  const body = await readStrictBody<{ expected_updated_at: string; targets: unknown }>(event, { expected_updated_at: 'string', targets: 'unknown' })
+  const body = await readStrictBody<{ updated_at: string; targets: unknown }>(event, { updated_at: 'string', targets: 'unknown' })
   const targets = parsePublishTargets(body.targets)
   const organization = await loadMemberOrganizationRow(event, db, env, organizationId, session.user.id)
   if (!organization) return jsonResponse({ error: 'Organization not found or access denied' }, { status: 404 })
@@ -33,5 +33,5 @@ export default defineHandler(async (event) => {
   if (!postScope) return jsonResponse({ error: 'Post not found' }, { status: 404 })
   await assertResourceAccess(db, { ...memberAccessPrincipal(organization.membership, { env, event }), resourceLocationId: postScope.location_id })
 
-  return jsonResponse(await publishPost(env, organization.id, postId, { expectedUpdatedAt: body.expected_updated_at, targets }, session.user.id))
+  return jsonResponse(await publishPost(env, organization.id, postId, { expectedUpdatedAt: body.updated_at, targets }, session.user.id))
 })

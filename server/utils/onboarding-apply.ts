@@ -18,7 +18,7 @@ import { resourceLocalizationDeletionQueries } from '~/server/utils/localization
 import { getProduct, planProductCreateWrites, publishStayProducts, slugCandidate } from '~/server/utils/product-management'
 import { updateLocation } from '~/server/utils/location-management'
 import { getDraftMedia, normalizeOnboardingDraftInput, onboardingPublicationMissingFields, readOnboardingDraft, upsertActiveOnboardingDraft, type OnboardingDraftInput, onboardingDraftWriteGuard, onboardingPageBlocks, onboardingPagePath, onboardingPageType, parseOnboardingDraftPayload, readActiveOnboardingDraft, type OnboardingDraftPayload, type SavedOnboardingDraft } from '~/server/utils/onboarding-drafts'
-import { createMediaAsset, insertInitialMediaPlacements, type CreateInput } from '~/server/utils/media-asset-manager'
+import { createMediaAsset, deleteProductMediaPlacementsQuery, insertInitialMediaPlacements, type CreateInput } from '~/server/utils/media-asset-manager'
 import { applyOnboardingTenantPages, getPublishedTenantPage, prepareTenantPageDelete, refreshTenantPageCard } from '~/server/utils/content/pages'
 import { activateOrganization, completeOnboarding, createOrganization, provisionOrganization, type OrganizationProvisioningResult } from '~/server/utils/organization-provisioning'
 import { isOrganizationWideRole, resolveUserOrganization } from '~/server/utils/member-access'
@@ -62,14 +62,14 @@ export interface OnboardingDraftRow {
 
 export async function saveOnboardingDraft(env: CloudflareEnv, db: D1Database, userId: string, input: OnboardingDraftInput) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new HTTPError({ statusCode: 400, statusMessage: 'Website answers must be an object' })
-  if (input.idempotencyKey !== undefined && typeof input.idempotencyKey !== 'string' || input.draftId !== undefined && typeof input.draftId !== 'string' || input.expectedUpdatedAt !== undefined && input.expectedUpdatedAt !== null && typeof input.expectedUpdatedAt !== 'string') throw new HTTPError({ statusCode: 400, statusMessage: 'Draft identity, revision and creation key must be text' })
+  if (input.idempotencyKey !== undefined && typeof input.idempotencyKey !== 'string' || input.draftId !== undefined && typeof input.draftId !== 'string' || input.updated_at !== undefined && input.updated_at !== null && typeof input.updated_at !== 'string') throw new HTTPError({ statusCode: 400, statusMessage: 'Draft identity, revision and creation key must be text' })
   const key = input.idempotencyKey?.trim()
   const keyedId = key ? `mcp-website-${await creationRequestHash({ userId, key })}` : undefined
   const existingRow = input.draftId || keyedId
     ? await queryFirst<SavedOnboardingDraft>(db, 'SELECT * FROM onboarding_drafts WHERE id = ? AND user_id = ?', [input.draftId ?? keyedId!, userId])
     : await readActiveOnboardingDraft(db, userId)
   if (input.draftId && !existingRow) throw new HTTPError({ statusCode: 404, statusMessage: 'Website draft not found' })
-  if (existingRow && input.expectedUpdatedAt !== undefined && input.expectedUpdatedAt !== null && existingRow.updated_at !== input.expectedUpdatedAt) throw new HTTPError({ statusCode: 409, statusMessage: 'Website draft changed; read it before saving', data: { code: 'ONBOARDING_DRAFT_CHANGED', draft_id: existingRow.id } })
+  if (existingRow && input.updated_at !== undefined && input.updated_at !== null && existingRow.updated_at !== input.updated_at) throw new HTTPError({ statusCode: 409, statusMessage: 'Website draft changed; read it before saving', data: { code: 'ONBOARDING_DRAFT_CHANGED', draft_id: existingRow.id } })
   if (existingRow?.status === 'abandoned') throw new HTTPError({ statusCode: 409, statusMessage: 'This website draft was discarded', data: { code: 'ONBOARDING_DRAFT_ABANDONED', draft_id: existingRow.id } })
   const existing = existingRow ? parseOnboardingDraftPayload(existingRow.payload_json) : null
   if (existing && existingRow) existing.preview.subdomainCandidate = existingRow.subdomain_candidate
@@ -88,7 +88,7 @@ export async function saveOnboardingDraft(env: CloudflareEnv, db: D1Database, us
   const payload = normalizeOnboardingDraftInput(input, existing, place)
   const draft = await upsertActiveOnboardingDraft(db, {
     userId, name: payload.preview.brandName, vertical: payload.preview.vertical, sourceType, payload,
-    expectedUpdatedAt: input.expectedUpdatedAt ?? null, draftId: input.draftId, idempotencyKey: key,
+    updated_at: input.updated_at ?? null, draftId: input.draftId, idempotencyKey: key,
   })
   const saved = await readOnboardingDraft(db, userId, draft.id)
   if (saved.row.status === 'committed') return saved
@@ -110,7 +110,7 @@ export async function saveOnboardingDraft(env: CloudflareEnv, db: D1Database, us
 export async function activateOnboardingDraft(env: CloudflareEnv, db: D1Database, input: {
   userId: string
   draftId: string
-  expectedUpdatedAt: string
+  updated_at: string
   origin: { headers: Headers } | null
   activateSession?: (_organizationId: string) => Promise<void>
 }) {
@@ -132,7 +132,7 @@ export async function activateOnboardingDraft(env: CloudflareEnv, db: D1Database
     'SELECT onboarding_status FROM organization WHERE id = ?', [organizationId]) : null
   const live = existing?.onboarding_status === 'active'
   if (!live) {
-    if (draft.updated_at !== input.expectedUpdatedAt) throw new HTTPError({ statusCode: 409, statusMessage: 'Website draft changed; read it before publishing', data: { code: 'ONBOARDING_DRAFT_CHANGED', draft_id: draft.id } })
+    if (draft.updated_at !== input.updated_at) throw new HTTPError({ statusCode: 409, statusMessage: 'Website draft changed; read it before publishing', data: { code: 'ONBOARDING_DRAFT_CHANGED', draft_id: draft.id } })
     const revision = new Date(Math.max(Date.now(), Date.parse(draft.updated_at) + 1)).toISOString()
     const claim = await execute(db, "UPDATE onboarding_drafts SET updated_at = ? WHERE id = ? AND user_id = ? AND status = 'active' AND updated_at = ?", [revision, draft.id, input.userId, draft.updated_at])
     if (!claim.meta.changes) throw new HTTPError({ statusCode: 409, statusMessage: 'Website draft changed; retry the same request', data: { code: 'ONBOARDING_DRAFT_CHANGED', draft_id: draft.id, organization_id: organizationId } })
@@ -442,7 +442,7 @@ export async function applyOnboardingDraft(
     ? [
         ...pageDeletions.flatMap(page => page.queries),
         ...resourceLocalizationDeletionQueries('product', { query: 'SELECT value FROM json_each(?)', params: [JSON.stringify(previouslyImported.map(row => row.id))] }),
-        { query: "DELETE FROM media_placements WHERE organization_id = ? AND owner_type = 'product' AND owner_id IN (SELECT value FROM json_each(?))", params: [organizationId, JSON.stringify(previouslyImported.map(row => row.id))] },
+        deleteProductMediaPlacementsQuery(organizationId, previouslyImported.map(row => row.id)),
         { query: `DELETE FROM products WHERE organization_id = ? AND id IN (SELECT value FROM json_each(?))`, params: [organizationId, JSON.stringify(previouslyImported.map(row => row.id))] },
       ]
     : []

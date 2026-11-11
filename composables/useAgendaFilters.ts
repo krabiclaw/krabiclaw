@@ -3,7 +3,7 @@ import { createSharedComposable } from '@vueuse/core'
 
 export const AGENDA_FILTER_ALL = '__all__'
 
-const QUERY_KEYS = { locationId: 'locationId', kind: 'kinds', assignedMemberId: 'assigned_member_id', range: 'range' } as const
+const QUERY_KEYS = { locationId: 'location_id', kind: 'kinds', assignedMemberId: 'assigned_member_id', range: 'range' } as const
 
 /**
  * What Today and Calendar narrow the agenda by — one state, the URL query, so
@@ -41,7 +41,7 @@ export const useAgendaFilters = createSharedComposable(() => {
   const active = computed(() => filters.locationId !== AGENDA_FILTER_ALL || filters.kind !== AGENDA_FILTER_ALL || filters.assignedMemberId !== AGENDA_FILTER_ALL)
   /** The query the agenda API takes for the current filters. */
   const query = computed(() => ({
-    locationId: filters.locationId !== AGENDA_FILTER_ALL ? filters.locationId : undefined,
+    location_id: filters.locationId !== AGENDA_FILTER_ALL ? filters.locationId : undefined,
     kinds: filters.kind !== AGENDA_FILTER_ALL ? (filters.kind as AgendaKind) : undefined,
     assigned_member_id: filters.assignedMemberId !== AGENDA_FILTER_ALL ? filters.assignedMemberId : undefined,
   }))

@@ -24,7 +24,7 @@ export default defineHandler(async (event) => {
     if (!row.organization_id) throw new HTTPError({ statusCode: 409, statusMessage: 'Website draft cleanup has no recorded organization. Its native ownership must be verified.', data: { code: 'ONBOARDING_DRAFT_DISCARD_INCOMPLETE', draft_id: row.id } })
     const outcome = await deleteAbandonedDraftTenant(env, {
       draftId: row.id,
-      updatedAt: row.updated_at, organizationId: row.organization_id,
+      updated_at: row.updated_at, organizationId: row.organization_id,
       subdomain: row.subdomain_candidate, userId: session.user.id,
     })
     if ('refused' in outcome) throw new HTTPError({
@@ -56,7 +56,7 @@ export default defineHandler(async (event) => {
     success: true,
     draft: {
       draftId: row.id,
-      updatedAt: row.updated_at,
+      updated_at: row.updated_at,
       draftName: payload.preview.brandName,
       sourceType: row.source_type,
       placeId: payload.source.placeId,

@@ -100,7 +100,7 @@ for (const site of [
           expect(current.status()).toBe(200)
           const stored = mcpData<{ page: { blocks: Array<{ id: string; updated_at: string }> } }>(await current.json()).page.blocks.find(item => item.id === block.id)
           expect(stored).toBeDefined()
-          const removed = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'delete_content_block', args: { organization_id: tenant.organizationId, block_id: block.id, expected_updated_at: stored!.updated_at } })
+          const removed = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'delete_content_block', args: { organization_id: tenant.organizationId, block_id: block.id, updated_at: stored!.updated_at } })
           expect(removed.status()).toBe(200)
           expect(mcpData<{ blocks: unknown[] }>(await removed.json()).blocks).toEqual([])
         }

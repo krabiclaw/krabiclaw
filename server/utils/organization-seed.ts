@@ -86,7 +86,7 @@ export async function seedNewOrganization(
       locale: string
       path: string
       title: string
-      pageType: 'system' | 'recipe' | 'legal'
+      page_type: 'system' | 'recipe' | 'legal'
       recipe: string
       blocks: Array<{ id: string; type: string; position: number; data: Record<string, unknown> }>
     }
@@ -118,7 +118,7 @@ export async function seedNewOrganization(
       trustedSystemPage: definition.pageType === 'system',
       data: {
         locale: source.locale, path: definition.path, title: definition.title,
-        pageType: definition.pageType, recipe: definition.recipe, blocks,
+        page_type: definition.pageType, recipe: definition.recipe, blocks,
       },
     })
   }

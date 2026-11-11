@@ -53,9 +53,9 @@ export function mcpErrorRecoveryIds(value: unknown): Record<string, string> {
   const details = value as Record<string, unknown>
   return Object.fromEntries([
     'organization_id', 'draft_id', 'invitation_id', 'location_id', 'product_id',
-    'stay_id', 'request_id', 'booking_id', 'post_id', 'asset_id', 'thread_id',
+    'booking_id', 'post_id', 'asset_id',
     'task_id', 'lead_id', 'submission_id', 'user_id', 'campaign_id', 'publication_id',
-    'document_id',
+    'document_id', 'conversation_id', 'scheduled_message_id', 'message_id',
   ].flatMap(key =>
     typeof details[key] === 'string' && /^[A-Za-z0-9_:-]{1,200}$/.test(details[key]) ? [[key, details[key]]] : [],
   ))

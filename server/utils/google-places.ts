@@ -1,8 +1,9 @@
+import { HTTPError } from 'h3'
 import { normalizeGoogleOpeningHours, type OpeningHours } from '~/shared/reservation-hours'
 import { serializeOpeningHours } from '~/server/utils/location-management'
 import type { D1Database } from '@cloudflare/workers-types'
 import { normalizeGoogleReview, type GoogleReview } from '~/shared/google-review'
-import { executeBatch } from '~/server/db'
+import { executeBatch, queryFirst, type BatchQuery } from '~/server/db'
 import { parsePostalAddress, type PostalAddress } from '~/utils/postal-address'
 import { toE164 } from '~/utils/phone'
 
@@ -86,13 +87,13 @@ function normalizeDetail(place: RawPlace): PlaceDetails {
  * times (2026-09-13) because earlier syncs kept everything ever imported.
  * There is no fuller inventory to preserve: this response is the inventory.
  */
-export function staleGoogleReviewDeletes(scope: { organizationId: string; locationId: string }, reviews: PlaceReview[]) {
+function staleGoogleReviewDeletes(scope: { organizationId: string; locationId: string }, reviews: PlaceReview[], guard: BatchQuery) {
   const stale = `
       SELECT id FROM reviews
       WHERE organization_id = ? AND location_id = ?
         AND source = 'google_places'
-        AND (google_review_id IS NULL OR google_review_id NOT IN (SELECT value FROM json_each(?)))`
-  const params = [scope.organizationId, scope.locationId, JSON.stringify(reviews.map(review => review.google_review_id))]
+        AND (google_review_id IS NULL OR google_review_id NOT IN (SELECT value FROM json_each(?))) AND (${guard.query})`
+  const params = [scope.organizationId, scope.locationId, JSON.stringify(reviews.map(review => review.google_review_id)), ...guard.params!]
   // A review's media placements (author portrait) have no foreign key to the
   // review, so they go first, by the same predicate.
   return [
@@ -101,20 +102,20 @@ export function staleGoogleReviewDeletes(scope: { organizationId: string; locati
   ]
 }
 
-export function googleReviewUpserts(scope: { organizationId: string; locationId: string }, reviews: PlaceReview[], now: string) {
+export function googleReviewUpserts(scope: { organizationId: string; locationId: string }, reviews: PlaceReview[], now: string, guard: BatchQuery = { query: '1', params: [] }) {
   const { organizationId, locationId } = scope
   return reviews.map(review => {
     const reviewId = `gplaces-${locationId}-${review.google_review_id.replace(/\//g, '-')}`
     return {
       query: `INSERT INTO reviews (id, organization_id, location_id, google_review_id, author_name, rating, content,
         original_review_date, original_reference, google_review_metadata, status, source, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'approved', 'google_places', ?, ?)
+        SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'approved', 'google_places', ?, ? WHERE (${guard.query})
         ON CONFLICT(organization_id, location_id, google_review_id) DO UPDATE SET
           author_name = excluded.author_name, rating = excluded.rating, content = excluded.content,
           original_review_date = excluded.original_review_date, original_reference = excluded.original_reference,
           google_review_metadata = excluded.google_review_metadata, updated_at = excluded.updated_at`,
       params: [reviewId, organizationId, locationId, review.google_review_id, review.author_name, review.rating, review.content,
-        review.original_review_date, review.original_reference, JSON.stringify(review.google_review_metadata), now, now],
+        review.original_review_date, review.original_reference, JSON.stringify(review.google_review_metadata), now, now, ...guard.params!],
     }
   })
 }
@@ -137,9 +138,22 @@ export async function syncPlaceToLocation(
   placeId: string,
   scope: 'import' | 'provider',
 ): Promise<{ place: PlaceDetails; reviewsUpserted: number }> {
+  const current = await queryFirst<{ timezone: string; status: string; special_hours: string | null; updated_at: string; google_place_id: string | null }>(db,
+    'SELECT timezone, status, special_hours, updated_at, google_place_id FROM business_locations WHERE id = ? AND organization_id = ?', [locationId, organizationId])
+  if (!current) throw new HTTPError({ statusCode: 404, statusMessage: 'Location not found' })
+  if (scope === 'provider' && current.google_place_id !== placeId) throw new HTTPError({ statusCode: 409, statusMessage: 'The location is no longer connected to this Google place' })
   const place = await getPlaceDetails(apiKey, placeId)
   if (!place.placeId) throw new Error(`Google Maps returned no place id for ${placeId}`)
   const now = new Date().toISOString()
+  const version: BatchQuery = {
+    query: 'EXISTS (SELECT 1 FROM business_locations WHERE id = ? AND organization_id = ? AND updated_at = ? AND google_place_id IS ?)',
+    params: [locationId, organizationId, current.updated_at, current.google_place_id],
+  }
+  const seatings = scope === 'import' ? await (await import('~/server/utils/availability')).prepareLocationTableSeatings(db, {
+    organizationId, actorId: 'system', now,
+    location: { id: locationId, status: current.status, timezone: place.timezone ?? current.timezone, opening_hours: serializeOpeningHours(place.openingHours), special_hours: current.special_hours },
+    guard: version,
+  }) : { guard: version, queries: [] }
 
   const location = scope === 'import'
     ? { query: `
@@ -157,7 +171,7 @@ export async function syncPlaceToLocation(
       google_place_id = ?,
       last_synced_at = ?,
       updated_at = ?
-    WHERE id = ? AND organization_id = ?
+    WHERE id = ? AND organization_id = ? AND (${seatings.guard.query})
   `, params: [
       place.phone,
       place.websiteUrl,
@@ -174,6 +188,7 @@ export async function syncPlaceToLocation(
       now,
       locationId,
       organizationId,
+      ...seatings.guard.params!,
     ] }
     : { query: `
     UPDATE business_locations SET
@@ -182,14 +197,18 @@ export async function syncPlaceToLocation(
       review_count = ?,
       last_synced_at = ?,
       updated_at = ?
-    WHERE id = ? AND organization_id = ? AND google_place_id = ?
-  `, params: [place.mapsUrl, place.rating, place.ratingCount, now, now, locationId, organizationId, placeId] }
+    WHERE id = ? AND organization_id = ? AND (${seatings.guard.query})
+  `, params: [place.mapsUrl, place.rating, place.ratingCount, now, now, locationId, organizationId, ...seatings.guard.params!] }
 
-  const results = await executeBatch(db, [location,
-    ...staleGoogleReviewDeletes({ organizationId, locationId }, place.reviews),
-    ...googleReviewUpserts({ organizationId, locationId }, place.reviews, now)])
-  if (Number(results[0]?.meta?.changes ?? 0) !== 1) throw new Error(`Location ${locationId} is not connected to ${placeId}`)
-  const reviewsUpserted = results.slice(results.length - place.reviews.length).reduce((count, result) => count + Number(result.meta?.changes ?? 0), 0)
+  // The whole batch checks the old version before the location write advances it.
+  const reviews = googleReviewUpserts({ organizationId, locationId }, place.reviews, now, seatings.guard)
+  const results = await executeBatch(db, [...seatings.queries,
+    ...staleGoogleReviewDeletes({ organizationId, locationId }, place.reviews, seatings.guard),
+    ...reviews, location])
+  if (Number(results.at(-1)?.meta?.changes ?? 0) !== 1) {
+    throw new HTTPError({ statusCode: 409, statusMessage: 'The location changed while Google Maps was syncing. Reload it and try again.' })
+  }
+  const reviewsUpserted = results.slice(-1 - reviews.length, -1).reduce((count, result) => count + Number(result.meta?.changes ?? 0), 0)
 
   return { place, reviewsUpserted }
 }

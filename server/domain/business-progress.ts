@@ -11,7 +11,6 @@ import { addLocalDays, formatCalendarRange, formatTimestamp, localDateAt } from 
 import { articleSocialPostPath, blogCreatePath, blogEditorPath, guestConversationPath, postEditorPath, productEditorPath, productPaymentPath } from '~/server/utils/dashboard-links'
 import { listSessions } from '~/server/utils/availability'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
-import { listReservationSlots } from '~/server/utils/reservations'
 import { readStayGapCandidates, stayAccessFor } from '~/server/domain/stays'
 import { readStripeCheckoutSetup } from '~/server/utils/stripe-connect'
 import { hasOrganizationEntitlement } from '~/server/utils/billing'
@@ -266,7 +265,8 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
     return 0
   }
   const published = articles.filter(document => document.status === 'published').sort((a, b) => compareInterest(a.slug, b.slug) || (b.published_at ?? '').localeCompare(a.published_at ?? ''))
-  const leading = [...products].filter(product => !published.some(article => article.title?.toLocaleLowerCase().includes(product.name.toLocaleLowerCase())))
+  // A restaurant's tables are how guests book, not a topic to write about.
+  const leading = [...products].filter(product => product.kind !== 'table' && !published.some(article => article.title?.toLocaleLowerCase().includes(product.name.toLocaleLowerCase())))
     .sort((a, b) => compareInterest(a.slug, b.slug))[0]
   const topic = leading ? `“${leading.name}”` : organization.vertical === 'service' ? 'a question prospective clients ask'
     : organization.vertical === 'lodging' ? 'a useful local stay or travel topic' : organization.vertical === 'experience' ? 'what guests can expect from a class' : 'your food, drinks or next event'
@@ -408,21 +408,24 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
       `${formatTimestamp(open.starts_at, 'en', open.timezone, { dateStyle: 'medium', timeStyle: 'short' })}: ${open.remaining} recorded ${organization.vertical === 'service' ? 'consultation openings remain' : 'places remain in this session'}. External bookings are not established by this count.`,
       postEditorPath(organization.slug, 'new', input.locationId), 85, { productId: product.id, goal: goalFor('social'), locationId: open.location_id, recency: open.starts_at, icon: 'i-lucide-ticket' })
   } else if (canOperate && organization.vertical === 'restaurant') {
-    const locations = await queryAll<{ id: string; timezone: string }>(db, `SELECT l.id,l.timezone FROM business_locations l JOIN location_reservation_configs c
-      ON c.organization_id=l.organization_id AND c.location_id=l.id WHERE l.organization_id=? AND l.status='active' ${input.locationId ? 'AND l.id=?' : ''}`, [organizationId, ...(input.locationId ? [input.locationId] : [])])
-    for (const location of locations) {
-      const available = await listReservationSlots(db, { organizationId, locationId: location.id, date: localDateAt(now, location.timezone) })
-      const slot = available.slots.find(slot => slot.starts_at > now.toISOString() && !slot.is_closed && !slot.is_full && slot.remaining !== null && slot.remaining > 0)
-      if (slot && canWrite && enabled('social') && canPreparePost) offer('post.create', JSON.stringify(['reservation', location.id, slot.starts_at]), 'Give customers a reason to book a table',
-        `A recorded reservation slot still has capacity at ${formatTimestamp(slot.starts_at, 'en', location.timezone, { hour: 'numeric', minute: '2-digit' })}. Feature a current dish, special or event with the reservation link. Walk-ins and physical table occupancy are not measured by this slot.`,
-        postEditorPath(organization.slug, 'new', location.id), 85, { goal: goalFor('social'), locationId: location.id, icon: 'i-lucide-camera' })
+    // Each location's tables, today in the location's own calendar: the first seating with room left.
+    const tables = products.filter(product => product.kind === 'table')
+    const sessions = tables.length ? await listSessions(db, { env: principal.env, organizationId, locationId: input.locationId, productIds: tables.map(product => product.id), fromInstant: now.toISOString(), toInstant: new Date(now.getTime() + 86_400_000).toISOString() }) : []
+    const offered = new Set<string>()
+    for (const session of sessions) {
+      if (!session.location_id || offered.has(session.location_id) || localDateAt(new Date(session.starts_at), session.timezone) !== localDateAt(now, session.timezone)) continue
+      if (session.is_full || session.remaining === null || session.remaining < 1) continue
+      offered.add(session.location_id)
+      if (canWrite && enabled('social') && canPreparePost) offer('post.create', JSON.stringify(['session', session.product_id, session.id]), 'Give customers a reason to book a table',
+        `A table seating still has room at ${formatTimestamp(session.starts_at, 'en', session.timezone, { hour: 'numeric', minute: '2-digit' })}. Feature a current dish, special or event with the reservation link. Walk-ins and physical table occupancy are not measured by this seating.`,
+        postEditorPath(organization.slug, 'new', session.location_id), 85, { productId: session.product_id, goal: goalFor('social'), locationId: session.location_id, recency: session.starts_at, icon: 'i-lucide-camera' })
     }
   }
   // A booked client who has not heard from the business since booking is sent the host's own preparation.
   if (await roleAllows({ ...principal, permissions: { operations: ['reply'] } })) {
     for (const welcome of await readBookingWelcomes(db, organizationId, { now, locationId: input.locationId })) {
       offer('booking.welcome', welcome.requestId, welcome.kind === 'stay' ? 'Share info about your place' : 'Share how to prepare',
-        `Help ${welcome.guestFirstName ?? `your ${resolveBookingPresentation(welcome.kind === 'reservation' ? 'reservation' : 'booking', organization.vertical).counterpartyNoun}`} get ready`,
+        `Help ${welcome.guestFirstName ?? `your ${welcome.kind === 'stay' ? 'guest' : resolveBookingPresentation(welcome.productKind, organization.vertical).counterpartyNoun}`} get ready`,
         guestConversationPath(organization.slug, welcome.requestId), 90,
         { productId: welcome.productId, locationId: welcome.locationId, requestId: welcome.requestId, message: welcome.message, recency: welcome.startsAt, icon: 'i-lucide-messages-square' })
     }

@@ -16,9 +16,9 @@
       {
         "body": "Enjoy your stay!",
         "cancellable": true,
+        "due_at": "2026-11-08T23:00:00.000Z",
         "id": "00000000-0000-4000-8000-000000000003",
         "label": "Enjoy your stay!",
-        "sendAt": "2026-11-08T23:00:00.000Z",
         "source": "later",
         "time": "Sun, Nov 8, 4:00 PM"
       }
@@ -125,26 +125,26 @@
       {
         "change": {
           "after": {
-            "assignedMemberId": null,
-            "assignedMemberName": null,
-            "partySize": 2,
-            "totalLabel": "$900.00",
-            "whenLabel": "Nov 8, 2026 – Nov 14, 2026"
+            "assigned_member_id": null,
+            "assigned_member_name": null,
+            "party_size": 2,
+            "total_label": "$900.00",
+            "when_label": "Nov 8, 2026 – Nov 14, 2026"
           },
           "before": {
-            "assignedMemberId": null,
-            "assignedMemberName": null,
-            "partySize": 2,
-            "totalLabel": "$600.00",
-            "whenLabel": "Nov 8, 2026 – Nov 12, 2026"
+            "assigned_member_id": null,
+            "assigned_member_name": null,
+            "party_size": 2,
+            "total_label": "$600.00",
+            "when_label": "Nov 8, 2026 – Nov 12, 2026"
           },
           "channel": "airbnb",
-          "guestName": "Mililani Garcia",
+          "guest_name": "Mililani Garcia",
           "locale": "en",
-          "locationTitle": "74 D · Sky",
+          "location_title": "74 D · Sky",
           "noun": "stay",
-          "originalLocationTitle": "74 D · Sky",
-          "requestedBy": "guest",
+          "original_location_title": "74 D · Sky",
+          "requested_by": "guest",
           "status": "pending",
           "type": "stay",
           "vertical": "lodging"
@@ -156,19 +156,13 @@
       {
         "id": "00000000-0000-4000-8000-000000000011",
         "sentAt": "2026-11-05T19:00:00.000Z",
-        "text": "You archived this conversation",
-        "type": "event"
-      },
-      {
-        "id": "00000000-0000-4000-8000-000000000012",
-        "sentAt": "2026-11-05T19:00:00.000Z",
-        "text": "You moved this conversation back to Messages",
+        "text": "Payment received",
         "type": "event"
       },
       {
         "author": "You",
         "body": "Check-in is from 4 PM.",
-        "id": "00000000-0000-4000-8000-000000000013",
+        "id": "00000000-0000-4000-8000-000000000012",
         "label": null,
         "photos": [],
         "receipt": "Not delivered",

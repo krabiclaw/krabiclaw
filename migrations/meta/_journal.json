@@ -5,36 +5,8 @@
     {
       "idx": 0,
       "version": "6",
-      "when": 1794227478459,
+      "when": 1794397676242,
       "tag": "0000_baseline",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "6",
-      "when": 1794273326896,
-      "tag": "0001_drop_leases_and_retries",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "6",
-      "when": 1794282509114,
-      "tag": "0002_product_booking_notice",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "6",
-      "when": 1794291919424,
-      "tag": "0003_booked_record_references",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "6",
-      "when": 1794298600000,
-      "tag": "0004_meta_ads_integration_provider",
       "breakpoints": true
     }
   ]

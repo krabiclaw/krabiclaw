@@ -1,5 +1,5 @@
-// Carries booking confirmation details from the reservation or product booking
-// form to the dedicated `/reservations/confirmed` or `/bookings/confirmed` page via sessionStorage —
+// Carries booking confirmation details from the product booking form (a class,
+// a consultation or a table) to the `/bookings/confirmed` page via sessionStorage —
 // same-tab only, never sent to the server, so it can safely hold guest-entered text like
 // special requests that we don't want round-tripping through the URL.
 
@@ -9,7 +9,7 @@ import { PRODUCT_KINDS, type ProductKind } from '~/shared/product-details'
 import { outsideNotice } from '~/shared/availability-settings'
 
 export interface BookingConfirmation {
-  type: 'reservation' | 'booking'
+  type: 'booking'
   locale?: string
   status?: 'pending' | 'confirmed' | 'cancelled'
   operationalBookingId?: string
@@ -73,13 +73,12 @@ export function getBookingConfirmation(currentOrganizationId: string): BookingCo
 /** The handoff supplies receipt details; the saved booking supplies its current state. */
 export async function loadBookingConfirmation(
   organizationId: string,
-  kind: BookingConfirmation['type'],
   organizationName: string,
   link: { id: string; token: string },
   language: { locale: string; localePath: (path: string) => string; t: (key: string) => string },
 ): Promise<BookingConfirmation | null> {
   const stored = getBookingConfirmation(organizationId)
-  const handoff = stored?.type === kind ? stored : null
+  const handoff = stored
   let savedLink: URL | null = null
   if (handoff?.cancelUrl) {
     try { savedLink = new URL(handoff.cancelUrl, 'https://receipt.invalid') } catch { /* An explicit receipt link can still be read. */ }
@@ -91,7 +90,7 @@ export async function loadBookingConfirmation(
   if (!requestId || !token) throw new Error(language.t('booking.receipt_missing_description'))
 
   const response = await $fetch<{ success: true; booking: {
-    kind: BookingConfirmation['type']; status: 'pending' | 'confirmed' | 'cancelled'; name: string; email: string
+    kind: 'booking'; status: 'pending' | 'confirmed' | 'cancelled'; name: string; email: string
     starts_at: string; timezone: string; guests: string; location_id: string | null; product_id: string | null; product_kind: ProductKind | null; product_name: string | null
     location_name: string | null; location_slug: string | null
     locale: string; policy_summary: ApiRecord | null; advance_notice_minutes: number | null; can_retry_cancellation: boolean; paid: { amount: number; currency: string } | null; image_url: string | null; manage_url: string | null
@@ -100,10 +99,10 @@ export async function loadBookingConfirmation(
     headers: { Authorization: `Bearer ${token}` }, cache: 'no-store',
   })
   const booking = response?.booking
-  if (response?.success !== true || !booking || booking.kind !== kind
+  if (response?.success !== true || !booking || booking.kind !== 'booking'
     || !['pending', 'confirmed', 'cancelled'].includes(booking.status)
     || typeof booking.name !== 'string' || typeof booking.email !== 'string' || !isValidInstant(booking.starts_at) || !isValidTimezone(booking.timezone)
-    || (kind === 'booking' && (!booking.product_kind || !PRODUCT_KINDS.includes(booking.product_kind)))
+    || !booking.product_kind || !PRODUCT_KINDS.includes(booking.product_kind)
     || typeof booking.guests !== 'string' || booking.locale !== language.locale || (booking.location_id !== null && typeof booking.location_id !== 'string')
     || (booking.manage_url !== null && (typeof booking.manage_url !== 'string' || !URL.canParse(booking.manage_url)))
     || (booking.advance_notice_minutes !== null && !Number.isInteger(booking.advance_notice_minutes)) || typeof booking.can_retry_cancellation !== 'boolean'
@@ -113,10 +112,10 @@ export async function loadBookingConfirmation(
   const matchingHandoff = requestId === savedId ? handoff : null
   const sameLocale = matchingHandoff?.locale === language.locale
   const sameLocation = matchingHandoff?.locationId === booking.location_id
-  const sameProduct = kind === 'reservation' || matchingHandoff?.productId === booking.product_id
+  const sameProduct = matchingHandoff?.productId === booking.product_id
   return {
     ...matchingHandoff,
-    type: kind, locale: language.locale, organizationId, organizationName,
+    type: 'booking', locale: language.locale, organizationId, organizationName,
     requestId, status: booking.status, guestName: booking.name, guestEmail: booking.email, startsAt: booking.starts_at,
     timezone: booking.timezone, guests: booking.guests, locationId: booking.location_id,
     productId: booking.product_id,
@@ -133,7 +132,7 @@ export async function loadBookingConfirmation(
     // The cancel page cancels, or retries a failed refund after cancelling; no link once
     // neither is possible, including when the offering's advance notice has closed cancellation.
     cancelUrl: (booking.status === 'cancelled' ? booking.can_retry_cancellation : booking.advance_notice_minutes === null || outsideNotice(booking.starts_at, booking.advance_notice_minutes))
-      ? `${language.localePath(`/${kind === 'reservation' ? 'reservations' : 'bookings'}/cancel`)}?id=${encodeURIComponent(requestId)}#${token}`
+      ? `${language.localePath('/bookings/cancel')}?id=${encodeURIComponent(requestId)}#${token}`
       : null,
   }
 }

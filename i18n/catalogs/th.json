@@ -53,7 +53,6 @@
   "booking.provider_retry": "ลองอีกครั้ง",
   "booking_policy.deposit_amount": "เงินมัดจำ {amount} ต่อการจอง",
   "booking_policy.deposit_amount_exclusive": "เงินมัดจำ {amount} ต่อการจอง ยังไม่รวมภาษีที่เกี่ยวข้อง",
-  "reservations.deposit_label": "เงินมัดจำการจอง",
   "reservations.confirmed": "ยืนยันการจองโต๊ะแล้ว",
   "forms.yes": "ใช่",
   "forms.no": "ไม่ใช่",
