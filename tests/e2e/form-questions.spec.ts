@@ -71,9 +71,9 @@ test('an owner adds an inquiry question in Website, a visitor answers it, and th
 
     // The answers are the submission's, kept with the conversation; MCP reads them out (the inbox view does not carry them).
     const savedAnswers = async () => {
-      const response = await mcpRequest(owner, baseURL, { method: 'tools/call', toolName: 'get_guest_conversation', args: { organization_id: restaurant.organizationId, request_id: requestId } })
+      const response = await mcpRequest(owner, baseURL, { method: 'tools/call', toolName: 'get_conversation', args: { organization_id: restaurant.organizationId, conversation_id: requestId } })
       expect(response.status(), await response.text()).toBe(200)
-      return mcpData<{ conversation: { answers: FormAnswerSnapshot[] } }>(await response.json()).conversation.answers
+      return mcpData<{ guest: { answers: FormAnswerSnapshot[] } }>(await response.json()).guest.answers
     }
     const answers = await savedAnswers()
     expect(answers).toEqual([{ question_id: question.id, label: 'How did you hear about us?', type: 'single_choice', help_text: null, value: 'instagram', selected_choices: [{ id: 'instagram', label: 'Instagram' }] }])

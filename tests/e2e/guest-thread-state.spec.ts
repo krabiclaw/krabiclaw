@@ -173,7 +173,7 @@ const streamChanges = (thread: InboxThread) => thread.stream.filter((item): item
 
 interface LedgerEntry {
   id: string
-  kind: string
+  author: 'guest' | 'member' | 'krabiclaw'
   channel: string | null
   body: string | null
   event: string | null
@@ -184,22 +184,24 @@ interface LedgerEntry {
 interface Ledger {
   needs_reply: boolean
   archived: boolean
-  updated_at: string
+  last_message_at: string
   guest: { name: string | null; email: string | null; phone: string | null }
   operational_record: unknown
-  entries: LedgerEntry[]
+  messages: LedgerEntry[]
 }
 
 /**
  * The conversation's own ledger — whether it needs a reply, archive flag, event names and
  * payloads — which the inbox view model keeps on the server. MCP's
- * get_guest_conversation is the surface that still reads it out, and reading
+ * get_conversation is the surface that still reads it out, and reading
  * it acknowledges nothing.
  */
 async function loadLedger(request: APIRequestContext, threadId: string, targetOrganizationId = organizationId()) {
-  const response = await mcpRequest(request, baseURL, { method: 'tools/call', toolName: 'get_guest_conversation', args: { organization_id: targetOrganizationId, request_id: threadId } })
+  const response = await mcpRequest(request, baseURL, { method: 'tools/call', toolName: 'get_conversation', args: { organization_id: targetOrganizationId, conversation_id: threadId } })
   await expectStatus(response, 200)
-  return mcpData<{ conversation: Ledger }>(await response.json()).conversation
+  const ledger = mcpData<{ guest: Ledger | null }>(await response.json()).guest
+  if (!ledger) throw new Error(`Conversation ${threadId} is not a guest conversation`)
+  return ledger
 }
 
 /** The owner's reply tasks on Today, open and done today, for one conversation. */
@@ -277,8 +279,8 @@ test('guest thread state stays source-owned, per-user, tenant-isolated, and idem
     // The subject the form asked for is no longer drawn anywhere (inbox-parity.md: the opening submission dump is gone).
     const openingLedger = await loadLedger(owner, threadId)
     expect(openingLedger.guest).toEqual({ name: guestName, email: guestEmail, phone: null })
-    expect(openingLedger.entries.filter(entry => entry.kind === 'submission')).toHaveLength(0)
-    expect(openingLedger.entries[0]).toMatchObject({
+    expect(openingLedger.messages[0]).toMatchObject({
+      author: 'guest',
       id: streamMessages(detail)[0]!.id,
       channel: 'web',
       body: message,
@@ -333,7 +335,7 @@ test('guest thread state stays source-owned, per-user, tenant-isolated, and idem
     const afterReplies = await loadThreadDetail(owner, threadId)
     const replyEntries = streamMessages(afterReplies).filter(item => item.body === replyBody)
     expect(replyEntries).toMatchObject([{ side: 'business', author: 'You', receipt: 'Recorded locally' }])
-    expect((await loadLedger(owner, threadId)).entries.filter(entry => entry.body === replyBody)).toMatchObject([{
+    expect((await loadLedger(owner, threadId)).messages.filter(entry => entry.body === replyBody)).toMatchObject([{
       id: replyEntries[0]!.id,
       channel: 'email',
       event: 'thread.member_reply',

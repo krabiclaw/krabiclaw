@@ -888,7 +888,7 @@ test.describe('stateless MCP server', () => {
     expect(allToolNames).toEqual(expect.arrayContaining([
       'list_organizations',
       'get_organization', 'list_locations', 'list_location_products', 'list_posts', 'list_media_assets',
-      'list_site_pages', 'list_products', 'list_collections', 'list_guest_conversations',
+      'list_site_pages', 'list_products', 'list_collections', 'list_conversations',
     ]))
     const invalid = await mcpRequest(request, baseURL!, { method: 'bad/method', id: 'bad-method' })
     expect(invalid.status()).toBe(200)
