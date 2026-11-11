@@ -4,7 +4,7 @@ import { publishAccessInvalidation, publishBusinessInvalidation } from '~/server
 import { assertPublishedHost } from '~/server/utils/public-provider'
 import { creationRequestHash, isUniqueDedupeConflict, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
 import { d1JsonValue, MAX_D1_BATCH_STATEMENTS } from '~/server/db/d1-limits'
-import { locationAllowsBooking } from '~/shared/reservation-hours'
+import { getDateIntervals, locationAllowsBooking, parseOpeningHours, parseSpecialHours, toTimeString } from '~/shared/reservation-hours'
 import { providerAvailabilityParams, providerMemberSql, providerUnavailableSql } from '~/server/utils/provider-allocation'
 import { memberAvailabilityJson, workingWindows } from '~/server/domain/member-scheduling'
 import type { CloudflareEnv } from '~/server/utils/auth'
@@ -36,12 +36,14 @@ import { addLocalDays, assertCalendarDate, isValidTimezone, localDateAt, localDa
  * and state; a booking claims seats on one session. No step is inferred from
  * the absence of another.
  *
- * A restaurant's tables are a `table` product booked the same way: its rules
- * repeat a seating every interval through each service, and a booking claims
- * that seating's seats.
+ * A restaurant's tables are a `table` product booked the same way. It has no
+ * rules: its seatings are its location's current opening and special hours,
+ * cut by `tableSeatings`, and a booking claims that seating's seats.
  */
 
 const MAX_GENERATION_DAYS = 365
+/** Why a table takes no weekly times, dated sessions or per-seating edits. */
+const TABLE_HOURS_ONLY = 'A table is seated through its location\'s opening hours. Change those hours, or add special hours or a closure, to change when tables can be booked'
 const MAX_CALENDAR_DAYS = 42
 
 function badRequest(message: string): never {
@@ -75,6 +77,8 @@ export interface ProductBookingConfigRecord extends NightsBookingSettings {
   organization_id: string
   unit: BookingUnit
   duration_minutes: number | null
+  /** A table's minutes between seating starts through its location's hours; null for every other product. */
+  seating_interval_minutes: number | null
   default_capacity: number | null
   confirmation_mode: 'instant' | 'review'
   online_payment_required: boolean
@@ -118,11 +122,7 @@ export function partySizeRefusal(config: Pick<ProductBookingConfigRecord, 'party
   return null
 }
 
-/**
- * A weekly rule: a single start, or a start every `interval_minutes` from
- * `start_time` through `end_time`. `capacity` null is the configuration's
- * default_capacity.
- */
+/** A weekly start time at a location. `capacity` null is the configuration's default_capacity. */
 export interface ProductAvailabilityRule {
   id: string
   organization_id: string
@@ -131,8 +131,6 @@ export interface ProductAvailabilityRule {
   timezone: string
   weekday: number
   start_time: string
-  end_time: string | null
-  interval_minutes: number | null
   capacity: number | null
 }
 
@@ -188,7 +186,7 @@ export async function requireBookingConfig(
 
 /** The booking terms any offering may set, beside its schedule. */
 const GUEST_TERMS_FIELDS = ['party_size_min', 'party_size_max', 'minimum_guest_age', 'accessibility_contact_required', 'payment_basis', 'payment_min_party_size'] as const
-const BOOKING_CONFIG_COLUMNS = ['product_id', 'organization_id', 'unit', 'duration_minutes', 'default_capacity', 'confirmation_mode', 'online_payment_required', 'held_online', 'scheduling_mode', 'assigned_member_id', 'advance_notice_minutes', 'questions', ...GUEST_TERMS_FIELDS, ...NIGHTS_BOOKING_FIELDS] as const
+const BOOKING_CONFIG_COLUMNS = ['product_id', 'organization_id', 'unit', 'duration_minutes', 'seating_interval_minutes', 'default_capacity', 'confirmation_mode', 'online_payment_required', 'held_online', 'scheduling_mode', 'assigned_member_id', 'advance_notice_minutes', 'questions', ...GUEST_TERMS_FIELDS, ...NIGHTS_BOOKING_FIELDS] as const
 type StoredBookingConfig = Omit<ProductBookingConfigRecord, 'online_payment_required' | 'held_online' | 'accessibility_contact_required' | 'questions' | 'questions_revision' | 'calendar_rules'> & { online_payment_required: number; held_online: number; accessibility_contact_required: number; questions: string; calendar_rules: string | null }
 
 /** A stored configuration row as its record; a unit outside the known set is a corrupt row, not a default. */
@@ -214,7 +212,7 @@ export async function prepareProductBookingConfig(db: DbClient, input: {
    * A home's night settings, already checked by the stay writer
    * (product-management planStayConfig); refused for a slot unit.
    */
-  patch: { duration_minutes?: unknown; default_capacity?: unknown; confirmation_mode?: unknown; online_payment_required?: unknown; held_online?: unknown; scheduling_mode?: unknown; assigned_member_id?: unknown; advance_notice_minutes?: unknown; questions?: unknown; expected_questions_revision?: unknown }
+  patch: { duration_minutes?: unknown; seating_interval_minutes?: unknown; default_capacity?: unknown; confirmation_mode?: unknown; online_payment_required?: unknown; held_online?: unknown; scheduling_mode?: unknown; assigned_member_id?: unknown; advance_notice_minutes?: unknown; questions?: unknown; expected_questions_revision?: unknown }
     & { [K in typeof GUEST_TERMS_FIELDS[number]]?: unknown } & Partial<NightsBookingSettings>
 }): Promise<{ queries: BatchQuery[]; config: ProductBookingConfigRecord }> {
   const product = input.productInSameBatch ? null : await requireOrganizationProduct(db, input)
@@ -224,8 +222,8 @@ export async function prepareProductBookingConfig(db: DbClient, input: {
   const unit = Object.hasOwn(BOOKING_UNITS, kind) ? BOOKING_UNITS[kind]! : badRequest(input.productInSameBatch ? 'The bookable product kind is required before preparing booking setup' : 'Only experiences, services, tables and places to stay take bookings')
   const patch = input.patch
   if (!patch || typeof patch !== 'object' || Array.isArray(patch)) badRequest('Invalid request body')
-  const slotFields = ['duration_minutes', 'confirmation_mode', 'online_payment_required', 'held_online', 'scheduling_mode', 'advance_notice_minutes', 'party_size_min', 'party_size_max', 'payment_basis', 'payment_min_party_size'] as const
-  const fields = ['duration_minutes', 'default_capacity', 'confirmation_mode', 'online_payment_required', 'held_online', 'scheduling_mode', 'assigned_member_id', 'advance_notice_minutes', ...GUEST_TERMS_FIELDS, ...NIGHTS_BOOKING_FIELDS] as const
+  const slotFields = ['duration_minutes', 'seating_interval_minutes', 'confirmation_mode', 'online_payment_required', 'held_online', 'scheduling_mode', 'advance_notice_minutes', 'party_size_min', 'party_size_max', 'payment_basis', 'payment_min_party_size'] as const
+  const fields = ['duration_minutes', 'seating_interval_minutes', 'default_capacity', 'confirmation_mode', 'online_payment_required', 'held_online', 'scheduling_mode', 'assigned_member_id', 'advance_notice_minutes', ...GUEST_TERMS_FIELDS, ...NIGHTS_BOOKING_FIELDS] as const
   if (Object.keys(patch).some(key => !fields.includes(key as typeof fields[number]) && key !== 'questions' && key !== 'expected_questions_revision')) badRequest('Unknown booking configuration field')
   // A home is booked by the night on its business's calendar, paid in full on the site and confirmed when paid.
   if (unit === 'nights' && slotFields.some(field => patch[field] !== undefined)) badRequest('A place to stay is booked by the night; it takes no session length, scheduling, notice, confirmation or payment setting')
@@ -242,6 +240,8 @@ export async function prepareProductBookingConfig(db: DbClient, input: {
   if (patch.accessibility_contact_required !== undefined && typeof patch.accessibility_contact_required !== 'boolean') badRequest('accessibility_contact_required must be boolean')
   if (patch.payment_basis !== undefined && !(PAYMENT_BASES as readonly unknown[]).includes(patch.payment_basis)) badRequest('payment_basis must be per_guest or per_booking')
   if (patch.duration_minutes === 0) badRequest('duration_minutes must be positive')
+  if (patch.seating_interval_minutes !== undefined && kind !== 'table') badRequest('Only a table takes seating_interval_minutes; other offerings start at their weekly times')
+  if (patch.seating_interval_minutes !== undefined && patch.seating_interval_minutes !== null && (!Number.isSafeInteger(patch.seating_interval_minutes) || (patch.seating_interval_minutes as number) < 5 || (patch.seating_interval_minutes as number) > 1440)) badRequest('seating_interval_minutes must be a whole number of minutes from 5 to 1440')
   if (patch.confirmation_mode !== undefined && patch.confirmation_mode !== 'instant' && patch.confirmation_mode !== 'review') badRequest('confirmation_mode must be instant or review')
   if (patch.online_payment_required !== undefined && typeof patch.online_payment_required !== 'boolean') badRequest('online_payment_required must be boolean')
   if (unit === 'slot' && patch.online_payment_required === true) {
@@ -291,7 +291,7 @@ export async function prepareProductBookingConfig(db: DbClient, input: {
   const night = <K extends typeof NIGHTS_BOOKING_FIELDS[number]>(field: K): ProductBookingConfigRecord[K] => (patch[field] === undefined ? (saved ? saved[field] : null) : patch[field]) as ProductBookingConfigRecord[K]
   const config: ProductBookingConfigRecord = unit === 'nights' ? {
     product_id: input.productId, organization_id: input.organizationId, unit,
-    duration_minutes: null,
+    duration_minutes: null, seating_interval_minutes: null,
     default_capacity: patch.default_capacity === undefined ? current?.default_capacity ?? null : patch.default_capacity as number | null,
     confirmation_mode: 'instant', online_payment_required: true, held_online: false, scheduling_mode: 'business', assigned_member_id: assignedMember, advance_notice_minutes: null,
     questions, questions_revision: formQuestionsRevision(questions), ...guestTerms,
@@ -301,6 +301,7 @@ export async function prepareProductBookingConfig(db: DbClient, input: {
     product_id: input.productId, organization_id: input.organizationId, unit,
     check_in_time: null, check_in_end_time: null, check_out_time: null, min_nights: null, calendar_rules: null, cancellation_policy: null, long_term_cancellation_policy: null,
     duration_minutes: patch.duration_minutes === undefined ? current?.duration_minutes ?? null : patch.duration_minutes as number | null,
+    seating_interval_minutes: patch.seating_interval_minutes === undefined ? current?.seating_interval_minutes ?? null : patch.seating_interval_minutes as number | null,
     default_capacity: patch.default_capacity === undefined ? current?.default_capacity ?? null : patch.default_capacity as number | null,
     confirmation_mode: (patch.confirmation_mode ?? current?.confirmation_mode ?? 'instant') as ProductBookingConfigRecord['confirmation_mode'],
     online_payment_required: patch.online_payment_required === undefined ? current?.online_payment_required === 1 : patch.online_payment_required === true,
@@ -310,6 +311,8 @@ export async function prepareProductBookingConfig(db: DbClient, input: {
     advance_notice_minutes: patch.advance_notice_minutes === undefined ? current?.advance_notice_minutes ?? null : (patch.advance_notice_minutes as number | null) || null,
     questions, questions_revision: formQuestionsRevision(questions), ...guestTerms,
   }
+  // A table is seated every interval through its location's hours; without one it has no seatings.
+  if (kind === 'table' && (config.seating_interval_minutes === null || config.duration_minutes === null)) badRequest('Choose how long a table is held and how often one can be seated (duration_minutes and seating_interval_minutes)')
   if (config.duration_minutes === null && product?.kind === 'experience' && !product.order_url && product.publications.some(publication => publication.published)) {
     throw new HTTPError({ statusCode: 409, statusMessage: 'Keep a session duration for a published experience. Withhold the experience before clearing its booking setup.' })
   }
@@ -374,8 +377,10 @@ export async function setProductBookingConfig(db: DbClient, input: Omit<Paramete
   const throughDate = rules.map(rule => addLocalDays(localNow(rule.timezone).date, PUBLIC_BOOKING_WINDOW_DAYS)).sort().at(-1)
   const materialized = throughDate ? prepareSessionMaterialization({ ...input, throughDate }, config, rules, new Map(locations.map(location => [location.id, location])), await canScheduleSessions(db, config)).queries : []
   const online = config.held_online ? await prepareProviderHoursSessions(db, config, { actorId: input.actorId, now: new Date().toISOString() }) : []
+  // A table's seatings take its new length, interval and seats in the same batch.
+  const seatings = config.seating_interval_minutes === null ? [] : tableSeatingQueries(config, await tableLocation(db, config), { actorId: input.actorId, now: new Date().toISOString() })
   const paymentEnabled = input.patch.online_payment_required === true
-  const queries = [...configQueries, ...materialized, ...online, publicResourceCacheInvalidationQuery(input.organizationId, 'product-booking-config')]
+  const queries = [...configQueries, ...materialized, ...online, ...seatings, publicResourceCacheInvalidationQuery(input.organizationId, 'product-booking-config')]
   if (queries.length > MAX_D1_BATCH_STATEMENTS) badRequest('This schedule exceeds one atomic update; reduce the requested times')
   await executeBatch(db, queries, { operation: 'Set product booking config' }).catch(error => { throw bookingConfigurationWriteError(error) })
   if (input.patch.assigned_member_id !== undefined) {
@@ -406,7 +411,7 @@ export async function listAvailabilityRules(
   productId: string,
 ): Promise<ProductAvailabilityRule[]> {
   return queryAll<ProductAvailabilityRule>(db, `
-    SELECT id, organization_id, product_id, location_id, timezone, weekday, start_time, end_time, interval_minutes, capacity
+    SELECT id, organization_id, product_id, location_id, timezone, weekday, start_time, capacity
     FROM product_availability_rules
     WHERE organization_id = ? AND product_id = ?
     ORDER BY weekday, start_time, id
@@ -431,13 +436,50 @@ async function canScheduleSessions(db: DbClient, config: ProductBookingConfigRec
 }
 
 /**
+ * Sessions whose open time is someone's hours rather than weekly rules: an
+ * online offering's (its provider's working hours) and a table's (its
+ * location's opening and special hours). `slots` is every start those hours
+ * give inside the public window.
+ *
+ * One statement retires the future, unclaimed sessions the hours no longer
+ * cover, and one inserts the slots they do. A slot that comes back reopens its
+ * own row; a claimed session (a booking, even a cancelled one, or a live
+ * checkout hold) is never moved or cancelled here — it stays the commitment it
+ * is. `guard`, when given, must hold for either statement to write: the hours
+ * being written in the same batch.
+ */
+function hoursSessionQueries(input: {
+  organizationId: string; productId: string; locationId: string | null; keyPrefix: string; timezone: string; capacity: number | null
+  slots: Array<{ starts_at: string; ends_at: string }>; actorId: string; now: string; guard?: BatchQuery
+}): BatchQuery[] {
+  const unclaimed = `NOT EXISTS (SELECT 1 FROM bookings b WHERE b.organization_id=product_sessions.organization_id AND b.product_session_id=product_sessions.id)
+    AND NOT EXISTS (SELECT 1 FROM payment_checkout_holds h WHERE h.organization_id=product_sessions.organization_id AND h.session_id=product_sessions.id AND h.status='active' AND h.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now'))`
+  const guard = input.guard ?? { query: '1', params: [] }
+  const conflict = input.locationId === null ? '(product_id, starts_at) WHERE location_id IS NULL' : '(product_id, location_id, starts_at) WHERE location_id IS NOT NULL'
+  return [{
+    query: `UPDATE product_sessions SET status='cancelled', updated_at=?, updated_by=?
+      WHERE organization_id=? AND product_id=? AND location_id IS ? AND status='scheduled' AND starts_at>?
+        AND starts_at NOT IN (SELECT json_extract(value, '$.starts_at') FROM json_each(?)) AND ${unclaimed} AND (${guard.query})`,
+    params: [input.now, input.actorId, input.organizationId, input.productId, input.locationId, input.now, JSON.stringify(input.slots), ...guard.params!],
+  }, {
+    query: `INSERT INTO product_sessions (id, organization_id, product_id, location_id, source_occurrence_key, timezone, starts_at, ends_at, capacity, status, created_at, updated_at, created_by, updated_by)
+      SELECT lower(hex(randomblob(16))), ?, ?, ?, ? || json_extract(slot.value, '$.starts_at'), ?, json_extract(slot.value, '$.starts_at'), json_extract(slot.value, '$.ends_at'), ?, 'scheduled', ?, ?, ?, ? FROM json_each(?) slot WHERE (${guard.query})
+      ON CONFLICT ${conflict} DO UPDATE SET
+        ends_at=excluded.ends_at, source_occurrence_key=excluded.source_occurrence_key, timezone=excluded.timezone, capacity=excluded.capacity,
+        status='scheduled', updated_at=excluded.updated_at, updated_by=excluded.updated_by
+        WHERE ${unclaimed} AND (product_sessions.ends_at IS NOT excluded.ends_at
+          OR product_sessions.source_occurrence_key IS NOT excluded.source_occurrence_key
+          OR product_sessions.timezone IS NOT excluded.timezone OR product_sessions.capacity IS NOT excluded.capacity
+          OR product_sessions.status IS NOT excluded.status)
+      ON CONFLICT DO NOTHING`,
+    params: [input.organizationId, input.productId, input.locationId, input.keyPrefix, input.timezone, input.capacity, input.now, input.now, input.actorId, input.actorId, JSON.stringify(input.slots), ...guard.params!],
+  }]
+}
+
+/**
  * An online offering's sessions: each provider's working windows, cut into
  * slots of the offering's length, in that provider's own timezone — the way a
  * Calendly host's availability is their schedule, not a list on the event.
- *
- * One statement per provider retires the future, unclaimed slots their hours
- * no longer cover, and one inserts the slots they do. A slot that comes back
- * reopens its own row; a claimed slot is never moved or cancelled here.
  */
 export async function prepareProviderHoursSessions(db: DbClient, config: ProductBookingConfigRecord, input: { actorId: string; now: string }): Promise<BatchQuery[]> {
   const duration = resolvedDuration(config)
@@ -461,28 +503,77 @@ export async function prepareProviderHoursSessions(db: DbClient, config: Product
         slots.push(slot)
       }
     }
-    const unclaimed = `NOT EXISTS (SELECT 1 FROM bookings b WHERE b.organization_id=product_sessions.organization_id AND b.product_session_id=product_sessions.id)
-      AND NOT EXISTS (SELECT 1 FROM payment_checkout_holds h WHERE h.organization_id=product_sessions.organization_id AND h.session_id=product_sessions.id AND h.status='active' AND h.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now'))`
-    queries.push({
-      query: `UPDATE product_sessions SET status='cancelled', updated_at=?, updated_by=?
-        WHERE organization_id=? AND product_id=? AND location_id IS NULL AND status='scheduled' AND starts_at>?
-          AND starts_at NOT IN (SELECT json_extract(value, '$.starts_at') FROM json_each(?)) AND ${unclaimed}`,
-      params: [input.now, input.actorId, config.organization_id, config.product_id, input.now, JSON.stringify(slots)],
-    }, {
-      query: `INSERT INTO product_sessions (id, organization_id, product_id, location_id, source_occurrence_key, timezone, starts_at, ends_at, capacity, status, created_at, updated_at, created_by, updated_by)
-        SELECT lower(hex(randomblob(16))), ?, ?, NULL, 'hours:' || ? || ':' || json_extract(slot.value, '$.starts_at'), ?, json_extract(slot.value, '$.starts_at'), json_extract(slot.value, '$.ends_at'), ?, 'scheduled', ?, ?, ?, ? FROM json_each(?) slot WHERE true
-        ON CONFLICT (product_id, starts_at) WHERE location_id IS NULL DO UPDATE SET
-          ends_at=excluded.ends_at, source_occurrence_key=excluded.source_occurrence_key, timezone=excluded.timezone, capacity=excluded.capacity,
-          status='scheduled', updated_at=excluded.updated_at, updated_by=excluded.updated_by
-          WHERE ${unclaimed} AND (product_sessions.ends_at IS NOT excluded.ends_at
-            OR product_sessions.source_occurrence_key IS NOT excluded.source_occurrence_key
-            OR product_sessions.timezone IS NOT excluded.timezone OR product_sessions.capacity IS NOT excluded.capacity
-            OR product_sessions.status IS NOT excluded.status)
-        ON CONFLICT DO NOTHING`,
-      params: [config.organization_id, config.product_id, provider.member_id, provider.timezone, config.default_capacity, input.now, input.now, input.actorId, input.actorId, JSON.stringify(slots)],
-    })
+    queries.push(...hoursSessionQueries({ organizationId: config.organization_id, productId: config.product_id, locationId: null, keyPrefix: `hours:${provider.member_id}:`,
+      timezone: provider.timezone, capacity: config.default_capacity, slots, actorId: input.actorId, now: input.now }))
   }
   return queries
+}
+
+/**
+ * A table's seatings: the one place its configuration meets its location's
+ * hours. On each local day of the public window, every open period of the
+ * location that day — its weekly opening hours, or that date's special hours,
+ * with a closure leaving the day shut — offers a seating at the period's
+ * opening and every `seating_interval_minutes` after it, as long as
+ * `duration_minutes` still ends by the period's close. Each seating seats
+ * `default_capacity` guests. A period running past midnight belongs to the day
+ * it opens. A wall time that never happens or happens twice is not offered.
+ *
+ * A location with no opening hours has no open time, so its tables have no
+ * seatings; setting tables up there is refused, never guessed.
+ */
+export function tableSeatings(config: Pick<ProductBookingConfigRecord, 'duration_minutes' | 'seating_interval_minutes'>, location: SessionLocation, now: string): Array<{ starts_at: string; ends_at: string }> {
+  const duration = config.duration_minutes, interval = config.seating_interval_minutes
+  if (duration === null || interval === null) throw new Error('A table is seated with a duration and a seating interval')
+  if (!isValidTimezone(location.timezone)) throw new HTTPError({ statusCode: 409, statusMessage: 'The table\'s location has an invalid timezone' })
+  const hours = parseOpeningHours(location.opening_hours ? JSON.parse(location.opening_hours) : null)
+  const special = parseSpecialHours(location.special_hours ? JSON.parse(location.special_hours) : null)
+  const today = localNow(location.timezone).date
+  const seatings: Array<{ starts_at: string; ends_at: string }> = []
+  for (let date = today; date < addLocalDays(today, PUBLIC_BOOKING_WINDOW_DAYS); date = addLocalDays(date, 1)) {
+    for (const period of getDateIntervals(hours, special, date) ?? []) {
+      // The part of a period before midnight was offered on the day it opened.
+      if (period.start < 0) continue
+      for (let minute = period.start; minute < 1440 && minute + duration <= period.end; minute += interval) {
+        const time = toTimeString(minute)
+        if (unresolvableLocalTime(date, time, location.timezone)) continue
+        const start = localDateTimeToInstant(date, time, location.timezone, 'reject')
+        if (start.toISOString() <= now) continue
+        seatings.push({ starts_at: start.toISOString(), ends_at: new Date(start.getTime() + duration * 60_000).toISOString() })
+      }
+    }
+  }
+  return seatings
+}
+
+/** Write a table's seatings as its location's hours give them now. */
+function tableSeatingQueries(config: ProductBookingConfigRecord, location: SessionLocation, input: { actorId: string; now: string; guard?: BatchQuery }): BatchQuery[] {
+  return hoursSessionQueries({ organizationId: config.organization_id, productId: config.product_id, locationId: location.id, keyPrefix: `hours:${location.id}:`,
+    timezone: location.timezone, capacity: config.default_capacity, slots: tableSeatings(config, location, input.now), actorId: input.actorId, now: input.now, guard: input.guard })
+}
+
+/** A table product's one location: tables are booked at exactly one. */
+async function tableLocation(db: DbClient, config: ProductBookingConfigRecord): Promise<SessionLocation> {
+  const location = await queryFirst<SessionLocation>(db, `SELECT l.id,l.timezone,l.status,l.opening_hours,l.special_hours FROM product_locations pl
+    JOIN business_locations l ON l.id=pl.location_id AND l.organization_id=pl.organization_id WHERE pl.organization_id=? AND pl.product_id=?`, [config.organization_id, config.product_id])
+  if (!location) throw new HTTPError({ statusCode: 409, statusMessage: 'This table product is not at a location' })
+  return location
+}
+
+/**
+ * The seatings of the table at this location, as the hours being written give
+ * them: every writer of a location's opening hours, special hours or timezone
+ * adds these to its batch, behind `guard` (its own write landing). A location
+ * without tables gives none.
+ */
+export async function prepareLocationTableSeatings(db: DbClient, input: { organizationId: string; location: SessionLocation; actorId: string; now: string; guard: BatchQuery }): Promise<BatchQuery[]> {
+  const table = await queryFirst<{ product_id: string }>(db, `SELECT p.id product_id FROM product_locations pl
+    JOIN products p ON p.id=pl.product_id AND p.organization_id=pl.organization_id AND p.kind='table'
+    JOIN product_booking_configs c ON c.product_id=p.id AND c.organization_id=p.organization_id
+    WHERE pl.organization_id=? AND pl.location_id=?`, [input.organizationId, input.location.id])
+  if (!table) return []
+  const config = await requireBookingConfig(db, input.organizationId, table.product_id)
+  return tableSeatingQueries(config, input.location, input)
 }
 
 /** How a local wall time that does not exist, or exists twice, is handled. */
@@ -491,17 +582,6 @@ export interface OccurrenceSkip {
   local_date: string
   local_start_time: string
   reason: 'nonexistent_local_time' | 'ambiguous_local_time' | 'location_closed'
-}
-
-/** The local start times one rule names on each of its days: its start, then every interval through its end. */
-export function ruleStartTimes(rule: Pick<ProductAvailabilityRule, 'start_time' | 'end_time' | 'interval_minutes'>): string[] {
-  if (rule.end_time === null || rule.interval_minutes === null) return [rule.start_time]
-  const minutes = (time: string) => Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5))
-  const times: string[] = []
-  for (let minute = minutes(rule.start_time); minute <= minutes(rule.end_time); minute += rule.interval_minutes) {
-    times.push(`${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}`)
-  }
-  return times
 }
 
 function instantsFor(
@@ -577,24 +657,23 @@ function prepareSessionMaterialization(input: {
       .reduce((earliest, value) => (value < earliest ? value : earliest))
     if (from > through) continue
 
-    // One statement per rule: a table's seatings every quarter hour through a
-    // month are a thousand occurrences, one batch statement each would not fit.
+    // One statement per rule: a daily class through a year is 365
+    // occurrences; one batch statement each would not fit.
     const occurrences: Array<{ id: string; key: string; starts_at: string; ends_at: string }> = []
     for (let date = from; date <= through; date = addLocalDays(date, 1)) {
       if (new Date(`${date}T00:00:00Z`).getUTCDay() !== rule.weekday) continue
-      for (const time of ruleStartTimes(rule)) {
-        const resolved = instantsFor(rule, date, time, duration)
-        if ('reason' in resolved) { skipped.push(resolved); continue }
-        const location = locations.get(rule.location_id)
-        if (!location) throw new HTTPError({ statusCode: 409, statusMessage: 'The scheduled location no longer exists' })
-        if (!locationAllowsBooking(resolved, location)) { skipped.push({ rule_id: rule.id, local_date: date, local_start_time: time, reason: 'location_closed' }); continue }
-        sessions.push(resolved)
-        if (!schedulable) continue
-        planned += 1
-        const key = occurrenceKey(rule.id, date, time)
-        if (existing.has(key)) continue
-        occurrences.push({ id: crypto.randomUUID(), key, ...resolved })
-      }
+      const time = rule.start_time
+      const resolved = instantsFor(rule, date, time, duration)
+      if ('reason' in resolved) { skipped.push(resolved); continue }
+      const location = locations.get(rule.location_id)
+      if (!location) throw new HTTPError({ statusCode: 409, statusMessage: 'The scheduled location no longer exists' })
+      if (!locationAllowsBooking(resolved, location)) { skipped.push({ rule_id: rule.id, local_date: date, local_start_time: time, reason: 'location_closed' }); continue }
+      sessions.push(resolved)
+      if (!schedulable) continue
+      planned += 1
+      const key = occurrenceKey(rule.id, date, time)
+      if (existing.has(key)) continue
+      occurrences.push({ id: crypto.randomUUID(), key, ...resolved })
     }
     if (!occurrences.length) continue
     // A slot that was removed and added back meets its own old sessions at
@@ -642,6 +721,11 @@ export async function materializeSessions(db: DbClient, input: {
   actorId: string
 }): Promise<MaterializeSessionsResult> {
   const config = await requireBookingConfig(db, input.organizationId, input.productId)
+  // A table: its location's hours, as they are now.
+  if (config.seating_interval_minutes !== null) {
+    const results = await executeBatch(db, tableSeatingQueries(config, await tableLocation(db, config), { actorId: input.actorId, now: new Date().toISOString() }), { operation: 'Materialize table seatings' })
+    return { created: results[1]?.meta?.changes ?? 0, existing: 0, skipped: [] }
+  }
   let providerCreated = 0
   // No location named, or the online one: the providers' hours. A location: its weekly rules.
   if (config.held_online && !input.locationId) {
@@ -683,42 +767,27 @@ export async function materializeMemberSessions(db: DbClient, input: { organizat
   }
 }
 
-/**
- * One weekly time: a single start, or with `end_time` and `interval_minutes`
- * a start every interval from `start_time` through `end_time` — a
- * restaurant's seatings through one service.
- */
+/** One weekly start time. */
 export interface WeeklySlotInput {
   weekday: number
   start_time: string
-  end_time?: string | null
-  interval_minutes?: number | null
 }
 
-const weeklySlotKey = (slot: { weekday: number; start_time: string; end_time?: string | null; interval_minutes?: number | null }) => `${slot.weekday}:${slot.start_time}:${slot.end_time ?? ''}:${slot.interval_minutes ?? ''}`
+const weeklySlotKey = (slot: WeeklySlotInput) => `${slot.weekday}:${slot.start_time}`
 
-function parseWeeklySlots(value: unknown): Array<WeeklySlotInput & { end_time: string | null; interval_minutes: number | null }> {
+function parseWeeklySlots(value: unknown): WeeklySlotInput[] {
   if (!Array.isArray(value)) badRequest('slots must be an array')
   const slots = value.map(entry => {
     if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) badRequest('each slot must be an object')
     if (typeof entry.weekday !== 'number' || typeof entry.start_time !== 'string') badRequest('each slot needs a weekday and a start_time')
-    if (Object.keys(entry).some(key => !['weekday', 'start_time', 'end_time', 'interval_minutes'].includes(key))) badRequest('slots support weekday, start_time, end_time and interval_minutes; set duration and capacity on the product')
-    const endTime = entry.end_time ?? null
-    const interval = entry.interval_minutes ?? null
-    if ((endTime === null) !== (interval === null)) badRequest('end_time and interval_minutes are given together, for a start every interval through the end')
-    if (endTime !== null && typeof endTime !== 'string') badRequest('end_time must be "HH:MM"')
-    if (interval !== null && (!Number.isSafeInteger(interval) || interval < 5 || interval > 1440)) badRequest('interval_minutes must be a whole number of minutes from 5 to 1440')
-    return { weekday: entry.weekday as number, start_time: entry.start_time as string, end_time: endTime as string | null, interval_minutes: interval as number | null }
+    if (Object.keys(entry).some(key => !['weekday', 'start_time'].includes(key))) badRequest('slots support weekday and start_time; set duration and capacity on the product')
+    return { weekday: entry.weekday as number, start_time: entry.start_time as string }
   })
   const seen = new Set<string>()
   for (const slot of slots) {
     if (!Number.isInteger(slot.weekday) || slot.weekday < 0 || slot.weekday > 6) badRequest('weekday must be 0 (Sunday) to 6 (Saturday)')
     assertLocalStartTime(slot.start_time)
-    if (slot.end_time !== null) {
-      assertLocalStartTime(slot.end_time, 'end_time')
-      if (slot.end_time <= slot.start_time) badRequest('end_time must be after start_time on the same day')
-    }
-    const key = `${slot.weekday}:${slot.start_time}`
+    const key = weeklySlotKey(slot)
     if (seen.has(key)) badRequest(`The schedule lists ${slot.start_time} twice on the same day`)
     seen.add(key)
   }
@@ -745,8 +814,6 @@ function prepareWeeklySchedule(input: {
   if (slots.length && config.duration_minutes === null) badRequest('Set the session duration before adding a weekly schedule')
 
 
-  // A time whose end or interval changed is a different series: its old rule
-  // goes (cancelling its unbooked future sessions) before the new one is added.
   const byKey = new Map(existing.map(rule => [weeklySlotKey(rule), rule]))
   const kept = new Set<string>()
   const now = input.now
@@ -771,10 +838,10 @@ function prepareWeeklySchedule(input: {
     rules.push({ id, organization_id: input.organizationId, product_id: input.productId, location_id: input.locationId, timezone, ...slot, capacity: null })
     additions.push({
       query: `INSERT INTO product_availability_rules (
-                id, organization_id, product_id, location_id, timezone, weekday, start_time, end_time, interval_minutes, created_at, updated_at, created_by, updated_by
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                id, organization_id, product_id, location_id, timezone, weekday, start_time, created_at, updated_at, created_by, updated_by
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       params: [id, input.organizationId, input.productId, input.locationId, timezone,
-        slot.weekday, slot.start_time, slot.end_time, slot.interval_minutes, now, now, input.actorId, input.actorId],
+        slot.weekday, slot.start_time, now, now, input.actorId, input.actorId],
     })
   }
 
@@ -813,7 +880,7 @@ export async function replaceWeeklySchedule(db: DbClient, input: {
   slots: unknown
   actorId: string
 }): Promise<{ rules: ProductAvailabilityRule[]; sessions: MaterializeSessionsResult; cancelled: number }> {
-  await requireOrganizationProduct(db, input)
+  if ((await requireOrganizationProduct(db, input)).kind === 'table') badRequest(TABLE_HOURS_ONLY)
   const config = await requireBookingConfig(db, input.organizationId, input.productId)
   const locationId = input.locationId
   const locationRows = await queryAll<SessionLocation>(db, 'SELECT id,timezone,status,opening_hours,special_hours FROM business_locations WHERE organization_id=? AND id=?', [input.organizationId, locationId])
@@ -836,6 +903,8 @@ export async function replaceWeeklySchedule(db: DbClient, input: {
 export interface ProductBookingSetupInput {
   location_id: string | null
   duration_minutes: number
+  /** A table only: minutes between seatings through its location's hours. */
+  seating_interval_minutes?: number | null
   default_capacity: number | null
   confirmation_mode?: 'instant' | 'review'
   online_payment_required?: boolean
@@ -901,28 +970,37 @@ export async function prepareProductBookingSetup(db: DbClient, input: {
     if (!location || location.status !== 'active') badRequest('Choose an active location in this business')
     windowEnds[location.timezone] = bookingWindow(location.timezone).toInstant
     locationGuard = { query: `EXISTS (SELECT 1 FROM business_locations l WHERE l.id=s.location_id AND l.organization_id=s.organization_id AND l.status='active' AND l.timezone IS ? AND l.opening_hours IS ? AND l.special_hours IS ?)`, params: [location.timezone, location.opening_hours, location.special_hours] }
-    const existingRules = input.productInSameBatch ? [] : (await listAvailabilityRules(db, input.organizationId, input.productId)).filter(rule => rule.location_id === locationId)
-    const schedule = prepareWeeklySchedule({ ...input, locationId, slots: weeklySlots ?? existingRules.map(rule => ({ weekday: rule.weekday, start_time: rule.start_time, end_time: rule.end_time, interval_minutes: rule.interval_minutes })) }, config, location.timezone, existingRules)
-    if (!schedule.rules.length && !oneOffSessions?.length) badRequest('Provide actual weekly times or dated sessions before creating a bookable offering')
-    queries.push({
+    const placement: BatchQuery = {
       query: `INSERT INTO product_locations (organization_id, product_id, location_id, active, published, created_at, updated_at, created_by, updated_by) VALUES (?, ?, ?, 1, 1, ?, ?, ?, ?) ON CONFLICT(product_id,location_id) DO UPDATE SET active=1,published=1,updated_at=excluded.updated_at,updated_by=excluded.updated_by`,
       params: [input.organizationId, input.productId, locationId, input.now, input.now, input.actorId, input.actorId],
-    }, ...schedule.queries)
-    if (!await canScheduleSessions(db, config)) badRequest('Set working hours for the assigned member before adding bookable times')
-    const materialized = prepareSessionMaterialization({ ...input, throughDate: addLocalDays(localNow(location.timezone).date, PUBLIC_BOOKING_WINDOW_DAYS) }, config, schedule.rules, new Map([[location.id, location]]), true)
-    if (materialized.skipped.some(skipped => skipped.reason !== 'location_closed')) throw new HTTPError({ statusCode: 400, statusMessage: 'Some requested local times are ambiguous or do not exist; choose their actual times before creating the offering', data: { skipped: materialized.skipped } })
-    queries.push(...materialized.queries)
-    let futureSessions = materialized.sessions.filter(session => session.starts_at > input.now).length
-    for (const session of oneOffSessions ?? []) {
-      const instants = sessionInstants(session.starts_at, session.ends_at)
-      if (instants.starts_at <= input.now) badRequest('New dated sessions must start in the future')
-      const capacity = session.capacity === undefined ? config.default_capacity : session.capacity
-      if (capacity !== null && (!Number.isSafeInteger(capacity) || capacity <= 0)) badRequest('Dated sessions need positive capacity or explicit null for unlimited places')
-      if (!locationAllowsBooking(instants, location)) badRequest('A dated session is outside opening hours or during a closure')
-      queries.push(manualSessionQuery({ ...input, location }, { id: crypto.randomUUID(), ...instants, capacity }))
-      futureSessions += 1
     }
-    if (!futureSessions) badRequest('Provide at least one future session before creating a bookable offering')
+    if (kind === 'table') {
+      // A table's open time is its location's hours; times of its own would be a second schedule.
+      if (weeklySlots?.length || oneOffSessions?.length) badRequest(TABLE_HOURS_ONLY)
+      if (location.opening_hours === null) badRequest('Set this location\'s opening hours before taking table bookings: tables are seated through them')
+      queries.push(placement, ...tableSeatingQueries(config, location, input))
+      if (!tableSeatings(config, location, input.now).length) badRequest('This location\'s opening hours leave no seating in the next weeks; change its hours or the table\'s length and interval')
+    } else {
+      const existingRules = input.productInSameBatch ? [] : (await listAvailabilityRules(db, input.organizationId, input.productId)).filter(rule => rule.location_id === locationId)
+      const schedule = prepareWeeklySchedule({ ...input, locationId, slots: weeklySlots ?? existingRules.map(rule => ({ weekday: rule.weekday, start_time: rule.start_time })) }, config, location.timezone, existingRules)
+      if (!schedule.rules.length && !oneOffSessions?.length) badRequest('Provide actual weekly times or dated sessions before creating a bookable offering')
+      queries.push(placement, ...schedule.queries)
+      if (!await canScheduleSessions(db, config)) badRequest('Set working hours for the assigned member before adding bookable times')
+      const materialized = prepareSessionMaterialization({ ...input, throughDate: addLocalDays(localNow(location.timezone).date, PUBLIC_BOOKING_WINDOW_DAYS) }, config, schedule.rules, new Map([[location.id, location]]), true)
+      if (materialized.skipped.some(skipped => skipped.reason !== 'location_closed')) throw new HTTPError({ statusCode: 400, statusMessage: 'Some requested local times are ambiguous or do not exist; choose their actual times before creating the offering', data: { skipped: materialized.skipped } })
+      queries.push(...materialized.queries)
+      let futureSessions = materialized.sessions.filter(session => session.starts_at > input.now).length
+      for (const session of oneOffSessions ?? []) {
+        const instants = sessionInstants(session.starts_at, session.ends_at)
+        if (instants.starts_at <= input.now) badRequest('New dated sessions must start in the future')
+        const capacity = session.capacity === undefined ? config.default_capacity : session.capacity
+        if (capacity !== null && (!Number.isSafeInteger(capacity) || capacity <= 0)) badRequest('Dated sessions need positive capacity or explicit null for unlimited places')
+        if (!locationAllowsBooking(instants, location)) badRequest('A dated session is outside opening hours or during a closure')
+        queries.push(manualSessionQuery({ ...input, location }, { id: crypto.randomUUID(), ...instants, capacity }))
+        futureSessions += 1
+      }
+      if (!futureSessions) badRequest('Provide at least one future session before creating a bookable offering')
+    }
   }
   const bookableFrom = input.now
   // The sessions this batch inserts are not stored yet: their providers come from the configuration.
@@ -1319,7 +1397,7 @@ export async function createSession(db: DbClient, input: {
   }
   const earlier = await replay()
   if (earlier) return earlier
-  await requireOrganizationProduct(db, input)
+  if ((await requireOrganizationProduct(db, input)).kind === 'table') badRequest(TABLE_HOURS_ONLY)
   const config = await requireBookingConfig(db, input.organizationId, input.productId)
   const location = await queryFirst<SessionLocation>(db, 'SELECT id,timezone,status,opening_hours,special_hours FROM business_locations WHERE organization_id=? AND id=?', [input.organizationId, input.locationId])
   if (!location) badRequest('Choose a location in this business')
@@ -1360,6 +1438,7 @@ export async function updateSession(db: DbClient, input: {
     FROM product_sessions WHERE organization_id = ? AND id = ? AND (? IS NULL OR product_id=?)
   `, [input.organizationId, input.sessionId, input.productId ?? null, input.productId ?? null])
   if (!session) throw new HTTPError({ statusCode: 404, statusMessage: 'Session not found' })
+  if ((await requireBookingConfig(db, input.organizationId, session.product_id)).seating_interval_minutes !== null) badRequest(TABLE_HOURS_ONLY)
 
   if (input.expectedUpdatedAt !== undefined && input.expectedUpdatedAt !== session.updated_at) throw new HTTPError({ statusCode: 409, statusMessage: 'This session changed; read its current state before editing' })
   if (input.status !== undefined && !(PRODUCT_SESSION_STATUSES as readonly string[]).includes(input.status)) badRequest('Invalid session status')

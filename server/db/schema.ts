@@ -802,6 +802,12 @@ export const product_booking_configs = sqliteTable("product_booking_configs", {
 	// table rebuild D1 cannot run under its foreign keys.
 	unit: text().notNull(),
 	duration_minutes: integer(),
+	// A table's seatings: a start every this many minutes through each of its
+	// location's open periods, as long as duration_minutes still fits before
+	// the period closes. The location's opening and special hours are a
+	// table's only open time (server/utils/availability.ts tableSeatings);
+	// null for every other product.
+	seating_interval_minutes: integer(),
 	// Seats per session; for nights, the most guests the home sleeps.
 	default_capacity: integer(),
 	confirmation_mode: text().default("instant").notNull(),
@@ -859,6 +865,7 @@ export const product_booking_configs = sqliteTable("product_booking_configs", {
 	// so a rule can never attach to another tenant's Product.
 	unique("product_booking_configs_org_product_unique").on(table.organization_id, table.product_id),
 	check("product_booking_configs_duration_check", sql`duration_minutes IS NULL OR duration_minutes > 0`),
+	check("product_booking_configs_seating_interval_check", sql`seating_interval_minutes IS NULL OR (seating_interval_minutes BETWEEN 5 AND 1440 AND unit = 'slot' AND held_online = 0)`),
 	check("product_booking_configs_capacity_check", sql`default_capacity IS NULL OR default_capacity >= 0`),
 	check("product_booking_configs_confirmation_check", sql`confirmation_mode IN ('instant', 'review')`),
 	check("product_booking_configs_scheduling_mode_check", sql`scheduling_mode IN ('business', 'provider')`),
@@ -906,14 +913,9 @@ export const product_availability_rules = sqliteTable("product_availability_rule
 	timezone: text().notNull(),
 	// 0 = Sunday .. 6 = Saturday.
 	weekday: integer().notNull(),
-	// Local wall-clock 'HH:MM'.
+	// Local wall-clock 'HH:MM'. A table has no rules: its seatings follow its
+	// location's hours (product_booking_configs.seating_interval_minutes).
 	start_time: text().notNull(),
-	// A repeating slot: start_time, then every interval_minutes until the last
-	// start at or before end_time. Both null is a single start time, which is
-	// what a class is. A restaurant's tables are one row per service period
-	// instead of one per seating.
-	end_time: text(),
-	interval_minutes: integer(),
 	interval_weeks: integer().default(1).notNull(),
 	effective_from_date: text(),
 	effective_until_date: text(),
@@ -934,9 +936,6 @@ export const product_availability_rules = sqliteTable("product_availability_rule
 	index("product_availability_rules_product_idx").on(table.product_id, table.weekday, table.start_time),
 	check("product_availability_rules_weekday_check", sql`weekday BETWEEN 0 AND 6`),
 	check("product_availability_rules_start_time_check", sql`start_time GLOB '[0-2][0-9]:[0-5][0-9]' AND start_time < '24:00'`),
-	// end_time and interval_minutes are one feature: neither means anything
-	// alone, and a repeat that ends before it starts has no occurrences.
-	check("product_availability_rules_repeat_check", sql`(end_time IS NULL) = (interval_minutes IS NULL) AND (end_time IS NULL OR (end_time GLOB '[0-2][0-9]:[0-5][0-9]' AND end_time < '24:00' AND end_time > start_time)) AND (interval_minutes IS NULL OR interval_minutes > 0)`),
 	check("product_availability_rules_interval_check", sql`interval_weeks >= 1`),
 	// A cadence longer than a week has to say from when, or "every other
 	// Saturday" means a different Saturday depending on the day generation

@@ -243,9 +243,12 @@ article bodies, or upload URLs.
 ## Product bookings, consultations and restaurant tables
 
 Classes, consultations and restaurant tables use Product → Variant → Price → Session → Booking.
-A restaurant's tables are one `table` product per location: its weekly slots repeat a
-seating every `interval_minutes` through each service, `default_capacity` is the guests
-seatable per start time, and a deposit is the variant price with `payment_basis`
+A restaurant's tables are one `table` product per location, seated through that
+location's opening and special hours: a seating at each opening and every
+`seating_interval_minutes` after it while `duration_minutes` still ends by closing.
+`update_location`, `block_dates` and `open_dates` change when tables can be booked;
+the table takes no weekly slots or dated sessions. `default_capacity` is the guests
+seatable per seating, and a deposit is the variant price with `payment_basis`
 `per_booking` and an optional `payment_min_party_size`. Product bookings
 are managed with `list_product_booking_sessions`, `list_product_bookings`,
 `get_product_booking`, `create_product_booking`, `confirm_product_booking`,

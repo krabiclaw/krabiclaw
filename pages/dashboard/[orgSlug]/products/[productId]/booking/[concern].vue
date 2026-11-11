@@ -23,6 +23,15 @@
       <UFormField v-else-if="concern === 'confirmation'" name="confirmation_mode">
         <URadioGroup v-model="p.form.confirmation_mode" :items="[{ value: 'instant', label: 'Confirm automatically' }, { value: 'review', label: 'Review each request' }]" variant="card" />
       </UFormField>
+      <!-- A table is seated from each opening of its location's hours, every interval, while its length still ends by closing. -->
+      <div v-if="concern === 'seatings' || concern === 'enabled' && p.form.bookable && table" class="grid grid-cols-2 gap-4">
+        <UFormField name="booking_duration" label="Table held for (minutes)" required>
+          <UInput v-model="p.form.booking_duration" inputmode="numeric" pattern="[0-9]*" class="w-full" />
+        </UFormField>
+        <UFormField name="seating_interval" label="A seating every (minutes)" required>
+          <UInput v-model="p.form.seating_interval" inputmode="numeric" pattern="[0-9]*" class="w-full" />
+        </UFormField>
+      </div>
       <div v-if="concern === 'assignment' || concern === 'enabled' && p.form.bookable" class="space-y-6">
         <UFormField name="assigned_member_id" :label="p.bookingCopy.value.assigneeLabel">
           <ResponsibilityPicker v-model:member-id="p.form.assigned_member_id" :organization-id="p.organizationId" :disabled="p.saving.value" :people-label="peopleLabel" required profiles />
@@ -72,7 +81,7 @@
 
 <script setup lang="ts">
 import SettingRow from '~/components/dashboard/SettingRow.vue'
-import { productEditorKey, type BookingConcern } from '~/components/dashboard/ProductEditorPage.vue'
+import { productEditorKey, seatingIntervalValid, type BookingConcern } from '~/components/dashboard/ProductEditorPage.vue'
 import OfferCard from '~/components/dashboard/OfferCard.vue'
 import { offer } from '~/shared/offers'
 import ResponsibilityPicker from '~/components/dashboard/ResponsibilityPicker.vue'
@@ -84,12 +93,14 @@ const route = useRoute()
 const level = useRouteLevel()
 const concern = computed(() => String(route.params.concern))
 const legal = computed(() => p.product.value?.kind === 'service')
+const table = computed(() => p.product.value?.kind === 'table')
 const occurrence = computed(() => legal.value ? 'consultation' : 'session')
 const peopleLabel = computed(() => legal.value ? 'Clients' : 'Guests')
 const workingHoursLabel = computed(() => `Book the ${p.bookingCopy.value.assigneeNoun}'s working hours`)
 const settings = computed(() => ({
   enabled: { title: legal.value ? 'Consultation calendar' : 'Booking calendar', lead: `Set up times for ${p.bookingCopy.value.guestsLabelPlural} to book. Removing the calendar deletes its schedule and is only allowed before any bookings. To pause this offering and keep its schedule, use its Website settings.` },
   duration: { title: 'Duration', lead: `How long does each ${occurrence.value} last? Existing appointments keep their saved duration.` },
+  seatings: { title: 'Seatings', lead: 'Tables are seated from each opening in this location’s hours, every interval, while the time a table is held still ends by closing. Unbooked seatings follow a change at once; booked tables keep their time.' },
   capacity: { title: legal.value ? 'Client limit' : 'Guest limit', lead: `How many ${p.bookingCopy.value.guestsLabelPlural} can book the same ${occurrence.value}? Existing appointments keep their saved ${p.bookingCopy.value.guestLabel} limit.` },
   notice: { title: 'Advance notice', lead: `How much notice do you need before a ${occurrence.value}? ${peopleLabel.value} can’t book or cancel online once it starts sooner than this, and you can’t move a booking into that time. Free cancellation closes at least 24 hours before either way.` },
   confirmation: { title: 'Confirmation', lead: `Confirm ${legal.value ? 'consultations' : 'bookings'} as soon as ${p.bookingCopy.value.guestsLabelPlural} ${legal.value ? 'request a time' : 'reserve'}, or review each request before confirming.` },
@@ -124,7 +135,8 @@ const unpublishedHost = computed(() => members.value?.members.find(member => mem
 const setting = computed(() => settings.value[concern.value as keyof typeof settings.value] ?? { title: '', lead: '' })
 watchEffect(() => {
   if (level.mode.value === 'yield') return
-  if ((concern.value === 'location' && p.locationId.value && !['experience', 'service'].includes(p.product.value?.kind ?? '')) || !(concern.value in settings.value) || (concern.value !== 'enabled' && p.product.value && !p.loadError.value && !p.product.value.booking)) showError(createError({ statusCode: 404, statusMessage: 'Page not found' }))
+  // A table's length is set with its seating interval; every other offering sets a duration alone.
+  if ((concern.value === 'seatings' && p.product.value && !table.value) || (concern.value === 'duration' && table.value) || (concern.value === 'location' && p.locationId.value && !['experience', 'service'].includes(p.product.value?.kind ?? '')) || !(concern.value in settings.value) || (concern.value !== 'enabled' && p.product.value && !p.loadError.value && !p.product.value.booking)) showError(createError({ statusCode: 404, statusMessage: 'Page not found' }))
 })
 const capacityOptions = computed(() => [{ value: 'one', label: `One ${p.bookingCopy.value.guestLabel}` }, { value: 'group', label: `A group of ${p.bookingCopy.value.guestsLabelPlural}` }, { value: 'unlimited', label: `No ${p.bookingCopy.value.guestLabel} limit` }, { value: 'closed', label: `Closed to new ${p.bookingCopy.value.guestsLabelPlural}` }])
 const capacityChoice = ref('unlimited')
@@ -144,7 +156,9 @@ watch(capacityChoice, choice => {
   else if (Number(p.form.booking_capacity) < 2) p.form.booking_capacity = ''
 })
 const valid = computed(() => {
-  if (concern.value === 'assignment' || concern.value === 'enabled' && p.form.bookable) return membersStatus.value === 'success' && Boolean(p.form.assigned_member_id) && (!legal.value || p.form.scheduling_mode === 'provider')
+  const seated = !table.value || (Number.isSafeInteger(Number(p.form.booking_duration)) && Number(p.form.booking_duration) > 0 && seatingIntervalValid(p.form.seating_interval))
+  if (concern.value === 'seatings') return seated
+  if (concern.value === 'assignment' || concern.value === 'enabled' && p.form.bookable) return membersStatus.value === 'success' && Boolean(p.form.assigned_member_id) && (!legal.value || p.form.scheduling_mode === 'provider') && (concern.value !== 'enabled' || seated)
   if (concern.value === 'duration') return Number.isSafeInteger(Number(p.form.booking_duration)) && Number(p.form.booking_duration) > 0
   if (concern.value === 'capacity') return capacityChoice.value !== 'group' || (Number.isSafeInteger(Number(p.form.booking_capacity)) && Number(p.form.booking_capacity) >= 2)
   if (concern.value === 'location') return !p.form.held_online || p.form.scheduling_mode === 'provider'

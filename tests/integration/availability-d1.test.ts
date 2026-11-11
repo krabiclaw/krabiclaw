@@ -13,7 +13,6 @@ import {
   claimSessionCapacity,
   listSessions,
   materializeSessions,
-  ruleStartTimes,
   sessionMoveQuery,
   updateSession,
 } from '../../server/utils/availability.ts'
@@ -22,6 +21,8 @@ import { executeGuestThreadOperation } from '../../server/domain/guest-threads/o
 import { appendMessage } from '../../server/domain/conversations.ts'
 import { conversationTaskQueries } from '../../server/domain/guest-threads/repository.ts'
 import { listDashboardLocations } from '../../server/utils/dashboard-context.ts'
+import { updateLocation } from '../../server/utils/location-management.ts'
+import { listPublicBookingSessions } from '../../server/utils/public-session-booking.ts'
 import { createProduct, getProduct, removeProductLocation, updateProduct } from '../../server/utils/product-management.ts'
 import { occurrenceKey } from '../../shared/bookings.ts'
 import { addLocalDays, formatTimestamp, localDateTimeToInstant, localNow } from '../../utils/timezone.ts'
@@ -41,7 +42,7 @@ async function boot() {
     name: 'availability-proof', compatibilityDate: '2024-11-01',
     manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export class Hub { fetch() { return new Response(null, { status: 204 }) } } export default { fetch() { return new Response("ok") } }' } } },
     exports: { Hub: { type: 'durable-object', storage: 'sqlite' } },
-    env: { DB: { type: 'd1' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'availability-proof', exportName: 'Hub' } },
+    env: { DB: { type: 'd1' }, ORGANIZATION_CACHE: { type: 'kv' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'availability-proof', exportName: 'Hub' } },
   } }] })
   const db = await runtime.getD1Database('DB')
   const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
@@ -82,41 +83,102 @@ function addRule(db: D1Database, id: string, over: Partial<{ weekday: number; st
       over.start_time ?? '14:00', ACTOR, ACTOR).run()
 }
 
-test('a repeating weekly time puts a session on every interval through its last start, inside the place\'s hours, once', { timeout: 120_000 }, async () => {
+test('a weekly time puts a session on each of its days inside the place\'s hours, once', { timeout: 120_000 }, async () => {
   const { runtime, db, env } = await boot()
   try {
-    // The rule's own start times: its start, then every interval through its end; a single time is itself.
-    assert.deepEqual(ruleStartTimes({ start_time: '16:00', end_time: '20:30', interval_minutes: 30 }), ['16:00', '16:30', '17:00', '17:30', '18:00', '18:30', '19:00', '19:30', '20:00', '20:30'])
-    assert.deepEqual(ruleStartTimes({ start_time: '17:00', end_time: '17:40', interval_minutes: 15 }), ['17:00', '17:15', '17:30'])
-    assert.deepEqual(ruleStartTimes({ start_time: '10:00', end_time: null, interval_minutes: null }), ['10:00'])
     // The studio is open 17:00–21:00 every day; a two-hour session must fit inside.
     await db.prepare('UPDATE business_locations SET opening_hours = ? WHERE id = ?')
       .bind(JSON.stringify({ periods: [0, 1, 2, 3, 4, 5, 6].map(day => ({ open: { day, hour: 17, minute: 0 }, close: { day, hour: 21, minute: 0 } })) }), LOCATION).run()
-    const slots = [0, 1, 2, 3, 4, 5, 6].map(weekday => ({ weekday, start_time: '16:00', end_time: '20:30', interval_minutes: 30 }))
-    await assert.rejects(replaceWeeklySchedule(db, { organizationId: ORG, productId: PRODUCT, locationId: LOCATION, actorId: ACTOR, slots: [{ weekday: 1, start_time: '16:00', end_time: '20:30' }] }), /end_time and interval_minutes are given together/)
-    await assert.rejects(replaceWeeklySchedule(db, { organizationId: ORG, productId: PRODUCT, locationId: LOCATION, actorId: ACTOR, slots: [{ weekday: 1, start_time: '16:00', end_time: '15:00', interval_minutes: 30 }] }), /end_time must be after start_time/)
+    await assert.rejects(replaceWeeklySchedule(db, { organizationId: ORG, productId: PRODUCT, locationId: LOCATION, actorId: ACTOR, slots: [{ weekday: 1, start_time: '16:00', end_time: '20:30', interval_minutes: 30 }] }), /slots support weekday and start_time/)
+    const slots = [0, 1, 2, 3, 4, 5, 6].flatMap(weekday => ['16:00', '17:00', '18:30', '19:30'].map(start_time => ({ weekday, start_time })))
     const saved = await replaceWeeklySchedule(db, { organizationId: ORG, productId: PRODUCT, locationId: LOCATION, actorId: ACTOR, slots })
-    assert.equal(saved.rules.length, 7, 'one rule per weekday, not one per seating')
+    assert.equal(saved.rules.length, 28)
     assert.ok(saved.sessions.skipped.length > 0 && saved.sessions.skipped.every(skip => skip.reason === 'location_closed'), 'starts the hours cannot hold are skipped, by name')
-    const rules = (await db.prepare('SELECT weekday, start_time, end_time, interval_minutes FROM product_availability_rules WHERE product_id = ? ORDER BY weekday').bind(PRODUCT).all()).results
-    assert.deepEqual(rules[1], { weekday: 1, start_time: '16:00', end_time: '20:30', interval_minutes: 30 })
 
     const day = addLocalDays(localNow('Asia/Bangkok').date, 3)
     const window = { fromInstant: localDateTimeToInstant(day, '00:00', 'Asia/Bangkok', 'compatible').toISOString(), toInstant: localDateTimeToInstant(addLocalDays(day, 1), '00:00', 'Asia/Bangkok', 'compatible').toISOString() }
     const local = (instant: string) => formatTimestamp(instant, 'en', 'Asia/Bangkok', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
     const onDay = await listSessions(db, { env, organizationId: ORG, productId: PRODUCT, ...window })
-    // 16:00 and 16:30 start before opening; 19:30 onwards would end after closing.
+    // 16:00 starts before opening; 19:30 would end after closing.
     assert.deepEqual(onDay.map(session => [local(session.starts_at), local(session.ends_at), session.capacity, session.remaining]),
-      [['17:00', '19:00', 10, 10], ['17:30', '19:30', 10, 10], ['18:00', '20:00', 10, 10], ['18:30', '20:30', 10, 10], ['19:00', '21:00', 10, 10]])
+      [['17:00', '19:00', 10, 10], ['18:30', '20:30', 10, 10]])
 
     // Running generation again over the same window makes nothing new.
     const again = await materializeSessions(db, { organizationId: ORG, productId: PRODUCT, throughDate: addLocalDays(localNow('Asia/Bangkok').date, 31), actorId: ACTOR })
     assert.equal(again.created, 0)
-    assert.equal((await listSessions(db, { env, organizationId: ORG, productId: PRODUCT, ...window })).length, 5)
+    assert.equal((await listSessions(db, { env, organizationId: ORG, productId: PRODUCT, ...window })).length, 2)
 
-    // A dated closure takes the day's seatings off sale without deleting them.
+    // A dated closure takes the day's sessions off sale without deleting them.
     await db.prepare('UPDATE business_locations SET special_hours = ? WHERE id = ?').bind(JSON.stringify([{ kind: 'closure', starts_on: day, ends_on: day, note: null }]), LOCATION).run()
-    assert.deepEqual((await listSessions(db, { env, organizationId: ORG, productId: PRODUCT, ...window })).map(session => [session.remaining, session.is_full]), Array(5).fill([0, true]))
+    assert.deepEqual((await listSessions(db, { env, organizationId: ORG, productId: PRODUCT, ...window })).map(session => [session.remaining, session.is_full]), Array(2).fill([0, true]))
+  } finally {
+    await runtime.dispose()
+  }
+})
+
+test('a table is seated through its location\'s current hours: wider hours and an opened day add seatings, closing cancels the unbooked ones', { timeout: 120_000 }, async () => {
+  const { runtime, db, env } = await boot()
+  try {
+    const ZONE = 'Asia/Bangkok'
+    await db.prepare("INSERT INTO member (id, organizationId, userId, role) VALUES ('member-actor', ?, ?, 'owner')").bind(ORG, ACTOR).run()
+    const hours = (close: number) => ({ periods: [0, 2, 3, 4, 5, 6].map(day => ({ open: { day, hour: 17, minute: 0 }, close: { day, hour: close, minute: 0 } })) })
+    // The dining room opens Tuesday to Sunday, 17:00–21:00; Monday is its closed day. Bangkok keeps no daylight saving.
+    assert.equal((await updateLocation(db, ORG, LOCATION, { opening_hours: hours(21) }, ACTOR, env)).status, 200)
+    const tables = await createProduct(db, {
+      env, organizationId: ORG, actor: { actorId: ACTOR }, publication: { published: true },
+      product: { kind: 'table', name: 'Dining room', variants: [{ name: 'Table', prices: [{ unit_amount: 0, currency: 'THB', type: 'one_time' }] }] },
+      booking: { env, data: { location_id: LOCATION, duration_minutes: 90, seating_interval_minutes: 30, default_capacity: 20, confirmation_mode: 'instant', scheduling_mode: 'business', assigned_member_id: 'class-host' } },
+    })
+    // A table has no weekly times of its own: its location's hours are its one schedule.
+    assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM product_availability_rules WHERE product_id = ?').bind(tables.id).first<{ n: number }>())!.n, 0)
+    await assert.rejects(replaceWeeklySchedule(db, { organizationId: ORG, productId: tables.id, locationId: LOCATION, actorId: ACTOR, slots: [{ weekday: 1, start_time: '12:00' }] }), /seated through its location's opening hours/)
+
+    // What a guest is offered, read the way the booking page reads it: local "date time" of each open seating.
+    const local = (instant: string) => new Intl.DateTimeFormat('en-CA', { timeZone: ZONE, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(instant)).replace(',', '')
+    const offered = async (date: string) => (await listPublicBookingSessions(db, ORG, tables.slug, env)).sessions
+      .filter(session => local(session.starts_at).startsWith(date)).map(session => [local(session.starts_at).slice(11), session.remaining])
+    let monday = addLocalDays(localNow(ZONE).date, 2)
+    while (new Date(`${monday}T00:00:00Z`).getUTCDay() !== 1) monday = addLocalDays(monday, 1)
+    const tuesday = addLocalDays(monday, 1)
+    const wednesday = addLocalDays(monday, 2)
+    const evening = (until: string) => ['17:00', '17:30', '18:00', '18:30', '19:00', '19:30', '20:00', '20:30'].filter(time => time <= until).map(time => [time, 20])
+    // A 90-minute table every half hour that still ends by closing: the last seating is 19:30.
+    assert.deepEqual(await offered(tuesday), evening('19:30'))
+    assert.deepEqual(await offered(monday), [])
+
+    // A party of four holds Tuesday's 19:30 table.
+    const booked = await db.prepare('SELECT id FROM product_sessions WHERE product_id = ? AND starts_at = ?').bind(tables.id, localDateTimeToInstant(tuesday, '19:30', ZONE, 'reject').toISOString()).first<{ id: string }>()
+    assert(booked)
+    await db.prepare(`INSERT INTO bookings (id, organization_id, product_id, product_session_id, product_variant_id, location_id, starts_at, ends_at, timezone, party_size, policy_json, status)
+      SELECT 'tuesday-party', organization_id, product_id, id, ?, location_id, starts_at, ends_at, timezone, 4, ?, 'confirmed' FROM product_sessions WHERE id = ?`)
+      .bind(tables.variants[0]!.id, OPEN_TERMS_JSON, booked.id).run()
+
+    // Staying open until 22:00 adds the 20:00 and 20:30 seatings.
+    assert.equal((await updateLocation(db, ORG, LOCATION, { opening_hours: hours(22) }, ACTOR, env)).status, 200)
+    assert.deepEqual(await offered(wednesday), evening('20:30'))
+    assert.deepEqual(await offered(tuesday), evening('20:30').map(([time, seats]) => [time, time === '19:30' ? 16 : seats]))
+
+    // Special hours opening the closed Monday for lunch seat tables that day, and no other.
+    assert.equal((await updateLocation(db, ORG, LOCATION, { special_hours: [{ kind: 'hours', date: monday, periods: [{ open_time: '12:00', close_time: '14:00', close_day_offset: 0 }], note: 'Holiday lunch' }] }, ACTOR, env)).status, 200)
+    assert.deepEqual(await offered(monday), [['12:00', 20], ['12:30', 20]])
+    assert.deepEqual(await offered(addLocalDays(monday, 7)), [])
+
+    // Closing Tuesday cancels its unbooked seatings; the booked table keeps its time and is no longer offered.
+    assert.equal((await updateLocation(db, ORG, LOCATION, { special_hours: [
+      { kind: 'hours', date: monday, periods: [{ open_time: '12:00', close_time: '14:00', close_day_offset: 0 }], note: 'Holiday lunch' },
+      { kind: 'closure', starts_on: tuesday, ends_on: tuesday, note: 'Private event' },
+    ] }, ACTOR, env)).status, 200)
+    const onTuesday = (await db.prepare('SELECT starts_at, status FROM product_sessions WHERE product_id = ? AND starts_at >= ? AND starts_at < ? ORDER BY starts_at')
+      .bind(tables.id, localDateTimeToInstant(tuesday, '00:00', ZONE, 'reject').toISOString(), localDateTimeToInstant(wednesday, '00:00', ZONE, 'reject').toISOString()).all<{ starts_at: string; status: string }>()).results
+    assert.deepEqual(onTuesday.map(row => [local(row.starts_at).slice(11), row.status]), evening('20:30').map(([time]) => [time, time === '19:30' ? 'scheduled' : 'cancelled']))
+    assert.deepEqual((await db.prepare("SELECT status, party_size FROM bookings WHERE id = 'tuesday-party'").first()), { status: 'confirmed', party_size: 4 })
+    assert.deepEqual(await offered(tuesday), [['19:30', 0]])
+
+    // Closing at 21:00 again cancels the late seatings it no longer holds; reopening Tuesday brings its seatings back.
+    assert.equal((await updateLocation(db, ORG, LOCATION, { opening_hours: hours(21), special_hours: null }, ACTOR, env)).status, 200)
+    assert.deepEqual(await offered(wednesday), evening('19:30'))
+    assert.deepEqual(await offered(tuesday), evening('19:30').map(([time, seats]) => [time, time === '19:30' ? 16 : seats]))
+    assert.deepEqual(await offered(monday), [])
   } finally {
     await runtime.dispose()
   }
@@ -423,7 +485,7 @@ test('weekly replacement uses saved timezone, converges and preserves booked occ
   const slots = [{ weekday: 0, start_time: '14:00' }, { weekday: 1, start_time: '10:00' }]
   try {
     await assert.rejects(replaceWeeklySchedule(db, { ...scope, timezone: 'UTC', slots }), /timezone must match/)
-    await assert.rejects(replaceWeeklySchedule(db, { ...scope, slots: [{ weekday: 0, start_time: '14:00', capacity: null }] }), /slots support weekday, start_time, end_time and interval_minutes; set duration and capacity on the product/)
+    await assert.rejects(replaceWeeklySchedule(db, { ...scope, slots: [{ weekday: 0, start_time: '14:00', capacity: null }] }), /slots support weekday and start_time; set duration and capacity on the product/)
     await assert.rejects(replaceWeeklySchedule(db, { ...scope, locationId: 'foreign-location', slots }), /Location not found/)
     await db.prepare(`INSERT INTO business_locations (id, organization_id, slug, title, status, timezone, created_at, updated_at)
       VALUES ('other-studio', ?, 'other-studio', 'Other studio', 'active', 'Asia/Bangkok', ?, ?)`).bind(ORG, NOW, NOW).run()

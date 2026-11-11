@@ -45,11 +45,11 @@ function mcpBookingProvenance(provenance: ThreadPayload['provenance'] | null) {
 }
 
 export const BOOKINGS_TOOLS: McpToolDefinition[] = [
-  organizationTool({ name: 'create_product_session', domain: 'bookings', minimumRole: 'member', description: 'Add a dated time at a location for an existing bookable offering using its actual start and end. Online offerings take no dated sessions: they are booked in their provider\'s working hours.',
+  organizationTool({ name: 'create_product_session', domain: 'bookings', minimumRole: 'member', description: 'Add a dated time at a location for an existing bookable offering using its actual start and end. Online offerings take no dated sessions: they are booked in their provider\'s working hours. A restaurant\'s tables take none either: they are seated through their location\'s opening hours.',
     inputSchema: { product_id: text, location_id: { ...text, description: 'Session location.' }, starts_at: { type: 'string', format: 'date-time' }, ends_at: { type: 'string', format: 'date-time' }, capacity: { type: ['integer', 'null'], minimum: 0 }, idempotency_key: key }, required: ['product_id', 'location_id', 'starts_at', 'ends_at', 'idempotency_key'],
     outputSchema: { type: 'object', properties: { sessions: { type: 'array', items: session, minItems: 1 } }, required: ['sessions'] },
   }),
-  organizationTool({ name: 'update_product_session', domain: 'bookings', minimumRole: 'member', description: 'Edit one session’s time, capacity or state using its current timestamp. Committed bookings or checkout holds prevent time or state changes; use the guest booking-change workflow.',
+  organizationTool({ name: 'update_product_session', domain: 'bookings', minimumRole: 'member', description: 'Edit one session’s time, capacity or state using its current timestamp. Committed bookings or checkout holds prevent time or state changes; use the guest booking-change workflow. A restaurant table\'s seatings are not edited one by one: change its location\'s hours, special hours or closures.',
     inputSchema: { anyOf: [{ required: ['starts_at'] }, { required: ['ends_at'] }, { required: ['capacity'] }, { required: ['status'] }], product_id: text, session_id: text, expected_updated_at: { ...text, description: 'Session updated_at from list_product_booking_sessions.' }, starts_at: { type: 'string', format: 'date-time' }, ends_at: { type: 'string', format: 'date-time' }, capacity: { type: ['integer', 'null'], minimum: 0 }, status: { type: 'string', enum: ['scheduled', 'cancelled'] } }, required: ['product_id', 'session_id', 'expected_updated_at'],
     outputSchema: { type: 'object', properties: { session }, required: ['session'] },
   }),

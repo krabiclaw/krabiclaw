@@ -14,7 +14,9 @@ import { addLocalDays, localDateAt } from '~/utils/timezone'
  * bookable product read "no sessions scheduled" until someone noticed.
  *
  * Generation is idempotent: it inserts the occurrences the rules name inside
- * the public booking window and leaves the rest alone. A bounded page per run,
+ * the public booking window and leaves the rest alone. A table has no rules:
+ * its seatings are its location's opening and special hours, so its run
+ * rolls those forward instead (materializeSessions). A bounded page per run,
  * with the cursor in KV, keeps one tenant's catalogue from starving another's.
  *
  * Every edit to a product's times materializes its whole window as it is

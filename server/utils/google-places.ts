@@ -2,7 +2,7 @@ import { normalizeGoogleOpeningHours, type OpeningHours } from '~/shared/reserva
 import { serializeOpeningHours } from '~/server/utils/location-management'
 import type { D1Database } from '@cloudflare/workers-types'
 import { normalizeGoogleReview, type GoogleReview } from '~/shared/google-review'
-import { executeBatch } from '~/server/db'
+import { executeBatch, queryFirst } from '~/server/db'
 import { parsePostalAddress, type PostalAddress } from '~/utils/postal-address'
 import { toE164 } from '~/utils/phone'
 
@@ -185,7 +185,14 @@ export async function syncPlaceToLocation(
     WHERE id = ? AND organization_id = ? AND google_place_id = ?
   `, params: [place.mapsUrl, place.rating, place.ratingCount, now, now, locationId, organizationId, placeId] }
 
-  const results = await executeBatch(db, [location,
+  // Imported hours are the open time of a table here: its seatings follow them in the same batch.
+  const current = scope === 'import' ? await queryFirst<{ timezone: string; status: string; special_hours: string | null }>(db, 'SELECT timezone, status, special_hours FROM business_locations WHERE id = ? AND organization_id = ?', [locationId, organizationId]) : null
+  const seatings = current ? await (await import('~/server/utils/availability')).prepareLocationTableSeatings(db, {
+    organizationId, actorId: 'system', now,
+    location: { id: locationId, status: current.status, timezone: place.timezone ?? current.timezone, opening_hours: serializeOpeningHours(place.openingHours), special_hours: current.special_hours },
+    guard: { query: 'EXISTS (SELECT 1 FROM business_locations WHERE id = ? AND organization_id = ? AND updated_at = ? AND special_hours IS ?)', params: [locationId, organizationId, now, current.special_hours] },
+  }) : []
+  const results = await executeBatch(db, [location, ...seatings,
     ...staleGoogleReviewDeletes({ organizationId, locationId }, place.reviews),
     ...googleReviewUpserts({ organizationId, locationId }, place.reviews, now)])
   if (Number(results[0]?.meta?.changes ?? 0) !== 1) throw new Error(`Location ${locationId} is not connected to ${placeId}`)
