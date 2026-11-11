@@ -531,7 +531,7 @@ export const SCHEMA_OBJECTS_QUERY = "SELECT type, name, sql FROM sqlite_schema W
  * @typedef {{ table: string, source_rows: number, target_rows: number }} TableTransfer
  * @typedef {{ baseline_sha256: string, source_migrations: string[], target_migrations: string[], tables: TableTransfer[], transforms: Array<{ name: string, changes: number, sql_sha256: string }>,
  *   invariants: Array<{ name: string, violations: number, sql_sha256: string }>, payload?: { tables: number, statements: number, delta?: Record<string, number>, left_behind?: Record<string, { changed: string[], deleted: string[] }> },
- *   provider_hours_session_ids: string[], provider_hours_session_source_hashes: Record<string, string>, schema?: Array<{ type: string, name: string, sql: string }> }} TransferManifest
+ *   hours_session_ids: string[], hours_session_source_hashes: Record<string, string>, schema?: Array<{ type: string, name: string, sql: string }> }} TransferManifest
  */
 
 /** Collapse the v26 records on the private copy. The replacement's ledger still applies the native baseline. */
@@ -742,7 +742,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
   const target = new Database(targetPath)
   /** @type {TransferManifest} */
   const manifest = {
-    baseline_sha256: hash(baseSql), source_migrations: [], target_migrations: files, tables: [], transforms: [], invariants: [], provider_hours_session_ids: [], provider_hours_session_source_hashes: {},
+    baseline_sha256: hash(baseSql), source_migrations: [], target_migrations: files, tables: [], transforms: [], invariants: [], hours_session_ids: [], hours_session_source_hashes: {},
   }
   try {
     const hasLedger = source.prepare("SELECT count(*) AS n FROM sqlite_schema WHERE type = 'table' AND name = 'd1_migrations'").get().n === 1
@@ -1267,11 +1267,23 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
       assert(count(target, 'organization_integrations') === integrations.length, 'organization_integrations differs from the connections it maps')
       manifest.transforms.push({ name: 'integrations_json_to_organization_integrations', changes: integrations.length })
     }
-    if (![MIGRATIONS_DIRECTORY, V26_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19'].includes(sourceDirectory)) {
-      const configs = target.prepare('SELECT * FROM product_booking_configs WHERE held_online = 1 ORDER BY product_id').all()
+    if (sourceDirectory !== MIGRATIONS_DIRECTORY) {
+      const rebuildProviderHours = ![V26_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19'].includes(sourceDirectory)
+      const configs = rebuildProviderHours ? target.prepare('SELECT * FROM product_booking_configs WHERE held_online = 1 ORDER BY product_id').all() : []
+      const tables = target.prepare(`SELECT c.*, l.id AS location_id, l.timezone, l.status, l.opening_hours, l.special_hours
+        FROM product_booking_configs c
+        JOIN product_locations pl ON pl.organization_id = c.organization_id AND pl.product_id = c.product_id
+        JOIN business_locations l ON l.organization_id = pl.organization_id AND l.id = pl.location_id
+        WHERE c.seating_interval_minutes IS NOT NULL ORDER BY c.product_id`).all()
+      // The legacy reservation transfer names a booked table session from its
+      // location and start. An old writer may book one before the final delta.
+      const tableSessionId = (locationId, start) => 'table-session-' + locationId + '-' + start
+      const hoursProducts = new Map([
+        ...configs.map(config => [config.product_id, null]),
+        ...tables.map(table => [table.product_id, table.location_id]),
+      ])
       const previousSourceRows = new Map()
-      if (deltaFrom) {
-        const held = new Set(configs.map(config => config.product_id))
+      if (deltaFrom && hoursProducts.size) {
         // These rows were derived on the replacement, never held by the old
         // source. Seed their canonical occurrences before regeneration so the
         // native unique index retains their identities across a final delta.
@@ -1279,50 +1291,56 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
         // visible in the payload audit rather than being restored here.
         const previous = JSON.parse(readFileSync(`${deltaFrom}.manifest.json`, 'utf8'))
         assert(previous.baseline_sha256 === manifest.baseline_sha256, 'The initial transfer was built from another baseline')
-        assert(Array.isArray(previous.provider_hours_session_ids) && previous.provider_hours_session_ids.every(id => typeof id === 'string')
-          && new Set(previous.provider_hours_session_ids).size === previous.provider_hours_session_ids.length,
-        'The initial transfer has no valid provider-hours session inventory; repeat the initial preflight before deriving a delta')
-        assert(previous.provider_hours_session_source_hashes && typeof previous.provider_hours_session_source_hashes === 'object'
-          && !Array.isArray(previous.provider_hours_session_source_hashes) && Object.values(previous.provider_hours_session_source_hashes).every(value => typeof value === 'string' && /^[a-f0-9]{64}$/u.test(value)),
-        'The initial transfer has no valid provider-hours source signatures; repeat the initial preflight before deriving a delta')
+        assert(Array.isArray(previous.hours_session_ids) && previous.hours_session_ids.every(id => typeof id === 'string')
+          && new Set(previous.hours_session_ids).size === previous.hours_session_ids.length,
+        'The initial transfer has no valid hours session inventory; repeat the initial preflight before deriving a delta')
+        assert(previous.hours_session_source_hashes && typeof previous.hours_session_source_hashes === 'object'
+          && !Array.isArray(previous.hours_session_source_hashes) && Object.values(previous.hours_session_source_hashes).every(value => typeof value === 'string' && /^[a-f0-9]{64}$/u.test(value)),
+        'The initial transfer has no valid hours session source signatures; repeat the initial preflight before deriving a delta')
         const earlier = comparisonDatabase(deltaFrom)
         try {
           assert(sameSchema(earlier, target), 'The initial transfer schema differs from the current target')
-          for (const [id, signature] of Object.entries(previous.provider_hours_session_source_hashes)) {
+          for (const [id, signature] of Object.entries(previous.hours_session_source_hashes)) {
             const row = earlier.prepare('SELECT * FROM product_sessions WHERE id = ?').get(id)
-            assert(row, `Initial provider-hours source session is missing: ${id}`)
+            assert(row, `Initial hours source session is missing: ${id}`)
             previousSourceRows.set(id, { row, signature })
           }
           const sessionColumns = columns(target, 'product_sessions')
           const insert = target.prepare(`INSERT INTO product_sessions (${sessionColumns.map(qi).join(',')}) VALUES (${sessionColumns.map(() => '?').join(',')})`)
-          const sourceOccurrence = target.prepare('SELECT id FROM product_sessions WHERE product_id = ? AND starts_at = ? AND location_id IS NULL LIMIT 1')
+          const sourceOccurrence = target.prepare('SELECT id FROM product_sessions WHERE product_id = ? AND starts_at = ? AND location_id IS ? LIMIT 1')
           let retained = 0
           target.transaction(() => {
-            for (const id of previous.provider_hours_session_ids) {
+            for (const id of previous.hours_session_ids) {
               const row = earlier.prepare('SELECT * FROM product_sessions WHERE id = ?').get(id)
-              assert(row && row.location_id === null && row.source_occurrence_key?.startsWith('hours:')
-                && row.source_occurrence_key.endsWith(':' + row.starts_at), `Invalid initial provider-hours session: ${id}`)
-              if (!held.has(row.product_id)) continue
-              const occupied = sourceOccurrence.get(row.product_id, row.starts_at)
+              assert(row && row.source_occurrence_key?.startsWith('hours:')
+                && row.source_occurrence_key.endsWith(':' + row.starts_at), `Invalid initial hours session: ${id}`)
+              if (hoursProducts.get(row.product_id) !== row.location_id) continue
+              const occupied = sourceOccurrence.get(row.product_id, row.starts_at, row.location_id)
+              if (row.location_id !== null && occupied?.id === row.id && row.id === tableSessionId(row.location_id, row.starts_at)) continue
               assert(!occupied, `Source session ${occupied?.id} occupies initial derived session ${id}; explicitly reconcile this occurrence before a creations-only delta. No replacement rows were overwritten.`)
               try { insert.run(...sessionColumns.map(name => row[name])) }
-              catch (cause) { throw new Error(`Retaining provider-hours session ${id}: ${cause.message}`, { cause }) }
+              catch (cause) { throw new Error(`Retaining hours session ${id}: ${cause.message}`, { cause }) }
               retained++
             }
           })()
-          manifest.transforms.push({ name: 'provider_hours_session_identities_retained', changes: retained })
+          manifest.transforms.push({ name: 'hours_session_identities_retained', changes: retained })
         } finally { earlier.close() }
       }
-      if (configs.length) {
-        const { prepareProviderHoursSessions } = await import('../server/utils/availability.ts')
+      if (hoursProducts.size) {
+        const { prepareProviderHoursSessions, tableSeatingQueries } = await import('../server/utils/availability.ts')
         const db = drizzle(target)
         const before = new Map(target.prepare('SELECT * FROM product_sessions').all().map(row => [row.id, row]))
         const now = new Date().toISOString()
         const queries = []
         for (const config of configs) queries.push(...await prepareProviderHoursSessions(db, config, { actorId: 'system', now }))
+        for (const table of tables) {
+          const { location_id: id, timezone, status, opening_hours, special_hours } = table
+          queries.push(...tableSeatingQueries(table, { id, timezone, status, opening_hours, special_hours },
+            { actorId: 'system', now, sessionIdForStart: start => tableSessionId(id, start) }))
+        }
         const changes = target.transaction(() => queries.reduce((total, { query, params }) => {
           try { return total + target.prepare(query).run(...params).changes }
-          catch (cause) { throw new Error(`Generating provider-hours sessions: ${cause.message}`, { cause }) }
+          catch (cause) { throw new Error(`Generating booking sessions from hours: ${cause.message}`, { cause }) }
         }, 0))()
         const sourceSessions = new Map(source.prepare('SELECT * FROM product_sessions').all().map(row => [row.id, hash(JSON.stringify(row))]))
         const sessions = target.prepare('SELECT * FROM product_sessions ORDER BY id').all()
@@ -1342,12 +1360,12 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
               row.updated_at = previous.row.updated_at
               row.updated_by = previous.row.updated_by
             }
-            if (JSON.stringify(row) !== JSON.stringify(original)) manifest.provider_hours_session_source_hashes[row.id] = signature
+            if (JSON.stringify(row) !== JSON.stringify(original)) manifest.hours_session_source_hashes[row.id] = signature
           }
         })()
-        manifest.provider_hours_session_ids = sessions.filter(row => !sourceSessions.has(row.id)).map(row => row.id)
+        manifest.hours_session_ids = sessions.filter(row => !sourceSessions.has(row.id)).map(row => row.id)
         const created = sessions.filter(row => !before.has(row.id)).length
-        manifest.transforms.push({ name: 'online_provider_hours_sessions_created', changes: created }, { name: 'online_provider_hours_sessions_updated', changes: changes - created })
+        manifest.transforms.push({ name: 'hours_sessions_created', changes: created }, { name: 'hours_sessions_updated', changes: changes - created })
       }
     }
     manifest.tables = names.map(table => ({ table, source_rows: sourceTables.includes(table) ? count(source, table) : 0, target_rows: count(target, table) }))

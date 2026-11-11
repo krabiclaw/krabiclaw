@@ -414,10 +414,9 @@ UPDATE product_booking_configs SET seating_interval_minutes = 30
  WHERE product_id IN (SELECT id FROM products WHERE kind = 'table' AND organization_id = product_booking_configs.organization_id);
 
 -- A table's sessions keep their times and bookings; they stop naming a rule
--- (product_sessions_rule_scope_fk), and the rules go. The next
--- sessions-materialize run regenerates each table's seatings from its
--- location's hours: unbooked sessions the hours do not give are cancelled,
--- booked ones are left as they are.
+-- (product_sessions_rule_scope_fk), and the rules go. The transfer regenerates
+-- each table's seatings from its location's hours before loading the replacement.
+-- Unbooked sessions outside those hours are cancelled. Booked ones keep their times.
 UPDATE product_sessions SET availability_rule_id = NULL
  WHERE availability_rule_id IN (SELECT r.id FROM product_availability_rules r
    JOIN products p ON p.organization_id = r.organization_id AND p.id = r.product_id WHERE p.kind = 'table');

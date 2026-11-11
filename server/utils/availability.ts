@@ -459,7 +459,7 @@ async function canScheduleSessions(db: DbClient, config: ProductBookingConfigRec
  */
 function hoursSessionQueries(input: {
   organizationId: string; productId: string; locationId: string | null; keyPrefix: string; timezone: string; capacity: number | null
-  slots: Array<{ starts_at: string; ends_at: string }>; actorId: string; now: string; guard?: BatchQuery
+  slots: Array<{ id?: string; starts_at: string; ends_at: string }>; actorId: string; now: string; guard?: BatchQuery
 }): BatchQuery[] {
   const unclaimed = `NOT EXISTS (SELECT 1 FROM bookings b WHERE b.organization_id=product_sessions.organization_id AND b.product_session_id=product_sessions.id)
     AND NOT EXISTS (SELECT 1 FROM payment_checkout_holds h WHERE h.organization_id=product_sessions.organization_id AND h.session_id=product_sessions.id AND h.status='active' AND h.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now'))`
@@ -472,7 +472,7 @@ function hoursSessionQueries(input: {
     params: [input.now, input.actorId, input.organizationId, input.productId, input.locationId, input.now, JSON.stringify(input.slots), ...guard.params!],
   }, {
     query: `INSERT INTO product_sessions (id, organization_id, product_id, location_id, source_occurrence_key, timezone, starts_at, ends_at, capacity, status, created_at, updated_at, created_by, updated_by)
-      SELECT lower(hex(randomblob(16))), ?, ?, ?, ? || json_extract(slot.value, '$.starts_at'), ?, json_extract(slot.value, '$.starts_at'), json_extract(slot.value, '$.ends_at'), ?, 'scheduled', ?, ?, ?, ? FROM json_each(?) slot WHERE (${guard.query})
+      SELECT COALESCE(json_extract(slot.value, '$.id'), lower(hex(randomblob(16)))), ?, ?, ?, ? || json_extract(slot.value, '$.starts_at'), ?, json_extract(slot.value, '$.starts_at'), json_extract(slot.value, '$.ends_at'), ?, 'scheduled', ?, ?, ?, ? FROM json_each(?) slot WHERE (${guard.query})
       ON CONFLICT ${conflict} DO UPDATE SET
         ends_at=excluded.ends_at, source_occurrence_key=excluded.source_occurrence_key, timezone=excluded.timezone, capacity=excluded.capacity,
         status='scheduled', updated_at=excluded.updated_at, updated_by=excluded.updated_by
@@ -557,9 +557,10 @@ export function tableSeatings(config: Pick<ProductBookingConfigRecord, 'duration
 type TableSeatingConfig = Pick<ProductBookingConfigRecord, 'organization_id' | 'product_id' | 'duration_minutes' | 'seating_interval_minutes' | 'default_capacity'>
 
 /** Write a table's seatings as its location's hours give them now. */
-function tableSeatingQueries(config: TableSeatingConfig, location: SessionLocation, input: { actorId: string; now: string; guard?: BatchQuery }): BatchQuery[] {
+export function tableSeatingQueries(config: TableSeatingConfig, location: SessionLocation, input: { actorId: string; now: string; guard?: BatchQuery; sessionIdForStart?: (start: string) => string }): BatchQuery[] {
+  const slots = tableSeatings(config, location, input.now).map(slot => input.sessionIdForStart ? { ...slot, id: input.sessionIdForStart(slot.starts_at) } : slot)
   return hoursSessionQueries({ organizationId: config.organization_id, productId: config.product_id, locationId: location.id, keyPrefix: `hours:${location.id}:`,
-    timezone: location.timezone, capacity: config.default_capacity, slots: tableSeatings(config, location, input.now), actorId: input.actorId, now: input.now, guard: input.guard })
+    timezone: location.timezone, capacity: config.default_capacity, slots, actorId: input.actorId, now: input.now, guard: input.guard })
 }
 
 /** A table product's one location: tables are booked at exactly one. */

@@ -942,6 +942,11 @@ migrations to its private copy, then moves the records through
 `scripts/database-transfers/v26-to-v27.sql`. The new D1 applies the v27
 baseline through its native migration ledger.
 
+The transfer materializes table seatings through each location's opening and
+special hours. Check future seatings before loading the replacement. The staging
+Worker has no session-materialization cron, and the production cron runs hourly.
+A late reservation from v26 keeps the same seating ID in the final delta.
+
 The 2026-11-11 staging preflight preserved 116,742 rows across 98 tables.
 The transfer folded four groups of duplicate provider sessions after checking
 their scope, times, capacity and state. It kept the IDs of their bookings.
