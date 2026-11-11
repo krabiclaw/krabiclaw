@@ -12,7 +12,7 @@ import { notifyPaymentFinancialEvent, reconcilePayoutEvent } from './notificatio
 import { recordPaymentPaid } from '~/server/domain/booking-analytics'
 import { notifyStayBooked, raiseSettledFailures } from '~/server/utils/notifications'
 import { paymentsBillingBasis } from './fx'
-import { deliverPaymentsUsage } from './usage'
+import { deliverPaymentsUsage, paymentUsageEventQuery } from './usage'
 import { isStayPurchase } from './checkout'
 import { turnoverTaskQueries } from '~/server/domain/tasks'
 import { conversationTaskQueries } from '~/server/domain/guest-threads/repository'
@@ -73,7 +73,11 @@ async function settlePaymentIntent(db:DbClient,stripe:Stripe,payment:Payment,rep
     {query:'UPDATE payments SET stripe_charge_id=?,receipt_url=?,surcharge_amount=? WHERE id=?',params:[charge.id,charge.receipt_url,(intent as Stripe.PaymentIntent&{amount_details?:{surcharge?:{amount?:number}}}).amount_details?.surcharge?.amount??0,payment.id]},
     {query:"UPDATE payments SET stripe_payment_intent_id=?,captured_amount=?,tax_amount=?,updated_at=? WHERE id=? AND organization_id=?",params:[intent.id,intent.amount_received,taxAmount,now,payment.id,payment.organization_id]},
     // Usage is billed in the platform's mode only: a demo's test-mode capture on a live platform is never billable volume.
-    ...(Boolean(payment.livemode)===platformLivemode(env)?[{query:"INSERT OR IGNORE INTO payment_usage_events(id,organization_id,payment_id,kind,currency,amount,billing_basis_json,source_id,provider_occurred_at,created_at) VALUES(?,?,?,'captured_volume',?,?,?,?,?,?)",params:[crypto.randomUUID(),payment.organization_id,payment.id,payment.currency,intent.amount_received,JSON.stringify(billingBasis),`capture:${payment.stripe_account_id}:${payment.livemode}:${intent.id}`,new Date(charge.created*1000).toISOString(),now]}]:[]),
+    ...(Boolean(payment.livemode) === platformLivemode(env) ? [paymentUsageEventQuery({
+      organizationId: payment.organization_id, paymentId: payment.id, kind: 'captured_volume', currency: payment.currency,
+      amount: intent.amount_received, billingBasis, sourceId: `capture:${payment.stripe_account_id}:${payment.livemode}:${intent.id}`,
+      occurredAt: new Date(charge.created * 1000).toISOString(), createdAt: now,
+    })] : []),
   ],{operation:'Record authenticated capture and usage'})
   const recorded = await requirePayment(db,payment.organization_id,payment.id)
   // A card offered from the buyer's saved ones existed before this intent did.

@@ -315,7 +315,7 @@ test('automatic Calendar connection recovers a hidden calendar after ambiguous c
   const connection=await readCalendarIntegration(db,'org')
   assert.equal(connection?.calendar_id,'created-calendar')
   assert.equal(connection?.calendar_name,'KrabiClaw')
-  assert.equal(await db.prepare('SELECT * FROM google_calendar_setup').first(),null)
+  assert.equal(await db.prepare("SELECT revision FROM organization_integrations WHERE organization_id = 'org' AND status = 'setting_up'").first(),null)
   await disconnectCalendar(db,'org')
   await connectCalendar(db,'org','linked','token')
   assert.equal((await readCalendarIntegration(db,'org'))?.status,'active')

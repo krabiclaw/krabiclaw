@@ -89,13 +89,6 @@ export function guestVisibleSql(message: string): string {
     OR (${message}.author_kind = 'krabiclaw' AND (${message}.event_name IN ('${SCHEDULED_MESSAGE_EVENT}', '${OPENING_EVENT}', ${GUEST_VISIBLE_EVENTS.map(event => `'${event}'`).join(', ')}))))`
 }
 
-export function isGuestVisible(message: Pick<MessageRow, 'author_kind' | 'channel' | 'event_name'>): boolean {
-  if (message.author_kind === 'guest') return ['web', 'email', 'whatsapp'].includes(message.channel ?? '')
-  if (message.author_kind === 'member') return message.event_name === MEMBER_REPLY_EVENT
-  return message.event_name === SCHEDULED_MESSAGE_EVENT || message.event_name === OPENING_EVENT
-    || (GUEST_VISIBLE_EVENTS as readonly string[]).includes(message.event_name ?? '')
-}
-
 /**
  * Unread, the one statement: the conversation `conversation` has a message
  * from someone other than the viewer that is newer than the viewer's read
@@ -231,8 +224,8 @@ export async function getMessage(db: DbClient, id: string): Promise<MessageRow |
 }
 
 /** A conversation's messages in order. */
-export async function listConversationMessages(db: DbClient, conversationId: string): Promise<MessageRow[]> {
-  return await queryAll<MessageRow>(db, 'SELECT * FROM messages WHERE conversation_id = ? ORDER BY sequence', [conversationId])
+export async function listConversationMessages(db: DbClient, conversationId: string, guestAudience: boolean): Promise<MessageRow[]> {
+  return await queryAll<MessageRow>(db, `SELECT m.* FROM messages m WHERE m.conversation_id = ? ${guestAudience ? `AND ${guestVisibleSql('m')}` : ''} ORDER BY m.sequence`, [conversationId])
 }
 
 /** A message already under this key is this message, or the key was given to a different one. */

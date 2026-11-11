@@ -5,7 +5,7 @@ import { assertConversationAccess, findMessageByDedupeKey, markConversationRead,
 import { archiveConversation, countUnreadConversations, listConversations } from '~/server/domain/guest-threads/repository'
 import { getGuestThreadDetail } from '~/server/domain/guest-threads/detail'
 import { executeGuestThreadOperation, guestReplyDestination, operationDedupeKey } from '~/server/domain/guest-threads/operations'
-import { getGuestRequest } from '~/server/domain/requests'
+import { getGuestRequest, parseGuestRequest } from '~/server/domain/requests'
 import type { InboxThreadKind } from '~/server/domain/guest-threads/types'
 import { memberAccessPrincipal, resolveMemberId, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import { publishConversationAck, publishConversationEvent } from '~/server/cloudflare/guest-inbox-events'
@@ -114,12 +114,11 @@ export const CONVERSATION_TOOLS: McpToolDefinition[] = [
 
 /** A guest conversation as get_conversation returns it. */
 async function guestConversationView(ctx: McpExecutorContext, conversation: ConversationRow) {
-  const { db, organizationId } = ctx.organization
-  const detail = await getGuestThreadDetail(db, conversation.id, organizationId)
-  const request = await getGuestRequest(db, conversation.id, organizationId)
-  if (!detail || !request) throw new HTTPError({ statusCode: 404, message: `Conversation '${conversation.id}' not found in this organization`, data: { code: 'THREAD_NOT_FOUND', field: 'conversation_id' } })
+  const { db, organizationId, userId } = ctx.organization
+  const detail = await getGuestThreadDetail(db, conversation.id, organizationId, { memberUserId: userId })
+  if (!detail) throw new HTTPError({ statusCode: 404, message: `Conversation '${conversation.id}' not found in this organization`, data: { code: 'THREAD_NOT_FOUND', field: 'conversation_id' } })
   // Where send_message would send, by the reply operation's own rule.
-  const destination = await guestReplyDestination(db, request)
+  const destination = await guestReplyDestination(db, parseGuestRequest({ ...conversation }))
   return {
     type: detail.submissionType, needs_reply: detail.needsReply, archived: detail.manuallyArchived, last_message_at: conversation.last_message_at,
     participant_label: detail.participantLabel, reply_channel: destination.channel, reply_not_possible: destination.channel === null ? destination.reason : null,

@@ -1718,16 +1718,16 @@ export const organization_integrations = sqliteTable("organization_integrations"
 	provider: text().$type<typeof INTEGRATION_PROVIDERS[number]>().notNull(),
 	account_id: text().notNull(),
 	// Page id, Instagram professional account id, Discord channel id, GA4 property id or Search Console site URL.
-	target_id: text().notNull(),
+	target_id: text(),
 	// Page name, Instagram username, Discord channel name, GA4 property name or Search Console site URL.
-	target_name: text().notNull(),
+	target_name: text(),
 	// Google Analytics only: the property's web stream, which Zaraz serves.
 	measurement_id: text(),
 	// Search Console only: whether Google confirmed ownership, and the meta tag
 	// KrabiClaw serves while Google still requires it.
 	verified: integer({ mode: "boolean" }),
 	verification_token: text(),
-	status: text({ enum: ["active", "disabled", "error"] }),
+	status: text({ enum: ["setting_up", "active", "disabled", "error"] }),
 	last_error: text(),
 	// A new selection writes a new revision, so a caller holding the old one is refused.
 	revision: text().notNull(),
@@ -1738,10 +1738,10 @@ export const organization_integrations = sqliteTable("organization_integrations"
 	unique("organization_integrations_target_unique").on(table.provider, table.target_id),
 	index("organization_integrations_account_idx").on(table.provider, table.account_id),
 	check("organization_integrations_provider_check", sql`provider IN (${sql.raw(INTEGRATION_PROVIDERS.map(value => `'${value}'`).join(', '))})`),
-	check("organization_integrations_values_check", sql`trim(account_id) <> '' AND trim(target_id) <> '' AND trim(target_name) <> '' AND trim(revision) <> ''`),
+	check("organization_integrations_values_check", sql`trim(account_id) <> '' AND trim(revision) <> '' AND ((status IS 'setting_up' AND target_id IS NULL AND target_name IS NULL) OR (status IS NOT 'setting_up' AND length(trim(target_id)) > 0 AND length(trim(target_name)) > 0)) IS TRUE`),
 	check("organization_integrations_measurement_check", sql`(provider = 'google_analytics') = (measurement_id IS NOT NULL)`),
 	check("organization_integrations_verification_check", sql`(provider = 'google_search_console') = (verified IS NOT NULL) AND (verification_token IS NULL OR provider = 'google_search_console') AND (verified IS NULL OR verified IN (0, 1))`),
-	check("organization_integrations_calendar_check", sql`(provider = 'google_calendar') = (status IS NOT NULL) AND (status IS NULL OR status IN ('active', 'disabled', 'error')) AND (provider = 'google_calendar' OR (status IS NULL AND last_error IS NULL))`),
+	check("organization_integrations_calendar_check", sql`(provider = 'google_calendar') = (status IS NOT NULL) AND (status IS NULL OR status IN ('setting_up', 'active', 'disabled', 'error')) AND (provider = 'google_calendar' OR (status IS NULL AND last_error IS NULL))`),
 	check("organization_integrations_instants_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at`),
 ]);
 
@@ -2497,7 +2497,14 @@ export const stripe_ga4_subscription_intents = sqliteTable("stripe_ga4_subscript
 
 export const usage_events = sqliteTable("usage_events", {
 	id: text().primaryKey(),
-	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" } ),
+	organization_id: text().notNull(),
+	// Application activity cascades with the tenant. Meter events stay with retained Payments records.
+	activity_organization_id: text().generatedAlwaysAs(sql`CASE WHEN provider_occurred_at IS NULL THEN organization_id END`).references(() => organization.id, { onDelete: "cascade" }),
+	payment_id: text().references(() => payments.id, { onDelete: "restrict" }),
+	billing_basis_json: text(),
+	provider_occurred_at: text(),
+	delivery_at: text(),
+	error: text(),
 	resource: text().notNull(),
 	source: text().notNull(),
 	provider: text(),
@@ -2511,9 +2518,14 @@ export const usage_events = sqliteTable("usage_events", {
 }, (table) => [
 	check("usage_events_instants_check", sql`(created_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at)`),
 	check("usage_events_metadata_json_check", sql`metadata_json IS NULL OR (json_valid(metadata_json))`),
-	unique("usage_events_organization_id_idempotency_key_unique").on(table.organization_id, table.idempotency_key),
+	uniqueIndex("usage_events_organization_id_idempotency_key_unique").on(table.organization_id, table.idempotency_key).where(sql`provider_occurred_at IS NULL`),
 	index("usage_events_organization_resource_created_idx").on(table.organization_id, table.resource, table.created_at),
 	index("usage_events_org_created_idx").on(table.created_at),
+	index("usage_events_activity_org_idx").on(table.activity_organization_id),
+	index("usage_events_pending_meter_idx").on(table.organization_id, table.created_at).where(sql`provider_occurred_at IS NOT NULL AND delivery_at IS NULL`),
+	uniqueIndex("usage_events_meter_key_unique").on(table.idempotency_key).where(sql`provider_occurred_at IS NOT NULL`),
+	check("usage_events_meter_check", sql`(provider_occurred_at IS NULL AND payment_id IS NULL AND billing_basis_json IS NULL AND delivery_at IS NULL AND error IS NULL)
+	  OR (provider_occurred_at IS NOT NULL AND resource IN ('captured_volume', 'stripe_cost', 'stripe_cost_adjustment', 'ad_spend') AND length(unit) = 3 AND unit = upper(unit))`),
 ]);
 
 export const user = sqliteTable("user", {
@@ -3132,21 +3144,6 @@ export const payment_disputes = sqliteTable("payment_disputes", {
 
 // Stripe meters rate and invoice usage on the plan subscription. This is only
 // the delivery outbox to them, not a ledger.
-export const payment_usage_events = sqliteTable("payment_usage_events", {
- id: text().primaryKey(),
- organization_id: text().notNull(),
- payment_id: text().references(() => payments.id, { onDelete: "restrict" }),
- kind: text().$type<'captured_volume' | 'stripe_cost' | 'stripe_cost_adjustment' | 'ad_spend'>().notNull(),
- currency: text().notNull(),
- amount: integer().notNull(),
- billing_basis_json: text(),
- source_id: text().notNull().unique(),
- provider_occurred_at: text().notNull(),
- delivery_at: text(),
- error: text(),
- created_at: text().notNull(),
-});
-
 export const payment_authorizations = sqliteTable("payment_authorizations", {
  id: text().primaryKey(),
  organization_id: text().notNull(),
@@ -3222,11 +3219,3 @@ export const member_scheduling = sqliteTable("member_scheduling", {
  foreignKey({ columns: [t.member_id, t.organization_id], foreignColumns: [member.id, member.organizationId] }).onDelete("cascade"),
  check("member_scheduling_hours_check", sql`(${t.timezone} IS NULL AND ${t.weekly_json} IS NULL AND ${t.time_off_json} IS NULL) OR (${t.timezone} IS NOT NULL AND ${t.weekly_json} IS NOT NULL AND ${t.time_off_json} IS NOT NULL)`),
 ]);
-
-// A creation attempt survives an ambiguous provider response. Retry discovers
-// its exact organization marker before it may issue another calendars.insert.
-export const google_calendar_setup = sqliteTable("google_calendar_setup", {
- organization_id: text().primaryKey().references(() => organization.id, { onDelete: "cascade" }),
- account_id: text().notNull(),
- started_at: text().notNull(),
-});

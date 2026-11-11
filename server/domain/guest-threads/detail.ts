@@ -4,7 +4,7 @@ import { d1JsonStringSet, queryAll, queryFirst, type DbClient } from '~/server/d
 import { bookingDay, getGuestRequest, getThreadOperationalRecord, requestSummary, requestActions, stayPreview } from '~/server/domain/requests'
 import { formatOperationalStatusLabel } from './status-labels'
 import { resolveGuestThreadMailbox } from './mailbox'
-import { GUEST_NOTE_EVENT, MIRRORED_EVENT, OPENING_EVENT, SCHEDULED_MESSAGE_EVENT, SUBMISSION_EVENT, isEventMessage, isGuestVisible, listConversationMessages, messageRole, parseMessagePayload, type MessageRow } from '~/server/domain/conversations'
+import { GUEST_NOTE_EVENT, MIRRORED_EVENT, OPENING_EVENT, SCHEDULED_MESSAGE_EVENT, SUBMISSION_EVENT, isEventMessage, listConversationMessages, messageRole, parseMessagePayload, type MessageRow } from '~/server/domain/conversations'
 import { isDeliverySent, isVisibleDeliveryFailure, listThreadDeliveries } from './deliveries'
 import { listMessagePhotos } from './attachments'
 import type { GuestThreadDetailViewModel, GuestThreadEntryDeliveryViewModel, GuestThreadEntryViewModel } from './types'
@@ -48,8 +48,8 @@ export async function getGuestThreadDetail(
     getGuestRequest(db, threadId, organizationId, undefined, audience?.buyerUserId),
     getThreadOperationalRecord(db, threadId),
     queryFirst<{ name: string; vertical: string }>(db, 'SELECT name, vertical FROM organization WHERE id = ?', [organizationId]),
-    listConversationMessages(db, threadId),
-    listThreadDeliveries(db, threadId),
+    listConversationMessages(db, threadId, Boolean(audience)),
+    audience ? [] : listThreadDeliveries(db, threadId),
     queryFirst<{ product_id: string | null }>(db, `SELECT product_id FROM channel_threads WHERE organization_id = ? AND conversation_id = ?
       UNION ALL SELECT b.product_id FROM conversations c JOIN bookings b ON b.id = c.booking_id AND b.organization_id = c.organization_id
         WHERE c.organization_id = ? AND c.id = ? AND b.owner = 'channel' LIMIT 1`, [organizationId, threadId, organizationId, threadId]),
@@ -89,8 +89,7 @@ export async function getGuestThreadDetail(
   ])
   const actorNames = new Map(actorRows.map(row => [row.id, row.name]))
 
-  const visibleEntries = audience ? entryRows.filter(isGuestVisible) : entryRows
-  const entries: GuestThreadEntryViewModel[] = visibleEntries.map(entry => {
+  const entries: GuestThreadEntryViewModel[] = entryRows.map(entry => {
     const payload = parseMessagePayload(entry)
     delete payload.email
     const mirrored = entry.event_name === MIRRORED_EVENT

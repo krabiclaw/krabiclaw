@@ -411,7 +411,7 @@ test('MCP paid booking cancellation and rejection hand off without preparing mon
    await db.prepare("UPDATE payments SET subject_id=?,captured_amount=10000,stripe_payment_intent_id='pi_paid',stripe_charge_id='ch_paid' WHERE id='paid'").bind(booking.bookingId).run()
    await db.prepare("UPDATE payment_checkout_holds SET conversation_id=?,status='converted',converted_booking_id=? WHERE payment_id='paid'").bind(opening.id,booking.bookingId).run()
    const input = { organizationId: ORG, threadId: opening.id, action, actorUserId: 'verified', idempotencyKey: 'same-request', env }
-   const tables = ['bookings', 'conversations', 'messages', 'guest_thread_deliveries', 'payments', 'payment_checkout_holds', 'payment_orders', 'payment_order_lines', 'payment_authorizations', 'payment_refunds', 'payment_usage_events']
+   const tables = ['bookings', 'conversations', 'messages', 'guest_thread_deliveries', 'payments', 'payment_checkout_holds', 'payment_orders', 'payment_order_lines', 'payment_authorizations', 'payment_refunds', 'usage_events']
    const before = await Promise.all(tables.map(async table => (await db.prepare(`SELECT * FROM ${table} ORDER BY id`).all()).results))
    for (let retry = 0; retry < 2; retry++) {
     await assert.rejects(() => executeGuestThreadOperation(db, { ...input, financialWritesAllowed: false }), error => {
@@ -506,14 +506,14 @@ test('MCP financial reads return bounded reports and authenticated detail links 
   await payable(db,'report')
   await db.prepare("UPDATE payments SET captured_amount=10000,refunded_amount=1000,price_snapshot_json=? WHERE id='report'").bind(JSON.stringify({title:'Original consultation',quantity:1,price:{unit_amount:10000,currency:'USD',type:'one_time',tax_behavior:'exclusive',provider_secret:'private-provider-value'},buyer_email:'private-buyer@example.test'})).run()
   await db.prepare("INSERT INTO payment_refunds(id,payment_id,idempotency_key,amount,reason,note,status,error,created_by,created_at,updated_at) VALUES('report-refund','report','private-retry-key',1000,'requested_by_customer','private-guest-note','succeeded','private-refund-diagnostic','other',?,?)").bind(NOW,NOW).run()
-  await db.prepare("INSERT INTO payment_usage_events(id,organization_id,payment_id,kind,currency,amount,source_id,provider_occurred_at,error,created_at) VALUES('report-usage',?,'report','stripe_cost','USD',100,'private-provider-source',?,'private-usage-diagnostic',?)").bind(ORG,NOW,NOW).run()
+  await db.prepare("INSERT INTO usage_events(id,organization_id,payment_id,resource,unit,quantity,idempotency_key,provider_occurred_at,error,created_at,source) VALUES('report-usage',?,'report','stripe_cost','USD',100,'private-provider-source',?,'private-usage-diagnostic',?,'payments')").bind(ORG,NOW,NOW).run()
   await db.prepare("INSERT INTO stripe_connected_accounts(id,organization_id,stripe_account_id,livemode,country,status,created_at,updated_at) VALUES('report-connected',?,'acct_seller',0,'US','ready',?,?)").bind(ORG,NOW,NOW).run()
   const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_URL:'https://proof.example', BETTER_AUTH_SECRET:'local-proof-secret-long-enough-for-auth', NUXT_PUBLIC_PLATFORM_DOMAIN:'https://proof.example', STRIPE_SECRET_KEY:'sk_test_local_boundary' }
   const membership = await resolveOrganizationMembership(env,{organizationId:ORG,userId:'verified'})
   assert(membership)
   const organization: McpOrganizationContext = { env,db,userId:'verified',isPlatformAdmin:false,scopes:['organization:read'],organizationId:ORG,organizationSlug:membership.organizationSlug!,role:'owner',membership }
   const call = (toolName:string,args:Record<string,unknown>={}) => handlePaymentsTools({organization,toolName,args}) as Promise<Record<string,unknown>>
-  const tables = ['payments','payment_checkout_holds','payment_orders','payment_order_lines','payment_authorizations','payment_refunds','payment_usage_events','stripe_connected_accounts']
+  const tables = ['payments','payment_checkout_holds','payment_orders','payment_order_lines','payment_authorizations','payment_refunds','usage_events','stripe_connected_accounts']
   const before = await Promise.all(tables.map(async table => (await db.prepare(`SELECT * FROM ${table} ORDER BY id`).all()).results))
   const listed = await call('list_payments',{from:'2000-01-01T00:00:00.000Z',to:'2099-01-01T00:00:00.000Z'})
   assert.equal(listed.organization_id,ORG)
@@ -561,7 +561,7 @@ test('Stripe cost report replay and correction bill attributable deltas while co
   const csv=(amount:string)=>`fee_transaction_id,incurred_by,currency,amount,tax,incurred_at\nfee1,ch:cost,usd,${amount},0.20,2026-10-01T00:00:00Z\n,ch:cost,usd,0.600000000000000000,0.000000000000000000,2026-10-01T00:00:00Z\n,ch:cost,usd,0.343000000000000000,0.041160000000000000,2026-10-01T00:00:00Z\nfee2,unknown,usd,5.00,0,2026-10-01T00:00:00Z\nfee3,acct_seller,usd,1.00,0,2026-10-01T00:00:00Z\n`
   await ingestStripeFeeReport(db,false,csv('3.00'));await ingestStripeFeeReport(db,false,csv('3.00'));await ingestStripeFeeReport(db,false,csv('2.00'))
   // Stripe leaves fee_transaction_id blank for a card processing fee netted inside the charge, and itemizes below a cent; those rows share one identity, are summed exactly and rounded once (0.60 + 0.38416 = 0.98416 → 98).
-  const events=(await db.prepare("SELECT amount,kind FROM payment_usage_events ORDER BY kind,amount").all()).results
+  const events=(await db.prepare("SELECT quantity AS amount,resource AS kind FROM usage_events WHERE provider_occurred_at IS NOT NULL ORDER BY kind,amount").all()).results
   assert.deepEqual(events,[{amount:98,kind:'stripe_cost'},{amount:320,kind:'stripe_cost'},{amount:-100,kind:'stripe_cost_adjustment'}])
   assert.equal(await db.prepare('SELECT COUNT(*) n FROM payment_cost_snapshots WHERE organization_id IS NULL').first('n'),2)
   assert.equal(await db.prepare("SELECT organization_id FROM payment_cost_snapshots WHERE incurred_by='acct_seller'").first('organization_id'),null)
@@ -951,7 +951,7 @@ test('Payments usage reaches its Stripe meters once, a correction as a negative 
    ['correction',null,'stripe_cost_adjustment','USD',-30,'fee:txn_1:revision:2'],
    ['ads',null,'ad_spend','USD',50000,'google_ads:1234567890:2026-09-30'],
   ] as const
-  await db.batch(events.map(([id,payment,kind,currency,amount,source],index)=>db.prepare('INSERT INTO payment_usage_events(id,organization_id,payment_id,kind,currency,amount,source_id,provider_occurred_at,created_at)VALUES(?,?,?,?,?,?,?,?,?)').bind(id,ORG,payment,kind,currency,amount,source,NOW,new Date(Date.parse(NOW)+index*1000).toISOString())))
+  await db.batch(events.map(([id,payment,kind,currency,amount,source],index)=>db.prepare("INSERT INTO usage_events(id,organization_id,payment_id,resource,unit,quantity,idempotency_key,provider_occurred_at,created_at,source) VALUES(?,?,?,?,?,?,?,?,?,'payments')").bind(id,ORG,payment,kind,currency,amount,source,NOW,new Date(Date.parse(NOW)+index*1000).toISOString())))
   const sent:Array<{event_name:string|null;customer:string|null;value:string|null;identifier:string|null;key:string|null}>=[]
   let answer:'ok'|'unavailable'|'invalid'='unavailable'
   const originalFetch=globalThis.fetch
@@ -969,7 +969,7 @@ test('Payments usage reaches its Stripe meters once, a correction as a negative 
   // Stripe unavailable: every event is sent, each keeps the reason and stays deliverable.
   await assert.rejects(()=>deliverPaymentsUsage(db,env,ORG),/Stripe did not take 4 of 4 usage events.*unavailable at the test boundary/u)
   assert.equal(sent.length,4)
-  assert.equal(await db.prepare("SELECT COUNT(*) n FROM payment_usage_events WHERE delivery_at IS NULL AND error='Meter events are unavailable at the test boundary'").first('n'),4)
+  assert.equal(await db.prepare("SELECT COUNT(*) n FROM usage_events WHERE provider_occurred_at IS NOT NULL AND delivery_at IS NULL AND error='Meter events are unavailable at the test boundary'").first('n'),4)
   // Delivered: each to its meter, the correction negative, the repeat of each under the same identifier and key.
   answer='ok'
   assert.deepEqual(await deliverPaymentsUsage(db,env,ORG),{delivered:4})
@@ -983,15 +983,15 @@ test('Payments usage reaches its Stripe meters once, a correction as a negative 
   assert.equal(sent[4]!.key,sent[4]!.identifier)
   assert.equal(sent[4]!.identifier,`payments:${await tokenHash('capture:billable')}`)
   assert.equal(new Set(sent.slice(4).map(row=>row.identifier)).size,4)
-  assert.equal(await db.prepare('SELECT COUNT(*) n FROM payment_usage_events WHERE delivery_at IS NOT NULL AND error IS NULL').first('n'),4)
+  assert.equal(await db.prepare('SELECT COUNT(*) n FROM usage_events WHERE provider_occurred_at IS NOT NULL AND delivery_at IS NOT NULL AND error IS NULL').first('n'),4)
   assert.equal(await db.prepare("SELECT COUNT(*) n FROM analytics_events WHERE organization_id='platform' AND payload_json->>'$.event_name'='payments_volume_billed' AND payload_json->>'$.properties.volume_minor'=10000").first('n'),1)
   assert.deepEqual(await deliverPaymentsUsage(db,env,ORG),{delivered:0})
   assert.equal(sent.length,8)
   // Stripe refuses one meter outright: that event keeps Stripe’s reason and fails every delivery until Stripe takes it; a later event on another meter is still billed.
   answer='invalid'
-  await db.prepare("INSERT INTO payment_usage_events(id,organization_id,kind,currency,amount,source_id,provider_occurred_at,created_at)VALUES('late',?,'ad_spend','USD',100,'google_ads:1234567890:2026-10-01',?,?),('later',?,'stripe_cost','USD',45,'fee:txn_2:revision:1',?,?)").bind(ORG,NOW,NOW,ORG,NOW,new Date(Date.parse(NOW)+60_000).toISOString()).run()
+  await db.prepare("INSERT INTO usage_events(id,organization_id,resource,unit,quantity,idempotency_key,provider_occurred_at,created_at,source) VALUES('late',?,'ad_spend','USD',100,'google_ads:1234567890:2026-10-01',?,?,'payments'),('later',?,'stripe_cost','USD',45,'fee:txn_2:revision:1',?,?,'payments')").bind(ORG,NOW,NOW,ORG,NOW,new Date(Date.parse(NOW)+60_000).toISOString()).run()
   await assert.rejects(()=>deliverPaymentsUsage(db,env,ORG),/Stripe did not take 1 of 2 usage events.*No active meter/u)
-  assert.deepEqual(await db.prepare("SELECT id,delivery_at IS NOT NULL AS delivered,error FROM payment_usage_events WHERE id IN ('late','later') ORDER BY id").all().then(result=>result.results),[
+  assert.deepEqual(await db.prepare("SELECT id,delivery_at IS NOT NULL AS delivered,error FROM usage_events WHERE id IN ('late','later') ORDER BY id").all().then(result=>result.results),[
    {id:'late',delivered:0,error:'No active meter was found for event_name krabiclaw_ad_spend'},
    {id:'later',delivered:1,error:null},
   ])
@@ -1000,12 +1000,12 @@ test('Payments usage reaches its Stripe meters once, a correction as a negative 
   answer='ok'
   assert.deepEqual(await deliverPaymentsUsage(db,env,ORG),{delivered:1})
   assert.equal(sent.length,12)
-  assert.deepEqual(await db.prepare("SELECT delivery_at IS NOT NULL AS delivered,error FROM payment_usage_events WHERE id='late'").first(),{delivered:1,error:null})
+  assert.deepEqual(await db.prepare("SELECT delivery_at IS NOT NULL AS delivered,error FROM usage_events WHERE id='late'").first(),{delivered:1,error:null})
   // A business with no Stripe customer has nothing to bill usage to: the delivery fails with that reason on the event.
   await db.prepare('UPDATE organization SET "stripeCustomerId"=NULL WHERE id=?').bind(ORG).run()
-  await db.prepare("INSERT INTO payment_usage_events(id,organization_id,kind,currency,amount,source_id,provider_occurred_at,created_at)VALUES('orphaned',?,'ad_spend','USD',100,'google_ads:1234567890:2026-10-02',?,?)").bind(ORG,NOW,NOW).run()
+  await db.prepare("INSERT INTO usage_events(id,organization_id,resource,unit,quantity,idempotency_key,provider_occurred_at,created_at,source) VALUES('orphaned',?,'ad_spend','USD',100,'google_ads:1234567890:2026-10-02',?,?,'payments')").bind(ORG,NOW,NOW).run()
   await assert.rejects(()=>deliverPaymentsUsage(db,env,ORG),/no Stripe customer to bill this usage to/u)
-  assert.deepEqual(await db.prepare("SELECT delivery_at,error FROM payment_usage_events WHERE id='orphaned'").first(),{delivery_at:null,error:'The business has no Stripe customer to bill this usage to'})
+  assert.deepEqual(await db.prepare("SELECT delivery_at,error FROM usage_events WHERE id='orphaned'").first(),{delivery_at:null,error:'The business has no Stripe customer to bill this usage to'})
   assert.equal(sent.length,12)
  }finally{await runtime.dispose()}
 })
@@ -1879,7 +1879,7 @@ test('managed ads keeps MCP creation paused, preserves updates and billing conse
   assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM account WHERE id='ads-linked'").first('n'), 1)
   const runDaily = () => adSpendDailyTask.run({ name: 'marketing:ad-spend-daily', payload: {}, context: { cloudflare: { env } } })
   await assert.rejects(runDaily, /Google Ads API error \(503\)/u)
-  assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM payment_usage_events WHERE kind='ad_spend'").first('n'), 0)
+  assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM usage_events WHERE resource='ad_spend' AND provider_occurred_at IS NOT NULL").first('n'), 0)
   providerUnavailable = false
   assert.deepEqual(await unrecordedAdSpendDays(db, env, ORG), ['2026-10-01', '2026-10-02'])
   await assert.rejects(() => releaseIntegration(env, ORG, 'google-ads'), /Keep Google Ads connected until your prior managed spend has been counted/u)
@@ -1896,7 +1896,7 @@ test('managed ads keeps MCP creation paused, preserves updates and billing conse
   providerUnavailable = false
   deliveryUnavailable = true
   await Promise.all([assert.rejects(runDaily, /Native ingestion unavailable at test boundary/u), assert.rejects(runDaily, /Native ingestion unavailable at test boundary/u)])
-  const captured = (await db.prepare("SELECT id,source_id,amount,provider_occurred_at,delivery_at FROM payment_usage_events WHERE kind='ad_spend' ORDER BY source_id").all()).results
+  const captured = (await db.prepare("SELECT id,idempotency_key AS source_id,quantity AS amount,provider_occurred_at,delivery_at FROM usage_events WHERE resource='ad_spend' AND provider_occurred_at IS NOT NULL ORDER BY idempotency_key").all()).results
   assert.deepEqual(captured.map(({ source_id, amount, provider_occurred_at, delivery_at }) => ({ source_id, amount, provider_occurred_at, delivery_at })), [
    { source_id: 'google_ads:1234567890:2026-10-01', amount: 0, provider_occurred_at: '2026-10-02T03:59:59.999Z', delivery_at: null },
    { source_id: 'google_ads:1234567890:2026-10-02', amount: 1250, provider_occurred_at: '2026-10-03T03:59:59.999Z', delivery_at: null },
@@ -1918,7 +1918,7 @@ test('managed ads keeps MCP creation paused, preserves updates and billing conse
   assert.equal(new Set(zeroSpend.map(row => row.identifier)).size, 1, 'failed and concurrent deliveries preserve the meter event identifier')
   assert.equal(new Set(spend.map(row => row.identifier)).size, 1, 'failed and concurrent deliveries preserve the meter event identifier')
   assert.deepEqual(ingests.slice(-2).map(row => row.value), ['0', '1250'])
-  const delivered = (await db.prepare("SELECT id,delivery_at FROM payment_usage_events WHERE kind='ad_spend' ORDER BY source_id").all()).results
+  const delivered = (await db.prepare("SELECT id,delivery_at FROM usage_events WHERE resource='ad_spend' AND provider_occurred_at IS NOT NULL ORDER BY idempotency_key").all()).results
   assert.deepEqual(delivered.map(row => row.id), captured.map(row => row.id))
   assert.ok(delivered.every(row => row.delivery_at === '2026-10-04T10:00:00.000Z'))
   assert.deepEqual((await runDaily()).result, { billed: 0, skipped: 1 })
@@ -1973,14 +1973,14 @@ test('managed spend follows actual account-local closed days and reporting delay
    assert.deepEqual(await unrecordedAdSpendDays(db, env, ORG, new Date(day.mature), 2), [], 'ending at the final millisecond excludes that day')
    await db.prepare("UPDATE organization_services SET ended_at=? WHERE id='historical'").bind(day.end).run()
    assert.deepEqual(await recordAdSpend(db, env, ORG, day.date), { amount: 100 })
-   assert.deepEqual(await db.prepare('SELECT amount,provider_occurred_at,delivery_at FROM payment_usage_events WHERE source_id=?').bind(`google_ads:1234567890:${day.date}`).first(), { amount: 100, provider_occurred_at: day.occurred, delivery_at: null })
+   assert.deepEqual(await db.prepare('SELECT quantity AS amount,provider_occurred_at,delivery_at FROM usage_events WHERE idempotency_key=? AND provider_occurred_at IS NOT NULL').bind(`google_ads:1234567890:${day.date}`).first(), { amount: 100, provider_occurred_at: day.occurred, delivery_at: null })
    assert.deepEqual(await unrecordedAdSpendDays(db, env, ORG, new Date(day.mature), 2), [])
   }
   for (const invalid of [undefined, 'Not/A-Timezone']) {
    timeZone = invalid
    await assert.rejects(() => unrecordedAdSpendDays(db, env, ORG, new Date('2026-11-03T12:00:00.000Z')), /valid reporting timezone/u)
    await assert.rejects(() => recordAdSpend(db, env, ORG, '2026-11-01'), /valid reporting timezone/u)
-   assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM payment_usage_events WHERE kind='ad_spend'").first('n'), 2)
+   assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM usage_events WHERE resource='ad_spend' AND provider_occurred_at IS NOT NULL").first('n'), 2)
   }
  } finally { await runtime.dispose() }
 })
