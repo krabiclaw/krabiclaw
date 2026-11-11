@@ -11,7 +11,7 @@ import type {
 import { authRequestHeaders, loginAs } from './helpers/auth'
 import { mcpData, mcpRequest } from './helpers/mcp'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
-import { bookTable, openSeating, seededTables, tableSeatings } from './helpers/tables'
+import { bookTable, openSeating, tableSeatings } from './helpers/tables'
 import { seededTenant } from './seed/manifest'
 import { devLoginHeaders, seededSiteHeaders, testBaseUrl } from './test-env'
 import type { TaskPerson, TaskSection } from '../../server/domain/tasks'

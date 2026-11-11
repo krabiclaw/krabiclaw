@@ -272,9 +272,9 @@ const manageOpen = ref(false)
 const isStay = (value: unknown): value is { stay: StayDetail; manage?: boolean } => isRecord(value) && isRecord(value.stay) && typeof value.stay.id === 'string'
   && (value.stay.guest_image_url === null || typeof value.stay.guest_image_url === 'string')
 /** Managers read the whole stay; a member looking after the home reads its turnover. */
-type DashboardStay = { stay: StayDetail; manage: true } | { stay: StayTurnover; manage: false }
+type DashboardStay = { stay: StayDetail; manage: true; can_message_guest: boolean } | { stay: StayTurnover; manage: false }
 const isDashboardStay = (value: unknown): value is DashboardStay => isRecord(value) && isRecord(value.stay) && typeof value.stay.id === 'string'
-  && (value.manage === false || (value.manage === true && isStay(value)))
+  && (value.manage === false || (value.manage === true && typeof value.can_message_guest === 'boolean' && isStay(value)))
 const { data, error, refresh } = await useAsyncData(`${props.personalScope ? 'account' : String(route.params.orgSlug)}-stay:${props.stayId}`, (): Promise<DashboardStay | GuestStay> => props.personalScope
   ? applicationFetch(`/api/account/stays/${encodeURIComponent(props.stayId)}`, { validate: isGuestStay })
   : dashboardApi(`/api/dashboard/stays/${encodeURIComponent(props.stayId)}`, { validate: isDashboardStay }))
@@ -313,10 +313,13 @@ const arrivalTime = computed(() => {
   const local = new Intl.DateTimeFormat('en-GB', { timeZone: value.timezone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(value.starts_at))
   return local === recordHome.value?.check_in_time ? null : formatTime(local, 'en')
 })
-const messagePath = computed(() => detail.value?.conversation_id
-  ? props.personalScope ? `/dashboard/account/messages/${encodeURIComponent(detail.value.conversation_id)}`
-    : `/dashboard/${encodeURIComponent(String(route.params.orgSlug))}/messages/${encodeURIComponent(detail.value.conversation_id)}`
-  : null)
+const messagePath = computed(() => {
+  if (!detail.value?.conversation_id) return null
+  const id = encodeURIComponent(detail.value.conversation_id)
+  if (props.personalScope) return `/dashboard/account/messages/${id}`
+  if (!data.value || !('manage' in data.value) || !data.value.manage || !data.value.can_message_guest) return null
+  return `/dashboard/${encodeURIComponent(String(route.params.orgSlug))}/messages/${id}`
+})
 const callPhone = computed(() => !props.personalScope ? detail.value?.guest_phone ?? null : null)
 const guestAddress = computed(() => home.value?.location?.address ? formatPostalAddress(home.value.location.address) : '')
 const cancellation = computed(() => data.value && 'cancellation' in data.value ? data.value.cancellation : null)

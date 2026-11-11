@@ -10,9 +10,8 @@ import type { Product, PublicProduct } from '../../server/types/products'
 import type { InboxThread } from '../../server/domain/guest-threads/types'
 import type { TaskSection } from '../../server/domain/tasks'
 
-type NotificationRow = { template: string }
-type DeliveryRow = { channel: 'email' | 'whatsapp'; purpose: string; status: string }
-type NotificationState = { notifications: NotificationRow[]; deliveries: DeliveryRow[] }
+type DeliveryRow = { conversation_id: string; channel: 'email' | 'whatsapp'; purpose: string; status: string }
+type NotificationState = { deliveries: DeliveryRow[] }
 const executionHost = new URL(testBaseUrl()).hostname
 const writableEnvironment = ['localhost', '127.0.0.1'].includes(executionHost)
 
@@ -35,19 +34,21 @@ async function waitForNotifications(
   baseURL: string,
   organizationId: string,
   since: string,
+  conversationId: string,
   complete: (_state: NotificationState) => boolean,
 ) {
-  let state: NotificationState = { notifications: [], deliveries: [] }
+  let state: NotificationState = { deliveries: [] }
   await expect.poll(async () => {
     const response = await request.get(notificationUrl(baseURL, organizationId, since), { headers: devLoginHeaders() })
-    state = response.ok() ? await response.json() as NotificationState : { notifications: [], deliveries: [] }
+    expect(response.status(), await response.text()).toBe(200)
+    const { deliveries } = await response.json() as NotificationState
+    state = { deliveries: deliveries.filter(delivery => delivery.conversation_id === conversationId) }
     return complete(state)
   }, { timeout: 8_000 }).toBe(true)
   return state
 }
 
 function expectOwnerDispatch(state: NotificationState) {
-  expect(state.notifications.length).toBeGreaterThan(0)
   expect(state.deliveries.some(row => row.purpose === 'owner_alert' && row.status === 'sent')).toBe(true)
   expect(state.deliveries.some(row => row.purpose === 'guest_acknowledgement' && row.channel === 'email' && row.status === 'sent')).toBe(true)
   // Whatever channels this tenant does dispatch on, none of them may have failed.
@@ -169,9 +170,8 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     })
     await expect(page).toHaveURL(/\/bookings\/confirmed/)
     await expect(page.locator('main')).toContainText(/booking|received|confirmed/i)
-    const state = await waitForNotifications(request, seededSiteURL('experience'), wheel.organizationId, since, state =>
-      state.notifications.some(row => row.template === 'new_booking')
-      && ownerAlertSent(state)
+    const state = await waitForNotifications(request, seededSiteURL('experience'), wheel.organizationId, since, booked.conversation_id, state =>
+      ownerAlertSent(state)
       && state.deliveries.some(row => row.purpose === 'guest_acknowledgement' && row.channel === 'email' && row.status === 'sent'),
     )
     expectOwnerDispatch(state)
@@ -214,9 +214,8 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
       await expect(page).toHaveURL(/\/bookings\/confirmed/)
       await expect(page.locator('main')).toContainText('Reservation confirmed')
       await expect(page.locator('main')).not.toContainText(/confirm your .* shortly/i)
-      const state = await waitForNotifications(request, baseURL, restaurant.organizationId, since, state =>
-        state.notifications.some(row => row.template === 'new_booking')
-        && state.deliveries.some(row => row.purpose === 'owner_alert' && row.channel === 'whatsapp' && row.status === 'sent')
+      const state = await waitForNotifications(request, baseURL, restaurant.organizationId, since, reservation.conversation_id, state =>
+        ownerAlertSent(state)
         && state.deliveries.some(row => row.purpose === 'guest_acknowledgement' && row.channel === 'email' && row.status === 'sent'),
       )
       expectOwnerDispatch(state)
@@ -235,11 +234,12 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     await page.getByLabel(/your message/i).fill('Please tell me more about private pottery classes.')
     const submission = page.waitForResponse(response => response.request().method() === 'POST' && response.url().endsWith('/api/public/contact'))
     await page.getByRole('button', { name: 'Send message', exact: true }).click()
-    expect((await submission).status()).toBe(201)
+    const response = await submission
+    expect(response.status()).toBe(201)
+    const { conversation_id } = await response.json() as { conversation_id: string }
     await expect(page).toHaveURL(/\/contact\/confirmed/)
-    const state = await waitForNotifications(request, seededSiteURL('experience'), seededTenant('experience').organizationId, since, state =>
-      state.notifications.some(row => row.template === 'new_contact_msg')
-      && ownerAlertSent(state)
+    const state = await waitForNotifications(request, seededSiteURL('experience'), seededTenant('experience').organizationId, since, conversation_id, state =>
+      ownerAlertSent(state)
       && state.deliveries.some(row => row.purpose === 'guest_acknowledgement' && row.channel === 'email' && row.status === 'sent'),
     )
     expectOwnerDispatch(state)

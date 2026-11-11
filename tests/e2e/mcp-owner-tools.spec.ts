@@ -339,9 +339,10 @@ test.describe('stateless MCP server', () => {
     } finally { await release() }
   })
 
-  test('owner can use submission inquiry tools', async ({ request, baseURL }, testInfo) => {
+  test('owner can use submission inquiry tools', async ({ request, playwright, baseURL }, testInfo) => {
     // A public table booking here shares the Brooklyn tables with the calendar specs.
     const releaseTenantMutationLock = await acquireTenantMutationLock(testInfo, mcpOrganizationId())
+    const guest = await playwright.request.newContext({ baseURL })
     try {
       await loginAs(request, baseURL!)
       const organizationId = mcpOrganizationId()
@@ -356,14 +357,14 @@ test.describe('stateless MCP server', () => {
       const asTenant = seededSiteHeaders('restaurant')
       const contactEmail = `mcp-contact-${Date.now()}@example.test`
       const reservationEmail = `mcp-res-${Date.now()}@example.test`
-      const publicContact = await request.post(`${baseURL}/api/public/contact`, {
+      const publicContact = await guest.post(`${baseURL}/api/public/contact`, {
         headers: asTenant,
         data: { name: `MCP Contact ${contactEmail}`, email: contactEmail, message: 'hello from MCP e2e' },
       })
       expect(publicContact.status()).toBe(201)
       // A guest books a table on the site: the dining room's tables are a product like any other.
       const seating = await openSeating(request, 2)
-      const { requestId: reservationThreadId } = await bookTable(request, { name: 'MCP Reservation', email: reservationEmail, phone: '+14155552673', partySize: 2, seating })
+      const { requestId: reservationThreadId } = await bookTable(guest, { name: 'MCP Reservation', email: reservationEmail, phone: '+14155552673', partySize: 2, seating })
 
       type ConversationRow = { conversation_id: string; kind: string; title: string; channel: string; home: string | null; when: string | null; preview: string; preview_from: string | null; time: string; unread: boolean }
       const listConversations = async (type: 'booking' | 'contact') => mcpData<{ conversations: ConversationRow[] }>(await (await mcpRequest(request, baseURL!, {
@@ -439,6 +440,7 @@ test.describe('stateless MCP server', () => {
       expect(toolNames).toContain('list_product_bookings')
       expect(toolNames).not.toContain('list_table_reservations')
     } finally {
+      await guest.dispose()
       await releaseTenantMutationLock()
     }
   })
@@ -982,20 +984,24 @@ test.describe('stateless MCP server', () => {
       const qaUrl = `${baseURL}/api/editor/organizations/${organizationId}/qa`
       const qaIds: string[] = []
       // A product's booking has no questions until the owner adds some.
-      const noQuestions = { questions: [], questions_revision: formQuestionsRevision([]) }
+      const defaults = {
+        seating_interval_minutes: null, party_size_min: null, party_size_max: null, payment_basis: 'per_guest',
+        payment_min_party_size: null, minimum_guest_age: null, accessibility_contact_required: false,
+        questions: [], questions_revision: formQuestionsRevision([]),
+      }
       try {
         // Turning bookings on names who handles them.
         const enabled = await request.put(`${productUrl}/booking`, { data: { duration_minutes: 60, default_capacity: 9, assigned_member_id: seededTenant('restaurant').memberIds[E2E_ADMIN_ID]! } })
         expect(enabled.status(), await enabled.text()).toBe(200)
         let product = mcpData<{ product: { booking: unknown } }>(await call('get_product', { product_id: productId })).product
-        expect(product.booking).toEqual({ duration_minutes: 60, default_capacity: 9, confirmation_mode: 'instant', online_payment_required: false, held_online: false, scheduling_mode: 'business', assigned_member_id: seededTenant('restaurant').memberIds[E2E_ADMIN_ID]!, advance_notice_minutes: null, ...noQuestions })
+        expect(product.booking).toEqual({ duration_minutes: 60, default_capacity: 9, confirmation_mode: 'instant', online_payment_required: false, held_online: false, scheduling_mode: 'business', assigned_member_id: seededTenant('restaurant').memberIds[E2E_ADMIN_ID]!, advance_notice_minutes: null, ...defaults })
         expect((await call('set_product_booking_config', { product_id: productId, default_capacity: 0 })).result.isError).not.toBe(true)
         const httpProduct = await request.get(`${baseURL}/api/editor/organizations/${organizationId}/products`)
         expect(httpProduct.status(), await httpProduct.text()).toBe(200)
-        expect((await httpProduct.json()).products.find((row: { id: string }) => row.id === productId).booking).toEqual({ duration_minutes: 60, default_capacity: 0, confirmation_mode: 'instant', online_payment_required: false, held_online: false, scheduling_mode: 'business', assigned_member_id: seededTenant('restaurant').memberIds[E2E_ADMIN_ID]!, advance_notice_minutes: null, ...noQuestions })
+        expect((await httpProduct.json()).products.find((row: { id: string }) => row.id === productId).booking).toEqual({ duration_minutes: 60, default_capacity: 0, confirmation_mode: 'instant', online_payment_required: false, held_online: false, scheduling_mode: 'business', assigned_member_id: seededTenant('restaurant').memberIds[E2E_ADMIN_ID]!, advance_notice_minutes: null, ...defaults })
         expect((await call('set_product_booking_config', { product_id: productId, default_capacity: null })).result.isError).not.toBe(true)
         product = mcpData<{ product: { booking: unknown } }>(await call('get_product', { product_id: productId })).product
-        expect(product.booking).toEqual({ duration_minutes: 60, default_capacity: null, confirmation_mode: 'instant', online_payment_required: false, held_online: false, scheduling_mode: 'business', assigned_member_id: seededTenant('restaurant').memberIds[E2E_ADMIN_ID]!, advance_notice_minutes: null, ...noQuestions })
+        expect(product.booking).toEqual({ duration_minutes: 60, default_capacity: null, confirmation_mode: 'instant', online_payment_required: false, held_online: false, scheduling_mode: 'business', assigned_member_id: seededTenant('restaurant').memberIds[E2E_ADMIN_ID]!, advance_notice_minutes: null, ...defaults })
         expect((await request.put(`${productUrl}/booking`, { data: { duration_minutes: 0 } })).status()).toBe(400)
         expect((await call('set_product_booking_config', { product_id: productId, duration_minutes: 0 })).result.isError).toBe(true)
         const schedule = { location_id: locationId, slots: [{ weekday: 2, start_time: '10:00' }] }

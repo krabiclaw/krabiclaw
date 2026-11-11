@@ -50,14 +50,14 @@ import { MAX_STAY_NIGHTS, STAY_PAYMENT_METHODS, STAY_PAYMENT_METHOD_LABELS, type
 import { isCurrencyCode } from '~/shared/currencies'
 import { majorAmountToMinor } from '~/shared/prices'
 import { isSuccessfulChannelPush } from '~/shared/channel-push'
-import { isValidCalendarDate, isValidTimezone, localDateAt } from '~/utils/timezone'
+import { isValidCalendarDate, isValidTimezone, localDateAt, localDateTimeToInstant } from '~/utils/timezone'
 import { toE164 } from '~/utils/phone'
 import { ApiClientError } from '~/utils/api-clients'
 import { getErrorMessage } from '~/utils/errors'
 
 definePageMeta({ layout: 'dashboard', tab: 'today', back: 'dashboard-orgSlug', key: route => `stay-create:${String(route.params.orgSlug)}:${String(route.query.product_id ?? '')}:${String(route.query.check_in_date ?? '')}:${String(route.query.check_out_date ?? '')}` })
 const { title, action } = newRecordLabels('stay')
-type Home = Pick<StayHome, 'product_id' | 'name' | 'internal_name' | 'currency' | 'timezone' | 'max_guests'>
+type Home = Pick<StayHome, 'product_id' | 'name' | 'internal_name' | 'currency' | 'timezone' | 'max_guests' | 'check_in_time'>
 const route = useRoute()
 const nuxtApp = useNuxtApp()
 const orgSlug = String(route.params.orgSlug)
@@ -78,7 +78,7 @@ const queryError = computed(() => {
 })
 const { data, error } = await useAsyncData(`stay-create-homes:${orgSlug}`, () => api('/api/dashboard/stay-homes', {
   validate: (value): value is { homes: Home[]; manage: boolean } => isRecord(value) && typeof value.manage === 'boolean' && Array.isArray(value.homes)
-    && value.homes.every(home => isRecord(home) && typeof home.product_id === 'string' && Boolean(home.product_id) && typeof home.internal_name === 'string' && isCurrencyCode(home.currency) && typeof home.timezone === 'string' && isValidTimezone(home.timezone) && Number.isInteger(home.max_guests) && Number(home.max_guests) > 0),
+    && value.homes.every(home => isRecord(home) && typeof home.product_id === 'string' && Boolean(home.product_id) && typeof home.internal_name === 'string' && isCurrencyCode(home.currency) && typeof home.timezone === 'string' && isValidTimezone(home.timezone) && (home.check_in_time === null || typeof home.check_in_time === 'string') && Number.isInteger(home.max_guests) && Number(home.max_guests) > 0),
 }))
 const loadError = computed(() => queryError.value || (error.value ? getErrorMessage(error.value, 'Homes could not be loaded') : !data.value ? 'Homes could not be loaded.' : !data.value.manage ? 'Only owners and admins can add stays.' : suppliedHome && !data.value.homes.some(home => home.product_id === suppliedHome) ? 'That home is not available in this organization.' : !data.value.homes.length ? 'Add a home in Catalog before recording a stay.' : null))
 function initialDraft() {
@@ -139,9 +139,12 @@ async function commit() {
     }
     const result = await api('/api/dashboard/stays', { method: 'POST', body: draft.value.attempt, signal: mutation.signal, validate: (value): value is { stay: { id: string } } => isRecord(value) && isRecord(value.stay) && typeof value.stay.id === 'string' && Boolean(value.stay.id) && Object.hasOwn(value.stay, 'channel_push') && isSuccessfulChannelPush(value.stay.channel_push) })
     if (mutation.signal.aborted) return
-    const { payment, idempotency_key: _key, ...fields } = draft.value.attempt
+    const { payment, idempotency_key: _key, arrival_time, ...fields } = draft.value.attempt
+    const selectedHome = home.value!
+    const arrival = typeof arrival_time === 'string' ? arrival_time : selectedHome.check_in_time
+    const startsAt = arrival ? localDateTimeToInstant(draft.value.check_in_date, arrival, selectedHome.timezone, 'reject').toISOString() : draft.value.check_in_date
     const expected = { ...fields, guest_phone: draft.value.guest_phone.trim() ? toE164(draft.value.guest_phone.trim()) : null }
-    await api(`/api/dashboard/stays/${encodeURIComponent(result.stay.id)}`, { signal: mutation.signal, validate: (value): value is { stay: { id: string } } => isRecord(value) && isRecord(value.stay) && value.stay.id === result.stay.id && value.stay.status === 'confirmed'
+    await api(`/api/dashboard/stays/${encodeURIComponent(result.stay.id)}`, { signal: mutation.signal, validate: (value): value is { stay: { id: string } } => isRecord(value) && isRecord(value.stay) && value.stay.id === result.stay.id && value.stay.status === 'confirmed' && value.stay.starts_at === startsAt
       && Object.entries(expected).every(([field, wanted]) => (value.stay as Record<string, unknown>)[field] === wanted)
       && value.stay.currency === home.value?.currency && Array.isArray(value.stay.payments)
       && (!isRecord(payment) || value.stay.payments.some(saved => isRecord(saved) && saved.amount_minor === payment.amount_minor && saved.method === payment.method && saved.paid_on === payment.paid_on && saved.reference === payment.reference)) })

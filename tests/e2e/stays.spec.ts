@@ -503,7 +503,7 @@ test('a responsible home member reads its stays as turnovers on every surface un
     await expect.poll(async () => {
       for (const row of await teamRows()) {
         const thread = await teamThread(row.id)
-        if (thread.bookingId === stay.id && thread.job) jobThreadId = thread.id
+        if (thread.booking_id === stay.id && thread.job) jobThreadId = thread.id
       }
       return jobThreadId
     }, { timeout: 30_000, message: 'the hub opens the turnover’s conversation after the stay write' }).not.toBe('')
@@ -1262,7 +1262,7 @@ test('a host saves cancellation policies, guests, minimum nights and arrival tim
     await expectStatus(homes, 200)
     // The editor created the home without a nightly price, so it has no base price; its currency is the organization's.
     expect((await homes.json() as { homes: unknown[] }).homes).toEqual([{
-      product_id: productId, product_updated_at: settingsRead.data!.product.updated_at, name: 'Cliff Cabin', internal_name: 'Cliff Cabin', location_id: location.id, timezone: TIME_ZONE, currency: 'THB', base_price_minor: null, base_price_tax_behavior: null,
+      product_id: productId, variant_id: settingsRead.data!.product.variants[0]!.id, product_updated_at: settingsRead.data!.product.updated_at, name: 'Cliff Cabin', internal_name: 'Cliff Cabin', location_id: location.id, timezone: TIME_ZONE, currency: 'THB', base_price_minor: null, base_price_tax_behavior: null,
       // A home the editor creates has a flexible check-in end until the host chooses one.
       check_in_time: '16:00', check_in_end_time: null, check_out_time: '10:00', max_guests: 6, min_nights: 1, calendar_rules: null, assigned_member_id: ownerMemberId, channel: null,
       check_in_instructions: null, photos: [], photo_rooms: [],
@@ -3813,7 +3813,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
   const organizationId = (await created.json() as { id: string }).id
   const provisioned = await page.request.post('/api/organizations', { headers, data: { organizationId, name: `Cleaner ${slug}`, subdomain: slug, vertical: 'lodging', sourceLocale: 'en' } })
   await expectStatus(provisioned, 200)
-  const api = (path: string) => `/api/dashboard/${path}?org=${encodeURIComponent(slug)}`
+  const api = (path: string) => `/api/dashboard/${path}${path.includes('?') ? '&' : '?'}org=${encodeURIComponent(slug)}`
   const call = <T>(name: string, args: Record<string, unknown>) => tool<T>(page.request, baseURL!, organizationId, name, args)
   const cleaner = await browser.newContext({ baseURL: baseURL! })
   try {
@@ -4626,8 +4626,8 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
         for (const row of await cleanerTeamRows()) {
           const response = await cleaner.request.get(api(`team/threads/${row.id}/messages?limit=1`))
           await expectStatus(response, 200)
-          const { thread } = await response.json() as { thread: { id: string; bookingId: string | null; job: { id: string } | null } }
-          if (thread.bookingId === stays[0]!.id && thread.job?.id === turnover.id) jobThread = thread
+          const { thread } = await response.json() as { thread: { id: string; booking_id: string | null; job: { id: string } | null } }
+          if (thread.booking_id === stays[0]!.id && thread.job?.id === turnover.id) jobThread = thread
         }
         return jobThread?.id ?? ''
       }, { timeout: 30_000, message: 'the organization’s jobs open the cleaner’s conversation for the turnover' }).not.toBe('')
@@ -4658,7 +4658,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       const hostTurnovers = await call<{ sections: TaskSection[] }>('list_tasks', { range: 'today', kind: 'turnover' })
       expect(hostTurnovers.error).toBeNull()
       expect(hostTurnovers.data!.sections.flatMap(section => section.tasks).filter(task => task.id === turnover.id))
-        .toEqual([expect.objectContaining({ status: 'done', stayId: stays[0]!.id, outcome: expect.objectContaining({ note: 'Fresh linen on both beds' }) })])
+        .toEqual([expect.objectContaining({ status: 'done', booking_id: stays[0]!.id, outcome: expect.objectContaining({ note: 'Fresh linen on both beds' }) })])
 
       const cleanerPage = await cleaner.newPage()
       let deliveringSocket: WebSocket | undefined
@@ -4704,7 +4704,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       expect((await call('update_stay', { stay_id: stays[1]!.id, expected_version: privateStay.data!.stay.version, private_notes: 'Other home only' })).error).toBeNull()
       const noted = await call<{ stay: { version: number } }>('update_stay', { stay_id: stays[0]!.id, expected_version: renamed.data!.stay.version, arrival_time: '18:30', private_notes: 'Host-only live note' })
       expect(noted.error).toBeNull()
-      await expect(cleanerPage.getByText(/^6:30\sPM$/u)).toBeVisible()
+      await expect(cleanerPage.getByText(/^6:30\sPM$/u).first()).toBeVisible()
       await expect(cleanerPage.getByText('Host-only live note')).toHaveCount(0)
       // The page can render the note before the socket's frame is recorded here.
       await expect.poll(() => liveEvents.filter(event => 'stayId' in event).length).toBe(2)
@@ -4799,7 +4799,7 @@ test('a stay socket in a service organization closes when Better Auth removes it
     await expectStatus(renamed, 200)
     const version = (await renamed.json() as { stay: { version: number } }).stay.version
     await expect(cleanerPage.getByRole('heading', { name: 'Membership', level: 2, exact: true })).toBeVisible()
-    await expect(cleanerPage.getByText(/^6:30\sPM$/u)).toBeVisible()
+    await expect(cleanerPage.getByText(/^6:30\sPM$/u).first()).toBeVisible()
     await expect.poll(() => liveEvents.filter(event => event.type === 'stay.changed').length).toBe(1)
     const socket = sockets.find(socket => !socket.isClosed())
     expect(socket).toBeDefined()
@@ -4823,11 +4823,11 @@ test('a stay socket in a service organization closes when Better Auth removes it
 
 test('a host selects nights across homes on the multi-calendar and edits them in place', async ({ page, baseURL }) => {
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
-  const { request, headers, slug, api, productId } = await createStayHome(page, baseURL!)
+  const { request, headers, slug, api, productId, ownerMemberId } = await createStayHome(page, baseURL!)
   const makeHome = async (name: string, address: string, city: string, minNights: number, price: number) => {
     const made = await request.post(api('stay-homes'), { headers, data: { name, timezone: TIME_ZONE, address, city, country: 'TH',
       state: null, zip_code: null, phone: null, email: null, check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: minNights,
-      base_price_minor: price, idempotency_key: crypto.randomUUID() } })
+      base_price_minor: price, assigned_member_id: ownerMemberId, idempotency_key: crypto.randomUUID() } })
     await expectStatus(made, 201)
     return (await made.json() as { home: { product_id: string } }).home.product_id
   }
