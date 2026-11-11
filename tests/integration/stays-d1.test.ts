@@ -36,7 +36,8 @@ import { listOrganizationReviews } from '../../server/utils/organization-reviews
 import { loadPublicSocialMedia } from '../../server/utils/public-social-image.ts'
 import { arrangeProductPhotos, attachMediaPlacement, removeMediaPlacement, setSingleMediaPlacement } from '../../server/utils/media-placement.ts'
 import { deleteMediaAsset, getMediaAsset } from '../../server/utils/media-asset-manager.ts'
-import { assertAssignedBookingAccess, listOrganizationNotificationMembers, memberAccessPrincipal, resolveMembership, resolveOrganizationMembership } from '../../server/utils/member-access.ts'
+import { listOrganizationNotificationMembers, memberAccessPrincipal, resolveMembership, resolveOrganizationMembership } from '../../server/utils/member-access.ts'
+import { assertConversationAccess } from '../../server/domain/conversations.ts'
 import { listScheduledGuestMessages, saveMessageTemplate } from '../../server/domain/guest-messaging.ts'
 import { handleStaysTools, STAYS_TOOLS } from '../../server/utils/mcp-tools/stays.ts'
 import { BOOKINGS_TOOLS, handleBookingsTools } from '../../server/utils/mcp-tools/bookings.ts'
@@ -1496,8 +1497,8 @@ test('a member reads a stay at a home they look after as its turnover on every r
     // The stay's guest conversation is not the member's, and its alerts do not reach them.
     const [ownerMembership, cleanerMembership] = await Promise.all([OWNER, CLEANER].map(userId => resolveOrganizationMembership(env, { organizationId: ORG, userId })))
     assert(ownerMembership && cleanerMembership)
-    await assert.rejects(assertAssignedBookingAccess(db, { ...memberAccessPrincipal(cleanerMembership, { env }), requestId: stay.request_id }), { status: 404, data: { code: 'THREAD_NOT_FOUND', field: 'threadId' } })
-    await assertAssignedBookingAccess(db, { ...memberAccessPrincipal(ownerMembership, { env }), requestId: stay.request_id })
+    await assert.rejects(assertConversationAccess(db, memberAccessPrincipal(cleanerMembership, { env }), stay.request_id), { status: 404, data: { code: 'THREAD_NOT_FOUND', field: 'conversationId' } })
+    await assertConversationAccess(db, memberAccessPrincipal(ownerMembership, { env }), stay.request_id)
     assert.deepEqual((await listOrganizationNotificationMembers(env, ORG, { requestId: stay.request_id })).map(member => member.userId), [OWNER])
 
     // Today names the guest by first name for the member and in full for the owner.

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { appendMessage } from '../../server/domain/conversations.ts'
 import test from 'node:test'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
@@ -66,16 +67,15 @@ test('the cron sends due messages, leaves future ones pending and records failur
     // A send recorded under Cy's key with other words cannot be reconciled
     // automatically; it goes to review rather than being sent again.
     const cyWelcome = (await planned(cy.id, welcome.id))!
-    await db.prepare(`INSERT INTO activity_entries (id, request_id, kind, scope_kind, actor_kind, channel, body, event_name, payload_json, dedupe_key, sequence, occurred_at, created_at)
-      VALUES ('earlier-attempt', ?, 'message', 'request', 'system', 'email', 'Different words', 'thread.scheduled_message', '{"request_hash":"other"}', ?, 99, ?, ?)`)
-      .bind(cy.request_id, `guest-thread-operation:${cy.request_id}:scheduled-guest-message:${cyWelcome.id}`, new Date().toISOString(), new Date().toISOString()).run()
+    await appendMessage(db, { id: 'earlier-attempt', conversationId: cy.request_id, authorKind: 'krabiclaw', authorUserId: null, channel: 'email', body: 'Different words',
+      eventName: 'thread.scheduled_message', payload: { request_hash: 'other' }, dedupeKey: `guest-thread-operation:${cy.request_id}:scheduled-guest-message:${cyWelcome.id}` })
 
     // Eve's conversation is addressed through Channex. The provider's answer to
     // the read before any send is malformed, so nothing is sent and the
     // message fails with the provider's typed facts instead of staying sending.
     await db.prepare(`INSERT INTO product_channel_mappings (organization_id, product_id, provider, listing_id, channel_id, property_id, room_type_id, rate_plan_id, import_stage, enabled)
       VALUES (?, ?, 'channex', 'listing', 'channel', 'property', 'room', 'rate', 'complete', 1)`).bind(ORG, cabin.id).run()
-    await db.prepare(`INSERT INTO channel_threads (provider, external_thread_id, organization_id, product_id, request_id, external_booking_id, provider_updated_at)
+    await db.prepare(`INSERT INTO channel_threads (provider, external_thread_id, organization_id, product_id, conversation_id, external_booking_id, provider_updated_at)
       VALUES ('channex', 'thread-eve', ?, ?, ?, NULL, '2026-10-16T00:00:00')`).bind(ORG, cabin.id, eve.request_id).run()
     const channexEnv = { ...env, CHANNEX_BASE_URL: 'https://channex.test/api/v1', CHANNEX_API_KEY: 'test-provider-key' } as CloudflareEnv
     const realFetch = globalThis.fetch
@@ -92,18 +92,18 @@ test('the cron sends due messages, leaves future ones pending and records failur
     } finally { globalThis.fetch = realFetch }
     assert.deepEqual(providerCalls.filter(call => call.startsWith('POST')), [])
     const providerFailed = (await planned(eve.id, welcome.id))!
-    assert.deepEqual([providerFailed.status, providerFailed.error_code, providerFailed.error_field, providerFailed.entry_id, providerFailed.sent_at], ['failed', 'INVALID_PROVIDER_RESPONSE', 'data', null, null])
+    assert.deepEqual([providerFailed.status, providerFailed.error_code, providerFailed.error_field, providerFailed.message_id, providerFailed.sent_at], ['failed', 'INVALID_PROVIDER_RESPONSE', 'data', null, null])
     assert.ok(providerFailed.reason)
 
     const sent = (await planned(ana.id, welcome.id))!
     assert.equal(sent.status, 'sent')
-    assert.ok(sent.sent_at && sent.entry_id)
-    assert.deepEqual(await db.prepare('SELECT e.request_id, e.actor_kind, e.actor_user_id, e.event_name, e.body, d.channel, d.purpose, d.status FROM activity_entries e JOIN guest_thread_deliveries d ON d.entry_id = e.id WHERE e.id = ?').bind(sent.entry_id).first(), {
-      request_id: ana.request_id, actor_kind: 'system', actor_user_id: null, event_name: 'thread.scheduled_message', body: 'Thanks for booking the cabin.', channel: 'email', purpose: 'scheduled_message', status: 'sent',
+    assert.ok(sent.sent_at && sent.message_id)
+    assert.deepEqual(await db.prepare('SELECT e.conversation_id, e.author_kind, e.author_user_id, e.event_name, e.body, d.channel, d.purpose, d.status FROM messages e JOIN guest_thread_deliveries d ON d.message_id = e.id WHERE e.id = ?').bind(sent.message_id).first(), {
+      conversation_id: ana.request_id, author_kind: 'krabiclaw', author_user_id: null, event_name: 'thread.scheduled_message', body: 'Thanks for booking the cabin.', channel: 'email', purpose: 'scheduled_message', status: 'sent',
     })
     // Phone alone, with no email and no KrabiClaw account, is nowhere to send: the failure is recorded with its own facts.
     const failed = (await planned(dee.id, welcome.id))!
-    assert.deepEqual([failed.status, failed.error_code, failed.error_field, failed.reason, failed.entry_id, failed.sent_at],
+    assert.deepEqual([failed.status, failed.error_code, failed.error_field, failed.reason, failed.message_id, failed.sent_at],
       ['failed', 'GUEST_UNREACHABLE', 'request_id', 'This guest has no email or KrabiClaw account to reply to.', null, null])
     const review = (await planned(cy.id, welcome.id))!
     assert.deepEqual([review.status, review.error_code, review.error_field, review.sent_at], ['needs_review', 'IDEMPOTENCY_CONFLICT', 'idempotencyKey', null])
@@ -112,7 +112,7 @@ test('the cron sends due messages, leaves future ones pending and records failur
 
     // A repeated run sends nothing again and changes no recorded outcome.
     assert.deepEqual(await sendDueScheduledGuestMessages(db, channexEnv, later), { sent: 0, failed: 0, needs_review: 0 })
-    assert.equal(await db.prepare("SELECT count(*) AS n FROM activity_entries WHERE event_name = 'thread.scheduled_message'").first('n'), 2)
+    assert.equal(await db.prepare("SELECT count(*) AS n FROM messages WHERE event_name = 'thread.scheduled_message'").first('n'), 2)
 
     // A schedule saved after its event has passed records the miss instead of sending late.
     const lateNote = await saveMessageTemplate(db, env, manager, null, { title: 'Pre-arrival', body: 'Your stay is a week away.', schedule: { trigger: 'check_in', offsetDays: -7, localTime: '09:00', productIds: [cabin.id] } })
@@ -128,17 +128,17 @@ test('the cron sends due messages, leaves future ones pending and records failur
     const changed = await saveMessageTemplate(db, env, manager, lateNote.id, { title: 'Pre-arrival', body: 'Your stay is coming up.', expectedVersion: lateNote.version,
       schedule: { trigger: 'check_in', offsetDays: -6, localTime: '09:00', productIds: [cabin.id] } })
     assert.equal((await planned(cy.id, lateNote.id))?.body, 'Your stay is coming up.')
-    assert.deepEqual((await publications()).slice(observed).filter(event => event.type === 'thread.changed').map(event => 'threadId' in event ? event.threadId : null).sort(), [ana, dee, cy, eve].map(stay => stay.request_id).sort())
+    assert.deepEqual((await publications()).slice(observed).filter(event => event.type === 'MESSAGE_UPDATE').map(event => 'conversationId' in event ? event.conversationId : null).sort(), [ana, dee, cy, eve].map(stay => stay.request_id).sort())
     observed = (await publications()).length
     const cyNote = (await planned(cy.id, lateNote.id))!
     await cancelScheduledGuestMessage(db, env, manager, cyNote.id!)
     assert.equal((await planned(cy.id, lateNote.id))?.status, 'cancelled')
-    assert.deepEqual((await publications()).slice(observed).map(event => [event.type, 'threadId' in event ? event.threadId : null]), [['thread.changed', cy.request_id]])
+    assert.deepEqual((await publications()).slice(observed).map(event => [event.type, 'conversationId' in event ? event.conversationId : null]), [['MESSAGE_UPDATE', cy.request_id]])
     observed = (await publications()).length
     await deleteMessageTemplate(db, env, manager, lateNote.id, changed.version)
     assert.equal(await db.prepare('SELECT count(*) FROM message_templates WHERE id = ?').bind(lateNote.id).first('count(*)'), 0)
     assert.deepEqual(await db.prepare('SELECT template_id, status FROM scheduled_guest_messages WHERE id = ?').bind(cyNote.id).first(), { template_id: null, status: 'cancelled' })
-    assert.deepEqual((await publications()).slice(observed).map(event => 'threadId' in event ? event.threadId : null).sort(), [ana, dee, cy, eve].map(stay => stay.request_id).sort())
+    assert.deepEqual((await publications()).slice(observed).map(event => 'conversationId' in event ? event.conversationId : null).sort(), [ana, dee, cy, eve].map(stay => stay.request_id).sort())
   } finally {
     await runtime.dispose()
   }

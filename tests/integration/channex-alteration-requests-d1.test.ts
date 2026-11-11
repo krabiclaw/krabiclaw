@@ -155,7 +155,7 @@ async function airbnbStay(db: D1Database, env: CloudflareEnv, channex: FakeChann
   await applyBookingRevision(db, env, channex.revise('bk-1', { arrival: '2027-01-10', departure: '2027-01-13', adults: 2, amount: '450.00' }, 'new'))
   if (conversation) assert.equal((await mirrorChannexThread(db, env, 'thread', PROPERTY)).status, 'mirrored')
   // Every booking has its conversation; Airbnb's thread is addressed to it once mirrored.
-  const stay = await db.prepare("SELECT b.id, b.request_id, EXISTS (SELECT 1 FROM channel_threads t WHERE t.request_id = b.request_id) AS mirrored FROM bookings b WHERE b.external_booking_id = 'bk-1'").first<{ id: string; request_id: string; mirrored: number }>()
+  const stay = await db.prepare("SELECT b.id, c.id AS request_id, EXISTS (SELECT 1 FROM channel_threads t WHERE t.conversation_id = c.id) AS mirrored FROM bookings b JOIN conversations c ON c.booking_id = b.id AND c.kind = 'booking' WHERE b.external_booking_id = 'bk-1'").first<{ id: string; request_id: string; mirrored: number }>()
   assert.equal(stay!.mirrored === 1, conversation)
   return stay!
 }
@@ -165,12 +165,12 @@ const stayRow = async (db: D1Database, id: string) => {
   const { check_in_date, check_out_date, adults, total_minor, version } = await getStay(db, { organizationId: ORG, actorId: OWNER, manage: true }, id)
   return { check_in_date, check_out_date, adults, total_minor, version }
 }
-const requests = (db: D1Database, threadId: string) => db.prepare("SELECT id, actor_kind, channel, json_extract(payload_json, '$.live_feed_event_id') AS event FROM activity_entries WHERE request_id = ? AND event_name = 'booking_change.requested' ORDER BY sequence").bind(threadId).all<{ id: string; actor_kind: string; channel: string; event: string }>().then(rows => rows.results)
-const decision = (db: D1Database, requestId: string) => db.prepare("SELECT event_name, actor_kind, actor_user_id, body FROM activity_entries WHERE dedupe_key = ?").bind(`booking-change-decision:${requestId}`).first()
-const alerts = (db: D1Database, requestId: string) => db.prepare("SELECT purpose, channel, status FROM guest_thread_deliveries WHERE entry_id = ? ORDER BY channel").bind(requestId).all().then(rows => rows.results)
+const requests = (db: D1Database, threadId: string) => db.prepare("SELECT id, author_kind, channel, json_extract(payload_json, '$.live_feed_event_id') AS event FROM messages WHERE conversation_id = ? AND event_name = 'booking_change.requested' ORDER BY sequence").bind(threadId).all<{ id: string; author_kind: string; channel: string | null; event: string }>().then(rows => rows.results)
+const decision = (db: D1Database, requestId: string) => db.prepare("SELECT event_name, author_kind, author_user_id, body FROM messages WHERE dedupe_key = ?").bind(`booking-change-decision:${requestId}`).first()
+const alerts = (db: D1Database, requestId: string) => db.prepare("SELECT purpose, channel, status FROM guest_thread_deliveries WHERE message_id = ? ORDER BY channel").bind(requestId).all().then(rows => rows.results)
 /** The open reply tasks of a conversation, by their dedupe key (the guest entry they are about). */
-const openReplies = (db: D1Database, threadId: string) => db.prepare("SELECT dedupe_key FROM tasks WHERE kind = 'guest_reply' AND subject_type = 'request' AND subject_id = ? AND status = 'open'").bind(threadId).all<{ dedupe_key: string }>().then(rows => rows.results.map(row => row.dedupe_key))
-const firstGuestMessage = (db: D1Database, threadId: string) => db.prepare("SELECT id FROM activity_entries WHERE request_id = ? AND actor_kind = 'guest' AND kind = 'message' ORDER BY sequence LIMIT 1").bind(threadId).first<string>('id')
+const openReplies = (db: D1Database, threadId: string) => db.prepare("SELECT dedupe_key FROM tasks WHERE kind = 'guest_reply' AND subject_type = 'conversation' AND subject_id = ? AND status = 'open'").bind(threadId).all<{ dedupe_key: string }>().then(rows => rows.results.map(row => row.dedupe_key))
+const firstGuestMessage = (db: D1Database, threadId: string) => db.prepare("SELECT id FROM messages WHERE conversation_id = ? AND author_kind = 'guest' ORDER BY sequence LIMIT 1").bind(threadId).first<string>('id')
 const answer = (db: D1Database, env: CloudflareEnv, threadId: string, requestId: string, action: 'accept_change' | 'decline_change', stayManager = true) =>
   executeGuestThreadOperation(db, { threadId, organizationId: ORG, action, requestId, stayManager, actorUserId: OWNER, idempotencyKey: `${requestId}:${action}`, env })
 
@@ -183,12 +183,12 @@ test('a guest change request lands once in the stay conversation, survives a rel
     const { id: stayId } = await airbnbStay(db, env, channex, false)
     channex.requests.set('alt-1', { booking: 'bk-1', after: { arrival: '2027-01-10', departure: '2027-01-14', adults: 3, amount: '600.00' }, status: null })
     assert.deepEqual(await runAlterationRequestFeed(db, env, PROPERTY), { recorded: 1, reconciled: 0 })
-    const stay = (await db.prepare('SELECT id, request_id FROM bookings WHERE id = ?').bind(stayId).first<{ id: string; request_id: string }>())!
+    const stay = (await db.prepare("SELECT b.id, c.id AS request_id FROM bookings b JOIN conversations c ON c.booking_id = b.id AND c.kind = 'booking' WHERE b.id = ?").bind(stayId).first<{ id: string; request_id: string }>())!
     assert.equal(typeof stay.request_id, 'string')
     // A repeated webhook or feed run records nothing twice and alerts nobody twice.
     assert.deepEqual(await runAlterationRequestFeed(db, env), { recorded: 0, reconciled: 0 })
     const [request, ...extra] = await requests(db, stay.request_id)
-    assert.deepEqual([request && { actor_kind: request.actor_kind, channel: request.channel, event: request.event }, extra], [{ actor_kind: 'guest', channel: 'airbnb', event: 'alt-1' }, []])
+    assert.deepEqual([request && { author_kind: request.author_kind, channel: request.channel, event: request.event }, extra], [{ author_kind: 'krabiclaw', channel: 'airbnb', event: 'alt-1' }, []])
     assert.deepEqual(await alerts(db, request!.id), [{ purpose: 'owner_alert', channel: 'email', status: 'sent' }])
     const guestMessage = await firstGuestMessage(db, stay.request_id)
     assert.equal(typeof guestMessage, 'string')
@@ -213,7 +213,7 @@ test('a guest change request lands once in the stay conversation, survives a rel
     const accepted = await answer(db, env, stay.request_id, request!.id, 'accept_change')
     assert.equal(accepted.ok, true)
     assert.deepEqual(channex.resolutions, [{ id: 'alt-1', body: { resolution: { accept: 'accept' } } }])
-    assert.deepEqual(await decision(db, request!.id), { event_name: 'booking_change.accepted', actor_kind: 'member', actor_user_id: OWNER, body: 'Accepted the guest’s change on Airbnb.' })
+    assert.deepEqual(await decision(db, request!.id), { event_name: 'booking_change.accepted', author_kind: 'krabiclaw', author_user_id: OWNER, body: 'Accepted the guest’s change on Airbnb.' })
     // Airbnb's confirmed revision is the change: landed and acknowledged, the stay now as the guest asked.
     assert.deepEqual(await stayRow(db, stay.id), { check_in_date: '2027-01-10', check_out_date: '2027-01-14', adults: 3, total_minor: 60_000, version: 2 })
     assert.deepEqual(channex.acked, ['rev-1', 'rev-2'])
@@ -260,7 +260,7 @@ test('declining leaves the stay as it is; a request withdrawn or answered on Air
 
     assert.equal((await answer(db, env, stay.request_id!, recorded.get('alt-decline')!, 'decline_change')).ok, true)
     assert.deepEqual(channex.resolutions, [{ id: 'alt-decline', body: { resolution: { accept: 'decline' } } }])
-    assert.deepEqual(await decision(db, recorded.get('alt-decline')!), { event_name: 'booking_change.declined', actor_kind: 'member', actor_user_id: OWNER, body: 'Declined the guest’s change on Airbnb.' })
+    assert.deepEqual(await decision(db, recorded.get('alt-decline')!), { event_name: 'booking_change.declined', author_kind: 'krabiclaw', author_user_id: OWNER, body: 'Declined the guest’s change on Airbnb.' })
     assert.deepEqual(await stayRow(db, stay.id), { check_in_date: '2027-01-10', check_out_date: '2027-01-13', adults: 2, total_minor: 45_000, version: 1 })
 
     // The guest withdrew on Airbnb, which sends no notification: the next feed run reads it.
@@ -268,14 +268,14 @@ test('declining leaves the stay as it is; a request withdrawn or answered on Air
     channex.requests.get('alt-withdrawn')!.status = 'CANCELED'
     channex.requests.get('alt-host')!.status = 'ACCEPTED'
     assert.deepEqual(await runAlterationRequestFeed(db, env), { recorded: 0, reconciled: 2 })
-    assert.deepEqual(await decision(db, recorded.get('alt-withdrawn')!), { event_name: 'booking_change.withdrawn', actor_kind: 'system', actor_user_id: null, body: 'The guest withdrew the change on Airbnb.' })
-    assert.deepEqual(await decision(db, hostProposal), { event_name: 'booking_change.accepted', actor_kind: 'system', actor_user_id: null, body: 'The guest accepted the change on Airbnb.' })
+    assert.deepEqual(await decision(db, recorded.get('alt-withdrawn')!), { event_name: 'booking_change.withdrawn', author_kind: 'krabiclaw', author_user_id: null, body: 'The guest withdrew the change on Airbnb.' })
+    assert.deepEqual(await decision(db, hostProposal), { event_name: 'booking_change.accepted', author_kind: 'krabiclaw', author_user_id: null, body: 'The guest accepted the change on Airbnb.' })
 
     // Declined on Airbnb before the host answered here: the host's accept records Airbnb's outcome and is refused naming it.
     channex.requests.get('alt-answered')!.status = 'DECLINED'
     await assert.rejects(answer(db, env, stay.request_id!, recorded.get('alt-answered')!, 'accept_change'),
       (error: unknown) => (error as { data?: { code?: string; outcome?: string } }).data?.code === 'CHANGE_REQUEST_RESOLVED' && (error as { data: { outcome: string } }).data.outcome === 'declined')
-    assert.deepEqual(await decision(db, recorded.get('alt-answered')!), { event_name: 'booking_change.declined', actor_kind: 'system', actor_user_id: null, body: 'The guest’s change was declined on Airbnb.' })
+    assert.deepEqual(await decision(db, recorded.get('alt-answered')!), { event_name: 'booking_change.declined', author_kind: 'krabiclaw', author_user_id: null, body: 'The guest’s change was declined on Airbnb.' })
     assert.equal(channex.resolutions.length, 1)
 
     const views = new Map((await getGuestThreadDetail(db, stay.request_id!, ORG))!.entries.flatMap(entry => entry.bookingChange ? [[entry.id, entry.bookingChange.status]] : []))
