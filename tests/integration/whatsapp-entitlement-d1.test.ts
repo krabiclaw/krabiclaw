@@ -207,7 +207,7 @@ test('an owner answers a guest by quoting their WhatsApp alert, with nothing ask
     const dee = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'dee', check_in_date: day(10), check_out_date: day(12), adults: 1, guest_name: 'Dee', guest_phone: '+61491570151', total_minor: 30_000 })
     // Each guest wrote, and the owner was alerted on WhatsApp about each.
     for (const [stay, name] of [[ana, 'ana'], [bo, 'bo'], [dee, 'dee']] as const) {
-      const entry = await appendMessage(db, { conversationId: stay.request_id, authorKind: 'guest', authorUserId: null, channel: 'email', body: `Hi from ${name}`, dedupeKey: `guest-${name}` })
+      const entry = await appendMessage(db, { conversationId: stay.conversation_id, authorKind: 'guest', authorUserId: null, channel: 'email', body: `Hi from ${name}`, dedupeKey: `guest-${name}` })
       const alert = await createDeliveryReceipt(db, { subject: { messageId: entry.id }, channel: 'whatsapp', provider: 'meta', purpose: 'owner_alert', idempotencyKey: `alert-${name}` })
       await recordDeliveryOutcome(db, { deliveryId: alert.id, status: 'sent', providerMessageId: `meta-alert-${name}` })
     }
@@ -235,8 +235,8 @@ test('an owner answers a guest by quoting their WhatsApp alert, with nothing ask
       assert.equal(response.status, status, await response.clone().text())
       return sent.slice(before)
     }
-    const replies = async (stay: { request_id: string | null }) => (await db.prepare("SELECT body FROM messages WHERE conversation_id = ? AND event_name = 'thread.member_reply'")
-      .bind(stay.request_id).all<{ body: string }>()).results.map(row => row.body)
+    const replies = async (stay: { conversation_id: string | null }) => (await db.prepare("SELECT body FROM messages WHERE conversation_id = ? AND event_name = 'thread.member_reply'")
+      .bind(stay.conversation_id).all<{ body: string }>()).results.map(row => row.body)
 
     // A message that quotes no alert is answered with one line, and nothing is sent to anyone.
     assert.deepEqual(await write('Can I reply?'), ['To answer a message, reply to it.'])
@@ -247,7 +247,7 @@ test('an owner answers a guest by quoting their WhatsApp alert, with nothing ask
     assert.deepEqual(await write('See you at 4', 'meta-alert-ana', 'wamid-ana'), ['Reply sent.'])
     assert.deepEqual(await replies(ana), ['See you at 4'])
     const delivery = await db.prepare(`SELECT d.channel, d.purpose, json_extract(d.email_json, '$.message.to') AS recipient FROM guest_thread_deliveries d JOIN messages e ON e.id = d.message_id
-      WHERE e.conversation_id = ? AND e.event_name = 'thread.member_reply'`).bind(ana.request_id).first<{ channel: string; purpose: string; recipient: string }>()
+      WHERE e.conversation_id = ? AND e.event_name = 'thread.member_reply'`).bind(ana.conversation_id).first<{ channel: string; purpose: string; recipient: string }>()
     assert.deepEqual(delivery, { channel: 'email', purpose: 'member_reply', recipient: 'ana@example.test' })
     // Meta redelivering that message answers nothing again and sends nothing again.
     assert.deepEqual(await write('See you at 4', 'meta-alert-ana', 'wamid-ana'), [])
@@ -266,7 +266,7 @@ test('an owner answers a guest by quoting their WhatsApp alert, with nothing ask
     assert.deepEqual(await write('Running late', undefined, 'wamid-dee', 200, '61491570151'), [''])
     assert.deepEqual(await write('Running late', undefined, 'wamid-dee', 200, '61491570151'), [])
     assert.deepEqual((await db.prepare("SELECT author_kind, author_user_id, channel, body FROM messages WHERE dedupe_key = 'whatsapp:wamid-dee'").all()).results,
-      [{ author_kind: 'guest', author_user_id: (await db.prepare('SELECT user_id FROM conversations WHERE id = ?').bind(dee.request_id).first<string>('user_id')), channel: 'whatsapp', body: 'Running late' }])
+      [{ author_kind: 'guest', author_user_id: (await db.prepare('SELECT user_id FROM conversations WHERE id = ?').bind(dee.conversation_id).first<string>('user_id')), channel: 'whatsapp', body: 'Running late' }])
 
     // The reply went and Meta refused to carry its outcome: the message fails, so Meta delivers it again,
     // and the redelivery tells the member without sending the guest the reply twice.
@@ -288,7 +288,7 @@ test('an owner answers a guest by quoting their WhatsApp alert, with nothing ask
     assert.ok(teamAlert)
     assert.deepEqual(await write('Thanks', teamAlert, 'wamid-team'), ['Reply sent.'])
     assert.deepEqual(await write('Thanks', teamAlert, 'wamid-team'), [])
-    assert.deepEqual((await listTeamMessages(db, ownerSeat, teamThread.id, {})).messages.filter(message => message.body === 'Thanks').map(message => message.senderId), ['owner'])
+    assert.deepEqual((await listTeamMessages(db, ownerSeat, teamThread.id, {})).messages.filter(message => message.body === 'Thanks').map(message => message.author_user_id), ['owner'])
 
     // A member removed from the business is told so, and nothing reaches the guest.
     await db.prepare("DELETE FROM member WHERE id = 'member-paid'").run()

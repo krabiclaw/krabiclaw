@@ -273,9 +273,9 @@ export async function listAgenda(
   // in Today and Calendar. The same bookings table, read by its nights; SQL
   // narrows by instants a day wider either side and each stay's days decide.
   const stayRows = requestedKinds.has('stay') ? queryAll<{
-    id: string; request_id: string; organization_id: string; organization_name: string; vertical: string; product_id: string; product_name: string; status: string; overbooked: number; starts_at: string; ends_at: string
+    id: string; conversation_id: string; organization_id: string; organization_name: string; vertical: string; product_id: string; product_name: string; status: string; overbooked: number; starts_at: string; ends_at: string
     owner: 'app' | 'channel'; channel: Stay['channel']; guest_name: string | null; guest_image_url: string | null; party_size: number; location_id: string; location_title: string; timezone: string
-  }>(db, `SELECT st.id, r.id AS request_id, st.organization_id, o.name AS organization_name, o.vertical, st.product_id, ${scope.buyerUserId ? 'p.name' : 'c.internal_name'} AS product_name, st.status, st.overbooked, st.starts_at, st.ends_at, st.owner, st.channel,
+  }>(db, `SELECT st.id, r.id AS conversation_id, st.organization_id, o.name AS organization_name, o.vertical, st.product_id, ${scope.buyerUserId ? 'p.name' : 'c.internal_name'} AS product_name, st.status, st.overbooked, st.starts_at, st.ends_at, st.owner, st.channel,
         json_extract(r.payload_json, '$.guest.name') AS guest_name,
         ${staff || scope.buyerUserId ? 'NULL' : '(SELECT u.image FROM user u WHERE u.id = st.user_id)'} AS guest_image_url,
         st.party_size, c.location_id, l.title AS location_title, st.timezone
@@ -366,13 +366,13 @@ export async function listAgenda(
     for (const [moment, day, instant] of moments) {
       if (!scope.buyerUserId && (day < query.from || day > query.to)) continue
       items.push({
-        assignedMemberId: null, assignedMemberName: null, id: scope.buyerUserId ? `stay:${stay.id}` : `stay:${stay.id}:${moment}`, requestId: staff ? null : stay.request_id, operationalBookingId: null,
+        assignedMemberId: null, assignedMemberName: null, id: scope.buyerUserId ? `stay:${stay.id}` : `stay:${stay.id}:${moment}`, requestId: staff ? null : stay.conversation_id, operationalBookingId: null,
         stayId: stay.id, productId: stay.product_id, stayChannel: stay.channel, stayMoment: moment === 'departure' && turnover ? 'turnover' : moment, kind: 'stay', startsAt: instant, endsAt: scope.buyerUserId || moment === 'current' ? stay.ends_at : null, dayKey: day, timeZone: stay.timezone, showTimeZone: false,
         title: scope.buyerUserId ? stay.product_name : title, subtitle: scope.buyerUserId ? stay.organization_name : [moment === 'arrival' ? 'Checking in' : moment === 'departure' ? 'Checking out' : 'Currently hosting', partyLabel(stay.vertical, stay.party_size, false), moment === 'departure' && turnover ? 'Next guests arrive the same day' : null].filter(Boolean).join(' · '),
         status: stay.status, organizationId: stay.organization_id, locationId: stay.location_id, locationTitle: stay.location_title,
         guestImageUrl: stay.guest_image_url, guestFirstName: scope.buyerUserId ? null : stayGuestFirstName(stay.guest_name), overbooked: !staff && Number(stay.overbooked) === 1, checkOutDate: stay.check_out_date,
         resourceImageUrl: pictures.get(`${stay.organization_id}\nproduct\n${stay.product_id}`) ?? null, resourceTitle: stay.product_name, partySize: stay.party_size,
-        to: scope.buyerUserId ? `/dashboard/account/activity/stay/${encodeURIComponent(stay.request_id)}` : `/dashboard/${organizationPath}/bookings/stay/${encodeURIComponent(stay.id)}`,
+        to: scope.buyerUserId ? `/dashboard/account/activity/stay/${encodeURIComponent(stay.conversation_id)}` : `/dashboard/${organizationPath}/bookings/stay/${encodeURIComponent(stay.id)}`,
       })
     }
   }
@@ -439,7 +439,7 @@ export async function listTodayReservations(
       })
   const requestIds = [...new Set(items.flatMap(item => item.requestId ? [item.requestId] : []))]
   // The team's note is the booking's one private note.
-  const notes = new Map((requestIds.length ? await queryAll<{ request_id: string }>(db, `SELECT c.id AS request_id FROM conversations c JOIN bookings b ON b.id = c.booking_id AND b.organization_id = c.organization_id
-    WHERE c.id IN (SELECT value FROM json_each(?)) AND b.private_notes IS NOT NULL`, [d1JsonStringSet(requestIds)]) : []).map(row => [row.request_id, 1]))
+  const notes = new Map((requestIds.length ? await queryAll<{ conversation_id: string }>(db, `SELECT c.id AS conversation_id FROM conversations c JOIN bookings b ON b.id = c.booking_id AND b.organization_id = c.organization_id
+    WHERE c.id IN (SELECT value FROM json_each(?)) AND b.private_notes IS NOT NULL`, [d1JsonStringSet(requestIds)]) : []).map(row => [row.conversation_id, 1]))
   return items.map(item => agendaToTodayReservation(item, { range: input.range, vertical: input.vertical, notes: item.requestId ? notes.get(item.requestId) ?? 0 : 0 }))
 }

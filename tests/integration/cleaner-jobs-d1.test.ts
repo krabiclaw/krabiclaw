@@ -97,7 +97,7 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
     assert.match(job!.body, /^Turnover: Cabin\n/)
     assert.match(job!.body, /Checkout 10:00 AM · Dee\nCheck-in 3:00 PM · Lee · 1 guest/)
     const messages = (await listTeamMessages(db, cleaner, thread.id, {})).messages
-    assert.deepEqual([messages[0]!.automatic, messages[0]!.senderId], [true, null])
+    assert.deepEqual([messages[0]!.automatic, messages[0]!.author_user_id], [true, null])
     // The hosts read along, and it is unread for them too until they do.
     assert.equal((await getTeamThread(env, db, owner, thread.id)).unread, true)
     // The cleaner's alert is the message itself, sent to the cleaner alone.
@@ -139,7 +139,7 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
     const closed = await closeTask(db, await taskViewer(db, principal('cook', 'member')), turnover.id, { status: 'done', note: 'All clean, towels restocked', photos: [], env })
     assert.equal(closed.status, 'done')
     const cookMessages = (await listTeamMessages(db, cook, cookThreads[0]!.id, {})).messages
-    assert.deepEqual([cookMessages[0]!.senderId, cookMessages[0]!.automatic, cookMessages[0]!.body, cookMessages[0]!.deliveries], ['cook', false, 'All clean, towels restocked', []])
+    assert.deepEqual([cookMessages[0]!.author_user_id, cookMessages[0]!.automatic, cookMessages[0]!.body, cookMessages[0]!.deliveries], ['cook', false, 'All clean, towels restocked', []])
     assert.equal((await getTeamThread(env, db, owner, cookThreads[0]!.id)).job?.status, 'done')
     // The cook's own message reads the conversation through for them and is unread for the hosts; the cleaner, no longer seated with it, never sees it.
     assert.equal((await getTeamThread(env, db, owner, cookThreads[0]!.id)).unread, true)
@@ -232,7 +232,7 @@ test('a consultation gives its attorney jobs that follow the booking and an aler
     await runOrganizationJobs(env, db, ORG, morning)
     const attorney = await teamAccessFor(memberAccessPrincipal({ userId: 'host', role: 'member', organizationId: ORG } as never, { env }), 'host-member', 'send')
     const threads = await Promise.all((await db.prepare("SELECT id FROM conversations WHERE kind = 'team' AND booking_id = ?").bind(booking.bookingId).all<{ id: string }>()).results.map(row => getTeamThread(env, db, attorney, row.id)))
-    assert.deepEqual(threads.map(thread => [thread.name, thread.bookingId, thread.job?.id]), [['Client', booking.bookingId, prep!.id]])
+    assert.deepEqual(threads.map(thread => [thread.name, thread.booking_id, thread.job?.id]), [['Client', booking.bookingId, prep!.id]])
     const posts = (await db.prepare("SELECT body FROM messages WHERE conversation_id = ? AND author_kind = 'krabiclaw'").bind(threads[0]!.id).all<{ body: string }>()).results.map(row => row.body)
     assert.equal(posts.filter(body => body === `Today: prepare for consultation with Client${view.when ? `, ${view.when}` : ''}.`).length, 1)
     assert.equal(posts.filter(body => body.includes('arrive')).length, 0)

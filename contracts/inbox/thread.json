@@ -16,9 +16,9 @@
       {
         "body": "Enjoy your stay!",
         "cancellable": true,
+        "due_at": "2026-11-08T23:00:00.000Z",
         "id": "00000000-0000-4000-8000-000000000003",
         "label": "Enjoy your stay!",
-        "sendAt": "2026-11-08T23:00:00.000Z",
         "source": "later",
         "time": "Sun, Nov 8, 4:00 PM"
       }

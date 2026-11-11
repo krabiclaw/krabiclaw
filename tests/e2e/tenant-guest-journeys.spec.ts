@@ -158,9 +158,9 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     const response = await submission
     expect(response.status()).toBe(201)
     expect(response.request().postDataJSON()).toMatchObject({ guest_phone: '+66812345678' })
-    const booked = await response.json() as { request_id: string }
-    expect(booked.request_id).toEqual(expect.any(String))
-    const persisted = await request.get(`${testBaseUrl()}/api/dashboard/bookings/booking/${booked.request_id}`, {
+    const booked = await response.json() as { conversation_id: string }
+    expect(booked.conversation_id).toEqual(expect.any(String))
+    const persisted = await request.get(`${testBaseUrl()}/api/dashboard/bookings/booking/${booked.conversation_id}`, {
       params: { org: wheel.slug },
     })
     expect(persisted.status(), await persisted.text()).toBe(200)
@@ -197,15 +197,15 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
       await page.getByLabel('Your details').getByRole('button', { name: 'Confirm booking', exact: true }).click()
       const response = await submission
       expect(response.status(), await response.text()).toBe(201)
-      const reservation: { request_id?: unknown; cancellation_token?: unknown; message?: unknown } = await response.json()
+      const reservation: { conversation_id?: unknown; cancellation_token?: unknown; message?: unknown } = await response.json()
       expect(reservation.message).toEqual(expect.stringMatching(/^Your reservation for .+ is confirmed\.$/u))
-      expect(reservation.request_id).toEqual(expect.any(String))
+      expect(reservation.conversation_id).toEqual(expect.any(String))
       expect(reservation.cancellation_token).toEqual(expect.any(String))
-      if (typeof reservation.request_id !== 'string' || typeof reservation.cancellation_token !== 'string') {
+      if (typeof reservation.conversation_id !== 'string' || typeof reservation.cancellation_token !== 'string') {
         throw new Error('The table booking response omitted its lookup credentials')
       }
       // Read back through the guest's receipt: a table, booked and confirmed.
-      const persisted = await request.get(`${baseURL}/api/public/booking-requests/${reservation.request_id}`, {
+      const persisted = await request.get(`${baseURL}/api/public/booking-requests/${reservation.conversation_id}`, {
         headers: { ...seededSiteHeaders('restaurant'), Authorization: `Bearer ${reservation.cancellation_token}` },
       })
       expect(persisted.status(), await persisted.text()).toBe(200)
@@ -252,7 +252,7 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     // A guest names a SESSION, not a date and a time: the occurrence is a real
     // row, so there is nothing to re-derive and no slot to invent.
     const book = (name: string, email: string, sessionId: string) => request.post(`${baseURL}/api/public/products/${wheel.product.slug}/book`, {
-      headers, data: { guest_name: name, guest_email: email, party_size: 1, session_id: sessionId, idempotency_key: crypto.randomUUID() },
+      headers, data: { guest_name: name, guest_email: email, party_size: 1, product_session_id: sessionId, idempotency_key: crypto.randomUUID() },
     })
     expect((await book('Missing Session', 'past@playwright.example', '')).status()).toBe(400)
     expect((await book('Unknown Session', 'slot@playwright.example', 'session-that-does-not-exist')).status()).toBe(404)
@@ -291,22 +291,22 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     const created = await submission
     expect(created.status()).toBe(201)
     expect(created.request().postDataJSON()).toMatchObject({ guest_phone: null })
-    const body = await created.json() as { request_id: string; cancellation_token: string }
+    const body = await created.json() as { conversation_id: string; cancellation_token: string }
     expect(JSON.stringify(body)).not.toContain('cancel-once@playwright.example')
     await loginAs(request, baseURL, 'user-e2e-pottery-owner')
-    const persisted = await request.get(`${baseURL}/api/dashboard/bookings/booking/${body.request_id}`, {
+    const persisted = await request.get(`${baseURL}/api/dashboard/bookings/booking/${body.conversation_id}`, {
       params: { org: wheel.slug },
     })
     expect(persisted.status(), await persisted.text()).toBe(200)
     const persistedBooking = (await persisted.json()).booking as { guestName: string; guestPhone: string | null; bookingDate: string }
     expect(persistedBooking).toMatchObject({ guestName: 'Cancel Once', guestPhone: null })
-    const threadURL = `${baseURL}/api/dashboard/organizations/${wheel.organizationId}/guest-threads/${body.request_id}`
+    const threadURL = `${baseURL}/api/dashboard/organizations/${wheel.organizationId}/guest-threads/${body.conversation_id}`
     const pendingThread = await request.get(threadURL)
     expect(pendingThread.status(), await pendingThread.text()).toBe(200)
-    expect((await pendingThread.json() as { thread: InboxThread }).thread).toMatchObject({ id: body.request_id, guestName: 'Cancel Once', recordKind: 'booking' })
+    expect((await pendingThread.json() as { thread: InboxThread }).thread).toMatchObject({ id: body.conversation_id, guestName: 'Cancel Once', recordKind: 'booking' })
     // Whether a reply is owed is the ledger's, which MCP reads out; the inbox view keeps it on the server.
     const conversationLedger = async () => {
-      const response = await mcpRequest(request, baseURL, { method: 'tools/call', toolName: 'get_conversation', args: { organization_id: wheel.organizationId, conversation_id: body.request_id } })
+      const response = await mcpRequest(request, baseURL, { method: 'tools/call', toolName: 'get_conversation', args: { organization_id: wheel.organizationId, conversation_id: body.conversation_id } })
       expect(response.status()).toBe(200)
       return mcpData<{ guest: { needs_reply: boolean; operational_record: { status: string } | null; messages: Array<{ id: string; event: string | null }> } }>(await response.json()).guest
     }
@@ -315,14 +315,14 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     const todayBefore = await request.get(`${baseURL}/api/dashboard/today`, { params: { org: wheel.slug } })
     expect(todayBefore.status(), await todayBefore.text()).toBe(200)
     const todayBeforePayload = await todayBefore.json() as { tasks: TaskSection[] }
-    expect(todayBeforePayload.tasks.flatMap(section => section.tasks).filter(task => task.requestId === body.request_id)).toEqual([])
+    expect(todayBeforePayload.tasks.flatMap(section => section.tasks).filter(task => task.requestId === body.conversation_id)).toEqual([])
     const day = persistedBooking.bookingDate
     // Calendar owns confirmed commitments; quests do not repeat its agenda.
     const scheduleParams = { org: wheel.slug, from: day, to: day }
     const scheduleBefore = await request.get(`${baseURL}/api/dashboard/agenda`, { params: scheduleParams })
     expect(scheduleBefore.status(), await scheduleBefore.text()).toBe(200)
-    expect((await scheduleBefore.json() as { items: Array<{ id: string }> }).items.map(item => item.id)).toContain(`booking:${body.request_id}`)
-    const cancelURL = `${baseURL}/api/public/booking-requests/${body.request_id}/cancel`
+    expect((await scheduleBefore.json() as { items: Array<{ id: string }> }).items.map(item => item.id)).toContain(`booking:${body.conversation_id}`)
+    const cancelURL = `${baseURL}/api/public/booking-requests/${body.conversation_id}/cancel`
     const authHeaders = { ...headers, Authorization: `Bearer ${body.cancellation_token}` }
     const receiptURL = cancelURL.replace(/\/cancel$/, '')
     const before = await request.get(receiptURL, { headers: authHeaders })
@@ -347,7 +347,7 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     expect(thread.stream.filter(item => item.type === 'event' && item.id === cancelEntries[0]!.id)).toMatchObject([{ text: expect.stringMatching(/ canceled the booking$/) }])
     const scheduleAfter = await request.get(`${baseURL}/api/dashboard/agenda`, { params: scheduleParams })
     expect(scheduleAfter.status(), await scheduleAfter.text()).toBe(200)
-    expect((await scheduleAfter.json() as { items: Array<{ id: string }> }).items.some(item => item.id === `booking:${body.request_id}`)).toBe(false)
+    expect((await scheduleAfter.json() as { items: Array<{ id: string }> }).items.some(item => item.id === `booking:${body.conversation_id}`)).toBe(false)
     expect((await request.post(cancelURL, {
       headers: { ...headers, Authorization: 'Bearer invalid-cancellation-token' },
     })).status()).toBe(404)

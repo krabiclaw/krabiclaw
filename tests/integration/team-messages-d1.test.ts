@@ -86,7 +86,7 @@ test('members talk in team conversations, see unread state and receive recorded 
     const teamThread = (access: TeamAccess, id: string) => getTeamThread(env, db, access, id)
 
     // Everyone in the organization, owners first; nobody from another one.
-    assert.deepEqual((await listTeamMembers(env, cleaner)).map(member => [member.memberId, member.id, member.role, member.image]),
+    assert.deepEqual((await listTeamMembers(env, cleaner)).map(member => [member.member_id, member.id, member.role, member.image]),
       [['m-owner', 'owner', 'owner', null], ['m-cleaner', 'cleaner', 'member', null], ['m-cook', 'cook', 'member', null]])
 
     // A conversation has another current member of this organization in it, and is reused for the same people.
@@ -130,7 +130,7 @@ test('members talk in team conversations, see unread state and receive recorded 
     const stayConversation = await db.prepare("SELECT id FROM conversations WHERE booking_id = ? AND kind = 'booking'").bind(stay.id).first<string>('id')
     assert.ok(stayConversation)
     // A stay's guest conversation is owners' and admins': the member looking after the home reads its turnover.
-    await assert.rejects(assertConversationAccess(db, principal('cleaner', 'member'), stayConversation), refused(404, 'THREAD_NOT_FOUND', 'conversationId'))
+    await assert.rejects(assertConversationAccess(db, principal('cleaner', 'member'), stayConversation), refused(404, 'THREAD_NOT_FOUND', 'conversation_id'))
     assert.deepEqual((await listOrganizationNotificationMembers(env, ORG, { requestId: stayConversation })).map(member => member.userId).sort(), ['owner'], 'a stay conversation alerts owner oversight, not the member looking after the home')
     await updateStayHome(env, db, manager, cabin.id, { assigned_member_id: 'm-cleaner' })
     const about = await createTeamThread(env, db, cleaner, { memberIds: ['owner'], bookingId: stay.id })
@@ -148,11 +148,11 @@ test('members talk in team conversations, see unread state and receive recorded 
 
     // Giving cook the site's tables gives cook access to reuse and view the location conversation
     await createTables(db, env, { organizationId: ORG, locationId: 'cabin-site', actorId: 'owner', memberId: 'm-cook', name: 'Cabin tables', durationMinutes: 90, seats: 12, open: '18:00', lastSeating: '20:00', idempotencyKey: 'cabin-tables' })
-    await assert.rejects(assertConversationAccess(db, principal('cook', 'member'), stayConversation), refused(404, 'THREAD_NOT_FOUND', 'conversationId'))
+    await assert.rejects(assertConversationAccess(db, principal('cook', 'member'), stayConversation), refused(404, 'THREAD_NOT_FOUND', 'conversation_id'))
     assert.deepEqual((await listOrganizationNotificationMembers(env, ORG, { requestId: stayConversation })).map(member => member.userId).sort(), ['owner'], 'handling the site\'s tables does not reach a lodging conversation either')
     assert.deepEqual(await createTeamThread(env, db, cook, { memberIds: ['owner'], locationId: 'cabin-site' }), { id: floorChat.id, created: false })
     const cookFloorView = await teamThread(cook, floorChat.id)
-    assert.equal(cookFloorView.locationId, 'cabin-site')
+    assert.equal(cookFloorView.location_id, 'cabin-site')
     assert.deepEqual(cookFloorView.location, { id: 'cabin-site', title: 'Pine Cabin', slug: 'cabin', timezone: 'America/Denver' })
 
     // One message per key; the same key with different words is refused.
@@ -161,7 +161,7 @@ test('members talk in team conversations, see unread state and receive recorded 
     const sent = await sendTeamMessage(env, db, cleaner, direct.id, { body: ' Towels are out ', photos: [], idempotencyKey: 'k1', senderName: 'cleaner' })
     assert.equal(sent.created, true)
     assert.equal(sent.message.body, 'Towels are out')
-    assert.equal(sent.message.senderId, 'cleaner')
+    assert.equal(sent.message.author_user_id, 'cleaner')
     // The owner's device was tried and Apple's refusal is recorded on the message.
     assert.equal(sent.message.deliveries.length, 1)
     assert.equal(sent.message.deliveries[0]!.status, 'failed')
@@ -172,14 +172,14 @@ test('members talk in team conversations, see unread state and receive recorded 
 
     // Unread is the recipient's, until they read it; the sender has read their own.
     const ownerView = await teamThread(owner, direct.id)
-    assert.deepEqual({ unread: ownerView.unread, last: ownerView.lastMessage?.body, stay: ownerView.stay }, { unread: true, last: 'Towels are out', stay: null })
+    assert.deepEqual({ unread: ownerView.unread, last: ownerView.last_message?.body, stay: ownerView.stay }, { unread: true, last: 'Towels are out', stay: null })
     assert.deepEqual(ownerView.participants.map(participant => participant.id).sort(), ['cleaner', 'owner'])
     assert.equal((await teamThread(cleaner, direct.id)).unread, false)
     // The one list says the same, with the same statement.
     const ownerRow = (await listConversations(db, ORG, { userId: 'owner', principal: owner.principal, kind: 'team' })).find(row => row.id === direct.id)
     assert.deepEqual([ownerRow?.kind, ownerRow?.unread, ownerRow?.preview], ['team', true, 'Towels are out'])
     const stayView = await teamThread(owner, about.id)
-    assert.deepEqual(stayView.stay, { id: stay.id, productId: cabin.id, homeName: 'Cabin', checkInDate: day(3), checkOutDate: day(5), status: stay.status })
+    assert.deepEqual(stayView.stay, { id: stay.id, product_id: cabin.id, name: 'Cabin', check_in_date: day(3), check_out_date: day(5), status: stay.status })
     await markConversationRead(db, { organizationId: ORG, conversationId: direct.id, userId: 'owner' })
     assert.equal((await teamThread(owner, direct.id)).unread, false)
     // Marked unread from the list: the cleaner's newest message counts as new again, then read again.
@@ -188,7 +188,7 @@ test('members talk in team conversations, see unread state and receive recorded 
     await markConversationRead(db, { organizationId: ORG, conversationId: direct.id, userId: 'owner' })
     assert.equal((await teamThread(owner, direct.id)).unread, false)
     // Nobody else has written to the cleaner here, so there is nothing to be unread.
-    await assert.rejects(markConversationUnread(db, { organizationId: ORG, conversationId: direct.id, userId: 'cleaner' }), refused(409, 'NOTHING_TO_MARK', 'conversationId'))
+    await assert.rejects(markConversationUnread(db, { organizationId: ORG, conversationId: direct.id, userId: 'cleaner' }), refused(409, 'NOTHING_TO_MARK', 'conversation_id'))
 
     // A member switched team pushes off gets none, and nothing is recorded for them.
     await setNotificationPreference(db, env as never, 'owner', 'messages', { email: false, whatsapp: false, push: false })
@@ -200,11 +200,11 @@ test('members talk in team conversations, see unread state and receive recorded 
 
     // Newest first, paged back from the oldest loaded message.
     const page = await listTeamMessages(db, owner, direct.id, { limit: '2' })
-    assert.deepEqual({ bodies: page.messages.map(message => message.body), hasMore: page.hasMore }, { bodies: ['Thanks', 'Second'], hasMore: true })
+    assert.deepEqual({ bodies: page.messages.map(message => message.body), has_more: page.has_more }, { bodies: ['Thanks', 'Second'], has_more: true })
     const oldest = page.messages.at(-1)!
-    const earlier = await listTeamMessages(db, owner, direct.id, { limit: '2', before: oldest.createdAt, beforeId: oldest.id })
-    assert.deepEqual({ bodies: earlier.messages.map(message => message.body), hasMore: earlier.hasMore }, { bodies: ['Towels are out'], hasMore: false })
-    await assert.rejects(listTeamMessages(db, owner, direct.id, { before: oldest.createdAt }), refused(422, 'INVALID_CURSOR', 'beforeId'))
+    const earlier = await listTeamMessages(db, owner, direct.id, { limit: '2', before: oldest.created_at, before_id: oldest.id })
+    assert.deepEqual({ bodies: earlier.messages.map(message => message.body), has_more: earlier.has_more }, { bodies: ['Towels are out'], has_more: false })
+    await assert.rejects(listTeamMessages(db, owner, direct.id, { before: oldest.created_at }), refused(422, 'INVALID_CURSOR', 'before_id'))
 
     // A committed host photo can finish publication after its download URL expires.
     const photoBytes = Uint8Array.from(await sharp({ create: { width: 12, height: 8, channels: 3, background: '#2563eb' } }).avif().toBuffer())
@@ -242,7 +242,7 @@ test('members talk in team conversations, see unread state and receive recorded 
     const nativePhoto = await sendTeamMessage(env, db, cleaner, direct.id, { body: '', photos: [{ bytes: photoBytes, filename: 'native.avif' }], idempotencyKey: 'native-photo', senderName: 'cleaner' })
     const nativeSaved = (await listTeamMessages(db, owner, direct.id, { limit: 100 })).messages.find(message => message.id === nativePhoto.message.id)
     assert.ok(nativeSaved)
-    assert.deepEqual({ id: nativeSaved.id, threadId: nativeSaved.threadId, senderId: nativeSaved.senderId, body: nativeSaved.body, photos: nativeSaved.attachments.length }, { id: nativePhoto.message.id, threadId: direct.id, senderId: 'cleaner', body: '', photos: 1 })
+    assert.deepEqual({ id: nativeSaved.id, threadId: nativeSaved.conversation_id, author_user_id: nativeSaved.author_user_id, body: nativeSaved.body, photos: nativeSaved.attachments.length }, { id: nativePhoto.message.id, threadId: direct.id, author_user_id: 'cleaner', body: '', photos: 1 })
     const nativeAsset = await db.prepare(`SELECT ma.id, ma.r2_key, ma.public_url FROM media_assets ma JOIN media_placements mp ON mp.asset_id = ma.id
       WHERE mp.owner_type = 'message' AND mp.owner_id = ? AND mp.status = 'active' AND ma.organization_id = ?`).bind(nativeSaved.id, ORG).first<{ id: string; r2_key: string; public_url: string }>()
     assert.ok(nativeAsset)
@@ -274,14 +274,14 @@ test('members talk in team conversations, see unread state and receive recorded 
     const separateGroup = await createTeamThread(env, db, cleaner, { ...groupInput, idempotencyKey: 'another-crew' })
     assert.notEqual(separateGroup.id, group.id)
     const groupView = async (access = owner) => (await teamThreads(access)).find(thread => thread.id === group.id)
-    assert.deepEqual(await groupView().then(thread => thread && { name: thread.name, isGroup: thread.isGroup, creator: thread.createdByUserId, canManage: thread.canManage, canLeave: thread.canLeave, members: thread.participants.map(person => person.id).sort() }),
-      { name: 'Cabin crew', isGroup: true, creator: 'cleaner', canManage: true, canLeave: true, members: ['cleaner', 'cook', 'owner'] })
-    assert.equal((await groupView(cleaner))?.canManage, true)
-    assert.equal((await groupView(cook))?.canManage, false)
+    assert.deepEqual(await groupView().then(thread => thread && { name: thread.name, is_group: thread.is_group, creator: thread.created_by_user_id, can_manage: thread.can_manage, can_leave: thread.can_leave, members: thread.participants.map(person => person.id).sort() }),
+      { name: 'Cabin crew', is_group: true, creator: 'cleaner', can_manage: true, can_leave: true, members: ['cleaner', 'cook', 'owner'] })
+    assert.equal((await groupView(cleaner))?.can_manage, true)
+    assert.equal((await groupView(cook))?.can_manage, false)
     await assert.rejects(operateTeamGroup(env, db, cook, group.id, { action: 'rename', name: 'No permission', idempotencyKey: 'no-permission' }), refused(403, 'TEAM_GROUP_MANAGEMENT_REQUIRED', 'permissions'))
     await assert.rejects(operateTeamGroup(env, db, cleaner, direct.id, { action: 'leave', idempotencyKey: 'direct-leave' }), refused(409, 'TEAM_GROUP_PROTECTED', 'threadId'))
     const contextualGroup = await createTeamThread(env, db, owner, { memberIds: ['cleaner', 'cook'], locationId: 'cabin-site' })
-    assert.deepEqual(await teamThread(owner, contextualGroup.id).then(thread => [thread.isGroup, thread.canManage, thread.canLeave]), [false, false, false])
+    assert.deepEqual(await teamThread(owner, contextualGroup.id).then(thread => [thread.is_group, thread.can_manage, thread.can_leave]), [false, false, false])
     await assert.rejects(operateTeamGroup(env, db, owner, contextualGroup.id, { action: 'remove', userId: 'cook', idempotencyKey: 'context-remove' }), refused(409, 'TEAM_GROUP_PROTECTED', 'threadId'))
     await assert.rejects(operateTeamGroup(env, db, cleaner, group.id, { action: 'add', memberIds: ['outsider'], idempotencyKey: 'outsider-add' }), refused(422, 'INVALID_TEAM_MEMBERS', 'memberIds'))
     await assert.rejects(operateTeamGroup(env, db, cleaner, group.id, { action: 'rename', name: ' ', idempotencyKey: 'blank-name' }), refused(422, 'INVALID_GROUP_NAME', 'name'))
@@ -305,7 +305,7 @@ test('members talk in team conversations, see unread state and receive recorded 
     const unexpectedReport = async (error: unknown) => { throw error }
     await receiveMemberEmail(env, emailedReply, unexpectedReport)
     await receiveMemberEmail(env, emailedReply, unexpectedReport)
-    assert.deepEqual((await listTeamMessages(db, owner, contextualGroup.id, {})).messages.filter(message => message.body === 'On my way').map(message => message.senderId), ['cleaner'])
+    assert.deepEqual((await listTeamMessages(db, owner, contextualGroup.id, {})).messages.filter(message => message.body === 'On my way').map(message => message.author_user_id), ['cleaner'])
     // The reply saves but open apps cannot be told: the delivery fails so its redelivery finishes the work,
     // and the redelivery writes no second message.
     const hubs = env.GUEST_INBOX_HUBS!
@@ -315,7 +315,7 @@ test('members talk in team conversations, see unread state and receive recorded 
     await assert.rejects(receiveMemberEmail(env, unfinished, unexpectedReport), (error: unknown) => (error as { cause?: { data?: { code?: string } } }).cause?.data?.code === 'DASHBOARD_PUBLICATION_FAILED')
     env.GUEST_INBOX_HUBS = hubs
     await receiveMemberEmail(env, unfinished, unexpectedReport)
-    assert.deepEqual((await listTeamMessages(db, owner, contextualGroup.id, {})).messages.filter(message => message.body === 'Keys are in the box').map(message => message.senderId), ['cleaner'])
+    assert.deepEqual((await listTeamMessages(db, owner, contextualGroup.id, {})).messages.filter(message => message.body === 'Keys are in the box').map(message => message.author_user_id), ['cleaner'])
     // The signature is the cleaner's: another member replying from their own address is refused.
     await assert.rejects(receiveMemberEmail(env, { ...emailedReply, from: 'owner@example.test', messageId: '<team-forged@mail.example.test>' }, unexpectedReport), InboundEmailRejection)
     assert.equal((await listTeamMessages(db, owner, contextualGroup.id, {})).messages.filter(message => message.body === 'On my way').length, 1)
@@ -407,7 +407,7 @@ test('members talk in team conversations, see unread state and receive recorded 
     assert.deepEqual(rejectedRename.reason.data, { code: 'IDEMPOTENCY_KEY_REUSED', field: 'idempotencyKey' })
     await operateTeamGroup(env, db, owner, group.id, { action: 'remove', userId: 'cook', idempotencyKey: 'remove-cook' })
     await assert.rejects(listTeamMessages(db, cook, group.id, {}), refused(404, 'TEAM_THREAD_NOT_FOUND', 'threadId'))
-    assert.deepEqual(await groupView().then(thread => thread && [thread.isGroup, thread.canLeave, thread.participants.length]), [true, true, 2])
+    assert.deepEqual(await groupView().then(thread => thread && [thread.is_group, thread.can_leave, thread.participants.length]), [true, true, 2])
     await operateTeamGroup(env, db, cleaner, group.id, { action: 'add', memberIds: ['cook'], idempotencyKey: 'add-cook' })
     assert.equal((await listTeamMessages(db, cook, group.id, {})).messages[0]?.id, groupMessage.message.id)
     await operateTeamGroup(env, db, owner, group.id, { action: 'remove', userId: 'cleaner', idempotencyKey: 'remove-creator' })
@@ -465,7 +465,7 @@ test('members talk in team conversations, see unread state and receive recorded 
     assert.deepEqual(after.participants.map(participant => participant.id), ['owner'])
     // The departed member keeps no seat or read position in this organization's conversations.
     assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM conversation_participants WHERE organization_id = ? AND user_id = 'cleaner'").bind(ORG).first('n'), 0)
-    assert.equal((await listTeamMessages(db, owner, direct.id, {})).messages.find(message => message.body === 'Towels are out')?.senderId, 'cleaner')
+    assert.equal((await listTeamMessages(db, owner, direct.id, {})).messages.find(message => message.body === 'Towels are out')?.author_user_id, 'cleaner')
 
     // Only departed/dangling current targets are released. Promotion preserves explicit responsibility.
     const assignee = async () => (await listStayHomes(db, manager)).find(home => home.product_id === cabin.id)?.assigned_member_id

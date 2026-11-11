@@ -95,7 +95,7 @@ export function isThreadDetailResponse(value: unknown): value is { thread: Threa
     && isNullableText(thread.activityPath)
     && Array.isArray(thread.stream) && thread.stream.every(isStreamItem)
     && Array.isArray(thread.pending) && thread.pending.every(item => isRecord(item) && isText(item.id) && (item.source === 'automatic' || item.source === 'later')
-      && isText(item.label) && isText(item.sendAt) && isText(item.time) && typeof item.body === 'string' && typeof item.cancellable === 'boolean')
+      && isText(item.label) && isText(item.due_at) && isText(item.time) && typeof item.body === 'string' && typeof item.cancellable === 'boolean')
     && isRecord(thread.composer) && (thread.composer.channel === 'airbnb' || thread.composer.channel === 'email') && typeof thread.composer.available === 'boolean' && (thread.composer.reason === null || typeof thread.composer.reason === 'string')
 }
 

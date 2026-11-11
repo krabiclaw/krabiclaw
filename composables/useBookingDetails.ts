@@ -16,9 +16,10 @@ export function isBookingDetailsResponse(value: unknown): value is { booking: Da
   return isRecord(value)
     && isRecord(value.booking)
     && typeof value.booking.id === 'string'
-    && typeof value.booking.organizationId === 'string'
-    && (value.booking.guestName === null || typeof value.booking.guestName === 'string')
-    && Array.isArray(value.booking.notes)
+    && typeof value.booking.organization_id === 'string'
+    && (value.booking.guest_name === null || typeof value.booking.guest_name === 'string')
+    && (value.booking.notes === null || typeof value.booking.notes === 'string')
+    && Array.isArray(value.booking.answers)
     && (value.booking.policy === null || isRecord(value.booking.policy))
 }
 
@@ -58,11 +59,11 @@ export async function useBookingDetails(bookingType: DashboardRecordType, bookin
   // rather than guessing, so it is only asked once the booking has loaded.
   const purchase = bookingType === 'order' || bookingType === 'payment'
   const presentation = computed(() => booking.value
-    ? booking.value.productKind === null ? PURCHASE : resolveBookingPresentation(booking.value.productKind, booking.value.vertical)
+    ? booking.value.product_kind === null ? PURCHASE : resolveBookingPresentation(booking.value.product_kind, booking.value.vertical)
     : null)
   const noun = computed(() => presentation.value?.noun ?? '')
 
-  const referenceDay = computed(() => booking.value ? localDateAt(now.value, booking.value.timeZone) : '')
+  const referenceDay = computed(() => booking.value ? localDateAt(now.value, booking.value.timezone) : '')
   const pageTitle = computed(() => {
     if (!booking.value) return purchase ? 'Purchase' : 'Booking details'
     // A purchase's state is the money's: Paid, Refunded, Pending — as the visit's is Coming up or Cancelled.
@@ -71,10 +72,10 @@ export async function useBookingDetails(bookingType: DashboardRecordType, bookin
     if (booking.value.status === 'cancelled') return 'Cancelled'
     // Under way by the instant, so a visit past midnight is still being hosted.
     const instant = now.value.toISOString()
-    const underway = booking.value.startsAt !== null && booking.value.endsAt !== null && booking.value.startsAt <= instant && instant < booking.value.endsAt
-    if (underway && !booking.value.noShowAt && !personalScope && booking.value.vertical !== 'service') return 'Currently hosting'
-    if (booking.value.bookingDate === referenceDay.value) return 'Today'
-    if (booking.value.bookingDate > referenceDay.value) return 'Coming up'
+    const underway = booking.value.starts_at !== null && booking.value.ends_at !== null && booking.value.starts_at <= instant && instant < booking.value.ends_at
+    if (underway && !booking.value.no_show_at && !personalScope && booking.value.vertical !== 'service') return 'Currently hosting'
+    if (booking.value.booking_date === referenceDay.value) return 'Today'
+    if (booking.value.booking_date > referenceDay.value) return 'Coming up'
     return `Past ${noun.value}`
   })
 

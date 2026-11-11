@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:b33f599e248711ecbfa644338537d478f69357d192c142abff1e5d991adb909f",
-  "documentationFingerprint": "sha256:0dcd6f1c79f1fa3658c037eba1800e68381eda794f8abce2bfb821d28d34f2d0",
+  "fingerprint": "sha256:bcaa55bbf0474aea0f1b9012e29ec6068579288f846e27b049f2a4e5ceffc4d6",
+  "documentationFingerprint": "sha256:46a21457cd5ac5e65efaf0fd0ada02d2a10402c9ad6982ce709a1e08cec12152",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -13189,6 +13189,10 @@
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
+          "booking_id": {
+            "description": "Booking ID returned by list_product_bookings or create_product_booking. Distinct from conversation_id, which identifies the inbox conversation.",
+            "type": "string"
+          },
           "expected_version": {
             "description": "Required for a stay: stay.version from get_product_booking. A stale version is refused.",
             "minimum": 1,
@@ -13198,10 +13202,6 @@
             "description": "Caller-supplied durable idempotency key. Reuse only for the identical operation.",
             "maxLength": 200,
             "minLength": 1,
-            "type": "string"
-          },
-          "operational_booking_id": {
-            "description": "Booking ID returned by list_product_bookings or create_product_booking. Distinct from request_id, which identifies the inbox conversation.",
             "type": "string"
           },
           "organization_id": {
@@ -13217,7 +13217,7 @@
           }
         },
         "required": [
-          "operational_booking_id",
+          "booking_id",
           "idempotency_key"
         ],
         "type": "object"
@@ -13227,12 +13227,16 @@
         "anyOf": [
           {
             "properties": {
-              "availableActions": {
+              "available_actions": {
                 "items": {
                   "minLength": 1,
                   "type": "string"
                 },
                 "type": "array"
+              },
+              "conversation_id": {
+                "minLength": 1,
+                "type": "string"
               },
               "ok": {
                 "const": true
@@ -13325,10 +13329,6 @@
                 ],
                 "type": "object"
               },
-              "request_id": {
-                "minLength": 1,
-                "type": "string"
-              },
               "status": {
                 "const": 200
               },
@@ -13355,9 +13355,9 @@
             "required": [
               "ok",
               "status",
-              "request_id",
+              "conversation_id",
               "record",
-              "availableActions",
+              "available_actions",
               "thread"
             ],
             "type": "object"
@@ -13365,6 +13365,10 @@
           {
             "additionalProperties": false,
             "properties": {
+              "booking_id": {
+                "minLength": 1,
+                "type": "string"
+              },
               "cancellation_reason": {
                 "type": [
                   "string",
@@ -13417,10 +13421,6 @@
                   "null"
                 ]
               },
-              "operational_booking_id": {
-                "minLength": 1,
-                "type": "string"
-              },
               "status": {
                 "const": "cancelled"
               },
@@ -13432,7 +13432,7 @@
               }
             },
             "required": [
-              "operational_booking_id",
+              "booking_id",
               "unit",
               "status",
               "version",
@@ -13473,19 +13473,19 @@
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
-          "message_id": {
-            "minLength": 1,
-            "type": "string"
-          },
           "organization_id": {
             "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
             "minLength": 1,
             "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
             "type": "string"
+          },
+          "scheduled_message_id": {
+            "minLength": 1,
+            "type": "string"
           }
         },
         "required": [
-          "message_id"
+          "scheduled_message_id"
         ],
         "type": "object"
       },
@@ -13975,14 +13975,14 @@
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
+          "booking_id": {
+            "description": "Booking ID returned by list_product_bookings or create_product_booking. Distinct from conversation_id, which identifies the inbox conversation.",
+            "type": "string"
+          },
           "idempotency_key": {
             "description": "Caller-supplied durable idempotency key. Reuse only for the identical operation.",
             "maxLength": 200,
             "minLength": 1,
-            "type": "string"
-          },
-          "operational_booking_id": {
-            "description": "Booking ID returned by list_product_bookings or create_product_booking. Distinct from request_id, which identifies the inbox conversation.",
             "type": "string"
           },
           "organization_id": {
@@ -13993,7 +13993,7 @@
           }
         },
         "required": [
-          "operational_booking_id",
+          "booking_id",
           "idempotency_key"
         ],
         "type": "object"
@@ -14002,12 +14002,16 @@
         "$defs": {},
         "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
         "properties": {
-          "availableActions": {
+          "available_actions": {
             "items": {
               "minLength": 1,
               "type": "string"
             },
             "type": "array"
+          },
+          "conversation_id": {
+            "minLength": 1,
+            "type": "string"
           },
           "ok": {
             "const": true
@@ -14100,10 +14104,6 @@
             ],
             "type": "object"
           },
-          "request_id": {
-            "minLength": 1,
-            "type": "string"
-          },
           "status": {
             "const": 200
           },
@@ -14130,9 +14130,9 @@
         "required": [
           "ok",
           "status",
-          "request_id",
+          "conversation_id",
           "record",
-          "availableActions",
+          "available_actions",
           "thread"
         ],
         "type": "object"
@@ -20472,10 +20472,10 @@
                 "additionalProperties": false,
                 "description": "Five minutes after KrabiClaw receives a new booking.",
                 "properties": {
-                  "delayMinutes": {
+                  "delay_minutes": {
                     "const": 5
                   },
-                  "productIds": {
+                  "product_ids": {
                     "description": "The offerings whose bookings get this message.",
                     "items": {
                       "description": "A canonical product ID of a home, experience, consultation or restaurant table product (list_products); never a provider property ID.",
@@ -20493,8 +20493,8 @@
                 },
                 "required": [
                   "trigger",
-                  "delayMinutes",
-                  "productIds"
+                  "delay_minutes",
+                  "product_ids"
                 ],
                 "type": "object"
               },
@@ -20502,16 +20502,16 @@
                 "additionalProperties": false,
                 "description": "A number of days before or after the start or end, at a local time in the booking’s own timezone (the home’s, location’s, or an online consultation’s attorney’s).",
                 "properties": {
-                  "localTime": {
+                  "local_time": {
                     "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
                     "type": "string"
                   },
-                  "offsetDays": {
+                  "offset_days": {
                     "maximum": 7,
                     "minimum": -7,
                     "type": "integer"
                   },
-                  "productIds": {
+                  "product_ids": {
                     "description": "The offerings whose bookings get this message.",
                     "items": {
                       "description": "A canonical product ID of a home, experience, consultation or restaurant table product (list_products); never a provider property ID.",
@@ -20534,9 +20534,9 @@
                 },
                 "required": [
                   "trigger",
-                  "offsetDays",
-                  "localTime",
-                  "productIds"
+                  "offset_days",
+                  "local_time",
+                  "product_ids"
                 ],
                 "type": "object"
               },
@@ -20544,12 +20544,12 @@
                 "additionalProperties": false,
                 "description": "A number of hours before (negative) or after (positive) the start or end itself. A home needs its check-in or checkout time.",
                 "properties": {
-                  "offsetHours": {
+                  "offset_hours": {
                     "maximum": 72,
                     "minimum": -72,
                     "type": "integer"
                   },
-                  "productIds": {
+                  "product_ids": {
                     "description": "The offerings whose bookings get this message.",
                     "items": {
                       "description": "A canonical product ID of a home, experience, consultation or restaurant table product (list_products); never a provider property ID.",
@@ -20572,8 +20572,8 @@
                 },
                 "required": [
                   "trigger",
-                  "offsetHours",
-                  "productIds"
+                  "offset_hours",
+                  "product_ids"
                 ],
                 "type": "object"
               }
@@ -20602,7 +20602,7 @@
                 "minLength": 1,
                 "type": "string"
               },
-              "createdAt": {
+              "created_at": {
                 "minLength": 1,
                 "type": "string"
               },
@@ -20610,7 +20610,7 @@
                 "minLength": 1,
                 "type": "string"
               },
-              "organizationId": {
+              "organization_id": {
                 "minLength": 1,
                 "type": "string"
               },
@@ -20620,10 +20620,10 @@
                     "additionalProperties": false,
                     "description": "Five minutes after KrabiClaw receives a new booking.",
                     "properties": {
-                      "delayMinutes": {
+                      "delay_minutes": {
                         "const": 5
                       },
-                      "productIds": {
+                      "product_ids": {
                         "description": "The offerings whose bookings get this message.",
                         "items": {
                           "description": "A canonical product ID of a home, experience, consultation or restaurant table product (list_products); never a provider property ID.",
@@ -20641,8 +20641,8 @@
                     },
                     "required": [
                       "trigger",
-                      "delayMinutes",
-                      "productIds"
+                      "delay_minutes",
+                      "product_ids"
                     ],
                     "type": "object"
                   },
@@ -20650,16 +20650,16 @@
                     "additionalProperties": false,
                     "description": "A number of days before or after the start or end, at a local time in the booking’s own timezone (the home’s, location’s, or an online consultation’s attorney’s).",
                     "properties": {
-                      "localTime": {
+                      "local_time": {
                         "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
                         "type": "string"
                       },
-                      "offsetDays": {
+                      "offset_days": {
                         "maximum": 7,
                         "minimum": -7,
                         "type": "integer"
                       },
-                      "productIds": {
+                      "product_ids": {
                         "description": "The offerings whose bookings get this message.",
                         "items": {
                           "description": "A canonical product ID of a home, experience, consultation or restaurant table product (list_products); never a provider property ID.",
@@ -20682,9 +20682,9 @@
                     },
                     "required": [
                       "trigger",
-                      "offsetDays",
-                      "localTime",
-                      "productIds"
+                      "offset_days",
+                      "local_time",
+                      "product_ids"
                     ],
                     "type": "object"
                   },
@@ -20692,12 +20692,12 @@
                     "additionalProperties": false,
                     "description": "A number of hours before (negative) or after (positive) the start or end itself. A home needs its check-in or checkout time.",
                     "properties": {
-                      "offsetHours": {
+                      "offset_hours": {
                         "maximum": 72,
                         "minimum": -72,
                         "type": "integer"
                       },
-                      "productIds": {
+                      "product_ids": {
                         "description": "The offerings whose bookings get this message.",
                         "items": {
                           "description": "A canonical product ID of a home, experience, consultation or restaurant table product (list_products); never a provider property ID.",
@@ -20720,8 +20720,8 @@
                     },
                     "required": [
                       "trigger",
-                      "offsetHours",
-                      "productIds"
+                      "offset_hours",
+                      "product_ids"
                     ],
                     "type": "object"
                   }
@@ -20731,7 +20731,7 @@
                 "minLength": 1,
                 "type": "string"
               },
-              "updatedAt": {
+              "updated_at": {
                 "minLength": 1,
                 "type": "string"
               },
@@ -20742,13 +20742,13 @@
             },
             "required": [
               "id",
-              "organizationId",
+              "organization_id",
               "title",
               "body",
               "schedule",
               "version",
-              "createdAt",
-              "updatedAt"
+              "created_at",
+              "updated_at"
             ],
             "type": "object"
           }
@@ -29086,16 +29086,19 @@
             "minimum": 1,
             "type": "integer"
           },
+          "product_session_id": {
+            "description": "Available session ID from list_product_booking_sessions.",
+            "type": "string"
+          },
           "product_slug": {
             "description": "Offering slug from list_products or get_product, not its product ID.",
             "type": "string"
           },
-          "questions_revision": {
-            "description": "The questions_revision the answers were collected against. Required with answers; a changed revision returns questions_changed with the current questions.",
+          "product_variant_id": {
             "type": "string"
           },
-          "session_id": {
-            "description": "Available session ID from list_product_booking_sessions.",
+          "questions_revision": {
+            "description": "The questions_revision the answers were collected against. Required with answers; a changed revision returns questions_changed with the current questions.",
             "type": "string"
           },
           "source": {
@@ -29103,14 +29106,11 @@
             "maxLength": 100,
             "minLength": 1,
             "type": "string"
-          },
-          "variant_id": {
-            "type": "string"
           }
         },
         "required": [
           "product_slug",
-          "session_id",
+          "product_session_id",
           "party_size",
           "guest_name",
           "guest_email",
@@ -29124,21 +29124,21 @@
         "$defs": {},
         "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
         "properties": {
+          "booking_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "conversation_id": {
+            "minLength": 1,
+            "type": "string"
+          },
           "http_status": {
             "maximum": 299,
             "minimum": 200,
             "type": "integer"
           },
-          "operational_booking_id": {
-            "minLength": 1,
-            "type": "string"
-          },
           "replayed": {
             "type": "boolean"
-          },
-          "request_id": {
-            "minLength": 1,
-            "type": "string"
           },
           "status": {
             "enum": [
@@ -29154,8 +29154,8 @@
         },
         "required": [
           "success",
-          "operational_booking_id",
-          "request_id",
+          "booking_id",
+          "conversation_id",
           "status",
           "http_status"
         ],
@@ -37326,15 +37326,15 @@
                 "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
                 "type": "string"
               },
+              "conversation_id": {
+                "minLength": 1,
+                "type": "string"
+              },
               "id": {
                 "minLength": 1,
                 "type": "string"
               },
               "product_id": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "request_id": {
                 "minLength": 1,
                 "type": "string"
               },
@@ -37357,7 +37357,7 @@
             "required": [
               "id",
               "product_id",
-              "request_id",
+              "conversation_id",
               "status",
               "version",
               "updated_at",
@@ -42133,10 +42133,6 @@
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
-          "expected_version": {
-            "minimum": 1,
-            "type": "integer"
-          },
           "organization_id": {
             "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
             "minLength": 1,
@@ -42146,11 +42142,15 @@
           "template_id": {
             "minLength": 1,
             "type": "string"
+          },
+          "version": {
+            "minimum": 1,
+            "type": "integer"
           }
         },
         "required": [
           "template_id",
-          "expected_version"
+          "version"
         ],
         "type": "object"
       },
@@ -42775,7 +42775,7 @@
             "type": "string"
           },
           "stay_id": {
-            "description": "Stay ID: operational_booking_id from list_product_bookings.",
+            "description": "Stay ID: booking_id from list_product_bookings.",
             "minLength": 1,
             "type": "string"
           }
@@ -48083,6 +48083,13 @@
                       },
                       "type": "array"
                     },
+                    "author_user_id": {
+                      "description": "The sender; null for an automatic message, or once a person’s account was deleted.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
                     "automatic": {
                       "description": "Written by KrabiClaw (a cleaning job, a reminder, a move), not by a member. It is unread until read, like any message from someone else.",
                       "type": "boolean"
@@ -48090,7 +48097,10 @@
                     "body": {
                       "type": "string"
                     },
-                    "createdAt": {
+                    "conversation_id": {
+                      "type": "string"
+                    },
+                    "created_at": {
                       "type": "string"
                     },
                     "deliveries": {
@@ -48116,7 +48126,7 @@
                           "status": {
                             "type": "string"
                           },
-                          "updatedAt": {
+                          "updated_at": {
                             "type": "string"
                           }
                         },
@@ -48125,7 +48135,7 @@
                           "channel",
                           "status",
                           "error",
-                          "updatedAt"
+                          "updated_at"
                         ],
                         "type": "object"
                       },
@@ -48133,25 +48143,15 @@
                     },
                     "id": {
                       "type": "string"
-                    },
-                    "senderId": {
-                      "description": "The sender; null for an automatic message, or once a person’s account was deleted.",
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "threadId": {
-                      "type": "string"
                     }
                   },
                   "required": [
                     "id",
-                    "threadId",
-                    "senderId",
+                    "conversation_id",
+                    "author_user_id",
                     "automatic",
                     "body",
-                    "createdAt",
+                    "created_at",
                     "attachments",
                     "deliveries"
                   ],
@@ -48162,23 +48162,23 @@
               "thread": {
                 "description": "A team conversation: its people, what it is about and its newest message.",
                 "properties": {
-                  "bookingId": {
+                  "booking_id": {
                     "description": "The booking the conversation is about: a stay (see stay) or a class, consultation or table (see record).",
                     "type": [
                       "string",
                       "null"
                     ]
                   },
-                  "canLeave": {
+                  "can_leave": {
                     "type": "boolean"
                   },
-                  "canManage": {
+                  "can_manage": {
                     "type": "boolean"
                   },
-                  "createdAt": {
+                  "created_at": {
                     "type": "string"
                   },
-                  "createdByUserId": {
+                  "created_by_user_id": {
                     "type": [
                       "string",
                       "null"
@@ -48187,7 +48187,7 @@
                   "id": {
                     "type": "string"
                   },
-                  "isGroup": {
+                  "is_group": {
                     "type": "boolean"
                   },
                   "job": {
@@ -48545,40 +48545,40 @@
                       "null"
                     ]
                   },
-                  "lastMessage": {
+                  "last_message": {
                     "properties": {
-                      "attachmentCount": {
+                      "attachment_count": {
                         "type": "integer"
                       },
-                      "body": {
-                        "type": "string"
-                      },
-                      "createdAt": {
-                        "type": "string"
-                      },
-                      "id": {
-                        "type": "string"
-                      },
-                      "senderId": {
+                      "author_user_id": {
                         "type": [
                           "string",
                           "null"
                         ]
+                      },
+                      "body": {
+                        "type": "string"
+                      },
+                      "created_at": {
+                        "type": "string"
+                      },
+                      "id": {
+                        "type": "string"
                       }
                     },
                     "required": [
                       "id",
-                      "senderId",
+                      "author_user_id",
                       "body",
-                      "attachmentCount",
-                      "createdAt"
+                      "attachment_count",
+                      "created_at"
                     ],
                     "type": [
                       "object",
                       "null"
                     ]
                   },
-                  "lastMessageAt": {
+                  "last_message_at": {
                     "type": "string"
                   },
                   "location": {
@@ -48607,7 +48607,7 @@
                       "null"
                     ]
                   },
-                  "locationId": {
+                  "location_id": {
                     "type": [
                       "string",
                       "null"
@@ -48632,7 +48632,7 @@
                             "null"
                           ]
                         },
-                        "memberId": {
+                        "member_id": {
                           "type": "string"
                         },
                         "name": {
@@ -48641,7 +48641,7 @@
                       },
                       "required": [
                         "id",
-                        "memberId",
+                        "member_id",
                         "name",
                         "image"
                       ],
@@ -48670,19 +48670,19 @@
                   },
                   "stay": {
                     "properties": {
-                      "checkInDate": {
+                      "check_in_date": {
                         "type": "string"
                       },
-                      "checkOutDate": {
-                        "type": "string"
-                      },
-                      "homeName": {
+                      "check_out_date": {
                         "type": "string"
                       },
                       "id": {
                         "type": "string"
                       },
-                      "productId": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "product_id": {
                         "type": "string"
                       },
                       "status": {
@@ -48696,10 +48696,10 @@
                     },
                     "required": [
                       "id",
-                      "productId",
-                      "homeName",
-                      "checkInDate",
-                      "checkOutDate",
+                      "product_id",
+                      "name",
+                      "check_in_date",
+                      "check_out_date",
                       "status"
                     ],
                     "type": [
@@ -48713,22 +48713,22 @@
                 },
                 "required": [
                   "id",
-                  "createdAt",
-                  "lastMessageAt",
-                  "bookingId",
-                  "locationId",
+                  "created_at",
+                  "last_message_at",
+                  "booking_id",
+                  "location_id",
                   "record",
                   "name",
-                  "isGroup",
-                  "createdByUserId",
-                  "canManage",
-                  "canLeave",
+                  "is_group",
+                  "created_by_user_id",
+                  "can_manage",
+                  "can_leave",
                   "participants",
                   "unread",
                   "stay",
                   "job",
                   "location",
-                  "lastMessage"
+                  "last_message"
                 ],
                 "type": "object"
               }
@@ -48975,7 +48975,7 @@
         "$defs": {},
         "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
         "properties": {
-          "conversationId": {
+          "conversation_id": {
             "minLength": 1,
             "type": "string"
           },
@@ -49093,16 +49093,19 @@
                   "null"
                 ]
               },
-              "noShow": {
-                "type": "boolean"
-              },
-              "offering": {
+              "name": {
                 "type": [
                   "string",
                   "null"
                 ]
               },
-              "partySize": {
+              "no_show_at": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "party_size": {
                 "type": "integer"
               },
               "phone": {
@@ -49135,15 +49138,15 @@
             "required": [
               "unit",
               "status",
-              "offering",
+              "name",
               "location",
               "address",
               "phone",
-              "partySize",
+              "party_size",
               "timezone",
               "starts",
               "ends",
-              "noShow"
+              "no_show_at"
             ],
             "type": [
               "object",
@@ -49207,7 +49210,7 @@
           }
         },
         "required": [
-          "conversationId",
+          "conversation_id",
           "home",
           "stay",
           "record"
@@ -55505,12 +55508,12 @@
     {
       "name": "get_product_booking",
       "title": "Get product booking",
-      "description": "Read one booking — an experience, consultation, table or stay at a home — when the user wants its guest details, answers to the offering's questions, status or current session. Use operational_updated_at when proposing a change.",
+      "description": "Read one booking — an experience, consultation, table or stay at a home — when the user wants its guest details, answers to the offering's questions, status or current session. Use updated_at when proposing a change.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
-          "operational_booking_id": {
-            "description": "Booking ID returned by list_product_bookings or create_product_booking. Distinct from request_id, which identifies the inbox conversation.",
+          "booking_id": {
+            "description": "Booking ID returned by list_product_bookings or create_product_booking. Distinct from conversation_id, which identifies the inbox conversation.",
             "type": "string"
           },
           "organization_id": {
@@ -55521,7 +55524,7 @@
           }
         },
         "required": [
-          "operational_booking_id"
+          "booking_id"
         ],
         "type": "object"
       },
@@ -55606,6 +55609,14 @@
                 },
                 "type": "array"
               },
+              "booking_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "conversation_id": {
+                "minLength": 1,
+                "type": "string"
+              },
               "guest": {
                 "properties": {
                   "email": {
@@ -55628,14 +55639,6 @@
                   "email"
                 ],
                 "type": "object"
-              },
-              "operational_booking_id": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "operational_updated_at": {
-                "minLength": 1,
-                "type": "string"
               },
               "provenance": {
                 "properties": {
@@ -55751,15 +55754,15 @@
                 ],
                 "type": "object"
               },
-              "request_id": {
+              "updated_at": {
                 "minLength": 1,
                 "type": "string"
               }
             },
             "required": [
-              "operational_booking_id",
-              "request_id",
-              "operational_updated_at",
+              "booking_id",
+              "conversation_id",
+              "updated_at",
               "guest",
               "answers",
               "provenance",
@@ -55771,7 +55774,7 @@
             "additionalProperties": false,
             "description": "A stay: its guest, nights, payments and version, or, for a member who looks after the home, its turnover.",
             "properties": {
-              "operational_booking_id": {
+              "booking_id": {
                 "minLength": 1,
                 "type": "string"
               },
@@ -55975,6 +55978,11 @@
                       },
                       "children": {
                         "type": "integer"
+                      },
+                      "conversation_id": {
+                        "description": "The guest conversation about this stay, for get_conversation and send_message. Every stay has one.",
+                        "minLength": 1,
+                        "type": "string"
                       },
                       "created_at": {
                         "minLength": 1,
@@ -56199,11 +56207,6 @@
                           "null"
                         ]
                       },
-                      "request_id": {
-                        "description": "The guest conversation about this stay, for get_conversation and send_message. Every stay has one.",
-                        "minLength": 1,
-                        "type": "string"
-                      },
                       "starts_at": {
                         "description": "Check-in: an ISO instant at the home's check-in time (or the arrival the host recorded), or the day alone when the home has no check-in time.",
                         "minLength": 1,
@@ -56268,7 +56271,7 @@
                       "external_booking_id",
                       "channel_booking_id",
                       "channel_booking_url",
-                      "request_id",
+                      "conversation_id",
                       "cancelled_at",
                       "cancellation_reason",
                       "cancellation_policy",
@@ -56380,7 +56383,7 @@
               }
             },
             "required": [
-              "operational_booking_id",
+              "booking_id",
               "unit",
               "stay"
             ],
@@ -67765,7 +67768,7 @@
                     "null"
                   ]
                 },
-                "memberId": {
+                "member_id": {
                   "type": "string"
                 },
                 "name": {
@@ -67777,7 +67780,7 @@
               },
               "required": [
                 "id",
-                "memberId",
+                "member_id",
                 "name",
                 "image",
                 "email",
@@ -69242,7 +69245,7 @@
                   "minLength": 1,
                   "type": "string"
                 },
-                "createdAt": {
+                "created_at": {
                   "minLength": 1,
                   "type": "string"
                 },
@@ -69250,7 +69253,7 @@
                   "minLength": 1,
                   "type": "string"
                 },
-                "organizationId": {
+                "organization_id": {
                   "minLength": 1,
                   "type": "string"
                 },
@@ -69260,10 +69263,10 @@
                       "additionalProperties": false,
                       "description": "Five minutes after KrabiClaw receives a new booking.",
                       "properties": {
-                        "delayMinutes": {
+                        "delay_minutes": {
                           "const": 5
                         },
-                        "productIds": {
+                        "product_ids": {
                           "description": "The offerings whose bookings get this message.",
                           "items": {
                             "description": "A canonical product ID of a home, experience, consultation or restaurant table product (list_products); never a provider property ID.",
@@ -69281,8 +69284,8 @@
                       },
                       "required": [
                         "trigger",
-                        "delayMinutes",
-                        "productIds"
+                        "delay_minutes",
+                        "product_ids"
                       ],
                       "type": "object"
                     },
@@ -69290,16 +69293,16 @@
                       "additionalProperties": false,
                       "description": "A number of days before or after the start or end, at a local time in the booking’s own timezone (the home’s, location’s, or an online consultation’s attorney’s).",
                       "properties": {
-                        "localTime": {
+                        "local_time": {
                           "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
                           "type": "string"
                         },
-                        "offsetDays": {
+                        "offset_days": {
                           "maximum": 7,
                           "minimum": -7,
                           "type": "integer"
                         },
-                        "productIds": {
+                        "product_ids": {
                           "description": "The offerings whose bookings get this message.",
                           "items": {
                             "description": "A canonical product ID of a home, experience, consultation or restaurant table product (list_products); never a provider property ID.",
@@ -69322,9 +69325,9 @@
                       },
                       "required": [
                         "trigger",
-                        "offsetDays",
-                        "localTime",
-                        "productIds"
+                        "offset_days",
+                        "local_time",
+                        "product_ids"
                       ],
                       "type": "object"
                     },
@@ -69332,12 +69335,12 @@
                       "additionalProperties": false,
                       "description": "A number of hours before (negative) or after (positive) the start or end itself. A home needs its check-in or checkout time.",
                       "properties": {
-                        "offsetHours": {
+                        "offset_hours": {
                           "maximum": 72,
                           "minimum": -72,
                           "type": "integer"
                         },
-                        "productIds": {
+                        "product_ids": {
                           "description": "The offerings whose bookings get this message.",
                           "items": {
                             "description": "A canonical product ID of a home, experience, consultation or restaurant table product (list_products); never a provider property ID.",
@@ -69360,8 +69363,8 @@
                       },
                       "required": [
                         "trigger",
-                        "offsetHours",
-                        "productIds"
+                        "offset_hours",
+                        "product_ids"
                       ],
                       "type": "object"
                     }
@@ -69371,7 +69374,7 @@
                   "minLength": 1,
                   "type": "string"
                 },
-                "updatedAt": {
+                "updated_at": {
                   "minLength": 1,
                   "type": "string"
                 },
@@ -69382,13 +69385,13 @@
               },
               "required": [
                 "id",
-                "organizationId",
+                "organization_id",
                 "title",
                 "body",
                 "schedule",
                 "version",
-                "createdAt",
-                "updatedAt"
+                "created_at",
+                "updated_at"
               ],
               "type": "object"
             },
@@ -71095,7 +71098,7 @@
     {
       "name": "list_product_bookings",
       "title": "List product bookings",
-      "description": "Read bookings — experiences, consultations and restaurant table reservations — with guest names, session times, assigned members and status; use operational_booking_id to manage a booking. Use get_product_booking for one booking’s guest contact details.",
+      "description": "Read bookings — experiences, consultations and restaurant table reservations — with guest names, session times, assigned members and status; use booking_id to manage a booking. Use get_product_booking for one booking’s guest contact details.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -71161,6 +71164,16 @@
                     "null"
                   ]
                 },
+                "booking_id": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "conversation_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "ends_at": {
                   "minLength": 1,
                   "type": "string"
@@ -71191,10 +71204,6 @@
                     "string",
                     "null"
                   ]
-                },
-                "operational_booking_id": {
-                  "minLength": 1,
-                  "type": "string"
                 },
                 "party_size": {
                   "type": "integer"
@@ -71253,12 +71262,6 @@
                     "null"
                   ]
                 },
-                "request_id": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
                 "starts_at": {
                   "minLength": 1,
                   "type": "string"
@@ -71289,8 +71292,8 @@
                 }
               },
               "required": [
-                "operational_booking_id",
-                "request_id",
+                "booking_id",
+                "conversation_id",
                 "product_id",
                 "product_kind",
                 "product_variant_id",
@@ -71705,7 +71708,7 @@
     {
       "name": "list_scheduled_guest_messages",
       "title": "List scheduled guest messages",
-      "description": "Read the outbox, newest first, optionally for one canonical guest conversation: your own send-later replies (authorUserId is you), and for workspace managers every automatic guest-message snapshot with its visible failure reason for every booking (bookingId names it, a stay’s included), including each stay’s built-in check-in message (templateId null, title “Check-in instructions”). Teammates’ send-later replies are not visible. Read provider delivery receipts through get_conversation; no provider result is inferred from a scheduled time.",
+      "description": "Read the outbox, newest first, optionally for one canonical guest conversation: your own send-later replies (author_user_id is you), and for workspace managers every automatic guest-message snapshot with its visible failure reason for every booking (booking_id names it, a stay’s included), including each stay’s built-in check-in message (template_id null, template_title “Check-in instructions”). Teammates’ send-later replies are not visible. Read provider delivery receipts through get_conversation; no provider result is inferred from a scheduled time.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -71740,7 +71743,7 @@
           "messages": {
             "items": {
               "properties": {
-                "authorUserId": {
+                "author_user_id": {
                   "description": "The member whose own send-later reply this is; null for an automatic message the business sends.",
                   "type": [
                     "string",
@@ -71751,36 +71754,36 @@
                   "minLength": 1,
                   "type": "string"
                 },
-                "bookingId": {
+                "booking_id": {
                   "description": "The booking an automatic message is about, a stay’s included; null for a send-later reply.",
                   "type": [
                     "string",
                     "null"
                   ]
                 },
-                "conversationId": {
+                "conversation_id": {
                   "type": [
                     "string",
                     "null"
                   ]
                 },
-                "createdAt": {
+                "created_at": {
                   "minLength": 1,
                   "type": "string"
                 },
-                "dueAt": {
+                "due_at": {
                   "type": [
                     "string",
                     "null"
                   ]
                 },
-                "errorCode": {
+                "error_code": {
                   "type": [
                     "string",
                     "null"
                   ]
                 },
-                "errorField": {
+                "error_field": {
                   "type": [
                     "string",
                     "null"
@@ -71790,17 +71793,17 @@
                   "minLength": 1,
                   "type": "string"
                 },
-                "messageId": {
+                "message_id": {
                   "type": [
                     "string",
                     "null"
                   ]
                 },
-                "organizationId": {
+                "organization_id": {
                   "minLength": 1,
                   "type": "string"
                 },
-                "productId": {
+                "product_id": {
                   "type": [
                     "string",
                     "null"
@@ -71812,13 +71815,13 @@
                     "null"
                   ]
                 },
-                "sentAt": {
+                "sent_at": {
                   "type": [
                     "string",
                     "null"
                   ]
                 },
-                "startedAt": {
+                "started_at": {
                   "type": [
                     "string",
                     "null"
@@ -71836,13 +71839,20 @@
                   ],
                   "type": "string"
                 },
-                "templateId": {
+                "template_id": {
                   "type": [
                     "string",
                     "null"
                   ]
                 },
-                "templateVersion": {
+                "template_title": {
+                  "description": "The automatic message’s title; null for a send-later reply.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "template_version": {
                   "minimum": 1,
                   "type": [
                     "integer",
@@ -71856,40 +71866,33 @@
                     "null"
                   ]
                 },
-                "title": {
-                  "description": "The automatic message’s title; null for a send-later reply.",
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "updatedAt": {
+                "updated_at": {
                   "minLength": 1,
                   "type": "string"
                 }
               },
               "required": [
                 "id",
-                "organizationId",
-                "productId",
-                "bookingId",
-                "conversationId",
-                "authorUserId",
-                "templateId",
-                "title",
-                "templateVersion",
+                "organization_id",
+                "product_id",
+                "booking_id",
+                "conversation_id",
+                "author_user_id",
+                "template_id",
+                "template_title",
+                "template_version",
                 "body",
-                "dueAt",
+                "due_at",
                 "timezone",
                 "status",
                 "reason",
-                "errorCode",
-                "errorField",
-                "messageId",
-                "startedAt",
-                "sentAt",
-                "createdAt",
-                "updatedAt"
+                "error_code",
+                "error_field",
+                "message_id",
+                "started_at",
+                "sent_at",
+                "created_at",
+                "updated_at"
               ],
               "type": "object"
             },
@@ -72807,7 +72810,7 @@
             "type": "string"
           },
           "stay_id": {
-            "description": "Stay ID: operational_booking_id from list_product_bookings.",
+            "description": "Stay ID: booking_id from list_product_bookings.",
             "minLength": 1,
             "type": "string"
           }
@@ -72882,15 +72885,15 @@
                 "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
                 "type": "string"
               },
+              "conversation_id": {
+                "minLength": 1,
+                "type": "string"
+              },
               "id": {
                 "minLength": 1,
                 "type": "string"
               },
               "product_id": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "request_id": {
                 "minLength": 1,
                 "type": "string"
               },
@@ -72913,7 +72916,7 @@
             "required": [
               "id",
               "product_id",
-              "request_id",
+              "conversation_id",
               "status",
               "version",
               "updated_at",
@@ -88760,7 +88763,7 @@
             "type": "string"
           },
           "stay_id": {
-            "description": "Stay ID: operational_booking_id from list_product_bookings.",
+            "description": "Stay ID: booking_id from list_product_bookings.",
             "minLength": 1,
             "type": "string"
           }
@@ -88902,14 +88905,14 @@
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
+          "booking_id": {
+            "description": "Booking ID returned by list_product_bookings or create_product_booking. Distinct from conversation_id, which identifies the inbox conversation.",
+            "type": "string"
+          },
           "idempotency_key": {
             "description": "Caller-supplied durable idempotency key. Reuse only for the identical operation.",
             "maxLength": 200,
             "minLength": 1,
-            "type": "string"
-          },
-          "operational_booking_id": {
-            "description": "Booking ID returned by list_product_bookings or create_product_booking. Distinct from request_id, which identifies the inbox conversation.",
             "type": "string"
           },
           "organization_id": {
@@ -88920,7 +88923,7 @@
           }
         },
         "required": [
-          "operational_booking_id",
+          "booking_id",
           "idempotency_key"
         ],
         "type": "object"
@@ -88929,12 +88932,16 @@
         "$defs": {},
         "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
         "properties": {
-          "availableActions": {
+          "available_actions": {
             "items": {
               "minLength": 1,
               "type": "string"
             },
             "type": "array"
+          },
+          "conversation_id": {
+            "minLength": 1,
+            "type": "string"
           },
           "ok": {
             "const": true
@@ -89027,10 +89034,6 @@
             ],
             "type": "object"
           },
-          "request_id": {
-            "minLength": 1,
-            "type": "string"
-          },
           "status": {
             "const": 200
           },
@@ -89057,9 +89060,9 @@
         "required": [
           "ok",
           "status",
-          "request_id",
+          "conversation_id",
           "record",
-          "availableActions",
+          "available_actions",
           "thread"
         ],
         "type": "object"
@@ -98395,18 +98398,14 @@
             "description": "For bookings other than consultations, move immediately and email the guest. Consultations always require client acceptance.",
             "type": "boolean"
           },
-          "expected_updated_at": {
-            "description": "operational_updated_at from get_product_booking: the booking's own version. A guest message in the conversation does not change it.",
+          "booking_id": {
+            "description": "Booking ID returned by list_product_bookings or create_product_booking. Distinct from conversation_id, which identifies the inbox conversation.",
             "type": "string"
           },
           "idempotency_key": {
             "description": "Caller-supplied durable idempotency key. Reuse only for the identical operation.",
             "maxLength": 200,
             "minLength": 1,
-            "type": "string"
-          },
-          "operational_booking_id": {
-            "description": "Booking ID returned by list_product_bookings or create_product_booking. Distinct from request_id, which identifies the inbox conversation.",
             "type": "string"
           },
           "organization_id": {
@@ -98420,16 +98419,20 @@
             "minimum": 1,
             "type": "integer"
           },
-          "session_id": {
+          "product_session_id": {
             "description": "Destination session ID from list_product_booking_sessions.",
+            "type": "string"
+          },
+          "updated_at": {
+            "description": "updated_at from get_product_booking: the booking's own version. A guest message in the conversation does not change it.",
             "type": "string"
           }
         },
         "required": [
-          "operational_booking_id",
-          "session_id",
+          "booking_id",
+          "product_session_id",
           "party_size",
-          "expected_updated_at",
+          "updated_at",
           "idempotency_key"
         ],
         "type": "object"
@@ -98445,6 +98448,10 @@
               "declined",
               "moved"
             ],
+            "type": "string"
+          },
+          "conversation_id": {
+            "minLength": 1,
             "type": "string"
           },
           "record": {
@@ -98535,17 +98542,13 @@
             ],
             "type": "object"
           },
-          "request_id": {
-            "minLength": 1,
-            "type": "string"
-          },
           "success": {
             "const": true
           }
         },
         "required": [
           "success",
-          "request_id",
+          "conversation_id",
           "change_status",
           "record"
         ],
@@ -99600,18 +99603,22 @@
     {
       "name": "schedule_guest_reply",
       "title": "Schedule guest reply",
-      "description": "Send your own text reply in a guest conversation later, at send_at (an ISO 8601 instant within the next year). It is sent through the conversation’s reply_channel as your reply, if you can still reach the conversation then. Only you see it pending, in list_scheduled_guest_messages; cancel it with cancel_scheduled_guest_message. Text only: send photos now with send_message.",
+      "description": "Send your own text reply in a guest conversation later, at due_at (an ISO 8601 instant within the next year). It is sent through the conversation’s reply_channel as your reply, if you can still reach the conversation then. Only you see it pending, in list_scheduled_guest_messages; cancel it with cancel_scheduled_guest_message. Text only: send photos now with send_message.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
+          "body": {
+            "maxLength": 5000,
+            "minLength": 1,
+            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
+            "type": "string"
+          },
           "conversation_id": {
             "minLength": 1,
             "type": "string"
           },
-          "message": {
-            "maxLength": 5000,
-            "minLength": 1,
-            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
+          "due_at": {
+            "format": "date-time",
             "type": "string"
           },
           "organization_id": {
@@ -99619,16 +99626,12 @@
             "minLength": 1,
             "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
             "type": "string"
-          },
-          "send_at": {
-            "format": "date-time",
-            "type": "string"
           }
         },
         "required": [
           "conversation_id",
-          "message",
-          "send_at"
+          "body",
+          "due_at"
         ],
         "type": "object"
       },
@@ -99638,7 +99641,7 @@
         "properties": {
           "message": {
             "properties": {
-              "authorUserId": {
+              "author_user_id": {
                 "description": "The member whose own send-later reply this is; null for an automatic message the business sends.",
                 "type": [
                   "string",
@@ -99649,36 +99652,36 @@
                 "minLength": 1,
                 "type": "string"
               },
-              "bookingId": {
+              "booking_id": {
                 "description": "The booking an automatic message is about, a stay’s included; null for a send-later reply.",
                 "type": [
                   "string",
                   "null"
                 ]
               },
-              "conversationId": {
+              "conversation_id": {
                 "type": [
                   "string",
                   "null"
                 ]
               },
-              "createdAt": {
+              "created_at": {
                 "minLength": 1,
                 "type": "string"
               },
-              "dueAt": {
+              "due_at": {
                 "type": [
                   "string",
                   "null"
                 ]
               },
-              "errorCode": {
+              "error_code": {
                 "type": [
                   "string",
                   "null"
                 ]
               },
-              "errorField": {
+              "error_field": {
                 "type": [
                   "string",
                   "null"
@@ -99688,17 +99691,17 @@
                 "minLength": 1,
                 "type": "string"
               },
-              "messageId": {
+              "message_id": {
                 "type": [
                   "string",
                   "null"
                 ]
               },
-              "organizationId": {
+              "organization_id": {
                 "minLength": 1,
                 "type": "string"
               },
-              "productId": {
+              "product_id": {
                 "type": [
                   "string",
                   "null"
@@ -99710,13 +99713,13 @@
                   "null"
                 ]
               },
-              "sentAt": {
+              "sent_at": {
                 "type": [
                   "string",
                   "null"
                 ]
               },
-              "startedAt": {
+              "started_at": {
                 "type": [
                   "string",
                   "null"
@@ -99734,13 +99737,20 @@
                 ],
                 "type": "string"
               },
-              "templateId": {
+              "template_id": {
                 "type": [
                   "string",
                   "null"
                 ]
               },
-              "templateVersion": {
+              "template_title": {
+                "description": "The automatic message’s title; null for a send-later reply.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "template_version": {
                 "minimum": 1,
                 "type": [
                   "integer",
@@ -99754,40 +99764,33 @@
                   "null"
                 ]
               },
-              "title": {
-                "description": "The automatic message’s title; null for a send-later reply.",
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "updatedAt": {
+              "updated_at": {
                 "minLength": 1,
                 "type": "string"
               }
             },
             "required": [
               "id",
-              "organizationId",
-              "productId",
-              "bookingId",
-              "conversationId",
-              "authorUserId",
-              "templateId",
-              "title",
-              "templateVersion",
+              "organization_id",
+              "product_id",
+              "booking_id",
+              "conversation_id",
+              "author_user_id",
+              "template_id",
+              "template_title",
+              "template_version",
               "body",
-              "dueAt",
+              "due_at",
               "timezone",
               "status",
               "reason",
-              "errorCode",
-              "errorField",
-              "messageId",
-              "startedAt",
-              "sentAt",
-              "createdAt",
-              "updatedAt"
+              "error_code",
+              "error_field",
+              "message_id",
+              "started_at",
+              "sent_at",
+              "created_at",
+              "updated_at"
             ],
             "type": "object"
           }
@@ -112407,10 +112410,6 @@
             "minLength": 1,
             "type": "string"
           },
-          "expected_version": {
-            "minimum": 1,
-            "type": "integer"
-          },
           "organization_id": {
             "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
             "minLength": 1,
@@ -112423,10 +112422,10 @@
                 "additionalProperties": false,
                 "description": "Five minutes after KrabiClaw receives a new booking.",
                 "properties": {
-                  "delayMinutes": {
+                  "delay_minutes": {
                     "const": 5
                   },
-                  "productIds": {
+                  "product_ids": {
                     "description": "The offerings whose bookings get this message.",
                     "items": {
                       "description": "A canonical product ID of a home, experience, consultation or restaurant table product (list_products); never a provider property ID.",
@@ -112444,8 +112443,8 @@
                 },
                 "required": [
                   "trigger",
-                  "delayMinutes",
-                  "productIds"
+                  "delay_minutes",
+                  "product_ids"
                 ],
                 "type": "object"
               },
@@ -112453,16 +112452,16 @@
                 "additionalProperties": false,
                 "description": "A number of days before or after the start or end, at a local time in the booking’s own timezone (the home’s, location’s, or an online consultation’s attorney’s).",
                 "properties": {
-                  "localTime": {
+                  "local_time": {
                     "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
                     "type": "string"
                   },
-                  "offsetDays": {
+                  "offset_days": {
                     "maximum": 7,
                     "minimum": -7,
                     "type": "integer"
                   },
-                  "productIds": {
+                  "product_ids": {
                     "description": "The offerings whose bookings get this message.",
                     "items": {
                       "description": "A canonical product ID of a home, experience, consultation or restaurant table product (list_products); never a provider property ID.",
@@ -112485,9 +112484,9 @@
                 },
                 "required": [
                   "trigger",
-                  "offsetDays",
-                  "localTime",
-                  "productIds"
+                  "offset_days",
+                  "local_time",
+                  "product_ids"
                 ],
                 "type": "object"
               },
@@ -112495,12 +112494,12 @@
                 "additionalProperties": false,
                 "description": "A number of hours before (negative) or after (positive) the start or end itself. A home needs its check-in or checkout time.",
                 "properties": {
-                  "offsetHours": {
+                  "offset_hours": {
                     "maximum": 72,
                     "minimum": -72,
                     "type": "integer"
                   },
-                  "productIds": {
+                  "product_ids": {
                     "description": "The offerings whose bookings get this message.",
                     "items": {
                       "description": "A canonical product ID of a home, experience, consultation or restaurant table product (list_products); never a provider property ID.",
@@ -112523,8 +112522,8 @@
                 },
                 "required": [
                   "trigger",
-                  "offsetHours",
-                  "productIds"
+                  "offset_hours",
+                  "product_ids"
                 ],
                 "type": "object"
               }
@@ -112538,11 +112537,15 @@
             "maxLength": 100,
             "minLength": 1,
             "type": "string"
+          },
+          "version": {
+            "minimum": 1,
+            "type": "integer"
           }
         },
         "required": [
           "template_id",
-          "expected_version",
+          "version",
           "title",
           "body",
           "schedule"
@@ -112559,7 +112562,7 @@
                 "minLength": 1,
                 "type": "string"
               },
-              "createdAt": {
+              "created_at": {
                 "minLength": 1,
                 "type": "string"
               },
@@ -112567,7 +112570,7 @@
                 "minLength": 1,
                 "type": "string"
               },
-              "organizationId": {
+              "organization_id": {
                 "minLength": 1,
                 "type": "string"
               },
@@ -112577,10 +112580,10 @@
                     "additionalProperties": false,
                     "description": "Five minutes after KrabiClaw receives a new booking.",
                     "properties": {
-                      "delayMinutes": {
+                      "delay_minutes": {
                         "const": 5
                       },
-                      "productIds": {
+                      "product_ids": {
                         "description": "The offerings whose bookings get this message.",
                         "items": {
                           "description": "A canonical product ID of a home, experience, consultation or restaurant table product (list_products); never a provider property ID.",
@@ -112598,8 +112601,8 @@
                     },
                     "required": [
                       "trigger",
-                      "delayMinutes",
-                      "productIds"
+                      "delay_minutes",
+                      "product_ids"
                     ],
                     "type": "object"
                   },
@@ -112607,16 +112610,16 @@
                     "additionalProperties": false,
                     "description": "A number of days before or after the start or end, at a local time in the booking’s own timezone (the home’s, location’s, or an online consultation’s attorney’s).",
                     "properties": {
-                      "localTime": {
+                      "local_time": {
                         "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
                         "type": "string"
                       },
-                      "offsetDays": {
+                      "offset_days": {
                         "maximum": 7,
                         "minimum": -7,
                         "type": "integer"
                       },
-                      "productIds": {
+                      "product_ids": {
                         "description": "The offerings whose bookings get this message.",
                         "items": {
                           "description": "A canonical product ID of a home, experience, consultation or restaurant table product (list_products); never a provider property ID.",
@@ -112639,9 +112642,9 @@
                     },
                     "required": [
                       "trigger",
-                      "offsetDays",
-                      "localTime",
-                      "productIds"
+                      "offset_days",
+                      "local_time",
+                      "product_ids"
                     ],
                     "type": "object"
                   },
@@ -112649,12 +112652,12 @@
                     "additionalProperties": false,
                     "description": "A number of hours before (negative) or after (positive) the start or end itself. A home needs its check-in or checkout time.",
                     "properties": {
-                      "offsetHours": {
+                      "offset_hours": {
                         "maximum": 72,
                         "minimum": -72,
                         "type": "integer"
                       },
-                      "productIds": {
+                      "product_ids": {
                         "description": "The offerings whose bookings get this message.",
                         "items": {
                           "description": "A canonical product ID of a home, experience, consultation or restaurant table product (list_products); never a provider property ID.",
@@ -112677,8 +112680,8 @@
                     },
                     "required": [
                       "trigger",
-                      "offsetHours",
-                      "productIds"
+                      "offset_hours",
+                      "product_ids"
                     ],
                     "type": "object"
                   }
@@ -112688,7 +112691,7 @@
                 "minLength": 1,
                 "type": "string"
               },
-              "updatedAt": {
+              "updated_at": {
                 "minLength": 1,
                 "type": "string"
               },
@@ -112699,13 +112702,13 @@
             },
             "required": [
               "id",
-              "organizationId",
+              "organization_id",
               "title",
               "body",
               "schedule",
               "version",
-              "createdAt",
-              "updatedAt"
+              "created_at",
+              "updated_at"
             ],
             "type": "object"
           }
@@ -118910,11 +118913,6 @@
             "format": "date-time",
             "type": "string"
           },
-          "expected_updated_at": {
-            "description": "Session updated_at from list_product_booking_sessions.",
-            "minLength": 1,
-            "type": "string"
-          },
           "organization_id": {
             "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
             "minLength": 1,
@@ -118925,7 +118923,7 @@
             "minLength": 1,
             "type": "string"
           },
-          "session_id": {
+          "product_session_id": {
             "minLength": 1,
             "type": "string"
           },
@@ -118939,12 +118937,17 @@
               "cancelled"
             ],
             "type": "string"
+          },
+          "updated_at": {
+            "description": "Session updated_at from list_product_booking_sessions.",
+            "minLength": 1,
+            "type": "string"
           }
         },
         "required": [
           "product_id",
-          "session_id",
-          "expected_updated_at"
+          "product_session_id",
+          "updated_at"
         ],
         "type": "object"
       },
@@ -127011,7 +127014,7 @@
             ]
           },
           "stay_id": {
-            "description": "Stay ID: operational_booking_id from list_product_bookings.",
+            "description": "Stay ID: booking_id from list_product_bookings.",
             "minLength": 1,
             "type": "string"
           },
@@ -127145,15 +127148,15 @@
                 "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
                 "type": "string"
               },
+              "conversation_id": {
+                "minLength": 1,
+                "type": "string"
+              },
               "id": {
                 "minLength": 1,
                 "type": "string"
               },
               "product_id": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "request_id": {
                 "minLength": 1,
                 "type": "string"
               },
@@ -127176,7 +127179,7 @@
             "required": [
               "id",
               "product_id",
-              "request_id",
+              "conversation_id",
               "status",
               "version",
               "updated_at",
@@ -128066,19 +128069,19 @@
         "text": "Use get_workspace_context to resolve the requested business. Read all relevant list_conversations pages (guests, Airbnb Support and team conversations, with unread counts) and get_conversation for full contact messages, booking details (classes, consultations and restaurant tables), proposals and delivery receipts. Select actual teammates with list_conversation_recipients. start_conversation reuses direct and explicit stay/location team conversations; manual groups of at least three people are distinct and require a stable idempotency_key. update_conversation_group changes only manual team groups: obey canManage/canLeave; preserve stay/location participants. New members can read group history; removal and leaving end access while retaining messages. Reading does not mark a conversation read; mark_conversation_read and mark_conversation_unread change only the caller’s read position. Summarize unanswered messages and pending bookings. Use send_message with a stable idempotency_key only for the message or photo the user requests, then read it back. Use get_product_booking before confirm_product_booking, reject_product_booking, cancel_product_booking or request_product_booking_change; a table reservation is a product booking and uses the same tools. Booking changes email a proposal and leave the existing allocation unchanged until guest acceptance. Financial actions requiring the dashboard remain incomplete; report the returned handoff instead of claiming completion. Use list_locations and list_location_reviews to read reviews separately; provider reviews and imported Google Q&A remain managed in Google. Report failed deliveries and actions awaiting guest acceptance accurately."
       },
       "toolContracts": {
-        "cancel_product_booking": "sha256:2dbb504336a7ddb03a996a148f283df69094360aa6ef878c616d7cfbe5faeab7",
-        "confirm_product_booking": "sha256:f607d38686b388e7f7e86fc1b48de40b19a4942d61ef9b9a3af62294c0d42ea2",
-        "get_conversation": "sha256:fa22383698e276d0efc4454f3b8be5eb7db4638ead676645a7058d7136ac1910",
-        "get_product_booking": "sha256:85db93c5b23b6416501ab4d2d42d85cdab95d16fee8c9187efe66d9517af2124",
+        "cancel_product_booking": "sha256:90614958b92689b4c273ffc336e9854909c30a54997c7c5fc8da78e0aeb12aeb",
+        "confirm_product_booking": "sha256:1c9695ad981f010718a3f36845717ed36a1546018f196b5f0292ac9a07f9fc8d",
+        "get_conversation": "sha256:f2b566d68b0618f9c48ec5a30a835ef020872d518f2ef66482bb1c3dd80e72a9",
+        "get_product_booking": "sha256:1a83fe61e11737be78f8fc8bc093d3625144bcd21417ceab9b1576c2c831b305",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
-        "list_conversation_recipients": "sha256:1fffa00253eb826213bb628a3b8b2d933dcea441c1385e03262c5ca18b562ef4",
+        "list_conversation_recipients": "sha256:439170e450547b9261d1f0499d27ef7ca95dd024cacf847719fee4f4c40e249e",
         "list_conversations": "sha256:24cf21b535c6689cb04bc7188bec604110c207a960c8ba5e69e9505150dceca7",
         "list_location_reviews": "sha256:95068cff21ac3fea416a9fa8ec3a8ad2d01db79ea0825274c0295b89f15f5d92",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "mark_conversation_read": "sha256:4284ca380f9c4245e346ef2952bbb3d0e49719491d6a3ada129bf55a681672a4",
         "mark_conversation_unread": "sha256:93abd5acbb4e271d1a1bf843bc1c9a3ef04a44e20b3252461c089d612ab69161",
-        "reject_product_booking": "sha256:a3c2fba812200e703c50d145e1622656a10af85f7bbf6ad50fe67589ff8e966b",
-        "request_product_booking_change": "sha256:bd9af8ee041ca1ce9dbc834e1fcc89026bad04c909b84a9074c1e15538643aa4",
+        "reject_product_booking": "sha256:98cfc8deb557779f1a3789e53c08419f181d7dc28323e975209f53e9a59e5123",
+        "request_product_booking_change": "sha256:4b038f01616e29c92a70a69157f3c3fb863aa12fdb42c89f0111b0ca2103680b",
         "send_message": "sha256:8636238ba370bd243b7a3f2d4c1f6a5993223e916e3695bfd8f2a3696f80e6e2",
         "start_conversation": "sha256:a39d46341c069673d967628f78638bb7ddbcf94a8689796860962531e8d2192d",
         "update_conversation_group": "sha256:c59f8ba58ee8c2feeb2418da95b0691ff6b0140861b2f20cbf79b774ac3492bf"
@@ -128198,7 +128201,7 @@
       },
       "toolContracts": {
         "create_post": "sha256:e800e3c19ecf887d09aa70d80dcbe66d985196d2138620b369cb9e1f9cace67a",
-        "get_conversation": "sha256:fa22383698e276d0efc4454f3b8be5eb7db4638ead676645a7058d7136ac1910",
+        "get_conversation": "sha256:f2b566d68b0618f9c48ec5a30a835ef020872d518f2ef66482bb1c3dd80e72a9",
         "get_organization_analytics": "sha256:06e0bfe504a9b9183d0429a06162e4af2d760695c842396608752a8f107cb4d9",
         "get_product": "sha256:b2afea3d084c67b0aacc46c8fbdbcf652dfaa2554de42de7bef06b16312f05e1",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",

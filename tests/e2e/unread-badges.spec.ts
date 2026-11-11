@@ -50,9 +50,9 @@ test('a new booking, its cancellation and a guest message are unread until read,
     // Reading the conversation writes nothing: it stays unread until the reader says how far they read.
     const opening = await detail(reservationId)
     expect(await unread()).toBe(before + 1)
-    const read = await owner.post(`${conversations}/${reservationId}/read`, { data: { messageId: newestShown(opening) } })
+    const read = await owner.post(`${conversations}/${reservationId}/read`, { data: { message_id: newestShown(opening) } })
     expect(read.status(), await read.text()).toBe(200)
-    expect(await read.json()).toEqual({ read: true, lastReadMessageId: newestShown(opening) })
+    expect(await read.json()).toEqual({ read: true, last_read_message_id: newestShown(opening) })
     expect(await row(reservationId)).toMatchObject({ unread: false })
     expect(await unread()).toBe(before)
 

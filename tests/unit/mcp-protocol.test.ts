@@ -118,7 +118,7 @@ test('asMcpError and mcpToolErrorResult preserve structured field, hint, and ent
     data: {
       code: 'BOOKING_NOT_FOUND',
       booking_id: 'book_123',
-      field: 'operational_booking_id',
+      field: 'booking_id',
       hint: 'Call list_product_bookings to view valid records.',
       private_token: 'secret-leaked',
     },
@@ -129,7 +129,7 @@ test('asMcpError and mcpToolErrorResult preserve structured field, hint, and ent
     status: 404,
     code: 'BOOKING_NOT_FOUND',
     booking_id: 'book_123',
-    field: 'operational_booking_id',
+    field: 'booking_id',
     hint: 'Call list_product_bookings to view valid records.',
   })
 
@@ -140,7 +140,7 @@ test('asMcpError and mcpToolErrorResult preserve structured field, hint, and ent
     code: 'BOOKING_NOT_FOUND',
     message: "Operational booking 'book_123' not found",
     booking_id: 'book_123',
-    field: 'operational_booking_id',
+    field: 'booking_id',
     hint: 'Call list_product_bookings to view valid records.',
   })
 })

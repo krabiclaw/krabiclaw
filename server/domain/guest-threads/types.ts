@@ -261,7 +261,7 @@ export interface InboxPendingMessage {
   source: 'automatic' | 'later'
   /** "Check-in instructions" for an automatic message; the words for one sent later. */
   label: string
-  sendAt: string
+  due_at: string
   /** "Fri, Nov 6, 3:00 PM" in the home's timezone. */
   time: string
   body: string

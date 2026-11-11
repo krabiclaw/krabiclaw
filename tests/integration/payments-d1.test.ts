@@ -37,7 +37,7 @@ import paymentReturnRoute from '../../server/api/public/payments/[paymentId]/ret
 import paymentCancelRoute from '../../server/api/public/payments/[paymentId]/cancel.post.ts'
 import paymentHandoffRoute from '../../server/api/public/payments/[paymentId].get.ts'
 import { readStayCalendar } from '../../server/domain/stays.ts'
-import bookingReceiptRoute from '../../server/api/public/booking-requests/[requestId].get.ts'
+import bookingReceiptRoute from '../../server/api/public/booking-requests/[conversation_id].get.ts'
 import { createReplayableReservationCancelToken, hashReservationCancelToken } from '../../server/utils/reservation-cancel-token.ts'
 import adSpendDailyTask from '../../server/tasks/marketing-ad-spend-daily.ts'
 import { recordAdSpend, unrecordedAdSpendDays } from '../../server/domain/payments/ad-spend.ts'
@@ -176,13 +176,13 @@ test('a table deposit is the table price once, only for parties at its threshold
   const before = await counts()
   await assert.rejects(createProductBooking(event('/api/mcp'), { organizationId: ORG, slug: 'tables', financialWritesAllowed: false,
    operator: { userId: 'host', idempotencyKey: 'six', source: 'operator', externalReference: null, guestAcknowledgement: false },
-   body: { guest_name: 'Six', guest_email: 'six@example.com', guest_phone: '+12025550123', session_id: 'soon', party_size: 6 } }),
+   body: { guest_name: 'Six', guest_email: 'six@example.com', guest_phone: '+12025550123', product_session_id: 'soon', party_size: 6 } }),
   (error: HTTPError) => error.statusCode === 409 && (error.data as { code?: string }).code === 'financial_action_required')
   assert.deepEqual(await counts(), before)
 
   // A party of five books on the site without paying, told the deposit it would owe as a party of six: the price once, not per guest.
   const five = await createProductBooking(event('/api/public/products/tables/bookings'), { organizationId: ORG, slug: 'tables',
-   body: { guest_name: 'Five', guest_email: 'five@example.com', guest_phone: '+12025550123', session_id: 'soon', party_size: 5, idempotency_key: 'five' } })
+   body: { guest_name: 'Five', guest_email: 'five@example.com', guest_phone: '+12025550123', product_session_id: 'soon', party_size: 5, idempotency_key: 'five' } })
   assert.equal(five.status, 201, JSON.stringify(five.body))
   const booked = five.body.policy_summary as { heading: string; items: Array<{ id: string; text: string }> }
   assert.deepEqual(booked.items.map(item => item.id), ['cancellation', 'deposit', 'deposit_amount'])
@@ -196,15 +196,15 @@ test('a table deposit is the table price once, only for parties at its threshold
   // The guest's receipt, read back through the business's receipt endpoint, still states the terms they booked.
   const app = new H3()
   app.use((event) => { event.context.organizationId = ORG })
-  app.get('/api/public/booking-requests/:requestId', bookingReceiptRoute)
-  const read = await app.request(Object.assign(new Request(`https://payments.proof.example/api/public/booking-requests/${String(five.body.request_id)}`, { headers: { authorization: `Bearer ${String(five.body.cancellation_token)}` } }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
+  app.get('/api/public/booking-requests/:conversation_id', bookingReceiptRoute)
+  const read = await app.request(Object.assign(new Request(`https://payments.proof.example/api/public/booking-requests/${String(five.body.conversation_id)}`, { headers: { authorization: `Bearer ${String(five.body.cancellation_token)}` } }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
   assert.equal(read.status, 200, await read.clone().text())
   const receipt = (await read.json() as { booking: { guests: string; policy_summary: unknown; advance_notice_minutes: number | null } }).booking
   assert.deepEqual([receipt.guests, receipt.policy_summary, receipt.advance_notice_minutes], ['5', booked, null])
   // And they can still cancel it online tomorrow's seating, as the terms they booked allow.
-  const cancelled = await cancelBookingRequest(db, { id: String(five.body.request_id), organizationId: ORG, kind: 'booking', now: new Date().toISOString(), env, tokenHash: await hashReservationCancelToken(String(five.body.cancellation_token)) })
+  const cancelled = await cancelBookingRequest(db, { id: String(five.body.conversation_id), organizationId: ORG, kind: 'booking', now: new Date().toISOString(), env, tokenHash: await hashReservationCancelToken(String(five.body.cancellation_token)) })
   assert.equal(cancelled?.changed, true)
-  assert.equal(await db.prepare('SELECT status FROM bookings WHERE id=?').bind(String(five.body.operational_booking_id)).first('status'), 'cancelled')
+  assert.equal(await db.prepare('SELECT status FROM bookings WHERE id=?').bind(String(five.body.booking_id)).first('status'), 'cancelled')
  } finally { await runtime.dispose() }
 })
 
@@ -357,8 +357,8 @@ test('authorized guest cancellation replay recovers an interrupted Stripe refund
     assert(cancellation)
     const interruptedDetails = await loadBuyerBookingDetails(db, env, 'verified', 'booking', scope.id)
     assert.equal(interruptedDetails.status, 'cancelled')
-    assert.equal(interruptedDetails.guestCanCancel, false)
-    assert.equal(interruptedDetails.guestCanRetryCancellation, true)
+    assert.equal(interruptedDetails.guest_can_cancel, false)
+    assert.equal(interruptedDetails.guest_can_retry_cancellation, true)
     await assert.rejects(() => loadBuyerBookingDetails(db, env, 'other', 'booking', scope.id), error => error instanceof HTTPError && error.statusCode === 404)
     const tokenScope = { organizationId: ORG, bookingId, requestId: scope.id }
     assert.equal(await canRetryGuestVisitRefund(db, tokenScope), true)
@@ -376,7 +376,7 @@ test('authorized guest cancellation replay recovers an interrupted Stripe refund
     assert.deepEqual((await db.prepare("SELECT id,idempotency_key,stripe_refund_id,amount,status,error FROM payment_refunds WHERE payment_id='deposit'").all()).results, [{ id: intent.id, idempotency_key: intent.idempotency_key, stripe_refund_id: 're_recovered', amount: 10500, status: 'succeeded', error: null }])
     assert.deepEqual(await db.prepare("SELECT refunded_amount FROM payments WHERE id='deposit'").first(), { refunded_amount: 10500 })
     const refundedDetails = await loadBuyerBookingDetails(db, env, 'verified', 'booking', scope.id)
-    assert.equal(refundedDetails.guestCanRetryCancellation, false)
+    assert.equal(refundedDetails.guest_can_retry_cancellation, false)
     assert.equal(await canRetryGuestVisitRefund(db, tokenScope), false)
     assert.deepEqual(refundedDetails.payments?.flatMap(payment => payment.refunds.map(refund => ({ amount: refund.amount, status: refund.status }))), [{ amount: 10500, status: 'succeeded' }])
     assert.deepEqual((await db.prepare("SELECT * FROM messages WHERE conversation_id='deposit-request' AND event_name='booking.cancel'").all()).results, [cancellation])
@@ -609,8 +609,8 @@ test('Checkout proof attaches ownership without exposing merchant financial data
   assert.equal(await buyerPaymentActivityPath(db,'verified','claim'),'/dashboard/account/activity/payment/claim')
   const owned=await loadBuyerBookingDetails(db, env,'verified','payment','claim')
   assert.equal(owned.type,'payment')
-  assert.equal(owned.resourceTitle,'Consultation')
-  assert.equal(owned.threadId,null)
+  assert.equal(owned.name,'Consultation')
+  assert.equal(owned.conversation_id,null)
   // refunded_amount is 0 in our row; the 1000 can only have come from Stripe's Charge.
   assert.deepEqual(owned.payments,[{payment:{id:'claim',currency:'USD',captured_amount:10000,refunded_amount:1000,surcharge_amount:0,receipt_url:'https://example.com/receipt'},refunds:[{id:'refund:claim',amount:1000,status:'pending',note:null}],order:null}])
   for(const field of ['stripe_account_id','stripe_payment_intent_id','stripe_charge_id','livemode','buyer_user_id','price_snapshot_json'])assert.equal(Object.hasOwn(owned.payments![0]!.payment,field),false)
@@ -713,7 +713,7 @@ test('a payment back on the business’s site claims for that site’s buyer and
   const app = new H3()
   app.use((event) => { event.context.organizationId = ORG })
   app.post('/api/public/payments/:paymentId/return', paymentReturnRoute)
-  app.get('/api/public/booking-requests/:requestId', bookingReceiptRoute)
+  app.get('/api/public/booking-requests/:conversation_id', bookingReceiptRoute)
   const call = (path: string, init: { method?: string; headers?: Record<string, string>; body?: unknown } = {}) => app.request(Object.assign(new Request(`https://payments.proof.example${path}`, {
    method: init.method ?? 'GET', headers: { origin: 'https://payments.proof.example', 'content-type': 'application/json', ...init.headers }, ...(init.body ? { body: JSON.stringify(init.body) } : {}),
   }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
@@ -745,7 +745,7 @@ test('a payment back on the business’s site claims for that site’s buyer and
   // and the receipt is the business's confirmation, not the platform's.
   const paid = await back('deposit', { cookie })
   assert.equal(paid.status, 200, await paid.clone().text())
-  assert.deepEqual(await paid.json(), { state: 'paid', kind: 'booking', request_id: 'deposit-request', cancellation_token: receipt.token })
+  assert.deepEqual(await paid.json(), { state: 'paid', kind: 'booking', conversation_id: 'deposit-request', cancellation_token: receipt.token })
   assert.deepEqual(paid.headers.getSetCookie(), [])
   assert.deepEqual(await db.prepare("SELECT claimed_user_id FROM payments WHERE id='deposit'").first(), { claimed_user_id: buyer })
   const bookingId = await db.prepare("SELECT converted_booking_id FROM payment_checkout_holds WHERE id='deposit-hold' AND status='converted'").first<string>('converted_booking_id')
@@ -765,7 +765,7 @@ test('a payment back on the business’s site claims for that site’s buyer and
   // Returning again, as a reload of the pay page does, names the same receipt and changes nothing.
   const before = await db.prepare("SELECT return_token_hash,claimed_at,claimed_user_id FROM payments WHERE id='deposit'").first()
   const again = await back('deposit', { cookie })
-  assert.deepEqual(await again.json(), { state: 'paid', kind: 'booking', request_id: 'deposit-request', cancellation_token: receipt.token })
+  assert.deepEqual(await again.json(), { state: 'paid', kind: 'booking', conversation_id: 'deposit-request', cancellation_token: receipt.token })
   assert.deepEqual(await db.prepare("SELECT return_token_hash,claimed_at,claimed_user_id FROM payments WHERE id='deposit'").first(), before)
   assert.equal(await db.prepare("SELECT count(*) n FROM messages WHERE conversation_id='deposit-request' AND event_name='payment.payment_captured'").first('n'), 1)
  } finally {
@@ -791,10 +791,10 @@ test('buyer Activity groups exact owned visits and immutable orders without manu
   await db.prepare("UPDATE bookings SET private_notes='Team-only note' WHERE id=?").bind(booking.bookingId).run()
   const detail=await loadBuyerBookingDetails(db, env,'verified','booking',opening.id)
   assert.deepEqual(detail.payments!.map(item=>item.payment.id),['visit-payment'])
-  assert.equal(detail.threadId,opening.id)
-  assert.equal(detail.privateNotes,null)
+  assert.equal(detail.conversation_id,opening.id)
+  assert.equal(detail.private_notes,null)
   assert.doesNotMatch(JSON.stringify(detail),/Team-only note/u)
-  assert.equal(detail.assignedMemberName,null)
+  assert.equal(detail.assigned_member_name,null)
   await assert.rejects(()=>loadBuyerBookingDetails(db, env,'verified','booking',booking.bookingId),error=>error instanceof HTTPError&&error.statusCode===404)
   await assert.rejects(()=>loadBuyerBookingDetails(db, env,'other','booking',opening.id),error=>error instanceof HTTPError&&error.statusCode===404)
   await db.prepare("INSERT INTO payments(id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,currency,amount,captured_amount,price_snapshot_json,created_at,updated_at) VALUES('order-payment',?,'verified','acct_seller',0,'order','USD',2500,2500,?,?,?)").bind(ORG,JSON.stringify({title:'Immutable item'}),NOW,NOW).run()
@@ -803,8 +803,8 @@ test('buyer Activity groups exact owned visits and immutable orders without manu
   const requestsBefore=(await db.prepare('SELECT * FROM conversations ORDER BY id').all()).results
   const order=await loadBuyerBookingDetails(db, env,'verified','order','order-payment')
   assert.equal(order.type,'order')
-  assert.equal(order.threadId,null)
-  assert.equal(order.partySize,null)
+  assert.equal(order.conversation_id,null)
+  assert.equal(order.party_size,null)
   assert.deepEqual(order.payments![0]!.order,{lines:[{id:'immutable-line',title:'Original item title',unit_amount:1250,quantity:2,currency:'USD'}]})
   assert.deepEqual((await db.prepare('SELECT * FROM conversations ORDER BY id').all()).results,requestsBefore)
   await assert.rejects(()=>loadBuyerBookingDetails(db, env,'other','order','order-payment'),error=>error instanceof HTTPError&&error.statusCode===404)
@@ -812,7 +812,7 @@ test('buyer Activity groups exact owned visits and immutable orders without manu
   assert.equal((await buyerActivities(db,'verified')).activities.some(item=>item.kind==='booking'),false)
   await assert.rejects(()=>loadBuyerBookingDetails(db, env,'verified','booking',opening.id),error=>error instanceof HTTPError&&error.statusCode===404)
   const retainedPayment=await loadBuyerBookingDetails(db, env,'verified','payment','visit-payment')
-  assert.equal(retainedPayment.threadId,null)
+  assert.equal(retainedPayment.conversation_id,null)
   assert.equal(retainedPayment.payments![0]!.payment.id,'visit-payment')
   assert.equal(await db.prepare("SELECT buyer_user_id FROM payments WHERE id='visit-payment'").first('buyer_user_id'),'verified')
   assert.equal(await getGuestThreadDetail(db,opening.id,ORG,{buyerUserId:'verified'}),null)

@@ -214,9 +214,9 @@ async function loadReplyTasks(request: APIRequestContext, slug: string, threadId
 /** Opening a conversation reads it through to the newest message shown; the GET that showed it wrote nothing. */
 async function readThrough(request: APIRequestContext, thread: InboxThread) {
   const newest = thread.stream.filter(item => item.type !== 'day').at(-1)!.id
-  const response = await request.post(`/api/dashboard/organizations/${organizationId()}/conversations/${thread.id}/read`, { data: { messageId: newest } })
+  const response = await request.post(`/api/dashboard/organizations/${organizationId()}/conversations/${thread.id}/read`, { data: { message_id: newest } })
   await expectStatus(response, 200)
-  expect(await response.json()).toEqual({ read: true, lastReadMessageId: newest })
+  expect(await response.json()).toEqual({ read: true, last_read_message_id: newest })
 }
 
 test('guest thread state stays source-owned, per-user, tenant-isolated, and idempotent', async ({ playwright }) => {
@@ -668,7 +668,7 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
   const summary = (await summaryResponse.json() as { booking: DashboardBookingDetails }).booking
   expect(summary).toMatchObject({ guestName, guestPhone: '+12025550123', partySize: 2 })
   expect(summary.resourceImageUrl, 'This reservation has its location’s actual authored picture').not.toBeNull()
-  expect(summary.threadId).not.toBeNull()
+  expect(summary.conversation_id).not.toBeNull()
   const priorViewport = page.viewportSize()!
   let desktopCountWidth: number | undefined
   for (const width of [1728, 390]) {
@@ -676,7 +676,7 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
     const identity = detailPanel.getByRole('heading', { level: 2, name: `${firstName}’s group of ${summary.partySize}`, exact: true })
     const message = detailPanel.getByRole('link', { name: 'Message guest', exact: true })
     const call = detailPanel.getByRole('link', { name: 'Call', exact: true })
-    await expect(message).toHaveAttribute('href', `/dashboard/${demoSlug()}/messages/${encodeURIComponent(summary.threadId!)}`)
+    await expect(message).toHaveAttribute('href', `/dashboard/${demoSlug()}/messages/${encodeURIComponent(summary.conversation_id!)}`)
     await expect(call).toHaveAttribute('href', `tel:${summary.guestPhone}`)
     await expect(identity).toBeInViewport()
     await expect(message).toBeInViewport()
@@ -793,20 +793,20 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
   }
   await page.goto(`${baseURL}${recordPath}${noteContext}`)
   const noteInput = detailPanel.getByRole('textbox', { name: 'Private note', exact: true })
-  for (const [written, expectedUpdatedAt] of [[note, summary.operationalUpdatedAt], [`${note} revised`, null]] as const) {
+  for (const [written, expectedUpdatedAt] of [[note, summary.updated_at], [`${note} revised`, null]] as const) {
     const before = await readBooking()
-    if (expectedUpdatedAt) expect(before.operationalUpdatedAt).toBe(expectedUpdatedAt)
+    if (expectedUpdatedAt) expect(before.updated_at).toBe(expectedUpdatedAt)
     await noteInput.fill(written)
     const noteWrite = page.waitForResponse(response => new URL(response.url()).pathname === noteEndpoint && response.request().method() === 'POST')
     await detailPanel.getByText('Private note', { exact: true }).click()
     const noteResponse = await noteWrite
     await expectStatus(noteResponse, 200)
-    expect(noteResponse.request().postDataJSON()).toEqual({ note: written, operationalUpdatedAt: before.operationalUpdatedAt })
+    expect(noteResponse.request().postDataJSON()).toEqual({ private_notes: written, updated_at: before.updated_at })
     // Read back through the booking, not the write's own answer.
-    expect((await readBooking()).privateNotes).toBe(written)
+    expect((await readBooking()).private_notes).toBe(written)
     await expect(noteInput).toHaveValue(written)
     // Nothing in the conversation carries it: no message, event or preview.
-    expect(JSON.stringify(await loadThreadDetail(page.request, summary.threadId!, demoOrganizationId()))).not.toContain(written)
+    expect(JSON.stringify(await loadThreadDetail(page.request, summary.conversation_id!, demoOrganizationId()))).not.toContain(written)
   }
 
   // Change is one sheet beneath the record, as Airbnb's: the details are edited
@@ -826,8 +826,8 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
     { params: { org: demoSlug() } },
   )
   await expectStatus(beforeResponse, 200)
-  const before = await beforeResponse.json() as { booking: { partySize: number; threadId: string } }
-  const targetPartySize = before.booking.partySize === 99 ? 98 : before.booking.partySize + 1
+  const before = await beforeResponse.json() as { booking: { party_size: number; conversation_id: string } }
+  const targetPartySize = before.booking.party_size === 99 ? 98 : before.booking.party_size + 1
   await page.getByRole('spinbutton', { name: 'Guests', exact: true }).fill(String(targetPartySize))
   // A typed count enables Send without leaving the field.
   await expect(page.getByRole('button', { name: 'Send request', exact: true })).toBeEnabled()
@@ -842,7 +842,7 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
   await expect(page.getByRole('heading', { name: 'Coming up', exact: true })).toBeVisible({ timeout: 30_000 })
   await expect(page).toHaveURL(`${baseURL}/dashboard/${demoSlug()}/bookings/booking/${upcomingBookingId}${changeContext}`)
 
-  const detail = await loadThreadDetail(page.request, before.booking.threadId, demoOrganizationId())
+  const detail = await loadThreadDetail(page.request, before.booking.conversation_id, demoOrganizationId())
   const requests = streamChanges(detail).filter(item => item.sentAt >= requestedAt)
   expect(requests).toHaveLength(1)
   expect(requests[0]!.change).toMatchObject({ requestedBy: 'business', status: 'pending', after: { partySize: targetPartySize } })
@@ -858,9 +858,9 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
   if (local) {
     const request = requests[0]!
     const token = createHmac('sha256', 'local-playwright-email-reply-secret')
-      .update(`booking-change:v1:${before.booking.threadId}:${request.id}`)
+      .update(`booking-change:v1:${before.booking.conversation_id}:${request.id}`)
       .digest('hex')
-    await page.goto(`${baseURL}/booking-changes/${before.booking.threadId}/${request.id}#${token}`)
+    await page.goto(`${baseURL}/booking-changes/${before.booking.conversation_id}/${request.id}#${token}`)
     await expect(page.getByRole('button', { name: 'Accept changes', exact: true })).toBeVisible()
     await page.getByRole('button', { name: 'Accept changes', exact: true }).click()
     await expect(page.getByText('Your booking has been updated.', { exact: true })).toBeVisible()
@@ -872,7 +872,7 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
     await expectStatus(afterResponse, 200)
     expect(await afterResponse.json()).toMatchObject({ booking: { partySize: targetPartySize } })
     // The proposal reads accepted, and the conversation says so once.
-    const afterDetail = await loadThreadDetail(page.request, before.booking.threadId, demoOrganizationId())
+    const afterDetail = await loadThreadDetail(page.request, before.booking.conversation_id, demoOrganizationId())
     expect(streamChanges(afterDetail).find(item => item.id === request.id)?.change.status).toBe('accepted')
     expect(streamEvents(afterDetail, `${afterDetail.guestName}’s change was accepted`)).toHaveLength(1)
   }
@@ -899,14 +899,14 @@ test('buyer conversation approves and declines canonical changes without moving 
     const read = async () => {
       const response = await owner.get(`/api/dashboard/bookings/booking/${threadId}`, { params: { org: demoSlug() } })
       await expectStatus(response, 200)
-      return (await response.json() as { booking: { updatedAt: string; bookingDate: string; bookingTime: string; partySize: number; locationId: string; sessionId: string } }).booking
+      return (await response.json() as { booking: { updated_at: string; booking_date: string; booking_time: string; party_size: number; location_id: string; product_session_id: string } }).booking
     }
     const original = await read()
     const requestChange = async (partySize: number) => {
       const current = await read()
       const response = await owner.post(`/api/dashboard/bookings/booking/${threadId}/changes`, {
         params: { org: demoSlug() },
-        data: { kind: 'booking', sessionId: current.sessionId, partySize, expectedUpdatedAt: current.updatedAt, idempotencyKey: crypto.randomUUID() },
+        data: { kind: 'booking', product_session_id: current.product_session_id, party_size: partySize, updated_at: current.updated_at, idempotency_key: crypto.randomUUID() },
       })
       await expectStatus(response, 200)
       const detail = await loadThreadDetail(owner, threadId!, demoOrganizationId())

@@ -52,8 +52,8 @@ test('the cron sends due messages, leaves future ones pending and records failur
 
     // Saved before the stays arrive: a welcome five minutes after each new direct
     // reservation, and an arrival note at noon on check-in day.
-    const welcome = await saveMessageTemplate(db, env, manager, null, { title: 'Welcome', body: 'Thanks for booking the cabin.', schedule: { trigger: 'booking_received', delayMinutes: 5, productIds: [cabin.id] } })
-    const arrival = await saveMessageTemplate(db, env, manager, null, { title: 'Arrival', body: 'See you today.', schedule: { trigger: 'check_in', offsetDays: 0, localTime: '12:00', productIds: [cabin.id] } })
+    const welcome = await saveMessageTemplate(db, env, manager, null, { title: 'Welcome', body: 'Thanks for booking the cabin.', schedule: { trigger: 'booking_received', delay_minutes: 5, product_ids: [cabin.id] } })
+    const arrival = await saveMessageTemplate(db, env, manager, null, { title: 'Arrival', body: 'See you today.', schedule: { trigger: 'check_in', offset_days: 0, local_time: '12:00', product_ids: [cabin.id] } })
     const ana = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'ana', check_in_date: day(3), check_out_date: day(5), adults: 2, guest_name: 'Ana', guest_email: 'ana@example.test', total_minor: 30_000 })
     const dee = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'dee', check_in_date: day(10), check_out_date: day(11), adults: 1, guest_name: 'Dee', guest_phone: '+61491570151', total_minor: 15_000 })
     const cy = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'cy', check_in_date: day(20), check_out_date: day(21), adults: 1, guest_name: 'Cy', guest_email: 'cy@example.test', total_minor: 15_000 })
@@ -67,8 +67,8 @@ test('the cron sends due messages, leaves future ones pending and records failur
     // A send recorded under Cy's key with other words cannot be reconciled
     // automatically; it goes to review rather than being sent again.
     const cyWelcome = (await planned(cy.id, welcome.id))!
-    await appendMessage(db, { id: 'earlier-attempt', conversationId: cy.request_id, authorKind: 'krabiclaw', authorUserId: null, channel: 'email', body: 'Different words',
-      eventName: 'thread.scheduled_message', payload: { request_hash: 'other' }, dedupeKey: `guest-thread-operation:${cy.request_id}:scheduled-guest-message:${cyWelcome.id}` })
+    await appendMessage(db, { id: 'earlier-attempt', conversationId: cy.conversation_id, authorKind: 'krabiclaw', authorUserId: null, channel: 'email', body: 'Different words',
+      eventName: 'thread.scheduled_message', payload: { request_hash: 'other' }, dedupeKey: `guest-thread-operation:${cy.conversation_id}:scheduled-guest-message:${cyWelcome.id}` })
 
     // Eve's conversation is addressed through Channex. The provider's answer to
     // the read before any send is malformed, so nothing is sent and the
@@ -76,7 +76,7 @@ test('the cron sends due messages, leaves future ones pending and records failur
     await db.prepare(`INSERT INTO product_channel_mappings (organization_id, product_id, provider, listing_id, channel_id, property_id, room_type_id, rate_plan_id, import_stage, enabled)
       VALUES (?, ?, 'channex', 'listing', 'channel', 'property', 'room', 'rate', 'complete', 1)`).bind(ORG, cabin.id).run()
     await db.prepare(`INSERT INTO channel_threads (provider, external_thread_id, organization_id, product_id, conversation_id, external_booking_id, provider_updated_at)
-      VALUES ('channex', 'thread-eve', ?, ?, ?, NULL, '2026-10-16T00:00:00')`).bind(ORG, cabin.id, eve.request_id).run()
+      VALUES ('channex', 'thread-eve', ?, ?, ?, NULL, '2026-10-16T00:00:00')`).bind(ORG, cabin.id, eve.conversation_id).run()
     const channexEnv = { ...env, CHANNEX_BASE_URL: 'https://channex.test/api/v1', CHANNEX_API_KEY: 'test-provider-key' } as CloudflareEnv
     const realFetch = globalThis.fetch
     const providerCalls: string[] = []
@@ -99,12 +99,12 @@ test('the cron sends due messages, leaves future ones pending and records failur
     assert.equal(sent.status, 'sent')
     assert.ok(sent.sent_at && sent.message_id)
     assert.deepEqual(await db.prepare('SELECT e.conversation_id, e.author_kind, e.author_user_id, e.event_name, e.body, d.channel, d.purpose, d.status FROM messages e JOIN guest_thread_deliveries d ON d.message_id = e.id WHERE e.id = ?').bind(sent.message_id).first(), {
-      conversation_id: ana.request_id, author_kind: 'krabiclaw', author_user_id: null, event_name: 'thread.scheduled_message', body: 'Thanks for booking the cabin.', channel: 'email', purpose: 'scheduled_message', status: 'sent',
+      conversation_id: ana.conversation_id, author_kind: 'krabiclaw', author_user_id: null, event_name: 'thread.scheduled_message', body: 'Thanks for booking the cabin.', channel: 'email', purpose: 'scheduled_message', status: 'sent',
     })
     // Phone alone, with no email and no KrabiClaw account, is nowhere to send: the failure is recorded with its own facts.
     const failed = (await planned(dee.id, welcome.id))!
     assert.deepEqual([failed.status, failed.error_code, failed.error_field, failed.reason, failed.message_id, failed.sent_at],
-      ['failed', 'GUEST_UNREACHABLE', 'request_id', 'This guest has no email or KrabiClaw account to reply to.', null, null])
+      ['failed', 'GUEST_UNREACHABLE', 'conversation_id', 'This guest has no email or KrabiClaw account to reply to.', null, null])
     const review = (await planned(cy.id, welcome.id))!
     assert.deepEqual([review.status, review.error_code, review.error_field, review.sent_at], ['needs_review', 'IDEMPOTENCY_CONFLICT', 'idempotencyKey', null])
     assert.ok(review.reason)
@@ -115,7 +115,7 @@ test('the cron sends due messages, leaves future ones pending and records failur
     assert.equal(await db.prepare("SELECT count(*) AS n FROM messages WHERE event_name = 'thread.scheduled_message'").first('n'), 2)
 
     // A schedule saved after its event has passed records the miss instead of sending late.
-    const lateNote = await saveMessageTemplate(db, env, manager, null, { title: 'Pre-arrival', body: 'Your stay is a week away.', schedule: { trigger: 'check_in', offsetDays: -7, localTime: '09:00', productIds: [cabin.id] } })
+    const lateNote = await saveMessageTemplate(db, env, manager, null, { title: 'Pre-arrival', body: 'Your stay is a week away.', schedule: { trigger: 'check_in', offset_days: -7, local_time: '09:00', product_ids: [cabin.id] } })
     const missed = (await planned(ana.id, lateNote.id))!
     assert.deepEqual([missed.status, missed.reason], ['skipped', 'This event was already in the past when the schedule or stay changed.'])
     assert.equal((await planned(cy.id, lateNote.id))?.status, 'pending')
@@ -125,20 +125,20 @@ test('the cron sends due messages, leaves future ones pending and records failur
     const hub = env.GUEST_INBOX_HUBS!.get(env.GUEST_INBOX_HUBS!.idFromName(ORG))
     const publications = async () => await (await hub.fetch('https://hub/observed')).json() as DashboardInvalidation[]
     let observed = (await publications()).length
-    const changed = await saveMessageTemplate(db, env, manager, lateNote.id, { title: 'Pre-arrival', body: 'Your stay is coming up.', expectedVersion: lateNote.version,
-      schedule: { trigger: 'check_in', offsetDays: -6, localTime: '09:00', productIds: [cabin.id] } })
+    const changed = await saveMessageTemplate(db, env, manager, lateNote.id, { title: 'Pre-arrival', body: 'Your stay is coming up.', version: lateNote.version,
+      schedule: { trigger: 'check_in', offset_days: -6, local_time: '09:00', product_ids: [cabin.id] } })
     assert.equal((await planned(cy.id, lateNote.id))?.body, 'Your stay is coming up.')
-    assert.deepEqual((await publications()).slice(observed).filter(event => event.type === 'MESSAGE_UPDATE').map(event => 'conversationId' in event ? event.conversationId : null).sort(), [ana, dee, cy, eve].map(stay => stay.request_id).sort())
+    assert.deepEqual((await publications()).slice(observed).filter(event => event.type === 'MESSAGE_UPDATE').map(event => 'conversationId' in event ? event.conversationId : null).sort(), [ana, dee, cy, eve].map(stay => stay.conversation_id).sort())
     observed = (await publications()).length
     const cyNote = (await planned(cy.id, lateNote.id))!
     await cancelScheduledGuestMessage(db, env, manager, cyNote.id!)
     assert.equal((await planned(cy.id, lateNote.id))?.status, 'cancelled')
-    assert.deepEqual((await publications()).slice(observed).map(event => [event.type, 'conversationId' in event ? event.conversationId : null]), [['MESSAGE_UPDATE', cy.request_id]])
+    assert.deepEqual((await publications()).slice(observed).map(event => [event.type, 'conversationId' in event ? event.conversationId : null]), [['MESSAGE_UPDATE', cy.conversation_id]])
     observed = (await publications()).length
     await deleteMessageTemplate(db, env, manager, lateNote.id, changed.version)
     assert.equal(await db.prepare('SELECT count(*) FROM message_templates WHERE id = ?').bind(lateNote.id).first('count(*)'), 0)
     assert.deepEqual(await db.prepare('SELECT template_id, status FROM scheduled_guest_messages WHERE id = ?').bind(cyNote.id).first(), { template_id: null, status: 'cancelled' })
-    assert.deepEqual((await publications()).slice(observed).map(event => 'conversationId' in event ? event.conversationId : null).sort(), [ana, dee, cy, eve].map(stay => stay.request_id).sort())
+    assert.deepEqual((await publications()).slice(observed).map(event => 'conversationId' in event ? event.conversationId : null).sort(), [ana, dee, cy, eve].map(stay => stay.conversation_id).sort())
   } finally {
     await runtime.dispose()
   }

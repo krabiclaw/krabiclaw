@@ -46,7 +46,7 @@ export async function seedRestaurant(createTenant: CreateTenant): Promise<SeedTe
     const dinner = await seating(nextWeek, '19:00')
     if (!dinner) throw new Error('Ember & Slice Brooklyn has no 19:00 seating next week')
     await tool('create_product_booking', {
-      product_slug: tables.brooklyn!.slug, session_id: dinner.id, party_size: 4, guest_name: 'Maya Chen', guest_email: 'maya.chen@playwright.example',
+      product_slug: tables.brooklyn!.slug, product_session_id: dinner.id, party_size: 4, guest_name: 'Maya Chen', guest_email: 'maya.chen@playwright.example',
       guest_phone: '+12025550188', idempotency_key: 'seed-restaurant-reservation', source: 'phone', guest_acknowledgement: false,
     })
 
@@ -64,7 +64,7 @@ export async function seedRestaurant(createTenant: CreateTenant): Promise<SeedTe
       const session = await seating(today, p.time)
       if (!session || session.is_full || Date.parse(session.starts_at) <= Date.now() + 10 * 60_000) continue
       await tool('create_product_booking', {
-        product_slug: tables.brooklyn!.slug, session_id: session.id, party_size: p.party_size, guest_name: p.guest_name, guest_email: p.guest_email,
+        product_slug: tables.brooklyn!.slug, product_session_id: session.id, party_size: p.party_size, guest_name: p.guest_name, guest_email: p.guest_email,
         guest_phone: p.guest_phone, idempotency_key: p.key, source: 'phone', guest_acknowledgement: false,
       })
     }

@@ -48,15 +48,13 @@ async function bookingNoun(db: DbClient, thread: Pick<GuestThreadRow, 'id' | 'or
  * real row, so the proposal names it. A table booking may move to a seating of
  * the same business's tables at another of its locations.
  */
-const bookingFieldsSchema = z.object({ kind: z.literal('booking'), sessionId: z.string().min(1), partySize: z.number().int().min(1).max(99) })
-const fieldsSchema = bookingFieldsSchema
-const requestSchema = z.intersection(fieldsSchema, z.object({ expectedUpdatedAt: z.string().min(1) }))
-const moveSchema = z.intersection(fieldsSchema, z.object({ expectedUpdatedAt: z.string().min(1).optional() }))
+const fieldsSchema = z.object({ kind: z.literal('booking'), product_session_id: z.string().min(1), party_size: z.number().int().min(1).max(99) })
+const requestSchema = fieldsSchema.extend({ updated_at: z.string().min(1) })
+const moveSchema = requestSchema.partial({ updated_at: true })
 const sourceSchema = z.object({
   recordKind: z.literal('booking'),
   assignedMemberId: z.string().nullable().default(null),
   sessionId: z.string().nullable().optional(),
-  operationalUpdatedAt: z.string().optional(),
   recordId: z.string(),
   status: z.string(),
   partySize: z.number().int(),
@@ -69,7 +67,7 @@ const sourceSchema = z.object({
   guest: z.object({ name: z.string(), email: z.string(), phone: z.string().nullable() }),
 })
 const proposalSchema = z.object({
-  before: sourceSchema, after: fieldsSchema, updatedAt: z.string(),
+  before: sourceSchema, after: fieldsSchema, updated_at: z.string(),
   locationTitle: z.string(), originalLocationTitle: z.string(), afterLabel: z.string(),
   // Written since the WhatsApp template gained real date and time slots.
   // Proposals recorded before that are immutable facts without them, and the
@@ -131,7 +129,7 @@ async function loadSource(db: DbClient, thread: GuestThreadRow): Promise<Source>
   const booking = await queryFirst<{ product_session_id: string; updated_at: string }>(db, 'SELECT product_session_id, updated_at FROM bookings WHERE id=? AND organization_id=?', [record.id, thread.organization_id])
   if (!booking) throw new HTTPError({ statusCode: 409, message: 'The booking changed while its current state was being read. Reload and try again.' })
   return {
-    assignedMemberId: record.assigned_member_id, sessionId: booking.product_session_id, operationalUpdatedAt: booking.updated_at,
+    assignedMemberId: record.assigned_member_id, sessionId: booking.product_session_id,
     recordKind: 'booking', recordId: record.id, status: record.status, partySize: record.party_size,
     startsAt: record.starts_at, endsAt: record.ends_at, timezone: record.timezone,
     locationId: record.location_id, productId: record.product_id,
@@ -168,7 +166,7 @@ async function validateDestination(db: DbClient, env: CloudflareEnv, thread: Gue
   const targetProduct = await queryFirst<{ product_id: string; kind: ProductKind; source_kind: ProductKind }>(db, `SELECT s.product_id, p.kind, source.kind AS source_kind FROM product_sessions s
       JOIN products p ON p.id = s.product_id AND p.organization_id = s.organization_id
       JOIN products source ON source.id = ? AND source.organization_id = s.organization_id
-     WHERE s.id = ? AND s.organization_id = ?`, [before.productId, after.sessionId, thread.organization_id])
+     WHERE s.id = ? AND s.organization_id = ?`, [before.productId, after.product_session_id, thread.organization_id])
   // A class moves within its own sessions; a table to any seating of the business's tables.
   if (!targetProduct || (targetProduct.product_id !== before.productId && !(targetProduct.kind === 'table' && targetProduct.source_kind === 'table'))) throw new HTTPError({ statusCode: 409, message: 'That session is not open for booking' })
   const productId = targetProduct.product_id
@@ -177,20 +175,20 @@ async function validateDestination(db: DbClient, env: CloudflareEnv, thread: Gue
     organizationId: thread.organization_id, productId,
     fromInstant: new Date().toISOString(), toInstant: new Date(Date.now() + 400 * 86_400_000).toISOString(),
   })
-    .then(sessions => sessions.filter(session => session.id === after.sessionId))
+    .then(sessions => sessions.filter(session => session.id === after.product_session_id))
   if (!target) throw new HTTPError({ statusCode: 409, message: 'That session is not open for booking' })
   const service = targetProduct.kind === 'service'
   const config = await requireBookingConfig(db, thread.organization_id, productId)
-  const partyRefusal = partySizeRefusal(config, after.partySize)
+  const partyRefusal = partySizeRefusal(config, after.party_size)
   if (partyRefusal) throw new HTTPError({ statusCode: 409, message: partyRefusal, data: { code: 'party_size_unavailable', field: 'party_size' } })
   const eligibility = attorneyEligibility(thread.organization_id, config.assigned_member_id)
   if (service && !await queryFirst(db, `SELECT 1 WHERE ${eligibility.query}`, eligibility.params)) throw new HTTPError({ statusCode: 409, message: 'The attorney needs a verified account and an approved public profile' })
-  const allocation = await sessionAllocationPredicate(db, { env, organizationId: thread.organization_id, productId, sessionId: target.id, partySize: after.partySize, replacingBookingId: before.recordId, now: new Date().toISOString() })
+  const allocation = await sessionAllocationPredicate(db, { env, organizationId: thread.organization_id, productId, sessionId: target.id, partySize: after.party_size, replacingBookingId: before.recordId, now: new Date().toISOString() })
   if (!await queryFirst(db, `SELECT 1 WHERE ${allocation.query}`, allocation.params)) throw new HTTPError({ statusCode: 409, message: service ? 'The proposed consultation time or attorney is no longer available' : 'That session filled up or is no longer available' })
   const booking = await queryFirst<{ product_variant_id: string }>(db, 'SELECT product_variant_id FROM bookings WHERE id = ? AND organization_id = ?', [before.recordId, thread.organization_id])
   if (!booking) throw new HTTPError({ statusCode: 409, message: 'The original booking is missing' })
   const paid = await queryFirst(db, "SELECT id FROM payments WHERE organization_id=? AND subject_type='booking' AND subject_id=? AND captured_amount>refunded_amount LIMIT 1", [thread.organization_id, before.recordId])
-  if (paid && (after.partySize !== before.partySize || target.location_id !== before.locationId)) throw new HTTPError({ statusCode: 409, message: 'Refund the paid booking before changing its quantity or location' })
+  if (paid && (after.party_size !== before.partySize || target.location_id !== before.locationId)) throw new HTTPError({ statusCode: 409, message: 'Refund the paid booking before changing its quantity or location' })
   // The booking keeps its option; at another location's tables it takes that product's one option.
   let variantId = booking.product_variant_id
   if (productId !== before.productId) {
@@ -198,7 +196,7 @@ async function validateDestination(db: DbClient, env: CloudflareEnv, thread: Gue
     if (variants.length !== 1) throw new HTTPError({ statusCode: 409, message: 'Those tables have no single bookable option' })
     variantId = variants[0]!.id
   }
-  if (!paid && partyPaysOnline(config, after.partySize)) {
+  if (!paid && partyPaysOnline(config, after.party_size)) {
     const organization = await queryFirst<{ slug: string; default_currency: string }>(db, 'SELECT slug, default_currency FROM organization WHERE id = ?', [thread.organization_id])
     if (!organization || !isCurrencyCode(organization.default_currency)) throw new Error('The booking organization or its currency is missing')
     const variant = (await getProduct(db, thread.organization_id, productId)).variants.find(candidate => candidate.id === variantId)
@@ -222,7 +220,7 @@ async function validateDestination(db: DbClient, env: CloudflareEnv, thread: Gue
         params: [before.sessionId, before.partySize, before.status, before.updatedAt, before.startsAt, before.endsAt, before.timezone, before.locationId, target.id, thread.organization_id, target.starts_at, target.ends_at, target.timezone, target.location_id, productId, config.assigned_member_id, config.scheduling_mode, ...(service ? eligibility.params! : []), ...(writeGuard?.params ?? [])] }
       return sessionMoveQuery(db, {
         env, bookingId, organizationId: thread.organization_id, fromProductId: before.productId!, productId, productVariantId: variantId,
-        sessionId: target.id, partySize: after.partySize, replacingBookingId: before.recordId, writeGuard: guarded,
+        sessionId: target.id, partySize: after.party_size, replacingBookingId: before.recordId, writeGuard: guarded,
         requireUndecided: { requestId: thread.id, organizationId: thread.organization_id, decisionDedupeKey: decisionDedupeKey ?? '' }, now,
       })
     },
@@ -231,7 +229,7 @@ async function validateDestination(db: DbClient, env: CloudflareEnv, thread: Gue
 
 /** The booking's own location and the one it would move to are both within the member's reach. */
 async function assertChangeLocations(db: DbClient, env: CloudflareEnv, membership: NonNullable<Awaited<ReturnType<typeof resolveOrganizationMembership>>>, before: Source, after: Fields): Promise<void> {
-  const target = await queryFirst<{ location_id: string | null }>(db, 'SELECT location_id FROM product_sessions WHERE id = ? AND organization_id = ?', [after.sessionId, membership.organizationId])
+  const target = await queryFirst<{ location_id: string | null }>(db, 'SELECT location_id FROM product_sessions WHERE id = ? AND organization_id = ?', [after.product_session_id, membership.organizationId])
   for (const locationId of new Set([before.locationId, target?.location_id ?? null].filter((value): value is string => Boolean(value)))) {
     await assertResourceAccess(db, { ...memberAccessPrincipal(membership, { env }), resourceLocationId: locationId })
   }
@@ -260,7 +258,7 @@ async function changePresentation(db: DbClient, thread: GuestThreadRow, proposal
   if (!startsAt || !timezone) {
     const target = await queryFirst<{ starts_at: string; timezone: string; location_id: string | null }>(db,
       'SELECT starts_at, timezone, location_id FROM product_sessions WHERE id = ? AND organization_id = ?',
-      [proposal.after.sessionId, thread.organization_id])
+      [proposal.after.product_session_id, thread.organization_id])
     if (!target || localLabel(target.starts_at, target.timezone) !== proposal.afterLabel) throw new HTTPError({ statusCode: 409, message: 'The proposed time has changed. Ask the business for a new change request.' })
     startsAt = target.starts_at
     timezone = target.timezone
@@ -281,7 +279,7 @@ async function changePresentation(db: DbClient, thread: GuestThreadRow, proposal
   return {
     ...guest, fromName: organization.name, vertical: organization.vertical, labels, copy,
     before: { assignedMemberId: proposal.before.assignedMemberId, assignedMemberName: beforeAssignedMemberName, whenLabel: formatTimestamp(proposal.before.startsAt, guest.locale, proposal.before.timezone, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }), partySize: proposal.before.partySize },
-    after: { assignedMemberId: afterAssignedMemberId, assignedMemberName: afterAssignedMemberName, whenLabel: formatTimestamp(startsAt, guest.locale, timezone, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }), partySize: proposal.after.partySize },
+    after: { assignedMemberId: afterAssignedMemberId, assignedMemberName: afterAssignedMemberName, whenLabel: formatTimestamp(startsAt, guest.locale, timezone, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }), partySize: proposal.after.party_size },
     locationTitle: guest.locationName?.trim() || labels['booking.online']!, originalLocationTitle: original.locationName?.trim() || labels['booking.online']!,
     afterStartsAt: startsAt, afterTimezone: timezone,
   }
@@ -356,7 +354,7 @@ async function deliverEmail(db: DbClient, env: ChangeEnv, thread: GuestThreadRow
   const offering = proposal.before.productId ? await queryFirst<{ name: string }>(db, 'SELECT name FROM products WHERE id = ? AND organization_id = ?', [proposal.before.productId, thread.organization_id]) : null
   const current = { date: before.date, time: before.time, nights: null, total: null, partySize: presentation.formatCount(proposal.before.partySize),
     location: proposal.originalLocationTitle || 'Online', assignee: guest.before.assignedMemberName }
-  const requested = { date: after.date, time: after.time, nights: null, total: null, partySize: presentation.formatCount(proposal.after.partySize),
+  const requested = { date: after.date, time: after.time, nights: null, total: null, partySize: presentation.formatCount(proposal.after.party_size),
     location: proposal.locationTitle || 'Online', assignee: guest.after.assignedMemberName }
   await notifyBookingChangeOwner(env, db, {
     organizationId: thread.organization_id, organizationName: guest.fromName,
@@ -377,8 +375,7 @@ async function deliverEmail(db: DbClient, env: ChangeEnv, thread: GuestThreadRow
 export async function requestBookingChange(db: DbClient, env: CloudflareEnv, thread: GuestThreadRow, actorUserId: string, body: unknown, idempotencyKey: string) {
   const parsed = requestSchema.safeParse(body)
   if (!parsed.success) throw new HTTPError({ statusCode: 400, message: 'Valid change details and the latest booking timestamp are required' })
-  const [afterInput, meta] = [parsed.data as Fields & { expectedUpdatedAt: string }, parsed.data as { expectedUpdatedAt: string }]
-  const after = fieldsSchema.parse(afterInput)
+  const { updated_at, ...after } = parsed.data
   const before = await loadSource(db, thread)
   const summary = await sourceSummary(db, thread)
   const membership = await resolveOrganizationMembership(env, { organizationId: thread.organization_id, userId: actorUserId })
@@ -391,7 +388,7 @@ export async function requestBookingChange(db: DbClient, env: CloudflareEnv, thr
   let entry = await findMessageByDedupeKey(db, externalId)
   if (entry) {
     const previous = proposalSchema.parse(JSON.parse(entry.payload_json || '{}'))
-    if (JSON.stringify(previous.after) !== JSON.stringify(after) || previous.updatedAt !== meta.expectedUpdatedAt) throw new HTTPError({ statusCode: 409, message: 'Request key was reused for different changes' })
+    if (JSON.stringify(previous.after) !== JSON.stringify(after) || previous.updated_at !== updated_at) throw new HTTPError({ statusCode: 409, message: 'Request key was reused for different changes' })
     const decision = await findMessageByDedupeKey(db, `booking-change-decision:${entry.id}`)
     if (decision) {
       if (decision.event_name === 'booking_change.accepted') return { changeStatus: 'accepted' as const }
@@ -401,12 +398,12 @@ export async function requestBookingChange(db: DbClient, env: CloudflareEnv, thr
   } else {
     if (!['pending', 'confirmed'].includes(before.status)) throw new HTTPError({ statusCode: 409, message: 'This booking can no longer be changed' })
     if (before.endsAt <= new Date().toISOString()) throw new HTTPError({statusCode:409,message:'This visit has ended and cannot be rescheduled'})
-    if (before.updatedAt !== meta.expectedUpdatedAt) throw new HTTPError({ statusCode: 409, message: 'The booking changed. Reload before sending a request.' })
+    if (before.updatedAt !== updated_at) throw new HTTPError({ statusCode: 409, message: 'The booking changed. Reload before sending a request.' })
     const destination = await validateDestination(db, env, thread, before, after)
     // Moving a table booking to another branch at the same time for the same
     // party is a change; comparing only the label and the party size rejected it.
     if (destination.startsAt === before.startsAt && destination.endsAt === before.endsAt && destination.timezone === before.timezone
-      && after.partySize === before.partySize
+      && after.party_size === before.partySize
       && destination.locationId === before.locationId) {
       throw new HTTPError({ statusCode: 400, message: 'Choose at least one change' })
     }
@@ -419,8 +416,8 @@ export async function requestBookingChange(db: DbClient, env: CloudflareEnv, thr
     const unchanged = sourceGuard(thread, before)
     entry = await appendMessage(db, { guard: { sql: unchanged.query, params: unchanged.params ?? [] }, conversationId: thread.id, authorKind: 'krabiclaw', authorUserId: actorUserId,
       eventName: 'booking_change.requested', dedupeKey: externalId,
-      body: `Requested ${destination.label} for ${after.partySize} guests${destination.title ? ` at ${destination.title}` : ''}.`,
-      payload: { before: sourceSchema.parse(before), after, updatedAt: before.updatedAt,
+      body: `Requested ${destination.label} for ${after.party_size} guests${destination.title ? ` at ${destination.title}` : ''}.`,
+      payload: { before: sourceSchema.parse(before), after, updated_at: before.updatedAt,
         beforeAssignedMemberName: await assignedMemberName(db, thread.organization_id, before.assignedMemberId), afterAssignedMemberId: destination.assignedMemberId ?? null, afterAssignedMemberName: await assignedMemberName(db, thread.organization_id, destination.assignedMemberId),
         locationTitle: destination.title, originalLocationTitle: original?.title ?? '', afterLabel: destination.label,
         afterDate: destination.date, afterTime: destination.time, afterStartsAt: destination.startsAt, afterEndsAt: destination.endsAt, afterTimezone: destination.timezone, afterLocationId: destination.locationId },
@@ -459,7 +456,7 @@ export async function moveBooking(db: DbClient, env: CloudflareEnv, thread: Gues
   const after = fieldsSchema.parse(parsed.data)
   const before = await loadSource(db, thread)
   if (before.productId && await queryFirst(db, "SELECT 1 FROM products WHERE id=? AND organization_id=? AND kind='service'", [before.productId, thread.organization_id])) {
-    return requestBookingChange(db, env, thread, actor.userId, { ...after, expectedUpdatedAt: parsed.data.expectedUpdatedAt ?? before.updatedAt }, idempotencyKey)
+    return requestBookingChange(db, env, thread, actor.userId, { ...after, updated_at: parsed.data.updated_at ?? before.updatedAt }, idempotencyKey)
   }
   const summary = await sourceSummary(db, thread)
   const membership = await resolveOrganizationMembership(env, { organizationId: thread.organization_id, userId: actor.userId })
@@ -473,10 +470,10 @@ export async function moveBooking(db: DbClient, env: CloudflareEnv, thread: Gues
   } else {
     if (!['pending', 'confirmed'].includes(before.status)) throw new HTTPError({ statusCode: 409, message: 'This booking can no longer be changed' })
     if (before.endsAt <= new Date().toISOString()) throw new HTTPError({ statusCode: 409, message: 'This visit has ended and cannot be rescheduled' })
-    if (parsed.data.expectedUpdatedAt !== undefined && before.updatedAt !== parsed.data.expectedUpdatedAt) throw new HTTPError({ statusCode: 409, message: 'The booking changed. Reload before moving it.' })
+    if (parsed.data.updated_at !== undefined && before.updatedAt !== parsed.data.updated_at) throw new HTTPError({ statusCode: 409, message: 'The booking changed. Reload before moving it.' })
     const destination = await validateDestination(db, env, thread, before, after, dedupeKey)
     if (!destination.claim) throw new Error('A move destination always claims its slot')
-    if (destination.startsAt === before.startsAt && destination.endsAt === before.endsAt && destination.timezone === before.timezone && after.partySize === before.partySize && destination.locationId === before.locationId) {
+    if (destination.startsAt === before.startsAt && destination.endsAt === before.endsAt && destination.timezone === before.timezone && after.party_size === before.partySize && destination.locationId === before.locationId) {
       throw new HTTPError({ statusCode: 400, message: 'Choose at least one change' })
     }
     const original = before.locationId
@@ -485,7 +482,7 @@ export async function moveBooking(db: DbClient, env: CloudflareEnv, thread: Gues
     if (!summary.guestEmail || !env.NUXT_PUBLIC_PLATFORM_DOMAIN) throw new HTTPError({ statusCode: 503, message: 'Guest email delivery is not configured' })
     const id = crypto.randomUUID()
     const now = new Date().toISOString()
-    const payload = proposalSchema.parse({ before: sourceSchema.parse(before), after, updatedAt: before.updatedAt,
+    const payload = proposalSchema.parse({ before: sourceSchema.parse(before), after, updated_at: before.updatedAt,
       beforeAssignedMemberName: await assignedMemberName(db, thread.organization_id, before.assignedMemberId), afterAssignedMemberId: destination.assignedMemberId ?? null, afterAssignedMemberName: await assignedMemberName(db, thread.organization_id, destination.assignedMemberId),
       locationTitle: destination.title, originalLocationTitle: original?.title ?? '', afterLabel: destination.label,
       afterDate: destination.date, afterTime: destination.time, afterStartsAt: destination.startsAt, afterEndsAt: destination.endsAt, afterTimezone: destination.timezone, afterLocationId: destination.locationId })
@@ -493,7 +490,7 @@ export async function moveBooking(db: DbClient, env: CloudflareEnv, thread: Gues
     // the party changes no row, so the entry is not written either.
     const queries: BatchQuery[] = [await destination.claim(before.recordId, now),
       ...messageQueries({ id, conversationId: thread.id, authorKind: 'krabiclaw', authorUserId: actor.userId, eventName: 'booking_change.moved',
-        body: `Moved to ${destination.label} for ${after.partySize} guests${destination.title ? ` at ${destination.title}` : ''}.`,
+        body: `Moved to ${destination.label} for ${after.party_size} guests${destination.title ? ` at ${destination.title}` : ''}.`,
         payload, dedupeKey, occurredAt: now, guard: { sql: 'c.organization_id = ? AND changes() = 1', params: [thread.organization_id] } }).queries, {
       // A moved booking is the party it moved with, no longer "this many or more".
       query: 'UPDATE bookings SET party_size_is_minimum = 0 WHERE id = ? AND organization_id = ? AND EXISTS (SELECT 1 FROM messages WHERE id = ?)',
@@ -588,7 +585,7 @@ export async function respondToBookingChange(db: DbClient, env: ChangeEnv, input
     const entryInsert = messageQueries({ id, conversationId: thread.id, authorKind: 'krabiclaw', authorUserId: thread.user_id,
       eventName: `booking_change.${input.decision === 'accept' ? 'accepted' : 'declined'}`,
       body: `Guest ${input.decision === 'accept' ? 'accepted' : 'declined'} the requested changes.`,
-      payload: { requestId: entry.id, operational_booking_id: current.recordId, beforeStatus: current.status, before: { starts_at: current.startsAt, ends_at: current.endsAt, party_size: current.partySize }, after: destination ? { starts_at: destination.startsAt, ends_at: destination.endsAt ?? new Date(Date.parse(destination.startsAt) + Date.parse(current.endsAt) - Date.parse(current.startsAt)).toISOString(), party_size: proposal.after.partySize } : null },
+      payload: { requestId: entry.id, booking_id: current.recordId, beforeStatus: current.status, before: { starts_at: current.startsAt, ends_at: current.endsAt, party_size: current.partySize }, after: destination ? { starts_at: destination.startsAt, ends_at: destination.endsAt ?? new Date(Date.parse(destination.startsAt) + Date.parse(current.endsAt) - Date.parse(current.startsAt)).toISOString(), party_size: proposal.after.party_size } : null },
       dedupeKey: resultId, occurredAt: now,
       guard: destination ? { sql: 'c.organization_id = ? AND changes()=1', params: [thread.organization_id] } : {
         sql: `c.organization_id = ? AND NOT EXISTS (SELECT 1 FROM messages newer WHERE newer.conversation_id=c.id AND newer.event_name='booking_change.requested' AND newer.sequence>?)
@@ -631,9 +628,9 @@ export async function respondToBookingChange(db: DbClient, env: ChangeEnv, input
     if (accepted) await (await import('~/server/domain/scheduled-guest-messages')).planSourceMessages(db, thread.organization_id, current.recordId)
     await reconcileConversationTasks(db, thread.id)
     if (!result.payload_json) throw new Error('A booking change answer has no recorded payload')
-    const answered = JSON.parse(result.payload_json) as { operational_booking_id?: unknown }
-    if (thread.kind === 'booking' && typeof answered.operational_booking_id === 'string') {
-      await recordBookingChangeAnswer(db, { organizationId: thread.organization_id, bookingId: answered.operational_booking_id, changeRequestId: entry.id, accepted })
+    const answered = JSON.parse(result.payload_json) as { booking_id?: unknown }
+    if (thread.kind === 'booking' && typeof answered.booking_id === 'string') {
+      await recordBookingChangeAnswer(db, { organizationId: thread.organization_id, bookingId: answered.booking_id, changeRequestId: entry.id, accepted })
     }
     // Told once the answer and its analytics are recorded, so a send that fails cannot skip them.
     await deliverEmail(db, env, thread as GuestThreadRow, result.id, entry.id, accepted ? 'accepted' : 'declined', proposal, noun)

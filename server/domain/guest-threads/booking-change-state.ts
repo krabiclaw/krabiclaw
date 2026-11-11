@@ -5,12 +5,13 @@ export interface BookingChangeState { status: BookingChangeStatus; decisionId: s
 
 /** Compare the immutable source shown to the client with its current canonical record. */
 function sourceMatchesSql(proposal: string, owner: string): string {
-  const recorded = ['recordKind', 'sessionId', 'operationalUpdatedAt', 'recordId', 'status', 'partySize', 'startsAt', 'endsAt', 'timezone', 'locationId', 'productId', 'partySizeIsMinimum', 'guest.name', 'guest.email', 'guest.phone']
+  const recorded = ['recordKind', 'sessionId', 'recordId', 'status', 'partySize', 'startsAt', 'endsAt', 'timezone', 'locationId', 'productId', 'partySizeIsMinimum', 'guest.name', 'guest.email', 'guest.phone']
     .map(field => `json_extract(${proposal}.payload_json,'$.before.${field}')`).join(',')
   const guest = ['guest.name', 'guest.email', 'guest.phone'].map(field => `json_extract(${owner}.payload_json,'$.${field}')`).join(',')
   return `(EXISTS (SELECT 1 FROM bookings b
       WHERE b.id=${owner}.booking_id AND b.organization_id=${owner}.organization_id AND ${owner}.kind='booking' AND b.product_session_id IS NOT NULL
-        AND json_array('booking',b.product_session_id,b.updated_at,b.id,b.status,b.party_size,b.starts_at,b.ends_at,b.timezone,b.location_id,b.product_id,b.party_size_is_minimum,${guest})=json_array(${recorded})))`
+        AND b.updated_at = json_extract(${proposal}.payload_json, '$.updated_at')
+        AND json_array('booking',b.product_session_id,b.id,b.status,b.party_size,b.starts_at,b.ends_at,b.timezone,b.location_id,b.product_id,b.party_size_is_minimum,${guest})=json_array(${recorded})))`
 }
 
 /**

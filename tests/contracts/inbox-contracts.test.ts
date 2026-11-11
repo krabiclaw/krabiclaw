@@ -163,7 +163,7 @@ test('the inbox view model matches contracts/inbox', { timeout: 120_000 }, async
     const refused = await executeGuestThreadOperation(db, { threadId, organizationId: ORG, action: 'reply', body: 'Check-in is from 4 PM.', actorUserId: OWNER, idempotencyKey: 'contract-reply', env })
     assert.equal(refused.ok, false)
     // A message the host set to send later is the pending row above the composer.
-    await scheduleGuestReply(db, principal, threadId, { body: 'Enjoy your stay!', sendAt: '2026-11-08T23:00:00.000Z' })
+    await scheduleGuestReply(db, principal, threadId, { body: 'Enjoy your stay!', due_at: '2026-11-08T23:00:00.000Z' })
 
     // A stay booked and paid on the site, as its captured payment converts it: the stay's own message, then the guest's note.
     const purchase = { product_id: home.id, location_id: 'location', timezone: 'America/Denver', check_in_date: '2026-11-20', check_out_date: '2026-11-23', adults: 2, children: 0, infants: 0,

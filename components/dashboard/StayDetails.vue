@@ -313,9 +313,9 @@ const arrivalTime = computed(() => {
   const local = new Intl.DateTimeFormat('en-GB', { timeZone: value.timezone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(value.starts_at))
   return local === recordHome.value?.check_in_time ? null : formatTime(local, 'en')
 })
-const messagePath = computed(() => detail.value?.request_id
-  ? props.personalScope ? `/dashboard/account/messages/${encodeURIComponent(detail.value.request_id)}`
-    : `/dashboard/${encodeURIComponent(String(route.params.orgSlug))}/messages/${encodeURIComponent(detail.value.request_id)}`
+const messagePath = computed(() => detail.value?.conversation_id
+  ? props.personalScope ? `/dashboard/account/messages/${encodeURIComponent(detail.value.conversation_id)}`
+    : `/dashboard/${encodeURIComponent(String(route.params.orgSlug))}/messages/${encodeURIComponent(detail.value.conversation_id)}`
   : null)
 const callPhone = computed(() => !props.personalScope ? detail.value?.guest_phone ?? null : null)
 const guestAddress = computed(() => home.value?.location?.address ? formatPostalAddress(home.value.location.address) : '')
@@ -433,7 +433,7 @@ async function deletePayment(paymentId: string) {
 // A stay booked here that has begun, before its guest reviewed it. The thread
 // operation is the writer; it refuses a stay that no longer qualifies.
 const canMarkNoShow = computed(() => !props.personalScope && manage.value && detail.value?.channel === 'direct' && detail.value.status === 'confirmed'
-  && !detail.value.no_show_at && Boolean(detail.value.request_id) && detail.value.check_in_date <= localDateAt(new Date(), detail.value.timezone))
+  && !detail.value.no_show_at && Boolean(detail.value.conversation_id) && detail.value.check_in_date <= localDateAt(new Date(), detail.value.timezone))
 
 async function undoMove() {
   const value = detail.value
@@ -447,7 +447,7 @@ async function undoMove() {
 
 async function markNoShow() {
   const value = detail.value
-  if (!value?.request_id) return
+  if (!value?.conversation_id) return
   if (!await confirmDialog.open({
     title: 'Mark as a no-show',
     description: `${guest.value.state === 'named' ? guest.value.name : 'The guest'} won’t be asked to review this stay, and a review link already sent stops working. The stay itself stays as it is. This cannot be undone.`,
@@ -456,7 +456,7 @@ async function markNoShow() {
   busy.value = 'no_show'
   actionError.value = null
   try {
-    await dashboardApi(`/api/dashboard/organizations/${encodeURIComponent(dashboardOrganization.organizationId.value ?? '')}/guest-threads/${encodeURIComponent(value.request_id)}/operations/no_show`, {
+    await dashboardApi(`/api/dashboard/organizations/${encodeURIComponent(dashboardOrganization.organizationId.value ?? '')}/guest-threads/${encodeURIComponent(value.conversation_id)}/operations/no_show`, {
       method: 'POST',
       body: { idempotencyKey: `no-show:${value.id}` },
       validate: (response: unknown): response is { thread: Record<string, unknown> } => isRecord(response) && isRecord(response.thread),
@@ -505,13 +505,13 @@ async function cancel() {
 async function cancelAsGuest() {
   const value = detail.value
   const quote = cancellation.value
-  if (!value || isChannelManagedStay(value) || !quote || !value.request_id || !policy.value) return
+  if (!value || isChannelManagedStay(value) || !quote || !value.conversation_id || !policy.value) return
   const description = quote.refund_minor === quote.paid_minor ? `You get back the full ${money(quote.paid_minor)}.`
     : quote.refund_minor > 0 ? `Under the ${policy.value.label} policy you get back ${money(quote.refund_minor)} of the ${money(quote.paid_minor)} you paid.`
       : `Under the ${policy.value.label} policy none of the ${money(quote.paid_minor)} you paid comes back.`
   if (!await confirmDialog.open({ title: 'Cancel your stay?', description, confirmLabel: 'Cancel stay', cancelLabel: 'Keep stay' })) return
   await run('cancel', () => applicationFetch('/api/account/cancel', {
-    method: 'POST', body: { request_id: value.request_id },
+    method: 'POST', body: { conversation_id: value.conversation_id },
     validate: (response: unknown): response is { success: true } => isRecord(response) && response.success === true,
   }), 'Your stay could not be cancelled')
 }

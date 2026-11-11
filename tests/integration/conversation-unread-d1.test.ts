@@ -85,7 +85,7 @@ test('unread is a message from someone else after your read position, the same c
     await db.batch(requestInsertQueries({ id: 'own-contact', kind: 'contact', organization_id: ORG, location_id: null, booking_id: null, user_id: null,
       payload: { guest: { name: 'Walk-in', email: 'walk@proof.example', phone: null }, subject: null, consent_at: null, ip_hash: null, answers: [] }, created_at: NOW })
       .map(write => db.prepare(write.query).bind(...write.params)))
-    await assert.rejects(markConversationUnread(db, { organizationId: ORG, conversationId: 'own-contact', userId: OWNER }), { status: 409, data: { code: 'NOTHING_TO_MARK', field: 'conversationId' } })
+    await assert.rejects(markConversationUnread(db, { organizationId: ORG, conversationId: 'own-contact', userId: OWNER }), { status: 409, data: { code: 'NOTHING_TO_MARK', field: 'conversation_id' } })
 
     // A team conversation behaves alike: a teammate's message is unread until read, mark unread brings it back, and
     // KrabiClaw's automatic message (a job reminder) is unread too. Who sees it is its participants.

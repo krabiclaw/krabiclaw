@@ -45,6 +45,8 @@ runtime state where possible. Ask only when the target cannot be determined.
 
 ## Canonical implementation
 
+A key carrying a stored value uses its column name across the domain, REST, MCP, web and iOS, and other API keys use snake_case except for provider-owned names.
+
 Every concept has one canonical implementation and every value has one canonical
 source.
 

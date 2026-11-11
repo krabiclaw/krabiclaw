@@ -25,7 +25,7 @@ import { NOT_HANDLED, optionalString, requiredString, resolveUserUploadedMediaFi
 
 const text = { type: 'string' }, nullableText = { type: ['string', 'null'] }
 const conversationId = { type: 'string', minLength: 1, description: 'A conversation_id from list_conversations, start_conversation or a booking read.' }
-const participant = { type: 'object', properties: { id: text, memberId: text, name: text, image: nullableText }, required: ['id', 'memberId', 'name', 'image'] }
+const participant = { type: 'object', properties: { id: text, member_id: text, name: text, image: nullableText }, required: ['id', 'member_id', 'name', 'image'] }
 const listRow = { type: 'object', properties: {
   conversation_id: text,
   kind: { type: 'string', enum: ['guest', 'support', 'team'], description: 'guest: a contact or a booking’s guest; support: Airbnb Support; team: members of this business.' },
@@ -49,20 +49,20 @@ const guestConversation = { type: 'object', description: 'A guest conversation: 
   }, required: ['id', 'author', 'actor', 'channel', 'body', 'event', 'occurred_at', 'provider_timestamp', 'booking_change', 'deliveries', 'attachments'] } },
 }, required: ['type', 'needs_reply', 'archived', 'last_message_at', 'participant_label', 'reply_channel', 'reply_not_possible', 'guest', 'answers', 'operational_record', 'messages'] }
 const teamThread = { type: 'object', description: 'A team conversation: its people, what it is about and its newest message.', properties: {
-  id: text, createdAt: text, lastMessageAt: text, bookingId: { ...nullableText, description: 'The booking the conversation is about: a stay (see stay) or a class, consultation or table (see record).' }, locationId: nullableText,
-  name: { ...nullableText, description: 'A group’s name; a stay conversation is titled by the home the guest sleeps in.' }, isGroup: { type: 'boolean' }, createdByUserId: nullableText, canManage: { type: 'boolean' }, canLeave: { type: 'boolean' },
+  id: text, created_at: text, last_message_at: text, booking_id: { ...nullableText, description: 'The booking the conversation is about: a stay (see stay) or a class, consultation or table (see record).' }, location_id: nullableText,
+  name: { ...nullableText, description: 'A group’s name; a stay conversation is titled by the home the guest sleeps in.' }, is_group: { type: 'boolean' }, created_by_user_id: nullableText, can_manage: { type: 'boolean' }, can_leave: { type: 'boolean' },
   participants: { type: 'array', items: participant }, unread: { type: 'boolean' },
-  stay: { type: ['object', 'null'], properties: { id: text, productId: text, homeName: text, checkInDate: text, checkOutDate: text, status: { type: 'string', enum: ['pending', 'confirmed', 'cancelled'] } }, required: ['id', 'productId', 'homeName', 'checkInDate', 'checkOutDate', 'status'] },
+  stay: { type: ['object', 'null'], properties: { id: text, product_id: text, name: text, check_in_date: text, check_out_date: text, status: { type: 'string', enum: ['pending', 'confirmed', 'cancelled'] } }, required: ['id', 'product_id', 'name', 'check_in_date', 'check_out_date', 'status'] },
   job: { ...TASK_VIEW_SCHEMA, type: ['object', 'null'], description: 'The job for the conversation’s booked record (a turnover or home-ready job for a stay, the prep or follow-up for a booking) as list_tasks presents it; null when there is none the caller may see.' },
   location: { type: ['object', 'null'], properties: { id: text, title: text, slug: text, timezone: text }, required: ['id', 'title', 'slug', 'timezone'] },
   record: { type: ['object', 'null'], description: 'The booking (a class, consultation or table) the conversation is about: who booked, else what.', properties: { id: text, title: text }, required: ['id', 'title'] },
-  lastMessage: { type: ['object', 'null'], properties: { id: text, senderId: nullableText, body: text, attachmentCount: { type: 'integer' }, createdAt: text }, required: ['id', 'senderId', 'body', 'attachmentCount', 'createdAt'] },
-}, required: ['id', 'createdAt', 'lastMessageAt', 'bookingId', 'locationId', 'record', 'name', 'isGroup', 'createdByUserId', 'canManage', 'canLeave', 'participants', 'unread', 'stay', 'job', 'location', 'lastMessage'] }
+  last_message: { type: ['object', 'null'], properties: { id: text, author_user_id: nullableText, body: text, attachment_count: { type: 'integer' }, created_at: text }, required: ['id', 'author_user_id', 'body', 'attachment_count', 'created_at'] },
+}, required: ['id', 'created_at', 'last_message_at', 'booking_id', 'location_id', 'record', 'name', 'is_group', 'created_by_user_id', 'can_manage', 'can_leave', 'participants', 'unread', 'stay', 'job', 'location', 'last_message'] }
 const teamMessage = { type: 'object', properties: {
-  id: text, threadId: text, senderId: { ...nullableText, description: 'The sender; null for an automatic message, or once a person’s account was deleted.' }, automatic: { type: 'boolean', description: 'Written by KrabiClaw (a cleaning job, a reminder, a move), not by a member. It is unread until read, like any message from someone else.' }, body: text, createdAt: text,
+  id: text, conversation_id: text, author_user_id: { ...nullableText, description: 'The sender; null for an automatic message, or once a person’s account was deleted.' }, automatic: { type: 'boolean', description: 'Written by KrabiClaw (a cleaning job, a reminder, a move), not by a member. It is unread until read, like any message from someone else.' }, body: text, created_at: text,
   attachments: { type: 'array', items: { type: 'object', properties: { id: text, url: text, width: { type: ['number', 'null'] }, height: { type: ['number', 'null'] } }, required: ['id', 'url', 'width', 'height'] } },
-  deliveries: { type: 'array', items: { type: 'object', properties: { id: text, channel: { type: 'string', enum: ['email', 'whatsapp', 'push'] }, status: text, error: nullableText, updatedAt: text }, required: ['id', 'channel', 'status', 'error', 'updatedAt'] } },
-}, required: ['id', 'threadId', 'senderId', 'automatic', 'body', 'createdAt', 'attachments', 'deliveries'] }
+  deliveries: { type: 'array', items: { type: 'object', properties: { id: text, channel: { type: 'string', enum: ['email', 'whatsapp', 'push'] }, status: text, error: nullableText, updated_at: text }, required: ['id', 'channel', 'status', 'error', 'updated_at'] } },
+}, required: ['id', 'conversation_id', 'author_user_id', 'automatic', 'body', 'created_at', 'attachments', 'deliveries'] }
 const readState = { type: 'object', properties: { conversation_id: text, unread: { type: 'boolean' }, last_read_message_id: nullableText }, required: ['conversation_id', 'unread', 'last_read_message_id'], additionalProperties: false }
 
 export const CONVERSATION_TOOLS: McpToolDefinition[] = [
@@ -162,7 +162,7 @@ export async function handleConversationTools(ctx: McpExecutorContext): Promise<
     case 'get_conversation': {
       if (conversation.kind !== 'team') return { conversation_id: conversation.id, kind: conversation.kind, guest: await guestConversationView(ctx, conversation), team: null }
       const access = await teamAccess(ctx, principal, 'read')
-      const [thread, page] = await Promise.all([getTeamThread(env, db, access, conversation.id), listTeamMessages(db, access, conversation.id, { limit: args.limit, before: args.before, beforeId: args.before_id })])
+      const [thread, page] = await Promise.all([getTeamThread(env, db, access, conversation.id), listTeamMessages(db, access, conversation.id, { limit: args.limit, before: args.before, before_id: args.before_id })])
       return { conversation_id: conversation.id, kind: conversation.kind, guest: null, team: { thread, ...page } }
     }
     case 'mark_conversation_read':
@@ -171,7 +171,7 @@ export async function handleConversationTools(ctx: McpExecutorContext): Promise<
         ? await markConversationRead(db, { organizationId, conversationId: conversation.id, userId, throughMessageId: optionalString(args, 'message_id') })
         : await markConversationUnread(db, { organizationId, conversationId: conversation.id, userId })
       await publishConversationAck(env, { organizationId, conversationId: conversation.id, targetUserId: userId })
-      return { conversation_id: conversation.id, unread: !position.read, last_read_message_id: position.lastReadMessageId }
+      return { conversation_id: conversation.id, unread: !position.read, last_read_message_id: position.last_read_message_id }
     }
     case 'set_conversation_archived': {
       if (typeof args.archived !== 'boolean') throw new HTTPError({ statusCode: 400, message: 'archived must be true or false', data: { code: 'VALIDATION_ERROR', field: 'archived' } })

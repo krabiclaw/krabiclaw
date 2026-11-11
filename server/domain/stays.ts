@@ -113,7 +113,7 @@ export interface Stay {
   /** The reservation on its channel's host pages, from its confirmation code; null where the channel has none KrabiClaw links to. */
   channel_booking_url: string | null
   /** The guest conversation in the inbox; every booking has one. */
-  request_id: string
+  conversation_id: string
   cancelled_at: string | null
   cancellation_reason: string | null
   /** The policy a guest booked under on the site; null for a stay not paid there. */
@@ -389,7 +389,7 @@ const STAY_FROM = `bookings s JOIN product_stay_configs c ON c.organization_id =
   JOIN conversations r ON r.organization_id = s.organization_id AND r.booking_id = s.id AND r.kind = 'booking'`
 const STAY_COLUMNS = `s.id, s.product_id, s.booked_product_id, (SELECT b.internal_name FROM product_stay_configs b WHERE b.organization_id = s.organization_id AND b.product_id = s.booked_product_id) AS booked_home_name, s.location_id, s.timezone, s.channel, s.owner, s.status, s.overbooked, s.starts_at, s.ends_at,
   s.adults, s.children, s.infants, s.party_size, json_extract(r.payload_json, '$.guest.name') AS guest_name, json_extract(r.payload_json, '$.guest.email') AS guest_email, json_extract(r.payload_json, '$.guest.phone') AS guest_phone,
-  s.user_id, s.total_minor, s.currency, s.private_notes, s.provider, s.external_booking_id, s.channel_booking_id, r.id AS request_id, s.cancelled_at, s.cancellation_reason,
+  s.user_id, s.total_minor, s.currency, s.private_notes, s.provider, s.external_booking_id, s.channel_booking_id, r.id AS conversation_id, s.cancelled_at, s.cancellation_reason,
   json_extract(s.policy_json, '$.cancellation') AS cancellation_policy, s.no_show_at, s.answers, s.version, s.created_at, s.updated_at`
 
 function mapStay(row: Record<string, unknown>): Stay {
@@ -2130,8 +2130,8 @@ export interface GuestStay {
 
 /** The account's stay by its activity ID: its conversation's ID, or the stay's own when it has none. */
 export async function readGuestStay(db: DbClient, buyerUserId: string, activityId: string): Promise<GuestStay> {
-  const owned = await queryFirst<{ id: string; request_id: string; organization_id: string; product_id: string; status: string; name: string; organization_name: string; check_in_time: string | null; check_out_time: string | null; address: string | null; latitude: number | null; longitude: number | null; maps_url: string | null; paid_online: number }>(db, `
-    SELECT s.id, r.id AS request_id, s.organization_id, s.product_id, s.status, p.name, o.name AS organization_name, b.check_in_time, b.check_out_time, l.address, l.latitude, l.longitude, l.maps_url,
+  const owned = await queryFirst<{ id: string; conversation_id: string; organization_id: string; product_id: string; status: string; name: string; organization_name: string; check_in_time: string | null; check_out_time: string | null; address: string | null; latitude: number | null; longitude: number | null; maps_url: string | null; paid_online: number }>(db, `
+    SELECT s.id, r.id AS conversation_id, s.organization_id, s.product_id, s.status, p.name, o.name AS organization_name, b.check_in_time, b.check_out_time, l.address, l.latitude, l.longitude, l.maps_url,
            EXISTS (SELECT 1 FROM payments WHERE organization_id = s.organization_id AND subject_type = 'booking' AND subject_id = s.id AND captured_amount > 0) AS paid_online
       FROM conversations r JOIN bookings s ON s.id = r.booking_id AND s.organization_id = r.organization_id
       JOIN products p ON p.organization_id = s.organization_id AND p.id = s.product_id
@@ -2141,7 +2141,7 @@ export async function readGuestStay(db: DbClient, buyerUserId: string, activityI
       JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
      WHERE r.id = ? AND r.kind = 'booking' AND s.user_id = ? AND s.owner = 'app' AND s.product_session_id IS NULL`, [activityId, buyerUserId])
   if (!owned) fail(404, 'STAY_NOT_FOUND', 'That stay is not in your account', 'stay_id')
-  await ownedBuyerRequest(db, buyerUserId, owned.request_id)
+  await ownedBuyerRequest(db, buyerUserId, owned.conversation_id)
   const [stay, pictures] = await Promise.all([
     getStay(db, { organizationId: owned.organization_id, actorId: buyerUserId, manage: true }, owned.id),
     loadOwnerPictures(db, owned.organization_id, 'product', [owned.product_id], { organizationFallback: false }),
@@ -2563,29 +2563,29 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
   if (booking.check_out_date <= booking.check_in_date) throw new Error(`Channel booking ${booking.external_booking_id} ends before it starts`)
   if (booking.adults < 1) throw new Error(`Channel booking ${booking.external_booking_id} has no adult guest`)
   if (!/^[A-Z]{3}$/.test(booking.currency)) throw new Error(`Channel booking ${booking.external_booking_id} has an invalid currency`)
-  type ChannelStayRow = { id: string; product_id: string; booked_product_id: string | null; provider_updated_at: string | null; revision_id: string | null; external_booking_id: string | null; user_id: string | null; request_id: string | null }
+  type ChannelStayRow = { id: string; product_id: string; booked_product_id: string | null; provider_updated_at: string | null; revision_id: string | null; external_booking_id: string | null; user_id: string | null; conversation_id: string | null }
   const currentChannelStay = () => queryFirst<ChannelStayRow>(db,
-    `SELECT id, product_id, booked_product_id, provider_updated_at, revision_id, external_booking_id, user_id, (SELECT c.id FROM conversations c WHERE c.booking_id = bookings.id AND c.kind = 'booking') AS request_id FROM bookings WHERE provider = ? AND external_booking_id = ?`, [booking.provider, booking.external_booking_id])
+    `SELECT id, product_id, booked_product_id, provider_updated_at, revision_id, external_booking_id, user_id, (SELECT c.id FROM conversations c WHERE c.booking_id = bookings.id AND c.kind = 'booking') AS conversation_id FROM bookings WHERE provider = ? AND external_booking_id = ?`, [booking.provider, booking.external_booking_id])
   // The same reservation under a new provider booking id (a re-import after a
   // new Channex account) is the stay it already is: the revision's write moves
   // it onto the new id, when that revision is newer than the stay.
   const existing = await currentChannelStay() ?? (booking.channel_booking_id === null ? null : await queryFirst<ChannelStayRow>(db,
-    `SELECT id, product_id, booked_product_id, provider_updated_at, revision_id, external_booking_id, user_id, (SELECT c.id FROM conversations c WHERE c.booking_id = bookings.id AND c.kind = 'booking') AS request_id FROM bookings WHERE organization_id = ? AND channel = ? AND channel_booking_id = ?
+    `SELECT id, product_id, booked_product_id, provider_updated_at, revision_id, external_booking_id, user_id, (SELECT c.id FROM conversations c WHERE c.booking_id = bookings.id AND c.kind = 'booking') AS conversation_id FROM bookings WHERE organization_id = ? AND channel = ? AND channel_booking_id = ?
       AND ((provider = ? AND external_booking_id <> ?) OR owner = 'app')`,
     [organizationId, booking.channel, booking.channel_booking_id, booking.provider, booking.external_booking_id]))
   // A revision names the listing it was booked on. A guest the host moved stays where they sleep; a revision for another listing is a real re-map.
   const landing = existing?.booked_product_id === productId ? existing.product_id : productId
   if (existing?.external_booking_id === null && existing.product_id !== landing) fail(409, 'CHANNEL_MIGRATION_HOME_CONFLICT', 'This reservation was imported into a different occupied home. Resolve its property assignment before accepting the channel revision.', 'product_id')
   const reimported = existing && existing.external_booking_id !== booking.external_booking_id ? existing.external_booking_id : null
-  const conversation = await queryFirst<{ organization_id: string; product_id: string; request_id: string }>(db,
-    'SELECT organization_id, product_id, conversation_id AS request_id FROM channel_threads WHERE provider = ? AND external_booking_id = ?', [booking.provider, booking.external_booking_id])
+  const conversation = await queryFirst<{ organization_id: string; product_id: string; conversation_id: string }>(db,
+    'SELECT organization_id, product_id, conversation_id AS conversation_id FROM channel_threads WHERE provider = ? AND external_booking_id = ?', [booking.provider, booking.external_booking_id])
   if (conversation && (conversation.organization_id !== organizationId || conversation.product_id !== productId)) {
     throw new HTTPError({ statusCode: 409, message: 'The provider booking and conversation belong to different homes', data: { code: 'CHANNEL_THREAD_ASSOCIATION_CONFLICT', field: 'external_booking_id' } })
   }
   // The channel's conversation about this reservation is its booking's one conversation: a booking that opened its own joins it.
   const joinChannelConversation = async (bookingId: string, from: string, into: string) => executeBatch(db,
     await joinBookingConversationQueries(db, { organizationId, bookingId, from, into, now: new Date().toISOString() }), { operation: 'Join channel booking conversation' })
-  if (conversation && existing && existing.request_id !== null && existing.request_id !== conversation.request_id) await joinChannelConversation(existing.id, existing.request_id, conversation.request_id)
+  if (conversation && existing && existing.conversation_id !== null && existing.conversation_id !== conversation.conversation_id) await joinChannelConversation(existing.id, existing.conversation_id, conversation.conversation_id)
   const revisionKey = `channel-revision:${JSON.stringify([organizationId, booking.provider, booking.external_booking_id, booking.revision_id])}`
   const recordedChange = async (): Promise<{ previous: ChannelStayTerms | null; terms: ChannelStayTerms } | null> => {
     const audit = await queryFirst<{ previous: string | null; terms: string | null; type: string | null }>(db, `SELECT json_extract(payload_json, '$.metadata.previous_terms') AS previous,
@@ -2745,9 +2745,9 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
   if (changed === 0 && (current.provider_updated_at === null || current.provider_updated_at < booking.provider_updated_at)) {
     throw new HTTPError({ statusCode: 409, message: 'The channel booking home changed concurrently. Retry this revision from the feed.', data: { code: 'CHANNEL_REVISION_CONFLICT', field: 'revision_id', revision_id: booking.revision_id, stay_id: stored.id, version: stored.version } })
   }
-  const linked = await queryFirst<{ request_id: string | null; mapped_request_id: string | null }>(db, `SELECT (SELECT c.id FROM conversations c WHERE c.booking_id = s.id AND c.kind = 'booking') AS request_id, t.conversation_id AS mapped_request_id FROM bookings s
+  const linked = await queryFirst<{ conversation_id: string | null; mapped_conversation_id: string | null }>(db, `SELECT (SELECT c.id FROM conversations c WHERE c.booking_id = s.id AND c.kind = 'booking') AS conversation_id, t.conversation_id AS mapped_conversation_id FROM bookings s
     LEFT JOIN channel_threads t ON t.provider = s.provider AND t.external_booking_id = s.external_booking_id WHERE s.id = ?`, [stored.id])
-  if (linked?.mapped_request_id && linked.request_id !== null && linked.request_id !== linked.mapped_request_id) await joinChannelConversation(stored.id, linked.request_id, linked.mapped_request_id)
+  if (linked?.mapped_conversation_id && linked.conversation_id !== null && linked.conversation_id !== linked.mapped_conversation_id) await joinChannelConversation(stored.id, linked.conversation_id, linked.mapped_conversation_id)
   await planSourceMessages(db, organizationId, stored.id)
   await publish(stored, current.revision_id)
   return { ...await storedStay(db, organizationId, stored.id), applied: changed === 1, change: changed === 1 ? await recordedChange() : null }
@@ -2758,10 +2758,10 @@ async function publishStayChange(env: GuestInboxPublicationEnv, db: DbClient, or
   await publishStayInvalidation(env, { ...input, type: 'stay.changed' }, { version: stay.version })
   if (nightsChanged) await publishStayInvalidation(env, { ...input, type: 'nights.changed' }, { version: stay.version })
   try {
-    await publishConversationEvent(env, db, { conversationId: stay.request_id, type: 'MESSAGE_UPDATE' })
+    await publishConversationEvent(env, db, { conversationId: stay.conversation_id, type: 'MESSAGE_UPDATE' })
   } catch (cause) {
     throw new HTTPError({ statusCode: 503, message: 'The stay was saved, but its conversation update could not be published. Reload before retrying.',
-      data: { code: 'DASHBOARD_PUBLICATION_FAILED', field: 'realtime', committed: true, stay_id: stay.id, product_id: stay.product_id, version: stay.version, request_id: stay.request_id }, cause })
+      data: { code: 'DASHBOARD_PUBLICATION_FAILED', field: 'realtime', committed: true, stay_id: stay.id, product_id: stay.product_id, version: stay.version, conversation_id: stay.conversation_id }, cause })
   }
 }
 

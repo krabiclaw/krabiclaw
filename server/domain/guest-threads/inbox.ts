@@ -291,8 +291,8 @@ async function pendingMessages(db: DbClient, threadId: string, organizationId: s
      WHERE m.organization_id = ? AND ${SCHEDULED_MESSAGE_CONVERSATION_SQL} = ? AND ${visible.query} AND m.due_at IS NOT NULL
        AND (m.status = 'pending' OR (m.status = 'sending' AND m.author_user_id IS NOT NULL)) ORDER BY m.due_at, m.id`, [organizationId, threadId, ...visible.params])
   return rows.map(row => row.author_user_id === null
-    ? { id: row.id, source: 'automatic' as const, label: row.template_title!, sendAt: row.due_at, time: sendTime(row.due_at, row.timezone!), body: row.body, cancellable: true }
-    : { id: row.id, source: 'later' as const, label: row.body, sendAt: row.due_at, time: sendTime(row.due_at, timeZone), body: row.body, cancellable: row.status === 'pending' })
+    ? { id: row.id, source: 'automatic' as const, label: row.template_title!, due_at: row.due_at, time: sendTime(row.due_at, row.timezone!), body: row.body, cancellable: true }
+    : { id: row.id, source: 'later' as const, label: row.body, due_at: row.due_at, time: sendTime(row.due_at, timeZone), body: row.body, cancellable: row.status === 'pending' })
 }
 
 async function rawThread(db: DbClient, threadId: string, organizationId: string, viewer: Viewer): Promise<GuestThreadDetailViewModel | null> {

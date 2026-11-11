@@ -185,7 +185,7 @@ const isReview = (value: unknown): value is Review => isRecord(value) && typeof 
 const isConfirmation = (value: unknown): value is Confirmation => isRecord(value) && typeof value.status === 'string' && typeof value.requires_action === 'boolean'
 const isReturn = (value: unknown): value is PaymentReturn => isRecord(value) && (value.state === 'processing' || value.state === 'refunded' || value.state === 'expired' || (value.state === 'paid' && (
   (value.kind === 'stay' && typeof value.activity_id === 'string' && typeof value.receipt_token === 'string')
-  || (value.kind === 'booking' && typeof value.request_id === 'string' && typeof value.cancellation_token === 'string'))))
+  || (value.kind === 'booking' && typeof value.conversation_id === 'string' && typeof value.cancellation_token === 'string'))))
 
 const { data: handoff, status, error } = await useAsyncData(`payment-handoff:${paymentId}`, () => publicApiRequest<Handoff>(`/api/public/payments/${encodeURIComponent(paymentId)}`, { query: { claim: claim.value }, validate: isHandoff }), { server: false, immediate: Boolean(claim.value) })
 // The fragment never reaches the server, so a missing claim is known only once mounted.
@@ -408,7 +408,7 @@ async function complete() {
     const done = await publicApiMutation<PaymentReturn>(`/api/public/payments/${encodeURIComponent(paymentId)}/return`, { method: 'POST', body: { claim: claim.value }, validate: isReturn })
     if (done.state !== 'paid') outcome.value = done.state
     else if (done.kind === 'stay') await navigateTo({ path: localePath('/bookings/stay'), query: { id: done.activity_id }, hash: `#${done.receipt_token}` }, { replace: true })
-    else await navigateTo({ path: localePath('/bookings/confirmed'), query: { id: done.request_id }, hash: `#${done.cancellation_token}` }, { replace: true })
+    else await navigateTo({ path: localePath('/bookings/confirmed'), query: { id: done.conversation_id }, hash: `#${done.cancellation_token}` }, { replace: true })
   } catch (cause) {
     actionError.value = getErrorMessage(cause, t('payment.unavailable'))
   } finally {

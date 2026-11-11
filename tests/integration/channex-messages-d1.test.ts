@@ -286,7 +286,7 @@ test('empty Channex host actions stay recorded without clearing reply work; a re
     const empty = provider.message('host-action', 'property', null, [], new Date(receivedAt + 1).toISOString())
     provider.messages = [provider.message('first', 'guest', 'Hello', [], guestAt), empty]
     assert.deepEqual(await backfillChannexMessages(db, env, 'property', ORG), { threads: 1 })
-    const requestId = await db.prepare("SELECT conversation_id AS request_id FROM channel_threads WHERE external_thread_id = 'thread'").first<string>('request_id')
+    const requestId = await db.prepare("SELECT conversation_id AS conversation_id FROM channel_threads WHERE external_thread_id = 'thread'").first<string>('conversation_id')
     assert.ok(requestId)
     const recorded = await db.prepare("SELECT author_kind, body FROM messages WHERE dedupe_key = 'channex-message:host-action'").first<{ author_kind: string; body: string | null }>()
     assert.deepEqual(recorded, { author_kind: 'member', body: null })
@@ -353,7 +353,7 @@ test('a dismissed question needs no note and stays closed until the guest writes
     const first = provider.message('first', 'guest', 'Hello', [], at(0))
     provider.messages = [first]
     await backfillChannexMessages(db, env, 'property', ORG)
-    const requestId = await db.prepare("SELECT conversation_id AS request_id FROM channel_threads WHERE external_thread_id = 'thread'").first<string>('request_id')
+    const requestId = await db.prepare("SELECT conversation_id AS conversation_id FROM channel_threads WHERE external_thread_id = 'thread'").first<string>('conversation_id')
     assert.ok(requestId)
     const second = provider.message('second', 'guest', 'Are you there?', [], at(0))
     provider.messages = [first, second]
@@ -420,7 +420,7 @@ test('a zoneless Channex time is UTC: an imported question is as old as Airbnb s
     const askedAt = new Date(Date.now() - 60 * 86_400_000).toISOString().replace('Z', '000')
     provider.messages = [provider.message('old', 'guest', 'Is the hot tub working?', [], askedAt)]
     await backfillChannexMessages(db, env, 'property', ORG)
-    const requestId = await db.prepare("SELECT conversation_id AS request_id FROM channel_threads WHERE external_thread_id = 'thread'").first<string>('request_id')
+    const requestId = await db.prepare("SELECT conversation_id AS conversation_id FROM channel_threads WHERE external_thread_id = 'thread'").first<string>('conversation_id')
     assert.ok(requestId)
     assert.deepEqual(await waitingOn(db, requestId), [])
     assert.equal(await db.prepare("SELECT count(*) n FROM tasks WHERE kind = 'guest_reply' AND subject_id = ?").bind(requestId).first<number>('n'), 0,
@@ -438,7 +438,7 @@ test('a message mirrored before photos were stored gets its photo on the next ba
     const attachmentMessage = provider.messages[1]!
     provider.messages = [provider.messages[0]!]
     assert.deepEqual(await backfillChannexMessages(db, env, 'property', ORG), { threads: 1 })
-    const requestId = await db.prepare("SELECT conversation_id AS request_id FROM channel_threads WHERE external_thread_id = 'thread'").first<string>('request_id')
+    const requestId = await db.prepare("SELECT conversation_id AS conversation_id FROM channel_threads WHERE external_thread_id = 'thread'").first<string>('conversation_id')
     assert.ok(requestId)
     const recorded = await appendMessage(db, {
       conversationId: requestId, authorKind: 'krabiclaw', authorUserId: null, channel: 'airbnb', body: null, eventName: 'channel.message_mirrored', dedupeKey: 'channex-message:second',
@@ -501,17 +501,17 @@ test('booking assignment before or after booking arrival adopts one request and 
       if (imported) assert.equal(await db.prepare('SELECT count(*) FROM conversations').first('count(*)'), 1)
       provider.bookingId = 'booking'
       let stay = first === 'booking' ? await applyChannelBooking(db, env, ORG, productId, booking()) : null
-      const opened = stay?.request_id ?? imported?.request_id ?? null
+      const opened = stay?.conversation_id ?? imported?.conversation_id ?? null
       await mirrorChannexMessageEvent(db, env, { event: 'message_thread_booking_assigned', property_id: 'property', payload: { booking_id: 'booking', message_thread_id: 'thread' } })
-      const requestId = (await db.prepare('SELECT conversation_id AS request_id FROM channel_threads').first<string>('request_id'))!
+      const requestId = (await db.prepare('SELECT conversation_id AS conversation_id FROM channel_threads').first<string>('conversation_id'))!
       if (first === 'booking') assert.equal(requestId, opened, 'the channel thread is addressed to the booking\'s own conversation')
       const historical = await appendMessage(db, { conversationId: requestId, authorKind: 'member', authorUserId: OWNER, body: 'Recorded history', channel: 'email', dedupeKey: 'history' })
       const receipt = await createDeliveryReceipt(db, { subject: { messageId: historical.id }, channel: 'email', provider: 'resend', purpose: 'member_reply', idempotencyKey: 'historical-delivery' })
       stay = await applyChannelBooking(db, env, ORG, productId, { ...booking(), revision_id: 'revision-2', provider_updated_at: '2026-10-16T01:00:00Z' })
-      assert.equal(stay.request_id, requestId)
+      assert.equal(stay.conversation_id, requestId)
       if (imported) {
         assert.equal(stay.id, imported.id, 'the channel revision adopts the imported stay')
-        assert.deepEqual(await db.prepare("SELECT b.owner, c.id AS request_id FROM bookings b JOIN conversations c ON c.booking_id = b.id AND c.kind = 'booking' WHERE b.id = ?").bind(imported.id).first(), { owner: 'channel', request_id: requestId })
+        assert.deepEqual(await db.prepare("SELECT b.owner, c.id AS conversation_id FROM bookings b JOIN conversations c ON c.booking_id = b.id AND c.kind = 'booking' WHERE b.id = ?").bind(imported.id).first(), { owner: 'channel', conversation_id: requestId })
       }
       assert.equal(await db.prepare('SELECT count(*) FROM bookings').first('count(*)'), 1)
       assert.equal(await db.prepare('SELECT count(*) FROM conversations').first('count(*)'), 1)
@@ -535,16 +535,16 @@ test('a guest who wrote before booking keeps one conversation: the reservation\'
   try {
     // The inquiry: Airbnb's conversation before any booking.
     await mirrorChannexThread(db, env, 'thread', 'property')
-    const inquiry = (await db.prepare('SELECT conversation_id AS request_id FROM channel_threads').first<string>('request_id'))!
+    const inquiry = (await db.prepare('SELECT conversation_id AS conversation_id FROM channel_threads').first<string>('conversation_id'))!
     // The reservation lands with its own conversation, opened by the channel.
     const stay = await applyChannelBooking(db, env, ORG, productId, booking())
-    assert.notEqual(stay.request_id, inquiry)
+    assert.notEqual(stay.conversation_id, inquiry)
     const ledger = async (id: string) => (await db.prepare('SELECT event_name, author_kind FROM messages WHERE conversation_id = ? ORDER BY sequence').bind(id).all<{ event_name: string | null; author_kind: string }>()).results
-    const before = [...await ledger(inquiry), ...await ledger(stay.request_id)]
+    const before = [...await ledger(inquiry), ...await ledger(stay.conversation_id)]
     // Airbnb assigns the conversation to the booking.
     provider.bookingId = 'booking'
     await mirrorChannexMessageEvent(db, env, { event: 'message_thread_booking_assigned', property_id: 'property', payload: { booking_id: 'booking', message_thread_id: 'thread' } })
-    assert.deepEqual(await db.prepare("SELECT c.id AS request_id FROM bookings b JOIN conversations c ON c.booking_id = b.id AND c.kind = 'booking' WHERE b.id = ?").bind(stay.id).first(), { request_id: inquiry })
+    assert.deepEqual(await db.prepare("SELECT c.id AS conversation_id FROM bookings b JOIN conversations c ON c.booking_id = b.id AND c.kind = 'booking' WHERE b.id = ?").bind(stay.id).first(), { conversation_id: inquiry })
     assert.deepEqual(await db.prepare('SELECT id FROM conversations').all().then(rows => rows.results), [{ id: inquiry }])
     // Every entry of both timelines is in the one conversation, the reservation's after the inquiry's.
     assert.deepEqual(await ledger(inquiry), before)
@@ -562,7 +562,7 @@ test('a reservation moved to a new Channex account keeps its conversation in eit
       provider.bookingId = 'booking'
       const stay = await applyChannelBooking(db, env, ORG, productId, booking())
       await mirrorChannexThread(db, env, 'thread', 'property')
-      const requestId = (await db.prepare('SELECT conversation_id AS request_id FROM channel_threads').first<string>('request_id'))!
+      const requestId = (await db.prepare('SELECT conversation_id AS conversation_id FROM channel_threads').first<string>('conversation_id'))!
       const entries = async () => (await db.prepare("SELECT body, author_kind FROM messages WHERE conversation_id = ? AND event_name = 'channel.message_mirrored' ORDER BY sequence").bind(requestId).all()).results
       assert.deepEqual(await entries(), [{ body: 'Hello', author_kind: 'guest' }, { body: null, author_kind: 'krabiclaw' }])
 
@@ -582,9 +582,9 @@ test('a reservation moved to a new Channex account keeps its conversation in eit
       }
 
 
-      assert.deepEqual((await db.prepare('SELECT external_thread_id, external_booking_id, moved_from_thread_id, conversation_id AS request_id FROM channel_threads').all()).results,
-        [{ external_thread_id: 'thread-production', external_booking_id: 'booking-production', moved_from_thread_id: 'thread', request_id: requestId }], first)
-      assert.deepEqual((await db.prepare("SELECT b.id, b.external_booking_id, c.id AS request_id FROM bookings b JOIN conversations c ON c.booking_id = b.id AND c.kind = 'booking'").all()).results, [{ id: stay.id, external_booking_id: 'booking-production', request_id: requestId }], first)
+      assert.deepEqual((await db.prepare('SELECT external_thread_id, external_booking_id, moved_from_thread_id, conversation_id AS conversation_id FROM channel_threads').all()).results,
+        [{ external_thread_id: 'thread-production', external_booking_id: 'booking-production', moved_from_thread_id: 'thread', conversation_id: requestId }], first)
+      assert.deepEqual((await db.prepare("SELECT b.id, b.external_booking_id, c.id AS conversation_id FROM bookings b JOIN conversations c ON c.booking_id = b.id AND c.kind = 'booking'").all()).results, [{ id: stay.id, external_booking_id: 'booking-production', conversation_id: requestId }], first)
       assert.equal(await db.prepare('SELECT count(*) FROM conversations').first('count(*)'), 1, first)
       assert.deepEqual(await entries(), [{ body: 'Hello', author_kind: 'guest' }, { body: null, author_kind: 'krabiclaw' }, { body: 'Arriving late', author_kind: 'guest' }], first)
       // A message whose text differs at the same Airbnb time is its own message.
@@ -601,14 +601,14 @@ test('an existing stay timeline is adopted intact; two existing timelines fail e
   globalThis.fetch = provider.fetch as typeof fetch
   try {
     const stay = await applyChannelBooking(db, env, ORG, productId, booking())
-    const history = stay.request_id
+    const history = stay.conversation_id
     await appendMessage(db, { conversationId: history, authorKind: 'guest', authorUserId: null, channel: 'email', body: 'Historical message', dedupeKey: 'old' })
     const input = { threadId: history, organizationId: ORG, action: 'reply', body: 'Hello', idempotencyKey: 'unaddressable', actorUserId: OWNER, env }
     // A channel stay with no addressable conversation is nowhere to reply, refused before anything is recorded or sent.
-    assert.deepEqual(await executeGuestThreadOperation(db, input), { ok: false, status: 409, reason: 'guest_unreachable', code: 'GUEST_UNREACHABLE', field: 'request_id', message: 'This Airbnb stay has no conversation to reply in yet.' })
+    assert.deepEqual(await executeGuestThreadOperation(db, input), { ok: false, status: 409, reason: 'guest_unreachable', code: 'GUEST_UNREACHABLE', field: 'conversation_id', message: 'This Airbnb stay has no conversation to reply in yet.' })
     provider.bookingId = 'booking'
     await mirrorChannexThread(db, env, 'thread', 'property')
-    assert.equal(await db.prepare('SELECT conversation_id AS request_id FROM channel_threads').first('request_id'), history)
+    assert.equal(await db.prepare('SELECT conversation_id AS conversation_id FROM channel_threads').first('conversation_id'), history)
     assert.equal((await getGuestThreadDetail(db, history, ORG))!.guestName, 'Actual Guest')
     // The stay is now another conversation's: the Airbnb thread's conversation no longer names it.
     await db.prepare("UPDATE conversations SET booking_id = NULL WHERE id = ?").bind(history).run()
@@ -934,7 +934,7 @@ test('an in-flight or interrupted reply never blocks actual provider messages an
     assert.equal((await executeGuestThreadOperation(db, input)).ok, true, 'an actual recorded receipt replays without a new provider request')
     // A new reply to a disconnected home is nowhere to send, refused before anything is recorded or sent.
     assert.deepEqual(await executeGuestThreadOperation(db, { ...input, idempotencyKey: 'disconnected-new', body: 'Not attempted' }),
-      { ok: false, status: 409, reason: 'guest_unreachable', code: 'GUEST_UNREACHABLE', field: 'request_id', message: 'This home is disconnected from Airbnb, so its guest cannot be replied to here.' })
+      { ok: false, status: 409, reason: 'guest_unreachable', code: 'GUEST_UNREACHABLE', field: 'conversation_id', message: 'This home is disconnected from Airbnb, so its guest cannot be replied to here.' })
     // The inbox reads the same rule: a disconnected home's Airbnb conversation shows no composer, and says why.
     const owner = memberAccessPrincipal({ userId: OWNER, organizationId: ORG, role: 'owner' }, { env })
     assert.deepEqual((await getInboxThread(db, mirrored.conversation_id, ORG, { audience: 'member', userId: OWNER, principal: owner }))!.composer,
@@ -1040,7 +1040,7 @@ test('a failed WhatsApp reply tells the manager a fixed notice and fails the mes
     await db.prepare("UPDATE user SET phoneNumber = '+66812345678', phoneNumberVerified = 1 WHERE id = ?").bind(OWNER).run()
     await db.prepare("INSERT INTO subscription (id, plan, referenceId, status, periodEnd) VALUES ('sub', 'growth', ?, 'active', ?)").bind(ORG, Math.floor(Date.now() / 1000) + 86400).run()
     assert.deepEqual(await backfillChannexMessages(db, env, 'property', ORG), { threads: 1 })
-    const threadId = (await db.prepare('SELECT conversation_id AS request_id FROM channel_threads').first<{ request_id: string }>())!.request_id
+    const threadId = (await db.prepare('SELECT conversation_id AS conversation_id FROM channel_threads').first<{ conversation_id: string }>())!.conversation_id
     const entry = await appendMessage(db, { conversationId: threadId, authorKind: 'guest', authorUserId: null, channel: 'airbnb', body: 'Is there parking?', dedupeKey: 'whatsapp-alerted' })
     const alert = await createDeliveryReceipt(db, { subject: { messageId: entry.id }, channel: 'whatsapp', provider: 'meta', purpose: 'owner_alert', idempotencyKey: 'alert' })
     await recordDeliveryOutcome(db, { deliveryId: alert.id, status: 'sent', providerMessageId: 'meta-alert' })
@@ -1095,7 +1095,7 @@ test('an Airbnb photo is in the owner alert, and replying to the alert answers t
     assert.deepEqual(await backfillChannexMessages(db, env, 'property', ORG), { threads: 1 })
     provider.messages.push(provider.message('guest-photo', 'guest', 'The lock is jammed', ['/attachment/file']))
     await mirrorChannexMessageEvent(db, env, { event: 'message', property_id: 'property', payload: { id: 'guest-photo', message_thread_id: 'thread', property_id: 'property' } })
-    const threadId = (await db.prepare('SELECT conversation_id AS request_id FROM channel_threads').first<{ request_id: string }>())!.request_id
+    const threadId = (await db.prepare('SELECT conversation_id AS conversation_id FROM channel_threads').first<{ conversation_id: string }>())!.conversation_id
     const photo = await db.prepare(`SELECT ma.public_url FROM media_placements mp JOIN media_assets ma ON ma.id = mp.asset_id JOIN messages e ON e.id = mp.owner_id
       WHERE e.dedupe_key = 'channex-message:guest-photo' AND mp.slot = 'attachments'`).first<string>('public_url')
     assert.match(photo!, /^https:\/\/media\.example\.test\//u)

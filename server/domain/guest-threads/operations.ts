@@ -48,10 +48,10 @@ export type OperationOutcome =
   | { ok: false; status: 404; reason: 'thread_not_found' | 'source_not_found' }
   | { ok: false; status: 409; reason: 'invalid_transition'; message: string }
   | { ok: false; status: 400; reason: 'empty_body' }
-  | { ok: false; status: 409; reason: 'guest_unreachable'; code: 'GUEST_UNREACHABLE'; field: 'request_id'; message: string }
+  | { ok: false; status: 409; reason: 'guest_unreachable'; code: 'GUEST_UNREACHABLE'; field: 'conversation_id'; message: string }
   | { ok: false; status: 400; reason: 'missing_idempotency_key' }
   | { ok: false; status: 400; reason: 'invalid_photo'; message: string }
-  | { ok: false; status: 409 | 502; reason: 'delivery_failed'; code: string; field: string; message: string; mutation_applied?: true; operation_completed?: false; request_id?: string; record?: ThreadOperationalRecord; retry_with_same_idempotency_key?: boolean; provider_error?: ChannexError['data'] }
+  | { ok: false; status: 409 | 502; reason: 'delivery_failed'; code: string; field: string; message: string; mutation_applied?: true; operation_completed?: false; conversation_id?: string; record?: ThreadOperationalRecord; retry_with_same_idempotency_key?: boolean; provider_error?: ChannexError['data'] }
 
 type NotFoundOutcome = Extract<OperationOutcome, { status: 404 }>
 
@@ -174,7 +174,7 @@ function operationEntryQueries(
     body: email?.body ?? null, eventName: `${plan.kind}.${plan.action}`, dedupeKey, occurredAt: now,
     payload: {
       action: plan.action, beforeStatus: plan.beforeStatus, afterStatus: plan.afterStatus,
-      operational_booking_id: record.id,
+      booking_id: record.id,
       subject: email?.subject ?? null,
       email: email ? { to: email.to, fromName: email.fromName, locale: email.locale, ...email.email } : null,
       booking: {
@@ -334,7 +334,7 @@ async function sendStatusUpdate(
       if (typeof payload.action !== 'string' || !['confirm', 'reject', 'cancel'].includes(payload.action)) return conflict('Status update has no recorded action')
       const booking = payload.booking
       if (typeof booking !== 'object' || booking === null) return conflict('Status update has no recorded booking facts')
-      if (payload.afterStatus !== context.record.status || payload.operational_booking_id !== context.record.id
+      if (payload.afterStatus !== context.record.status || payload.booking_id !== context.record.id
         || Reflect.get(booking, 'starts_at') !== context.record.starts_at || Reflect.get(booking, 'ends_at') !== context.record.ends_at
         || Reflect.get(booking, 'timezone') !== context.record.timezone || Reflect.get(booking, 'party_size') !== context.record.party_size
         || Reflect.get(booking, 'party_size_is_minimum') !== context.record.party_size_is_minimum
@@ -359,13 +359,13 @@ async function sendStatusUpdate(
     }
     return await successfulOutcome(db, context)
   }
-  if (deliveryError !== undefined) console.error({ event: 'guest_status_email_failed', organization_id: context.thread.organization_id, request_id: context.thread.id, error: deliveryError })
+  if (deliveryError !== undefined) console.error({ event: 'guest_status_email_failed', organization_id: context.thread.organization_id, conversation_id: context.thread.id, error: deliveryError })
   const currentRecord = await getThreadOperationalRecord(db, context.thread.id)
   if (!currentRecord) return { ok: false, status: 404, reason: 'source_not_found' }
   return {
     ok: false, status: 502, reason: 'delivery_failed', code: 'DELIVERY_FAILED', field: 'delivery',
     message: `Booking is ${currentRecord.status}, but the guest email failed. Retry with the same idempotency key.`,
-    mutation_applied: true, operation_completed: false, request_id: context.thread.id, record: currentRecord, retry_with_same_idempotency_key: true,
+    mutation_applied: true, operation_completed: false, conversation_id: context.thread.id, record: currentRecord, retry_with_same_idempotency_key: true,
   }
 }
 
@@ -482,7 +482,7 @@ async function executeReply(
   if (recorded?.channel === 'airbnb') assertReplyIntent(recorded, body, requestHash, eventName)
   else if (recorded && !matchesReply(recorded)) return conflict()
   const delivered = recorded ? await getDeliveryById(db, recorded.channel === 'airbnb' ? `guest-thread-channex:${context.thread.id}:${input.idempotencyKey}` : deliveryDedupeKey(input)) : null
-  if (destination.channel === null && !(delivered && isDeliverySent(delivered))) return { ok: false, status: 409, reason: 'guest_unreachable', code: 'GUEST_UNREACHABLE', field: 'request_id', message: destination.reason }
+  if (destination.channel === null && !(delivered && isDeliverySent(delivered))) return { ok: false, status: 409, reason: 'guest_unreachable', code: 'GUEST_UNREACHABLE', field: 'conversation_id', message: destination.reason }
   if (channel) {
     const sent = await replyThroughChannex(db, input.env, { mapping: channel, body, actorUserId, idempotencyKey: input.idempotencyKey!, requestHash,
       photoCount, resolvePhotos: async () => Array.isArray(photoInput) ? photoInput : await photoInput.resolve() }).catch((error: unknown) => {
@@ -506,7 +506,7 @@ async function executeReply(
     }
   }
 
-  if (destination.channel === null || destination.channel === 'airbnb') return { ok: false, status: 409, reason: 'guest_unreachable', code: 'GUEST_UNREACHABLE', field: 'request_id', message: destination.channel === null ? destination.reason : GUEST_UNREACHABLE_MESSAGE }
+  if (destination.channel === null || destination.channel === 'airbnb') return { ok: false, status: 409, reason: 'guest_unreachable', code: 'GUEST_UNREACHABLE', field: 'conversation_id', message: destination.channel === null ? destination.reason : GUEST_UNREACHABLE_MESSAGE }
   const guestEmail = destination.email
 
   if (!entry) {
@@ -741,7 +741,7 @@ async function executeNoShow(db: DbClient, context: ThreadContext, input: Execut
   const entryId = crypto.randomUUID()
   await executeBatch(db, [
     ...messageQueries({ id: entryId, conversationId: context.thread.id, authorKind: 'krabiclaw', authorUserId: input.actorUserId, body: 'Marked as a no-show',
-      eventName, payload: { action: 'no_show', operational_booking_id: record.id }, dedupeKey, occurredAt: now,
+      eventName, payload: { action: 'no_show', booking_id: record.id }, dedupeKey, occurredAt: now,
       guard: { sql: `c.organization_id = ? AND NOT EXISTS (SELECT 1 FROM reviews rv WHERE rv.organization_id = c.organization_id AND rv.booking_id = c.booking_id)
         AND EXISTS (SELECT 1 FROM bookings src WHERE src.id = ? AND src.id = c.booking_id AND src.organization_id = c.organization_id AND src.status = 'confirmed' AND src.no_show_at IS NULL)`,
       params: [context.thread.organization_id, record.id] } }).queries,

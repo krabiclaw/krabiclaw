@@ -1,6 +1,6 @@
 <template>
   <DashboardIndexPanel id="team-conversation" :title="thread ? teamThreadName(thread, session.data?.user.id) : 'Team conversation'" fill>
-    <template v-if="thread?.isGroup && !thread.bookingId && !thread.locationId" #right>
+    <template v-if="thread?.is_group && !thread.booking_id && !thread.location_id" #right>
       <UButton :to="{ path: `${level.path.value}/details`, query: { kind: 'team' } }" icon="i-lucide-info" aria-label="Conversation details" color="neutral" variant="ghost" />
     </template>
     <TeamThreadDetail :key="threadId" :thread-id="threadId" :thread="thread" :thread-error="error" />

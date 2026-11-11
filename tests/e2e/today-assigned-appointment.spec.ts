@@ -69,11 +69,11 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
     const session = availability.sessions.find(slot => slot.starts_at === `${day}T14:00:00.000Z`)
     expect(session, 'The saved provider hours expose an actual bookable future consultation').toBeTruthy()
     if (!session) throw new Error('The provider appointment is not bookable')
-    const booked = await body<{ request_id: string; status: string }>(await request.post(`/api/public/products/${product.slug}/book`, { headers, data: {
-      session_id: session.id, variant_id: product.variants[0]!.id, party_size: 1, guest_name: guestName,
+    const booked = await body<{ conversation_id: string; status: string }>(await request.post(`/api/public/products/${product.slug}/book`, { headers, data: {
+      product_session_id: session.id, product_variant_id: product.variants[0]!.id, party_size: 1, guest_name: guestName,
       guest_email: `today-assigned-${Date.now()}@playwright.example`, idempotency_key: crypto.randomUUID(),
     } }), 201)
-    requestId = booked.request_id
+    requestId = booked.conversation_id
     expect(booked.status).toBe('pending')
     const bookingPath = `${DASHBOARD}/bookings/booking/${requestId}`
     const read = await body<{ booking: DashboardBookingDetails }>(

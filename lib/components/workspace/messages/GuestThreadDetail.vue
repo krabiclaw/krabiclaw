@@ -361,7 +361,7 @@ async function sendReply() {
     sending.value = true
     actionError.value = null
     try {
-      await dashboardApi(`${threadPath.value}/send-later`, { method: 'POST', body: { body, sendAt: sendAt.value, ...(usedSuggestion.value ? { suggestion: usedSuggestion.value } : {}) }, validate: isScheduledMessageResponse })
+      await dashboardApi(`${threadPath.value}/send-later`, { method: 'POST', body: { body, due_at: sendAt.value, ...(usedSuggestion.value ? { suggestion: usedSuggestion.value } : {}) }, validate: isScheduledMessageResponse })
       draft.value = ''
       usedSuggestion.value = null
       sendAt.value = null
@@ -468,8 +468,8 @@ async function readThroughNewest() {
   markingRead = true
   try {
     await (props.personalScope ? applicationFetch : dashboardApi)(readPath.value, {
-      method: 'POST', body: { messageId: newest },
-      validate: (value): value is { read: true; lastReadMessageId: string } => isRecord(value) && value.read === true && typeof value.lastReadMessageId === 'string',
+      method: 'POST', body: { message_id: newest },
+      validate: (value): value is { read: true; last_read_message_id: string } => isRecord(value) && value.read === true && typeof value.last_read_message_id === 'string',
     })
     readThrough = target
     readError.value = null

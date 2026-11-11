@@ -1292,11 +1292,11 @@ export const product_stay_accessibility = sqliteTable("product_stay_accessibilit
 ]);
 
 // Workspace-owned reply text, scheduled for explicitly named offerings
-// (productIds): a home, experience or consultation by its product, a table
+// (product_ids): a home, experience or consultation by its product, a table
 // reservation by its location. check_in and check_out
 // are the start and end of whatever was booked: a stay's nights, a session, a
-// table. offsetDays/localTime anchors to that day in its own clock;
-// offsetHours to the instant itself.
+// table. offset_days/local_time anchors to that day in its own clock;
+// offset_hours to the instant itself.
 // A schedule's activation time is a local receipt baseline, never a provider
 // creation timestamp. Edits increase version so stale planners cannot win.
 export const message_templates = sqliteTable("message_templates", {
@@ -1314,7 +1314,7 @@ export const message_templates = sqliteTable("message_templates", {
 	index("message_templates_org_updated_idx").on(table.organization_id, table.updated_at, table.id),
 	check("message_templates_text_check", sql`length(trim(title)) BETWEEN 1 AND 100 AND length(trim(body)) BETWEEN 1 AND 5000`),
 	check("message_templates_version_check", sql`version >= 1`),
-	check("message_templates_schedule_check", sql`(schedule_json IS NULL AND schedule_enabled_at IS NULL) OR (schedule_json IS NOT NULL AND schedule_enabled_at IS NOT NULL AND json_valid(schedule_json) AND json_type(schedule_json) IS 'object' AND json_type(schedule_json, '$.productIds') IS 'array' AND json_array_length(schedule_json, '$.productIds') BETWEEN 1 AND 100 AND ((json_extract(schedule_json, '$.trigger') = 'booking_received' AND json_extract(schedule_json, '$.delayMinutes') = 5) OR (json_extract(schedule_json, '$.trigger') IN ('check_in', 'check_out') AND ((json_type(schedule_json, '$.offsetHours') IS NULL AND json_type(schedule_json, '$.offsetDays') IS 'integer' AND json_extract(schedule_json, '$.offsetDays') BETWEEN -7 AND 7 AND json_extract(schedule_json, '$.localTime') GLOB '[0-2][0-9]:[0-5][0-9]' AND json_extract(schedule_json, '$.localTime') < '24:00') OR (json_type(schedule_json, '$.offsetDays') IS NULL AND json_type(schedule_json, '$.localTime') IS NULL AND json_type(schedule_json, '$.offsetHours') IS 'integer' AND json_extract(schedule_json, '$.offsetHours') BETWEEN -72 AND 72))))) IS TRUE`),
+	check("message_templates_schedule_check", sql`(schedule_json IS NULL AND schedule_enabled_at IS NULL) OR (schedule_json IS NOT NULL AND schedule_enabled_at IS NOT NULL AND json_valid(schedule_json) AND json_type(schedule_json) IS 'object' AND json_type(schedule_json, '$.product_ids') IS 'array' AND json_array_length(schedule_json, '$.product_ids') BETWEEN 1 AND 100 AND ((json_extract(schedule_json, '$.trigger') = 'booking_received' AND json_extract(schedule_json, '$.delay_minutes') = 5) OR (json_extract(schedule_json, '$.trigger') IN ('check_in', 'check_out') AND ((json_type(schedule_json, '$.offset_hours') IS NULL AND json_type(schedule_json, '$.offset_days') IS 'integer' AND json_extract(schedule_json, '$.offset_days') BETWEEN -7 AND 7 AND json_extract(schedule_json, '$.local_time') GLOB '[0-2][0-9]:[0-5][0-9]' AND json_extract(schedule_json, '$.local_time') < '24:00') OR (json_type(schedule_json, '$.offset_days') IS NULL AND json_type(schedule_json, '$.local_time') IS NULL AND json_type(schedule_json, '$.offset_hours') IS 'integer' AND json_extract(schedule_json, '$.offset_hours') BETWEEN -72 AND 72))))) IS TRUE`),
 	check("message_templates_instants_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at AND (schedule_enabled_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', schedule_enabled_at, '+0 days') IS schedule_enabled_at)`),
 ]);
 

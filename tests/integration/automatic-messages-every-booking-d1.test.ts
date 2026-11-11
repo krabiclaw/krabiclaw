@@ -90,22 +90,22 @@ test('consultations, classes and table bookings are sent their automatic message
 
     // Saved before anything is booked: what each business sends, in its own words.
     const received = await saveMessageTemplate(db, env, law, null, { title: 'Request received', body: 'We have your consultation request.',
-      schedule: { trigger: 'booking_received', delayMinutes: 5, productIds: [consultation] } })
+      schedule: { trigger: 'booking_received', delay_minutes: 5, product_ids: [consultation] } })
     const prepare = await saveMessageTemplate(db, env, law, null, { title: 'Before we meet', body: 'Please bring your lease and any notices.',
-      schedule: { trigger: 'check_in', offsetHours: -2, productIds: [consultation] } })
+      schedule: { trigger: 'check_in', offset_hours: -2, product_ids: [consultation] } })
     const reminder = await saveMessageTemplate(db, env, studio, null, { title: 'Class tomorrow', body: 'Wear clothes you can get clay on.',
-      schedule: { trigger: 'check_in', offsetDays: -1, localTime: '09:00', productIds: [wheel] } })
+      schedule: { trigger: 'check_in', offset_days: -1, local_time: '09:00', product_ids: [wheel] } })
     const thanks = await saveMessageTemplate(db, env, bistro, null, { title: 'Thank you', body: 'Thank you for dining with us.',
-      schedule: { trigger: 'check_out', offsetHours: 2, productIds: [tables.id] } })
+      schedule: { trigger: 'check_out', offset_hours: 2, product_ids: [tables.id] } })
     // A restaurant's tables are named by their product; nothing outside the workspace is accepted.
-    await assert.rejects(saveMessageTemplate(db, env, law, null, { title: 'Wrong', body: 'x', schedule: { trigger: 'booking_received', delayMinutes: 5, productIds: [wheel] } }),
-      { statusCode: 404, data: { code: 'MESSAGE_OFFERING_NOT_FOUND', field: 'schedule.productIds' } })
+    await assert.rejects(saveMessageTemplate(db, env, law, null, { title: 'Wrong', body: 'x', schedule: { trigger: 'booking_received', delay_minutes: 5, product_ids: [wheel] } }),
+      { statusCode: 404, data: { code: 'MESSAGE_OFFERING_NOT_FOUND', field: 'schedule.product_ids' } })
 
     const book = async (organizationId: string, slug: string, sessionId: string, guest: string) => {
       const result = await createProductBooking(new H3Event(runAs(organizationId)), { organizationId, slug, operator: operator(`${guest}-key`),
-        body: { guest_name: guest, guest_email: `${guest.toLowerCase()}@proof.example`, session_id: sessionId, party_size: 1 } })
+        body: { guest_name: guest, guest_email: `${guest.toLowerCase()}@proof.example`, product_session_id: sessionId, party_size: 1 } })
       assert.equal(result.status, 201, JSON.stringify(result.body))
-      return { requestId: String(result.body.request_id), bookingId: String(result.body.operational_booking_id) }
+      return { requestId: String(result.body.conversation_id), bookingId: String(result.body.booking_id) }
     }
     const ana = await book(law.organizationId, 'service', 'law-1', 'Ana')
     const ben = await book(law.organizationId, 'service', 'law-2', 'Ben')
@@ -118,14 +118,14 @@ test('consultations, classes and table bookings are sent their automatic message
       return seating!.id
     }
     const reserved = await createProductBooking(new H3Event(runAs(bistro.organizationId)), { organizationId: bistro.organizationId, slug: tables.slug, financialWritesAllowed: false, operator: operator('dee-key'),
-      body: { guest_name: 'Dee', guest_email: 'dee@proof.example', guest_phone: '+66812345678', session_id: await seatingAt(dinner.time), party_size: 2 } })
+      body: { guest_name: 'Dee', guest_email: 'dee@proof.example', guest_phone: '+66812345678', product_session_id: await seatingAt(dinner.time), party_size: 2 } })
     assert.equal(reserved.status, 201, JSON.stringify(reserved.body))
-    const dee = { requestId: String(reserved.body.request_id), reservationId: String(reserved.body.operational_booking_id) }
+    const dee = { requestId: String(reserved.body.conversation_id), reservationId: String(reserved.body.booking_id) }
 
     // A conversation names what it is about for whoever replies (suggested replies, MCP): the table, for how many, at its own local time.
     const context = await guestThreadMessagingContext(db, memberAccessPrincipal({ userId: OWNER, organizationId: bistro.organizationId, role: 'owner' }, { env }), dee.requestId)
-    assert.deepEqual(context.record, { unit: 'slot', status: 'confirmed', offering: 'Bistro tables', location: `${bistro.organizationId} main`, address: null, phone: null, partySize: 2,
-      timezone: 'Asia/Bangkok', starts: `${dinner.date} ${dinner.time}`, ends: `${dinner.date} 21:00`, noShow: false })
+    assert.deepEqual(context.record, { unit: 'slot', status: 'confirmed', name: 'Bistro tables', location: `${bistro.organizationId} main`, address: null, phone: null, party_size: 2,
+      timezone: 'Asia/Bangkok', starts: `${dinner.date} ${dinner.time}`, ends: `${dinner.date} 21:00`, no_show_at: null })
 
     // Each booking's plan, read from the table rather than from the planner that wrote it.
     const planned = (id: string, templateId: string) => db.prepare('SELECT * FROM scheduled_guest_messages WHERE booking_id = ? AND template_id = ?').bind(id, templateId).first<Record<string, string | null>>()
@@ -166,11 +166,11 @@ test('consultations, classes and table bookings are sent their automatic message
     assert.deepEqual((await jobs('booking', ben.bookingId)).map(job => job.status), ['cancelled', 'cancelled'])
 
     // The studio moves Cy to the next day's class and the table to 20:30: their messages move with them.
-    await moveBooking(db, env, await thread(studio.organizationId, cy.requestId), { userId: OWNER }, { kind: 'booking', sessionId: 'clay-2', partySize: 1 }, 'move-cy')
+    await moveBooking(db, env, await thread(studio.organizationId, cy.requestId), { userId: OWNER }, { kind: 'booking', product_session_id: 'clay-2', party_size: 1 }, 'move-cy')
     assert.equal(await db.prepare('SELECT product_session_id FROM bookings WHERE id = ?').bind(cy.bookingId).first('product_session_id'), 'clay-2')
     const nextClassDay = localDateAt(new Date(hourOn(6, 16)), 'America/Denver')
     assert.equal((await planned(cy.bookingId, reminder.id))?.due_at, localDateTimeToInstant(addLocalDays(nextClassDay, -1), '09:00', 'America/Denver', 'reject').toISOString())
-    await moveBooking(db, env, await thread(bistro.organizationId, dee.requestId), { userId: OWNER }, { kind: 'booking', sessionId: await seatingAt('20:30'), partySize: 2 }, 'move-dee')
+    await moveBooking(db, env, await thread(bistro.organizationId, dee.requestId), { userId: OWNER }, { kind: 'booking', product_session_id: await seatingAt('20:30'), party_size: 2 }, 'move-dee')
     const movedTable = await db.prepare('SELECT s.ends_at FROM bookings b JOIN product_sessions s ON s.id = b.product_session_id WHERE b.id = ?').bind(dee.reservationId).first<string>('ends_at')
     assert.equal(movedTable, plus(localDateTimeToInstant(dinner.date, '20:30', 'Asia/Bangkok', 'reject').toISOString(), 120))
     assert.deepEqual([(await planned(dee.reservationId, thanks.id))?.status, (await planned(dee.reservationId, thanks.id))?.due_at], ['pending', plus(movedTable!, 120)])

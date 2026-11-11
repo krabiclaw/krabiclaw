@@ -57,7 +57,7 @@ const key = `automatic-message:${dashboard.organizationId.value}:${templateId.va
 const { data, error: readError, refresh } = await useAsyncData(key, () => isNew.value ? Promise.resolve(null) : api(`/api/dashboard/message-templates/${encodeURIComponent(templateId.value)}`, { validate: isMessageTemplateResponse }))
 watchEffect(() => { if (isNotFoundError(readError.value)) showError(createError({ statusCode: 404, statusMessage: 'Automatic message not found' })) })
 const saved = computed(() => data.value?.template ?? null)
-const empty = () => ({ title: '', body: '', schedule: { trigger: 'check_in', offsetDays: -1, localTime: '10:00', productIds: [] } as GuestMessageSchedule })
+const empty = () => ({ title: '', body: '', schedule: { trigger: 'check_in', offset_days: -1, local_time: '10:00', product_ids: [] } as GuestMessageSchedule })
 const draft = useState(`${key}:draft`, empty)
 const creation = useState(`${key}:creation`, () => ({ id: null as string | null, uncertain: false }))
 const clone = (reply: MessageTemplate) => ({ title: reply.title, body: reply.body, schedule: JSON.parse(JSON.stringify(reply.schedule)) as GuestMessageSchedule })
@@ -76,9 +76,9 @@ watchEffect(() => { if (level.child.value && (isNew.value || !['content', 'sched
 const valid = computed(() => {
   if (!draft.value.title.trim() || !draft.value.body.trim()) return false
   const schedule = draft.value.schedule
-  return (!offeringsError.value && schedule.productIds.length > 0 && schedule.productIds.length <= 100 && schedule.productIds.every(id => offerings.value.some(offering => offering.id === id))
-    && (schedule.trigger === 'booking_received' || ('offsetHours' in schedule ? Number.isInteger(schedule.offsetHours) && Math.abs(schedule.offsetHours) <= 72
-      : Number.isInteger(schedule.offsetDays) && schedule.offsetDays >= -7 && schedule.offsetDays <= 7 && /^([01]\d|2[0-3]):[0-5]\d$/.test(schedule.localTime))))
+  return (!offeringsError.value && schedule.product_ids.length > 0 && schedule.product_ids.length <= 100 && schedule.product_ids.every(id => offerings.value.some(offering => offering.id === id))
+    && (schedule.trigger === 'booking_received' || ('offset_hours' in schedule ? Number.isInteger(schedule.offset_hours) && Math.abs(schedule.offset_hours) <= 72
+      : Number.isInteger(schedule.offset_days) && schedule.offset_days >= -7 && schedule.offset_days <= 7 && /^([01]\d|2[0-3]):[0-5]\d$/.test(schedule.local_time))))
 })
 const dirty = computed(() => !saved.value || JSON.stringify(draft.value) !== JSON.stringify(clone(saved.value)))
 const saveLabel = computed(() => isNew.value ? createLabels.action : undefined)
@@ -97,7 +97,7 @@ async function commit() {
   try {
     if (isNew.value) creation.value.uncertain = true
     const result = await api(isNew.value ? '/api/dashboard/message-templates' : `/api/dashboard/message-templates/${encodeURIComponent(templateId.value)}`, {
-      method: isNew.value ? 'POST' : 'PUT', body: { ...draft.value, ...(saved.value ? { expectedVersion: saved.value.version } : {}) }, validate: isMessageTemplateResponse,
+      method: isNew.value ? 'POST' : 'PUT', body: { ...draft.value, ...(saved.value ? { version: saved.value.version } : {}) }, validate: isMessageTemplateResponse,
     })
     if (isNew.value) creation.value = { id: result.template.id, uncertain: false }
     await refreshNuxtData([`automatic-messages:${dashboard.organizationId.value}`, `reply-picker:${dashboard.organizationId.value}`])
@@ -133,7 +133,7 @@ async function remove() {
   saving.value = true
   actionError.value = ''
   try {
-    await api(`/api/dashboard/message-templates/${encodeURIComponent(saved.value.id)}`, { method: 'DELETE', body: { expectedVersion: saved.value.version }, validate: (value): value is { status: 'deleted' } => isRecord(value) && value.status === 'deleted' })
+    await api(`/api/dashboard/message-templates/${encodeURIComponent(saved.value.id)}`, { method: 'DELETE', body: { version: saved.value.version }, validate: (value): value is { status: 'deleted' } => isRecord(value) && value.status === 'deleted' })
     await refreshNuxtData([`automatic-messages:${dashboard.organizationId.value}`, `reply-picker:${dashboard.organizationId.value}`])
     clearNuxtState(`${key}:draft`, { reset: true })
     await navigateTo(level.to.value!)

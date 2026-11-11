@@ -29,9 +29,9 @@ export async function openSeating(request: APIRequestContext, partySize: number,
 /** A guest books a table on the site, as the booking form does. */
 export async function bookTable(request: APIRequestContext, input: { name: string; email: string; phone: string; partySize: number; seating: TableSeating; location?: 'brooklyn' | 'williamsburg' }) {
   const response = await request.post(`${testBaseUrl()}/api/public/products/${seededTables(input.location).slug}/book`, { headers: seededSiteHeaders('restaurant'), data: {
-    guest_name: input.name, guest_email: input.email, guest_phone: input.phone, session_id: input.seating.id, party_size: input.partySize, idempotency_key: crypto.randomUUID(),
+    guest_name: input.name, guest_email: input.email, guest_phone: input.phone, product_session_id: input.seating.id, party_size: input.partySize, idempotency_key: crypto.randomUUID(),
   } })
   expect(response.status(), await response.text()).toBe(201)
-  const body = await response.json() as { request_id: string; operational_booking_id: string; cancellation_token: string; status: string }
-  return { requestId: body.request_id, bookingId: body.operational_booking_id, cancellationToken: body.cancellation_token, status: body.status }
+  const body = await response.json() as { conversation_id: string; booking_id: string; cancellation_token: string; status: string }
+  return { requestId: body.conversation_id, bookingId: body.booking_id, cancellationToken: body.cancellation_token, status: body.status }
 }

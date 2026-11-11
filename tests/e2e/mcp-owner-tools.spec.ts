@@ -140,14 +140,14 @@ test.describe('stateless MCP server', () => {
     expect(member).toBeTruthy()
     const firstResponse = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'list_product_bookings', args: { organization_id: organizationId, limit: 1 } })
     expect(firstResponse.status()).toBe(200)
-    const first = mcpData<{ bookings: Array<{ operational_booking_id: string }>; page_info: { next_cursor: string | null } }>(await firstResponse.json())
+    const first = mcpData<{ bookings: Array<{ booking_id: string }>; page_info: { next_cursor: string | null } }>(await firstResponse.json())
     expect(first.bookings).toHaveLength(1)
     expect(first.page_info.next_cursor).toBeTruthy()
     const nextResponse = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'list_product_bookings', args: { organization_id: organizationId, limit: 1, cursor: first.page_info.next_cursor } })
     expect(nextResponse.status()).toBe(200)
-    const next = mcpData<{ bookings: Array<{ operational_booking_id: string }> }>(await nextResponse.json())
+    const next = mcpData<{ bookings: Array<{ booking_id: string }> }>(await nextResponse.json())
     expect(next.bookings).toHaveLength(1)
-    expect(next.bookings[0]!.operational_booking_id).not.toBe(first.bookings[0]!.operational_booking_id)
+    expect(next.bookings[0]!.booking_id).not.toBe(first.bookings[0]!.booking_id)
     const filteredResponse = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'list_product_bookings', args: { organization_id: organizationId, assigned_member_id: member!.id, limit: 1, cursor: first.page_info.next_cursor } })
     expect(filteredResponse.status()).toBe(200)
     expect((await filteredResponse.json()).result).toMatchObject({ isError: true, content: [{ type: 'text', text: 'Pagination cursor does not belong to this resource.' }] })
@@ -424,8 +424,8 @@ test.describe('stateless MCP server', () => {
         args: { organization_id: organizationId, product_id: seededTables().id, from: seating.starts_at, to: new Date(Date.parse(seating.starts_at) + 60_000).toISOString(), limit: 100 },
       })
       expect(listReservations.status()).toBe(200)
-      const reservationSubmission = mcpData<{ bookings: Array<{ request_id: string | null; product_kind: string; location_id: string | null; party_size: number; starts_at: string; guest: { name: string | null } | null }> }>(await listReservations.json())
-        .bookings.find(row => row.request_id === reservationThreadId)
+      const reservationSubmission = mcpData<{ bookings: Array<{ conversation_id: string | null; product_kind: string; location_id: string | null; party_size: number; starts_at: string; guest: { name: string | null } | null }> }>(await listReservations.json())
+        .bookings.find(row => row.conversation_id === reservationThreadId)
       expect(reservationSubmission).toMatchObject({ product_kind: 'table', location_id: locationId, party_size: 2, starts_at: seating.starts_at, guest: { name: 'MCP Reservation' } })
 
       const tools = await mcpRequest(request, baseURL!, {
@@ -1136,7 +1136,7 @@ test.describe('stateless MCP server', () => {
       expect(target).toBeTruthy()
       const booked = await request.post(`${baseURL}/api/public/products/${created.slug}/book`, {
         headers: seededSiteHeaders('restaurant'),
-        data: { session_id: target!.id, guest_name: 'Pizza Class Guest', guest_email: `session-authority-${Date.now()}@example.test`, party_size: 6, idempotency_key: crypto.randomUUID() },
+        data: { product_session_id: target!.id, guest_name: 'Pizza Class Guest', guest_email: `session-authority-${Date.now()}@example.test`, party_size: 6, idempotency_key: crypto.randomUUID() },
       })
       expect(booked.status(), await booked.text()).toBe(201)
       const before = (await read()).find(row => row.id === target!.id)!

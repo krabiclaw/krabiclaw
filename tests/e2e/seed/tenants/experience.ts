@@ -62,15 +62,15 @@ export async function seedExperience(createTenant: CreateTenant): Promise<SeedTe
     const { sessions: [session] } = await tool<{ sessions: Array<{ id: string }> }>('create_product_session', {
       product_id: wheel.id, location_id: aoNang.id, starts_at: startsAt.toISOString(), ends_at: endsAt.toISOString(), capacity: 4, idempotency_key: 'seed-experience-ended-class',
     })
-    const pastGuest = await tool<{ request_id: string }>('create_product_booking', {
-      product_slug: wheel.slug, session_id: session!.id, party_size: 1, guest_name: 'Past Guest', guest_email: 'past-guest@playwright.example',
+    const pastGuest = await tool<{ conversation_id: string }>('create_product_booking', {
+      product_slug: wheel.slug, product_session_id: session!.id, party_size: 1, guest_name: 'Past Guest', guest_email: 'past-guest@playwright.example',
       source: 'phone', guest_acknowledgement: false, idempotency_key: 'seed-experience-ended-booking',
     })
     // The owner opens the conversation, as a click on it does: the screen reads it through to the newest message it shows.
-    const opened = await owner.json<{ thread: { stream: Array<{ type: string; id: string }> } }>('GET', `/api/dashboard/organizations/${tenant.organizationId}/guest-threads/${pastGuest.request_id}`)
+    const opened = await owner.json<{ thread: { stream: Array<{ type: string; id: string }> } }>('GET', `/api/dashboard/organizations/${tenant.organizationId}/guest-threads/${pastGuest.conversation_id}`)
     const newest = opened.thread.stream.filter(item => item.type !== 'day').at(-1)
     if (!newest) throw new Error('The ended booking’s conversation shows no message to read')
-    await owner.json('POST', `/api/dashboard/organizations/${tenant.organizationId}/conversations/${pastGuest.request_id}/read`, { messageId: newest.id })
+    await owner.json('POST', `/api/dashboard/organizations/${tenant.organizationId}/conversations/${pastGuest.conversation_id}/read`, { message_id: newest.id })
     tenant.endedSessionEndsAt = endsAt.toISOString()
     return tenant
   } finally { await owner.dispose() }

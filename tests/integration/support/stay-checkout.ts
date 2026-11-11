@@ -22,7 +22,7 @@ export async function buyStay(db: D1Database, input: {
   currency: string
   buyerUserId: string
   guest: StayPurchase['guest']
-}): Promise<{ id: string; request_id: string }> {
+}): Promise<{ id: string; conversation_id: string }> {
   const nights: string[] = []
   for (let day = new Date(`${input.checkIn}T00:00:00Z`); day < new Date(`${input.checkOut}T00:00:00Z`); day.setUTCDate(day.getUTCDate() + 1)) nights.push(day.toISOString().slice(0, 10))
   const total = nights.length * input.nightlyMinor
@@ -46,7 +46,7 @@ export async function buyStay(db: D1Database, input: {
   // A nights conversion claims no session, so it reads nothing from the environment.
   const stayId = await commitBooking(db as never, { DB: db } as unknown as CloudflareEnv, await requirePayment(db as never, input.organizationId, paymentId), now)
   if (!stayId) throw new Error(`The checkout for ${input.id} did not convert into a stay`)
-  const stay = await db.prepare("SELECT b.id, c.id AS request_id FROM bookings b LEFT JOIN conversations c ON c.booking_id = b.id AND c.kind = 'booking' WHERE b.id = ? AND b.product_session_id IS NULL").bind(stayId).first<{ id: string; request_id: string | null }>()
-  if (!stay?.request_id) throw new Error(`The stay bought by ${input.id} has no conversation`)
-  return { id: stay.id, request_id: stay.request_id }
+  const stay = await db.prepare("SELECT b.id, c.id AS conversation_id FROM bookings b LEFT JOIN conversations c ON c.booking_id = b.id AND c.kind = 'booking' WHERE b.id = ? AND b.product_session_id IS NULL").bind(stayId).first<{ id: string; conversation_id: string | null }>()
+  if (!stay?.conversation_id) throw new Error(`The stay bought by ${input.id} has no conversation`)
+  return { id: stay.id, conversation_id: stay.conversation_id }
 }

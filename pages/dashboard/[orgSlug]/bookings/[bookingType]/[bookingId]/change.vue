@@ -6,7 +6,7 @@
   <DashboardLeafPanel
     id="booking-change"
     title="What do you want to change?"
-    :lead="booking ? `Nothing changes until ${b.firstName(booking.guestName ?? '')} accepts.` : undefined"
+    :lead="booking ? `Nothing changes until ${b.firstName(booking.guest_name ?? '')} accepts.` : undefined"
     save-label="Send request"
     desktop-cancel
     :saving="saving"
@@ -17,7 +17,7 @@
     <div v-if="booking" class="space-y-8">
       <div class="flex items-center gap-4">
         <img v-if="recordImage" :src="recordImage" alt="" class="size-14 shrink-0 rounded-xl object-cover">
-        <p class="min-w-0 flex-1 text-base font-medium text-highlighted">{{ booking.resourceTitle }}</p>
+        <p class="min-w-0 flex-1 text-base font-medium text-highlighted">{{ booking.name }}</p>
       </div>
 
       <section class="space-y-6 border-t border-default pt-6">
@@ -77,13 +77,13 @@ const b = inject(bookingEditorKey)!
 const booking = computed(() => b.booking.value)
 const copy = computed(() => booking.value ? getVerticalCopy(booking.value.vertical) : null)
 const guestsLabel = computed(() => copy.value?.guestsLabelPlural.replace(/^./u, letter => letter.toUpperCase()) ?? 'Guests')
-const recordImage = computed(() => booking.value?.resourceImageUrl ?? booking.value?.locations.find(location => location.id === booking.value?.locationId)?.imageUrl ?? null)
+const recordImage = computed(() => booking.value?.resource_image_url ?? booking.value?.locations.find(location => location.id === booking.value?.location_id)?.image_url ?? null)
 // The booked terms, as the guest read them: one line, not a setting here.
 const policyLine = computed(() => booking.value?.policy?.items.find(item => item.id === 'cancellation')?.text ?? null)
 
 // The page's own draft, seeded from the record each time it is opened.
 const draft = reactive({ date: '', partySize: 1, locationId: '', sessionId: '' })
-const movesBetweenLocations = computed(() => booking.value?.productKind === 'table' && booking.value.locations.length > 1)
+const movesBetweenLocations = computed(() => booking.value?.product_kind === 'table' && booking.value.locations.length > 1)
 // Reka's number field commits a typed value only on blur, so a click on Send
 // right after typing would land on a still-disabled button. Each keystroke that
 // forms a valid count is taken at once.
@@ -96,23 +96,23 @@ function typeGuests(event: Event) {
 }
 function seed(record: DashboardBookingDetails | null) {
   if (!record) return
-  draft.date = record.bookingDate
-  draft.partySize = record.partySize ?? 1
-  draft.locationId = record.locationId ?? ''
-  draft.sessionId = record.sessionId ?? ''
+  draft.date = record.booking_date
+  draft.partySize = record.party_size ?? 1
+  draft.locationId = record.location_id ?? ''
+  draft.sessionId = record.product_session_id ?? ''
 }
 // The booking's own version, never its conversation's: a guest message mid-edit leaves the draft standing.
-watch(() => booking.value?.operationalUpdatedAt, () => seed(booking.value), { immediate: true })
+watch(() => booking.value?.updated_at, () => seed(booking.value), { immediate: true })
 
 type SessionRow = { id: string; starts_at: string; timezone: string; remaining: number | null; assigned_member_id: string | null }
 const isSessionList = (value: unknown): value is { sessions: SessionRow[] } => isRecord(value) && Array.isArray(value.sessions)
   && value.sessions.every(row => isRecord(row) && typeof row.id === 'string' && typeof row.starts_at === 'string' && typeof row.timezone === 'string' && (row.remaining === null || typeof row.remaining === 'number'))
 // The chosen day's sessions at the chosen location, read for that day alone, so the current one is always among them.
 const { data: sessionData, error: sessionsError, status: sessionsStatus } = await useAsyncData(
-  () => `booking-change-sessions:${booking.value?.experienceId ?? ''}:${draft.locationId}:${draft.date}`,
+  () => `booking-change-sessions:${booking.value?.product_id ?? ''}:${draft.locationId}:${draft.date}`,
   () => {
     const record = booking.value
-    if (!record || !record.experienceId || !/^\d{4}-\d{2}-\d{2}$/.test(draft.date)) return Promise.resolve(null)
+    if (!record || !record.product_id || !/^\d{4}-\d{2}-\d{2}$/.test(draft.date)) return Promise.resolve(null)
     return api<{ sessions: SessionRow[] }>(`/api/dashboard/bookings/booking/${encodeURIComponent(String(route.params.bookingId))}/sessions`, {
       query: { date: draft.date, ...(movesBetweenLocations.value ? { location_id: draft.locationId } : {}) }, validate: isSessionList,
     })
@@ -127,24 +127,24 @@ const times = computed(() => {
   const byStart = new Map<string, SessionRow>()
   for (const row of sessionData.value?.sessions ?? []) {
     const current = byStart.get(row.starts_at)
-    if (!current || row.id === record?.sessionId || (current.id !== record?.sessionId && row.assigned_member_id === record?.assignedMemberId)) byStart.set(row.starts_at, row)
+    if (!current || row.id === record?.product_session_id || (current.id !== record?.product_session_id && row.assigned_member_id === record?.assigned_member_id)) byStart.set(row.starts_at, row)
   }
   return [...byStart.values()].map(row => ({
     id: row.id,
     label: formatTimestamp(row.starts_at, 'en', row.timezone, { hour: 'numeric', minute: '2-digit' }),
-    disabled: row.id !== record?.sessionId && row.remaining !== null && row.remaining < draft.partySize,
+    disabled: row.id !== record?.product_session_id && row.remaining !== null && row.remaining < draft.partySize,
   }))
 })
 
 const dirty = computed(() => {
   const record = booking.value
   if (!record) return false
-  if (draft.partySize !== (record.partySize ?? 1)) return true
-  return draft.sessionId !== (record.sessionId ?? '')
+  if (draft.partySize !== (record.party_size ?? 1)) return true
+  return draft.sessionId !== (record.product_session_id ?? '')
 })
 const valid = computed(() => !guestsTypedInvalid.value && Number.isInteger(draft.partySize) && draft.partySize > 0
   // Keeping the booked session needs no list of times: a guests-only change is valid whether or not they load.
-  && (draft.sessionId === (booking.value?.sessionId ?? '') ? Boolean(draft.sessionId) : times.value.some(slot => slot.id === draft.sessionId && !slot.disabled)))
+  && (draft.sessionId === (booking.value?.product_session_id ?? '') ? Boolean(draft.sessionId) : times.value.some(slot => slot.id === draft.sessionId && !slot.disabled)))
 
 const saving = ref(false)
 const error = ref<string | null>(null)
@@ -153,7 +153,7 @@ let attempt: { draft: string; key: string } | null = null
 async function send() {
   const record = booking.value
   if (!record || !valid.value || !dirty.value || saving.value) return
-  const proposal = { kind: 'booking' as const, sessionId: draft.sessionId, partySize: draft.partySize }
+  const proposal = { kind: 'booking' as const, product_session_id: draft.sessionId, party_size: draft.partySize }
   const signature = JSON.stringify(proposal)
   if (attempt?.draft !== signature) attempt = { draft: signature, key: crypto.randomUUID() }
   saving.value = true
@@ -161,7 +161,7 @@ async function send() {
   try {
     await api(`/api/dashboard/bookings/${b.bookingType}/${encodeURIComponent(String(route.params.bookingId))}/changes`, {
       method: 'POST',
-      body: { ...proposal, expectedUpdatedAt: record.operationalUpdatedAt, idempotencyKey: attempt.key },
+      body: { ...proposal, updated_at: record.updated_at, idempotency_key: attempt.key },
       validate: isRecord,
     })
     await b.refresh()

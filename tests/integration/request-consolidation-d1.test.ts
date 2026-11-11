@@ -278,8 +278,8 @@ test('archive and unarchive file a conversation for one person without touching 
     // Unread twice is still one unread conversation; one nobody else wrote in cannot be marked either way.
     await markConversationUnread(db, { organizationId: ORG, conversationId: 'ended', userId: ACTOR })
     assert.deepEqual(await ids('current', true), ['ended', 'future'])
-    await assert.rejects(markConversationUnread(db, { organizationId: ORG, conversationId: 'contact', userId: ACTOR }), { status: 409, data: { code: 'NOTHING_TO_MARK', field: 'conversationId' } })
-    await assert.rejects(markConversationRead(db, { organizationId: ORG, conversationId: 'contact', userId: ACTOR }), { status: 409, data: { code: 'NOTHING_TO_MARK', field: 'conversationId' } })
+    await assert.rejects(markConversationUnread(db, { organizationId: ORG, conversationId: 'contact', userId: ACTOR }), { status: 409, data: { code: 'NOTHING_TO_MARK', field: 'conversation_id' } })
+    await assert.rejects(markConversationRead(db, { organizationId: ORG, conversationId: 'contact', userId: ACTOR }), { status: 409, data: { code: 'NOTHING_TO_MARK', field: 'conversation_id' } })
     assert.deepEqual(await ids('current', true), ['ended', 'future'])
 
     // Archive a future booking, for the owner alone: Past at once, and nothing
@@ -329,7 +329,7 @@ test('archive and unarchive file a conversation for one person without touching 
     assert.equal((await ids('current')).includes('ended'), true)
 
     // Another organization cannot reach the conversation at all.
-    await assert.rejects(file('booking-future', true, 'org-foreign'), { status: 404, data: { code: 'THREAD_NOT_FOUND', field: 'conversationId' } })
+    await assert.rejects(file('booking-future', true, 'org-foreign'), { status: 404, data: { code: 'THREAD_NOT_FOUND', field: 'conversation_id' } })
     assert.equal(await archivedAt('booking-future'), null)
 
     // Nothing above moved the inbox order.

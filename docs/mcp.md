@@ -290,7 +290,7 @@ imports, source-owned calendar reconciliation, or existing-payment conversion.
 An existing appointment import must have a separately supported audited contract;
 it must never be represented as a new payment or fabricated paid Stripe record.
 
-`operational_booking_id` means `bookings.id`. `request_id` means the guest inbox
+`booking_id` means `bookings.id`. `conversation_id` means the guest inbox
 thread ID. No booking tool or public booking response returns a `booking_id`.
 Review confirmation/rejection and cancellation invoke the canonical guest-thread
 operation service with durable operation keys and guest status messages. Confirm
@@ -306,8 +306,7 @@ until guest acceptance, and acceptance retains review status and operational ID.
 
 A table booking is a booking: the same tools read, cancel and change it, and
 `request_product_booking_change` may move it to a session of the business's table
-product at another location. Its `expected_updated_at` is the booking's own
-`operational_updated_at` from `get_product_booking`; a guest message in the
+product at another location. It takes the booking's `updated_at` from `get_product_booking`; a guest message in the
 conversation does not refuse the business's change.
 
 ## Lodging homes, stays and nightly calendars
@@ -367,10 +366,10 @@ into each stay's or booking's own conversation, cancels pending
 messages with the booking and moves them with it; every confirmed stay is also
 sent its home's check-in instructions at 10:00 the day before arrival.
 `schedule_guest_reply` puts a member's own reply in the same outbox, to be
-sent later as their reply and visible only to them. `list_scheduled_guest_messages`
+sent at `due_at`, taking `conversation_id` and `body`. Only the author sees it. `list_scheduled_guest_messages`
 exposes the outbox's pending messages and failures (managers see every automatic
 message, each member their own replies), and `cancel_scheduled_guest_message`
-cancels only a pending one.
+cancels a pending one by `scheduled_message_id`.
 Verify actual delivery through the canonical guest conversation's receipts.
 
 These tools share the dashboard and native app's domain operations. New

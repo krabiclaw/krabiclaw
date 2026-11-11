@@ -116,8 +116,8 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
   const guestPhone = cleanString(body.guest_phone, 30)
   const normalizedGuestPhone = guestPhone ? toE164(guestPhone) : null
   if (guestPhone && !normalizedGuestPhone) return creationResult({ error: 'A valid phone number is required.' }, { status: 400 })
-  const sessionId = cleanString(body.session_id, 64)
-  const requestedVariantId = cleanString(body.variant_id, 64)
+  const sessionId = cleanString(body.product_session_id, 64)
+  const requestedVariantId = cleanString(body.product_variant_id, 64)
   const notes = cleanString(body.notes, 1000)
   const pageEventId = readPageEventId(body.page_event_id)
   const partySizeValue = typeof body.party_size === 'number' || typeof body.party_size === 'string' ? Number(body.party_size) : Number.NaN
@@ -143,7 +143,7 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
     if (existing.fingerprint !== fingerprint) return creationResult({ error: 'Idempotency key was reused with different booking details', code: 'idempotency_conflict' }, { status: 409 })
     if (!existing.completed) {
       if (existing.status !== existing.creation_status || existing.product_session_id !== sessionId || (requestedVariantId && existing.product_variant_id !== requestedVariantId) || existing.party_size !== partySize) {
-        return creationResult({ error: 'Booking changed before creation notifications completed. Read the current booking before continuing.', code: 'booking_changed', operational_booking_id: existing.id, request_id: threadId, status: existing.status }, { status: 409 })
+        return creationResult({ error: 'Booking changed before creation notifications completed. Read the current booking before continuing.', code: 'booking_changed', booking_id: existing.id, conversation_id: threadId, status: existing.status }, { status: 409 })
       }
       await notifyProductBookingCreated(env, db, organizationId, threadId)
       await db.prepare(`UPDATE conversations SET payload_json=json_set(payload_json,'$.provenance.followups_completed',json('true')) WHERE id=? AND organization_id=?`).bind(threadId, organizationId).run()
@@ -151,16 +151,16 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
     const record = await getThreadOperationalRecord(db, threadId)
     if (!record || record.organization_id !== organizationId || record.id !== existing.id) throw new Error('Committed booking is missing its operational receipt')
     if (!operator) {
-      if (record.status !== 'pending' && record.status !== 'confirmed') return creationResult({ error: 'This booking has already been cancelled', code: 'booking_cancelled', operational_booking_id: record.id, request_id: threadId }, { status: 409 })
+      if (record.status !== 'pending' && record.status !== 'confirmed') return creationResult({ error: 'This booking has already been cancelled', code: 'booking_cancelled', booking_id: record.id, conversation_id: threadId }, { status: 409 })
       const cancellation = await createReplayableReservationCancelToken(env.EMAIL_REPLY_SECRET ?? '', threadId)
       const request = await getGuestRequest(db, threadId, organizationId, 'booking')
       if (!request || request.kind !== 'booking' || await hashReservationCancelToken(cancellation.token) !== request.payload.cancellation.token_hash) throw new Error('Booking receipt is missing its cancellation capability')
-      return creationResult({ success: true, request_id: threadId, operational_booking_id: record.id, status: record.status, replayed: true,
+      return creationResult({ success: true, conversation_id: threadId, booking_id: record.id, status: record.status, replayed: true,
         starts_at: record.starts_at, ends_at: record.ends_at, timezone: record.timezone, cancellation_token: cancellation.token,
         message: record.status === 'pending' ? 'Your booking request is awaiting review.' : 'Your booking is confirmed.',
       }, { status: 200 })
     }
-    return creationResult({ success: true, request_id: threadId, operational_booking_id: record.id, status: record.status, replayed: true,
+    return creationResult({ success: true, conversation_id: threadId, booking_id: record.id, status: record.status, replayed: true,
       starts_at: record.starts_at, ends_at: record.ends_at, timezone: record.timezone,
     }, { status: 200 })
   }
@@ -392,13 +392,13 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
   await db.prepare(`UPDATE conversations SET payload_json = json_set(payload_json, '$.provenance.followups_completed', json('true')) WHERE id = ? AND organization_id = ?`).bind(threadId, organizationId).run()
   const record = await getThreadOperationalRecord(db, threadId)
   if (!record || record.organization_id !== organizationId || record.id !== operationalBookingId) throw new Error('Created booking is missing its operational receipt')
-  if (!operator && record.status === 'cancelled') return creationResult({ error: 'This booking has already been cancelled', code: 'booking_cancelled', operational_booking_id: record.id, request_id: threadId }, { status: 409 })
+  if (!operator && record.status === 'cancelled') return creationResult({ error: 'This booking has already been cancelled', code: 'booking_cancelled', booking_id: record.id, conversation_id: threadId }, { status: 409 })
   const whenLabel = new Intl.DateTimeFormat(locale, { timeZone: record.timezone, dateStyle: 'medium', timeStyle: 'short' }).format(new Date(record.starts_at)) + (record.location_id === null ? ` (${record.timezone})` : '')
   const measurement = measurementOutcome(followUps[1]!)
   const quotedValueOf = (result: PromiseSettledResult<unknown>) => result.status === 'fulfilled' ? (result.value as { quotedValue: unknown }).quotedValue : null
 
   return creationResult({
-    success: true, request_id: threadId, operational_booking_id: operationalBookingId, status: record.status, replayed: false, starts_at: record.starts_at, ends_at: record.ends_at, timezone: record.timezone, presentation, ...(operator ? {} : { cancellation_token: cancellation.token, quoted_value: quotedValueOf(followUps[1]!), measurement }),
+    success: true, conversation_id: threadId, booking_id: operationalBookingId, status: record.status, replayed: false, starts_at: record.starts_at, ends_at: record.ends_at, timezone: record.timezone, presentation, ...(operator ? {} : { cancellation_token: cancellation.token, quoted_value: quotedValueOf(followUps[1]!), measurement }),
     message: record.status === 'cancelled' ? 'This booking was cancelled.' : record.status === 'pending' ? `Your request for ${record.product_name} on ${whenLabel} is awaiting review.` : `Your ${presentation.noun} for ${record.product_name} on ${whenLabel} is confirmed.`,
     policy_summary: formatBookingPolicySummary(policy, locale, full.kind),
   }, { status: 201 })

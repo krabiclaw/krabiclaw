@@ -1466,7 +1466,7 @@ test('a member reads a stay at a home they look after as its turnover on every r
     const stay = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'turnover', check_in_date: '2026-11-01', check_out_date: '2026-11-03', arrival_time: '15:30',
       adults: 2, children: 1, infants: 1, guest_name: 'Ana Silva', guest_email: 'ana@example.test', private_notes: 'Door code 4411', total_minor: 45_000 })
     await recordStayPayment(db, env, manager, stay.id, { amount_minor: 20_000, method: 'cash', paid_on: '2026-11-01', idempotency_key: 'turnover-pay' })
-    assert(stay.request_id)
+    assert(stay.conversation_id)
     // The recorded arrival is the stay's start; it leaves at the home's 10:00 checkout.
     const turnover = { id: stay.id, product_id: cabin.id, location_id: 'cabin-site', timezone: 'America/Denver', status: 'confirmed', starts_at: '2026-11-01T22:30:00.000Z', ends_at: '2026-11-03T17:00:00.000Z',
       check_in_date: '2026-11-01', check_out_date: '2026-11-03', adults: 2, children: 1, infants: 1, guest_name: 'Ana', no_show_at: null }
@@ -1478,7 +1478,7 @@ test('a member reads a stay at a home they look after as its turnover on every r
     assert.deepEqual((await readStayCalendars(db, cleaner, window)).stays, [turnover])
     // Owners and admins read the whole stay, unchanged.
     const whole = await getStay(db, manager, stay.id)
-    assert.deepEqual([whole.guest_name, whole.guest_email, whole.private_notes, whole.total_minor, whole.paid_minor, whole.payments.length, whole.request_id], ['Ana Silva', 'ana@example.test', 'Door code 4411', 45_000, 20_000, 1, stay.request_id])
+    assert.deepEqual([whole.guest_name, whole.guest_email, whole.private_notes, whole.total_minor, whole.paid_minor, whole.payments.length, whole.conversation_id], ['Ana Silva', 'ana@example.test', 'Door code 4411', 45_000, 20_000, 1, stay.conversation_id])
     assert.equal((await listStays(db, manager, window))[0]!.guest_name, 'Ana Silva')
     // A site checkout saves the guest's whole name in guest_name; the member still reads the first name.
     const wholeName = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'whole-name', check_in_date: '2026-11-05', check_out_date: '2026-11-07', adults: 1, guest_name: '  Bo   Lee ', total_minor: 30_000 })
@@ -1497,17 +1497,17 @@ test('a member reads a stay at a home they look after as its turnover on every r
     ]) await assert.rejects(change(), { status: 403, data: { code: 'STAY_ROLE_REQUIRED' } })
     assert.deepEqual(await getStay(db, manager, stay.id), whole)
     // The outbox shows a member only their own replies: none of the business's automatic messages the manager reads.
-    await saveMessageTemplate(db, env, manager, null, { title: 'After your stay', body: 'Thanks for staying.', schedule: { trigger: 'check_out', offsetDays: 1, localTime: '10:00', productIds: [cabin.id] } })
+    await saveMessageTemplate(db, env, manager, null, { title: 'After your stay', body: 'Thanks for staying.', schedule: { trigger: 'check_out', offset_days: 1, local_time: '10:00', product_ids: [cabin.id] } })
     const managerOutbox = await listScheduledGuestMessages(db, manager, { limit: 20, offset: 0 }, null)
-    assert.ok(managerOutbox.messages.some(message => message.bookingId === stay.id && message.authorUserId === null))
+    assert.ok(managerOutbox.messages.some(message => message.booking_id === stay.id && message.author_user_id === null))
     assert.deepEqual((await listScheduledGuestMessages(db, cleaner, { limit: 20, offset: 0 }, null)).messages, [])
 
     // The stay's guest conversation is not the member's, and its alerts do not reach them.
     const [ownerMembership, cleanerMembership] = await Promise.all([OWNER, CLEANER].map(userId => resolveOrganizationMembership(env, { organizationId: ORG, userId })))
     assert(ownerMembership && cleanerMembership)
-    await assert.rejects(assertConversationAccess(db, memberAccessPrincipal(cleanerMembership, { env }), stay.request_id), { status: 404, data: { code: 'THREAD_NOT_FOUND', field: 'conversationId' } })
-    await assertConversationAccess(db, memberAccessPrincipal(ownerMembership, { env }), stay.request_id)
-    assert.deepEqual((await listOrganizationNotificationMembers(env, ORG, { requestId: stay.request_id })).map(member => member.userId), [OWNER])
+    await assert.rejects(assertConversationAccess(db, memberAccessPrincipal(cleanerMembership, { env }), stay.conversation_id), { status: 404, data: { code: 'THREAD_NOT_FOUND', field: 'conversation_id' } })
+    await assertConversationAccess(db, memberAccessPrincipal(ownerMembership, { env }), stay.conversation_id)
+    assert.deepEqual((await listOrganizationNotificationMembers(env, ORG, { requestId: stay.conversation_id })).map(member => member.userId), [OWNER])
 
     // Today names the guest by first name for the member and in full for the owner.
     const today = (membership: typeof ownerMembership) => listTodayAgenda(db, { organizationId: ORG }, { principal: { env, membership }, organizationSlug: 'org' }, new Date('2026-11-01T18:00:00.000Z'))
@@ -1525,12 +1525,12 @@ test('a member reads a stay at a home they look after as its turnover on every r
       assert(ajv.validate(schema, result), `${toolName} output: ${ajv.errorsText()}`)
       return result as Record<string, unknown>
     }
-    assert.deepEqual(await mcp(cleanerMembership, 'member', 'get_product_booking', { operational_booking_id: stay.id }), { operational_booking_id: stay.id, unit: 'nights', stay: turnover })
+    assert.deepEqual(await mcp(cleanerMembership, 'member', 'get_product_booking', { booking_id: stay.id }), { booking_id: stay.id, unit: 'nights', stay: turnover })
     const listed = (owner: boolean) => mcp(owner ? ownerMembership : cleanerMembership, owner ? 'owner' : 'member', 'list_product_bookings', { from: '2026-11-01T00:00:00.000Z', to: '2026-11-04T00:00:00.000Z' })
-      .then(result => (result.bookings as Array<Record<string, unknown>>).map(row => [row.operational_booking_id, row.unit, row.guest, row.starts_at]))
+      .then(result => (result.bookings as Array<Record<string, unknown>>).map(row => [row.booking_id, row.unit, row.guest, row.starts_at]))
     assert.deepEqual(await listed(false), [[stay.id, 'nights', { name: 'Ana' }, turnover.starts_at]])
     assert.deepEqual((await mcp(cleanerMembership, 'member', 'get_stay_calendar', { product_id: cabin.id, ...window })).stays, [turnover])
-    assert.equal(((await mcp(ownerMembership, 'owner', 'get_product_booking', { operational_booking_id: stay.id })).stay as Record<string, unknown>).guest_email, 'ana@example.test')
+    assert.equal(((await mcp(ownerMembership, 'owner', 'get_product_booking', { booking_id: stay.id })).stay as Record<string, unknown>).guest_email, 'ana@example.test')
     assert.deepEqual(await listed(true), [[stay.id, 'nights', { name: 'Ana Silva' }, turnover.starts_at]])
     assert.equal(((await mcp(ownerMembership, 'owner', 'get_stay_calendar', { product_id: cabin.id, ...window })).stays as Array<Record<string, unknown>>)[0]!.guest_name, 'Ana Silva')
   } finally {
@@ -1563,7 +1563,7 @@ test('a business’s site shows a guest the stay its signed link names, from any
     const stay = await buyStay(db, { id: 'site-stay', organizationId: ORG, productId: cabin.id, locationId: 'cabin-site', timezone: 'America/Denver', checkIn: '2026-11-01', checkOut: '2026-11-04', adults: 2,
       nightlyMinor: 15_000, currency: 'USD', buyerUserId: booker.id, guest: { name: 'Ana', email: 'ana@example.com', phone: null, notes: null } })
     // The guest's stay is read by its activity ID: its conversation's, as the account reads it.
-    const activityId = stay.request_id ?? stay.id
+    const activityId = stay.conversation_id ?? stay.id
     // The link the confirmation email and the paid return carry, signed with the site's secret.
     const link = (await createReplayableReservationCancelToken(env.EMAIL_REPLY_SECRET, activityId)).token
     const otherLink = (await createReplayableReservationCancelToken(env.EMAIL_REPLY_SECRET, 'another-stay')).token
@@ -1775,9 +1775,9 @@ test('a stay paid on a business’s site returns to that site’s stay confirmat
 
     const back = await call('/api/public/payments/stay-pay/return', { method: 'POST', body: JSON.stringify({ claim }) })
     assert.equal(back.status, 200)
-    const stay = (await db.prepare("SELECT s.id, c.id AS request_id FROM bookings s JOIN payment_checkout_holds h ON h.converted_booking_id = s.id JOIN conversations c ON c.booking_id = s.id AND c.kind = 'booking' WHERE h.id = 'stay-hold'").first<{ id: string; request_id: string }>())!
+    const stay = (await db.prepare("SELECT s.id, c.id AS conversation_id FROM bookings s JOIN payment_checkout_holds h ON h.converted_booking_id = s.id JOIN conversations c ON c.booking_id = s.id AND c.kind = 'booking' WHERE h.id = 'stay-hold'").first<{ id: string; conversation_id: string }>())!
     assert.ok(stay, 'The return converted the checkout into its stay')
-    const activityId = stay.request_id
+    const activityId = stay.conversation_id
     // The stay is read by its signed link, not by a browser's session: none, or a forged one, opens nothing.
     assert.equal((await call(`/api/public/guest-stays/${activityId}`)).status, 401)
     assert.equal((await call(`/api/public/guest-stays/${activityId}`, {}, { authorization: 'Bearer forged' })).status, 404)
@@ -2057,7 +2057,7 @@ test('migrated unpaid stays occupy nights without a fresh reservation message an
   const { runtime, db, env } = await boot()
   try {
     const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site' })
-    const template = await saveMessageTemplate(db, env, manager, null, { title: 'Booking received', body: 'Thanks for your reservation.', schedule: { trigger: 'booking_received', delayMinutes: 5, productIds: [cabin.id] } })
+    const template = await saveMessageTemplate(db, env, manager, null, { title: 'Booking received', body: 'Thanks for your reservation.', schedule: { trigger: 'booking_received', delay_minutes: 5, product_ids: [cabin.id] } })
     const offline = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'hostaway:offline', check_in_date: '2027-05-01', check_out_date: '2027-05-04', ...guest }, { imported: { source: 'hostaway', source_id: 'offline', row: { status: 'New', payment: 'Unpaid' }, fingerprint: 'offline-fingerprint', channel: 'direct' } })
     assert.equal(offline.payment_status, 'unpaid')
     assert.equal(offline.status, 'confirmed')
@@ -2066,7 +2066,7 @@ test('migrated unpaid stays occupy nights without a fresh reservation message an
     const source = { source: 'hostaway' as const, source_id: 'source-1', row: { id: 'source-1', payment: 'Unpaid' }, fingerprint: 'source-fingerprint', channel: 'airbnb' as const, channel_booking_id: 'ABB-EXACT-SOURCE' }
     const imported = await createStay(db, env, manager, input, { imported: source })
     // An imported stay has its conversation like every booking, naming the guest it was imported with.
-    assert.deepEqual(await db.prepare("SELECT kind, json_extract(payload_json, '$.guest.name') AS name, json_extract(payload_json, '$.guest.email') AS email FROM conversations WHERE id = ?").bind(imported.request_id).first(),
+    assert.deepEqual(await db.prepare("SELECT kind, json_extract(payload_json, '$.guest.name') AS name, json_extract(payload_json, '$.guest.email') AS email FROM conversations WHERE id = ?").bind(imported.conversation_id).first(),
       { kind: 'booking', name: 'Ana', email: 'ana@example.test' })
     assert.deepEqual({ channel: imported.channel, owner: imported.owner, status: imported.status, payment: imported.payment_status, paid: imported.paid_minor }, { channel: 'airbnb', owner: 'app', status: 'confirmed', payment: null, paid: 0 })
     await assert.rejects(updateStay(db, env, manager, imported.id, { expected_version: imported.version, check_out_date: '2027-06-04' }), code('STAY_NOT_EDITABLE'))

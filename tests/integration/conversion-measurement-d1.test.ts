@@ -250,9 +250,9 @@ test('the funnel joins a business site from visit to payment, by source and by l
       const result = await createProductBooking(origin ? guestEvent(origin) : new H3Event(Object.assign(new Request('https://funnel.example/api/mcp'), { runtime: { cloudflare: { env } } })), {
         organizationId: 'org-funnel', slug: tables[locationId]!.slug, financialWritesAllowed: false,
         ...(origin ? {} : { operator: { userId: 'funnel-owner', idempotencyKey: key, source: 'operator', externalReference: null, guestAcknowledgement: false } }),
-        body: { guest_name: 'Guest', guest_email: email, guest_phone: '+66812345678', session_id: await seating(locationId), party_size: 2, ...(origin ? { idempotency_key: key } : {}) } })
+        body: { guest_name: 'Guest', guest_email: email, guest_phone: '+66812345678', product_session_id: await seating(locationId), party_size: 2, ...(origin ? { idempotency_key: key } : {}) } })
       assert.equal(result.status, 201, JSON.stringify(result.body))
-      return { requestId: String(result.body.request_id), bookingId: String(result.body.operational_booking_id) }
+      return { requestId: String(result.body.conversation_id), bookingId: String(result.body.booking_id) }
     }
     const beach = await book(ad, 'loc-beach', 'beach@funnel.example', 'beach')
     const town = await book(direct, 'loc-town', 'town@funnel.example', 'town')

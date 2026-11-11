@@ -111,13 +111,13 @@ test('inbox publication failures are visible and table booking receipts reflect 
       const request = Object.assign(new Request('https://proof.example/api/mcp'), { runtime: { cloudflare: { env: reservationEnv } } })
       return createProductBooking(new H3Event(request), { organizationId: 'healthy', slug: tables.slug, financialWritesAllowed: false,
         operator: { userId: 'reservation-owner', idempotencyKey: key, source: 'operator', externalReference: null, guestAcknowledgement: false },
-        body: { guest_name: 'Guest', guest_email: 'guest@proof.example', guest_phone: '+66812345678', session_id: seating.id, party_size: 1 } })
+        body: { guest_name: 'Guest', guest_email: 'guest@proof.example', guest_phone: '+66812345678', product_session_id: seating.id, party_size: 1 } })
     }
     const hub = namespace.get(namespace.idFromName('healthy'))
     const arm = (action: string) => hub.fetch('https://guest-inbox.internal/arm', { method: 'POST', body: action })
     await arm('cancel')
     const cancelled = await create('cancel-during-creation')
-    const persistedCancelled = await db.prepare('SELECT status FROM bookings WHERE id=(SELECT booking_id FROM conversations WHERE id=?)').bind(cancelled.body.request_id).first('status')
+    const persistedCancelled = await db.prepare('SELECT status FROM bookings WHERE id=(SELECT booking_id FROM conversations WHERE id=?)').bind(cancelled.body.conversation_id).first('status')
     assert.equal(cancelled.status, 201)
     assert.equal(persistedCancelled, 'cancelled')
     assert.equal(cancelled.body.status, persistedCancelled)
@@ -125,10 +125,10 @@ test('inbox publication failures are visible and table booking receipts reflect 
 
     const movable = await create('move-during-replay')
     assert.equal(movable.status, 201)
-    await db.prepare("UPDATE conversations SET payload_json=json_set(payload_json,'$.provenance.followups_completed',json('false')) WHERE id=?").bind(movable.body.request_id).run()
+    await db.prepare("UPDATE conversations SET payload_json=json_set(payload_json,'$.provenance.followups_completed',json('false')) WHERE id=?").bind(movable.body.conversation_id).run()
     await arm('move')
     const moved = await create('move-during-replay')
-    const persistedMoved = await db.prepare('SELECT s.starts_at,s.ends_at,s.timezone,b.status FROM bookings b JOIN product_sessions s ON s.id=b.product_session_id WHERE b.id=(SELECT booking_id FROM conversations WHERE id=?)').bind(movable.body.request_id).first()
+    const persistedMoved = await db.prepare('SELECT s.starts_at,s.ends_at,s.timezone,b.status FROM bookings b JOIN product_sessions s ON s.id=b.product_session_id WHERE b.id=(SELECT booking_id FROM conversations WHERE id=?)').bind(movable.body.conversation_id).first()
     assert.equal(moved.status, 200)
     assert.equal(moved.body.replayed, true)
     assert.notEqual(moved.body.starts_at, movable.body.starts_at)

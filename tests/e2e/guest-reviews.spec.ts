@@ -32,7 +32,7 @@ test('a guest who did not come is marked a no-show from the booking record, and 
       const listed = (await body<{ threads: InboxRow[] }>(await page.request.get(`/api/dashboard/organizations/${organizationId}/conversations`, { params: { mailbox, type: submissionType } }), 200)).threads
       for (const row of listed) {
         const { booking } = await body<{ booking: DashboardBookingDetails }>(await page.request.get(`/api/dashboard/bookings/${submissionType}/${row.id}`, { params: { org: slug } }), 200)
-        if (booking.canMarkNoShow) { target = { thread: { ...row, submissionType }, details: booking }; break }
+        if (booking.can_mark_no_show) { target = { thread: { ...row, submissionType }, details: booking }; break }
       }
       if (target) break
     }
@@ -50,8 +50,8 @@ test('a guest who did not come is marked a no-show from the booking record, and 
 
     // Read back through other paths: the record, the conversation, and a repeat refused.
     const after = (await body<{ booking: DashboardBookingDetails }>(await page.request.get(`/api/dashboard/bookings/${thread.submissionType}/${thread.id}`, { params: { org: slug } }), 200)).booking
-    expect(after.noShowAt).not.toBeNull()
-    expect(after.canMarkNoShow).toBe(false)
+    expect(after.no_show_at).not.toBeNull()
+    expect(after.can_mark_no_show).toBe(false)
     expect(after.status).toBe(details.status)
     // The conversation says it once, as the owner who marked it reads it.
     const conversation = (await body<{ thread: InboxThread }>(await page.request.get(`/api/dashboard/organizations/${organizationId}/guest-threads/${thread.id}`), 200)).thread

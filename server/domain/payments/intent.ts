@@ -238,7 +238,7 @@ export async function confirmPayment(db: DbClient, stripe: Stripe, env: Cloudfla
  * unpaid booking's confirmation carries.
  */
 export type PaymentReturn =
-  | { state: 'paid'; kind: 'booking'; request_id: string; cancellation_token: string }
+  | { state: 'paid'; kind: 'booking'; conversation_id: string; cancellation_token: string }
   | { state: 'paid'; kind: 'stay'; activity_id: string; receipt_token: string }
   /** Stripe is still clearing the payment; nothing is booked until it captures. */
   | { state: 'processing' }
@@ -259,16 +259,16 @@ async function paymentReceipt(db: DbClient, env: CloudflareEnv, payment: Payment
     throw new Error('Captured payment has no booking it paid for')
   }
   if (payment.subject_type !== 'booking') throw new Error(`Payment subject ${payment.subject_type} has no guest confirmation`)
-  const booking = await queryFirst<{ request_id: string | null }>(db, "SELECT id AS request_id FROM conversations WHERE booking_id=? AND organization_id=? AND kind='booking'", [hold.converted_booking_id, payment.organization_id])
-  if (!booking?.request_id) throw new Error('Converted hold has no booking conversation')
+  const booking = await queryFirst<{ conversation_id: string | null }>(db, "SELECT id AS conversation_id FROM conversations WHERE booking_id=? AND organization_id=? AND kind='booking'", [hold.converted_booking_id, payment.organization_id])
+  if (!booking?.conversation_id) throw new Error('Converted hold has no booking conversation')
   if (hold.session_id === null) {
     // A stay is read by its conversation, as the guest's account reads it.
-    return { state: 'paid', kind: 'stay', activity_id: booking.request_id, receipt_token: (await createReplayableReservationCancelToken(env.EMAIL_REPLY_SECRET ?? '', booking.request_id)).token }
+    return { state: 'paid', kind: 'stay', activity_id: booking.conversation_id, receipt_token: (await createReplayableReservationCancelToken(env.EMAIL_REPLY_SECRET ?? '', booking.conversation_id)).token }
   }
-  const request = await getGuestRequest(db, booking.request_id, payment.organization_id, 'booking')
-  const cancellation = await createReplayableReservationCancelToken(env.EMAIL_REPLY_SECRET ?? '', booking.request_id)
+  const request = await getGuestRequest(db, booking.conversation_id, payment.organization_id, 'booking')
+  const cancellation = await createReplayableReservationCancelToken(env.EMAIL_REPLY_SECRET ?? '', booking.conversation_id)
   if (!request || request.kind !== 'booking' || await hashReservationCancelToken(cancellation.token) !== request.payload.cancellation.token_hash) throw new Error('Paid booking is missing its receipt capability')
-  return { state: 'paid', kind: 'booking', request_id: booking.request_id, cancellation_token: cancellation.token }
+  return { state: 'paid', kind: 'booking', conversation_id: booking.conversation_id, cancellation_token: cancellation.token }
 }
 
 /**

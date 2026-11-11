@@ -107,9 +107,9 @@ test('Today shows every booking type as a reservation card for its own business,
     const intake = await offering(db, env, 'law', { kind: 'service', name: 'Initial Case Review', day: inThreeDays })
     const book = async (org: Org, slug: string, sessionId: string, guest: string, party: number, key: string) => {
       const created = await createProductBooking(event(), { organizationId: org, slug, financialWritesAllowed: false, operator: operator(key),
-        body: { guest_name: guest, guest_email: `${key}@proof.example`, session_id: sessionId, party_size: party } })
+        body: { guest_name: guest, guest_email: `${key}@proof.example`, product_session_id: sessionId, party_size: party } })
       assert.equal(created.status, 201, JSON.stringify(created.body))
-      return created.body.request_id as string
+      return created.body.conversation_id as string
     }
     const evaConsultation = await book('law', estate.product.slug, estate.session.id, 'Eva Ortiz', 1, 'eva-consultation')
     const ianConsultation = await book('law', intake.product.slug, intake.session.id, 'Ian Reed', 1, 'ian-consultation')
@@ -128,7 +128,7 @@ test('Today shows every booking type as a reservation card for its own business,
     await updateStayHome(env, db, manager, home.id, { directions, wifi_network: 'Seaview', wifi_password: 'saltwater' })
     const stay = await createStay(db, env, manager, { product_id: home.id, idempotency_key: 'diana-stay', check_in_date: inTwoDays, check_out_date: addLocalDays(inTwoDays, 3),
       adults: 2, children: 0, guest_name: 'Diana Lee', guest_email: 'diana@proof.example', total_minor: 45_000 })
-    assert.ok(stay.request_id, 'a stay with a guest email has a conversation')
+    assert.ok(stay.conversation_id, 'a stay with a guest email has a conversation')
 
     // A table reservation: a booking of the bistro's tables at 18:00.
     const tables = await createTables(db, env, { organizationId: 'bistro', locationId: 'bistro-site', actorId: OWNER, memberId: 'bistro-owner', name: 'Bistro table',
@@ -137,7 +137,7 @@ test('Today shows every booking type as a reservation card for its own business,
     const seating = (await listSessions(db, { env, organizationId: 'bistro', productId: tables.id, fromInstant: evening, toInstant: new Date(Date.parse(evening) + 1).toISOString() }))[0]
     assert.equal(seating?.starts_at, evening)
     const table = await createProductBooking(event(), { organizationId: 'bistro', slug: tables.slug, financialWritesAllowed: false, operator: operator('nora-table'),
-      body: { guest_name: 'Nora Park', guest_email: 'nora@proof.example', guest_phone: '+66812345679', session_id: seating!.id, party_size: 4 } })
+      body: { guest_name: 'Nora Park', guest_email: 'nora@proof.example', guest_phone: '+66812345679', product_session_id: seating!.id, party_size: 4 } })
     assert.equal(table.status, 201, JSON.stringify(table.body))
 
     const law = await today('law', 'upcoming'), studio = await today('studio', 'upcoming'), inn = await today('inn', 'upcoming'), bistro = await today('bistro', 'upcoming')
@@ -153,12 +153,12 @@ test('Today shows every booking type as a reservation card for its own business,
       { kind: 'booking', requestId: brunoClass, headline: 'Bruno’s group of 3', resourceName: 'Wheel Throwing Class', suggestion: 'Share how to prepare' },
     ])
     assert.deepEqual(inn.reservations.cards.map(shape), [
-      { kind: 'stay', requestId: stay.request_id, headline: 'Diana’s group of 2', resourceName: 'Seaview Cottage', suggestion: 'Share info about your place' },
+      { kind: 'stay', requestId: stay.conversation_id, headline: 'Diana’s group of 2', resourceName: 'Seaview Cottage', suggestion: 'Share info about your place' },
     ])
     assert.equal(inn.reservations.cards[0]!.stayId, stay.id)
     // A restaurant has no host-written preparation, so its reservation has no suggestion.
     assert.deepEqual(bistro.reservations.cards.map(shape), [
-      { kind: 'booking', requestId: table.body.request_id, headline: 'Nora’s group of 4', resourceName: 'bistro office', suggestion: null },
+      { kind: 'booking', requestId: table.body.conversation_id, headline: 'Nora’s group of 4', resourceName: 'bistro office', suggestion: null },
     ])
     assert.equal(bistro.reservations.title, 'You have 1 upcoming reservation')
     // Upcoming bookings are not today's.

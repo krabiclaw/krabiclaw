@@ -1345,15 +1345,15 @@ export async function notifyStayBooked(env: NotificationEnv, db: DbClient, organ
   if (!isCurrencyCode(stay.currency)) throw new Error('The stay has an unsupported currency')
   const home = stay.home
   const studio = organizationName({ organizationId, organizationName: organization.name })
-  const threadContext = await getOpeningThreadContext(db, stay.request_id)
+  const threadContext = await getOpeningThreadContext(db, stay.conversation_id)
   const [inboxUrl, hero, logoUrl, guest, contact, audience, notes] = await Promise.all([
-    buildOwnerThreadInboxUrl(env, db, { organizationId, locationId: home.location_id, threadId: stay.request_id }),
+    buildOwnerThreadInboxUrl(env, db, { organizationId, locationId: home.location_id, threadId: stay.conversation_id }),
     messageHero(db, organizationId, { type: 'product', id: home.product_id }),
     organizationLogo(db, organizationId),
     guestPresentation(db, { organizationId, organizationName: studio, productId: home.product_id, productTitle: home.name, locationId: home.location_id }),
     resolveLocationContact(db, organizationId, home.location_id),
     stayTurnoverAudience(env, db, organizationId, stay, home.check_in_time),
-    guestNote(db, stay.request_id),
+    guestNote(db, stay.conversation_id),
   ])
   const nights = stayNights(stay)
   const when = (date: string, time: string | null, locale: string) => [formatCalendarDate(date, locale, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }), time ? formatTime(time, locale) : null].filter(Boolean).join(' · ')
@@ -1370,13 +1370,13 @@ export async function notifyStayBooked(env: NotificationEnv, db: DbClient, organ
   }
   const ownerMessage = stayBookedMessage(ownerInput)
   const guestMessage = guestStayConfirmedMessage({
-    manageUrl: await buildBuyerRequestActivityUrl(env, db, { organizationId, threadId: stay.request_id }),
+    manageUrl: await buildBuyerRequestActivityUrl(env, db, { organizationId, threadId: stay.conversation_id }),
     locale: guest.locale, guestName: stay.guest_name, organizationName: guest.organizationName, organizationLogoUrl: logoUrl, homeName: guest.productTitle ?? home.name,
     checkIn: when(stay.check_in_date, home.check_in_time, guest.locale), checkOut: when(stay.check_out_date, home.check_out_time, guest.locale),
     nights: String(nights), guests: String(stay.adults + stay.children), total: formatMinorAmount(paid.amount, paid.currency, guest.locale),
     checkInInstructions: home.check_in_instructions, contactPhone: contact.contactPhone ?? null, contactEmail: contact.contactEmail ?? null,
     heroImageUrl: hero?.imageUrl ?? null,
-    receiptUrl: organization.public_url ? `${organization.public_url.replace(/\/$/, '')}${formatTenantLocalePath('/bookings/stay', guest.locale, sourceLocale.locale)}?id=${encodeURIComponent(stay.request_id)}#${(await createReplayableReservationCancelToken(env.EMAIL_REPLY_SECRET ?? '', stay.request_id)).token}` : null,
+    receiptUrl: organization.public_url ? `${organization.public_url.replace(/\/$/, '')}${formatTenantLocalePath('/bookings/stay', guest.locale, sourceLocale.locale)}?id=${encodeURIComponent(stay.conversation_id)}#${(await createReplayableReservationCancelToken(env.EMAIL_REPLY_SECRET ?? '', stay.conversation_id)).token}` : null,
   })
   const payload = {
     stay_id: stay.id, guest_name: stay.guest_name, email: stay.guest_email, home: home.name, check_in_date: stay.check_in_date, check_out_date: stay.check_out_date,
@@ -1387,7 +1387,7 @@ export async function notifyStayBooked(env: NotificationEnv, db: DbClient, organ
   const results = await Promise.allSettled([
     notifyOwner(env, db, {
       organizationId, organizationName: studio, locationId: home.location_id, template: 'new_stay', title: ownerMessage.title, payload, message: ownerMessage,
-      source: { conversationId: stay.request_id, messageId: anchorId(threadContext.subject) },
+      source: { conversationId: stay.conversation_id, messageId: anchorId(threadContext.subject) },
       memberIds: audience.memberIds, memberAlert: { message: stayBookedMessage(stayTurnoverAlert(ownerInput, audience.stayUrl, memberGuestName({ name: stay.guest_name }))), stayId: stay.id },
     }),
     sendEmailNotification(env, db, {
@@ -1418,7 +1418,7 @@ export async function notifyStayCancelled(env: NotificationEnv, db: DbClient, or
     if (!organization || !stay.guest_email || !stay.guest_name) throw new Error('A stay paid on the site needs its organization, guest name and email')
     const studio = organizationName({ organizationId, organizationName: organization.name })
     const [inboxUrl, hero, logoUrl, guest, contact] = await Promise.all([
-      buildOwnerThreadInboxUrl(env, db, { organizationId, locationId: home.location_id, threadId: stay.request_id }),
+      buildOwnerThreadInboxUrl(env, db, { organizationId, locationId: home.location_id, threadId: stay.conversation_id }),
       messageHero(db, organizationId, { type: 'product', id: home.product_id }),
       organizationLogo(db, organizationId),
       guestPresentation(db, { organizationId, organizationName: studio, productId: home.product_id, productTitle: home.name, locationId: home.location_id }),
@@ -1427,7 +1427,7 @@ export async function notifyStayCancelled(env: NotificationEnv, db: DbClient, or
     const nights = stayNights(stay)
     const day = (date: string, locale: string) => formatCalendarDate(date, locale, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
     const guestMessage = guestBookingCancelledMessage({
-      manageUrl: await buildBuyerRequestActivityUrl(env, db, { organizationId, threadId: stay.request_id }),
+      manageUrl: await buildBuyerRequestActivityUrl(env, db, { organizationId, threadId: stay.conversation_id }),
       locale: guest.locale, guestName: stay.guest_name, organizationName: guest.organizationName, organizationLogoUrl: logoUrl, productTitle: guest.productTitle ?? home.name,
       date: `${day(stay.check_in_date, guest.locale)} – ${day(stay.check_out_date, guest.locale)}`, time: home.check_in_time ? formatTime(home.check_in_time, guest.locale) : '',
       partySize: String(stay.adults + stay.children), contactPhone: contact.contactPhone ?? null, contactEmail: contact.contactEmail ?? null, wasConfirmed: true, wording: 'booking',
@@ -1435,7 +1435,7 @@ export async function notifyStayCancelled(env: NotificationEnv, db: DbClient, or
     const guestEmail = await renderNotificationEmail(guestMessage, { platformDomain: getPlatformDomain(env) })
     const guestTitle = `${guestMessage.title} — ${guestMessage.preheader?.split(' · ')[0] ?? home.name}`
     entry = await appendMessage(db, {
-      conversationId: stay.request_id, authorKind: 'krabiclaw', authorUserId: null, channel: 'web', body: guestEmail.text,
+      conversationId: stay.conversation_id, authorKind: 'krabiclaw', authorUserId: null, channel: 'web', body: guestEmail.text,
       eventName: `stay.${by}_cancelled`, dedupeKey,
       payload: { subject: guestTitle, refund_minor: refundMinor, location_id: home.location_id,
         email: { to: stay.guest_email, fromName: studio, html: guestEmail.html, text: guestEmail.text },
@@ -1448,7 +1448,7 @@ export async function notifyStayCancelled(env: NotificationEnv, db: DbClient, or
       },
     })
   }
-  if (entry.conversation_id !== stay.request_id || entry.author_kind !== 'krabiclaw' || entry.event_name !== `stay.${by}_cancelled`) throw new Error('Stay cancellation notification has a different message')
+  if (entry.conversation_id !== stay.conversation_id || entry.author_kind !== 'krabiclaw' || entry.event_name !== `stay.${by}_cancelled`) throw new Error('Stay cancellation notification has a different message')
   const stored = parseMessagePayload(entry)
   if (stored?.refund_minor !== refundMinor) throw new Error('Stay cancellation notification differs from its recorded refund')
   // A host cancellation has one required notice. Guest cancellations also
@@ -1470,12 +1470,12 @@ export async function notifyStayCancelled(env: NotificationEnv, db: DbClient, or
   const audience = await stayTurnoverAudience(env, db, organizationId, stay, home.check_in_time)
   const ownerInput = { ...recorded.owner, channel: null, arrival: audience.arrival, stayDates: { checkIn: stay.check_in_date, checkOut: stay.check_out_date } }
   const ownerMessage = stayCancelledMessage(ownerInput)
-  const threadContext: DeliveryAnchor = { conversationId: stay.request_id, subject: { messageId: entry.id } }
+  const threadContext: DeliveryAnchor = { conversationId: stay.conversation_id, subject: { messageId: entry.id } }
   const payload = { stay_id: stay.id, organization_name: recorded.email.fromName, deep_link: recorded.owner.replyUrl ?? '' }
   const results = await Promise.allSettled([
     ...(by === 'guest' ? [notifyOwner(env, db, {
       organizationId, organizationName: recorded.email.fromName, locationId: recorded.location_id, template: 'stay_cancelled', payload,
-      source: { conversationId: stay.request_id, messageId: entry.id },
+      source: { conversationId: stay.conversation_id, messageId: entry.id },
       title: ownerMessage.title, message: ownerMessage,
       memberIds: audience.memberIds, memberAlert: { message: stayCancelledMessage(stayTurnoverAlert(ownerInput, audience.stayUrl, memberGuestName({ name: recorded.owner.guestName }))), stayId: stay.id },
     })] : []),

@@ -55,7 +55,7 @@ export async function seedTraffic(baseURL: string, manifest: SeedManifest) {
           if (open.length < 2) throw new Error(`${tenant.name} has fewer than two bookable class times`)
           for (const [index, session] of open.slice(0, 2).entries()) {
             const booked = await context.request.post(`/api/public/products/${slug}/book`, {
-              data: { session_id: session.id, guest_name: `Seed Guest ${index + 1}`, guest_email: `seed-booking-${index + 1}@playwright.example`, party_size: 1, idempotency_key: crypto.randomUUID() },
+              data: { product_session_id: session.id, guest_name: `Seed Guest ${index + 1}`, guest_email: `seed-booking-${index + 1}@playwright.example`, party_size: 1, idempotency_key: crypto.randomUUID() },
             })
             if (booked.status() !== 201) throw new Error(`Booking ${tenant.name}'s class answered ${booked.status()} ${await booked.text()}`)
           }

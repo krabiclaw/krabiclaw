@@ -25,6 +25,6 @@ export default defineHandler(async (event) => {
   // The link lasts as a booking's does, from when the stay was booked.
   if (Date.parse(owner.created_at) + TOKEN_TTL_DAYS * 86_400_000 <= Date.now()) throw new HTTPError({ statusCode: 410, statusMessage: 'This link has expired. Your stay is in your KrabiClaw account once you create one with the email you booked with.' })
   const guest = await readGuestStay(env.DB, owner.user_id, activityId)
-  const manageUrl = await buildBuyerRequestActivityUrl(env, env.DB, { organizationId, threadId: guest.stay.request_id })
+  const manageUrl = await buildBuyerRequestActivityUrl(env, env.DB, { organizationId, threadId: guest.stay.conversation_id })
   return jsonResponse({ ...guest, manage_url: manageUrl }, { headers: { 'cache-control': 'private, no-store' } })
 })

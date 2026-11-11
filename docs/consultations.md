@@ -19,7 +19,7 @@ operator, and historical booked assignments are not backfilled or rewritten.
 ## Shared interfaces across the four feature PRs
 
 - Identities: a booking is two records. `request_id` is `requests.id`, the guest
-  thread (conversation, guest snapshot, cancellation link); `operational_booking_id`
+  thread (conversation, guest snapshot, cancellation link); `booking_id`
   is `bookings.id`, the seat on a session. Every created-booking response names
   both; a booking that requires payment answers with its checkout instead, and
   the two ids exist once the payment captures. Neither is called `booking_id`.
@@ -96,7 +96,7 @@ the refund once. Foundation has no dependency on finance tables or provider stat
 
 Lifecycle activity events include `booking.created`, `booking.confirm`,
 `booking.reject`, `booking.cancel` and accepted change operations. Payloads carry
-`operational_booking_id` and `request_id`; downstream consumers read the canonical
+`booking_id` and `conversation_id`; downstream consumers read the canonical
 Booking after commit. Dashboard detail is addressed by its thread `id` (the request
 ID in its route) and exposes `operationalBookingId` for operations on the Booking
 itself.

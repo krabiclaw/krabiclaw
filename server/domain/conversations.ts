@@ -266,7 +266,7 @@ export async function appendMessage(db: DbClient, input: MessageInput, more: Bat
   if (Number(inserted?.meta?.changes ?? 0) === 0) {
     const replay = await findMessageByDedupeKey(db, write.dedupeKey)
     if (replay) return sameMessage(replay, input)
-    if (!await queryFirst(db, 'SELECT 1 FROM conversations WHERE id = ?', [input.conversationId])) throw new HTTPError({ statusCode: 404, message: 'Conversation not found', data: { code: 'THREAD_NOT_FOUND', field: 'conversationId' } })
+    if (!await queryFirst(db, 'SELECT 1 FROM conversations WHERE id = ?', [input.conversationId])) throw new HTTPError({ statusCode: 404, message: 'Conversation not found', data: { code: 'THREAD_NOT_FOUND', field: 'conversation_id' } })
     throw new MessageStateConflictError('The conversation changed before the message could be written')
   }
   const created = await getMessage(db, write.id)
@@ -291,7 +291,7 @@ export function readThroughQuery(input: { conversationId: string; organizationId
 }
 
 function nothingToMark(): never {
-  throw new HTTPError({ statusCode: 409, message: 'The conversation has no message from someone else to mark', data: { code: 'NOTHING_TO_MARK', field: 'conversationId' } })
+  throw new HTTPError({ statusCode: 409, message: 'The conversation has no message from someone else to mark', data: { code: 'NOTHING_TO_MARK', field: 'conversation_id' } })
 }
 
 /**
@@ -299,7 +299,7 @@ function nothingToMark(): never {
  * (`throughMessageId`), whatever it holds; Mark as read reads it through to its
  * newest, and needs a message from someone else, as Mark as unread does.
  */
-export async function markConversationRead(db: DbClient, input: { organizationId: string; conversationId: string; userId: string; throughMessageId?: string | null }): Promise<{ read: true; lastReadMessageId: string }> {
+export async function markConversationRead(db: DbClient, input: { organizationId: string; conversationId: string; userId: string; throughMessageId?: string | null }): Promise<{ read: true; last_read_message_id: string }> {
   if (!input.throughMessageId && !await newestFromSomeoneElse(db, input.conversationId, input.userId)) nothingToMark()
   const through = input.throughMessageId ?? (await queryFirst<{ id: string }>(db, 'SELECT id FROM messages WHERE conversation_id = ? ORDER BY sequence DESC LIMIT 1', [input.conversationId]))!.id
   const [written] = await executeBatch(db, [readThroughQuery({ ...input, messageId: through, now: new Date().toISOString() })], { operation: 'Read conversation' })
@@ -307,16 +307,16 @@ export async function markConversationRead(db: DbClient, input: { organizationId
     && !await queryFirst(db, 'SELECT 1 FROM messages WHERE id = ? AND conversation_id = ?', [through, input.conversationId])) {
     throw new HTTPError({ statusCode: 422, message: 'That message is not in this conversation', data: { code: 'INVALID_MESSAGE', field: 'messageId' } })
   }
-  return { read: true, lastReadMessageId: through }
+  return { read: true, last_read_message_id: through }
 }
 
 /** Mark as unread: the newest message from someone else is unread again, whoever wrote what after it. */
-export async function markConversationUnread(db: DbClient, input: { organizationId: string; conversationId: string; userId: string }): Promise<{ read: false; lastReadMessageId: string | null }> {
+export async function markConversationUnread(db: DbClient, input: { organizationId: string; conversationId: string; userId: string }): Promise<{ read: false; last_read_message_id: string | null }> {
   const newest = await newestFromSomeoneElse(db, input.conversationId, input.userId)
   if (!newest) nothingToMark()
   await executeBatch(db, [participantUpsert({ conversationId: input.conversationId, organizationId: input.organizationId, userId: input.userId,
     set: 'last_read_message_id', valueSql: '?', params: [newest.previous_id], now: new Date().toISOString() })], { operation: 'Mark conversation unread' })
-  return { read: false, lastReadMessageId: newest.previous_id }
+  return { read: false, last_read_message_id: newest.previous_id }
 }
 
 /** Archive or unarchive, for this person alone (D2). */
@@ -361,7 +361,7 @@ export async function conversationAccessSql(alias: string, principal: Pick<Membe
 export async function assertConversationAccess(db: DbClient, principal: MemberAccessPrincipal, conversationId: string): Promise<ConversationRow> {
   const access = await conversationAccessSql('c', principal)
   const row = await queryFirst<ConversationRow>(db, `SELECT c.* FROM conversations c WHERE c.organization_id = ? AND c.id = ? AND ${access.sql}`, [principal.organizationId, conversationId, ...access.params])
-  if (!row) throw new HTTPError({ statusCode: 404, message: 'Conversation not found or access denied', data: { code: 'THREAD_NOT_FOUND', field: 'conversationId' } })
+  if (!row) throw new HTTPError({ statusCode: 404, message: 'Conversation not found or access denied', data: { code: 'THREAD_NOT_FOUND', field: 'conversation_id' } })
   return row
 }
 

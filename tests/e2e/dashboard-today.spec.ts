@@ -40,15 +40,15 @@ test('automation remains in Inbox while Today keeps the unanswered inquiry', asy
     const threads = (await inbox.json() as { threads: Array<{ id: string; guestName: string }> }).threads.filter(thread => thread.guestName === marker)
     expect(threads).toHaveLength(1)
     const threadId = threads[0]!.id
-    const sendAt = new Date(Date.now() + 2 * 86_400_000).toISOString()
+    const due_at = new Date(Date.now() + 2 * 86_400_000).toISOString()
     const scheduled = await page.request.post(`/api/dashboard/organizations/${organizationId}/guest-threads/${threadId}/send-later`, {
-      data: { body: `We can discuss your group dinner, ${marker}.`, sendAt },
+      data: { body: `We can discuss your group dinner, ${marker}.`, due_at },
     })
     expect(scheduled.status(), await scheduled.text()).toBe(201)
     messageId = (await scheduled.json() as { message: { id: string } }).message.id
     const futureSendAt = new Date(Date.now() + 40 * 86_400_000).toISOString()
     const futureScheduled = await page.request.post(`/api/dashboard/organizations/${organizationId}/guest-threads/${threadId}/send-later`, {
-      data: { body: `Later follow-up for ${marker}.`, sendAt: futureSendAt },
+      data: { body: `Later follow-up for ${marker}.`, due_at: futureSendAt },
     })
     expect(futureScheduled.status(), await futureScheduled.text()).toBe(201)
     futureMessageId = (await futureScheduled.json() as { message: { id: string } }).message.id

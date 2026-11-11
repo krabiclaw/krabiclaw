@@ -52,7 +52,7 @@ export async function teamAccessFor(principal: MemberAccessPrincipal, memberId: 
 }
 
 export interface TeamMember {
-  memberId: string
+  member_id: string
   /** The member's user id: what participants and senders are named by. */
   id: string
   name: string
@@ -63,17 +63,17 @@ export interface TeamMember {
 
 export interface TeamParticipant {
   id: string
-  memberId: string
+  member_id: string
   name: string
   image: string | null
 }
 
 export interface TeamStaySummary {
   id: string
-  productId: string
-  homeName: string
-  checkInDate: string
-  checkOutDate: string
+  product_id: string
+  name: string
+  check_in_date: string
+  check_out_date: string
   status: 'pending' | 'confirmed' | 'cancelled'
 }
 
@@ -88,15 +88,15 @@ export interface TeamThread {
   id: string
   /** A group's name; a stay conversation is titled by the home the guest sleeps in. */
   name: string | null
-  isGroup: boolean
-  createdByUserId: string | null
-  canManage: boolean
-  canLeave: boolean
-  createdAt: string
-  lastMessageAt: string
+  is_group: boolean
+  created_by_user_id: string | null
+  can_manage: boolean
+  can_leave: boolean
+  created_at: string
+  last_message_at: string
   /** The booking the conversation is about, if any: a stay's (`stay`) or a table's, class's or consultation's (`record`). */
-  bookingId: string | null
-  locationId: string | null
+  booking_id: string | null
+  location_id: string | null
   stay: TeamStaySummary | null
   /** A booking of a table, a class or a consultation: who booked, or what. */
   record: { id: string; title: string } | null
@@ -104,23 +104,23 @@ export interface TeamThread {
   job: TaskView | null
   location: TeamLocationSummary | null
   participants: TeamParticipant[]
-  lastMessage: { id: string; senderId: string | null; body: string; attachmentCount: number; createdAt: string } | null
+  last_message: { id: string; author_user_id: string | null; body: string; attachment_count: number; created_at: string } | null
   /** A message from someone else after the caller's read position (conversations.ts unreadSql). */
   unread: boolean
 }
 
 export interface TeamMessage {
   id: string
-  threadId: string
+  conversation_id: string
   /** null for an automatic message, and for a person's message once their account has been deleted. */
-  senderId: string | null
+  author_user_id: string | null
   /** Written by KrabiClaw (a job, a reminder, a move), not by a member: shown as sent automatically. It counts as unread like any message from someone else. */
   automatic: boolean
   body: string
   attachments: Array<{ id: string; url: string; width: number | null; height: number | null }>
   /** Each send this message went out as (email, WhatsApp, push), with its outcome. */
-  deliveries: Array<{ id: string; channel: NotificationChannel; status: GuestThreadDeliveryStatus; error: string | null; updatedAt: string }>
-  createdAt: string
+  deliveries: Array<{ id: string; channel: NotificationChannel; status: GuestThreadDeliveryStatus; error: string | null; updated_at: string }>
+  created_at: string
 }
 
 const MAX_BODY = 5000
@@ -159,7 +159,7 @@ async function canManageGroups(access: TeamAccess): Promise<boolean> {
 export async function listTeamMembers(env: CloudflareEnv, access: TeamAccess): Promise<TeamMember[]> {
   const members = await listAllOrganizationMembers(await organizationAdapter(env), access.organizationId)
   return members
-    .map(member => ({ memberId: member.id, id: member.user.id, name: member.user.name, email: member.user.email, image: member.user.image ?? null, role: member.role }))
+    .map(member => ({ member_id: member.id, id: member.user.id, name: member.user.name, email: member.user.email, image: member.user.image ?? null, role: member.role }))
     .sort((left, right) => (ROLE_ORDER.get(left.role) ?? 99) - (ROLE_ORDER.get(right.role) ?? 99) || left.name.localeCompare(right.name))
 }
 
@@ -221,29 +221,29 @@ export async function getTeamThread(env: CloudflareEnv, db: DbClient, access: Te
   const participants = seats.map((seat) => {
     const member = members.get(seat.user_id)
     if (!member) throw new Error(`Team conversation ${thread.id} seats user ${seat.user_id}, whom Better Auth does not hold as a member`)
-    return { id: member.user.id, memberId: member.id, name: member.user.name, image: member.user.image ?? null }
+    return { id: member.user.id, member_id: member.id, name: member.user.name, image: member.user.image ?? null }
   })
   if (booked?.unit === 'nights' && !booked.home_name) throw new Error(`Team conversation ${thread.id} names stay ${booked.id}, whose home has no name`)
-  const stay = booked?.unit === 'nights' ? { id: booked.id, productId: booked.product_id, homeName: booked.home_name!, checkInDate: bookingDay(booked.starts_at, booked.timezone), checkOutDate: bookingDay(booked.ends_at, booked.timezone), status: booked.status } : null
+  const stay = booked?.unit === 'nights' ? { id: booked.id, product_id: booked.product_id, name: booked.home_name!, check_in_date: bookingDay(booked.starts_at, booked.timezone), check_out_date: bookingDay(booked.ends_at, booked.timezone), status: booked.status } : null
   const record = booked?.unit === 'slot' ? { id: booked.id, title: booked.title } : null
   const managesGroups = await canManageGroups(access)
   return {
     id: thread.id,
-    name: thread.name ?? stay?.homeName ?? record?.title ?? null,
-    isGroup: thread.is_group === 1,
-    createdByUserId: thread.created_by_user_id,
-    canManage: thread.is_group === 1 && !thread.booking_id && !thread.location_id && (thread.created_by_user_id === access.userId || managesGroups),
-    canLeave: thread.is_group === 1 && !thread.booking_id && !thread.location_id,
-    createdAt: thread.created_at,
-    lastMessageAt: thread.last_message_at,
-    bookingId: thread.booking_id,
-    locationId: thread.location_id,
+    name: thread.name ?? stay?.name ?? record?.title ?? null,
+    is_group: thread.is_group === 1,
+    created_by_user_id: thread.created_by_user_id,
+    can_manage: thread.is_group === 1 && !thread.booking_id && !thread.location_id && (thread.created_by_user_id === access.userId || managesGroups),
+    can_leave: thread.is_group === 1 && !thread.booking_id && !thread.location_id,
+    created_at: thread.created_at,
+    last_message_at: thread.last_message_at,
+    booking_id: thread.booking_id,
+    location_id: thread.location_id,
     record,
     stay,
     job: thread.booking_id ? jobs.get(thread.booking_id) ?? null : null,
     location,
     participants,
-    lastMessage: last ? { id: last.id, senderId: last.author_user_id, body: last.body ?? '', attachmentCount: photos.get(last.id)?.length ?? 0, createdAt: last.created_at } : null,
+    last_message: last ? { id: last.id, author_user_id: last.author_user_id, body: last.body ?? '', attachment_count: photos.get(last.id)?.length ?? 0, created_at: last.created_at } : null,
     unread: thread.unread === 1,
   }
 }
@@ -498,38 +498,38 @@ async function readMessages(db: DbClient, rows: MessageRow[]): Promise<TeamMessa
   ])
   return rows.map(row => ({
     id: row.id,
-    threadId: row.conversation_id,
-    senderId: row.author_user_id,
+    conversation_id: row.conversation_id,
+    author_user_id: row.author_user_id,
     automatic: row.author_kind === 'krabiclaw',
     body: row.body ?? '',
     attachments: (photos.get(row.id) ?? []).map(photo => ({ id: photo.id, url: photo.url, width: photo.width, height: photo.height })),
     deliveries: deliveries.filter(delivery => delivery.message_id === row.id)
-      .map(delivery => ({ id: delivery.id, channel: delivery.channel, status: delivery.status, error: delivery.error, updatedAt: delivery.updated_at })),
-    createdAt: row.created_at,
+      .map(delivery => ({ id: delivery.id, channel: delivery.channel, status: delivery.status, error: delivery.error, updated_at: delivery.updated_at })),
+    created_at: row.created_at,
   }))
 }
 
-/** Newest first. `before` and `beforeId` name the oldest message already loaded. */
-export async function listTeamMessages(db: DbClient, access: TeamAccess, threadId: string, query: { limit?: unknown; before?: unknown; beforeId?: unknown }): Promise<{ messages: TeamMessage[]; hasMore: boolean }> {
-  await requireSeat(db, access, threadId)
+/** Newest first. `before` and `before_id` name the oldest message already loaded. */
+export async function listTeamMessages(db: DbClient, access: TeamAccess, conversation_id: string, query: { limit?: unknown; before?: unknown; before_id?: unknown }): Promise<{ messages: TeamMessage[]; has_more: boolean }> {
+  await requireSeat(db, access, conversation_id)
   const limit = query.limit === undefined ? 20 : Number(query.limit)
   if (!Number.isInteger(limit) || limit < 1 || limit > 100) fail(422, 'INVALID_LIMIT', 'limit must be a whole number from 1 to 100', 'limit')
-  if ((query.before === undefined) !== (query.beforeId === undefined)) fail(422, 'INVALID_CURSOR', 'before and beforeId are sent together', query.before === undefined ? 'before' : 'beforeId')
-  if (query.before !== undefined && (typeof query.before !== 'string' || !query.before || typeof query.beforeId !== 'string' || !query.beforeId)) fail(422, 'INVALID_CURSOR', 'before and beforeId must name a loaded message', 'before')
+  if ((query.before === undefined) !== (query.before_id === undefined)) fail(422, 'INVALID_CURSOR', 'before and before_id are sent together', query.before === undefined ? 'before' : 'before_id')
+  if (query.before !== undefined && (typeof query.before !== 'string' || !query.before || typeof query.before_id !== 'string' || !query.before_id)) fail(422, 'INVALID_CURSOR', 'before and before_id must name a loaded message', 'before')
   let cursor = ''
   const cursorParams: unknown[] = []
-  if (typeof query.beforeId === 'string') {
-    const loaded = await queryFirst<{ sequence: number; created_at: string }>(db, 'SELECT sequence, created_at FROM messages WHERE conversation_id = ? AND id = ?', [threadId, query.beforeId])
-    if (!loaded || loaded.created_at !== query.before) fail(422, 'INVALID_CURSOR', 'before and beforeId must name a loaded message', 'beforeId')
+  if (typeof query.before_id === 'string') {
+    const loaded = await queryFirst<{ sequence: number; created_at: string }>(db, 'SELECT sequence, created_at FROM messages WHERE conversation_id = ? AND id = ?', [conversation_id, query.before_id])
+    if (!loaded || loaded.created_at !== query.before) fail(422, 'INVALID_CURSOR', 'before and before_id must name a loaded message', 'before_id')
     cursor = 'AND m.sequence < ?'
     cursorParams.push(loaded.sequence)
   }
   // The seat is read again with the messages, so access that ended after the check above reads nothing.
   const rows = await queryAll<MessageRow>(db, `SELECT m.* FROM messages m JOIN conversations c ON c.id = m.conversation_id
     WHERE m.organization_id = ? AND m.conversation_id = ? AND ${SEAT_SQL('c')} ${cursor} ORDER BY m.sequence DESC LIMIT ?`,
-    [access.organizationId, threadId, access.userId, ...cursorParams, limit + 1])
-  if (!rows.length) await requireSeat(db, access, threadId)
-  return { messages: await readMessages(db, rows.slice(0, limit)), hasMore: rows.length > limit }
+    [access.organizationId, conversation_id, access.userId, ...cursorParams, limit + 1])
+  if (!rows.length) await requireSeat(db, access, conversation_id)
+  return { messages: await readMessages(db, rows.slice(0, limit)), has_more: rows.length > limit }
 }
 
 /**

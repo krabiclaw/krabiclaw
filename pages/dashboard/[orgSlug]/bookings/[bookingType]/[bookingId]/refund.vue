@@ -13,7 +13,7 @@
     <UFormField v-if="payment" :label="`Amount (${payment.currency})`">
       <UInput v-model="amount" inputmode="decimal" class="w-full" />
     </UFormField>
-    <UFormField v-if="payment" label="Reason" :hint="`${b.firstName(b.booking.value?.guestName ?? '')} will see this`">
+    <UFormField v-if="payment" label="Reason" :hint="`${b.firstName(b.booking.value?.guest_name ?? '')} will see this`">
       <UTextarea v-model="note" :rows="3" maxlength="500" class="w-full" placeholder="Tell them why you’re sending this refund." />
     </UFormField>
   </DashboardLeafPanel>

@@ -190,7 +190,7 @@ test('member self-service uses Better Auth permissions, public approval is admin
   await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,timezone,starts_at,ends_at,capacity,created_by,updated_by)VALUES('session-one-b','org','one','UTC',?,?,1,'owner','owner')").bind(`${day}T14:30:00.000Z`,`${day}T15:30:00.000Z`).run()
   const sessionOne=await db.prepare("SELECT updated_at FROM product_sessions WHERE id='session-one'").first<string>('updated_at')
   const mcpOrganization={db,env,organizationId:'org',userId:'owner',role:'owner',isPlatformAdmin:false,scopes:['tenant'],membership:{id:'member-owner',organizationId:'org',userId:'owner',role:'owner'}} as McpExecutorContext['organization']
-  const cancelled=await handleBookingsTools({toolName:'update_product_session',args:{product_id:'one',session_id:'session-one',expected_updated_at:sessionOne,status:'cancelled'},organization:mcpOrganization} as McpExecutorContext) as {session:{status:string}}
+  const cancelled=await handleBookingsTools({toolName:'update_product_session',args:{product_id:'one',product_session_id:'session-one',updated_at:sessionOne,status:'cancelled'},organization:mcpOrganization} as McpExecutorContext) as {session:{status:string}}
   assert.equal(cancelled.session.status,'cancelled')
   assert.equal(await db.prepare("SELECT status FROM product_sessions WHERE id='session-one'").first('status'),'cancelled')
   await db.prepare("DELETE FROM product_sessions WHERE id='session-one-b'").run()

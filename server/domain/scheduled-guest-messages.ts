@@ -3,7 +3,7 @@ import { execute, executeBatch, queryAllPages, queryFirst, type DbClient } from 
 import { messageDeliveryTaskQueries } from './tasks'
 import { isValidInstant } from '~/utils/timezone'
 import { guestMessageDueAt, messageText, messagingError, type ScheduleAnchor } from './guest-message-schedule'
-import { scheduledGuestMessage, SCHEDULED_MESSAGE_VIEW_SQL, templateSchedule, type MessageTemplateRow, type ScheduledGuestMessageRow, type ScheduledGuestMessageView } from './guest-messaging'
+import { scheduledGuestMessage, SCHEDULED_MESSAGE_VIEW_SQL, templateSchedule, type MessageTemplateRow, type ScheduledGuestMessageRow } from './guest-messaging'
 import { guestReplyDestination, operationDedupeKey, sendScheduledGuestReply, type OperationOutcome } from './guest-threads/operations'
 import { assertConversationAccess, findMessageByDedupeKey } from './conversations'
 import { publishConversationEvent, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
@@ -40,7 +40,7 @@ async function plan(db: DbClient, template: MessageTemplateRow, source: BookedRe
   const existing = await queryFirst<ScheduledGuestMessageRow>(db, 'SELECT * FROM scheduled_guest_messages WHERE template_id = ? AND booking_id = ?', [template.id, source.id])
   if (existing && existing.status !== 'pending') return
   const schedule = templateSchedule(template)
-  const covered = schedule !== null && schedule.productIds.includes(source.offering_id)
+  const covered = schedule !== null && schedule.product_ids.includes(source.offering_id)
   const guard = bookedRecordGuard(source)
   if (!covered || source.status === 'cancelled') {
     if (existing) await execute(db, `UPDATE scheduled_guest_messages SET status = 'cancelled', reason = ?, updated_at = ?
@@ -66,9 +66,9 @@ async function plan(db: DbClient, template: MessageTemplateRow, source: BookedRe
         await savePlan(db, template, source, existing, values, now)
         return
       }
-      due = new Date(Date.parse(source.received_at) + schedule.delayMinutes * 60000).toISOString()
+      due = new Date(Date.parse(source.received_at) + schedule.delay_minutes * 60000).toISOString()
     } else due = guestMessageDueAt(schedule, anchors(source), source.timezone)
-    validTimestamp(template.updated_at, 'template.updatedAt')
+    validTimestamp(template.updated_at, 'template.updated_at')
     validTimestamp(source.updated_at, 'source.updatedAt')
     const changedAt = [template.updated_at, source.updated_at].sort().at(-1)!
     const past = due <= changedAt && (existing === undefined || existing.due_at !== due)
@@ -150,7 +150,7 @@ async function planCheckInMessage(db: DbClient, stay: CheckInStay, now: string):
         now, existing.id, existing.updated_at])
     return
   }
-  const planned = guestMessageDueAt({ trigger: 'check_in', offsetDays: -1, localTime: '10:00', productIds: [] }, anchors(stay), stay.timezone)
+  const planned = guestMessageDueAt({ trigger: 'check_in', offset_days: -1, local_time: '10:00', product_ids: [] }, anchors(stay), stay.timezone)
   const due = planned > now ? planned : existing?.status === 'pending' && existing.due_at && existing.due_at <= now ? existing.due_at : now
   if (existing?.status === 'pending' && existing.body === instructions && existing.due_at === due
     && existing.timezone === stay.timezone) return
@@ -192,7 +192,7 @@ export async function planTemplateMessages(db: DbClient, template: MessageTempla
     AND ((br.offering_id IN (SELECT value FROM json_each(?)) AND br.ends_at >= strftime('%Y-%m-%d', ?, '-10 days'))
       OR EXISTS (SELECT 1 FROM scheduled_guest_messages m WHERE m.template_id = ? AND m.status = 'pending' AND m.booking_id = br.id))
     ORDER BY br.id`,
-  [template.organization_id, JSON.stringify(schedule?.productIds ?? []), now, template.id])
+  [template.organization_id, JSON.stringify(schedule?.product_ids ?? []), now, template.id])
   for (const row of rows) await plan(db, template, row, now)
 }
 
@@ -230,36 +230,36 @@ async function reconcileScheduledGuestMessagePlans(db: DbClient, now: string): P
 }
 
 /** A send time is a future instant, at most a year ahead. */
-function sendAt(value: unknown, now: string): string {
-  if (typeof value !== 'string' || !isValidInstant(value)) messagingError(422, 'INVALID_MESSAGING_FIELD', 'sendAt must be an ISO 8601 instant', 'sendAt')
+function validateDueAt(value: unknown, now: string): string {
+  if (typeof value !== 'string' || !isValidInstant(value)) messagingError(422, 'INVALID_MESSAGING_FIELD', 'due_at must be an ISO 8601 instant', 'due_at')
   const instant = new Date(value).toISOString()
-  if (instant <= now) messagingError(422, 'SEND_LATER_IN_PAST', 'Choose a time in the future', 'sendAt')
-  if (Date.parse(instant) - Date.parse(now) > 366 * 86_400_000) messagingError(422, 'SEND_LATER_TOO_FAR', 'Choose a time within the next year', 'sendAt')
+  if (instant <= now) messagingError(422, 'SEND_LATER_IN_PAST', 'Choose a time in the future', 'due_at')
+  if (Date.parse(instant) - Date.parse(now) > 366 * 86_400_000) messagingError(422, 'SEND_LATER_TOO_FAR', 'Choose a time within the next year', 'due_at')
   return instant
 }
 
 /**
- * A member's own reply, put in the outbox to go out at sendAt as their reply.
+ * A member's own reply, put in the outbox to go out at due_at as their reply.
  * Nothing is scheduled to a guest the reply could not reach.
  */
-export async function scheduleGuestReply(db: DbClient, principal: MemberAccessPrincipal, threadId: string, value: { body: unknown; sendAt: unknown }, now = new Date().toISOString()) {
+export async function scheduleGuestReply(db: DbClient, principal: MemberAccessPrincipal, conversation_id: string, value: { body: unknown; due_at: unknown }, now = new Date().toISOString()) {
   const body = messageText(value.body, 'body', 5000)
-  const due = sendAt(value.sendAt, now)
-  const thread = await getGuestRequest(db, threadId, principal.organizationId)
-  if (!thread) messagingError(404, 'THREAD_NOT_FOUND', 'Thread not found', 'threadId')
+  const due = validateDueAt(value.due_at, now)
+  const thread = await getGuestRequest(db, conversation_id, principal.organizationId)
+  if (!thread) messagingError(404, 'THREAD_NOT_FOUND', 'Thread not found', 'conversation_id')
   await assertConversationAccess(db, principal, thread.id)
   const destination = await guestReplyDestination(db, thread)
   if (destination.channel === null) messagingError(409, 'GUEST_UNREACHABLE', destination.reason, 'conversation_id')
   const id = crypto.randomUUID()
   await execute(db, `INSERT INTO scheduled_guest_messages (id, organization_id, conversation_id, author_user_id, body, due_at, status, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)`, [id, principal.organizationId, thread.id, principal.userId, body, due, now, now])
-  const saved = await queryFirst<ScheduledGuestMessageView>(db, `${SCHEDULED_MESSAGE_VIEW_SQL} WHERE m.organization_id = ? AND m.id = ?`, [principal.organizationId, id])
-  if (!saved) messagingError(500, 'SCHEDULED_MESSAGE_NOT_SAVED', 'The scheduled reply could not be read back', 'messageId')
+  const saved = await queryFirst<ScheduledGuestMessageRow>(db, `${SCHEDULED_MESSAGE_VIEW_SQL} WHERE m.organization_id = ? AND m.id = ?`, [principal.organizationId, id])
+  if (!saved) messagingError(500, 'SCHEDULED_MESSAGE_NOT_SAVED', 'The scheduled reply could not be read back', 'scheduled_message_id')
   try {
-    await publishScheduledGuestMessageChange(db, principal.env, saved.resolved_conversation_id)
+    await publishScheduledGuestMessageChange(db, principal.env, saved.conversation_id)
   } catch (cause) {
     throw new HTTPError({ statusCode: 503, message: 'Your reply was scheduled, but open apps could not be updated. Reload before scheduling it again.',
-      data: { code: 'DASHBOARD_PUBLICATION_FAILED', field: 'realtime', committed: true, message_id: saved.id }, cause })
+      data: { code: 'DASHBOARD_PUBLICATION_FAILED', field: 'realtime', committed: true, scheduled_message_id: saved.id }, cause })
   }
   return scheduledGuestMessage(saved)
 }
@@ -270,7 +270,7 @@ type SendFailure = { status: 'failed' | 'needs_review'; reason: string; error_co
 /** Every non-sent reply outcome carries its own typed facts; none is generalized here. */
 function sendFailure(outcome: Exclude<OperationOutcome, { ok: true }>): SendFailure {
   switch (outcome.reason) {
-    case 'thread_not_found': return { status: 'failed', reason: 'The guest conversation no longer exists.', error_code: 'THREAD_NOT_FOUND', error_field: 'conversationId' }
+    case 'thread_not_found': return { status: 'failed', reason: 'The guest conversation no longer exists.', error_code: 'THREAD_NOT_FOUND', error_field: 'conversation_id' }
     case 'source_not_found': return { status: 'failed', reason: 'The conversation’s booking no longer exists.', error_code: 'SOURCE_NOT_FOUND', error_field: 'source' }
     case 'guest_unreachable': return { status: 'failed', reason: outcome.message, error_code: outcome.code, error_field: outcome.field }
     case 'empty_body': return { status: 'failed', reason: 'The scheduled message has no text.', error_code: 'EMPTY_MESSAGE', error_field: 'body' }
@@ -281,7 +281,7 @@ function sendFailure(outcome: Exclude<OperationOutcome, { ok: true }>): SendFail
   }
 }
 
-async function finishSend(db: DbClient, env: SendEnv, row: ScheduledGuestMessageView, values: { status: 'sent' | 'failed' | 'needs_review'; reason: string | null; error_code: string | null; error_field: string | null; message_id: string | null; sent_at: string | null }): Promise<void> {
+async function finishSend(db: DbClient, env: SendEnv, row: ScheduledGuestMessageRow, values: { status: 'sent' | 'failed' | 'needs_review'; reason: string | null; error_code: string | null; error_field: string | null; message_id: string | null; sent_at: string | null }): Promise<void> {
   const now = new Date().toISOString()
   const [result] = await executeBatch(db, [{
     query: `UPDATE scheduled_guest_messages SET status = ?, reason = ?, error_code = ?, error_field = ?, message_id = ?, sent_at = ?, updated_at = ?
@@ -289,7 +289,7 @@ async function finishSend(db: DbClient, env: SendEnv, row: ScheduledGuestMessage
     params: [values.status, values.reason, values.error_code, values.error_field, values.message_id, values.sent_at, now, row.id],
   }, ...messageDeliveryTaskQueries(row.id, now)], { operation: 'Record scheduled message outcome' })
   if (result?.meta.changes !== 1) messagingError(409, 'SCHEDULED_MESSAGE_NOT_SENDING', 'The scheduled message outcome could not be recorded because it is no longer sending', 'status')
-  if (row.resolved_conversation_id !== null) await publishScheduledGuestMessageChange(db, env, row.resolved_conversation_id, values.message_id === null ? 'MESSAGE_UPDATE' : 'MESSAGE_CREATE')
+  if (row.conversation_id !== null) await publishScheduledGuestMessageChange(db, env, row.conversation_id, values.message_id === null ? 'MESSAGE_UPDATE' : 'MESSAGE_CREATE')
 }
 
 /** The idempotency key a row is sent under: a reply's is its author's own, which Inbox Retry reuses. */
@@ -310,15 +310,15 @@ async function sendScheduledGuestMessage(db: DbClient, env: SendEnv, row: Pick<S
     if (row.booking_id === null) messagingError(500, 'INVALID_SCHEDULED_MESSAGE', 'The automatic message has no booking', 'bookingId')
     await planSourceMessages(db, row.organization_id, row.booking_id, now)
   }
-  const current = await queryFirst<ScheduledGuestMessageView>(db, `${SCHEDULED_MESSAGE_VIEW_SQL} WHERE m.organization_id = ? AND m.id = ?`, [row.organization_id, row.id])
+  const current = await queryFirst<ScheduledGuestMessageRow>(db, `${SCHEDULED_MESSAGE_VIEW_SQL} WHERE m.organization_id = ? AND m.id = ?`, [row.organization_id, row.id])
   if (!current || current.status !== 'pending' || current.due_at === null || current.due_at > now) return 'not_due'
   const claim = await execute(db, `UPDATE scheduled_guest_messages SET status = 'sending', started_at = ?, updated_at = ? WHERE id = ? AND status = 'pending' AND updated_at = ?`,
     [now, now, current.id, current.updated_at])
   if (claim.meta.changes !== 1) return 'not_due'
   const sending = { ...current, status: 'sending' as const, started_at: now, updated_at: now }
-  const conversationId = sending.resolved_conversation_id
+  const conversationId = sending.conversation_id
   if (conversationId === null) {
-    await finishSend(db, env, sending, { status: 'failed', reason: 'There is no guest conversation to send through.', error_code: 'CONVERSATION_REQUIRED', error_field: 'conversationId', message_id: null, sent_at: null })
+    await finishSend(db, env, sending, { status: 'failed', reason: 'There is no guest conversation to send through.', error_code: 'CONVERSATION_REQUIRED', error_field: 'conversation_id', message_id: null, sent_at: null })
     return 'failed'
   }
   if (sending.author_user_id !== null) {
@@ -332,7 +332,7 @@ async function sendScheduledGuestMessage(db: DbClient, env: SendEnv, row: Pick<S
         await execute(db, `UPDATE scheduled_guest_messages SET status = 'pending', started_at = NULL, updated_at = ? WHERE id = ? AND status = 'sending'`, [new Date().toISOString(), sending.id])
         throw error
       }
-      await finishSend(db, env, sending, { status: 'failed', reason: error.message, error_code: 'SEND_LATER_ACCESS_REVOKED', error_field: 'authorUserId', message_id: null, sent_at: null })
+      await finishSend(db, env, sending, { status: 'failed', reason: error.message, error_code: 'SEND_LATER_ACCESS_REVOKED', error_field: 'author_user_id', message_id: null, sent_at: null })
       return 'failed'
     }
   }

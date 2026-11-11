@@ -250,7 +250,7 @@ test('a moved guest takes the nights, turnover and messages to the new home whil
     channex.revise('rev-move', booking, '2026-10-15T01:00:00Z')
     const stayId = (await applyBookingRevision(db, env, 'rev-move') as { stay_id: string }).stay_id
     const landed = await getStay(db, access, stayId)
-    assert.ok(landed.request_id, 'the guest has a conversation to be told in')
+    assert.ok(landed.conversation_id, 'the guest has a conversation to be told in')
 
     // Without instructions the guest could not be told how to get in, so the move is refused and nothing changes.
     await assert.rejects(moveStay(db, env, access, stayId, { expected_version: landed.version, product_id: annex }), /Add check-in instructions/)

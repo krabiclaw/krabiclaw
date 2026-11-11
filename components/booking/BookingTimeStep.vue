@@ -80,7 +80,7 @@
         <div class="grid grid-cols-3 gap-2 sm:grid-cols-4">
           <button
             v-for="slot in day.slots"
-            :key="slot.session_id ?? slot.time_slot"
+            :key="slot.product_session_id ?? slot.time_slot"
             type="button"
             :disabled="slot.disabled"
             :aria-label="`${formatTime(slot.time_slot, locale)} ${slot.availabilityLabel}`"
@@ -119,7 +119,7 @@
 import { formatCalendarDate, formatTime, addLocalDays } from '~/utils/timezone'
 export interface RawSlotAvailability {
   time_slot: string
-  session_id?: string
+  product_session_id?: string
   capacity: number | null
   remaining: number | null
   is_closed: boolean
@@ -209,7 +209,7 @@ const days = computed(() => {
             : scarce
               ? t('site.experience_detail.left', { count: s.remaining })
               : t('site.experience_detail.available')
-      return { session_id: s.session_id, time_slot: s.time_slot, disabled, isClosedOrFull, scarce, availabilityLabel }
+      return { product_session_id: s.product_session_id, time_slot: s.time_slot, disabled, isClosedOrFull, scarce, availabilityLabel }
     })
     return { key: d.date, label: dayLabelFor(d.date), slots }
   }).filter((d) => d.slots.length > 0)
@@ -235,14 +235,14 @@ const selectedSummary = computed(() => {
   return `${dayPart} · ${formatTime(props.modelValue.time, locale.value)}`
 })
 
-function isSelected(day: { key: string }, slot: { time_slot: string; session_id?: string }): boolean {
+function isSelected(day: { key: string }, slot: { time_slot: string; product_session_id?: string }): boolean {
   const value = props.modelValue
-  return Boolean(value && (slot.session_id ? value.sessionId === slot.session_id : value.day === day.key && value.time === slot.time_slot))
+  return Boolean(value && (slot.product_session_id ? value.sessionId === slot.product_session_id : value.day === day.key && value.time === slot.time_slot))
 }
 
-function selectSlot(day: { key: string; label: string }, slot: { time_slot: string; session_id?: string; disabled: boolean }) {
+function selectSlot(day: { key: string; label: string }, slot: { time_slot: string; product_session_id?: string; disabled: boolean }) {
   if (slot.disabled) return
-  emit('update:modelValue', { sessionId: slot.session_id, day: day.key, label: day.label, time: slot.time_slot })
+  emit('update:modelValue', { sessionId: slot.product_session_id, day: day.key, label: day.label, time: slot.time_slot })
 }
 
 function jumpToDay(key: string) {

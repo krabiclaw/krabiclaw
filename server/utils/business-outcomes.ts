@@ -116,7 +116,7 @@ export async function listBusinessOutcomes(
           WHERE operation.organization_id = measured.organization_id
             AND ((json_extract(measured.payload_json, '$.event_name') IN ('booking_confirmed', 'booking_declined', 'booking_cancelled')
               AND operation.event_name = CASE json_extract(measured.payload_json, '$.event_name') WHEN 'booking_confirmed' THEN 'booking.confirm' WHEN 'booking_declined' THEN 'booking.reject' ELSE 'booking.cancel' END
-              AND json_extract(operation.payload_json, '$.operational_booking_id') = json_extract(measured.payload_json, '$.entity_id'))
+              AND json_extract(operation.payload_json, '$.booking_id') = json_extract(measured.payload_json, '$.entity_id'))
               OR (json_extract(measured.payload_json, '$.event_name') IN ('booking_change_accepted', 'booking_change_declined')
               AND operation.event_name = CASE json_extract(measured.payload_json, '$.event_name') WHEN 'booking_change_accepted' THEN 'booking_change.accepted' ELSE 'booking_change.declined' END
               AND json_extract(operation.payload_json, '$.requestId') = json_extract(measured.payload_json, '$.entity_id')))
@@ -144,7 +144,7 @@ export async function listBusinessOutcomes(
       if (!kind || !id) invalidEvidence(row, 'Measured conversion has no canonical subject')
       subject = { kind, id }
     } else if (row.request_id && row.source_table === 'messages') {
-      const operationalId = text(payload.operational_booking_id)
+      const operationalId = text(payload.booking_id)
       if (operationalId) {
         if (row.request_kind !== 'booking') invalidEvidence(row, 'Operational activity has no valid recorded request kind')
         subject = { kind: 'booking', id: operationalId }

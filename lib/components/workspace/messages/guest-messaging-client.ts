@@ -14,16 +14,16 @@ export type ScheduledMessagePage = Awaited<ReturnType<typeof listScheduledGuestM
 
 const isIds = (value: unknown): value is string[] => Array.isArray(value) && value.length <= 100 && value.every(id => typeof id === 'string' && Boolean(id))
 function isSchedule(value: unknown): value is GuestMessageSchedule {
-  if (!isRecord(value) || !isIds(value.productIds) || !value.productIds.length) return false
-  if (value.trigger === 'booking_received') return value.delayMinutes === 5
+  if (!isRecord(value) || !isIds(value.product_ids) || !value.product_ids.length) return false
+  if (value.trigger === 'booking_received') return value.delay_minutes === 5
   if (value.trigger !== 'check_in' && value.trigger !== 'check_out') return false
-  return 'offsetHours' in value ? Number.isInteger(value.offsetHours)
-    : Number.isInteger(value.offsetDays) && typeof value.localTime === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(value.localTime)
+  return 'offset_hours' in value ? Number.isInteger(value.offset_hours)
+    : Number.isInteger(value.offset_days) && typeof value.local_time === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(value.local_time)
 }
 export function isMessageTemplate(value: unknown): value is MessageTemplate {
-  return isRecord(value) && typeof value.id === 'string' && typeof value.organizationId === 'string'
+  return isRecord(value) && typeof value.id === 'string' && typeof value.organization_id === 'string'
     && typeof value.title === 'string' && Boolean(value.title.trim()) && typeof value.body === 'string' && Boolean(value.body.trim())
-    && Number.isSafeInteger(value.version) && Number(value.version) > 0 && isSchedule(value.schedule) && isValidInstant(value.createdAt) && isValidInstant(value.updatedAt)
+    && Number.isSafeInteger(value.version) && Number(value.version) > 0 && isSchedule(value.schedule) && isValidInstant(value.created_at) && isValidInstant(value.updated_at)
 }
 export function isMessageTemplateResponse(value: unknown): value is { template: MessageTemplate } { return isRecord(value) && isMessageTemplate(value.template) }
 function isPagination(value: unknown): boolean {
@@ -37,16 +37,16 @@ export function isMessageTemplatePage(value: unknown): value is MessageTemplateP
 /** An outbox row: an automatic message about a booking, or a member's own send-later reply in a conversation. */
 export function isScheduledMessage(value: unknown): value is ScheduledMessage {
   const text = (field: unknown) => typeof field === 'string' && Boolean(field)
-  if (!isRecord(value) || !['id', 'organizationId', 'body'].every(key => text(value[key]))) return false
-  const automatic = value.authorUserId === null
-    ? text(value.title) && text(value.productId) && text(value.bookingId) && Number.isSafeInteger(value.templateVersion) && typeof value.timezone === 'string' && isValidTimezone(value.timezone)
-    : text(value.authorUserId) && text(value.conversationId) && value.title === null && value.productId === null && value.bookingId === null && value.templateId === null && value.templateVersion === null && value.timezone === null
+  if (!isRecord(value) || !['id', 'organization_id', 'body'].every(key => text(value[key]))) return false
+  const automatic = value.author_user_id === null
+    ? text(value.template_title) && text(value.product_id) && text(value.booking_id) && Number.isSafeInteger(value.template_version) && typeof value.timezone === 'string' && isValidTimezone(value.timezone)
+    : text(value.author_user_id) && text(value.conversation_id) && value.template_title === null && value.product_id === null && value.booking_id === null && value.template_id === null && value.template_version === null && value.timezone === null
   return automatic
     && ['pending', 'sending', 'sent', 'failed', 'needs_review', 'cancelled', 'skipped'].includes(String(value.status))
-    && (value.conversationId === null || typeof value.conversationId === 'string') && (value.templateId === null || typeof value.templateId === 'string')
-    && (value.dueAt === null || isValidInstant(value.dueAt))
-    && ['reason', 'errorCode', 'errorField', 'messageId', 'startedAt', 'sentAt'].every(key => value[key] === null || typeof value[key] === 'string')
-    && isValidInstant(value.createdAt) && isValidInstant(value.updatedAt)
+    && (value.conversation_id === null || typeof value.conversation_id === 'string') && (value.template_id === null || typeof value.template_id === 'string')
+    && (value.due_at === null || isValidInstant(value.due_at))
+    && ['reason', 'error_code', 'error_field', 'message_id', 'started_at', 'sent_at'].every(key => value[key] === null || typeof value[key] === 'string')
+    && isValidInstant(value.created_at) && isValidInstant(value.updated_at)
 }
 export function isScheduledMessagePage(value: unknown): value is ScheduledMessagePage {
   return isRecord(value) && isPagination(value.pagination) && Array.isArray(value.messages) && value.messages.every(isScheduledMessage)
@@ -76,8 +76,8 @@ export function messageScheduleLabel(schedule: GuestMessageSchedule, vertical: s
   if (schedule.trigger === 'booking_received') return `5 minutes after ${words.received}`
   const event = words[schedule.trigger]
   const count = (amount: number, unit: string) => `${Math.abs(amount)} ${unit}${Math.abs(amount) === 1 ? '' : 's'} ${amount < 0 ? 'before' : 'after'} ${event}`
-  if ('offsetHours' in schedule) return schedule.offsetHours ? count(schedule.offsetHours, 'hour') : `When ${event}`
-  return `${schedule.offsetDays ? count(schedule.offsetDays, 'day') : schedule.trigger === 'check_in' ? words.checkInDay : words.checkOutDay} at ${schedule.localTime} · ${words.zone}`
+  if ('offset_hours' in schedule) return schedule.offset_hours ? count(schedule.offset_hours, 'hour') : `When ${event}`
+  return `${schedule.offset_days ? count(schedule.offset_days, 'day') : schedule.trigger === 'check_in' ? words.checkInDay : words.checkOutDay} at ${schedule.local_time} · ${words.zone}`
 }
 
 export function isScheduledMessageResponse(value: unknown): value is { message: ScheduledMessage } { return isRecord(value) && isScheduledMessage(value.message) }

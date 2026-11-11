@@ -125,7 +125,7 @@ export function useSessionBooking(input: MaybeRefOrGetter<SessionBookingContext>
       const date = localDateOf(session)
       const entry = byDate.get(date) ?? { date, slots: [] }
       entry.slots.push({
-        session_id: session.id,
+        product_session_id: session.id,
         time_slot: localTimeOf(session),
         capacity: session.remaining === null ? null : session.remaining,
         remaining: session.remaining,
@@ -278,15 +278,15 @@ export function useSessionBooking(input: MaybeRefOrGetter<SessionBookingContext>
       }
       checkoutRequestKey.value ??= crypto.randomUUID()
       type CheckoutResponse = { success: true; status: 'checkout'; payment_id: string; pay_path: string; purchase_claim: string; expires_at: string }
-      type BookingResponse = { success: true; status: 'pending' | 'confirmed'; operational_booking_id: string; request_id: string; cancellation_token: string; starts_at: string; ends_at: string; timezone: string; message: string; quoted_value?: ConversionValue | null; measurement?: SubmissionMeasurement; policy_summary?: ApiRecord | null }
+      type BookingResponse = { success: true; status: 'pending' | 'confirmed'; booking_id: string; conversation_id: string; cancellation_token: string; starts_at: string; ends_at: string; timezone: string; message: string; quoted_value?: ConversionValue | null; measurement?: SubmissionMeasurement; policy_summary?: ApiRecord | null }
       const response = await publicApiMutation<CheckoutResponse | BookingResponse>(
         `/api/public/products/${encodeURIComponent(context.value.product.slug)}/book`,
         {
           method: 'POST',
           body: {
             idempotency_key: checkoutRequestKey.value,
-            session_id: session.id,
-            variant_id: selectedVariantId.value,
+            product_session_id: session.id,
+            product_variant_id: selectedVariantId.value,
             party_size: partySize.value,
             guest_name: contact.name,
             guest_email: contact.email,
@@ -298,7 +298,7 @@ export function useSessionBooking(input: MaybeRefOrGetter<SessionBookingContext>
           },
           validate: (value): value is CheckoutResponse | BookingResponse =>
             isRecord(value) && value.success === true && ((value.status === 'checkout' && typeof value.pay_path === 'string' && value.pay_path.startsWith('/pay/') && typeof value.purchase_claim === 'string' && typeof value.payment_id === 'string' && isValidInstant(value.expires_at))
-              || (typeof value.cancellation_token === 'string' && typeof value.operational_booking_id === 'string' && typeof value.request_id === 'string'
+              || (typeof value.cancellation_token === 'string' && typeof value.booking_id === 'string' && typeof value.conversation_id === 'string'
                 && (value.status === 'pending' || value.status === 'confirmed') && typeof value.message === 'string' && isValidInstant(value.starts_at) && isValidInstant(value.ends_at) && typeof value.timezone === 'string' && isValidTimezone(value.timezone))),
         },
       )
@@ -310,7 +310,7 @@ export function useSessionBooking(input: MaybeRefOrGetter<SessionBookingContext>
       // A table is a reservation to the business's ad and analytics accounts, which already count it by that name.
       mirrorSubmission(context.value.product.kind === 'table' ? 'reservation_submit' : 'booking_submit', response.measurement, context.value.location?.id ?? null, response.quoted_value)
       setBookingConfirmation({
-        type: 'booking', status: response.status, operationalBookingId: response.operational_booking_id, requestId: response.request_id,
+        type: 'booking', status: response.status, operationalBookingId: response.booking_id, requestId: response.conversation_id,
         locale: locale.value,
         organizationId: context.value.organizationId,
         organizationName: context.value.location?.title ?? context.value.organizationName,
@@ -324,7 +324,7 @@ export function useSessionBooking(input: MaybeRefOrGetter<SessionBookingContext>
         title: context.value.product.name,
         requests: contact.notes || null,
         message: response.message,
-        cancelUrl: `${localePath('/bookings/cancel')}?id=${encodeURIComponent(response.request_id)}#${response.cancellation_token}`,
+        cancelUrl: `${localePath('/bookings/cancel')}?id=${encodeURIComponent(response.conversation_id)}#${response.cancellation_token}`,
         policySummary: response.policy_summary,
         locationId: context.value.location?.id ?? null,
         locationName: context.value.location?.title ?? context.value.organizationName,
@@ -332,7 +332,7 @@ export function useSessionBooking(input: MaybeRefOrGetter<SessionBookingContext>
         contactPhone: context.value.contactPhone ?? null,
       })
       bookingOpen.value = false
-      await navigateTo({ path: localePath('/bookings/confirmed'), query: { id: response.request_id }, hash: `#${response.cancellation_token}` })
+      await navigateTo({ path: localePath('/bookings/confirmed'), query: { id: response.conversation_id }, hash: `#${response.cancellation_token}` })
       checkoutRequestKey.value = null
       checkoutFingerprint = null
     } catch (error) {

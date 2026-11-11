@@ -23,7 +23,7 @@ export const STAY_CALENDAR_RULES_SCHEMA = { type: ['object', 'null'], descriptio
   weekend_price_minor: minor,
 }, additionalProperties: false }
 const productId = { type: 'string', minLength: 1, description: 'The place to stay: a product of kind stay, from list_products.' }
-const stayId = { type: 'string', minLength: 1, description: 'Stay ID: operational_booking_id from list_product_bookings.' }
+const stayId = { type: 'string', minLength: 1, description: 'Stay ID: booking_id from list_product_bookings.' }
 const version = { type: 'integer', minimum: 1, description: 'stay.version from the latest get_product_booking call; a stale version is refused.' }
 const key = { type: 'string', minLength: 1, maxLength: 200, description: 'Caller-supplied durable idempotency key. Reuse only for identical operation arguments.' }
 
@@ -37,7 +37,7 @@ const stayProperties = {
   check_in_date: day, check_out_date: day,
   adults: { type: 'integer' }, children: { type: 'integer' }, infants: { type: 'integer' }, party_size: { type: 'integer', description: 'Adults and children; infants are extra.' }, guest_name: { ...nullableText, description: 'The guest as their conversation names them; null for a channel conversation that names no one.' },
   guest_email: nullableText, guest_phone: nullableText, user_id: nullableText, total_minor: { type: 'integer' }, currency: text, private_notes: { ...nullableText, description: 'The host\'s own note, never shown to the guest.' },
-  provider: nullableText, external_booking_id: nullableText, channel_booking_id: nullableText, channel_booking_url: { ...nullableText, description: 'The reservation on its channel (Airbnb\'s host reservation page), where a channel stay is changed or cancelled. Null for other stays.' }, request_id: { ...text, description: 'The guest conversation about this stay, for get_conversation and send_message. Every stay has one.' }, cancelled_at: nullableText, cancellation_reason: nullableText,
+  provider: nullableText, external_booking_id: nullableText, channel_booking_id: nullableText, channel_booking_url: { ...nullableText, description: 'The reservation on its channel (Airbnb\'s host reservation page), where a channel stay is changed or cancelled. Null for other stays.' }, conversation_id: { ...text, description: 'The guest conversation about this stay, for get_conversation and send_message. Every stay has one.' }, cancelled_at: nullableText, cancellation_reason: nullableText,
   cancellation_policy: { type: ['string', 'null'], enum: [...STAY_BOOKED_POLICIES, null], description: 'The home cancellation policy the guest booked under on the site; it decides what their own cancellation refunds. Null for a stay not paid on the site.' },
   no_show_at: { ...nullableText, description: 'When the host recorded that the guest never arrived; null otherwise.' },
   answers: { ...formAnswerSnapshotsJsonSchema(), description: 'The guest\'s answers to the home\'s questions, worded as they answered them. The stay keeps them even when its conversation is deleted.' },
@@ -147,7 +147,7 @@ const calendarHome = { type: 'object', properties: calendarHomeProperties, requi
 const calendarStayProperties = Object.fromEntries(['id', 'product_id', 'channel', 'owner', 'status', 'overbooked', 'starts_at', 'ends_at', 'check_in_date', 'check_out_date', 'adults', 'children', 'infants', 'guest_name'].map(field => [field, stayProperties[field as keyof typeof stayProperties]]))
 const calendarStay = { type: 'object', properties: calendarStayProperties, required: Object.keys(calendarStayProperties), additionalProperties: false }
 const calendar = { type: 'object', properties: { home: calendarHome, nights: { type: 'array', items: night }, stays: { type: 'array', items: { anyOf: [calendarStay, stayTurnover] } }, channel_push: channelPush }, required: ['home', 'nights', 'stays'] }
-const stayReceiptProperties = { id: text, product_id: text, request_id: text, status: stayProperties.status, version: stayProperties.version, updated_at: text, check_in_date: day, check_out_date: day }
+const stayReceiptProperties = { id: text, product_id: text, conversation_id: text, status: stayProperties.status, version: stayProperties.version, updated_at: text, check_in_date: day, check_out_date: day }
 const stayReceipt = { type: 'object', properties: stayReceiptProperties, required: Object.keys(stayReceiptProperties), additionalProperties: false }
 const stayMutation = { type: 'object', properties: { stay: stayReceipt, channel_push: channelPush }, required: ['stay', 'channel_push'], additionalProperties: false }
 const paymentBalanceProperties = { stay_id: text, currency: text, paid_minor: { type: 'integer' }, payment_status: stayDetail.properties.payment_status }
@@ -188,7 +188,7 @@ function roomIdentityResult(room: StayHome['photo_rooms'][number]) {
 }
 
 function stayMutationReceipt(stay: StayDetail & { channel_push: unknown }) {
-  return { stay: { id: stay.id, product_id: stay.product_id, request_id: stay.request_id, status: stay.status, version: stay.version, updated_at: stay.updated_at, check_in_date: stay.check_in_date, check_out_date: stay.check_out_date }, channel_push: stay.channel_push }
+  return { stay: { id: stay.id, product_id: stay.product_id, conversation_id: stay.conversation_id, status: stay.status, version: stay.version, updated_at: stay.updated_at, check_in_date: stay.check_in_date, check_out_date: stay.check_out_date }, channel_push: stay.channel_push }
 }
 
 export const STAYS_TOOLS: McpToolDefinition[] = [

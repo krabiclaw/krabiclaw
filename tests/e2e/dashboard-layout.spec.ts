@@ -625,7 +625,7 @@ test.describe('dashboard pane hierarchy', () => {
         const current = (await currentResponse.json() as { session: SessionAvailability }).session
         expect(current).toMatchObject({ id: original.id, organization_id: restore.organizationId, product_id: restore.productId })
         const restored = await mcpRequest(restore.owner, restore.baseURL, { method: 'tools/call', toolName: 'update_product_session', args: {
-          organization_id: restore.organizationId, product_id: restore.productId, session_id: original.id, expected_updated_at: current.updated_at,
+          organization_id: restore.organizationId, product_id: restore.productId, product_session_id: original.id, updated_at: current.updated_at,
           starts_at: original.starts_at, ends_at: original.ends_at, capacity: original.capacity, status: original.status,
         } })
         expect(restored.status(), await restored.text()).toBe(200)

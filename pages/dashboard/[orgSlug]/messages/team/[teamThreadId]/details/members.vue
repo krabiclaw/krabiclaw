@@ -5,10 +5,10 @@
         <div v-for="person in thread.participants" :key="person.id" class="flex items-center gap-3 py-4">
           <UAvatar :src="person.image ?? undefined" :alt="person.name" />
           <span class="min-w-0 flex-1 text-highlighted">{{ person.name }}{{ person.id === userId ? ' (you)' : '' }}</span>
-          <UButton v-if="thread.canManage && person.id !== userId" icon="i-lucide-user-minus" :aria-label="`Remove ${person.name}`" color="error" variant="ghost" :disabled="saving" @click="removing = person" />
+          <UButton v-if="thread.can_manage && person.id !== userId" icon="i-lucide-user-minus" :aria-label="`Remove ${person.name}`" color="error" variant="ghost" :disabled="saving" @click="removing = person" />
         </div>
       </div>
-      <template v-if="thread.canManage && members">
+      <template v-if="thread.can_manage && members">
         <h2 class="mt-8 text-lg font-semibold">Add people</h2>
         <div class="mt-3 divide-y divide-default">
           <UCheckbox v-for="person in available" :key="person.id" :model-value="selected.includes(person.id)" :label="person.name" :description="person.email" :disabled="saving" class="w-full py-4" @update:model-value="toggle(person.id, $event === true)" />
@@ -45,7 +45,7 @@ const saving = ref(false)
 const actionError = ref('')
 function toggle(id: string, checked: boolean) { selected.value = checked ? [...new Set([...selected.value, id])] : selected.value.filter(userId => userId !== id) }
 async function add() {
-  if (saving.value || !selected.value.length || !thread.value?.canManage) return
+  if (saving.value || !selected.value.length || !thread.value?.can_manage) return
   saving.value = true
   actionError.value = ''
   try { await operate({ action: 'add', memberIds: [...selected.value].sort() }); selected.value = [] }
@@ -53,7 +53,7 @@ async function add() {
   finally { saving.value = false }
 }
 async function remove() {
-  if (saving.value || !removing.value || !thread.value?.canManage) return
+  if (saving.value || !removing.value || !thread.value?.can_manage) return
   saving.value = true
   actionError.value = ''
   try { await operate({ action: 'remove', userId: removing.value.id }); removing.value = null }
