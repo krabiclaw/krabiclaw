@@ -332,9 +332,9 @@ async function answerChange(decision: 'accept' | 'decline') {
   answering.value = decision
   actionError.value = null
   try {
-    await applicationFetch('/api/account/bookings/change', {
+    await applicationFetch(`/api/public/booking-changes/${encodeURIComponent(booking.value.threadId)}/${encodeURIComponent(change.requestId)}`, {
       method: 'POST',
-      body: { thread_id: booking.value.threadId, request_id: change.requestId, decision },
+      body: { decision },
       validate: (value: unknown): value is Record<string, unknown> => isRecord(value),
     })
     await refreshDetails()

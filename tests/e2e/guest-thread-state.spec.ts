@@ -927,7 +927,7 @@ test('buyer conversation approves and declines canonical changes without moving 
     await expect(card).toContainText('Proposed')
     await expect(card).toContainText('Your booking stays unchanged until you accept.')
     await expect(card.getByRole('button', { name: 'Accept changes', exact: true })).toBeVisible()
-    const declined = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === '/api/account/bookings/change')
+    const declined = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname.startsWith(`/api/public/booking-changes/${threadId}/`))
     await card.getByRole('button', { name: 'Decline changes', exact: true }).click()
     await expectStatus(await declined, 200)
     await expect(card).toContainText('Changes declined')
@@ -942,7 +942,7 @@ test('buyer conversation approves and declines canonical changes without moving 
     await page.reload()
     const pending = card.filter({ hasText: 'Your booking stays unchanged until you accept.' })
     await expect(pending).toHaveCount(1)
-    const accepted = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === '/api/account/bookings/change')
+    const accepted = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname.startsWith(`/api/public/booking-changes/${threadId}/`))
     await pending.getByRole('button', { name: 'Accept changes', exact: true }).click()
     await expectStatus(await accepted, 200)
     await expect(card.filter({ hasText: 'Changes accepted' })).toContainText('Your booking has been updated.')
@@ -951,8 +951,8 @@ test('buyer conversation approves and declines canonical changes without moving 
     expect(streamChanges(final).find(item => item.id === second.id)?.change.status).toBe('accepted')
     expect(streamEvents(final, 'E2E Buyer’s change was accepted')).toHaveLength(1)
     const finalRecord = (await loadLedger(owner, threadId, demoOrganizationId())).operational_record
-    const replay = await page.request.post('/api/account/bookings/change', {
-      headers: authRequestHeaders(baseURL), data: { thread_id: threadId, request_id: second.id, decision: 'accept' },
+    const replay = await page.request.post(`/api/public/booking-changes/${threadId}/${second.id}`, {
+      headers: authRequestHeaders(baseURL), data: { decision: 'accept' },
     })
     await expectStatus(replay, 200)
     // The replayed answer is the same answer: still one acceptance in the conversation.

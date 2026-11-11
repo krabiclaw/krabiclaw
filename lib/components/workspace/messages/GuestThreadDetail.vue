@@ -308,9 +308,9 @@ async function answerChange(requestId: string, decision: 'accept' | 'decline') {
       })
       return
     }
-    await applicationFetch('/api/account/bookings/change', {
+    await applicationFetch(`/api/public/booking-changes/${encodeURIComponent(props.threadId)}/${encodeURIComponent(requestId)}`, {
       method: 'POST',
-      body: { thread_id: props.threadId, request_id: requestId, decision },
+      body: { decision },
       validate: (value: unknown): value is BookingChangeView => isRecord(value) && ['accepted', 'declined'].includes(String(value.status)),
     })
     // Read the conversation after the answer, not through a refresh that a read
