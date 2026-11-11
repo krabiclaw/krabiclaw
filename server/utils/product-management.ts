@@ -271,7 +271,7 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
     { query: `SELECT product_id, collection_id, sort_order FROM collection_products
       WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?)) ORDER BY collection_id`, params: [organizationId, ids] },
     // A session offering's booking; a home's is presented with its stay settings below.
-    { query: `SELECT product_id, duration_minutes, default_capacity, confirmation_mode, online_payment_required, held_online, scheduling_mode, assigned_member_id, advance_notice_minutes, questions,
+    { query: `SELECT product_id, duration_minutes, seating_interval_minutes, default_capacity, confirmation_mode, online_payment_required, held_online, scheduling_mode, assigned_member_id, advance_notice_minutes, questions,
         party_size_min, party_size_max, minimum_guest_age, accessibility_contact_required, payment_basis, payment_min_party_size FROM product_booking_configs
       WHERE organization_id = ? AND unit = 'slot' AND product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
     // The page each product owns: the source row that carries its product_id.
@@ -321,6 +321,7 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
     if (!product) continue
     product.booking = {
       duration_minutes: row.duration_minutes === null ? null : Number(row.duration_minutes),
+      seating_interval_minutes: row.seating_interval_minutes === null ? null : Number(row.seating_interval_minutes),
       default_capacity: row.default_capacity === null ? null : Number(row.default_capacity),
       confirmation_mode: row.confirmation_mode as 'instant' | 'review', online_payment_required: Number(row.online_payment_required) === 1,
       held_online: Number(row.held_online) === 1,
@@ -2243,6 +2244,8 @@ export async function setProductLocation(db: DbClient, input: {
   if (!organization) notFound('Location not found')
   const product = await requireOrganizationProduct(db, input)
   if (product.stay && product.stay.location_id !== input.locationId) conflict('A place to stay is at exactly one location')
+  // A table is seated through one location's hours; a second placement would be a second schedule.
+  if (product.kind === 'table' && product.locations.some(location => location.location_id !== input.locationId)) conflict('A location\'s tables are at exactly one location')
   const currentLocation = product.locations.find(location => location.location_id === input.locationId)
   const expectedProductUpdatedAt = product.updated_at
   const location = { location_id: input.locationId, active: input.active ?? currentLocation?.active ?? true, published: input.published ?? currentLocation?.published ?? true }
@@ -2284,6 +2287,9 @@ export async function removeProductLocation(db: DbClient, input: {
   if (!organization) notFound('Location not found')
   const home = await queryFirst<{ product_id: string }>(db, 'SELECT product_id FROM product_stay_configs WHERE organization_id = ? AND product_id = ? AND location_id = ?', [input.organizationId, input.productId, input.locationId])
   if (home) conflict('A place to stay cannot leave the location it is at; delete the place to stay instead')
+  // A table is seated through this location's hours; without the location it has no open time.
+  const table = await queryFirst<{ id: string }>(db, "SELECT id FROM products WHERE organization_id = ? AND id = ? AND kind = 'table'", [input.organizationId, input.productId])
+  if (table) conflict('A location\'s tables cannot leave the location they are at; delete the tables instead')
   await executeBatch(db, [
     { query: 'DELETE FROM product_locations WHERE organization_id = ? AND product_id = ? AND location_id = ?', params: [input.organizationId, input.productId, input.locationId] },
     publicResourceCacheInvalidationQuery(input.organizationId, 'product_location_changed'),

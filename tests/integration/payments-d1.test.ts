@@ -96,7 +96,7 @@ async function diningTables(db: D1Database) {
   db.prepare("INSERT INTO product_variants(id,organization_id,product_id,name,created_by,updated_by) VALUES('table-variant',?,'tables','Table','host','host')").bind(ORG),
   db.prepare("INSERT INTO prices(id,organization_id,product_variant_id,currency,unit_amount,tax_behavior,created_by,updated_by) VALUES('table-price',?,'table-variant','USD',10000,'exclusive','host','host')").bind(ORG),
   db.prepare("INSERT INTO product_locations(organization_id,product_id,location_id,active,published,created_by,updated_by) VALUES(?,'tables','dining',1,1,'host','host')").bind(ORG),
-  db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,unit,duration_minutes,default_capacity,confirmation_mode,held_online,scheduling_mode,assigned_member_id,online_payment_required,payment_basis,created_by,updated_by) VALUES('tables',?,'slot',120,1,'instant',0,'business','host-member',1,'per_booking','host','host')").bind(ORG),
+  db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,unit,duration_minutes,seating_interval_minutes,default_capacity,confirmation_mode,held_online,scheduling_mode,assigned_member_id,online_payment_required,payment_basis,created_by,updated_by) VALUES('tables',?,'slot',120,30,1,'instant',0,'business','host-member',1,'per_booking','host','host')").bind(ORG),
   db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,location_id,timezone,starts_at,ends_at,capacity,status,created_by,updated_by) VALUES('seating',?,'tables','dining','UTC','2099-10-01T13:00:00.000Z','2099-10-01T15:00:00.000Z',1,'scheduled','host','host')").bind(ORG),
  ])
 }

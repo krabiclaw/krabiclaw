@@ -20,6 +20,10 @@ const route = useRoute()
 const router = useRouter()
 const legal = computed(() => p.product.value?.kind === 'service')
 const chooseLocationPath = computed(() => router.resolve({ path: level.path.value, query: { ...route.query, location_id: undefined } }).fullPath)
+// A table has no weekly times: its location's hours seat it.
+watchEffect(() => {
+  if (level.mode.value !== 'yield' && p.product.value?.kind === 'table') showError(createError({ statusCode: 404, statusMessage: 'Page not found' }))
+})
 const scopeError = computed(() => p.locationId.value
   ? p.location.value?.status !== 'active' ? `Choose an active ${legal.value ? 'office' : 'location'} for this weekly schedule.` : p.scheduleError.value
   : null)
@@ -42,9 +46,7 @@ const groups = computed<EditorNavigationGroup[]>(() => {
   }) }]
   return [{ id: 'week', items: p.weekdays.map(day => ({
   id: day.label.toLowerCase(), label: day.label,
-  summary: p.savedSlotsFor(day.value).length ? p.savedSlotsFor(day.value).map(slot => slot.end_time
-    ? `${formatTime(slot.start_time, 'en-US')}–${formatTime(slot.end_time, 'en-US')} every ${slot.interval_minutes} min`
-    : formatTime(slot.start_time, 'en-US')).join(', ') : legal.value ? 'No consultations' : 'No sessions',
+  summary: p.savedSlotsFor(day.value).length ? p.savedSlotsFor(day.value).map(slot => formatTime(slot.start_time, 'en-US')).join(', ') : legal.value ? 'No consultations' : 'No sessions',
   to: router.resolve({ path: `${level.path.value}/${day.label.toLowerCase()}`, query: route.query }).fullPath,
   })) }]
 })

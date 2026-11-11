@@ -220,27 +220,24 @@ export const SECTION_KEYS = [
   'guests', 'availability', 'arrival-time', 'directions', 'check-in-method', 'wifi', 'house-manual', 'house-rules', 'checkout-instructions', 'property-type', 'rooms', 'amenities', 'accessibility', 'cancellation', 'team', 'guest-safety', 'location', 'questions',
 ] as const
 export type SectionKey = typeof SECTION_KEYS[number]
-export type BookingConcern = 'enabled' | 'duration' | 'capacity' | 'party' | 'guest-terms' | 'confirmation' | 'notice' | 'payment' | 'location' | 'assignment' | number
+export type BookingConcern = 'enabled' | 'duration' | 'seatings' | 'capacity' | 'party' | 'guest-terms' | 'confirmation' | 'notice' | 'payment' | 'location' | 'assignment' | number
 export type ProductConcern = BookingConcern | 'publication-visibility' | 'publication-availability' | 'house-rules' | 'additional-rules' | 'arrival-time' | StaySafetySection
 
 /** Where the product is offered and shown, per location, as its Locations leaf edits it. */
 export interface ProductLocationDraft { active: boolean; published: boolean }
 
-/**
- * One weekly time as its leaf edits it: a start, and — for a restaurant's
- * seatings — `end_time` and `interval_minutes` repeating it every interval
- * through the end. Empty strings are a single start.
- */
-export interface ScheduleSlotDraft { weekday: number; start_time: string; end_time: string; interval_minutes: string }
-type SavedRule = { weekday: number; start_time: string; end_time: string | null; interval_minutes: number | null }
-const ruleDraft = (rule: SavedRule): ScheduleSlotDraft => ({ weekday: rule.weekday, start_time: rule.start_time.slice(0, 5), end_time: rule.end_time?.slice(0, 5) ?? '', interval_minutes: rule.interval_minutes === null ? '' : String(rule.interval_minutes) })
-const ruleWrite = (slot: ScheduleSlotDraft) => ({ weekday: slot.weekday, start_time: slot.start_time.trim(), ...(slot.end_time.trim() ? { end_time: slot.end_time.trim(), interval_minutes: Number(slot.interval_minutes) } : {}) })
-/** A slot is a start, or a start repeating every 5 to 1440 minutes through a later end on the same day. */
+/** One weekly start time as its leaf edits it. */
+export interface ScheduleSlotDraft { weekday: number; start_time: string }
+type SavedRule = { weekday: number; start_time: string }
+const ruleDraft = (rule: SavedRule): ScheduleSlotDraft => ({ weekday: rule.weekday, start_time: rule.start_time.slice(0, 5) })
+const ruleWrite = (slot: ScheduleSlotDraft) => ({ weekday: slot.weekday, start_time: slot.start_time.trim() })
 export function scheduleSlotValid(slot: ScheduleSlotDraft): boolean {
-  if (!MINUTE_TIME_PATTERN.test(slot.start_time.trim())) return false
-  if (!slot.end_time.trim() && !slot.interval_minutes.trim()) return true
-  const interval = Number(slot.interval_minutes)
-  return MINUTE_TIME_PATTERN.test(slot.end_time.trim()) && slot.end_time.trim() > slot.start_time.trim() && Number.isSafeInteger(interval) && interval >= 5 && interval <= 1440
+  return MINUTE_TIME_PATTERN.test(slot.start_time.trim())
+}
+/** A table's seatings: from each opening, every interval of 5 to 1440 minutes. */
+export function seatingIntervalValid(value: string): boolean {
+  const interval = Number(value)
+  return Boolean(value.trim()) && Number.isSafeInteger(interval) && interval >= 5 && interval <= 1440
 }
 
 export interface VariantDraft {
@@ -273,6 +270,8 @@ export interface ProductForm {
   collection_ids: string[]
   bookable: boolean
   booking_duration: string
+  /** A table's minutes between seatings through its location's hours. */
+  seating_interval: string
   booking_capacity: string
   confirmation_mode: 'instant' | 'review'
   /** null: no notice. */
@@ -813,8 +812,7 @@ async function reload() {
 
 // ── The weekly schedule ─────────────────────────────────
 const isRuleList = (value: unknown): value is { success: true; rules: SavedRule[] } =>
-  isRecord(value) && Array.isArray(value.rules) && value.rules.every(rule => isRecord(rule) && typeof rule.weekday === 'number' && typeof rule.start_time === 'string'
-    && (rule.end_time === null || typeof rule.end_time === 'string') && (rule.interval_minutes === null || typeof rule.interval_minutes === 'number'))
+  isRecord(value) && Array.isArray(value.rules) && value.rules.every(rule => isRecord(rule) && typeof rule.weekday === 'number' && typeof rule.start_time === 'string')
 const scheduleUrl = () => `/api/editor/organizations/${organizationId}/products/${productId.value}/availability`
 /** Weekly times belong to a location. Online, the provider's working hours are the schedule, so there are none to read. */
 const scheduleUnplaced = computed(() => Boolean(product.value?.booking) && !locationId.value && !product.value?.booking?.held_online)
@@ -866,6 +864,7 @@ const draft = useState<ProductForm>(draftKey, () => ({
   collection_ids: [] as string[],
   bookable: false,
   booking_duration: '',
+  seating_interval: '',
   booking_capacity: '', scheduling_mode: 'business', assigned_member_id: null, confirmation_mode: 'instant', advance_notice_minutes: null, online_payment_required: false, held_online: false,
   payment_basis: 'per_guest', payment_min_party_size: '', party_size_min: '', party_size_max: '', minimum_guest_age: '', accessibility_contact_required: false,
   image_asset_id: null as string | null,
@@ -998,6 +997,7 @@ function loadForm(row: Product) {
   // bookable" with empty defaults, whatever was stored.
   form.bookable = row.booking !== null
   form.booking_duration = row.booking?.duration_minutes === null || row.booking === null ? '' : String(row.booking.duration_minutes)
+  form.seating_interval = row.booking?.seating_interval_minutes == null ? '' : String(row.booking.seating_interval_minutes)
   form.confirmation_mode = row.booking?.confirmation_mode ?? 'instant'
   form.advance_notice_minutes = row.booking?.advance_notice_minutes ?? null
   form.scheduling_mode = row.booking?.scheduling_mode ?? 'business'
@@ -1160,6 +1160,7 @@ function bookingSummary(): string {
     noticeSummary(config.advance_notice_minutes),
     config.online_payment_required ? `Online payment required for paid ${legalEditor.value ? 'consultations' : 'sessions'}` : 'No payment collected at booking',
   ].join('\n')
+  if (product.value?.kind === 'table' && config?.seating_interval_minutes) return `${minutes} · A seating every ${config.seating_interval_minutes} minutes through opening hours`
   if (!scheduleData.value) return minutes
   const count = savedSchedule.value.filter(slot => slot.start_time.trim()).length
   return count ? `${minutes} · ${count === 1 ? '1 weekly time' : `${count} weekly times`}` : `${minutes} · No weekly availability set`
@@ -1671,8 +1672,9 @@ async function commit(concern?: ProductConcern) {
   const id = locationId.value
   const removesOnlineScope = locationScope.value === 'online' && (concern === 'location' && !form.held_online || concern === 'enabled' && !form.bookable)
   let ordinaryDraft: { version: string | null; values: ProductForm } | null = null
-  const bookingDraft: Partial<ProductForm> | null = concern === 'enabled' ? { bookable: form.bookable, ...(form.bookable ? { scheduling_mode: form.scheduling_mode, assigned_member_id: form.assigned_member_id } : {}) }
+  const bookingDraft: Partial<ProductForm> | null = concern === 'enabled' ? { bookable: form.bookable, ...(form.bookable ? { scheduling_mode: form.scheduling_mode, assigned_member_id: form.assigned_member_id, ...(product.value?.kind === 'table' ? { booking_duration: form.booking_duration, seating_interval: form.seating_interval } : {}) } : {}) }
     : concern === 'duration' ? { booking_duration: form.booking_duration }
+    : concern === 'seatings' ? { booking_duration: form.booking_duration, seating_interval: form.seating_interval }
     : concern === 'capacity' ? { booking_capacity: form.booking_capacity }
     : concern === 'confirmation' ? { confirmation_mode: form.confirmation_mode }
     : concern === 'notice' ? { advance_notice_minutes: form.advance_notice_minutes }
@@ -1895,9 +1897,11 @@ async function saveBooking(concern: BookingConcern) {
     await dashboardApi(url, { method: 'DELETE', validate: isRecord })
     return
   }
+  const seatings = { duration_minutes: Number(form.booking_duration), seating_interval_minutes: Number(form.seating_interval) }
   const body = concern === 'duration' ? { duration_minutes: Number(form.booking_duration) }
-    // Turning bookings on names who handles them.
-    : concern === 'enabled' ? { scheduling_mode: form.scheduling_mode, assigned_member_id: form.assigned_member_id }
+    : concern === 'seatings' ? seatings
+    // Turning bookings on names who handles them, and a table how it is seated.
+    : concern === 'enabled' ? { scheduling_mode: form.scheduling_mode, assigned_member_id: form.assigned_member_id, ...(product.value?.kind === 'table' ? seatings : {}) }
     : concern === 'capacity' ? { default_capacity: form.booking_capacity.trim() ? Number(form.booking_capacity) : null }
     : concern === 'confirmation' ? { confirmation_mode: form.confirmation_mode }
     : concern === 'notice' ? { advance_notice_minutes: form.advance_notice_minutes }
@@ -1920,7 +1924,7 @@ function slotsFor(weekday: number) {
   return schedule.value.filter(slot => slot.weekday === weekday)
 }
 function addSlot(weekday: number) {
-  schedule.value.push({ weekday, start_time: '', end_time: '', interval_minutes: '' })
+  schedule.value.push({ weekday, start_time: '' })
 }
 function removeSlot(slot: ScheduleSlotDraft) {
   schedule.value = schedule.value.filter(entry => entry !== slot)
@@ -1931,7 +1935,7 @@ async function saveSchedule(weekday: number) {
   const id = locationId.value
   if (scheduleError.value || !scheduleData.value) throw new Error('Load the schedule before saving times.')
   const day = slotsFor(weekday)
-  if (!day.every(scheduleSlotValid) || new Set(day.map(slot => slot.start_time.trim())).size !== day.length) throw new Error('Choose a different, valid start time for each session, and a later end time with an interval for repeating times.')
+  if (!day.every(scheduleSlotValid) || new Set(day.map(slot => slot.start_time.trim())).size !== day.length) throw new Error('Choose a different, valid start time for each session.')
   const { rules } = await dashboardApi(`${scheduleUrl()}?location_id=${encodeURIComponent(id ?? 'online')}`, { validate: isRuleList })
   const slots = [...rules.filter(rule => rule.weekday !== weekday).map(rule => ruleWrite(ruleDraft(rule))), ...day.map(ruleWrite)]
   await dashboardApi(scheduleUrl(), { method: 'PUT', body: { location_id: id, slots }, validate: isRecord })

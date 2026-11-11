@@ -590,6 +590,19 @@ export async function updateLocation(
   // moved since matches nothing and the write is refused rather than applied
   // over someone else's.
   const expectedUpdatedAt = input.expected_updated_at ?? existing.updated_at;
+  // A table here is seated through these hours: its seatings follow them in
+  // the same batch, written only if this update lands.
+  const saved = (field: 'timezone' | 'opening_hours' | 'special_hours') => {
+    const index = sets.findIndex(set => set === `${field} = ?`);
+    return (index >= 0 ? params[index] : existing[field] ?? null) as string | null;
+  };
+  const seatings = changedFields.some(field => ['timezone', 'opening_hours', 'special_hours'].includes(field))
+    ? await (await import('~/server/utils/availability')).prepareLocationTableSeatings(db, {
+      organizationId, actorId: userId ?? 'system', now,
+      location: { id: locationId, status: existing.status, timezone: saved('timezone')!, opening_hours: saved('opening_hours'), special_hours: saved('special_hours') },
+      guard: { query: 'EXISTS (SELECT 1 FROM business_locations WHERE id = ? AND organization_id = ? AND updated_at = ?)', params: [locationId, organizationId, now] },
+    })
+    : [];
   const runUpdate = async (boundParams: Array<string | number | null>): Promise<boolean> => {
     const statements: BatchQuery[] = [];
     statements.push({
@@ -617,7 +630,7 @@ export async function updateLocation(
       onlyIfPreviousChangedOneRow: true,
     }));
     // The site changed: recorded with the change, so its caches and search index follow it.
-    statements.push(publicResourceCacheInvalidationQuery(organizationId, 'location_updated'));
+    statements.push(publicResourceCacheInvalidationQuery(organizationId, 'location_updated'), ...seatings);
 
     // An inactive location takes its homes off the live count. Making it
     // active again is guarded by the same home-activation boundary.

@@ -96,7 +96,7 @@ export const LOCATIONS_TOOLS: McpToolDefinition[] = [
     }),
   organizationTool({
       name: 'update_location',
-      description: 'Update a location\'s own details: its name and descriptions, regular opening hours, temporary closures/special hours, contact info, saved map coordinates, and map sharing for its places to stay. Renaming keeps the saved public address. To change its hero media, call set_media with { owner_type: "business_location", owner_id: <location.id>, slot: "hero" }. Only provided fields are changed. Returns the updated location; website details can change immediately. This does not change a product’s session schedule, including a restaurant’s table seatings (replace_product_weekly_schedule on its table product).',
+      description: 'Update a location\'s own details: its name and descriptions, regular opening hours, temporary closures/special hours, contact info, saved map coordinates, and map sharing for its places to stay. Renaming keeps the saved public address. To change its hero media, call set_media with { owner_type: "business_location", owner_id: <location.id>, slot: "hero" }. Only provided fields are changed. Returns the updated location; website details can change immediately. A restaurant’s table seatings follow these hours: new open time adds seatings, and closed time cancels the unbooked ones; booked seatings stay. Other offerings keep their own weekly schedules.',
       domain: 'locations',
       minimumRole: 'admin',
       inputSchema: {
@@ -144,7 +144,7 @@ export const LOCATIONS_TOOLS: McpToolDefinition[] = [
     }),
   organizationTool({
       name: 'block_dates',
-      description: "Close a location for a whole-day date range when the user wants to prevent bookings on those dates. Both endpoints are inclusive. Adds a closure to special hours while retaining existing closures and dated hours. Returns the saved hours; existing bookings are not cancelled or messaged.",
+      description: "Close a location for a whole-day date range when the user wants to prevent bookings on those dates. Both endpoints are inclusive. Adds a closure to special hours while retaining existing closures and dated hours, and cancels the location’s unbooked table seatings on those dates. Returns the saved hours; existing bookings are not cancelled or messaged.",
       domain: 'locations',
       minimumRole: 'admin',
       inputSchema: {
@@ -158,7 +158,7 @@ export const LOCATIONS_TOOLS: McpToolDefinition[] = [
     }),
   organizationTool({
       name: 'open_dates',
-      description: "Remove temporary closures for an inclusive date range when the user wants to reopen a location. Closure dates outside the range and their notes are preserved. Regularly closed weekdays stay closed; change opening_hours with update_location to open those weekdays. Returns the saved hours without creating or changing existing bookings.",
+      description: "Remove temporary closures for an inclusive date range when the user wants to reopen a location. Closure dates outside the range and their notes are preserved. Regularly closed weekdays stay closed; change opening_hours with update_location to open those weekdays. The location’s table seatings return on the reopened dates. Returns the saved hours without creating or changing existing bookings.",
       domain: 'locations',
       minimumRole: 'admin',
       inputSchema: {

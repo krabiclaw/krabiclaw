@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:ae9dc8b936ea0adb07571f8b6f8498434e3133fc1316cf3132b7c13ac2009421",
-  "documentationFingerprint": "sha256:f9e4efa15f56bccdb5564e7ac7ec6e45a5c3a310a09bee0b2d1ea4c12ea05560",
+  "fingerprint": "sha256:fe1461be81c2481d0eda5bc7a4849c059993645c6a3c2267127b75ec8a00e4dd",
+  "documentationFingerprint": "sha256:16c934f067fdb1a1ea8691921538b99253004697f88ff05cdfaf8ec39808e561",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -10123,10 +10123,20 @@
                         "provider"
                       ],
                       "type": "string"
+                    },
+                    "seating_interval_minutes": {
+                      "description": "A table's minutes between seatings through its location's hours; null for every other offering.",
+                      "maximum": 1440,
+                      "minimum": 5,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
                     }
                   },
                   "required": [
                     "duration_minutes",
+                    "seating_interval_minutes",
                     "default_capacity",
                     "confirmation_mode",
                     "online_payment_required",
@@ -12284,7 +12294,7 @@
     {
       "name": "block_dates",
       "title": "Block dates",
-      "description": "Close a location for a whole-day date range when the user wants to prevent bookings on those dates. Both endpoints are inclusive. Adds a closure to special hours while retaining existing closures and dated hours. Returns the saved hours; existing bookings are not cancelled or messaged.",
+      "description": "Close a location for a whole-day date range when the user wants to prevent bookings on those dates. Both endpoints are inclusive. Adds a closure to special hours while retaining existing closures and dated hours, and cancels the location’s unbooked table seatings on those dates. Returns the saved hours; existing bookings are not cancelled or messaged.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -23310,7 +23320,7 @@
           },
           "booking": {
             "additionalProperties": false,
-            "description": "Complete booking setup for a published offering. Legal consultations require provider scheduling and an explicitly selected attorney. A restaurant's tables are one table product per location: weekly_slots repeat a seating every interval_minutes through each service, default_capacity is the guests seatable per start time, and a deposit is the variant's price with payment_basis per_booking (price zero for no deposit). At a location, provide weekly_slots or dated sessions; an update can retain its saved weekly times. location_id null holds it online: it needs scheduling_mode provider with an assigned member, takes no weekly_slots or sessions, and is booked in that provider's working hours. Runtime validation requires actual future availability before publication.",
+            "description": "Complete booking setup for a published offering. Legal consultations require provider scheduling and an explicitly selected attorney. A restaurant's tables are one table product per location, seated through that location's opening and special hours every seating_interval_minutes: they take no weekly_slots or sessions, the location needs opening hours, default_capacity is the guests seatable per seating, and a deposit is the variant's price with payment_basis per_booking (price zero for no deposit). Any other offering at a location takes weekly_slots or dated sessions; an update can retain its saved weekly times. location_id null holds it online: it needs scheduling_mode provider with an assigned member, takes no weekly_slots or sessions, and is booked in that provider's working hours. Runtime validation requires actual future availability before publication.",
             "properties": {
               "accessibility_contact_required": {
                 "description": "Ask guests needing accessibility support to contact the business before booking.",
@@ -23401,6 +23411,15 @@
                 ],
                 "type": "string"
               },
+              "seating_interval_minutes": {
+                "description": "Tables only, and required for them: minutes between seatings. A table is seated from each opening of its location's opening hours (or that date's special hours) and every interval after, while duration_minutes still ends by closing. Change when tables are bookable with update_location hours, block_dates and open_dates.",
+                "maximum": 1440,
+                "minimum": 5,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
               "sessions": {
                 "items": {
                   "additionalProperties": false,
@@ -23434,25 +23453,8 @@
               "weekly_slots": {
                 "items": {
                   "additionalProperties": false,
-                  "description": "One weekly start time, or with end_time and interval_minutes a start every interval from start_time through end_time — a restaurant's seatings through one service.",
+                  "description": "One weekly start time.",
                   "properties": {
-                    "end_time": {
-                      "description": "Local HH:mm of the last start, same day and after start_time. Given with interval_minutes.",
-                      "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "interval_minutes": {
-                      "description": "Minutes between starts from start_time through end_time. Given with end_time.",
-                      "maximum": 1440,
-                      "minimum": 5,
-                      "type": [
-                        "integer",
-                        "null"
-                      ]
-                    },
                     "start_time": {
                       "description": "Local HH:mm start time; visit duration is configured separately.",
                       "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
@@ -26980,10 +26982,20 @@
                       "provider"
                     ],
                     "type": "string"
+                  },
+                  "seating_interval_minutes": {
+                    "description": "A table's minutes between seatings through its location's hours; null for every other offering.",
+                    "maximum": 1440,
+                    "minimum": 5,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
                   }
                 },
                 "required": [
                   "duration_minutes",
+                  "seating_interval_minutes",
                   "default_capacity",
                   "confirmation_mode",
                   "online_payment_required",
@@ -29320,7 +29332,7 @@
     {
       "name": "create_product_session",
       "title": "Create product session",
-      "description": "Add a dated time at a location for an existing bookable offering using its actual start and end. Online offerings take no dated sessions: they are booked in their provider's working hours.",
+      "description": "Add a dated time at a location for an existing bookable offering using its actual start and end. Online offerings take no dated sessions: they are booked in their provider's working hours. A restaurant's tables take none either: they are seated through their location's opening hours.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -53471,10 +53483,20 @@
                       "provider"
                     ],
                     "type": "string"
+                  },
+                  "seating_interval_minutes": {
+                    "description": "A table's minutes between seatings through its location's hours; null for every other offering.",
+                    "maximum": 1440,
+                    "minimum": 5,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
                   }
                 },
                 "required": [
                   "duration_minutes",
+                  "seating_interval_minutes",
                   "default_capacity",
                   "confirmation_mode",
                   "online_payment_required",
@@ -73206,7 +73228,7 @@
     {
       "name": "open_dates",
       "title": "Open dates",
-      "description": "Remove temporary closures for an inclusive date range when the user wants to reopen a location. Closure dates outside the range and their notes are preserved. Regularly closed weekdays stay closed; change opening_hours with update_location to open those weekdays. Returns the saved hours without creating or changing existing bookings.",
+      "description": "Remove temporary closures for an inclusive date range when the user wants to reopen a location. Closure dates outside the range and their notes are preserved. Regularly closed weekdays stay closed; change opening_hours with update_location to open those weekdays. The location’s table seatings return on the reopened dates. Returns the saved hours without creating or changing existing bookings.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -86754,10 +86776,20 @@
                         "provider"
                       ],
                       "type": "string"
+                    },
+                    "seating_interval_minutes": {
+                      "description": "A table's minutes between seatings through its location's hours; null for every other offering.",
+                      "maximum": 1440,
+                      "minimum": 5,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
                     }
                   },
                   "required": [
                     "duration_minutes",
+                    "seating_interval_minutes",
                     "default_capacity",
                     "confirmation_mode",
                     "online_payment_required",
@@ -97250,7 +97282,7 @@
     {
       "name": "replace_product_weekly_schedule",
       "title": "Replace product weekly schedule",
-      "description": "Replace a product’s weekly time slots at one location when the user wants to change its recurring schedule. Times are in that location’s timezone and use the product duration/capacity; a restaurant table product repeats a seating every interval_minutes through end_time. An online offering has no weekly slots: it is booked in its provider’s working hours (set_member_scheduling). An empty slots array clears that schedule. Sessions with any booking history are preserved; removed future sessions without bookings are cancelled, and re-added unbooked slots can reopen with current defaults.",
+      "description": "Replace a product’s weekly time slots at one location when the user wants to change its recurring schedule. Times are in that location’s timezone and use the product duration/capacity. A restaurant table product has no weekly slots: it is seated through its location’s opening hours. An online offering has no weekly slots: it is booked in its provider’s working hours (set_member_scheduling). An empty slots array clears that schedule. Sessions with any booking history are preserved; removed future sessions without bookings are cancelled, and re-added unbooked slots can reopen with current defaults.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -97270,25 +97302,8 @@
           "slots": {
             "items": {
               "additionalProperties": false,
-              "description": "One weekly start time, or with end_time and interval_minutes a start every interval from start_time through end_time — a restaurant's seatings through one service.",
+              "description": "One weekly start time.",
               "properties": {
-                "end_time": {
-                  "description": "Local HH:mm of the last start, same day and after start_time. Given with interval_minutes.",
-                  "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "interval_minutes": {
-                  "description": "Minutes between starts from start_time through end_time. Given with end_time.",
-                  "maximum": 1440,
-                  "minimum": 5,
-                  "type": [
-                    "integer",
-                    "null"
-                  ]
-                },
                 "start_time": {
                   "description": "Local HH:mm start time; visit duration is configured separately.",
                   "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
@@ -97334,20 +97349,8 @@
                     "null"
                   ]
                 },
-                "end_time": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
                 "id": {
                   "type": "string"
-                },
-                "interval_minutes": {
-                  "type": [
-                    "integer",
-                    "null"
-                  ]
                 },
                 "location_id": {
                   "type": "string"
@@ -97378,8 +97381,6 @@
                 "timezone",
                 "weekday",
                 "start_time",
-                "end_time",
-                "interval_minutes",
                 "capacity"
               ],
               "type": "object"
@@ -101729,7 +101730,7 @@
     {
       "name": "set_product_booking_config",
       "title": "Set product booking config",
-      "description": "Configure booking duration, capacity, scheduling, minimum notice, party limits, guest terms, what an online payment is charged for, and the questions asked with each booking (for example an assessment visit's property questions or a restaurant table's occasion). New settings default to instant confirmation and no online collection. Omitted fields retain saved settings; existing sessions keep their times and capacity. Read settings with get_product.",
+      "description": "Configure booking duration, capacity, scheduling, minimum notice, party limits, guest terms, what an online payment is charged for, and the questions asked with each booking (for example an assessment visit's property questions or a restaurant table's occasion). New settings default to instant confirmation and no online collection. Omitted fields retain saved settings; existing sessions keep their times and capacity, except a table's unbooked seatings, which follow its new length, interval and seats. Read settings with get_product.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -101914,6 +101915,15 @@
               "provider"
             ],
             "type": "string"
+          },
+          "seating_interval_minutes": {
+            "description": "Tables only, and required for them: minutes between seatings. A table is seated from each opening of its location's opening hours (or that date's special hours) and every interval after, while duration_minutes still ends by closing. Change when tables are bookable with update_location hours, block_dates and open_dates.",
+            "maximum": 1440,
+            "minimum": 5,
+            "type": [
+              "integer",
+              "null"
+            ]
           }
         },
         "required": [
@@ -102110,10 +102120,20 @@
                   "provider"
                 ],
                 "type": "string"
+              },
+              "seating_interval_minutes": {
+                "description": "A table's minutes between seatings through its location's hours; null for every other offering.",
+                "maximum": 1440,
+                "minimum": 5,
+                "type": [
+                  "integer",
+                  "null"
+                ]
               }
             },
             "required": [
               "duration_minutes",
+              "seating_interval_minutes",
               "default_capacity",
               "confirmation_mode",
               "online_payment_required",
@@ -110513,7 +110533,7 @@
     {
       "name": "update_location",
       "title": "Update location",
-      "description": "Update a location's own details: its name and descriptions, regular opening hours, temporary closures/special hours, contact info, saved map coordinates, and map sharing for its places to stay. Renaming keeps the saved public address. To change its hero media, call set_media with { owner_type: \"business_location\", owner_id: <location.id>, slot: \"hero\" }. Only provided fields are changed. Returns the updated location; website details can change immediately. This does not change a product’s session schedule, including a restaurant’s table seatings (replace_product_weekly_schedule on its table product).",
+      "description": "Update a location's own details: its name and descriptions, regular opening hours, temporary closures/special hours, contact info, saved map coordinates, and map sharing for its places to stay. Renaming keeps the saved public address. To change its hero media, call set_media with { owner_type: \"business_location\", owner_id: <location.id>, slot: \"hero\" }. Only provided fields are changed. Returns the updated location; website details can change immediately. A restaurant’s table seatings follow these hours: new open time adds seatings, and closed time cancels the unbooked ones; booked seatings stay. Other offerings keep their own weekly schedules.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -114724,7 +114744,7 @@
           },
           "booking": {
             "additionalProperties": false,
-            "description": "Complete booking setup for a published offering. Legal consultations require provider scheduling and an explicitly selected attorney. A restaurant's tables are one table product per location: weekly_slots repeat a seating every interval_minutes through each service, default_capacity is the guests seatable per start time, and a deposit is the variant's price with payment_basis per_booking (price zero for no deposit). At a location, provide weekly_slots or dated sessions; an update can retain its saved weekly times. location_id null holds it online: it needs scheduling_mode provider with an assigned member, takes no weekly_slots or sessions, and is booked in that provider's working hours. Runtime validation requires actual future availability before publication.",
+            "description": "Complete booking setup for a published offering. Legal consultations require provider scheduling and an explicitly selected attorney. A restaurant's tables are one table product per location, seated through that location's opening and special hours every seating_interval_minutes: they take no weekly_slots or sessions, the location needs opening hours, default_capacity is the guests seatable per seating, and a deposit is the variant's price with payment_basis per_booking (price zero for no deposit). Any other offering at a location takes weekly_slots or dated sessions; an update can retain its saved weekly times. location_id null holds it online: it needs scheduling_mode provider with an assigned member, takes no weekly_slots or sessions, and is booked in that provider's working hours. Runtime validation requires actual future availability before publication.",
             "properties": {
               "accessibility_contact_required": {
                 "description": "Ask guests needing accessibility support to contact the business before booking.",
@@ -114815,6 +114835,15 @@
                 ],
                 "type": "string"
               },
+              "seating_interval_minutes": {
+                "description": "Tables only, and required for them: minutes between seatings. A table is seated from each opening of its location's opening hours (or that date's special hours) and every interval after, while duration_minutes still ends by closing. Change when tables are bookable with update_location hours, block_dates and open_dates.",
+                "maximum": 1440,
+                "minimum": 5,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
               "sessions": {
                 "items": {
                   "additionalProperties": false,
@@ -114848,25 +114877,8 @@
               "weekly_slots": {
                 "items": {
                   "additionalProperties": false,
-                  "description": "One weekly start time, or with end_time and interval_minutes a start every interval from start_time through end_time — a restaurant's seatings through one service.",
+                  "description": "One weekly start time.",
                   "properties": {
-                    "end_time": {
-                      "description": "Local HH:mm of the last start, same day and after start_time. Given with interval_minutes.",
-                      "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "interval_minutes": {
-                      "description": "Minutes between starts from start_time through end_time. Given with end_time.",
-                      "maximum": 1440,
-                      "minimum": 5,
-                      "type": [
-                        "integer",
-                        "null"
-                      ]
-                    },
                     "start_time": {
                       "description": "Local HH:mm start time; visit duration is configured separately.",
                       "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
@@ -116864,10 +116876,20 @@
                       "provider"
                     ],
                     "type": "string"
+                  },
+                  "seating_interval_minutes": {
+                    "description": "A table's minutes between seatings through its location's hours; null for every other offering.",
+                    "maximum": 1440,
+                    "minimum": 5,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
                   }
                 },
                 "required": [
                   "duration_minutes",
+                  "seating_interval_minutes",
                   "default_capacity",
                   "confirmation_mode",
                   "online_payment_required",
@@ -119065,7 +119087,7 @@
     {
       "name": "update_product_session",
       "title": "Update product session",
-      "description": "Edit one session’s time, capacity or state using its current timestamp. Committed bookings or checkout holds prevent time or state changes; use the guest booking-change workflow.",
+      "description": "Edit one session’s time, capacity or state using its current timestamp. Committed bookings or checkout holds prevent time or state changes; use the guest booking-change workflow. A restaurant table's seatings are not edited one by one: change its location's hours, special hours or closures.",
       "inputSchema": {
         "additionalProperties": false,
         "anyOf": [
@@ -128185,18 +128207,18 @@
         "text": "Update the catalog from: <items_description> Use get_workspace_context, list_organizations and list_locations to resolve the business and explicit location. Read every relevant list_location_products and list_collections page before matching existing IDs. For a restaurant menu, use update_menu with a stable idempotency_key, the stated sections and prices. Match existing product, variant, price and collection IDs. Omitted items and order remain; use set_collection_products or reorder_collections only when the user requests a complete new order. For other products, use create_product for new entries or update_product for partial edits. Use reconcile_products only when the user requests complete replacement of the supplied entries. Ask for missing prices or booking facts. Use get_product and list_location_products to read back the result, then open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "create_product": "sha256:6524cf2df05e3005cf841d0429c90192c20b4818cc833bde52a611db800fc30e",
-        "get_product": "sha256:ba1303e192c6daf5e6baa873ab9e5438e80608cbd361ed7cecfb5f789d8e7b86",
+        "create_product": "sha256:dc1d9046d7e0677372829a6cc81489de81387922664e671fe4bafe7eb3af57d2",
+        "get_product": "sha256:b2afea3d084c67b0aacc46c8fbdbcf652dfaa2554de42de7bef06b16312f05e1",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_collections": "sha256:7eb8f62291a619df46fa146bc6142f898aac1de8bda513b7a0bf92182faff563",
         "list_location_products": "sha256:7c79f573c07df88cb92d7506531a53fd493d7b5e6480511e4fb98e5dd331886b",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_organizations": "sha256:9edf9d564e3c56a28961d41b27d0694753b5c31e889b63ebc171b6478336e901",
-        "reconcile_products": "sha256:190161262117d8ca59305fbb6e89195d6f0068e79d985ba3b66188de2222e9b5",
+        "reconcile_products": "sha256:c529aeb98e729ceb0f3647171e615ba0c5ad804dffe40794fc7d64c2feadf938",
         "reorder_collections": "sha256:c8ad3c90e1fe802222fc5c184e33daa7f2f71b24f6161eddc408f1b1e485a59b",
         "set_collection_products": "sha256:7d92dda53c08f4ebcf2f11cfc3a4c2cc6f7465ad97b9190d9997fea30e0cc81d",
         "update_menu": "sha256:947551eb104f6be470aeaab3b3570d0ab9924d01450192f8ac88a77f91de7433",
-        "update_product": "sha256:7cd58fd4ab7279a63853812c8aad71fbd8ed004b0585da74a96874700354fd88"
+        "update_product": "sha256:e35df16c5c4faa3070c656d44c5040b101ac19fc0926698578858f3f91d23e68"
       }
     },
     {
@@ -128240,8 +128262,8 @@
       },
       "toolContracts": {
         "attach_media": "sha256:b6f84ecad030ec9ec81a253682c86d6f8a10dc0c3b35564c873c21bbdbace35a",
-        "create_product": "sha256:6524cf2df05e3005cf841d0429c90192c20b4818cc833bde52a611db800fc30e",
-        "get_product": "sha256:ba1303e192c6daf5e6baa873ab9e5438e80608cbd361ed7cecfb5f789d8e7b86",
+        "create_product": "sha256:dc1d9046d7e0677372829a6cc81489de81387922664e671fe4bafe7eb3af57d2",
+        "get_product": "sha256:b2afea3d084c67b0aacc46c8fbdbcf652dfaa2554de42de7bef06b16312f05e1",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_product_booking_sessions": "sha256:c3feed62de11467bd12a6fd7885907eba84c469608e6bc20735c686887df971f",
@@ -128308,7 +128330,7 @@
         "attach_media": "sha256:b6f84ecad030ec9ec81a253682c86d6f8a10dc0c3b35564c873c21bbdbace35a",
         "get_location": "sha256:eeb473e44df629a24ceb82a2db6873a6b1f108dd852c2fa923f605a637439f34",
         "get_post": "sha256:084fd73ea9efe150fe8e7812e02a80394a52477719bdab8ed3c33beae8225df8",
-        "get_product": "sha256:ba1303e192c6daf5e6baa873ab9e5438e80608cbd361ed7cecfb5f789d8e7b86",
+        "get_product": "sha256:b2afea3d084c67b0aacc46c8fbdbcf652dfaa2554de42de7bef06b16312f05e1",
         "get_site_page": "sha256:4991f484621a89a5c664386fca8d24faea4ce852a275059de9ec33ba04e3ea51",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "save_media_attachment": "sha256:dd3e83b857a53f97fa3f6a27e1788dc247133a954108a09e5f7c200b4a1e3a93",
@@ -128324,7 +128346,7 @@
         "text": "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft ID and revision. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Check for missing brand assets like logo, favicon, social card, palette colors, hero media, and about page story. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result."
       },
       "toolContracts": {
-        "create_product": "sha256:6524cf2df05e3005cf841d0429c90192c20b4818cc833bde52a611db800fc30e",
+        "create_product": "sha256:dc1d9046d7e0677372829a6cc81489de81387922664e671fe4bafe7eb3af57d2",
         "get_organization": "sha256:7659406922dc74826fdfd890dc16fb069dbc35c3af276860b62306848b471f06",
         "get_site_page": "sha256:4991f484621a89a5c664386fca8d24faea4ce852a275059de9ec33ba04e3ea51",
         "get_website_draft": "sha256:3fc96867bd2ccb2dbd9ece2124b0b7250cce1219a6da69d014dc81985d1bba23",
@@ -128350,14 +128372,14 @@
       },
       "toolContracts": {
         "get_location": "sha256:eeb473e44df629a24ceb82a2db6873a6b1f108dd852c2fa923f605a637439f34",
-        "get_product": "sha256:ba1303e192c6daf5e6baa873ab9e5438e80608cbd361ed7cecfb5f789d8e7b86",
+        "get_product": "sha256:b2afea3d084c67b0aacc46c8fbdbcf652dfaa2554de42de7bef06b16312f05e1",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_product_booking_sessions": "sha256:c3feed62de11467bd12a6fd7885907eba84c469608e6bc20735c686887df971f",
         "list_products": "sha256:bd6b30cee8a405d0bcdf6313fa20396a2e287bb3285b977fdc1c27baed9c48f0",
-        "replace_product_weekly_schedule": "sha256:dbe8f704642aa84a2505f148f33943dd56c5febbc489eee55a4e62b397d3e05e",
-        "set_product_booking_config": "sha256:5fc8fc5dac4805d6c9d7453b1e0b29f7a04075696b53e3b5e34656ffeff44bc1",
-        "update_product": "sha256:7cd58fd4ab7279a63853812c8aad71fbd8ed004b0585da74a96874700354fd88"
+        "replace_product_weekly_schedule": "sha256:606256312fe6c64160bcf9bfb31f5bfcc99d5ddf1c84b90fbc9b804389a021b1",
+        "set_product_booking_config": "sha256:50969e4450fa9d51c05b4a5b2901f3ceac78a3df29d96e77fc48bfea8d2b21fe",
+        "update_product": "sha256:e35df16c5c4faa3070c656d44c5040b101ac19fc0926698578858f3f91d23e68"
       }
     },
     {
@@ -128376,7 +128398,7 @@
         "list_products": "sha256:bd6b30cee8a405d0bcdf6313fa20396a2e287bb3285b977fdc1c27baed9c48f0",
         "list_site_pages": "sha256:5a49aa342807192ee45d329880f2f459d1914154e9a04a43562c0ea3587879cc",
         "set_media": "sha256:79e758a2b687c65350fa364dd1169fb47edc54c166f71d2c1ccee5a380a1295b",
-        "update_product": "sha256:7cd58fd4ab7279a63853812c8aad71fbd8ed004b0585da74a96874700354fd88",
+        "update_product": "sha256:e35df16c5c4faa3070c656d44c5040b101ac19fc0926698578858f3f91d23e68",
         "update_site_page": "sha256:1a5471900a3203b0215956f65d00b00a18459bf28b204542377bbdf93af009a1"
       }
     },
@@ -128392,14 +128414,14 @@
         "create_post": "sha256:e800e3c19ecf887d09aa70d80dcbe66d985196d2138620b369cb9e1f9cace67a",
         "get_conversation": "sha256:fa22383698e276d0efc4454f3b8be5eb7db4638ead676645a7058d7136ac1910",
         "get_organization_analytics": "sha256:06e0bfe504a9b9183d0429a06162e4af2d760695c842396608752a8f107cb4d9",
-        "get_product": "sha256:ba1303e192c6daf5e6baa873ab9e5438e80608cbd361ed7cecfb5f789d8e7b86",
+        "get_product": "sha256:b2afea3d084c67b0aacc46c8fbdbcf652dfaa2554de42de7bef06b16312f05e1",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_conversations": "sha256:24cf21b535c6689cb04bc7188bec604110c207a960c8ba5e69e9505150dceca7",
         "list_product_booking_sessions": "sha256:c3feed62de11467bd12a6fd7885907eba84c469608e6bc20735c686887df971f",
         "list_products": "sha256:bd6b30cee8a405d0bcdf6313fa20396a2e287bb3285b977fdc1c27baed9c48f0",
         "publish_post": "sha256:fbfd1f5ff6cbdc02ecba0e29e88a7efc5bedb5e6b60ad98eca33b6e99016f1b2",
         "send_message": "sha256:8636238ba370bd243b7a3f2d4c1f6a5993223e916e3695bfd8f2a3696f80e6e2",
-        "update_product": "sha256:7cd58fd4ab7279a63853812c8aad71fbd8ed004b0585da74a96874700354fd88"
+        "update_product": "sha256:e35df16c5c4faa3070c656d44c5040b101ac19fc0926698578858f3f91d23e68"
       }
     }
   ]

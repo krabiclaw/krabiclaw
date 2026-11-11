@@ -15,8 +15,8 @@ export async function seedRestaurant(createTenant: CreateTenant): Promise<SeedTe
     const brooklyn = await seedLocation(tool, tenant, 'brooklyn', { title: 'Ember & Slice Brooklyn', email: 'brooklyn@ember-slice.example', phone: '+12025550123', hours: everyDay(11, 22), address: address('120 Atlantic Avenue') })
     const williamsburg = await seedLocation(tool, tenant, 'williamsburg', { title: 'Ember & Slice Williamsburg', email: 'williamsburg@ember-slice.example', phone: '+12025550124', hours: everyDay(11, 22), address: address('88 Bedford Avenue') })
 
-    // Each dining room's tables: one table product per location, a 90-minute seating every half hour
-    // from opening to the last seating before close, forty guests per start time, no deposit.
+    // Each dining room's tables: one table product per location, seated through its opening hours with a
+    // 90-minute seating every half hour that still ends by close, forty guests per seating, no deposit.
     const chefMemberId = tenant.memberIds['user-e2e-demo-owner']
     if (!chefMemberId) throw new Error('The Ember & Slice chef is not a member')
     const tables: Record<string, { id: string; slug: string }> = {}
@@ -25,8 +25,7 @@ export async function seedRestaurant(createTenant: CreateTenant): Promise<SeedTe
         kind: 'table', name: `${place.title} tables`, active: true, idempotency_key: `seed-restaurant-tables-${key}`,
         variants: [{ name: 'Table', prices: [{ unit_amount: 0, currency: 'USD' }] }],
         booking: {
-          location_id: place.id, duration_minutes: 90, default_capacity: 40, confirmation_mode: 'instant', scheduling_mode: 'business', assigned_member_id: chefMemberId,
-          weekly_slots: [0, 1, 2, 3, 4, 5, 6].map(weekday => ({ weekday, start_time: '11:00', end_time: '20:30', interval_minutes: 30 })),
+          location_id: place.id, duration_minutes: 90, seating_interval_minutes: 30, default_capacity: 40, confirmation_mode: 'instant', scheduling_mode: 'business', assigned_member_id: chefMemberId,
         },
       })
       await tool('set_product_location', { product_id: product.id, location_id: place.id, active: true, published: true })
