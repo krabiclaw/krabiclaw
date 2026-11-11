@@ -216,8 +216,8 @@
           role="link"
           :aria-current="isBookingActive ? 'page' : undefined"
           data-testid="website-booking-card"
-          @click="navigateTo(`${settingsPath.value}/booking`)"
-          @keydown.enter="navigateTo(`${settingsPath.value}/booking`)"
+          @click="navigateTo(`${settingsPath}/booking`)"
+          @keydown.enter="navigateTo(`${settingsPath}/booking`)"
         >
           <div class="flex items-center justify-between">
             <h2 class="text-xl font-bold text-highlighted tracking-tight">
