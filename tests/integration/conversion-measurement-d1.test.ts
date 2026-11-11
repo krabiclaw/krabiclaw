@@ -633,29 +633,40 @@ test('a completed onboarding emails each operator once, with a link to that cust
 
     const completion = await completeOnboarding(env, db, 'org-customer', null)
     assert.deepEqual(completion.operator_email, { status: 'sent' })
-    assert.equal(sent.length, 1, 'a repeated operator address, however cased, is one email')
-    const [email] = sent
-    assert.deepEqual(email!.body.to, ['ops@krabiclaw.com'])
-    assert.equal(email!.body.subject, 'Clay Corner is live on KrabiClaw')
-    assert.equal(email!.idempotencyKey, `onboarding-complete:org-customer:${hashEmail('ops@krabiclaw.com')}`)
+    assert.deepEqual(completion.owner_welcome_email, { status: 'sent' })
+    assert.equal(sent.length, 2, 'a completed onboarding sends one operator notification and one owner welcome email')
+    const [operatorMail, ownerMail] = sent
+    assert.deepEqual(operatorMail!.body.to, ['ops@krabiclaw.com'])
+    assert.equal(operatorMail!.body.subject, 'Clay Corner is live on KrabiClaw')
+    assert.equal(operatorMail!.idempotencyKey, `onboarding-complete:org-customer:${hashEmail('ops@krabiclaw.com')}`)
     for (const expected of ['Mina Park (mina@clay-corner.com)', 'https://clay-corner.krabiclaw.com/',
       'https://krabiclaw.com/dashboard/krabiclaw/platform-accounts?user=user-owner&amp;organization=org-customer']) {
-      assert.ok(email!.body.html.includes(expected), `email carries ${expected}`)
+      assert.ok(operatorMail!.body.html.includes(expected), `operator email carries ${expected}`)
+    }
+
+    assert.deepEqual(ownerMail!.body.to, ['mina@clay-corner.com'])
+    assert.equal(ownerMail!.body.subject, 'Welcome to KrabiClaw — congrats on launching Clay Corner!')
+    assert.equal(ownerMail!.idempotencyKey, `onboarding-welcome:org-customer:${hashEmail('mina@clay-corner.com')}`)
+    for (const expected of ['Hi Mina,', 'Clay Corner', 'https://clay-corner.krabiclaw.com/', 'https://krabiclaw.com/dashboard/clay-corner', 'dining experience or cuisine', 'Paul', 'Founder, KrabiClaw']) {
+      assert.ok(ownerMail!.body.html.includes(expected), `owner welcome email carries ${expected}`)
     }
     // The conversion is recorded on its own path, once per organization.
     assert.equal(await db.prepare("SELECT count(*) FROM analytics_events WHERE json_extract(payload_json, '$.event_name') = 'onboarding_complete' AND json_extract(payload_json, '$.entity_id') = 'org-customer'").first('count(*)'), 1)
 
     // KrabiClaw activating itself is not a customer: no email.
     assert.deepEqual((await completeOnboarding(env, db, 'org-platform', null)).operator_email, { status: 'sent' })
-    assert.equal(sent.length, 1)
+    assert.deepEqual((await completeOnboarding(env, db, 'org-platform', null)).owner_welcome_email, { status: 'sent' })
+    assert.equal(sent.length, 2)
 
-    // An unconfigured operator address fails visibly and does not stop the measurement.
+    // An unconfigured operator address fails visibly and does not stop the owner welcome email or measurement.
     await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, status, default_currency, timezone) VALUES ('org-second', 'Second', 'second', 'second', 'active', 'USD', 'Asia/Bangkok')`).run()
+    await db.prepare(`INSERT INTO organization_domains (id, organization_id, domain, type, role, status) VALUES ('dom-2', 'org-second', 'second.krabiclaw.com', 'system', 'canonical', 'active')`).run()
     await db.prepare(`INSERT INTO member (id, "organizationId", "userId", role) VALUES ('m-second', 'org-second', 'user-owner', 'owner')`).run()
     const unconfigured = await completeOnboarding({ ...env, PLATFORM_OWNER_EMAILS: '' }, db, 'org-second', null)
     assert.deepEqual(unconfigured.operator_email, { status: 'failed', reason: 'PLATFORM_OWNER_EMAILS is not configured' })
+    assert.deepEqual(unconfigured.owner_welcome_email, { status: 'sent' })
     assert.equal(await db.prepare("SELECT count(*) FROM analytics_events WHERE json_extract(payload_json, '$.event_name') = 'onboarding_complete' AND json_extract(payload_json, '$.entity_id') = 'org-second'").first('count(*)'), 1)
-    assert.equal(sent.length, 1)
+    assert.equal(sent.length, 3, 'owner welcome email was sent despite operator email failure')
   } finally {
     await runtime.dispose()
   }

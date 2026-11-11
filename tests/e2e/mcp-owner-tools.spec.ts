@@ -1563,7 +1563,7 @@ test.describe('stateless MCP server', () => {
       expect(refusedPublication.status(), await refusedPublication.text()).toBe(200)
       const publicationResult = (await refusedPublication.json()).result
       expect(publicationResult.isError).toBe(true)
-      expect(JSON.parse(publicationResult.content[0].text)).toEqual({ status: 409, code: 'HOST_REQUIRED', message: 'Choose a host with a published profile before publishing. Guests see who hosts it.' })
+      expect(JSON.parse(publicationResult.content[0].text)).toEqual({ status: 409, code: 'HOST_REQUIRED', message: 'Choose a host with a published profile before publishing. Guests see who hosts it.', field: 'host' })
       const withheld = await request.get(`${baseURL}/api/editor/organizations/${organizationId}/products/${product.id}`)
       expect(withheld.status(), await withheld.text()).toBe(200)
       expect((await withheld.json()).product.publications.find((publication: { organization_id: string }) => publication.organization_id === organizationId)).toMatchObject({ published: false })

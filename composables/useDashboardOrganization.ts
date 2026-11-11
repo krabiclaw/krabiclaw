@@ -195,6 +195,7 @@ export function useDashboardOrganization() {
       pages: `${base}/website/pages`,
       blog: `${base}/website/blog`,
       qa: `${base}/website/qa`,
+      reviews: `${base}/website/reviews`,
     }
   })
 

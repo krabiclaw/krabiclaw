@@ -117,6 +117,13 @@ export function validateTenantPageBlock(block: TenantPageBlock): string[] {
     case 'gallery':
       break
     case 'faq':
+      if (authorsOwnItems(block)) {
+        const items = objectArray(data, 'items')
+        items.forEach((item, index) => {
+          if (!itemText(item, 'title', ['question'])) addError(errors, `Question ${index + 1} needs a question.`)
+        })
+      }
+      break
     case 'testimonial_grid':
       break
     case 'cta':

@@ -41,7 +41,7 @@
         :resource-id="owner.localization.value.resourceId"
         :resource-label="owner.localization.value.label"
         :fields="localizationFields"
-        :language-settings-path="`/dashboard/${route.params.orgSlug}/website/localization`"
+        :language-settings-path="`/dashboard/${route.params.orgSlug}/website/preferences/localization`"
       />
     </template>
   </DashboardIndexPanel>

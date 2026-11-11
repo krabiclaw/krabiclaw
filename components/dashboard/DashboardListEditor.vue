@@ -12,7 +12,7 @@
           <slot name="actions" />
           <slot v-if="!readOnly && editing && selected.length" name="selection-actions" :selected="selected" />
           <UButton
-            v-if="!readOnly && (items.length || editing)"
+            v-if="!readOnly && editable && (items.length || editing)"
             :label="editing ? 'Done' : 'Edit'"
             color="neutral"
             :variant="editing ? 'solid' : 'soft'"
@@ -187,6 +187,8 @@ const props = withDefaults(defineProps<{
   /** Keep list controls unavailable while its owner commits a draft. */
   disabled?: boolean
   readOnly?: boolean
+  /** When false, removes the Edit/Done toggle button from list header. */
+  editable?: boolean
   error?: string | null
   /** Lists with a persisted order gain move controls in the edit state. */
   reorderable?: boolean
@@ -200,7 +202,7 @@ const props = withDefaults(defineProps<{
   skeletonCount?: number
   /** Whether each skeleton row includes a thumbnail box placeholder. */
   thumbnailSkeleton?: boolean
-}>(), { addable: true, disabled: false, loading: false, skeletonCount: 4, thumbnailSkeleton: false })
+}>(), { addable: true, disabled: false, editable: true, loading: false, skeletonCount: 4, thumbnailSkeleton: false })
 
 defineEmits<{
   add: []

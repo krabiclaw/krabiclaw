@@ -31,11 +31,13 @@ import { buildSingleMediaPlacementQueries, insertInitialMediaPlacements, hydrate
 import { isSingleMediaPlacement } from '~/shared/media-placement-contract'
 import { getMediaPlacements } from '~/server/utils/media-placement'
 import { assertLocationGridSupported, loadOrganizationSite } from '~/server/utils/content/publishing'
+import { loadPublicSocialMedia } from '~/server/utils/public-social-image'
 import { siteAllowsPageDocumentAt, sitePageDocumentPaths } from '~/shared/tenant-page-paths'
 import { hasPublicLocationPages, isPublicLocationPath, type PublicSiteDefinition } from '~/utils/site-routing'
 import { CLAIMED_PUBLIC_ROUTES } from '#claimed-public-routes'
 import { formatTenantLocalePath } from '~/utils/tenant-locale-path'
 import { creationRequestHash, organizationEventQuery } from '~/server/utils/organization-events'
+import { listFaqBlockQa } from '~/server/utils/location-qa'
 
 export interface TenantPageEditorInput {
   id?: string
@@ -386,34 +388,113 @@ function pageDto(row: PageRepresentationRow, document: TenantPageDocument, block
   }
 }
 
+export interface PageTask {
+  id: string
+  pageId: string
+  pageTitle: string
+  headline: string
+  reason: string
+  actionLabel: string
+  to: string
+  imageUrl?: string | null
+}
+
 export async function listTenantPages(db: DbClient, organizationId: string, opts: { locale?: string | null } = {}) {
   const locale = await resolveLocale(db, organizationId, opts.locale)
-  const rows = await queryAll<PageRepresentationRow>(db, [
+  const rows = await queryAll<PageRepresentationRow & { section_count: number }>(db, [
     'SELECT v.id, COALESCE(v.root_id, v.id) AS page_id, v.organization_id, v.locale, v.path,',
     '       v.title, v.summary, p.product_id,',
-    `       json_extract(p.metadata_json, '$.page_type') AS page_type, json_extract(p.metadata_json, '$.recipe') AS recipe, p.sort_order, v.updated_at`,
+    `       json_extract(p.metadata_json, '$.page_type') AS page_type, json_extract(p.metadata_json, '$.recipe') AS recipe, p.sort_order, v.updated_at,`,
+    '       (SELECT COUNT(*) FROM content_blocks cb WHERE cb.document_id = v.id) AS section_count',
     `  FROM content_documents v JOIN content_documents p ON p.id = COALESCE(v.root_id, v.id) AND p.row_role = 'root' AND p.kind = 'page'`,
     ` WHERE v.row_role IN ('root','representation') AND v.kind = 'page' AND v.organization_id = ? AND v.locale = ? ORDER BY p.sort_order ASC, v.title ASC`,
   ].join('\n'), [organizationId, locale])
-  // Whether each page may be removed is decided here, by the same rule
-  // deleteTenantPage enforces, so the list and the endpoint cannot disagree and
-  // the dashboard never offers a remove control the server would refuse.
-  const { site } = await loadOrganizationSite(db, organizationId)
-  return rows.map(row => ({
-    id: row.id,
-    page_id: row.page_id,
-    locale: row.locale,
-    path: row.path,
-    title: row.title,
-    page_type: row.page_type,
-    recipe: row.recipe,
-    sort_order: row.sort_order,
-    updated_at: row.updated_at,
-    // The product this page belongs to, read off its source page. A bound page
-    // is edited from its product; the relationship, not its path, says so.
-    product_id: row.product_id,
-    removable: !sitePageDocumentPaths(site).includes(normalizeTenantPagePath(row.path)),
-  }))
+
+  // Canonical OG image resolution matching public-tenant-pages.ts:
+  // The home page has no card of its own: it is the organization's page, and its image is the organization's.
+  // Non-home pages read from content_document.
+  const nonHomeDocIds = rows.filter(r => r.path !== '/').map(r => r.id)
+  const [{ site }, pageMedia, orgMedia] = await Promise.all([
+    loadOrganizationSite(db, organizationId),
+    loadPublicSocialMedia(db, organizationId, 'content_document', nonHomeDocIds),
+    loadPublicSocialMedia(db, organizationId, 'organization', [organizationId]),
+  ])
+  const orgSocialImage = orgMedia.get(organizationId)?.social_image ?? null
+
+  return rows.map(row => {
+    const social = row.path === '/' ? orgSocialImage : pageMedia.get(row.id)?.social_image ?? null
+    return {
+      id: row.id,
+      page_id: row.page_id,
+      locale: row.locale,
+      path: row.path,
+      title: row.title,
+      page_type: row.page_type,
+      recipe: row.recipe,
+      sort_order: row.sort_order,
+      updated_at: row.updated_at,
+      section_count: row.section_count ?? 0,
+      image_url: social?.url ?? null,
+      product_id: row.product_id,
+      removable: !sitePageDocumentPaths(site).includes(normalizeTenantPagePath(row.path)),
+    }
+  })
+}
+
+export async function listPageTasks(db: DbClient, organizationId: string, opts: { locale?: string | null } = {}): Promise<PageTask[]> {
+  const pages = await listTenantPages(db, organizationId, opts)
+  const tasks: PageTask[] = []
+
+  // 1. Check stored tasks from tasks table for this organization
+  const storedTasks = await queryAll<{ id: string; title: string | null; notes: string | null; subject_id: string | null }>(db,
+    `SELECT id, title, notes, subject_id FROM tasks WHERE organization_id = ? AND status = 'open' AND (subject_type IN ('article', 'post') OR kind = 'opportunity') LIMIT 10`,
+    [organizationId]
+  )
+  for (const st of storedTasks) {
+    const matched = pages.find(p => p.id === st.subject_id || p.page_id === st.subject_id)
+    if (matched) {
+      tasks.push({
+        id: st.id,
+        pageId: matched.id,
+        pageTitle: matched.title,
+        headline: st.title || `Update: ${matched.title}`,
+        reason: st.notes || `Review and update ${matched.title} on your website storefront.`,
+        actionLabel: 'Edit page',
+        to: matched.recipe === 'links' ? `/dashboard/[orgSlug]/website/pages/links` : `/dashboard/[orgSlug]/website/pages/${matched.id}`,
+        imageUrl: matched.image_url,
+      })
+    }
+  }
+
+  // 2. Domain readiness checks: missing content or missing cover photos
+  for (const page of pages) {
+    if (page.recipe === 'links') continue
+    if (page.section_count === 0) {
+      tasks.push({
+        id: `task-empty-${page.id}`,
+        pageId: page.id,
+        pageTitle: page.title,
+        headline: `Add content: ${page.title}`,
+        reason: `This page is empty. Add sections so visitors learn about your practice and offerings.`,
+        actionLabel: 'Add sections',
+        to: `/dashboard/[orgSlug]/website/pages/${page.id}`,
+        imageUrl: page.image_url,
+      })
+    } else if (!page.image_url && ['/', '/about', '/services', '/contact'].includes(page.path)) {
+      tasks.push({
+        id: `task-photo-${page.id}`,
+        pageId: page.id,
+        pageTitle: page.title,
+        headline: `Add photo: ${page.title}`,
+        reason: `Pages with photos build client trust and appear in search result previews.`,
+        actionLabel: 'Add photo',
+        to: `/dashboard/[orgSlug]/website/pages/${page.id}`,
+        imageUrl: null,
+      })
+    }
+  }
+
+  return tasks
 }
 
 // The representation row this page is built from IS its content document row,
@@ -432,7 +513,16 @@ async function tenantPageBlocks(db: DbClient, organizationId: string, documentId
 export async function getTenantPageForEditor(db: DbClient, variantId: string, scope?: TenantPageScope): Promise<TenantPageDto> {
   const row = await getPageRepresentation(db, variantId, scope)
   if (!row) notFound('Tenant page variant not found')
-  return pageDto(row, documentOf(row), await tenantPageBlocks(db, row.organization_id, row.id))
+  const blocks = await tenantPageBlocks(db, row.organization_id, row.id)
+  for (const block of blocks) {
+    if (block.type === 'faq' && block.data.source === 'page_qa' && (!Array.isArray(block.data.items) || !block.data.items.length)) {
+      const pageQa = await listFaqBlockQa(db, row.organization_id, row.path, 'page_qa', row.locale)
+      if (pageQa.length) {
+        block.data.items = pageQa.map(qa => ({ title: qa.question, description: qa.answer ?? '' }))
+      }
+    }
+  }
+  return pageDto(row, documentOf(row), blocks)
 }
 
 export async function getPublishedTenantPage(db: DbClient, organizationId: string, path: string, locale?: string | null): Promise<TenantPageDto | null> {

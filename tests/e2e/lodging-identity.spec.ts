@@ -135,7 +135,10 @@ test.describe('lodging identity boundary', () => {
         return mcpData<T>(await response.json())
       }
       /** A team conversation's messages as get_conversation returns them, newest first. */
-      const teamRead = async (args: Record<string, unknown>, client = request) => (await teamCall<{ team: { messages: TeamMessage[]; has_more: boolean } }>('get_conversation', { conversation_id: threadId, ...args }, client)).team
+      const teamRead = async (args: Record<string, unknown>, client = request) => {
+        const { messages, has_more } = (await teamCall<{ team: { messages: TeamMessage[]; has_more: boolean } }>('get_conversation', { conversation_id: threadId, ...args }, client)).team
+        return { messages, has_more }
+      }
       const recipients = await teamCall<{ current_user_id: string; members: TeamMember[] }>('list_conversation_recipients')
       expect(recipients.current_user_id).toBe(fixture.id)
       const nativeMembers = await api.get(`/api/dashboard/team/members?org=${slug}`, { headers: bearer })
@@ -188,19 +191,22 @@ test.describe('lodging identity boundary', () => {
       const beforeInvalidCursor = await api.get(`${teamPath}/messages?org=${slug}`, { headers: bearer })
       expect(beforeInvalidCursor.status, await beforeInvalidCursor.text()).toBe(200)
       const messagesBeforeInvalidCursor = await beforeInvalidCursor.json()
-      for (const cursor of [{ before: replyMessage.createdAt }, { before_id: replyMessage.id }]) {
+      for (const { cursor, field } of [
+        { cursor: { before: replyMessage.created_at }, field: 'before_id' },
+        { cursor: { before_id: replyMessage.id }, field: 'before' },
+      ]) {
         const invalidCursor = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'get_conversation', args: { organization_id: organization.id, conversation_id: threadId, ...cursor } })
         expect(invalidCursor.status(), await invalidCursor.text()).toBe(200)
         const invalidCursorResult = (await invalidCursor.json()).result
         expect(invalidCursorResult.isError).toBe(true)
         expect(invalidCursorResult.structuredContent).toBeUndefined()
         // Half a cursor passes the schema, which has no combinator Claude clients mis-render; the team-message domain refuses it.
-        expect(JSON.parse(invalidCursorResult.content[0].text)).toEqual({ status: 422, message: 'before and before_id are sent together', code: 'INVALID_CURSOR' })
+        expect(JSON.parse(invalidCursorResult.content[0].text)).toEqual({ status: 422, message: 'before and before_id are sent together', code: 'INVALID_CURSOR', field })
       }
       const afterInvalidCursor = await api.get(`${teamPath}/messages?org=${slug}`, { headers: bearer })
       expect(afterInvalidCursor.status, await afterInvalidCursor.text()).toBe(200)
       expect(await afterInvalidCursor.json()).toEqual(messagesBeforeInvalidCursor)
-      const earlier = await teamRead({ limit: 1, before: replyMessage.createdAt, before_id: replyMessage.id })
+      const earlier = await teamRead({ limit: 1, before: replyMessage.created_at, before_id: replyMessage.id })
       expect(earlier).toEqual({ messages: [sent.message], has_more: false })
       expect(await teamRows(bearer)).toEqual([expect.objectContaining({ id: threadId, unread: true })])
 

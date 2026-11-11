@@ -130,7 +130,7 @@ const errorMessage = ref('')
 const { previewButton, previewPath, previewOpen, previewViewport, previewFailure, changePreviewViewport, restorePreviewFocus } = useDashboardContentPreview(
   computed(() => loadError.value || (!previewUrl.value ? 'The saved page could not be loaded for preview.' : '')),
 )
-const organizationLocalizationSettingsPath = computed(() => `/dashboard/${String(route.params.orgSlug)}/website/localization`)
+const organizationLocalizationSettingsPath = computed(() => `/dashboard/${String(route.params.orgSlug)}/website/preferences/localization`)
 
 function preview(value: string, empty: string) {
   return value.trim() || empty

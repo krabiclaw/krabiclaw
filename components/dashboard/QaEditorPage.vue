@@ -126,7 +126,7 @@ const qaLocalizationFields = computed(() => [
   { key: 'title', label: 'Question', source: record.value?.question },
   { key: 'summary', label: 'Answer', source: record.value?.answer, multiline: true, rows: 4 },
 ])
-const organizationLocalizationSettingsPath = computed(() => `/dashboard/${route.params.orgSlug}/website/localization`)
+const organizationLocalizationSettingsPath = computed(() => `/dashboard/${route.params.orgSlug}/website/preferences/localization`)
 
 const navigationGroups = computed<EditorNavigationGroup[]>(() => [
   {

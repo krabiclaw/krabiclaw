@@ -16,6 +16,7 @@ import {
   stayTurnoverAlert,
   domainUpdateMessage,
   onboardingCompletedMessage,
+  ownerWelcomeMessage,
   contentReportedMessage,
   inquiryReceivedMessage,
   messageReceived,
@@ -394,6 +395,58 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
       organizationName: studio, ownerName: 'Priya Shah', ownerEmail: 'priya@example.com',
       siteUrl: 'https://pottery-house.krabiclaw.com/',
       viewCustomerUrl: 'https://krabiclaw.com/dashboard/krabiclaw/platform-accounts?user=preview-user&organization=preview-organization',
+    }),
+  },
+
+  {
+    id: 'owner-welcome-experience',
+    audience: 'owner',
+    title: 'Owner — founder welcome (Experience)',
+    message: ownerWelcomeMessage({
+      organizationName: studio,
+      ownerName: 'Priya Shah',
+      siteUrl: 'https://pottery-house.krabiclaw.com/',
+      dashboardUrl: 'https://krabiclaw.com/dashboard/pottery-house',
+      vertical: 'experience',
+    }),
+  },
+
+  {
+    id: 'owner-welcome-restaurant',
+    audience: 'owner',
+    title: 'Owner — founder welcome (Restaurant)',
+    message: ownerWelcomeMessage({
+      organizationName: 'The Olive Branch',
+      ownerName: 'Marco Rossi',
+      siteUrl: 'https://olive-branch.krabiclaw.com/',
+      dashboardUrl: 'https://krabiclaw.com/dashboard/olive-branch',
+      vertical: 'restaurant',
+    }),
+  },
+
+  {
+    id: 'owner-welcome-lodging',
+    audience: 'owner',
+    title: 'Owner — founder welcome (Lodging)',
+    message: ownerWelcomeMessage({
+      organizationName: 'Pinecone Stays',
+      ownerName: 'Sarah Jenkins',
+      siteUrl: 'https://pinecone-stays.krabiclaw.com/',
+      dashboardUrl: 'https://krabiclaw.com/dashboard/pinecone-stays',
+      vertical: 'lodging',
+    }),
+  },
+
+  {
+    id: 'owner-welcome-service',
+    audience: 'owner',
+    title: 'Owner — founder welcome (Legal Services)',
+    message: ownerWelcomeMessage({
+      organizationName: 'North Carolina Legal Services',
+      ownerName: 'Robert Vance',
+      siteUrl: 'https://nclegal.krabiclaw.com/',
+      dashboardUrl: 'https://krabiclaw.com/dashboard/nclegal',
+      vertical: 'service',
     }),
   },
 

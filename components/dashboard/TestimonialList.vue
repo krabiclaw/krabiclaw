@@ -53,5 +53,5 @@ const { data, error } = await useAsyncData(
 
 const testimonials = computed(() => data.value?.reviews ?? [])
 // A review is a record, so its row links to its own level, as a question's does.
-const listItems = computed(() => testimonials.value.map(row => ({ id: row.id, title: row.author_name, to: router.resolve({ path: `${level.path.value}/reviews/${row.id}`, query: route.query }).fullPath, row })))
+const listItems = computed(() => testimonials.value.map(row => ({ id: row.id, title: row.author_name, to: router.resolve({ path: `${level.path.value}/${row.id}`, query: route.query }).fullPath, row })))
 </script>

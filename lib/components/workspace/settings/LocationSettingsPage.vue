@@ -226,7 +226,7 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
     status: 'active',
   })
   const addressDraftKeys = ['addressLines', 'regionCode', 'locality', 'sublocality', 'administrativeArea', 'postalCode'] as const
-  const organizationLocalizationSettingsPath = computed(() => `/dashboard/${route.params.orgSlug}/website/localization`)
+  const organizationLocalizationSettingsPath = computed(() => `/dashboard/${route.params.orgSlug}/website/preferences/localization`)
   const locationLocalizationFields = computed(() => [
     { key: 'title', label: 'Name', source: location.value?.title },
     { key: 'short_description', label: 'Short description', source: location.value?.short_description },

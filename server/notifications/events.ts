@@ -716,6 +716,61 @@ export function onboardingCompletedMessage(input: OnboardingCompletedInput): Mem
   }
 }
 
+export interface OwnerWelcomeInput {
+  organizationName: string
+  ownerName: string
+  siteUrl: string
+  dashboardUrl: string
+  vertical: string | null | undefined
+}
+
+/** Selects vertical-tailored greeting prompts for new business onboarding. */
+function welcomeVerticalPrompt(vertical: string | null | undefined, organizationName: string): string {
+  const v = vertical?.trim().toLowerCase()
+  switch (v) {
+    case 'experience':
+      return `What kind of experience or activity are you planning to host with ${organizationName}? If you need a hand setting up your first activity, booking schedule, or customizing your site, just reply directly to this email — I’m happy to help you get everything dialed in.`
+    case 'restaurant':
+      return `What kind of dining experience or cuisine are you featuring at ${organizationName}? If you need a hand setting up your menu, table reservations, or customizing your site, just reply directly to this email — I’m happy to help you get everything dialed in.`
+    case 'lodging':
+      return `Tell me a bit about your property — how many homes or rooms are you hosting with ${organizationName}? If you need a hand adding your first stay, setting up calendar sync with Airbnb or Vrbo, or customizing your site, just reply directly to this email — I’m happy to help you get everything dialed in.`
+    case 'service':
+      return `Tell me a bit about your practice at ${organizationName}. If you need a hand setting up your practice areas, consultation requests, attorney profiles, or customizing your site, just reply directly to this email — I’m happy to help you get everything dialed in.`
+    default:
+      return `What are you planning to build with ${organizationName}? If you need a hand setting up your offerings, booking flow, or customizing your site, just reply directly to this email — I’m happy to help you get everything dialed in.`
+  }
+}
+
+/** A personal founder welcome from Paul to every new business owner who finishes onboarding. */
+export function ownerWelcomeMessage(input: OwnerWelcomeInput): MemberAlertMessage {
+  const greeting = firstName(input.ownerName)
+  const verticalPrompt = welcomeVerticalPrompt(input.vertical, input.organizationName)
+  const body = [
+    `I saw that you just launched ${input.organizationName} on KrabiClaw (${input.siteUrl}) — congratulations!`,
+    `I’m Paul, the founder of KrabiClaw. I wanted to reach out personally to welcome you and see how setup went.`,
+    verticalPrompt,
+    `Excited to have you on board,\n\n**Paul**  \nFounder, KrabiClaw`,
+  ].join('\n\n')
+
+  return {
+    title: `Welcome to KrabiClaw — congrats on launching ${input.organizationName}!`,
+    preheader: `Welcome to KrabiClaw — your site is live at ${input.siteUrl}`,
+    hero: null,
+    intro: `Hi ${greeting},`,
+    body,
+    facts: facts(
+      fact('business', 'Business', input.organizationName, true),
+      fact('site', 'Site', input.siteUrl, true),
+    ),
+    primaryAction: { url: input.dashboardUrl, label: 'Open your dashboard' },
+    secondaryAction: { url: input.siteUrl, label: 'View your site' },
+    finePrint: 'You can reply directly to this email to reach me.',
+    category: 'organization_and_billing',
+    emailPurpose: 'transactional',
+    emailReason: `You received this email because you launched ${input.organizationName} on KrabiClaw.`,
+  }
+}
+
 export interface TaskAlertInput {
   /** Someone gave the reader this task, or its window starts today. */
   kind: 'assigned' | 'starting'

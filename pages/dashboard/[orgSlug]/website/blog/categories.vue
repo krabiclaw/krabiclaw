@@ -20,14 +20,14 @@
         @remove="removeCategory"
         @move="moveCategory"
       >
-        <template #filters>
+        <template v-if="isPlatform" #filters>
           <DashboardFilterPills id="category-collection" v-model="collection" label="Collection" :items="collectionTabs" />
         </template>
         <template #item="{ item }">
           <!-- A subcategory sits indented under its parent, the way the site's sidebar reads it. -->
-          <span class="min-w-0 flex-1" :style="{ paddingInlineStart: `${(item.depth - 1) * 1.5}rem` }" :data-testid="`article-category-${item.id}`">
-            <span class="block truncate text-sm font-semibold text-highlighted">{{ item.row.name }}</span>
-            <span class="mt-1 block text-sm text-muted">{{ countSummary(item.row) }}</span>
+          <span class="min-w-0 flex-1 flex items-center justify-between gap-4" :style="{ paddingInlineStart: `${(item.depth - 1) * 1.5}rem` }" :data-testid="`article-category-${item.id}`">
+            <span class="truncate text-sm font-semibold text-highlighted">{{ item.row.name }}</span>
+            <span class="text-xs sm:text-sm text-muted shrink-0">{{ formatCategoryUpdated(item.row.updated_at) }}</span>
           </span>
         </template>
       </DashboardListEditor>
@@ -68,6 +68,7 @@ const route = useRoute()
 const router = useRouter()
 const organizationId = useDashboardOrganizationId()
 const level = useRouteLevel()
+const isPlatform = computed(() => route.params.orgSlug === 'platform')
 
 const collectionTabs = ARTICLE_COLLECTION_SLUGS.map(slug => ({ value: slug, label: ARTICLE_COLLECTIONS[slug].label }))
 if (route.query.collection !== undefined && !isArticleCollection(route.query.collection)) throw createError({ statusCode: 400, statusMessage: 'Choose an article collection' })
@@ -101,9 +102,9 @@ const categories = computed(() => {
   return rows
 })
 const listItems = computed(() => categories.value.map(({ row, depth }) => ({ id: row.id, title: row.name, to: router.resolve({ path: `${level.path.value}/${row.id}`, query: { collection: collection.value } }).fullPath, row, depth })))
-function countSummary(row: DashboardArticleCategory) {
-  const articles = row.article_count === 1 ? '1 article' : `${row.article_count} articles`
-  return row.child_count ? `${articles} · ${row.child_count === 1 ? '1 subcategory' : `${row.child_count} subcategories`}` : articles
+function formatCategoryUpdated(iso?: string | null): string {
+  if (!iso) return ''
+  return `Updated ${new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`
 }
 const loadError = computed(() => error.value ? getErrorMessage(error.value, 'Categories could not be loaded') : null)
 

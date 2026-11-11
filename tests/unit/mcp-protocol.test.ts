@@ -52,12 +52,12 @@ test('asMcpError falls back to internal for a plain Error', () => {
 
 test('domain failures preserve actions and recovery receipts without private details', () => {
   const error = Object.assign(new Error('This website language is not published.'), { statusCode: 409, data: {
-    code: 'LANGUAGE_NOT_PUBLISHED', dashboard_url: '/dashboard/kanpai/website/localization',
+    code: 'LANGUAGE_NOT_PUBLISHED', dashboard_url: '/dashboard/kanpai/website/preferences/localization',
     credential: 'private-value', customer_email: 'private@example.com',
   } })
   const mapped = asMcpError(error)
   assert.equal(mapped.kind, 'tool_execution')
-  assert.deepEqual(mapped.data, { status: 409, code: 'LANGUAGE_NOT_PUBLISHED', dashboard_url: '/dashboard/kanpai/website/localization' })
+  assert.deepEqual(mapped.data, { status: 409, code: 'LANGUAGE_NOT_PUBLISHED', dashboard_url: '/dashboard/kanpai/website/preferences/localization' })
 
   const reason = 'Channex rejected part of the update.'
   const details: Record<string, unknown> = {

@@ -1,59 +1,137 @@
 <template>
-  <!-- A row of Website settings, so it closes back to it like its siblings; adding a domain is its own action, not a Save. -->
-  <DashboardLeafPanel id="organization-domains" title="Domains" :footer="false">
-    <template #right>
-      <UButton icon="i-lucide-plus" @click="openAddModal">Add domain</UButton>
-    </template>
+  <DashboardIndexPanel
+    id="organization-domains"
+    title="Domains"
+    lead="Manage your website's web addresses. Visitors can reach your site on your default address or a custom domain you own."
+  >
+    <UAlert
+      v-if="actionError"
+      color="error"
+      variant="soft"
+      icon="i-lucide-circle-alert"
+      :description="actionError"
+      class="mb-6"
+    />
+    <UAlert
+      v-if="loadError"
+      color="error"
+      variant="soft"
+      title="Domains could not be loaded"
+      :description="loadError"
+      class="mb-6"
+    />
 
-    <div class="space-y-4">
+    <div class="space-y-6">
+      <!-- Default Website Address (Airbnb Parity) -->
+      <div class="rounded-2xl border border-default p-5 sm:p-6 bg-default shadow-xs">
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div class="min-w-0">
+            <div class="flex items-center gap-2.5">
+              <span class="font-mono text-sm sm:text-base font-semibold text-highlighted truncate">
+                {{ defaultHostname }}
+              </span>
+              <UBadge color="neutral" variant="subtle" size="sm">
+                Default
+              </UBadge>
+              <UBadge v-if="!hasCanonicalCustomDomain" color="success" variant="subtle" size="sm">
+                Primary
+              </UBadge>
+            </div>
+            <p class="mt-1 text-xs sm:text-sm text-muted">
+              Your free included web address, always active.
+            </p>
+          </div>
+
+          <div class="flex items-center gap-2 shrink-0">
+            <UButton
+              :icon="copiedValue === defaultUrl ? 'i-lucide-check' : 'i-lucide-copy'"
+              :label="copiedValue === defaultUrl ? 'Copied' : 'Copy link'"
+              color="neutral"
+              variant="outline"
+              size="sm"
+              @click="copy(defaultUrl)"
+            />
+            <UButton
+              icon="i-lucide-external-link"
+              label="Visit"
+              color="neutral"
+              variant="soft"
+              size="sm"
+              :to="defaultUrl"
+              target="_blank"
+            />
+          </div>
+        </div>
+      </div>
+
+      <!-- Custom Domains Section (Airbnb Parity) -->
       <div>
-        <UAlert
-          v-if="actionError"
-          color="error"
-          variant="soft"
-          icon="i-lucide-circle-alert"
-          :description="actionError"
-          class="mb-4"
-        />
-        <UAlert
-          v-if="loadError"
-          color="error"
-          variant="soft"
-          title="Domains could not be loaded"
-          :description="loadError"
-          class="mb-4"
-        />
-        <UEmpty
-          v-if="!loadError && !domainGroups?.length"
-          icon="i-lucide-globe"
-          title="No custom domains"
-          description="Add a paid-plan domain when you are ready to connect one."
-        />
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-base font-semibold text-highlighted">
+            Custom domain
+          </h3>
+          <UButton
+            v-if="domainGroups?.length"
+            icon="i-lucide-plus"
+            label="Connect domain"
+            color="neutral"
+            variant="ghost"
+            size="sm"
+            @click="openAddModal"
+          />
+        </div>
 
-        <div v-else class="divide-y divide-default">
+        <!-- Empty state when no custom domains connected -->
+        <div
+          v-if="!loadError && !domainGroups?.length"
+          class="rounded-2xl border border-dashed border-default p-6 sm:p-8 text-center bg-default/50"
+        >
+          <div class="size-12 rounded-full bg-accented flex items-center justify-center mx-auto mb-3">
+            <UIcon name="i-lucide-globe" class="size-6 text-muted" />
+          </div>
+          <h4 class="text-sm sm:text-base font-semibold text-highlighted">
+            Connect your own domain
+          </h4>
+          <p class="mt-1 text-xs sm:text-sm text-muted max-w-sm mx-auto leading-relaxed">
+            Use your own web address (like yourbusiness.com) so clients and guests find you easily.
+          </p>
+          <div class="mt-5">
+            <UButton
+              label="Connect a custom domain"
+              icon="i-lucide-plus"
+              color="neutral"
+              variant="outline"
+              size="md"
+              class="rounded-xl font-semibold border-2 cursor-pointer"
+              data-testid="empty-connect-domain-button"
+              @click="openAddModal"
+            />
+          </div>
+        </div>
+
+        <!-- Custom domains list -->
+        <div v-else class="space-y-4">
           <div
             v-for="group in domainGroups"
             :key="group.id"
+            class="rounded-2xl border border-default p-5 sm:p-6 bg-default shadow-xs"
+            :data-testid="`domain-card-${group.domain}`"
           >
-            <div class="flex flex-col gap-3 py-3 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between">
-              <UButton
-                color="neutral"
-                variant="ghost"
-                class="-mx-2 min-w-0 justify-start px-2"
-                :trailing-icon="expandedGroups[group.id] ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'"
-                @click="toggleGroup(group.id)"
-              >
-                <span class="flex min-w-0 flex-col items-start gap-1 text-left">
-                  <span class="flex min-w-0 items-center gap-2">
-                    <span class="truncate font-mono text-sm font-medium text-highlighted">{{ group.domain }}</span>
-                    <UBadge v-if="group.role === 'canonical'" label="Primary" color="primary" variant="soft" size="xs" />
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div class="min-w-0">
+                <div class="flex items-center gap-2.5 flex-wrap">
+                  <span class="font-mono text-sm sm:text-base font-semibold text-highlighted">
+                    {{ group.domain }}
                   </span>
-                  <span v-if="group.www_domain_id" class="text-xs text-muted">www -> {{ group.root_domain }}</span>
-                </span>
-              </UButton>
+                  <UBadge v-if="group.role === 'canonical'" label="Primary" color="primary" variant="soft" size="xs" />
+                  <UBadge :label="statusLabel(group.status)" :color="statusColor(group.status)" variant="soft" size="xs" />
+                </div>
+                <p v-if="group.www_domain_id" class="mt-1 text-xs text-muted">
+                  www.{{ group.root_domain }} redirects to {{ group.domain }}
+                </p>
+              </div>
 
-              <div class="flex shrink-0 items-center gap-2">
-                <UBadge :label="statusLabel(group.status)" :color="statusColor(group.status)" variant="soft" />
+              <div class="flex items-center gap-2 shrink-0">
                 <UButton
                   v-if="primaryAction(group)"
                   size="sm"
@@ -65,31 +143,43 @@
                 >
                   {{ primaryAction(group)?.label }}
                 </UButton>
+
+                <UButton
+                  color="neutral"
+                  variant="ghost"
+                  size="sm"
+                  :icon="expandedGroups[group.id] ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'"
+                  @click="toggleGroup(group.id)"
+                >
+                  {{ expandedGroups[group.id] ? 'Hide DNS' : 'DNS Records' }}
+                </UButton>
+
                 <UDropdownMenu :items="domainMenuItems(group)" :content="{ align: 'end' }">
                   <UButton icon="i-lucide-more-horizontal" color="neutral" variant="ghost" size="sm" aria-label="Domain actions" />
                 </UDropdownMenu>
               </div>
             </div>
 
-            <div v-if="expandedGroups[group.id]">
-              <div class="space-y-3 pb-4">
-                <UAlert
-                  v-if="group.warning || group.error"
-                  :color="group.error ? 'error' : 'warning'"
-                  variant="soft"
-                  :title="group.error ? 'Action required' : 'Needs attention'"
-                  :description="group.error || group.warning || undefined"
-                />
+            <!-- Expanded DNS Verification Details -->
+            <div v-if="expandedGroups[group.id]" class="mt-5 pt-5 border-t border-default space-y-4">
+              <UAlert
+                v-if="group.warning || group.error"
+                :color="group.error ? 'error' : 'warning'"
+                variant="soft"
+                :title="group.error ? 'Action required' : 'Needs attention'"
+                :description="group.error || group.warning || undefined"
+              />
 
+              <div class="overflow-x-auto">
                 <UTable :data="group.records" :columns="recordColumns">
                   <template #type-cell="{ row }">
                     <UBadge :label="row.original.type" color="neutral" variant="soft" size="xs" />
                   </template>
                   <template #name-cell="{ row }">
-                    <code class="block break-all text-xs text-highlighted">{{ row.original.name }}</code>
+                    <code class="block break-all text-xs text-highlighted font-mono">{{ row.original.name }}</code>
                   </template>
                   <template #value-cell="{ row }">
-                    <code class="block max-w-full break-all text-xs text-muted">{{ row.original.value }}</code>
+                    <code class="block max-w-full break-all text-xs text-muted font-mono">{{ row.original.value }}</code>
                   </template>
                   <template #actions-cell="{ row }">
                     <UTooltip :text="copiedValue === row.original.value ? 'Copied' : 'Copy value'">
@@ -103,20 +193,20 @@
                     </UTooltip>
                   </template>
                 </UTable>
+              </div>
 
-                <div class="flex flex-col gap-2 text-xs text-muted sm:flex-row sm:items-center sm:justify-between">
-                  <span>{{ group.last_synced_at ? `Last checked ${formatDateTime(group.last_synced_at)}` : 'Not checked yet' }}</span>
-                  <UButton
-                    size="xs"
-                    color="neutral"
-                    variant="soft"
-                    icon="i-lucide-refresh-cw"
-                    :loading="syncingGroupId === group.id"
-                    @click="syncGroup(group)"
-                  >
-                    Check now
-                  </UButton>
-                </div>
+              <div class="flex flex-col gap-2 text-xs text-muted sm:flex-row sm:items-center sm:justify-between pt-2">
+                <span>{{ group.last_synced_at ? `Last checked ${formatDateTime(group.last_synced_at)}` : 'Not checked yet' }}</span>
+                <UButton
+                  size="xs"
+                  color="neutral"
+                  variant="soft"
+                  icon="i-lucide-refresh-cw"
+                  :loading="syncingGroupId === group.id"
+                  @click="syncGroup(group)"
+                >
+                  Check now
+                </UButton>
               </div>
             </div>
           </div>
@@ -124,11 +214,35 @@
       </div>
     </div>
 
-    <UModal v-model:open="addModalOpen" title="Add domain">
-      <template #body>
+    <!-- Add Custom Domain Modal (Airbnb Parity) -->
+    <UModal v-model:open="addModalOpen" :ui="{ content: 'max-w-md p-6 sm:p-7 rounded-3xl' }">
+      <template #content>
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="text-xl font-semibold text-highlighted">Connect a custom domain</h3>
+          <UButton
+            icon="i-lucide-x"
+            color="neutral"
+            variant="ghost"
+            square
+            size="sm"
+            aria-label="Close"
+            @click="closeAddModal"
+          />
+        </div>
+
+        <p class="text-xs sm:text-sm text-muted mb-5 leading-relaxed">
+          Enter the domain you purchased from your registrar (e.g. GoDaddy, Namecheap, Cloudflare).
+        </p>
+
         <UForm :state="addForm" class="space-y-4" @submit="addDomain">
-          <UFormField label="Domain" name="domain" :error="addError">
-            <UInput v-model="addForm.domain" placeholder="example.com" class="w-full" :disabled="adding" />
+          <UFormField label="Domain name" name="domain" :error="addError">
+            <UInput
+              v-model="addForm.domain"
+              placeholder="example.com"
+              class="w-full"
+              :disabled="adding"
+              autofocus
+            />
           </UFormField>
 
           <UAlert
@@ -145,30 +259,49 @@
             label="I understand changing DNS can interrupt the current site until validation finishes."
           />
 
-          <div class="flex justify-end gap-2">
-            <UButton color="neutral" variant="ghost" :disabled="adding" @click="closeAddModal">Cancel</UButton>
+          <div class="flex items-center justify-between pt-6">
+            <UButton
+              color="neutral"
+              variant="ghost"
+              size="lg"
+              class="font-semibold"
+              :disabled="adding"
+              @click="closeAddModal"
+            >
+              Cancel
+            </UButton>
             <UButton
               type="submit"
+              color="neutral"
+              variant="solid"
+              size="lg"
+              class="px-6 rounded-xl font-semibold justify-center"
               :loading="adding"
               :disabled="!addForm.domain.trim() || Boolean(liveCutoverWarning && !addForm.acknowledge_live_cutover)"
+              data-testid="submit-add-domain"
             >
-              Add domain
+              Connect domain
             </UButton>
           </div>
         </UForm>
       </template>
     </UModal>
-  </DashboardLeafPanel>
+  </DashboardIndexPanel>
 </template>
 
 <script setup lang="ts">
 import DashboardConfirmDialog from '~/components/dashboard/DashboardConfirmDialog.vue'
 import SettingRow from '~/components/dashboard/SettingRow.vue'
 import { formatTimestamp } from '~/utils/timezone'
-const dashboardApi = useDashboardApi()
-definePageMeta({ layout: 'dashboard' })
-const confirmDialog = useOverlay().create(DashboardConfirmDialog)
 
+definePageMeta({ layout: 'dashboard' })
+
+const confirmDialog = useOverlay().create(DashboardConfirmDialog)
+const dashboardApi = useDashboardApi()
+const dashboard = useDashboardOrganization()
+const runtimeConfig = useRuntimeConfig()
+const route = useRoute()
+const { trackDomainConnected } = useAnalytics()
 
 type DomainStatus = 'pending' | 'verifying' | 'active' | 'blocked' | 'failed' | 'disabled' | 'deleted'
 
@@ -241,18 +374,36 @@ const isDomainsResponse = (value: unknown): value is DomainsResponse =>
   && Array.isArray(value.domain_groups)
   && value.domain_groups.every(isDomainGroup)
 
-const copiedValue = ref<string | null>(null)
-const actionError = ref<string | null>(null)
-const dashboard = useDashboardOrganization()
-
 const organizationId = computed(() => dashboard.organization.value?.id ?? null)
 if (!organizationId.value) {
   throw createError({ statusCode: 404, statusMessage: 'Organization not found' })
 }
 
-const { trackDomainConnected } = useAnalytics()
-const route = useRoute()
+const freeOrganizationDomain = computed(() =>
+  String(runtimeConfig.public.freeOrganizationDomain || 'krabiclaw.com').replace(/^https?:\/\//, ''),
+)
 
+const defaultHostname = computed(() => {
+  const subdomain = dashboard.organization.value?.subdomain
+  if (!subdomain) return freeOrganizationDomain.value
+  return `${subdomain}.${freeOrganizationDomain.value}`
+})
+
+const defaultUrl = computed(() => `https://${defaultHostname.value}`)
+
+const { data: domainGroups, error: domainsError, refresh: loadDomains } = await useAsyncData(
+  () => `organization-domains:${organizationId.value}`,
+  async () => (await dashboardApi<DomainsResponse>(`/api/organizations/${organizationId.value}/domains`, { validate: isDomainsResponse })).domain_groups,
+)
+
+const loadError = computed(() => domainsError.value ? getErrorMessage(domainsError.value, 'Failed to load domains') : null)
+
+const hasCanonicalCustomDomain = computed(() =>
+  domainGroups.value?.some(g => g.role === 'canonical' && g.status === 'active'),
+)
+
+const copiedValue = ref<string | null>(null)
+const actionError = ref<string | null>(null)
 const adding = ref(false)
 const syncingGroupId = ref<string | null>(null)
 const promotingGroupId = ref<string | null>(null)
@@ -476,12 +627,6 @@ watch(() => route.params.orgSlug, () => {
 watch(addModalOpen, (open) => {
   if (!open) resetAddModal()
 })
-
-const { data: domainGroups, error: domainsError, refresh: loadDomains } = await useAsyncData(
-  () => `organization-domains:${organizationId.value}`,
-  async () => (await dashboardApi<DomainsResponse>(`/api/organizations/${organizationId.value}/domains`, { validate: isDomainsResponse })).domain_groups,
-)
-const loadError = computed(() => domainsError.value ? getErrorMessage(domainsError.value, 'Failed to load domains') : null)
 
 useSeoMeta({ title: 'Domains | KrabiClaw Dashboard', robots: 'noindex, nofollow' })
 </script>
