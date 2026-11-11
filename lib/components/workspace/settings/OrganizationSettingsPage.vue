@@ -43,7 +43,7 @@
           class="group block w-full text-left rounded-3xl p-5 sm:p-6 bg-white dark:bg-neutral-900 shadow-[0_4px_24px_rgba(0,0,0,0.06)] dark:shadow-[0_4px_24px_rgba(0,0,0,0.3)] hover:shadow-[0_6px_28px_rgba(0,0,0,0.09)] transition cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
           tabindex="0"
           role="link"
-          :aria-current="route.path.startsWith(pagesPath) ? 'page' : undefined"
+          :aria-current="isPagesActive ? 'page' : undefined"
           data-testid="website-pages-featured-card"
           @click="navigateTo(pagesPath)"
           @keydown.enter="navigateTo(pagesPath)"
@@ -113,7 +113,7 @@
           class="group block w-full text-left rounded-3xl p-5 sm:p-6 bg-white dark:bg-neutral-900 shadow-[0_4px_24px_rgba(0,0,0,0.06)] dark:shadow-[0_4px_24px_rgba(0,0,0,0.3)] hover:shadow-[0_6px_28px_rgba(0,0,0,0.09)] transition cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
           tabindex="0"
           role="link"
-          :aria-current="route.path.startsWith(blogPath) ? 'page' : undefined"
+          :aria-current="isBlogActive ? 'page' : undefined"
           data-testid="website-blog-featured-card"
           @click="navigateTo(blogPath)"
           @keydown.enter="navigateTo(blogPath)"
@@ -163,7 +163,7 @@
           class="group block w-full text-left rounded-3xl p-5 sm:p-6 bg-white dark:bg-neutral-900 shadow-[0_4px_24px_rgba(0,0,0,0.06)] dark:shadow-[0_4px_24px_rgba(0,0,0,0.3)] hover:shadow-[0_6px_28px_rgba(0,0,0,0.09)] transition cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
           tabindex="0"
           role="link"
-          :aria-current="route.path.startsWith(postsPath) ? 'page' : undefined"
+          :aria-current="isPostsActive ? 'page' : undefined"
           data-testid="website-posts-featured-card"
           @click="navigateTo(postsPath)"
           @keydown.enter="navigateTo(postsPath)"
@@ -211,10 +211,10 @@
       <div v-if="surface === 'settings'" class="mb-6">
         <div
           class="block w-full text-left rounded-3xl p-6 bg-white dark:bg-neutral-900 shadow-[0_4px_24px_rgba(0,0,0,0.06)] dark:shadow-[0_4px_24px_rgba(0,0,0,0.3)] hover:shadow-[0_6px_28px_rgba(0,0,0,0.09)] transition cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-          :class="{ 'ring-2 ring-highlighted': route.path.startsWith(`${settingsPath}/booking`) || route.path.startsWith(`${settingsPath}/inquiry-form`) }"
+          :class="{ 'ring-2 ring-highlighted': isBookingActive }"
           tabindex="0"
           role="link"
-          :aria-current="(route.path.startsWith(`${settingsPath}/booking`) || route.path.startsWith(`${settingsPath}/inquiry-form`)) ? 'page' : undefined"
+          :aria-current="isBookingActive ? 'page' : undefined"
           data-testid="website-booking-card"
           @click="navigateTo(`${settingsPath}/booking`)"
           @keydown.enter="navigateTo(`${settingsPath}/booking`)"
@@ -688,6 +688,11 @@ const pagesTaskText = computed(() => {
 
 const blogPath = computed(() => dashboard.organizationPaths.value?.blog ?? `${organizationDashboardPath.value}/website/blog`)
 const postsPath = computed(() => dashboard.organizationPaths.value?.posts ?? `${organizationDashboardPath.value}/website/posts`)
+
+const isPagesActive = computed(() => route.path.startsWith(pagesPath.value))
+const isBlogActive = computed(() => route.path.startsWith(blogPath.value))
+const isPostsActive = computed(() => route.path.startsWith(postsPath.value))
+const isBookingActive = computed(() => route.path.startsWith(`${settingsPath.value}/booking`) || route.path.startsWith(`${settingsPath.value}/inquiry-form`))
 
 const isBlogSummaryResponse = (value: unknown): value is { posts: BlogPost[] } =>
   isRecord(value) && Array.isArray(value.posts)

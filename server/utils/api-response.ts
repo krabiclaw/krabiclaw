@@ -177,7 +177,8 @@ export const cloudflareEnv = (event: H3Event): CloudflareEnv => {
   // reload, so say what happened and what fixes it.
   let d1: D1Database | undefined
   try {
-    d1 = rawD1 ? instrumentD1(event, rawD1.withSession('first-primary'), rawD1) : undefined
+    const sessionD1 = import.meta.dev ? rawD1 : rawD1?.withSession('first-primary')
+    d1 = sessionD1 && rawD1 ? instrumentD1(event, sessionD1, rawD1) : undefined
   } catch (error) {
     if (error instanceof Error && error.message.includes('poisoned stub')) {
       throw new HTTPError({
