@@ -198,6 +198,7 @@ test('a v25 replacement names business scheduling with no default to fall back o
     source.prepare("INSERT INTO member(id,organizationId,userId,role) VALUES('host-owner','host','owner','owner')").run()
     source.prepare("INSERT INTO business_locations(id,organization_id,slug,title,timezone,opening_hours) VALUES('dining-room','host','dining-room','Dining room','UTC',?)").run(JSON.stringify(opening))
     source.prepare("INSERT INTO location_reservation_configs(location_id,organization_id,duration_minutes,slot_capacity,created_by,updated_by) VALUES('dining-room','host',90,12,'owner','owner')").run()
+    source.prepare("INSERT INTO reservations(id,organization_id,location_id,timezone,starts_at,ends_at,party_size) VALUES('existing-table','host','dining-room','UTC','2026-11-12T18:45:00.000Z','2026-11-12T20:15:00.000Z',2)").run()
     // Stale evidence nobody decided about, beside its live successor.
     source.exec(`INSERT INTO opportunities(id,organization_id,operation,subject_id,evidence_revision,status,created_at,updated_at)
         VALUES('stale','host','article.create','host','${'1'.repeat(64)}','superseded','2026-11-01T10:00:00.000Z','2026-11-01T10:00:00.000Z'),
@@ -230,6 +231,7 @@ test('a v25 replacement names business scheduling with no default to fall back o
       ])
       assert.deepEqual(target.pragma('foreign_key_check'), [])
     } finally { target.close() }
+    assert(!manifest.hours_session_ids.includes('table-session-dining-room-2026-11-12T18:45:00.000Z'))
     const delta = await transferDatabaseExport(sourcePath, join(directory, 'v27-delta.sqlite'), { payloadPath: join(directory, 'payload-delta.sql'), deltaFrom: targetPath })
     assert.deepEqual(delta.hours_session_ids, manifest.hours_session_ids)
     assert.equal(delta.payload?.delta?.product_sessions, 0)

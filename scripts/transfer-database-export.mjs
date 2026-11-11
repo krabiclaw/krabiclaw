@@ -1283,6 +1283,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
         ...tables.map(table => [table.product_id, table.location_id]),
       ])
       const previousSourceRows = new Map()
+      const retainedHoursIds = new Set()
       if (deltaFrom && hoursProducts.size) {
         // These rows were derived on the replacement, never held by the old
         // source. Seed their canonical occurrences before regeneration so the
@@ -1308,7 +1309,6 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
           const sessionColumns = columns(target, 'product_sessions')
           const insert = target.prepare(`INSERT INTO product_sessions (${sessionColumns.map(qi).join(',')}) VALUES (${sessionColumns.map(() => '?').join(',')})`)
           const sourceOccurrence = target.prepare('SELECT id FROM product_sessions WHERE product_id = ? AND starts_at = ? AND location_id IS ? LIMIT 1')
-          let retained = 0
           target.transaction(() => {
             for (const id of previous.hours_session_ids) {
               const row = earlier.prepare('SELECT * FROM product_sessions WHERE id = ?').get(id)
@@ -1320,10 +1320,10 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
               assert(!occupied, `Source session ${occupied?.id} occupies initial derived session ${id}; explicitly reconcile this occurrence before a creations-only delta. No replacement rows were overwritten.`)
               try { insert.run(...sessionColumns.map(name => row[name])) }
               catch (cause) { throw new Error(`Retaining hours session ${id}: ${cause.message}`, { cause }) }
-              retained++
+              retainedHoursIds.add(id)
             }
           })()
-          manifest.transforms.push({ name: 'hours_session_identities_retained', changes: retained })
+          manifest.transforms.push({ name: 'hours_session_identities_retained', changes: retainedHoursIds.size })
         } finally { earlier.close() }
       }
       if (hoursProducts.size) {
@@ -1363,7 +1363,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
             if (JSON.stringify(row) !== JSON.stringify(original)) manifest.hours_session_source_hashes[row.id] = signature
           }
         })()
-        manifest.hours_session_ids = sessions.filter(row => !sourceSessions.has(row.id)).map(row => row.id)
+        manifest.hours_session_ids = sessions.filter(row => !before.has(row.id) || retainedHoursIds.has(row.id)).map(row => row.id)
         const created = sessions.filter(row => !before.has(row.id)).length
         manifest.transforms.push({ name: 'hours_sessions_created', changes: created }, { name: 'hours_sessions_updated', changes: changes - created })
       }

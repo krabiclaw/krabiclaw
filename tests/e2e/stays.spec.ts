@@ -507,9 +507,9 @@ test('a responsible home member reads its stays as turnovers on every surface un
       }
       return jobThreadId
     }, { timeout: 30_000, message: 'the hub opens the turnover’s conversation after the stay write' }).not.toBe('')
-    const hosted = await memberContext.request.post(api('team/threads'), { data: { memberIds: ['user-e2e-lodging-host'], bookingId: stay.id } })
+    const hosted = await memberContext.request.post(api('team/threads'), { data: { member_user_ids: ['user-e2e-lodging-host'], booking_id: stay.id } })
     await expectStatus(hosted, 200)
-    expect((await hosted.json() as { id: string }).id).toBe(jobThreadId)
+    expect((await hosted.json() as { conversation_id: string }).conversation_id).toBe(jobThreadId)
     expect(await teamThread(jobThreadId)).toMatchObject({ name: 'Cliff Cabin', booking_id: stay.id, job: expect.objectContaining({ kind: 'turnover', status: 'open', title: 'Cliff Cabin', booking_id: stay.id }) })
     await expect.poll(async () => {
       const read = await memberContext.request.get(api(`team/threads/${jobThreadId}/messages`))
