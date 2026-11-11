@@ -27,7 +27,8 @@ test('an owner adds an inquiry question in Website, a visitor answers it, and th
   try {
     const cms = await dashboard.newPage()
     await openTenantPage(cms, `${baseURL}/dashboard/${restaurant.slug}/website`, {})
-    await cms.getByRole('link', { name: /Inquiry form/ }).click({ timeout: 30_000 })
+    await cms.getByTestId('website-booking-card').click({ timeout: 30_000 })
+    await cms.getByTestId('booking-intake-questions-link').click({ timeout: 30_000 })
     await expect(cms).toHaveURL(new RegExp(`/dashboard/${restaurant.slug}/website/inquiry-form$`))
     await cms.getByTestId('list-editor-add').click({ timeout: 30_000 })
     await expect(cms).toHaveURL(/\/website\/inquiry-form\/new$/)

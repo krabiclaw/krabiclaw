@@ -5,7 +5,7 @@
     one level below it. Preferences holds status, languages, domains, currency.
     Each setting is a leaf below its list.
   -->
-  <DashboardIndexPanel :id="panelId" :title="navbarTitle" :auto-open="navigationGroups[0]?.items.find(item => item.to)?.to ?? null">
+  <DashboardIndexPanel :id="panelId" :title="navbarTitle" :auto-open="autoOpenDestination">
     <template v-if="surface === 'settings'" #right>
       <UButton
         icon="i-lucide-settings"
@@ -43,6 +43,7 @@
           class="group block w-full text-left rounded-3xl p-5 sm:p-6 bg-white dark:bg-neutral-900 shadow-[0_4px_24px_rgba(0,0,0,0.06)] dark:shadow-[0_4px_24px_rgba(0,0,0,0.3)] hover:shadow-[0_6px_28px_rgba(0,0,0,0.09)] transition cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
           tabindex="0"
           role="link"
+          :aria-current="route.path.startsWith(pagesPath) ? 'page' : undefined"
           data-testid="website-pages-featured-card"
           @click="navigateTo(pagesPath)"
           @keydown.enter="navigateTo(pagesPath)"
@@ -112,6 +113,7 @@
           class="group block w-full text-left rounded-3xl p-5 sm:p-6 bg-white dark:bg-neutral-900 shadow-[0_4px_24px_rgba(0,0,0,0.06)] dark:shadow-[0_4px_24px_rgba(0,0,0,0.3)] hover:shadow-[0_6px_28px_rgba(0,0,0,0.09)] transition cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
           tabindex="0"
           role="link"
+          :aria-current="route.path.startsWith(blogPath) ? 'page' : undefined"
           data-testid="website-blog-featured-card"
           @click="navigateTo(blogPath)"
           @keydown.enter="navigateTo(blogPath)"
@@ -161,6 +163,7 @@
           class="group block w-full text-left rounded-3xl p-5 sm:p-6 bg-white dark:bg-neutral-900 shadow-[0_4px_24px_rgba(0,0,0,0.06)] dark:shadow-[0_4px_24px_rgba(0,0,0,0.3)] hover:shadow-[0_6px_28px_rgba(0,0,0,0.09)] transition cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
           tabindex="0"
           role="link"
+          :aria-current="route.path.startsWith(postsPath) ? 'page' : undefined"
           data-testid="website-posts-featured-card"
           @click="navigateTo(postsPath)"
           @keydown.enter="navigateTo(postsPath)"
@@ -201,6 +204,31 @@
             </span>
             <p class="text-sm">No social posts published yet</p>
           </div>
+        </div>
+      </div>
+
+      <!-- Airbnb Parity: Booking Settings Card -->
+      <div v-if="surface === 'settings'" class="mb-6">
+        <div
+          class="block w-full text-left rounded-3xl p-6 bg-white dark:bg-neutral-900 shadow-[0_4px_24px_rgba(0,0,0,0.06)] dark:shadow-[0_4px_24px_rgba(0,0,0,0.3)] hover:shadow-[0_6px_28px_rgba(0,0,0,0.09)] transition cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+          :class="{ 'ring-2 ring-highlighted': route.path.startsWith(`${settingsPath}/booking`) || route.path.startsWith(`${settingsPath}/inquiry-form`) }"
+          tabindex="0"
+          role="link"
+          :aria-current="(route.path.startsWith(`${settingsPath}/booking`) || route.path.startsWith(`${settingsPath}/inquiry-form`)) ? 'page' : undefined"
+          data-testid="website-booking-card"
+          @click="navigateTo(`${settingsPath}/booking`)"
+          @keydown.enter="navigateTo(`${settingsPath}/booking`)"
+        >
+          <div class="flex items-center justify-between">
+            <h2 class="text-xl font-bold text-highlighted tracking-tight">
+              {{ bookingCardTitle }}
+            </h2>
+            <UIcon name="i-lucide-chevron-right" class="size-5 text-muted" />
+          </div>
+
+          <p class="mt-2 text-sm text-muted">
+            {{ bookingCardSubtitle }}
+          </p>
         </div>
       </div>
 
@@ -466,6 +494,8 @@ export interface OrganizationSettingsEditor {
   nameCharactersRemaining: ComputedRef<number>
   descriptionCharactersRemaining: ComputedRef<number>
   theme: ComputedRef<string | undefined>
+  /** The organization's vertical (e.g. 'service', 'restaurant', 'lodging', 'experience'). */
+  vertical: ComputedRef<string | null>
   /** Whether the site wears its own palette or its template's. */
   paletteSource: ComputedRef<'custom' | 'default' | null>
   /** Returns the site to the default colors. */
@@ -493,7 +523,6 @@ import { ORGANIZATION_FONT_OPTIONS, isOrganizationFontPreset, resolveOrganizatio
 import { parseSitePalette } from '~/shared/site-palette'
 import { getErrorMessage } from '~/utils/errors'
 import { ORIGINAL_LOGO_PRESENTATION } from '~/shared/media-placement-contract'
-import { formQuestionsSummary } from '~/utils/form-question-editing'
 import PageTasksModal from '~/components/dashboard/PageTasksModal.vue'
 import { isTenantPageListResponse, type PageTask, type TenantPageListRow } from '~/composables/useTenantPageDraft'
 import { getVerticalLabel } from '~/utils/vertical-copy'
@@ -603,7 +632,6 @@ const descriptionCharactersRemaining = computed(() => 500 - form.brand_descripti
 function explicitSummary(value: string | null | undefined, empty = 'Not set') { return value?.trim() || empty }
 const STATUS_LABELS: Record<OrganizationStatus, string> = { active: 'Published', inactive: 'Draft', suspended: 'Suspended' }
 const domainSummary = computed(() => dashboard.organization.value?.custom_domain || dashboard.organization.value?.public_url || 'Not connected')
-const CONSULTATION_MODE_SUMMARIES = { native: 'Online consultation requests', external_url: 'External scheduler', native_disabled: 'Online requests hidden' } as const
 const brandItems = computed<EditorNavigationItem[]>(() => [
   { id: 'name', label: 'Brand name', summary: explicitSummary(loadedSettings.value?.name), icon: 'i-lucide-building-2', to: `${brandPath.value}/name` },
   { id: 'description', label: 'Description', summary: explicitSummary(loadedSettings.value?.brand_description), icon: 'i-lucide-file-text', to: `${brandPath.value}/description` },
@@ -728,11 +756,28 @@ const settingsItems = computed<EditorNavigationItem[]>(() => [
   ...(dashboard.organizationPaths.value ? [
     { id: 'qa', label: 'Reviews and Q&A', icon: 'i-lucide-message-circle-question', to: dashboard.organizationPaths.value.qa },
   ] : []),
-  { id: 'inquiry-form', label: 'Inquiry form', summary: loadedSettings.value ? formQuestionsSummary(loadedSettings.value.inquiry_questions) : 'Not set', icon: 'i-lucide-message-square-text', to: `${settingsPath.value}/inquiry-form` },
-  ...(loadedSettings.value?.consultation_mode
-    ? [{ id: 'booking', label: 'Schedule page', summary: CONSULTATION_MODE_SUMMARIES[loadedSettings.value.consultation_mode], icon: 'i-lucide-calendar-check', to: `${settingsPath.value}/booking` }]
-    : []),
 ])
+
+const bookingCardTitle = computed(() => {
+  const v = loadedSettings.value?.vertical || dashboard.organization.value?.vertical
+  if (v === 'service') return 'Consultation settings'
+  if (v === 'restaurant') return 'Reservation settings'
+  return 'Booking settings'
+})
+
+const bookingCardSubtitle = computed(() => {
+  const v = loadedSettings.value?.vertical || dashboard.organization.value?.vertical
+  if (v === 'service') {
+    return form.native_consultations
+      ? 'Accepting consultation requests online'
+      : 'Inquiries only (offline scheduling)'
+  }
+  const questionsCount = loadedSettings.value?.inquiry_questions?.length ?? 0
+  if (questionsCount > 0) {
+    return `${questionsCount} intake ${questionsCount === 1 ? 'question' : 'questions'} configured`
+  }
+  return 'All bookings are automatically approved'
+})
 
 const brandLogoUrl = computed(() => {
   if (form.logoAssetId) return logoUrl(form.logoAssetId)
@@ -787,6 +832,11 @@ const navigationGroups = computed(() => {
   if (surface.value === 'brand') return [{ id: 'brand', items: brandItems.value }]
   if (surface.value === 'preferences') return [{ id: 'preferences', items: preferencesItems.value }]
   return [{ id: 'settings', items: settingsItems.value }]
+})
+
+const autoOpenDestination = computed(() => {
+  if (surface.value === 'settings') return pagesPath.value
+  return navigationGroups.value[0]?.items.find(item => item.to)?.to ?? null
 })
 
 // Leaving a section resets its editor. This used to hang off the back button's
@@ -990,6 +1040,7 @@ provide(organizationSettingsEditorKey, {
   nameCharactersRemaining,
   descriptionCharactersRemaining,
   theme,
+  vertical: computed(() => loadedSettings.value?.vertical ?? dashboard.organization.value?.vertical ?? null),
   paletteSource,
   resetPalette,
   consultationMode: computed(() => loadedSettings.value?.consultation_mode ?? null),
