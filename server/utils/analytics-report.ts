@@ -319,7 +319,7 @@ async function loadFunnel(db: DbClient, organizationId: string, start: string, e
             ${FUNNEL_STEP_SQL} step, (payload_json ->> '$.value.currency') currency, (payload_json ->> '$.value.collected_minor') collected_minor,
             CASE WHEN (payload_json ->> '$.event_name') = 'payment_paid' THEN (SELECT c.id FROM payments p
                 LEFT JOIN conversations c ON p.subject_type = 'booking' AND c.booking_id = p.subject_id AND c.kind = 'booking' AND c.organization_id = p.organization_id
-                WHERE p.id = (payload_json ->> '$.entity_id') AND p.organization_id = analytics_events.organization_id)
+                WHERE p.id = (analytics_events.payload_json ->> '$.entity_id') AND p.organization_id = analytics_events.organization_id)
               ELSE (payload_json ->> '$.entity_id') END thread_id
           FROM analytics_events WHERE kind IN ('conversion', 'interaction') AND organization_id = ? AND created_at >= ? AND created_at < ?
             AND (payload_json ->> '$.event_name') IN (${FUNNEL_EVENT_SQL_LIST})))
