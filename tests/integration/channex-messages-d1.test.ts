@@ -42,7 +42,7 @@ type TodayPayload = { tasks: TaskSection[]; opportunities: OpportunityView[] }
 /** Today in outline: each task as its kind and conversation, each opportunity as the operation it records. */
 async function todayOutline(db: D1Database, today: TodayPayload) {
   const operations = new Map((await db.prepare('SELECT id, operation FROM opportunities WHERE organization_id = ?').bind(ORG).all<{ id: string; operation: string }>()).results.map(row => [row.id, row.operation]))
-  return { tasks: today.tasks.flatMap(section => section.tasks.map(task => [task.kind, task.requestId])), opportunities: today.opportunities.map(opportunity => operations.get(opportunity.id)) }
+  return { tasks: today.tasks.flatMap(section => section.tasks.map(task => [task.kind, task.conversation_id])), opportunities: today.opportunities.map(opportunity => operations.get(opportunity.id)) }
 }
 /** The guest message each open reply task is about, by its ledger dedupe key, and the organization the task belongs to. */
 const openReplies = (db: D1Database, threadId: string) => db.prepare(`SELECT t.organization_id, e.dedupe_key AS entry FROM tasks t JOIN messages e ON t.dedupe_key = 'guest_reply:' || t.subject_id || ':' || e.id
@@ -51,7 +51,7 @@ const waitingOn = async (db: D1Database, threadId: string) => (await openReplies
 /** The reply tasks on Today as the owner reads them at `now`: conversation and status line ("Asked 1d ago · home"). */
 async function replyEyebrows(db: D1Database, env: CloudflareEnv, now: Date) {
   const viewer = await taskViewer(db, memberAccessPrincipal({ userId: OWNER, organizationId: ORG, role: 'owner' }, { env }))
-  return (await listTasks(db, viewer, parseTaskListQuery({}), now)).sections.flatMap(section => section.tasks).filter(task => task.kind === 'guest_reply').map(task => [task.requestId, task.statusLine])
+  return (await listTasks(db, viewer, parseTaskListQuery({}), now)).sections.flatMap(section => section.tasks).filter(task => task.kind === 'guest_reply').map(task => [task.conversation_id, task.status_line])
 }
 const GROWTH = ['post.create', 'social.connect', 'article.create']
 const code = (expected: string) => (error: unknown) => (error as { data?: { code?: string } }).data?.code === expected
@@ -246,11 +246,11 @@ test('empty greenfield collections are valid; inquiries mirror into the canonica
     // recorded conversation title without inventing a guest identity.
     const today = await readToday()
     const replies = today.tasks.flatMap(section => section.tasks).filter(task => task.kind === 'guest_reply')
-    assert.deepEqual(replies.map(task => ({ status: task.status, title: task.title, detail: task.detail, path: task.path, action: task.action, requestId: task.requestId, stayId: task.stayId, startsAt: task.startsAt, dueAt: task.dueAt, avatar: task.avatar })), [{
+    assert.deepEqual(replies.map(task => ({ status: task.status, title: task.title, detail: task.detail, path: task.path, action: task.action, conversation_id: task.conversation_id, booking_id: task.booking_id, starts_at: task.starts_at, due_at: task.due_at, avatar: task.avatar })), [{
       status: 'open', title: 'Conversation supplied by Airbnb', detail: 'Hello', path: `/dashboard/org/messages/${rows[0]!.id}`, action: { type: 'open', label: 'Reply', path: `/dashboard/org/messages/${rows[0]!.id}` },
-      requestId: rows[0]!.id, stayId: null, startsAt: null, dueAt: null, avatar: { initial: 'C', tone: 'warm' },
+      conversation_id: rows[0]!.id, booking_id: null, starts_at: null, due_at: null, avatar: { initial: 'C', tone: 'warm' },
     }])
-    assert.match(replies[0]!.statusLine!, /^Asked .+$/)
+    assert.match(replies[0]!.status_line!, /^Asked .+$/)
     const afterToday = (await getGuestThreadDetail(db, rows[0]!.id, ORG))!
     assert.deepEqual([afterToday.guestName, afterToday.guestEmail, afterToday.guestPhone, afterToday.operationalRecord], [null, null, null, null])
     assert.equal(await db.prepare('SELECT count(*) FROM bookings').first('count(*)'), 0)
@@ -339,7 +339,7 @@ test('empty Channex host actions stay recorded without clearing reply work; a re
     assert.deepEqual(await waitingOn(db, requestId), [])
     const afterPhoto = await readToday()
     // The reply closed its task today, so Today shows it done; the growth opportunities remain.
-    assert.deepEqual(afterPhoto.tasks.flatMap(section => section.tasks).map(task => [task.kind, task.status, task.requestId]), [['guest_reply', 'done', requestId]])
+    assert.deepEqual(afterPhoto.tasks.flatMap(section => section.tasks).map(task => [task.kind, task.status, task.conversation_id]), [['guest_reply', 'done', requestId]])
     assert.deepEqual((await todayOutline(db, afterPhoto)).opportunities, GROWTH, 'the real photo reply clears only its reply task; useful growth opportunities remain')
   } finally { globalThis.fetch = realFetch; await runtime.dispose() }
 })
@@ -365,7 +365,7 @@ test('a dismissed question needs no note and stays closed until the guest writes
     assert.ok(taskId)
     const dismissed = await closeTask(db, viewer, taskId, { status: 'skipped', note: '', photos: [], env })
     assert.deepEqual([dismissed.status, dismissed.outcome?.note, dismissed.action, dismissed.dismiss], ['skipped', null, { type: 'reopen', label: 'Undo' }, null])
-    assert.match(dismissed.statusLine ?? '', /^Dismissed at /)
+    assert.match(dismissed.status_line ?? '', /^Dismissed at /)
     assert.deepEqual(await db.prepare('SELECT status, outcome_note FROM tasks WHERE id = ?').bind(taskId).first(), { status: 'skipped', outcome_note: null })
 
     // Everything said before the dismissal stays closed, whatever touches the conversation next.
@@ -390,7 +390,7 @@ test('a dismissed question needs no note and stays closed until the guest writes
     assert.ok(thirdTask)
     const omitted = await closeTask(db, viewer, thirdTask, { status: 'skipped', note: undefined, photos: [], env })
     assert.deepEqual(await db.prepare('SELECT status, outcome_note FROM tasks WHERE id = ?').bind(thirdTask).first(), { status: 'skipped', outcome_note: null })
-    await reopenTask(db, viewer, thirdTask, { expectedVersion: omitted.version })
+    await reopenTask(db, viewer, thirdTask, { version: omitted.version })
     assert.deepEqual(await waitingOn(db, requestId), ['channex-message:third'])
 
     // Thirty-one days on the open question has aged out, and the newer one behind it becomes the work.

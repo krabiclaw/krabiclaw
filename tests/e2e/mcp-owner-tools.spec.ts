@@ -64,28 +64,28 @@ test.describe('stateless MCP server', () => {
       expect(response.status()).toBe(200)
       const { task } = mcpData<{ task: TaskView }>(await response.json())
       taskId = task.id
-      expect(task).toMatchObject({ title, notes, productId, locationId, version: 1, assignee: { id: assignedMemberId, you: true } })
+      expect(task).toMatchObject({ title, notes, product_id: productId, location_id: locationId, version: 1, assignee: { id: assignedMemberId, you: true } })
       expect(overlappingResponse.status()).toBe(200)
       expect(mcpData<{ task: TaskView }>(await overlappingResponse.json()).task).toMatchObject({ id: taskId, version: 1 })
       const taskPath = `${tasksPath}/${taskId}`
       const saved = await request.get(taskPath)
       expect(saved.status()).toBe(200)
-      expect((await saved.json()).task).toMatchObject({ id: taskId, title, notes, productId, locationId, assignee: { id: assignedMemberId } })
+      expect((await saved.json()).task).toMatchObject({ id: taskId, title, notes, product_id: productId, location_id: locationId, assignee: { id: assignedMemberId } })
 
       await expectRefusal({ ...original, location_id: tenant.locations.williamsburg!.id }, 409, 'IDEMPOTENCY_CONFLICT')
       await expectRefusal({ ...original, assigned_member_id: tenant.memberIds['user-e2e-demo-owner']! }, 409, 'IDEMPOTENCY_CONFLICT')
 
-      const edited = await request.patch(taskPath, { data: { expectedVersion: task.version, title: 'Check revised menu photos', notes: 'Use the updated menu.', assignedMemberId: null } })
+      const edited = await request.patch(taskPath, { data: { version: task.version, title: 'Check revised menu photos', notes: 'Use the updated menu.', assigned_member_id: null } })
       expect(edited.status()).toBe(200)
       const replay = await create(original)
       expect(replay.status()).toBe(200)
       expect(mcpData<{ task: TaskView }>(await replay.json()).task).toMatchObject({
-        id: taskId, title: 'Check revised menu photos', notes: 'Use the updated menu.', assignee: null, locationId, version: 2,
+        id: taskId, title: 'Check revised menu photos', notes: 'Use the updated menu.', assignee: null, location_id: locationId, version: 2,
       })
       await expectRefusal({ ...original, title: 'Check revised menu photos', notes: 'Use the updated menu.', assigned_member_id: null }, 409, 'IDEMPOTENCY_CONFLICT')
       const current = await request.get(taskPath)
       expect(current.status()).toBe(200)
-      expect((await current.json()).task).toMatchObject({ id: taskId, version: 2, assignee: null, locationId })
+      expect((await current.json()).task).toMatchObject({ id: taskId, version: 2, assignee: null, location_id: locationId })
     } finally {
       try {
         if (taskId) {

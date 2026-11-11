@@ -107,7 +107,7 @@ test('MCP Product booking uses public capacity, durable replay, guest identity a
 
       const dashboard = await request.get(`${baseURL}/api/dashboard/bookings/booking/${created.conversation_id}?org=${encodeURIComponent(orgSlug)}`)
       expect(dashboard.status(), await dashboard.text()).toBe(200)
-      expect((await dashboard.json()).booking).toMatchObject({ id: created.conversation_id, status: 'pending', threadId: created.conversation_id })
+      expect((await dashboard.json()).booking).toMatchObject({ id: created.conversation_id, status: 'pending', conversation_id: created.conversation_id, booking_id: created.booking_id })
       await loginAs(page.request, baseURL!, 'user-e2e-pottery-owner')
       await page.goto(`${baseURL}/dashboard/${encodeURIComponent(orgSlug)}/bookings/booking/${created.conversation_id}`)
       await expect(page.getByText('MCP Guest', { exact: true }).first()).toBeVisible()
@@ -247,9 +247,9 @@ test('MCP Product booking uses public capacity, durable replay, guest identity a
       expect(experienceThread.stream.filter(item => item.type === 'message' && item.side === 'guest' && item.body === 'Could we attend the following week instead?')).toHaveLength(1)
       expect((await call<{ guest: { needs_reply: boolean } }>('get_conversation', { conversation_id: publicCreated.conversation_id })).guest.needs_reply).toBe(true)
       // The unanswered request is the owner's open reply task on Today.
-      const replyTasks = (await call<{ sections: Array<{ id: string; tasks: Array<{ kind: string; status: string; requestId: string | null }> }> }>('list_tasks', { range: 'today', kind: 'guest_reply' }))
-        .sections.flatMap(section => section.tasks).filter(task => task.requestId === publicCreated.conversation_id)
-      expect(replyTasks).toEqual([expect.objectContaining({ kind: 'guest_reply', status: 'open', requestId: publicCreated.conversation_id })])
+      const replyTasks = (await call<{ sections: Array<{ id: string; tasks: Array<{ kind: string; status: string; conversation_id: string | null }> }> }>('list_tasks', { range: 'today', kind: 'guest_reply' }))
+        .sections.flatMap(section => section.tasks).filter(task => task.conversation_id === publicCreated.conversation_id)
+      expect(replyTasks).toEqual([expect.objectContaining({ kind: 'guest_reply', status: 'open', conversation_id: publicCreated.conversation_id })])
       const foreign = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'get_product_booking', args: { organization_id: seededTenant('restaurant').organizationId, booking_id: instant.booking_id } })
       expect(foreign.status()).toBe(200)
       expect((await foreign.json()).result.isError).toBe(true)

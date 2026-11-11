@@ -201,7 +201,7 @@ test('authored goals and evidence-bound opportunity decisions follow persisted w
     await expect.poll(draftOpportunities, { timeout: 15_000 }).toEqual(reoffered)
     // Accepting makes it the owner's task, due today, recorded as business activity.
     const { task: acceptedTask } = await responseBody<{ task: TaskView }>(await request.post(`${api}/opportunities/${reoffered[0]!.id}/accept`, { data: {} }), 201)
-    expect(acceptedTask).toMatchObject({ kind: 'opportunity', status: 'open', title: `Publish “${edited.title}”`, assignee: { type: 'member', you: true }, dueAt: expect.any(String) })
+    expect(acceptedTask).toMatchObject({ kind: 'opportunity', status: 'open', title: `Publish “${edited.title}”`, assignee: { type: 'member', you: true }, due_at: expect.any(String) })
     expect(await draftOpportunities()).toEqual([])
     const listedTasks = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'list_tasks', args: { organization_id: organization.id, range: 'today', kind: 'opportunity' } })
     expect(listedTasks.status(), await listedTasks.text()).toBe(200)
@@ -242,7 +242,7 @@ test('authored goals and evidence-bound opportunity decisions follow persisted w
       const listed = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'list_tasks', args: { organization_id: organization.id, range: 'today', kind: 'guest_reply' } })
       expect(listed.status(), await listed.text()).toBe(200)
       expect(mcpData<{ sections: TaskSection[] }>(await listed.json()).sections).toEqual(tasks)
-      return tasks.map(section => ({ section: section.id, tasks: section.tasks.filter(task => task.requestId === threadId).map(task => ({ id: task.id, status: task.status, detail: task.detail })) })).filter(section => section.tasks.length)
+      return tasks.map(section => ({ section: section.id, tasks: section.tasks.filter(task => task.conversation_id === threadId).map(task => ({ id: task.id, status: task.status, detail: task.detail })) })).filter(section => section.tasks.length)
     }
     const unanswered = await replyTasks()
     expect(unanswered).toEqual([{ section: 'open', tasks: [{ id: expect.any(String), status: 'open', detail: 'Which documents should I bring to my legal consultation?' }] }])

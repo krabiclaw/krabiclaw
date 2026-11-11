@@ -263,7 +263,7 @@ async function readTaskRow(db: DbClient, viewer: TaskViewer, taskId: string): Pr
 // ---------------------------------------------------------------------------
 
 export interface TaskPerson { type: 'member'; id: string; name: string; initial: string; you: boolean }
-export interface TaskPhoto { id: string; url: string; thumbnailUrl: string; width: number | null; height: number | null }
+export interface TaskPhoto { id: string; url: string; thumbnail_url: string; width: number | null; height: number | null }
 /** One side of a turnover: when, and who. */
 export interface TaskSheetSide { label: 'Checkout' | 'Check-in'; time: string; guest: string | null }
 /**
@@ -281,20 +281,20 @@ export interface TaskView {
   /** The label on a photo card's picture: "Turnover". */
   tag: string | null
   /** The home's picture: a photo card's media, a compact card's square avatar. */
-  imageUrl: string | null
+  image_url: string | null
   /** A compact card's round avatar when there is a person rather than a home. */
   avatar: { initial: string; tone: 'warm' | 'cool' } | null
   /** The linked reservation on an open guest reply, when the viewer can read it. */
   reservation?: {
-    dateLabel: string
-    groupHeadline: string
-    homeName: string
-    statusLabel: string
-    guestImageUrl: string | null
+    date_label: string
+    headline: string
+    name: string
+    status_label: string
+    guest_image_url: string | null
     conversation: { label: string; description: string | null; to: string } | null
   }
   /** The grey line above the title: "Arriving tomorrow · 45B", "Asked 2h ago · Penthouse", "Done at 11:48 AM · 1 photo". Never repeats the section's day. */
-  statusLine: string | null
+  status_line: string | null
   /** The place, person or task, at 18 semibold, wrapping. */
   title: string
   /** A photo card's time, right of the title: "11:00 AM – 3:00 PM", "From 11:00 AM". */
@@ -312,18 +312,18 @@ export interface TaskView {
   action: { type: 'complete'; label: 'Done' } | { type: 'open'; label: string; path: string } | { type: 'reopen'; label: 'Undo Done' | 'Undo' } | null
   /** The task sheet. A turnover has its Checkout | Check-in split. */
   sheet: { heading: string; title: string; date: string | null; checkout: TaskSheetSide | null; checkin: TaskSheetSide | null }
-  startsAt: string | null
-  dueAt: string | null
+  starts_at: string | null
+  due_at: string | null
   timezone: string
   /** The owner's instructions. */
   notes: string | null
-  outcome: { note: string | null; photos: TaskPhoto[]; closedAt: string; closedBy: string | null } | null
+  outcome: { note: string | null; photos: TaskPhoto[]; closed_at: string; closed_by: string | null } | null
   /** The dashboard page of the task's subject, when it has one. */
   path: string | null
-  productId: string | null
-  locationId: string | null
-  stayId: string | null
-  requestId: string | null
+  product_id: string | null
+  location_id: string | null
+  booking_id: string | null
+  conversation_id: string | null
   can: { complete: boolean; skip: boolean; reopen: boolean; assign: boolean; edit: boolean }
   /** How an open task is set aside, and whether its card offers it as well as its sheet. Null when it cannot be. */
   dismiss: { label: 'Skip' | 'Dismiss'; card: boolean } | null
@@ -458,7 +458,7 @@ async function loadContext(db: DbClient, viewer: TaskViewer, rows: TaskRow[]): P
     messages: new Map(messages.map(message => [message.id, { title: message.template_title, status: message.status, conversation_id: message.conversation_id, booking_id: message.booking_id }])),
     records: new Map(records.map(record => [record.id, { conversation_id: record.conversation_id, starts_at: record.starts_at, product_kind: record.product_kind }])),
     entries: new Map(entries.map(entry => [entry.id, { event_name: entry.event_name, author_kind: entry.author_kind, body: entry.body }])),
-    photos: new Map([...photos].map(([id, list]) => [id, list.map(photo => ({ id: photo.id, url: photo.url, thumbnailUrl: photo.thumbnailUrl, width: photo.width, height: photo.height }))])),
+    photos: new Map([...photos].map(([id, list]) => [id, list.map(photo => ({ id: photo.id, url: photo.url, thumbnail_url: photo.thumbnailUrl, width: photo.width, height: photo.height }))])),
   }
 }
 
@@ -492,12 +492,13 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
   const assignee: TaskPerson | null = row.assigned_member_id && member ? { type: 'member', id: row.assigned_member_id, name: member.userId === viewer.principal.userId ? 'You' : member.name, initial: initialOf(member.name), you: member.userId === viewer.principal.userId } : null
   const closerName = row.closed_by_user_id === null ? null : row.closed_by_user_id === viewer.principal.userId ? 'You' : context.users.get(row.closed_by_user_id) ?? 'A former member'
   const closer: TaskPerson | null = closerName === null ? null : { type: 'member', id: row.closed_by_user_id!, name: closerName, initial: initialOf(closerName === 'You' ? context.users.get(row.closed_by_user_id!) ?? 'Y' : closerName), you: closerName === 'You' }
-  const conversation = (requestId: string | null) => requestId ? guestConversationPath(context.slug, requestId) : null
-  const stayPath = (stayId: string) => `/dashboard/${encodeURIComponent(context.slug)}/bookings/stay/${encodeURIComponent(stayId)}`
+  const conversation = (conversation_id: string | null) => conversation_id ? guestConversationPath(context.slug, conversation_id) : null
+  const stayPath = (booking_id: string) => `/dashboard/${encodeURIComponent(context.slug)}/bookings/stay/${encodeURIComponent(booking_id)}`
   const who = (name: string | null) => name ? firstName(name) : 'Guest'
   let face: TaskView['face'] = product ? 'photo' : 'compact', tag: string | null = null, avatar: TaskView['avatar'] = null
-  let statusLine: string | null = null, title = '', when: string | null = null, detail: string | null = null, error: string | null = null, path: string | null = null
-  let stayId: string | null = null, requestId: string | null = null
+  let status_line: string | null = null, title = '', when: string | null = null, detail: string | null = null, error: string | null = null, path: string | null = null
+  let booking_id = row.subject_type === 'booking' ? row.subject_id : null
+  let conversation_id: string | null = null
   let reservation: TaskView['reservation']
   let action: TaskView['action'] = { type: 'complete', label: 'Done' }
   let sheet: TaskView['sheet'] = { heading: 'Task', title: '', date: null, checkout: null, checkin: null }
@@ -505,7 +506,7 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
     case 'turnover': {
       const stay = context.stays.get(row.subject_id!)
       if (!stay || !product) throw new Error(`Turnover ${row.id} has no stay or home`)
-      stayId = stay.id
+      booking_id = stay.id
       face = 'photo'
       tag = 'Turnover'
       title = product.name
@@ -526,12 +527,12 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
     case 'guest_reply': {
       const request = context.requests.get(row.subject_id!)
       if (!request) throw new Error(`Reply task ${row.id} has no conversation`)
-      requestId = row.subject_id
+      conversation_id = row.subject_id
       face = 'compact'
       // A guest by their first name; a channel conversation with no guest identity by the channel's own title.
       title = request.guest_name ? firstName(request.guest_name) : request.participant ?? 'Guest'
       avatar = { initial: initialOf(title), tone: 'warm' }
-      statusLine = [`Asked ${relative(request.asked_at ?? row.created_at, now)}`, place].filter(Boolean).join(' · ')
+      status_line = [`Asked ${relative(request.asked_at ?? row.created_at, now)}`, place].filter(Boolean).join(' · ')
       detail = request.preview?.trim() || null
       path = conversation(row.subject_id)
       action = { type: 'open', label: 'Reply', path: path! }
@@ -540,28 +541,28 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
       if (stay) {
         const home = context.products.get(stay.product_id)
         if (!home) throw new Error(`Stay ${stay.id} has no home`)
-        stayId = stay.id
+        booking_id = stay.id
         const localDay = localDateAt(now, stay.timezone)
         const clockAt = (value: string) => isBookingDay(value) ? 'Time not set' : formatTimestamp(value, 'en', stay.timezone, { hour: 'numeric', minute: '2-digit' })
-        let statusLabel: string
-        if (stay.status === 'cancelled') statusLabel = 'Cancelled'
-        else if (stay.no_show_at !== null) statusLabel = 'No-show recorded'
-        else if (stay.status === 'pending') statusLabel = 'Pending confirmation'
-        else if (localDay > stay.check_out_date) statusLabel = 'Stay ended'
+        let status_label: string
+        if (stay.status === 'cancelled') status_label = 'Cancelled'
+        else if (stay.no_show_at !== null) status_label = 'No-show recorded'
+        else if (stay.status === 'pending') status_label = 'Pending confirmation'
+        else if (localDay > stay.check_out_date) status_label = 'Stay ended'
         else if (localDay <= stay.check_in_date) {
-          statusLabel = `Checking in · ${clockAt(stay.starts_at)}`
+          status_label = `Checking in · ${clockAt(stay.starts_at)}`
         } else if (localDay === stay.check_out_date) {
           const clock = clockAt(stay.ends_at)
-          statusLabel = stay.same_day_arrival ? `Checking out · Next guests arrive the same day · ${clock}` : `Checking out · ${clock}`
-        } else statusLabel = 'Currently hosting'
+          status_label = stay.same_day_arrival ? `Checking out · Next guests arrive the same day · ${clock}` : `Checking out · ${clock}`
+        } else status_label = 'Currently hosting'
         const guest = stay.guest_name ?? ''
         const partySize = stay.adults + stay.children
         reservation = {
-          dateLabel: `${formatCalendarDate(stay.check_in_date, 'en', { month: 'short', day: 'numeric' })} – ${formatCalendarDate(stay.check_out_date, 'en', { month: 'short', day: 'numeric', year: 'numeric' })}`,
-          groupHeadline: stay.guest_name && partySize > 1 ? `${firstName(stay.guest_name)}’s group of ${partySize}` : guest || `Name not provided by ${STAY_CHANNEL_LABELS[stay.channel]}`,
-          homeName: home.name,
-          statusLabel: stay.overbooked ? `Overbooked · ${statusLabel}` : statusLabel,
-          guestImageUrl: stay.guest_image_url,
+          date_label: `${formatCalendarDate(stay.check_in_date, 'en', { month: 'short', day: 'numeric' })} – ${formatCalendarDate(stay.check_out_date, 'en', { month: 'short', day: 'numeric', year: 'numeric' })}`,
+          headline: stay.guest_name && partySize > 1 ? `${firstName(stay.guest_name)}’s group of ${partySize}` : guest || `Name not provided by ${STAY_CHANNEL_LABELS[stay.channel]}`,
+          name: home.name,
+          status_label: stay.overbooked ? `Overbooked · ${status_label}` : status_label,
+          guest_image_url: stay.guest_image_url,
           conversation: { label: action.label, description: detail, to: action.path },
         }
       }
@@ -570,20 +571,20 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
     case 'message_delivery': {
       const message = context.messages.get(row.subject_id!)
       if (!message) throw new Error(`Delivery task ${row.id} has no scheduled message`)
-      requestId = message.conversation_id
+      conversation_id = message.conversation_id
+      booking_id = message.booking_id
       face = 'compact'
       // Only what our own record knows: the message, and that it did not send.
       error = `${message.title} didn’t send`
       detail = message.status === 'needs_review' ? 'Its send was already used for a different message. Check the conversation before sending it again.' : 'You can send it yourself from the conversation.'
       const stay = context.stays.get(message.booking_id)
       if (stay) {
-        stayId = message.booking_id
         avatar = { initial: initialOf(who(stay.guest_name)), tone: 'cool' }
         const home = context.products.get(stay.product_id)?.name ?? null
         const arrival = stay.check_in_date > today
           ? stay.check_in_date === addLocalDays(today, 1) ? 'Arriving tomorrow' : `Arriving ${calendarDay(stay.check_in_date)}`
           : stay.check_in_date === today ? 'Arriving today' : stay.check_out_date > today ? 'Staying now' : `Checked out ${calendarDay(stay.check_out_date)}`
-        statusLine = [arrival, home].filter(Boolean).join(' · ')
+        status_line = [arrival, home].filter(Boolean).join(' · ')
         title = who(stay.guest_name)
         path = conversation(message.conversation_id) ?? stayPath(message.booking_id)
         action = { type: 'open', label: message.conversation_id ? 'Open conversation' : 'Open stay', path }
@@ -594,7 +595,7 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
         const request = record.conversation_id ? context.requests.get(record.conversation_id) : undefined
         title = request?.guest_name ? firstName(request.guest_name) : request?.participant ?? 'Guest'
         avatar = { initial: initialOf(title), tone: 'cool' }
-        statusLine = [`${day(record.starts_at)}, ${time(record.starts_at)}`, place].filter(Boolean).join(' · ')
+        status_line = [`${day(record.starts_at)}, ${time(record.starts_at)}`, place].filter(Boolean).join(' · ')
         path = conversation(message.conversation_id)
         action = path ? { type: 'open', label: 'Open conversation', path } : { type: 'complete', label: 'Done' }
       }
@@ -605,11 +606,11 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
       const record = context.records.get(row.subject_id!)
       const request = record?.conversation_id ? context.requests.get(record.conversation_id) : undefined
       if (!record?.conversation_id || !request) throw new Error(`Review task ${row.id} has no booking conversation`)
-      requestId = record.conversation_id
+      conversation_id = record.conversation_id
       face = 'compact'
       title = request.guest_name ? firstName(request.guest_name) : request.participant ?? 'Guest'
       avatar = { initial: initialOf(title), tone: 'warm' }
-      statusLine = ['Waiting for your approval', place].filter(Boolean).join(' · ')
+      status_line = ['Waiting for your approval', place].filter(Boolean).join(' · ')
       detail = `${day(record.starts_at)}, ${time(record.starts_at)}`
       path = bookingEditorPath(context.slug, 'booking', record.conversation_id)
       action = { type: 'open', label: 'Review', path }
@@ -624,11 +625,11 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
       // In the business's own words: "Prepare for consultation", a client; "Prepare for reservation", a guest.
       const presentation = resolveBookingPresentation(record.product_kind, context.vertical)
       const heading = row.kind === 'consultation_prep' ? `Prepare for ${getVerticalCopy(context.vertical, 'en').reservationWord}` : 'Follow up'
-      requestId = record.conversation_id
+      conversation_id = record.conversation_id
       face = 'compact'
       title = request.guest_name ? firstName(request.guest_name) : request.participant ?? `${presentation.counterpartyNoun.charAt(0).toUpperCase()}${presentation.counterpartyNoun.slice(1)}`
       avatar = { initial: initialOf(title), tone: 'warm' }
-      statusLine = [heading, place].filter(Boolean).join(' · ')
+      status_line = [heading, place].filter(Boolean).join(' · ')
       detail = `${day(record.starts_at)}, ${time(record.starts_at)}`
       path = bookingEditorPath(context.slug, 'booking', record.conversation_id)
       sheet = { heading, title, date: null, checkout: null, checkin: null }
@@ -638,17 +639,17 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
       const entry = context.entries.get(row.dedupe_key.slice('booking_change:'.length))
       const stay = context.stays.get(row.subject_id!)
       const record = stay ? null : context.records.get(row.subject_id!)
-      requestId = stay?.conversation_id ?? record?.conversation_id ?? null
-      const request = requestId ? context.requests.get(requestId) : undefined
-      if (!entry || !requestId || !request) throw new Error(`Change task ${row.id} has no change or conversation`)
-      stayId = stay?.id ?? null
+      conversation_id = stay?.conversation_id ?? record?.conversation_id ?? null
+      const request = conversation_id ? context.requests.get(conversation_id) : undefined
+      if (!entry || !conversation_id || !request) throw new Error(`Change task ${row.id} has no change or conversation`)
+      booking_id = stay?.id ?? (record ? row.subject_id : null)
       face = 'compact'
       title = request.guest_name ? firstName(request.guest_name) : request.participant ?? 'Guest'
       avatar = { initial: initialOf(title), tone: 'cool' }
       const waiting = entry.author_kind !== 'guest' && row.starts_at !== null && row.starts_at > now.toISOString()
-      statusLine = [entry.author_kind === 'guest' ? 'Change requested' : waiting ? 'Change proposal waiting on the guest' : 'Change proposal expired', place].filter(Boolean).join(' · ')
+      status_line = [entry.author_kind === 'guest' ? 'Change requested' : waiting ? 'Change proposal waiting on the guest' : 'Change proposal expired', place].filter(Boolean).join(' · ')
       detail = record ? `${day(record.starts_at)}, ${time(record.starts_at)}` : null
-      path = conversation(requestId)
+      path = conversation(conversation_id)
       // A change closes when it is answered or proposed again.
       action = { type: 'open', label: 'Review', path: path! }
       sheet = { heading: 'Change', title, date: null, checkout: null, checkin: null }
@@ -663,7 +664,7 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
         } else action = null
       }
       face = 'compact'
-      statusLine = ['Accepted opportunity', place].filter(Boolean).join(' · ')
+      status_line = ['Accepted opportunity', place].filter(Boolean).join(' · ')
       title = row.title!
       detail = row.notes
       sheet = { heading: 'Task', title, date: row.due_at ? day(row.due_at) : null, checkout: null, checkin: null }
@@ -671,7 +672,7 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
     case 'custom':
     case 'stay_ready':
       face = 'compact'
-      statusLine = ['Task', place].filter(Boolean).join(' · ')
+      status_line = ['Task', place].filter(Boolean).join(' · ')
       title = row.title!
       detail = row.notes
       sheet = { heading: 'Task', title, date: row.due_at ? day(row.due_at) : null, checkout: null, checkin: null }
@@ -685,7 +686,7 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
     when = null
     error = null
     const at = sameDay(row.closed_at!, now.toISOString()) ? time(row.closed_at!) : day(row.closed_at!)
-    statusLine = [`${row.status === 'done' ? 'Done' : row.status === 'skipped' ? PERSON_WORK.has(row.kind) ? 'Skipped' : 'Dismissed' : 'Cancelled'} at ${at}`, photos.length ? `${photos.length} ${photos.length === 1 ? 'photo' : 'photos'}` : null].filter(Boolean).join(' · ')
+    status_line = [`${row.status === 'done' ? 'Done' : row.status === 'skipped' ? PERSON_WORK.has(row.kind) ? 'Skipped' : 'Dismissed' : 'Cancelled'} at ${at}`, photos.length ? `${photos.length} ${photos.length === 1 ? 'photo' : 'photos'}` : null].filter(Boolean).join(' · ')
     detail = null
   }
   const mine = assignee?.you ?? false
@@ -703,13 +704,13 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
   else if (action?.type === 'complete' && !can.complete) action = null
   return {
     id: row.id, kind: row.kind, status: row.status, version: row.version,
-    face, tag, imageUrl: product?.imageUrl ?? null, avatar, statusLine, title, when, detail, error,
+    face, tag, image_url: product?.imageUrl ?? null, avatar, status_line, title, when, detail, error,
     ...(reservation ? { reservation } : {}),
     note: row.outcome_note ? `“${row.outcome_note}”` : null,
     person: row.status === 'open' ? assignee : closer, assignee, action, sheet,
-    startsAt: row.starts_at, dueAt: row.due_at, timezone: zone, notes: row.notes,
-    outcome: row.status === 'open' ? null : { note: row.outcome_note, photos, closedAt: row.closed_at!, closedBy: closerName },
-    path, productId: row.product_id, locationId: row.location_id, stayId, requestId, can,
+    starts_at: row.starts_at, due_at: row.due_at, timezone: zone, notes: row.notes,
+    outcome: row.status === 'open' ? null : { note: row.outcome_note, photos, closed_at: row.closed_at!, closed_by: closerName },
+    path, product_id: row.product_id, location_id: row.location_id, booking_id, conversation_id, can,
     dismiss: can.skip ? { label: PERSON_WORK.has(row.kind) ? 'Skip' : 'Dismiss', card: row.kind === 'guest_reply' } : null,
   }
 }
@@ -718,7 +719,7 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
 // Reads.
 // ---------------------------------------------------------------------------
 
-export interface TaskListQuery { range: 'today' | 'upcoming'; assignee: 'me' | 'all' | string; locationId?: string; status?: TaskStatus; kind?: TaskKind }
+export interface TaskListQuery { range: 'today' | 'upcoming'; assignee: 'me' | 'all' | string; location_id?: string; status?: TaskStatus; kind?: TaskKind }
 
 const STATUSES: readonly TaskStatus[] = ['open', 'done', 'skipped', 'cancelled']
 
@@ -730,7 +731,7 @@ export function parseTaskListQuery(query: Record<string, unknown>, defaults: Par
   if (status !== undefined && !STATUSES.includes(status as TaskStatus)) fail(400, 'INVALID_TASK_QUERY', 'status must be open, done, skipped or cancelled', 'status')
   const kind = read('kind')
   if (kind !== undefined && !TASK_KINDS.includes(kind as TaskKind)) fail(400, 'INVALID_TASK_QUERY', `kind must be one of ${TASK_KINDS.join(', ')}`, 'kind')
-  return { range, assignee: read('assignee') ?? defaults.assignee ?? 'all', locationId: read('locationId'), status: status as TaskStatus | undefined, kind: kind as TaskKind | undefined }
+  return { range, assignee: read('assignee') ?? defaults.assignee ?? 'all', location_id: read('location_id'), status: status as TaskStatus | undefined, kind: kind as TaskKind | undefined }
 }
 
 /** Today's open work in the owner's order: failed deliveries, turnovers, replies, then everything else. */
@@ -739,7 +740,7 @@ const PERSON_WORK: ReadonlySet<TaskKind> = new Set(['turnover', 'custom', 'stay_
 const TODAY_ORDER: Record<TaskKind, number> = { message_delivery: 0, turnover: 1, guest_reply: 2, booking_review: 2, booking_change: 2, consultation_prep: 2, custom: 3, stay_ready: 1, consultation_follow_up: 3, opportunity: 3 }
 
 /** Today: open work due or starting today or earlier, or with no date; then what was closed today. Upcoming: open work later than today, by day. */
-export async function listTasks(db: DbClient, viewer: TaskViewer, query: TaskListQuery, now = new Date()): Promise<{ sections: TaskSection[]; resolvedAt: string }> {
+export async function listTasks(db: DbClient, viewer: TaskViewer, query: TaskListQuery, now = new Date()): Promise<{ sections: TaskSection[]; resolved_at: string }> {
   const organizationId = viewer.principal.organizationId
   const scope = scopeSql(viewer)
   const filters: string[] = []
@@ -752,7 +753,7 @@ export async function listTasks(db: DbClient, viewer: TaskViewer, query: TaskLis
     filters.push('t.assigned_member_id = ?')
     params.push(query.assignee)
   }
-  if (query.locationId) { filters.push('t.location_id = ?'); params.push(query.locationId) }
+  if (query.location_id) { filters.push('t.location_id = ?'); params.push(query.location_id) }
   if (query.kind) { filters.push('t.kind = ?'); params.push(query.kind) }
   // Closed work is shown on the day it was closed; two days covers every zone's today.
   const closedSince = new Date(now.getTime() - 2 * 86_400_000).toISOString()
@@ -778,11 +779,11 @@ export async function listTasks(db: DbClient, viewer: TaskViewer, query: TaskLis
   const shown = rows.filter(row => query.range === 'today' ? isToday(row) : row.status === 'open' && !isToday(row))
   const context = await loadContext(db, viewer, shown)
   const views = shown.map(row => ({ row, view: present(row, viewer, context, now) }))
-  const resolvedAt = now.toISOString()
+  const resolved_at = now.toISOString()
   if (query.range === 'today') {
     const open = views.filter(item => item.row.status === 'open').sort((a, b) => TODAY_ORDER[a.row.kind] - TODAY_ORDER[b.row.kind]).map(item => item.view)
     const closed = views.filter(item => item.row.status !== 'open').sort((a, b) => b.row.closed_at!.localeCompare(a.row.closed_at!)).map(item => item.view)
-    return { resolvedAt, sections: [
+    return { resolved_at, sections: [
       ...(open.length ? [{ id: 'open', title: null, subtitle: null, tasks: open }] : []),
       ...(closed.length ? [{ id: 'done', title: 'Done', subtitle: null, tasks: closed }] : []),
     ] }
@@ -800,7 +801,7 @@ export async function listTasks(db: DbClient, viewer: TaskViewer, query: TaskLis
     section.tasks.push(view)
     byDay.set(date, section)
   }
-  return { resolvedAt, sections: [...byDay.values()].sort((a, b) => a.id.localeCompare(b.id)) }
+  return { resolved_at, sections: [...byDay.values()].sort((a, b) => a.id.localeCompare(b.id)) }
 }
 
 /** The members a manager can give work to; empty for anyone who cannot assign. */
@@ -814,7 +815,7 @@ export async function listTaskAssignees(db: DbClient, viewer: TaskViewer): Promi
 /** A task as an alert to one of its people tells it: the member projection, with no guest's full name or contact. */
 export async function describeTaskForAlert(db: DbClient, organizationId: string, taskId: string, recipientUserId: string): Promise<{ eyebrow: string; title: string; detail: string | null; locationId: string | null }> {
   const view = await taskViewForUser(db, organizationId, taskId, recipientUserId)
-  return { eyebrow: [view.tag ?? view.statusLine, view.when].filter(Boolean).join(' · '), title: view.title, detail: view.detail, locationId: view.locationId }
+  return { eyebrow: [view.tag ?? view.status_line, view.when].filter(Boolean).join(' · '), title: view.title, detail: view.detail, locationId: view.location_id }
 }
 
 /** A task as one member sees it, from a server path with no caller: the member projection, with no guest's full name or contact. */
@@ -872,10 +873,10 @@ function instant(value: unknown, field: string): string | null {
   return new Date(value as string).toISOString()
 }
 
-export async function readTaskAssignee(db: DbClient, organizationId: string, input: { assignedMemberId?: unknown }): Promise<string | null> {
-  const member = input.assignedMemberId ?? null
+export async function readTaskAssignee(db: DbClient, organizationId: string, input: { assigned_member_id?: unknown }): Promise<string | null> {
+  const member = input.assigned_member_id ?? null
   if (member !== null && (typeof member !== 'string' || !await queryFirst(db, 'SELECT id FROM member WHERE organizationId = ? AND id = ?', [organizationId, member]))) {
-    fail(422, 'INVALID_RESPONSIBILITY', 'The member must belong to this organization', 'assignedMemberId')
+    fail(422, 'INVALID_RESPONSIBILITY', 'The member must belong to this organization', 'assigned_member_id')
   }
   return member as string | null
 }
@@ -968,21 +969,21 @@ async function afterWrite(db: DbClient, viewer: TaskViewer, taskId: string, assi
 export async function createTask(db: DbClient, viewer: TaskViewer, body: Record<string, unknown>): Promise<{ task: TaskView; created: boolean }> {
   await assertRoleAllows({ ...viewer.principal, permissions: { task: ['create'] } })
   const organizationId = viewer.principal.organizationId
-  const key = text(body.idempotencyKey, 'idempotencyKey', 200, true)!
+  const key = text(body.idempotency_key, 'idempotency_key', 200, true)!
   const title = text(body.title, 'title', 200, true)!
   const notes = text(body.notes, 'notes', 5000)
-  const startsAt = instant(body.startsAt, 'startsAt'), dueAt = instant(body.dueAt, 'dueAt')
-  if (startsAt && dueAt && startsAt > dueAt) fail(422, 'INVALID_TASK_FIELD', 'startsAt must not be after dueAt', 'startsAt')
+  const startsAt = instant(body.starts_at, 'starts_at'), dueAt = instant(body.due_at, 'due_at')
+  if (startsAt && dueAt && startsAt > dueAt) fail(422, 'INVALID_TASK_FIELD', 'starts_at must not be after due_at', 'starts_at')
   const actorId = viewer.principal.userId
-  const productId = body.productId ?? null, locationId = body.locationId ?? null
-  const assignedMemberId = body.assignedMemberId ?? null
+  const productId = body.product_id ?? null, locationId = body.location_id ?? null
+  const assignedMemberId = body.assigned_member_id ?? null
   const dedupeKey = `custom:${organizationId}:${key}`
   const eventKey = creationDedupeKey('task', organizationId, key)
   const requestHash = await creationRequestHash({ actorId, title, notes, startsAt, dueAt, productId, locationId, assignedMemberId })
   const readReplay = async (): Promise<string | null> => {
     const record = await readCreationRecord(db, eventKey)
     if (!record) return null
-    if (record.requestHash !== requestHash) fail(409, 'IDEMPOTENCY_CONFLICT', 'This key belongs to a different task request', 'idempotencyKey')
+    if (record.requestHash !== requestHash) fail(409, 'IDEMPOTENCY_CONFLICT', 'This key belongs to a different task request', 'idempotency_key')
     return record.entityId
   }
   const replayId = await readReplay()
@@ -996,9 +997,9 @@ export async function createTask(db: DbClient, viewer: TaskViewer, body: Record<
         WHERE pl.organization_id = ? AND pl.product_id = ? ${locationId !== null ? 'AND pl.location_id = ?' : ''} LIMIT 2`,
       [organizationId, productId, ...(locationId !== null ? [locationId] : [])])
     : locationId !== null ? await queryAll<Place>(db, 'SELECT id AS location_id, timezone FROM business_locations WHERE organization_id = ? AND id = ?', [organizationId, locationId]) : []
-  if (places.length > 1) fail(422, 'TASK_LOCATION_REQUIRED', 'Choose a location for a product linked to multiple locations', 'locationId')
+  if (places.length > 1) fail(422, 'TASK_LOCATION_REQUIRED', 'Choose a location for a product linked to multiple locations', 'location_id')
   const place = places[0]
-  if ((productId !== null || locationId !== null) && !place) fail(422, 'INVALID_TASK_FIELD', productId !== null ? 'The offering is not at that location in this organization' : 'The location is not in this organization', productId !== null ? 'productId' : 'locationId')
+  if ((productId !== null || locationId !== null) && !place) fail(422, 'INVALID_TASK_FIELD', productId !== null ? 'The offering is not at that location in this organization' : 'The location is not in this organization', productId !== null ? 'product_id' : 'location_id')
   const organization = await queryFirst<{ timezone: string }>(db, 'SELECT timezone FROM organization WHERE id = ?', [organizationId])
   if (!organization) throw new Error(`Organization ${organizationId} is missing`)
   const id = crypto.randomUUID(), now = new Date().toISOString()
@@ -1013,7 +1014,7 @@ export async function createTask(db: DbClient, viewer: TaskViewer, body: Record<
   })], { operation: 'Create task' })
   if (results[0]?.meta.changes !== 1) {
     const winnerId = await readReplay()
-    if (!winnerId) fail(409, 'IDEMPOTENCY_CONFLICT', 'This key already belongs to a task whose original request could not be verified. Read your tasks before creating another.', 'idempotencyKey')
+    if (!winnerId) fail(409, 'IDEMPOTENCY_CONFLICT', 'This key already belongs to a task whose original request could not be verified. Read your tasks before creating another.', 'idempotency_key')
     return { task: await afterWrite(db, viewer, winnerId), created: false }
   }
   return { task: await afterWrite(db, viewer, id, assigned ?? undefined), created: true }
@@ -1021,14 +1022,14 @@ export async function createTask(db: DbClient, viewer: TaskViewer, body: Record<
 
 export async function updateTask(db: DbClient, viewer: TaskViewer, taskId: string, body: Record<string, unknown>): Promise<TaskView> {
   const current = await readTaskRow(db, viewer, taskId)
-  const touchesAssignee = body.assignedMemberId !== undefined
+  const touchesAssignee = body.assigned_member_id !== undefined
   await assertRoleAllows({ ...viewer.principal, permissions: { task: touchesAssignee ? ['assign'] : ['update'] } })
-  if (body.expectedVersion !== current.version) fail(409, 'TASK_VERSION_CONFLICT', 'This task changed since you opened it; reload it and try again', 'expectedVersion')
+  if (body.version !== current.version) fail(409, 'TASK_VERSION_CONFLICT', 'This task changed since you opened it; reload it and try again', 'version')
   if (current.status !== 'open') fail(409, 'TASK_CLOSED', 'Reopen the task before changing it', 'status')
   const assigned = touchesAssignee ? await readTaskAssignee(db, viewer.principal.organizationId, body) : current.assigned_member_id
-  const startsAt = body.startsAt === undefined ? current.starts_at : instant(body.startsAt, 'startsAt')
-  const dueAt = body.dueAt === undefined ? current.due_at : instant(body.dueAt, 'dueAt')
-  if (startsAt && dueAt && startsAt > dueAt) fail(422, 'INVALID_TASK_FIELD', 'startsAt must not be after dueAt', 'startsAt')
+  const startsAt = body.starts_at === undefined ? current.starts_at : instant(body.starts_at, 'starts_at')
+  const dueAt = body.due_at === undefined ? current.due_at : instant(body.due_at, 'due_at')
+  if (startsAt && dueAt && startsAt > dueAt) fail(422, 'INVALID_TASK_FIELD', 'starts_at must not be after due_at', 'starts_at')
   const notes = body.notes === undefined ? current.notes : text(body.notes, 'notes', 5000)
   const title = body.title === undefined ? current.title : current.kind === 'custom' || current.kind === 'opportunity' ? text(body.title, 'title', 200, true) : fail(422, 'INVALID_TASK_FIELD', 'This task takes its title from what it is about', 'title')
   const after = { assigned_member_id: assigned, starts_at: startsAt, due_at: dueAt, notes, title }
@@ -1040,7 +1041,7 @@ export async function updateTask(db: DbClient, viewer: TaskViewer, taskId: strin
       WHERE organization_id = ? AND id = ? AND version = ? AND status = 'open'`,
     params: [after.assigned_member_id, startsAt, dueAt, notes, title, new Date().toISOString(), viewer.principal.organizationId, taskId, current.version],
   }, taskEventQuery(viewer, current, reassigned ? 'task.assigned' : 'task.updated', { before, after })], { operation: 'Update task' })
-  if (results[0]?.meta.changes !== 1) fail(409, 'TASK_VERSION_CONFLICT', 'This task changed since you opened it; reload it and try again', 'expectedVersion')
+  if (results[0]?.meta.changes !== 1) fail(409, 'TASK_VERSION_CONFLICT', 'This task changed since you opened it; reload it and try again', 'version')
   return afterWrite(db, viewer, taskId, reassigned && assigned ? assigned : undefined)
 }
 
@@ -1094,7 +1095,7 @@ export async function reopenTask(db: DbClient, viewer: TaskViewer, taskId: strin
   const current = await readTaskRow(db, viewer, taskId)
   const view = present(current, viewer, await loadContext(db, viewer, [current]), new Date())
   if (!view.can.reopen) fail(409, 'TASK_NOT_REOPENABLE', 'Only a task a person closed can be reopened, by them or a manager', 'status')
-  if (body.expectedVersion !== current.version) fail(409, 'TASK_VERSION_CONFLICT', 'This task changed since you opened it; reload it and try again', 'expectedVersion')
+  if (body.version !== current.version) fail(409, 'TASK_VERSION_CONFLICT', 'This task changed since you opened it; reload it and try again', 'version')
   const now = new Date().toISOString()
   const results = await executeBatch(db, [{
     query: `UPDATE tasks SET status = 'open', outcome_note = NULL, closed_at = NULL, closed_by_user_id = NULL, version = version + 1, updated_at = ?
@@ -1102,7 +1103,7 @@ export async function reopenTask(db: DbClient, viewer: TaskViewer, taskId: strin
     params: [now, viewer.principal.organizationId, taskId, current.version],
   }, taskEventQuery(viewer, current, 'task.reopened', { before: { status: current.status, outcome_note: current.outcome_note } }),
   { query: `DELETE FROM media_placements WHERE organization_id = ? AND owner_type = 'task' AND owner_id = ? AND changes() = 1`, params: [viewer.principal.organizationId, taskId] }], { operation: 'Reopen task' })
-  if (results[0]?.meta.changes !== 1) fail(409, 'TASK_VERSION_CONFLICT', 'This task changed since you opened it; reload it and try again', 'expectedVersion')
+  if (results[0]?.meta.changes !== 1) fail(409, 'TASK_VERSION_CONFLICT', 'This task changed since you opened it; reload it and try again', 'version')
   return afterWrite(db, viewer, taskId)
 }
 

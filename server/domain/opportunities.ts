@@ -28,16 +28,16 @@ interface OpportunityRow {
 export interface OpportunityView {
   id: string
   /** What part of the business, and where: "Calendar · 45B", "Website". */
-  statusLine: string
+  status_line: string
   title: string
   detail: string
   icon: string
   /** Where the owner does it in the dashboard. */
   path: string
-  productId: string | null
-  locationId: string | null
+  product_id: string | null
+  location_id: string | null
   /** The guest conversation a message opportunity is sent in; null for every other opportunity. */
-  requestId: string | null
+  conversation_id: string | null
   /** The message it pre-writes from the business's own records, for the owner to review and send. */
   message: string | null
 }
@@ -80,7 +80,7 @@ async function refreshOpportunities(db: DbClient, principal: MemberAccessPrincip
 }
 
 function view(row: OpportunityRow, item: BusinessRecommendation, homes: Map<string, string>): OpportunityView {
-  return { id: row.id, statusLine: [AREA[item.operation], item.productId ? homes.get(item.productId) ?? null : null].filter(Boolean).join(' · '), title: item.headline, detail: item.reason, icon: item.icon, path: item.to, productId: item.productId, locationId: item.locationId, requestId: item.requestId, message: item.message }
+  return { id: row.id, status_line: [AREA[item.operation], item.productId ? homes.get(item.productId) ?? null : null].filter(Boolean).join(' · '), title: item.headline, detail: item.reason, icon: item.icon, path: item.to, product_id: item.productId, location_id: item.locationId, conversation_id: item.requestId, message: item.message }
 }
 
 /** The open opportunities available now, in the selector's order. */
@@ -140,16 +140,16 @@ export async function acceptOpportunity(db: DbClient, principal: MemberAccessPri
     fail(409, 'OPPORTUNITY_CHANGED', 'What this opportunity was based on has changed. Reload Today to see what is current.', 'opportunity_id')
   }
   const viewer = await taskViewer(db, principal)
-  const assigned = body.assignedMemberId === undefined
+  const assigned = body.assigned_member_id === undefined
     ? viewer.memberId
     : await readTaskAssignee(db, principal.organizationId, body)
   const place = item.locationId ? await queryFirst<{ timezone: string }>(db, 'SELECT timezone FROM business_locations WHERE organization_id = ? AND id = ?', [principal.organizationId, item.locationId]) : null
   const organization = await queryFirst<{ timezone: string }>(db, 'SELECT timezone FROM organization WHERE id = ?', [principal.organizationId])
   if (!organization) throw new Error(`Organization ${principal.organizationId} is missing`)
   const timezone = place?.timezone ?? organization.timezone
-  if (body.dueAt !== undefined && body.dueAt !== null && !isValidInstant(body.dueAt)) fail(422, 'INVALID_TASK_FIELD', 'dueAt must be an instant with a timezone offset', 'dueAt')
+  if (body.due_at !== undefined && body.due_at !== null && !isValidInstant(body.due_at)) fail(422, 'INVALID_TASK_FIELD', 'due_at must be an instant with a timezone offset', 'due_at')
   const now = new Date()
-  const dueAt = body.dueAt === undefined ? localDateTimeToInstant(localDateAt(now, timezone), '23:59', timezone, 'compatible').toISOString() : body.dueAt === null ? null : new Date(body.dueAt as string).toISOString()
+  const dueAt = body.due_at === undefined ? localDateTimeToInstant(localDateAt(now, timezone), '23:59', timezone, 'compatible').toISOString() : body.due_at === null ? null : new Date(body.due_at as string).toISOString()
   const subjectType = SUBJECT[row.operation] ?? null
   const subjectId = subjectType === null ? null : row.operation === 'stay.gap' ? item.productId : row.subject_id
   const taskId = crypto.randomUUID()

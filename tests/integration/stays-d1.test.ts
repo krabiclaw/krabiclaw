@@ -1395,14 +1395,14 @@ test('unknown home clocks preserve turnover dates without inventing task instant
     const before = new Date('2026-11-02T18:00:00.000Z')
     assert.deepEqual((await listTasks(db, viewer, parseTaskListQuery({}), before)).sections, [])
     const upcoming = await listTasks(db, viewer, parseTaskListQuery({ range: 'upcoming' }), before)
-    assert.deepEqual(upcoming.sections.map(section => [section.id, section.tasks.map(task => task.stayId)]), [['2026-11-03', [first.id]], ['2026-11-05', [next.id]]])
+    assert.deepEqual(upcoming.sections.map(section => [section.id, section.tasks.map(task => task.booking_id)]), [['2026-11-03', [first.id]], ['2026-11-05', [next.id]]])
     assert.equal(upcoming.sections[0]!.title, 'Tomorrow')
     const stored = await db.prepare("SELECT starts_at, due_at FROM tasks WHERE dedupe_key = ?").bind(`turnover:${first.id}`).first()
     assert.deepEqual(stored, { starts_at: null, due_at: null })
     const today = await listTasks(db, viewer, parseTaskListQuery({}), new Date('2026-11-03T18:00:00.000Z'))
     const tasks = today.sections.flatMap(section => section.tasks)
     assert.equal(tasks.length, 1)
-    assert.equal(tasks[0]!.stayId, first.id)
+    assert.equal(tasks[0]!.booking_id, first.id)
     assert.equal(tasks[0]!.when, 'Time not set')
     assert.deepEqual(tasks[0]!.sheet, { heading: 'Turnover', title: 'Cabin', date: 'Tue, Nov 3', checkout: { label: 'Checkout', time: 'Time not set', guest: 'Ana' }, checkin: { label: 'Check-in', time: 'Time not set', guest: 'Ana · 2 guests' } })
   } finally {
@@ -1434,7 +1434,7 @@ test('members see only the homes they look after and change nothing; a home with
     }
     // The cleaner's Today is the turnover tasks at the homes they look after.
     const cleanerTasks = async (now: string) => (await listTasks(db, await taskViewer(db, memberAccessPrincipal(cleanerMembership!, { env })), parseTaskListQuery({}), new Date(now)))
-      .sections.flatMap(section => section.tasks).map(task => [task.kind, task.stayId, task.detail])
+      .sections.flatMap(section => section.tasks).map(task => [task.kind, task.booking_id, task.detail])
     assert.deepEqual(await cleanerTasks('2026-11-03T18:00:00.000Z'), [['turnover', cabinStay.id, 'Ana out']])
     const next = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'next', check_in_date: '2026-11-03', check_out_date: '2026-11-05', ...guest })
     const turnover = await cleanerToday('2026-11-03T18:00:00.000Z')

@@ -32,7 +32,7 @@
 
       <!-- The business's stored tasks and opportunities. -->
       <template v-else-if="business">
-        <UAlert v-if="business.opportunityIssues.length" class="mb-6" color="warning" variant="soft" title="Some performance data could not be loaded" :description="business.opportunityIssues.join(' ')" />
+        <UAlert v-if="business.opportunity_issues.length" class="mb-6" color="warning" variant="soft" title="Some performance data could not be loaded" :description="business.opportunity_issues.join(' ')" />
         <!-- Airbnb's reservations: one card per booking, its suggestion at the foot. -->
         <template v-if="business.reservations.cards.length">
           <h2 class="wtitle" data-testid="today-reservations-title">{{ business.reservations.title }}</h2>
@@ -91,7 +91,7 @@ useSeoMeta({ title: 'Today | KrabiClaw', robots: 'noindex, nofollow' })
 
 const props = defineProps<{ personalScope?: boolean }>()
 type Range = 'today' | 'upcoming'
-interface BusinessToday { reservations: { title: string | null; cards: TodayReservation[] }; tasks: TaskSection[]; opportunities: OpportunityView[]; opportunityIssues: string[]; assignees: TaskPerson[]; resolvedAt: string }
+interface BusinessToday { reservations: { title: string | null; cards: TodayReservation[] }; tasks: TaskSection[]; opportunities: OpportunityView[]; opportunity_issues: string[]; assignees: TaskPerson[]; resolved_at: string }
 const ranges: Array<{ label: string; value: Range }> = [{ label: 'Today', value: 'today' }, { label: 'Upcoming', value: 'upcoming' }]
 
 const route = useRoute()
@@ -147,7 +147,7 @@ function onRangeKeydown(event: KeyboardEvent) {
   ;(event.currentTarget as HTMLElement).parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[index]?.focus()
 }
 
-const isBusinessToday = (value: unknown): value is BusinessToday => isRecord(value) && isRecord(value.reservations) && Array.isArray(value.reservations.cards) && Array.isArray(value.tasks) && Array.isArray(value.opportunities) && Array.isArray(value.assignees) && typeof value.resolvedAt === 'string'
+const isBusinessToday = (value: unknown): value is BusinessToday => isRecord(value) && isRecord(value.reservations) && Array.isArray(value.reservations.cards) && Array.isArray(value.tasks) && Array.isArray(value.opportunities) && Array.isArray(value.assignees) && typeof value.resolved_at === 'string'
 const isFeed = (value: unknown): value is TodayFeedPayload => todayFeedSchema.safeParse(value).success
 const isAgenda = (value: unknown): value is AgendaPayload => isRecord(value) && Array.isArray(value.items)
 

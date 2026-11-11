@@ -14,7 +14,7 @@ const DASHBOARD = `/dashboard/${SLUG}`
 const ACTOR = 'user-e2e-ncls-consultation-owner'
 
 /** GET /api/dashboard/today: the business's stored tasks and, for a manager, its opportunities. */
-type BusinessToday = { tasks: TaskSection[]; opportunities: OpportunityView[]; opportunityIssues: string[]; assignees: TaskPerson[]; resolvedAt: string }
+type BusinessToday = { tasks: TaskSection[]; opportunities: OpportunityView[]; opportunity_issues: string[]; assignees: TaskPerson[]; resolved_at: string }
 
 async function body<T>(response: APIResponse, status: number): Promise<T> {
   expect(response.status(), await response.text()).toBe(status)
@@ -90,10 +90,10 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
     // A member's Today is their own work: no opportunities, nobody to assign to,
     // and only tasks given to them or replies in conversations they handle.
     const today = await body<BusinessToday>(await memberContext.request.get('/api/dashboard/today', { params: { org: SLUG } }), 200)
-    expect(today).toMatchObject({ opportunities: [], opportunityIssues: [], assignees: [] })
+    expect(today).toMatchObject({ opportunities: [], opportunity_issues: [], assignees: [] })
     for (const task of today.tasks.flatMap(section => section.tasks)) {
       expect(task.can, `${task.kind} ${task.id} is not a manager's`).toMatchObject({ assign: false, edit: false })
-      if (task.kind === 'guest_reply') await body(await memberContext.request.get(`/api/dashboard/organizations/${ORGANIZATION}/guest-threads/${task.requestId}`), 200)
+      if (task.kind === 'guest_reply') await body(await memberContext.request.get(`/api/dashboard/organizations/${ORGANIZATION}/guest-threads/${task.conversation_id}`), 200)
       else expect(task.assignee, `${task.kind} ${task.id} is given to the member`).toMatchObject({ type: 'member', id: actor.id, you: true })
     }
     // The consultation is the Calendar's: it is on its day there.
@@ -188,8 +188,8 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
     // Confirming the consultation is the review its booking asked for: that task is done, by the member who
     // confirmed it, and nothing else is left on Today for it; the visit itself is the Calendar's.
     const after = await body<BusinessToday>(await memberContext.request.get('/api/dashboard/today', { params: { org: SLUG } }), 200)
-    expect(after.tasks.flatMap(section => section.tasks.map(task => ({ section: section.id, task }))).filter(item => item.task.requestId === requestId)).toEqual([{ section: 'done', task: expect.objectContaining({
-      kind: 'booking_review', status: 'done', person: expect.objectContaining({ name: 'You', you: true }), outcome: expect.objectContaining({ closedBy: 'You' }),
+    expect(after.tasks.flatMap(section => section.tasks.map(task => ({ section: section.id, task }))).filter(item => item.task.conversation_id === requestId)).toEqual([{ section: 'done', task: expect.objectContaining({
+      kind: 'booking_review', status: 'done', person: expect.objectContaining({ name: 'You', you: true }), outcome: expect.objectContaining({ closed_by: 'You' }),
     }) }])
     await memberPage.setViewportSize({ width: 1440, height: 900 })
     await expect(todayPanel).toBeVisible()

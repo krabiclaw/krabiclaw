@@ -3,7 +3,7 @@
     <template #body>
       <template v-if="task">
         <div class="text-center">
-          <img v-if="task.imageUrl" :src="task.imageUrl" alt="" class="mx-auto mb-4 h-28 w-42 rounded-2xl object-cover">
+          <img v-if="task.image_url" :src="task.image_url" alt="" class="mx-auto mb-4 h-28 w-42 rounded-2xl object-cover">
           <h3 class="text-[26px] font-bold leading-[30px] tracking-tight">{{ task.sheet.title }}</h3>
           <p v-if="task.sheet.date" class="mt-1.5 text-muted">{{ task.sheet.date }}</p>
         </div>
@@ -25,11 +25,11 @@
         </div>
 
         <div v-if="task.outcome" class="sh-card space-y-2" data-testid="today-task-outcome">
-          <h4>What {{ task.outcome.closedBy === 'You' ? 'you' : task.outcome.closedBy ?? 'they' }} found</h4>
-          <p class="text-muted">{{ task.statusLine }}</p>
+          <h4>What {{ task.outcome.closed_by === 'You' ? 'you' : task.outcome.closed_by ?? 'they' }} found</h4>
+          <p class="text-muted">{{ task.status_line }}</p>
           <p v-if="task.outcome.note" class="whitespace-pre-line">{{ task.outcome.note }}</p>
           <div v-if="task.outcome.photos.length" class="flex flex-wrap gap-2">
-            <a v-for="photo in task.outcome.photos" :key="photo.id" :href="photo.url" target="_blank" rel="noopener"><img :src="photo.thumbnailUrl" alt="" class="size-20 rounded-lg object-cover"></a>
+            <a v-for="photo in task.outcome.photos" :key="photo.id" :href="photo.url" target="_blank" rel="noopener"><img :src="photo.thumbnail_url" alt="" class="size-20 rounded-lg object-cover"></a>
           </div>
         </div>
         <div v-else-if="task.can.complete" class="sh-card">
@@ -120,12 +120,12 @@ async function close(status: 'done' | 'skipped') {
 }
 
 async function reopen() {
-  await run('reopen', () => applicationFetch(`${base.value}/reopen`, { method: 'POST', validate: isTaskResult, body: { expectedVersion: props.task!.version } }), true)
+  await run('reopen', () => applicationFetch(`${base.value}/reopen`, { method: 'POST', validate: isTaskResult, body: { version: props.task!.version } }), true)
 }
 
 async function assign(person: TaskPerson | null) {
   await run('assign', () => applicationFetch(base.value, { method: 'PATCH', validate: isTaskResult,
-    body: { expectedVersion: props.task!.version, assignedMemberId: person?.id ?? null } }), false)
+    body: { version: props.task!.version, assigned_member_id: person?.id ?? null } }), false)
 }
 </script>
 

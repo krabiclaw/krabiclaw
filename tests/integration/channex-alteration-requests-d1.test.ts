@@ -144,7 +144,7 @@ async function boot() {
       assert.equal(response.status, 200, body)
       const feed = JSON.parse(body) as { tasks: TaskSection[]; opportunities: OpportunityView[] }
       const operations = new Map((await db.prepare('SELECT id, operation FROM opportunities WHERE organization_id = ?').bind(ORG).all<{ id: string; operation: string }>()).results.map(row => [row.id, row.operation]))
-      return { tasks: feed.tasks.flatMap(section => section.tasks.map(task => [task.kind, task.requestId])), opportunities: feed.opportunities.map(opportunity => operations.get(opportunity.id)) }
+      return { tasks: feed.tasks.flatMap(section => section.tasks.map(task => [task.kind, task.conversation_id])), opportunities: feed.opportunities.map(opportunity => operations.get(opportunity.id)) }
     }
     return { runtime, db, env, today }
   } catch (error) { await runtime.dispose(); throw error }

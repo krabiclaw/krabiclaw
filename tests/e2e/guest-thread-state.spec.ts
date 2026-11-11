@@ -31,7 +31,7 @@ interface DeliveryList {
 }
 
 /** GET /api/dashboard/today: the business's stored tasks and, for a manager, its opportunities. */
-type BusinessToday = { tasks: TaskSection[]; opportunities: OpportunityView[]; opportunityIssues: string[]; assignees: TaskPerson[]; resolvedAt: string }
+type BusinessToday = { tasks: TaskSection[]; opportunities: OpportunityView[]; opportunity_issues: string[]; assignees: TaskPerson[]; resolved_at: string }
 
 const baseURL = testBaseUrl()
 // Contact threads run on the seeded experience business; table bookings on the
@@ -208,7 +208,7 @@ async function loadLedger(request: APIRequestContext, threadId: string, targetOr
 async function loadReplyTasks(request: APIRequestContext, slug: string, threadId: string) {
   const response = await request.get('/api/dashboard/today', { params: { org: slug, kind: 'guest_reply' } })
   await expectStatus(response, 200)
-  return (await response.json() as BusinessToday).tasks.map(section => ({ section: section.id, tasks: section.tasks.filter(task => task.requestId === threadId) })).filter(section => section.tasks.length)
+  return (await response.json() as BusinessToday).tasks.map(section => ({ section: section.id, tasks: section.tasks.filter(task => task.conversation_id === threadId) })).filter(section => section.tasks.length)
 }
 
 /** Opening a conversation reads it through to the newest message shown; the GET that showed it wrote nothing. */
@@ -289,7 +289,7 @@ test('guest thread state stays source-owned, per-user, tenant-isolated, and idem
     // The guest's question is the business's to answer: one open reply task on Today, which opens the conversation.
     expect(openingLedger.needs_reply).toBe(true)
     expect(await loadReplyTasks(owner, organizationSlug(), threadId)).toEqual([{ section: 'open', tasks: [expect.objectContaining({
-      kind: 'guest_reply', status: 'open', title: `Thread${nonce}`, detail: message, requestId: threadId, outcome: null,
+      kind: 'guest_reply', status: 'open', title: `Thread${nonce}`, detail: message, conversation_id: threadId, outcome: null,
       action: { type: 'open', label: 'Reply', path: expect.stringContaining(threadId) },
       can: expect.objectContaining({ complete: false }),
     })] }])
@@ -639,7 +639,7 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
   const todayResponse = await page.request.get('/api/dashboard/today', { params: { org: demoSlug() } })
   await expectStatus(todayResponse, 200)
   const todayFeed = await todayResponse.json() as BusinessToday
-  expect(todayFeed.tasks.flatMap(section => section.tasks).filter(task => task.requestId === bookingIds[0]).map(task => task.kind)).toContain('consultation_prep')
+  expect(todayFeed.tasks.flatMap(section => section.tasks).filter(task => task.conversation_id === bookingIds[0]).map(task => task.kind)).toContain('consultation_prep')
   const agendaResponse = await page.request.get('/api/dashboard/agenda', { params: { org: demoSlug(), from: localToday.date, to: localDateAt(new Date(now + 5 * 86_400_000), timezone) } })
   await expectStatus(agendaResponse, 200)
   const agenda = await agendaResponse.json() as { items: Array<{ id: string; to: string; startsAt: string }> }
@@ -651,14 +651,14 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
   const upcomingResponse = await page.request.get('/api/dashboard/today', { params: { org: demoSlug(), range: 'upcoming' } })
   await expectStatus(upcomingResponse, 200)
   const upcomingFeed = await upcomingResponse.json() as BusinessToday
-  expect(upcomingFeed.tasks.flatMap(section => section.tasks).filter(task => task.requestId === upcomingBookingId).map(task => task.kind)).toContain('consultation_prep')
+  expect(upcomingFeed.tasks.flatMap(section => section.tasks).filter(task => task.conversation_id === upcomingBookingId).map(task => task.kind)).toContain('consultation_prep')
   const upcomingReservation = agenda.items.find(item => item.id === `booking:${upcomingBookingId}`)
   expect(upcomingReservation?.to).toBe(`/dashboard/${demoSlug()}/bookings/booking/${upcomingBookingId}`)
-  expect(localDateAt(new Date(upcomingReservation!.startsAt), timezone) > localToday.date).toBe(true)
+  expect(localDateAt(new Date(upcomingReservation!.starts_at), timezone) > localToday.date).toBe(true)
 
   await page.goto(`${baseURL}${reservation!.to}`)
   const instant = new Date().toISOString()
-  await expect(page.locator('#dashboard-panel-booking-details').getByRole('heading', { name: reservation!.startsAt <= instant && instant < reservation!.endsAt! ? 'Currently hosting' : 'Today', exact: true })).toBeVisible()
+  await expect(page.locator('#dashboard-panel-booking-details').getByRole('heading', { name: reservation!.starts_at <= instant && instant < reservation!.ends_at! ? 'Currently hosting' : 'Today', exact: true })).toBeVisible()
   await expect(page.getByText(guestName, { exact: true }).first()).toBeVisible()
   await expect(page.getByText(guestEmail, { exact: true })).toHaveCount(0)
   const detailPanel = page.locator('#dashboard-panel-booking-details')
@@ -980,7 +980,7 @@ test('buyer conversation approves and declines canonical changes without moving 
     expect(requestedLedger.operational_record).toEqual(finalRecord)
     // It is the owner's open reply task on Today, quoting the guest's words.
     expect(await loadReplyTasks(owner, demoSlug(), threadId)).toEqual([{ section: 'open', tasks: [expect.objectContaining({
-      kind: 'guest_reply', status: 'open', detail: changeMessage, requestId: threadId,
+      kind: 'guest_reply', status: 'open', detail: changeMessage, conversation_id: threadId,
     })] }])
     const customerRequest = streamMessages(requested).filter(item => item.side === 'guest' && item.body === changeMessage)
     expect(customerRequest).toMatchObject([{ author: 'E2E Buyer' }])

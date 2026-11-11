@@ -162,7 +162,7 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
     // A job the owner takes for themselves has no conversation: the task alert goes out on the morning of, once.
     const leeTurnover = (await taskRow(`turnover:${lee.id}`))!
     const ownerViewer = await taskViewer(db, principal('owner', 'owner'))
-    await updateTask(db, ownerViewer, leeTurnover.id, { expectedVersion: leeTurnover.version, assignedMemberId: 'm-owner' })
+    await updateTask(db, ownerViewer, leeTurnover.id, { version: leeTurnover.version, assigned_member_id: 'm-owner' })
     await runOrganizationJobs(env, db, ORG, at(day(5), '08:05'))
     await runOrganizationJobs(env, db, ORG, at(day(5), '08:06'))
     // Its sends are the task's, keyed by the day: the owner's email, once.

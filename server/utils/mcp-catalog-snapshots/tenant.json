@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:f1787ff444e8e6b856c7a85563c9f95871044344e74ed17960d281257b04b75b",
-  "documentationFingerprint": "sha256:c78b6f905007b5c7a02925b69b28a35a85abb5b09cdb9908ab82ed7bcec6bb4e",
+  "fingerprint": "sha256:df30a9d18fbd4767f1dedea4ffabacbc4d370e7292d0bebd2f19bf253bd26e6c",
+  "documentationFingerprint": "sha256:2e2aa67959687b6ac9b97f00a4817bef6e2a625fadffa8d7fe433d2afafadb8f",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -95,6 +95,12 @@
                   "null"
                 ]
               },
+              "booking_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "can": {
                 "properties": {
                   "assign": {
@@ -122,13 +128,19 @@
                 ],
                 "type": "object"
               },
+              "conversation_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "detail": {
                 "type": [
                   "string",
                   "null"
                 ]
               },
-              "dueAt": {
+              "due_at": {
                 "type": [
                   "string",
                   "null"
@@ -150,7 +162,7 @@
               "id": {
                 "type": "string"
               },
-              "imageUrl": {
+              "image_url": {
                 "type": [
                   "string",
                   "null"
@@ -171,7 +183,7 @@
                 ],
                 "type": "string"
               },
-              "locationId": {
+              "location_id": {
                 "type": [
                   "string",
                   "null"
@@ -238,13 +250,7 @@
                   }
                 ]
               },
-              "productId": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "requestId": {
+              "product_id": {
                 "type": [
                   "string",
                   "null"
@@ -281,31 +287,31 @@
                       }
                     ]
                   },
-                  "dateLabel": {
+                  "date_label": {
                     "type": "string"
                   },
-                  "groupHeadline": {
-                    "type": "string"
-                  },
-                  "guestImageUrl": {
+                  "guest_image_url": {
                     "type": [
                       "string",
                       "null"
                     ]
                   },
-                  "homeName": {
+                  "headline": {
                     "type": "string"
                   },
-                  "statusLabel": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "status_label": {
                     "type": "string"
                   }
                 },
                 "required": [
-                  "dateLabel",
-                  "groupHeadline",
-                  "homeName",
-                  "statusLabel",
-                  "guestImageUrl",
+                  "date_label",
+                  "headline",
+                  "name",
+                  "status_label",
+                  "guest_image_url",
                   "conversation"
                 ],
                 "type": "object"
@@ -313,7 +319,7 @@
               "sheet": {
                 "type": "object"
               },
-              "startsAt": {
+              "starts_at": {
                 "type": [
                   "string",
                   "null"
@@ -328,13 +334,7 @@
                 ],
                 "type": "string"
               },
-              "statusLine": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "stayId": {
+              "status_line": {
                 "type": [
                   "string",
                   "null"
@@ -369,9 +369,9 @@
               "version",
               "face",
               "tag",
-              "imageUrl",
+              "image_url",
               "avatar",
-              "statusLine",
+              "status_line",
               "title",
               "when",
               "detail",
@@ -380,17 +380,17 @@
               "person",
               "assignee",
               "sheet",
-              "startsAt",
-              "dueAt",
+              "starts_at",
+              "due_at",
               "timezone",
               "notes",
               "outcome",
               "action",
               "path",
-              "productId",
-              "locationId",
-              "stayId",
-              "requestId",
+              "product_id",
+              "location_id",
+              "booking_id",
+              "conversation_id",
               "can"
             ],
             "type": "object"
@@ -13675,6 +13675,12 @@
                   "null"
                 ]
               },
+              "booking_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "can": {
                 "properties": {
                   "assign": {
@@ -13702,13 +13708,19 @@
                 ],
                 "type": "object"
               },
+              "conversation_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "detail": {
                 "type": [
                   "string",
                   "null"
                 ]
               },
-              "dueAt": {
+              "due_at": {
                 "type": [
                   "string",
                   "null"
@@ -13730,7 +13742,7 @@
               "id": {
                 "type": "string"
               },
-              "imageUrl": {
+              "image_url": {
                 "type": [
                   "string",
                   "null"
@@ -13751,7 +13763,7 @@
                 ],
                 "type": "string"
               },
-              "locationId": {
+              "location_id": {
                 "type": [
                   "string",
                   "null"
@@ -13818,13 +13830,7 @@
                   }
                 ]
               },
-              "productId": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "requestId": {
+              "product_id": {
                 "type": [
                   "string",
                   "null"
@@ -13861,31 +13867,31 @@
                       }
                     ]
                   },
-                  "dateLabel": {
+                  "date_label": {
                     "type": "string"
                   },
-                  "groupHeadline": {
-                    "type": "string"
-                  },
-                  "guestImageUrl": {
+                  "guest_image_url": {
                     "type": [
                       "string",
                       "null"
                     ]
                   },
-                  "homeName": {
+                  "headline": {
                     "type": "string"
                   },
-                  "statusLabel": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "status_label": {
                     "type": "string"
                   }
                 },
                 "required": [
-                  "dateLabel",
-                  "groupHeadline",
-                  "homeName",
-                  "statusLabel",
-                  "guestImageUrl",
+                  "date_label",
+                  "headline",
+                  "name",
+                  "status_label",
+                  "guest_image_url",
                   "conversation"
                 ],
                 "type": "object"
@@ -13893,7 +13899,7 @@
               "sheet": {
                 "type": "object"
               },
-              "startsAt": {
+              "starts_at": {
                 "type": [
                   "string",
                   "null"
@@ -13908,13 +13914,7 @@
                 ],
                 "type": "string"
               },
-              "statusLine": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "stayId": {
+              "status_line": {
                 "type": [
                   "string",
                   "null"
@@ -13949,9 +13949,9 @@
               "version",
               "face",
               "tag",
-              "imageUrl",
+              "image_url",
               "avatar",
-              "statusLine",
+              "status_line",
               "title",
               "when",
               "detail",
@@ -13960,17 +13960,17 @@
               "person",
               "assignee",
               "sheet",
-              "startsAt",
-              "dueAt",
+              "starts_at",
+              "due_at",
               "timezone",
               "notes",
               "outcome",
               "action",
               "path",
-              "productId",
-              "locationId",
-              "stayId",
-              "requestId",
+              "product_id",
+              "location_id",
+              "booking_id",
+              "conversation_id",
               "can"
             ],
             "type": "object"
@@ -37647,6 +37647,12 @@
                   "null"
                 ]
               },
+              "booking_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "can": {
                 "properties": {
                   "assign": {
@@ -37674,13 +37680,19 @@
                 ],
                 "type": "object"
               },
+              "conversation_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "detail": {
                 "type": [
                   "string",
                   "null"
                 ]
               },
-              "dueAt": {
+              "due_at": {
                 "type": [
                   "string",
                   "null"
@@ -37702,7 +37714,7 @@
               "id": {
                 "type": "string"
               },
-              "imageUrl": {
+              "image_url": {
                 "type": [
                   "string",
                   "null"
@@ -37723,7 +37735,7 @@
                 ],
                 "type": "string"
               },
-              "locationId": {
+              "location_id": {
                 "type": [
                   "string",
                   "null"
@@ -37790,13 +37802,7 @@
                   }
                 ]
               },
-              "productId": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "requestId": {
+              "product_id": {
                 "type": [
                   "string",
                   "null"
@@ -37833,31 +37839,31 @@
                       }
                     ]
                   },
-                  "dateLabel": {
+                  "date_label": {
                     "type": "string"
                   },
-                  "groupHeadline": {
-                    "type": "string"
-                  },
-                  "guestImageUrl": {
+                  "guest_image_url": {
                     "type": [
                       "string",
                       "null"
                     ]
                   },
-                  "homeName": {
+                  "headline": {
                     "type": "string"
                   },
-                  "statusLabel": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "status_label": {
                     "type": "string"
                   }
                 },
                 "required": [
-                  "dateLabel",
-                  "groupHeadline",
-                  "homeName",
-                  "statusLabel",
-                  "guestImageUrl",
+                  "date_label",
+                  "headline",
+                  "name",
+                  "status_label",
+                  "guest_image_url",
                   "conversation"
                 ],
                 "type": "object"
@@ -37865,7 +37871,7 @@
               "sheet": {
                 "type": "object"
               },
-              "startsAt": {
+              "starts_at": {
                 "type": [
                   "string",
                   "null"
@@ -37880,13 +37886,7 @@
                 ],
                 "type": "string"
               },
-              "statusLine": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "stayId": {
+              "status_line": {
                 "type": [
                   "string",
                   "null"
@@ -37921,9 +37921,9 @@
               "version",
               "face",
               "tag",
-              "imageUrl",
+              "image_url",
               "avatar",
-              "statusLine",
+              "status_line",
               "title",
               "when",
               "detail",
@@ -37932,17 +37932,17 @@
               "person",
               "assignee",
               "sheet",
-              "startsAt",
-              "dueAt",
+              "starts_at",
+              "due_at",
               "timezone",
               "notes",
               "outcome",
               "action",
               "path",
-              "productId",
-              "locationId",
-              "stayId",
-              "requestId",
+              "product_id",
+              "location_id",
+              "booking_id",
+              "conversation_id",
               "can"
             ],
             "type": "object"
@@ -48416,6 +48416,12 @@
                           "null"
                         ]
                       },
+                      "booking_id": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
                       "can": {
                         "properties": {
                           "assign": {
@@ -48443,13 +48449,19 @@
                         ],
                         "type": "object"
                       },
+                      "conversation_id": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
                       "detail": {
                         "type": [
                           "string",
                           "null"
                         ]
                       },
-                      "dueAt": {
+                      "due_at": {
                         "type": [
                           "string",
                           "null"
@@ -48471,7 +48483,7 @@
                       "id": {
                         "type": "string"
                       },
-                      "imageUrl": {
+                      "image_url": {
                         "type": [
                           "string",
                           "null"
@@ -48492,7 +48504,7 @@
                         ],
                         "type": "string"
                       },
-                      "locationId": {
+                      "location_id": {
                         "type": [
                           "string",
                           "null"
@@ -48559,13 +48571,7 @@
                           }
                         ]
                       },
-                      "productId": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      },
-                      "requestId": {
+                      "product_id": {
                         "type": [
                           "string",
                           "null"
@@ -48602,31 +48608,31 @@
                               }
                             ]
                           },
-                          "dateLabel": {
+                          "date_label": {
                             "type": "string"
                           },
-                          "groupHeadline": {
-                            "type": "string"
-                          },
-                          "guestImageUrl": {
+                          "guest_image_url": {
                             "type": [
                               "string",
                               "null"
                             ]
                           },
-                          "homeName": {
+                          "headline": {
                             "type": "string"
                           },
-                          "statusLabel": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "status_label": {
                             "type": "string"
                           }
                         },
                         "required": [
-                          "dateLabel",
-                          "groupHeadline",
-                          "homeName",
-                          "statusLabel",
-                          "guestImageUrl",
+                          "date_label",
+                          "headline",
+                          "name",
+                          "status_label",
+                          "guest_image_url",
                           "conversation"
                         ],
                         "type": "object"
@@ -48634,7 +48640,7 @@
                       "sheet": {
                         "type": "object"
                       },
-                      "startsAt": {
+                      "starts_at": {
                         "type": [
                           "string",
                           "null"
@@ -48649,13 +48655,7 @@
                         ],
                         "type": "string"
                       },
-                      "statusLine": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      },
-                      "stayId": {
+                      "status_line": {
                         "type": [
                           "string",
                           "null"
@@ -48690,9 +48690,9 @@
                       "version",
                       "face",
                       "tag",
-                      "imageUrl",
+                      "image_url",
                       "avatar",
-                      "statusLine",
+                      "status_line",
                       "title",
                       "when",
                       "detail",
@@ -48701,17 +48701,17 @@
                       "person",
                       "assignee",
                       "sheet",
-                      "startsAt",
-                      "dueAt",
+                      "starts_at",
+                      "due_at",
                       "timezone",
                       "notes",
                       "outcome",
                       "action",
                       "path",
-                      "productId",
-                      "locationId",
-                      "stayId",
-                      "requestId",
+                      "product_id",
+                      "location_id",
+                      "booking_id",
+                      "conversation_id",
                       "can"
                     ],
                     "type": [
@@ -69761,6 +69761,13 @@
           "opportunities": {
             "items": {
               "properties": {
+                "conversation_id": {
+                  "description": "The guest conversation a message opportunity is sent in.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "detail": {
                   "type": "string"
                 },
@@ -69770,14 +69777,14 @@
                 "id": {
                   "type": "string"
                 },
-                "locationId": {
+                "location_id": {
                   "type": [
                     "string",
                     "null"
                   ]
                 },
                 "message": {
-                  "description": "The message it pre-writes from the business’s own records. Review it, then send it with send_message in requestId’s conversation; nothing is sent until then.",
+                  "description": "The message it pre-writes from the business’s own records. Review it, then send it with send_message in conversation_id’s conversation; nothing is sent until then.",
                   "type": [
                     "string",
                     "null"
@@ -69786,20 +69793,13 @@
                 "path": {
                   "type": "string"
                 },
-                "productId": {
+                "product_id": {
                   "type": [
                     "string",
                     "null"
                   ]
                 },
-                "requestId": {
-                  "description": "The guest conversation a message opportunity is sent in.",
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "statusLine": {
+                "status_line": {
                   "type": "string"
                 },
                 "title": {
@@ -69808,14 +69808,14 @@
               },
               "required": [
                 "id",
-                "statusLine",
+                "status_line",
                 "title",
                 "detail",
                 "icon",
                 "path",
-                "productId",
-                "locationId",
-                "requestId",
+                "product_id",
+                "location_id",
+                "conversation_id",
                 "message"
               ],
               "type": "object"
@@ -72442,7 +72442,7 @@
             },
             "type": "array"
           },
-          "resolvedAt": {
+          "resolved_at": {
             "type": "string"
           },
           "sections": {
@@ -72509,6 +72509,12 @@
                           "null"
                         ]
                       },
+                      "booking_id": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
                       "can": {
                         "properties": {
                           "assign": {
@@ -72536,13 +72542,19 @@
                         ],
                         "type": "object"
                       },
+                      "conversation_id": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
                       "detail": {
                         "type": [
                           "string",
                           "null"
                         ]
                       },
-                      "dueAt": {
+                      "due_at": {
                         "type": [
                           "string",
                           "null"
@@ -72564,7 +72576,7 @@
                       "id": {
                         "type": "string"
                       },
-                      "imageUrl": {
+                      "image_url": {
                         "type": [
                           "string",
                           "null"
@@ -72585,7 +72597,7 @@
                         ],
                         "type": "string"
                       },
-                      "locationId": {
+                      "location_id": {
                         "type": [
                           "string",
                           "null"
@@ -72652,13 +72664,7 @@
                           }
                         ]
                       },
-                      "productId": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      },
-                      "requestId": {
+                      "product_id": {
                         "type": [
                           "string",
                           "null"
@@ -72695,31 +72701,31 @@
                               }
                             ]
                           },
-                          "dateLabel": {
+                          "date_label": {
                             "type": "string"
                           },
-                          "groupHeadline": {
-                            "type": "string"
-                          },
-                          "guestImageUrl": {
+                          "guest_image_url": {
                             "type": [
                               "string",
                               "null"
                             ]
                           },
-                          "homeName": {
+                          "headline": {
                             "type": "string"
                           },
-                          "statusLabel": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "status_label": {
                             "type": "string"
                           }
                         },
                         "required": [
-                          "dateLabel",
-                          "groupHeadline",
-                          "homeName",
-                          "statusLabel",
-                          "guestImageUrl",
+                          "date_label",
+                          "headline",
+                          "name",
+                          "status_label",
+                          "guest_image_url",
                           "conversation"
                         ],
                         "type": "object"
@@ -72727,7 +72733,7 @@
                       "sheet": {
                         "type": "object"
                       },
-                      "startsAt": {
+                      "starts_at": {
                         "type": [
                           "string",
                           "null"
@@ -72742,13 +72748,7 @@
                         ],
                         "type": "string"
                       },
-                      "statusLine": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      },
-                      "stayId": {
+                      "status_line": {
                         "type": [
                           "string",
                           "null"
@@ -72783,9 +72783,9 @@
                       "version",
                       "face",
                       "tag",
-                      "imageUrl",
+                      "image_url",
                       "avatar",
-                      "statusLine",
+                      "status_line",
                       "title",
                       "when",
                       "detail",
@@ -72794,17 +72794,17 @@
                       "person",
                       "assignee",
                       "sheet",
-                      "startsAt",
-                      "dueAt",
+                      "starts_at",
+                      "due_at",
                       "timezone",
                       "notes",
                       "outcome",
                       "action",
                       "path",
-                      "productId",
-                      "locationId",
-                      "stayId",
-                      "requestId",
+                      "product_id",
+                      "location_id",
+                      "booking_id",
+                      "conversation_id",
                       "can"
                     ],
                     "type": "object"
@@ -72832,7 +72832,7 @@
         "required": [
           "sections",
           "assignees",
-          "resolvedAt"
+          "resolved_at"
         ],
         "type": "object"
       },
@@ -103331,6 +103331,12 @@
                   "null"
                 ]
               },
+              "booking_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "can": {
                 "properties": {
                   "assign": {
@@ -103358,13 +103364,19 @@
                 ],
                 "type": "object"
               },
+              "conversation_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "detail": {
                 "type": [
                   "string",
                   "null"
                 ]
               },
-              "dueAt": {
+              "due_at": {
                 "type": [
                   "string",
                   "null"
@@ -103386,7 +103398,7 @@
               "id": {
                 "type": "string"
               },
-              "imageUrl": {
+              "image_url": {
                 "type": [
                   "string",
                   "null"
@@ -103407,7 +103419,7 @@
                 ],
                 "type": "string"
               },
-              "locationId": {
+              "location_id": {
                 "type": [
                   "string",
                   "null"
@@ -103474,13 +103486,7 @@
                   }
                 ]
               },
-              "productId": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "requestId": {
+              "product_id": {
                 "type": [
                   "string",
                   "null"
@@ -103517,31 +103523,31 @@
                       }
                     ]
                   },
-                  "dateLabel": {
+                  "date_label": {
                     "type": "string"
                   },
-                  "groupHeadline": {
-                    "type": "string"
-                  },
-                  "guestImageUrl": {
+                  "guest_image_url": {
                     "type": [
                       "string",
                       "null"
                     ]
                   },
-                  "homeName": {
+                  "headline": {
                     "type": "string"
                   },
-                  "statusLabel": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "status_label": {
                     "type": "string"
                   }
                 },
                 "required": [
-                  "dateLabel",
-                  "groupHeadline",
-                  "homeName",
-                  "statusLabel",
-                  "guestImageUrl",
+                  "date_label",
+                  "headline",
+                  "name",
+                  "status_label",
+                  "guest_image_url",
                   "conversation"
                 ],
                 "type": "object"
@@ -103549,7 +103555,7 @@
               "sheet": {
                 "type": "object"
               },
-              "startsAt": {
+              "starts_at": {
                 "type": [
                   "string",
                   "null"
@@ -103564,13 +103570,7 @@
                 ],
                 "type": "string"
               },
-              "statusLine": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "stayId": {
+              "status_line": {
                 "type": [
                   "string",
                   "null"
@@ -103605,9 +103605,9 @@
               "version",
               "face",
               "tag",
-              "imageUrl",
+              "image_url",
               "avatar",
-              "statusLine",
+              "status_line",
               "title",
               "when",
               "detail",
@@ -103616,17 +103616,17 @@
               "person",
               "assignee",
               "sheet",
-              "startsAt",
-              "dueAt",
+              "starts_at",
+              "due_at",
               "timezone",
               "notes",
               "outcome",
               "action",
               "path",
-              "productId",
-              "locationId",
-              "stayId",
-              "requestId",
+              "product_id",
+              "location_id",
+              "booking_id",
+              "conversation_id",
               "can"
             ],
             "type": "object"
@@ -127914,7 +127914,7 @@
     {
       "name": "update_task",
       "title": "Update task",
-      "description": "Reassign, reschedule or edit the notes of an open task. Pass expected_version from list_tasks; a newer version is refused so another change is not overwritten. A new assignee is told.",
+      "description": "Reassign, reschedule or edit the notes of an open task. Pass version from list_tasks; a newer version is refused so another change is not overwritten. A new assignee is told.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -127931,10 +127931,6 @@
               "string",
               "null"
             ]
-          },
-          "expected_version": {
-            "minimum": 1,
-            "type": "integer"
           },
           "notes": {
             "maxLength": 5000,
@@ -127965,11 +127961,15 @@
             "maxLength": 200,
             "minLength": 1,
             "type": "string"
+          },
+          "version": {
+            "minimum": 1,
+            "type": "integer"
           }
         },
         "required": [
           "task_id",
-          "expected_version"
+          "version"
         ],
         "type": "object"
       },
@@ -128028,6 +128028,12 @@
                   "null"
                 ]
               },
+              "booking_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "can": {
                 "properties": {
                   "assign": {
@@ -128055,13 +128061,19 @@
                 ],
                 "type": "object"
               },
+              "conversation_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "detail": {
                 "type": [
                   "string",
                   "null"
                 ]
               },
-              "dueAt": {
+              "due_at": {
                 "type": [
                   "string",
                   "null"
@@ -128083,7 +128095,7 @@
               "id": {
                 "type": "string"
               },
-              "imageUrl": {
+              "image_url": {
                 "type": [
                   "string",
                   "null"
@@ -128104,7 +128116,7 @@
                 ],
                 "type": "string"
               },
-              "locationId": {
+              "location_id": {
                 "type": [
                   "string",
                   "null"
@@ -128171,13 +128183,7 @@
                   }
                 ]
               },
-              "productId": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "requestId": {
+              "product_id": {
                 "type": [
                   "string",
                   "null"
@@ -128214,31 +128220,31 @@
                       }
                     ]
                   },
-                  "dateLabel": {
+                  "date_label": {
                     "type": "string"
                   },
-                  "groupHeadline": {
-                    "type": "string"
-                  },
-                  "guestImageUrl": {
+                  "guest_image_url": {
                     "type": [
                       "string",
                       "null"
                     ]
                   },
-                  "homeName": {
+                  "headline": {
                     "type": "string"
                   },
-                  "statusLabel": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "status_label": {
                     "type": "string"
                   }
                 },
                 "required": [
-                  "dateLabel",
-                  "groupHeadline",
-                  "homeName",
-                  "statusLabel",
-                  "guestImageUrl",
+                  "date_label",
+                  "headline",
+                  "name",
+                  "status_label",
+                  "guest_image_url",
                   "conversation"
                 ],
                 "type": "object"
@@ -128246,7 +128252,7 @@
               "sheet": {
                 "type": "object"
               },
-              "startsAt": {
+              "starts_at": {
                 "type": [
                   "string",
                   "null"
@@ -128261,13 +128267,7 @@
                 ],
                 "type": "string"
               },
-              "statusLine": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "stayId": {
+              "status_line": {
                 "type": [
                   "string",
                   "null"
@@ -128302,9 +128302,9 @@
               "version",
               "face",
               "tag",
-              "imageUrl",
+              "image_url",
               "avatar",
-              "statusLine",
+              "status_line",
               "title",
               "when",
               "detail",
@@ -128313,17 +128313,17 @@
               "person",
               "assignee",
               "sheet",
-              "startsAt",
-              "dueAt",
+              "starts_at",
+              "due_at",
               "timezone",
               "notes",
               "outcome",
               "action",
               "path",
-              "productId",
-              "locationId",
-              "stayId",
-              "requestId",
+              "product_id",
+              "location_id",
+              "booking_id",
+              "conversation_id",
               "can"
             ],
             "type": "object"
@@ -128446,7 +128446,7 @@
       "toolContracts": {
         "cancel_product_booking": "sha256:90614958b92689b4c273ffc336e9854909c30a54997c7c5fc8da78e0aeb12aeb",
         "confirm_product_booking": "sha256:1c9695ad981f010718a3f36845717ed36a1546018f196b5f0292ac9a07f9fc8d",
-        "get_conversation": "sha256:f2b566d68b0618f9c48ec5a30a835ef020872d518f2ef66482bb1c3dd80e72a9",
+        "get_conversation": "sha256:7b38dd36eba30635bab52f32dabb6480988a456bf0d7ce0a28f37716e4145c74",
         "get_product_booking": "sha256:1a83fe61e11737be78f8fc8bc093d3625144bcd21417ceab9b1576c2c831b305",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_conversation_recipients": "sha256:439170e450547b9261d1f0499d27ef7ca95dd024cacf847719fee4f4c40e249e",
@@ -128576,7 +128576,7 @@
       },
       "toolContracts": {
         "create_post": "sha256:e800e3c19ecf887d09aa70d80dcbe66d985196d2138620b369cb9e1f9cace67a",
-        "get_conversation": "sha256:f2b566d68b0618f9c48ec5a30a835ef020872d518f2ef66482bb1c3dd80e72a9",
+        "get_conversation": "sha256:7b38dd36eba30635bab52f32dabb6480988a456bf0d7ce0a28f37716e4145c74",
         "get_organization_analytics": "sha256:06e0bfe504a9b9183d0429a06162e4af2d760695c842396608752a8f107cb4d9",
         "get_product": "sha256:b2afea3d084c67b0aacc46c8fbdbcf652dfaa2554de42de7bef06b16312f05e1",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",

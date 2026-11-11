@@ -59,9 +59,9 @@ async function save() {
     const result = await applicationFetch(`/api/organizations/${encodeURIComponent(props.organizationId)}/tasks`, { method: 'POST', validate: isTaskResult, body: {
       title: title.value.trim(), notes: notes.value.trim() || null,
       // The end of the chosen day on this device's clock.
-      dueAt: due.value ? new Date(`${due.value}T23:59:00`).toISOString() : null,
-      assignedMemberId: assigneeKey.value === 'none' ? null : assigneeKey.value,
-      idempotencyKey: idempotencyKey.value,
+      due_at: due.value ? new Date(`${due.value}T23:59:00`).toISOString() : null,
+      assigned_member_id: assigneeKey.value === 'none' ? null : assigneeKey.value,
+      idempotency_key: idempotencyKey.value,
     } })
     emit('created', result.task)
     open.value = false

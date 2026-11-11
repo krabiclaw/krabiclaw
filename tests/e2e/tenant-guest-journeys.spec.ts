@@ -315,7 +315,7 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     const todayBefore = await request.get(`${baseURL}/api/dashboard/today`, { params: { org: wheel.slug } })
     expect(todayBefore.status(), await todayBefore.text()).toBe(200)
     const todayBeforePayload = await todayBefore.json() as { tasks: TaskSection[] }
-    expect(todayBeforePayload.tasks.flatMap(section => section.tasks).filter(task => task.requestId === body.conversation_id)).toEqual([])
+    expect(todayBeforePayload.tasks.flatMap(section => section.tasks).filter(task => task.conversation_id === body.conversation_id)).toEqual([])
     const day = persistedBooking.bookingDate
     // Calendar owns confirmed commitments; quests do not repeat its agenda.
     const scheduleParams = { org: wheel.slug, from: day, to: day }

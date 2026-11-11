@@ -31,7 +31,7 @@ import type { OpportunityView } from '../../server/domain/opportunities'
 const TIME_ZONE = 'Asia/Bangkok'
 
 /** GET /api/dashboard/today: the business's stored tasks and, for a manager, its opportunities. */
-type BusinessToday = { reservations: { title: string | null; cards: TodayReservation[] }; tasks: TaskSection[]; opportunities: OpportunityView[]; opportunityIssues: string[]; assignees: TaskPerson[]; resolvedAt: string }
+type BusinessToday = { reservations: { title: string | null; cards: TodayReservation[] }; tasks: TaskSection[]; opportunities: OpportunityView[]; opportunity_issues: string[]; assignees: TaskPerson[]; resolved_at: string }
 
 function localDay(offset: number): string {
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
@@ -239,14 +239,14 @@ test('a home keeps its operator name independent from its public title across CM
   const today = await request.get(api('today'))
   await expectStatus(today, 200)
   const todayTasks = (await today.json() as BusinessToday).tasks.flatMap(section => section.tasks)
-  const task = todayTasks.find(item => item.kind === 'guest_reply' && item.requestId === stay.conversation_id)!
+  const task = todayTasks.find(item => item.kind === 'guest_reply' && item.conversation_id === stay.conversation_id)!
   expect(task).toMatchObject({
     status: 'open',
-    stayId: stay.id,
+    booking_id: stay.id,
     action: { type: 'open', label: 'Reply', path: `/dashboard/${slug}/messages/${stay.conversation_id}` },
     detail: questionText,
     reservation: {
-      groupHeadline: 'Ana’s group of 3', homeName: internalName, statusLabel: 'Checking in · 3:00 PM',
+      headline: 'Ana’s group of 3', name: internalName, status_label: 'Checking in · 3:00 PM',
       conversation: { label: 'Reply', description: questionText, to: `/dashboard/${slug}/messages/${stay.conversation_id}` },
     },
   })
@@ -259,20 +259,20 @@ test('a home keeps its operator name independent from its public title across CM
   await page.screenshot({ animations: 'disabled', path: testInfo.outputPath('web-today-reservation-task.png') })
   const taskPath = `/api/organizations/${organizationId}/tasks/${task.id}`
   const startsAt = new Date(Date.now() + 86_400_000).toISOString()
-  const scheduled = await request.patch(taskPath, { data: { expectedVersion: task.version, startsAt, dueAt: startsAt } })
+  const scheduled = await request.patch(taskPath, { data: { version: task.version, starts_at: startsAt, due_at: startsAt } })
   await expectStatus(scheduled, 200)
-  expect((await scheduled.json() as { task: TaskView }).task).toMatchObject({ id: task.id, version: task.version + 1, startsAt, dueAt: startsAt, action: task.action })
+  expect((await scheduled.json() as { task: TaskView }).task).toMatchObject({ id: task.id, version: task.version + 1, starts_at: startsAt, due_at: startsAt, action: task.action })
   const upcoming = await request.get(api('today?range=upcoming'))
   await expectStatus(upcoming, 200)
   const upcomingToday = await upcoming.json() as BusinessToday
   const upcomingTasks = upcomingToday.tasks.flatMap(section => section.tasks)
-  expect(upcomingTasks.filter(item => item.stayId === stay.id).map(item => item.kind).sort()).toEqual(['guest_reply', 'turnover'])
+  expect(upcomingTasks.filter(item => item.booking_id === stay.id).map(item => item.kind).sort()).toEqual(['guest_reply', 'turnover'])
   // Upcoming draws the stay once, as its reservation card; the reply under it is the question alone.
   const upcomingReply = upcomingTasks.find(item => item.id === task.id)!
   expect(upcomingReply).toMatchObject({ version: task.version + 1, action: task.action, detail: task.detail })
   expect(upcomingReply.reservation).toBeUndefined()
-  expect(upcomingToday.reservations.cards.filter(card => card.stayId === stay.id).map(card => [card.headline, card.resourceName])).toEqual([['Ana’s group of 3', internalName]])
-  expect(upcomingTasks.find(item => item.kind === 'turnover' && item.stayId === stay.id)).toMatchObject({
+  expect(upcomingToday.reservations.cards.filter(card => card.booking_id === stay.id).map(card => [card.headline, card.name])).toEqual([['Ana’s group of 3', internalName]])
+  expect(upcomingTasks.find(item => item.kind === 'turnover' && item.booking_id === stay.id)).toMatchObject({
     face: 'photo', action: { type: 'complete', label: 'Done' },
   })
   const remaining = await request.get(api('today?kind=guest_reply'))
@@ -281,7 +281,7 @@ test('a home keeps its operator name independent from its public title across CM
 
   await page.goto(`/dashboard/${slug}?range=upcoming`)
   await waitForNuxtHydration(page)
-  const turnoverCard = page.locator(`[data-task-id="${upcomingTasks.find(item => item.kind === 'turnover' && item.stayId === stay.id)!.id}"]`)
+  const turnoverCard = page.locator(`[data-task-id="${upcomingTasks.find(item => item.kind === 'turnover' && item.booking_id === stay.id)!.id}"]`)
   await expect(turnoverCard.locator('.tc-media')).toHaveCount(0)
   await expect(turnoverCard.getByText('Turnover', { exact: true })).toBeVisible()
   // The card opens its sheet, which holds Done for work a person completes.
@@ -327,7 +327,7 @@ test('a home keeps its operator name independent from its public title across CM
   expect(recordedArrival.error).toBeNull()
   const replyWithArrival = await request.get(taskPath)
   await expectStatus(replyWithArrival, 200)
-  expect((await replyWithArrival.json() as { task: TaskView }).task.reservation?.statusLabel).toBe('Checking in · 6:30 PM')
+  expect((await replyWithArrival.json() as { task: TaskView }).task.reservation?.status_label).toBe('Checking in · 6:30 PM')
 
   const unsetClocks = await request.patch(api(`stay-homes/${productId}`), { data: { check_in_time: null, check_out_time: null } })
   await expectStatus(unsetClocks, 200)
@@ -358,7 +358,7 @@ test('a home keeps its operator name independent from its public title across CM
   await expectStatus(pastQuestion, 200)
   const pastWork = await request.get(api('today'))
   await expectStatus(pastWork, 200)
-  expect((await pastWork.json() as BusinessToday).tasks.flatMap(section => section.tasks).find(item => item.kind === 'guest_reply' && item.requestId === pastStay.conversation_id)?.reservation)
+  expect((await pastWork.json() as BusinessToday).tasks.flatMap(section => section.tasks).find(item => item.kind === 'guest_reply' && item.conversation_id === pastStay.conversation_id)?.reservation)
     .toMatchObject({ homeName: internalName, groupHeadline: 'Bo', statusLabel: 'Stay ended' })
 })
 
@@ -424,9 +424,9 @@ test('a responsible home member reads its stays as turnovers on every surface un
     const memberCall = <T>(name: string, args: Record<string, unknown>) => tool<T>(memberContext.request, baseURL!, organizationId, name, args)
     expect(await memberCall('get_product_booking', { booking_id: stay.id })).toEqual({ data: { booking_id: stay.id, unit: 'nights', stay: turnover }, error: null })
     // The one booking list names the member's stay by its guest's first name.
-    const memberList = await memberCall('list_product_bookings', { product_id: productId })
-    expect(memberList.error).toBeNull()
-    expect((memberList.data as { bookings: Array<Record<string, unknown>> }).bookings).toEqual([expect.objectContaining({ booking_id: stay.id, unit: 'nights', guest: { name: guestName }, starts_at: stay.starts_at, ends_at: stay.ends_at })])
+    const memberBookings = await memberCall('list_product_bookings', { product_id: productId })
+    expect(memberBookings.error).toBeNull()
+    expect((memberBookings.data as { bookings: Array<Record<string, unknown>> }).bookings).toEqual([expect.objectContaining({ booking_id: stay.id, unit: 'nights', guest: { name: guestName }, starts_at: stay.starts_at, ends_at: stay.ends_at })])
     const memberCalendar = await memberCall<{ stays: unknown[] }>('get_stay_calendar', { product_id: productId, from: localDay(0), to: localDay(3) })
     expect(memberCalendar.data!.stays).toEqual([turnover])
     // The stay checks out in two days: its turnover is the member's Upcoming work, under that day, and Today holds nothing.
@@ -438,20 +438,20 @@ test('a responsible home member reads its stays as turnovers on every surface un
     const upcoming = await memberContext.request.get(api('today?range=upcoming'))
     await expectStatus(upcoming, 200)
     const upcomingBody = await upcoming.json() as BusinessToday
-    const turnoverDay = upcomingBody.tasks.find(section => section.tasks.some(task => task.stayId === stay.id))
+    const turnoverDay = upcomingBody.tasks.find(section => section.tasks.some(task => task.booking_id === stay.id))
     expect(turnoverDay?.id).toBe(localDay(2))
-    expect(turnoverDay!.tasks.filter(task => task.stayId === stay.id)).toEqual([expect.objectContaining({
-      kind: 'turnover', status: 'open', title: 'Cliff Cabin', productId, requestId: null, path: null,
+    expect(turnoverDay!.tasks.filter(task => task.booking_id === stay.id)).toEqual([expect.objectContaining({
+      kind: 'turnover', status: 'open', title: 'Cliff Cabin', product_id: productId, conversation_id: null, path: null,
       assignee: { type: 'member', id: memberId, name: 'You', initial: memberName.trim().charAt(0).toUpperCase(), you: true },
       can: { complete: true, skip: true, reopen: false, assign: false, edit: false },
     })])
     // The member reads the turnover as its card does: the guest by first name, never their contact, note or conversation.
     expect(leaks(upcomingBody)).toEqual([])
-    expect(turnoverDay!.tasks.find(task => task.stayId === stay.id)!.detail).toBe(`${guestName} out`)
+    expect(turnoverDay!.tasks.find(task => task.booking_id === stay.id)!.detail).toBe(`${guestName} out`)
     const memberAgenda = await memberContext.request.get(api(`agenda?from=${localDay(0)}&to=${localDay(3)}`))
     await expectStatus(memberAgenda, 200)
-    const memberAgendaBody = await memberAgenda.json() as { items: Array<{ id: string; stayId: string }> }
-    expect(memberAgendaBody.items.find(item => item.id === `stay:${stay.id}:arrival`)).toMatchObject({ stayId: stay.id })
+    const memberAgendaBody = await memberAgenda.json() as { items: Array<{ id: string; booking_id: string }> }
+    expect(memberAgendaBody.items.find(item => item.id === `stay:${stay.id}:arrival`)).toMatchObject({ booking_id: stay.id })
     expect(leaks(memberAgendaBody)).toEqual([])
     expect(leaks(todayBody)).toEqual([])
     // The guest's conversation, automatic messages, money and changes are the managers': the member's outbox holds only their own replies.
@@ -510,7 +510,7 @@ test('a responsible home member reads its stays as turnovers on every surface un
     const hosted = await memberContext.request.post(api('team/threads'), { data: { memberIds: ['user-e2e-lodging-host'], bookingId: stay.id } })
     await expectStatus(hosted, 200)
     expect((await hosted.json() as { id: string }).id).toBe(jobThreadId)
-    expect(await teamThread(jobThreadId)).toMatchObject({ name: 'Cliff Cabin', booking_id: stay.id, job: expect.objectContaining({ kind: 'turnover', status: 'open', title: 'Cliff Cabin', stayId: stay.id }) })
+    expect(await teamThread(jobThreadId)).toMatchObject({ name: 'Cliff Cabin', booking_id: stay.id, job: expect.objectContaining({ kind: 'turnover', status: 'open', title: 'Cliff Cabin', booking_id: stay.id }) })
     await expect.poll(async () => {
       const read = await memberContext.request.get(api(`team/threads/${jobThreadId}/messages`))
       await expectStatus(read, 200)
@@ -549,7 +549,7 @@ test('a responsible home member reads its stays as turnovers on every surface un
     // Unassigned, the home's turnover is no longer the member's work.
     const afterUpcoming = await memberContext.request.get(api('today?range=upcoming'))
     await expectStatus(afterUpcoming, 200)
-    expect((await afterUpcoming.json() as BusinessToday).tasks.flatMap(section => section.tasks).filter(task => task.stayId === stay.id)).toEqual([])
+    expect((await afterUpcoming.json() as BusinessToday).tasks.flatMap(section => section.tasks).filter(task => task.booking_id === stay.id)).toEqual([])
   } finally {
     try {
       const deleted = await page.request.post('/api/auth/organization/delete', { headers, data: { organizationId } })
@@ -4583,14 +4583,14 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await expectStatus(todayResponse, 200)
       const today = await todayResponse.json() as BusinessToday
       const arrivalPath = `/dashboard/${slug}/bookings/stay/${stays[0]!.id}`
-      expect(today).toMatchObject({ tasks: [], opportunities: [], opportunityIssues: [], assignees: [] })
+      expect(today).toMatchObject({ tasks: [], opportunities: [], opportunity_issues: [], assignees: [] })
       const upcomingResponse = await cleaner.request.get(api('today'), { params: { range: 'upcoming' } })
       await expectStatus(upcomingResponse, 200)
       const upcoming = await upcomingResponse.json() as BusinessToday
       expect(upcoming.tasks.map(section => section.id)).toEqual([localDay(2)])
       expect(upcoming.tasks[0]!.tasks).toEqual([expect.objectContaining({
-        kind: 'turnover', status: 'open', title: 'Assigned Cabin', detail: 'Ana out', stayId: stays[0]!.id, requestId: null, path: null,
-        productId: assignedHome.product_id, locationId: assignedHome.location_id, dueAt: null, outcome: null, action: { type: 'complete', label: 'Done' },
+        kind: 'turnover', status: 'open', title: 'Assigned Cabin', detail: 'Ana out', booking_id: stays[0]!.id, conversation_id: null, path: null,
+        product_id: assignedHome.product_id, location_id: assignedHome.location_id, due_at: null, outcome: null, action: { type: 'complete', label: 'Done' },
         assignee: { type: 'member', id: memberId, name: 'You', initial: expect.any(String), you: true },
         can: { complete: true, skip: true, reopen: false, assign: false, edit: false },
       })])
@@ -4599,22 +4599,22 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       for (const guest of ['Private', 'Silva']) expect(JSON.stringify(upcoming)).not.toContain(guest)
       const assignedAgendaResponse = await cleaner.request.get(api('agenda'), { params: { from: localDay(0), to: localDay(7) } })
       await expectStatus(assignedAgendaResponse, 200)
-      const assignedAgenda = await assignedAgendaResponse.json() as { items: Array<{ id: string; to: string; stayId: string; locationId: string; resourceTitle: string }> }
+      const assignedAgenda = await assignedAgendaResponse.json() as { items: Array<{ id: string; to: string; booking_id: string; location_id: string; name: string }> }
       expect(assignedAgenda.items).toEqual([
-        expect.objectContaining({ id: `stay:${stays[0]!.id}:arrival`, to: arrivalPath, stayId: stays[0]!.id, resourceTitle: 'Assigned Cabin', locationId: homes[0]!.location_id }),
-        expect.objectContaining({ id: `stay:${stays[0]!.id}:departure`, to: arrivalPath, stayId: stays[0]!.id, resourceTitle: 'Assigned Cabin', locationId: homes[0]!.location_id }),
+        expect.objectContaining({ id: `stay:${stays[0]!.id}:arrival`, to: arrivalPath, booking_id: stays[0]!.id, name: 'Assigned Cabin', location_id: homes[0]!.location_id }),
+        expect.objectContaining({ id: `stay:${stays[0]!.id}:departure`, to: arrivalPath, booking_id: stays[0]!.id, name: 'Assigned Cabin', location_id: homes[0]!.location_id }),
       ])
       const denied = await cleaner.request.get(api(`stays/${stays[1]!.id}`))
       expect(denied.status()).toBe(404)
-      const otherLocation = await cleaner.request.get(api('today'), { params: { range: 'upcoming', locationId: homes[1]!.location_id } })
+      const otherLocation = await cleaner.request.get(api('today'), { params: { range: 'upcoming', location_id: homes[1]!.location_id } })
       await expectStatus(otherLocation, 200)
       expect((await otherLocation.json() as BusinessToday).tasks).toEqual([])
       // The host takes the turnover back and gives it to the cleaner again. A cleaner's job is a team
       // conversation with the owners: the organization's jobs post it there as KrabiClaw's message once
       // they wake, that message is the cleaner's alert (push, email, WhatsApp), and it is unread until read.
-      const unassigned = await call<{ task: { version: number } }>('update_task', { task_id: turnover.id, expected_version: turnover.version, assigned_member_id: null })
+      const unassigned = await call<{ task: { version: number } }>('update_task', { task_id: turnover.id, version: turnover.version, assigned_member_id: null })
       expect(unassigned.error).toBeNull()
-      const reassigned = await call<{ task: { version: number } }>('update_task', { task_id: turnover.id, expected_version: unassigned.data!.task.version, assigned_member_id: memberId })
+      const reassigned = await call<{ task: { version: number } }>('update_task', { task_id: turnover.id, version: unassigned.data!.task.version, assigned_member_id: memberId })
       expect(reassigned.error).toBeNull()
       const cleanerTeamRows = async () => {
         const response = await cleaner.request.get(`/api/dashboard/organizations/${organizationId}/conversations?kind=team&org=${encodeURIComponent(slug)}`)
@@ -4648,8 +4648,8 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       const afterDone = await cleaner.request.get(api('today'))
       await expectStatus(afterDone, 200)
       expect((await afterDone.json() as BusinessToday).tasks).toEqual([{ id: 'done', title: 'Done', subtitle: null, tasks: [expect.objectContaining({
-        id: turnover.id, kind: 'turnover', status: 'done', stayId: stays[0]!.id, version: reassigned.data!.task.version + 1,
-        outcome: { note: 'Fresh linen on both beds', photos: [], closedAt: expect.any(String), closedBy: 'You' },
+        id: turnover.id, kind: 'turnover', status: 'done', booking_id: stays[0]!.id, version: reassigned.data!.task.version + 1,
+        outcome: { note: 'Fresh linen on both beds', photos: [], closed_at: expect.any(String), closed_by: 'You' },
         can: { complete: false, skip: false, reopen: true, assign: false, edit: false },
       })] }])
       const afterDoneUpcoming = await cleaner.request.get(api('today'), { params: { range: 'upcoming' } })

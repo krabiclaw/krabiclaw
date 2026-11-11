@@ -164,7 +164,7 @@ test('Today shows every booking type as a reservation card for its own business,
     // Upcoming bookings are not today's.
     for (const org of Object.keys(ORGS) as Org[]) assert.deepEqual((await today(org, 'today')).reservations, { title: null, cards: [] })
     // A booking's suggestion is on its card, not among Today's other opportunities.
-    assert.equal((await today('law', 'today')).opportunities.some(opportunity => opportunity.requestId !== null), false)
+    assert.equal((await today('law', 'today')).opportunities.some(opportunity => opportunity.conversation_id !== null), false)
 
     // The message is written from the offering's and the home's own fields.
     const consultationMessage = law.reservations.cards[0]!.suggestion!.message!
@@ -180,8 +180,8 @@ test('Today shows every booking type as a reservation card for its own business,
     const membership = await resolveOrganizationMembership(env, { organizationId: 'law', userId: OWNER })
     assert.ok(membership)
     const lawPrincipal = memberAccessPrincipal(membership, { env })
-    const listed = (await listOpportunities(db, lawPrincipal)).opportunities.filter(opportunity => opportunity.requestId !== null)
-    assert.deepEqual(listed.map(opportunity => [opportunity.id, opportunity.requestId, opportunity.message]), [[law.reservations.cards[0]!.suggestion!.id, evaConsultation, consultationMessage]])
+    const listed = (await listOpportunities(db, lawPrincipal)).opportunities.filter(opportunity => opportunity.conversation_id !== null)
+    assert.deepEqual(listed.map(opportunity => [opportunity.id, opportunity.conversation_id, opportunity.message]), [[law.reservations.cards[0]!.suggestion!.id, evaConsultation, consultationMessage]])
 
     // The host's message takes the suggestion off the card; the card stays.
     const replied = await executeGuestThreadOperation(db, { threadId: evaConsultation, organizationId: 'law', action: 'reply', body: consultationMessage,
@@ -192,7 +192,7 @@ test('Today shows every booking type as a reservation card for its own business,
       { kind: 'booking', requestId: evaConsultation, headline: 'Eva’s consultation', resourceName: 'Estate Planning Consultation', suggestion: null },
       { kind: 'booking', requestId: ianConsultation, headline: 'Ian’s consultation', resourceName: 'Initial Case Review', suggestion: null },
     ])
-    assert.equal((await listOpportunities(db, lawPrincipal)).opportunities.some(opportunity => opportunity.requestId === evaConsultation), false)
+    assert.equal((await listOpportunities(db, lawPrincipal)).opportunities.some(opportunity => opportunity.conversation_id === evaConsultation), false)
     // The sent message is the conversation's, read back from the ledger.
     assert.equal(await db.prepare("SELECT body FROM messages WHERE conversation_id = ? AND author_kind = 'member'").bind(evaConsultation).first('body'), consultationMessage)
   } finally {
