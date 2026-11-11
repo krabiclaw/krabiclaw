@@ -250,48 +250,48 @@ async function loadConversionReport(db: DbClient, organizationId: string, window
   ])
   const cohortRevenue = (row: Record<string, unknown>) => cohortRevenueRows
     .filter(revenue => revenue.source === row.source && revenue.medium === row.medium && revenue.campaign === row.campaign && revenue.content === row.content)
-    .map(revenue => ({ currency: String(revenue.currency), collectedMinor: n(revenue.collected), refundedMinor: n(revenue.refunded), netMinor: n(revenue.collected) - n(revenue.refunded) }))
+    .map(revenue => ({ currency: String(revenue.currency), collected_minor: n(revenue.collected), refunded_minor: n(revenue.refunded), net_minor: n(revenue.collected) - n(revenue.refunded) }))
   return {
-    dailyConversions: window.dates.map(date => ({ date, events: dailyRows.find(row => row.date === date)?.events ?? 0 })),
-    outcomeAttribution: outcomeRows.map(row => ({ source: String(row.source), medium: String(row.medium), campaign: text(row.campaign), content: text(row.content), eventName: String(row.event_name), events: n(row.events), distinctEntities: n(row.entities) })),
-    attributedValue: attributedRows.map(row => ({ source: text(row.source), medium: text(row.medium), campaign: text(row.campaign), content: text(row.content), currency: String(row.currency),
-      purchases: n(row.purchases), collectedMinor: n(row.collected), refundedMinor: n(row.refunded), netMinor: n(row.collected) - n(row.refunded) })),
+    daily_conversions: window.dates.map(date => ({ date, events: dailyRows.find(row => row.date === date)?.events ?? 0 })),
+    outcome_attribution: outcomeRows.map(row => ({ source: String(row.source), medium: String(row.medium), campaign: text(row.campaign), content: text(row.content), event_name: String(row.event_name), events: n(row.events), distinct_entities: n(row.entities) })),
+    attributed_value: attributedRows.map(row => ({ source: text(row.source), medium: text(row.medium), campaign: text(row.campaign), content: text(row.content), currency: String(row.currency),
+      purchases: n(row.purchases), collected_minor: n(row.collected), refunded_minor: n(row.refunded), net_minor: n(row.collected) - n(row.refunded) })),
     conversions: conversionRows.map(row => ({
-      eventName: String(row.event_name), stage: String(row.stage), conversionType: text(row.conversion_type),
-      events: n(row.events), distinctEntities: n(row.entities), convertingSessions: n(row.sessions), nonbrowserEvents: n(row.nonbrowser),
+      event_name: String(row.event_name), stage: String(row.stage), conversion_type: text(row.conversion_type),
+      events: n(row.events), distinct_entities: n(row.entities), converting_sessions: n(row.sessions), nonbrowser_events: n(row.nonbrowser),
       // Only a business outcome has a session conversion rate. A click or a view is an interaction.
-      sessionConversionRate: OUTCOME_EVENT_NAMES.has(String(row.event_name)) ? rate(n(row.sessions), uniqueSessions) : null,
+      session_conversion_rate: OUTCOME_EVENT_NAMES.has(String(row.event_name)) ? rate(n(row.sessions), uniqueSessions) : null,
     })),
     values: valueRows.map(row => ({
-      eventName: String(row.event_name), basis: row.basis as 'quoted' | 'purchase' | 'refund', currency: String(row.currency), events: n(row.events),
-      valueMinor: n(row.value_minor), collectedMinor: n(row.collected_events) > 0 ? n(row.collected_minor) : null,
+      event_name: String(row.event_name), basis: row.basis as 'quoted' | 'purchase' | 'refund', currency: String(row.currency), events: n(row.events),
+      value_minor: n(row.value_minor), collected_minor: n(row.collected_events) > 0 ? n(row.collected_minor) : null,
     })),
-    bookingValue: bookingValueRows.map(row => ({
-      productId: text(row.product_id), productName: text(row.product_name), locationId: text(row.location_id), currency: text(row.currency),
-      bookings: n(row.bookings), valuedBookings: n(row.valued), quotedValueMinor: n(row.quoted_minor),
+    booking_value: bookingValueRows.map(row => ({
+      product_id: text(row.product_id), product_name: text(row.product_name), location_id: text(row.location_id), currency: text(row.currency),
+      bookings: n(row.bookings), valued_bookings: n(row.valued), quoted_value_minor: n(row.quoted_minor),
     })),
     net: netByCurrency(valueRows),
-    signupCohort: {
-      observedThrough: observedEnd,
+    signup_cohort: {
+      observed_through: observedEnd,
       signups: cohortRows.reduce((sum, row) => sum + n(row.signups), 0),
-      onboardedSignups: cohortRows.reduce((sum, row) => sum + n(row.onboarded), 0),
-      firstPaidSignups: cohortRows.reduce((sum, row) => sum + n(row.first_paid), 0),
-      bySignupAttribution: cohortRows.map(row => ({
+      onboarded_signups: cohortRows.reduce((sum, row) => sum + n(row.onboarded), 0),
+      first_paid_signups: cohortRows.reduce((sum, row) => sum + n(row.first_paid), 0),
+      by_signup_attribution: cohortRows.map(row => ({
         source: text(row.source), medium: text(row.medium), campaign: text(row.campaign), content: text(row.content),
-        signups: n(row.signups), onboardedSignups: n(row.onboarded), firstPaidSignups: n(row.first_paid), revenue: cohortRevenue(row),
+        signups: n(row.signups), onboarded_signups: n(row.onboarded), first_paid_signups: n(row.first_paid), revenue: cohortRevenue(row),
       })),
-      onboardedBusinesses: n(businessStats?.onboarded),
-      firstPaidBusinesses: n(businessStats?.first_paid),
+      onboarded_businesses: n(businessStats?.onboarded),
+      first_paid_businesses: n(businessStats?.first_paid),
     },
     coverage: {
-      measurementContractStartedAt: text(coverageRows?.started_at),
-      outcomeEventsWithoutAttribution: n(coverageRows?.unattributed),
-      ga4Delivery: deliveryRows.map(row => ({ eventName: String(row.event_name), status: String(row.status), count: n(row.count) })),
+      measurement_contract_started_at: text(coverageRows?.started_at),
+      outcome_events_without_attribution: n(coverageRows?.unattributed),
+      ga4_delivery: deliveryRows.map(row => ({ event_name: String(row.event_name), status: String(row.status), count: n(row.count) })),
     },
   }
 }
 
-type FunnelCounts = Omit<AnalyticsReport['funnel'], 'bySource' | 'byLocation'>
+type FunnelCounts = Omit<AnalyticsReport['funnel'], 'by_source' | 'by_location'>
 const FUNNEL_EVENTS = ORGANIZATION_CONVERSION_EVENT_NAMES.flatMap((name) => {
   const step: FunnelStep | undefined = (CONVERSION_EVENT_CATALOG[name] as ConversionEventDefinition).funnel
   return step ? [{ name, step }] : []
@@ -327,16 +327,16 @@ async function loadFunnel(db: DbClient, organizationId: string, start: string, e
     queryAll<{ location_id: string | null; sessions: number }>(db, `SELECT location_id, COUNT(DISTINCT session_id) sessions FROM analytics_events
       WHERE organization_id = ? AND kind = 'pageview' AND created_at >= ? AND created_at < ? GROUP BY 1`, [organizationId, start, end]),
   ])
-  const empty = (): FunnelCounts => ({ visits: 0, viewed: 0, intent: 0, submitted: 0, confirmed: 0, paid: 0, paidCollected: [] })
+  const empty = (): FunnelCounts => ({ visits: 0, viewed: 0, intent: 0, submitted: 0, confirmed: 0, paid: 0, paid_collected: [] })
   const add = (counts: FunnelCounts, row: Record<string, unknown>) => {
     const step = row.step as FunnelStep
     if (step !== 'submitted') counts[step] += n(row.events)
     counts.submitted += n(row.submitted)
     counts.confirmed += n(row.confirmed)
     if (step === 'paid' && row.currency) {
-      const entry = counts.paidCollected.find(paid => paid.currency === row.currency)
-      if (entry) entry.collectedMinor += n(row.collected_minor)
-      else counts.paidCollected.push({ currency: row.currency as FunnelCounts['paidCollected'][number]['currency'], collectedMinor: n(row.collected_minor) })
+      const entry = counts.paid_collected.find(paid => paid.currency === row.currency)
+      if (entry) entry.collected_minor += n(row.collected_minor)
+      else counts.paid_collected.push({ currency: row.currency as FunnelCounts['paid_collected'][number]['currency'], collected_minor: n(row.collected_minor) })
     }
   }
   const total = { ...empty(), visits: visits.total }
@@ -354,21 +354,21 @@ async function loadFunnel(db: DbClient, organizationId: string, start: string, e
   }
   return {
     ...total,
-    bySource: ATTRIBUTION_CHANNELS.filter(channel => bySource.has(channel)).map(channel => ({ channel, ...bySource.get(channel)! })),
-    byLocation: Array.from(byLocation, ([locationId, counts]) => ({ locationId, ...counts })).sort((a, b) => b.visits - a.visits),
+    by_source: ATTRIBUTION_CHANNELS.filter(channel => bySource.has(channel)).map(channel => ({ channel, ...bySource.get(channel)! })),
+    by_location: Array.from(byLocation, ([locationId, counts]) => ({ location_id: locationId, ...counts })).sort((a, b) => b.visits - a.visits),
   }
 }
 function netByCurrency(valueRows: Array<Record<string, unknown>>) {
-  const byCurrency = new Map<string, { collectedMinor: number; refundedMinor: number }>()
+  const byCurrency = new Map<string, { collected_minor: number; refunded_minor: number }>()
   for (const row of valueRows) {
     if (row.basis !== 'purchase' && row.basis !== 'refund') continue
-    const entry = byCurrency.get(String(row.currency)) ?? { collectedMinor: 0, refundedMinor: 0 }
+    const entry = byCurrency.get(String(row.currency)) ?? { collected_minor: 0, refunded_minor: 0 }
     // Cash both ways, tax included: the tax-exclusive value of a refund is not what was returned.
-    if (row.basis === 'purchase') entry.collectedMinor += n(row.collected_minor)
-    else entry.refundedMinor += n(row.collected_minor)
+    if (row.basis === 'purchase') entry.collected_minor += n(row.collected_minor)
+    else entry.refunded_minor += n(row.collected_minor)
     byCurrency.set(String(row.currency), entry)
   }
-  return Array.from(byCurrency, ([currency, entry]) => ({ currency, ...entry, netMinor: entry.collectedMinor - entry.refundedMinor }))
+  return Array.from(byCurrency, ([currency, entry]) => ({ currency, ...entry, net_minor: entry.collected_minor - entry.refunded_minor }))
 }
 
 export async function getAnalyticsReport(db: DbClient, input: {
@@ -448,11 +448,11 @@ export async function getAnalyticsReport(db: DbClient, input: {
   }).sort((a, b) => b.views - a.views)
 
   let adSpend: {
-    totalSpendMicros: number
+    total_spend_micros: number
     clicks: number
     impressions: number
     conversions: number
-    costPerClickMicros: number
+    cost_per_click_micros: number
     error?: string | null
   } | undefined = undefined
 
@@ -469,54 +469,54 @@ export async function getAnalyticsReport(db: DbClient, input: {
           range.endDate,
         )
         adSpend = {
-          totalSpendMicros: summary.costMicros,
+          total_spend_micros: summary.costMicros,
           clicks: summary.clicks,
           impressions: summary.impressions,
           conversions: summary.conversions,
-          costPerClickMicros: summary.averageCpcMicros,
+          cost_per_click_micros: summary.averageCpcMicros,
           error: null,
         }
       }
     } catch (error) {
       adSpend = {
-        totalSpendMicros: 0,
+        total_spend_micros: 0,
         clicks: 0,
         impressions: 0,
         conversions: 0,
-        costPerClickMicros: 0,
+        cost_per_click_micros: 0,
         error: error instanceof Error ? error.message : String(error),
       }
     }
   }
 
   return analyticsReportSchema.parse({
-    period: { startDate: range.startDate, endDate: range.endDate, timezone: context.timezone, analyticsDataStartAt: context.analyticsDataStartAt, nativeCoverage },
+    period: { start_date: range.startDate, end_date: range.endDate, timezone: context.timezone, analytics_data_start_at: context.analyticsDataStartAt, native_coverage: nativeCoverage },
     metrics: {
-      pageViews,
-      uniqueSessions,
-      uniqueVisitors: n(sessionStats?.visitors),
-      returningVisitors: n(returningStats?.count),
-      avgSessionDuration: n(sessionStats?.avg_duration),
-      pagesPerSession: uniqueSessions ? Math.round(pageViews / uniqueSessions * 100) / 100 : 0,
-      changePercent,
+      page_views: pageViews,
+      unique_sessions: uniqueSessions,
+      unique_visitors: n(sessionStats?.visitors),
+      returning_visitors: n(returningStats?.count),
+      avg_session_duration: n(sessionStats?.avg_duration),
+      pages_per_session: uniqueSessions ? Math.round(pageViews / uniqueSessions * 100) / 100 : 0,
+      change_percent: changePercent,
     },
-    dailyData: slices.map(slice => ({ date: slice.date, pageViews: slice.pageViews, sessions: slice.sessions, avgDuration: slice.avgDuration })),
-    topPages: Array.from(pageMap, ([path, views]) => ({ path, views, percentOfTotal: percent(views) })).sort((a, b) => b.views - a.views).slice(0, 10),
+    daily_data: slices.map(slice => ({ date: slice.date, page_views: slice.pageViews, sessions: slice.sessions, avg_duration: slice.avgDuration })),
+    top_pages: Array.from(pageMap, ([path, views]) => ({ path, views, percent_of_total: percent(views) })).sort((a, b) => b.views - a.views).slice(0, 10),
     attribution: attributionRows.map(row => {
       const sessions = n(row.sessions)
       return { source: String(row.source), medium: String(row.medium), campaign: row.campaign ? String(row.campaign) : null, content: row.content ? String(row.content) : null,
-        sessions, outcomeEvents: n(row.outcome_events), convertingSessions: n(row.converting), sessionConversionRate: rate(n(row.converting), sessions) }
+        sessions, outcome_events: n(row.outcome_events), converting_sessions: n(row.converting), session_conversion_rate: rate(n(row.converting), sessions) }
     }).sort((a, b) => b.sessions - a.sessions),
     ...conversionReport,
     funnel,
-    countries: dimensionRows('country').slice(0, 12).map(row => ({ country: row.value, countryCode: row.value, views: row.views, percentOfTotal: percent(row.views) })),
+    countries: dimensionRows('country').slice(0, 12).map(row => ({ country: row.value, country_code: row.value, views: row.views, percent_of_total: percent(row.views) })),
     cities: dimensionRows('city').slice(0, 10).map(row => {
       const [region, countryCode = 'XX'] = row.subvalue.split('|')
-      return { city: row.value, region: region || null, countryCode, views: row.views }
+      return { city: row.value, region: region || null, country_code: countryCode, views: row.views }
     }),
-    referrers: dimensionRows('referrer').slice(0, 10).map(row => ({ source: row.value, views: row.views, percentOfTotal: percent(row.views) })),
-    devices: dimensionRows('device').map(row => ({ type: row.value, views: row.views, percentOfTotal: percent(row.views) })),
-    ...(adSpend ? { adSpend } : {}),
+    referrers: dimensionRows('referrer').slice(0, 10).map(row => ({ source: row.value, views: row.views, percent_of_total: percent(row.views) })),
+    devices: dimensionRows('device').map(row => ({ type: row.value, views: row.views, percent_of_total: percent(row.views) })),
+    ...(adSpend ? { ad_spend: adSpend } : {}),
   })
 }
 

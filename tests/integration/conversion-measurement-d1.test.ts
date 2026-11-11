@@ -112,30 +112,30 @@ test('conversion measurement: contract, values, idempotency, report and cohort o
     const period = { startDate: '2026-09-10', endDate: '2026-09-12', now: new Date('2026-09-13T00:00:00Z') }
     const platform = await getAnalyticsReport(db, { organizationId: 'org-platform', ...period })
     // One session, one signup: the session converted once; the purchase and onboarding have no session.
-    const signupRow = platform.conversions.find(row => row.eventName === 'sign_up')
-    assert.deepEqual([signupRow?.events, signupRow?.distinctEntities, signupRow?.convertingSessions, signupRow?.sessionConversionRate], [1, 1, 1, 100])
-    assert.equal(platform.conversions.find(row => row.eventName === 'onboarding_complete')?.nonbrowserEvents, 1)
+    const signupRow = platform.conversions.find(row => row.event_name === 'sign_up')
+    assert.deepEqual([signupRow?.events, signupRow?.distinct_entities, signupRow?.converting_sessions, signupRow?.session_conversion_rate], [1, 1, 1, 100])
+    assert.equal(platform.conversions.find(row => row.event_name === 'onboarding_complete')?.nonbrowser_events, 1)
     // Revenue is attributed to the campaign and creative the checkout observed, without a browser session.
-    assert.deepEqual(platform.attributedValue.map(row => [row.campaign, row.content, row.currency, row.purchases, row.collectedMinor, row.refundedMinor, row.netMinor]), [['launch', 'video-a', 'USD', 1, 5243, 1500, 3743]])
+    assert.deepEqual(platform.attributed_value.map(row => [row.campaign, row.content, row.currency, row.purchases, row.collected_minor, row.refunded_minor, row.net_minor]), [['launch', 'video-a', 'USD', 1, 5243, 1500, 3743]])
     assert.equal(await db.prepare("SELECT count(*) FROM analytics_events WHERE json_extract(payload_json, '$.event_name') = 'purchase' AND session_id IS NULL").first('count(*)'), 1)
-    assert.equal(platform.conversions.find(row => row.eventName === 'purchase')?.sessionConversionRate, 0)
-    assert.deepEqual(platform.attribution.map(row => [row.campaign, row.content, row.sessions, row.outcomeEvents, row.convertingSessions, row.sessionConversionRate]), [['launch', 'video-a', 1, 1, 1, 100]])
-    assert.deepEqual(platform.values.find(row => row.eventName === 'purchase'), { eventName: 'purchase', basis: 'purchase', currency: 'USD', events: 1, valueMinor: 4900, collectedMinor: 5243 })
-    assert.deepEqual(platform.net, [{ currency: 'USD', collectedMinor: 5243, refundedMinor: 1500, netMinor: 3743 }])
-    assert.deepEqual(platform.signupCohort.bySignupAttribution[0]?.revenue, [{ currency: 'USD', collectedMinor: 5243, refundedMinor: 1500, netMinor: 3743 }])
+    assert.equal(platform.conversions.find(row => row.event_name === 'purchase')?.session_conversion_rate, 0)
+    assert.deepEqual(platform.attribution.map(row => [row.campaign, row.content, row.sessions, row.outcome_events, row.converting_sessions, row.session_conversion_rate]), [['launch', 'video-a', 1, 1, 1, 100]])
+    assert.deepEqual(platform.values.find(row => row.event_name === 'purchase'), { event_name: 'purchase', basis: 'purchase', currency: 'USD', events: 1, value_minor: 4900, collected_minor: 5243 })
+    assert.deepEqual(platform.net, [{ currency: 'USD', collected_minor: 5243, refunded_minor: 1500, net_minor: 3743 }])
+    assert.deepEqual(platform.signup_cohort.by_signup_attribution[0]?.revenue, [{ currency: 'USD', collected_minor: 5243, refunded_minor: 1500, net_minor: 3743 }])
     // The signup cohort links signup -> owned organization -> onboarding and first payment, counted per signup.
-    assert.deepEqual([platform.signupCohort.signups, platform.signupCohort.onboardedSignups, platform.signupCohort.firstPaidSignups], [1, 1, 1])
-    assert.equal(platform.signupCohort.bySignupAttribution[0]?.campaign, 'launch')
-    assert.deepEqual([platform.signupCohort.onboardedBusinesses, platform.signupCohort.firstPaidBusinesses], [1, 1])
+    assert.deepEqual([platform.signup_cohort.signups, platform.signup_cohort.onboarded_signups, platform.signup_cohort.first_paid_signups], [1, 1, 1])
+    assert.equal(platform.signup_cohort.by_signup_attribution[0]?.campaign, 'launch')
+    assert.deepEqual([platform.signup_cohort.onboarded_businesses, platform.signup_cohort.first_paid_businesses], [1, 1])
     // Only the nonbrowser onboarding carried no observed attribution.
-    assert.equal(platform.coverage.outcomeEventsWithoutAttribution, 1)
-    assert.equal(platform.coverage.measurementContractStartedAt, '2026-09-10T04:00:00.000Z')
-    assert.deepEqual(platform.coverage.ga4Delivery.map(row => [row.eventName, row.status]).sort(), [['onboarding_complete', 'unrecorded'], ['purchase', 'unrecorded'], ['refund', 'unrecorded'], ['sign_up', 'unrecorded']])
+    assert.equal(platform.coverage.outcome_events_without_attribution, 1)
+    assert.equal(platform.coverage.measurement_contract_started_at, '2026-09-10T04:00:00.000Z')
+    assert.deepEqual(platform.coverage.ga4_delivery.map(row => [row.event_name, row.status]).sort(), [['onboarding_complete', 'unrecorded'], ['purchase', 'unrecorded'], ['refund', 'unrecorded'], ['sign_up', 'unrecorded']])
 
     const customer = await getAnalyticsReport(db, { organizationId: 'org-customer', ...period })
-    assert.deepEqual(customer.bookingValue.map(row => [row.productName, row.currency, row.bookings, row.valuedBookings, row.quotedValueMinor]).sort(), [['Pottery', 'THB', 1, 1, 240000], [null, null, 1, 0, 0]].sort())
+    assert.deepEqual(customer.booking_value.map(row => [row.product_name, row.currency, row.bookings, row.valued_bookings, row.quoted_value_minor]).sort(), [['Pottery', 'THB', 1, 1, 240000], [null, null, 1, 0, 0]].sort())
     assert.deepEqual(customer.net, [])
-    assert.equal(customer.signupCohort.signups, 0)
+    assert.equal(customer.signup_cohort.signups, 0)
     // KrabiClaw's subscription revenue never appears as the subscribing customer's revenue.
     assert.equal(customer.values.some(row => row.basis !== 'quoted'), false)
 
@@ -148,9 +148,9 @@ test('conversion measurement: contract, values, idempotency, report and cohort o
         value: { ...purchase.value, transaction_id: `cohort-invoice-${index}`, amount_minor: (index + 1) * 100, collected_minor: (index + 1) * 100 },
         metadata: { purchase_type: 'initial_subscription', originating_user_id: userId } })
     }
-    const cohorts = (await getAnalyticsReport(db, { organizationId: 'org-platform', ...period })).signupCohort.bySignupAttribution
+    const cohorts = (await getAnalyticsReport(db, { organizationId: 'org-platform', ...period })).signup_cohort.by_signup_attribution
       .filter(row => row.source === 'cohort-proof')
-    assert.deepEqual(cohorts.map(row => row.revenue.map(value => value.netMinor)).sort(), [[100], [200]])
+    assert.deepEqual(cohorts.map(row => row.revenue.map(value => value.net_minor)).sort(), [[100], [200]])
 
     // Progress reads these same canonical results, rather than copying an
     // analytics report or treating the assigned member as the acting user.
@@ -273,11 +273,11 @@ test('the funnel joins a business site from visit to payment, by source and by l
 
     const today = localDateAt(new Date(), 'Asia/Bangkok')
     const { funnel } = await getAnalyticsReport(db, { organizationId: 'org-funnel', startDate: addLocalDays(today, -1), endDate: addLocalDays(today, 1), now: new Date(Date.now() + 3 * 86_400_000) })
-    const steps = (counts: Omit<typeof funnel, 'bySource' | 'byLocation'>) => [counts.visits, counts.viewed, counts.intent, counts.submitted, counts.confirmed, counts.paid]
+    const steps = (counts: Omit<typeof funnel, 'by_source' | 'by_location'>) => [counts.visits, counts.viewed, counts.intent, counts.submitted, counts.confirmed, counts.paid]
     assert.deepEqual(steps(funnel), [2, 2, 1, 3, 2, 2])
-    assert.deepEqual(funnel.paidCollected, [{ currency: 'THB', collectedMinor: 214000 }])
-    assert.deepEqual(funnel.bySource.map(row => [row.channel, ...steps(row)]), [['Google Ads', 1, 1, 1, 2, 2, 2], ['Direct', 1, 1, 0, 1, 0, 0]])
-    assert.deepEqual(funnel.byLocation.map(row => [row.locationId, ...steps(row)]).sort(), [['loc-beach', 1, 1, 1, 2, 2, 2], ['loc-town', 1, 1, 0, 1, 0, 0]])
+    assert.deepEqual(funnel.paid_collected, [{ currency: 'THB', collected_minor: 214000 }])
+    assert.deepEqual(funnel.by_source.map(row => [row.channel, ...steps(row)]), [['Google Ads', 1, 1, 1, 2, 2, 2], ['Direct', 1, 1, 0, 1, 0, 0]])
+    assert.deepEqual(funnel.by_location.map(row => [row.location_id, ...steps(row)]).sort(), [['loc-beach', 1, 1, 1, 2, 2, 2], ['loc-town', 1, 1, 0, 1, 0, 0]])
   } finally { await runtime.dispose() }
 })
 
@@ -304,10 +304,10 @@ test('attribution rates share one population; cohorts follow the acquiring owner
     }
     const period = { organizationId: 'org-platform', startDate: '2026-09-10', endDate: '2026-09-10', now: new Date('2026-09-11T00:00:00Z') }
     const report = await getAnalyticsReport(db, period)
-    for (const row of report.attribution) assert.ok((row.sessionConversionRate ?? 0) <= 100, `${row.campaign} rate ${row.sessionConversionRate}`)
-    assert.deepEqual(report.attribution.map(row => [row.campaign, row.sessions, row.convertingSessions]).sort(), [['A', 1, 0], ['B', 2, 2]])
+    for (const row of report.attribution) assert.ok((row.session_conversion_rate ?? 0) <= 100, `${row.campaign} rate ${row.session_conversion_rate}`)
+    assert.deepEqual(report.attribution.map(row => [row.campaign, row.sessions, row.converting_sessions]).sort(), [['A', 1, 0], ['B', 2, 2]])
     // The events keep the touch they had when they happened, in their own grouping.
-    assert.deepEqual(report.outcomeAttribution.map(row => [row.campaign, row.events]), [['A', 2]])
+    assert.deepEqual(report.outcome_attribution.map(row => [row.campaign, row.events]), [['A', 2]])
 
     // A paying business already owned by someone else; a newcomer is added as a later owner and is not its acquirer.
     const founderSignup = await recordAt(db, null, { organizationId: 'org-platform', eventName: 'sign_up', stage: 'completed', surface: 'auth', entityType: 'user', entityId: 'founder', occurredAt: '2026-09-10T05:00:00.000Z' })
@@ -324,10 +324,10 @@ test('attribution rates share one population; cohorts follow the acquiring owner
     await recordAt(db, null, { organizationId: 'org-platform', eventName: 'purchase', stage: 'completed', surface: 'stripe', entityType: 'invoice', entityId: 'in_new', occurredAt: '2026-09-10T08:00:00.000Z',
       value: { basis: 'purchase', amount_minor: 4900, collected_minor: 4900, currency: 'USD', transaction_id: 'in_new' },
       metadata: { purchase_type: 'initial_subscription', subscribing_organization_id: 'org-new', originating_user_id: 'founder' } })
-    const cohort = (await getAnalyticsReport(db, period)).signupCohort
+    const cohort = (await getAnalyticsReport(db, period)).signup_cohort
     // Four signups; only the founder's led to a business that onboarded and paid after them. The paying business predates the newcomer.
-    assert.deepEqual([cohort.signups, cohort.onboardedSignups, cohort.firstPaidSignups], [4, 1, 1])
-    assert.deepEqual([cohort.onboardedBusinesses, cohort.firstPaidBusinesses], [1, 2])
+    assert.deepEqual([cohort.signups, cohort.onboarded_signups, cohort.first_paid_signups], [4, 1, 1])
+    assert.deepEqual([cohort.onboarded_businesses, cohort.first_paid_businesses], [1, 2])
   } finally { await runtime.dispose() }
 })
 
@@ -635,7 +635,10 @@ test('a completed onboarding emails each operator once, with a link to that cust
     assert.deepEqual(completion.operator_email, { status: 'sent' })
     assert.deepEqual(completion.owner_welcome_email, { status: 'sent' })
     assert.equal(sent.length, 2, 'a completed onboarding sends one operator notification and one owner welcome email')
-    const [operatorMail, ownerMail] = sent
+    const operatorMail = sent.find(mail => mail.body.to.includes('ops@krabiclaw.com'))
+    const ownerMail = sent.find(mail => mail.body.to.includes('mina@clay-corner.com'))
+    assert.ok(operatorMail)
+    assert.ok(ownerMail)
     assert.deepEqual(operatorMail!.body.to, ['ops@krabiclaw.com'])
     assert.equal(operatorMail!.body.subject, 'Clay Corner is live on KrabiClaw')
     assert.equal(operatorMail!.idempotencyKey, `onboarding-complete:org-customer:${hashEmail('ops@krabiclaw.com')}`)

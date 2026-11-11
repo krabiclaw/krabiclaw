@@ -586,9 +586,9 @@ test('Insights reads a linked report period and preserves preset changes in its 
   await expect(reportPeriod.nth(0)).toHaveAttribute('datetime', range.startDate)
   await expect(reportPeriod.nth(1)).toHaveAttribute('datetime', range.endDate)
   const linkedUrl = new URL(page.url())
-  const first = await page.request.get('/api/dashboard/analytics', { params: { org: orgSlug, startDate: linkedUrl.searchParams.get('startDate')!, endDate: linkedUrl.searchParams.get('endDate')! } })
+  const first = await page.request.get('/api/dashboard/analytics', { params: { org: orgSlug, start_date: linkedUrl.searchParams.get('startDate')!, end_date: linkedUrl.searchParams.get('endDate')! } })
   expect(first.status(), await first.text()).toBe(200)
-  expect((await first.json() as { report: { period: typeof range } }).report.period).toMatchObject(range)
+  expect((await first.json()).report.period).toMatchObject({ start_date: range.startDate, end_date: range.endDate })
   await expect(page.getByText('Traffic trend', { exact: true })).toBeVisible()
   const datePill = page.getByTestId('insights-date-range-pill')
   await expect(datePill).toBeVisible()
@@ -605,7 +605,7 @@ test('Insights reads a linked report period and preserves preset changes in its 
   await page.getByRole('button', { name: 'Apply', exact: true }).click()
   const preset = await rangeReport
   expect(preset.status(), await preset.text()).toBe(200)
-  const period = (await preset.json() as { report: { period: typeof range } }).report.period
-  expect(period.startDate).toBe(updatedRange.startDate)
-  await expect(page).toHaveURL(insightsPath(orgSlug, { startDate: period.startDate, endDate: period.endDate }))
+  const period = (await preset.json() as { report: { period: { start_date: string; end_date: string } } }).report.period
+  expect(period.start_date).toBe(updatedRange.startDate)
+  await expect(page).toHaveURL(insightsPath(orgSlug, { startDate: period.start_date, endDate: period.end_date }))
 })

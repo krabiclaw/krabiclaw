@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:d83406b5520c776e76f98823aa99f67e8fcbf9071e90862aac17c1255c584c7f",
-  "documentationFingerprint": "sha256:d1c611c1165dfb0bc5626c62952a946afd71b6e45919714d3ed45469c2b09d29",
+  "fingerprint": "sha256:22ad080ffeaf3df11df60a40b29e45d4ca83614938929e44cacb4e8aac6de94d",
+  "documentationFingerprint": "sha256:5029e1f885c69d4cb366c3c6c7e492c460066a44b89709abe4af3bc3880f43e1",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -50556,7 +50556,7 @@
         "additionalProperties": false,
         "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
         "properties": {
-          "adSpend": {
+          "ad_spend": {
             "additionalProperties": false,
             "properties": {
               "clicks": {
@@ -50569,7 +50569,7 @@
                 "minimum": 0,
                 "type": "integer"
               },
-              "costPerClickMicros": {
+              "cost_per_click_micros": {
                 "maximum": 9007199254740991,
                 "minimum": 0,
                 "type": "integer"
@@ -50585,22 +50585,22 @@
                 "minimum": 0,
                 "type": "integer"
               },
-              "totalSpendMicros": {
+              "total_spend_micros": {
                 "maximum": 9007199254740991,
                 "minimum": 0,
                 "type": "integer"
               }
             },
             "required": [
-              "totalSpendMicros",
+              "total_spend_micros",
               "clicks",
               "impressions",
               "conversions",
-              "costPerClickMicros"
+              "cost_per_click_micros"
             ],
             "type": "object"
           },
-          "attributedValue": {
+          "attributed_value": {
             "items": {
               "additionalProperties": false,
               "properties": {
@@ -50610,7 +50610,7 @@
                     "null"
                   ]
                 },
-                "collectedMinor": {
+                "collected_minor": {
                   "type": "number"
                 },
                 "content": {
@@ -50628,7 +50628,7 @@
                     "null"
                   ]
                 },
-                "netMinor": {
+                "net_minor": {
                   "type": "number"
                 },
                 "purchases": {
@@ -50636,7 +50636,7 @@
                   "minimum": 0,
                   "type": "integer"
                 },
-                "refundedMinor": {
+                "refunded_minor": {
                   "type": "number"
                 },
                 "source": {
@@ -50652,9 +50652,9 @@
                 "campaign",
                 "content",
                 "currency",
-                "collectedMinor",
-                "refundedMinor",
-                "netMinor",
+                "collected_minor",
+                "refunded_minor",
+                "net_minor",
                 "purchases"
               ],
               "type": "object"
@@ -50677,7 +50677,7 @@
                     "null"
                   ]
                 },
-                "convertingSessions": {
+                "converting_sessions": {
                   "maximum": 9007199254740991,
                   "minimum": 0,
                   "type": "integer"
@@ -50685,12 +50685,12 @@
                 "medium": {
                   "type": "string"
                 },
-                "outcomeEvents": {
+                "outcome_events": {
                   "maximum": 9007199254740991,
                   "minimum": 0,
                   "type": "integer"
                 },
-                "sessionConversionRate": {
+                "session_conversion_rate": {
                   "type": [
                     "number",
                     "null"
@@ -50711,15 +50711,15 @@
                 "campaign",
                 "content",
                 "sessions",
-                "outcomeEvents",
-                "convertingSessions",
-                "sessionConversionRate"
+                "outcome_events",
+                "converting_sessions",
+                "session_conversion_rate"
               ],
               "type": "object"
             },
             "type": "array"
           },
-          "bookingValue": {
+          "booking_value": {
             "items": {
               "additionalProperties": false,
               "properties": {
@@ -50734,41 +50734,41 @@
                     "null"
                   ]
                 },
-                "locationId": {
+                "location_id": {
                   "type": [
                     "string",
                     "null"
                   ]
                 },
-                "productId": {
+                "product_id": {
                   "type": [
                     "string",
                     "null"
                   ]
                 },
-                "productName": {
+                "product_name": {
                   "type": [
                     "string",
                     "null"
                   ]
                 },
-                "quotedValueMinor": {
+                "quoted_value_minor": {
                   "type": "number"
                 },
-                "valuedBookings": {
+                "valued_bookings": {
                   "maximum": 9007199254740991,
                   "minimum": 0,
                   "type": "integer"
                 }
               },
               "required": [
-                "productId",
-                "productName",
-                "locationId",
+                "product_id",
+                "product_name",
+                "location_id",
                 "currency",
                 "bookings",
-                "valuedBookings",
-                "quotedValueMinor"
+                "valued_bookings",
+                "quoted_value_minor"
               ],
               "type": "object"
             },
@@ -50781,7 +50781,7 @@
                 "city": {
                   "type": "string"
                 },
-                "countryCode": {
+                "country_code": {
                   "type": "string"
                 },
                 "region": {
@@ -50799,7 +50799,7 @@
               "required": [
                 "city",
                 "region",
-                "countryCode",
+                "country_code",
                 "views"
               ],
               "type": "object"
@@ -50810,23 +50810,23 @@
             "items": {
               "additionalProperties": false,
               "properties": {
-                "conversionType": {
+                "conversion_type": {
                   "type": [
                     "string",
                     "null"
                   ]
                 },
-                "convertingSessions": {
+                "converting_sessions": {
                   "maximum": 9007199254740991,
                   "minimum": 0,
                   "type": "integer"
                 },
-                "distinctEntities": {
+                "distinct_entities": {
                   "maximum": 9007199254740991,
                   "minimum": 0,
                   "type": "integer"
                 },
-                "eventName": {
+                "event_name": {
                   "type": "string"
                 },
                 "events": {
@@ -50834,12 +50834,12 @@
                   "minimum": 0,
                   "type": "integer"
                 },
-                "nonbrowserEvents": {
+                "nonbrowser_events": {
                   "maximum": 9007199254740991,
                   "minimum": 0,
                   "type": "integer"
                 },
-                "sessionConversionRate": {
+                "session_conversion_rate": {
                   "type": [
                     "number",
                     "null"
@@ -50850,14 +50850,14 @@
                 }
               },
               "required": [
-                "eventName",
+                "event_name",
                 "stage",
-                "conversionType",
+                "conversion_type",
                 "events",
-                "distinctEntities",
-                "convertingSessions",
-                "nonbrowserEvents",
-                "sessionConversionRate"
+                "distinct_entities",
+                "converting_sessions",
+                "nonbrowser_events",
+                "session_conversion_rate"
               ],
               "type": "object"
             },
@@ -50870,10 +50870,10 @@
                 "country": {
                   "type": "string"
                 },
-                "countryCode": {
+                "country_code": {
                   "type": "string"
                 },
-                "percentOfTotal": {
+                "percent_of_total": {
                   "type": "number"
                 },
                 "views": {
@@ -50884,9 +50884,9 @@
               },
               "required": [
                 "country",
-                "countryCode",
+                "country_code",
                 "views",
-                "percentOfTotal"
+                "percent_of_total"
               ],
               "type": "object"
             },
@@ -50895,7 +50895,7 @@
           "coverage": {
             "additionalProperties": false,
             "properties": {
-              "ga4Delivery": {
+              "ga4_delivery": {
                 "items": {
                   "additionalProperties": false,
                   "properties": {
@@ -50904,7 +50904,7 @@
                       "minimum": 0,
                       "type": "integer"
                     },
-                    "eventName": {
+                    "event_name": {
                       "type": "string"
                     },
                     "status": {
@@ -50912,7 +50912,7 @@
                     }
                   },
                   "required": [
-                    "eventName",
+                    "event_name",
                     "status",
                     "count"
                   ],
@@ -50920,26 +50920,26 @@
                 },
                 "type": "array"
               },
-              "measurementContractStartedAt": {
+              "measurement_contract_started_at": {
                 "type": [
                   "string",
                   "null"
                 ]
               },
-              "outcomeEventsWithoutAttribution": {
+              "outcome_events_without_attribution": {
                 "maximum": 9007199254740991,
                 "minimum": 0,
                 "type": "integer"
               }
             },
             "required": [
-              "measurementContractStartedAt",
-              "outcomeEventsWithoutAttribution",
-              "ga4Delivery"
+              "measurement_contract_started_at",
+              "outcome_events_without_attribution",
+              "ga4_delivery"
             ],
             "type": "object"
           },
-          "dailyConversions": {
+          "daily_conversions": {
             "items": {
               "additionalProperties": false,
               "properties": {
@@ -50960,18 +50960,18 @@
             },
             "type": "array"
           },
-          "dailyData": {
+          "daily_data": {
             "items": {
               "additionalProperties": false,
               "properties": {
-                "avgDuration": {
+                "avg_duration": {
                   "minimum": 0,
                   "type": "number"
                 },
                 "date": {
                   "type": "string"
                 },
-                "pageViews": {
+                "page_views": {
                   "maximum": 9007199254740991,
                   "minimum": 0,
                   "type": "integer"
@@ -50984,9 +50984,9 @@
               },
               "required": [
                 "date",
-                "pageViews",
+                "page_views",
                 "sessions",
-                "avgDuration"
+                "avg_duration"
               ],
               "type": "object"
             },
@@ -50996,7 +50996,7 @@
             "items": {
               "additionalProperties": false,
               "properties": {
-                "percentOfTotal": {
+                "percent_of_total": {
                   "type": "number"
                 },
                 "type": {
@@ -51011,7 +51011,7 @@
               "required": [
                 "type",
                 "views",
-                "percentOfTotal"
+                "percent_of_total"
               ],
               "type": "object"
             },
@@ -51020,7 +51020,7 @@
           "funnel": {
             "additionalProperties": false,
             "properties": {
-              "byLocation": {
+              "by_location": {
                 "items": {
                   "additionalProperties": false,
                   "properties": {
@@ -51034,7 +51034,7 @@
                       "minimum": 0,
                       "type": "integer"
                     },
-                    "locationId": {
+                    "location_id": {
                       "type": [
                         "string",
                         "null"
@@ -51045,11 +51045,11 @@
                       "minimum": 0,
                       "type": "integer"
                     },
-                    "paidCollected": {
+                    "paid_collected": {
                       "items": {
                         "additionalProperties": false,
                         "properties": {
-                          "collectedMinor": {
+                          "collected_minor": {
                             "type": "number"
                           },
                           "currency": {
@@ -51058,7 +51058,7 @@
                         },
                         "required": [
                           "currency",
-                          "collectedMinor"
+                          "collected_minor"
                         ],
                         "type": "object"
                       },
@@ -51081,20 +51081,20 @@
                     }
                   },
                   "required": [
-                    "locationId",
+                    "location_id",
                     "visits",
                     "viewed",
                     "intent",
                     "submitted",
                     "confirmed",
                     "paid",
-                    "paidCollected"
+                    "paid_collected"
                   ],
                   "type": "object"
                 },
                 "type": "array"
               },
-              "bySource": {
+              "by_source": {
                 "items": {
                   "additionalProperties": false,
                   "properties": {
@@ -51126,11 +51126,11 @@
                       "minimum": 0,
                       "type": "integer"
                     },
-                    "paidCollected": {
+                    "paid_collected": {
                       "items": {
                         "additionalProperties": false,
                         "properties": {
-                          "collectedMinor": {
+                          "collected_minor": {
                             "type": "number"
                           },
                           "currency": {
@@ -51139,7 +51139,7 @@
                         },
                         "required": [
                           "currency",
-                          "collectedMinor"
+                          "collected_minor"
                         ],
                         "type": "object"
                       },
@@ -51169,7 +51169,7 @@
                     "submitted",
                     "confirmed",
                     "paid",
-                    "paidCollected"
+                    "paid_collected"
                   ],
                   "type": "object"
                 },
@@ -51190,11 +51190,11 @@
                 "minimum": 0,
                 "type": "integer"
               },
-              "paidCollected": {
+              "paid_collected": {
                 "items": {
                   "additionalProperties": false,
                   "properties": {
-                    "collectedMinor": {
+                    "collected_minor": {
                       "type": "number"
                     },
                     "currency": {
@@ -51203,7 +51203,7 @@
                   },
                   "required": [
                     "currency",
-                    "collectedMinor"
+                    "collected_minor"
                   ],
                   "type": "object"
                 },
@@ -51232,58 +51232,58 @@
               "submitted",
               "confirmed",
               "paid",
-              "paidCollected",
-              "bySource",
-              "byLocation"
+              "paid_collected",
+              "by_source",
+              "by_location"
             ],
             "type": "object"
           },
           "metrics": {
             "additionalProperties": false,
             "properties": {
-              "avgSessionDuration": {
+              "avg_session_duration": {
                 "minimum": 0,
                 "type": "number"
               },
-              "changePercent": {
+              "change_percent": {
                 "type": [
                   "number",
                   "null"
                 ]
               },
-              "pageViews": {
+              "page_views": {
                 "maximum": 9007199254740991,
                 "minimum": 0,
                 "type": "integer"
               },
-              "pagesPerSession": {
+              "pages_per_session": {
                 "minimum": 0,
                 "type": "number"
               },
-              "returningVisitors": {
+              "returning_visitors": {
                 "maximum": 9007199254740991,
                 "minimum": 0,
                 "type": "integer"
               },
-              "uniqueSessions": {
+              "unique_sessions": {
                 "maximum": 9007199254740991,
                 "minimum": 0,
                 "type": "integer"
               },
-              "uniqueVisitors": {
+              "unique_visitors": {
                 "maximum": 9007199254740991,
                 "minimum": 0,
                 "type": "integer"
               }
             },
             "required": [
-              "pageViews",
-              "uniqueSessions",
-              "uniqueVisitors",
-              "returningVisitors",
-              "avgSessionDuration",
-              "pagesPerSession",
-              "changePercent"
+              "page_views",
+              "unique_sessions",
+              "unique_visitors",
+              "returning_visitors",
+              "avg_session_duration",
+              "pages_per_session",
+              "change_percent"
             ],
             "type": "object"
           },
@@ -51291,30 +51291,30 @@
             "items": {
               "additionalProperties": false,
               "properties": {
-                "collectedMinor": {
+                "collected_minor": {
                   "type": "number"
                 },
                 "currency": {
                   "type": "string"
                 },
-                "netMinor": {
+                "net_minor": {
                   "type": "number"
                 },
-                "refundedMinor": {
+                "refunded_minor": {
                   "type": "number"
                 }
               },
               "required": [
                 "currency",
-                "collectedMinor",
-                "refundedMinor",
-                "netMinor"
+                "collected_minor",
+                "refunded_minor",
+                "net_minor"
               ],
               "type": "object"
             },
             "type": "array"
           },
-          "outcomeAttribution": {
+          "outcome_attribution": {
             "items": {
               "additionalProperties": false,
               "properties": {
@@ -51330,12 +51330,12 @@
                     "null"
                   ]
                 },
-                "distinctEntities": {
+                "distinct_entities": {
                   "maximum": 9007199254740991,
                   "minimum": 0,
                   "type": "integer"
                 },
-                "eventName": {
+                "event_name": {
                   "type": "string"
                 },
                 "events": {
@@ -51355,9 +51355,9 @@
                 "medium",
                 "campaign",
                 "content",
-                "eventName",
+                "event_name",
                 "events",
-                "distinctEntities"
+                "distinct_entities"
               ],
               "type": "object"
             },
@@ -51366,23 +51366,23 @@
           "period": {
             "additionalProperties": false,
             "properties": {
-              "analyticsDataStartAt": {
+              "analytics_data_start_at": {
                 "type": [
                   "string",
                   "null"
                 ]
               },
-              "endDate": {
+              "end_date": {
                 "type": "string"
               },
-              "nativeCoverage": {
+              "native_coverage": {
                 "enum": [
                   "full",
                   "partial"
                 ],
                 "type": "string"
               },
-              "startDate": {
+              "start_date": {
                 "type": "string"
               },
               "timezone": {
@@ -51390,11 +51390,11 @@
               }
             },
             "required": [
-              "startDate",
-              "endDate",
+              "start_date",
+              "end_date",
               "timezone",
-              "analyticsDataStartAt",
-              "nativeCoverage"
+              "analytics_data_start_at",
+              "native_coverage"
             ],
             "type": "object"
           },
@@ -51402,7 +51402,7 @@
             "items": {
               "additionalProperties": false,
               "properties": {
-                "percentOfTotal": {
+                "percent_of_total": {
                   "type": "number"
                 },
                 "source": {
@@ -51417,16 +51417,16 @@
               "required": [
                 "source",
                 "views",
-                "percentOfTotal"
+                "percent_of_total"
               ],
               "type": "object"
             },
             "type": "array"
           },
-          "signupCohort": {
+          "signup_cohort": {
             "additionalProperties": false,
             "properties": {
-              "bySignupAttribution": {
+              "by_signup_attribution": {
                 "items": {
                   "additionalProperties": false,
                   "properties": {
@@ -51442,7 +51442,7 @@
                         "null"
                       ]
                     },
-                    "firstPaidSignups": {
+                    "first_paid_signups": {
                       "maximum": 9007199254740991,
                       "minimum": 0,
                       "type": "integer"
@@ -51453,7 +51453,7 @@
                         "null"
                       ]
                     },
-                    "onboardedSignups": {
+                    "onboarded_signups": {
                       "maximum": 9007199254740991,
                       "minimum": 0,
                       "type": "integer"
@@ -51462,24 +51462,24 @@
                       "items": {
                         "additionalProperties": false,
                         "properties": {
-                          "collectedMinor": {
+                          "collected_minor": {
                             "type": "number"
                           },
                           "currency": {
                             "type": "string"
                           },
-                          "netMinor": {
+                          "net_minor": {
                             "type": "number"
                           },
-                          "refundedMinor": {
+                          "refunded_minor": {
                             "type": "number"
                           }
                         },
                         "required": [
                           "currency",
-                          "collectedMinor",
-                          "refundedMinor",
-                          "netMinor"
+                          "collected_minor",
+                          "refunded_minor",
+                          "net_minor"
                         ],
                         "type": "object"
                       },
@@ -51503,33 +51503,33 @@
                     "campaign",
                     "content",
                     "signups",
-                    "onboardedSignups",
-                    "firstPaidSignups",
+                    "onboarded_signups",
+                    "first_paid_signups",
                     "revenue"
                   ],
                   "type": "object"
                 },
                 "type": "array"
               },
-              "firstPaidBusinesses": {
+              "first_paid_businesses": {
                 "maximum": 9007199254740991,
                 "minimum": 0,
                 "type": "integer"
               },
-              "firstPaidSignups": {
+              "first_paid_signups": {
                 "maximum": 9007199254740991,
                 "minimum": 0,
                 "type": "integer"
               },
-              "observedThrough": {
+              "observed_through": {
                 "type": "string"
               },
-              "onboardedBusinesses": {
+              "onboarded_businesses": {
                 "maximum": 9007199254740991,
                 "minimum": 0,
                 "type": "integer"
               },
-              "onboardedSignups": {
+              "onboarded_signups": {
                 "maximum": 9007199254740991,
                 "minimum": 0,
                 "type": "integer"
@@ -51541,24 +51541,24 @@
               }
             },
             "required": [
-              "observedThrough",
+              "observed_through",
               "signups",
-              "onboardedSignups",
-              "firstPaidSignups",
-              "bySignupAttribution",
-              "onboardedBusinesses",
-              "firstPaidBusinesses"
+              "onboarded_signups",
+              "first_paid_signups",
+              "by_signup_attribution",
+              "onboarded_businesses",
+              "first_paid_businesses"
             ],
             "type": "object"
           },
-          "topPages": {
+          "top_pages": {
             "items": {
               "additionalProperties": false,
               "properties": {
                 "path": {
                   "type": "string"
                 },
-                "percentOfTotal": {
+                "percent_of_total": {
                   "type": "number"
                 },
                 "views": {
@@ -51570,7 +51570,7 @@
               "required": [
                 "path",
                 "views",
-                "percentOfTotal"
+                "percent_of_total"
               ],
               "type": "object"
             },
@@ -51588,7 +51588,7 @@
                   ],
                   "type": "string"
                 },
-                "collectedMinor": {
+                "collected_minor": {
                   "type": [
                     "number",
                     "null"
@@ -51597,7 +51597,7 @@
                 "currency": {
                   "type": "string"
                 },
-                "eventName": {
+                "event_name": {
                   "type": "string"
                 },
                 "events": {
@@ -51605,17 +51605,17 @@
                   "minimum": 0,
                   "type": "integer"
                 },
-                "valueMinor": {
+                "value_minor": {
                   "type": "number"
                 }
               },
               "required": [
-                "eventName",
+                "event_name",
                 "basis",
                 "currency",
                 "events",
-                "valueMinor",
-                "collectedMinor"
+                "value_minor",
+                "collected_minor"
               ],
               "type": "object"
             },
@@ -51625,18 +51625,18 @@
         "required": [
           "period",
           "metrics",
-          "dailyData",
-          "dailyConversions",
-          "topPages",
+          "daily_data",
+          "daily_conversions",
+          "top_pages",
           "attribution",
-          "outcomeAttribution",
-          "attributedValue",
+          "outcome_attribution",
+          "attributed_value",
           "conversions",
           "values",
-          "bookingValue",
+          "booking_value",
           "net",
           "funnel",
-          "signupCohort",
+          "signup_cohort",
           "coverage",
           "countries",
           "cities",
@@ -128577,7 +128577,7 @@
       "toolContracts": {
         "create_post": "sha256:e800e3c19ecf887d09aa70d80dcbe66d985196d2138620b369cb9e1f9cace67a",
         "get_conversation": "sha256:0bb638b4ce881d5db51291ff262e13633e2b2a6bcbeca21246027deb716fcd84",
-        "get_organization_analytics": "sha256:06e0bfe504a9b9183d0429a06162e4af2d760695c842396608752a8f107cb4d9",
+        "get_organization_analytics": "sha256:4fcc7f6cef537aa552200cc74b666d866684657015427e256651d7791140b814",
         "get_product": "sha256:b2afea3d084c67b0aacc46c8fbdbcf652dfaa2554de42de7bef06b16312f05e1",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_conversations": "sha256:24cf21b535c6689cb04bc7188bec604110c207a960c8ba5e69e9505150dceca7",

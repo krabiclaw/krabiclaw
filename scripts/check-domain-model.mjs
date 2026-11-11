@@ -89,6 +89,35 @@ for (const path of sources(join(root, 'server'))) {
   }
 }
 
+// MCP schemas expose the wire keys without confusing them with local names or
+// JSON Schema keywords. Keep the names supplied by Better Auth and Google.
+const googleAddressKeys = new Set(['addressLines', 'administrativeArea', 'languageCode', 'postalCode', 'regionCode'])
+const betterAuthKeys = new Map([
+  ['cancel_organization_invitation', ['expiresAt']],
+  ['invite_organization_member', ['expiresAt']],
+  ['list_organization_members', ['expiresAt', 'createdAt', 'organizationId', 'userId']],
+  ['remove_organization_member', ['createdAt', 'organizationId', 'userId']],
+  ['update_organization_member_role', ['createdAt', 'organizationId', 'userId']],
+])
+const googleReportKeys = new Map([
+  ['get_google_ads_campaign', ['adGroups', 'budgetAmountMicros', 'budgetId', 'channelType', 'costMicros', 'finalUrls', 'matchType']],
+  ['list_google_ads_campaigns', ['budgetAmountMicros', 'budgetId', 'channelType', 'costMicros']],
+  ['query_google_ads_report', ['adGroupId', 'campaignId', 'campaignName', 'conversionsValue', 'costMicros']],
+])
+function checkMcpSchema(tool, schema, keys) {
+  if (!schema || typeof schema !== 'object') return
+  for (const key of Object.keys(schema.properties ?? {})) {
+    if (!/^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/.test(key) && !keys.has(key)) failures.push(`MCP ${tool}: ${key} must use its canonical snake_case name`)
+  }
+  for (const value of Object.values(schema)) checkMcpSchema(tool, value, keys)
+}
+const catalog = JSON.parse(readFileSync(join(root, 'server/utils/mcp-catalog-snapshots/tenant.json'), 'utf8'))
+for (const tool of catalog.tools) {
+  const keys = new Set([...googleAddressKeys, ...(betterAuthKeys.get(tool.name) ?? []), ...(googleReportKeys.get(tool.name) ?? [])])
+  checkMcpSchema(tool.name, tool.inputSchema, keys)
+  checkMcpSchema(tool.name, tool.outputSchema, keys)
+}
+
 if (failures.length) {
   console.error(`Domain model check failed (${failures.length}):\n${[...new Set(failures)].map(line => `- ${line}`).join('\n')}`)
   process.exit(1)

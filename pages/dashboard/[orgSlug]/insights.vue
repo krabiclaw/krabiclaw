@@ -30,7 +30,7 @@
         </div>
 
         <div v-if="canReadAnalytics" class="flex items-center gap-3 text-xs text-muted">
-          <span v-if="analytics?.period" class="hidden sm:inline">Last updated: {{ formatDate(analytics.period.endDate) }}</span>
+          <span v-if="analytics?.period" class="hidden sm:inline">Last updated: {{ formatDate(analytics.period.end_date) }}</span>
           <UButton
             label="Booking income by channel"
             :to="`/dashboard/${route.params.orgSlug}/earnings/performance`"
@@ -43,8 +43,8 @@
 
       <!-- Test & Accessibility anchor for period verification -->
       <p v-if="tab === 'views' && analytics" class="sr-only" data-testid="insights-period">
-        <time :datetime="analytics.period.startDate">{{ formatDate(analytics.period.startDate) }}</time> –
-        <time :datetime="analytics.period.endDate">{{ formatDate(analytics.period.endDate) }}</time>
+        <time :datetime="analytics.period.start_date">{{ formatDate(analytics.period.start_date) }}</time> –
+        <time :datetime="analytics.period.end_date">{{ formatDate(analytics.period.end_date) }}</time>
       </p>
 
       <!-- ========================================== -->
@@ -123,7 +123,7 @@
         />
 
         <!-- 6. Signup Funnel & Cohort -->
-        <section v-if="analytics.signupCohort.signups" class="rounded-2xl border border-default bg-default p-6 shadow-2xs">
+        <section v-if="analytics.signup_cohort.signups" class="rounded-2xl border border-default bg-default p-6 shadow-2xs">
           <header class="mb-4">
             <h2 class="text-base font-semibold text-highlighted">Signup funnel</h2>
             <p class="mt-1 text-xs text-muted">Progress of people who signed up in this period through their organizations.</p>
@@ -131,9 +131,9 @@
           <div class="grid grid-cols-3 gap-4" aria-label="Signup conversion funnel">
             <div
               v-for="stage in [
-                { label: 'Signups', count: analytics.signupCohort.signups },
-                { label: 'Onboarded', count: analytics.signupCohort.onboardedSignups },
-                { label: 'Paid', count: analytics.signupCohort.firstPaidSignups },
+                { label: 'Signups', count: analytics.signup_cohort.signups },
+                { label: 'Onboarded', count: analytics.signup_cohort.onboarded_signups },
+                { label: 'Paid', count: analytics.signup_cohort.first_paid_signups },
               ]"
               :key="stage.label"
               class="space-y-2 rounded-xl bg-muted/30 p-3"
@@ -141,9 +141,9 @@
               <p class="text-xs font-medium text-muted uppercase">{{ stage.label }}</p>
               <p class="text-2xl font-semibold tabular-nums text-highlighted">{{ formatCount(stage.count) }}</p>
               <div class="h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden="true">
-                <div class="h-full rounded-full bg-primary" :style="{ width: `${stage.count / analytics.signupCohort.signups * 100}%` }" />
+                <div class="h-full rounded-full bg-primary" :style="{ width: `${stage.count / analytics.signup_cohort.signups * 100}%` }" />
               </div>
-              <p class="text-xs tabular-nums text-muted">{{ Math.round(stage.count / analytics.signupCohort.signups * 100) }}%</p>
+              <p class="text-xs tabular-nums text-muted">{{ Math.round(stage.count / analytics.signup_cohort.signups * 100) }}%</p>
             </div>
           </div>
         </section>
@@ -370,7 +370,7 @@
           <div v-if="reviews.recent.length" class="divide-y divide-default">
             <article v-for="review in reviews.recent" :key="review.id" class="py-4 first:pt-0 last:pb-0">
               <div class="flex items-center gap-2">
-                <span class="font-medium text-highlighted">{{ review.author }}</span>
+                <span class="font-medium text-highlighted">{{ review.author_name }}</span>
                 <span class="text-sm tabular-nums text-primary">{{ '★'.repeat(review.rating) }}</span>
                 <UBadge v-if="review.source === 'google'" color="neutral" variant="soft" size="xs" label="Google" />
               </div>
@@ -451,7 +451,7 @@ const requestedRange = computed(() => ({
 
 const currentStartDate = computed(() => {
   if (requestedRange.value.startDate) return requestedRange.value.startDate
-  if (analytics.value?.period) return analytics.value.period.startDate
+  if (analytics.value?.period) return analytics.value.period.start_date
   const end = new Date()
   const start = new Date(end.getTime() - 29 * 86_400_000)
   return start.toISOString().slice(0, 10)
@@ -459,7 +459,7 @@ const currentStartDate = computed(() => {
 
 const currentEndDate = computed(() => {
   if (requestedRange.value.endDate) return requestedRange.value.endDate
-  if (analytics.value?.period) return analytics.value.period.endDate
+  if (analytics.value?.period) return analytics.value.period.end_date
   return new Date().toISOString().slice(0, 10)
 })
 
@@ -471,7 +471,7 @@ async function onDateRangeUpdate(range: { startDate: string; endDate: string }) 
 const { data: insightsResource, error: resourceError, refresh } = await useAsyncData(
   () => `dashboard-org-insights:${scope.value?.orgSlug}:${requestedRange.value.startDate ?? ''}:${requestedRange.value.endDate ?? ''}`,
   async () => !canReadAnalytics.value ? null : await dashboardApi<OrganizationAnalyticsReport>('/api/dashboard/analytics', {
-    query: requestedRange.value,
+    query: { start_date: requestedRange.value.startDate, end_date: requestedRange.value.endDate },
     validate: (value): value is OrganizationAnalyticsReport => {
       const result = organizationAnalyticsSchema.safeParse(value)
       if (!result.success) {
@@ -544,7 +544,7 @@ watch([feedback, focusedReview], ([loaded, reviewId]) => {
 const reviews = computed(() => insightsResource.value?.reviews)
 
 // Multi-Vertical Funnel Mapping
-type FunnelCounts = Omit<AnalyticsReport['funnel'], 'bySource' | 'byLocation'>
+type FunnelCounts = Omit<AnalyticsReport['funnel'], 'by_source' | 'by_location'>
 const FUNNEL_KEYS = ['visits', 'viewed', 'intent', 'submitted', 'confirmed', 'paid'] as const
 const FUNNEL_WORDS = {
   service: { long: ['Visits', 'Viewed a practice area', 'Clicked Book a consultation or called', 'Requested a consultation', 'Scheduled', 'Paid'], short: ['Visits', 'Viewed', 'Clicked or called', 'Requested', 'Scheduled', 'Paid'], confirmedNoun: 'consultation' },
@@ -558,8 +558,8 @@ const funnelWords = computed(() => FUNNEL_WORDS[dashboard.organization.value?.ve
 
 const funnelCell = (counts: FunnelCounts, key: typeof FUNNEL_KEYS[number]) => {
   if (!counts[key]) return '—'
-  if (key !== 'paid' || !counts.paidCollected.length) return formatCount(counts[key])
-  return `${formatCount(counts.paid)} · ${counts.paidCollected.map(paid => formatMoney(paid.collectedMinor, paid.currency)).join(' · ')}`
+  if (key !== 'paid' || !counts.paid_collected.length) return formatCount(counts[key])
+  return `${formatCount(counts.paid)} · ${counts.paid_collected.map(paid => formatMoney(paid.collected_minor, paid.currency)).join(' · ')}`
 }
 
 const funnelSteps = computed(() => {
@@ -578,9 +578,9 @@ const funnelBreakdowns = computed(() => {
   const rows = (entries: Array<{ label: string; counts: FunnelCounts }>) => entries.map(({ label, counts }) => ({ label, cells: FUNNEL_KEYS.map(key => funnelCell(counts, key)) }))
   const locationTitle = (id: string | null) => id ? dashboard.locations.value.find(location => location.id === id)?.title ?? 'Removed location' : 'No location'
   return [
-    { title: 'Source', testId: 'insights-funnel-by-source', rows: rows(funnel.bySource.map(row => ({ label: row.channel, counts: row }))) },
+    { title: 'Source', testId: 'insights-funnel-by-source', rows: rows(funnel.by_source.map(row => ({ label: row.channel, counts: row }))) },
     ...(dashboard.locations.value.length > 1
-      ? [{ title: 'Location', testId: 'insights-funnel-by-location', rows: rows(funnel.byLocation.map(row => ({ label: locationTitle(row.locationId), counts: row }))) }]
+      ? [{ title: 'Location', testId: 'insights-funnel-by-location', rows: rows(funnel.by_location.map(row => ({ label: locationTitle(row.location_id), counts: row }))) }]
       : []),
   ].filter(breakdown => breakdown.rows.length)
 })
@@ -590,28 +590,28 @@ const metricCards = computed(() => {
   const metrics = analytics.value?.metrics
   if (!metrics) return []
   return [
-    { label: 'Pageviews', value: formatCount(metrics.pageViews), subtext: metrics.changePercent === null ? 'Not enough prior data' : `${formatSigned(metrics.changePercent)} vs previous period` },
-    { label: 'Unique visitors', value: formatCount(metrics.uniqueVisitors), subtext: `${formatCount(metrics.returningVisitors)} returning` },
-    { label: 'Sessions', value: formatCount(metrics.uniqueSessions), subtext: `${formatNumber(metrics.pagesPerSession)} pages per session` },
-    { label: 'Avg. duration', value: formatDuration(metrics.avgSessionDuration), subtext: 'Average session time' }
+    { label: 'Pageviews', value: formatCount(metrics.page_views), subtext: metrics.change_percent === null ? 'Not enough prior data' : `${formatSigned(metrics.change_percent)} vs previous period` },
+    { label: 'Unique visitors', value: formatCount(metrics.unique_visitors), subtext: `${formatCount(metrics.returning_visitors)} returning` },
+    { label: 'Sessions', value: formatCount(metrics.unique_sessions), subtext: `${formatNumber(metrics.pages_per_session)} pages per session` },
+    { label: 'Avg. duration', value: formatDuration(metrics.avg_session_duration), subtext: 'Average session time' }
   ]
 })
 
 // Chart series
-const dailyData = computed(() => analytics.value?.dailyData || [])
+const dailyData = computed(() => analytics.value?.daily_data || [])
 const trafficSeries = computed(() => [
-  { label: 'Pageviews', values: dailyData.value.map(day => day.pageViews), color: 'var(--ui-primary)' },
+  { label: 'Pageviews', values: dailyData.value.map(day => day.page_views), color: 'var(--ui-primary)' },
   { label: 'Sessions', values: dailyData.value.map(day => day.sessions), color: 'var(--ui-info)' },
 ])
 
 // Breakdown items formatted for BreakdownTable
 const topPagesItems = computed(() => {
-  const pages = analytics.value?.topPages || []
+  const pages = analytics.value?.top_pages || []
   return pages.map(p => ({
     label: p.path,
     value: p.views,
     formattedValue: formatCount(p.views),
-    percent: p.percentOfTotal,
+    percent: p.percent_of_total,
   }))
 })
 
@@ -621,19 +621,19 @@ const attributionItems = computed(() => {
     label: `${a.source} / ${a.medium}`,
     detail: [a.campaign, a.content].filter(Boolean).join(' · '),
     value: a.sessions,
-    formattedValue: `${formatCount(a.sessions)} sessions · ${formatCount(a.convertingSessions)} conv.`,
-    percent: a.sessionConversionRate !== null ? Math.round(a.sessionConversionRate) : 0,
+    formattedValue: `${formatCount(a.sessions)} sessions · ${formatCount(a.converting_sessions)} conv.`,
+    percent: a.session_conversion_rate !== null ? Math.round(a.session_conversion_rate) : 0,
   }))
 })
 
 const countryItems = computed(() => {
   const list = analytics.value?.countries || []
   return list.map(c => ({
-    label: countryName(c.countryCode),
-    prefix: countryFlag(c.countryCode),
+    label: countryName(c.country_code),
+    prefix: countryFlag(c.country_code),
     value: c.views,
     formattedValue: formatCount(c.views),
-    percent: c.percentOfTotal,
+    percent: c.percent_of_total,
   }))
 })
 
@@ -641,7 +641,7 @@ const cityItems = computed(() => {
   const list = analytics.value?.cities || []
   return list.map(c => ({
     label: c.region ? `${c.city}, ${c.region}` : c.city,
-    prefix: countryFlag(c.countryCode),
+    prefix: countryFlag(c.country_code),
     value: c.views,
     formattedValue: formatCount(c.views),
     percent: percentOfViews(c.views),
@@ -655,7 +655,7 @@ const deviceItems = computed(() => {
     prefix: deviceIcon(d.type),
     value: d.views,
     formattedValue: formatCount(d.views),
-    percent: d.percentOfTotal,
+    percent: d.percent_of_total,
   }))
 })
 
@@ -665,7 +665,7 @@ const referrerItems = computed(() => {
     label: r.source,
     value: r.views,
     formattedValue: formatCount(r.views),
-    percent: r.percentOfTotal,
+    percent: r.percent_of_total,
   }))
 })
 
@@ -756,7 +756,7 @@ function deviceIcon(type: string): string {
   return '•'
 }
 function percentOfViews(views: number): number {
-  const total = analytics.value?.metrics.pageViews || 0
+  const total = analytics.value?.metrics.page_views || 0
   return total > 0 ? Math.round((views / total) * 100) : 0
 }
 
