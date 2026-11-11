@@ -26,7 +26,7 @@ export default defineHandler(async (event) => {
   const { env, db, session, organization } = await requireOrganizationMembership(event, organizationId)
 
   const thread = await getGuestRequest(db, threadId, organizationId)
-  if (!thread) return jsonResponse({ error: 'Thread not found', code: 'THREAD_NOT_FOUND', field: 'threadId' }, { status: 404 })
+  if (!thread) return jsonResponse({ error: 'Thread not found', code: 'THREAD_NOT_FOUND', field: 'conversation_id' }, { status: 404 })
   const principal = memberAccessPrincipal(organization.membership, { env, event })
   await assertGuestOperations(principal)
   await assertConversationAccess(db, principal, thread.id)
@@ -45,23 +45,23 @@ export default defineHandler(async (event) => {
         .map(async part => ({ bytes: new Uint8Array(await part.arrayBuffer()), filename: part.name || 'photo' })))
     : []
   const headerKey = (event.req.headers.get('idempotency-key')) || (event.req.headers.get('x-idempotency-key'))
-  const idempotencyKey = field('idempotencyKey') || headerKey || undefined
+  const idempotencyKey = field('idempotency_key') || headerKey || undefined
 
   if (!idempotencyKey) {
-    return jsonResponse({ error: 'Idempotency key is required', code: 'MISSING_IDEMPOTENCY_KEY', field: 'idempotencyKey' }, { status: 400 })
+    return jsonResponse({ error: 'Idempotency key is required', code: 'MISSING_IDEMPOTENCY_KEY', field: 'idempotency_key' }, { status: 400 })
   }
 
   // "Try again" on a reply that did not reach the guest is that same reply sent
   // again under its own idempotency key, so a send that did land is not repeated.
   let retried: { body: string; idempotencyKey: string } | null = null
   if (action === 'retry') {
-    const messageId = field('messageId')
+    const messageId = field('message_id')
     const entry = messageId ? await queryFirst<{ body: string | null; dedupe_key: string; photos: number }>(db, `SELECT e.body, e.dedupe_key,
         (SELECT COUNT(*) FROM media_placements mp WHERE mp.owner_type = 'message' AND mp.owner_id = e.id AND mp.slot = 'attachments' AND mp.status = 'active') AS photos
       FROM messages e WHERE e.id = ? AND e.conversation_id = ? AND e.event_name = '${MEMBER_REPLY_EVENT}'`, [messageId, thread.id]) : null
     const prefix = `guest-thread-operation:${thread.id}:`
-    if (!entry || !entry.dedupe_key.startsWith(prefix)) return jsonResponse({ error: 'That reply is not in this conversation', code: 'MESSAGE_NOT_FOUND', field: 'messageId' }, { status: 404 })
-    if (entry.photos || !entry.body?.trim()) return jsonResponse({ error: 'Send the photo again from the composer', code: 'RETRY_TEXT_ONLY', field: 'messageId' }, { status: 409 })
+    if (!entry || !entry.dedupe_key.startsWith(prefix)) return jsonResponse({ error: 'That reply is not in this conversation', code: 'MESSAGE_NOT_FOUND', field: 'message_id' }, { status: 404 })
+    if (entry.photos || !entry.body?.trim()) return jsonResponse({ error: 'Send the photo again from the composer', code: 'RETRY_TEXT_ONLY', field: 'message_id' }, { status: 409 })
     retried = { body: entry.body, idempotencyKey: entry.dedupe_key.slice(prefix.length) }
   }
 
@@ -77,7 +77,7 @@ export default defineHandler(async (event) => {
     financialWritesAllowed: await roleAllows({ ...organization.membership, permissions: { payments: ['refund'] } }),
     body: retried ? retried.body : field('body'),
     reason: field('reason'),
-    requestId: field('requestId'),
+    requestId: field('message_id'),
     // Who may change a stay (stayAccessFor): the role that updates operations.
     stayManager: await roleAllows({ ...organization.membership, permissions: { operations: ['update'] } }),
     photos,
@@ -94,7 +94,7 @@ export default defineHandler(async (event) => {
 
   if (outcome.ok === false) {
     if (outcome.reason === 'thread_not_found' || outcome.reason === 'source_not_found') {
-      return jsonResponse({ error: 'Thread not found', code: 'THREAD_NOT_FOUND', field: 'threadId' }, { status: 404 })
+      return jsonResponse({ error: 'Thread not found', code: 'THREAD_NOT_FOUND', field: 'conversation_id' }, { status: 404 })
     }
     if (outcome.reason === 'invalid_transition') {
       return jsonResponse({ error: outcome.message, code: 'INVALID_TRANSITION', field: 'action' }, { status: 409 })
@@ -109,7 +109,7 @@ export default defineHandler(async (event) => {
       return jsonResponse({ error: outcome.message, code: 'INVALID_PHOTO', field: 'photos' }, { status: 400 })
     }
     if (outcome.reason === 'missing_idempotency_key') {
-      return jsonResponse({ error: 'Idempotency key is required', code: 'MISSING_IDEMPOTENCY_KEY', field: 'idempotencyKey' }, { status: 400 })
+      return jsonResponse({ error: 'Idempotency key is required', code: 'MISSING_IDEMPOTENCY_KEY', field: 'idempotency_key' }, { status: 400 })
     }
     if (outcome.reason === 'delivery_failed') {
       return jsonResponse({ ...outcome, error: outcome.message }, { status: outcome.status })
@@ -118,5 +118,5 @@ export default defineHandler(async (event) => {
   }
 
   const detail = await getInboxThread(db, threadId, organizationId, { audience: 'member', userId: principal.userId, principal })
-  return jsonResponse({ thread: detail, availableActions: outcome.availableActions }, { status: outcome.status })
+  return jsonResponse({ thread: detail, available_actions: outcome.availableActions }, { status: outcome.status })
 })

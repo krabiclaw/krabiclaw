@@ -717,7 +717,7 @@ export async function executeGuestThreadOperation(db: DbClient, input: ExecuteOp
     // A guest's request on their channel; a business's proposal is answered by its guest.
     if (context.record?.unit !== 'nights') return conflict('Only a stay’s guest change requests are answered here')
     if (!input.stayManager) throw new HTTPError({ statusCode: 403, message: 'Only organization owners and admins can change stays', data: { code: 'STAY_ROLE_REQUIRED', field: 'role' } })
-    if (!input.requestId) throw new HTTPError({ statusCode: 400, message: 'Name the change request to answer', data: { code: 'VALIDATION_ERROR', field: 'requestId' } })
+    if (!input.requestId) throw new HTTPError({ statusCode: 400, message: 'Name the change request to answer', data: { code: 'VALIDATION_ERROR', field: 'message_id' } })
     await respondToStayChangeRequest(db, input.env, { thread: context.thread, requestId: input.requestId, decision: input.action === 'accept_change' ? 'accept' : 'decline', actorUserId: input.actorUserId })
     return await successfulOutcome(db, context)
   }

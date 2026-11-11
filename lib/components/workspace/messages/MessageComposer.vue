@@ -55,7 +55,7 @@ export function useMessagePhotoDraft() {
 export function messageReplyForm(body: string, photos: MessagePhotoDraft[], idempotencyKey: string, suggestion: { generationId: string; index: number } | null = null) {
   const form = new FormData()
   form.set('body', body)
-  form.set('idempotencyKey', idempotencyKey)
+  form.set('idempotency_key', idempotencyKey)
   if (suggestion) form.set('suggestion', JSON.stringify(suggestion))
   for (const photo of photos) form.append('photos', photo.file, photo.file.name)
   return form

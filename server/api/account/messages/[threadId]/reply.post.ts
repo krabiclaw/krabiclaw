@@ -33,7 +33,7 @@ export default defineHandler(async event=>{
  if(parts.some(part=>part instanceof File&&part.size>MAX_IMAGE_BYTES))throw new HTTPError({statusCode:400,statusMessage:'Message photos must be no larger than 10 MB.'})
  const photos=await Promise.all(parts.filter((part):part is File=>part instanceof File).map(async part=>({bytes:new Uint8Array(await part.arrayBuffer()),filename:part.name||'photo'})))
  try {
-  await receiveGuestWebReply(env,{threadId,userId:session.user.id,body:field('body')??'',photos,idempotencyKey:field('idempotencyKey')??''})
+  await receiveGuestWebReply(env,{threadId,userId:session.user.id,body:field('body')??'',photos,idempotencyKey:field('idempotency_key')??''})
  }catch(error){
   if(error instanceof MessagePhotoRejection)throw new HTTPError({statusCode:400,statusMessage:error.message})
   throw error

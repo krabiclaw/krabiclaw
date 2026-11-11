@@ -851,7 +851,7 @@ export class AirbnbConnection {
         if (!result.meta.changes) fail(409, 'IMPORT_CHANGED', 'The import changed. Refresh and try again.')
         const home = await readStayHome(this.db, this.manager(), productId)
         await publishBusinessInvalidation(this.env, this.organizationId)
-        await publishStayInvalidation(this.env, { type: 'nights.changed', organizationId: this.organizationId, productId, locationId: home.location_id, stayId: null }, { updated_at: now() })
+        await publishStayInvalidation(this.env, { type: 'nights.changed', organization_id: this.organizationId, product_id: productId, location_id: home.location_id, booking_id: null }, { updated_at: now() })
         return { product_id: productId, stage: 'complete' as const, content: report }
       })
     })

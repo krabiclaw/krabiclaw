@@ -408,7 +408,7 @@ function openCancel() {
 
 watch(realtime.event, (event) => {
   if (!event || (event.type !== 'MESSAGE_CREATE' && event.type !== 'MESSAGE_UPDATE')) return
-  if (event.conversationId === booking.value?.conversation_id) void refreshDetails()
+  if (event.conversation_id === booking.value?.conversation_id) void refreshDetails()
 })
 watch(realtime.connectionEpoch, (epoch) => {
   if (epoch > 0) void refreshDetails()
@@ -479,7 +479,7 @@ async function runAction(action: string) {
     } else {
       await dashboardApi(`/api/dashboard/organizations/${booking.value.organization_id}/guest-threads/${booking.value.conversation_id}/operations/${action}`, {
         method: 'POST',
-        body: { idempotencyKey: actionAttempt.value.key, ...(note ? { body: note } : {}) },
+        body: { idempotency_key: actionAttempt.value.key, ...(note ? { body: note } : {}) },
         validate: (value: unknown): value is { thread: Record<string, unknown> } => isRecord(value) && isRecord(value.thread),
       })
     }

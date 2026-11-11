@@ -248,8 +248,8 @@ test('authored goals and evidence-bound opportunity decisions follow persisted w
     expect(unanswered).toEqual([{ section: 'open', tasks: [{ id: expect.any(String), status: 'open', detail: 'Which documents should I bring to my legal consultation?' }] }])
     const replyBody = 'Please bring the relevant documents and any prior correspondence.'
     const replyKey = crypto.randomUUID()
-    await responseBody(await request.post(`${threadUrl}/operations/reply`, { data: { body: replyBody, idempotencyKey: replyKey } }))
-    await responseBody(await request.post(`${threadUrl}/operations/reply`, { data: { body: replyBody, idempotencyKey: replyKey } }))
+    await responseBody(await request.post(`${threadUrl}/operations/reply`, { data: { body: replyBody, idempotency_key: replyKey } }))
+    await responseBody(await request.post(`${threadUrl}/operations/reply`, { data: { body: replyBody, idempotency_key: replyKey } }))
     progress = await responseBody<Progress>(await request.get(`${api}/progress`))
     const replies = progress.outcomes.filter(outcome => outcome.event === 'thread.member_reply' && outcome.subject.id === threadId)
     expect(replies).toEqual([expect.objectContaining({
@@ -262,7 +262,7 @@ test('authored goals and evidence-bound opportunity decisions follow persisted w
     // so the record shows no delivered answer and the question is still owed.
     expect(await replyTasks()).toEqual(unanswered)
     const guestReply = 'I found another letter with a deadline tomorrow; should I send it now?'
-    await responseBody(await member.post(`/api/account/messages/${threadId}/reply`, { headers: authRequestHeaders(baseURL!), data: { body: guestReply, idempotencyKey: crypto.randomUUID() } }))
+    await responseBody(await member.post(`/api/account/messages/${threadId}/reply`, { headers: authRequestHeaders(baseURL!), data: { body: guestReply, idempotency_key: crypto.randomUUID() } }))
     const { reference: inboundReference } = await responseBody<{ reference: BusinessProgressReference }>(await request.get(`${api}/progress/reference`, { params: { operation: 'guest_thread.reply', subjectId: threadId } }))
     expect(inboundReference.evidenceRevision).not.toBe(repliedReference.evidenceRevision)
     if (inboundReference.evidence.kind !== 'guest_thread' || repliedReference.evidence.kind !== 'guest_thread') throw new Error('The explicit thread reference must describe thread evidence')

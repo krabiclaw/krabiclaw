@@ -128,17 +128,17 @@ test('the cron sends due messages, leaves future ones pending and records failur
     const changed = await saveMessageTemplate(db, env, manager, lateNote.id, { title: 'Pre-arrival', body: 'Your stay is coming up.', version: lateNote.version,
       schedule: { trigger: 'check_in', offset_days: -6, local_time: '09:00', product_ids: [cabin.id] } })
     assert.equal((await planned(cy.id, lateNote.id))?.body, 'Your stay is coming up.')
-    assert.deepEqual((await publications()).slice(observed).filter(event => event.type === 'MESSAGE_UPDATE').map(event => 'conversationId' in event ? event.conversationId : null).sort(), [ana, dee, cy, eve].map(stay => stay.conversation_id).sort())
+    assert.deepEqual((await publications()).slice(observed).filter(event => event.type === 'MESSAGE_UPDATE').map(event => 'conversation_id' in event ? event.conversation_id : null).sort(), [ana, dee, cy, eve].map(stay => stay.conversation_id).sort())
     observed = (await publications()).length
     const cyNote = (await planned(cy.id, lateNote.id))!
     await cancelScheduledGuestMessage(db, env, manager, cyNote.id!)
     assert.equal((await planned(cy.id, lateNote.id))?.status, 'cancelled')
-    assert.deepEqual((await publications()).slice(observed).map(event => [event.type, 'conversationId' in event ? event.conversationId : null]), [['MESSAGE_UPDATE', cy.conversation_id]])
+    assert.deepEqual((await publications()).slice(observed).map(event => [event.type, 'conversation_id' in event ? event.conversation_id : null]), [['MESSAGE_UPDATE', cy.conversation_id]])
     observed = (await publications()).length
     await deleteMessageTemplate(db, env, manager, lateNote.id, changed.version)
     assert.equal(await db.prepare('SELECT count(*) FROM message_templates WHERE id = ?').bind(lateNote.id).first('count(*)'), 0)
     assert.deepEqual(await db.prepare('SELECT template_id, status FROM scheduled_guest_messages WHERE id = ?').bind(cyNote.id).first(), { template_id: null, status: 'cancelled' })
-    assert.deepEqual((await publications()).slice(observed).map(event => 'conversationId' in event ? event.conversationId : null).sort(), [ana, dee, cy, eve].map(stay => stay.conversation_id).sort())
+    assert.deepEqual((await publications()).slice(observed).map(event => 'conversation_id' in event ? event.conversation_id : null).sort(), [ana, dee, cy, eve].map(stay => stay.conversation_id).sort())
   } finally {
     await runtime.dispose()
   }

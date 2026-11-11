@@ -302,7 +302,7 @@ async function answerChange(requestId: string, decision: 'accept' | 'decline') {
     if (!props.personalScope) {
       data.value = await dashboardApi(`${threadPath.value}/operations/${decision}_change`, {
         method: 'POST',
-        body: { requestId, idempotencyKey: `${requestId}:${decision}` },
+        body: { message_id: requestId, idempotency_key: `${requestId}:${decision}` },
         validate: isThreadDetailResponse,
       })
       return
@@ -383,7 +383,7 @@ async function sendReply() {
   try {
     const res = await (props.personalScope ? applicationFetch : dashboardApi)<{ thread: ThreadDetail }>(`${threadPath.value}/${props.personalScope ? 'reply' : 'operations/reply'}`, {
       method: 'POST',
-      body: photos.length ? messageReplyForm(body, photos, current.key, props.personalScope ? null : usedSuggestion.value) : { body, idempotencyKey: current.key, ...(!props.personalScope && usedSuggestion.value ? { suggestion: usedSuggestion.value } : {}) },
+      body: photos.length ? messageReplyForm(body, photos, current.key, props.personalScope ? null : usedSuggestion.value) : { body, idempotency_key: current.key, ...(!props.personalScope && usedSuggestion.value ? { suggestion: usedSuggestion.value } : {}) },
       validate: isThreadDetailResponse,
     })
     const reply = res.thread.stream.findLast(item => item.type === 'message' && item.side === mineSide.value && !current.sentAfter.has(item.id))
@@ -412,7 +412,7 @@ async function retry(messageId: string) {
   retrying.value = true
   actionError.value = null
   try {
-    data.value = await dashboardApi(`${threadPath.value}/operations/retry`, { method: 'POST', body: { messageId, idempotencyKey: messageId }, validate: isThreadDetailResponse })
+    data.value = await dashboardApi(`${threadPath.value}/operations/retry`, { method: 'POST', body: { message_id: messageId, idempotency_key: messageId }, validate: isThreadDetailResponse })
   } catch (err) {
     actionError.value = getErrorMessage(err, 'The reply could not be sent again')
   } finally {
@@ -422,10 +422,10 @@ async function retry(messageId: string) {
 
 watch(realtime.event, (event) => {
   if (props.personalScope || !event) return
-  if (event.organizationId !== dashboard.organizationId.value) return
+  if (event.organization_id !== dashboard.organizationId.value) return
   // Access changes invalidate the cached identity, including hydration data and in-flight reads.
   if (event.type === 'access.changed') clear()
-  if (event.type === 'access.changed' || ((event.type === 'MESSAGE_CREATE' || event.type === 'MESSAGE_UPDATE') && event.conversationId === props.threadId)) void refresh()
+  if (event.type === 'access.changed' || ((event.type === 'MESSAGE_CREATE' || event.type === 'MESSAGE_UPDATE') && event.conversation_id === props.threadId)) void refresh()
 })
 
 watch(error, cause => {

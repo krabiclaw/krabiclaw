@@ -136,8 +136,8 @@ function fail(statusCode: number, code: string, message: string, field: string):
 const teamMessageKey = (threadId: string, key: string) => `team:${threadId}:${key}`
 
 function requestKey(value: unknown): string {
-  if (typeof value !== 'string' || !value.trim()) fail(400, 'MISSING_IDEMPOTENCY_KEY', 'An idempotency key is required', 'idempotencyKey')
-  if (value.trim().length > 200) fail(422, 'INVALID_IDEMPOTENCY_KEY', 'The idempotency key must be at most 200 characters', 'idempotencyKey')
+  if (typeof value !== 'string' || !value.trim()) fail(400, 'MISSING_IDEMPOTENCY_KEY', 'An idempotency key is required', 'idempotency_key')
+  if (value.trim().length > 200) fail(422, 'INVALID_IDEMPOTENCY_KEY', 'The idempotency key must be at most 200 characters', 'idempotency_key')
   return value.trim()
 }
 
@@ -172,7 +172,7 @@ const SEAT_SQL = (conversation: string, user = '?') => `EXISTS (SELECT 1 FROM co
 async function requireSeat(db: DbClient, access: TeamAccess, threadId: string) {
   const seat = await queryFirst<{ id: string }>(db, `SELECT c.id FROM conversations c
      WHERE c.organization_id = ? AND c.id = ? AND c.kind = 'team' AND ${SEAT_SQL('c')}`, [access.organizationId, threadId, access.userId])
-  if (!seat) fail(404, 'TEAM_THREAD_NOT_FOUND', 'That conversation is not one of yours', 'threadId')
+  if (!seat) fail(404, 'TEAM_THREAD_NOT_FOUND', 'That conversation is not one of yours', 'conversation_id')
   return seat
 }
 
@@ -181,7 +181,7 @@ async function publishThreadChanged(env: GuestInboxPublicationEnv, db: DbClient,
     await publishConversationEvent(env, db, { conversationId: threadId, type })
   } catch (cause) {
     throw new HTTPError({ statusCode: 503, message: 'The change was saved, but open apps could not be told. Retry with the same request.',
-      data: { code: 'DASHBOARD_PUBLICATION_FAILED', field: 'realtime', committed: true, thread_id: threadId, ...committed }, cause })
+      data: { code: 'DASHBOARD_PUBLICATION_FAILED', field: 'realtime', committed: true, conversation_id: threadId, ...committed }, cause })
   }
 }
 
@@ -197,7 +197,7 @@ export async function getTeamThread(env: CloudflareEnv, db: DbClient, access: Te
   const thread = await queryFirst<{ id: string; name: string | null; is_group: number; created_by_user_id: string | null; booking_id: string | null; location_id: string | null; last_message_at: string; created_at: string; unread: number }>(db, `
     SELECT c.id, c.name, c.is_group, c.created_by_user_id, c.booking_id, c.location_id, c.last_message_at, c.created_at, ${unread.sql} AS unread
       FROM conversations c WHERE c.organization_id = ? AND c.id = ? AND c.kind = 'team'`, [...unread.params, access.organizationId, threadId])
-  if (!thread) fail(404, 'TEAM_THREAD_NOT_FOUND', 'That conversation is not one of yours', 'threadId')
+  if (!thread) fail(404, 'TEAM_THREAD_NOT_FOUND', 'That conversation is not one of yours', 'conversation_id')
   // A stay is titled by its home; any other booking by who booked, else what: the offering, or a table's place.
   const booked = thread.booking_id ? await queryFirst<{ unit: 'slot' | 'nights'; id: string; title: string; product_id: string; home_name: string | null; starts_at: string; ends_at: string; timezone: string; status: TeamStaySummary['status'] }>(db, `
     SELECT br.unit, br.id, COALESCE(json_extract(guest.payload_json, '$.guest.name'), CASE WHEN br.product_kind = 'table' THEN l.title END, br.product_name) AS title,
@@ -262,48 +262,56 @@ function seatQueries(organizationId: string, threadId: string, memberIds: readon
  * Direct and contextual conversations reuse their initial roster. A manually
  * created group has its own identity and replays only its creation request key.
  */
-export async function createTeamThread(env: TeamEnv, db: DbClient, access: TeamAccess, input: { memberIds: unknown; bookingId?: unknown; locationId?: unknown; name?: unknown; idempotencyKey?: unknown }): Promise<{ id: string; created: boolean }> {
-  const { memberIds, bookingId, locationId } = input
+export interface TeamConversationInput {
+  member_user_ids?: unknown
+  booking_id?: unknown
+  location_id?: unknown
+  name?: unknown
+  idempotency_key?: unknown
+}
+
+export async function createTeamThread(env: TeamEnv, db: DbClient, access: TeamAccess, input: TeamConversationInput): Promise<{ id: string; created: boolean }> {
+  const { member_user_ids: memberIds, booking_id: bookingId, location_id: locationId } = input
   if (!Array.isArray(memberIds) || memberIds.length === 0 || memberIds.length > MAX_THREAD_MEMBERS || memberIds.some(id => typeof id !== 'string' || !id)) {
-    fail(422, 'INVALID_TEAM_MEMBERS', `memberIds must list 1 to ${MAX_THREAD_MEMBERS} member user ids`, 'memberIds')
+    fail(422, 'INVALID_TEAM_MEMBERS', `member_user_ids must list 1 to ${MAX_THREAD_MEMBERS} member user ids`, 'member_user_ids')
   }
-  if (bookingId !== undefined && (typeof bookingId !== 'string' || !bookingId)) fail(422, 'INVALID_BOOKING_ID', 'bookingId must name a booking', 'bookingId')
-  if (locationId !== undefined && (typeof locationId !== 'string' || !locationId)) fail(422, 'INVALID_LOCATION_ID', 'locationId must name a location', 'locationId')
+  if (bookingId !== undefined && (typeof bookingId !== 'string' || !bookingId)) fail(422, 'INVALID_BOOKING_ID', 'booking_id must name a booking', 'booking_id')
+  if (locationId !== undefined && (typeof locationId !== 'string' || !locationId)) fail(422, 'INVALID_LOCATION_ID', 'location_id must name a location', 'location_id')
   const members = await listAllOrganizationMembers(await organizationAdapter(env), access.organizationId)
   const byUser = new Map(members.map(member => [member.user.id, member]))
   if (byUser.get(access.userId)?.id !== access.memberId) fail(404, 'ORGANIZATION_MEMBER_NOT_FOUND', 'Your workspace membership has ended', 'memberId')
   const others = [...new Set(memberIds as string[])].filter(id => id !== access.userId)
-  if (!others.length) fail(422, 'TEAM_THREAD_MEMBERS_REQUIRED', 'Choose at least one other member', 'memberIds')
-  if (others.length + 1 > MAX_THREAD_MEMBERS) fail(422, 'INVALID_TEAM_MEMBERS', `A conversation can have at most ${MAX_THREAD_MEMBERS} members including you`, 'memberIds')
+  if (!others.length) fail(422, 'TEAM_THREAD_MEMBERS_REQUIRED', 'Choose at least one other member', 'member_user_ids')
+  if (others.length + 1 > MAX_THREAD_MEMBERS) fail(422, 'INVALID_TEAM_MEMBERS', `A conversation can have at most ${MAX_THREAD_MEMBERS} members including you`, 'member_user_ids')
   const isGroup = others.length >= 2 && bookingId === undefined && locationId === undefined
   if (!isGroup && input.name !== undefined) fail(422, 'TEAM_GROUP_REQUIRED', 'Only manually created internal groups can have a group name', 'name')
   const name = input.name === undefined ? null : groupName(input.name)
-  const dedupeKey = isGroup ? groupCreationKey(access, requestKey(input.idempotencyKey)) : null
+  const dedupeKey = isGroup ? groupCreationKey(access, requestKey(input.idempotency_key)) : null
   const requestHash = isGroup ? await creationRequestHash({ member_user_ids: [...others, access.userId].sort(), name }) : null
   if (dedupeKey) {
     // A committed creation survives later roster changes. Only the caller's
     // current membership and seat matter when finishing its publication.
     const replay = await readCreationRecord(db, dedupeKey)
     if (replay) {
-      if (replay.requestHash !== requestHash) fail(409, 'IDEMPOTENCY_KEY_REUSED', 'This idempotency key belongs to a different group creation', 'idempotencyKey')
+      if (replay.requestHash !== requestHash) fail(409, 'IDEMPOTENCY_KEY_REUSED', 'This idempotency key belongs to a different group creation', 'idempotency_key')
       await requireSeat(db, access, replay.entityId)
       await publishThreadChanged(env, db, replay.entityId, 'MESSAGE_UPDATE', {})
       return { id: replay.entityId, created: false }
     }
   }
   const unknown = (memberIds as string[]).filter(id => !byUser.has(id))
-  if (unknown.length) fail(422, 'INVALID_TEAM_MEMBERS', `Not members of this organization: ${unknown.join(', ')}`, 'memberIds')
+  if (unknown.length) fail(422, 'INVALID_TEAM_MEMBERS', `Not members of this organization: ${unknown.join(', ')}`, 'member_user_ids')
   let subject: JobSubject | null = null
   if (typeof bookingId === 'string') {
     const booking = await queryFirst<{ nights: number }>(db, 'SELECT product_session_id IS NULL AS nights FROM bookings WHERE organization_id = ? AND id = ?', [access.organizationId, bookingId])
-    if (!booking) fail(404, 'BOOKING_NOT_FOUND', 'That booking is not one you can see', 'bookingId')
+    if (!booking) fail(404, 'BOOKING_NOT_FOUND', 'That booking is not one you can see', 'booking_id')
     subject = { id: bookingId, unit: booking.nights === 1 ? 'nights' : 'slot' }
     try {
       // A stay is seen by who looks after its home; any other booking by who handles it.
       if (subject.unit === 'nights') await getStay(db, await stayAccessFor(access.principal), bookingId)
       else await assertAssignedBookingAccess(db, { ...access.principal, bookingId })
     } catch (error) {
-      if (HTTPError.isError(error) && error.status === 404) fail(404, 'BOOKING_NOT_FOUND', 'That booking is not one you can see', 'bookingId')
+      if (HTTPError.isError(error) && error.status === 404) fail(404, 'BOOKING_NOT_FOUND', 'That booking is not one you can see', 'booking_id')
       throw error
     }
   }
@@ -311,7 +319,7 @@ export async function createTeamThread(env: TeamEnv, db: DbClient, access: TeamA
     try {
       await assertLocationAccess(db, { ...access.principal, locationId })
     } catch (error) {
-      if (HTTPError.isError(error) && error.status === 404) fail(404, 'LOCATION_NOT_FOUND', 'That location is not one you can see', 'locationId')
+      if (HTTPError.isError(error) && error.status === 404) fail(404, 'LOCATION_NOT_FOUND', 'That location is not one you can see', 'location_id')
       throw error
     }
   }
@@ -338,11 +346,11 @@ export async function createTeamThread(env: TeamEnv, db: DbClient, access: TeamA
     ...(creationAudit ? [{ query: creationAudit.query + ' WHERE EXISTS (SELECT 1 FROM conversations WHERE id = ?)', params: [...creationAudit.params!, id] }] : []),
   ], { operation: 'Start a team conversation' })
   const thread = await queryFirst<{ id: string }>(db, 'SELECT id FROM conversations WHERE organization_id = ? AND participants_key = ?', [access.organizationId, participantsKey])
-  if (!thread) fail(409, 'TEAM_MEMBERS_CHANGED', 'Workspace membership changed while starting the conversation. Choose its members again.', 'memberIds')
+  if (!thread) fail(409, 'TEAM_MEMBERS_CHANGED', 'Workspace membership changed while starting the conversation. Choose its members again.', 'member_user_ids')
   if (dedupeKey) {
     const record = await readCreationRecord(db, dedupeKey)
     if (!record || record.entityId !== thread.id) throw new Error(`Team group ${thread.id} has no creation receipt`)
-    if (record.requestHash !== requestHash) fail(409, 'IDEMPOTENCY_KEY_REUSED', 'This idempotency key belongs to a different group creation', 'idempotencyKey')
+    if (record.requestHash !== requestHash) fail(409, 'IDEMPOTENCY_KEY_REUSED', 'This idempotency key belongs to a different group creation', 'idempotency_key')
   }
   await requireSeat(db, access, thread.id)
   await publishThreadChanged(env, db, thread.id, 'MESSAGE_UPDATE', {})
@@ -351,15 +359,15 @@ export async function createTeamThread(env: TeamEnv, db: DbClient, access: TeamA
 
 export interface TeamGroupOperationInput {
   action: unknown
-  idempotencyKey: unknown
+  idempotency_key: unknown
   name?: unknown
-  memberIds?: unknown
-  userId?: unknown
+  member_user_ids?: unknown
+  user_id?: unknown
 }
 
 export interface TeamGroupOperationResult {
   status: 'updated' | 'left'
-  threadId: string
+  conversation_id: string
 }
 
 /**
@@ -369,22 +377,22 @@ export interface TeamGroupOperationResult {
 export async function operateTeamGroup(env: TeamEnv, db: DbClient, access: TeamAccess, threadId: string, input: TeamGroupOperationInput): Promise<TeamGroupOperationResult> {
   const { action } = input
   if (action !== 'rename' && action !== 'add' && action !== 'remove' && action !== 'leave') fail(422, 'INVALID_GROUP_OPERATION', 'Choose rename, add, remove or leave', 'action')
-  for (const field of ['name', 'memberIds', 'userId'] as const) {
-    if (input[field] !== undefined && !((action === 'rename' && field === 'name') || (action === 'add' && field === 'memberIds') || (action === 'remove' && field === 'userId'))) {
+  for (const field of ['name', 'member_user_ids', 'user_id'] as const) {
+    if (input[field] !== undefined && !((action === 'rename' && field === 'name') || (action === 'add' && field === 'member_user_ids') || (action === 'remove' && field === 'user_id'))) {
       fail(422, 'INVALID_GROUP_OPERATION', `${field} is not used by ${action}`, field)
     }
   }
-  const key = requestKey(input.idempotencyKey)
+  const key = requestKey(input.idempotency_key)
   const name = action === 'rename' ? groupName(input.name) : undefined
   let memberIds: string[] = []
   if (action === 'add') {
-    if (!Array.isArray(input.memberIds) || !input.memberIds.length || input.memberIds.length > MAX_THREAD_MEMBERS
-      || input.memberIds.some(id => typeof id !== 'string' || !id)) fail(422, 'INVALID_TEAM_MEMBERS', 'Choose current workspace members to add', 'memberIds')
-    memberIds = [...new Set(input.memberIds as string[])].sort()
+    if (!Array.isArray(input.member_user_ids) || !input.member_user_ids.length || input.member_user_ids.length > MAX_THREAD_MEMBERS
+      || input.member_user_ids.some(id => typeof id !== 'string' || !id)) fail(422, 'INVALID_TEAM_MEMBERS', 'Choose current workspace members to add', 'member_user_ids')
+    memberIds = [...new Set(input.member_user_ids as string[])].sort()
   }
-  const removedUserId = action === 'leave' ? access.userId : action === 'remove' ? input.userId : null
-  if (action === 'remove' && (typeof removedUserId !== 'string' || !removedUserId)) fail(422, 'INVALID_TEAM_MEMBER', 'Choose a participant to remove', 'userId')
-  if (action === 'remove' && removedUserId === access.userId) fail(422, 'USE_LEAVE_GROUP', 'Use Leave group to leave this conversation', 'userId')
+  const removedUserId = action === 'leave' ? access.userId : action === 'remove' ? input.user_id : null
+  if (action === 'remove' && (typeof removedUserId !== 'string' || !removedUserId)) fail(422, 'INVALID_TEAM_MEMBER', 'Choose a participant to remove', 'user_id')
+  if (action === 'remove' && removedUserId === access.userId) fail(422, 'USE_LEAVE_GROUP', 'Use Leave group to leave this conversation', 'user_id')
   const dedupeKey = `team-group-operation:${access.organizationId}:${access.userId}:${key}`
   const requestHash = await creationRequestHash({ threadId, action, name, memberIds, removedUserId })
   const currentMember = await queryFirst(db, 'SELECT id FROM member WHERE id = ? AND organizationId = ? AND userId = ?', [access.memberId, access.organizationId, access.userId])
@@ -394,18 +402,18 @@ export async function operateTeamGroup(env: TeamEnv, db: DbClient, access: TeamA
       // No payload content is sent to a person whose seat ended. The hub also
       // suppresses this event if the person has since been added again.
       if (typeof removedUserId === 'string') await publishDashboardInvalidation(env, {
-        eventId: crypto.randomUUID(), type: 'CONVERSATION_LEAVE', organizationId: access.organizationId,
-        conversationId: threadId, targetUserId: removedUserId, occurredAt: new Date().toISOString(),
+        event_id: crypto.randomUUID(), type: 'CONVERSATION_LEAVE', organization_id: access.organizationId,
+        conversation_id: threadId, user_id: removedUserId, occurred_at: new Date().toISOString(),
       })
       await publishConversationEvent(env, db, { conversationId: threadId, type: 'MESSAGE_UPDATE' })
     } catch (cause) {
       throw new HTTPError({ statusCode: 503, message: 'The group change was saved, but open apps could not be told. Retry with the same request.',
-        data: { code: 'DASHBOARD_PUBLICATION_FAILED', field: 'realtime', committed: true, thread_id: threadId }, cause })
+        data: { code: 'DASHBOARD_PUBLICATION_FAILED', field: 'realtime', committed: true, conversation_id: threadId }, cause })
     }
-    return { status: action === 'leave' ? 'left' as const : 'updated' as const, threadId }
+    return { status: action === 'leave' ? 'left' as const : 'updated' as const, conversation_id: threadId }
   }
   const verifyRecord = (record: NonNullable<Awaited<ReturnType<typeof readCreationRecord>>>) => {
-    if (record.entityId !== threadId || record.requestHash !== requestHash) fail(409, 'IDEMPOTENCY_KEY_REUSED', 'This idempotency key belongs to a different group operation', 'idempotencyKey')
+    if (record.entityId !== threadId || record.requestHash !== requestHash) fail(409, 'IDEMPOTENCY_KEY_REUSED', 'This idempotency key belongs to a different group operation', 'idempotency_key')
   }
   const replay = await readCreationRecord(db, dedupeKey)
   if (replay) {
@@ -416,7 +424,7 @@ export async function operateTeamGroup(env: TeamEnv, db: DbClient, access: TeamA
     await requireSeat(db, access, threadId)
     const thread = await queryFirst<{ is_group: number; booking_id: string | null; location_id: string | null; created_by_user_id: string | null }>(db,
       "SELECT is_group, booking_id, location_id, created_by_user_id FROM conversations WHERE organization_id = ? AND id = ? AND kind = 'team'", [access.organizationId, threadId])
-    if (!thread?.is_group || thread.booking_id || thread.location_id) fail(409, 'TEAM_GROUP_PROTECTED', 'Only manually created internal groups can be changed or left', 'threadId')
+    if (!thread?.is_group || thread.booking_id || thread.location_id) fail(409, 'TEAM_GROUP_PROTECTED', 'Only manually created internal groups can be changed or left', 'conversation_id')
     if (action !== 'leave' && thread.created_by_user_id !== access.userId && !await canManageGroups(access)) {
       fail(403, 'TEAM_GROUP_MANAGEMENT_REQUIRED', 'Only the group creator and participating workspace owners or admins can manage this group', 'permissions')
     }
@@ -424,10 +432,10 @@ export async function operateTeamGroup(env: TeamEnv, db: DbClient, access: TeamA
   await requireGroup()
   if (action === 'add') {
     const available = await listTeamMembers(env, access)
-    if (memberIds.some(id => !available.some(member => member.id === id))) fail(422, 'INVALID_TEAM_MEMBERS', 'Only current members of this workspace can be added', 'memberIds')
+    if (memberIds.some(id => !available.some(member => member.id === id))) fail(422, 'INVALID_TEAM_MEMBERS', 'Only current members of this workspace can be added', 'member_user_ids')
   }
   if (typeof removedUserId === 'string' && !await queryFirst(db, 'SELECT 1 FROM conversation_participants WHERE organization_id = ? AND conversation_id = ? AND user_id = ?', [access.organizationId, threadId, removedUserId])) {
-    fail(404, 'TEAM_GROUP_MEMBER_NOT_FOUND', 'That person is not in this group', 'userId')
+    fail(404, 'TEAM_GROUP_MEMBER_NOT_FOUND', 'That person is not in this group', 'user_id')
   }
   const permittedManager = await canManageGroups(access)
   const targets = d1JsonStringSet(memberIds)
@@ -481,7 +489,7 @@ export async function operateTeamGroup(env: TeamEnv, db: DbClient, access: TeamA
   const committed = await readCreationRecord(db, dedupeKey)
   if (!committed) {
     await requireGroup()
-    fail(409, 'TEAM_GROUP_CHANGED', 'Group membership changed or the group would exceed 50 members. Reload before trying again.', 'memberIds')
+    fail(409, 'TEAM_GROUP_CHANGED', 'Group membership changed or the group would exceed 50 members. Reload before trying again.', 'member_user_ids')
   }
   verifyRecord(committed)
   return await publish()
@@ -543,10 +551,10 @@ export async function sendTeamMessage(
   db: DbClient,
   access: TeamAccess,
   threadId: string,
-  input: { body: unknown; photos: MessagePhotoInput; idempotencyKey: unknown; senderName: string },
+  input: { body: unknown; photos: MessagePhotoInput; idempotency_key: unknown; senderName: string },
 ): Promise<{ message: TeamMessage; created: boolean }> {
   await requireSeat(db, access, threadId)
-  const idempotencyKey = requestKey(input.idempotencyKey)
+  const idempotencyKey = requestKey(input.idempotency_key)
   if (input.body !== undefined && typeof input.body !== 'string') fail(422, 'INVALID_MESSAGE', 'body must be text', 'body')
   const body = (input.body ?? '').trim()
   if (body.length > MAX_BODY) fail(422, 'MESSAGE_TOO_LONG', `A message can be at most ${MAX_BODY} characters`, 'body')
@@ -599,9 +607,9 @@ export async function sendTeamMessage(
       created = row.id === id
     }
   } catch (error) {
-    if (error instanceof MessageDedupeConflictError) fail(409, 'IDEMPOTENCY_KEY_REUSED', 'This idempotency key belongs to a different message', 'idempotencyKey')
+    if (error instanceof MessageDedupeConflictError) fail(409, 'IDEMPOTENCY_KEY_REUSED', 'This idempotency key belongs to a different message', 'idempotency_key')
     // The seat was removed between the check and the write: nothing was written.
-    if (error instanceof MessageStateConflictError) fail(404, 'TEAM_THREAD_NOT_FOUND', 'That conversation is not one of yours', 'threadId')
+    if (error instanceof MessageStateConflictError) fail(404, 'TEAM_THREAD_NOT_FOUND', 'That conversation is not one of yours', 'conversation_id')
     throw error
   }
   const recipients = await queryAll<{ user_id: string }>(db, `SELECT seat.user_id FROM conversation_participants seat
@@ -725,16 +733,16 @@ export async function reseatAutomaticThread(db: DbClient, input: { organizationI
  * 1.2). KrabiClaw's operators are emailed before the caller hears it worked;
  * the same key finds the same report.
  */
-export async function reportTeamMessage(env: ContentReportEnv, db: DbClient, access: TeamAccess, threadId: string, messageId: string, input: { reason: unknown; idempotencyKey: unknown }): Promise<ContentReport> {
+export async function reportTeamMessage(env: ContentReportEnv, db: DbClient, access: TeamAccess, threadId: string, messageId: string, input: { reason: unknown; idempotency_key: unknown }): Promise<ContentReport> {
   await requireSeat(db, access, threadId)
   const reason = reportReason(input.reason)
-  if (typeof input.idempotencyKey !== 'string' || !input.idempotencyKey.trim()) fail(400, 'MISSING_IDEMPOTENCY_KEY', 'Idempotency key is required', 'idempotencyKey')
+  if (typeof input.idempotency_key !== 'string' || !input.idempotency_key.trim()) fail(400, 'MISSING_IDEMPOTENCY_KEY', 'Idempotency key is required', 'idempotency_key')
   const message = await queryFirst<{ author_kind: string; author_user_id: string | null; body: string | null }>(db,
     'SELECT author_kind, author_user_id, body FROM messages WHERE organization_id = ? AND conversation_id = ? AND id = ?', [access.organizationId, threadId, messageId])
-  if (!message) fail(404, 'TEAM_MESSAGE_NOT_FOUND', 'That message is not in this conversation', 'messageId')
-  if (message.author_kind === 'member' && message.author_user_id === access.userId) fail(422, 'OWN_MESSAGE', 'You cannot report your own message', 'messageId')
+  if (!message) fail(404, 'TEAM_MESSAGE_NOT_FOUND', 'That message is not in this conversation', 'message_id')
+  if (message.author_kind === 'member' && message.author_user_id === access.userId) fail(422, 'OWN_MESSAGE', 'You cannot report your own message', 'message_id')
   const authorUserId = message.author_kind === 'krabiclaw' ? null : message.author_user_id
-  const id = contentReportId(access.userId, input.idempotencyKey)
+  const id = contentReportId(access.userId, input.idempotency_key)
   await executeBatch(db, [contentReportInsert({
     id, organizationId: access.organizationId, reporterUserId: access.userId, subject: 'message', conversationId: null,
     messageId, authorUserId, reason, excerpt: message.body || 'Photos only', blocked: false,

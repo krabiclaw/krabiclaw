@@ -24,7 +24,7 @@ test('inbox publication failures are visible and table booking receipts reflect 
           }
           const event = await request.json()
           if (request.method !== 'POST' || new URL(request.url).pathname !== '/broadcast'
-            || request.headers.get('x-krabiclaw-organization-id') !== event.organizationId) {
+            || request.headers.get('x-krabiclaw-organization-id') !== event.organization_id) {
             throw new Error('Invalid publisher wire contract')
           }
           await this.ctx.storage.put('observed', event)
@@ -33,20 +33,20 @@ test('inbox publication failures are visible and table booking receipts reflect 
             if (action && (action === 'cancel' ? event.type === 'MESSAGE_UPDATE' : event.type === 'MESSAGE_CREATE')) {
               await this.ctx.storage.delete('bookingAction')
               const booked = "(SELECT booking_id FROM conversations WHERE id = ?)"
-              if (action === 'cancel') await this.env.DB.prepare("UPDATE bookings SET status='cancelled',cancelled_at=?1,updated_at=?1 WHERE id=" + booked.replace('?', '?2')).bind(new Date().toISOString(), event.conversationId).run()
+              if (action === 'cancel') await this.env.DB.prepare("UPDATE bookings SET status='cancelled',cancelled_at=?1,updated_at=?1 WHERE id=" + booked.replace('?', '?2')).bind(new Date().toISOString(), event.conversation_id).run()
               // The table's seating an hour later.
               if (action === 'move') {
                 await this.env.DB.prepare(\`UPDATE bookings SET product_session_id=(SELECT later.id FROM product_sessions later JOIN product_sessions booked ON booked.id=bookings.product_session_id
-                  WHERE later.product_id=bookings.product_id AND later.starts_at=strftime('%Y-%m-%dT%H:%M:%fZ',booked.starts_at,'+1 hour')),updated_at=? WHERE id=\${booked}\`).bind(new Date().toISOString(), event.conversationId).run()
+                  WHERE later.product_id=bookings.product_id AND later.starts_at=strftime('%Y-%m-%dT%H:%M:%fZ',booked.starts_at,'+1 hour')),updated_at=? WHERE id=\${booked}\`).bind(new Date().toISOString(), event.conversation_id).run()
                 // A move takes the seating's time and place with it.
-                await this.env.DB.prepare('UPDATE bookings SET starts_at=s.starts_at,ends_at=s.ends_at,timezone=s.timezone,location_id=s.location_id,version=bookings.version+1 FROM product_sessions s WHERE s.id=bookings.product_session_id AND bookings.id=' + booked).bind(event.conversationId).run()
+                await this.env.DB.prepare('UPDATE bookings SET starts_at=s.starts_at,ends_at=s.ends_at,timezone=s.timezone,location_id=s.location_id,version=bookings.version+1 FROM product_sessions s WHERE s.id=bookings.product_session_id AND bookings.id=' + booked).bind(event.conversation_id).run()
               }
             }
           }
-          if (event.organizationId === 'throws') throw new Error('Injected DO transport failure')
-          if (event.organizationId === 'reset') this.ctx.abort('Injected DO storage reset')
-          if (event.organizationId === 'unavailable') return new Response('Unavailable', { status: 503 })
-          if (event.organizationId === 'forbidden') return new Response('Forbidden', { status: 403 })
+          if (event.organization_id === 'throws') throw new Error('Injected DO transport failure')
+          if (event.organization_id === 'reset') this.ctx.abort('Injected DO storage reset')
+          if (event.organization_id === 'unavailable') return new Response('Unavailable', { status: 503 })
+          if (event.organization_id === 'forbidden') return new Response('Forbidden', { status: 403 })
           return new Response(null, { status: 204 })
         }
       }
@@ -66,8 +66,8 @@ test('inbox publication failures are visible and table booking receipts reflect 
     const env = await runtime.getBindings<{ GUEST_INBOX_HUBS: DurableObjectNamespace }>()
     const namespace = env.GUEST_INBOX_HUBS
     const eventFor = (organizationId: string): Parameters<typeof publishDashboardInvalidation>[1] => ({
-      eventId: crypto.randomUUID(), type: 'MESSAGE_UPDATE', organizationId,
-      locationId: null, conversationId: 'proof-thread', team: false, occurredAt: new Date().toISOString(),
+      event_id: crypto.randomUUID(), type: 'MESSAGE_UPDATE', organization_id: organizationId,
+      location_id: null, conversation_id: 'proof-thread', team: false, occurred_at: new Date().toISOString(),
     })
     const healthy = eventFor('healthy')
     await assert.doesNotReject(() => publishDashboardInvalidation(env, healthy))

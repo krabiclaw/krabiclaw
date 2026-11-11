@@ -647,7 +647,7 @@ test('native online review uses canonical Products, holds capacity, and releases
     expect((await unchangedBooking.json()).booking).toMatchObject({ status: 'pending', booking_id: pending.booking_id, assigned_member_id: self.id, assigned_member_name: host.name })
     const key = `reject-${stamp}`
     for (let replay = 0; replay < 2; replay++) {
-      const reject = await page.request.post(`/api/dashboard/organizations/${org}/guest-threads/${pending.conversation_id}/operations/reject`, { data: { idempotencyKey: key } })
+      const reject = await page.request.post(`/api/dashboard/organizations/${org}/guest-threads/${pending.conversation_id}/operations/reject`, { data: { idempotency_key: key } })
       expect(reject.status(), await reject.text()).toBe(200)
     }
     const remaining = await request.get(`/api/public/products/${products[0]!.slug}/sessions?location_id=online&from=${day}&to=${day}`, { headers })
@@ -670,7 +670,7 @@ test('native online review uses canonical Products, holds capacity, and releases
     await expect(page.getByText('Your request is waiting for confirmation from the business.', { exact: true })).toBeVisible()
     expect(analyticsFailures).toEqual([])
     for (let replay = 0; replay < 2; replay++) {
-      const confirm = await page.request.post(`/api/dashboard/organizations/${org}/guest-threads/${browserBooking.conversation_id}/operations/confirm`, { data: { idempotencyKey: `confirm-${stamp}` } })
+      const confirm = await page.request.post(`/api/dashboard/organizations/${org}/guest-threads/${browserBooking.conversation_id}/operations/confirm`, { data: { idempotency_key: `confirm-${stamp}` } })
       expect(confirm.status(), await confirm.text()).toBe(200)
     }
     const confirmedDetails = await page.request.get(`/api/dashboard/bookings/booking/${browserBooking.conversation_id}?org=${legal.slug}`)

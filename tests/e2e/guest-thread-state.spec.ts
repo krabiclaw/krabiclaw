@@ -314,7 +314,7 @@ test('guest thread state stays source-owned, per-user, tenant-isolated, and idem
     const foreignRead = await foreignOwner.get(`/api/dashboard/organizations/${organizationId()}/guest-threads/${threadId}`)
     expect([403, 404]).toContain(foreignRead.status())
     const foreignMutation = await foreignOwner.post(`/api/dashboard/organizations/${organizationId()}/guest-threads/${threadId}/operations/reply`, {
-      data: { body: `Foreign reply ${nonce}`, idempotencyKey: `foreign-reply-${nonce}` },
+      data: { body: `Foreign reply ${nonce}`, idempotency_key: `foreign-reply-${nonce}` },
     })
     expect([403, 404]).toContain(foreignMutation.status())
 
@@ -988,7 +988,7 @@ test('buyer conversation approves and declines canonical changes without moving 
     await expectStatus(requestDelivery, 200)
     expect((await requestDelivery.json() as DeliveryList).deliveries.some(delivery => delivery.message_id === customerRequest[0]!.id && delivery.purpose === 'owner_alert' && delivery.status === 'sent')).toBe(true)
   } finally {
-    if (threadId) await expectStatus(await owner.post(`/api/dashboard/organizations/${demoOrganizationId()}/guest-threads/${threadId}/operations/cancel`, { data: { idempotencyKey: crypto.randomUUID() } }), 200)
+    if (threadId) await expectStatus(await owner.post(`/api/dashboard/organizations/${demoOrganizationId()}/guest-threads/${threadId}/operations/cancel`, { data: { idempotency_key: crypto.randomUUID() } }), 200)
     await owner.dispose()
   }
 })

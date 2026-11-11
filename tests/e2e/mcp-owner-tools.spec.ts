@@ -1047,7 +1047,7 @@ test.describe('stateless MCP server', () => {
         expect((await request.put(`${productUrl}/booking`, { data: { held_online: true } })).status()).toBe(400)
         const updatedPolicy = await request.put(`${productUrl}/booking`, { data: { confirmation_mode: 'instant', online_payment_required: false } })
         expect(updatedPolicy.status()).toBe(200)
-        expect(mcpData<{ product: { booking: unknown } }>(await call('get_product', { product_id: productId })).product.booking).toEqual({ duration_minutes: 60, default_capacity: null, confirmation_mode: 'instant', online_payment_required: false, held_online: false, scheduling_mode: 'business', assigned_member_id: seededTenant('restaurant').memberIds[E2E_ADMIN_ID]!, advance_notice_minutes: null, ...noQuestions })
+        expect(mcpData<{ product: { booking: unknown } }>(await call('get_product', { product_id: productId })).product.booking).toEqual({ duration_minutes: 60, default_capacity: null, confirmation_mode: 'instant', online_payment_required: false, held_online: false, scheduling_mode: 'business', assigned_member_id: seededTenant('restaurant').memberIds[E2E_ADMIN_ID]!, advance_notice_minutes: null, ...defaults })
 
         const viaHttp = await request.post(qaUrl, { data: { question: '  Shared HTTP question  ', answer: 'HTTP answer', page_path: '/parity-check' } })
         expect(viaHttp.status(), await viaHttp.text()).toBe(201)

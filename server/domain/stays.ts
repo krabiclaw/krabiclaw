@@ -852,11 +852,11 @@ export async function updateStayHome(env: CloudflareEnv, db: DbClient, access: S
     const updated = await readStayHome(db, access, productId)
     if (zone !== null && zone !== home.timezone) await planHomeMessages(db, access.organizationId, home.location_id)
     if (product && pushes && channelPush !== null) {
-      await publishStayInvalidation(env, { type: 'nights.changed', organizationId: access.organizationId, productId, locationId: updated.location_id, stayId: null }, { updated_at: product.updated_at })
+      await publishStayInvalidation(env, { type: 'nights.changed', organization_id: access.organizationId, product_id: productId, location_id: updated.location_id, booking_id: null }, { updated_at: product.updated_at })
     }
     // A product or location change already announced itself; the arrival guide and the listing switch do here.
     if (instructionsAt !== null || 'published' in body) {
-      await publishStayInvalidation(env, { type: 'stay.changed', organizationId: access.organizationId, productId, locationId: updated.location_id, stayId: null }, { updated_at: instructionsAt ?? new Date().toISOString() })
+      await publishStayInvalidation(env, { type: 'stay.changed', organization_id: access.organizationId, product_id: productId, location_id: updated.location_id, booking_id: null }, { updated_at: instructionsAt ?? new Date().toISOString() })
     }
     return { home: updated, airbnb_unsynced: airbnbUnsynced(updated, Object.keys(body)) }
   })
@@ -905,7 +905,7 @@ async function arrangeHomePhotos(db: DbClient, env: CloudflareEnv & GuestInboxPu
   // The placement batch already advances the revision read by public pages.
   await publishBusinessInvalidation(env, access.organizationId)
   const updated = await readStayHome(db, access, home.product_id)
-  await publishStayInvalidation(env, { type: 'stay.changed', organizationId: access.organizationId, productId: home.product_id, locationId: home.location_id, stayId: null }, { updated_at: new Date().toISOString() })
+  await publishStayInvalidation(env, { type: 'stay.changed', organization_id: access.organizationId, product_id: home.product_id, location_id: home.location_id, booking_id: null }, { updated_at: new Date().toISOString() })
   return updated
 }
 
@@ -1006,7 +1006,7 @@ export async function updateStayHomePhoto(db: DbClient, env: GuestInboxPublicati
   }
   await purgePublicResourceCacheNow(env, access.organizationId)
   const updated = await readStayHome(db, access, productId)
-  await publishStayInvalidation(env, { type: 'stay.changed', organizationId: access.organizationId, productId, locationId: home.location_id, stayId: null }, { updated_at: new Date().toISOString() })
+  await publishStayInvalidation(env, { type: 'stay.changed', organization_id: access.organizationId, product_id: productId, location_id: home.location_id, booking_id: null }, { updated_at: new Date().toISOString() })
   return updated
 }
 
@@ -1044,7 +1044,7 @@ function stayPhotoRoomInsert(access: StayAccess, productId: string, roomId: stri
 async function changedStayPhotoRooms(db: DbClient, env: CloudflareEnv & GuestInboxPublicationEnv, access: StayAccess, home: StayHome): Promise<StayHome> {
   await purgePublicResourceCacheNow(env, access.organizationId)
   const updated = await readStayHome(db, access, home.product_id)
-  await publishStayInvalidation(env, { type: 'stay.changed', organizationId: access.organizationId, productId: home.product_id, locationId: home.location_id, stayId: null }, { updated_at: new Date().toISOString() })
+  await publishStayInvalidation(env, { type: 'stay.changed', organization_id: access.organizationId, product_id: home.product_id, location_id: home.location_id, booking_id: null }, { updated_at: new Date().toISOString() })
   return updated
 }
 
@@ -1462,7 +1462,7 @@ export async function deliverPendingChannelNights(db: DbClient, env: StayMutatio
       if (added.length) await pushStayNights(db, env, row.organization_id, home, added, read)
       else await deliverStayNights(db, env, row.organization_id, home, read)
       delivered++
-      await publishStayInvalidation(env, { type: 'nights.changed', organizationId: row.organization_id, locationId: home.location_id, productId: home.product_id, stayId: null }, { updated_at: new Date().toISOString() })
+      await publishStayInvalidation(env, { type: 'nights.changed', organization_id: row.organization_id, location_id: home.location_id, product_id: home.product_id, booking_id: null }, { updated_at: new Date().toISOString() })
     } catch (error) {
       failures.push(`${row.product_id}: ${error instanceof Error ? error.message : String(error)}`)
     }
@@ -2039,7 +2039,7 @@ export async function moveStay(db: DbClient, env: StayMutationEnv, access: StayA
   return completeChannelPush(channelPush, { product_id: to.product_id, stay_id: stayId, version: next, ranges: range }, async () => {
     const stay = await getStay(db, access, stayId)
     await publishStayChange(env, db, access.organizationId, stay, true)
-    const released = { organizationId: access.organizationId, locationId: from.location_id, productId: from.product_id, stayId }
+    const released = { organization_id: access.organizationId, location_id: from.location_id, product_id: from.product_id, booking_id: stayId }
     await publishStayInvalidation(env, { ...released, type: 'stay.changed' }, { version: next })
     await publishStayInvalidation(env, { ...released, type: 'nights.changed' }, { version: next })
     if (!backOnListing) await notifyStayReady(env as CloudflareEnv, db, { organizationId: access.organizationId, stayId, productId: to.product_id, actorUserId: access.actorId })
@@ -2284,7 +2284,7 @@ export async function recordStayPayment(db: DbClient, env: GuestInboxPublication
       'SELECT id, booking_id, amount_minor, method, paid_on, reference, note FROM offline_payments WHERE organization_id = ? AND idempotency_key = ?', [access.organizationId, key])
     if (!existing) return null
     if (existing.booking_id !== stayId || Object.entries(payment).some(([field, value]) => existing[field as keyof StayPaymentFields] !== value)) fail(409, 'IDEMPOTENCY_CONFLICT', 'This idempotency_key was already used for a different payment', 'idempotency_key')
-    await publishStayInvalidation(env, { type: 'stay.changed', organizationId: access.organizationId, locationId: stay.location_id, productId: stay.product_id, stayId }, { version: stay.version })
+    await publishStayInvalidation(env, { type: 'stay.changed', organization_id: access.organizationId, location_id: stay.location_id, product_id: stay.product_id, booking_id: stayId }, { version: stay.version })
     const updated = await getStay(db, access, stayId)
     const recorded = updated.payments.find(entry => entry.id === existing.id)
     if (!recorded) fail(409, 'PAYMENT_CHANGED', 'The payment was recorded but removed before readback. Reload the stay before another change.', 'payment_id', { committed: true, stay_id: stayId })
@@ -2314,7 +2314,7 @@ export async function deleteStayPayment(db: DbClient, env: GuestInboxPublication
     { query: 'DELETE FROM offline_payments WHERE organization_id = ? AND booking_id = ? AND id = ?', params: [access.organizationId, stayId, paymentId] },
     organizationEventQuery({ organizationId: access.organizationId, locationId: stay.location_id, actorId: access.actorId, eventType: 'stay.payment_deleted', entityType: 'stay', entityId: stayId, metadata: { payment_id: paymentId }, onlyIfPreviousChangedOneRow: true }),
   ], { operation: 'Delete stay payment' })
-  await publishStayInvalidation(env, { type: 'stay.changed', organizationId: access.organizationId, locationId: stay.location_id, productId: stay.product_id, stayId }, { version: stay.version })
+  await publishStayInvalidation(env, { type: 'stay.changed', organization_id: access.organizationId, location_id: stay.location_id, product_id: stay.product_id, booking_id: stayId }, { version: stay.version })
   return getStay(db, access, stayId)
 }
 
@@ -2450,7 +2450,7 @@ export async function setStayNights(db: DbClient, env: StayMutationEnv, access: 
   }
   const channelPush = await pushNights(db, env, access, home.product_id, ranges)
   return completeChannelPush(channelPush, { product_id: home.product_id, updated_at: now, ranges }, async () => {
-    await publishStayInvalidation(env, { type: 'nights.changed', organizationId: access.organizationId, locationId: home.location_id, productId: home.product_id, stayId: null }, { updated_at: now })
+    await publishStayInvalidation(env, { type: 'nights.changed', organization_id: access.organizationId, location_id: home.location_id, product_id: home.product_id, booking_id: null }, { updated_at: now })
     return readStayCalendar(db, access, { productId: home.product_id, from, to })
   })
 }
@@ -2514,7 +2514,7 @@ export async function importStayNights(db: DbClient, env: GuestInboxPublicationE
     },
     audit.after,
   ], { operation: 'Import stay nights' })
-  await publishStayInvalidation(env, { type: 'nights.changed', organizationId: access.organizationId, locationId: home.location_id, productId: home.product_id, stayId: null }, { updated_at: now })
+  await publishStayInvalidation(env, { type: 'nights.changed', organization_id: access.organizationId, location_id: home.location_id, product_id: home.product_id, booking_id: null }, { updated_at: now })
 }
 
 /** A channel's booking as its current state reads, ready to land as a stay. */
@@ -2625,7 +2625,7 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
       for (const [product, location] of [[receipt.previous_product_id, receipt.previous_location_id], [receipt.product_id, receipt.location_id]]) {
         if (typeof product !== 'string' || typeof location !== 'string' || published.has(product)) continue
         published.add(product)
-        const affected = { organizationId, locationId: location, productId: product, stayId: stored.id }
+        const affected = { organization_id: organizationId, location_id: location, product_id: product, booking_id: stored.id }
         await publishStayInvalidation(env, { ...affected, type: 'stay.changed' }, { version: stored.version })
         await publishStayInvalidation(env, { ...affected, type: 'nights.changed' }, { version: stored.version })
       }
@@ -2756,14 +2756,14 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
 }
 
 async function publishStayChange(env: GuestInboxPublicationEnv, db: DbClient, organizationId: string, stay: Stay, nightsChanged: boolean): Promise<void> {
-  const input = { organizationId, locationId: stay.location_id, productId: stay.product_id, stayId: stay.id }
+  const input = { organization_id: organizationId, location_id: stay.location_id, product_id: stay.product_id, booking_id: stay.id }
   await publishStayInvalidation(env, { ...input, type: 'stay.changed' }, { version: stay.version })
   if (nightsChanged) await publishStayInvalidation(env, { ...input, type: 'nights.changed' }, { version: stay.version })
   try {
     await publishConversationEvent(env, db, { conversationId: stay.conversation_id, type: 'MESSAGE_UPDATE' })
   } catch (cause) {
     throw new HTTPError({ statusCode: 503, message: 'The stay was saved, but its conversation update could not be published. Reload before retrying.',
-      data: { code: 'DASHBOARD_PUBLICATION_FAILED', field: 'realtime', committed: true, stay_id: stay.id, product_id: stay.product_id, version: stay.version, conversation_id: stay.conversation_id }, cause })
+      data: { code: 'DASHBOARD_PUBLICATION_FAILED', field: 'realtime', committed: true, booking_id: stay.id, product_id: stay.product_id, version: stay.version, conversation_id: stay.conversation_id }, cause })
   }
 }
 
@@ -2963,7 +2963,7 @@ export async function pushStayHoldNights(db: DbClient, env: StayMutationEnv, org
   const home = await readStayHome(db, access, productId)
   const channelPush = await pushNights(db, env, access, productId, [[checkIn, checkOut]])
   const completed = await completeChannelPush(channelPush, { product_id: productId, ranges: [[checkIn, checkOut]] }, async () => {
-    await publishStayInvalidation(env, { type: 'nights.changed', organizationId, locationId: home.location_id, productId, stayId: null }, { updated_at: new Date().toISOString() })
+    await publishStayInvalidation(env, { type: 'nights.changed', organization_id: organizationId, location_id: home.location_id, product_id: productId, booking_id: null }, { updated_at: new Date().toISOString() })
     return {}
   })
   return completed.channel_push
@@ -3263,7 +3263,7 @@ async function syncCalendarLink(db: DbClient, env: CalendarLinkEnv, row: StayCal
   if (!changed.length) return { ...await calendarLinkView(db, env, saved, home.timezone), channel_push: null }
   const channelPush = await pushNights(db, env, access, row.product_id, changed)
   return completeChannelPush(channelPush, { product_id: row.product_id, updated_at: now, ranges: changed }, async () => {
-    await publishStayInvalidation(env, { type: 'nights.changed', organizationId: row.organization_id, locationId: home.location_id, productId: row.product_id, stayId: null }, { updated_at: now })
+    await publishStayInvalidation(env, { type: 'nights.changed', organization_id: row.organization_id, location_id: home.location_id, product_id: row.product_id, booking_id: null }, { updated_at: now })
     return calendarLinkView(db, env, saved, home.timezone)
   })
 }
@@ -3308,7 +3308,7 @@ export async function removeStayCalendarLink(db: DbClient, env: StayMutationEnv,
   const ranges = nightRuns(released)
   const channelPush = ranges.length ? await pushNights(db, env, access, home.product_id, ranges) : null
   return completeChannelPush(channelPush, { product_id: home.product_id, updated_at: now, ranges }, async () => {
-    if (ranges.length) await publishStayInvalidation(env, { type: 'nights.changed', organizationId: access.organizationId, locationId: home.location_id, productId: home.product_id, stayId: null }, { updated_at: now })
+    if (ranges.length) await publishStayInvalidation(env, { type: 'nights.changed', organization_id: access.organizationId, location_id: home.location_id, product_id: home.product_id, booking_id: null }, { updated_at: now })
     return {}
   })
 }

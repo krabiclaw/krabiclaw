@@ -112,14 +112,14 @@ test('committed stays report publication failures and idempotent retries publish
       return value as DashboardInvalidation[]
     }
     const homeEvents = await events()
-    assert.deepEqual(homeEvents.map(event => ({ type: event.type, ...('stayId' in event ? { productId: event.productId, stayId: event.stayId, locationId: event.locationId } : {}) })), [
-      { type: 'stay.changed', productId: cabin.id, stayId: null, locationId: 'cabin-site' },
-      { type: 'nights.changed', productId: cabin.id, stayId: null, locationId: 'cabin-site' },
+    assert.deepEqual(homeEvents.map(event => ({ type: event.type, ...('booking_id' in event ? { product_id: event.product_id, booking_id: event.booking_id, location_id: event.location_id } : {}) })), [
+      { type: 'stay.changed', product_id: cabin.id, booking_id: null, location_id: 'cabin-site' },
+      { type: 'nights.changed', product_id: cabin.id, booking_id: null, location_id: 'cabin-site' },
     ])
     await hub.fetch('https://inbox.test/failure', { method: 'PUT' })
     const input = { product_id: cabin.id, idempotency_key: 'publish-stay', check_in_date: '2027-05-01', check_out_date: '2027-05-03', ...guest }
     await assert.rejects(createStay(db, env, manager, input), (error: { status?: number; data?: Record<string, unknown> }) =>
-      error.status === 503 && error.data?.code === 'DASHBOARD_PUBLICATION_FAILED' && error.data.committed === true && error.data.version === 1 && typeof error.data.stay_id === 'string')
+      error.status === 503 && error.data?.code === 'DASHBOARD_PUBLICATION_FAILED' && error.data.committed === true && error.data.version === 1 && typeof error.data.booking_id === 'string')
     const persisted = await db.prepare('SELECT id, version FROM bookings WHERE idempotency_key = ?').bind(input.idempotency_key).first<{ id: string; version: number }>()
     assert(persisted)
     assert.equal(await db.prepare('SELECT count(*) FROM stay_nights WHERE booking_id = ?').bind(persisted.id).first('count(*)'), 2)
@@ -128,8 +128,8 @@ test('committed stays report publication failures and idempotent retries publish
     assert.deepEqual({ id: replay.id, version: replay.version }, persisted)
     assert.equal(await db.prepare('SELECT count(*) FROM bookings WHERE idempotency_key = ?').bind(input.idempotency_key).first('count(*)'), 1)
     // Every stay has its conversation, which hears the change after the stay's own screens.
-    assert.deepEqual((await events()).slice(-3).map(event => ({ type: event.type, ...('stayId' in event ? { stayId: event.stayId, productId: event.productId } : {}) })), [
-      { type: 'stay.changed', stayId: replay.id, productId: cabin.id }, { type: 'nights.changed', stayId: replay.id, productId: cabin.id }, { type: 'MESSAGE_UPDATE' },
+    assert.deepEqual((await events()).slice(-3).map(event => ({ type: event.type, ...('booking_id' in event ? { booking_id: event.booking_id, product_id: event.product_id } : {}) })), [
+      { type: 'stay.changed', booking_id: replay.id, product_id: cabin.id }, { type: 'nights.changed', booking_id: replay.id, product_id: cabin.id }, { type: 'MESSAGE_UPDATE' },
     ])
 
     await hub.fetch('https://inbox.test/failure', { method: 'PUT' })
@@ -159,12 +159,12 @@ test('committed stays report publication failures and idempotent retries publish
     assert.equal(channel.version, 1)
     assert.equal(await db.prepare('SELECT count(*) FROM bookings WHERE external_booking_id = ?').bind(booking.external_booking_id).first('count(*)'), 1)
     const published = await events()
-    assert.deepEqual(published.slice(-3).map(event => ({ type: event.type, ...('stayId' in event ? { stayId: event.stayId, productId: event.productId, locationId: event.locationId } : {}) })), [
-      { type: 'stay.changed', stayId: channel.id, productId: cabin.id, locationId: 'cabin-site' },
-      { type: 'nights.changed', stayId: channel.id, productId: cabin.id, locationId: 'cabin-site' },
+    assert.deepEqual(published.slice(-3).map(event => ({ type: event.type, ...('booking_id' in event ? { booking_id: event.booking_id, product_id: event.product_id, location_id: event.location_id } : {}) })), [
+      { type: 'stay.changed', booking_id: channel.id, product_id: cabin.id, location_id: 'cabin-site' },
+      { type: 'nights.changed', booking_id: channel.id, product_id: cabin.id, location_id: 'cabin-site' },
       { type: 'MESSAGE_UPDATE' },
     ])
-    assert.equal(new Set(published.map(event => event.eventId)).size, published.length)
+    assert.equal(new Set(published.map(event => event.event_id)).size, published.length)
   } finally {
     await runtime.dispose()
   }
@@ -208,11 +208,11 @@ test('a moved channel revision repairs its audited home scopes without rewriting
     const replay = await applyChannelBooking(db, env, ORG, lake.id, moved)
     assert.equal(replay.applied, false)
     assert.deepEqual([replay.version, replay.updated_at], [committed.version, committed.updated_at])
-    assert.deepEqual((await events()).slice(beforeRepair).map(event => ({ type: event.type, ...('productId' in event ? { productId: event.productId, locationId: event.locationId, stayId: event.stayId } : {}) })), [
-      { type: 'stay.changed', productId: cabin.id, locationId: 'cabin-site', stayId: first.id },
-      { type: 'nights.changed', productId: cabin.id, locationId: 'cabin-site', stayId: first.id },
-      { type: 'stay.changed', productId: lake.id, locationId: 'lake-site', stayId: first.id },
-      { type: 'nights.changed', productId: lake.id, locationId: 'lake-site', stayId: first.id },
+    assert.deepEqual((await events()).slice(beforeRepair).map(event => ({ type: event.type, ...('product_id' in event ? { product_id: event.product_id, location_id: event.location_id, booking_id: event.booking_id } : {}) })), [
+      { type: 'stay.changed', product_id: cabin.id, location_id: 'cabin-site', booking_id: first.id },
+      { type: 'nights.changed', product_id: cabin.id, location_id: 'cabin-site', booking_id: first.id },
+      { type: 'stay.changed', product_id: lake.id, location_id: 'lake-site', booking_id: first.id },
+      { type: 'nights.changed', product_id: lake.id, location_id: 'lake-site', booking_id: first.id },
       // The reservation's conversation, which every channel stay has from its first revision.
       { type: 'MESSAGE_UPDATE' },
     ])
@@ -226,7 +226,7 @@ test('a moved channel revision repairs its audited home scopes without rewriting
     const beforeStale = (await events()).length
     const stale = await applyChannelBooking(db, env, ORG, cabin.id, { ...booking, revision_id: 'never-applied', provider_updated_at: '2026-10-16T00:00:00Z' })
     assert.equal(stale.applied, false)
-    assert.deepEqual((await events()).slice(beforeStale).filter(event => 'productId' in event).map(event => event.productId), [lake.id, lake.id])
+    assert.deepEqual((await events()).slice(beforeStale).filter(event => 'product_id' in event).map(event => event.product_id), [lake.id, lake.id])
     assert.deepEqual((await audit()).results, appliedAudits.results)
     assert.equal((await getStay(db, manager, first.id)).updated_at, committed.updated_at)
 

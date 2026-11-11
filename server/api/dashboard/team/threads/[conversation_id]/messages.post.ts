@@ -12,7 +12,7 @@ export default defineHandler(async (event) => {
   const access = await teamAccessFor(memberAccessPrincipal(organization, { env, event }), organization.memberId, 'send')
   const multipart = event.req.headers.get('content-type')?.startsWith('multipart/form-data') ?? false
   const form = multipart ? await event.req.formData() : null
-  const body = form ? null : await readStrictBody<{ body?: unknown; idempotencyKey?: unknown }>(event, { body: 'string', idempotencyKey: 'string' })
+  const body = form ? null : await readStrictBody<{ body?: unknown; idempotency_key?: unknown }>(event, { body: 'string', idempotency_key: 'string' })
   const formText = (name: string) => form?.get(name) ?? undefined
   const photos = form
     ? await Promise.all(form.getAll('photos').map(async (part) => {
@@ -23,7 +23,7 @@ export default defineHandler(async (event) => {
   const result = await sendTeamMessage(env, db, access, getRouterParam(event, 'conversation_id') ?? '', {
     body: form ? formText('body') : body!.body,
     photos,
-    idempotencyKey: form ? formText('idempotencyKey') : body!.idempotencyKey,
+    idempotency_key: form ? formText('idempotency_key') : body!.idempotency_key,
     senderName: session.user.name,
   })
   return jsonResponse({ message: result.message }, { status: result.created ? 201 : 200 })

@@ -47,8 +47,8 @@ export function teamThreadName(thread: TeamThread, userId: string | undefined) {
 
 export type TeamGroupOperation =
   | { action: 'rename'; name: string | null }
-  | { action: 'add'; memberIds: string[] }
-  | { action: 'remove'; userId: string }
+  | { action: 'add'; member_user_ids: string[] }
+  | { action: 'remove'; user_id: string }
   | { action: 'leave' }
 
 /** Keep the leave form alive until its keyed request reports its result. */
@@ -70,9 +70,9 @@ export async function useTeamGroup() {
     if (operation.action === 'leave') leaving.value = id
     try {
       const result = await api(`/api/dashboard/team/threads/${encodeURIComponent(id)}/operations`, {
-        method: 'POST', body: { ...operation, idempotencyKey: keys.get(identity) },
-        validate: (value): value is { status: 'updated' | 'left'; threadId: string } => isRecord(value)
-          && value.threadId === id && value.status === (operation.action === 'leave' ? 'left' : 'updated'),
+        method: 'POST', body: { ...operation, idempotency_key: keys.get(identity) },
+        validate: (value): value is { status: 'updated' | 'left'; conversation_id: string } => isRecord(value)
+          && value.conversation_id === id && value.status === (operation.action === 'leave' ? 'left' : 'updated'),
       })
       await refresh()
       // Having left, the conversation is no longer this member's to read: 404 is the proof.
@@ -83,8 +83,8 @@ export async function useTeamGroup() {
         const saved = data.value?.thread
         const verified = saved && (
           operation.action === 'rename' ? saved.name === operation.name
-            : operation.action === 'add' ? operation.memberIds.every(userId => saved.participants.some(person => person.id === userId))
-              : !saved.participants.some(person => person.id === operation.userId))
+            : operation.action === 'add' ? operation.member_user_ids.every(userId => saved.participants.some(person => person.id === userId))
+              : !saved.participants.some(person => person.id === operation.user_id))
         if (!verified) throw new Error('The conversation change could not be verified. Retry the same action.')
       }
       keys.delete(identity)

@@ -424,7 +424,7 @@ export async function updateLocation(
     if (!homes.length) return;
     if (typeof updatedAt !== 'string' || !updatedAt) throw new HTTPError({ statusCode: 500, message: 'The saved home location has no update timestamp', data: { code: 'LOCATION_NOT_READABLE', field: 'location.updated_at', committed: true, location_id: locationId } });
     for (const home of homes) {
-      const input = { organizationId, productId: home.product_id, locationId, stayId: null };
+      const input = { organization_id: organizationId, product_id: home.product_id, location_id: locationId, booking_id: null };
       await publishStayInvalidation(env, { ...input, type: 'stay.changed' }, { updated_at: updatedAt });
       await publishStayInvalidation(env, { ...input, type: 'nights.changed' }, { updated_at: updatedAt });
     }

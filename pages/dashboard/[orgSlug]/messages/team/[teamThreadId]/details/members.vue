@@ -48,7 +48,7 @@ async function add() {
   if (saving.value || !selected.value.length || !thread.value?.can_manage) return
   saving.value = true
   actionError.value = ''
-  try { await operate({ action: 'add', memberIds: [...selected.value].sort() }); selected.value = [] }
+  try { await operate({ action: 'add', member_user_ids: [...selected.value].sort() }); selected.value = [] }
   catch (error) { actionError.value = getErrorMessage(error, 'People could not be added to the conversation') }
   finally { saving.value = false }
 }
@@ -56,7 +56,7 @@ async function remove() {
   if (saving.value || !removing.value || !thread.value?.can_manage) return
   saving.value = true
   actionError.value = ''
-  try { await operate({ action: 'remove', userId: removing.value.id }); removing.value = null }
+  try { await operate({ action: 'remove', user_id: removing.value.id }); removing.value = null }
   catch (error) { removing.value = null; actionError.value = getErrorMessage(error, 'The participant could not be removed') }
   finally { saving.value = false }
 }

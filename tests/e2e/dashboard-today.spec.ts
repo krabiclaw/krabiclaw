@@ -276,7 +276,7 @@ test('the member who handles a branch’s tables gains and loses its table booki
     const accessChanged = socket.waitForEvent('framereceived', { predicate: frame => {
       if (frame.payload === 'pong') return false
       const event: unknown = JSON.parse(String(frame.payload))
-      return isDashboardInvalidation(event) && event.type === 'access.changed' && event.organizationId === organizationId
+      return isDashboardInvalidation(event) && event.type === 'access.changed' && event.organization_id === organizationId
     } })
     // The tables go back to the chef.
     await assign(chefMemberId)
@@ -294,7 +294,7 @@ test('the member who handles a branch’s tables gains and loses its table booki
   } finally {
     try {
       if (reservationId) {
-        const cancelled = await page.request.post(`${inboxPath}/${reservationId}/operations/cancel`, { data: { idempotencyKey: crypto.randomUUID() } })
+        const cancelled = await page.request.post(`${inboxPath}/${reservationId}/operations/cancel`, { data: { idempotency_key: crypto.randomUUID() } })
         expect(cancelled.status(), await cancelled.text()).toBe(200)
         const read = await page.request.get(`/api/dashboard/bookings/booking/${reservationId}`, { params: { org } })
         expect(read.status(), await read.text()).toBe(200)

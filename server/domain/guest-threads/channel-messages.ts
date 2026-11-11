@@ -265,7 +265,7 @@ export async function mirrorChannexThread(db: DbClient, env: ChannelEnv, threadI
     [mapping.external_booking_id, mapping.organization_id, mapping.product_id, mapping.conversation_id])
   if (stay) {
     await planSourceMessages(db, mapping.organization_id, stay.id)
-    await publishStayInvalidation(env, { type: 'stay.changed', organizationId: mapping.organization_id, locationId: home.location_id, productId: mapping.product_id, stayId: stay.id }, { version: stay.version })
+    await publishStayInvalidation(env, { type: 'stay.changed', organization_id: mapping.organization_id, location_id: home.location_id, product_id: mapping.product_id, booking_id: stay.id }, { version: stay.version })
   }
   return { status: 'mirrored', conversation_id: mapping.conversation_id, messages: messages.length }
 }

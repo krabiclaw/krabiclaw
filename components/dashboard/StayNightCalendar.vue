@@ -386,7 +386,7 @@ watch(() => route.query.month, value => {
 })
 const realtime = useDashboardInvalidations()
 watch(realtime.event, event => {
-  if ((event?.type === 'stay.changed' || event?.type === 'nights.changed') && event.productId === props.productId && !busy.value) void refresh()
+  if ((event?.type === 'stay.changed' || event?.type === 'nights.changed') && event.product_id === props.productId && !busy.value) void refresh()
 })
 watch(realtime.connectionEpoch, epoch => { if (epoch > 0 && !busy.value) void refresh() })
 const calendarUi = {

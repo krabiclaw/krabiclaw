@@ -153,7 +153,7 @@ export async function handleConversationTools(ctx: McpExecutorContext): Promise<
     }
     case 'list_conversation_recipients': return { current_user_id: userId, members: await listTeamMembers(env, await teamAccess(ctx, principal, 'read')) }
     case 'start_conversation': {
-      const thread = await createTeamThread(env, db, await teamAccess(ctx, principal, 'send'), { memberIds: args.member_user_ids, bookingId: args.booking_id, locationId: args.location_id, name: args.name, idempotencyKey: args.idempotency_key })
+      const thread = await createTeamThread(env, db, await teamAccess(ctx, principal, 'send'), args)
       return { conversation_id: thread.id, created: thread.created }
     }
   }
@@ -180,8 +180,7 @@ export async function handleConversationTools(ctx: McpExecutorContext): Promise<
       return { conversation_id: conversation.id, archived: result.archived }
     }
     case 'update_conversation_group': {
-      const result = await operateTeamGroup(env, db, await teamAccess(ctx, principal, 'send'), conversation.id, { action: args.action, idempotencyKey: args.idempotency_key, ...(args.name !== undefined ? { name: args.name } : {}), ...(args.member_user_ids !== undefined ? { memberIds: args.member_user_ids } : {}), ...(args.user_id !== undefined ? { userId: args.user_id } : {}) })
-      return { status: result.status, conversation_id: result.threadId }
+      return await operateTeamGroup(env, db, await teamAccess(ctx, principal, 'send'), conversation.id, { ...args, action: args.action, idempotency_key: args.idempotency_key })
     }
     case 'send_message': {
       const file = args.file === undefined ? null : toolFileReference(args.file, 'file')
@@ -195,7 +194,7 @@ export async function handleConversationTools(ctx: McpExecutorContext): Promise<
         const access = await teamAccess(ctx, principal, 'send')
         const sender = (await listTeamMembers(env, access)).find(member => member.id === userId)
         if (!sender) throw new HTTPError({ statusCode: 404, statusMessage: 'Organization membership not found' })
-        const sent = await sendTeamMessage(env, db, access, conversation.id, { body: args.message, photos: photo ?? [], idempotencyKey, senderName: sender.name })
+        const sent = await sendTeamMessage(env, db, access, conversation.id, { body: args.message, photos: photo ?? [], idempotency_key: idempotencyKey, senderName: sender.name })
         return { conversation_id: conversation.id, outcome: { ok: true }, message_id: sent.message.id, created: sent.created }
       }
       const outcome = await executeGuestThreadOperation(db, { threadId: conversation.id, organizationId, action: 'reply', body: optionalString(args, 'message') ?? undefined,

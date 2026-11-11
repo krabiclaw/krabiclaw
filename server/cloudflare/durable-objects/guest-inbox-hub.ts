@@ -48,22 +48,22 @@ async function socketMembership(env: GuestInboxHubEnv, attachment: InboxSocketAt
 }
 
 async function canReceive(env: GuestInboxHubEnv, attachment: InboxSocketAttachment, membership: ResolvedMembership, event: DashboardInvalidation): Promise<boolean> {
-  if (attachment.organizationId !== event.organizationId) return false
+  if (attachment.organizationId !== event.organization_id) return false
   // Scope changes carry no resource or person identity. Former assignees must
   // learn to re-read too, even though resource events no longer reach them.
   if (event.type === 'access.changed' || event.type === 'business.changed') return true
   // A read position or archive moved: the reader's own apps alone.
-  if (event.type === 'MESSAGE_ACK') return event.targetUserId === attachment.userId
+  if (event.type === 'MESSAGE_ACK') return event.user_id === attachment.userId
   if (event.type === 'CONVERSATION_LEAVE') {
-    if (event.targetUserId !== attachment.userId) return false
+    if (event.user_id !== attachment.userId) return false
     // An old keyed retry must not evict someone who has since been added again.
     return !await queryFirst(env.DB, 'SELECT 1 FROM conversation_participants WHERE organization_id = ? AND conversation_id = ? AND user_id = ?',
-      [attachment.organizationId, event.conversationId, attachment.userId])
+      [attachment.organizationId, event.conversation_id, attachment.userId])
   }
   if (event.type === 'MESSAGE_CREATE' || event.type === 'MESSAGE_UPDATE') {
     // The one statement of who sees a conversation: a team conversation its participants, a guest one by role or responsibility.
     try {
-      await assertConversationAccess(env.DB, memberAccessPrincipal(membership, { env }), event.conversationId)
+      await assertConversationAccess(env.DB, memberAccessPrincipal(membership, { env }), event.conversation_id)
       return true
     } catch (error) {
       if (error instanceof HTTPError && error.status === 404) return false
@@ -75,7 +75,7 @@ async function canReceive(env: GuestInboxHubEnv, attachment: InboxSocketAttachme
   // What remains is a home's stay or nights change: the home's responsible members.
   return Boolean(await queryFirst(env.DB, `SELECT c.product_id FROM product_stay_configs s JOIN product_booking_configs c ON c.organization_id = s.organization_id AND c.product_id = s.product_id
       WHERE c.organization_id = ? AND c.product_id = ? AND (${assignedMemberSql('c')})`,
-    [attachment.organizationId, event.productId, attachment.userId]))
+    [attachment.organizationId, event.product_id, attachment.userId]))
 }
 
 export class GuestInboxHubObject extends DurableObject<GuestInboxHubEnv> {
@@ -171,7 +171,7 @@ export class GuestInboxHubObject extends DurableObject<GuestInboxHubEnv> {
       return failure(400, 'INVALID_JSON', 'Dashboard invalidation must be valid JSON', 'body')
     }
     const organizationId = request.headers.get('x-krabiclaw-organization-id')
-    if (!organizationId || !isDashboardInvalidation(event) || event.organizationId !== organizationId) {
+    if (!organizationId || !isDashboardInvalidation(event) || event.organization_id !== organizationId) {
       return failure(400, 'INVALID_DASHBOARD_INVALIDATION', 'Invalid dashboard invalidation', 'body')
     }
     // A stay, booking or task write is announced this way (a booking's in its guest conversation); the organization's jobs follow it.

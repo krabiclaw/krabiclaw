@@ -328,9 +328,9 @@ const canRequestChange = computed(() => props.personalScope && detail.value !== 
 const policy = computed(() => detail.value?.cancellation_policy ? bookedPolicyTerms(detail.value.cancellation_policy) : null)
 const paymentPath = computed(() => detail.value?.online_payment ? `/dashboard/${route.params.orgSlug}/bookings/payment/${encodeURIComponent(detail.value.online_payment.payment_id)}` : '')
 watch(realtime.event, event => {
-  if (event?.type === 'stay.changed' && (event.stayId === props.stayId || (event.stayId === null && event.productId === stay.value?.product_id))) {
+  if (event?.type === 'stay.changed' && (event.booking_id === props.stayId || (event.booking_id === null && event.product_id === stay.value?.product_id))) {
     void refresh()
-    if (!props.personalScope && event.stayId === null) void refreshHostHome()
+    if (!props.personalScope && event.booking_id === null) void refreshHostHome()
   }
 })
 watch(realtime.connectionEpoch, epoch => {
@@ -461,7 +461,7 @@ async function markNoShow() {
   try {
     await dashboardApi(`/api/dashboard/organizations/${encodeURIComponent(dashboardOrganization.organizationId.value ?? '')}/guest-threads/${encodeURIComponent(value.conversation_id)}/operations/no_show`, {
       method: 'POST',
-      body: { idempotencyKey: `no-show:${value.id}` },
+      body: { idempotency_key: `no-show:${value.id}` },
       validate: (response: unknown): response is { thread: Record<string, unknown> } => isRecord(response) && isRecord(response.thread),
     })
     await refresh()

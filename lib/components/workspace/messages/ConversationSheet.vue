@@ -104,7 +104,7 @@ async function move(transition: 'archive' | 'unarchive' | 'report' | 'block' | '
         validate: (value: unknown): value is { archived: boolean } => isRecord(value) && value.archived === archived,
       })
     } else {
-      await api(`${path.value}/operations/${transition}`, { method: 'POST', body: reason === undefined ? { idempotencyKey } : { idempotencyKey, reason }, validate: isThreadDetailResponse })
+      await api(`${path.value}/operations/${transition}`, { method: 'POST', body: reason === undefined ? { idempotency_key: idempotencyKey } : { idempotency_key: idempotencyKey, reason }, validate: isThreadDetailResponse })
     }
     attemptKeys.delete(attempt)
     reporting.value = null

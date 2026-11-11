@@ -16,19 +16,20 @@ export async function publishConversationEvent(
     'SELECT id, organization_id, location_id, kind FROM conversations WHERE id = ?', [input.conversationId])
   if (!conversation) throw new Error(`Conversation ${input.conversationId} not found for publication`)
   await publishDashboardInvalidation(env, {
-    eventId: crypto.randomUUID(),
+    event_id: crypto.randomUUID(),
     type: input.type,
-    organizationId: conversation.organization_id,
-    locationId: conversation.location_id,
-    conversationId: conversation.id,
+    organization_id: conversation.organization_id,
+    location_id: conversation.location_id,
+    conversation_id: conversation.id,
     team: conversation.kind === 'team',
-    occurredAt: new Date().toISOString(),
+    occurred_at: new Date().toISOString(),
   })
 }
 
 /** One person's read position or archive moved; only their own apps hear it. */
 export async function publishConversationAck(env: GuestInboxPublicationEnv, input: { organizationId: string; conversationId: string; targetUserId: string }): Promise<void> {
-  await publishDashboardInvalidation(env, { ...input, eventId: crypto.randomUUID(), type: 'MESSAGE_ACK', occurredAt: new Date().toISOString() })
+  await publishDashboardInvalidation(env, { organization_id: input.organizationId, conversation_id: input.conversationId, user_id: input.targetUserId,
+    event_id: crypto.randomUUID(), type: 'MESSAGE_ACK', occurred_at: new Date().toISOString() })
 }
 
 export async function publishDashboardInvalidation(
@@ -39,16 +40,16 @@ export async function publishDashboardInvalidation(
     throw new HTTPError({ statusCode: 503, message: 'GUEST_INBOX_HUBS binding is not configured', data: { code: 'REALTIME_CONFIGURATION_REQUIRED', field: 'GUEST_INBOX_HUBS' } })
   }
 
-  const hub = env.GUEST_INBOX_HUBS.get(env.GUEST_INBOX_HUBS.idFromName(event.organizationId))
+  const hub = env.GUEST_INBOX_HUBS.get(env.GUEST_INBOX_HUBS.idFromName(event.organization_id))
   const request = {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      'x-krabiclaw-organization-id': event.organizationId,
+      'x-krabiclaw-organization-id': event.organization_id,
     },
     body: JSON.stringify(event),
   }
-  const publication = { eventId: event.eventId, type: event.type, organizationId: event.organizationId }
+  const publication = { eventId: event.event_id, type: event.type, organizationId: event.organization_id }
   // This broadcast is how an open dashboard learns a booking just arrived. A
   // transport error or a 5xx used to return quietly while a 4xx threw, so the
   // failures that meant the hub was actually broken were the ones that stayed
@@ -64,7 +65,7 @@ export async function publishDashboardInvalidation(
 export async function publishAccessInvalidation(env: GuestInboxPublicationEnv, input: { organizationId: string }): Promise<void> {
   try {
     await publishDashboardInvalidation(env, {
-      eventId: crypto.randomUUID(), type: 'access.changed', organizationId: input.organizationId, occurredAt: new Date().toISOString(),
+      event_id: crypto.randomUUID(), type: 'access.changed', organization_id: input.organizationId, occurred_at: new Date().toISOString(),
     })
   } catch (cause) {
     throw new HTTPError({ statusCode: 503, message: 'Access changed, but open apps could not be told. Retry the same operation to refresh them.',
@@ -76,7 +77,7 @@ export async function publishAccessInvalidation(env: GuestInboxPublicationEnv, i
 export async function publishBusinessInvalidation(env: GuestInboxPublicationEnv, organizationId: string): Promise<void> {
   try {
     await publishDashboardInvalidation(env, {
-      eventId: crypto.randomUUID(), type: 'business.changed', organizationId, occurredAt: new Date().toISOString(),
+      event_id: crypto.randomUUID(), type: 'business.changed', organization_id: organizationId, occurred_at: new Date().toISOString(),
     })
   } catch (cause) {
     throw new HTTPError({ statusCode: 503, message: 'The change was saved, but open dashboards could not be updated. Reload before retrying.',
@@ -86,17 +87,17 @@ export async function publishBusinessInvalidation(env: GuestInboxPublicationEnv,
 
 export async function publishStayInvalidation(
   env: GuestInboxPublicationEnv,
-  input: Omit<StayInvalidation, 'eventId' | 'occurredAt'>,
+  input: Omit<StayInvalidation, 'event_id' | 'occurred_at'>,
   committed: { version: number } | { updated_at: string },
 ): Promise<void> {
   try {
     await publishDashboardInvalidation(env, {
       ...input,
-      eventId: crypto.randomUUID(),
-      occurredAt: new Date().toISOString(),
+      event_id: crypto.randomUUID(),
+      occurred_at: new Date().toISOString(),
     })
   } catch (cause) {
     throw new HTTPError({ statusCode: 503, message: 'The change was saved, but dashboard updates could not be published. Reload before retrying.',
-      data: { code: 'DASHBOARD_PUBLICATION_FAILED', field: 'realtime', committed: true, product_id: input.productId, stay_id: input.stayId, ...committed }, cause })
+      data: { code: 'DASHBOARD_PUBLICATION_FAILED', field: 'realtime', committed: true, product_id: input.product_id, booking_id: input.booking_id, ...committed }, cause })
   }
 }

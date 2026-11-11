@@ -204,7 +204,7 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
   } finally {
     try {
       if (requestId) {
-        await body(await page.request.post(`/api/dashboard/organizations/${ORGANIZATION}/guest-threads/${requestId}/operations/cancel`, { data: { idempotencyKey: crypto.randomUUID() } }), 200)
+        await body(await page.request.post(`/api/dashboard/organizations/${ORGANIZATION}/guest-threads/${requestId}/operations/cancel`, { data: { idempotency_key: crypto.randomUUID() } }), 200)
         const cancelled = await body<{ booking: { status: string } }>(await page.request.get(`/api/dashboard/bookings/booking/${requestId}`, { params: { org: SLUG } }), 200)
         expect(cancelled.booking.status).toBe('cancelled')
       }

@@ -147,7 +147,7 @@ async function report(reason: string) {
   reportSaving.value = true
   reportError.value = null
   try {
-    await api(`${path.value}/messages/${encodeURIComponent(message.id)}/report`, { method: 'POST', body: { reason, idempotencyKey: reportKeys.get(message.id) }, validate: isReportResponse })
+    await api(`${path.value}/messages/${encodeURIComponent(message.id)}/report`, { method: 'POST', body: { reason, idempotency_key: reportKeys.get(message.id) }, validate: isReportResponse })
     reportKeys.delete(message.id)
     reporting.value = null
   } catch (error) { reportError.value = getErrorMessage(error, 'The report could not be sent') } finally { reportSaving.value = false }
@@ -165,7 +165,7 @@ async function send() {
   sending.value = true
   actionError.value = ''
   try {
-    await api(`${path.value}/messages`, { method: 'POST', body: selected.length ? messageReplyForm(body, selected, current.key) : { body, idempotencyKey: current.key }, validate: isTeamMessageResponse })
+    await api(`${path.value}/messages`, { method: 'POST', body: selected.length ? messageReplyForm(body, selected, current.key) : { body, idempotency_key: current.key }, validate: isTeamMessageResponse })
     // Clear only the exact committed draft; a failed receipt/reconciliation keeps the keyed retry.
     await refresh()
     if (error.value) throw error.value
@@ -207,7 +207,7 @@ async function markRead() {
 watch([data, visibility], markRead, { immediate: true })
 const realtime = useDashboardInvalidations()
 watch(realtime.event, event => {
-  if ((event?.type === 'MESSAGE_CREATE' || event?.type === 'MESSAGE_UPDATE') && event.organizationId === dashboard.organizationId.value && event.conversationId === props.threadId) void refresh()
+  if ((event?.type === 'MESSAGE_CREATE' || event?.type === 'MESSAGE_UPDATE') && event.organization_id === dashboard.organizationId.value && event.conversation_id === props.threadId) void refresh()
 })
 watch(realtime.connectionEpoch, epoch => { if (epoch > 0) void refresh() })
 </script>

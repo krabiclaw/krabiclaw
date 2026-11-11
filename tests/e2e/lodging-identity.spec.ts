@@ -149,9 +149,9 @@ test.describe('lodging identity boundary', () => {
       expect(started.created).toBe(true)
       const threadId = started.conversation_id
       const teamPath = `/api/dashboard/team/threads/${threadId}`
-      const reusedTeam = await api.post(`/api/dashboard/team/threads?org=${slug}`, { headers: inviteeBearer, data: { memberIds: [fixture.id] } })
+      const reusedTeam = await api.post(`/api/dashboard/team/threads?org=${slug}`, { headers: inviteeBearer, data: { member_user_ids: [fixture.id] } })
       expect(reusedTeam.status, await reusedTeam.text()).toBe(200)
-      expect(await reusedTeam.json()).toEqual({ id: threadId })
+      expect(await reusedTeam.json()).toEqual({ conversation_id: threadId })
       const conversations = await teamCall<{ conversations: Array<{ conversation_id: string; kind: string; unread: boolean }>; page_info: { has_more: boolean; next_cursor: string | null } }>('list_conversations', { kind: 'team' })
       expect(conversations.conversations).toEqual([expect.objectContaining({ conversation_id: threadId, kind: 'team', unread: false })])
       expect(conversations.page_info).toEqual({ has_more: false, next_cursor: null })
@@ -183,7 +183,7 @@ test.describe('lodging identity boundary', () => {
       const marked = await teamCall<{ conversation_id: string; unread: boolean; last_read_message_id: string | null }>('mark_conversation_read', { conversation_id: threadId }, memberMcp)
       expect(marked).toEqual({ conversation_id: threadId, unread: false, last_read_message_id: sent.message.id })
       expect(await teamRows(inviteeBearer)).toEqual([expect.objectContaining({ id: threadId, unread: false })])
-      const reply = await api.post(`${teamPath}/messages?org=${slug}`, { headers: inviteeBearer, data: { body: 'Thank you, I will check the room.', idempotencyKey: crypto.randomUUID() } })
+      const reply = await api.post(`${teamPath}/messages?org=${slug}`, { headers: inviteeBearer, data: { body: 'Thank you, I will check the room.', idempotency_key: crypto.randomUUID() } })
       expect(reply.status, await reply.text()).toBe(201)
       const replyMessage = (await reply.json() as { message: TeamMessage }).message
       const latest = await teamRead({ limit: 1 })
@@ -221,7 +221,7 @@ test.describe('lodging identity boundary', () => {
       await page.getByRole('button', { name: 'Start', exact: true }).click()
       const reopenedResponse = await reopened
       expect(reopenedResponse.status()).toBe(200)
-      expect(await reopenedResponse.json()).toEqual({ id: threadId })
+      expect(await reopenedResponse.json()).toEqual({ conversation_id: threadId })
       await expect(page).toHaveURL(new RegExp(`/messages/team/${threadId}\\?kind=team$`))
       const cmsBody = `Team CMS proof ${crypto.randomUUID()}`
       const composer = page.getByRole('textbox', { name: 'Message your team', exact: true })
@@ -230,7 +230,7 @@ test.describe('lodging identity boundary', () => {
       let attemptedKey = ''
       await page.route('**/api/dashboard/team/threads/*/messages?*', async route => {
         if (route.request().method() !== 'POST') return route.continue()
-        attemptedKey = (route.request().postDataJSON() as { idempotencyKey: string }).idempotencyKey
+        attemptedKey = (route.request().postDataJSON() as { idempotency_key: string }).idempotency_key
         await route.abort('failed')
       })
       await page.getByRole('button', { name: 'Send message', exact: true }).click()
@@ -248,7 +248,7 @@ test.describe('lodging identity boundary', () => {
         await page.getByRole('button', { name: 'Send message', exact: true }).click()
         const cmsSentResponse = await cmsSent
         expect(cmsSentResponse.status()).toBe(201)
-        expect((cmsSentResponse.request().postDataJSON() as { idempotencyKey: string }).idempotencyKey).toBe(attemptedKey)
+        expect((cmsSentResponse.request().postDataJSON() as { idempotency_key: string }).idempotency_key).toBe(attemptedKey)
         await expect(composer).toHaveValue('')
         const cmsNativeRead = await api.get(`${teamPath}/messages?org=${slug}`, { headers: inviteeBearer })
         expect(cmsNativeRead.status, await cmsNativeRead.text()).toBe(200)
@@ -295,7 +295,7 @@ test.describe('lodging identity boundary', () => {
       // its oldest row when the next live arrival refreshes the source window.
       let lastHistoryMessage: TeamMessage | null = null
       for (let index = 0; index < 17; index++) {
-        const historySent = await api.post(`${teamPath}/messages?org=${slug}`, { headers: inviteeBearer, data: { body: `Native team history ${index + 1} ${threadId}`, idempotencyKey: crypto.randomUUID() } })
+        const historySent = await api.post(`${teamPath}/messages?org=${slug}`, { headers: inviteeBearer, data: { body: `Native team history ${index + 1} ${threadId}`, idempotency_key: crypto.randomUUID() } })
         expect(historySent.status, await historySent.text()).toBe(201)
         lastHistoryMessage = (await historySent.json() as { message: TeamMessage }).message
       }
@@ -308,7 +308,7 @@ test.describe('lodging identity boundary', () => {
       await expect(oldestRow).toContainText(message)
       await expect(earlierMessages).toHaveCount(0)
       const liveBody = `Native arrival after loading earlier messages ${threadId}`
-      const liveSent = await api.post(`${teamPath}/messages?org=${slug}`, { headers: inviteeBearer, data: { body: liveBody, idempotencyKey: crypto.randomUUID() } })
+      const liveSent = await api.post(`${teamPath}/messages?org=${slug}`, { headers: inviteeBearer, data: { body: liveBody, idempotency_key: crypto.randomUUID() } })
       expect(liveSent.status, await liveSent.text()).toBe(201)
       const liveMessage = (await liveSent.json() as { message: TeamMessage }).message
       const liveRow = page.locator(`[data-team-message="${liveMessage.id}"]`)
@@ -438,15 +438,15 @@ test.describe('lodging identity boundary', () => {
         await page.getByRole('button', { name: 'Start', exact: true }).click()
         const groupResponse = await groupCreated
         expect(groupResponse.status(), await groupResponse.text()).toBe(201)
-        const { id: threadId } = await groupResponse.json() as { id: string }
+        const { conversation_id: threadId } = await groupResponse.json() as { conversation_id: string }
         const groupPath = `${listPath}/team/${threadId}`
         const teamPath = `/api/dashboard/team/threads/${threadId}`
-        const createBody = groupResponse.request().postDataJSON() as { memberIds: string[]; name: string; idempotencyKey: string }
-        expect(createBody).toMatchObject({ memberIds: [invitee.id, teammate.id].sort(), name: initialName, idempotencyKey: expect.any(String) })
-        expect(createBody.idempotencyKey).not.toBe('')
+        const createBody = groupResponse.request().postDataJSON() as { member_user_ids: string[]; name: string; idempotency_key: string }
+        expect(createBody).toMatchObject({ member_user_ids: [invitee.id, teammate.id].sort(), name: initialName, idempotency_key: expect.any(String) })
+        expect(createBody.idempotency_key).not.toBe('')
         const retriedStart = await api.post(teamListPath, { headers: ownerBearer, data: createBody })
         expect(retriedStart.status, await retriedStart.text()).toBe(200)
-        expect(await retriedStart.json()).toEqual({ id: threadId })
+        expect(await retriedStart.json()).toEqual({ conversation_id: threadId })
         const changedStart = await api.post(teamListPath, { headers: ownerBearer, data: { ...createBody, name: 'Different group' } })
         expect(changedStart.status, await changedStart.text()).toBe(409)
         await expect(page).toHaveURL(new RegExp(`/messages/team/${threadId}\\?kind=team$`))
@@ -472,7 +472,7 @@ test.describe('lodging identity boundary', () => {
         const bodies: string[] = []
         for (const [actor, bearer] of [[fixture, ownerBearer], [invitee, adminBearer], [teammate, memberBearer]] as const) {
           const body = `${actor.name} group proof ${crypto.randomUUID()}`
-          const sent = await api.post(`${teamPath}/messages?org=${slug}`, { headers: bearer, data: { body, idempotencyKey: crypto.randomUUID() } })
+          const sent = await api.post(`${teamPath}/messages?org=${slug}`, { headers: bearer, data: { body, idempotency_key: crypto.randomUUID() } })
           expect(sent.status, await sent.text()).toBe(201)
           const { message } = await sent.json() as { message: TeamMessage }
           expect(message).toMatchObject({ conversation_id: threadId, body, author_user_id: actor.id })
@@ -489,13 +489,13 @@ test.describe('lodging identity boundary', () => {
         await dismissPreviewToolbar(memberPage)
         await expect(memberPage.locator(`[data-team-message="${messageIds[2]}"]`)).toContainText(bodies[2]!)
 
-        const deniedRename = await api.post(`${teamPath}/operations?org=${slug}`, { headers: memberBearer, data: { action: 'rename', name: 'Unpermitted', idempotencyKey: crypto.randomUUID() } })
+        const deniedRename = await api.post(`${teamPath}/operations?org=${slug}`, { headers: memberBearer, data: { action: 'rename', name: 'Unpermitted', idempotency_key: crypto.randomUUID() } })
         expect(deniedRename.status, await deniedRename.text()).toBe(403)
         expect((await threads(adminBearer)).find(thread => thread.id === threadId)?.name).toBe(initialName)
         for (const headers of [outsiderBearer, buyerBearer]) {
           expect((await api.get(`${teamPath}/messages?org=${slug}`, { headers })).status).toBe(404)
-          expect((await api.post(`${teamPath}/messages?org=${slug}`, { headers, data: { body: 'Outside', idempotencyKey: crypto.randomUUID() } })).status).toBe(404)
-          expect((await api.post(`${teamPath}/operations?org=${slug}`, { headers, data: { action: 'rename', name: 'Outside', idempotencyKey: crypto.randomUUID() } })).status).toBe(404)
+          expect((await api.post(`${teamPath}/messages?org=${slug}`, { headers, data: { body: 'Outside', idempotency_key: crypto.randomUUID() } })).status).toBe(404)
+          expect((await api.post(`${teamPath}/operations?org=${slug}`, { headers, data: { action: 'rename', name: 'Outside', idempotency_key: crypto.randomUUID() } })).status).toBe(404)
         }
 
         await page.getByLabel('Conversation details', { exact: true }).click()
@@ -504,7 +504,7 @@ test.describe('lodging identity boundary', () => {
         await page.getByRole('textbox', { name: 'Conversation name', exact: true }).fill(renamed)
         await page.getByRole('button', { name: 'Save name', exact: true }).click()
         await expect.poll(async () => (await threads(memberBearer)).find(thread => thread.id === threadId)?.name).toBe(renamed)
-        const memberManagement = await api.post(`${teamPath}/operations?org=${slug}`, { headers: memberBearer, data: { action: 'remove', userId: invitee.id, idempotencyKey: crypto.randomUUID() } })
+        const memberManagement = await api.post(`${teamPath}/operations?org=${slug}`, { headers: memberBearer, data: { action: 'remove', user_id: invitee.id, idempotency_key: crypto.randomUUID() } })
         expect(memberManagement.status, await memberManagement.text()).toBe(403)
 
         await page.goto(`${groupPath}/details/members?kind=team`)
@@ -514,14 +514,14 @@ test.describe('lodging identity boundary', () => {
         await page.getByRole('dialog').getByRole('button', { name: 'Remove', exact: true }).click()
         const removedResponse = await removed
         expect(removedResponse.status(), await removedResponse.text()).toBe(200)
-        expect(await removedResponse.json()).toEqual({ status: 'updated', threadId })
+        expect(await removedResponse.json()).toEqual({ status: 'updated', conversation_id: threadId })
         expect((await threads(adminBearer)).find(thread => thread.id === threadId)?.participants.map(person => person.id).sort()).toEqual([fixture.id, invitee.id].sort())
         expect((await history(adminBearer)).map(message => message.id).sort()).toEqual([...messageIds].sort())
         // Revocation reaches an already-open browser; a stale transcript is not retained.
         await expect(memberPage.locator('[data-team-message]')).toHaveCount(0)
         await expect(memberPage.locator(`[data-thread-row="${threadId}"]`)).toHaveCount(0)
         expect((await api.get(`${teamPath}/messages?org=${slug}`, { headers: memberBearer })).status).toBe(404)
-        expect((await api.post(`${teamPath}/messages?org=${slug}`, { headers: memberBearer, data: { body: 'No seat', idempotencyKey: crypto.randomUUID() } })).status).toBe(404)
+        expect((await api.post(`${teamPath}/messages?org=${slug}`, { headers: memberBearer, data: { body: 'No seat', idempotency_key: crypto.randomUUID() } })).status).toBe(404)
 
         await page.getByRole('checkbox', { name: teammate.name, exact: true }).check()
         await page.getByRole('button', { name: 'Add', exact: true }).click()
@@ -537,10 +537,10 @@ test.describe('lodging identity boundary', () => {
         await memberPage.getByRole('dialog').getByRole('button', { name: 'Leave conversation', exact: true }).click()
         const leftResponse = await left
         expect(leftResponse.status(), await leftResponse.text()).toBe(200)
-        expect(await leftResponse.json()).toEqual({ status: 'left', threadId })
+        expect(await leftResponse.json()).toEqual({ status: 'left', conversation_id: threadId })
         expect((await threads(ownerBearer)).find(thread => thread.id === threadId)?.participants.map(person => person.id).sort()).toEqual([fixture.id, invitee.id].sort())
         expect((await api.get(`${teamPath}/messages?org=${slug}`, { headers: memberBearer })).status).toBe(404)
-        expect((await api.post(`${teamPath}/messages?org=${slug}`, { headers: memberBearer, data: { body: 'After leaving', idempotencyKey: crypto.randomUUID() } })).status).toBe(404)
+        expect((await api.post(`${teamPath}/messages?org=${slug}`, { headers: memberBearer, data: { body: 'After leaving', idempotency_key: crypto.randomUUID() } })).status).toBe(404)
 
         // The participating admin can manage; an owner's role cannot replace a lost seat.
         const adminRename = await mcpRequest(memberMcp, baseURL!, { method: 'tools/call', toolName: 'update_conversation_group', args: { organization_id: organization.id, conversation_id: threadId, action: 'rename', name: 'Admin handover', idempotency_key: crypto.randomUUID() } })
@@ -551,22 +551,22 @@ test.describe('lodging identity boundary', () => {
         await waitForNuxtHydration(page)
         await expect(page.getByRole('button', { name: `Remove ${invitee.name}`, exact: true })).toBeVisible()
         await page.screenshot({ path: testInfo.outputPath('team-group-details-after-membership-changes.png'), fullPage: true })
-        const ownerLeft = await api.post(`${teamPath}/operations?org=${slug}`, { headers: ownerBearer, data: { action: 'leave', idempotencyKey: crypto.randomUUID() } })
+        const ownerLeft = await api.post(`${teamPath}/operations?org=${slug}`, { headers: ownerBearer, data: { action: 'leave', idempotency_key: crypto.randomUUID() } })
         expect(ownerLeft.status, await ownerLeft.text()).toBe(200)
-        expect(await ownerLeft.json()).toEqual({ status: 'left', threadId })
+        expect(await ownerLeft.json()).toEqual({ status: 'left', conversation_id: threadId })
         expect((await api.get(`${teamPath}/messages?org=${slug}`, { headers: ownerBearer })).status).toBe(404)
-        expect((await api.post(`${teamPath}/messages?org=${slug}`, { headers: ownerBearer, data: { body: 'Owner bypass', idempotencyKey: crypto.randomUUID() } })).status).toBe(404)
-        expect((await api.post(`${teamPath}/operations?org=${slug}`, { headers: ownerBearer, data: { action: 'rename', name: 'Owner bypass', idempotencyKey: crypto.randomUUID() } })).status).toBe(404)
+        expect((await api.post(`${teamPath}/messages?org=${slug}`, { headers: ownerBearer, data: { body: 'Owner bypass', idempotency_key: crypto.randomUUID() } })).status).toBe(404)
+        expect((await api.post(`${teamPath}/operations?org=${slug}`, { headers: ownerBearer, data: { action: 'rename', name: 'Owner bypass', idempotency_key: crypto.randomUUID() } })).status).toBe(404)
         expect((await history(adminBearer)).map(message => message.id).sort()).toEqual([...messageIds].sort())
 
         // A direct conversation keeps its existing protected addressing and has no group controls.
-        const direct = await api.post(teamListPath, { headers: adminBearer, data: { memberIds: [fixture.id] } })
+        const direct = await api.post(teamListPath, { headers: adminBearer, data: { member_user_ids: [fixture.id] } })
         expect(direct.status, await direct.text()).toBe(201)
-        const { id: directId } = await direct.json() as { id: string }
+        const { conversation_id: directId } = await direct.json() as { conversation_id: string }
         expect((await threads(ownerBearer, directId)).find(thread => thread.id === directId)).toMatchObject({ name: null, is_group: false, can_manage: false, can_leave: false })
-        const protectedDirect = await api.post(`/api/dashboard/team/threads/${directId}/operations?org=${slug}`, { headers: ownerBearer, data: { action: 'leave', idempotencyKey: crypto.randomUUID() } })
+        const protectedDirect = await api.post(`/api/dashboard/team/threads/${directId}/operations?org=${slug}`, { headers: ownerBearer, data: { action: 'leave', idempotency_key: crypto.randomUUID() } })
         expect(protectedDirect.status, await protectedDirect.text()).toBe(409)
-        expect(await protectedDirect.json()).toMatchObject({ data: { code: 'TEAM_GROUP_PROTECTED', field: 'threadId' } })
+        expect(await protectedDirect.json()).toMatchObject({ data: { code: 'TEAM_GROUP_PROTECTED', field: 'conversation_id' } })
         await page.goto(`${listPath}/team/${directId}?kind=team`)
         await waitForNuxtHydration(page)
         await expect(page.getByLabel('Conversation details', { exact: true })).toHaveCount(0)
@@ -669,7 +669,7 @@ test.describe('lodging identity boundary', () => {
       const revoked = socket.waitForEvent('framereceived', { predicate: frame => {
         if (frame.payload === 'pong') return false
         const event: unknown = JSON.parse(String(frame.payload))
-        return isDashboardInvalidation(event) && event.type === 'access.changed' && event.organizationId === organization.id
+        return isDashboardInvalidation(event) && event.type === 'access.changed' && event.organization_id === organization.id
       } })
       const removed = await api.put(`${editor}/products/${product.id}/booking`, { headers: ownerBearer, data: { assigned_member_id: ownerMemberId } })
       expect(removed.status, await removed.text()).toBe(200)

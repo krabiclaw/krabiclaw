@@ -359,7 +359,7 @@ watch(data, page => { if (page?.unread) unreadCounts.value = page.unread }, { im
 watch(realtime.event, (event) => {
   // MESSAGE_ACK: this member read, marked or archived a conversation on another device or tab.
   if (props.personalScope || !event || !['access.changed', 'MESSAGE_CREATE', 'MESSAGE_UPDATE', 'MESSAGE_ACK', 'CONVERSATION_LEAVE'].includes(event.type)) return
-  if (organizationId.value && event.organizationId !== organizationId.value) return
+  if (organizationId.value && event.organization_id !== organizationId.value) return
   void refresh()
 })
 

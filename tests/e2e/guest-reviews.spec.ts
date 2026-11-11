@@ -56,7 +56,7 @@ test('a guest who did not come is marked a no-show from the booking record, and 
     // The conversation says it once, as the owner who marked it reads it.
     const conversation = (await body<{ thread: InboxThread }>(await page.request.get(`/api/dashboard/organizations/${organizationId}/guest-threads/${thread.id}`), 200)).thread
     expect(conversation.stream.filter(item => item.type === 'event' && item.text === `You marked the ${thread.submissionType} as a no-show`)).toHaveLength(1)
-    const repeat = await page.request.post(`/api/dashboard/organizations/${organizationId}/guest-threads/${thread.id}/operations/no_show`, { data: { idempotencyKey: `repeat-${Date.now()}` } })
+    const repeat = await page.request.post(`/api/dashboard/organizations/${organizationId}/guest-threads/${thread.id}/operations/no_show`, { data: { idempotency_key: `repeat-${Date.now()}` } })
     expect(repeat.status(), await repeat.text()).toBe(409)
   } finally {
     await release()

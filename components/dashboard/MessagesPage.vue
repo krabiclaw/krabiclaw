@@ -70,11 +70,11 @@ const leaveRequest = useTeamGroupLeaveRequest()
 const realtime = useDashboardInvalidations()
 // This member left a team conversation or was removed from it: its screen closes, wherever it is open.
 watch(realtime.event, async event => {
-  if (event?.type !== 'CONVERSATION_LEAVE' || event.organizationId !== dashboard.organizationId.value || event.targetUserId !== session.value.data?.user.id) return
-  clearNuxtData(`team-conversation:${event.organizationId}:${event.conversationId}`)
-  clearNuxtData(`team-messages:${event.organizationId}:${event.conversationId}`)
-  if (route.params.teamThreadId !== event.conversationId) return
-  if (leaveRequest.value === event.conversationId) return
+  if (event?.type !== 'CONVERSATION_LEAVE' || event.organization_id !== dashboard.organizationId.value || event.user_id !== session.value.data?.user.id) return
+  clearNuxtData(`team-conversation:${event.organization_id}:${event.conversation_id}`)
+  clearNuxtData(`team-messages:${event.organization_id}:${event.conversation_id}`)
+  if (route.params.teamThreadId !== event.conversation_id) return
+  if (leaveRequest.value === event.conversation_id) return
   firstThread.value = null
   try { await navigateTo({ path: listPath.value, query: { kind: 'team' } }, { replace: true }) }
   catch (error) { accessError.value = getErrorMessage(error, 'The conversation could not be closed after access ended') }

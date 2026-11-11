@@ -1299,7 +1299,7 @@ export async function publishStayProducts(env: CloudflareEnv, products: readonly
   for (const product of products) {
     if (product.kind !== 'stay') continue
     if (!product.stay) throw new HTTPError({ statusCode: 500, message: 'The place to stay has no home configuration', data: { code: 'STAY_HOME_CONFIGURATION_REQUIRED', field: 'stay' } })
-    const input = { organizationId: product.organization_id, productId: product.id, locationId: product.stay.location_id, stayId: null }
+    const input = { organization_id: product.organization_id, product_id: product.id, location_id: product.stay.location_id, booking_id: null }
     await publishStayInvalidation(env, { ...input, type: 'stay.changed' }, { updated_at: product.updated_at })
     await publishStayInvalidation(env, { ...input, type: 'nights.changed' }, { updated_at: product.updated_at })
   }

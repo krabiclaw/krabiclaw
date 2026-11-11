@@ -4712,7 +4712,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await expect(cleanerPage.getByText('Host-only live note')).toHaveCount(0)
       // The page can render the note before the socket's frame is recorded here.
       await expect.poll(() => liveEvents.filter(event => 'stayId' in event).length).toBe(2)
-      expect(liveEvents.filter(event => 'stayId' in event).map(event => event.stayId)).toEqual([stays[0]!.id, stays[0]!.id])
+      expect(liveEvents.filter(event => 'booking_id' in event).map(event => event.booking_id)).toEqual([stays[0]!.id, stays[0]!.id])
 
       // A cookie cache read must not keep this socket authorized after sign-out.
       expect((await cleaner.request.get('/api/auth/get-session')).status()).toBe(200)

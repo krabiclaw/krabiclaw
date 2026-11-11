@@ -103,7 +103,7 @@ async function replyToTeamAsMember(env: ExecuteOperationInput['env'], input: { o
   if (!user) throw new Error(`Member ${input.userId} has no user record`)
   const idempotencyKey = await creationRequestHash(input.idempotencyKey)
   return teamAccessFor(memberAccessPrincipal(membership, { env }), membership.memberId, 'send').then(async access => {
-    await sendTeamMessage(env, env.DB, access, input.threadId, { body: input.body, photos: input.files, idempotencyKey, senderName: user.name })
+    await sendTeamMessage(env, env.DB, access, input.threadId, { body: input.body, photos: input.files, idempotency_key: idempotencyKey, senderName: user.name })
     return { sent: true, notice: REPLY_SENT, report: null }
   }).catch(async (error: unknown) => {
     if (error instanceof HTTPError && error.status >= 400 && error.status < 500) return { sent: false, notice: replyNotSent(error.message), report: null }
