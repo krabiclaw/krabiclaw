@@ -17,6 +17,8 @@ import { memberInbox } from '../../server/utils/dashboard-guest-threads.ts'
 import { memberAccessPrincipal } from '../../server/utils/member-access.ts'
 import { executeBatch } from '../../server/db/index.ts'
 import { requestInsertQueries } from '../../server/domain/requests.ts'
+import { appendMessage } from '../../server/domain/conversations.ts'
+import { archiveConversation } from '../../server/domain/guest-threads/repository.ts'
 import { stayCheckoutPolicy, stayFromCheckoutQueries } from '../../server/domain/stays.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 
@@ -140,26 +142,24 @@ test('the inbox view model matches contracts/inbox', { timeout: 120_000 }, async
     await applyBookingRevision(db, env, 'rev-contract')
     const mirrored = await mirrorChannexMessageEvent(db, env, { event: 'message', property_id: PROPERTY, payload: { id: 'guest-3', property_id: PROPERTY, message_thread_id: 'thread' } })
     assert.equal(mirrored.status, 'mirrored')
-    const threadId = mirrored.request_id
+    if (mirrored.status !== 'mirrored') throw new Error('Expected the contract conversation to be mirrored')
+    const threadId = mirrored.conversation_id
 
     // Suggested replies to the guest's question, as the suggested-reply route returns them.
     const suggestions = await suggestGuestReplies(db, env as unknown as Record<string, unknown>, principal, threadId)
 
-    // An automatic message already sent, the guest's change request, filing the conversation away and back, and a reply Airbnb refused.
-    const stay = (await db.prepare('SELECT id, version FROM bookings WHERE request_id = ?').bind(threadId).first<{ id: string; version: number }>())!
-    await db.batch([
-      db.prepare(`INSERT INTO activity_entries (id, request_id, kind, scope_kind, actor_kind, channel, body, event_name, payload_json, dedupe_key, sequence, occurred_at, created_at)
-        SELECT 'automatic-contract', ?, 'message', 'request', 'system', 'airbnb', 'Your door code is 1106. Garage D is unlocked.', 'thread.scheduled_message', '{}', 'automatic-contract',
-          (SELECT MAX(sequence) FROM activity_entries WHERE request_id = ?) + 1, ?, ?`).bind(threadId, threadId, NOW, NOW),
-      db.prepare(`INSERT INTO scheduled_guest_messages (id, organization_id, product_id, booking_id, request_id, template_id, template_title, template_version, body, due_at, timezone, status, entry_id, sent_at, created_at, updated_at)
-        VALUES ('scheduled-contract', ?, ?, ?, ?, NULL, 'Check-in instructions', 1, 'Your door code is 1106. Garage D is unlocked.', ?, 'America/Denver', 'sent', 'automatic-contract', ?, ?, ?)`)
-        .bind(ORG, home.id, stay.id, threadId, NOW, NOW, NOW, NOW),
-    ])
+    // An automatic message already sent, the guest's change request, filing the conversation away and back, a payment, and a reply Airbnb refused.
+    const stay = (await db.prepare("SELECT b.id, b.version FROM bookings b JOIN conversations c ON c.booking_id = b.id AND c.kind = 'booking' WHERE c.id = ?").bind(threadId).first<{ id: string; version: number }>())!
+    await appendMessage(db, { id: 'automatic-contract', conversationId: threadId, authorKind: 'krabiclaw', authorUserId: null, channel: 'airbnb', body: 'Your door code is 1106. Garage D is unlocked.',
+      eventName: 'thread.scheduled_message', dedupeKey: 'automatic-contract', occurredAt: NOW })
+    await db.prepare(`INSERT INTO scheduled_guest_messages (id, organization_id, product_id, booking_id, template_id, template_title, template_version, body, due_at, timezone, status, message_id, sent_at, created_at, updated_at)
+      VALUES ('scheduled-contract', ?, ?, ?, NULL, 'Check-in instructions', 1, 'Your door code is 1106. Garage D is unlocked.', ?, 'America/Denver', 'sent', 'automatic-contract', ?, ?, ?)`)
+      .bind(ORG, home.id, stay.id, NOW, NOW, NOW, NOW).run()
     assert.deepEqual(await runAlterationRequestFeed(db, env, PROPERTY), { recorded: 1, reconciled: 0 })
-    for (const action of ['archive', 'unarchive'] as const) {
-      const moved = await executeGuestThreadOperation(db, { threadId, organizationId: ORG, action, actorUserId: OWNER, idempotencyKey: `contract-${action}`, env })
-      assert.equal(moved.ok, true)
-    }
+    for (const archived of [true, false]) assert.deepEqual(await archiveConversation(db, { organizationId: ORG, conversationId: threadId, userId: OWNER, archived }), { archived })
+    // A payment the conversation records as KrabiClaw's event, as payments/notifications.ts writes it.
+    await appendMessage(db, { conversationId: threadId, authorKind: 'krabiclaw', authorUserId: null, eventName: 'payment.payment_captured', body: 'Payment received\nAmount: $450.00',
+      payload: { payment_id: 'contract-payment', status: 'succeeded', amount: 45000, currency: 'USD' }, dedupeKey: 'financial-operation:contract', occurredAt: NOW })
     const refused = await executeGuestThreadOperation(db, { threadId, organizationId: ORG, action: 'reply', body: 'Check-in is from 4 PM.', actorUserId: OWNER, idempotencyKey: 'contract-reply', env })
     assert.equal(refused.ok, false)
     // A message the host set to send later is the pending row above the composer.
@@ -177,12 +177,12 @@ test('the inbox view model matches contracts/inbox', { timeout: 120_000 }, async
     await executeBatch(db, stayFromCheckoutQueries({ organizationId: ORG, stayId: 'site-stay', holdId: 'site-hold', paymentId: 'site-pay', buyerUserId: 'site-guest', now: NOW,
       stay: { quote: purchase, guest: purchase.guest }, policy: await stayCheckoutPolicy(db, ORG, { ...purchase, tax_behavior: 'unspecified' }),
       home: { name: home.name, location_id: 'location', timezone: 'America/Denver', check_in_time: '16:00', check_out_time: '10:00', variant_id: variant.id } }))
-    const siteThreadId = (await db.prepare("SELECT request_id FROM bookings WHERE id = 'site-stay'").first<{ request_id: string }>())!.request_id
+    const siteThreadId = (await db.prepare("SELECT id FROM conversations WHERE booking_id = 'site-stay' AND kind = 'booking'").first<{ id: string }>())!.id
     // A question through the contact form that nobody has written in for 30 days: past by the rule, not archived.
     const quiet = '2026-10-01T15:00:00.000Z'
-    await executeBatch(db, requestInsertQueries({ id: 'quiet-contact', kind: 'contact', organization_id: ORG, location_id: 'location', user_id: null, review_id: null, conversation_state: 'needs_attention', resolved_at: null,
-      payload: { guest: { name: 'Jo Park', email: 'jo@example.test', phone: null, locale: 'en' }, subject: null, message: 'Do you allow dogs at 74 D?', consent_at: null, ip_hash: null, source: null, route_context: null, suggested_summary: null, agent_metadata: null, answers: [] },
-      created_at: quiet, updated_at: quiet }))
+    await executeBatch(db, requestInsertQueries({ id: 'quiet-contact', kind: 'contact', organization_id: ORG, location_id: 'location', user_id: null, booking_id: null,
+      payload: { guest: { name: 'Jo Park', email: 'jo@example.test', phone: null, locale: 'en' }, subject: null, consent_at: null, ip_hash: null, source: null, route_context: null, suggested_summary: null, agent_metadata: null, answers: [] },
+      created_at: quiet }, undefined, { words: 'Do you allow dogs at 74 D?' }))
 
     const thread = await getInboxThread(db, threadId, ORG, viewer, new Date(NOW))
     assert.ok(thread)
@@ -195,8 +195,8 @@ test('the inbox view model matches contracts/inbox', { timeout: 120_000 }, async
     assert.ok(opened)
     assert.deepEqual(opened.stream.flatMap(item => item.type === 'message' ? [[item.side, item.body.split('\n')[0]]] : []),
       [['guest', '74 D · Sky from Fri, Nov 20 to Mon, Nov 23 for 2 guests. Ana Ruiz, +1 303 555 0123.'], ['guest', 'We arrive late, around 9 PM.']])
-    const current = await memberInbox(env, db, ORG, principal, { limit: 100, offset: 0, mailbox: 'current' })
-    const past = await memberInbox(env, db, ORG, principal, { limit: 100, offset: 0, mailbox: 'past' })
+    const current = await memberInbox(db, ORG, principal, { limit: 100, offset: 0, mailbox: 'current', locationId: null, type: null, kind: null, q: null, unreadOnly: false })
+    const past = await memberInbox(db, ORG, principal, { limit: 100, offset: 0, mailbox: 'past', locationId: null, type: null, kind: null, q: null, unreadOnly: false })
     assert.deepEqual([current.threads.map(row => row.id).sort(), past.threads.map(row => row.id)], [[siteThreadId, threadId].sort(), ['quiet-contact']])
 
     await check('list', current)
