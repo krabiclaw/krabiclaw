@@ -5,7 +5,7 @@ import { assertConversationAccess, findMessageByDedupeKey, markConversationRead,
 import { archiveConversation, countUnreadConversations, listConversations } from '~/server/domain/guest-threads/repository'
 import { getGuestThreadDetail } from '~/server/domain/guest-threads/detail'
 import { executeGuestThreadOperation, guestReplyDestination, operationDedupeKey } from '~/server/domain/guest-threads/operations'
-import { getGuestRequest, parseGuestRequest } from '~/server/domain/requests'
+import { parseGuestRequest } from '~/server/domain/requests'
 import type { InboxThreadKind } from '~/server/domain/guest-threads/types'
 import { memberAccessPrincipal, resolveMemberId, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import { publishConversationAck, publishConversationEvent } from '~/server/cloudflare/guest-inbox-events'

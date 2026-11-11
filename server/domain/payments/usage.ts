@@ -1,5 +1,5 @@
 import { HTTPError } from 'nitro'
-import { execute, queryAll, queryFirst, type DbClient } from '~/server/db'
+import { execute, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { getOrganizationBillingStatus, getStripe } from '~/server/utils/billing'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { BILLING_METERS, BUSINESS_PLAN_ID, ratePercent, type BillingMeterKey } from '~/shared/billing-model'
@@ -8,7 +8,6 @@ import { recordPaymentsVolumeBilled } from '~/server/domain/booking-analytics'
 import { tokenHash } from './buyer'
 import { readPaymentsBillingBasis } from './fx'
 import { usageEventInsert } from '~/server/utils/usage-metering'
-import type { BatchQuery } from '~/server/db'
 
 /**
  * Payments usage is billed by Stripe meters on the business's own plan
