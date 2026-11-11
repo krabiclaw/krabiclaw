@@ -61,33 +61,6 @@
           </template>
         </template>
         <p v-if="!business.tasks.length && !business.opportunities.length && !business.reservations.cards.length && !pending" class="text-sm text-muted" data-testid="today-empty">{{ range === 'today' ? 'Nothing to do today' : 'Nothing planned yet' }}</p>
-
-        <details v-if="canManage && range === 'today'" class="mt-8" role="group" aria-label="Your priority" data-testid="today-priorities">
-          <summary class="cursor-pointer text-sm font-medium">Business goals</summary>
-          <ul v-if="goals.length" class="mb-4 space-y-2">
-            <li v-for="goal in goals" :key="goal.id" class="flex items-start justify-between gap-3 rounded-lg bg-elevated/50 px-3 py-2" data-testid="today-priority">
-              <div class="min-w-0 text-sm">
-                <span class="text-highlighted">{{ goal.intent }}</span>
-                <p v-if="goal.strategy" class="mt-1 text-muted">{{ strategyDescription(goal.strategy) }}</p>
-              </div>
-              <UButton size="xs" color="neutral" variant="ghost" icon="i-lucide-x" :aria-label="`Remove priority: ${goal.intent}`" :loading="goalBusy === goal.id" :disabled="goalBusy !== null" @click="removeGoal(goal)" />
-            </li>
-          </ul>
-          <form class="space-y-3" @submit.prevent="addGoal">
-            <div class="flex gap-2">
-              <UInput v-model="goalDraft" class="flex-1" :maxlength="2000" required placeholder="What should the business focus on now?" aria-label="New priority" />
-              <UButton type="submit" color="neutral" variant="soft" label="Add" :loading="goalBusy === 'new'" :disabled="goalBusy !== null || !goalDraft.trim()" />
-            </div>
-            <details>
-              <summary class="cursor-pointer text-sm text-muted">Choose related work (optional)</summary>
-              <div class="mt-3 flex flex-wrap gap-x-5 gap-y-3">
-                <UCheckbox v-for="channel in strategyChannels" :key="channel.value" :model-value="goalChannels.includes(channel.value)" :label="channel.label" @update:model-value="toggleChannel(channel.value, $event === true)" />
-                <UCheckbox v-model="goalPayments" label="Accept payments" />
-                <UCheckbox v-model="goalAvailability" label="Booking availability" />
-              </div>
-            </details>
-          </form>
-        </details>
       </template>
 
       <div v-if="pending && !loadError" class="flex min-h-24 items-center justify-center" aria-live="polite">
@@ -110,7 +83,6 @@ import { agendaToTodayCard, todayFeedSchema, type TodayCard, type TodayFeedPaylo
 import type { AgendaPayload } from '~/server/utils/dashboard-agenda'
 import type { TaskKind, TaskPerson, TaskSection, TaskView } from '~/server/domain/tasks'
 import type { OpportunityView } from '~/server/domain/opportunities'
-import type { BusinessGoal, BusinessGoalStrategy } from '~/shared/business-progress'
 import { authClient } from '~/lib/auth-client'
 import type { organizationRoles } from '~/utils/organization-access'
 import { addLocalDays, localDateAt } from '~/utils/timezone'
@@ -134,7 +106,6 @@ const roleAllows = (permissions: Parameters<typeof authClient.organization.check
   return Boolean(role && authClient.organization.checkRolePermission({ role, permissions }))
 }
 const canAddStay = computed(() => !props.personalScope && hasFeature('stays') && roleAllows({ operations: ['update'] }))
-const canManage = computed(() => !props.personalScope && roleAllows({ task: ['assign'] }))
 const canCreate = computed(() => !props.personalScope && roleAllows({ task: ['create'] }))
 const createOpen = ref(false)
 const addStayPath = computed(() => `/dashboard/${encodeURIComponent(orgSlug.value)}/bookings/stay/new`)
@@ -245,62 +216,6 @@ async function act<T extends Record<string, string>>(busy: Ref<T>, id: string, s
 const skip = (task: TaskView) => act(taskBusy, task.id, 'skip', () => applicationFetch(`${tasksApi.value}/tasks/${encodeURIComponent(task.id)}/skip`, { method: 'POST', validate: isTaskResult, body: {} }))
 const isOpportunityResult = (value: unknown): value is { opportunity: { id: string } } => isRecord(value) && isRecord(value.opportunity) && typeof value.opportunity.id === 'string'
 const dismiss = (opportunity: OpportunityView) => act(opportunityBusy, opportunity.id, 'later', () => applicationFetch(`${tasksApi.value}/opportunities/${encodeURIComponent(opportunity.id)}/dismiss`, { method: 'POST', validate: isOpportunityResult, body: {} }))
-
-// Business goals steer which opportunities the selector finds.
-const isProgress = (value: unknown): value is { goals: BusinessGoal[] } => isRecord(value) && Array.isArray(value.goals)
-const { data: progress, refresh: refreshGoals } = await useAsyncData(() => `today-goals-${orgSlug.value}`,
-  async () => canManage.value ? (await applicationFetch<{ goals: BusinessGoal[] }>(`${tasksApi.value}/progress`, { query: { limit: 1 }, validate: isProgress })).goals : [],
-  { watch: [canManage] })
-const goals = computed(() => (progress.value ?? []).filter(goal => goal.status === 'active'))
-const goalDraft = ref('')
-const strategyChannels: Array<{ value: BusinessGoalStrategy['channels'][number]; label: string }> = [
-  { value: 'blog', label: 'Blog articles' }, { value: 'social', label: 'Social posts' }, { value: 'google_ads', label: 'Google Ads' },
-]
-const goalChannels = ref<BusinessGoalStrategy['channels']>([])
-const goalPayments = ref(false)
-const goalAvailability = ref(false)
-const goalBusy = ref<string | null>(null)
-const goalRequest = ref<{ signature: string; idempotencyKey: string } | null>(null)
-const isSavedGoal = (value: unknown): value is { goal: BusinessGoal } => isRecord(value) && isRecord(value.goal) && typeof value.goal.id === 'string'
-async function changeGoals(busy: string, request: () => Promise<unknown>): Promise<boolean> {
-  goalBusy.value = busy
-  actionError.value = null
-  try {
-    await request()
-  } catch (cause) {
-    actionError.value = cause
-    return false
-  } finally {
-    goalBusy.value = null
-  }
-  await Promise.all([refreshGoals(), refresh()])
-  return true
-}
-async function addGoal() {
-  const intent = goalDraft.value.trim()
-  if (!intent) return
-  const strategy: BusinessGoalStrategy | null = goalChannels.value.length || goalPayments.value || goalAvailability.value
-    ? { channels: [...goalChannels.value], payments: goalPayments.value, availability: goalAvailability.value } : null
-  const signature = JSON.stringify({ intent, strategy })
-  if (goalRequest.value?.signature !== signature) goalRequest.value = { signature, idempotencyKey: crypto.randomUUID() }
-  if (await changeGoals('new', () => applicationFetch(`${tasksApi.value}/goals`, { method: 'POST', validate: isSavedGoal, body: { idempotencyKey: goalRequest.value!.idempotencyKey, intent, strategy } }))) {
-    goalRequest.value = null
-    goalDraft.value = ''
-    goalChannels.value = []
-    goalPayments.value = false
-    goalAvailability.value = false
-  }
-}
-function toggleChannel(channel: BusinessGoalStrategy['channels'][number], selected: boolean) {
-  goalChannels.value = selected ? [...new Set([...goalChannels.value, channel])] : goalChannels.value.filter(value => value !== channel)
-}
-function strategyDescription(strategy: BusinessGoalStrategy): string {
-  return [...strategyChannels.filter(channel => strategy.channels.includes(channel.value)).map(channel => channel.label),
-    ...(strategy.payments ? ['Accept payments'] : []), ...(strategy.availability ? ['Booking availability'] : [])].join(' · ')
-}
-async function removeGoal(goal: BusinessGoal) {
-  await changeGoals(goal.id, () => applicationFetch(`${tasksApi.value}/goals/${encodeURIComponent(goal.id)}`, { method: 'PATCH', validate: isSavedGoal, body: { revision: goal.revision, status: 'archived' } }))
-}
 
 watch(realtime.event, (event) => {
   if (!event) return

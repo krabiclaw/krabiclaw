@@ -196,8 +196,7 @@ writes again. Upcoming groups by day
 stay in Calendar.
 
 The page re-reads on `business.changed`, `stay.changed` and conversation
-invalidations. Opening a task (`?task=`) reads its alerts. Business goals stay
-editable below the list in a collapsed disclosure; they steer the selector.
+invalidations. Opening a task (`?task=`) reads its alerts.
 Personal-account Today/Upcoming project the buyer's own agenda with
 `TodayAgendaCard`; this is separate from the business's tasks.
 
