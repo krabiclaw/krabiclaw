@@ -24,15 +24,15 @@ import { getCookie, readBody } from 'nitro/h3'
 import { recordZarazPageviewReceipt, zarazPageviewDelivery } from '~/server/utils/ga4-delivery'
 
 interface PageviewRequest {
-  eventId?: unknown
-  eventType?: unknown
-  pagePath?: unknown
+  event_id?: unknown
+  event_type?: unknown
+  page_path?: unknown
   locale?: unknown
-  referrerHost?: unknown
+  referrer_host?: unknown
   attribution?: unknown
-  durationSeconds?: unknown
-  occurredAt?: unknown
-  deliveryStatus?: unknown
+  duration_seconds?: unknown
+  occurred_at?: unknown
+  delivery_status?: unknown
 }
 
 const RATE_LIMIT_MAX = 120
@@ -48,12 +48,12 @@ export default defineHandler(async (event) => {
       return jsonResponse({ error: 'Invalid analytics payload' }, { status: 400 })
     }
 
-    const eventType = body.eventType === 'duration' ? 'duration' : body.eventType === 'pageview' ? 'pageview' : body.eventType === 'ga4_delivery' ? 'ga4_delivery' : null
-    if (!eventType || !isCanonicalEventId(body.eventId)) {
-      return jsonResponse({ error: 'eventId and a valid eventType are required' }, { status: 400 })
+    const eventType = body.event_type === 'duration' ? 'duration' : body.event_type === 'pageview' ? 'pageview' : body.event_type === 'ga4_delivery' ? 'ga4_delivery' : null
+    if (!eventType || !isCanonicalEventId(body.event_id)) {
+      return jsonResponse({ error: 'event_id and a valid event_type are required' }, { status: 400 })
     }
 
-    const pagePath = typeof body.pagePath === 'string' ? body.pagePath.trim() : ''
+    const pagePath = typeof body.page_path === 'string' ? body.page_path.trim() : ''
     if (!isTrackablePath(pagePath)) return jsonResponse({ error: 'Page path is not trackable' }, { status: 400 })
 
     const tenantType = event.context.tenantType
@@ -65,12 +65,12 @@ export default defineHandler(async (event) => {
     const userAgent = (event.req.headers.get('user-agent') || '').slice(0, 1024)
     if (isKnownBot(userAgent)) return jsonResponse({ ok: true, ignored: true })
 
-    const rawDuration = Number(body.durationSeconds)
+    const rawDuration = Number(body.duration_seconds)
     const durationSeconds = Number.isFinite(rawDuration) && rawDuration >= 0 && rawDuration <= 86_400
       ? Math.round(rawDuration)
       : null
     if (eventType === 'duration' && durationSeconds === null) {
-      return jsonResponse({ error: 'durationSeconds must be between 0 and 86400' }, { status: 400 })
+      return jsonResponse({ error: 'duration_seconds must be between 0 and 86400' }, { status: 400 })
     }
 
     const rawLocale = typeof body.locale === 'string' ? body.locale.trim() : ''
@@ -101,19 +101,19 @@ export default defineHandler(async (event) => {
         return jsonResponse({ error: 'A valid analytics session is required' }, { status: 400 })
       }
       if (eventType === 'ga4_delivery') {
-        if (body.deliveryStatus !== 'dispatched' && body.deliveryStatus !== 'failed') return jsonResponse({ error: 'Invalid GA4 delivery receipt' }, { status: 400 })
-        const accepted = await recordZarazPageviewReceipt(db, { eventId: body.eventId, organizationId, sessionId, status: body.deliveryStatus })
+        if (body.delivery_status !== 'dispatched' && body.delivery_status !== 'failed') return jsonResponse({ error: 'Invalid GA4 delivery receipt' }, { status: 400 })
+        const accepted = await recordZarazPageviewReceipt(db, { eventId: body.event_id, organizationId, sessionId, status: body.delivery_status })
         return accepted ? jsonResponse({ ok: true }) : jsonResponse({ error: 'GA4 delivery receipt does not match this session' }, { status: 409 })
       }
-      await updateTenantPageviewDuration(db, { eventId: body.eventId, organizationId, sessionId, durationSeconds: durationSeconds!, now })
+      await updateTenantPageviewDuration(db, { eventId: body.event_id, organizationId, sessionId, durationSeconds: durationSeconds!, now })
       return jsonResponse({ ok: true })
     }
 
     const visitorId = getOrCreateVisitorId(event)
     const sessionId = getOrCreateSessionId(event)
 
-    const referrerHost = typeof body.referrerHost === 'string'
-      ? normalizeReferrerHost(`https://${body.referrerHost}`)
+    const referrerHost = typeof body.referrer_host === 'string'
+      ? normalizeReferrerHost(`https://${body.referrer_host}`)
       : null
     const geo = getCloudflareGeo(event)
     const organization = event.context.organization as { vertical?: string | null } | undefined
@@ -126,7 +126,7 @@ export default defineHandler(async (event) => {
     ])
     if (!identity) return jsonResponse({ error: 'Page path is not a published public route' }, { status: 400 })
     await recordTenantPageview(db, {
-      eventId: body.eventId,
+      eventId: body.event_id,
       organizationId,
       pagePath,
       sourcePath: identity.sourcePath,
@@ -147,10 +147,10 @@ export default defineHandler(async (event) => {
       recipe: identity.recipe,
       documentId: identity.documentId,
       productId: identity.productId,
-      occurredAt: boundedOccurrence(body.occurredAt, now),
+      occurredAt: boundedOccurrence(body.occurred_at, now),
       now,
     })
-    const ga4Delivery = await zarazPageviewDelivery(db, { eventId: body.eventId, organizationId, sessionId, cookieHeader: event.req.headers.get('cookie') ?? '' })
+    const ga4Delivery = await zarazPageviewDelivery(db, { eventId: body.event_id, organizationId, sessionId, cookieHeader: event.req.headers.get('cookie') ?? '' })
     return jsonResponse({ ok: true, ga4_delivery: ga4Delivery })
   } catch (error) {
     console.error('Analytics track error:', error instanceof Error ? error.message : String(error))

@@ -7,7 +7,7 @@ import { getSessionAvailability } from '~/server/utils/availability'
 export default defineHandler(async (event) => {
   const organizationId = getRouterParam(event, 'organizationId')
   const productId = getRouterParam(event, 'productId')
-  const sessionId = getRouterParam(event, 'sessionId')
+  const sessionId = getRouterParam(event, 'product_session_id')
   if (!organizationId || !productId || !sessionId) throw new HTTPError({ statusCode: 400, statusMessage: 'Organization, product and session are required' })
   const { db, env, organization } = await requireProductAccess(event, organizationId, productId)
   return jsonResponse({ success: true, session: await getSessionAvailability(db, env, organization.id, productId, sessionId) })

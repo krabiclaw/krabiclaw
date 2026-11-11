@@ -16,7 +16,7 @@ import { getRouterParam } from 'nitro/h3'
 export default defineHandler(async (event) => {
   const organizationId = getRouterParam(event, 'organizationId')
   const productId = getRouterParam(event, 'productId')
-  const sessionId = getRouterParam(event, 'sessionId')
+  const sessionId = getRouterParam(event, 'product_session_id')
   if (!organizationId || !productId || !sessionId) return jsonResponse({ error: 'Organization, product and session IDs are required' }, { status: 400 })
   try {
     const { db, env, session: auth, organization } = await requireProductAccess(event, organizationId, productId)

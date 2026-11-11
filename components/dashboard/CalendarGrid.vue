@@ -318,7 +318,7 @@ const placeRows = computed<GridRow[]>(() => (placesData.value?.places ?? [])
   .filter(entry => matches(entry.place.name, entry.place.detail) && (!freeOnly.value || !entry.days.some(day => day.booked > 0)))
   .map(({ place, days }) => {
     const id = `${place.kind}:${place.id}`
-    const scope = place.kind === 'location' ? { locationId: place.id } : { product_id: place.id }
+    const scope = place.kind === 'location' ? { location_id: place.id } : { product_id: place.id }
     const bars = days.flatMap((day, index): GridBar[] => day.booked ? [{ key: `${id}:${day.date}`, date: day.date, stayId: null, channel: null, column: index + 1, span: 1, label: `${day.booked} booked`, title: day.held?.kind === 'booked' ? day.held.text : `${day.booked} booked`, to: { path: `/dashboard/${orgSlug}/calendar/${day.date}`, query: scope } }] : [])
     const cells = days.map((day): GridCell => {
       const label = day.held?.kind === 'hours' || day.held?.kind === 'inactive' ? 'Closed' : day.closed ? 'Blocked' : day.free ? `${day.free} free` : ''
@@ -368,7 +368,7 @@ function homeTo(productId: string, date?: string) {
 }
 /** One place's own calendar on a date: the month narrowed to the location, or the offering's calendar. */
 function placeTo(place: Place, date: string) {
-  return { path: `/dashboard/${orgSlug}/calendar`, query: { ...(place.kind === 'location' ? { locationId: place.id } : { product_id: place.id, date }), month: date.slice(0, 7) } }
+  return { path: `/dashboard/${orgSlug}/calendar`, query: { ...(place.kind === 'location' ? { location_id: place.id } : { product_id: place.id, date }), month: date.slice(0, 7) } }
 }
 // Nothing moves the selection or the rows while a save runs: its read-back compares the rows it wrote.
 function setQuery(changes: LocationQueryRaw) {

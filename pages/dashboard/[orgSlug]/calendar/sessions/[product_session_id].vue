@@ -39,7 +39,7 @@ const locationChoice = computed(() => legal.value ? 'Choose an office' : 'Choose
 const route = useRoute()
 const router = useRouter()
 const dashboardApi = useDashboardApi()
-const sessionId = computed(() => String(route.params.sessionId))
+const sessionId = computed(() => String(route.params.product_session_id))
 const isNew = computed(() => sessionId.value === 'new')
 const endpoint = `/api/editor/organizations/${p.organizationId}/products/${productId}/sessions`
 const { data, error, pending, refresh: refreshSession } = await useAsyncData(
@@ -48,7 +48,7 @@ const { data, error, pending, refresh: refreshSession } = await useAsyncData(
 )
 const locationItems = computed(() => p.locations.value.map(location => ({ label: `${location.title}${location.status === 'active' ? '' : ` · ${location.status}`}`, value: location.id, disabled: location.status !== 'active' })))
 function chooseLocation(value: string) {
-  return router.replace({ query: { ...route.query, locationId: value } })
+  return router.replace({ query: { ...route.query, location_id: value } })
 }
 const canCreate = computed(() => p.location.value?.status === 'active')
 const timezone = computed(() => data.value?.session.timezone ?? p.location.value?.timezone)
@@ -195,7 +195,7 @@ async function save() {
     // compare against the write that succeeded, while retaining the draft.
     if (!creating) data.value = { success: true, session: saved[0]! }
     await p.refresh(date)
-    await navigateTo({ path: `/dashboard/${route.params.orgSlug}/calendar`, query: { product_id: productId, locationId: p.scope.value ?? undefined, month: date.slice(0, 7), date } })
+    await navigateTo({ path: `/dashboard/${route.params.orgSlug}/calendar`, query: { product_id: productId, location_id: p.scope.value ?? undefined, month: date.slice(0, 7), date } })
   } catch (failure) { saveError.value = getErrorMessage(failure, 'Session could not be saved') }
   finally { saving.value = false }
 }

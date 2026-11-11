@@ -416,7 +416,7 @@ const creationUnavailable = computed(() => {
   }
 })
 function addTo(date?: string) {
-  return { path: `/dashboard/${route.params.orgSlug}/calendar/sessions/new`, query: { product_id: sessionProduct.value?.id, locationId: physicalLocation.value?.id, date, month: monthKey.value, view: view.value === 'month' ? undefined : view.value } }
+  return { path: `/dashboard/${route.params.orgSlug}/calendar/sessions/new`, query: { product_id: sessionProduct.value?.id, location_id: physicalLocation.value?.id, date, month: monthKey.value, view: view.value === 'month' ? undefined : view.value } }
 }
 const addAvailabilityTo = computed(() => addTo(openDay.value ?? undefined))
 
@@ -516,7 +516,7 @@ async function loadMonth(key: string, signal?: AbortSignal): Promise<void> {
           subtitle: `${places(session.claimed)} reserved${session.capacity === null ? '' : ` · ${places(session.capacity)}`}`,
           status: session.status, location_title: location?.title ?? 'Online', guest_image_url: null,
           resource_image_url: mediaStillUrl(product.image),
-          to: router.resolve({ path: `${level.path.value}/sessions/${session.id}`, query: { product_id: product.id, locationId: session.location_id ? productLocations.value.some(entry => entry.id === session.location_id) ? session.location_id : undefined : product.booking?.held_online ? 'online' : undefined, date: dayKey, month: key } }).fullPath,
+          to: router.resolve({ path: `${level.path.value}/sessions/${session.id}`, query: { product_id: product.id, location_id: session.location_id ? productLocations.value.some(entry => entry.id === session.location_id) ? session.location_id : undefined : product.booking?.held_online ? 'online' : undefined, date: dayKey, month: key } }).fullPath,
         }]
       })
       putMonth({ key, status: 'ready', items })

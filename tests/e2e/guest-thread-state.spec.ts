@@ -783,7 +783,7 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
 
   // The team's one private note lives on the booking, saved as a whole when the field is left; it never enters the conversation.
   const note = `Today page note ${Date.now()}`
-  const noteContext = `?range=upcoming&locationId=${demoLocationId()}&kinds=booking`
+  const noteContext = `?range=upcoming&location_id=${demoLocationId()}&kinds=booking`
   const recordPath = `/dashboard/${demoSlug()}/bookings/booking/${bookingIds[0]}`
   const noteEndpoint = `/api/dashboard/bookings/booking/${bookingIds[0]}/notes`
   const readBooking = async () => {
@@ -819,7 +819,7 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
   await expect(page.getByLabel('Date', { exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Send request', exact: true })).toBeVisible()
 
-  const changeContext = `?range=upcoming&locationId=${demoLocationId()}&kinds=booking`
+  const changeContext = `?range=upcoming&location_id=${demoLocationId()}&kinds=booking`
   await page.goto(`${baseURL}/dashboard/${demoSlug()}/bookings/booking/${upcomingBookingId}/change${changeContext}`)
   const beforeResponse = await page.request.get(
     `/api/dashboard/bookings/booking/${upcomingBookingId}`,

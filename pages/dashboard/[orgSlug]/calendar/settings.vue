@@ -13,7 +13,7 @@
 <script setup lang="ts">
 import EditorNavigationList, { type EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
 
-definePageMeta({ layout: 'dashboard', key: route => String(route.query.locationId ?? 'business') })
+definePageMeta({ layout: 'dashboard', key: route => String(route.query.location_id ?? 'business') })
 
 const route = useRoute()
 const level = useRouteLevel()

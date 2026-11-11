@@ -1132,7 +1132,7 @@ test.describe('stateless MCP server', () => {
       await waitForNuxtHydration(page)
       await expect(page.getByRole('link', { name: 'Duration 120 minutes', exact: true })).toBeVisible()
       await expect(page.getByRole('link', { name: 'Guest limit Up to 10 guests per session', exact: true })).toBeVisible()
-      await expect(page.locator('#dashboard-panel-product-booking').getByTestId('editor-row-availability')).toHaveAttribute('href', `/dashboard/ember-slice-demo/calendar?product_id=${created.id}&locationId=${brooklynLocationId()}`)
+      await expect(page.locator('#dashboard-panel-product-booking').getByTestId('editor-row-availability')).toHaveAttribute('href', `/dashboard/ember-slice-demo/calendar?product_id=${created.id}&location_id=${brooklynLocationId()}`)
       const read = async () => {
         const response = await request.get(`${url}/sessions`)
         expect(response.status(), await response.text()).toBe(200)
@@ -1273,7 +1273,7 @@ test.describe('stateless MCP server', () => {
       await expect(add).toBeEnabled()
       await draft.getByRole('button', { name: 'Cancel', exact: true }).click()
       await expect(page).toHaveURL(url => url.pathname === calendarPath && url.searchParams.get('product_id') === created.id)
-      expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ product_id: created.id, locationId: location.id, month: gapDate.slice(0, 7), date: gapDate })
+      expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ product_id: created.id, location_id: location.id, month: gapDate.slice(0, 7), date: gapDate })
       expect(createRequests).toEqual([])
       const sessionsAfterDraft = await read()
       expect(sessionsAfterDraft.map(session => session.id)).toEqual(sessionsBeforeDraft.map(session => session.id))
@@ -1283,7 +1283,7 @@ test.describe('stateless MCP server', () => {
       expect(unclaimed, 'the real weekly schedule has another unclaimed occurrence to edit').toBeDefined()
       const unclaimedStart = localNow(unclaimed!.timezone, new Date(unclaimed!.starts_at))
       const unclaimedEnd = localNow(unclaimed!.timezone, new Date(unclaimed!.ends_at))
-      expect((await page.goto(`${calendarPath}/sessions/${unclaimed!.id}?product_id=${created.id}&locationId=${location.id}&month=${unclaimedStart.date.slice(0, 7)}&date=${unclaimedStart.date}`))?.status()).toBe(200)
+      expect((await page.goto(`${calendarPath}/sessions/${unclaimed!.id}?product_id=${created.id}&location_id=${location.id}&month=${unclaimedStart.date.slice(0, 7)}&date=${unclaimedStart.date}`))?.status()).toBe(200)
       await waitForNuxtHydration(page)
       const save = draft.getByRole('button', { name: 'Save', exact: true })
       await expect(save).toBeDisabled()
@@ -1604,7 +1604,7 @@ test.describe('stateless MCP server', () => {
       const bookingPath = `/dashboard/ember-slice-demo/products/${product.id}/booking`
       const calendarPath = '/dashboard/ember-slice-demo/calendar'
       const sessionEndpoint = `/api/editor/organizations/${organizationId}/products/${product.id}/sessions`
-      expect((await page.goto(`${calendarPath}/sessions/new?product_id=${product.id}&locationId=${locationId}&month=${additionalSeating!.date.slice(0, 7)}&date=${additionalSeating!.date}`))?.status()).toBe(200)
+      expect((await page.goto(`${calendarPath}/sessions/new?product_id=${product.id}&location_id=${locationId}&month=${additionalSeating!.date.slice(0, 7)}&date=${additionalSeating!.date}`))?.status()).toBe(200)
       await waitForNuxtHydration(page)
       const availability = page.locator('#dashboard-panel-product-session')
       await expect(availability.getByLabel('Date', { exact: true })).toHaveValue(additionalSeating!.date)
@@ -1687,8 +1687,8 @@ test.describe('stateless MCP server', () => {
       expect((await savedCalendar).status()).toBe(200)
       page.off('request', countCreation)
       expect(creations).toBe(1)
-      await expect(page).toHaveURL(url => url.pathname === calendarPath && url.searchParams.get('date') === additionalSeating!.date && url.searchParams.get('locationId') === locationId)
-      expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ product_id: product.id, locationId, month: additionalSeating!.date.slice(0, 7), date: additionalSeating!.date })
+      await expect(page).toHaveURL(url => url.pathname === calendarPath && url.searchParams.get('date') === additionalSeating!.date && url.searchParams.get('location_id') === locationId)
+      expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ product_id: product.id, location_id: locationId, month: additionalSeating!.date.slice(0, 7), date: additionalSeating!.date })
       await expect(page.locator(`#dashboard-panel-org-calendar [data-session-id="${addedId}"]:visible`)).toBeVisible()
       const persisted = await call<{ sessions: SessionAvailability[] }>('list_product_booking_sessions', {
         product_id: product.id,

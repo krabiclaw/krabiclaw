@@ -87,7 +87,7 @@ const calendarSessions = inject(calendarSessionsKey, null)
 const { organization } = useDashboardOrganization()
 const sessionProduct = computed(() => calendarSessions?.product.value)
 const day = computed(() => String(route.params.day ?? ''))
-const locationId = computed(() => typeof route.query.locationId === 'string' ? route.query.locationId : null)
+const locationId = computed(() => typeof route.query.location_id === 'string' ? route.query.location_id : null)
 const title = computed(() => formatCalendarDate(day.value, 'en', { weekday: 'long', month: 'long', day: 'numeric' }))
 
 const isAgendaItem = (value: unknown): value is AgendaItem =>
@@ -109,7 +109,7 @@ const { data, error, status: agendaStatus, refresh } = await useAsyncData(
   async () => {
     if (sessionProduct.value) return null
     const agenda = await dashboardApi<AgendaPayload>(`${apiBase}/agenda`, {
-      query: { from: day.value, to: day.value, locationId: locationId.value ?? undefined, kinds: typeof route.query.kinds === 'string' ? route.query.kinds : undefined },
+      query: { from: day.value, to: day.value, location_id: locationId.value ?? undefined, kinds: typeof route.query.kinds === 'string' ? route.query.kinds : undefined },
       validate: isAgendaPayload,
     })
     return { items: agenda.items }

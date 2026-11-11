@@ -9,7 +9,7 @@ const selected = computed(() => typeof route.query.product_id === 'string' ? rou
 function choose(value: string) {
   return navigateTo({ path: `/dashboard/${route.params.orgSlug}/calendar`, query: {
     product_id: value === AGENDA_FILTER_ALL ? undefined : value,
-    locationId: value === selected.value && typeof route.query.locationId === 'string' ? route.query.locationId : undefined,
+    location_id: value === selected.value && typeof route.query.location_id === 'string' ? route.query.location_id : undefined,
     month: typeof route.query.month === 'string' ? route.query.month : undefined,
     view: typeof route.query.view === 'string' ? route.query.view : undefined,
   } })

@@ -20,7 +20,7 @@ const legal = computed(() => p.product.value?.kind === 'service')
 const table = computed(() => p.product.value?.kind === 'table')
 const to = (name: string) => router.resolve({ path: `${level.path.value}/${name}`, query: route.query }).fullPath
 const row = (id: string, label: string, summary: string, icon?: string) => ({ id, label, summary, icon, to: to(id) })
-const availability = () => ({ id: 'availability', label: 'Availability', summary: `Add or change ${legal.value ? 'consultation' : 'bookable'} times in Calendar`, icon: 'i-lucide-calendar-days', to: router.resolve({ path: `/dashboard/${route.params.orgSlug}/calendar`, query: { product_id: p.product.value?.id, locationId: typeof route.query.location_id === 'string' ? route.query.location_id : undefined } }).fullPath })
+const availability = () => ({ id: 'availability', label: 'Availability', summary: `Add or change ${legal.value ? 'consultation' : 'bookable'} times in Calendar`, icon: 'i-lucide-calendar-days', to: router.resolve({ path: `/dashboard/${route.params.orgSlug}/calendar`, query: { product_id: p.product.value?.id, location_id: typeof route.query.location_id === 'string' ? route.query.location_id : undefined } }).fullPath })
 const groups = computed<EditorNavigationGroup[]>(() => {
   const config = p.product.value?.booking
   const copy = p.bookingCopy.value

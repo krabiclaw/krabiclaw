@@ -8,10 +8,10 @@
 import EditorNavigationList, {type EditorNavigationGroup} from '~/components/dashboard/EditorNavigationList.vue'
 import {useCalendarLocationEditor} from '~/composables/useCalendarLocationEditor'
 import {hoursSummary} from '~/shared/availability-settings'
-definePageMeta({layout:'dashboard',key:route=>String(route.query.locationId??'business')})
+definePageMeta({layout:'dashboard',key:route=>String(route.query.location_id??'business')})
 const level=useRouteLevel(),route=useRoute(),router=useRouter()
 const organizationId=useDashboardOrganizationId()
-const editor=typeof route.query.locationId==='string'?await useCalendarLocationEditor(null):null
+const editor=typeof route.query.location_id==='string'?await useCalendarLocationEditor(null):null
 const to=(segment:string)=>router.resolve({path:`${level.path.value}/${segment}`,query:route.query}).fullPath
 const groups=computed<EditorNavigationGroup[]>(()=>[
  ...(editor?.location.value?[{id:'hours',items:[
