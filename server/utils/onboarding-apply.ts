@@ -162,8 +162,12 @@ export async function activateOnboardingDraft(env: CloudflareEnv, db: D1Database
     const site = await queryFirst<{ onboarding_status: string }>(db, 'SELECT onboarding_status FROM organization WHERE id = ?', [organizationId])
     const homepage = await getPublishedTenantPage(db, organizationId, '/', sourceLocale)
     if (!organization || site?.onboarding_status !== 'active' || !homepage?.blocks.length || !locations.length || !publicUrl) throw new Error('Activated website could not be read back')
-    if (completion.measurement.status === 'failed' || completion.operator_email.status === 'failed') {
-      throw new Error([completion.measurement.status === 'failed' ? completion.measurement.reason : null, completion.operator_email.status === 'failed' ? completion.operator_email.reason : null].filter(Boolean).join('; '))
+    if (completion.measurement.status === 'failed' || completion.operator_email.status === 'failed' || completion.owner_welcome_email?.status === 'failed') {
+      throw new Error([
+        completion.measurement.status === 'failed' ? completion.measurement.reason : null,
+        completion.operator_email.status === 'failed' ? completion.operator_email.reason : null,
+        completion.owner_welcome_email?.status === 'failed' ? completion.owner_welcome_email.reason : null,
+      ].filter(Boolean).join('; '))
     }
     return { organizationId, orgSlug: organization.slug, subdomain: draft.subdomain_candidate, locationId: locations[0]!.id, locationSlug: locations[0]!.slug, publicUrl, ...completion }
   } catch (error) {
