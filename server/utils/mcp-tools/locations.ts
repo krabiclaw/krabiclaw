@@ -317,7 +317,7 @@ export async function handleLocationsTools(ctx: McpExecutorContext): Promise<unk
           organization.db,
           organization.organizationId,
           location.id,
-          { special_hours: withNote, expected_updated_at: location.updated_at } as never,
+          { special_hours: withNote, updated_at: location.updated_at } as never,
           organization.userId,
           organization.env,
         );

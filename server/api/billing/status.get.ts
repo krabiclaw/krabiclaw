@@ -16,24 +16,24 @@ export default defineHandler(async (event) => {
   if (!session?.user.id) throw new HTTPError({ statusCode: 401, statusMessage: 'Sign in to read billing', data: { code: 'AUTHENTICATION_REQUIRED', field: 'session' } })
   const query = getQuery(event)
   if (query.organizationId !== undefined && (typeof query.organizationId !== 'string' || !query.organizationId.trim())) throw new HTTPError({ statusCode: 422, statusMessage: 'A valid organization ID is required', data: { code: 'INVALID_QUERY', field: 'organizationId' } })
-  if (query.includePrice !== undefined && query.includePrice !== 'true' && query.includePrice !== 'false') throw new HTTPError({ statusCode: 422, statusMessage: 'includePrice must be true or false', data: { code: 'INVALID_QUERY', field: 'includePrice' } })
+  if (query.include_price !== undefined && query.include_price !== 'true' && query.include_price !== 'false') throw new HTTPError({ statusCode: 422, statusMessage: 'include_price must be true or false', data: { code: 'INVALID_QUERY', field: 'include_price' } })
   const organization = await resolveRequestedOrganization(event, db, session.user.id, { explicitOrganizationId: typeof query.organizationId === 'string' ? query.organizationId : null })
   if (!organization) throw new HTTPError({ statusCode: 400, statusMessage: 'Choose a workspace to read billing', data: { code: 'ORGANIZATION_REQUIRED', field: 'org' } })
   await assertRoleAllows({ organizationId: organization.id, role: organization.role, permissions: { billing: ['read'] } })
   try {
     const status = await getOrganizationBillingStatus(env, db, organization.id)
-    const canUpdate = await hasBillingUpdatePermission(organization.id, organization.role)
-    const [subscriptionPrice, scheduledPlan] = await Promise.all([
-      getQuery(event).includePrice === 'true' ? getOrganizationSubscriptionPrice(env, status) : undefined,
+    const can_update = await hasBillingUpdatePermission(organization.id, organization.role)
+    const [subscription_price, scheduled_plan] = await Promise.all([
+      getQuery(event).include_price === 'true' ? getOrganizationSubscriptionPrice(env, status) : undefined,
       status.stripeScheduleId ? scheduledPlanChange(env, status.stripeScheduleId) : null,
     ])
     return jsonResponse({ success: true, billing: {
-      ...status, subscriptionPrice, scheduledPlan, organizationId: organization.id,
-      canUpdate, actions: billingPlanActions(status, scheduledPlan),
-    }, userRole: organization.role }, { headers: { 'cache-control': 'private, no-store' } })
+      ...status, subscription_price, scheduled_plan, organizationId: organization.id,
+      can_update, actions: billingPlanActions(status, scheduled_plan),
+    }, user_role: organization.role }, { headers: { 'cache-control': 'private, no-store' } })
   } catch (cause) {
     if (cause instanceof HTTPError) throw cause
     throw new HTTPError({ statusCode: 502, statusMessage: 'The current subscription could not be read',
-      data: { code: 'BILLING_SUBSCRIPTION_UNAVAILABLE', field: 'billing.subscriptionPrice' }, cause })
+      data: { code: 'BILLING_SUBSCRIPTION_UNAVAILABLE', field: 'billing.subscription_price' }, cause })
   }
 })

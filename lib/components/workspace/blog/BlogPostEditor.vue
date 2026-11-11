@@ -244,7 +244,7 @@ async function saveArticle(): Promise<BlogPost | null> {
     saveState.value = 'saving'
     if (!post.value) draft.value.submitted = true
     const updated = post.value
-      ? await props.repository.update(persistedPostId.value, { ...payload, expected_updated_at: serverPostUpdatedAt })
+      ? await props.repository.update(persistedPostId.value, { ...payload, updated_at: serverPostUpdatedAt })
       : await props.repository.create({ ...payload, title: form.title.trim(), content_blocks: payload.content_blocks ?? [], idempotency_key: draft.value.idempotency_key })
     syncServerVersion(updated)
     post.value = updated
@@ -342,7 +342,7 @@ function buildSavePayload(): BlogPostUpdateInput {
 }
 function lifecycleVersionInput() {
   if (!serverPostUpdatedAt) throw new Error('Blog lifecycle version is unavailable. Reload the editor.')
-  return { expected_updated_at: serverPostUpdatedAt }
+  return { updated_at: serverPostUpdatedAt }
 }
 function recordLifecycleError(error: unknown) {
   const status = Number((error as { statusCode?: number; status?: number })?.statusCode ?? (error as { status?: number })?.status)

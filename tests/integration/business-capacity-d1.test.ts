@@ -172,7 +172,7 @@ test('live homes are reported to their Stripe meter, drafts and locations are fr
       '2026-11-22T14:06:27.000Z',
     ])
     // The billing status the plan screen reads says the same trial, and what Stripe does at its end without a card.
-    assert.deepEqual((await getOrganizationSubscriptionPrice(env, await getOrganizationBillingStatus(env, db, 'inn')))?.trial, { end: '2026-11-22T14:06:27.000Z', withoutPaymentMethod: 'cancel' })
+    assert.deepEqual((await getOrganizationSubscriptionPrice(env, await getOrganizationBillingStatus(env, db, 'inn')))?.trial, { end: '2026-11-22T14:06:27.000Z', missing_payment_method: 'cancel' })
     // A stay product made at a location is one more home once it is live.
     const cabin = await homeAt('inn', bistroId, 'Garden Cabin')
     assert.equal(cabin.stay!.live, false)

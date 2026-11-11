@@ -169,7 +169,7 @@ const { data: photosResource, error: photosError, refresh: loadPhotos } = await 
   photosKey,
   async () => {
     if (!locationId.value) throw createError({ statusCode: 404, statusMessage: 'Location not found' })
-    const params = new URLSearchParams({ ownerType: 'business_location', ownerId: locationId.value, slot: 'gallery', limit: '100' })
+    const params = new URLSearchParams({ owner_type: 'business_location', owner_id: locationId.value, slot: 'gallery', limit: '100' })
     return await dashboardApi<{ media: MediaAsset[] }>(`${organizationApiBase}/media?${params}`, {
       validate: isMediaResponse,
     })

@@ -184,7 +184,7 @@ export interface StayHome {
   /** The home's one variant, its nightly offer: what each of its bookings names. */
   variant_id: string
   /** The Product version used when saving listing accessibility. */
-  product_updated_at: string
+  updated_at: string
   /** Public listing title, independently editable from the operator name. */
   name: string
   internal_name: string
@@ -435,7 +435,7 @@ async function stayHomes(db: DbClient, access: StayAccess, productId: string | n
 
 async function stayHomesWhere(db: DbClient, organizationId: string, productId: string | null, scope: { sql: string; params: string[] }): Promise<StayHome[]> {
   const rows = await queryAll<Record<string, unknown>>(db, `
-    SELECT p.id AS product_id, (SELECT json_group_array(v.id) FROM product_variants v WHERE v.organization_id = c.organization_id AND v.product_id = c.product_id) AS variant_ids, p.updated_at AS product_updated_at, p.name, c.internal_name, p.description, p.details_json, c.location_id, l.timezone, l.address, l.latitude, l.longitude, l.stay_map_sharing, o.default_currency,
+    SELECT p.id AS product_id, (SELECT json_group_array(v.id) FROM product_variants v WHERE v.organization_id = c.organization_id AND v.product_id = c.product_id) AS variant_ids, p.updated_at, p.name, c.internal_name, p.description, p.details_json, c.location_id, l.timezone, l.address, l.latitude, l.longitude, l.stay_map_sharing, o.default_currency,
            b.check_in_time, b.check_in_end_time, b.check_out_time, b.default_capacity AS max_guests, b.min_nights, b.calendar_rules, ${stayWeekendPriceSql('c')} AS weekend_price_minor, c.property_type_group, c.property_type,
            c.listing_type, c.total_floors, c.listing_floor, c.year_built, c.property_size, c.property_size_unit, c.bedrooms, c.beds, c.bathrooms, c.amenities,
            b.cancellation_policy, b.long_term_cancellation_policy, c.check_in_method, c.check_in_instructions, c.wifi_network, c.wifi_password,
@@ -474,7 +474,7 @@ async function stayHomesWhere(db: DbClient, organizationId: string, productId: s
     const own = prices.filter(price => price.product_id === row.product_id).map(price => ({ ...price, active: Number(price.active) === 1 }))
     const base = selectPrice(own, { currency: row.default_currency, location_id: String(row.location_id) })
     return {
-      product_id: String(row.product_id), variant_id: variants[0]!, product_updated_at: String(row.product_updated_at), name: String(row.name), internal_name: String(row.internal_name), location_id: String(row.location_id), timezone: String(row.timezone),
+      product_id: String(row.product_id), variant_id: variants[0]!, updated_at: String(row.updated_at), name: String(row.name), internal_name: String(row.internal_name), location_id: String(row.location_id), timezone: String(row.timezone),
       currency: row.default_currency, base_price_minor: base ? base.unit_amount : null, base_price_tax_behavior: base ? base.tax_behavior : null,
       check_in_time: nullableText(row.check_in_time), check_in_end_time: nullableText(row.check_in_end_time), check_out_time: nullableText(row.check_out_time), max_guests: Number(row.max_guests), min_nights: Number(row.min_nights), calendar_rules: readStayCalendarRules(row.calendar_rules, row.weekend_price_minor),
       description: String(row.description), published: Number(row.published) === 1, live: Number(row.live) === 1,
@@ -1070,14 +1070,14 @@ export async function createStayPhotoRoom(db: DbClient, env: CloudflareEnv & Gue
 export async function updateStayHomeAccessibility(db: DbClient, env: CloudflareEnv & GuestInboxPublicationEnv, access: StayAccess, productId: string, body: unknown): Promise<{ home: StayHome }> {
   const home = await managedHome(db, access, productId)
   if (!isRecord(body)) fail(422, 'INVALID_STAY_ACCESSIBILITY', 'Provide the accessibility answer to change', 'accessibility')
-  const unknown = Object.keys(body).find(key => !['expected_updated_at', 'accessibility'].includes(key))
+  const unknown = Object.keys(body).find(key => !['updated_at', 'accessibility'].includes(key))
   if (unknown) fail(422, 'INVALID_STAY_ACCESSIBILITY', `${unknown} cannot be changed here`, unknown)
-  if (typeof body.expected_updated_at !== 'string' || !Number.isFinite(Date.parse(body.expected_updated_at))) fail(422, 'INVALID_STAY_ACCESSIBILITY', 'Provide the Product updated_at value from the latest read', 'expected_updated_at')
+  if (typeof body.updated_at !== 'string' || !Number.isFinite(Date.parse(body.updated_at))) fail(422, 'INVALID_STAY_ACCESSIBILITY', 'Provide the Product updated_at value from the latest read', 'updated_at')
   if (!isStayHomeAccessibility(body.accessibility)) fail(422, 'INVALID_STAY_ACCESSIBILITY', 'Choose a listing accessibility feature and true, false or null. A true answer needs unique photo IDs; false or null needs an empty photo list.', 'accessibility')
-  if (body.expected_updated_at !== home.product_updated_at) fail(409, 'STAY_ACCESSIBILITY_CHANGED', 'The listing changed while you were editing. Reload the accessibility information and try again.', 'expected_updated_at')
+  if (body.updated_at !== home.updated_at) fail(409, 'STAY_ACCESSIBILITY_CHANGED', 'The listing changed while you were editing. Reload the accessibility information and try again.', 'updated_at')
   await updateProduct(db, {
     organizationId: access.organizationId, productId, patch: {}, actor: { actorId: access.actorId }, env,
-    stayAccessibilityUpdate: { expectedUpdatedAt: body.expected_updated_at, accessibility: body.accessibility },
+    stayAccessibilityUpdate: { expectedUpdatedAt: body.updated_at, accessibility: body.accessibility },
   })
   return { home: await readStayHome(db, access, productId) }
 }
@@ -2400,7 +2400,7 @@ export async function setStayNights(db: DbClient, env: StayMutationEnv, access: 
     ...(weekdays ? { weekdays: weekdays.join(',') } : {}), ...(percent === null ? {} : { price_change_percent: percent }),
   })
   // A night with no price of its own moves from the listing's price as read above; the batch refuses if the listing changed since.
-  const listingGuard = { query: "SELECT CASE WHEN EXISTS (SELECT 1 FROM products WHERE organization_id = ? AND id = ? AND updated_at = ?) THEN NULL ELSE json('Stay listing changed') END", params: [access.organizationId, home.product_id, home.product_updated_at] }
+  const listingGuard = { query: "SELECT CASE WHEN EXISTS (SELECT 1 FROM products WHERE organization_id = ? AND id = ? AND updated_at = ?) THEN NULL ELSE json('Stay listing changed') END", params: [access.organizationId, home.product_id, home.updated_at] }
   const datesSql = "SELECT json_extract(value, '$.date') FROM json_each(?)"
   const priceScope = 'organization_id = ? AND product_variant_id = ?'
   const priceParams = [access.organizationId, home.variant_id]
@@ -2436,7 +2436,7 @@ export async function setStayNights(db: DbClient, env: StayMutationEnv, access: 
     audit.after,
   ], { operation: 'Set stay nights' }).catch(async (cause: unknown) => {
     if (percent !== null && String(cause).includes('Night price too large')) fail(422, 'INVALID_AMOUNT', 'A night’s price would be too large', 'price_change_percent')
-    if ((await readStayHome(db, access, home.product_id)).product_updated_at !== home.product_updated_at) {
+    if ((await readStayHome(db, access, home.product_id)).updated_at !== home.updated_at) {
       fail(409, 'STAY_HOME_CHANGED', 'The listing changed while its nights were being edited. Reload the calendar and try again.', 'product_id')
     }
     throw cause

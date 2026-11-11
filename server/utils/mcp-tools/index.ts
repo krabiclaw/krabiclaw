@@ -172,7 +172,7 @@ export async function executeMcpToolCall(
       ? await readOnboardingDraft(user.db, user.userId, optionalString(normalizedArguments, 'draft_id') ?? undefined)
       : await saveOnboardingDraft(user.env, user.db, user.userId, {
           draftId: optionalString(normalizedArguments, 'draft_id') ?? undefined,
-          expectedUpdatedAt: optionalString(normalizedArguments, 'revision'), idempotencyKey: requiredString(normalizedArguments, 'idempotency_key'),
+          updated_at: optionalString(normalizedArguments, 'updated_at'), idempotencyKey: requiredString(normalizedArguments, 'idempotency_key'),
           name: normalizedArguments.name, vertical: normalizedArguments.vertical, subdomain: normalizedArguments.subdomain,
           details: { sourceLocale: normalizedArguments.source_locale, currency: normalizedArguments.currency, timezone: normalizedArguments.timezone,
             streetAddress: location?.street_address, addressLine2: location?.address_line_2, city: location?.city, region: location?.region,
@@ -186,7 +186,7 @@ export async function executeMcpToolCall(
     if (row.organization_id) event.context.mcpExecutionContext = { organizationId: row.organization_id }
     const details = payload.source.details
     return {
-      draft_id: row.id, revision: row.updated_at, ...(row.organization_id ? { organization_id: row.organization_id } : {}), status: row.status,
+      draft_id: row.id, updated_at: row.updated_at, ...(row.organization_id ? { organization_id: row.organization_id } : {}), status: row.status,
       ...(payload.request ? { idempotency_key: payload.request.key } : {}),
       subdomain: row.subdomain_candidate, name: payload.preview.brandName, vertical: payload.preview.vertical, source_locale: details.sourceLocale,
       ...(details.currency ? { currency: details.currency } : {}), ...(details.timezone ? { timezone: details.timezone } : {}),
@@ -202,7 +202,7 @@ export async function executeMcpToolCall(
   if (toolName === 'publish_website') {
     const user = authenticatedUser ?? await requireMcpUser(event)
     const draftId = requiredString(normalizedArguments, 'draft_id')
-    const created = await activateOnboardingDraft(user.env, user.db, { userId: user.userId, draftId, expectedUpdatedAt: requiredString(normalizedArguments, 'revision'), origin: event.req })
+    const created = await activateOnboardingDraft(user.env, user.db, { userId: user.userId, draftId, updated_at: requiredString(normalizedArguments, 'updated_at'), origin: event.req })
     event.context.mcpExecutionContext = { organizationId: created.organizationId, locationId: created.locationId }
     try {
       await upsertMcpWorkspacePreference(user.db, { userId: user.userId, organizationId: created.organizationId, locationId: created.locationId })

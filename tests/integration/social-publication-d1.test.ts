@@ -667,7 +667,7 @@ test('publication: one result and one external post per target; a failure is the
 
     // After publication, local edits are allowed and nothing is re-sent; the management view says the website copy changed.
     const edited = await mcp('update_post', {
-      post_id: racing.post.id, body: 'Edited later', expected_updated_at: (await getPost(db, env, 'org-a', racing.post.id))!.updated_at,
+      post_id: racing.post.id, body: 'Edited later', updated_at: (await getPost(db, env, 'org-a', racing.post.id))!.updated_at,
     })
     const editedPost = (await getPost(db, env, 'org-a', racing.post.id))!
     assert.equal(editedPost.body, 'Edited later')

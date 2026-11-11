@@ -48,7 +48,7 @@ const [{ servicesResource, services, servicesError, refreshServices }, { billing
 const on = computed(() => !!services.value?.strategy)
 // The service is an item on the plan's subscription, so it needs one that is running.
 const onPaidPlan = computed(() => servicesResource.value?.requirements?.strategy?.paid_plan)
-const planName = computed(() => billing.value?.subscriptionPrice?.name ?? plans.value.find(plan => plan.id === billing.value?.plan)?.name ?? 'your plan')
+const planName = computed(() => billing.value?.subscription_price?.name ?? plans.value.find(plan => plan.id === billing.value?.plan)?.name ?? 'your plan')
 const requirementRows = computed<EditorNavigationItem[]>(() => typeof onPaidPlan.value !== 'boolean' ? [] : [{
   id: 'paid-plan', label: 'Paid plan', mark: onPaidPlan.value ? 'met' : 'open',
   summary: `On ${planName.value}`,

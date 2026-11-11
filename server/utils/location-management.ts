@@ -40,7 +40,7 @@ export interface CreateLocationInput {
   opening_hours?: OpeningHours;
   special_hours?: SpecialHours;
   /** The updated_at the caller read; the write is refused if the row moved since. */
-  expected_updated_at?: string;
+  updated_at?: string;
   price_level?: string | null;
   rating?: number | null;
   review_count?: number | null;
@@ -562,9 +562,9 @@ export async function updateLocation(
 
   const stale = {
     status: 409,
-    data: { error: "The location changed since it was read. Reload it and try again.", code: 'LOCATION_VERSION_CONFLICT', field: 'expected_updated_at' },
+    data: { error: "The location changed since it was read. Reload it and try again.", code: 'LOCATION_VERSION_CONFLICT', field: 'updated_at' },
   };
-  if (input.expected_updated_at !== undefined && input.expected_updated_at !== existing.updated_at) return stale;
+  if (input.updated_at !== undefined && input.updated_at !== existing.updated_at) return stale;
   const changedFields: string[] = [];
   for (let index = 1; index < sets.length; index++) {
     const field = sets[index]!.split(' = ')[0] as keyof LocationRecord;
@@ -589,7 +589,7 @@ export async function updateLocation(
   // the row it read. With the caller's updated_at in the WHERE, a row that
   // moved since matches nothing and the write is refused rather than applied
   // over someone else's.
-  const expectedUpdatedAt = input.expected_updated_at ?? existing.updated_at;
+  const expectedUpdatedAt = input.updated_at ?? existing.updated_at;
   // A table here is seated through these hours: its seatings follow them in
   // the same batch, written only if this update lands.
   const saved = (field: 'timezone' | 'opening_hours' | 'special_hours') => {

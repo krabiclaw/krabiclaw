@@ -24,14 +24,14 @@ export interface OrganizationBillingStatus {
   plan: string
   stripeCustomerId?: string
   stripeSubscriptionId?: string
-  subscriptionStatus?: string
-  currentPeriodEnd?: string
+  status?: string
+  periodEnd?: string
   cancelAtPeriodEnd?: boolean
   /** Better Auth's subscription schedule for a plan change at the end of the period. */
   stripeScheduleId?: string
   billingInterval?: 'month'
   /** The plan item's own charge, and the metered prices the subscription carries: an earlier contract may lack one added since. */
-  subscriptionPrice?: { name: string; amount: number; currency: CurrencyCode; interval: 'month'; meters: BillingMeterKey[]; trial: SubscriptionTrial | null }
+  subscription_price?: { name: string; amount: number; currency: CurrencyCode; interval: 'month'; meters: BillingMeterKey[]; trial: SubscriptionTrial | null }
   /** What the plan bills by count: its live homes. */
   usage: BillingCapacity
   entitlements: EntitlementsMap
@@ -40,7 +40,7 @@ export interface OrganizationBillingStatus {
 /** A free trial as Stripe runs it: when it ends, and what Stripe does then when no card is on file. */
 export interface SubscriptionTrial {
   end: string
-  withoutPaymentMethod: Stripe.Subscription.TrialSettings.EndBehavior.MissingPaymentMethod
+  missing_payment_method: Stripe.Subscription.TrialSettings.EndBehavior.MissingPaymentMethod
 }
 
 const billingAuthorizationOptions = {
@@ -86,8 +86,8 @@ export async function getOrganizationBillingStatus(
     plan,
     stripeCustomerId: customerId,
     stripeSubscriptionId: subscription?.stripeSubscriptionId ?? undefined,
-    subscriptionStatus: subscription?.status ?? undefined,
-    currentPeriodEnd: subscription?.periodEnd?.toISOString(),
+    status: subscription?.status ?? undefined,
+    periodEnd: subscription?.periodEnd?.toISOString(),
     cancelAtPeriodEnd: subscription?.cancelAtPeriodEnd,
     stripeScheduleId: subscription?.stripeScheduleId ?? undefined,
     billingInterval: billingInterval(subscription?.billingInterval),
@@ -101,7 +101,7 @@ export async function getOrganizationBillingStatus(
 export async function getOrganizationSubscriptionPrice(
   env: CloudflareEnv,
   status: OrganizationBillingStatus,
-): Promise<OrganizationBillingStatus['subscriptionPrice']> {
+): Promise<OrganizationBillingStatus['subscription_price']> {
   if (!status.stripeSubscriptionId) return undefined
   const native = await getStripe(env).subscriptions.retrieve(status.stripeSubscriptionId, { expand: ['items.data.price.product', 'items.data.price.tiers'] })
   const customerId = typeof native.customer === 'string' ? native.customer : native.customer.id
@@ -121,7 +121,7 @@ export async function getOrganizationSubscriptionPrice(
 function subscriptionTrial(native: Stripe.Subscription): SubscriptionTrial | null {
   if (native.status !== 'trialing') return null
   if (!native.trial_end || !native.trial_settings) throw new Error(`Stripe subscription ${native.id} is trialing without its trial end and settings`)
-  return { end: new Date(native.trial_end * 1000).toISOString(), withoutPaymentMethod: native.trial_settings.end_behavior.missing_payment_method }
+  return { end: new Date(native.trial_end * 1000).toISOString(), missing_payment_method: native.trial_settings.end_behavior.missing_payment_method }
 }
 
 /** The metered prices a subscription carries, read from its items' products (expanded): one from before a meter was added lacks it. */

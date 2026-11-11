@@ -53,7 +53,7 @@ test('device registration requires the current session and cascades with that se
     }
     const first = await signIn('first-user')
     const bearer = { authorization: `Bearer ${first.token}` }
-    const registration = { deviceToken: 'AB'.repeat(40), environment: 'sandbox' }
+    const registration = { token: 'AB'.repeat(40), environment: 'sandbox' }
     const count = () => db.prepare('SELECT count(*) AS n FROM device_tokens').first<number>('n')
 
     // The app presents its bearer session and the dashboard its cookie; neither may be absent or forged.
@@ -68,9 +68,9 @@ test('device registration requires the current session and cascades with that se
       ['{', 400, 'INVALID_BODY', 'body'],
       [[], 400, 'INVALID_BODY', 'body'],
       [null, 400, 'INVALID_BODY', 'body'],
-      [{ environment: 'sandbox' }, 422, 'INVALID_DEVICE_TOKEN', 'deviceToken'],
-      [{ deviceToken: registration.deviceToken }, 422, 'INVALID_DEVICE_ENVIRONMENT', 'environment'],
-      [{ ...registration, deviceToken: 'abc' }, 422, 'INVALID_DEVICE_TOKEN', 'deviceToken'],
+      [{ environment: 'sandbox' }, 422, 'INVALID_DEVICE_TOKEN', 'token'],
+      [{ token: registration.token }, 422, 'INVALID_DEVICE_ENVIRONMENT', 'environment'],
+      [{ ...registration, token: 'abc' }, 422, 'INVALID_DEVICE_TOKEN', 'token'],
       [{ ...registration, environment: null }, 400, 'INVALID_BODY_FIELD', 'environment'],
       [{ ...registration, environment: 'other' }, 422, 'INVALID_DEVICE_ENVIRONMENT', 'environment'],
     ] as const) {
@@ -80,12 +80,12 @@ test('device registration requires the current session and cascades with that se
     assert.equal(await count(), 0)
     const identityInjection = await call('POST', bearer, { ...registration, userId: 'second-user', sessionId: first.sessionId })
     assert.deepEqual({ status: identityInjection.status, ...identityInjection.body.data }, { status: 400, code: 'INVALID_BODY', fields: ['sessionId', 'userId'] })
-    await assert.rejects(registerDevice(db, { kind: 'apns', deviceToken: registration.deviceToken, environment: 'sandbox', userId: 'second-user', sessionId: first.sessionId }),
+    await assert.rejects(registerDevice(db, { kind: 'apns', token: registration.token, environment: 'sandbox', userId: 'second-user', sessionId: first.sessionId }),
       { status: 401, data: { code: 'UNAUTHORIZED', field: 'session' } })
     assert.equal(await count(), 0)
     assert.deepEqual(await call('POST', bearer, registration), { status: 200, body: { status: 'registered' } })
     assert.deepEqual(await db.prepare('SELECT token, kind, user_id, session_id, environment, p256dh, auth FROM device_tokens').first(), {
-      token: registration.deviceToken.toLowerCase(), kind: 'apns', user_id: 'first-user', session_id: first.sessionId, environment: 'sandbox', p256dh: null, auth: null,
+      token: registration.token.toLowerCase(), kind: 'apns', user_id: 'first-user', session_id: first.sessionId, environment: 'sandbox', p256dh: null, auth: null,
     })
     assert.deepEqual(await call('POST', bearer, registration), { status: 200, body: { status: 'registered' } })
     assert.equal(await count(), 1)
@@ -94,17 +94,17 @@ test('device registration requires the current session and cascades with that se
     const next = await signIn('first-user')
     assert.notEqual(next.sessionId, first.sessionId)
     assert.equal((await call('POST', { authorization: `Bearer ${next.token}` }, { ...registration, environment: 'production' })).status, 200)
-    assert.equal((await call('DELETE', bearer, { deviceToken: registration.deviceToken })).status, 200)
+    assert.equal((await call('DELETE', bearer, { token: registration.token })).status, 200)
     assert.equal(await db.prepare('SELECT session_id FROM device_tokens').first('session_id'), next.sessionId)
     await auth.api.signOut({ headers: new Headers({ authorization: `Bearer ${first.token}` }) })
     assert.equal(await count(), 1)
     // An operation already authenticated before logout cannot rebind the token afterward.
-    await assert.rejects(registerDevice(db, { kind: 'apns', deviceToken: registration.deviceToken, environment: 'sandbox', userId: 'first-user', sessionId: first.sessionId }),
+    await assert.rejects(registerDevice(db, { kind: 'apns', token: registration.token, environment: 'sandbox', userId: 'first-user', sessionId: first.sessionId }),
       { status: 401, data: { code: 'UNAUTHORIZED', field: 'session' } })
     assert.equal(await db.prepare('SELECT session_id FROM device_tokens').first('session_id'), next.sessionId)
 
     const second = await signIn('second-user')
-    assert.equal((await call('DELETE', { authorization: `Bearer ${second.token}` }, { deviceToken: registration.deviceToken })).status, 200)
+    assert.equal((await call('DELETE', { authorization: `Bearer ${second.token}` }, { token: registration.token })).status, 200)
     assert.equal(await count(), 1)
     await auth.api.signOut({ headers: new Headers({ authorization: `Bearer ${next.token}` }) })
     assert.equal(await count(), 0)
@@ -114,7 +114,7 @@ test('device registration requires the current session and cascades with that se
 
     const expiring = await signIn('first-user')
     await db.prepare('UPDATE session SET expiresAt = unixepoch() - 1 WHERE id = ?').bind(expiring.sessionId).run()
-    await assert.rejects(registerDevice(db, { kind: 'apns', deviceToken: registration.deviceToken, environment: 'sandbox', userId: 'first-user', sessionId: expiring.sessionId }),
+    await assert.rejects(registerDevice(db, { kind: 'apns', token: registration.token, environment: 'sandbox', userId: 'first-user', sessionId: expiring.sessionId }),
       { status: 401, data: { code: 'UNAUTHORIZED', field: 'session' } })
     assert.equal(await count(), 0)
 

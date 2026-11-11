@@ -34,7 +34,7 @@ test('document scopes, translations, block ownership and concurrent edits persis
       id: 'article', organizationId: 'one', kind: 'article', rowRole: 'root', locale: 'en',
       title: 'Original', slug: 'article', status: 'published', publishedAt: '2026-01-01T00:00:00.000Z', visibility: 'listed',
     }, [{ id: 'body', type: 'markdown', data: { markdown: 'Original', editor_mode: 'rich' } }])
-    const prepare = (label: string) => prepareContentDocumentUpdate(document, { expected_updated_at: document.updated_at,
+    const prepare = (label: string) => prepareContentDocumentUpdate(document, { updated_at: document.updated_at,
       changes: { title: label, summary: label }, blocks: [{ id: 'body', type: 'markdown', data: { markdown: label, editor_mode: 'rich' } }],
     })
     await executeBatch(db, prepare('Winner').queries)
@@ -52,7 +52,7 @@ test('document scopes, translations, block ownership and concurrent edits persis
     const { normalizeTenantPageBlocks } = await import('../../utils/tenant-page-blocks.ts')
     const returnedBlocks = normalizeTenantPageBlocks(beforePage.map(block => ({ ...block, data: JSON.parse(block.data_json) })))
     await updateContentDocument(db, page.document.id, {
-      expected_updated_at: page.document.updated_at, changes: { title: 'About us' }, blocks: returnedBlocks,
+      updated_at: page.document.updated_at, changes: { title: 'About us' }, blocks: returnedBlocks,
     })
     const afterPage = await listBlocksForDocument(db, page.document.id)
     const content = (rows: typeof beforePage) => rows.map(({ updated_at, created_at, ...row }) => row)
@@ -67,7 +67,7 @@ test('document scopes, translations, block ownership and concurrent edits persis
       rowRole: 'representation', rootId: document.id, locale: 'th' }, []))
     await assert.rejects(createContentDocumentWithBlocks(db, { organizationId: 'one', kind: 'article',
       rowRole: 'representation', rootId: translated.document.id, locale: 'th' }, []))
-    await assert.rejects(updateContentDocument(db, translated.document.id, { expected_updated_at: translated.document.updated_at,
+    await assert.rejects(updateContentDocument(db, translated.document.id, { updated_at: translated.document.updated_at,
       blocks: [{ id: 'body', type: 'markdown', data: { markdown: 'Cross-document overwrite', editor_mode: 'rich' } }] }))
     await db.prepare("INSERT INTO media_assets (id,organization_id,kind,provider,source) VALUES ('shared-image','one','image','cloudflare_r2','uploaded')").run()
     const sourceLinks = await createContentDocumentWithBlocks(db, { id: 'links', organizationId: 'one',
@@ -77,7 +77,7 @@ test('document scopes, translations, block ownership and concurrent edits persis
       kind: 'page', rowRole: 'representation', rootId: sourceLinks.document.id, locale: 'th', title: 'Translated links', path: '/links' },
     [{ id: 'link-a-th', source_block_id: 'link-a', type: 'cta', data: { label: 'Translated A' } },
       { id: 'translated-link-image', parent_block_id: 'link-a-th', type: 'image', data: {} }])
-    await assert.rejects(updateContentDocument(db, translatedLinks.document.id, { expected_updated_at: translatedLinks.document.updated_at,
+    await assert.rejects(updateContentDocument(db, translatedLinks.document.id, { updated_at: translatedLinks.document.updated_at,
       blocks: [{ id: 'link-a-th', source_block_id: 'body', type: 'cta', data: { label: 'Wrong root' } }] }))
     const appended = await appendContentBlock(db, translatedLinks.document.id, {
       source_block_id: 'link-b', type: 'cta', data: { label: 'Translated B' },
@@ -88,12 +88,12 @@ test('document scopes, translations, block ownership and concurrent edits persis
     let translatedBlocks = await listBlocksForDocument(db, translatedLinks.document.id)
     let firstLink = translatedBlocks.find(block => block.id === 'link-a-th')!
     assert.equal(firstLink.source_block_id, 'link-a')
-    await replaceContentBlock(db, firstLink.id, { expected_updated_at: firstLink.updated_at, data: { label: 'Edited A' } }, { actorId: null })
+    await replaceContentBlock(db, firstLink.id, { updated_at: firstLink.updated_at, data: { label: 'Edited A' } }, { actorId: null })
     translatedBlocks = await listBlocksForDocument(db, translatedLinks.document.id)
     firstLink = translatedBlocks.find(block => block.id === 'link-a-th')!
     assert.equal(firstLink.source_block_id, 'link-a')
     const afterBlockEdit = await getContentDocumentById(db, translatedLinks.document.id)
-    await replaceContentBlock(db, firstLink.id, { expected_updated_at: firstLink.updated_at, data: { label: 'Edited A' } }, { actorId: null })
+    await replaceContentBlock(db, firstLink.id, { updated_at: firstLink.updated_at, data: { label: 'Edited A' } }, { actorId: null })
     assert.deepEqual(await getContentDocumentById(db, translatedLinks.document.id), afterBlockEdit, 'an unchanged block is not a document edit')
     const blockReceipts = await db.prepare("SELECT actor_kind, payload_json FROM activity_entries WHERE event_name = 'content.updated' AND json_extract(payload_json, '$.entityId') = ? ORDER BY occurred_at, id").bind(translatedLinks.document.id).all<{ actor_kind: string; payload_json: string }>()
     assert.equal(blockReceipts.results.length, 2)
@@ -101,13 +101,13 @@ test('document scopes, translations, block ownership and concurrent edits persis
     assert.ok(blockReceipts.results.every(row => row.actor_kind === 'system' && JSON.parse(row.payload_json).metadata.changed_fields[0] === 'content_blocks'))
     const secondLink = translatedBlocks.find(block => block.id === appendedLink.id)!
     assert.equal(secondLink.source_block_id, 'link-b')
-    await deleteContentBlock(db, secondLink.id, { expected_updated_at: secondLink.updated_at, actorId: null })
+    await deleteContentBlock(db, secondLink.id, { updated_at: secondLink.updated_at, actorId: null })
     assert.equal((await listBlocksForDocument(db, translatedLinks.document.id)).find(block => block.id === firstLink.id)?.source_block_id, 'link-a')
     await executeBatch(db, [buildMediaPlacementInsertQuery({ id: 'translated-descendant-image', organizationId: 'one',
       ownerType: 'content_block', ownerId: 'translated-link-image', slot: 'media', assetId: 'shared-image', sortOrder: 0 })])
     const beforeTypeChange = await listBlocksForDocument(db, sourceLinks.document.id)
     const beforeTranslatedTypeChange = await listBlocksForDocument(db, translatedLinks.document.id)
-    await assert.rejects(updateContentDocument(db, sourceLinks.document.id, { expected_updated_at: sourceLinks.document.updated_at,
+    await assert.rejects(updateContentDocument(db, sourceLinks.document.id, { updated_at: sourceLinks.document.updated_at,
       changes: { title: 'Invalid type change' },
       blocks: [{ id: 'link-a', type: 'heading', data: { text: 'Changed type' } }] }))
     assert.deepEqual(await listBlocksForDocument(db, sourceLinks.document.id), beforeTypeChange)
@@ -115,28 +115,28 @@ test('document scopes, translations, block ownership and concurrent edits persis
     assert.deepEqual(await getContentDocumentById(db, sourceLinks.document.id), sourceLinks.document)
     assert.equal(await db.prepare("SELECT title FROM content_documents WHERE id = 'links'").first('title'), 'Links')
     assert.equal(await db.prepare("SELECT count(*) AS count FROM media_placements WHERE id = 'translated-descendant-image'").first('count'), 1)
-    await updateContentDocument(db, sourceLinks.document.id, { expected_updated_at: sourceLinks.document.updated_at,
+    await updateContentDocument(db, sourceLinks.document.id, { updated_at: sourceLinks.document.updated_at,
       blocks: [{ id: 'link-b', type: 'cta', data: { label: 'B', url: '/b' } }, { id: 'link-a', type: 'cta', data: { label: 'A', url: '/new-a' } }] })
     assert.equal((await listBlocksForDocument(db, translatedLinks.document.id))[0]?.id, 'link-a-th')
     const reordered = await getContentDocumentById(db, sourceLinks.document.id)
     assert.ok(reordered)
-    await updateContentDocument(db, reordered.id, { expected_updated_at: reordered.updated_at,
+    await updateContentDocument(db, reordered.id, { updated_at: reordered.updated_at,
       blocks: [{ id: 'link-b', type: 'cta', data: { label: 'B', url: '/b' } }] })
     assert.deepEqual(await listBlocksForDocument(db, translatedLinks.document.id), [])
     assert.equal(await db.prepare("SELECT count(*) AS count FROM media_placements WHERE id = 'translated-descendant-image'").first('count'), 0)
     const unreferencedSource = await getContentDocumentById(db, sourceLinks.document.id)
     assert.ok(unreferencedSource)
-    await updateContentDocument(db, unreferencedSource.id, { expected_updated_at: unreferencedSource.updated_at,
+    await updateContentDocument(db, unreferencedSource.id, { updated_at: unreferencedSource.updated_at,
       blocks: [{ id: 'link-b', type: 'heading', data: { text: 'Unreferenced heading' } }] })
     const headingSource = await getContentDocumentById(db, sourceLinks.document.id)
     assert.ok(headingSource)
     const emptyTranslation = await getContentDocumentById(db, translatedLinks.document.id)
     assert.ok(emptyTranslation)
-    await updateContentDocument(db, emptyTranslation.id, { expected_updated_at: emptyTranslation.updated_at,
+    await updateContentDocument(db, emptyTranslation.id, { updated_at: emptyTranslation.updated_at,
       blocks: [{ id: 'heading-th', source_block_id: 'link-b', type: 'heading', data: { text: 'Translated heading' } }] })
-    await assert.rejects(updateContentDocument(db, headingSource.id, { expected_updated_at: headingSource.updated_at,
+    await assert.rejects(updateContentDocument(db, headingSource.id, { updated_at: headingSource.updated_at,
       blocks: [{ id: 'link-b', type: 'markdown', data: { markdown: 'Changed type', editor_mode: 'rich' } }] }))
-    await updateContentDocument(db, headingSource.id, { expected_updated_at: headingSource.updated_at,
+    await updateContentDocument(db, headingSource.id, { updated_at: headingSource.updated_at,
       additionalQueriesBefore: prepareContentDocumentDeletion({ documentId: emptyTranslation.id, organizationId: 'one' }),
       blocks: [{ id: 'link-b', type: 'markdown', data: { markdown: 'Changed after removing translation', editor_mode: 'rich' } }] })
     assert.equal((await listBlocksForDocument(db, headingSource.id))[0]?.type, 'markdown')

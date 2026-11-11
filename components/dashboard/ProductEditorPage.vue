@@ -1485,7 +1485,7 @@ function isSafetyConcern(concern: unknown): concern is StaySafetySection {
 function payload(concern?: ProductConcern) {
   if (!isNew.value) {
     if (!editVersion.value) throw new Error('Read the saved product before editing it.')
-    const version = { expected_updated_at: editVersion.value }
+    const version = { updated_at: editVersion.value }
     if (editorKey.value === 'internal-name') return { ...version, stay: { internal_name: form.internal_name.trim() } }
     if (editorKey.value === 'name') return { ...version, name: form.name.trim() }
     if (editorKey.value === 'description') {
@@ -1500,7 +1500,7 @@ function payload(concern?: ProductConcern) {
     }
   }
   if (!isNew.value && !stayEditor.value) {
-    const version = { expected_updated_at: editVersion.value }
+    const version = { updated_at: editVersion.value }
     if (editorKey.value === 'name') return { ...version, name: form.name.trim() }
     if (editorKey.value === 'order-url') return { ...version, order_url: form.order_url || null }
     if (editorKey.value === 'kind') return { ...version, kind: assertProductKind(form.kind) }
@@ -2190,7 +2190,7 @@ async function updateStayPhotoRoom(roomId: string, patch: Pick<StayPhotoRoom, 'd
 
 async function updateStayAccessibility(accessibility: StayHomeAccessibility, expectedUpdatedAt: string) {
   return await changeStayPhotos(async () => await dashboardApi(`${arrivalUrl()}/accessibility`, {
-    method: 'PATCH', body: { expected_updated_at: expectedUpdatedAt, accessibility },
+    method: 'PATCH', body: { updated_at: expectedUpdatedAt, accessibility },
     validate: (value: unknown): value is { home: { product_id: string; photos: unknown[]; accessibility: StayHomeAccessibility[] } } => {
       if (!isRecord(value) || !isRecord(value.home)) return false
       const home = value.home

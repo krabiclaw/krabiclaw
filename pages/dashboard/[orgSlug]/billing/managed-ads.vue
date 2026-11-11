@@ -68,7 +68,7 @@ const priceLine = `${SERVICES.managed_ads.price[0]!.toUpperCase()}${SERVICES.man
 // then, and a chevron only where there is somewhere to go to meet it.
 const row = (id: string, label: string, holds: boolean, state: string, open: Pick<EditorNavigationItem, 'to' | 'action'>): EditorNavigationItem =>
   ({ id, label, summary: state, mark: holds ? 'met' : 'open', ...(holds || !dashboard.canUpdateBilling.value ? {} : open) })
-const currentPlan = computed(() => billing.value?.subscriptionPrice?.name ?? plans.value.find(plan => plan.id === billing.value?.plan)?.name ?? 'your plan')
+const currentPlan = computed(() => billing.value?.subscription_price?.name ?? plans.value.find(plan => plan.id === billing.value?.plan)?.name ?? 'your plan')
 const requirementRows = computed<EditorNavigationItem[]>(() => {
   const state = requirements.value
   if (!state) return []

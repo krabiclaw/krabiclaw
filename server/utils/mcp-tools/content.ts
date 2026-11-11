@@ -144,11 +144,11 @@ export const CONTENT_TOOLS: McpToolDefinition[] = [
       minimumRole: 'admin',
       inputSchema: {
         block_id: { type: 'string' },
-        expected_updated_at: { type: 'string', description: 'The block\'s updated_at from the last read.' },
+        updated_at: { type: 'string', description: 'The block\'s updated_at from the last read.' },
         data: { ...CONTENT_BLOCK_WRITE_SCHEMA.data, description: 'Complete replacement data; omitted fields are removed.' },
         media: { ...CONTENT_BLOCK_WRITE_SCHEMA.media, description: 'Omit to retain existing placements; supply the complete array to replace them.' },
       },
-      required: ['block_id', 'expected_updated_at', 'data'],
+      required: ['block_id', 'updated_at', 'data'],
       outputSchema: CONTENT_BLOCKS_OUTPUT,
     }),
   organizationTool({
@@ -158,9 +158,9 @@ export const CONTENT_TOOLS: McpToolDefinition[] = [
       minimumRole: 'admin',
       inputSchema: {
         block_id: { type: 'string' },
-        expected_updated_at: { type: 'string', description: 'The block\'s updated_at from the last read.' },
+        updated_at: { type: 'string', description: 'The block\'s updated_at from the last read.' },
       },
-      required: ['block_id', 'expected_updated_at'],
+      required: ['block_id', 'updated_at'],
       outputSchema: CONTENT_BLOCKS_OUTPUT,
     }),
   organizationTool({
@@ -246,9 +246,9 @@ export const CONTENT_TOOLS: McpToolDefinition[] = [
       minimumRole: 'admin',
       inputSchema: {
         variant_id: { type: 'string' },
-        expected_updated_at: { type: 'string', description: 'The document timestamp from the last read, so a page edited since is refused rather than silently removed.' },
+        updated_at: { type: 'string', description: 'The document timestamp from the last read, so a page edited since is refused rather than silently removed.' },
       },
-      required: ['variant_id', 'expected_updated_at'],
+      required: ['variant_id', 'updated_at'],
       outputSchema: {
         type: 'object',
         properties: {
@@ -476,7 +476,7 @@ export async function handleContentTools(ctx: McpExecutorContext): Promise<unkno
       try {
         const deleted = await deleteTenantPage(organization.db, requiredString(args, "variant_id"), {
           scope: { organizationId: organization.organizationId},
-          expectedUpdatedAt: requiredString(args, "expected_updated_at"),
+          expectedUpdatedAt: requiredString(args, "updated_at"),
           env: organization.env,
         });
         return tenantPageLifecycleResponse("Deleted", deleted, organization.organizationSlug);
@@ -506,14 +506,14 @@ export async function handleContentTools(ctx: McpExecutorContext): Promise<unkno
         organization.db, [{ id: blockId, type: existing.type, data: args.data as Record<string, unknown>, media: (args.media ?? existing.media) as ContentBlockMedia[], level: existing.level }],
         organization.organizationId,
       )
-      await replaceContentBlock(organization.db, blockId, { data: blocks[0]!.data, expected_updated_at: requiredString(args, "expected_updated_at") }, { additionalQueriesAfter: placementQueries, actorId: organization.userId })
+      await replaceContentBlock(organization.db, blockId, { data: blocks[0]!.data, updated_at: requiredString(args, "updated_at") }, { additionalQueriesAfter: placementQueries, actorId: organization.userId })
       return await contentBlocksChanged(ctx, document, blockId, `Replaced the ${existing.type} block.`)
     }
     case "delete_content_block": {
       const blockId = requiredString(args, "block_id")
       const existing = await getContentBlock(organization.db, blockId)
       const document = await requireOrganizationDocument(ctx, existing.document_id)
-      await deleteContentBlock(organization.db, blockId, { expected_updated_at: requiredString(args, "expected_updated_at"), actorId: organization.userId })
+      await deleteContentBlock(organization.db, blockId, { updated_at: requiredString(args, "updated_at"), actorId: organization.userId })
       return await contentBlocksChanged(ctx, document, null, `Deleted the ${existing.type} block.`)
     }
     default:

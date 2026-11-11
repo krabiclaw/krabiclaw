@@ -106,7 +106,7 @@ export const BLOG_TOOLS: McpToolDefinition[] = [
     }),
   organizationTool({
       name: 'update_blog_post',
-      description: "Edit the selected blog or documentation article. Only supplied metadata changes; content_blocks replaces the entire body and requires expected_updated_at from the latest read. Stale tokens conflict. Changes to a published article are public immediately. When linking to dashboard settings in markdown copy, use /dashboard/app/<path> (e.g. /dashboard/app/products) so the link dynamically resolves to the reader's active organization.",
+      description: "Edit the selected blog or documentation article. Only supplied metadata changes; content_blocks replaces the entire body and requires updated_at from the latest read. Stale tokens conflict. Changes to a published article are public immediately. When linking to dashboard settings in markdown copy, use /dashboard/app/<path> (e.g. /dashboard/app/products) so the link dynamically resolves to the reader's active organization.",
       domain: 'blog',
       minimumRole: 'admin',
       inputSchema: {
@@ -116,10 +116,10 @@ export const BLOG_TOOLS: McpToolDefinition[] = [
         collection: { type: 'string', enum: ['blog', 'docs'], description: "Move the article to the site's blog or its documentation. Omit to leave it where it is." },
         category_id: { type: 'string', description: "The article's category: the id of one of its collection's categories (list_article_categories). Required before publish_blog_post. To use a category that does not exist yet, create it with create_article_category first." },
         content_blocks: { type: 'array', minItems: 1, description: 'The whole article, in order, replacing every block. Blocks read back keep their id. The first block, when it is an image, is the cover.', items: blogContentBlockSchema },
-        expected_updated_at: { type: 'string', description: 'Required with content_blocks. Use updated_at returned by get_blog_post; stale tokens are rejected with a conflict.' },
+        updated_at: { type: 'string', description: 'Required with content_blocks. Use updated_at returned by get_blog_post; stale tokens are rejected with a conflict.' },
         visibility: { type: 'string', enum: ['listed', 'unlisted'] },
         anyOf: ['title', 'excerpt', 'collection', 'category_id', 'content_blocks', 'visibility'].map(field => ({ required: [field] })),
-        allOf: [{ if: { required: ['content_blocks'] }, then: { required: ['expected_updated_at'] } }],
+        allOf: [{ if: { required: ['content_blocks'] }, then: { required: ['updated_at'] } }],
       },
       required: ['post_id'],
       outputSchema: {
@@ -133,12 +133,12 @@ export const BLOG_TOOLS: McpToolDefinition[] = [
     }),
   organizationTool({
       name: 'publish_blog_post',
-      description: "Publish the selected draft blog or documentation article when publication is requested. Requires expected_updated_at from the latest read. An already published article is unchanged, including its date and announcement. Returns its publication state, revision and website URL; this does not publish to Facebook or Instagram.",
+      description: "Publish the selected draft blog or documentation article when publication is requested. Requires updated_at from the latest read. An already published article is unchanged, including its date and announcement. Returns its publication state, revision and website URL; this does not publish to Facebook or Instagram.",
       domain: 'blog', minimumRole: 'admin', inputSchema: {
         post_id: { type: 'string', description: 'Post id or slug.' },
-        expected_updated_at: { type: 'string', description: 'Exact post.updated_at concurrency token from the latest get_blog_post or successful blog mutation.' },
+        updated_at: { type: 'string', description: 'Exact post.updated_at concurrency token from the latest get_blog_post or successful blog mutation.' },
       },
-      required: ['post_id', 'expected_updated_at'],
+      required: ['post_id', 'updated_at'],
       outputSchema: articlePublicationResult,
     }),
   organizationTool({
@@ -444,7 +444,7 @@ export async function handleBlogTools(ctx: McpExecutorContext): Promise<unknown>
     case "publish_blog_post": {
       const postId = requiredString(args, "post_id")
       const lifecycle = await updateBlogLifecycle(organization.db, postId, {
-        expected_updated_at: requiredString(args, 'expected_updated_at'),
+        updated_at: requiredString(args, 'updated_at'),
       }, organization.organizationId, organization.userId)
       const result = await getBlogPost(organization.db, postId, organization.organizationId, organization.env)
       const summary = toBlogPostSummary(result, organization)

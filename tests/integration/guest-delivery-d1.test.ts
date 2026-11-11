@@ -74,7 +74,7 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
     // device, routed to that token's APNs environment, every outcome recorded.
     await db.prepare("INSERT INTO session (id, expiresAt, token, userId) VALUES ('session-proof', unixepoch() + 3600, 'session-token-proof', 'user-proof')").run()
     const deviceToken = 'ab'.repeat(32)
-    await registerDevice(db, { kind: 'apns', deviceToken, environment: 'sandbox', userId: 'user-proof', sessionId: 'session-proof' })
+    await registerDevice(db, { kind: 'apns', token: deviceToken, environment: 'sandbox', userId: 'user-proof', sessionId: 'session-proof' })
     const notifyPushContact = async (contactEnv: typeof env, id: string) => {
       const writes = requestInsertQueries({ id, kind: 'contact', organization_id: 'org-proof', location_id: null, booking_id: null, user_id: null, payload: { guest: { name: 'Proof Guest', email: 'guest@proof.example', phone: null }, subject: null, consent_at: null, ip_hash: null, answers: [] }, created_at: now }, undefined, { words: 'Hello' })
       await db.batch(writes.map(write => db.prepare(write.query).bind(...write.params)))
@@ -627,7 +627,7 @@ test('a guest-cancelled stay alerts owners with the whole stay and the member lo
       "INSERT INTO session (id, expiresAt, token, userId) VALUES ('session-cleaner', unixepoch() + 3600, 'session-token-cleaner', 'cleaner-turnover'), ('session-unassigned', unixepoch() + 3600, 'session-token-unassigned', 'unassigned-turnover')",
     ]) await db.prepare(statement).run()
     const deviceToken = 'cd'.repeat(32)
-    await registerDevice(db, { kind: 'apns', deviceToken, environment: 'sandbox', userId: 'cleaner-turnover', sessionId: 'session-cleaner' })
+    await registerDevice(db, { kind: 'apns', token: deviceToken, environment: 'sandbox', userId: 'cleaner-turnover', sessionId: 'session-cleaner' })
     await registerDevice(db, { kind: 'apns', deviceToken: 'ef'.repeat(32), environment: 'sandbox', userId: 'unassigned-turnover', sessionId: 'session-unassigned' })
     const access = { organizationId: 'org-turnover', actorId: 'owner-turnover', manage: true as const }
     const home = await createProduct(db, { env, organizationId: access.organizationId, actor: { actorId: access.actorId }, product: {

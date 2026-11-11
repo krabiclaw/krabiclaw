@@ -692,13 +692,13 @@ export async function appendContentBlock(
 export async function replaceContentBlock(
   db: DbClient,
   blockId: string,
-  input: { data: Record<string, unknown>; expected_updated_at: string },
+  input: { data: Record<string, unknown>; updated_at: string },
   opts: Pick<ContentDocumentWriteOptions, 'additionalQueriesAfter' | 'actorId'> = {},
 ) {
   const current = await getContentBlock(db, blockId)
   const document = await getContentDocumentById(db, current.document_id)
   if (!document) notFound('Content document not found')
-  if (current.updated_at !== input.expected_updated_at) {
+  if (current.updated_at !== input.updated_at) {
     throw new HTTPError({ statusCode: 409, statusMessage: 'Content block was updated by another writer' })
   }
   const data = mediaFreeBlockData(current.type, input.data, 'content block data')
@@ -710,7 +710,7 @@ export async function replaceContentBlock(
     ...blockLocationGuard(document, current.type, data),
     { query: 'UPDATE content_blocks SET data_json = ?, updated_at = ? WHERE id = ? AND document_id = ?', params: [JSON.stringify(data), now, blockId, document.id] },
   ]
-  await runSingleBlockBatch(db, document, singleBlockBatch(document, { id: blockId, updated_at: input.expected_updated_at }, now, statements, opts))
+  await runSingleBlockBatch(db, document, singleBlockBatch(document, { id: blockId, updated_at: input.updated_at }, now, statements, opts))
   return { id: blockId, updated_at: now }
 }
 
@@ -722,12 +722,12 @@ export async function replaceContentBlock(
 export async function deleteContentBlock(
   db: DbClient,
   blockId: string,
-  input: { expected_updated_at: string; actorId?: string | null },
+  input: { updated_at: string; actorId?: string | null },
 ) {
   const current = await getContentBlock(db, blockId)
   const document = await getContentDocumentById(db, current.document_id)
   if (!document) notFound('Content document not found')
-  if (current.updated_at !== input.expected_updated_at) {
+  if (current.updated_at !== input.updated_at) {
     throw new HTTPError({ statusCode: 409, statusMessage: 'Content block was updated by another writer' })
   }
   const now = new Date(Math.max(Date.now(), Date.parse(document.updated_at) + 1)).toISOString()
@@ -752,7 +752,7 @@ export async function deleteContentBlock(
       query: 'UPDATE content_blocks SET position = ? WHERE id = ? AND document_id = ?', params: [position, block.id, document.id],
     }]),
   ]
-  await runSingleBlockBatch(db, document, singleBlockBatch(document, { id: blockId, updated_at: input.expected_updated_at }, now, statements, { actorId: input.actorId }))
+  await runSingleBlockBatch(db, document, singleBlockBatch(document, { id: blockId, updated_at: input.updated_at }, now, statements, { actorId: input.actorId }))
   return { updated_at: now }
 }
 
@@ -774,7 +774,7 @@ export async function updateContentDocument(
   db: DbClient,
   documentId: string,
   input: {
-    expected_updated_at: string
+    updated_at: string
     blocks?: ContentBlockInput[]
     changes?: ContentDocumentChanges
     actorId?: string | null
@@ -785,7 +785,7 @@ export async function updateContentDocument(
 ) {
   const document = await getContentDocumentById(db, documentId)
   if (!document) notFound('Content document not found')
-  if (document.updated_at !== input.expected_updated_at) {
+  if (document.updated_at !== input.updated_at) {
     throw new HTTPError({ statusCode: 409, statusMessage: 'Content document was updated by another writer' })
   }
   const snapshots = input.blocks?.map((block, index) => ({
@@ -795,7 +795,7 @@ export async function updateContentDocument(
   }))
   const result = await writeDocumentBlocks(db, document, snapshots, {
     actorId: input.actorId, changedFields: input.changedFields,
-    changes: input.changes, expectedDocument: { id: document.id, updatedAt: input.expected_updated_at },
+    changes: input.changes, expectedDocument: { id: document.id, updatedAt: input.updated_at },
     additionalQueriesBefore: input.additionalQueriesBefore,
     additionalQueriesAfter: [...(input.additionalQueriesAfter ?? []), publicResourceCacheInvalidationQuery(document.organization_id, `${document.kind}-update`)],
   })
@@ -805,14 +805,14 @@ export async function updateContentDocument(
 export function prepareContentDocumentUpdate(
   document: ContentDocumentRow,
   input: {
-    expected_updated_at: string
+    updated_at: string
     blocks?: ContentBlockInput[]
     changes?: ContentDocumentChanges
     additionalQueriesBefore?: BatchQuery[]
     additionalQueriesAfter?: BatchQuery[]
   },
 ) {
-  if (document.updated_at !== input.expected_updated_at) {
+  if (document.updated_at !== input.updated_at) {
     throw new HTTPError({ statusCode: 409, statusMessage: 'Content document was updated by another writer' })
   }
   const snapshots = input.blocks?.map((block, index) => ({
@@ -820,7 +820,7 @@ export function prepareContentDocumentUpdate(
     position: index, level: block.level ?? null, data: asObject(block.data, `content block ${index} data`), updated_at: null,
   }))
   return buildDocumentWriteBatch(document, snapshots, {
-    changes: input.changes, expectedDocument: { id: document.id, updatedAt: input.expected_updated_at },
+    changes: input.changes, expectedDocument: { id: document.id, updatedAt: input.updated_at },
     additionalQueriesBefore: input.additionalQueriesBefore, additionalQueriesAfter: input.additionalQueriesAfter,
   })
 }

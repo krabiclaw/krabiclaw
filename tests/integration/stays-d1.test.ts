@@ -822,7 +822,7 @@ test('authored photo rooms move photos atomically and follow the listing placeme
         sleeping_arrangements: [{ type: 'queen', count: 1 }], private_attached_bathroom: true, amenities: ['hot_water'],
       }), (error: unknown) => (error as { status: number }).status === 400 && (error as Error).message === message)
       await assert.rejects(updateStayHomeAccessibility(db, env, manager, cabin.id, {
-        expected_updated_at: beforeInvalidEvidence.updated_at, accessibility: { feature: 'home_wide_doorway', available: true, photo_ids: ['room-library', assetId] },
+        updated_at: beforeInvalidEvidence.updated_at, accessibility: { feature: 'home_wide_doorway', available: true, photo_ids: ['room-library', assetId] },
       }), (error: unknown) => (error as { status: number }).status === 400 && (error as Error).message === message)
       assert.deepEqual((await getProduct(db, ORG, cabin.id)).stay, beforeInvalidEvidence.stay)
       assert.deepEqual((await readStayHome(db, manager, cabin.id)).photos.map(photo => photo.id), ['room-a', 'room-b', 'room-c', 'room-evidence'])
@@ -858,7 +858,7 @@ test('authored photo rooms move photos atomically and follow the listing placeme
     assert.deepEqual(clearedStep.room.accessibility, [unansweredAccessibility[0], { feature: 'wide_doorway', available: true, photo_ids: ['room-evidence'] }])
     // The same media boundaries protect listing evidence after the room has
     // released that photo, including the guard before provider storage deletion.
-    const listingEvidence = await updateStayHomeAccessibility(db, env, manager, cabin.id, { expected_updated_at: (await getProduct(db, ORG, cabin.id)).updated_at, accessibility: { feature: 'home_step_free_access', available: true, photo_ids: ['room-a'] } })
+    const listingEvidence = await updateStayHomeAccessibility(db, env, manager, cabin.id, { updated_at: (await getProduct(db, ORG, cabin.id)).updated_at, accessibility: { feature: 'home_step_free_access', available: true, photo_ids: ['room-a'] } })
     const listingPublic = await loadPublicProductApiDetail(env, db, ORG, true, 'cabin-site', cabin.slug)
     assert(listingPublic)
     assert.deepEqual(listingPublic.product.stay!.accessibility, listingEvidence.home.accessibility)
@@ -870,11 +870,11 @@ test('authored photo rooms move photos atomically and follow the listing placeme
       assert.equal((await getMediaAsset(db, 'room-a', ORG))?.status, 'active')
     }
     const listingRace = await Promise.allSettled([true, false].map(available => updateStayHomeAccessibility(db, env, manager, cabin.id, {
-      expected_updated_at: listingEvidence.home.product_updated_at, accessibility: { feature: 'ceiling_hoist', available, photo_ids: available ? ['room-a'] : [] },
+      updated_at: listingEvidence.home.updated_at, accessibility: { feature: 'ceiling_hoist', available, photo_ids: available ? ['room-a'] : [] },
     })))
     assert.equal(listingRace.filter(result => result.status === 'fulfilled').length, 1)
     for (const result of listingRace) if (result.status === 'rejected') { assert.equal(result.reason.status, 409); assert.equal(result.reason.data.code, 'STAY_ACCESSIBILITY_CHANGED') }
-    for (const feature of ['home_step_free_access', 'ceiling_hoist']) await updateStayHomeAccessibility(db, env, manager, cabin.id, { expected_updated_at: (await getProduct(db, ORG, cabin.id)).updated_at, accessibility: { feature, available: null, photo_ids: [] } })
+    for (const feature of ['home_step_free_access', 'ceiling_hoist']) await updateStayHomeAccessibility(db, env, manager, cabin.id, { updated_at: (await getProduct(db, ORG, cabin.id)).updated_at, accessibility: { feature, available: null, photo_ids: [] } })
     await removeStayHomePhoto(db, env, manager, principal, cabin.id, 'room-a')
     await addStayHomePhoto(db, env, manager, principal, cabin.id, { asset_id: 'room-a' })
     await reorderStayHomePhotos(db, env, manager, principal, cabin.id, { photo_ids: ['room-a', 'room-b', 'room-c', 'room-evidence'] })
@@ -1318,7 +1318,7 @@ test('gap recommendations follow live listing state, effective night rules and a
     const read = () => readStayGapCandidates(db, manager, window)
     assert.deepEqual(await read(), [], 'a configured draft home is not promoted')
 
-    await writeMemberScheduling({ env, userId: OWNER, organizationId: ORG }, `m-${OWNER}`, { expected_updated_at: null, public_name: 'Cabin host', public_approved: true })
+    await writeMemberScheduling({ env, userId: OWNER, organizationId: ORG }, `m-${OWNER}`, { updated_at: null, public_name: 'Cabin host', public_approved: true })
     await setProductPublication(db, { env, organizationId: ORG, productId: cabin.id, published: true, actor: { actorId: OWNER } })
     const gap = { productId: cabin.id, name: 'Gap cabin', locationId: 'cabin-site', from: '2027-05-03', to: '2027-05-04', nights: 1, bookable: true, restriction: null }
     assert.deepEqual(await read(), [gap], 'the saved one-night override applies despite the 21-night home default')
@@ -1893,11 +1893,11 @@ test('home location sharing protects every public projection after localization 
 
     for (const mode of ['general', 'specific'] as const) {
       if (mode === 'specific') {
-        assert.equal((await updateLocation(db, ORG, 'cabin-site', { stay_map_sharing: mode, expected_updated_at: originalVersion }, OWNER, env)).status, 200)
+        assert.equal((await updateLocation(db, ORG, 'cabin-site', { stay_map_sharing: mode, updated_at: originalVersion }, OWNER, env)).status, 200)
         assert.equal(await db.prepare("SELECT count(*) FROM media_placements WHERE owner_id = 'cabin-site' AND slot = 'social_card'").first('count(*)'), 0)
         assert.equal(await db.prepare("SELECT status FROM media_assets WHERE id = 'old-private-card'").first('status'), 'active')
-        const stale = await updateLocation(db, ORG, 'cabin-site', { stay_map_sharing: 'general', expected_updated_at: originalVersion }, OWNER, env)
-        assert.deepEqual(stale, { status: 409, data: { error: 'The location changed since it was read. Reload it and try again.', code: 'LOCATION_VERSION_CONFLICT', field: 'expected_updated_at' } })
+        const stale = await updateLocation(db, ORG, 'cabin-site', { stay_map_sharing: 'general', updated_at: originalVersion }, OWNER, env)
+        assert.deepEqual(stale, { status: 409, data: { error: 'The location changed since it was read. Reload it and try again.', code: 'LOCATION_VERSION_CONFLICT', field: 'updated_at' } })
       }
       const collection = await loadPublicProductCollection(db, ORG, 'menu', false, 'cabin-site', env)
       assert.equal(collection?.products[0]?.id, dish.id)

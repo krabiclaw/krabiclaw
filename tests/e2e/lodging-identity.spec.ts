@@ -241,7 +241,7 @@ test.describe('lodging identity boundary', () => {
       // The local Worker has no APNs signing key. Register through the native
       // boundary so its actual failed push receipt must be visible in the CMS.
       const deviceToken = crypto.randomUUID().replaceAll('-', '')
-      const registered = await api.post('/api/dashboard/devices', { headers: inviteeBearer, data: { deviceToken, environment: 'sandbox' } })
+      const registered = await api.post('/api/dashboard/devices', { headers: inviteeBearer, data: { token: deviceToken, environment: 'sandbox' } })
       expect(registered.status, await registered.text()).toBe(200)
       expect(await registered.json()).toEqual({ status: 'registered' })
       try {
@@ -265,7 +265,7 @@ test.describe('lodging identity boundary', () => {
         const cmsMcpRead = await teamRead({ limit: 1 }, memberMcp)
         expect(cmsMcpRead).toEqual({ messages: [saved], has_more: true })
       } finally {
-        const unregistered = await api.delete('/api/dashboard/devices', { headers: inviteeBearer, data: { deviceToken } })
+        const unregistered = await api.delete('/api/dashboard/devices', { headers: inviteeBearer, data: { token: deviceToken } })
         expect(unregistered.status, await unregistered.text()).toBe(200)
         expect(await unregistered.json()).toEqual({ status: 'unregistered' })
       }
@@ -605,7 +605,7 @@ test.describe('lodging identity boundary', () => {
       const accepted = await api.post(`/api/invite-links/${token}/accept`, { headers: memberBearer })
       expect(accepted.status, await accepted.text()).toBe(200)
       const { memberId } = await accepted.json() as { memberId: string }
-      const profile = await api.put(`/api/organizations/${organization.id}/members/${memberId}/scheduling`, { headers: ownerBearer, data: { expected_updated_at: null, public_name: 'Experience guide', public_bio: 'Leads the local experience.', public_approved: true } })
+      const profile = await api.put(`/api/organizations/${organization.id}/members/${memberId}/scheduling`, { headers: ownerBearer, data: { updated_at: null, public_name: 'Experience guide', public_bio: 'Leads the local experience.', public_approved: true } })
       expect(profile.status, await profile.text()).toBe(200)
       const context = await api.get(`/api/dashboard/context?org=${slug}`, { headers: ownerBearer })
       expect(context.status, await context.text()).toBe(200)

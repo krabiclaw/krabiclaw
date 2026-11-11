@@ -206,7 +206,7 @@ test('MCP Product booking uses public capacity, durable replay, guest identity a
       const payLaterPolicy = (await beforePaymentPolicy.json()).product.booking as ProductBookingConfig
       const billing = await request.get(`${baseURL}/api/billing/status?organizationId=${org}`)
       expect(billing.status(), await billing.text()).toBe(200)
-      expect((await billing.json()).billing).toMatchObject({ plan: 'growth', subscriptionStatus: 'active' })
+      expect((await billing.json()).billing).toMatchObject({ plan: 'growth', status: 'active' })
       const usage = await request.get(`${baseURL}/api/dashboard/payments/billing?org=${encodeURIComponent(orgSlug)}`)
       expect(usage.status(), await usage.text()).toBe(200)
       expect((await usage.json()).configured).toBe(false)
@@ -285,7 +285,7 @@ test('MCP online collection returns the real Payments setup handoff without chan
     const context = await call<{ context: { organization_slug: string } }>('get_organization')
     const billing = await request.get(`${baseURL}/api/billing/status?organizationId=${organizationId}`)
     expect(billing.status(), await billing.text()).toBe(200)
-    expect((await billing.json()).billing).toMatchObject({ plan: 'business', subscriptionStatus: 'active' })
+    expect((await billing.json()).billing).toMatchObject({ plan: 'business', status: 'active' })
     const usage = await request.get(`${baseURL}/api/dashboard/payments/billing?org=${encodeURIComponent(context.context.organization_slug)}`)
     expect(usage.status(), await usage.text()).toBe(200)
     // Business's subscription carries the fee prices, read from Stripe; what is missing is the business's own Stripe account.

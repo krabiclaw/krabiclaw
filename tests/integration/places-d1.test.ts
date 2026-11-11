@@ -160,7 +160,7 @@ test('blocking and opening a place’s days writes a location’s closures and a
 
     // Wednesdays and Fridays blocked at Brooklyn: one closure each, read back from the location and from the calendar.
     const before = (await db.prepare('SELECT updated_at FROM business_locations WHERE id = ?').bind('brooklyn').first<{ updated_at: string }>())!.updated_at
-    const blocked = await write('location', 'brooklyn', { from: FROM, to: TO, closed: true, weekdays: [3, 5], expected_updated_at: before })
+    const blocked = await write('location', 'brooklyn', { from: FROM, to: TO, closed: true, weekdays: [3, 5], updated_at: before })
     assert.deepEqual(state(blocked.days), ['09:blocked:hours:0:', '10:open:booked:2:', '11:blocked::0:', '12:open::0:', '13:blocked::0:', '14:open::0:', '15:open::0:'])
     assert.notEqual(blocked.place.updated_at, before)
     const saved = await db.prepare('SELECT special_hours FROM business_locations WHERE id = ?').bind('brooklyn').first<{ special_hours: string }>()
@@ -169,7 +169,7 @@ test('blocking and opening a place’s days writes a location’s closures and a
       { kind: 'closure', starts_on: '2026-11-13', ends_on: '2026-11-13', note: null },
     ])
     // A stale timestamp is refused and changes nothing.
-    await assert.rejects(write('location', 'brooklyn', { from: FROM, to: TO, closed: false, expected_updated_at: before }), (error: unknown) => (error as { statusCode?: number }).statusCode === 409 || (error as { status?: number }).status === 409)
+    await assert.rejects(write('location', 'brooklyn', { from: FROM, to: TO, closed: false, updated_at: before }), (error: unknown) => (error as { statusCode?: number }).statusCode === 409 || (error as { status?: number }).status === 409)
     assert.deepEqual(state((await readPlacesCalendar(db, owner, { from: FROM, to: TO }, { kind: 'location', id: 'brooklyn' })).places[0]!.days), state(blocked.days))
     // Opening the whole week cuts both closures out; Monday stays closed by the hours.
     const opened = await write('location', 'brooklyn', { from: FROM, to: TO, closed: false })

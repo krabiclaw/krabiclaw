@@ -397,7 +397,7 @@ test('opportunities follow explicit strategy, the owner’s decisions and actual
 
     // A separate writer changes the draft: the changed evidence is a new opportunity, which the deferral of the old evidence does not hide.
     const edit = async (expectedUpdatedAt: string, excerpt: string) => {
-      const edited = await page.request.patch(`${editor}/${postId}`, { data: { expected_updated_at: expectedUpdatedAt, excerpt } })
+      const edited = await page.request.patch(`${editor}/${postId}`, { data: { updated_at: expectedUpdatedAt, excerpt } })
       expect(edited.status(), await edited.text()).toBe(200)
       return (await edited.json() as { post: { updated_at: string } }).post
     }
@@ -433,7 +433,7 @@ test('opportunities follow explicit strategy, the owner’s decisions and actual
     expect((await readToday()).tasks.find(section => section.id === 'open')?.tasks.map(task => task.id)).toContain(acceptedTask.id)
 
     // Publishing from another surface is the work the task asked for: it is done, and the next growth opportunity is offered.
-    const published = await page.request.post(`${editor}/${postId}/publish`, { data: { expected_updated_at: editedArticle.updated_at } })
+    const published = await page.request.post(`${editor}/${postId}/publish`, { data: { updated_at: editedArticle.updated_at } })
     expect(published.status(), await published.text()).toBe(200)
     const readBack = await page.request.get(`${editor}/${postId}`)
     expect(readBack.status(), await readBack.text()).toBe(200)

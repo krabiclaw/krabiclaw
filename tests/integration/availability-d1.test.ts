@@ -309,8 +309,8 @@ test('session materialization is idempotent across cancel, edit and reschedule, 
     assert.equal(receipt.afterState.updated_at, afterBooking.updated_at)
     await updateProduct(db, bookingReplacement)
     assert.equal((await getProduct(db, ORG, PRODUCT)).updated_at, afterBooking.updated_at, 'the keyed booking replay keeps the committed Product revision')
-    await assert.rejects(updateProduct(db, { ...bookingReplacement, idempotencyKey: 'stale-booking-replacement', patch: { expected_updated_at: beforeBooking.updated_at } }),
-      { statusCode: 409, data: { code: 'PRODUCT_UPDATE_CONFLICT', field: 'expected_updated_at', product_id: PRODUCT } })
+    await assert.rejects(updateProduct(db, { ...bookingReplacement, idempotencyKey: 'stale-booking-replacement', patch: { updated_at: beforeBooking.updated_at } }),
+      { statusCode: 409, data: { code: 'PRODUCT_UPDATE_CONFLICT', field: 'updated_at', product_id: PRODUCT } })
   } finally { await runtime.dispose() }
 })
 
@@ -878,7 +878,7 @@ test('an online offering is booked in its provider\'s hours, in the provider\'s 
     await db.prepare("INSERT INTO member (id, organizationId, userId, role) VALUES ('host', ?, 'host-user', 'member')").bind(ORG).run()
     await db.prepare("INSERT INTO member (id, organizationId, userId, role) VALUES ('member-actor', ?, ?, 'owner')").bind(ORG, ACTOR).run()
     const hostActor = { env, organizationId: ORG, userId: 'host-user' }
-    const profile = await writeMemberScheduling(hostActor, 'host', { expected_updated_at: null, public_name: 'Authored host' })
+    const profile = await writeMemberScheduling(hostActor, 'host', { updated_at: null, public_name: 'Authored host' })
     assert.equal(profile.timezone, null)
     await setProductBookingConfig(db, { ...scope, env, patch: { assigned_member_id: 'host', scheduling_mode: 'business' } })
     assert.equal(await db.prepare('SELECT assigned_member_id FROM product_booking_configs WHERE product_id=?').bind(PRODUCT).first('assigned_member_id'), 'host', 'a host does not need provider hours for physical sessions')
@@ -889,7 +889,7 @@ test('an online offering is booked in its provider\'s hours, in the provider\'s 
     const away = { start: localDateTimeToInstant(tuesday, '09:00', zone).toISOString(), end: localDateTimeToInstant(tuesday, '10:00', zone).toISOString() }
     const write = async (end: string, timeOff: Array<{ start: string; end: string }>) => writeMemberScheduling(hostActor, 'host', {
       timezone: zone, weekly: [1, 2, 3, 4, 5].map(weekday => ({ weekday, start: '09:00', end })), time_off: timeOff,
-      expected_updated_at: (await db.prepare("SELECT updated_at FROM member_scheduling WHERE member_id='host'").first<string>('updated_at'))!,
+      updated_at: (await db.prepare("SELECT updated_at FROM member_scheduling WHERE member_id='host'").first<string>('updated_at'))!,
     })
     await write('12:00', [away])
     await setProductBookingConfig(db, { ...scope, env, patch: { duration_minutes: 60, default_capacity: 1, held_online: true, scheduling_mode: 'provider', assigned_member_id: 'host' } })

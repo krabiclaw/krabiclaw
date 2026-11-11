@@ -278,7 +278,7 @@ test('Stripe onboarding recommendations follow real account readiness and clear 
         .filter(item => item.product_id === paid.id && item.status_line === 'Catalog').map(item => item.path)
       // Every offering has its host; the card asks for the host's public profile.
       assert.deepEqual(await catalogCards(), ['/dashboard/cliff/team/m-owner/profile'])
-      await writeMemberScheduling({ env, organizationId: 'org', userId: 'owner' }, 'm-owner', { expected_updated_at: null, public_name: 'Wheel class host', public_approved: true })
+      await writeMemberScheduling({ env, organizationId: 'org', userId: 'owner' }, 'm-owner', { updated_at: null, public_name: 'Wheel class host', public_approved: true })
       assert.deepEqual(await catalogCards(), [`${editor}/locations`])
       await updateProduct(db, { organizationId: 'org', productId: paid.id, actor: { actorId: 'owner' }, env,
         patch: { order_url: 'https://example.com/book/wheel-class' } })

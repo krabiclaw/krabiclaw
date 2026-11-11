@@ -28,10 +28,10 @@ export type BillingPlanId = StarterPlanId | KnownRecurringPlanId
 
 /** The choices both account clients show; Better Auth still owns and authorizes each change. */
 export function billingPlanActions(status: {
-  plan: string; stripeSubscriptionId?: string; subscriptionStatus?: string; cancelAtPeriodEnd?: boolean
+  plan: string; stripeSubscriptionId?: string; status?: string; cancelAtPeriodEnd?: boolean
 }, scheduledPlan: { plan: string; at: string } | null) {
   if (status.cancelAtPeriodEnd || scheduledPlan) return { label: null, changes: [], restore: true } as const
-  if (status.subscriptionStatus === 'past_due') return { label: null, changes: [], restore: false } as const
+  if (status.status === 'past_due') return { label: null, changes: [], restore: false } as const
   if (status.plan === STARTER_PLAN_ID && !status.stripeSubscriptionId) return {
     label: 'Choose a plan', changes: NEW_SALE_PAID_PLAN_IDS.map(plan => ({ plan, timing: 'immediate' as const })), restore: false,
   }

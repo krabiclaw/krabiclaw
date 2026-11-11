@@ -130,7 +130,7 @@ export async function seedRestaurant(createTenant: CreateTenant): Promise<SeedTe
     const hero = page.blocks.find(block => block.type === 'hero')
     if (!hero) throw new Error('Ember & Slice\'s home page has no hero')
     await tool('replace_content_block', {
-      block_id: hero.id, expected_updated_at: hero.updated_at,
+      block_id: hero.id, updated_at: hero.updated_at,
       data: { title: hero.data.title ?? 'Ember & Slice', subtitle: 'Wood-fired pizza in Brooklyn and Williamsburg.', cta_label: 'Reserve a table', cta_url: '/reservations', secondary_label: 'View menu', secondary_url: '/menu' },
     })
 

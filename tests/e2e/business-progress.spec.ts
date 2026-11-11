@@ -117,7 +117,7 @@ test('authored goals and evidence-bound opportunity decisions follow persisted w
     })])
 
     const update = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'update_blog_post', args: {
-      organization_id: organization.id, post_id: postId, expected_updated_at: created.post.updated_at,
+      organization_id: organization.id, post_id: postId, updated_at: created.post.updated_at,
       title: 'Documents to bring to a legal consultation',
     } })
     expect(update.status(), await update.text()).toBe(200)
@@ -133,7 +133,7 @@ test('authored goals and evidence-bound opportunity decisions follow persisted w
     expect(progress.coverage.unverified).toContain('public_visibility')
 
     const { reference } = await responseBody<{ reference: BusinessProgressReference }>(await request.get(`${api}/progress/reference`, { params: { operation: 'article.publish', subjectId: postId } }))
-    const noChange = await responseBody<{ changed: boolean; post: { updated_at: string } }>(await request.patch(postUrl, { data: { title: edited.title, expected_updated_at: edited.updated_at } }))
+    const noChange = await responseBody<{ changed: boolean; post: { updated_at: string } }>(await request.patch(postUrl, { data: { title: edited.title, updated_at: edited.updated_at } }))
     expect(noChange).toMatchObject({ changed: false, post: { updated_at: edited.updated_at } })
     const unchangedReference = await responseBody<{ reference: BusinessProgressReference }>(await request.get(`${api}/progress/reference`, { params: { operation: 'article.publish', subjectId: postId } }))
     expect(unchangedReference.reference).toEqual(reference)
@@ -186,7 +186,7 @@ test('authored goals and evidence-bound opportunity decisions follow persisted w
     expect(articleOutcomes(await responseBody<Progress>(await request.get(`${api}/progress`)))).toEqual(editedOutcomes)
 
     const changedArticle = await responseBody<{ post: { updated_at: string } }>(await request.patch(postUrl, { data: {
-      expected_updated_at: edited.updated_at, excerpt: 'Updated guidance for existing clients.',
+      updated_at: edited.updated_at, excerpt: 'Updated guidance for existing clients.',
     } }))
     const changedReference = await responseBody<{ reference: BusinessProgressReference }>(await request.get(`${api}/progress/reference`, { params: { operation: 'article.publish', subjectId: postId } }))
     expect(changedReference.reference.evidenceRevision).not.toBe(reference.evidenceRevision)
@@ -211,7 +211,7 @@ test('authored goals and evidence-bound opportunity decisions follow persisted w
       subject: { kind: 'opportunity', id: reoffered[0]!.id }, actor: { kind: 'member', userId: actorId },
     })])
 
-    const { lifecycle } = await responseBody<{ lifecycle: { status: string; changed: boolean; updated_at: string } }>(await request.post(`${postUrl}/publish`, { data: { expected_updated_at: changedArticle.post.updated_at } }))
+    const { lifecycle } = await responseBody<{ lifecycle: { status: string; changed: boolean; updated_at: string } }>(await request.post(`${postUrl}/publish`, { data: { updated_at: changedArticle.post.updated_at } }))
     expect(lifecycle).toMatchObject({ status: 'published', changed: true })
     const publishedRead = await responseBody<{ post: { status: string; updated_at: string } }>(await request.get(postUrl))
     expect(publishedRead.post).toMatchObject({ status: 'published', updated_at: lifecycle.updated_at })
@@ -219,7 +219,7 @@ test('authored goals and evidence-bound opportunity decisions follow persisted w
     expect(articleOutcomes(publishedProgress).filter(outcome => outcome.event === 'article.published')).toEqual([expect.objectContaining({
       actor: { kind: 'member', userId: actorId }, verification: { status: 'verified', basis: 'persisted_change', receipts: [] },
     })])
-    const republished = await responseBody<{ lifecycle: { changed: boolean; updated_at: string } }>(await request.post(`${postUrl}/publish`, { data: { expected_updated_at: lifecycle.updated_at } }))
+    const republished = await responseBody<{ lifecycle: { changed: boolean; updated_at: string } }>(await request.post(`${postUrl}/publish`, { data: { updated_at: lifecycle.updated_at } }))
     expect(republished.lifecycle).toMatchObject({ changed: false, updated_at: lifecycle.updated_at })
     expect(articleOutcomes(await responseBody<Progress>(await request.get(`${api}/progress`)))).toEqual(articleOutcomes(publishedProgress))
 

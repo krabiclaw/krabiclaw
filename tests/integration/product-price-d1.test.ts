@@ -584,15 +584,15 @@ test('a minimal price patch preserves sibling variants, prices and unrelated fie
     }
     t.mock.timers.enable({ apis: ['Date'], now: Date.parse(previous.updated_at) })
     await updateProduct(db, { organizationId: ORG, productId: product.id, actor: ACTOR, patch: {
-      expected_updated_at: previous.updated_at,
+      updated_at: previous.updated_at,
       variants: [{ id: kept.id, prices: [{ id: priceA.id, unit_amount: 21000 }] }],
     } })
     const afterMinimal = await getProduct(db, ORG, product.id)
     assert.equal(afterMinimal.updated_at, new Date(Date.parse(previous.updated_at) + 1).toISOString(), 'a price edit advances the canonical Product version even in the same millisecond')
     await assert.rejects(updateProduct(db, { organizationId: ORG, productId: product.id, actor: ACTOR, patch: {
-      expected_updated_at: previous.updated_at, name: 'Stale dish', variants_mode: 'replace',
+      updated_at: previous.updated_at, name: 'Stale dish', variants_mode: 'replace',
       variants: [{ id: kept.id, prices_mode: 'replace', prices: [{ id: priceA.id, unit_amount: 1 }] }],
-    } }), { statusCode: 409, data: { code: 'PRODUCT_UPDATE_CONFLICT', field: 'expected_updated_at', product_id: product.id } })
+    } }), { statusCode: 409, data: { code: 'PRODUCT_UPDATE_CONFLICT', field: 'updated_at', product_id: product.id } })
     assert.deepEqual(await getProduct(db, ORG, product.id), afterMinimal, 'a stale full catalog edit changes no scalar, variant or price')
     assert.equal(afterMinimal.variants.length, 2, 'an unmentioned sibling variant is preserved')
     assert.deepEqual(afterMinimal.variants.find(variant => variant.id === 'var-large'), previous.variants.find(variant => variant.id === 'var-large'))
@@ -710,8 +710,8 @@ test('catalog edits and publication changes retain their actor without counting 
     await updateProduct(db, { organizationId: ORG, productId: made.id, patch: { name: 'New bowl' }, actor: repeatingActor, env })
     assert.deepEqual(await edits(), first)
     assert.deepEqual(await persistedEditor(), afterEdit, 'an unchanged save preserves the actual revision and the last editor')
-    await assert.rejects(updateProduct(db, { organizationId: ORG, productId: made.id, patch: { name: 'New bowl', expected_updated_at: made.updated_at }, actor: repeatingActor, env }),
-      { statusCode: 409, data: { code: 'PRODUCT_UPDATE_CONFLICT', field: 'expected_updated_at', product_id: made.id } })
+    await assert.rejects(updateProduct(db, { organizationId: ORG, productId: made.id, patch: { name: 'New bowl', updated_at: made.updated_at }, actor: repeatingActor, env }),
+      { statusCode: 409, data: { code: 'PRODUCT_UPDATE_CONFLICT', field: 'updated_at', product_id: made.id } })
     const keyed = { organizationId: ORG, productId: made.id, patch: { name: 'New bowl' }, actor: repeatingActor, env, idempotencyKey: 'unchanged-bowl' }
     await updateProduct(db, keyed)
     await updateProduct(db, keyed)

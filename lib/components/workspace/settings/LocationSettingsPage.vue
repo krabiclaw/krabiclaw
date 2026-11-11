@@ -377,10 +377,10 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
       return
     }
     if (key === 'stay-map-sharing') {
-      return patchLocation({ stay_map_sharing: parseStayMapSharing(detailsForm.stay_map_sharing), expected_updated_at: location.value!.updated_at })
+      return patchLocation({ stay_map_sharing: parseStayMapSharing(detailsForm.stay_map_sharing), updated_at: location.value!.updated_at })
     }
     if (key === 'address') {
-      return patchLocation({ address: addressFromForm(), expected_updated_at: location.value!.updated_at })
+      return patchLocation({ address: addressFromForm(), updated_at: location.value!.updated_at })
     }
     if (key === 'contact') {
       await patchLocation({

@@ -42,7 +42,7 @@ member's hours, time off and Calendar status. `set_member_scheduling` changes
 working hours or time off. `get_member_public_profile` and
 `update_member_public_profile` read and edit the separate authored host profile,
 including unpublished drafts. Valid memberships without settings return null.
-Both concerns use the same latest `expected_updated_at`; either edit can make a
+Both concerns use the same latest `updated_at`; either edit can make a
 previous read stale. Member IDs are organization membership IDs, not user IDs.
 
 Members can manage only their own settings; owners and admins can manage their

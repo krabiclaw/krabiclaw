@@ -17,7 +17,7 @@ export async function seedPlatform(owner: SeedClient, platformOrganizationId: st
   const hero = page.blocks.find(block => block.type === 'hero')
   if (!hero) throw new Error('The platform home page has no hero')
   await tool('replace_content_block', {
-    block_id: hero.id, expected_updated_at: hero.updated_at,
+    block_id: hero.id, updated_at: hero.updated_at,
     data: { title: 'Your business, online in minutes', subtitle: 'Websites, bookings and messages for local businesses.', cta_label: 'Start free', cta_url: '/signup' },
   })
   for (const slot of ['media', ...PARALLAX_LAYERS.flatMap(layer => PARALLAX_SIZES.map(size => `parallax_${layer}_${size}`))]) {

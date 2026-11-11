@@ -57,7 +57,7 @@ jobs:
       github.event_name == 'pull_request'
       && !(github.base_ref == 'main' && github.head_ref == 'staging')
     runs-on: ubuntu-latest
-    container:
+    container: &playwright_container
       # Match @playwright/test in yarn.lock so the runner already has its browsers and libraries.
       image: mcr.microsoft.com/playwright:v1.64.0-noble@sha256:06a9939e57531807f8d5fd76ce44b53165ffb7d7501d87ab10e285c20b1e971f
       options: --user 1001
@@ -138,6 +138,7 @@ jobs:
     # Staging is the first deployed validation. Checks gates this exact SHA.
     needs: [typecheck]
     runs-on: ubuntu-latest
+    container: *playwright_container
     timeout-minutes: 90
     environment: staging
     concurrency:
@@ -174,9 +175,6 @@ jobs:
           key: yarn-${{ runner.os }}-${{ hashFiles('yarn.lock') }}
           restore-keys: yarn-${{ runner.os }}-
       - run: corepack yarn install --immutable
-      - run: &install_browsers |
-          printf 'https://archive.ubuntu.com/ubuntu/\tpriority:1\nhttps://security.ubuntu.com/ubuntu/\tpriority:2\n' | sudo tee /etc/apt/apt-mirrors.txt > /dev/null
-          corepack yarn playwright install --with-deps chromium webkit
       - name: Build staging Worker
         run: yarn build
       - name: Capture Nuxt build ID
@@ -197,11 +195,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          branch_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/${GITHUB_REF#refs/}" --jq '.object.sha')"
-          if [[ "$branch_sha" != "$GITHUB_SHA" ]]; then
-            echo "::error::Refusing outdated deployment $GITHUB_SHA; $GITHUB_REF now points to $branch_sha."
-            exit 1
-          fi
+          node --input-type=module <<'JS'
+          const { GITHUB_API_URL, GITHUB_REPOSITORY, GITHUB_REF, GITHUB_SHA, GH_TOKEN } = process.env
+          const response = await fetch(`${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/git/ref/${GITHUB_REF.replace(/^refs\//, '')}`, {
+            headers: { authorization: `Bearer ${GH_TOKEN}`, accept: 'application/vnd.github+json' },
+          })
+          if (!response.ok) throw new Error(`Could not read deployment branch: HTTP ${response.status}`)
+          const { object } = await response.json()
+          if (object?.sha !== GITHUB_SHA) {
+            throw new Error(`Refusing outdated deployment ${GITHUB_SHA}; ${GITHUB_REF} now points to ${object?.sha}.`)
+          }
+          JS
       # D1 keeps no planner statistics until `PRAGMA optimize` runs (D1 "Use
       # indexes"). Without them SQLite read a conversation's messages through
       # the (kind, created_at) index, scanning every message once per inbox row.
@@ -359,7 +363,9 @@ jobs:
           key: yarn-${{ runner.os }}-${{ hashFiles('yarn.lock') }}
           restore-keys: yarn-${{ runner.os }}-
       - run: corepack yarn install --immutable
-      - run: *install_browsers
+      - run: |
+          printf 'https://archive.ubuntu.com/ubuntu/\tpriority:1\nhttps://security.ubuntu.com/ubuntu/\tpriority:2\n' | sudo tee /etc/apt/apt-mirrors.txt > /dev/null
+          corepack yarn playwright install --with-deps chromium webkit
       - name: Wait for production assets to converge
         run: >-
           node scripts/wait-for-nuxt-deployment.mjs

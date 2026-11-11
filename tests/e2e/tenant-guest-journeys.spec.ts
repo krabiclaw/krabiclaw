@@ -405,15 +405,15 @@ for (const seeded of [
         const loaded = await page.request.get(`${editor}/${product.id}`)
         expect(loaded.status(), await loaded.text()).toBe(200)
         const savedProduct = (await loaded.json() as { product: Product }).product
-        const concurrent = await page.request.patch(`${editor}/${product.id}`, { data: { description, expected_updated_at: savedProduct.updated_at } })
+        const concurrent = await page.request.patch(`${editor}/${product.id}`, { data: { description, updated_at: savedProduct.updated_at } })
         expect(concurrent.status(), await concurrent.text()).toBe(200)
         const concurrentProduct = (await concurrent.json() as { product: Product }).product
         const refusedSave = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === `${editor}/${product.id}`)
         await page.getByRole('button', { name: 'Save', exact: true }).click()
         const refusedResponse = await refusedSave
         expect(refusedResponse.status(), await refusedResponse.text()).toBe(409)
-        expect(await refusedResponse.json()).toMatchObject({ data: { code: 'PRODUCT_UPDATE_CONFLICT', field: 'expected_updated_at', product_id: product.id } })
-        expect(refusedResponse.request().postDataJSON()).toEqual({ details_mode: 'merge', details: { dietary_notes: [detail] }, expected_updated_at: savedProduct.updated_at })
+        expect(await refusedResponse.json()).toMatchObject({ data: { code: 'PRODUCT_UPDATE_CONFLICT', field: 'updated_at', product_id: product.id } })
+        expect(refusedResponse.request().postDataJSON()).toEqual({ details_mode: 'merge', details: { dietary_notes: [detail] }, updated_at: savedProduct.updated_at })
         const retained = page.locator('#dashboard-panel-product-attribute')
         await expect(retained.getByText(detail, { exact: true })).toBeVisible()
         const unchanged = await page.request.get(`${editor}/${product.id}`)

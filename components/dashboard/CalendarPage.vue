@@ -685,7 +685,7 @@ async function writeSelection(action: 'block' | 'open'): Promise<void> {
     // The one dates write every calendar uses: the place's closures, read back.
     await dashboardApi(`/api/dashboard/places/location/${record.id}/dates`, {
       method: 'PUT',
-      body: { from: range.from, to: addLocalDays(range.to, 1), closed: action === 'block', expected_updated_at: record.updated_at },
+      body: { from: range.from, to: addLocalDays(range.to, 1), closed: action === 'block', updated_at: record.updated_at },
       validate: isPlaceDates,
     })
     await refreshLocation()

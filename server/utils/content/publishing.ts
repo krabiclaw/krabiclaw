@@ -97,11 +97,11 @@ export interface PlatformBlogUpdateInput {
   visibility?: 'listed' | 'unlisted'
   slug?: string | null
   content_blocks?: Array<ContentBlockInput & { id?: string }>
-  expected_updated_at?: string
+  updated_at?: string
 }
 
 export interface PlatformBlogLifecycleInput {
-  expected_updated_at: string
+  updated_at: string
 }
 
 export interface PlatformBlogLifecycleState {
@@ -116,10 +116,10 @@ export interface PlatformBlogLifecycleState {
 export function parseBlogLifecycleInput(body: unknown): PlatformBlogLifecycleInput {
   if (!body || typeof body !== 'object' || Array.isArray(body)) badRequest('Request body must be a valid object')
   const record = body as Record<string, unknown>
-  const unknownField = Object.keys(record).find(key => key !== 'expected_updated_at')
+  const unknownField = Object.keys(record).find(key => key !== 'updated_at')
   if (unknownField) badRequest(`Unknown request field: ${unknownField}`)
-  if (typeof record.expected_updated_at !== 'string' || !record.expected_updated_at.trim()) badRequest('expected_updated_at is required')
-  return { expected_updated_at: record.expected_updated_at }
+  if (typeof record.updated_at !== 'string' || !record.updated_at.trim()) badRequest('updated_at is required')
+  return { updated_at: record.updated_at }
 }
 
 function badRequest(message: string): never {
@@ -373,7 +373,7 @@ async function resolveTenantContext(db: DbClient, organizationId: string, env?: 
 }
 
 function validateBlogCommon(input: Partial<PlatformBlogCreateInput>, operation: 'create' | 'update') {
-  const writable = new Set<string>([...BLOG_UPDATE_MUTATION_FIELDS, ...(operation === 'create' ? [] : ['expected_updated_at'])])
+  const writable = new Set<string>([...BLOG_UPDATE_MUTATION_FIELDS, ...(operation === 'create' ? [] : ['updated_at'])])
   const unknown = Object.keys(input).find(field => !writable.has(field))
   if (unknown) badRequest(unknown + ' is not writable through article ' + operation)
   if ('visibility' in input && input.visibility !== undefined && !['listed', 'unlisted'].includes(String(input.visibility))) badRequest('visibility must be listed or unlisted')
@@ -778,14 +778,14 @@ export async function updateBlogLifecycle(
   actorId: string | null,
 ): Promise<PlatformBlogLifecycleState> {
   if (actorId !== null && (typeof actorId !== 'string' || !actorId.trim())) badRequest('actorId must identify the authenticated actor or explicitly be null')
-  if (!input.expected_updated_at?.trim()) badRequest('expected_updated_at is required')
+  if (!input.updated_at?.trim()) badRequest('updated_at is required')
   const sourceId = await resolvePlatformContentId(db, 'article', postIdOrSlug, 'Post not found', organizationId)
   const source = await queryFirst<{ id: string; status: string; published_at: string | null; updated_at: string }>(db,
     "SELECT id, status, published_at, updated_at FROM content_documents WHERE id = ? AND row_role = 'root' AND kind = 'article'", [sourceId])
   if (!source) notFound('Post not found')
   if (source.status !== 'draft' && source.status !== 'published') throw new Error('Article has an invalid publication status')
   if (source.status === 'published') return { id: source.id, status: 'published', published_at: source.published_at, updated_at: source.updated_at, changed: false }
-  if (source.updated_at !== input.expected_updated_at) {
+  if (source.updated_at !== input.updated_at) {
     throw new HTTPError({ statusCode: 409, statusMessage: 'Article was updated by another writer' })
   }
   // A published article is always in a category: its index, sidebar and breadcrumb are built from them.
@@ -795,7 +795,7 @@ export async function updateBlogLifecycle(
   const [result] = await executeBatch(db, [{ query: `UPDATE content_documents SET
     published_at = COALESCE(published_at, ?), first_published_at = COALESCE(first_published_at, ?),
     status = 'published', updated_at = ?, updated_by = ? WHERE id = ? AND kind = 'article' AND row_role = 'root' AND updated_at = ? AND status = 'draft'`,
-  params: [committedAt, committedAt, committedAt, actorId, source.id, input.expected_updated_at] },
+  params: [committedAt, committedAt, committedAt, actorId, source.id, input.updated_at] },
   organizationEventQuery({ organizationId, actorId, eventType: 'article.published', entityType: 'article', entityId: source.id,
     beforeState: { status: source.status, updated_at: source.updated_at },
     afterState: { status: 'published', published_at: source.published_at ?? committedAt, updated_at: committedAt },
@@ -824,8 +824,8 @@ export async function updateBlogPost(
     FROM content_documents WHERE id = ? AND kind = 'article' AND row_role = 'root'`, [postId])
   if (!current) notFound('Post not found')
   if (input.slug !== undefined && input.slug !== current.slug) badRequest('An article keeps its saved slug')
-  if (input.content_blocks !== undefined && !input.expected_updated_at) badRequest('expected_updated_at is required with content_blocks')
-  if (input.expected_updated_at !== undefined && input.expected_updated_at !== current.updated_at) {
+  if (input.content_blocks !== undefined && !input.updated_at) badRequest('updated_at is required with content_blocks')
+  if (input.updated_at !== undefined && input.updated_at !== current.updated_at) {
     throw new HTTPError({ statusCode: 409, statusMessage: 'Content document was updated by another writer' })
   }
   const effectiveCollection = articleCollectionOf(input.collection === undefined ? current.collection : input.collection)
@@ -869,7 +869,7 @@ export async function updateBlogPost(
     if (changed) {
       changes.updated_by = actorId
       await updateContentDocument(db, postId, {
-        expected_updated_at: input.expected_updated_at ?? current.updated_at, blocks: blocksChanged ? normalizedBlocks : undefined, changes,
+        updated_at: input.updated_at ?? current.updated_at, blocks: blocksChanged ? normalizedBlocks : undefined, changes,
         additionalQueriesAfter: [...placementQueries,
           ...(changedFields.includes('category_id') ? categoryMembership : []),
           organizationEventQuery({ organizationId, actorId, eventType: 'article.updated', entityType: 'article', entityId: postId,

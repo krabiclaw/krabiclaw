@@ -201,7 +201,7 @@ test('public discovery resolves translations through current publication owners'
     ])
     const source = await db.prepare("SELECT updated_at FROM content_documents WHERE id = 'tenant-story'").first<string>('updated_at')
     assert(source)
-    await updateContentDocument(db, 'tenant-story', { expected_updated_at: source, changes: { visibility: 'unlisted' } })
+    await updateContentDocument(db, 'tenant-story', { updated_at: source, changes: { visibility: 'unlisted' } })
     assert.deepEqual(await listPublishedArticles(db, env, 'tenant', 'blog', 'th'), [])
     assert(!(await buildTenantBlogDocuments(db)).some(record => record.id === 'tenant-blog:tenant-story'))
     await disableOrganizationLanguage(createDb(db), { organizationId: 'tenant', locale: 'th' })

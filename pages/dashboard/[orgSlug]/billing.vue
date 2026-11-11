@@ -86,10 +86,10 @@ const monthly = (cents: number) => formatRecurring(cents, 'USD')
 const nameOf = (id: string) => plans.value.find(plan => plan.id === id)?.name ?? id
 
 const onStarter = computed(() => billing.value?.plan === STARTER_PLAN_ID && !billing.value.stripeSubscriptionId)
-const scheduledPlan = computed(() => billing.value?.scheduledPlan ?? null)
-const planName = computed(() => billing.value?.subscriptionPrice?.name ?? (billing.value ? nameOf(billing.value.plan) : ''))
+const scheduledPlan = computed(() => billing.value?.scheduled_plan ?? null)
+const planName = computed(() => billing.value?.subscription_price?.name ?? (billing.value ? nameOf(billing.value.plan) : ''))
 const price = computed(() => {
-  const subscription = billing.value?.subscriptionPrice
+  const subscription = billing.value?.subscription_price
   return subscription ? formatRecurring(subscription.amount, subscription.currency) : 'Free'
 })
 const card = computed(() => {
@@ -103,17 +103,17 @@ const planLine = computed(() => {
   const status = billing.value
   if (!status || onStarter.value) return ''
   const parts: string[] = []
-  const trial = status.subscriptionPrice?.trial
+  const trial = status.subscription_price?.trial
   if (trial) {
     parts.push(`Free trial ends ${formatExactDateTime(trial.end)}`)
     // A change already set for the period's end is what happens; only without one does the card decide.
     if (status.cancelAtPeriodEnd) parts.push(`${planName.value} ends with the trial`)
     else if (scheduledPlan.value) parts.push(`Changes to ${nameOf(scheduledPlan.value.plan)} on ${formatExactDateTime(scheduledPlan.value.at)}`)
     // Only a card list that loaded can say there is no card; a failed load shows its own error above.
-    else if (methods.value && !methodsError.value && !card.value) parts.push(TRIAL_WITHOUT_CARD[trial.withoutPaymentMethod](planName.value))
-  } else if (status.subscriptionStatus === 'past_due') parts.push('Payment past due')
+    else if (methods.value && !methodsError.value && !card.value) parts.push(TRIAL_WITHOUT_CARD[trial.missing_payment_method](planName.value))
+  } else if (status.status === 'past_due') parts.push('Payment past due')
   else if (scheduledPlan.value) parts.push(`Changes to ${nameOf(scheduledPlan.value.plan)} on ${formatExactDateTime(scheduledPlan.value.at)}`)
-  else if (status.currentPeriodEnd) parts.push(`${status.cancelAtPeriodEnd ? 'Ends' : 'Renews'} ${formatExactDateTime(status.currentPeriodEnd)}`)
+  else if (status.periodEnd) parts.push(`${status.cancelAtPeriodEnd ? 'Ends' : 'Renews'} ${formatExactDateTime(status.periodEnd)}`)
   if (card.value) parts.push(card.value)
   return parts.join(' · ')
 })
@@ -230,7 +230,7 @@ onMounted(async () => {
   // the current plan, a lower one, a plan already changing or an admin's visit leaves the index as it is.
   const planId = Array.isArray(plan) ? plan[0] : plan
   const status = billing.value
-  const step = typeof planId === 'string' && status && !status.cancelAtPeriodEnd && !status.scheduledPlan ? classifyStripePlanChange(status.plan, planId, Boolean(status.stripeSubscriptionId)) : null
+  const step = typeof planId === 'string' && status && !status.cancelAtPeriodEnd && !status.scheduled_plan ? classifyStripePlanChange(status.plan, planId, Boolean(status.stripeSubscriptionId)) : null
   if (typeof planId === 'string' && isNewSalePlan(planId) && (step === 'upgrade' || step === 'initial_subscription') && dashboard.canUpdateBilling.value && !busy.value) {
     busy.value = true
     try {

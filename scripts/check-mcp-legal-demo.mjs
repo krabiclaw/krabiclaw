@@ -227,7 +227,7 @@ async function main() {
     const current = expectSuccess(`get_member_scheduling ${attorney.public_name} succeeds`, currentRes)?.scheduling
     const schedulingRes = await mcp(headers, 'set_member_scheduling', {
       member_id: attorney.member_id,
-      expected_updated_at: current?.updated_at ?? null,
+      updated_at: current?.updated_at ?? null,
       timezone: 'America/New_York',
       weekly: WEEKDAY_HOURS,
       time_off: [],
@@ -237,7 +237,7 @@ async function main() {
     const profile = expectSuccess(`get_member_public_profile ${attorney.public_name} succeeds`, profileRes)?.profile
     const profileWrite = await mcp(headers, 'update_member_public_profile', {
       member_id: attorney.member_id,
-      expected_updated_at: profile.updated_at,
+      updated_at: profile.updated_at,
       public_name: attorney.public_name,
       public_bio: attorney.public_bio,
       public_photo_url: profile?.public_photo_url ?? null,

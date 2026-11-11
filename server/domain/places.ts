@@ -213,7 +213,7 @@ export async function readPlacesCalendar(db: DbClient, principal: MemberAccessPr
 export async function setPlaceDates(db: D1Database, principal: MemberAccessPrincipal, input: { kind: string; id: string; body: Record<string, unknown> }): Promise<{ place: Place; days: PlaceDay[] }> {
   const { kind, id, body } = input
   if (kind !== 'location' && kind !== 'offering') fail(404, 'Place not found')
-  const unknown = Object.keys(body).find(key => !['from', 'to', 'weekdays', 'closed', 'expected_updated_at'].includes(key))
+  const unknown = Object.keys(body).find(key => !['from', 'to', 'weekdays', 'closed', 'updated_at'].includes(key))
   if (unknown) fail(400, `${unknown} is not a date setting`, unknown)
   const { from, to } = readWindow({ from: body.from, to: body.to })
   if (typeof body.closed !== 'boolean') fail(400, 'closed must be true or false', 'closed')
@@ -224,7 +224,7 @@ export async function setPlaceDates(db: D1Database, principal: MemberAccessPrinc
     }
     weekdays = body.weekdays as number[]
   }
-  if (body.expected_updated_at !== undefined && typeof body.expected_updated_at !== 'string') fail(400, 'expected_updated_at must be a timestamp', 'expected_updated_at')
+  if (body.updated_at !== undefined && typeof body.updated_at !== 'string') fail(400, 'updated_at must be a timestamp', 'updated_at')
   const last = addLocalDays(to, -1)
   let runs: Array<{ from: string; to: string }>
   try { runs = dateRuns(from, last, weekdays) } catch (cause) { fail(400, cause instanceof Error ? cause.message : 'No date in this range falls on the chosen weekdays', 'weekdays') }
@@ -238,7 +238,7 @@ export async function setPlaceDates(db: D1Database, principal: MemberAccessPrinc
     const special = parseSpecialHours(row.special_hours ? JSON.parse(row.special_hours) : null)
     const result = await updateLocation(db, principal.organizationId, row.id, {
       special_hours: closed ? closeDates(special, from, last, weekdays) : openDates(special, from, last, weekdays),
-      expected_updated_at: typeof body.expected_updated_at === 'string' ? body.expected_updated_at : row.updated_at,
+      updated_at: typeof body.updated_at === 'string' ? body.updated_at : row.updated_at,
     }, principal.userId, principal.env)
     if (result.status >= 400) {
       const data = result.data as { error?: string; code?: string; field?: string }

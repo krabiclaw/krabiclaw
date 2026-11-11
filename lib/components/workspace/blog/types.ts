@@ -68,7 +68,7 @@ export interface BlogPostUpdateInput {
   seo_keywords?: string | null
   visibility?: 'listed' | 'unlisted'
   content_blocks?: BlogEditorBlock[]
-  expected_updated_at?: string
+  updated_at?: string
 }
 
 export interface BlogLifecycleState {
@@ -85,5 +85,5 @@ export interface BlogPostRepository {
   create(_input: BlogPostCreateInput): Promise<BlogPost & { id: string }>
   update(_postId: string, _input: BlogPostUpdateInput): Promise<BlogPost>
   delete(_postId: string): Promise<void>
-  publish(_postId: string, _input: { expected_updated_at: string }): Promise<BlogPost>
+  publish(_postId: string, _input: { updated_at: string }): Promise<BlogPost>
 }

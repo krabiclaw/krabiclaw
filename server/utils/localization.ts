@@ -684,8 +684,8 @@ export async function putLocalizationForAuthoring(env: CloudflareEnv, db: D1Data
         params: [...removeMetadata.map(key => '$.' + JSON.stringify(key)), documentId] }]
     : []
   if (existing) {
-    if (typeof input.expectedUpdatedAt !== 'string') localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', 'expected_updated_at is required')
-    await updateContentDocument(db, existing.id, { expected_updated_at: input.expectedUpdatedAt, changes,
+    if (typeof input.expectedUpdatedAt !== 'string') localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', 'updated_at is required')
+    await updateContentDocument(db, existing.id, { updated_at: input.expectedUpdatedAt, changes,
       blocks: prepared?.blocks, additionalQueriesAfter: [...removal(existing.id), ...after] })
   } else {
     await createContentDocumentWithBlocks(db, { organizationId: input.organizationId,

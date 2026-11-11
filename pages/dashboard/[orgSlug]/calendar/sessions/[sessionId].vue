@@ -178,7 +178,7 @@ async function save() {
     const saved = creating ? (await dashboardApi(endpoint, {
       method: 'POST', body: { ...times, location_id: p.locationId.value, idempotency_key: creationIntent.value.key }, validate: isSessionsResponse,
     })).sessions : [(await dashboardApi(`${endpoint}/${sessionId.value}`, {
-      method: 'PATCH', body: { ...times, status: sessionStatus.value, expected_updated_at: data.value!.session.updated_at }, validate: isSessionResponse,
+      method: 'PATCH', body: { ...times, status: sessionStatus.value, updated_at: data.value!.session.updated_at }, validate: isSessionResponse,
     })).session]
     const dates = [...new Set(saved.map(session => localNow(session.timezone, new Date(session.starts_at)).date))]
     const [date] = dates

@@ -17,7 +17,7 @@ export default defineHandler(async (event) => {
   if (isDemoOrganization(organization) && !(await hasPlatformEventPermission(event, env, { platform: ['access'] }))) {
     throw createError({ statusCode: 403, statusMessage: 'Demo organization is read-only' })
   }
-  const body = await readRequiredBody<{ values?: unknown; route_path?: unknown; content_blocks?: unknown; expected_updated_at?: unknown }>(event)
+  const body = await readRequiredBody<{ values?: unknown; route_path?: unknown; content_blocks?: unknown; updated_at?: unknown }>(event)
   return { localization: await putLocalizationForAuthoring(env, db, {
     organizationId: organization.id,
     resourceType,
@@ -26,7 +26,7 @@ export default defineHandler(async (event) => {
     values: body.values,
     routePath: body.route_path,
     contentBlocks: body.content_blocks,
-    expectedUpdatedAt: body.expected_updated_at,
+    expectedUpdatedAt: body.updated_at,
     userId: session.user.id,
   }) }
 })

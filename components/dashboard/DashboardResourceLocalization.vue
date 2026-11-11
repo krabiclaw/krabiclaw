@@ -371,7 +371,7 @@ async function save(): Promise<void> {
           method: 'PUT',
           body: {
             values,
-            ...(documentRevision?.locale === requestedLocale ? { expected_updated_at: documentRevision.updatedAt } : {}),
+            ...(documentRevision?.locale === requestedLocale ? { updated_at: documentRevision.updatedAt } : {}),
           },
           validate: isLocalizationResponse,
         },

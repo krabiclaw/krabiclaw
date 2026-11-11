@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:739f557e57942bb84be05568e864082c587cd4ed00d3a76dab8f158c1d81c14f",
-  "documentationFingerprint": "sha256:da68a37a144bc28f807a1f452350e8891d9f6fa29c1f4d8ac7311007802c071e",
+  "fingerprint": "sha256:df9e8d5415f28e4be25d847e47fb7d0f5a12408fa72090f20b2bf8acde3e74ea",
+  "documentationFingerprint": "sha256:d955f39647a0ab17dfb8de98c7bdfedd27c4781abb5323556503d6088d9a2f95",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -21384,7 +21384,7 @@
                 ]
               },
               "updated_at": {
-                "description": "The expected_updated_at update_post and publish_post take.",
+                "description": "The updated_at update_post and publish_post take.",
                 "type": "string"
               },
               "view_url": {
@@ -38346,20 +38346,20 @@
           "block_id": {
             "type": "string"
           },
-          "expected_updated_at": {
-            "description": "The block's updated_at from the last read.",
-            "type": "string"
-          },
           "organization_id": {
             "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
             "minLength": 1,
             "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
             "type": "string"
+          },
+          "updated_at": {
+            "description": "The block's updated_at from the last read.",
+            "type": "string"
           }
         },
         "required": [
           "block_id",
-          "expected_updated_at"
+          "updated_at"
         ],
         "type": "object"
       },
@@ -42841,14 +42841,14 @@
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
-          "expected_updated_at": {
-            "description": "The document timestamp from the last read, so a page edited since is refused rather than silently removed.",
-            "type": "string"
-          },
           "organization_id": {
             "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
             "minLength": 1,
             "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
+            "type": "string"
+          },
+          "updated_at": {
+            "description": "The document timestamp from the last read, so a page edited since is refused rather than silently removed.",
             "type": "string"
           },
           "variant_id": {
@@ -42857,7 +42857,7 @@
         },
         "required": [
           "variant_id",
-          "expected_updated_at"
+          "updated_at"
         ],
         "type": "object"
       },
@@ -53234,7 +53234,7 @@
                 ]
               },
               "updated_at": {
-                "description": "The expected_updated_at update_post and publish_post take.",
+                "description": "The updated_at update_post and publish_post take.",
                 "type": "string"
               },
               "view_url": {
@@ -66823,10 +66823,6 @@
             },
             "type": "array"
           },
-          "revision": {
-            "format": "date-time",
-            "type": "string"
-          },
           "source_locale": {
             "type": "string"
           },
@@ -66843,6 +66839,10 @@
           "timezone": {
             "type": "string"
           },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
           "vertical": {
             "enum": [
               "restaurant",
@@ -66855,7 +66855,7 @@
         },
         "required": [
           "draft_id",
-          "revision",
+          "updated_at",
           "status",
           "subdomain",
           "name",
@@ -71083,7 +71083,7 @@
                   ]
                 },
                 "updated_at": {
-                  "description": "The expected_updated_at update_post and publish_post take.",
+                  "description": "The updated_at update_post and publish_post take.",
                   "type": "string"
                 },
                 "view_url": {
@@ -73946,14 +73946,10 @@
     {
       "name": "publish_blog_post",
       "title": "Publish blog post",
-      "description": "Publish the selected draft blog or documentation article when publication is requested. Requires expected_updated_at from the latest read. An already published article is unchanged, including its date and announcement. Returns its publication state, revision and website URL; this does not publish to Facebook or Instagram.",
+      "description": "Publish the selected draft blog or documentation article when publication is requested. Requires updated_at from the latest read. An already published article is unchanged, including its date and announcement. Returns its publication state, revision and website URL; this does not publish to Facebook or Instagram.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
-          "expected_updated_at": {
-            "description": "Exact post.updated_at concurrency token from the latest get_blog_post or successful blog mutation.",
-            "type": "string"
-          },
           "organization_id": {
             "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
             "minLength": 1,
@@ -73963,11 +73959,15 @@
           "post_id": {
             "description": "Post id or slug.",
             "type": "string"
+          },
+          "updated_at": {
+            "description": "Exact post.updated_at concurrency token from the latest get_blog_post or successful blog mutation.",
+            "type": "string"
           }
         },
         "required": [
           "post_id",
-          "expected_updated_at"
+          "updated_at"
         ],
         "type": "object"
       },
@@ -74185,10 +74185,6 @@
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
-          "expected_updated_at": {
-            "description": "The post's updated_at as you last read it.",
-            "type": "string"
-          },
           "organization_id": {
             "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
             "minLength": 1,
@@ -74248,11 +74244,15 @@
             "maxItems": 4,
             "minItems": 1,
             "type": "array"
+          },
+          "updated_at": {
+            "description": "The post's updated_at as you last read it.",
+            "type": "string"
           }
         },
         "required": [
           "post_id",
-          "expected_updated_at",
+          "updated_at",
           "targets"
         ],
         "type": "object"
@@ -74362,14 +74362,14 @@
             "minLength": 1,
             "type": "string"
           },
-          "revision": {
+          "updated_at": {
             "format": "date-time",
             "type": "string"
           }
         },
         "required": [
           "draft_id",
-          "revision"
+          "updated_at"
         ],
         "type": "object"
       },
@@ -74493,7 +74493,7 @@
     {
       "name": "put_resource_localization",
       "title": "Put resource localization",
-      "description": "Replace an exact translation with fields allowed for its resource_type. For content_document, an existing translation requires its current expected_updated_at from get_resource_localization; a new article or page translation requires content_blocks. Omit blocks to retain an existing body. Document addresses come from the source and remain stable. Authored Q&A translations use title and summary without blocks; imported Q&A remains read-only.",
+      "description": "Replace an exact translation with fields allowed for its resource_type. For content_document, an existing translation requires its current updated_at from get_resource_localization; a new article or page translation requires content_blocks. Omit blocks to retain an existing body. Document addresses come from the source and remain stable. Authored Q&A translations use title and summary without blocks; imported Q&A remains read-only.",
       "inputSchema": {
         "$defs": {
           "content_ai_assistance": {
@@ -76323,7 +76323,7 @@
                 },
                 {
                   "required": [
-                    "expected_updated_at"
+                    "updated_at"
                   ]
                 }
               ]
@@ -76408,7 +76408,7 @@
                 },
                 {
                   "required": [
-                    "expected_updated_at"
+                    "updated_at"
                   ]
                 }
               ]
@@ -76472,7 +76472,7 @@
                 },
                 {
                   "required": [
-                    "expected_updated_at"
+                    "updated_at"
                   ]
                 }
               ]
@@ -76847,7 +76847,7 @@
                 },
                 {
                   "required": [
-                    "expected_updated_at"
+                    "updated_at"
                   ]
                 }
               ]
@@ -76880,7 +76880,7 @@
                 },
                 {
                   "required": [
-                    "expected_updated_at"
+                    "updated_at"
                   ]
                 }
               ]
@@ -76913,7 +76913,7 @@
                 },
                 {
                   "required": [
-                    "expected_updated_at"
+                    "updated_at"
                   ]
                 }
               ]
@@ -78934,13 +78934,6 @@
             },
             "type": "array"
           },
-          "expected_updated_at": {
-            "description": "content_document only: required current translation updated_at when replacing an existing document. Omit or use null when creating a translation.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "locale": {
             "type": "string"
           },
@@ -78964,6 +78957,13 @@
               "content_document"
             ],
             "type": "string"
+          },
+          "updated_at": {
+            "description": "content_document only: required current translation updated_at when replacing an existing document. Omit or use null when creating a translation.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "values": {
             "additionalProperties": false,
@@ -93502,10 +93502,6 @@
             ],
             "description": "Complete replacement data; omitted fields are removed."
           },
-          "expected_updated_at": {
-            "description": "The block's updated_at from the last read.",
-            "type": "string"
-          },
           "media": {
             "description": "Omit to retain existing placements; supply the complete array to replace them.",
             "items": {
@@ -93518,11 +93514,15 @@
             "minLength": 1,
             "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
             "type": "string"
+          },
+          "updated_at": {
+            "description": "The block's updated_at from the last read.",
+            "type": "string"
           }
         },
         "required": [
           "block_id",
-          "expected_updated_at",
+          "updated_at",
           "data"
         ],
         "type": "object"
@@ -99601,7 +99601,7 @@
     {
       "name": "save_website_draft",
       "title": "Save website draft",
-      "description": "Save website answers without publishing. Use the returned draft_id and revision for changes; reuse the creation key on retry.",
+      "description": "Save website answers without publishing. Use the returned draft_id and updated_at for changes; reuse the creation key on retry.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -99693,11 +99693,6 @@
             },
             "type": "array"
           },
-          "revision": {
-            "description": "Required when editing: the revision returned by get_website_draft.",
-            "format": "date-time",
-            "type": "string"
-          },
           "source_locale": {
             "description": "Required when creating; a saved draft cannot be relabelled into another language.",
             "enum": [
@@ -99717,6 +99712,11 @@
           "timezone": {
             "description": "Explicit IANA timezone identifier, such as Asia/Bangkok. Missing timezone is an error, never the browser timezone.",
             "minLength": 1,
+            "type": "string"
+          },
+          "updated_at": {
+            "description": "Required when editing: the revision returned by get_website_draft.",
+            "format": "date-time",
             "type": "string"
           },
           "vertical": {
@@ -99829,10 +99829,6 @@
             },
             "type": "array"
           },
-          "revision": {
-            "format": "date-time",
-            "type": "string"
-          },
           "source_locale": {
             "type": "string"
           },
@@ -99849,6 +99845,10 @@
           "timezone": {
             "type": "string"
           },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
           "vertical": {
             "enum": [
               "restaurant",
@@ -99861,7 +99861,7 @@
         },
         "required": [
           "draft_id",
-          "revision",
+          "updated_at",
           "status",
           "subdomain",
           "name",
@@ -101623,14 +101623,6 @@
           }
         ],
         "properties": {
-          "expected_updated_at": {
-            "description": "Latest updated_at from get_member_scheduling or get_member_public_profile; null only when that read returns null. Both concerns share this revision, so either kind of edit can make an earlier read stale.",
-            "format": "date-time",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "member_id": {
             "description": "Organization membership ID from get_member_scheduling.members[].id or list_organization_members.members[].id, not the person’s userId. Ordinary members may name only their own membership.",
             "minLength": 1,
@@ -101668,6 +101660,14 @@
             "description": "IANA timezone for these working hours.",
             "type": "string"
           },
+          "updated_at": {
+            "description": "Latest updated_at from get_member_scheduling or get_member_public_profile; null only when that read returns null. Both concerns share this revision, so either kind of edit can make an earlier read stale.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "weekly": {
             "items": {
               "additionalProperties": false,
@@ -101699,7 +101699,7 @@
         },
         "required": [
           "member_id",
-          "expected_updated_at"
+          "updated_at"
         ],
         "type": "object"
       },
@@ -103899,7 +103899,7 @@
     {
       "name": "update_blog_post",
       "title": "Update blog post",
-      "description": "Edit the selected blog or documentation article. Only supplied metadata changes; content_blocks replaces the entire body and requires expected_updated_at from the latest read. Stale tokens conflict. Changes to a published article are public immediately. When linking to dashboard settings in markdown copy, use /dashboard/app/<path> (e.g. /dashboard/app/products) so the link dynamically resolves to the reader's active organization.",
+      "description": "Edit the selected blog or documentation article. Only supplied metadata changes; content_blocks replaces the entire body and requires updated_at from the latest read. Stale tokens conflict. Changes to a published article are public immediately. When linking to dashboard settings in markdown copy, use /dashboard/app/<path> (e.g. /dashboard/app/products) so the link dynamically resolves to the reader's active organization.",
       "inputSchema": {
         "$defs": {
           "content_ai_assistance": {
@@ -104505,7 +104505,7 @@
             },
             "then": {
               "required": [
-                "expected_updated_at"
+                "updated_at"
               ]
             }
           }
@@ -105257,10 +105257,6 @@
           "excerpt": {
             "type": "string"
           },
-          "expected_updated_at": {
-            "description": "Required with content_blocks. Use updated_at returned by get_blog_post; stale tokens are rejected with a conflict.",
-            "type": "string"
-          },
           "organization_id": {
             "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
             "minLength": 1,
@@ -105272,6 +105268,10 @@
             "type": "string"
           },
           "title": {
+            "type": "string"
+          },
+          "updated_at": {
+            "description": "Required with content_blocks. Use updated_at returned by get_blog_post; stale tokens are rejected with a conflict.",
             "type": "string"
           },
           "visibility": {
@@ -109780,11 +109780,6 @@
             ],
             "type": "object"
           },
-          "expected_updated_at": {
-            "description": "product.updated_at from the latest get_product call. A stale value refuses the entire change.",
-            "minLength": 1,
-            "type": "string"
-          },
           "organization_id": {
             "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
             "minLength": 1,
@@ -109795,11 +109790,16 @@
             "description": "The place to stay: a product of kind stay, from list_products.",
             "minLength": 1,
             "type": "string"
+          },
+          "updated_at": {
+            "description": "product.updated_at from the latest get_product call. A stale value refuses the entire change.",
+            "minLength": 1,
+            "type": "string"
           }
         },
         "required": [
           "product_id",
-          "expected_updated_at",
+          "updated_at",
           "accessibility"
         ],
         "type": "object"
@@ -109883,14 +109883,14 @@
             "minLength": 1,
             "type": "string"
           },
-          "product_updated_at": {
+          "updated_at": {
             "minLength": 1,
             "type": "string"
           }
         },
         "required": [
           "product_id",
-          "product_updated_at",
+          "updated_at",
           "accessibility"
         ],
         "type": "object"
@@ -110261,10 +110261,6 @@
             "minLength": 1,
             "type": "string"
           },
-          "product_updated_at": {
-            "minLength": 1,
-            "type": "string"
-          },
           "room": {
             "additionalProperties": false,
             "properties": {
@@ -110626,11 +110622,15 @@
               "accessibility"
             ],
             "type": "object"
+          },
+          "updated_at": {
+            "minLength": 1,
+            "type": "string"
           }
         },
         "required": [
           "product_id",
-          "product_updated_at",
+          "updated_at",
           "room"
         ],
         "type": "object"
@@ -111707,14 +111707,6 @@
           }
         ],
         "properties": {
-          "expected_updated_at": {
-            "description": "Latest updated_at from get_member_scheduling or get_member_public_profile; null only when that read returns null. Both concerns share this revision, so either kind of edit can make an earlier read stale.",
-            "format": "date-time",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "member_id": {
             "description": "Organization membership ID from get_member_scheduling.members[].id or list_organization_members.members[].id, not the person’s userId. Ordinary members may name only their own membership.",
             "minLength": 1,
@@ -111751,11 +111743,19 @@
               "string",
               "null"
             ]
+          },
+          "updated_at": {
+            "description": "Latest updated_at from get_member_scheduling or get_member_public_profile; null only when that read returns null. Both concerns share this revision, so either kind of edit can make an earlier read stale.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
           "member_id",
-          "expected_updated_at"
+          "updated_at"
         ],
         "type": "object"
       },
@@ -114351,7 +114351,7 @@
     {
       "name": "update_post",
       "title": "Update post",
-      "description": "Change at least one supplied website post field. First call get_post for its updated_at and use that as expected_updated_at. Omitted fields retain their values; null clears a nullable field. Published social posts are unchanged.",
+      "description": "Change at least one supplied website post field. Use the current updated_at from get_post. Omitted fields retain their values; null clears a nullable field. Published social posts are unchanged.",
       "inputSchema": {
         "additionalProperties": false,
         "anyOf": [
@@ -114421,10 +114421,6 @@
               }
             ]
           },
-          "expected_updated_at": {
-            "description": "Current post.updated_at from get_post. A stale revision refuses the change.",
-            "type": "string"
-          },
           "location_id": {
             "anyOf": [
               {
@@ -114458,6 +114454,10 @@
             ],
             "description": "Optional headline. Never invented when absent."
           },
+          "updated_at": {
+            "description": "Current post.updated_at from get_post. A stale revision refuses the change.",
+            "type": "string"
+          },
           "visibility": {
             "description": "listed shows the post in feeds; unlisted keeps it reachable by its URL only. Neither makes a draft public.",
             "enum": [
@@ -114469,7 +114469,7 @@
         },
         "required": [
           "post_id",
-          "expected_updated_at"
+          "updated_at"
         ],
         "type": "object"
       },
@@ -114797,7 +114797,7 @@
                 ]
               },
               "updated_at": {
-                "description": "The expected_updated_at update_post and publish_post take.",
+                "description": "The updated_at update_post and publish_post take.",
                 "type": "string"
               },
               "view_url": {
@@ -115874,11 +115874,6 @@
             ],
             "type": "string"
           },
-          "expected_updated_at": {
-            "description": "The Product updated_at from the read being edited. A stale value refuses the entire update, including variants and prices. Omit only for a deliberate update based on current state.",
-            "minLength": 1,
-            "type": "string"
-          },
           "idempotency_key": {
             "description": "Required with booking setup. Repeat the same key with the same request for an identical retry.",
             "maxLength": 200,
@@ -116648,6 +116643,11 @@
               "string",
               "null"
             ]
+          },
+          "updated_at": {
+            "description": "The Product updated_at from the read being edited. A stale value refuses the entire update, including variants and prices. Omit only for a deliberate update based on current state.",
+            "minLength": 1,
+            "type": "string"
           },
           "variants": {
             "description": "Partial existing variants by id or new variants. Omitted variants and their prices remain unless variants_mode is replace. Existing variant and price IDs retain their identities.",
@@ -128384,7 +128384,7 @@
         "reorder_collections": "sha256:c8ad3c90e1fe802222fc5c184e33daa7f2f71b24f6161eddc408f1b1e485a59b",
         "set_collection_products": "sha256:7d92dda53c08f4ebcf2f11cfc3a4c2cc6f7465ad97b9190d9997fea30e0cc81d",
         "update_menu": "sha256:947551eb104f6be470aeaab3b3570d0ab9924d01450192f8ac88a77f91de7433",
-        "update_product": "sha256:e35df16c5c4faa3070c656d44c5040b101ac19fc0926698578858f3f91d23e68"
+        "update_product": "sha256:76ac8761f201285b2ba6f59554164a8fca0bb6a3331b1544e8e206329b7a226d"
       }
     },
     {
@@ -128404,12 +128404,12 @@
       ],
       "rendered": {
         "description": "Create and publish a post",
-        "text": "Call create_post with a new idempotency_key and this body: <body> If the user supplied or approved media, pass it as create_post media in the order they want it shown: the cover first, then the gallery. Publish only to: <destinations>. For Facebook, Instagram or Discord, call get_social_connections and use the exact target_id and connection_revision it returns; if the destination is not connected or has a problem, say so instead of publishing elsewhere. Show the user the draft's preview_url, then call publish_post with the post's updated_at as expected_updated_at and one target per named destination. Report each outcome exactly as returned: published, with its public_url when the destination gives one; already_published; failed with the provider's reason; or skipped."
+        "text": "Call create_post with a new idempotency_key and this body: <body> If the user supplied or approved media, pass it as create_post media in the order they want it shown: the cover first, then the gallery. Publish only to: <destinations>. For Facebook, Instagram or Discord, call get_social_connections and use the exact target_id and connection_revision it returns; if the destination is not connected or has a problem, say so instead of publishing elsewhere. Show the user the draft's preview_url, then call publish_post with the post's current updated_at and one target per named destination. Report each outcome exactly as returned: published, with its public_url when the destination gives one; already_published; failed with the provider's reason; or skipped."
       },
       "toolContracts": {
-        "create_post": "sha256:e800e3c19ecf887d09aa70d80dcbe66d985196d2138620b369cb9e1f9cace67a",
+        "create_post": "sha256:a2a95f5e752b47a10f2d42dfaaca0caca19afd2a4110adc3fd97dad2eb8a763a",
         "get_social_connections": "sha256:ce06b442ff3f389bf517c54c51ff4fb762a7bde099820d26f260139f1e3d1686",
-        "publish_post": "sha256:fbfd1f5ff6cbdc02ecba0e29e88a7efc5bedb5e6b60ad98eca33b6e99016f1b2"
+        "publish_post": "sha256:752fb1e9c0267e6ba03088081fa8a0e5c5f8034640f03df3c52078a8df8f95d4"
       }
     },
     {
@@ -128495,7 +128495,7 @@
       "toolContracts": {
         "attach_media": "sha256:b6f84ecad030ec9ec81a253682c86d6f8a10dc0c3b35564c873c21bbdbace35a",
         "get_location": "sha256:eeb473e44df629a24ceb82a2db6873a6b1f108dd852c2fa923f605a637439f34",
-        "get_post": "sha256:084fd73ea9efe150fe8e7812e02a80394a52477719bdab8ed3c33beae8225df8",
+        "get_post": "sha256:fd95e9d97a5f0624dda58886752832eee80a1fef08c9c7a64d8c2af4ff3481d1",
         "get_product": "sha256:b2afea3d084c67b0aacc46c8fbdbcf652dfaa2554de42de7bef06b16312f05e1",
         "get_site_page": "sha256:19e8f6df9f3d8dba2fa2a14be053e505abd0564cdf279d649db199c2afdd46d6",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
@@ -128509,20 +128509,20 @@
       "arguments": [],
       "rendered": {
         "description": "Finish business setup",
-        "text": "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft ID and revision. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Check for missing brand assets like logo, favicon, social card, palette colors, hero media, and about page story. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result."
+        "text": "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft_id and updated_at. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Check for missing brand assets like logo, favicon, social card, palette colors, hero media, and about page story. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result."
       },
       "toolContracts": {
         "create_product": "sha256:de3e65a1a63086940417c4307644f1368a210f3face38dea55138c73ffd4270a",
         "get_organization": "sha256:7659406922dc74826fdfd890dc16fb069dbc35c3af276860b62306848b471f06",
         "get_site_page": "sha256:19e8f6df9f3d8dba2fa2a14be053e505abd0564cdf279d649db199c2afdd46d6",
-        "get_website_draft": "sha256:3fc96867bd2ccb2dbd9ece2124b0b7250cce1219a6da69d014dc81985d1bba23",
+        "get_website_draft": "sha256:c9a35d9cbeeac75d7f0be22022549499d6f881100f1ef31851ba08ec238baed5",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_organizations": "sha256:1d699ce3820543aed0a3f9b17007d6f33a3c498d17a73f77de0971943a98d30a",
         "list_products": "sha256:bd6b30cee8a405d0bcdf6313fa20396a2e287bb3285b977fdc1c27baed9c48f0",
         "list_site_pages": "sha256:5a49aa342807192ee45d329880f2f459d1914154e9a04a43562c0ea3587879cc",
-        "publish_website": "sha256:6ba702a3293b004e38bcc734ff0b74c3073caaeb12cd831f0f78ddec1a1efaa4",
-        "save_website_draft": "sha256:6a7e9c21393133afa96ef5bd80d3ca08ced43fc89e669394496d8d4785ed82ab",
+        "publish_website": "sha256:05e40520e524c3ab6c5cf48d56bd0cc94e9e18f61c11b519930950ecc0c7fdee",
+        "save_website_draft": "sha256:3fa5e06d7509ac6181e1f7c4f2bb44e570e52ba6e28109c82fd7f8e11686a0d2",
         "update_menu": "sha256:947551eb104f6be470aeaab3b3570d0ab9924d01450192f8ac88a77f91de7433",
         "update_organization_settings": "sha256:7191c77fc0ed6eb5ce818283be58acb26679a8cf793cbba600dccb694e8051a6",
         "update_site_page": "sha256:d1e8cc9a99c9970e6f8c84785867979a71b4adb09725cd72fe7d81c9af6350cb"
@@ -128545,7 +128545,7 @@
         "list_products": "sha256:bd6b30cee8a405d0bcdf6313fa20396a2e287bb3285b977fdc1c27baed9c48f0",
         "replace_product_weekly_schedule": "sha256:606256312fe6c64160bcf9bfb31f5bfcc99d5ddf1c84b90fbc9b804389a021b1",
         "set_product_booking_config": "sha256:50969e4450fa9d51c05b4a5b2901f3ceac78a3df29d96e77fc48bfea8d2b21fe",
-        "update_product": "sha256:e35df16c5c4faa3070c656d44c5040b101ac19fc0926698578858f3f91d23e68"
+        "update_product": "sha256:76ac8761f201285b2ba6f59554164a8fca0bb6a3331b1544e8e206329b7a226d"
       }
     },
     {
@@ -128564,7 +128564,7 @@
         "list_products": "sha256:bd6b30cee8a405d0bcdf6313fa20396a2e287bb3285b977fdc1c27baed9c48f0",
         "list_site_pages": "sha256:5a49aa342807192ee45d329880f2f459d1914154e9a04a43562c0ea3587879cc",
         "set_media": "sha256:79e758a2b687c65350fa364dd1169fb47edc54c166f71d2c1ccee5a380a1295b",
-        "update_product": "sha256:e35df16c5c4faa3070c656d44c5040b101ac19fc0926698578858f3f91d23e68",
+        "update_product": "sha256:76ac8761f201285b2ba6f59554164a8fca0bb6a3331b1544e8e206329b7a226d",
         "update_site_page": "sha256:d1e8cc9a99c9970e6f8c84785867979a71b4adb09725cd72fe7d81c9af6350cb"
       }
     },
@@ -128577,7 +128577,7 @@
         "text": "Use get_workspace_context and get_organization_analytics to read recent traffic. Use list_products, get_product and list_product_booking_sessions for bookable offerings and availability, and list_conversations plus get_conversation for current guest demand. Recommend the most useful action supported by those records. Use send_message, update_product or create_post and publish_post for the action the user requests, then read back its actual outcome and report any incomplete delivery or dashboard handoff."
       },
       "toolContracts": {
-        "create_post": "sha256:e800e3c19ecf887d09aa70d80dcbe66d985196d2138620b369cb9e1f9cace67a",
+        "create_post": "sha256:a2a95f5e752b47a10f2d42dfaaca0caca19afd2a4110adc3fd97dad2eb8a763a",
         "get_conversation": "sha256:0bb638b4ce881d5db51291ff262e13633e2b2a6bcbeca21246027deb716fcd84",
         "get_organization_analytics": "sha256:4fcc7f6cef537aa552200cc74b666d866684657015427e256651d7791140b814",
         "get_product": "sha256:b2afea3d084c67b0aacc46c8fbdbcf652dfaa2554de42de7bef06b16312f05e1",
@@ -128585,9 +128585,9 @@
         "list_conversations": "sha256:24cf21b535c6689cb04bc7188bec604110c207a960c8ba5e69e9505150dceca7",
         "list_product_booking_sessions": "sha256:dd7f33d38984d5063ada647edd2b1dbca7a39b7ac6a31c79addad28cd6a739c1",
         "list_products": "sha256:bd6b30cee8a405d0bcdf6313fa20396a2e287bb3285b977fdc1c27baed9c48f0",
-        "publish_post": "sha256:fbfd1f5ff6cbdc02ecba0e29e88a7efc5bedb5e6b60ad98eca33b6e99016f1b2",
+        "publish_post": "sha256:752fb1e9c0267e6ba03088081fa8a0e5c5f8034640f03df3c52078a8df8f95d4",
         "send_message": "sha256:8636238ba370bd243b7a3f2d4c1f6a5993223e916e3695bfd8f2a3696f80e6e2",
-        "update_product": "sha256:e35df16c5c4faa3070c656d44c5040b101ac19fc0926698578858f3f91d23e68"
+        "update_product": "sha256:76ac8761f201285b2ba6f59554164a8fca0bb6a3331b1544e8e206329b7a226d"
       }
     }
   ]

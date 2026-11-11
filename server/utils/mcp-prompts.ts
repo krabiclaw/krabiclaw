@@ -112,7 +112,7 @@ export function renderMcpPrompt(name: string, args: Record<string, string>): { d
           `Call create_post with a new idempotency_key and this body: ${body}`,
           "If the user supplied or approved media, pass it as create_post media in the order they want it shown: the cover first, then the gallery.",
           `Publish only to: ${destinations}. For Facebook, Instagram or Discord, call get_social_connections and use the exact target_id and connection_revision it returns; if the destination is not connected or has a problem, say so instead of publishing elsewhere.`,
-          "Show the user the draft's preview_url, then call publish_post with the post's updated_at as expected_updated_at and one target per named destination.",
+          "Show the user the draft's preview_url, then call publish_post with the post's current updated_at and one target per named destination.",
           "Report each outcome exactly as returned: published, with its public_url when the destination gives one; already_published; failed with the provider's reason; or skipped.",
         ].join(" "),
       };
@@ -157,7 +157,7 @@ export function renderMcpPrompt(name: string, args: Record<string, string>): { d
     case "finish_my_organization_setup": {
       return {
         description: "Finish business setup",
-        text: "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft ID and revision. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Check for missing brand assets like logo, favicon, social card, palette colors, hero media, and about page story. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result.",
+        text: "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft_id and updated_at. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Check for missing brand assets like logo, favicon, social card, palette colors, hero media, and about page story. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result.",
       };
     }
     case "make_organization_more_bookable": {

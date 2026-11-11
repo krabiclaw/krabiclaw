@@ -169,7 +169,7 @@ async function toggleClosure(): Promise<void> {
     // The one dates write every calendar uses: the place's closures, read back.
     await dashboardApi(`/api/dashboard/places/location/${record.id}/dates`, {
       method: 'PUT',
-      body: { from: day.value, to: addLocalDays(day.value, 1), closed: availability.value.action === 'block', expected_updated_at: record.updated_at },
+      body: { from: day.value, to: addLocalDays(day.value, 1), closed: availability.value.action === 'block', updated_at: record.updated_at },
       validate: isPlaceDates,
     })
     await refreshLocation()

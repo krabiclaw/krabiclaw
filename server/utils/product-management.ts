@@ -1630,9 +1630,9 @@ async function planProductUpdate(db: DbClient, input: {
   const { current, organizationId } = input
   const { patch } = input
   if ('slug' in patch && patch.slug !== undefined && patch.slug !== current.slug) invalid('A product keeps its saved slug')
-  if (patch.expected_updated_at !== undefined) {
-    if (typeof patch.expected_updated_at !== 'string' || !Number.isFinite(Date.parse(patch.expected_updated_at))) invalid('expected_updated_at must be the Product updated_at value from the latest read')
-    if (patch.expected_updated_at !== current.updated_at) throw new HTTPError({ statusCode: 409, statusMessage: 'The product changed while you were editing. Nothing was changed; read it again before saving.', data: { code: 'PRODUCT_UPDATE_CONFLICT', field: 'expected_updated_at', product_id: current.id } })
+  if (patch.updated_at !== undefined) {
+    if (typeof patch.updated_at !== 'string' || !Number.isFinite(Date.parse(patch.updated_at))) invalid('updated_at must be the Product updated_at value from the latest read')
+    if (patch.updated_at !== current.updated_at) throw new HTTPError({ statusCode: 409, statusMessage: 'The product changed while you were editing. Nothing was changed; read it again before saving.', data: { code: 'PRODUCT_UPDATE_CONFLICT', field: 'updated_at', product_id: current.id } })
   }
   if (patch.stay && Object.hasOwn(patch.stay, 'accessibility')) invalid('Use the home accessibility operation to author accessibility information')
   if (patch.stay?.expected_questions_revision !== undefined && patch.stay.questions === undefined) invalidStayField('expected_questions_revision', 'stay.expected_questions_revision is only sent with stay.questions')
@@ -1925,7 +1925,7 @@ export async function updateProduct(db: DbClient, input: {
     throw new HTTPError({ statusCode: 409, statusMessage: 'The room or listing changed while you were editing. Nothing was changed; reload the room and try again.', data: { code: 'ROOM_DETAILS_CHANGED', field: 'expected_details_version', product_id: input.productId } })
   }
   const homeChanged = (): never => {
-    throw new HTTPError({ statusCode: 409, statusMessage: 'The listing changed while you were editing. Nothing was changed; reload the accessibility information and try again.', data: { code: 'STAY_ACCESSIBILITY_CHANGED', field: 'expected_updated_at', product_id: input.productId } })
+    throw new HTTPError({ statusCode: 409, statusMessage: 'The listing changed while you were editing. Nothing was changed; reload the accessibility information and try again.', data: { code: 'STAY_ACCESSIBILITY_CHANGED', field: 'updated_at', product_id: input.productId } })
   }
   if (homeUpdate && (!current.stay || current.updated_at !== homeUpdate.expectedUpdatedAt)) homeChanged()
   if (roomUpdate && !current.stay?.photo_rooms.some(room => room.id === roomUpdate.roomId && room.details_version === roomUpdate.expectedDetailsVersion)) roomChanged()
@@ -2075,7 +2075,7 @@ export async function updateProduct(db: DbClient, input: {
       if (await replay()) return
       if (roomUpdate) roomChanged()
       if (homeUpdate) homeChanged()
-      throw new HTTPError({ statusCode: 409, statusMessage: 'The offering or its availability changed while you were editing. Nothing was changed; read its current state and retry.', data: { code: 'PRODUCT_UPDATE_CONFLICT', ...(input.patch.expected_updated_at !== undefined ? { field: 'expected_updated_at' } : {}), product_id: input.productId }, cause: error })
+      throw new HTTPError({ statusCode: 409, statusMessage: 'The offering or its availability changed while you were editing. Nothing was changed; read its current state and retry.', data: { code: 'PRODUCT_UPDATE_CONFLICT', ...(input.patch.updated_at !== undefined ? { field: 'updated_at' } : {}), product_id: input.productId }, cause: error })
     }
     if (input.booking) {
       const { bookingConfigurationWriteError } = await import('~/server/utils/availability')

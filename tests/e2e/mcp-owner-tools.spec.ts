@@ -952,7 +952,7 @@ test.describe('stateless MCP server', () => {
               if (step === 'verify') { expect(current ?? expected).toMatchObject(expected); continue }
               if (!current) continue
               const restored = await mcpRequest(restore.cleanupRequest, restore.baseURL, { method: 'tools/call', toolName: 'update_member_public_profile', args: {
-                organization_id: restore.organizationId, member_id: memberId, expected_updated_at: current.updated_at, ...expected, public_approved: Boolean(expected.public_approved),
+                organization_id: restore.organizationId, member_id: memberId, updated_at: current.updated_at, ...expected, public_approved: Boolean(expected.public_approved),
               } })
               expect(restored.status(), await restored.text()).toBe(200)
               mcpData(await restored.json())
@@ -1113,7 +1113,7 @@ test.describe('stateless MCP server', () => {
       expect(host, 'The canonical role actor belongs to the demo tenant').toBeDefined()
       const { profile: originalProfile } = mcpData<{ profile: { updated_at: string; public_name: string | null; public_photo_url: string | null; public_bio: string | null; public_approved: number } | null }>(await call('get_member_public_profile', { member_id: host!.id }))
       restore.host = { memberId: host!.id, profile: originalProfile }
-      await call('update_member_public_profile', { member_id: host!.id, expected_updated_at: originalProfile?.updated_at ?? null, public_name: originalProfile?.public_name ?? 'Pizza class host', public_approved: true })
+      await call('update_member_public_profile', { member_id: host!.id, updated_at: originalProfile?.updated_at ?? null, public_name: originalProfile?.public_name ?? 'Pizza class host', public_approved: true })
       const created = mcpData<{ product: { id: string; slug: string } }>(await call('create_product', { kind: 'experience', active: true, idempotency_key: crypto.randomUUID(),
         name: 'Family Pizza Class', variants: [{ name: 'Class seat', prices: [{ unit_amount: 1000, currency: settings.default_currency }] }],
       })).product
@@ -1504,7 +1504,7 @@ test.describe('stateless MCP server', () => {
         ['update_member_public_profile', { timezone: location.timezone, weekly: [], time_off: [] }],
         ['update_member_public_profile', {}],
       ] as const) {
-        const refused = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName, args: { organization_id: organizationId, member_id: hostMemberId, expected_updated_at: null, ...fields } })
+        const refused = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName, args: { organization_id: organizationId, member_id: hostMemberId, updated_at: null, ...fields } })
         expect(refused.status(), await refused.text()).toBe(200)
         const result = (await refused.json()).result
         expect(result.isError).toBe(true)
@@ -1515,7 +1515,7 @@ test.describe('stateless MCP server', () => {
         expect(await unchanged.json()).toEqual({ scheduling: null, calendar_sync: true })
       }
       for (const public_name of [null, '', '   ']) {
-        const refused = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'update_member_public_profile', args: { organization_id: organizationId, member_id: hostMemberId, expected_updated_at: null, public_name, public_approved: true } })
+        const refused = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'update_member_public_profile', args: { organization_id: organizationId, member_id: hostMemberId, updated_at: null, public_name, public_approved: true } })
         expect(refused.status(), await refused.text()).toBe(200)
         const result = (await refused.json()).result
         expect(result.isError).toBe(true)
@@ -1526,13 +1526,13 @@ test.describe('stateless MCP server', () => {
       }
       // A published profile does not claim working hours. Physical sessions
       // remain bookable from the Product's own explicitly authored times.
-      let profile = await call<{ profile: PublicProfile }>('update_member_public_profile', { member_id: hostMemberId, expected_updated_at: null, public_name: 'Omakase host' }, hostRequest)
+      let profile = await call<{ profile: PublicProfile }>('update_member_public_profile', { member_id: hostMemberId, updated_at: null, public_name: 'Omakase host' }, hostRequest)
       const draftRead = await request.get(memberEndpoint)
       expect(draftRead.status(), await draftRead.text()).toBe(200)
       const draftNative = (await draftRead.json()).scheduling
       expect(profile.profile).toEqual({ member_id: hostMemberId, updated_at: draftNative.updated_at, public_name: 'Omakase host', public_photo_url: null, public_bio: null, public_approved: 0 })
       expect(await call('get_member_public_profile', { member_id: hostMemberId })).toEqual(profile)
-      const selfApproval = await mcpRequest(hostRequest, baseURL!, { method: 'tools/call', toolName: 'update_member_public_profile', args: { organization_id: organizationId, member_id: hostMemberId, expected_updated_at: profile.profile.updated_at, public_approved: true } })
+      const selfApproval = await mcpRequest(hostRequest, baseURL!, { method: 'tools/call', toolName: 'update_member_public_profile', args: { organization_id: organizationId, member_id: hostMemberId, updated_at: profile.profile.updated_at, public_approved: true } })
       expect(selfApproval.status(), await selfApproval.text()).toBe(200)
       const selfApprovalResult = (await selfApproval.json()).result
       expect(selfApprovalResult.isError).toBe(true)
@@ -1540,7 +1540,7 @@ test.describe('stateless MCP server', () => {
       const selfUnchanged = await request.get(memberEndpoint)
       expect(selfUnchanged.status(), await selfUnchanged.text()).toBe(200)
       expect((await selfUnchanged.json()).scheduling).toEqual(draftNative)
-      profile = await call<{ profile: PublicProfile }>('update_member_public_profile', { member_id: hostMemberId, expected_updated_at: profile.profile.updated_at, public_approved: true })
+      profile = await call<{ profile: PublicProfile }>('update_member_public_profile', { member_id: hostMemberId, updated_at: profile.profile.updated_at, public_approved: true })
       const profileRead = await request.get(memberEndpoint)
       expect(profileRead.status(), await profileRead.text()).toBe(200)
       const profileNative = (await profileRead.json()).scheduling
@@ -1559,7 +1559,7 @@ test.describe('stateless MCP server', () => {
       expect((await call<{product:{id:string}}>('create_product', creation)).product.id).toBe(product.id)
       // A member's content edit withholds their profile; it does not invent
       // hours, and publication must refuse until an admin approves it again.
-      profile = await call<{ profile: PublicProfile }>('update_member_public_profile', { member_id: hostMemberId, expected_updated_at: profile.profile.updated_at, public_bio: 'Omakase prepared and hosted by this team member.' }, hostRequest)
+      profile = await call<{ profile: PublicProfile }>('update_member_public_profile', { member_id: hostMemberId, updated_at: profile.profile.updated_at, public_bio: 'Omakase prepared and hosted by this team member.' }, hostRequest)
       expect(profile.profile.public_approved).toBe(0)
       const editedNative = await request.get(memberEndpoint)
       expect(editedNative.status(), await editedNative.text()).toBe(200)
@@ -1573,7 +1573,7 @@ test.describe('stateless MCP server', () => {
       const withheld = await request.get(`${baseURL}/api/editor/organizations/${organizationId}/products/${product.id}`)
       expect(withheld.status(), await withheld.text()).toBe(200)
       expect((await withheld.json()).product.publications.find((publication: { organization_id: string }) => publication.organization_id === organizationId)).toMatchObject({ published: false })
-      profile = await call<{ profile: PublicProfile }>('update_member_public_profile', { member_id: hostMemberId, expected_updated_at: profile.profile.updated_at, public_approved: true })
+      profile = await call<{ profile: PublicProfile }>('update_member_public_profile', { member_id: hostMemberId, updated_at: profile.profile.updated_at, public_approved: true })
       await call('set_product_publication', { product_id: product.id, published: true })
       const readback = await request.get(`${baseURL}/api/editor/organizations/${organizationId}/products/${product.id}`)
       expect(readback.status()).toBe(200)
@@ -1711,14 +1711,14 @@ test.describe('stateless MCP server', () => {
       // and rereads saved state without following an invalid online address.
       await call('set_product_publication', { product_id: product.id, published: false })
       const authoredHours = { timezone: location.timezone, weekly: [{ weekday: new Date(`${seating!.date}T12:00:00Z`).getUTCDay(), start: '09:00', end: '10:00' }], time_off: [] }
-      const hours = await call<{ scheduling: Pick<NonNullable<Scheduling>, 'member_id' | 'updated_at' | 'timezone' | 'weekly' | 'time_off'> }>('set_member_scheduling', { member_id: hostMemberId, expected_updated_at: profile.profile.updated_at, ...authoredHours })
+      const hours = await call<{ scheduling: Pick<NonNullable<Scheduling>, 'member_id' | 'updated_at' | 'timezone' | 'weekly' | 'time_off'> }>('set_member_scheduling', { member_id: hostMemberId, updated_at: profile.profile.updated_at, ...authoredHours })
       const hoursRead = await request.get(`${baseURL}/api/organizations/${organizationId}/members/${hostMemberId}/scheduling`)
       expect(hoursRead.status(), await hoursRead.text()).toBe(200)
       const hoursNative = (await hoursRead.json()).scheduling
       expect(hoursNative).toMatchObject(hours.scheduling)
       expect(hoursNative).toMatchObject({ ...authoredHours, public_name: 'Omakase host', public_approved: 1 })
       expect(hours.scheduling).toEqual({ member_id: hostMemberId, updated_at: hoursNative.updated_at, ...authoredHours })
-      const staleProfile = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'update_member_public_profile', args: { organization_id: organizationId, member_id: hostMemberId, expected_updated_at: profile.profile.updated_at, public_bio: 'An edit based on the old shared revision' } })
+      const staleProfile = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'update_member_public_profile', args: { organization_id: organizationId, member_id: hostMemberId, updated_at: profile.profile.updated_at, public_bio: 'An edit based on the old shared revision' } })
       expect(staleProfile.status(), await staleProfile.text()).toBe(200)
       const staleProfileResult = (await staleProfile.json()).result
       expect(staleProfileResult.isError).toBe(true)
@@ -1728,11 +1728,11 @@ test.describe('stateless MCP server', () => {
       expect((await unchangedHours.json()).scheduling).toEqual(hoursNative)
       const profileAfterHours = await call<{ profile: PublicProfile }>('get_member_public_profile', { member_id: hostMemberId })
       expect(profileAfterHours.profile).toEqual({ ...profile.profile, updated_at: hoursNative.updated_at })
-      const editedAfterHours = await call<{ profile: PublicProfile }>('update_member_public_profile', { member_id: hostMemberId, expected_updated_at: profileAfterHours.profile.updated_at, public_approved: false })
+      const editedAfterHours = await call<{ profile: PublicProfile }>('update_member_public_profile', { member_id: hostMemberId, updated_at: profileAfterHours.profile.updated_at, public_approved: false })
       const retainedHours = await request.get(memberEndpoint)
       expect(retainedHours.status(), await retainedHours.text()).toBe(200)
       expect((await retainedHours.json()).scheduling).toEqual({ ...hoursNative, public_approved: 0, updated_at: editedAfterHours.profile.updated_at })
-      await call<{ profile: PublicProfile }>('update_member_public_profile', { member_id: hostMemberId, expected_updated_at: editedAfterHours.profile.updated_at, public_approved: true })
+      await call<{ profile: PublicProfile }>('update_member_public_profile', { member_id: hostMemberId, updated_at: editedAfterHours.profile.updated_at, public_approved: true })
       await call('set_product_booking_config', { product_id: product.id, held_online: true, scheduling_mode: 'provider' })
       await page.goto(`${bookingPath}/location?location_id=online`)
       const format = page.locator('#dashboard-panel-booking-location')

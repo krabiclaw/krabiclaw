@@ -348,7 +348,7 @@ test.describe('dashboard pane hierarchy', () => {
       await portrait.getByRole('button', { name: 'Save', exact: true }).click()
       const photoResponse = await photoWrite
       expect(photoResponse.status(), await photoResponse.text()).toBe(200)
-      expect(photoResponse.request().postDataJSON()).toEqual({ public_photo_url: photo.public_url, expected_updated_at: originalProfile?.updated_at ?? null })
+      expect(photoResponse.request().postDataJSON()).toEqual({ public_photo_url: photo.public_url, updated_at: originalProfile?.updated_at ?? null })
       const photoProfileRead = await mcpRequest(memberContext.request, baseURL!, { method: 'tools/call', toolName: 'get_member_public_profile', args: { organization_id: organizationId, member_id: actor.id } })
       expect(photoProfileRead.status(), await photoProfileRead.text()).toBe(200)
       type PublicProfile = Pick<NonNullable<MemberSchedule>, 'member_id' | 'updated_at' | 'public_name' | 'public_photo_url' | 'public_bio' | 'public_approved'>
@@ -367,7 +367,7 @@ test.describe('dashboard pane hierarchy', () => {
       await picker.getByRole('button', { name: attemptedPhoto.alt_text || attemptedPhoto.file_name || attemptedPhoto.kind, exact: true }).click()
       await picker.getByRole('button', { name: 'Done', exact: true }).click()
       const concurrentWrite = await mcpRequest(memberContext.request, baseURL!, { method: 'tools/call', toolName: 'update_member_public_profile', args: {
-        organization_id: organizationId, member_id: actor.id, public_photo_url: originalProfile?.public_photo_url ?? null, expected_updated_at: savedProfile.updated_at,
+        organization_id: organizationId, member_id: actor.id, public_photo_url: originalProfile?.public_photo_url ?? null, updated_at: savedProfile.updated_at,
       } })
       expect(concurrentWrite.status(), await concurrentWrite.text()).toBe(200)
       const concurrent = mcpData<{ profile: PublicProfile }>(await concurrentWrite.json()).profile
@@ -377,7 +377,7 @@ test.describe('dashboard pane hierarchy', () => {
       await portrait.getByRole('button', { name: 'Save', exact: true }).click()
       const conflictResponse = await conflictWrite
       expect(conflictResponse.status(), await conflictResponse.text()).toBe(409)
-      expect(conflictResponse.request().postDataJSON()).toEqual({ public_photo_url: attemptedPhoto.public_url, expected_updated_at: savedProfile.updated_at })
+      expect(conflictResponse.request().postDataJSON()).toEqual({ public_photo_url: attemptedPhoto.public_url, updated_at: savedProfile.updated_at })
       await expect(portrait.locator('img')).toHaveAttribute('src', attemptedPhoto.public_url!)
       await expect(portrait.getByRole('button', { name: 'Retry', exact: true })).toBeDisabled()
       const savedValuesRead = page.waitForResponse(response => new URL(response.url()).pathname === schedulingEndpoint && response.request().method() === 'GET')
@@ -407,7 +407,7 @@ test.describe('dashboard pane hierarchy', () => {
           if (current) {
             const restored = await page.request.put(schedulingEndpoint, { data: {
               public_name: originalProfile?.public_name ?? null, public_photo_url: originalProfile?.public_photo_url ?? null,
-              public_bio: originalProfile?.public_bio ?? null, public_approved: Boolean(originalProfile?.public_approved), expected_updated_at: current.updated_at,
+              public_bio: originalProfile?.public_bio ?? null, public_approved: Boolean(originalProfile?.public_approved), updated_at: current.updated_at,
             } })
             expect(restored.status(), await restored.text()).toBe(200)
             const readback = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_member_public_profile', args: { organization_id: organizationId, member_id: actor.id } })
@@ -1008,7 +1008,7 @@ test.describe('dashboard pane hierarchy', () => {
     await leaf.getByRole('spinbutton', { name: 'Guest limit', exact: true }).fill('10')
     await leaf.getByRole('spinbutton', { name: 'Guest limit', exact: true }).press('Tab')
     const current = (await list()).find(row => row.id === original!.id)!
-    const concurrent = await page.request.patch(`${endpoint}/${original!.id}`, { data: { capacity: 9, expected_updated_at: current.updated_at } })
+    const concurrent = await page.request.patch(`${endpoint}/${original!.id}`, { data: { capacity: 9, updated_at: current.updated_at } })
     expect(concurrent.status(), await concurrent.text()).toBe(200)
     const concurrentReadback = (await list()).find(row => row.id === original!.id)
     expect(concurrentReadback, 'the concurrent write preserves the existing session').toBeDefined()
@@ -2393,7 +2393,7 @@ test.describe('dashboard pane hierarchy', () => {
           const read = await cleanupRequest.get(`${editor}/pages/${pageId}`)
           expect(read.status(), await read.text()).toBe(200)
           const current = (await read.json() as { page: { document: { updated_at: string } } }).page
-          const removedPage = await cleanupRequest.delete(`${editor}/pages/${pageId}`, { data: { expectedUpdatedAt: current.document.updated_at } })
+          const removedPage = await cleanupRequest.delete(`${editor}/pages/${pageId}`, { data: { updated_at: current.document.updated_at } })
           expect(removedPage.status(), await removedPage.text()).toBe(200)
           const removedRead = await cleanupRequest.get(`${editor}/pages/${pageId}`)
           expect(removedRead.status(), await removedRead.text()).toBe(404)
@@ -2539,7 +2539,7 @@ test.describe('dashboard pane hierarchy', () => {
     const publicNameResponse = await publicNameWrite
     expect(publicNameResponse.status(), await publicNameResponse.text()).toBe(200)
     profileSaved = true
-    expect(publicNameResponse.request().postDataJSON()).toEqual({ public_name: publicName, expected_updated_at: previous?.updated_at ?? null })
+    expect(publicNameResponse.request().postDataJSON()).toEqual({ public_name: publicName, updated_at: previous?.updated_at ?? null })
     const namedRead = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_member_public_profile', args: { organization_id: organizationId, member_id: memberId } })
     expect(namedRead.status(), await namedRead.text()).toBe(200)
     const namedProfile = mcpData<{ profile: PublicProfile }>(await namedRead.json()).profile
@@ -2559,7 +2559,7 @@ test.describe('dashboard pane hierarchy', () => {
     await bioLeaf.getByRole('button', { name: 'Save', exact: true }).click()
     const bioResponse = await bioWrite
     expect(bioResponse.status(), await bioResponse.text()).toBe(200)
-    expect(bioResponse.request().postDataJSON()).toEqual({ public_bio: bio, expected_updated_at: namedProfile.updated_at })
+    expect(bioResponse.request().postDataJSON()).toEqual({ public_bio: bio, updated_at: namedProfile.updated_at })
     const independentProfile = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_member_public_profile', args: { organization_id: organizationId, member_id: memberId } })
     expect(independentProfile.status(), await independentProfile.text()).toBe(200)
     const saved = mcpData<{ profile: PublicProfile }>(await independentProfile.json()).profile
@@ -2584,7 +2584,7 @@ test.describe('dashboard pane hierarchy', () => {
     const attemptedBio = `${bio} unsaved edit`
     await bioLeaf.getByRole('textbox', { name: 'About you', exact: true }).fill(attemptedBio)
     const concurrentBio = `${bio} concurrent edit`
-    const concurrentWrite = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'update_member_public_profile', args: { organization_id: organizationId, member_id: memberId, public_bio: concurrentBio, expected_updated_at: saved.updated_at } })
+    const concurrentWrite = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'update_member_public_profile', args: { organization_id: organizationId, member_id: memberId, public_bio: concurrentBio, updated_at: saved.updated_at } })
     expect(concurrentWrite.status(), await concurrentWrite.text()).toBe(200)
     const concurrent = mcpData<{ profile: PublicProfile }>(await concurrentWrite.json()).profile
     expect(concurrent).toEqual({ ...saved, updated_at: concurrent.updated_at, public_bio: concurrentBio, public_approved: 0 })
@@ -2592,7 +2592,7 @@ test.describe('dashboard pane hierarchy', () => {
     await bioLeaf.getByRole('button', { name: 'Save', exact: true }).click()
     const conflictResponse = await conflictWrite
     expect(conflictResponse.status(), await conflictResponse.text()).toBe(409)
-    expect(conflictResponse.request().postDataJSON()).toEqual({ public_bio: attemptedBio, expected_updated_at: saved.updated_at })
+    expect(conflictResponse.request().postDataJSON()).toEqual({ public_bio: attemptedBio, updated_at: saved.updated_at })
     await expect(bioLeaf.getByRole('textbox', { name: 'About you', exact: true })).toHaveValue(attemptedBio)
     await expect(bioLeaf.getByText(/These settings changed after your edit\. Use the saved values before editing again\./)).toBeVisible()
     await expect(bioLeaf.getByRole('button', { name: 'Retry', exact: true })).toBeDisabled()
@@ -2635,7 +2635,7 @@ test.describe('dashboard pane hierarchy', () => {
     await approvalLeaf.getByRole('button', { name: 'Save', exact: true }).click()
     const approvalResponse = await approvalWrite
     expect(approvalResponse.status(), await approvalResponse.text()).toBe(200)
-    expect(approvalResponse.request().postDataJSON()).toEqual({ public_approved: true, expected_updated_at: concurrent.updated_at })
+    expect(approvalResponse.request().postDataJSON()).toEqual({ public_approved: true, updated_at: concurrent.updated_at })
     const approvalRead = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_member_public_profile', args: { organization_id: organizationId, member_id: memberId } })
     expect(approvalRead.status(), await approvalRead.text()).toBe(200)
     const approved = mcpData<{ profile: PublicProfile }>(await approvalRead.json()).profile
@@ -2714,7 +2714,7 @@ test.describe('dashboard pane hierarchy', () => {
           const record = (await current.json() as { scheduling: NonNullable<MemberSchedule> }).scheduling
           const restored = await cleanupRequest!.put(`/api/organizations/${organizationId}/members/${memberId}/scheduling`, { data: {
             public_name: originalSettings.public_name, public_photo_url: originalSettings.public_photo_url,
-            public_bio: originalSettings.public_bio, public_approved: Boolean(originalSettings.public_approved), expected_updated_at: record.updated_at,
+            public_bio: originalSettings.public_bio, public_approved: Boolean(originalSettings.public_approved), updated_at: record.updated_at,
           } })
           expect(restored.status(), await restored.text()).toBe(200)
           const independent = await mcpRequest(cleanupRequest!, baseURL!, { method: 'tools/call', toolName: 'get_member_public_profile', args: { organization_id: organizationId, member_id: memberId } })

@@ -219,7 +219,7 @@ export type ProductVariantPatchInput = Omit<Partial<ProductVariantInput>, 'price
 
 export type UpdateProductInput = Partial<Omit<CreateProductInput, 'source' | 'variants' | 'stay' | 'details'>> & {
   /** The Product updated_at from the caller's read; a stale snapshot refuses the entire edit. */
-  expected_updated_at?: string
+  updated_at?: string
   /** Stay settings to change. The location a home is at is fixed when it is created. */
   stay?: Partial<Omit<ProductStayConfig, 'location_id' | 'photo_rooms' | 'amenity_answers' | 'accessibility' | 'questions' | 'questions_revision'>> & { amenity_answers?: import('~/shared/stay-listing').StayAmenityAnswerPatch[]
     /** The complete replacement question list, sent with the revision it replaces. */

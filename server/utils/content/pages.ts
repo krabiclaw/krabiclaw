@@ -720,7 +720,7 @@ export async function applyOnboardingTenantPages(
     const now = new Date().toISOString()
     const placementQueries = await tenantPagePlacementQueries(db, input.organizationId, blocks, now)
     const prepared = prepareContentDocumentUpdate(document, {
-      blocks: blocksAsInputs(blocks), expected_updated_at: row.updated_at,
+      blocks: blocksAsInputs(blocks), updated_at: row.updated_at,
       changes: { path: page.path, title: metadata.title, summary: metadata.summary,
         updated_by: input.userId,
         metadata: { page_type: metadata.pageType, recipe: metadata.recipe } },
@@ -1088,7 +1088,7 @@ export async function updateTenantPage(db: DbClient, variantId: string, input: {
       row.page_id, input.scope.organizationId, variantId],
   }
   await updateContentDocument(db, variantId, {
-    blocks: blocksChanged ? blocksAsInputs(blocks) : undefined, expected_updated_at: input.data.updated_at,
+    blocks: blocksChanged ? blocksAsInputs(blocks) : undefined, updated_at: input.data.updated_at,
     actorId: input.userId, changedFields,
     additionalQueriesAfter: [...placementQueries, updateVariant, updatePage, ...bindingQueries,
       publicResourceCacheInvalidationQuery(input.scope.organizationId, 'tenant-page-update')],

@@ -10,25 +10,25 @@ import type { HomesQuote } from '~/server/utils/billing'
  * serves both and a leaf's refresh updates the row it came from.
  */
 
-export interface BillingStatus { canUpdate: boolean; actions: ReturnType<typeof billingPlanActions>; organizationId: string; plan: string; stripeCustomerId?: string; stripeSubscriptionId?: string; subscriptionStatus?: string; currentPeriodEnd?: string; cancelAtPeriodEnd?: boolean; billingInterval?: 'month'; subscriptionPrice?: { name: string; amount: number; currency: string; interval: 'month'; meters: string[]; trial: { end: string; withoutPaymentMethod: 'cancel' | 'create_invoice' | 'pause' } | null }; usage: { homes: number }; scheduledPlan?: { plan: string; at: string } | null }
+export interface BillingStatus { can_update: boolean; actions: ReturnType<typeof billingPlanActions>; organizationId: string; plan: string; stripeCustomerId?: string; stripeSubscriptionId?: string; status?: string; periodEnd?: string; cancelAtPeriodEnd?: boolean; billingInterval?: 'month'; subscription_price?: { name: string; amount: number; currency: string; interval: 'month'; meters: string[]; trial: { end: string; missing_payment_method: 'cancel' | 'create_invoice' | 'pause' } | null }; usage: { homes: number }; scheduled_plan?: { plan: string; at: string } | null }
 export const isBillingResponse = (value: unknown): value is { success: true; billing: BillingStatus } =>
   isRecord(value) && value.success === true && isRecord(value.billing) && typeof value.billing.organizationId === 'string' && isKnownBillingPlan(value.billing.plan)
-  && typeof value.billing.canUpdate === 'boolean' && isRecord(value.billing.actions)
+  && typeof value.billing.can_update === 'boolean' && isRecord(value.billing.actions)
   && (value.billing.actions.label === null || typeof value.billing.actions.label === 'string') && typeof value.billing.actions.restore === 'boolean'
   && Array.isArray(value.billing.actions.changes) && value.billing.actions.changes.every(change => isRecord(change) && isNewSalePlan(change.plan) && (change.timing === 'immediate' || change.timing === 'period_end'))
   && isRecord(value.billing.usage) && Number.isSafeInteger(value.billing.usage.homes)
-  && (value.billing.subscriptionPrice === undefined || (isRecord(value.billing.subscriptionPrice) && typeof value.billing.subscriptionPrice.name === 'string' && Number.isSafeInteger(value.billing.subscriptionPrice.amount) && isCurrencyCode(value.billing.subscriptionPrice.currency) && value.billing.subscriptionPrice.interval === 'month'
-    && Array.isArray(value.billing.subscriptionPrice.meters) && value.billing.subscriptionPrice.meters.every(meter => typeof meter === 'string')
-    && (value.billing.subscriptionPrice.trial === null || (isRecord(value.billing.subscriptionPrice.trial) && typeof value.billing.subscriptionPrice.trial.end === 'string'
-      && ['cancel', 'create_invoice', 'pause'].includes(String(value.billing.subscriptionPrice.trial.withoutPaymentMethod))))))
-  && (value.billing.scheduledPlan === undefined || value.billing.scheduledPlan === null || (isRecord(value.billing.scheduledPlan) && isKnownBillingPlan(value.billing.scheduledPlan.plan) && typeof value.billing.scheduledPlan.at === 'string'))
+  && (value.billing.subscription_price === undefined || (isRecord(value.billing.subscription_price) && typeof value.billing.subscription_price.name === 'string' && Number.isSafeInteger(value.billing.subscription_price.amount) && isCurrencyCode(value.billing.subscription_price.currency) && value.billing.subscription_price.interval === 'month'
+    && Array.isArray(value.billing.subscription_price.meters) && value.billing.subscription_price.meters.every(meter => typeof meter === 'string')
+    && (value.billing.subscription_price.trial === null || (isRecord(value.billing.subscription_price.trial) && typeof value.billing.subscription_price.trial.end === 'string'
+      && ['cancel', 'create_invoice', 'pause'].includes(String(value.billing.subscription_price.trial.missing_payment_method))))))
+  && (value.billing.scheduled_plan === undefined || value.billing.scheduled_plan === null || (isRecord(value.billing.scheduled_plan) && isKnownBillingPlan(value.billing.scheduled_plan.plan) && typeof value.billing.scheduled_plan.at === 'string'))
 
 export async function useOrganizationBilling() {
   const route = useRoute()
   const dashboardApi = useDashboardApi()
   const { data, error, refresh } = await useAsyncData(
     `dashboard-billing:${String(route.params.orgSlug || '')}`,
-    () => dashboardApi('/api/billing/status', { query: { includePrice: 'true' }, validate: isBillingResponse }),
+    () => dashboardApi('/api/billing/status', { query: { include_price: 'true' }, validate: isBillingResponse }),
   )
   return { billing: computed(() => data.value?.billing ?? null), billingError: error, refreshBilling: refresh }
 }

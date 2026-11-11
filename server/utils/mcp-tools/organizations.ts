@@ -79,13 +79,13 @@ const websiteDraftProductSchema = {
 } as const
 const websiteDraftOutputSchema = {
   type: 'object', properties: {
-    draft_id: { type: 'string' }, revision: { type: 'string', format: 'date-time' }, organization_id: { type: 'string' }, idempotency_key: { type: 'string' },
+    draft_id: { type: 'string' }, updated_at: { type: 'string', format: 'date-time' }, organization_id: { type: 'string' }, idempotency_key: { type: 'string' },
     status: { type: 'string', enum: ['active', 'committed'] }, subdomain: { type: 'string' },
     name: { type: 'string' }, vertical: { type: 'string', enum: ALL_VERTICALS }, source_locale: { type: 'string' },
     currency: { type: 'string' }, timezone: { type: 'string' }, location: websiteDraftLocationSchema,
     hero_headline: { type: 'string' }, hero_subtitle: { type: 'string' }, products: { type: 'array', items: websiteDraftProductSchema },
     missing_fields: { type: 'array', items: { type: 'string', enum: ['source_locale', 'currency', 'timezone', 'subdomain'] } },
-  }, required: ['draft_id', 'revision', 'status', 'subdomain', 'name', 'vertical', 'source_locale', 'location', 'products', 'missing_fields'], additionalProperties: false,
+  }, required: ['draft_id', 'updated_at', 'status', 'subdomain', 'name', 'vertical', 'source_locale', 'location', 'products', 'missing_fields'], additionalProperties: false,
 } as const
 
 const ORGANIZATION_SETTINGS_READ_PROPERTIES = {
@@ -142,10 +142,10 @@ export const ORGANIZATIONS_TOOLS: McpToolDefinition[] = [
     outputSchema: websiteDraftOutputSchema,
   })),
   globalTool(withToolAnnotations({
-    name: 'save_website_draft', description: 'Save website answers without publishing. Use the returned draft_id and revision for changes; reuse the creation key on retry.',
+    name: 'save_website_draft', description: 'Save website answers without publishing. Use the returned draft_id and updated_at for changes; reuse the creation key on retry.',
     domain: 'organizations', minimumRole: 'admin',
     inputSchema: { type: 'object', properties: {
-      draft_id: { type: 'string', minLength: 1, description: 'Existing draft to edit; omit when creating.' }, revision: { type: 'string', format: 'date-time', description: 'Required when editing: the revision returned by get_website_draft.' },
+      draft_id: { type: 'string', minLength: 1, description: 'Existing draft to edit; omit when creating.' }, updated_at: { type: 'string', format: 'date-time', description: 'Required when editing: the revision returned by get_website_draft.' },
       idempotency_key: { type: 'string', minLength: 1, maxLength: 200, pattern: '^[\\s\\S]*\\S[\\s\\S]*$' },
       name: { type: 'string', minLength: 1, maxLength: 200, pattern: '^[\\s\\S]*\\S[\\s\\S]*$', description: 'Required when creating; omitted on an edit to retain it.' },
       vertical: { type: 'string', enum: ALL_VERTICALS, description: 'Required when creating; omitted on an edit to retain it.' }, source_locale: { type: 'string', enum: PLATFORM_LOCALES.map(locale => locale.locale), description: 'Required when creating; a saved draft cannot be relabelled into another language.' },
@@ -160,7 +160,7 @@ export const ORGANIZATIONS_TOOLS: McpToolDefinition[] = [
   globalTool(withToolAnnotations({
     name: 'publish_website', description: 'Publish a saved website draft, select it as your workspace and notify KrabiClaw operators by email. Finish any returned missing fields before retrying. Repeating a completed publication can resend the operator email.',
     domain: 'organizations', minimumRole: 'admin',
-    inputSchema: { type: 'object', properties: { draft_id: { type: 'string', minLength: 1 }, revision: { type: 'string', format: 'date-time' } }, required: ['draft_id', 'revision'], additionalProperties: false },
+    inputSchema: { type: 'object', properties: { draft_id: { type: 'string', minLength: 1 }, updated_at: { type: 'string', format: 'date-time' } }, required: ['draft_id', 'updated_at'], additionalProperties: false },
     outputSchema: { type: 'object', properties: {
       organization_id: { type: 'string' }, location_id: { type: 'string' }, draft_id: { type: 'string' },
       public_url: { type: 'string', format: 'uri' }, ready: { const: true }, context: workspaceContextObject,

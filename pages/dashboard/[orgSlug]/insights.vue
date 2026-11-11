@@ -445,12 +445,12 @@ const tabItems = computed(() => canReadAnalytics.value
 
 // Range handling
 const requestedRange = computed(() => ({
-  startDate: route.query.startDate === undefined ? undefined : String(route.query.startDate ?? ''),
-  endDate: route.query.endDate === undefined ? undefined : String(route.query.endDate ?? ''),
+  start_date: route.query.start_date === undefined ? undefined : String(route.query.start_date ?? ''),
+  end_date: route.query.end_date === undefined ? undefined : String(route.query.end_date ?? ''),
 }))
 
 const currentStartDate = computed(() => {
-  if (requestedRange.value.startDate) return requestedRange.value.startDate
+  if (requestedRange.value.start_date) return requestedRange.value.start_date
   if (analytics.value?.period) return analytics.value.period.start_date
   const end = new Date()
   const start = new Date(end.getTime() - 29 * 86_400_000)
@@ -458,20 +458,20 @@ const currentStartDate = computed(() => {
 })
 
 const currentEndDate = computed(() => {
-  if (requestedRange.value.endDate) return requestedRange.value.endDate
+  if (requestedRange.value.end_date) return requestedRange.value.end_date
   if (analytics.value?.period) return analytics.value.period.end_date
   return new Date().toISOString().slice(0, 10)
 })
 
 async function onDateRangeUpdate(range: { startDate: string; endDate: string }) {
-  await navigateTo({ query: { ...route.query, startDate: range.startDate, endDate: range.endDate } })
+  await navigateTo({ query: { ...route.query, start_date: range.startDate, end_date: range.endDate } })
 }
 
 // Fetch main analytics
 const { data: insightsResource, error: resourceError, refresh } = await useAsyncData(
-  () => `dashboard-org-insights:${scope.value?.orgSlug}:${requestedRange.value.startDate ?? ''}:${requestedRange.value.endDate ?? ''}`,
+  () => `dashboard-org-insights:${scope.value?.orgSlug}:${requestedRange.value.start_date ?? ''}:${requestedRange.value.end_date ?? ''}`,
   async () => !canReadAnalytics.value ? null : await dashboardApi<OrganizationAnalyticsReport>('/api/dashboard/analytics', {
-    query: { start_date: requestedRange.value.startDate, end_date: requestedRange.value.endDate },
+    query: requestedRange.value,
     validate: (value): value is OrganizationAnalyticsReport => {
       const result = organizationAnalyticsSchema.safeParse(value)
       if (!result.success) {
@@ -489,7 +489,7 @@ const loadError = computed(() => resourceError.value?.message ?? null)
 
 // Fetch Instagram
 const { data: instagram, pending: instagramLoading, error: instagramError, refresh: refreshInstagram, execute: loadInstagram } = await useAsyncData(
-  () => `dashboard-org-instagram:${scope.value?.orgSlug}:${requestedRange.value.startDate ?? ''}:${requestedRange.value.endDate ?? ''}`,
+  () => `dashboard-org-instagram:${scope.value?.orgSlug}:${requestedRange.value.start_date ?? ''}:${requestedRange.value.end_date ?? ''}`,
   () => dashboardApi<InstagramInsights>('/api/dashboard/instagram-insights', {
     query: requestedRange.value,
     validate: (value): value is InstagramInsights => {
@@ -500,11 +500,11 @@ const { data: instagram, pending: instagramLoading, error: instagramError, refre
   }),
   { lazy: true, immediate: false },
 )
-watch(() => tab.value === 'instagram' ? `${scope.value?.orgSlug}:${requestedRange.value.startDate ?? ''}:${requestedRange.value.endDate ?? ''}` : null, (key) => { if (key) void loadInstagram() }, { immediate: true })
+watch(() => tab.value === 'instagram' ? `${scope.value?.orgSlug}:${requestedRange.value.start_date ?? ''}:${requestedRange.value.end_date ?? ''}` : null, (key) => { if (key) void loadInstagram() }, { immediate: true })
 
 // Fetch Google Ads
 const { data: ads, pending: adsLoading, error: adsError, refresh: refreshAds, execute: loadAds } = await useAsyncData(
-  () => `dashboard-org-ads:${scope.value?.orgSlug}:${requestedRange.value.startDate ?? ''}:${requestedRange.value.endDate ?? ''}`,
+  () => `dashboard-org-ads:${scope.value?.orgSlug}:${requestedRange.value.start_date ?? ''}:${requestedRange.value.end_date ?? ''}`,
   () => dashboardApi<GoogleAdsInsights>('/api/dashboard/google-ads-insights', {
     query: requestedRange.value,
     validate: (value): value is GoogleAdsInsights => {
@@ -515,7 +515,7 @@ const { data: ads, pending: adsLoading, error: adsError, refresh: refreshAds, ex
   }),
   { lazy: true, immediate: false },
 )
-watch(() => tab.value === 'ads' ? `${scope.value?.orgSlug}:${requestedRange.value.startDate ?? ''}:${requestedRange.value.endDate ?? ''}` : null, (key) => { if (key) void loadAds() }, { immediate: true })
+watch(() => tab.value === 'ads' ? `${scope.value?.orgSlug}:${requestedRange.value.start_date ?? ''}:${requestedRange.value.end_date ?? ''}` : null, (key) => { if (key) void loadAds() }, { immediate: true })
 
 // Guest feedback
 const FEEDBACK_RANGES = [30, 90, 365] as const

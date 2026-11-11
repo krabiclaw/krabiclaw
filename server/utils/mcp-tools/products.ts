@@ -338,7 +338,7 @@ const variantPatch = {
 } as const
 const productPatch = {
   ...productWrite,
-  expected_updated_at: { type: 'string', minLength: 1, description: 'The Product updated_at from the read being edited. A stale value refuses the entire update, including variants and prices. Omit only for a deliberate update based on current state.' },
+  updated_at: { type: 'string', minLength: 1, description: 'The Product updated_at from the read being edited. A stale value refuses the entire update, including variants and prices. Omit only for a deliberate update based on current state.' },
   details: { ...productDetailsSchema(undefined, false, true), description: 'Named customer-facing facts for the product kind. Omitted details stay unchanged. Supplied details replace their map by default, retaining featured unless supplied. With details_mode merge, only supplied facts change and null removes a named fact. pricing_note requires empty numeric prices.' },
   details_mode: { type: 'string', enum: ['merge', 'replace'], default: 'replace', description: 'Requires details. replace is the default complete replacement map, retaining featured unless supplied; null is refused. merge preserves unmentioned facts and null explicitly removes a named fact. Unknown keys are refused in either mode.' },
   variants: { ...productWrite.variants, items: variantPatch, description: 'Partial existing variants by id or new variants. Omitted variants and their prices remain unless variants_mode is replace. Existing variant and price IDs retain their identities.' },

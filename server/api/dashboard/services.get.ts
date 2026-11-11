@@ -26,7 +26,7 @@ export default defineHandler(async (event) => {
   const billing = requested === 'strategy' ? await getOrganizationBillingStatus(env, db, organization.id) : null
   return jsonResponse({ success: true, services: { ...agreements, strategy }, offers,
     ...(requirements ? { requirements: { managed_ads: requirements } } : {}),
-    ...(billing ? { requirements: { strategy: { paid_plan: !!billing.stripeSubscriptionId && ['active', 'trialing'].includes(billing.subscriptionStatus ?? '') } } } : {}),
+    ...(billing ? { requirements: { strategy: { paid_plan: !!billing.stripeSubscriptionId && ['active', 'trialing'].includes(billing.status ?? '') } } } : {}),
   }, { headers: { 'cache-control': 'private, no-store' } })
   } catch (cause) {
     if (cause instanceof HTTPError) throw cause

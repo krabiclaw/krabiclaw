@@ -248,7 +248,7 @@ export const contentBlockMediaInputObject = {
 export const contentBlockMediaInputRef = { $ref: '#/$defs/content_block_media' }
 const contentBlockKnownDefinitions = { content_block_media: contentBlockMediaInputObject }
 
-/** A block's own timestamp as a read returns it. Accepted on a whole-document write so a read can be sent back verbatim; the document's expected_updated_at is the concurrency token there. */
+/** A block's own timestamp as a read returns it. Accepted on a whole-document write so a read can be sent back verbatim; the document's updated_at is the concurrency token there. */
 export const contentBlockUpdatedAtInput = { type: ['string', 'null'], description: 'As read. Ignored on a whole-document write.' }
 
 export const contentBlockDataInputSchema = {
@@ -460,7 +460,7 @@ export const postObject = {
     },
     publications: { type: 'array', items: postPublicationObject },
     created_at: { type: 'string' },
-    updated_at: { type: 'string', description: 'The expected_updated_at update_post and publish_post take.' },
+    updated_at: { type: 'string', description: 'The updated_at update_post and publish_post take.' },
   },
   required: ['id', 'slug', 'status', 'visibility', 'media', 'publications', 'updated_at'],
 }

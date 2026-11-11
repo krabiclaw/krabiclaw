@@ -6,6 +6,7 @@
 // the schema or the server code has grown a second one.
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+import ts from 'typescript'
 
 const root = process.cwd()
 const doc = readFileSync(join(root, 'docs/domain-model.md'), 'utf8')
@@ -104,10 +105,12 @@ const googleReportKeys = new Map([
   ['list_google_ads_campaigns', ['budgetAmountMicros', 'budgetId', 'channelType', 'costMicros']],
   ['query_google_ads_report', ['adGroupId', 'campaignId', 'campaignName', 'conversionsValue', 'costMicros']],
 ])
+const snakeCase = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/
+const retiredRevisionKeys = new Set(['expected_updated_at', 'product_updated_at'])
 function checkMcpSchema(tool, schema, keys) {
   if (!schema || typeof schema !== 'object') return
   for (const key of Object.keys(schema.properties ?? {})) {
-    if (!/^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/.test(key) && !keys.has(key)) failures.push(`MCP ${tool}: ${key} must use its canonical snake_case name`)
+    if ((!snakeCase.test(key) && !keys.has(key)) || retiredRevisionKeys.has(key)) failures.push(`MCP ${tool}: ${key} must use its canonical column or snake_case name`)
   }
   for (const value of Object.values(schema)) checkMcpSchema(tool, value, keys)
 }
@@ -116,6 +119,47 @@ for (const tool of catalog.tools) {
   const keys = new Set([...googleAddressKeys, ...(betterAuthKeys.get(tool.name) ?? []), ...(googleReportKeys.get(tool.name) ?? [])])
   checkMcpSchema(tool.name, tool.inputSchema, keys)
   checkMcpSchema(tool.name, tool.outputSchema, keys)
+}
+
+// Literal request schemas and direct query reads expose accepted fields
+// without mistaking local variables or provider data for REST keys.
+for (const path of sources(join(root, 'server/api'))) {
+  const route = path.slice(root.length + 1)
+  const file = ts.createSourceFile(route, readFileSync(path, 'utf8'), ts.ScriptTarget.Latest)
+  const checkKey = key => {
+    if (!snakeCase.test(key) || retiredRevisionKeys.has(key)) {
+      failures.push(`${route}: ${key} must use its canonical column or snake_case name`)
+    }
+  }
+  function visit(node) {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'readStrictBody') {
+      const fields = node.arguments[1]
+      if (fields && ts.isObjectLiteralExpression(fields)) {
+        for (const { name } of fields.properties) {
+          if (name && (ts.isIdentifier(name) || ts.isStringLiteral(name))) checkKey(name.text)
+        }
+      }
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(file)
+
+  if (/^server\/api\/(dashboard|editor|billing)\//.test(route)) {
+    const queryVariables = new Set()
+    function findQueryVariables(node) {
+      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer
+        && ts.isCallExpression(node.initializer) && ts.isIdentifier(node.initializer.expression)
+        && node.initializer.expression.text === 'getQuery') queryVariables.add(node.name.text)
+      ts.forEachChild(node, findQueryVariables)
+    }
+    function checkQueryReads(node) {
+      if (ts.isPropertyAccessExpression(node) && ts.isIdentifier(node.expression)
+        && queryVariables.has(node.expression.text) && node.name.text !== 'organizationId') checkKey(node.name.text)
+      ts.forEachChild(node, checkQueryReads)
+    }
+    findQueryVariables(file)
+    if (queryVariables.size) checkQueryReads(file)
+  }
 }
 
 if (failures.length) {

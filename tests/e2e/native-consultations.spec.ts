@@ -167,7 +167,7 @@ test('native online review uses canonical Products, holds capacity, and releases
   }
   // The attorney hosts the consultations, and guests meet them through their published profile.
   const host = { name: 'Consultation attorney', photo_url: null, bio: 'Reviews family law questions before your appointment.' }
-  const hours = await page.request.put(`/api/organizations/${org}/members/${self.id}/scheduling`, { data: { timezone: 'UTC', weekly: [{ weekday: tomorrow.getUTCDay(), start: '14:00', end: '14:45' }], time_off: [], expected_updated_at: null, public_name: host.name, public_bio: host.bio, public_approved: true } })
+  const hours = await page.request.put(`/api/organizations/${org}/members/${self.id}/scheduling`, { data: { timezone: 'UTC', weekly: [{ weekday: tomorrow.getUTCDay(), start: '14:00', end: '14:45' }], time_off: [], updated_at: null, public_name: host.name, public_bio: host.bio, public_approved: true } })
   expect(hours.status(), await hours.text()).toBe(200)
   expect((await hours.json()).scheduling).toMatchObject({ public_name: host.name, public_bio: host.bio, public_approved: 1 })
   for (let index = 0; index < 2; index++) {
@@ -180,7 +180,7 @@ test('native online review uses canonical Products, holds capacity, and releases
     expect(product.page).toBeTruthy()
     const automaticPage = await page.request.get(`${editor}/pages/${product.page.id}`)
     expect(automaticPage.status(), await automaticPage.text()).toBe(200)
-    const removedPage = await page.request.delete(`${editor}/pages/${product.page.id}`, { data: { expectedUpdatedAt: (await automaticPage.json()).page.document.updated_at } })
+    const removedPage = await page.request.delete(`${editor}/pages/${product.page.id}`, { data: { updated_at: (await automaticPage.json()).page.document.updated_at } })
     expect(removedPage.status(), await removedPage.text()).toBe(200)
     if (index === 0) {
       await page.goto(`${dashboard}/products/${product.id}/booking/enabled`)
@@ -392,7 +392,7 @@ test('native online review uses canonical Products, holds capacity, and releases
     expect(publishedService.title).toBe(service.title)
     expect(publishedService.blocks.map((block: { id: string }) => block.id)).toEqual(service.blocks.map((block: { id: string }) => block.id))
     const storedGallery = (await Promise.all(['cover', 'gallery'].map(async slot => {
-      const response = await page.request.get(`${editor}/media?ownerType=content_document&ownerId=${publishedService.id}&slot=${slot}`)
+      const response = await page.request.get(`${editor}/media?owner_type=content_document&owner_id=${publishedService.id}&slot=${slot}`)
       expect(response.status(), await response.text()).toBe(200)
       return (await response.json()).media as Array<{ id: string; public_url: string; kind: string; thumbnail_url: string | null }>
     }))).flat()
@@ -640,7 +640,7 @@ test('native online review uses canonical Products, holds capacity, and releases
     const details = await page.request.get(`/api/dashboard/bookings/booking/${pending.conversation_id}?org=${legal.slug}`)
     expect(details.status(), await details.text()).toBe(200)
     expect((await details.json()).booking).toMatchObject({ location_id: null, location_title: 'Online', status: 'pending', booking_id: pending.booking_id, assigned_member_id: self.id, assigned_member_name: host.name, policy: pending.policy_summary })
-    const invalidReassignment = await page.request.post(`/api/dashboard/bookings/booking/${pending.booking_id}/provider?org=${legal.slug}`, { data: { member_id: 42, expected_updated_at: new Date().toISOString(), idempotency_key: `invalid-${stamp}` } })
+    const invalidReassignment = await page.request.post(`/api/dashboard/bookings/booking/${pending.booking_id}/provider?org=${legal.slug}`, { data: { member_id: 42, updated_at: new Date().toISOString(), idempotency_key: `invalid-${stamp}` } })
     expect(invalidReassignment.status(), await invalidReassignment.text()).toBe(400)
     const unchangedBooking = await page.request.get(`/api/dashboard/bookings/booking/${pending.conversation_id}?org=${legal.slug}`)
     expect(unchangedBooking.status(), await unchangedBooking.text()).toBe(200)

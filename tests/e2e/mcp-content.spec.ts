@@ -164,7 +164,7 @@ test.describe('stateless MCP server', () => {
 
       for (const identity of [{ route_path: `/${locale}/moved-home` }, { values: { title: 'Must not be saved', slug: 'moved-home' } }]) {
         const moved = await request.put(localizationPath, { data: {
-          values: { title: 'Must not be saved' }, expected_updated_at: authored.updated_at, ...identity,
+          values: { title: 'Must not be saved' }, updated_at: authored.updated_at, ...identity,
         } })
         expect(moved.status(), await moved.text()).toBe(422)
         const unchanged = await request.get(localizationPath)
@@ -174,7 +174,7 @@ test.describe('stateless MCP server', () => {
       const renamed = await mcpRequest(request, baseURL!, {
         method: 'tools/call', toolName: 'put_resource_localization', args: {
           organization_id: mcpOrganizationId(), resource_type: 'content_document', resource_id: home!.page_id,
-          locale, expected_updated_at: authored.updated_at, values: { title: translatedTitle + ' · Updated' },
+          locale, updated_at: authored.updated_at, values: { title: translatedTitle + ' · Updated' },
         },
       })
       expect(renamed.status()).toBe(200)
@@ -422,7 +422,7 @@ test.describe('stateless MCP server', () => {
       expect(originalDraft.location_id).toBe(createArgs.location_id)
       const { preview_url: _privatePreview, ...beforeInvalidPostChanges } = originalDraft
       for (const [toolName, fields] of [
-        ['update_post', { post_id: created.post.id, expected_updated_at: draft.updated_at }],
+        ['update_post', { post_id: created.post.id, updated_at: draft.updated_at }],
         ['delete_channel_post', { channel: 'instagram', target_id: 'unused-unsupported-channel', connection_revision: 'unused-unsupported-channel', provider_post_id: 'unused-unsupported-channel' }],
         ['get_location', { location_id: null }],
       ] as const) {
@@ -437,7 +437,7 @@ test.describe('stateless MCP server', () => {
         expect(afterInvalidPostChanges).toEqual(beforeInvalidPostChanges)
       }
       const move = await request.patch(postEditorPath, { data: {
-        expected_updated_at: draft.updated_at, title: 'Must not be saved', slug: 'another-post-address',
+        updated_at: draft.updated_at, title: 'Must not be saved', slug: 'another-post-address',
       } })
       expect(move.status()).toBe(400)
       expect((await move.json()).error).toBe('A post keeps its saved slug')
@@ -456,7 +456,7 @@ test.describe('stateless MCP server', () => {
       }
       const rename = await mcpRequest(request, baseURL!, {
         method: 'tools/call', toolName: 'update_post', args: {
-          organization_id: organizationId, post_id: created.post.id, expected_updated_at: draft.updated_at,
+          organization_id: organizationId, post_id: created.post.id, updated_at: draft.updated_at,
           title: `Renamed short post ${now}`,
         },
       })
@@ -470,7 +470,7 @@ test.describe('stateless MCP server', () => {
       draft = { ...draft, ...renamedPost }
 
       const clearLocation = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'update_post', args: {
-        organization_id: organizationId, post_id: created.post.id, expected_updated_at: draft.updated_at, location_id: null,
+        organization_id: organizationId, post_id: created.post.id, updated_at: draft.updated_at, location_id: null,
       } })
       expect(clearLocation.status()).toBe(200)
       const clearedPost = mcpData<{ post: Record<string, unknown> }>(await clearLocation.json()).post
@@ -495,7 +495,7 @@ test.describe('stateless MCP server', () => {
 
       const publish = await mcpRequest(request, baseURL!, {
         method: 'tools/call', toolName: 'publish_post',
-        args: { organization_id: organizationId, post_id: created.post.id, expected_updated_at: draft.updated_at, targets: [{ channel: 'organization' }, facebookTarget] },
+        args: { organization_id: organizationId, post_id: created.post.id, updated_at: draft.updated_at, targets: [{ channel: 'organization' }, facebookTarget] },
       })
       expect(publish.status()).toBe(200)
       const publishResult = (await publish.json()).result
@@ -554,7 +554,7 @@ test.describe('stateless MCP server', () => {
       // A repeat with the old revision returns the receipt and changes nothing.
       const repeat = await mcpRequest(request, baseURL!, {
         method: 'tools/call', toolName: 'publish_post',
-        args: { organization_id: organizationId, post_id: created.post.id, expected_updated_at: draft.updated_at, targets: [{ channel: 'organization' }] },
+        args: { organization_id: organizationId, post_id: created.post.id, updated_at: draft.updated_at, targets: [{ channel: 'organization' }] },
       })
       expect(repeat.status()).toBe(200)
       const repeatData = mcpData<{ ok: boolean, outcomes: Array<{ channel: string, status: string }> }>(await repeat.json())
@@ -670,7 +670,7 @@ test.describe('stateless MCP server', () => {
         args: {
           organization_id: organizationId,
           post_id: postId,
-          expected_updated_at: readPost.updated_at,
+          updated_at: readPost.updated_at,
           title: 'Renamed canonical article',
           content_blocks: [
             { type: 'heading', level: 2, data: { text: 'Edited through MCP' } },
@@ -701,7 +701,7 @@ test.describe('stateless MCP server', () => {
       expect(editorPost.title).toBe('Renamed canonical article')
       expect(editorPost.slug).toBe(readPost.slug)
       const rejectedMove = await request.patch(`${baseURL}/api/editor/organizations/${organizationId}/blog/${postId}`, { data: {
-        title: 'Must not be saved', slug: 'another-article-address', expected_updated_at: editorPost.updated_at,
+        title: 'Must not be saved', slug: 'another-article-address', updated_at: editorPost.updated_at,
       } })
       expect(rejectedMove.status()).toBe(400)
       expect((await rejectedMove.json()).error).toBe('An article keeps its saved slug')
@@ -763,7 +763,7 @@ test.describe('stateless MCP server', () => {
       expect(cleared.status(), await cleared.text()).toBe(200)
       const clearedWrite = cleared.request().postDataJSON()
       expect(clearedWrite.values).toEqual({ title: null, summary: null, seo_keywords: authoredTranslation.seo_keywords, metadata: authoredTranslation.metadata })
-      expect(clearedWrite.expected_updated_at).toBe(authoredTranslation.updated_at)
+      expect(clearedWrite.updated_at).toBe(authoredTranslation.updated_at)
       const clearedRead = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'get_resource_localization', args: {
         organization_id: organizationId, resource_type: 'content_document', resource_id: postId, locale: addedLocale,
       } })
@@ -777,7 +777,7 @@ test.describe('stateless MCP server', () => {
       // Articles publish now or stay drafts: there is no scheduling.
       const schedule = await mcpRequest(request, baseURL!, {
         method: 'tools/call', toolName: 'publish_blog_post',
-        args: { organization_id: organizationId, post_id: postId, expected_updated_at: updatedPost.updated_at, scheduled_for: '2099-01-01T00:00:00.000Z' },
+        args: { organization_id: organizationId, post_id: postId, updated_at: updatedPost.updated_at, scheduled_for: '2099-01-01T00:00:00.000Z' },
       })
       const scheduleBody = await schedule.json()
       expect(scheduleBody.result?.isError).toBe(true)
@@ -787,7 +787,7 @@ test.describe('stateless MCP server', () => {
       const beforePublication = (await beforePublicationRead.json()).post
       const publish = await mcpRequest(request, baseURL!, {
         method: 'tools/call', toolName: 'publish_blog_post',
-        args: { organization_id: organizationId, post_id: postId, expected_updated_at: updatedPost.updated_at },
+        args: { organization_id: organizationId, post_id: postId, updated_at: updatedPost.updated_at },
       })
       const publication = mcpData<{ post: { id: string; status: string; updated_at: string; public_url: string; published_at: string }; changed: boolean }>(await publish.json())
       const published = publication.post
@@ -799,7 +799,7 @@ test.describe('stateless MCP server', () => {
       expect(published.published_at).toEqual(expect.any(String))
       const republish = await mcpRequest(request, baseURL!, {
         method: 'tools/call', toolName: 'publish_blog_post',
-        args: { organization_id: organizationId, post_id: postId, expected_updated_at: published.updated_at },
+        args: { organization_id: organizationId, post_id: postId, updated_at: published.updated_at },
       })
       const republication = mcpData<{ post: { updated_at: string; published_at: string }; changed: boolean }>(await republish.json())
       const republished = republication.post
@@ -814,7 +814,7 @@ test.describe('stateless MCP server', () => {
       expect(afterPublication).toMatchObject({ id: published.id, status: 'published', updated_at: published.updated_at, published_at: published.published_at })
       const unlist = await mcpRequest(request, baseURL!, {
         method: 'tools/call', toolName: 'update_blog_post',
-        args: { organization_id: organizationId, post_id: postId, expected_updated_at: published.updated_at, visibility: 'unlisted' },
+        args: { organization_id: organizationId, post_id: postId, updated_at: published.updated_at, visibility: 'unlisted' },
       })
       const unlisted = mcpData<{ post: { status: string; visibility: string; public_url: string; published_at: string } }>(await unlist.json()).post
       expect(unlisted.status).toBe('published')

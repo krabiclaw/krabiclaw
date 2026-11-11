@@ -475,7 +475,7 @@ export function parseOnboardingDraftPayload(raw: string): OnboardingDraftPayload
 
 export interface OnboardingDraftInput {
   draftId?: string
-  expectedUpdatedAt?: string | null
+  updated_at?: string | null
   idempotencyKey?: string
   sourceType?: unknown
   placeId?: unknown
@@ -592,7 +592,7 @@ export async function upsertActiveOnboardingDraft(db: D1Database, input: {
   vertical: OrganizationVertical
   sourceType: DraftSourceType
   payload: OnboardingDraftPayload
-  expectedUpdatedAt: string | null
+  updated_at: string | null
   draftId?: string
   idempotencyKey?: string
 }): Promise<OnboardingDraftUpsertResult> {
@@ -602,7 +602,7 @@ export async function upsertActiveOnboardingDraft(db: D1Database, input: {
   const id = input.draftId ?? (key ? `mcp-website-${await creationRequestHash({ userId: input.userId, key })}` : crypto.randomUUID())
   const keyed = key ? await queryFirst<SavedOnboardingDraft>(db, 'SELECT * FROM onboarding_drafts WHERE id = ? AND user_id = ?', [id, input.userId]) : null
   const fingerprint = await creationRequestHash({ ...input.payload, request: undefined, preview: { ...input.payload.preview, content: input.payload.preview.content.map(content => ({ ...content, updated_at: undefined })) } })
-  if (keyed && input.expectedUpdatedAt === null) {
+  if (keyed && input.updated_at === null) {
     const saved = parseOnboardingDraftPayload(keyed.payload_json)
     if (!saved.request || saved.request.key !== key || saved.request.fingerprint !== fingerprint) throw new HTTPError({ statusCode: 409, statusMessage: 'This idempotency key was already used for different website answers', data: { code: 'IDEMPOTENCY_KEY_CONFLICT', draft_id: keyed.id } })
     if (keyed.status === 'abandoned') throw new HTTPError({ statusCode: 409, statusMessage: 'This website draft was discarded', data: { code: 'ONBOARDING_DRAFT_ABANDONED', draft_id: keyed.id } })
@@ -610,7 +610,7 @@ export async function upsertActiveOnboardingDraft(db: D1Database, input: {
   }
   if (existing && input.draftId !== existing.id) throw new HTTPError({ statusCode: 409, statusMessage: 'Resume your saved website draft before creating another', data: { code: 'ONBOARDING_DRAFT_EXISTS', draft_id: existing.id } })
   if (input.draftId && !existing) throw new HTTPError({ statusCode: 404, statusMessage: 'Active website draft not found' })
-  if ((existing?.updated_at ?? null) !== input.expectedUpdatedAt) throw new HTTPError({ statusCode: 409, statusMessage: 'Website draft changed; reload before saving', data: { code: 'ONBOARDING_DRAFT_CHANGED', draft_id: existing?.id } })
+  if ((existing?.updated_at ?? null) !== input.updated_at) throw new HTTPError({ statusCode: 409, statusMessage: 'Website draft changed; reload before saving', data: { code: 'ONBOARDING_DRAFT_CHANGED', draft_id: existing?.id } })
   if (existing?.organization_id && input.payload.preview.subdomainCandidate !== existing.subdomain_candidate) {
     const organization = await queryFirst<{ subdomain: string | null; onboarding_status: string }>(db, 'SELECT subdomain, onboarding_status FROM organization WHERE id = ?', [existing.organization_id])
     if (!organization || organization.subdomain !== null || !['pending', 'failed'].includes(organization.onboarding_status)) throw new HTTPError({ statusCode: 409, statusMessage: 'A saved draft already owns its website address' })
@@ -634,7 +634,7 @@ export async function upsertActiveOnboardingDraft(db: D1Database, input: {
     VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
     ON CONFLICT DO NOTHING
     RETURNING id, subdomain_candidate, organization_id, updated_at
-  `, existing ? [input.name, input.vertical, payload.preview.subdomainCandidate, input.sourceType, payloadJson, now, existing.id, input.userId, input.expectedUpdatedAt, payload.preview.subdomainCandidate] : [id, input.userId, input.organizationId ?? null, input.name, input.vertical, payload.preview.subdomainCandidate, input.sourceType, payloadJson, now, now])
+  `, existing ? [input.name, input.vertical, payload.preview.subdomainCandidate, input.sourceType, payloadJson, now, existing.id, input.userId, input.updated_at, payload.preview.subdomainCandidate] : [id, input.userId, input.organizationId ?? null, input.name, input.vertical, payload.preview.subdomainCandidate, input.sourceType, payloadJson, now, now])
   if (!draft) throw new HTTPError({ statusCode: 409, statusMessage: 'Website draft changed; read it before retrying', data: { code: 'ONBOARDING_DRAFT_CHANGED' } })
   return { id: draft.id, subdomainCandidate: draft.subdomain_candidate, updatedAt: draft.updated_at, organizationId: draft.organization_id, payload }
 }
