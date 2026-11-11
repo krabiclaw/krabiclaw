@@ -115,11 +115,12 @@ The destinations are files under `O`, and their URLs are their files:
 
 | Destination | URL |
 | --- | --- |
-| Website | `O/website` — Pages, Blog, Posts, Reviews and Q&A, Brand, Preferences, Website booking |
+| Website | `O/website` — Pages, Blog, Posts, Reviews, Q&A, Brand, Preferences, Website booking |
 | Preferences | `O/website/preferences` and its leaves — Status, Languages, Domains, Currency |
 | Pages | `O/website/pages`, a page `O/website/pages/:pageId`, the Links page `O/website/pages/links` |
 | Blog | `O/website/blog` |
-| Reviews and Q&A | `O/website/qa` |
+| Reviews | `O/website/reviews` |
+| Q&A | `O/website/qa` |
 | Brand | `O/website/brand` and its leaves |
 | Posts | `O/website/posts` — short posts to the site and its connected social accounts |
 | Locations | `O/locations`, a location `O/locations/:locationSlug`, `O/locations/new` |
@@ -860,7 +861,7 @@ each Menu destination — Website, Locations, Team, Connections, Earnings,
 Payments, Plan and billing, Insights, Notifications — as Airbnb's `/hosting/listings` grid does.
 A root that is a grid or a chart uses the frame; a root that is settings opens
 its first row beside it (Leaf width, above). Within a destination, levels pair
-with their parent: Pages, Blog, Reviews and Q&A, and Brand render as
+with their parent: Pages, Blog, Reviews, Q&A, and Brand render as
 `Website | Pages`, and a Catalog entry renders beside Catalog.
 
 **Auto-selection.** Auto-selection answers whether an index may choose one of

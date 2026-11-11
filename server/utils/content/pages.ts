@@ -37,6 +37,7 @@ import { hasPublicLocationPages, isPublicLocationPath, type PublicSiteDefinition
 import { CLAIMED_PUBLIC_ROUTES } from '#claimed-public-routes'
 import { formatTenantLocalePath } from '~/utils/tenant-locale-path'
 import { creationRequestHash, organizationEventQuery } from '~/server/utils/organization-events'
+import { listFaqBlockQa } from '~/server/utils/location-qa'
 
 export interface TenantPageEditorInput {
   id?: string
@@ -512,7 +513,16 @@ async function tenantPageBlocks(db: DbClient, organizationId: string, documentId
 export async function getTenantPageForEditor(db: DbClient, variantId: string, scope?: TenantPageScope): Promise<TenantPageDto> {
   const row = await getPageRepresentation(db, variantId, scope)
   if (!row) notFound('Tenant page variant not found')
-  return pageDto(row, documentOf(row), await tenantPageBlocks(db, row.organization_id, row.id))
+  const blocks = await tenantPageBlocks(db, row.organization_id, row.id)
+  for (const block of blocks) {
+    if (block.type === 'faq' && block.data.source === 'page_qa' && (!Array.isArray(block.data.items) || !block.data.items.length)) {
+      const pageQa = await listFaqBlockQa(db, row.organization_id, row.path, 'page_qa', row.locale)
+      if (pageQa.length) {
+        block.data.items = pageQa.map(qa => ({ title: qa.question, description: qa.answer ?? '' }))
+      }
+    }
+  }
+  return pageDto(row, documentOf(row), blocks)
 }
 
 export async function getPublishedTenantPage(db: DbClient, organizationId: string, path: string, locale?: string | null): Promise<TenantPageDto | null> {

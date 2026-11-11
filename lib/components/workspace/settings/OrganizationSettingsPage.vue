@@ -754,7 +754,8 @@ function postSubtitle(post: PostSummaryItem) {
 
 const settingsItems = computed<EditorNavigationItem[]>(() => [
   ...(dashboard.organizationPaths.value ? [
-    { id: 'qa', label: 'Reviews and Q&A', icon: 'i-lucide-message-circle-question', to: dashboard.organizationPaths.value.qa },
+    { id: 'reviews', label: 'Reviews', icon: 'i-lucide-star', to: dashboard.organizationPaths.value.reviews },
+    { id: 'qa', label: 'Q&A', icon: 'i-lucide-message-circle-question', to: dashboard.organizationPaths.value.qa },
   ] : []),
 ])
 

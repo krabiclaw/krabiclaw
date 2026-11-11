@@ -517,7 +517,13 @@ async function hydrateBlocks(
       })
     }
     const faqSource = faqBlockSource(block)
-    if (faqSource) data.items = qaItemsBySource.get(faqSource)
+    if (faqSource === 'organization_qa') {
+      data.items = qaItemsBySource.get(faqSource)
+    } else if (faqSource === 'page_qa') {
+      data.items = (Array.isArray(block.data.items) && block.data.items.length)
+        ? block.data.items
+        : qaItemsBySource.get(faqSource)
+    }
     if (block.type === 'testimonial_grid') data.items = reviewItems
     if (block.type === 'social_posts') {
       const feed = socialFeeds.get(block.id)!

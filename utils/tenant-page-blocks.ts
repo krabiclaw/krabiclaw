@@ -270,6 +270,16 @@ export const TENANT_PAGE_BLOCK_REGISTRY: Record<TenantPageBlockType, TenantPageB
       kind: 'enum', label: 'Questions', required: true, translatable: false, section: 'settings', default: 'page_qa',
       options: [{ value: 'page_qa', label: "This page's questions" }, { value: 'organization_qa', label: "The site's questions" }],
     },
+    items: {
+      kind: 'list',
+      label: 'Questions',
+      section: 'items',
+      of: {
+        title: text('Question', { required: true }),
+        description: prose('Answer'),
+      },
+      availableWhen: { field: 'source', equals: ['page_qa'] },
+    },
   }, { accessibility: 'required', seo: 'structured' }),
 
   how_to: blockDefinitionWithMetadata('how_to', 'How-to', 'i-lucide-list-ordered', 'Steps in order.', ALL_RECIPES, {
@@ -756,13 +766,12 @@ export function validateContentBlockData(type: string, data: Record<string, unkn
       }
     }
   }
-  // These blocks select canonical read-only records; they never store copies.
-  // A testimonial grid has no source to choose — reviews are the site's reviews —
-  // so it declares no `source` field. The editor used to offer "Items I write"
-  // for it, which the writer refused: an editing surface for data it rejected.
-  if (type === 'faq' || type === 'testimonial_grid') {
-    if (data.items !== undefined) throw new Error(`${type}.items is not stored; Q&A and reviews are read-only records.`)
-    if (type === 'faq' && !FAQ_BLOCK_SOURCES.some(source => source === data.source)) throw new Error('faq.source must select page_qa or organization_qa.')
+  // Testimonial grids select canonical read-only records; they never store copies.
+  if (type === 'testimonial_grid') {
+    if (data.items !== undefined) throw new Error(`${type}.items is not stored; reviews are read-only records.`)
+  }
+  if (type === 'faq') {
+    if (!FAQ_BLOCK_SOURCES.some(source => source === data.source)) throw new Error('faq.source must select page_qa or organization_qa.')
   }
   if (type === 'social_posts') {
     // A new block shows six; a stored one keeps the number it was given.
