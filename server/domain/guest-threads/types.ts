@@ -2,7 +2,6 @@ import type { GuestRequest, ThreadOperationalRecord } from '~/server/domain/requ
 import type { MessageAuthorKind, MessageChannel } from '~/server/domain/conversations'
 import type { MemberAccessPrincipal } from '~/server/utils/member-access'
 import type { GuestThreadMailbox } from './mailbox'
-import type { StayChannel } from '~/shared/bookings'
 import type { BookingChangeView } from './booking-changes'
 
 export type GuestThreadSubmissionType = 'contact' | 'booking' | 'stay'

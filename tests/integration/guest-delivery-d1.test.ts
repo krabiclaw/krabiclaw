@@ -325,7 +325,7 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
       purpose: 'member_reply',
       idempotencyKey: `guest-thread-email:contact-proof:${delayedOperationKey}`,
     })
-    const inboundEntry = await appendMessage(db, {
+    await appendMessage(db, {
       conversationId: 'contact-proof',
       authorKind: 'guest', authorUserId: 'guest-proof',
       channel: 'email',

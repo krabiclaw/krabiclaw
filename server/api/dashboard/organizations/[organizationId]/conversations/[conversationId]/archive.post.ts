@@ -1,7 +1,6 @@
-import { defineHandler } from 'nitro'
+import { defineHandler, HTTPError } from 'nitro'
 import { getRouterParam } from 'nitro/h3'
 import { jsonResponse, readStrictBody } from '~/server/utils/api-response'
-import { HTTPError } from 'nitro'
 import { memberConversation } from '~/server/utils/dashboard-guest-threads'
 import { archiveConversation } from '~/server/domain/guest-threads/repository'
 import { publishConversationAck } from '~/server/cloudflare/guest-inbox-events'
