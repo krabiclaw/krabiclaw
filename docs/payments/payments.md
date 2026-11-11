@@ -46,7 +46,7 @@ from when locations were metered keeps its retired location item, which is sent
 no events and bills nothing.
 
 Captured volume, Stripe's attributable costs (a correction is a negative
-value) and managed ad spend are queued in `payment_usage_events` and delivered
+value) and managed ad spend are queued in `usage_events` and delivered
 by `deliverPaymentsUsage` (`server/domain/payments/usage.ts`) as Stripe meter
 events on the business's own customer, timestamped when they are sent so they
 land in the open period. Each event's identifier and idempotency key derive

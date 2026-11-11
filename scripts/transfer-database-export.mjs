@@ -271,7 +271,7 @@ export const TARGET_INVARIANT_QUERIES = {
     UNION ALL SELECT id FROM activity_entries WHERE json_type(payload_json, '$.visibility_scope') IS NOT NULL OR instr(payload_json ->> '$.deep_link', '/sites/') > 0`,
   media_owner_scope: MEDIA_PLACEMENT_OWNER_AUDIT_QUERY,
   document_owner_scope: `WITH scope AS (${CONTENT_DOCUMENT_SCOPE_QUERY}) SELECT d.id FROM content_documents d WHERE (SELECT count(*) FROM scope s WHERE s.id = d.id) <> 1`,
-  editorial_representation_scope: `SELECT d.id FROM content_documents d WHERE d.row_role = 'representation' AND NOT EXISTS (
+  editorial_representation_scope: `SELECT d.id FROM content_documents d WHERE d.row_role = 'representation' AND d.kind <> 'resource' AND NOT EXISTS (
     SELECT 1 FROM content_documents r WHERE r.id = d.root_id AND r.row_role = 'root'
       AND r.kind = d.kind AND r.organization_id = d.organization_id)`,
   organization_source_locale: `SELECT o.id FROM organization o WHERE
@@ -282,7 +282,7 @@ export const TARGET_INVARIANT_QUERIES = {
   // Every localized resource is scoped by its organization. This used to add a
   // site to that scope for all but Product, which was the same organization
   // said twice.
-  localized_resource_owner_scope: `SELECT r.id FROM resource_localizations r WHERE NOT (
+  localized_resource_owner_scope: `SELECT r.id FROM content_documents r WHERE r.kind = 'resource' AND NOT (
     ${Object.entries(LOCALIZED_OWNER_TABLES).map(([type, table]) => `(r.resource_type = '${type}' AND EXISTS (SELECT 1 FROM ${table} o WHERE o.id = r.resource_id AND ${type === 'organization' ? 'o.id' : 'o.organization_id'} = r.organization_id))`).join(' OR ')})`,
   channel_thread_scope: `SELECT t.external_thread_id FROM channel_threads t JOIN conversations r ON r.id = t.conversation_id
     JOIN product_stay_configs c ON c.product_id = t.product_id AND c.organization_id = t.organization_id

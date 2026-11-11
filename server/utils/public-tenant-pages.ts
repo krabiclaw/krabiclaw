@@ -390,7 +390,7 @@ async function hydrateBlocks(
   const reviewRows = sourceReviewRows
   const postRows = sourcePostRows
   // A page's translation is its representation row, loaded by locale in the
-  // reference query above — not a resource_localizations entry. Only the media
+  // reference query above. Only the media
   // alt text needs projecting here.
   const pages = localizations
     ? sourcePages.map(page => ({ ...page, media: projectLocalizedMediaAlt(page.media, localizations) }))

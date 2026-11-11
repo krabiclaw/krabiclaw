@@ -33,8 +33,8 @@ export {
 } from '~/shared/content-registries'
 
 export type ContentDocumentRow = Pick<typeof content_documents.$inferSelect,
-  'id' | 'organization_id' | 'kind' | 'created_at' | 'updated_at'
-> & { row_role: 'root' | 'representation'; root_id: string | null; locale: string }
+  'id' | 'organization_id' | 'created_at' | 'updated_at'
+> & { kind: ContentDocumentKind; row_role: 'root' | 'representation'; root_id: string | null; locale: string }
 
 interface ContentDocumentInputFields {
   id?: string
@@ -272,7 +272,7 @@ export function prepareContentDocumentDeletion(input: { organizationId: string }
 export async function getContentDocumentById(db: DbClient, documentId: string) {
   return await queryFirst<ContentDocumentRow>(db, `
     SELECT id, organization_id, kind, row_role, root_id, locale, created_at, updated_at
-    FROM content_documents WHERE id = ? AND row_role IN ('root', 'representation')
+    FROM content_documents WHERE id = ? AND kind <> 'resource' AND row_role IN ('root', 'representation')
   `, [documentId])
 }
 

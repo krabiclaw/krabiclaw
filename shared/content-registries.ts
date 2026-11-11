@@ -94,3 +94,9 @@ export function contentBlockSchemaDefinitions(schema: unknown, knownDefinitions:
   visit(schema)
   return definitions
 }
+
+
+/** The localized fields of a catalog resource, stored as a content representation. */
+export const RESOURCE_LOCALIZATIONS_SQL = `(SELECT id, organization_id, resource_type, resource_id, locale,
+  metadata_json AS values_json, path AS route_path, created_at, created_by AS created_by_user_id, updated_at, updated_by AS updated_by_user_id
+  FROM content_documents WHERE kind = 'resource' AND row_role = 'representation')`

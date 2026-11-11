@@ -256,7 +256,7 @@ export async function deleteArticleCategory(db: DbClient, input: { organizationI
     })
   }
   await executeBatch(db, [
-    { query: "DELETE FROM resource_localizations WHERE organization_id = ? AND resource_type = 'article_category' AND resource_id = ?", params: [input.organizationId, input.categoryId] },
+    { query: "DELETE FROM content_documents WHERE organization_id = ? AND resource_type = 'article_category' AND resource_id = ?", params: [input.organizationId, input.categoryId] },
     { query: 'DELETE FROM article_categories WHERE organization_id = ? AND id = ?', params: [input.organizationId, input.categoryId] },
     publicResourceCacheInvalidationQuery(input.organizationId, 'article_category_deleted'),
   ], { operation: 'Delete article category' })

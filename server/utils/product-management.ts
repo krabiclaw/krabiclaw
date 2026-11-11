@@ -10,7 +10,7 @@ import { d1JsonArray, executeBatch, queryAll, queryFirst, type BatchQuery, type 
 import { MAX_D1_BATCH_STATEMENTS } from '~/server/db/d1-limits'
 import { resourceLocalizationDeletionQueries } from '~/server/utils/localization'
 import { loadPublicSocialMedia } from '~/server/utils/public-social-image'
-import { buildDeleteOwnerPlacementsQuery, hydrateMediaAssetRefs, readMediaPlacements, stayAccessibilityEvidenceGuardQueries, stayAccessibilityEvidenceWriteError } from '~/server/utils/media-asset-manager'
+import { buildDeleteOwnerPlacementsQuery, buildMediaPlacementReplacementQueries, deleteProductMediaPlacementsQuery, hydrateMediaAssetRefs, readMediaPlacements, stayAccessibilityEvidenceGuardQueries, stayAccessibilityEvidenceWriteError } from '~/server/utils/media-asset-manager'
 import { isStayBedAllocationConflict, prepareArrangeProductPhotos, readProductPhotos, readStayHomeAccessibility, readStayPhotoRooms, stayBedAllocationGuardQuery } from '~/server/utils/media-placement'
 import { parseStaySleepingArrangements, type StayPhotoRoom } from '~/shared/stay-photos'
 import { isStayHomeAccessibility, type StayHomeAccessibility, type StayRoomAccessibility } from '~/shared/stay-accessibility'
@@ -1216,8 +1216,8 @@ function productWrites(
     const clearedAlarmPaths = STAY_ALARM_AMENITIES.filter(code => stayAmenityAvailability(planned.stay!.amenity_answers, code) !== true || planned.details[STAY_ALARM_DETAIL_KEYS[code]] === undefined)
       .map(code => `$.details.${STAY_ALARM_DETAIL_KEYS[code]}`)
     if (clearedAlarmPaths.length) writes.push({
-      query: `UPDATE resource_localizations SET values_json = json_remove(values_json, ${clearedAlarmPaths.map(() => '?').join(', ')}), updated_at = ?, updated_by_user_id = ?
-        WHERE organization_id = ? AND resource_type = 'product' AND resource_id = ? AND (${clearedAlarmPaths.map(() => 'json_type(values_json, ?) IS NOT NULL').join(' OR ')})`,
+      query: `UPDATE content_documents SET metadata_json = json_remove(metadata_json, ${clearedAlarmPaths.map(() => '?').join(', ')}), updated_at = ?, updated_by = ?
+        WHERE organization_id = ? AND resource_type = 'product' AND resource_id = ? AND (${clearedAlarmPaths.map(() => 'json_type(metadata_json, ?) IS NOT NULL').join(' OR ')})`,
       params: [...clearedAlarmPaths, now, actor.actorId, organizationId, planned.id, ...clearedAlarmPaths],
     })
   }
@@ -1971,10 +1971,11 @@ export async function updateProduct(db: DbClient, input: {
     writes.push({ query: 'DELETE FROM product_stay_accessibility WHERE organization_id = ? AND product_id = ? AND feature_code = ?', params: [input.organizationId, input.productId, answer.feature] })
     if (answer.available !== null) writes.push({
       query: 'INSERT INTO product_stay_accessibility (organization_id, product_id, feature_code, available) VALUES (?, ?, ?, ?)', params: [input.organizationId, input.productId, answer.feature, answer.available ? 1 : 0],
-    }, {
-      query: `INSERT INTO product_stay_accessibility_photos (organization_id, product_id, feature_code, asset_id)
-        SELECT ?, ?, ?, value FROM json_each(?)`, params: [input.organizationId, input.productId, answer.feature, d1JsonArray(answer.photo_ids)],
     })
+    writes.push(...buildMediaPlacementReplacementQueries({ organizationId: input.organizationId,
+      placement: { owner_type: 'stay_home_accessibility', owner_id: input.productId, slot: answer.feature },
+      media: answer.photo_ids.map(asset_id => ({ asset_id })), now,
+    }))
   }
   if (roomUpdate) {
     writes.unshift({ query: `UPDATE products SET updated_at = NULL WHERE organization_id = ? AND id = ? AND NOT EXISTS (
@@ -2003,10 +2004,11 @@ export async function updateProduct(db: DbClient, input: {
       writes.push({ query: 'DELETE FROM product_stay_room_accessibility WHERE organization_id = ? AND product_id = ? AND room_id = ? AND feature_code = ?', params: [input.organizationId, input.productId, roomUpdate.roomId, answer.feature] })
       if (answer.available !== null) writes.push({
         query: 'INSERT INTO product_stay_room_accessibility (organization_id, product_id, room_id, feature_code, available) VALUES (?, ?, ?, ?, ?)', params: [input.organizationId, input.productId, roomUpdate.roomId, answer.feature, answer.available ? 1 : 0],
-      }, {
-        query: `INSERT INTO product_stay_room_accessibility_photos (organization_id, product_id, room_id, feature_code, asset_id)
-          SELECT ?, ?, ?, ?, value FROM json_each(?)`, params: [input.organizationId, input.productId, roomUpdate.roomId, answer.feature, d1JsonArray(answer.photo_ids)],
       })
+      writes.push(...buildMediaPlacementReplacementQueries({ organizationId: input.organizationId,
+        placement: { owner_type: 'stay_room_accessibility', owner_id: roomUpdate.roomId, slot: answer.feature },
+        media: answer.photo_ids.map(asset_id => ({ asset_id })), now,
+      }))
     }
     writes.push(stayBedAllocationGuardQuery(input.organizationId, input.productId), {
       // All room references must still have their canonical listing fact.
@@ -2129,7 +2131,7 @@ export async function deleteProduct(db: DbClient, input: {
     ...resourceLocalizationDeletionQueries('product', { query: 'SELECT ?', params: [input.productId] }),
     ...invalidations,
     // Its pictures go with it; the assets stay in the library.
-    buildDeleteOwnerPlacementsQuery({ ownerType: 'product', ownerId: input.productId, organizationId: input.organizationId }),
+    deleteProductMediaPlacementsQuery(input.organizationId, [input.productId]),
     { query: 'DELETE FROM products WHERE organization_id = ? AND id = ?', params: [input.organizationId, input.productId] },
   ], { operation: 'Delete product', action: 'delete it', stay: product.kind === 'stay' }).catch((error: unknown) => {
     if (/NOT NULL constraint failed: products\.updated_at/.test(error instanceof Error ? error.message : String(error))) conflict('This product received a booking, stay, guest conversation, schedule or checkout while you were deleting it. Turn it off instead of deleting it.')

@@ -10,7 +10,7 @@ export default defineScheduledTask({
   async run({ context }) {
     const env = (context as { cloudflare: { env: CloudflareEnv } }).cloudflare.env
     const cleanup = await runCalendarCleanupJobs(env)
-    const organizations = await filterEntitledRows(env, await queryAll<{ organization_id: string }>(env.DB, "SELECT organization_id FROM organization_integrations WHERE provider='google_calendar'"), 'calendar_sync')
+    const organizations = await filterEntitledRows(env, await queryAll<{ organization_id: string }>(env.DB, "SELECT organization_id FROM organization_integrations WHERE provider='google_calendar' AND status <> 'setting_up'"), 'calendar_sync')
     const results = []
     const failures: string[] = []
     for (const organization of organizations) {

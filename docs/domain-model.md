@@ -29,7 +29,7 @@ extend that model. Never add a second one beside it.
 | Timed inventory | `product_sessions` | server/utils/availability.ts | KrabiClaw |
 | Night inventory | `product_nights` | server/domain/stays.ts | KrabiClaw |
 | Night claim (the nights a booking, a checkout hold or a linked calendar holds at a home, as a session's seats are a slot booking's claim) | `stay_nights` | server/domain/stays.ts | KrabiClaw |
-| Home rooms and accessibility | `product_stay_photo_rooms` `product_stay_photo_room_memberships` `product_stay_photo_room_amenities` `product_stay_room_accessibility` `product_stay_room_accessibility_photos` `product_stay_accessibility` `product_stay_accessibility_photos` | server/domain/stays.ts | KrabiClaw |
+| Home rooms and accessibility | `product_stay_photo_rooms` `product_stay_photo_room_amenities` `product_stay_room_accessibility` `product_stay_accessibility` | server/domain/stays.ts | KrabiClaw |
 | Booked record (a class seat, a consultation, a table or a stay at a home, with the terms frozen when it was made) | `bookings` | server/domain/product-bookings.ts | KrabiClaw |
 | Conversation (a guest's with the business, or the team's: direct, group or a job's), each person's read position and archive, and its messages from people and from KrabiClaw | `conversations` `conversation_participants` `messages` | server/domain/conversations.ts | KrabiClaw |
 | Audit log (who changed what in an organization) | `activity_entries` | server/utils/organization-events.ts | KrabiClaw |
@@ -39,25 +39,26 @@ extend that model. Never add a second one beside it.
 | Reported content | `content_reports` | server/domain/content-reports.ts | KrabiClaw |
 | Work and suggestions | `tasks` `opportunities` `organization_goals` | server/domain/tasks.ts | KrabiClaw |
 | Provider working hours | `member_scheduling` | server/domain/member-scheduling.ts | KrabiClaw |
-| Media | `media_assets` `media_placements` | server/utils/media-placement.ts | Cloudflare Images |
-| Website content | `content_documents` `content_blocks` `article_categories` `article_category_articles` `organization_redirects` | server/utils/content | KrabiClaw |
-| Localization | `resource_localizations` `organization_locales` | server/utils/localization.ts | KrabiClaw |
+| Media and its placements, including a home’s photo rooms and accessibility evidence | `media_assets` `media_placements` | server/utils/media-placement.ts | Cloudflare Images |
+| Website content and localized representations | `content_documents` `content_blocks` `article_categories` `article_category_articles` `organization_redirects` | server/utils/content | KrabiClaw |
+| Site languages | `organization_locales` | server/utils/organization-languages.ts | KrabiClaw |
 | Custom domain | `organization_domains` | server/utils/domains.ts | Cloudflare |
 | Public cache invalidation | `public_resource_cache_invalidations` | server/utils/public-resource-cache.ts | Cloudflare |
 | Social post publication | `post_publications` | server/utils/social-publication.ts | Meta |
 | Article email | `broadcasts` | server/domain/article-broadcast.ts | Resend |
 | Reviews | `reviews` `review_requests` `review_category_ratings` | server/utils/review-requests.ts | KrabiClaw |
-| Payments | `payments` `payment_refunds` `payment_disputes` `payment_orders` `payment_order_lines` `payment_authorizations` `payment_checkout_holds` `offline_payments` `payment_fee_reports` `payment_cost_snapshots` `payment_servicing_tenants` `stripe_connected_accounts` `stripe_connected_customers` `stripe_webhook_events` `payment_usage_events` | server/domain/payments | Stripe |
+| Payments | `payments` `payment_refunds` `payment_disputes` `payment_orders` `payment_order_lines` `payment_authorizations` `payment_checkout_holds` `offline_payments` `payment_fee_reports` `payment_cost_snapshots` `payment_servicing_tenants` `stripe_connected_accounts` `stripe_connected_customers` `stripe_webhook_events` | server/domain/payments | Stripe |
 | Channex channel | `channex_connections` `product_channel_mappings` `channel_threads` `channel_night_pushes` `channel_sync_log` `airbnb_sync_jobs` | server/integrations/channex | Channex |
 | Imported iCal calendar | `stay_calendar_links` | server/domain/stays.ts | KrabiClaw |
-| Google Calendar | `google_calendar_setup` `google_calendar_event_links` `google_calendar_cleanup_jobs` | server/utils/google-calendar.ts | Google |
-| Connected service selection | `organization_integrations` `organization_services` | server/utils/organization-integrations.ts | Better Auth linked accounts |
+| Google Calendar event delivery | `google_calendar_event_links` `google_calendar_cleanup_jobs` | server/utils/google-calendar.ts | Google |
+| Connected provider selection | `organization_integrations` | server/utils/organization-integrations.ts | Better Auth linked accounts |
+| Service agreement | `organization_services` | server/utils/organization-services.ts | KrabiClaw |
 | Push device | `device_tokens` | server/domain/devices.ts | APNs / Web Push |
 | Notification preference | `user_notification_preferences` | server/domain/notification-preferences.ts | KrabiClaw |
 | Workspace state | `user_workspace_state` | server/utils/mcp-context.ts | KrabiClaw |
 | Analytics | `analytics_events` `analytics_summaries` | server/utils/analytics-report.ts | KrabiClaw |
 | MCP tool audit | `mcp_tool_call_events` | server/utils/mcp-protocol.ts | KrabiClaw |
-| Metered usage | `usage_events` | server/utils/usage-metering.ts | Stripe meters |
+| Usage (application activity and quantities billed through Stripe meters) | `usage_events` | server/utils/usage-metering.ts | KrabiClaw and Stripe |
 
 ## Single-owner columns
 

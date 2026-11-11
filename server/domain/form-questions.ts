@@ -1,3 +1,4 @@
+import { RESOURCE_LOCALIZATIONS_SQL } from '~/shared/content-registries'
 import { HTTPError } from 'nitro'
 import { queryFirst, type DbClient } from '~/server/db'
 import { getSourceLocale } from '~/server/utils/organization-locales'
@@ -53,7 +54,7 @@ export async function readLocalizedFormQuestions(db: DbClient, owner: FormQuesti
   const questions_revision = formQuestionsRevision(questions)
   if (!questions.length || locale === null || locale === await getSourceLocale(db, owner.organizationId)) return { questions, questions_revision }
   const { resourceType, resourceId, field } = formQuestionLocalizationField(owner)
-  const row = await queryFirst<{ wording: string | null }>(db, `SELECT json_extract(values_json, '$.' || ?) AS wording FROM resource_localizations
+  const row = await queryFirst<{ wording: string | null }>(db, `SELECT json_extract(values_json, '$.' || ?) AS wording FROM ${RESOURCE_LOCALIZATIONS_SQL}
     WHERE organization_id = ? AND resource_type = ? AND resource_id = ? AND locale = ?`, [field, owner.organizationId, resourceType, resourceId, locale])
   const localization = row?.wording ? formQuestionLocalizationSchema.parse(JSON.parse(row.wording)) : null
   return { questions: localizeFormQuestions(questions, localization), questions_revision }

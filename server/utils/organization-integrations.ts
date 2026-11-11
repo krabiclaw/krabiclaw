@@ -37,12 +37,12 @@ type Row = Omit<OrganizationIntegration, 'verified'> & { verified: number | null
 const project = (row: Row): OrganizationIntegration => ({ ...row, verified: row.verified === null ? null : row.verified === 1 })
 
 export async function readIntegration(db: DbClient, organizationId: string, provider: IntegrationProvider): Promise<OrganizationIntegration | null> {
-  const row = await queryFirst<Row>(db, `SELECT ${COLUMNS} FROM organization_integrations WHERE organization_id = ? AND provider = ?`, [organizationId, provider])
+  const row = await queryFirst<Row>(db, `SELECT ${COLUMNS} FROM organization_integrations WHERE organization_id = ? AND provider = ? AND status IS NOT 'setting_up'`, [organizationId, provider])
   return row ? project(row) : null
 }
 
 export async function listIntegrations(db: DbClient, organizationId: string): Promise<OrganizationIntegration[]> {
-  return (await queryAll<Row>(db, `SELECT ${COLUMNS} FROM organization_integrations WHERE organization_id = ? ORDER BY provider`, [organizationId])).map(project)
+  return (await queryAll<Row>(db, `SELECT ${COLUMNS} FROM organization_integrations WHERE organization_id = ? AND status IS NOT 'setting_up' ORDER BY provider`, [organizationId])).map(project)
 }
 
 /** The organizations connected through one linked account. */
