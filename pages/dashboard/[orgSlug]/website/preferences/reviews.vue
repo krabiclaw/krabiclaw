@@ -4,7 +4,7 @@
     title="Review settings"
     :saving="saving"
     :disabled="false"
-    :error="pageError ?? ''"
+    :error="pageError || (reviewsError ? getErrorMessage(reviewsError, 'Failed to load reviews') : '')"
     @cancel="navigateTo(preferencesPath)"
     @save="saveSettings"
   >
@@ -167,6 +167,8 @@
                   type="button"
                   class="p-1 text-2xl transition cursor-pointer select-none"
                   :class="star <= newReview.rating ? 'text-amber-400' : 'text-neutral-300 dark:text-neutral-700'"
+                  :aria-label="`${star} ${star === 1 ? 'star' : 'stars'}`"
+                  :aria-pressed="star === newReview.rating"
                   @click="newReview.rating = star"
                 >
                   ★
@@ -280,12 +282,12 @@ const newReview = reactive({
 const isReviewsResponse = (value: unknown): value is { reviews: Array<{ id: string; status: string }> } =>
   isRecord(value) && Array.isArray(value.reviews)
 
-const { data: reviewsData, refresh: refreshReviews } = await useAsyncData(
+const { data: reviewsData, error: reviewsError, refresh: refreshReviews } = await useAsyncData(
   `dashboard-org-reviews-count-${organizationId}`,
   () => dashboardApi<{ reviews: Array<{ id: string; status: string }> }>(
     `/api/editor/organizations/${organizationId}/reviews`,
     { validate: isReviewsResponse },
-  ).catch(() => ({ reviews: [] })),
+  ),
 )
 
 const reviewsSummaryText = computed(() => {
