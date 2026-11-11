@@ -1060,7 +1060,9 @@ test('editing and cancelling a stay move and free exactly its nights, under its 
     const cancelled = await cancelStay(db, env, manager, stay.id, { version: 3, reason: 'Guest changed plans' })
     assert.equal(cancelled.status, 'cancelled')
     assert.ok(cancelled.cancelled_at)
-    assert(((await readStayCalendar(db, manager, { productId: cabin.id, from: '2026-11-05', to: '2026-11-30' })).nights).every(night => night.booking_id !== stay.id))
+    const afterCancellation = await readStayCalendar(db, manager, { productId: cabin.id, from: '2026-11-05', to: '2026-11-30' })
+    assert.equal(afterCancellation.nights.length, 25)
+    assert(afterCancellation.nights.every(night => night.booking_id !== stay.id))
     await assert.rejects(updateStay(db, env, manager, stay.id, { version: 4, adults: 1 }), code('STAY_NOT_EDITABLE'))
     assert.deepEqual((await listStays(db, manager, { from: '2026-11-01', to: '2026-12-01' })).map(row => row.id).includes(stay.id), false)
     assert.equal((await listStays(db, manager, { from: '2026-11-01', to: '2026-12-01', includeCancelled: true })).some(row => row.id === stay.id), true)
@@ -2061,7 +2063,9 @@ test('migrated unpaid stays occupy nights without a fresh reservation message an
     const offline = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'hostaway:offline', check_in_date: '2027-05-01', check_out_date: '2027-05-04', ...guest }, { imported: { source: 'hostaway', source_id: 'offline', row: { status: 'New', payment: 'Unpaid' }, fingerprint: 'offline-fingerprint', channel: 'direct' } })
     assert.equal(offline.payment_status, 'unpaid')
     assert.equal(offline.status, 'confirmed')
-    assert((await readStayCalendar(db, manager, { productId: cabin.id, from: '2027-05-01', to: '2027-05-04' })).nights.every(night => night.booking_id === offline.id && !night.available))
+    const afterImport = await readStayCalendar(db, manager, { productId: cabin.id, from: '2027-05-01', to: '2027-05-04' })
+    assert.equal(afterImport.nights.length, 3)
+    assert(afterImport.nights.every(night => night.booking_id === offline.id && !night.available))
     const input = { product_id: cabin.id, idempotency_key: 'hostaway:source-1', check_in_date: '2027-06-01', check_out_date: '2027-06-03', ...guest, guest_email: 'ana@example.test' }
     const source = { source: 'hostaway' as const, source_id: 'source-1', row: { id: 'source-1', payment: 'Unpaid' }, fingerprint: 'source-fingerprint', channel: 'airbnb' as const, channel_booking_id: 'ABB-EXACT-SOURCE' }
     const imported = await createStay(db, env, manager, input, { imported: source })
