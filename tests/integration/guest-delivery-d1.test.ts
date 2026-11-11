@@ -628,7 +628,7 @@ test('a guest-cancelled stay alerts owners with the whole stay and the member lo
     ]) await db.prepare(statement).run()
     const deviceToken = 'cd'.repeat(32)
     await registerDevice(db, { kind: 'apns', token: deviceToken, environment: 'sandbox', userId: 'cleaner-turnover', sessionId: 'session-cleaner' })
-    await registerDevice(db, { kind: 'apns', deviceToken: 'ef'.repeat(32), environment: 'sandbox', userId: 'unassigned-turnover', sessionId: 'session-unassigned' })
+    await registerDevice(db, { kind: 'apns', token: 'ef'.repeat(32), environment: 'sandbox', userId: 'unassigned-turnover', sessionId: 'session-unassigned' })
     const access = { organizationId: 'org-turnover', actorId: 'owner-turnover', manage: true as const }
     const home = await createProduct(db, { env, organizationId: access.organizationId, actor: { actorId: access.actorId }, product: {
       kind: 'stay', name: 'Turnover Cabin', variants: [{ name: 'Turnover Cabin', prices: [{ unit_amount: 15000, currency: 'USD' }] }],
