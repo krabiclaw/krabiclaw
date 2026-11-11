@@ -4,7 +4,8 @@ import test from 'node:test'
 import { Miniflare } from 'miniflare'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import * as schema from '../../server/db/schema.ts'
-import { claimSessionCapacity, setBookingStatus } from '../../server/utils/availability.ts'
+import { claimSessionCapacity } from '../../server/utils/availability.ts'
+import { nameConversationBooking, setBookingStatus } from './support/booking-state.ts'
 import { CalendarSelectionConflict, connectCalendar, calendarSubjects, runCalendarCleanupJobs, disconnectCalendar, readCalendarIntegration, storeCalendarSelection, syncCalendarOrganization } from '../../server/utils/google-calendar.ts'
 import { requireIntegrationAccount, type CloudflareEnv } from '../../server/utils/auth.ts'
 import { cleanupOrganizationBeforeDelete } from '../../server/utils/tenant-deletion.ts'
@@ -28,9 +29,10 @@ test('committed consultation projection is tenant scoped, private, idempotent an
     await db.prepare(`INSERT INTO member_scheduling(member_id, organization_id, public_name, public_approved, timezone, weekly_json, time_off_json, updated_at, updated_by) VALUES(?,?,'Host',1,'UTC','[{"weekday":0,"start":"00:00","end":"23:59"},{"weekday":1,"start":"00:00","end":"23:59"},{"weekday":2,"start":"00:00","end":"23:59"},{"weekday":3,"start":"00:00","end":"23:59"},{"weekday":4,"start":"00:00","end":"23:59"},{"weekday":5,"start":"00:00","end":"23:59"},{"weekday":6,"start":"00:00","end":"23:59"}]','[]','2099-01-01T00:00:00.000Z','host')`).bind('host-org', 'org').run()
     await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,unit,duration_minutes,held_online,scheduling_mode,assigned_member_id,confirmation_mode,created_by,updated_by) VALUES('p','org','slot',30,1,'provider','host-org','review','actor','actor'),('class','org','slot',30,1,'provider','host-org','instant','actor','actor')").run()
     await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,timezone,starts_at,ends_at,capacity,created_by,updated_by) VALUES('s','org','p','America/New_York','2099-11-01T14:00:00.000Z','2099-11-01T14:30:00.000Z',1,'actor','actor')").run()
-    await db.prepare(`INSERT INTO requests(id,kind,organization_id,payload_json) VALUES('thread','booking','org','{"guest":{"name":"Jane Doe","email":"private@example.test","phone":null},"notes":"PRIVATE MATTER"}')`).run()
+    await db.prepare(`INSERT INTO conversations(id,kind,organization_id,payload_json,last_message_at) VALUES('thread','booking','org','{"guest":{"name":"Jane Doe","email":"private@example.test","phone":null},"notes":"PRIVATE MATTER"}','2099-01-01T00:00:00.000Z')`).run()
     const env = { DB: db, BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://krabiclaw.test' } as CloudflareEnv
-    const { bookingId } = await claimSessionCapacity(db, { policyJson: OPEN_TERMS_JSON, env, organizationId: 'org', productId: 'p', sessionId: 's', productVariantId: 'v', partySize: 1, requestId: 'thread' })
+    const { bookingId } = await claimSessionCapacity(db, { policyJson: OPEN_TERMS_JSON, env, organizationId: 'org', productId: 'p', sessionId: 's', productVariantId: 'v', partySize: 1 })
+    await nameConversationBooking(db, 'thread', bookingId)
     await storeCalendarSelection(db, 'org', { account_id: 'linked-account', calendar_id: 'chosen', calendar_name: 'Calendar' })
     const integration = (await readCalendarIntegration(db, 'org'))!
     assert.equal((await calendarSubjects(db, 'other', integration)).length, 0)
@@ -211,8 +213,8 @@ test('bounded Calendar backfill resumes and cancelled historical Sessions are cl
     for (let i = 0; i < 3; i++) await syncCalendarOrganization(env, 'org', 25, provider)
     assert.equal(events.size, 55)
     for(const event of events.values())assert.equal((event as {description:string}).description,'Status: pending\nAttorney: Attorney Host','a hold without a guest thread has no fabricated dashboard link or attendee')
-    await db.prepare(`INSERT INTO requests(id,kind,organization_id,payload_json) VALUES('thread','booking','org','{"guest":{"name":"Client","email":"client@example.test","phone":null},"notes":null}')`).run()
-    await db.prepare("UPDATE bookings SET request_id='thread' WHERE id=?").bind(bookings[0]).run()
+    await db.prepare(`INSERT INTO conversations(id,kind,organization_id,payload_json,last_message_at) VALUES('thread','booking','org','{"guest":{"name":"Client","email":"client@example.test","phone":null}}','2099-01-01T00:00:00.000Z')`).run()
+    await nameConversationBooking(db, 'thread', bookings[0]!)
     await setBookingStatus(db, { organizationId: 'org', bookingId: bookings[0]!, status: 'confirmed' })
     for (let i = 0; i < 3; i++) await syncCalendarOrganization(env, 'org', 25, provider)
     // Imported historical state, independently of the live change workflow.
@@ -341,18 +343,19 @@ test('experience and dining Calendar management links follow canonical buyer own
     await db.prepare("INSERT INTO product_locations(organization_id,product_id,location_id,active,published,created_by,updated_by) VALUES('org','tables','dining',1,1,'actor','actor')").run()
     await db.prepare("INSERT INTO product_variants(id,organization_id,product_id,name,created_by,updated_by) VALUES('table-variant','org','tables','Table','actor','actor')").run()
     await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,location_id,timezone,starts_at,ends_at,capacity,created_by,updated_by) VALUES('seating','org','tables','dining','UTC','2099-11-02T14:00:00.000Z','2099-11-02T15:00:00.000Z',10,'actor','actor')").run()
-    for (const id of ['experience-thread','dining-thread','stay-thread']) await db.prepare(`INSERT INTO requests(id,kind,organization_id,user_id,payload_json) VALUES(?,'booking','org','buyer','{"guest":{"name":"Buyer","email":"buyer@example.test","phone":null},"notes":"PRIVATE NOTES","cancellation":{"token_hash":"PRIVATE_CAPABILITY","expires_at":null,"used_at":null}}')`).bind(id).run()
+    for (const id of ['experience-thread','dining-thread','stay-thread']) await db.prepare(`INSERT INTO conversations(id,kind,organization_id,user_id,payload_json,last_message_at) VALUES(?,'booking','org','buyer','{"guest":{"name":"Buyer","email":"buyer@example.test","phone":null},"notes":"PRIVATE NOTES","cancellation":{"token_hash":"PRIVATE_CAPABILITY","expires_at":null,"used_at":null}}','2099-01-01T00:00:00.000Z')`).bind(id).run()
     // A home booked by the night is a booking too: its check-in at the home's time, its checkout a day alone where the home has no checkout time.
     await db.prepare("INSERT INTO products(kind,id,organization_id,name,slug,created_by,updated_by) VALUES('stay','home','org','Garden house','garden-house','actor','actor')").run()
     await db.prepare("INSERT INTO product_locations(organization_id,product_id,location_id,active,published,created_by,updated_by) VALUES('org','home','dining',1,1,'actor','actor')").run()
     await db.prepare("INSERT INTO product_stay_configs(product_id,organization_id,location_id,internal_name,created_by,updated_by) VALUES('home','org','dining','Garden house','actor','actor')").run()
     await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,unit,default_capacity,min_nights,check_in_time,held_online,scheduling_mode,confirmation_mode,created_by,updated_by) VALUES('home','org','nights',4,1,'15:00',0,'business','instant','actor','actor')").run()
     await db.prepare("INSERT INTO product_variants(id,organization_id,product_id,name,created_by,updated_by) VALUES('home-variant','org','home','Night','actor','actor')").run()
-    await db.prepare(`INSERT INTO bookings(id,organization_id,user_id,request_id,product_id,product_variant_id,location_id,starts_at,ends_at,timezone,party_size,adults,children,infants,status,policy_json,total_minor,currency)
-      VALUES('stay','org','buyer','stay-thread','home','home-variant','dining','2099-11-05T15:00:00.000Z','2099-11-08','UTC',2,2,0,0,'confirmed',?,90000,'USD')`).bind(OPEN_TERMS_JSON).run()
+    await db.prepare(`INSERT INTO bookings(id,organization_id,user_id,product_id,product_variant_id,location_id,starts_at,ends_at,timezone,party_size,adults,children,infants,status,policy_json,total_minor,currency)
+      VALUES('stay','org','buyer','home','home-variant','dining','2099-11-05T15:00:00.000Z','2099-11-08','UTC',2,2,0,0,'confirmed',?,90000,'USD')`).bind(OPEN_TERMS_JSON).run()
     const env={DB:db,NUXT_PUBLIC_PLATFORM_DOMAIN:'http://localhost:3113'} as CloudflareEnv
-    await claimSessionCapacity(db,{policyJson: OPEN_TERMS_JSON, env,organizationId:'org',productId:'experience',sessionId:'session',productVariantId:'variant',partySize:1,requestId:'experience-thread',userId:'buyer'})
-    await claimSessionCapacity(db,{policyJson: OPEN_TERMS_JSON, env,organizationId:'org',productId:'tables',sessionId:'seating',productVariantId:'table-variant',partySize:2,requestId:'dining-thread',userId:'buyer'})
+    await nameConversationBooking(db, 'stay-thread', 'stay')
+    await nameConversationBooking(db, 'experience-thread', (await claimSessionCapacity(db,{policyJson: OPEN_TERMS_JSON, env,organizationId:'org',productId:'experience',sessionId:'session',productVariantId:'variant',partySize:1,userId:'buyer'})).bookingId)
+    await nameConversationBooking(db, 'dining-thread', (await claimSessionCapacity(db,{policyJson: OPEN_TERMS_JSON, env,organizationId:'org',productId:'tables',sessionId:'seating',productVariantId:'table-variant',partySize:2,userId:'buyer'})).bookingId)
     await storeCalendarSelection(db,'org',{account_id:'linked',calendar_id:'managed',calendar_name:'Calendar'})
     const provider={token:async()=> 'token'}
     const events=new Map<string,Record<string,unknown>>()
@@ -388,10 +391,10 @@ test('experience and dining Calendar management links follow canonical buyer own
     assert.equal(stayEvent.summary,'Stay — Buyer')
     assert.deepEqual([stayEvent.start,stayEvent.end],[{date:'2099-11-05'},{date:'2099-11-08'}],'a checkout with no time spans whole days to the checkout day')
     const identities=[...events.keys()]
-    await db.prepare("UPDATE requests SET user_id='other-buyer' WHERE id IN ('experience-thread','dining-thread','stay-thread')").run()
+    await db.prepare("UPDATE conversations SET user_id='other-buyer' WHERE id IN ('experience-thread','dining-thread','stay-thread')").run()
     assert.equal((await syncCalendarOrganization(env,'org',25,provider)).failed,0)
     for(const event of events.values()) assert.ok(!String(event.description).includes('Manage '),'a request/commitment ownership mismatch removes an unusable management link')
-    await db.prepare("UPDATE requests SET user_id='buyer' WHERE id IN ('experience-thread','dining-thread','stay-thread')").run()
+    await db.prepare("UPDATE conversations SET user_id='buyer' WHERE id IN ('experience-thread','dining-thread','stay-thread')").run()
     assert.equal((await syncCalendarOrganization(env,'org',25,provider)).failed,0)
     assert.deepEqual([...events.keys()],identities,'ownership eligibility reconciles existing event identities')
     assert.equal(inserts,3,'eligible management links update existing events instead of duplicating them')

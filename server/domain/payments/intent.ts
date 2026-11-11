@@ -259,7 +259,7 @@ async function paymentReceipt(db: DbClient, env: CloudflareEnv, payment: Payment
     throw new Error('Captured payment has no booking it paid for')
   }
   if (payment.subject_type !== 'booking') throw new Error(`Payment subject ${payment.subject_type} has no guest confirmation`)
-  const booking = await queryFirst<{ request_id: string | null }>(db, 'SELECT request_id FROM bookings WHERE id=? AND organization_id=?', [hold.converted_booking_id, payment.organization_id])
+  const booking = await queryFirst<{ request_id: string | null }>(db, "SELECT id AS request_id FROM conversations WHERE booking_id=? AND organization_id=? AND kind='booking'", [hold.converted_booking_id, payment.organization_id])
   if (!booking?.request_id) throw new Error('Converted hold has no booking conversation')
   if (hold.session_id === null) {
     // A stay is read by its conversation, as the guest's account reads it.

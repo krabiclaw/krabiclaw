@@ -64,21 +64,23 @@ export async function listBusinessOutcomes(
   const rows = await queryAll<OutcomeEntry>(db, `
     WITH facts AS (
       SELECT 'activity_entries' AS source_table, a.id AS source_id, a.event_name, a.actor_kind, a.actor_user_id,
-             a.request_id, r.kind AS request_kind, a.channel, a.payload_json, a.occurred_at
-      FROM activity_entries a LEFT JOIN requests r ON r.id = a.request_id AND a.scope_kind = 'request'
-      WHERE a.event_name IN (SELECT value FROM json_each(?)) AND (
-        (a.scope_kind = 'organization' AND a.organization_id = ? AND a.kind = 'audit') OR
-        (a.scope_kind = 'request' AND r.organization_id = ? AND a.kind IN ('message', 'operation'))
-      )
-      AND COALESCE(json_extract(a.payload_json, '$.metadata.operation'), '') <> 'unchanged'
+             NULL AS request_id, NULL AS request_kind, NULL AS channel, a.payload_json, a.occurred_at
+      FROM activity_entries a
+      WHERE a.event_name IN (SELECT value FROM json_each(?)) AND a.organization_id = ?
+        AND COALESCE(json_extract(a.payload_json, '$.metadata.operation'), '') <> 'unchanged'
+      UNION ALL
+      SELECT 'messages', m.id, m.event_name, CASE m.author_kind WHEN 'krabiclaw' THEN 'system' ELSE m.author_kind END, m.author_user_id,
+             m.conversation_id, c.kind, m.channel, m.payload_json, m.occurred_at
+      FROM messages m JOIN conversations c ON c.id = m.conversation_id AND c.organization_id = m.organization_id
+      WHERE m.event_name IN (SELECT value FROM json_each(?)) AND m.organization_id = ?
       -- Captures/refunds have one financial fact, in analytics. A conversation
-      -- notification is not a second sale. Failed/pending notifications remain visible.
-      AND NOT (a.event_name IN ('payment.payment_captured', 'payment.refund_succeeded') AND EXISTS (
-        SELECT 1 FROM analytics_events measured WHERE measured.organization_id = r.organization_id AND measured.kind = 'conversion'
-          AND ((a.event_name = 'payment.payment_captured' AND json_extract(measured.payload_json, '$.event_name') = 'payment_paid'
-            AND json_extract(measured.payload_json, '$.entity_id') = json_extract(a.payload_json, '$.payment_id'))
-            OR (a.event_name = 'payment.refund_succeeded' AND json_extract(measured.payload_json, '$.event_name') = 'payment_refunded'
-            AND json_extract(measured.payload_json, '$.entity_id') = json_extract(a.payload_json, '$.native_object_id')))
+      -- message is not a second sale. Failed/pending messages remain visible.
+      AND NOT (m.event_name IN ('payment.payment_captured', 'payment.refund_succeeded') AND EXISTS (
+        SELECT 1 FROM analytics_events measured WHERE measured.organization_id = m.organization_id AND measured.kind = 'conversion'
+          AND ((m.event_name = 'payment.payment_captured' AND json_extract(measured.payload_json, '$.event_name') = 'payment_paid'
+            AND json_extract(measured.payload_json, '$.entity_id') = json_extract(m.payload_json, '$.payment_id'))
+            OR (m.event_name = 'payment.refund_succeeded' AND json_extract(measured.payload_json, '$.event_name') = 'payment_refunded'
+            AND json_extract(measured.payload_json, '$.entity_id') = json_extract(m.payload_json, '$.native_object_id')))
       ))
       UNION ALL
       SELECT 'post_publications', p.id, 'post.publication', COALESCE(initiator.actor_kind, 'unknown'), initiator.actor_user_id,
@@ -88,7 +90,7 @@ export async function listBusinessOutcomes(
                'errorCode', p.error_code, 'errorMessage', p.error_message, 'revision', p.updated_at, 'payloadHash', p.payload_hash),
              CASE WHEN p.state = 'published' THEN p.published_at ELSE p.updated_at END
       FROM post_publications p LEFT JOIN activity_entries initiator ON initiator.id = p.initiating_activity_id
-        AND initiator.organization_id = p.organization_id AND initiator.scope_kind = 'organization'
+        AND initiator.organization_id = p.organization_id
         AND initiator.event_name = 'post.publication_started'
       WHERE p.organization_id = ?
       UNION ALL
@@ -99,7 +101,7 @@ export async function listBusinessOutcomes(
              json_object('entityType', 'review', 'entityId', review.id, 'state', review.status, 'source', review.source,
                'reviewRequestId', review.review_request_id, 'bookingId', review.booking_id, 'publicationAuthorized', review.publication_authorized, 'revision', review.updated_at), review.created_at
       FROM reviews review LEFT JOIN bookings visit ON visit.id = review.booking_id AND visit.organization_id = review.organization_id
-        LEFT JOIN requests review_thread ON review_thread.id = visit.request_id AND review_thread.organization_id = review.organization_id
+        LEFT JOIN conversations review_thread ON review_thread.booking_id = visit.id AND review_thread.kind = 'booking' AND review_thread.organization_id = review.organization_id
       WHERE review.organization_id = ? AND review.source IN ('direct', 'owner_entered')
       UNION ALL
       SELECT 'analytics_events', measured.id, 'measurement.' || json_extract(measured.payload_json, '$.event_name'),
@@ -109,8 +111,8 @@ export async function listBusinessOutcomes(
         -- A decision's measurement is the same business result as its canonical
         -- operation. Prefer that operation, while measurements without one remain visible.
         AND NOT EXISTS (
-          SELECT 1 FROM activity_entries operation JOIN requests request ON request.id = operation.request_id
-          WHERE request.organization_id = measured.organization_id AND operation.scope_kind = 'request'
+          SELECT 1 FROM messages operation
+          WHERE operation.organization_id = measured.organization_id
             AND ((json_extract(measured.payload_json, '$.event_name') IN ('booking_confirmed', 'booking_declined', 'booking_cancelled')
               AND operation.event_name = CASE json_extract(measured.payload_json, '$.event_name') WHEN 'booking_confirmed' THEN 'booking.confirm' WHEN 'booking_declined' THEN 'booking.reject' ELSE 'booking.cancel' END
               AND json_extract(operation.payload_json, '$.operational_booking_id') = json_extract(measured.payload_json, '$.entity_id'))
@@ -119,13 +121,14 @@ export async function listBusinessOutcomes(
               AND json_extract(operation.payload_json, '$.requestId') = json_extract(measured.payload_json, '$.entity_id')))
         )
     ) SELECT * FROM facts ORDER BY occurred_at DESC, source_table DESC, source_id DESC LIMIT ? OFFSET ?
-  `, [ACTIVITY_EVENTS_JSON, principal.organizationId, principal.organizationId, principal.organizationId,
+  `, [ACTIVITY_EVENTS_JSON, principal.organizationId, ACTIVITY_EVENTS_JSON, principal.organizationId, principal.organizationId,
     principal.organizationId, principal.organizationId, MEASUREMENT_EVENTS_JSON, limit + 1, offset])
   const page = rows.slice(0, limit)
-  const activityIds = page.filter(row => row.source_table === 'activity_entries').map(row => row.source_id)
+  const ledger = (row: OutcomeEntry) => row.source_table === 'activity_entries' || row.source_table === 'messages'
+  const activityIds = page.filter(ledger).map(row => row.source_id)
   const receipts = activityIds.length ? await queryAll<GuestThreadDeliveryRow>(db, `
-    SELECT * FROM guest_thread_deliveries WHERE entry_id IN (SELECT value FROM json_each(?)) ORDER BY created_at DESC, id DESC
-  `, [d1JsonStringSet(activityIds)]) : []
+    SELECT * FROM guest_thread_deliveries WHERE message_id IN (SELECT value FROM json_each(?)) OR activity_entry_id IN (SELECT value FROM json_each(?)) ORDER BY created_at DESC, id DESC
+  `, [d1JsonStringSet(activityIds), d1JsonStringSet(activityIds)]) : []
   const outcomes = page.map((row): BusinessOutcome => {
     const parsed: unknown = JSON.parse(row.payload_json)
     if (!isRecord(parsed)) invalidEvidence(row, 'Business activity has no object evidence')
@@ -139,7 +142,7 @@ export async function listBusinessOutcomes(
       const kind = text(payload.entity_type), id = text(payload.entity_id)
       if (!kind || !id) invalidEvidence(row, 'Measured conversion has no canonical subject')
       subject = { kind, id }
-    } else if (row.request_id && row.source_table === 'activity_entries') {
+    } else if (row.request_id && row.source_table === 'messages') {
       const operationalId = text(payload.operational_booking_id)
       if (operationalId) {
         if (row.request_kind !== 'booking') invalidEvidence(row, 'Operational activity has no valid recorded request kind')
@@ -153,7 +156,7 @@ export async function listBusinessOutcomes(
     if (message && (!row.request_id || !['web', 'email', 'airbnb', 'whatsapp'].includes(row.channel ?? ''))) {
       invalidEvidence(row, 'Message activity has no supported canonical destination')
     }
-    const deliveries = receipts.filter(receipt => receipt.entry_id === row.source_id
+    const deliveries = receipts.filter(receipt => (receipt.message_id === row.source_id || receipt.activity_entry_id === row.source_id)
       && (!message || receipt.channel === row.channel))
     if (deliveries.some(receipt => receipt.provider === 'channex' && isDeliverySent(receipt) && !receipt.provider_message_id?.trim())) {
       throw new HTTPError({ statusCode: 500, message: 'A successful channel reply has no provider message ID', data: { code: 'CHANNEL_RECEIPT_INVALID', field: 'delivery.provider_message_id' } })
@@ -168,7 +171,7 @@ export async function listBusinessOutcomes(
         ? payload.state === 'failed' ? 'failed' : 'verified'
         : 'verified'
     const outcome: BusinessOutcome = {
-      id: row.source_table === 'activity_entries' ? row.source_id : `${row.source_table}:${row.source_id}`,
+      id: ledger(row) ? row.source_id : `${row.source_table}:${row.source_id}`,
       source: { table: row.source_table, id: row.source_id }, event: row.event_name, subject,
       actor: { kind: row.actor_kind, userId: row.actor_user_id }, occurredAt: row.occurred_at,
       state: providerStatus === 'unconfirmed' ? 'unknown' : text(payload.state) ?? text(payload.afterStatus) ?? text(payload.status) ?? text(after.status),
@@ -182,7 +185,7 @@ export async function listBusinessOutcomes(
           providerMessageId: receipt.provider_message_id })),
       },
     }
-    const details = row.source_table === 'activity_entries' ? {
+    const details = ledger(row) ? {
       ...metadata,
       ...(Object.hasOwn(payload, 'beforeState') ? { beforeState: payload.beforeState } : {}),
       ...(Object.hasOwn(payload, 'afterState') ? { afterState: payload.afterState } : {}),
@@ -192,7 +195,7 @@ export async function listBusinessOutcomes(
       outcome.requestedFields = metadata.changed_fields.filter((field): field is string => typeof field === 'string')
     }
     const operationId = text(metadata.operation_id)
-    if (operationId) outcome.references.push({ kind: 'activity_entry', id: operationId })
+    if (operationId) outcome.references.push({ kind: 'operation', id: operationId })
     const financialPaymentId = text(payload.payment_id)
     if (financialPaymentId) outcome.references.push({ kind: 'payment', id: financialPaymentId })
     const paymentId = text(metadata.payment_id)
@@ -235,7 +238,7 @@ export async function listBusinessOutcomes(
   return {
     outcomes, pagination: { limit, offset, hasMore, nextOffset: hasMore ? offset + limit : null },
     coverage: {
-      supportedEvents: BUSINESS_OUTCOME_EVENTS, sources: ['activity_entries', 'post_publications', 'reviews', 'analytics_events'],
+      supportedEvents: BUSINESS_OUTCOME_EVENTS, sources: ['activity_entries', 'messages', 'post_publications', 'reviews', 'analytics_events'],
       attribution: 'recorded_actor_only', article: 'persisted_change_only', webReply: 'stored_message_only',
       externalReply: 'provider_acceptance_requires_receipt', verification: 'only_the_named_evidence_basis',
       unverified: ['public_visibility', 'operation_completion', 'recipient_notification', 'conversation_resolution', 'business_goal_achievement', 'attendance_or_fulfilment', 'causal_revenue_attribution'],
@@ -347,19 +350,19 @@ export async function readBookingWelcomes(db: DbClient, organizationId: string, 
   const now = input.now.toISOString(), until = new Date(input.now.getTime() + UPCOMING_RESERVATION_DAYS * 86_400_000).toISOString()
   const only = (column: string, value: string | undefined) => value === undefined ? '' : `AND ${column} = ?`
   const rows = await queryAll<WelcomeRow>(db, `
-    SELECT br.unit, br.product_kind, br.id AS record_id, br.request_id, br.status, br.starts_at, br.ends_at, br.timezone,
+    SELECT br.unit, br.product_kind, br.id AS record_id, r.id AS request_id, br.status, br.starts_at, br.ends_at, br.timezone,
       br.product_id, br.product_name, br.location_id, json_extract(r.payload_json, '$.guest.name') AS guest_name,
       p.details_json, c.directions, c.wifi_network, c.wifi_password, c.house_manual
     FROM ${BOOKING_RECORDS_SQL} br
-    JOIN requests r ON r.id = br.request_id AND r.organization_id = br.organization_id
+    JOIN conversations r ON r.booking_id = br.id AND r.kind = 'booking' AND r.organization_id = br.organization_id
     JOIN products p ON p.id = br.product_id AND p.organization_id = br.organization_id
     LEFT JOIN product_stay_configs c ON br.unit = 'nights' AND c.organization_id = br.organization_id AND c.product_id = br.product_id
     WHERE br.organization_id = ? AND br.status = 'confirmed' AND br.starts_at BETWEEN ? AND ?
       AND (json_extract(p.details_json, '$.preparation') IS NOT NULL OR json_array_length(p.details_json, '$.what_to_bring') > 0
         OR COALESCE(c.directions, c.wifi_network, c.wifi_password, c.house_manual) IS NOT NULL)
-      AND r.archived_at IS NULL AND r.blocked_at IS NULL
+      AND r.blocked_at IS NULL
       -- The client has had no business message in this conversation since they booked.
-      AND NOT EXISTS (SELECT 1 FROM activity_entries e WHERE e.request_id = r.id AND e.kind = 'message' AND e.actor_kind = 'member' AND e.occurred_at >= br.created_at)
+      AND NOT EXISTS (SELECT 1 FROM messages e WHERE e.conversation_id = r.id AND e.author_kind = 'member' AND e.occurred_at >= br.created_at)
       ${only('r.id', input.requestId)} ${only('br.location_id', input.locationId)}
     ORDER BY br.starts_at, br.id`,
   [organizationId, new Date(input.now.getTime() - 2 * 86_400_000).toISOString(), until, ...[input.requestId, input.locationId].filter((value): value is string => value !== undefined)])
@@ -501,7 +504,7 @@ export async function readBusinessProgressReference(
     const [blocks, categories, activity, documentMedia] = await Promise.all([
       queryAll<{ id: string } & Record<string, unknown>>(db, 'SELECT id, parent_block_id, type, position, level, data_json FROM content_blocks WHERE document_id = ? ORDER BY position, id', [document.id]),
       queryAll(db, 'SELECT category_id FROM article_category_articles WHERE article_id = ? ORDER BY category_id', [document.id]),
-      queryFirst<{ id: string }>(db, `SELECT id FROM activity_entries WHERE scope_kind = 'organization' AND organization_id = ? AND kind = 'audit'
+      queryFirst<{ id: string }>(db, `SELECT id FROM activity_entries WHERE organization_id = ?
         AND event_name IN (SELECT value FROM json_each(?)) AND json_extract(payload_json, '$.entityType') = 'article' AND json_extract(payload_json, '$.entityId') = ?
         ORDER BY occurred_at DESC, id DESC LIMIT 1`, [principal.organizationId, ARTICLE_EVENTS_JSON, document.id]),
       readMediaPlacements(db, { organizationId: principal.organizationId, ownerType: 'content_document', ownerIds: [document.id] }),
@@ -524,13 +527,13 @@ export async function readBusinessProgressReference(
   if (!request) throw missing()
   const [commitment, latestGuest, latestReply, latestMember] = await Promise.all([
     getThreadOperationalRecord(db, request.id),
-    queryFirst<{ id: string }>(db, `SELECT id FROM activity_entries WHERE request_id = ? AND actor_kind = 'guest' AND kind IN ('submission', 'message') ORDER BY sequence DESC LIMIT 1`, [request.id]),
-    queryFirst<{ id: string }>(db, "SELECT id FROM activity_entries WHERE request_id = ? AND actor_kind = 'member' AND kind = 'message' AND event_name = 'thread.member_reply' ORDER BY sequence DESC LIMIT 1", [request.id]),
-    queryFirst<{ id: string }>(db, "SELECT id FROM activity_entries WHERE request_id = ? AND actor_kind = 'member' AND kind = 'message' ORDER BY sequence DESC LIMIT 1", [request.id]),
+    queryFirst<{ id: string }>(db, `SELECT id FROM messages WHERE conversation_id = ? AND author_kind = 'guest' ORDER BY sequence DESC LIMIT 1`, [request.id]),
+    queryFirst<{ id: string }>(db, "SELECT id FROM messages WHERE conversation_id = ? AND author_kind = 'member' AND event_name = 'thread.member_reply' ORDER BY sequence DESC LIMIT 1", [request.id]),
+    queryFirst<{ id: string }>(db, "SELECT id FROM messages WHERE conversation_id = ? AND author_kind = 'member' ORDER BY sequence DESC LIMIT 1", [request.id]),
   ])
-  const deliveries = latestReply ? await queryAll<GuestThreadDeliveryRow>(db, "SELECT * FROM guest_thread_deliveries WHERE entry_id = ? AND purpose = 'member_reply' ORDER BY id", [latestReply.id]) : []
+  const deliveries = latestReply ? await queryAll<GuestThreadDeliveryRow>(db, "SELECT * FROM guest_thread_deliveries WHERE message_id = ? AND purpose = 'member_reply' ORDER BY id", [latestReply.id]) : []
   const evidence = {
-    kind: 'guest_thread' as const, archivedAt: request.archived_at, blockedAt: request.blocked_at,
+    kind: 'guest_thread' as const, blockedAt: request.blocked_at,
     latestGuestEntryId: latestGuest?.id ?? null, latestReplyEntryId: latestReply?.id ?? null,
     latestMemberEntryId: latestMember?.id ?? null,
     commitment: commitment ? { kind: commitment.unit === 'nights' ? 'stay' as const : 'booking' as const, id: commitment.id, status: commitment.status, startsAt: commitment.starts_at, endsAt: commitment.ends_at } : null,

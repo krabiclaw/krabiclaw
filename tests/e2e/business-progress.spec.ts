@@ -145,7 +145,7 @@ test('authored goals and evidence-bound opportunity decisions follow persisted w
     await responseBody(await member.post('/api/public/contact', { headers: { 'x-preview-tenant': slug }, data: {
       name: guestName, email: 'buyer@playwright.example', subject: 'general', consent: true, message: 'Which documents should I bring to my legal consultation?',
     } }), 201)
-    const inbox = await responseBody<{ threads: InboxRow[] }>(await request.get(`/api/dashboard/organizations/${organization.id}/guest-threads`, { params: { type: 'contact' } }))
+    const inbox = await responseBody<{ threads: InboxRow[] }>(await request.get(`/api/dashboard/organizations/${organization.id}/conversations`, { params: { type: 'contact' } }))
     const contacts = inbox.threads.filter(thread => thread.guestName === guestName)
     expect(contacts).toHaveLength(1)
     const threadId = contacts[0]!.id

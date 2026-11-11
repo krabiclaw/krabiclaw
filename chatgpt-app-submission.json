@@ -632,6 +632,18 @@
         "open_world_justification": "Reads one post from the exact saved Page, Instagram account or Discord channel and validates that target."
       }
     },
+    "get_conversation": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Reads one conversation the caller may see — a guest conversation’s guest, answers, booking, messages and delivery receipts, or a team conversation’s people and messages — without marking it read.",
+        "destructive_justification": "Does not send a message, change participants, advance the caller read position or modify a booking.",
+        "open_world_justification": "Reads one conversation and its private records within the caller authorized business scope."
+      }
+    },
     "get_google_ads_campaign": {
       "annotations": {
         "readOnlyHint": true,
@@ -642,18 +654,6 @@
         "read_only_justification": "Reads one campaign’s status, budget, ad groups, keywords and copy in the connected account.",
         "destructive_justification": "Does not change campaign status, budget, keywords or ad copy.",
         "open_world_justification": "Reads one campaign only from the business connected Google Ads customer account."
-      }
-    },
-    "get_guest_conversation": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Reads saved guest messages, answers, operational records, attachments and delivery receipts without changing the conversation.",
-        "destructive_justification": "Does not change conversation state, send guest replies or modify the operational booking.",
-        "open_world_justification": "Reads one guest conversation and its private records within the caller authorized business scope."
       }
     },
     "get_guest_messaging_context": {
@@ -884,18 +884,6 @@
         "open_world_justification": "Reads the saved calendar and stay claims for one authorized home in the selected business."
       }
     },
-    "get_team_conversation": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Reads messages, photos and notification receipts without marking the conversation read.",
-        "destructive_justification": "Does not send a message, remove participants or advance the caller read position.",
-        "open_world_justification": "Reads only an internal conversation the signed-in workspace member participates in."
-      }
-    },
     "get_website_draft": {
       "annotations": {
         "readOnlyHint": true,
@@ -980,6 +968,30 @@
         "open_world_justification": "Reads only collections owned by the selected business and optional named location."
       }
     },
+    "list_conversation_recipients": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Reads actual members available in the selected private workspace.",
+        "destructive_justification": "Does not create conversations, invite people or change team membership.",
+        "open_world_justification": "Reads existing members eligible for conversations in the selected private workspace."
+      }
+    },
+    "list_conversations": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Reads the authorized Messages list — guest, Airbnb Support and the caller’s team conversations — with each row’s last-message preview and the caller’s unread counts.",
+        "destructive_justification": "Does not archive conversations, mark messages read, reply or change bookings.",
+        "open_world_justification": "Reads the business private inbox subject to the caller conversation access."
+      }
+    },
     "list_google_ads_campaigns": {
       "annotations": {
         "readOnlyHint": true,
@@ -990,18 +1002,6 @@
         "read_only_justification": "Reads campaigns and metrics in the organization’s connected Google Ads account.",
         "destructive_justification": "Does not create campaigns, enable delivery or change advertising budgets.",
         "open_world_justification": "Reads campaigns and metrics only in the business configured Google Ads customer account."
-      }
-    },
-    "list_guest_conversations": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Reads the authorized inbox’s conversation labels and reply status without returning message text or intake answers in bulk.",
-        "destructive_justification": "Does not archive conversations, mark messages read, reply or change bookings.",
-        "open_world_justification": "Reads the business private inbox subject to the caller conversation access."
       }
     },
     "list_location_products": {
@@ -1268,31 +1268,7 @@
         "open_world_justification": "Reads only the selected private workspace."
       }
     },
-    "list_team_conversation_recipients": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Reads actual members available in the selected private workspace.",
-        "destructive_justification": "Does not create conversations, invite people or change team membership.",
-        "open_world_justification": "Reads existing members eligible for conversations in the selected private workspace."
-      }
-    },
-    "list_team_conversations": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Reads only the caller’s internal conversations and their saved unread state.",
-        "destructive_justification": "Does not send messages, alter participants or advance read positions.",
-        "open_world_justification": "Reads only internal conversations the signed-in member already participates in."
-      }
-    },
-    "mark_team_conversation_read": {
+    "mark_conversation_read": {
       "annotations": {
         "readOnlyHint": false,
         "openWorldHint": false,
@@ -1300,11 +1276,11 @@
       },
       "justifications": {
         "read_only_justification": "Persists the caller’s read position for the selected conversation.",
-        "destructive_justification": "Overwrites the caller’s existing last-read timestamp.",
+        "destructive_justification": "Moves the caller’s own read position forward; it does not message anyone or change anyone else’s.",
         "open_world_justification": "Changes only the caller’s private read position within the workspace."
       }
     },
-    "mark_team_conversation_unread": {
+    "mark_conversation_unread": {
       "annotations": {
         "readOnlyHint": false,
         "openWorldHint": false,
@@ -1312,7 +1288,7 @@
       },
       "justifications": {
         "read_only_justification": "Persists the caller’s read position for the selected conversation, just before its newest message from someone else.",
-        "destructive_justification": "Overwrites the caller’s existing last-read timestamp.",
+        "destructive_justification": "Moves the caller’s own read position back; it does not message anyone or change anyone else’s.",
         "open_world_justification": "Changes only the caller’s private read position within the workspace."
       }
     },
@@ -1640,18 +1616,6 @@
         "open_world_justification": "Can immediately change translations in a published website language."
       }
     },
-    "reply_to_guest": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": true,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Saves a reply and dispatches its text or photo through the guest conversation’s channel.",
-        "destructive_justification": "Sends text or a photo to the guest that cannot be recalled.",
-        "open_world_justification": "Can download the supplied ChatGPT attachment and send through email, Airbnb or guest inbox."
-      }
-    },
     "request_product_booking_change": {
       "annotations": {
         "readOnlyHint": false,
@@ -1700,16 +1664,16 @@
         "open_world_justification": "Schedules communication to a guest through their conversation channel."
       }
     },
-    "send_team_message": {
+    "send_message": {
       "annotations": {
         "readOnlyHint": false,
         "openWorldHint": true,
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Persists the message or photo and sends configured participant notifications.",
-        "destructive_justification": "Sends a message and email, WhatsApp or push notifications that cannot be recalled.",
-        "open_world_justification": "Can download an optional photo from the host-supplied HTTPS attachment URL and its redirects; conversation members and notification recipients remain within the selected private workspace."
+        "read_only_justification": "Saves the caller’s message and sends its text or photo through the conversation: the guest’s channel, or the team participants’ notifications.",
+        "destructive_justification": "Sends text or a photo that cannot be recalled.",
+        "open_world_justification": "Can download the supplied ChatGPT attachment and send through email, Airbnb, the guest inbox, WhatsApp or push within the selected private workspace."
       }
     },
     "set_collection_products": {
@@ -1736,27 +1700,15 @@
         "open_world_justification": "Changes the public Schedule page and can direct clients to an external scheduler."
       }
     },
-    "set_guest_conversation_archived": {
+    "set_conversation_archived": {
       "annotations": {
         "readOnlyHint": false,
         "openWorldHint": false,
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Persists the selected conversation’s archived or restored state.",
-        "destructive_justification": "Overwrites its inbox archive state; it does not cancel the booking or send a guest message.",
-        "open_world_justification": "Operates only in the selected private business inbox."
-      }
-    },
-    "set_guest_conversation_read": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Persists whether the selected conversation is unread for the caller.",
-        "destructive_justification": "Overwrites the caller’s own read state for that conversation; it does not message the guest or change anyone else’s.",
+        "read_only_justification": "Persists the caller’s own archived or restored state for the selected conversation, and for a guest conversation dismisses its open reply task.",
+        "destructive_justification": "Overwrites the caller’s own archive state; it does not cancel a booking, send a message or change anyone else’s Messages.",
         "open_world_justification": "Operates only in the selected private business inbox."
       }
     },
@@ -1868,14 +1820,14 @@
         "open_world_justification": "Writes only to the selected private workspace."
       }
     },
-    "start_team_conversation": {
+    "start_conversation": {
       "annotations": {
         "readOnlyHint": false,
         "openWorldHint": false,
         "destructiveHint": false
       },
       "justifications": {
-        "read_only_justification": "Creates an internal conversation with the chosen members, or reuses the existing conversation with the same members and subject.",
+        "read_only_justification": "Creates a team conversation with the chosen members, or reuses the existing conversation with the same members and subject.",
         "destructive_justification": "Only adds a conversation and its members; it sends no message and removes no existing member.",
         "open_world_justification": "Only targets actual members of the selected private workspace."
       }
@@ -1914,6 +1866,18 @@
         "read_only_justification": "Edits only supplied name/description/order fields on one collection.",
         "destructive_justification": "Overwrites existing collection metadata and display order.",
         "open_world_justification": "Can immediately change collection metadata in the public catalog."
+      }
+    },
+    "update_conversation_group": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Persists a manual team group’s name or participant changes.",
+        "destructive_justification": "Can overwrite its name or revoke a participant’s access and expose history to added members.",
+        "open_world_justification": "Only acts on the selected private workspace group and its real workspace members."
       }
     },
     "update_google_ads_campaign": {
@@ -2142,18 +2106,6 @@
         "read_only_justification": "Changes a stored task's assignee, window, title or notes.",
         "destructive_justification": "Overwrites the task's saved assignment or schedule and notifies a new assignee.",
         "open_world_justification": "Reassignment can send configured email, WhatsApp or push notifications to the new assignee through external delivery services."
-      }
-    },
-    "update_team_group": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Persists a manual group’s name or participant changes.",
-        "destructive_justification": "Can overwrite its name or revoke a participant’s access and expose history to added members.",
-        "open_world_justification": "Only acts on the selected private workspace group and its real workspace members."
       }
     }
   },

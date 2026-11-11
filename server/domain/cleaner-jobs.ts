@@ -1,8 +1,8 @@
 import { d1JsonStringSet, queryAll, queryFirst, type DbClient } from '~/server/db'
 import { isOrganizationWideRole } from '~/server/utils/member-access'
 import { jobThreadParticipantsKey, postAutomaticTeamMessage, reseatAutomaticThread } from '~/server/domain/team-messages'
-import { JOB_TASK_SQL, isJobTask, jobSubject, taskViewForUser, type JobSubject, type TaskRow, type TaskView } from '~/server/domain/tasks'
-import { notifyTaskStarting } from '~/server/utils/notifications'
+import { JOB_TASK_SQL, isJobTask, jobKey, jobSubject, taskViewForUser, type JobSubject, type TaskRow, type TaskView } from '~/server/domain/tasks'
+import { notifyTaskStarting, taskStartingSent } from '~/server/utils/notifications'
 import { addLocalDays, localDateAt, localDateTimeToInstant } from '~/utils/timezone'
 import type { CloudflareEnv } from '~/server/utils/auth'
 
@@ -39,8 +39,6 @@ interface Roster {
   /** The owners and admins, as users: told when a job runs late. */
   hosts: string[]
 }
-
-export const jobKey = (task: Pick<TaskRow, 'id' | 'product_id'>) => `job:${task.id}:${task.product_id}`
 
 function rosterFor(task: TaskRow, members: Member[]): Roster | null {
   const hosts = members.filter(member => isOrganizationWideRole(member.role))
@@ -92,9 +90,9 @@ export async function runOrganizationJobs(env: CloudflareEnv, db: DbClient, orga
   ])
   const subjectIds = [...new Set(tasks.filter(isJobTask).map(task => jobSubject(task).id))]
   const posted = subjectIds.length ? await queryAll<{ thread_id: string; subject_id: string; participants_key: string; idempotency_key: string }>(db, `
-    SELECT m.thread_id, t.booking_id AS subject_id, t.participants_key, m.idempotency_key FROM team_messages m
-      JOIN team_threads t ON t.organization_id = m.organization_id AND t.id = m.thread_id
-     WHERE t.organization_id = ? AND t.booking_id IN (SELECT value FROM json_each(?)) AND m.automatic = 1`, [organizationId, d1JsonStringSet(subjectIds)]) : []
+    SELECT m.conversation_id AS thread_id, t.booking_id AS subject_id, t.participants_key, json_extract(m.payload_json, '$.key') AS idempotency_key FROM messages m
+      JOIN conversations t ON t.organization_id = m.organization_id AND t.id = m.conversation_id
+     WHERE t.organization_id = ? AND t.kind = 'team' AND t.booking_id IN (SELECT value FROM json_each(?)) AND m.author_kind = 'krabiclaw'`, [organizationId, d1JsonStringSet(subjectIds)]) : []
   const keysByThread = new Map<string, Set<string>>()
   const threads = new Map<string, { subject_id: string; participants_key: string }>()
   for (const row of posted) {
@@ -103,8 +101,8 @@ export async function runOrganizationJobs(env: CloudflareEnv, db: DbClient, orga
   }
   const seatUsers = new Map<string, string[]>()
   if (threads.size) {
-    for (const seat of await queryAll<{ thread_id: string; user_id: string }>(db, `SELECT s.thread_id, m.userId AS user_id FROM team_thread_members s
-        JOIN member m ON m.id = s.member_id AND m.organizationId = s.organization_id WHERE s.organization_id = ? AND s.thread_id IN (SELECT value FROM json_each(?))`,
+    for (const seat of await queryAll<{ thread_id: string; user_id: string }>(db, `SELECT s.conversation_id AS thread_id, s.user_id FROM conversation_participants s
+        JOIN member m ON m.userId = s.user_id AND m.organizationId = s.organization_id WHERE s.organization_id = ? AND s.conversation_id IN (SELECT value FROM json_each(?))`,
     [organizationId, d1JsonStringSet([...threads.keys()])])) seatUsers.set(seat.thread_id, [...seatUsers.get(seat.thread_id) ?? [], seat.user_id])
   }
   const hostUsers = members.filter(member => isOrganizationWideRole(member.role)).map(member => member.userId)
@@ -115,17 +113,15 @@ export async function runOrganizationJobs(env: CloudflareEnv, db: DbClient, orga
   }
   const pending: Date[] = []
   const failures: unknown[] = []
-  /** The task alert, once, on the morning of. */
+  /** The task alert, once, on the morning of: a send the task already has for that day is not repeated. */
   const alertOnTheDay = async (task: TaskRow, recipients: readonly string[]) => {
     const morning = reminders(task).find(reminder => reminder.kind === 'morning')
     if (!morning) return
     if (morning.at > now) { pending.push(morning.at); return }
     if (now >= morning.until) return
     const day = localDateAt(new Date(task.starts_at ?? task.due_at!), task.timezone)
-    const sent = recipients.length ? await queryAll<{ dedupe_key: string }>(db, "SELECT dedupe_key FROM activity_entries WHERE organization_id = ? AND kind = 'notification' AND dedupe_key IN (SELECT value FROM json_each(?))",
-      [organizationId, d1JsonStringSet(recipients.map(userId => `notification:task-starting:${task.id}:${day}:${userId}`))]) : []
-    const unsent = recipients.filter(userId => !sent.some(row => row.dedupe_key === `notification:task-starting:${task.id}:${day}:${userId}`))
-    if (unsent.length) await notifyTaskStarting(env, db, { organizationId, taskId: task.id, day, recipientUserIds: unsent })
+    if (!recipients.length || await taskStartingSent(db, task.id, day)) return
+    await notifyTaskStarting(env, db, { organizationId, taskId: task.id, day, recipientUserIds: [...recipients] })
   }
   for (const task of tasks) {
     try {

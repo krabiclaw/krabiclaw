@@ -4,8 +4,8 @@ import type { CloudflareEnv } from '~/server/utils/auth'
 import { isCurrencyCode } from '~/shared/currencies'
 import { ownerPaymentMessage, guestPaymentMessage, subscriptionPlanMessage, type GuestPaymentNotificationKind, type PaymentNotificationEvent } from '~/server/notifications/payment-events'
 import { notifyFinancialNotification, notifyOwner } from '~/server/utils/notifications'
-import { appendEntry } from '~/server/domain/guest-threads/entries'
-import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
+import { appendMessage } from '~/server/domain/conversations'
+import { publishConversationEvent } from '~/server/cloudflare/guest-inbox-events'
 import { dashboardOrigin } from '~/server/utils/dashboard-notification-links'
 import type { Payment } from './index'
 import { buyerPaymentActivityPath } from './buyer'
@@ -36,7 +36,7 @@ export async function notifyPaymentFinancialEvent(db: DbClient, stripe: Stripe, 
     // The address the guest booked with, which their confirmation went to.
     const booked = snapshot.stay
       ? snapshot.stay.guest?.email
-      : (await queryFirst<{ email: string | null }>(db, `SELECT json_extract(r.payload_json, '$.guest.email') AS email FROM payment_checkout_holds h JOIN requests r ON r.id = h.request_id AND r.organization_id = h.organization_id WHERE h.payment_id = ? AND h.organization_id = ?`, [payment.id, payment.organization_id]))?.email
+      : (await queryFirst<{ email: string | null }>(db, `SELECT json_extract(r.payload_json, '$.guest.email') AS email FROM payment_checkout_holds h JOIN conversations r ON r.id = h.conversation_id AND r.organization_id = h.organization_id WHERE h.payment_id = ? AND h.organization_id = ?`, [payment.id, payment.organization_id]))?.email
     if (typeof booked !== 'string' || !booked) throw new Error('Paid checkout has no guest email to notify')
     email = booked
   } else if (guestKind) {
@@ -51,11 +51,11 @@ export async function notifyPaymentFinancialEvent(db: DbClient, stripe: Stripe, 
   const eventKey = `payments:${payment.stripe_account_id}:${payment.livemode}:${input.nativeId}:${input.status}:${input.kind}`
   // A session booking's checkout waits in its guest's conversation; a stay's conversation opens when its payment is captured, with its booking.
   const nights = Boolean(snapshot.stay)
-  const hold = checkout && !nights && organization ? await queryFirst<{ request_id: string | null }>(db, 'SELECT request_id FROM payment_checkout_holds WHERE payment_id=? AND organization_id=?', [payment.id, payment.organization_id]) : null
-  if (checkout && !nights && organization && !hold?.request_id) throw new Error('Booking payment notification has no canonical guest request')
-  const booking = checkout && payment.subject_id && organization ? await queryFirst<{ request_id: string | null }>(db, 'SELECT request_id FROM bookings WHERE organization_id=? AND id=?', [payment.organization_id, payment.subject_id]) : null
-  const threadId = hold?.request_id ?? booking?.request_id ?? null
-  if (booking && booking.request_id !== threadId) throw new Error('Booking payment notification request does not match its operational booking')
+  const hold = checkout && !nights && organization ? await queryFirst<{ conversation_id: string | null }>(db, 'SELECT conversation_id FROM payment_checkout_holds WHERE payment_id=? AND organization_id=?', [payment.id, payment.organization_id]) : null
+  if (checkout && !nights && organization && !hold?.conversation_id) throw new Error('Booking payment notification has no guest conversation')
+  const booking = checkout && payment.subject_id && organization ? await queryFirst<{ request_id: string | null }>(db, "SELECT (SELECT c.id FROM conversations c WHERE c.booking_id = b.id AND c.kind = 'booking') AS request_id FROM bookings b WHERE b.organization_id=? AND b.id=?", [payment.organization_id, payment.subject_id]) : null
+  const threadId = hold?.conversation_id ?? booking?.request_id ?? null
+  if (booking && booking.request_id !== threadId) throw new Error('Booking payment notification conversation does not match its booking')
   const deepLink = organization ? `${dashboardOrigin(env, { orgSlug: organization.slug, locationSlug: null })}${booking?.request_id ? (nights ? `/bookings/stay/${encodeURIComponent(payment.subject_id!)}` : `/bookings/booking/${encodeURIComponent(booking.request_id)}`) : `/earnings/transactions/${encodeURIComponent(payment.id)}`}` : null
   // A purchase refunded because its capacity had gone is refunded without being asked, so the buyer is told why.
   const refundedForCapacity = (input.kind === 'refund_pending' || input.kind === 'refund_succeeded') && await queryFirst(db, "SELECT 1 FROM payment_refunds WHERE payment_id=? AND stripe_refund_id=? AND idempotency_key LIKE 'unfulfillable:%'", [payment.id, input.nativeId])
@@ -68,15 +68,15 @@ export async function notifyPaymentFinancialEvent(db: DbClient, stripe: Stripe, 
   const ownerMessage = deepLink ? ownerPaymentMessage({ ...event, action: { url: deepLink, label: 'View details' } }) : undefined
   let sourceEntryId: string | null = null
   if (threadId && ownerMessage) {
-    const entry = await appendEntry(db, {
-      threadId, kind: 'operation', actorKind: 'system', channel: 'system',
+    const message = await appendMessage(db, {
+      conversationId: threadId, authorKind: 'krabiclaw', authorUserId: null,
       eventName: `payment.${input.kind}`,
       body: [ownerMessage.title, ...ownerMessage.facts.filter(fact => fact.key === 'amount' || fact.key === 'productTitle').map(fact => `${fact.label}: ${fact.value}`)].join('\n'),
-      payloadJson: { payment_id: payment.id, native_object_id: input.nativeId, status: input.status, amount: input.amount, currency: payment.currency },
+      payload: { payment_id: payment.id, native_object_id: input.nativeId, status: input.status, amount: input.amount, currency: payment.currency },
       dedupeKey: `financial-operation:${eventKey}`,
     })
-    sourceEntryId = entry.id
-    await publishGuestInboxThreadEvent(env, db, { threadId, type: 'thread.changed' })
+    sourceEntryId = message.id
+    await publishConversationEvent(env, db, { conversationId: threadId, type: 'MESSAGE_CREATE' })
   }
   // An account opens its own activity; a guest who never made one reads Stripe's receipt.
   const buyer = guestKind ? payment.buyer_user_id : null
@@ -86,8 +86,11 @@ export async function notifyPaymentFinancialEvent(db: DbClient, stripe: Stripe, 
     : payment.receipt_url?{url:payment.receipt_url,label:'View receipt'}:null
   await notifyFinancialNotification(env, db, {
     organizationId: organization ? payment.organization_id : null,
-    eventKey, ownerMessage, sourceEntryId, threadId, deepLink,
-    guest: guestKind ? { userId: payment.buyer_user_id, email, message: guestPaymentMessage({ ...details, kind: guestKind, action: guestAction }) } : undefined,
+    eventKey, ownerMessage, deepLink,
+    // The payment's message in its booking's conversation; otherwise the audit row of the payment event.
+    source: threadId && sourceEntryId ? { conversationId: threadId, messageId: sourceEntryId } : null,
+    entity: { type: 'payment', id: payment.id },
+    guest: guestKind ? { email, message: guestPaymentMessage({ ...details, kind: guestKind, action: guestAction }) } : undefined,
   })
 }
 
@@ -121,6 +124,7 @@ export async function notifyPayoutState(db: DbClient, env: CloudflareEnv, scope:
     organizationId: scope.organizationId,
     eventKey: `payments:${scope.stripeAccountId}:${Number(scope.livemode)}:${payout.id}:${payout.status}`,
     ownerMessage: ownerPaymentMessage({ ...event, action: details.action }),
+    entity: { type: 'payout', id: payout.id },
     deepLink,
   })
 }

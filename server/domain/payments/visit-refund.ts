@@ -15,7 +15,7 @@ export async function visitRefundQueries(db:DbClient,input:{action:VisitRefundAc
  const payment=await queryFirst<Payment>(db,"SELECT * FROM payments WHERE organization_id=? AND subject_type='booking' AND subject_id=? AND captured_amount>refunded_amount",[input.organizationId,input.bookingId])
  if(!payment)return {queries:[],guard:null}
  if(input.financialWritesAllowed===false){
-  const destination=await queryFirst<{slug:string;request_id:string|null;nights:number}>(db,`SELECT o.slug,b.request_id,b.product_session_id IS NULL AS nights FROM organization o JOIN bookings b ON b.organization_id=o.id WHERE o.id=? AND b.id=?`,[input.organizationId,input.bookingId])
+  const destination=await queryFirst<{slug:string;request_id:string|null;nights:number}>(db,`SELECT o.slug,(SELECT c.id FROM conversations c WHERE c.booking_id=b.id AND c.kind='booking') AS request_id,b.product_session_id IS NULL AS nights FROM organization o JOIN bookings b ON b.organization_id=o.id WHERE o.id=? AND b.id=?`,[input.organizationId,input.bookingId])
   if(!destination?.slug||!destination.request_id)throw new HTTPError({statusCode:409,statusMessage:'Paid booking dashboard destination is unavailable'})
   const url=destination.nights===1?`/dashboard/${encodeURIComponent(destination.slug)}/bookings/stay/${encodeURIComponent(input.bookingId)}`:`/dashboard/${encodeURIComponent(destination.slug)}/bookings/booking/${encodeURIComponent(destination.request_id)}`
   throw new HTTPError({statusCode:409,statusMessage:`This paid booking requires a refund before ${input.action==='reject'?'rejection':'cancellation'} can complete. Open its dashboard details to review and approve the financial action. The booking has not changed.`,data:{code:'financial_action_required',dashboard_url:url}})
@@ -59,7 +59,7 @@ export async function guestVisitRefundQueries(db: DbClient, input: {
  }
  return { guard, queries: [{
   query: `INSERT INTO payment_refunds(id,payment_id,idempotency_key,amount,reason,status,created_by,created_at,updated_at)
-    SELECT ?,?,?,NULL,'requested_by_customer','queued',?,?,? WHERE EXISTS (SELECT 1 FROM activity_entries WHERE request_id = ? AND dedupe_key = ?)
+    SELECT ?,?,?,NULL,'requested_by_customer','queued',?,?,? WHERE EXISTS (SELECT 1 FROM messages WHERE conversation_id = ? AND dedupe_key = ?)
     ON CONFLICT(idempotency_key) DO NOTHING`,
   params: [crypto.randomUUID(), payment.id, key, input.buyerUserId ?? null, input.now, input.now, input.requestId, `booking:${input.bookingId}:guest-cancel`],
  }] }
@@ -71,11 +71,11 @@ export async function canRetryGuestVisitRefund(db: DbClient, input: {
 }): Promise<boolean> {
  return Boolean(await queryFirst(db, `SELECT f.id FROM payment_refunds f JOIN payments p ON p.id = f.payment_id
   JOIN bookings v ON v.id = p.subject_id AND v.organization_id = p.organization_id
-  JOIN requests r ON r.id = v.request_id AND r.organization_id = v.organization_id AND r.kind = 'booking'
+  JOIN conversations r ON r.booking_id = v.id AND r.organization_id = v.organization_id AND r.kind = 'booking'
   WHERE p.organization_id = ? AND p.subject_type = 'booking' AND p.subject_id = ? AND r.id = ?
     AND v.status = 'cancelled' AND json_extract(r.payload_json, '$.cancellation.used_at') IS NOT NULL
     AND f.idempotency_key = ? AND f.status IN ('queued', 'creating')
-    AND EXISTS (SELECT 1 FROM activity_entries WHERE request_id = r.id AND dedupe_key = ?)
+    AND EXISTS (SELECT 1 FROM messages WHERE conversation_id = r.id AND dedupe_key = ?)
     ${input.buyerUserId ? 'AND r.user_id = ? AND v.user_id = ? AND p.buyer_user_id = ?' : ''}`,
  [input.organizationId, input.bookingId, input.requestId, guestVisitRefundKey(input.bookingId), `booking:${input.bookingId}:guest-cancel`, ...(input.buyerUserId ? [input.buyerUserId, input.buyerUserId, input.buyerUserId] : [])]))
 }

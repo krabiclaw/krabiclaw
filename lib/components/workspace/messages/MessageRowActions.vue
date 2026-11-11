@@ -4,7 +4,7 @@
        Messages), the row's own menu on a right-click or long press, and an
        envelope that appears on hover for a mouse (Gmail). -->
   <slot v-if="!enabled" />
-  <UContextMenu v-else :items="[{ label, icon, onSelect: () => emit('toggle') }]">
+  <UContextMenu v-else :items="[{ label, icon, onSelect: () => emit('toggle') }, ...(archivable ? [{ label: 'Archive', icon: 'i-lucide-archive', onSelect: () => emit('archive') }] : [])]">
     <div
       ref="row"
       class="group relative touch-pan-y overflow-hidden rounded-xl"
@@ -41,8 +41,9 @@
 import { usePointerSwipe } from '@vueuse/core'
 
 // A list whose read state is not the member's own (a guest's inbox) draws its rows without the actions.
-const props = withDefaults(defineProps<{ unread: boolean; name: string; enabled?: boolean }>(), { enabled: true })
-const emit = defineEmits<{ toggle: [] }>()
+// Archive is offered where the row can be filed away (Current); the conversation's own sheet unarchives.
+const props = withDefaults(defineProps<{ unread: boolean; name: string; enabled?: boolean; archivable?: boolean }>(), { enabled: true, archivable: false })
+const emit = defineEmits<{ toggle: []; archive: [] }>()
 
 const label = computed(() => props.unread ? 'Mark as read' : 'Mark as unread')
 const icon = computed(() => props.unread ? 'i-lucide-mail-open' : 'i-lucide-mail-plus')

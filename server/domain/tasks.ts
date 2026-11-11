@@ -3,7 +3,8 @@ import type { ProductKind } from '~/shared/product-details'
 import { d1JsonStringSet, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { assertRoleAllows, assignedGuestThreadScope, assignedMemberSql, isOrganizationWideRole, locationMemberSql, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import { creationDedupeKey, creationRequestHash, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
-import { publishBusinessInvalidation, publishDashboardInvalidation } from '~/server/cloudflare/guest-inbox-events'
+import { publishBusinessInvalidation, publishConversationEvent } from '~/server/cloudflare/guest-inbox-events'
+import { messageQueries } from '~/server/domain/conversations'
 import { discardMessagePhotos, listMessagePhotos, messagePhotoPlacements, uploadMessagePhotos, MessagePhotoRejection, type MessagePhoto } from '~/server/domain/guest-threads/attachments'
 import { firstName } from '~/server/domain/guest-threads/presentation'
 import { bookingEditorPath, guestConversationPath, productPaymentPath } from '~/server/utils/dashboard-links'
@@ -29,7 +30,7 @@ export type TaskStatus = 'open' | 'done' | 'skipped' | 'cancelled'
 
 export interface TaskRow {
   id: string; organization_id: string; kind: TaskKind
-  subject_type: 'request' | 'scheduled_guest_message' | 'booking' | 'article' | 'post' | 'product' | null; subject_id: string | null
+  subject_type: 'conversation' | 'scheduled_guest_message' | 'booking' | 'article' | 'post' | 'product' | null; subject_id: string | null
   product_id: string | null; location_id: string | null; opportunity_id: string | null
   title: string | null; notes: string | null
   assigned_member_id: string | null
@@ -65,6 +66,9 @@ export function jobSubject(row: Pick<TaskRow, 'dedupe_key' | 'kind' | 'subject_t
   if (!row.subject_id || row.subject_type !== 'booking') throw new Error(`Job task ${row.dedupe_key} names no booking`)
   return { id: row.subject_id, unit: row.kind === 'turnover' || row.kind === 'stay_ready' ? 'nights' : 'slot' }
 }
+
+/** The key of a job's post in its team conversation (messages.payload_json $.key): the one place it is built. */
+export const jobKey = (task: Pick<TaskRow, 'id' | 'product_id'>) => `job:${task.id}:${task.product_id}`
 
 /** Whether a job's member hears about it in a team conversation: a member who is not an owner or admin. */
 export async function jobHasConversation(db: DbClient, organizationId: string, memberId: string | null): Promise<boolean> {
@@ -239,7 +243,7 @@ function scopeSql(viewer: TaskViewer, alias = 't'): { sql: string; params: unkno
     sql: `(${alias}.assigned_member_id = ?
       OR EXISTS (SELECT 1 FROM product_booking_configs c WHERE c.organization_id = ${alias}.organization_id AND c.product_id = ${alias}.product_id AND ${assignedMemberSql('c')})
       OR (${alias}.product_id IS NULL AND ${alias}.location_id IS NOT NULL AND ${locationMemberSql(`${alias}.organization_id`, `${alias}.location_id`)})
-      OR (${alias}.kind = 'guest_reply' AND EXISTS (SELECT 1 FROM requests r WHERE r.id = ${alias}.subject_id AND r.organization_id = ${alias}.organization_id AND ${conversation.sql})))`,
+      OR (${alias}.kind = 'guest_reply' AND EXISTS (SELECT 1 FROM conversations r WHERE r.id = ${alias}.subject_id AND r.organization_id = ${alias}.organization_id AND ${conversation.sql})))`,
     params: [viewer.memberId, ...Array(2).fill(viewer.principal.userId), ...conversation.params],
   }
 }
@@ -334,9 +338,9 @@ interface StayContextFacts extends StayFacts {
   overbooked: number
 }
 
-/** A nights booking with its guest as their conversation names them; `s` is the booking. */
-const STAY_FACTS = `s.id, s.product_id, json_extract(r.payload_json, '$.guest.name') AS guest_name, s.adults, s.children, s.starts_at, s.ends_at, s.timezone, s.request_id`
-const STAY_FACTS_FROM = 'bookings s JOIN requests r ON r.organization_id = s.organization_id AND r.id = s.request_id'
+/** A nights booking with its guest as their conversation names them; `s` is the booking, `r` its guest conversation. */
+const STAY_FACTS = `s.id, s.product_id, json_extract(r.payload_json, '$.guest.name') AS guest_name, s.adults, s.children, s.starts_at, s.ends_at, s.timezone, r.id AS request_id`
+const STAY_FACTS_FROM = "bookings s JOIN conversations r ON r.organization_id = s.organization_id AND r.booking_id = s.id AND r.kind = 'booking'"
 function stayFacts<T extends Omit<StayFacts, 'check_in_date' | 'check_out_date'>>(row: T): T & Pick<StayFacts, 'check_in_date' | 'check_out_date'> {
   if (row.adults === null || row.children === null) throw new Error(`Stay ${row.id} has no party breakdown`)
   return { ...row, check_in_date: bookingDay(row.starts_at, row.timezone), check_out_date: bookingDay(row.ends_at, row.timezone) }
@@ -364,8 +368,8 @@ interface Context {
   messages: Map<string, { title: string; status: string; request_id: string | null; booking_id: string }>
   /** A booking's conversation, when it is and what was booked. */
   records: Map<string, { request_id: string | null; starts_at: string; product_kind: ProductKind }>
-  /** The entry a change task is about. */
-  entries: Map<string, { event_name: string; actor_kind: string; body: string | null }>
+  /** The message a change task is about. */
+  entries: Map<string, { event_name: string; author_kind: string; body: string | null }>
   photos: Map<string, TaskPhoto[]>
 }
 
@@ -374,15 +378,17 @@ async function loadContext(db: DbClient, viewer: TaskViewer, rows: TaskRow[]): P
   const ids = (pick: (row: TaskRow) => string | null) => [...new Set(rows.map(pick).filter((id): id is string => id !== null))]
   const messageIds = ids(row => row.subject_type === 'scheduled_guest_message' ? row.subject_id : null)
   const messages = messageIds.length ? await queryAll<{ id: string; template_title: string; status: string; request_id: string | null; booking_id: string }>(db,
-    'SELECT id, template_title, status, request_id, booking_id FROM scheduled_guest_messages WHERE organization_id = ? AND id IN (SELECT value FROM json_each(?))', [organizationId, d1JsonStringSet(messageIds)]) : []
+    `SELECT m.id, m.template_title, m.status, (SELECT c.id FROM conversations c WHERE c.organization_id = m.organization_id AND c.booking_id = m.booking_id AND c.kind = 'booking') AS request_id, m.booking_id
+      FROM scheduled_guest_messages m WHERE m.organization_id = ? AND m.id IN (SELECT value FROM json_each(?))`, [organizationId, d1JsonStringSet(messageIds)]) : []
   const bookingIds = [...new Set([...ids(row => row.subject_type === 'booking' ? row.subject_id : null), ...messages.map(message => message.booking_id)])]
-  const booked = bookingIds.length ? await queryAll<{ id: string; request_id: string | null; starts_at: string; product_kind: ProductKind; unit: 'slot' | 'nights' }>(db, `SELECT br.id, br.request_id, br.starts_at, br.product_kind, br.unit FROM ${BOOKING_RECORDS_SQL} br
+  const booked = bookingIds.length ? await queryAll<{ id: string; request_id: string | null; starts_at: string; product_kind: ProductKind; unit: 'slot' | 'nights' }>(db, `SELECT br.id, br.starts_at, br.product_kind, br.unit,
+       (SELECT c.id FROM conversations c WHERE c.organization_id = br.organization_id AND c.booking_id = br.id AND c.kind = 'booking') AS request_id FROM ${BOOKING_RECORDS_SQL} br
      WHERE br.organization_id = ? AND br.id IN (SELECT value FROM json_each(?))`, [organizationId, d1JsonStringSet(bookingIds)]) : []
   const records = booked.filter(record => record.unit === 'slot')
   const changeStayRequests = booked.filter(record => record.unit === 'nights' && rows.some(row => row.kind === 'booking_change' && row.subject_id === record.id))
   const entryIds = rows.filter(row => row.kind === 'booking_change').map(row => row.dedupe_key.slice('booking_change:'.length))
-  const entries = entryIds.length ? await queryAll<{ id: string; event_name: string; actor_kind: string; body: string | null }>(db, 'SELECT id, event_name, actor_kind, body FROM activity_entries WHERE id IN (SELECT value FROM json_each(?))', [d1JsonStringSet(entryIds)]) : []
-  const requestIds = [...new Set([...ids(row => row.subject_type === 'request' ? row.subject_id : null),
+  const entries = entryIds.length ? await queryAll<{ id: string; event_name: string; author_kind: string; body: string | null }>(db, 'SELECT id, event_name, author_kind, body FROM messages WHERE id IN (SELECT value FROM json_each(?))', [d1JsonStringSet(entryIds)]) : []
+  const requestIds = [...new Set([...ids(row => row.subject_type === 'conversation' ? row.subject_id : null),
     ...records.flatMap(record => record.request_id ? [record.request_id] : []), ...changeStayRequests.flatMap(stay => stay.request_id ? [stay.request_id] : [])])]
   // Stay writers load this module; the conversation repository is loaded when a view is drawn.
   const { guestEntryAskedAtSql } = await import('~/server/domain/guest-threads/repository')
@@ -392,11 +398,11 @@ async function loadContext(db: DbClient, viewer: TaskViewer, rows: TaskRow[]): P
     queryAll<{ id: string; title: string }>(db, 'SELECT id, title FROM business_locations WHERE organization_id = ? AND id IN (SELECT value FROM json_each(?))', [organizationId, d1JsonStringSet(ids(row => row.location_id))]),
     queryAll<{ id: string; guest_name: string | null; participant: string | null; preview: string | null; asked_at: string | null }>(db, `
       SELECT r.id, json_extract(r.payload_json, '$.guest.name') AS guest_name, json_extract(r.payload_json, '$.participant.title') AS participant,
-        (SELECT CASE WHEN e.kind = 'submission' THEN json_extract(r.payload_json, '$.message') ELSE e.body END FROM activity_entries e JOIN tasks t ON t.subject_id = r.id AND t.kind = 'guest_reply'
+        (SELECT e.body FROM messages e JOIN tasks t ON t.subject_id = r.id AND t.kind = 'guest_reply'
           WHERE e.id = substr(t.dedupe_key, length('guest_reply:' || r.id || ':') + 1) ORDER BY t.created_at DESC LIMIT 1) AS preview,
-        (SELECT ${guestEntryAskedAtSql('e')} FROM activity_entries e JOIN tasks t ON t.subject_id = r.id AND t.kind = 'guest_reply'
+        (SELECT ${guestEntryAskedAtSql('e')} FROM messages e JOIN tasks t ON t.subject_id = r.id AND t.kind = 'guest_reply'
           WHERE e.id = substr(t.dedupe_key, length('guest_reply:' || r.id || ':') + 1) ORDER BY t.created_at DESC LIMIT 1) AS asked_at
-      FROM requests r WHERE r.organization_id = ? AND r.id IN (SELECT value FROM json_each(?))`, [organizationId, d1JsonStringSet(requestIds)]),
+      FROM conversations r WHERE r.organization_id = ? AND r.id IN (SELECT value FROM json_each(?))`, [organizationId, d1JsonStringSet(requestIds)]),
     listMessagePhotos(db, 'task', rows.map(row => row.id)),
     queryAll<{ id: string }>(db, "SELECT id FROM opportunities WHERE organization_id = ? AND operation = 'product.payment' AND id IN (SELECT value FROM json_each(?))",
       [organizationId, d1JsonStringSet(ids(row => row.status === 'open' ? row.opportunity_id : null))]),
@@ -409,7 +415,7 @@ async function loadContext(db: DbClient, viewer: TaskViewer, rows: TaskRow[]): P
     SELECT ${STAY_FACTS}, s.status, s.no_show_at, s.channel, s.overbooked, u.image AS guest_image_url
     FROM ${STAY_FACTS_FROM}
     LEFT JOIN user u ON u.id = s.user_id
-    WHERE s.organization_id = ? AND s.product_session_id IS NULL AND (s.id IN (SELECT value FROM json_each(?)) OR s.request_id IN (SELECT value FROM json_each(?)))`,
+    WHERE s.organization_id = ? AND s.product_session_id IS NULL AND (s.id IN (SELECT value FROM json_each(?)) OR r.id IN (SELECT value FROM json_each(?)))`,
   [organizationId, d1JsonStringSet(stayIds), d1JsonStringSet(replyRequests)])).map(stayFacts)
   // Whether the home's next guests arrive the day the guest of a conversation being answered leaves.
   const sameDay = new Set<string>()
@@ -448,7 +454,7 @@ async function loadContext(db: DbClient, viewer: TaskViewer, rows: TaskRow[]): P
     requests: new Map(requests.map(request => [request.id, request])),
     messages: new Map(messages.map(message => [message.id, { title: message.template_title, status: message.status, request_id: message.request_id, booking_id: message.booking_id }])),
     records: new Map(records.map(record => [record.id, { request_id: record.request_id, starts_at: record.starts_at, product_kind: record.product_kind }])),
-    entries: new Map(entries.map(entry => [entry.id, { event_name: entry.event_name, actor_kind: entry.actor_kind, body: entry.body }])),
+    entries: new Map(entries.map(entry => [entry.id, { event_name: entry.event_name, author_kind: entry.author_kind, body: entry.body }])),
     photos: new Map([...photos].map(([id, list]) => [id, list.map(photo => ({ id: photo.id, url: photo.url, thumbnailUrl: photo.thumbnailUrl, width: photo.width, height: photo.height }))])),
   }
 }
@@ -636,8 +642,8 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
       face = 'compact'
       title = request.guest_name ? firstName(request.guest_name) : request.participant ?? 'Guest'
       avatar = { initial: initialOf(title), tone: 'cool' }
-      const waiting = entry.actor_kind !== 'guest' && row.starts_at !== null && row.starts_at > now.toISOString()
-      statusLine = [entry.actor_kind === 'guest' ? 'Change requested' : waiting ? 'Change proposal waiting on the guest' : 'Change proposal expired', place].filter(Boolean).join(' · ')
+      const waiting = entry.author_kind !== 'guest' && row.starts_at !== null && row.starts_at > now.toISOString()
+      statusLine = [entry.author_kind === 'guest' ? 'Change requested' : waiting ? 'Change proposal waiting on the guest' : 'Change proposal expired', place].filter(Boolean).join(' · ')
       detail = record ? `${day(record.starts_at)}, ${time(record.starts_at)}` : null
       path = conversation(requestId)
       // A change closes when it is answered or proposed again.
@@ -1049,24 +1055,19 @@ export async function closeTask(db: DbClient, viewer: TaskViewer, taskId: string
   const organizationId = viewer.principal.organizationId
   // A job closes in its conversation too: the note and photos are the person's own message there, and nobody is alerted.
   // The conversation that carries this job is the one its automatic post went to, and the closer must still sit in it.
-  const thread = isJobTask(current) ? await queryFirst<{ id: string }>(db, `SELECT t.id FROM team_threads t
-      JOIN team_messages m ON m.organization_id = t.organization_id AND m.thread_id = t.id AND m.automatic = 1 AND m.idempotency_key = ?
-      JOIN team_thread_members s ON s.organization_id = t.organization_id AND s.thread_id = t.id
-     WHERE t.organization_id = ? AND s.member_id = ? ORDER BY m.created_at DESC, t.id LIMIT 1`, [`job:${current.id}:${current.product_id}`, organizationId, viewer.memberId]) : null
+  const thread = isJobTask(current) ? await queryFirst<{ id: string }>(db, `SELECT c.id FROM conversations c
+      JOIN messages m ON m.conversation_id = c.id AND m.author_kind = 'krabiclaw' AND json_extract(m.payload_json, '$.key') = ?
+      JOIN conversation_participants seat ON seat.conversation_id = c.id AND seat.user_id = ?
+     WHERE c.organization_id = ? AND c.kind = 'team' ORDER BY m.sequence DESC, c.id LIMIT 1`, [jobKey(current), viewer.principal.userId, organizationId]) : null
   const assetIds = input.photos.length ? await uploadMessagePhotos(db, input.env, organizationId, input.photos, { source: 'uploaded', userId: viewer.principal.userId })
     .catch((error: unknown) => error instanceof MessagePhotoRejection ? fail(422, 'INVALID_PHOTO', error.message, 'photos') : Promise.reject(error)) : []
-  const messageId = crypto.randomUUID()
-  const messageExists = `EXISTS (SELECT 1 FROM team_messages WHERE id = ?)`
-  const messageQueries: BatchQuery[] = thread ? [{
-    query: `INSERT INTO team_messages (id, organization_id, thread_id, sender_user_id, automatic, body, idempotency_key, request_hash, created_at)
-      VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?)`,
-    params: [messageId, organizationId, thread.id, viewer.principal.userId, note ?? (input.status === 'done' ? 'Done' : 'Skipped'), `task-closed:${taskId}:${current.version + 1}`,
-      await creationRequestHash({ note, photos: assetIds }), now],
-  }, organizationEventQuery({ organizationId, actorId: viewer.principal.userId, eventType: 'team.message_sent', entityType: 'team_message', entityId: messageId,
-    metadata: { team_thread_id: thread.id, task_id: taskId }, dedupeKey: `team-message:${messageId}`, onlyIfPreviousChangedOneRow: true }),
-  ...messagePhotoPlacements(organizationId, 'team_message', messageId, assetIds, now),
-  { query: `UPDATE team_threads SET last_message_at = ? WHERE organization_id = ? AND id = ? AND last_message_at < ? AND ${messageExists}`, params: [now, organizationId, thread.id, now, messageId] },
-  { query: `UPDATE team_thread_members SET last_read_at = ? WHERE organization_id = ? AND thread_id = ? AND member_id = ? AND ${messageExists}`, params: [now, organizationId, thread.id, viewer.memberId, messageId] }] : []
+  // The person's own message in the job's conversation, written by the one message writer.
+  const message = thread ? messageQueries({
+    conversationId: thread.id, authorKind: 'member', authorUserId: viewer.principal.userId,
+    body: note ?? (input.status === 'done' ? 'Done' : 'Skipped'), dedupeKey: `team:${thread.id}:task-closed:${taskId}:${current.version + 1}`,
+    guard: { sql: 'EXISTS (SELECT 1 FROM conversation_participants seat WHERE seat.conversation_id = c.id AND seat.user_id = ?)', params: [viewer.principal.userId] },
+  }) : null
+  const closedMessage: BatchQuery[] = message ? [...message.queries, ...messagePhotoPlacements(organizationId, 'message', message.id, assetIds, now)] : []
   try {
     await executeBatch(db, [{
       query: `UPDATE tasks SET status = ?, outcome_note = ?, closed_at = ?, closed_by_user_id = ?, version = version + 1, updated_at = ?
@@ -1076,13 +1077,13 @@ export async function closeTask(db: DbClient, viewer: TaskViewer, taskId: string
     // Everything after this is this request's own close: a close that lost to another one fails the batch here.
     { query: "SELECT CASE WHEN changes() = 1 THEN NULL ELSE json('TASK_VERSION_CONFLICT') END" },
     taskEventQuery(viewer, current, input.status === 'done' ? 'task.completed' : 'task.skipped', { after: { status: input.status, outcome_note: note, photos: assetIds.length } }),
-    ...messagePhotoPlacements(organizationId, 'task', taskId, assetIds, now), ...messageQueries], { operation: input.status === 'done' ? 'Complete task' : 'Skip task' })
+    ...messagePhotoPlacements(organizationId, 'task', taskId, assetIds, now), ...closedMessage], { operation: input.status === 'done' ? 'Complete task' : 'Skip task' })
   } catch (error) {
     await discardMessagePhotos(db, input.env, viewer.principal.organizationId, assetIds, viewer.principal.userId, error)
     if (/malformed JSON/.test(error instanceof Error ? error.message : String(error))) fail(409, 'TASK_VERSION_CONFLICT', 'This task changed since you opened it; reload it and try again', 'task')
     throw error
   }
-  if (thread) await publishDashboardInvalidation(input.env, { eventId: crypto.randomUUID(), type: 'team_thread.changed', organizationId, teamThreadId: thread.id, occurredAt: now })
+  if (thread) await publishConversationEvent(input.env, db, { conversationId: thread.id, type: 'MESSAGE_CREATE' })
   return afterWrite(db, viewer, taskId)
 }
 

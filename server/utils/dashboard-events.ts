@@ -27,7 +27,7 @@ export async function listDashboardEvents(
   query: DashboardEventsQuery,
 ): Promise<{ events: DashboardEvent[]; nextCursor: string | null }> {
   const limit = Math.max(1, Math.min(query.limit || 20, 50))
-  const conditions = ["e.kind = 'audit'", 'e.organization_id = ?']
+  const conditions = ['e.organization_id = ?']
   const params: unknown[] = [organizationId]
   if (query.locationId) { conditions.push('e.location_id = ?'); params.push(query.locationId) }
   if (query.eventType) { conditions.push('e.event_name = ?'); params.push(query.eventType) }

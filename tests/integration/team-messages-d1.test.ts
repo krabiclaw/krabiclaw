@@ -7,17 +7,20 @@ import * as schema from '../../server/db/schema.ts'
 import { createDb } from '../../server/db/index.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
 import { createTables } from './support/table-product.ts'
-import { assertAssignedBookingAccess, listOrganizationNotificationMembers, memberAccessPrincipal, reconcileResponsibilities } from '../../server/utils/member-access.ts'
+import { listOrganizationNotificationMembers, memberAccessPrincipal, reconcileResponsibilities } from '../../server/utils/member-access.ts'
+import { assertConversationAccess, markConversationRead, markConversationUnread } from '../../server/domain/conversations.ts'
+import { listConversations } from '../../server/domain/guest-threads/repository.ts'
 import { createStay, listStayHomes, stayAccessFor, updateStayHome, type StayAccess } from '../../server/domain/stays.ts'
 import { receiveMemberEmail } from '../../server/domain/guest-threads/inbound-email.ts'
 import { InboundEmailRejection, parseReplyToAddress } from '../../server/utils/reply-address.ts'
-import { createTeamThread, listTeamMembers, listTeamMessages, listTeamThreads, markTeamThreadRead, markTeamThreadUnread, operateTeamGroup, sendTeamMessage, teamAccessFor } from '../../server/domain/team-messages.ts'
+import { createTeamThread, getTeamThread, listTeamMembers, listTeamMessages, operateTeamGroup, sendTeamMessage, teamAccessFor, type TeamAccess } from '../../server/domain/team-messages.ts'
 import { setNotificationPreference } from '../../server/domain/notification-preferences.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 
-// Team conversations are their members' alone: a seat is a current membership,
-// a message is written once per idempotency key, every push it was sent as is
-// recorded on it, and a home's one assigned member is set from the member's side.
+// Team conversations are their members' alone: a seat is a participant who is a
+// current member, a message is written once per idempotency key, every push it
+// was sent as is recorded on it, unread is the conversation's one statement, and
+// a home's one assigned member is set from the member's side.
 
 const ORG = 'org'
 const OTHER = 'other-org'
@@ -30,7 +33,7 @@ test('members talk in team conversations, see unread state and receive recorded 
       constructor(state, env) { this.env = env }
       async fetch(request) {
         const event = await request.json()
-        if (event.type === 'team_thread.changed' || event.type === 'team_thread.access_ended') {
+        if ((event.type === 'MESSAGE_CREATE' || event.type === 'MESSAGE_UPDATE') && event.team || event.type === 'CONVERSATION_LEAVE') {
           const cache = this.env.ORGANIZATION_CACHE
           await cache.put('team-publication:last', JSON.stringify(event))
           await cache.put('team-publication:count', String(Number(await cache.get('team-publication:count') ?? '0') + 1))
@@ -77,6 +80,10 @@ test('members talk in team conversations, see unread state and receive recorded 
     const cleaner = await team('cleaner', 'member', 'm-cleaner')
     const cook = await team('cook', 'member', 'm-cook')
     const refused = (status: number, code: string, field: string) => ({ status, data: { code, field } })
+    // The caller's team conversations, each as its conversation screen reads it.
+    const teamThreads = async (access: TeamAccess) => Promise.all((await db.prepare(`SELECT c.id FROM conversations c JOIN conversation_participants seat ON seat.conversation_id = c.id
+      WHERE c.organization_id = ? AND c.kind = 'team' AND seat.user_id = ? ORDER BY c.last_message_at DESC, c.id DESC`).bind(ORG, access.userId).all<{ id: string }>()).results.map(row => getTeamThread(env, db, access, row.id)))
+    const teamThread = (access: TeamAccess, id: string) => getTeamThread(env, db, access, id)
 
     // Everyone in the organization, owners first; nobody from another one.
     assert.deepEqual((await listTeamMembers(env, cleaner)).map(member => [member.memberId, member.id, member.role, member.image]),
@@ -93,16 +100,16 @@ test('members talk in team conversations, see unread state and receive recorded 
       assert.partialDeepStrictEqual(failure.data, { code: 'DASHBOARD_PUBLICATION_FAILED', field: 'realtime', committed: true })
       return true
     })
-    const firstPublication = await publicationCache.get<{ teamThreadId: string; eventId: string }>('team-publication:last', 'json')
+    const firstPublication = await publicationCache.get<{ conversationId: string; eventId: string }>('team-publication:last', 'json')
     assert.ok(firstPublication)
-    const committedThread = (await listTeamThreads(env, db, owner))[0]!
-    assert.equal(committedThread.id, firstPublication.teamThreadId)
-    assert.equal(await db.prepare('SELECT COUNT(*) AS n FROM team_thread_members WHERE thread_id = ?').bind(committedThread.id).first('n'), 2)
+    const committedThread = (await teamThreads(owner))[0]!
+    assert.equal(committedThread.id, firstPublication.conversationId)
+    assert.equal(await db.prepare('SELECT COUNT(*) AS n FROM conversation_participants WHERE conversation_id = ?').bind(committedThread.id).first('n'), 2)
     await publicationCache.delete('team-publication:refuse')
     const direct = await createTeamThread(env, db, cleaner, { memberIds: ['owner'] })
     assert.deepEqual(direct, { id: committedThread.id, created: false })
-    const retriedPublication = await publicationCache.get<{ teamThreadId: string; eventId: string }>('team-publication:last', 'json')
-    assert.equal(retriedPublication?.teamThreadId, committedThread.id)
+    const retriedPublication = await publicationCache.get<{ conversationId: string; eventId: string }>('team-publication:last', 'json')
+    assert.equal(retriedPublication?.conversationId, committedThread.id)
     assert.notEqual(retriedPublication?.eventId, firstPublication.eventId, 'reusing the saved thread completes the failed publication')
     assert.equal(await publicationCache.get('team-publication:count'), '2')
     assert.deepEqual(await createTeamThread(env, db, owner, { memberIds: ['cleaner'] }), { id: direct.id, created: false })
@@ -110,7 +117,7 @@ test('members talk in team conversations, see unread state and receive recorded 
     const raced = await Promise.all([createTeamThread(env, db, cleaner, { memberIds: ['cook'] }), createTeamThread(env, db, cook, { memberIds: ['cleaner'] })])
     assert.equal(raced[0].id, raced[1].id)
     assert.deepEqual(raced.map(result => result.created).sort(), [false, true])
-    assert.equal(await db.prepare('SELECT COUNT(*) AS n FROM team_thread_members WHERE thread_id = ?').bind(raced[0].id).first('n'), 2)
+    assert.equal(await db.prepare('SELECT COUNT(*) AS n FROM conversation_participants WHERE conversation_id = ?').bind(raced[0].id).first('n'), 2)
 
     // A stay conversation needs a stay the caller can see: a member sees only the homes they look after.
     await assert.rejects(createTeamThread(env, db, cleaner, { memberIds: ['owner'], bookingId: stay.id }), refused(404, 'BOOKING_NOT_FOUND', 'bookingId'))
@@ -120,10 +127,11 @@ test('members talk in team conversations, see unread state and receive recorded 
     await assert.rejects(updateStayHome(env, db, await stayAccessFor(principal('cook', 'member')), cabin.id, { assigned_member_id: 'm-cook' }), { status: 403, data: { code: 'STAY_ROLE_REQUIRED' } })
     await updateStayHome(env, db, manager, cabin.id, { assigned_member_id: 'm-cleaner' })
     assert.equal((await listStayHomes(db, manager)).find(home => home.product_id === cabin.id)?.assigned_member_id, 'm-cleaner')
-    assert.ok(stay.request_id)
+    const stayConversation = await db.prepare("SELECT id FROM conversations WHERE booking_id = ? AND kind = 'booking'").bind(stay.id).first<string>('id')
+    assert.ok(stayConversation)
     // A stay's guest conversation is owners' and admins': the member looking after the home reads its turnover.
-    await assert.rejects(assertAssignedBookingAccess(db, { ...principal('cleaner', 'member'), requestId: stay.request_id }), refused(404, 'THREAD_NOT_FOUND', 'threadId'))
-    assert.deepEqual((await listOrganizationNotificationMembers(env, ORG, { requestId: stay.request_id })).map(member => member.userId).sort(), ['owner'], 'a stay conversation alerts owner oversight, not the member looking after the home')
+    await assert.rejects(assertConversationAccess(db, principal('cleaner', 'member'), stayConversation), refused(404, 'THREAD_NOT_FOUND', 'conversationId'))
+    assert.deepEqual((await listOrganizationNotificationMembers(env, ORG, { requestId: stayConversation })).map(member => member.userId).sort(), ['owner'], 'a stay conversation alerts owner oversight, not the member looking after the home')
     await updateStayHome(env, db, manager, cabin.id, { assigned_member_id: 'm-cleaner' })
     const about = await createTeamThread(env, db, cleaner, { memberIds: ['owner'], bookingId: stay.id })
     assert.equal(about.created, true)
@@ -140,10 +148,10 @@ test('members talk in team conversations, see unread state and receive recorded 
 
     // Giving cook the site's tables gives cook access to reuse and view the location conversation
     await createTables(db, env, { organizationId: ORG, locationId: 'cabin-site', actorId: 'owner', memberId: 'm-cook', name: 'Cabin tables', durationMinutes: 90, seats: 12, open: '18:00', lastSeating: '20:00', idempotencyKey: 'cabin-tables' })
-    await assert.rejects(assertAssignedBookingAccess(db, { ...principal('cook', 'member'), requestId: stay.request_id }), refused(404, 'THREAD_NOT_FOUND', 'threadId'))
-    assert.deepEqual((await listOrganizationNotificationMembers(env, ORG, { requestId: stay.request_id })).map(member => member.userId).sort(), ['owner'], 'handling the site\'s tables does not reach a lodging conversation either')
+    await assert.rejects(assertConversationAccess(db, principal('cook', 'member'), stayConversation), refused(404, 'THREAD_NOT_FOUND', 'conversationId'))
+    assert.deepEqual((await listOrganizationNotificationMembers(env, ORG, { requestId: stayConversation })).map(member => member.userId).sort(), ['owner'], 'handling the site\'s tables does not reach a lodging conversation either')
     assert.deepEqual(await createTeamThread(env, db, cook, { memberIds: ['owner'], locationId: 'cabin-site' }), { id: floorChat.id, created: false })
-    const cookFloorView = (await listTeamThreads(env, db, cook, { locationId: 'cabin-site' })).find(thread => thread.id === floorChat.id)!
+    const cookFloorView = await teamThread(cook, floorChat.id)
     assert.equal(cookFloorView.locationId, 'cabin-site')
     assert.deepEqual(cookFloorView.location, { id: 'cabin-site', title: 'Pine Cabin', slug: 'cabin', timezone: 'America/Denver' })
 
@@ -163,31 +171,31 @@ test('members talk in team conversations, see unread state and receive recorded 
     await assert.rejects(sendTeamMessage(env, db, cleaner, direct.id, { body: 'Different', photos: [], idempotencyKey: 'k1', senderName: 'cleaner' }), refused(409, 'IDEMPOTENCY_KEY_REUSED', 'idempotencyKey'))
 
     // Unread is the recipient's, until they read it; the sender has read their own.
-    const ownerView = (await listTeamThreads(env, db, owner)).find(thread => thread.id === direct.id)!
-    assert.deepEqual({ unread: ownerView.unread, unreadCount: ownerView.unreadCount, last: ownerView.lastMessage?.body, stay: ownerView.stay },
-      { unread: true, unreadCount: 1, last: 'Towels are out', stay: null })
+    const ownerView = await teamThread(owner, direct.id)
+    assert.deepEqual({ unread: ownerView.unread, last: ownerView.lastMessage?.body, stay: ownerView.stay }, { unread: true, last: 'Towels are out', stay: null })
     assert.deepEqual(ownerView.participants.map(participant => participant.id).sort(), ['cleaner', 'owner'])
-    assert.equal((await listTeamThreads(env, db, cleaner)).find(thread => thread.id === direct.id)?.unreadCount, 0)
-    const stayView = (await listTeamThreads(env, db, owner)).find(thread => thread.id === about.id)!
+    assert.equal((await teamThread(cleaner, direct.id)).unread, false)
+    // The one list says the same, with the same statement.
+    const ownerRow = (await listConversations(db, ORG, { userId: 'owner', principal: owner.principal, kind: 'team' })).find(row => row.id === direct.id)
+    assert.deepEqual([ownerRow?.kind, ownerRow?.unread, ownerRow?.preview], ['team', true, 'Towels are out'])
+    const stayView = await teamThread(owner, about.id)
     assert.deepEqual(stayView.stay, { id: stay.id, productId: cabin.id, homeName: 'Cabin', checkInDate: day(3), checkOutDate: day(5), status: stay.status })
-    await markTeamThreadRead(db, owner, direct.id)
-    assert.equal((await listTeamThreads(env, db, owner)).find(thread => thread.id === direct.id)?.unreadCount, 0)
+    await markConversationRead(db, { organizationId: ORG, conversationId: direct.id, userId: 'owner' })
+    assert.equal((await teamThread(owner, direct.id)).unread, false)
     // Marked unread from the list: the cleaner's newest message counts as new again, then read again.
-    assert.equal((await markTeamThreadUnread(db, owner, direct.id)).status, 'unread')
-    assert.deepEqual((({ unread, unreadCount }) => ({ unread, unreadCount }))((await listTeamThreads(env, db, owner)).find(thread => thread.id === direct.id)!), { unread: true, unreadCount: 1 })
-    await markTeamThreadRead(db, owner, direct.id)
-    assert.equal((await listTeamThreads(env, db, owner)).find(thread => thread.id === direct.id)?.unreadCount, 0)
+    assert.equal((await markConversationUnread(db, { organizationId: ORG, conversationId: direct.id, userId: 'owner' })).read, false)
+    assert.equal((await teamThread(owner, direct.id)).unread, true)
+    await markConversationRead(db, { organizationId: ORG, conversationId: direct.id, userId: 'owner' })
+    assert.equal((await teamThread(owner, direct.id)).unread, false)
     // Nobody else has written to the cleaner here, so there is nothing to be unread.
-    await assert.rejects(markTeamThreadUnread(db, cleaner, direct.id), refused(409, 'NO_TEAM_MESSAGE', 'threadId'))
+    await assert.rejects(markConversationUnread(db, { organizationId: ORG, conversationId: direct.id, userId: 'cleaner' }), refused(409, 'NOTHING_TO_MARK', 'conversationId'))
 
     // A member switched team pushes off gets none, and nothing is recorded for them.
     await setNotificationPreference(db, env as never, 'owner', 'messages', { email: false, whatsapp: false, push: false })
     const quiet = await sendTeamMessage(env, db, cleaner, direct.id, { body: 'Second', photos: [], idempotencyKey: 'k2', senderName: 'cleaner' })
     assert.deepEqual(quiet.message.deliveries, [])
-    assert.equal(await db.prepare(`SELECT COUNT(*) AS n FROM guest_thread_deliveries d JOIN activity_entries a ON a.id = d.entry_id WHERE a.dedupe_key = ?`)
-      .bind(`team-message:${quiet.message.id}`).first('n'), 0)
-    assert.equal(await db.prepare(`SELECT COUNT(*) AS n FROM guest_thread_deliveries d JOIN activity_entries a ON a.id = d.entry_id WHERE a.dedupe_key = ? AND d.status = 'failed'`)
-      .bind(`team-message:${sent.message.id}`).first('n'), 1)
+    assert.equal(await db.prepare('SELECT COUNT(*) AS n FROM guest_thread_deliveries WHERE message_id = ?').bind(quiet.message.id).first('n'), 0)
+    assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM guest_thread_deliveries WHERE message_id = ? AND status = 'failed'").bind(sent.message.id).first('n'), 1)
     await sendTeamMessage(env, db, owner, direct.id, { body: 'Thanks', photos: [], idempotencyKey: 'k3', senderName: 'owner' })
 
     // Newest first, paged back from the oldest loaded message.
@@ -215,7 +223,7 @@ test('members talk in team conversations, see unread state and receive recorded 
     assert.equal(committedPhoto.body, hostPhoto.body)
     assert.equal(committedPhoto.attachments.length, 1)
     const photoAsset = await db.prepare(`SELECT ma.id, ma.r2_key, ma.public_url FROM media_assets ma JOIN media_placements mp ON mp.asset_id = ma.id
-      WHERE mp.owner_type = 'team_message' AND mp.owner_id = ? AND mp.status = 'active' AND ma.organization_id = ?`).bind(committedPhoto.id, ORG).first<{ id: string; r2_key: string; public_url: string }>()
+      WHERE mp.owner_type = 'message' AND mp.owner_id = ? AND mp.status = 'active' AND ma.organization_id = ?`).bind(committedPhoto.id, ORG).first<{ id: string; r2_key: string; public_url: string }>()
     assert.ok(photoAsset)
     assert.deepEqual(committedPhoto.attachments.map(photo => [photo.id, photo.url]), [[photoAsset.id, photoAsset.public_url]])
     const storedPhoto = await (await runtime.getR2Bucket('MEDIA_BUCKET')).get(photoAsset.r2_key)
@@ -229,14 +237,14 @@ test('members talk in team conversations, see unread state and receive recorded 
     assert.notEqual((await publicationCache.get<{ eventId: string }>('team-publication:last', 'json'))?.eventId, photoPublication?.eventId)
     await assert.rejects(sendTeamMessage(env, db, cleaner, direct.id, { ...expiredPhoto, photos: { ...expiredPhoto.photos, sourceIds: ['different-host-photo'] } }), refused(409, 'IDEMPOTENCY_KEY_REUSED', 'idempotencyKey'))
     assert.equal(resolutions, 1)
-    assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM team_messages WHERE thread_id = ? AND idempotency_key = 'host-photo'").bind(direct.id).first('n'), 1)
+    assert.equal(await db.prepare('SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ? AND dedupe_key = ?').bind(direct.id, `team:${direct.id}:host-photo`).first('n'), 1)
     assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM media_assets WHERE organization_id = ? AND status = 'active'").bind(ORG).first('n'), 1)
     const nativePhoto = await sendTeamMessage(env, db, cleaner, direct.id, { body: '', photos: [{ bytes: photoBytes, filename: 'native.avif' }], idempotencyKey: 'native-photo', senderName: 'cleaner' })
     const nativeSaved = (await listTeamMessages(db, owner, direct.id, { limit: 100 })).messages.find(message => message.id === nativePhoto.message.id)
     assert.ok(nativeSaved)
     assert.deepEqual({ id: nativeSaved.id, threadId: nativeSaved.threadId, senderId: nativeSaved.senderId, body: nativeSaved.body, photos: nativeSaved.attachments.length }, { id: nativePhoto.message.id, threadId: direct.id, senderId: 'cleaner', body: '', photos: 1 })
     const nativeAsset = await db.prepare(`SELECT ma.id, ma.r2_key, ma.public_url FROM media_assets ma JOIN media_placements mp ON mp.asset_id = ma.id
-      WHERE mp.owner_type = 'team_message' AND mp.owner_id = ? AND mp.status = 'active' AND ma.organization_id = ?`).bind(nativeSaved.id, ORG).first<{ id: string; r2_key: string; public_url: string }>()
+      WHERE mp.owner_type = 'message' AND mp.owner_id = ? AND mp.status = 'active' AND ma.organization_id = ?`).bind(nativeSaved.id, ORG).first<{ id: string; r2_key: string; public_url: string }>()
     assert.ok(nativeAsset)
     assert.deepEqual(nativeSaved.attachments.map(photo => [photo.id, photo.url]), [[nativeAsset.id, nativeAsset.public_url]])
     const storedNativePhoto = await (await runtime.getR2Bucket('MEDIA_BUCKET')).get(nativeAsset.r2_key)
@@ -245,15 +253,16 @@ test('members talk in team conversations, see unread state and receive recorded 
     const nativeReplay = await sendTeamMessage(env, db, cleaner, direct.id, { body: '', photos: [{ bytes: photoBytes, filename: 'renamed.avif' }], idempotencyKey: 'native-photo', senderName: 'cleaner' })
     assert.deepEqual({ id: nativeReplay.message.id, created: nativeReplay.created, attachments: nativeReplay.message.attachments }, { id: nativePhoto.message.id, created: false, attachments: nativePhoto.message.attachments }, 'native photo replay retains its byte identity independently of a filename')
     assert.deepEqual((await listTeamMessages(db, owner, direct.id, { limit: 100 })).messages.filter(message => message.id === nativeSaved.id), [nativeSaved])
-    assert.deepEqual((await db.prepare("SELECT id, sender_user_id, body FROM team_messages WHERE organization_id = ? AND thread_id = ? AND idempotency_key = 'native-photo'").bind(ORG, direct.id).all()).results,
-      [{ id: nativeSaved.id, sender_user_id: 'cleaner', body: '' }])
-    assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM media_placements WHERE owner_type = 'team_message' AND owner_id = ? AND asset_id = ?").bind(nativeSaved.id, nativeAsset.id).first('n'), 1)
+    assert.deepEqual((await db.prepare('SELECT id, author_user_id, body FROM messages WHERE organization_id = ? AND conversation_id = ? AND dedupe_key = ?').bind(ORG, direct.id, `team:${direct.id}:native-photo`).all()).results,
+      [{ id: nativeSaved.id, author_user_id: 'cleaner', body: '' }])
+    assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM media_placements WHERE owner_type = 'message' AND owner_id = ? AND asset_id = ?").bind(nativeSaved.id, nativeAsset.id).first('n'), 1)
     assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM media_assets WHERE organization_id = ? AND status = 'active'").bind(ORG).first('n'), 2)
 
     // Someone without a seat cannot read or write it, and does not see it.
     await assert.rejects(listTeamMessages(db, cook, direct.id, {}), refused(404, 'TEAM_THREAD_NOT_FOUND', 'threadId'))
     await assert.rejects(sendTeamMessage(env, db, cook, direct.id, { body: 'hi', photos: [], idempotencyKey: 'cook', senderName: 'cook' }), refused(404, 'TEAM_THREAD_NOT_FOUND', 'threadId'))
-    assert.deepEqual((await listTeamThreads(env, db, cook)).map(thread => thread.id).sort(), [floorChat.id, raced[0].id].sort())
+    assert.deepEqual((await teamThreads(cook)).map(thread => thread.id).sort(), [floorChat.id, raced[0].id].sort())
+    await assert.rejects(teamThread(cook, direct.id), refused(404, 'TEAM_THREAD_NOT_FOUND', 'threadId'))
 
     // A manual group has its own identity. Its roster may shrink, without
     // becoming a direct conversation or exposing another group's history.
@@ -264,7 +273,7 @@ test('members talk in team conversations, see unread state and receive recorded 
     await assert.rejects(createTeamThread(env, db, cleaner, { ...groupInput, name: 'Different crew' }), refused(409, 'IDEMPOTENCY_KEY_REUSED', 'idempotencyKey'))
     const separateGroup = await createTeamThread(env, db, cleaner, { ...groupInput, idempotencyKey: 'another-crew' })
     assert.notEqual(separateGroup.id, group.id)
-    const groupView = async (access = owner) => (await listTeamThreads(env, db, access)).find(thread => thread.id === group.id)
+    const groupView = async (access = owner) => (await teamThreads(access)).find(thread => thread.id === group.id)
     assert.deepEqual(await groupView().then(thread => thread && { name: thread.name, isGroup: thread.isGroup, creator: thread.createdByUserId, canManage: thread.canManage, canLeave: thread.canLeave, members: thread.participants.map(person => person.id).sort() }),
       { name: 'Cabin crew', isGroup: true, creator: 'cleaner', canManage: true, canLeave: true, members: ['cleaner', 'cook', 'owner'] })
     assert.equal((await groupView(cleaner))?.canManage, true)
@@ -272,7 +281,7 @@ test('members talk in team conversations, see unread state and receive recorded 
     await assert.rejects(operateTeamGroup(env, db, cook, group.id, { action: 'rename', name: 'No permission', idempotencyKey: 'no-permission' }), refused(403, 'TEAM_GROUP_MANAGEMENT_REQUIRED', 'permissions'))
     await assert.rejects(operateTeamGroup(env, db, cleaner, direct.id, { action: 'leave', idempotencyKey: 'direct-leave' }), refused(409, 'TEAM_GROUP_PROTECTED', 'threadId'))
     const contextualGroup = await createTeamThread(env, db, owner, { memberIds: ['cleaner', 'cook'], locationId: 'cabin-site' })
-    assert.deepEqual((await listTeamThreads(env, db, owner)).filter(thread => thread.id === contextualGroup.id).map(thread => [thread.isGroup, thread.canManage, thread.canLeave]), [[false, false, false]])
+    assert.deepEqual(await teamThread(owner, contextualGroup.id).then(thread => [thread.isGroup, thread.canManage, thread.canLeave]), [false, false, false])
     await assert.rejects(operateTeamGroup(env, db, owner, contextualGroup.id, { action: 'remove', userId: 'cook', idempotencyKey: 'context-remove' }), refused(409, 'TEAM_GROUP_PROTECTED', 'threadId'))
     await assert.rejects(operateTeamGroup(env, db, cleaner, group.id, { action: 'add', memberIds: ['outsider'], idempotencyKey: 'outsider-add' }), refused(422, 'INVALID_TEAM_MEMBERS', 'memberIds'))
     await assert.rejects(operateTeamGroup(env, db, cleaner, group.id, { action: 'rename', name: ' ', idempotencyKey: 'blank-name' }), refused(422, 'INVALID_GROUP_NAME', 'name'))
@@ -280,18 +289,19 @@ test('members talk in team conversations, see unread state and receive recorded 
     assert.equal((await listTeamMessages(db, cleaner, group.id, {})).messages[0]?.id, groupMessage.message.id)
     // A team alert's email answers the team conversation as the member who replied, once.
     const alerted = await sendTeamMessage(env, db, cook, contextualGroup.id, { body: 'Is the cabin ready?', photos: [], idempotencyKey: 'email-reply-alert', senderName: 'cook' })
-    const alertEmail = await db.prepare(`SELECT d.email_json FROM guest_thread_deliveries d JOIN activity_entries a ON a.id = d.entry_id WHERE a.dedupe_key = ? AND d.channel = 'email' AND d.email_json LIKE '%cleaner@example.test%'`)
-      .bind(`team-message:${alerted.message.id}`).first<string>('email_json')
+    const alertEmail = await db.prepare("SELECT email_json FROM guest_thread_deliveries WHERE message_id = ? AND channel = 'email' AND email_json LIKE '%cleaner@example.test%'")
+      .bind(alerted.message.id).first<string>('email_json')
     const address = parseReplyToAddress(env, (JSON.parse(alertEmail!).message as { replyTo: string }).replyTo)
-    assert.equal(address.kind, 'member')
+    // The reply address carries the message itself.
+    assert.deepEqual([address.kind, address.messageId], ['member', alerted.message.id])
     // Another member writing in the same conversation is the same email thread for the cleaner: the first alert's subject, not a new one.
     const followUp = await sendTeamMessage(env, db, owner, contextualGroup.id, { body: 'Checking in too', photos: [], idempotencyKey: 'email-thread-follow-up', senderName: 'owner' })
-    const cleanerAlert = async (messageId: string) => JSON.parse((await db.prepare(`SELECT d.email_json FROM guest_thread_deliveries d JOIN activity_entries a ON a.id = d.entry_id
-      WHERE a.dedupe_key = ? AND d.channel = 'email' AND d.email_json LIKE '%cleaner@example.test%'`).bind(`team-message:${messageId}`).first<string>('email_json'))!).message as { subject: string }
+    const cleanerAlert = async (messageId: string) => JSON.parse((await db.prepare(`SELECT email_json FROM guest_thread_deliveries
+      WHERE message_id = ? AND channel = 'email' AND email_json LIKE '%cleaner@example.test%'`).bind(messageId).first<string>('email_json'))!).message as { subject: string }
     const firstSubject = (await cleanerAlert(alerted.message.id)).subject
     assert.match(firstSubject, /cook/iu)
     assert.equal((await cleanerAlert(followUp.message.id)).subject, firstSubject)
-    const emailedReply = { entryId: address.entryId, token: address.token, from: 'Cleaner@example.test', body: 'On my way', files: [], messageId: '<team-reply@mail.example.test>' }
+    const emailedReply = { entryId: address.messageId, token: address.token, from: 'Cleaner@example.test', body: 'On my way', files: [], messageId: '<team-reply@mail.example.test>' }
     const unexpectedReport = async (error: unknown) => { throw error }
     await receiveMemberEmail(env, emailedReply, unexpectedReport)
     await receiveMemberEmail(env, emailedReply, unexpectedReport)
@@ -301,7 +311,8 @@ test('members talk in team conversations, see unread state and receive recorded 
     const hubs = env.GUEST_INBOX_HUBS!
     env.GUEST_INBOX_HUBS = { idFromName: (name: string) => hubs.idFromName(name), get: () => ({ fetch: () => Promise.resolve(new Response(null, { status: 500 })) }) } as unknown as typeof hubs
     const unfinished = { ...emailedReply, body: 'Keys are in the box', messageId: '<team-reply-unfinished@mail.example.test>' }
-    await assert.rejects(receiveMemberEmail(env, unfinished, unexpectedReport), (error: unknown) => (error as { data?: { code?: string } }).data?.code === 'DASHBOARD_PUBLICATION_FAILED')
+    // The send's own receipt is the first to tell open apps, so the failure arrives as that send's.
+    await assert.rejects(receiveMemberEmail(env, unfinished, unexpectedReport), (error: unknown) => (error as { cause?: { data?: { code?: string } } }).cause?.data?.code === 'DASHBOARD_PUBLICATION_FAILED')
     env.GUEST_INBOX_HUBS = hubs
     await receiveMemberEmail(env, unfinished, unexpectedReport)
     assert.deepEqual((await listTeamMessages(db, owner, contextualGroup.id, {})).messages.filter(message => message.body === 'Keys are in the box').map(message => message.senderId), ['cleaner'])
@@ -332,7 +343,7 @@ test('members talk in team conversations, see unread state and receive recorded 
         await operateTeamGroup(env, db, owner, separateGroup.id, { action: 'add', memberIds: ['cook'], idempotencyKey: 'transcript-race-readd' })
       }
     })
-    await context.test('revocation after listing thread IDs exposes neither the thread nor its later preview', async () => {
+    await context.test('revocation after listing conversation IDs exposes neither the conversation nor its later preview', async () => {
       let interleaved = false
       const revokingDb = new Proxy(readingDb, { get(target, key) {
         if (key === 'all') return async (query: Parameters<typeof readingDb.all>[0]) => {
@@ -348,28 +359,26 @@ test('members talk in team conversations, see unread state and receive recorded 
         return typeof value === 'function' ? value.bind(target) : value
       } })
       try {
-        const threads = await listTeamThreads(env, revokingDb, cook)
+        const rows = await listConversations(revokingDb, ORG, { userId: 'cook', principal: cook.principal, kind: 'team' })
         assert.equal(interleaved, true)
-        assert.equal(threads.some(thread => thread.id === separateGroup.id), false)
-        assert.equal(JSON.stringify(threads).includes('After preview access ended'), false)
+        assert.equal(JSON.stringify(rows).includes('After preview access ended'), false)
+        await assert.rejects(getTeamThread(env, db, cook, separateGroup.id), refused(404, 'TEAM_THREAD_NOT_FOUND', 'threadId'))
         assert.equal((await listTeamMessages(db, owner, separateGroup.id, {})).messages[0]?.body, 'After preview access ended')
       } finally {
         await operateTeamGroup(env, db, owner, separateGroup.id, { action: 'add', memberIds: ['cook'], idempotencyKey: 'list-race-readd' })
       }
     })
-    await context.test('a text send losing its seat before commit changes no message, receipt, activity or read state', async () => {
+    await context.test('a text send losing its seat before commit changes no message, receipt or read state', async () => {
       let interleaved = false
       let afterRemoval: Record<string, unknown> | undefined
       let readsAfterRemoval: unknown
-      let receiptsAfterRemoval: unknown
       const revokingDb = new Proxy(db, { get(target, key) {
         if (key === 'batch') return async (statements: D1PreparedStatement[]) => {
           assert.equal(interleaved, false)
           interleaved = true
           await operateTeamGroup(env, db, owner, separateGroup.id, { action: 'remove', userId: 'cook', idempotencyKey: 'send-race-remove' })
-          afterRemoval = await db.prepare('SELECT id, last_message_at FROM team_threads WHERE id = ?').bind(separateGroup.id).first<Record<string, unknown>>() ?? undefined
-          readsAfterRemoval = (await db.prepare('SELECT member_id, last_read_at FROM team_thread_members WHERE thread_id = ? ORDER BY member_id').bind(separateGroup.id).all()).results
-          receiptsAfterRemoval = await db.prepare("SELECT COUNT(*) AS n FROM activity_entries WHERE organization_id = ? AND event_name = 'team.message_sent'").bind(ORG).first('n')
+          afterRemoval = await db.prepare('SELECT id, last_message_at FROM conversations WHERE id = ?').bind(separateGroup.id).first<Record<string, unknown>>() ?? undefined
+          readsAfterRemoval = (await db.prepare('SELECT user_id, last_read_message_id, archived_at FROM conversation_participants WHERE conversation_id = ? ORDER BY user_id').bind(separateGroup.id).all()).results
           return target.batch(statements)
         }
         const value = Reflect.get(target, key, target)
@@ -378,10 +387,9 @@ test('members talk in team conversations, see unread state and receive recorded 
       try {
         await assert.rejects(sendTeamMessage(env, revokingDb, cook, separateGroup.id, { body: 'Must never be sent', photos: [], idempotencyKey: 'send-race-message', senderName: 'cook' }), refused(404, 'TEAM_THREAD_NOT_FOUND', 'threadId'))
         assert.equal(interleaved, true)
-        assert.equal(await db.prepare('SELECT COUNT(*) AS n FROM team_messages WHERE thread_id = ? AND idempotency_key = ?').bind(separateGroup.id, 'send-race-message').first('n'), 0)
-        assert.deepEqual(await db.prepare('SELECT id, last_message_at FROM team_threads WHERE id = ?').bind(separateGroup.id).first(), afterRemoval)
-        assert.deepEqual((await db.prepare('SELECT member_id, last_read_at FROM team_thread_members WHERE thread_id = ? ORDER BY member_id').bind(separateGroup.id).all()).results, readsAfterRemoval)
-        assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM activity_entries WHERE organization_id = ? AND event_name = 'team.message_sent'").bind(ORG).first('n'), receiptsAfterRemoval)
+        assert.equal(await db.prepare('SELECT COUNT(*) AS n FROM messages WHERE dedupe_key = ?').bind(`team:${separateGroup.id}:send-race-message`).first('n'), 0)
+        assert.deepEqual(await db.prepare('SELECT id, last_message_at FROM conversations WHERE id = ?').bind(separateGroup.id).first(), afterRemoval)
+        assert.deepEqual((await db.prepare('SELECT user_id, last_read_message_id, archived_at FROM conversation_participants WHERE conversation_id = ? ORDER BY user_id').bind(separateGroup.id).all()).results, readsAfterRemoval)
       } finally {
         await operateTeamGroup(env, db, owner, separateGroup.id, { action: 'add', memberIds: ['cook'], idempotencyKey: 'send-race-readd' })
       }
@@ -415,13 +423,13 @@ test('members talk in team conversations, see unread state and receive recorded 
       return true
     })
     assert.equal(await groupView(cook), undefined)
-    assert.partialDeepStrictEqual(await publicationCache.get('team-publication:last', 'json'), { type: 'team_thread.access_ended', teamThreadId: group.id, targetUserId: 'cook' })
+    assert.partialDeepStrictEqual(await publicationCache.get('team-publication:last', 'json'), { type: 'CONVERSATION_LEAVE', conversationId: group.id, targetUserId: 'cook' })
     await publicationCache.delete('team-publication:refuse')
     assert.deepEqual(await operateTeamGroup(env, db, cook, group.id, leaving), { status: 'left', threadId: group.id })
     assert.equal((await listTeamMessages(db, owner, group.id, {})).messages[0]?.id, groupMessage.message.id)
     await operateTeamGroup(env, db, owner, group.id, { action: 'leave', idempotencyKey: 'last-person-leave' })
-    assert.equal(await db.prepare('SELECT COUNT(*) AS n FROM team_thread_members WHERE thread_id = ?').bind(group.id).first('n'), 0)
-    assert.equal(await db.prepare('SELECT id FROM team_messages WHERE thread_id = ?').bind(group.id).first('id'), groupMessage.message.id)
+    assert.equal(await db.prepare('SELECT COUNT(*) AS n FROM conversation_participants WHERE conversation_id = ?').bind(group.id).first('n'), 0)
+    assert.equal(await db.prepare('SELECT id FROM messages WHERE conversation_id = ?').bind(group.id).first('id'), groupMessage.message.id)
 
     // The home's one canonical assignment write retains its other details.
     await updateStayHome(env, db, manager, cabin.id, { assigned_member_id: 'm-cook', check_in_time: '17:00', check_out_time: '11:00' })
@@ -440,7 +448,7 @@ test('members talk in team conversations, see unread state and receive recorded 
       assert.equal(failure.data.committed, true)
       return true
     })
-    const retainedGroup = (await listTeamThreads(env, db, owner)).find(thread => thread.name === 'Retained group')!
+    const retainedGroup = (await teamThreads(owner)).find(thread => thread.name === 'Retained group')!
     assert.equal(retainedGroup.participants.length, 3)
     // Leaving the organization ends the seat; what they wrote stays, sent by their user.
     await updateStayHome(env, db, manager, cabin.id, { assigned_member_id: 'm-cleaner' })
@@ -452,9 +460,11 @@ test('members talk in team conversations, see unread state and receive recorded 
     await updateStayHome(env, db, manager, cabin.id, { assigned_member_id: 'm-cook' })
     await publicationCache.delete('team-publication:refuse')
     assert.deepEqual(await createTeamThread(env, db, owner, retainedCreation), { id: retainedGroup.id, created: false })
-    assert.deepEqual((await listTeamThreads(env, db, owner)).find(thread => thread.id === retainedGroup.id)?.participants.map(person => person.id).sort(), ['cook', 'owner'])
-    const after = (await listTeamThreads(env, db, owner)).find(thread => thread.id === direct.id)!
+    assert.deepEqual((await teamThread(owner, retainedGroup.id)).participants.map(person => person.id).sort(), ['cook', 'owner'])
+    const after = await teamThread(owner, direct.id)
     assert.deepEqual(after.participants.map(participant => participant.id), ['owner'])
+    // The departed member keeps no seat or read position in this organization's conversations.
+    assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM conversation_participants WHERE organization_id = ? AND user_id = 'cleaner'").bind(ORG).first('n'), 0)
     assert.equal((await listTeamMessages(db, owner, direct.id, {})).messages.find(message => message.body === 'Towels are out')?.senderId, 'cleaner')
 
     // Only departed/dangling current targets are released. Promotion preserves explicit responsibility.

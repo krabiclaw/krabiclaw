@@ -365,79 +365,56 @@ test.describe('stateless MCP server', () => {
       const seating = await openSeating(request, 2)
       const { requestId: reservationThreadId } = await bookTable(request, { name: 'MCP Reservation', email: reservationEmail, phone: '+14155552673', partySize: 2, seating })
 
-      const reservationInbox = await mcpRequest(request, baseURL!, {
-        method: 'tools/call', toolName: 'list_guest_conversations',
-        args: { organization_id: organizationId, type: 'booking', limit: 100 },
-      })
-      expect(reservationInbox.status()).toBe(200)
-      const inboxReservation = mcpData<{ conversations: Array<{ request_id: string }> }>(await reservationInbox.json())
-        .conversations.find(row => row.request_id === reservationThreadId)
-      expect(inboxReservation).toMatchObject({ guest_name: 'MCP Reservation', type: 'booking' })
-      expect(Object.keys(inboxReservation!).sort()).toEqual(['guest_name', 'needs_reply', 'operational_status', 'participant_label', 'reply_channel', 'reply_not_possible', 'request_id', 'type', 'unread', 'updated_at'])
+      type ConversationRow = { conversation_id: string; kind: string; title: string; channel: string; home: string | null; when: string | null; preview: string; preview_from: string | null; time: string; unread: boolean }
+      const listConversations = async (type: 'booking' | 'contact') => mcpData<{ conversations: ConversationRow[] }>(await (await mcpRequest(request, baseURL!, {
+        method: 'tools/call', toolName: 'list_conversations', args: { organization_id: organizationId, kind: 'guests', type, limit: 100 },
+      })).json()).conversations
+      const inboxReservation = (await listConversations('booking')).find(row => row.conversation_id === reservationThreadId)
+      expect(inboxReservation).toMatchObject({ title: 'MCP Reservation', kind: 'guest' })
+      expect(Object.keys(inboxReservation!).sort()).toEqual(['channel', 'conversation_id', 'home', 'kind', 'preview', 'preview_from', 'time', 'title', 'unread', 'when'])
 
-      const listContacts = await mcpRequest(request, baseURL!, {
-        method: 'tools/call',
-        toolName: 'list_guest_conversations',
-        args: { organization_id: organizationId, type: 'contact', limit: 100 },
-      })
-      expect(listContacts.status()).toBe(200)
-      const contactsBody = await listContacts.json()
       // The shared demo inbox holds other runs' submissions; read back this test's own.
-      const contactSubmission = mcpData<{ conversations: Array<{ request_id: string; guest_name: string }> }>(contactsBody)
-        .conversations.find(row => row.guest_name === `MCP Contact ${contactEmail}`)
-      expect(contactSubmission).toMatchObject({ request_id: expect.any(String) })
-      expect(contactSubmission).not.toHaveProperty('preview')
-      const contactRead = await mcpRequest(request,baseURL!,{method:'tools/call',toolName:'get_guest_conversation',args:{organization_id:organizationId,request_id:contactSubmission!.request_id}})
-      const contact = mcpData<{conversation:{guest:{email:string};inquiry_message:string;entries:Array<{id:string;event:string|null}>;archived:boolean}}>(await contactRead.json()).conversation
+      const contactSubmission = (await listConversations('contact')).find(row => row.title === `MCP Contact ${contactEmail}`)
+      expect(contactSubmission).toMatchObject({ conversation_id: expect.any(String), preview: 'hello from MCP e2e' })
+      const conversationId = contactSubmission!.conversation_id
+      const readContact = async () => mcpData<{ guest: { guest: { email: string }; archived: boolean; messages: Array<{ id: string; author: string; body: string | null; event: string | null }> } }>(await (await mcpRequest(request, baseURL!, {
+        method: 'tools/call', toolName: 'get_conversation', args: { organization_id: organizationId, conversation_id: conversationId } })).json()).guest
+      const contact = await readContact()
       expect(contact.guest.email).toBe(contactEmail)
-      expect(contact.inquiry_message).toBe('hello from MCP e2e')
-      const emptyReply = await mcpRequest(request,baseURL!,{method:'tools/call',toolName:'reply_to_guest',args:{organization_id:organizationId,request_id:contactSubmission!.request_id,idempotency_key:crypto.randomUUID()}})
+      // The contact's words are the guest's first message.
+      expect(contact.messages[0]).toMatchObject({ author: 'guest', body: 'hello from MCP e2e', event: 'thread.submission' })
+      const emptyReply = await mcpRequest(request,baseURL!,{method:'tools/call',toolName:'send_message',args:{organization_id:organizationId,conversation_id:conversationId,idempotency_key:crypto.randomUUID()}})
       expect(emptyReply.status()).toBe(200)
       const emptyReplyResult = (await emptyReply.json()).result
       expect(emptyReplyResult.isError).toBe(true)
       expect(emptyReplyResult.structuredContent).toBeUndefined()
-      expect(emptyReplyResult.content[0].text).toContain('Invalid arguments for tool reply_to_guest')
-      // The refused reply wrote nothing: the ledger and the conversation the dashboard draws are as they were.
-      const unchangedContactRead = await mcpRequest(request,baseURL!,{method:'tools/call',toolName:'get_guest_conversation',args:{organization_id:organizationId,request_id:contactSubmission!.request_id}})
-      const unchangedContactLedger = mcpData<{conversation:{entries:Array<{id:string;event:string|null}>}}>(await unchangedContactRead.json()).conversation
-      expect(unchangedContactLedger.entries.map(entry => entry.id)).toEqual(contact.entries.map(entry => entry.id))
-      const unchangedContact = await request.get(`${baseURL}/api/dashboard/organizations/${organizationId}/guest-threads/${contactSubmission!.request_id}`)
+      expect(emptyReplyResult.content[0].text).toContain('Invalid arguments for tool send_message')
+      // The refused reply wrote nothing: the conversation MCP and the dashboard read are as they were.
+      expect((await readContact()).messages.map(message => message.id)).toEqual(contact.messages.map(message => message.id))
+      const unchangedContact = await request.get(`${baseURL}/api/dashboard/organizations/${organizationId}/guest-threads/${conversationId}`)
       expect(unchangedContact.status()).toBe(200)
       const unchangedContactState = (await unchangedContact.json() as { thread: InboxThread }).thread
       expect(unchangedContactState.stream.filter(item => item.type === 'message')).toMatchObject([{ side: 'guest', body: 'hello from MCP e2e' }])
-      // Opening it above read it; MCP marks it unread and read again, and the inbox list reads each back.
-      const contactUnread = async () => mcpData<{ conversations: Array<{ request_id: string; unread: boolean }> }>(await (await mcpRequest(request, baseURL!, {
-        method: 'tools/call', toolName: 'list_guest_conversations', args: { organization_id: organizationId, type: 'contact', limit: 100 },
-      })).json()).conversations.find(row => row.request_id === contactSubmission!.request_id)?.unread
-      expect(await contactUnread()).toBe(false)
-      for (const read of [false, true]) {
-        const marked = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'set_guest_conversation_read', args: { organization_id: organizationId, request_id: contactSubmission!.request_id, read } })
+      // Reading writes nothing: the guest's message is still unread. MCP marks it read and unread, and the list reads each back.
+      const contactUnread = async () => (await listConversations('contact')).find(row => row.conversation_id === conversationId)?.unread
+      expect(await contactUnread()).toBe(true)
+      for (const toolName of ['mark_conversation_read', 'mark_conversation_unread', 'mark_conversation_read'] as const) {
+        const marked = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName, args: { organization_id: organizationId, conversation_id: conversationId } })
         expect(marked.status()).toBe(200)
-        expect(mcpData<{ request_id: string; unread: boolean }>(await marked.json())).toEqual({ request_id: contactSubmission!.request_id, unread: !read })
-        expect(await contactUnread()).toBe(!read)
+        expect(mcpData<{ conversation_id: string; unread: boolean }>(await marked.json())).toMatchObject({ conversation_id: conversationId, unread: toolName === 'mark_conversation_unread' })
+        expect(await contactUnread()).toBe(toolName === 'mark_conversation_unread')
       }
+      // Archive is the caller's own filing: Past for them, and nothing written in the conversation.
       for (const archived of [true, false]) {
-        const archive = await mcpRequest(request,baseURL!,{method:'tools/call',toolName:'set_guest_conversation_archived',args:{organization_id:organizationId,request_id:contactSubmission!.request_id,archived,idempotency_key:crypto.randomUUID()}})
+        const archive = await mcpRequest(request,baseURL!,{method:'tools/call',toolName:'set_conversation_archived',args:{organization_id:organizationId,conversation_id:conversationId,archived}})
         expect(archive.status()).toBe(200)
-        const receipt = mcpData<{outcome:{ok:boolean};conversation:{request_id:string;needs_reply:boolean;archived:boolean;updated_at:string}}>(await archive.json())
-        expect(receipt.outcome).toEqual({ok:true})
-        expect(Object.keys(receipt.conversation).sort()).toEqual(['archived','needs_reply','request_id','updated_at'])
-        expect(receipt.conversation).toMatchObject({request_id:contactSubmission!.request_id,archived})
-        // The dashboard reads the same filing: the conversation keeps every earlier item, and says each move once.
-        const native = await request.get(`${baseURL}/api/dashboard/organizations/${organizationId}/guest-threads/${contactSubmission!.request_id}`)
-        expect(native.status()).toBe(200)
-        const nativeConversation = (await native.json() as { thread: InboxThread }).thread
-        const nativeActions = await request.get(`${baseURL}/api/dashboard/organizations/${organizationId}/guest-threads/${contactSubmission!.request_id}/details`)
+        expect(mcpData<{ conversation_id: string; archived: boolean }>(await archive.json())).toEqual({ conversation_id: conversationId, archived })
+        expect((await readContact()).archived).toBe(archived)
+        const nativeActions = await request.get(`${baseURL}/api/dashboard/organizations/${organizationId}/guest-threads/${conversationId}/details`)
         expect(nativeActions.status()).toBe(200)
         expect((await nativeActions.json() as InboxThreadDetails).actions).toMatchObject({ archive: !archived, unarchive: archived })
-        expect(nativeConversation.composer).toEqual({ channel: 'email', available: true, reason: null })
-        // Day headers are the reader's calendar, not conversation items.
-        const earlier = unchangedContactState.stream.filter(item => item.type !== 'day')
-        const items = nativeConversation.stream.filter(item => item.type !== 'day')
-        expect(items).toEqual(expect.arrayContaining(earlier))
-        expect(items).toHaveLength(earlier.length + (archived ? 1 : 2))
-        expect(items.slice(earlier.length).map(item => item.type === 'event' ? item.text : item.type))
-          .toEqual(archived ? ['You archived this conversation'] : ['You archived this conversation', 'You moved this conversation back to Messages'])
+        const native = await request.get(`${baseURL}/api/dashboard/organizations/${organizationId}/guest-threads/${conversationId}`)
+        expect(((await native.json() as { thread: InboxThread }).thread.stream.filter(item => item.type !== 'day'))).toEqual(unchangedContactState.stream.filter(item => item.type !== 'day'))
       }
 
       // The assistant reads the table booking with every other booking, at its seating.
@@ -458,7 +435,7 @@ test.describe('stateless MCP server', () => {
       expect(tools.status()).toBe(200)
       const toolsBody = await tools.json() as { result: { tools: Array<{ name: string }> } }
       const toolNames = toolsBody.result.tools.map(tool => tool.name)
-      expect(toolNames).toContain('list_guest_conversations')
+      expect(toolNames).toContain('list_conversations')
       expect(toolNames).toContain('list_product_bookings')
       expect(toolNames).not.toContain('list_table_reservations')
     } finally {

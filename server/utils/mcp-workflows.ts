@@ -67,7 +67,8 @@ export async function listContactSubmissions(
     params.push(d1JsonStringSet(opts.locationIds))
   }
   return await queryAll<Record<string, unknown>>(db, `
-    SELECT id, organization_id, location_id, json_extract(payload_json, '$.guest.name') AS name, json_extract(payload_json, '$.guest.email') AS email, json_extract(payload_json, '$.subject') AS subject, json_extract(payload_json, '$.message') AS message, created_at FROM requests
+    SELECT id, organization_id, location_id, json_extract(payload_json, '$.guest.name') AS name, json_extract(payload_json, '$.guest.email') AS email, json_extract(payload_json, '$.subject') AS subject,
+      (SELECT m.body FROM messages m WHERE m.conversation_id = conversations.id AND m.author_kind = 'guest' ORDER BY m.sequence LIMIT 1) AS message, created_at FROM conversations
     WHERE kind = 'contact' AND organization_id = ?
       ${locationClause}
     ORDER BY created_at DESC

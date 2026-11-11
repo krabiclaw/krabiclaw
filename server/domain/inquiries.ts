@@ -2,7 +2,8 @@ import type { H3Event } from 'nitro'
 import { requestInsertQueries, getGuestRequest } from '~/server/domain/requests'
 import { conversationTaskQueries } from '~/server/domain/guest-threads/repository'
 import { acceptFormAnswers, readFormQuestions } from '~/server/domain/form-questions'
-import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
+import { publishConversationEvent } from '~/server/cloudflare/guest-inbox-events'
+import { SUBMISSION_EVENT } from '~/server/domain/conversations'
 import { isLegalPracticeSite } from '~/utils/site-routing'
 import { execute, executeBatch, queryFirst, type DbClient } from '~/server/db'
 import { cleanString, cloudflareEnv } from '~/server/utils/api-response'
@@ -37,12 +38,15 @@ function readPagePath(value: unknown): string | null {
 async function notifyInquiry(env: CloudflareEnv, db: DbClient, organization: { id: string; name: string | null; vertical: string }, threadId: string) {
   const thread = await getGuestRequest(db, threadId, organization.id, 'contact')
   if (!thread || thread.kind !== 'contact') throw new Error('Inquiry delivery requires its saved thread')
+  // The guest's words are their first message.
+  const words = await queryFirst<{ body: string | null }>(db, `SELECT body FROM messages WHERE conversation_id = ? AND event_name = '${SUBMISSION_EVENT}'`, [threadId])
+  if (!words) throw new Error(`Inquiry ${threadId} has no message of its own`)
   await notifyContactSubmitted(env, db, {
     organizationId: organization.id, locale: thread.payload.guest.locale, locationId: thread.location_id, organizationName: organization.name, vertical: organization.vertical,
     contactId: threadId, guestName: thread.payload.guest.name, email: thread.payload.guest.email, phone: thread.payload.guest.phone,
-    subject: thread.payload.subject, message: thread.payload.message, answers: thread.payload.answers, consentAcknowledged: thread.payload.consent_at !== null,
+    subject: thread.payload.subject, message: words.body ?? '', answers: thread.payload.answers, consentAcknowledged: thread.payload.consent_at !== null,
   })
-  await execute(db, `UPDATE requests SET payload_json = json_set(payload_json, '$.submission.followups_completed', json('true')) WHERE id = ? AND organization_id = ? AND json_type(payload_json, '$.submission') = 'object'`, [threadId, organization.id])
+  await execute(db, `UPDATE conversations SET payload_json = json_set(payload_json, '$.submission.followups_completed', json('true')) WHERE id = ? AND organization_id = ? AND json_type(payload_json, '$.submission') = 'object'`, [threadId, organization.id])
 }
 
 /**
@@ -113,7 +117,7 @@ export async function createInquiry(event: H3Event, input: { organizationId: str
   const replay = async (): Promise<InquiryResult | null> => {
     if (!idempotencyKey) return null
     const existing = await queryFirst<{ fingerprint: string | null; completed: number | null }>(db, `SELECT json_extract(payload_json, '$.submission.fingerprint') AS fingerprint, json_extract(payload_json, '$.submission.followups_completed') AS completed
-      FROM requests WHERE id = ? AND organization_id = ? AND kind = 'contact'`, [id, organizationId])
+      FROM conversations WHERE id = ? AND organization_id = ? AND kind = 'contact'`, [id, organizationId])
     if (!existing) return null
     if (existing.fingerprint !== fingerprint) return result({ error: 'This idempotency key belongs to a different inquiry.', code: 'idempotency_conflict', field: 'idempotency_key' }, 409)
     if (!existing.completed) await notifyInquiry(env, db, organization, id)
@@ -144,17 +148,17 @@ export async function createInquiry(event: H3Event, input: { organizationId: str
   const now = new Date().toISOString()
   try {
     await executeBatch(db, requestInsertQueries({ id, kind: 'contact', organization_id: organization.id, location_id: assignedLocationId,
-      user_id: userId, review_id: null, payload: { guest: { name, email, phone, locale: language.locale }, subject: subject || topic || null, message, consent_at: consentAcknowledged ? now : null, ip_hash: ipHash,
+      booking_id: null, user_id: userId, payload: { guest: { name, email, phone, locale: language.locale }, subject: subject || topic || null, consent_at: consentAcknowledged ? now : null, ip_hash: ipHash,
         source: source || null, route_context: routeContext || null, suggested_summary: suggestedSummary || null, agent_metadata: agentMetadata, answers,
         ...(idempotencyKey && fingerprint ? { submission: { idempotency_key: idempotencyKey, fingerprint, actor_user_id: operator?.userId ?? null, source: source || 'website', followups_completed: false } } : {}) },
-      created_at: now, updated_at: now }).concat(conversationTaskQueries(id, now)))
+      created_at: now }, undefined, { words: message }).concat(conversationTaskQueries(id, now)))
   } catch (error) {
     // The same key committed by a concurrent attempt is that attempt's inquiry.
     const concurrent = await replay()
     if (concurrent) return concurrent
     throw error
   }
-  await publishGuestInboxThreadEvent(env, db, { threadId: id, type: 'thread.created' })
+  await publishConversationEvent(env, db, { conversationId: id, type: 'MESSAGE_CREATE' })
 
   // Both are attempted before either failure is raised. Telling the owner and
   // recording the conversion are independent of each other.

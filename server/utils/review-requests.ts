@@ -121,11 +121,12 @@ export async function getReviewBookingContext(
     b.status, b.no_show_at, b.ends_at,
     -- Whether the visit was invited and answered is the review_requests record's, not the thread's.
     (SELECT MIN(rr.first_sent_at) FROM review_requests rr WHERE rr.booking_id = b.id) AS review_request_sent_at,
-    (SELECT MIN(rr.submitted_at) FROM review_requests rr WHERE rr.booking_id = b.id) AS review_submitted_at, r.review_id,
+    (SELECT MIN(rr.submitted_at) FROM review_requests rr WHERE rr.booking_id = b.id) AS review_submitted_at,
+    (SELECT rv.id FROM reviews rv WHERE rv.organization_id = b.organization_id AND rv.booking_id = b.id ORDER BY rv.created_at LIMIT 1) AS review_id,
     s.name AS organization_name, s.vertical AS organization_vertical, (SELECT 'https://' || domain FROM organization_domains WHERE organization_id = s.id AND role = 'canonical' AND status = 'active') AS organization_public_url,
     bl.title AS location_title, bl.google_place_id, bl.google_review_url,
     b.starts_at AS visit_starts_at, b.timezone AS visit_timezone, b.party_size, b.product_id, p.kind AS product_kind, p.name AS product_title
-    FROM bookings b JOIN requests r ON r.id = b.request_id AND r.organization_id = b.organization_id AND r.kind = 'booking'
+    FROM bookings b JOIN conversations r ON r.booking_id = b.id AND r.organization_id = b.organization_id AND r.kind = 'booking'
     JOIN organization s ON s.id = b.organization_id LEFT JOIN business_locations bl ON bl.id = r.location_id
     JOIN products p ON p.organization_id = b.organization_id AND p.id = b.product_id
     WHERE b.id = ? AND b.channel = 'direct'`, [bookingId])
@@ -218,7 +219,7 @@ export async function createReviewRequest(
   if (request && request.token === null) {
     const receipts = await queryAll<{ email_json: string | null }>(db, `
       SELECT d.email_json FROM guest_thread_deliveries d
-      JOIN activity_entries e ON e.id = d.entry_id
+      JOIN messages e ON e.id = d.message_id
       WHERE e.dedupe_key = ? AND d.channel = 'email' AND d.purpose = 'status_update'
     `, [`review-request:${request.id}`])
     let recovered: string | null = null
@@ -282,7 +283,7 @@ export function revokeReviewRequestQuery(bookingId: string, entryId: string, now
       UPDATE review_requests
       SET revoked_at = COALESCE(revoked_at, ?), updated_at = ?
       WHERE booking_id = ? AND submitted_at IS NULL AND revoked_at IS NULL
-        AND EXISTS (SELECT 1 FROM activity_entries WHERE id = ?)
+        AND EXISTS (SELECT 1 FROM messages WHERE id = ?)
     `,
     params: [now, now, bookingId, entryId],
   }

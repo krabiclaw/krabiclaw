@@ -18,14 +18,14 @@
     "recordTitle": "Reservation",
     "stream": [
       {
-        "id": "day:00000000-0000-4000-8000-000000000014",
+        "id": "day:00000000-0000-4000-8000-000000000013",
         "label": "Today",
         "type": "day"
       },
       {
         "author": "Ana Ruiz",
         "body": "74 D · Sky from Fri, Nov 20 to Mon, Nov 23 for 2 guests. Ana Ruiz, +1 303 555 0123.",
-        "id": "00000000-0000-4000-8000-000000000014",
+        "id": "00000000-0000-4000-8000-000000000013",
         "label": null,
         "photos": [],
         "receipt": null,
@@ -40,7 +40,7 @@
       {
         "author": "Ana Ruiz",
         "body": "We arrive late, around 9 PM.",
-        "id": "00000000-0000-4000-8000-000000000015",
+        "id": "00000000-0000-4000-8000-000000000014",
         "label": null,
         "photos": [],
         "receipt": null,

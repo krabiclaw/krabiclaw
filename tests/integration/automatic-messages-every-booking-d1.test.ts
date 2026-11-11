@@ -130,8 +130,8 @@ test('consultations, classes and table bookings are sent their automatic message
     // Each booking's plan, read from the table rather than from the planner that wrote it.
     const planned = (id: string, templateId: string) => db.prepare('SELECT * FROM scheduled_guest_messages WHERE booking_id = ? AND template_id = ?').bind(id, templateId).first<Record<string, string | null>>()
     const anaCreated = await db.prepare('SELECT created_at FROM bookings WHERE id = ?').bind(ana.bookingId).first<string>('created_at')
-    assert.deepEqual(Object.fromEntries(Object.entries((await planned(ana.bookingId, received.id))!).filter(([key]) => ['status', 'due_at', 'request_id', 'product_id', 'booking_id', 'timezone'].includes(key))),
-      { product_id: consultation, booking_id: ana.bookingId, request_id: ana.requestId, due_at: plus(anaCreated!, 5), timezone: 'America/New_York', status: 'pending' })
+    assert.deepEqual(Object.fromEntries(Object.entries((await planned(ana.bookingId, received.id))!).filter(([key]) => ['status', 'due_at', 'product_id', 'booking_id', 'timezone'].includes(key))),
+      { product_id: consultation, booking_id: ana.bookingId, due_at: plus(anaCreated!, 5), timezone: 'America/New_York', status: 'pending' })
     assert.deepEqual([(await planned(ana.bookingId, prepare.id))?.status, (await planned(ana.bookingId, prepare.id))?.due_at], ['pending', plus(hourOn(3, 15), -120)])
     const classDay = localDateAt(new Date(hourOn(5, 16)), 'America/Denver')
     assert.deepEqual([(await planned(cy.bookingId, reminder.id))?.status, (await planned(cy.bookingId, reminder.id))?.due_at],
@@ -139,7 +139,7 @@ test('consultations, classes and table bookings are sent their automatic message
     const table = await db.prepare('SELECT s.starts_at, s.ends_at FROM bookings b JOIN product_sessions s ON s.id = b.product_session_id WHERE b.id = ?').bind(dee.reservationId).first<{ starts_at: string; ends_at: string }>()
     assert.equal(table?.starts_at, localDateTimeToInstant(dinner.date, dinner.time, 'Asia/Bangkok', 'reject').toISOString())
     const deeThanks = (await planned(dee.reservationId, thanks.id))!
-    assert.deepEqual([deeThanks.status, deeThanks.due_at, deeThanks.product_id, deeThanks.request_id], ['pending', plus(table!.ends_at, 120), tables.id, dee.requestId])
+    assert.deepEqual([deeThanks.status, deeThanks.due_at, deeThanks.product_id, deeThanks.booking_id], ['pending', plus(table!.ends_at, 120), tables.id, dee.reservationId])
     // The studio's message never reaches the law firm's clients, nor the reverse.
     assert.equal(await db.prepare('SELECT count(*) AS n FROM scheduled_guest_messages WHERE booking_id = ? AND template_id = ?').bind(ana.bookingId, reminder.id).first('n'), 0)
 
@@ -189,8 +189,8 @@ test('consultations, classes and table bookings are sent their automatic message
     for (const [id, templateId, requestId] of [[ana.bookingId, prepare.id, ana.requestId], [cy.bookingId, reminder.id, cy.requestId], [dee.reservationId, thanks.id, dee.requestId]] as const) {
       const sent = (await planned(id, templateId))!
       assert.equal(sent.status, 'sent')
-      assert.deepEqual(await db.prepare('SELECT e.request_id, e.actor_kind, d.channel, d.purpose, d.status FROM activity_entries e JOIN guest_thread_deliveries d ON d.entry_id = e.id WHERE e.id = ?').bind(sent.entry_id).first(),
-        { request_id: requestId, actor_kind: 'system', channel: 'email', purpose: 'scheduled_message', status: 'sent' })
+      assert.deepEqual(await db.prepare('SELECT e.conversation_id, e.author_kind, d.channel, d.purpose, d.status FROM messages e JOIN guest_thread_deliveries d ON d.message_id = e.id WHERE e.id = ?').bind(sent.message_id).first(),
+        { conversation_id: requestId, author_kind: 'krabiclaw', channel: 'email', purpose: 'scheduled_message', status: 'sent' })
     }
   } finally {
     await runtime.dispose()

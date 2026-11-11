@@ -13,7 +13,7 @@ import type { DomainRecord } from '../../server/utils/domains.ts'
 import { notifyContactSubmitted, notifyGuestThreadReply } from '../../server/utils/notifications.ts'
 import { requestInsertQueries } from '../../server/domain/requests.ts'
 import { createDeliveryReceipt, getDeliveryById, isDeliverySent, isVisibleDeliveryFailure, recordDeliveryOutcome } from '../../server/domain/guest-threads/deliveries.ts'
-import { appendEntry } from '../../server/domain/guest-threads/entries.ts'
+import { appendMessage } from '../../server/domain/conversations.ts'
 import whatsappWebhook from '../../server/api/whatsapp/webhook.post.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
 import { createStay } from '../../server/domain/stays.ts'
@@ -93,27 +93,26 @@ test('organization messaging entitlement fences Meta calls while preserving noti
       for (const organizationId of ['free', 'paid']) {
         const id = `contact-${organizationId}`
         const now = new Date().toISOString()
-        await db.batch(requestInsertQueries({ id, kind: 'contact', organization_id: organizationId, location_id: null, user_id: null, review_id: null, payload: { guest: { name: 'Guest', email: 'guest@proof.example', phone: null }, subject: null, message: 'Hello', consent_at: null, ip_hash: null }, created_at: now, updated_at: now }).map(write => db.prepare(write.query).bind(...write.params)))
+        await db.batch(requestInsertQueries({ id, kind: 'contact', organization_id: organizationId, location_id: null, booking_id: null, user_id: null, payload: { guest: { name: 'Guest', email: 'guest@proof.example', phone: null }, subject: null, consent_at: null, ip_hash: null, answers: [] }, created_at: now }, undefined, { words: 'Hello' }).map(write => db.prepare(write.query).bind(...write.params)))
         const before = metaCalls
         await notifyContactSubmitted(providerEnv, db, { organizationId, organizationName: organizationId, vertical: 'restaurant', locationId: null, contactId: id, guestName: 'Guest', email: 'guest@proof.example', subject: null, message: 'Hello' })
         assert.equal(metaCalls - before, organizationId === 'paid' ? 1 : 0)
-        const entry = await appendEntry(db, { threadId: id, kind: 'message', actorKind: 'guest', channel: 'email', body: 'Reply', dedupeKey: `reply-${id}` })
+        const entry = await appendMessage(db, { conversationId: id, authorKind: 'guest', authorUserId: null, channel: 'email', body: 'Reply', dedupeKey: `reply-${id}` })
         const replyBefore = metaCalls
-        await notifyGuestThreadReply(providerEnv, db, { organizationId, threadId: id, sourceEntryId: entry.id, submissionType: 'contact', submissionId: id, participantLabel: 'Guest', guestEmail: 'guest@proof.example', inboundChannel: 'email' })
+        await notifyGuestThreadReply(providerEnv, db, { organizationId, threadId: id, messageId: entry.id, submissionType: 'contact', submissionId: id, participantLabel: 'Guest', guestEmail: 'guest@proof.example', inboundChannel: 'email' })
         assert.equal(metaCalls - replyBefore, organizationId === 'paid' ? 1 : 0)
-        const rows = (await db.prepare('SELECT d.channel,d.status FROM guest_thread_deliveries d JOIN activity_entries e ON e.id=d.entry_id WHERE e.request_id=?').bind(id).all<{ channel: string; status: string }>()).results
+        const rows = (await db.prepare('SELECT d.channel,d.status FROM guest_thread_deliveries d JOIN messages e ON e.id=d.message_id WHERE e.conversation_id=?').bind(id).all<{ channel: string; status: string }>()).results
         assert(rows.some(row => row.channel === 'email' && row.status === 'sent'), 'email fallback persists')
         assert.equal(rows.filter(row => row.channel === 'whatsapp').length, organizationId === 'paid' ? 2 : 0)
-        assert.equal(await db.prepare("SELECT count(*) AS count FROM activity_entries WHERE kind='notification' AND organization_id=?").bind(organizationId).first('count'), organizationId === 'paid' ? 4 : 3, 'dashboard alerts persist independently of WhatsApp')
       }
       await db.prepare("UPDATE user_notification_preferences SET whatsapp_enabled=0 WHERE category='messages'").run()
-      const entry = await appendEntry(db, { threadId: 'contact-paid', kind: 'message', actorKind: 'guest', channel: 'email', body: 'Opted out', dedupeKey: 'reply-optout' })
+      const entry = await appendMessage(db, { conversationId: 'contact-paid', authorKind: 'guest', authorUserId: null, channel: 'email', body: 'Opted out', dedupeKey: 'reply-optout' })
       const before = metaCalls
-      await notifyGuestThreadReply(providerEnv, db, { organizationId: 'paid', threadId: 'contact-paid', sourceEntryId: entry.id, submissionType: 'contact', submissionId: 'contact-paid', participantLabel: 'Guest', inboundChannel: 'email' })
+      await notifyGuestThreadReply(providerEnv, db, { organizationId: 'paid', threadId: 'contact-paid', messageId: entry.id, submissionType: 'contact', submissionId: 'contact-paid', participantLabel: 'Guest', inboundChannel: 'email' })
       assert.equal(metaCalls, before)
       // A notification whose organization downgrades is explicitly skipped,
       // not represented as a failed or sent delivery.
-      const receipt = await createDeliveryReceipt(db, { entryId: entry.id, channel: 'whatsapp', provider: 'meta', purpose: 'owner_alert', idempotencyKey: 'downgrade-proof' })
+      const receipt = await createDeliveryReceipt(db, { subject: { messageId: entry.id }, channel: 'whatsapp', provider: 'meta', purpose: 'owner_alert', idempotencyKey: 'downgrade-proof' })
       await db.prepare("UPDATE subscription SET status='canceled' WHERE id='paid-sub'").run()
       const result = await send('paid')
       assert.equal(result.status, 'skipped')
@@ -208,8 +207,8 @@ test('an owner answers a guest by quoting their WhatsApp alert, with nothing ask
     const dee = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'dee', check_in_date: day(10), check_out_date: day(12), adults: 1, guest_name: 'Dee', guest_phone: '+61491570151', total_minor: 30_000 })
     // Each guest wrote, and the owner was alerted on WhatsApp about each.
     for (const [stay, name] of [[ana, 'ana'], [bo, 'bo'], [dee, 'dee']] as const) {
-      const entry = await appendEntry(db, { threadId: stay.request_id!, kind: 'message', actorKind: 'guest', channel: 'email', body: `Hi from ${name}`, dedupeKey: `guest-${name}` })
-      const alert = await createDeliveryReceipt(db, { entryId: entry.id, channel: 'whatsapp', provider: 'meta', purpose: 'owner_alert', idempotencyKey: `alert-${name}` })
+      const entry = await appendMessage(db, { conversationId: stay.request_id, authorKind: 'guest', authorUserId: null, channel: 'email', body: `Hi from ${name}`, dedupeKey: `guest-${name}` })
+      const alert = await createDeliveryReceipt(db, { subject: { messageId: entry.id }, channel: 'whatsapp', provider: 'meta', purpose: 'owner_alert', idempotencyKey: `alert-${name}` })
       await recordDeliveryOutcome(db, { deliveryId: alert.id, status: 'sent', providerMessageId: `meta-alert-${name}` })
     }
     const sent: string[] = []
@@ -227,8 +226,8 @@ test('an owner answers a guest by quoting their WhatsApp alert, with nothing ask
     app.post('/api/whatsapp/webhook', whatsappWebhook)
     let inbound = 0
     /** Delivers one owner message as Meta signs it, and returns what the owner was sent back. */
-    const write = async (text: string, quoting?: string, id = `wamid-${++inbound}`, status = 200) => {
-      const body = JSON.stringify({ object: 'whatsapp_business_account', entry: [{ changes: [{ value: { messages: [{ id, from: '66812345678', timestamp: String(Math.floor(Date.now() / 1000)), type: 'text', text: { body: text }, ...(quoting && { context: { id: quoting } }) }] } }] }] })
+    const write = async (text: string, quoting?: string, id = `wamid-${++inbound}`, status = 200, from = '66812345678') => {
+      const body = JSON.stringify({ object: 'whatsapp_business_account', entry: [{ changes: [{ value: { messages: [{ id, from, timestamp: String(Math.floor(Date.now() / 1000)), type: 'text', text: { body: text }, ...(quoting && { context: { id: quoting } }) }] } }] }] })
       const before = sent.length
       const response = await app.request(Object.assign(new Request('https://proof.example/api/whatsapp/webhook', {
         method: 'POST', headers: { 'content-type': 'application/json', 'x-hub-signature-256': `sha256=${createHmac('sha256', 'whatsapp-secret').update(body).digest('hex')}` }, body,
@@ -236,7 +235,7 @@ test('an owner answers a guest by quoting their WhatsApp alert, with nothing ask
       assert.equal(response.status, status, await response.clone().text())
       return sent.slice(before)
     }
-    const replies = async (stay: { request_id: string | null }) => (await db.prepare("SELECT body FROM activity_entries WHERE request_id = ? AND event_name = 'thread.member_reply'")
+    const replies = async (stay: { request_id: string | null }) => (await db.prepare("SELECT body FROM messages WHERE conversation_id = ? AND event_name = 'thread.member_reply'")
       .bind(stay.request_id).all<{ body: string }>()).results.map(row => row.body)
 
     // A message that quotes no alert is answered with one line, and nothing is sent to anyone.
@@ -247,8 +246,8 @@ test('an owner answers a guest by quoting their WhatsApp alert, with nothing ask
     // Quoting Ana's alert sends the words to Ana at once, as the inbox would, and says so.
     assert.deepEqual(await write('See you at 4', 'meta-alert-ana', 'wamid-ana'), ['Reply sent.'])
     assert.deepEqual(await replies(ana), ['See you at 4'])
-    const delivery = await db.prepare(`SELECT d.channel, d.purpose, json_extract(d.email_json, '$.message.to') AS recipient FROM guest_thread_deliveries d JOIN activity_entries e ON e.id = d.entry_id
-      WHERE e.request_id = ? AND e.event_name = 'thread.member_reply'`).bind(ana.request_id).first<{ channel: string; purpose: string; recipient: string }>()
+    const delivery = await db.prepare(`SELECT d.channel, d.purpose, json_extract(d.email_json, '$.message.to') AS recipient FROM guest_thread_deliveries d JOIN messages e ON e.id = d.message_id
+      WHERE e.conversation_id = ? AND e.event_name = 'thread.member_reply'`).bind(ana.request_id).first<{ channel: string; purpose: string; recipient: string }>()
     assert.deepEqual(delivery, { channel: 'email', purpose: 'member_reply', recipient: 'ana@example.test' })
     // Meta redelivering that message answers nothing again and sends nothing again.
     assert.deepEqual(await write('See you at 4', 'meta-alert-ana', 'wamid-ana'), [])
@@ -261,6 +260,13 @@ test('an owner answers a guest by quoting their WhatsApp alert, with nothing ask
     // Dee can only be reached by phone: quoting her alert says why the reply cannot go, and writes nothing.
     assert.deepEqual(await write('Hello Dee', 'meta-alert-dee'), ['Reply not sent: This guest has no email or KrabiClaw account to reply to.'])
     assert.deepEqual(await replies(dee), [])
+
+    // Dee's own WhatsApp message is hers in her stay's conversation, on the WhatsApp channel, once however often Meta delivers it.
+    // The owner is alerted once, by template (no text body); the redelivery writes and alerts nothing.
+    assert.deepEqual(await write('Running late', undefined, 'wamid-dee', 200, '61491570151'), [''])
+    assert.deepEqual(await write('Running late', undefined, 'wamid-dee', 200, '61491570151'), [])
+    assert.deepEqual((await db.prepare("SELECT author_kind, author_user_id, channel, body FROM messages WHERE dedupe_key = 'whatsapp:wamid-dee'").all()).results,
+      [{ author_kind: 'guest', author_user_id: (await db.prepare('SELECT user_id FROM conversations WHERE id = ?').bind(dee.request_id).first<string>('user_id')), channel: 'whatsapp', body: 'Running late' }])
 
     // The reply went and Meta refused to carry its outcome: the message fails, so Meta delivers it again,
     // and the redelivery tells the member without sending the guest the reply twice.
@@ -277,8 +283,8 @@ test('an owner answers a guest by quoting their WhatsApp alert, with nothing ask
     const [mate, ownerSeat] = await Promise.all([teamAccess('teammate', 'member', 'member-mate'), teamAccess('owner', 'owner', 'member-paid')])
     const teamThread = await createTeamThread(env, db, mate, { memberIds: ['owner'] })
     const teamAlerted = await sendTeamMessage(env, db, mate, teamThread.id, { body: 'Towels are out', photos: [], idempotencyKey: 'team-alert', senderName: 'Teammate' })
-    const teamAlert = await db.prepare(`SELECT d.provider_message_id FROM guest_thread_deliveries d JOIN activity_entries e ON e.id = d.entry_id
-      WHERE e.dedupe_key = ? AND d.channel = 'whatsapp' AND d.provider = 'meta'`).bind(`team-message:${teamAlerted.message.id}`).first<string>('provider_message_id')
+    const teamAlert = await db.prepare(`SELECT d.provider_message_id FROM guest_thread_deliveries d
+      WHERE d.message_id = ? AND d.channel = 'whatsapp' AND d.provider = 'meta'`).bind(teamAlerted.message.id).first<string>('provider_message_id')
     assert.ok(teamAlert)
     assert.deepEqual(await write('Thanks', teamAlert, 'wamid-team'), ['Reply sent.'])
     assert.deepEqual(await write('Thanks', teamAlert, 'wamid-team'), [])

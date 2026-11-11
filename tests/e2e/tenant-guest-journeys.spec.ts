@@ -306,9 +306,9 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     expect((await pendingThread.json() as { thread: InboxThread }).thread).toMatchObject({ id: body.request_id, guestName: 'Cancel Once', recordKind: 'booking' })
     // Whether a reply is owed is the ledger's, which MCP reads out; the inbox view keeps it on the server.
     const conversationLedger = async () => {
-      const response = await mcpRequest(request, baseURL, { method: 'tools/call', toolName: 'get_guest_conversation', args: { organization_id: wheel.organizationId, request_id: body.request_id } })
+      const response = await mcpRequest(request, baseURL, { method: 'tools/call', toolName: 'get_conversation', args: { organization_id: wheel.organizationId, conversation_id: body.request_id } })
       expect(response.status()).toBe(200)
-      return mcpData<{ conversation: { needs_reply: boolean; operational_record: { status: string } | null; entries: Array<{ id: string; event: string | null }> } }>(await response.json()).conversation
+      return mcpData<{ guest: { needs_reply: boolean; operational_record: { status: string } | null; messages: Array<{ id: string; event: string | null }> } }>(await response.json()).guest
     }
     // The booking carries no question from the guest: no reply is owed, and Today holds no task for it (Calendar has it).
     expect((await conversationLedger()).needs_reply).toBe(false)
@@ -342,7 +342,7 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     // A cancel and its replay are one cancellation: one ledger entry, said once in the conversation.
     const cancelledLedger = await conversationLedger()
     expect(cancelledLedger).toMatchObject({ needs_reply: false, operational_record: { status: 'cancelled' } })
-    const cancelEntries = cancelledLedger.entries.filter(entry => entry.event === 'booking.cancel')
+    const cancelEntries = cancelledLedger.messages.filter(entry => entry.event === 'booking.cancel')
     expect(cancelEntries).toHaveLength(1)
     expect(thread.stream.filter(item => item.type === 'event' && item.id === cancelEntries[0]!.id)).toMatchObject([{ text: expect.stringMatching(/ canceled the booking$/) }])
     const scheduleAfter = await request.get(`${baseURL}/api/dashboard/agenda`, { params: scheduleParams })

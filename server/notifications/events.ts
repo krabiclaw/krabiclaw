@@ -671,7 +671,7 @@ export interface OnboardingCompletedInput {
 export interface ContentReportedInput {
   organizationName: string
   reporter: string
-  subject: 'guest_thread' | 'team_message'
+  subject: 'conversation' | 'message'
   blocked: boolean
   reason: string
   excerpt: string
@@ -680,7 +680,7 @@ export interface ContentReportedInput {
 
 /** A member reported a guest or a teammate; KrabiClaw acts on it within 24 hours. */
 export function contentReportedMessage(input: ContentReportedInput): MemberAlertMessage {
-  const what = input.subject === 'guest_thread' ? 'a guest conversation' : 'a team message'
+  const what = input.subject === 'conversation' ? 'a guest conversation' : 'a team message'
   return {
     title: `${input.blocked ? 'Guest blocked and reported' : 'Content reported'} in ${input.organizationName}`,
     preheader: `${input.reporter} reported ${what}. Review it within 24 hours.`,

@@ -693,7 +693,7 @@ export async function deleteLocation(
     },
     {
       query: `
-      DELETE FROM requests WHERE organization_id = ? AND location_id = ? AND kind = 'booking'
+      DELETE FROM conversations WHERE organization_id = ? AND location_id = ? AND kind = 'booking'
     `,
       params: [organizationId, locationId],
     },

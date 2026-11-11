@@ -20,7 +20,7 @@ export default defineHandler(async (event) => {
   const env = cloudflareEnv(event)
   const expected = await createReplayableReservationCancelToken(env.EMAIL_REPLY_SECRET ?? '', activityId)
   if (await hashReservationCancelToken(token) !== await hashReservationCancelToken(expected.token)) throw new HTTPError({ statusCode: 404, statusMessage: 'Stay not found' })
-  const owner = await queryFirst<{ user_id: string | null; created_at: string }>(env.DB, "SELECT user_id, created_at FROM bookings WHERE organization_id = ? AND request_id = ? AND owner = 'app' AND product_session_id IS NULL", [organizationId, activityId])
+  const owner = await queryFirst<{ user_id: string | null; created_at: string }>(env.DB, "SELECT b.user_id, b.created_at FROM conversations c JOIN bookings b ON b.id = c.booking_id AND b.organization_id = c.organization_id WHERE c.organization_id = ? AND c.id = ? AND c.kind = 'booking' AND b.owner = 'app' AND b.product_session_id IS NULL", [organizationId, activityId])
   if (!owner?.user_id) throw new HTTPError({ statusCode: 404, statusMessage: 'Stay not found' })
   // The link lasts as a booking's does, from when the stay was booked.
   if (Date.parse(owner.created_at) + TOKEN_TTL_DAYS * 86_400_000 <= Date.now()) throw new HTTPError({ statusCode: 410, statusMessage: 'This link has expired. Your stay is in your KrabiClaw account once you create one with the email you booked with.' })

@@ -13,13 +13,13 @@ import type Stripe from 'stripe'
 import type { notifySubscriptionPlan } from '~/server/domain/payments/notifications'
 import { getCurrentAuthEndpointContext } from '@better-auth/core/context'
 import { HTTPError, type H3Event } from 'nitro';
-import { createDb, execute, executeBatch, queryAll, queryFirst, schema, type BatchQuery } from '~/server/db'
+import { createDb, executeBatch, queryAll, queryFirst, schema, type BatchQuery } from '~/server/db'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
 import { sendWhatsAppOtp } from '~/server/utils/whatsapp'
 import { parsePhoneOrThrow } from '~/utils/phone'
 import { isCurrencyCode } from '~/shared/currencies'
 import { isValidTimezone } from '~/utils/timezone'
-import { createCanonicalNotification, notifyNewUserSignup } from '~/server/utils/notification-center'
+import { departedParticipantsQuery } from '~/server/domain/conversations'
 import { measurementOutcome, readPageEventId, recordAndDeliverConversion } from '~/server/utils/organization-conversions'
 import { getPlatformOrganization } from '~/server/utils/platform-organization'
 import { sendPasswordResetEmail, sendSignInCodeEmail, sendVerificationEmail } from '~/server/utils/auth-email'
@@ -357,7 +357,8 @@ function buildAuth(env: CloudflareEnv) {
   // with each other, and a failure of either reaches the caller.
   const recordMemberChange = async (organizationId: string, audit: BatchQuery[] = []) => {
     await reconcileResponsibilities(env, db, { organizationId })
-    await executeBatch(db, [publicResourceCacheInvalidationQuery(organizationId, 'member-change'), ...audit])
+    // A person who left keeps no seat or read position in the organization's conversations.
+    await executeBatch(db, [publicResourceCacheInvalidationQuery(organizationId, 'member-change'), departedParticipantsQuery(organizationId), ...audit])
     await publishAccessInvalidation(env, { organizationId })
   }
   // Removed by an owner, leaving, or deleting the account: one departure, one
@@ -586,7 +587,6 @@ function buildAuth(env: CloudflareEnv) {
           before: async (user) => {
             // A deleted account's Customer at every business it paid goes with it, and the cards saved there.
             await deleteBuyerCustomers(db, env, user.id)
-            await execute(db, "DELETE FROM activity_entries WHERE kind='notification' AND scope_kind='global' AND target_user_id=?", [user.id])
             departingMemberships.set(user.id, await queryAll<{ id: string; organizationId: string; userId: string }>(db, 'SELECT id, "organizationId", "userId" FROM member WHERE "userId" = ?', [user.id]))
           },
           // Current business responsibility ends with membership, once the
@@ -616,7 +616,6 @@ function buildAuth(env: CloudflareEnv) {
             // Signup itself must not assume why the user is here: they may be
             // accepting an invitation into an existing org, in which case a
             // personal org here would just be an orphaned, siteless duplicate.
-            await notifyNewUserSignup(db)
             // One registered account, once per user, through every way an
             // account is created (password, social, phone, an anonymous guest
             // becoming a user). Login, provider linking and invitation
@@ -653,17 +652,6 @@ function buildAuth(env: CloudflareEnv) {
         await sendPasswordResetEmail(env, {
           email: user.email,
           resetUrl: url,
-        }).catch(async (error) => {
-          // Better Auth keeps the reset response generic to prevent enumeration.
-          // Its callback failure must still be visible to platform operators.
-          await createCanonicalNotification(db, {
-            scope: 'global',
-            template: 'auth.reset_password_email_failed',
-            severity: 'error',
-            title: 'Password reset email failed',
-            message: error instanceof Error ? error.message : String(error),
-          })
-          throw error
         })
       },
       onPasswordReset: async ({ user }) => {
@@ -678,15 +666,6 @@ function buildAuth(env: CloudflareEnv) {
         await sendVerificationEmail(env, {
           email: user.email,
           verificationUrl: url,
-        }).catch(async (error) => {
-          await createCanonicalNotification(db, {
-            scope: 'global',
-            template: 'auth.verification_email_failed',
-            severity: 'error',
-            title: 'Verification email failed',
-            message: error instanceof Error ? error.message : String(error),
-          })
-          throw error
         })
       },
     },

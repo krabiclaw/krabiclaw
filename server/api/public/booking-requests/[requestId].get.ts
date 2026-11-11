@@ -39,7 +39,7 @@ export default defineHandler(async (event) => {
   // Reading the receipt remains valid after spending the cancellation token.
   // Cancellation writes still enforce the token's single-use boundary.
   const readable = await queryFirst<{ id: string }>(db, `
-    SELECT r.id FROM requests r
+    SELECT r.id FROM conversations r
      WHERE r.id = ? AND r.organization_id = ? AND r.kind = 'booking'
        AND json_extract(r.payload_json, '$.cancellation.token_hash') = ?
        AND json_extract(r.payload_json, '$.cancellation.expires_at') > ?

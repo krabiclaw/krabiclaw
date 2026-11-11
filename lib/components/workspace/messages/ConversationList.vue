@@ -1,7 +1,7 @@
 <template>
   <div
     class="flex min-h-0 w-full min-w-0 flex-1 flex-col"
-    :data-guest-thread-list-hydrated="listHydrated ? 'true' : 'false'"
+    :data-conversation-list-hydrated="listHydrated ? 'true' : 'false'"
   >
     <!-- The list's controls: Airbnb's two pills, the kind menu and Unread. Search and settings sit beside the title. -->
     <header class="shrink-0 pb-2" :class="dashboardGutterClass">
@@ -35,7 +35,9 @@
           :unread="thread.unread"
           :name="thread.guestName"
           :enabled="!personalScope"
+          :archivable="!pastOnly && !blockedOnly"
           @toggle="toggleRead(thread)"
+          @archive="archive(thread)"
         >
           <NuxtLink
             :to="{ path: threadRoute(thread), query: route.query }"
@@ -45,7 +47,7 @@
             :class="thread.id === openThreadId ? 'bg-elevated' : 'hover:bg-elevated/60'"
           >
             <span v-if="thread.unread" class="absolute left-2.5 top-[38px] size-2 rounded-full bg-primary" :aria-label="`${thread.guestName}: unread`" />
-            <InboxAvatar :name="thread.guestName" :initial="thread.avatarInitial" :support="thread.kind === 'support'" :channel="thread.channel" size="lg" />
+            <InboxAvatar :name="thread.guestName" :initial="thread.avatarInitial" :support="thread.kind === 'support'" :channel="thread.kind === 'team' ? null : thread.channel" size="lg" />
             <span class="min-w-0 flex-1">
               <span class="flex items-baseline justify-between gap-3 text-sm text-muted">
                 <span class="min-w-0 truncate">{{ [thread.when, thread.home].filter(Boolean).join(' · ') }}</span>
@@ -104,10 +106,12 @@ import MessageRowActions from './MessageRowActions.vue'
 import { useInboxUnread } from './inbox-unread'
 
 /*
-  The thread list, and only the list. A thread opens as this level's detail
-  column through the editor frame, so nothing here fetches, renders or mutates
-  a conversation. Every word on a row is the server's (inbox-parity.md, "The
-  list"); this draws them.
+  The one list of conversations: guests', Airbnb Support's and the team's, in
+  one order, read from the one list the server has for every surface. A
+  conversation opens as this level's detail column through the editor frame
+  (a guest's or the team's screen), so nothing here fetches or renders one.
+  Every word on a row is the server's (inbox-parity.md, "The list"); this
+  draws them. Read, unread and archive are the reader's own, and saved here.
 */
 const props = withDefaults(defineProps<{ personalScope?: boolean }>(), { personalScope: false })
 const session = authClient.useSession()
@@ -119,17 +123,18 @@ const organizationId = computed(() => dashboard.organizationId.value)
 
 const listRoute = computed(() => props.personalScope ? '/dashboard/account/messages' : `/dashboard/${String(route.params.orgSlug)}/messages`)
 
-// The open thread, for the selected row, read from the route below this list.
+// The open conversation, for the selected row, read from the route below this list.
 const openThreadId = computed(() => {
   if (!route.path.startsWith(`${listRoute.value}/`)) return null
-  return decodeURIComponent(route.path.slice(listRoute.value.length + 1).split('/')[0] ?? '') || null
+  const segments = route.path.slice(listRoute.value.length + 1).split('/')
+  return decodeURIComponent((segments[0] === 'team' ? segments[1] : segments[0]) ?? '') || null
 })
 
 // Filter and corpus live in the URL, so a filtered list is a link.
 const pastOnly = computed(() => route.query.archived !== undefined)
 const blockedOnly = computed(() => !props.personalScope && route.query.blocked !== undefined)
 const withoutArchived = computed(() => { const { archived: _archived, blocked: _blocked, ...rest } = route.query; return rest })
-const kind = computed(() => route.query.kind === 'guests' || route.query.kind === 'support' ? route.query.kind : null)
+const kind = computed(() => route.query.kind === 'guests' || route.query.kind === 'support' || route.query.kind === 'team' ? route.query.kind : null)
 const unreadOnly = computed(() => route.query.unread === '1')
 const search = computed(() => typeof route.query.q === 'string' && route.query.q.trim() ? route.query.q.trim() : null)
 
@@ -157,7 +162,7 @@ const listQuery = computed(() => ({
 }))
 
 const listKey = computed(() => [
-  props.personalScope ? `account-guest-threads:${session.value.data?.user.id}` : 'dashboard-guest-threads',
+  props.personalScope ? `account-conversations:${session.value.data?.user.id}` : 'dashboard-conversations',
   String(route.params.orgSlug ?? ''),
   organizationId.value,
   kind.value ?? 'all',
@@ -180,7 +185,7 @@ async function loadPage(offset: number, signal?: AbortSignal): Promise<ThreadLis
   }
   const page = props.personalScope
     ? await applicationFetch<ThreadListPage>('/api/account/messages', { query, signal, validate: isThreadListResponse })
-    : await dashboardApi<ThreadListPage>(`/api/dashboard/organizations/${organizationId.value}/guest-threads`, { query, signal, validate: isThreadListResponse })
+    : await dashboardApi<ThreadListPage>(`/api/dashboard/organizations/${organizationId.value}/conversations`, { query, signal, validate: isThreadListResponse })
   if (page.pagination.limit !== query.limit || page.pagination.offset !== offset) throw createError({ statusCode: 502, statusMessage: 'Messages returned a different page than requested' })
   return page
 }
@@ -289,9 +294,9 @@ watch([threads, openThreadId, pending], ([rows, open, loading]) => {
   emit('first', first ? { path: threadRoute(first), query: route.query } : null)
 }, { immediate: true })
 
-// A thread opens beside this list, whichever location it belongs to.
+// A conversation opens beside this list: a guest's at its id, the team's on the team screen.
 function threadRoute(thread: ThreadListItem) {
-  return `${listRoute.value}/${encodeURIComponent(thread.id)}`
+  return thread.kind === 'team' ? `${listRoute.value}/team/${encodeURIComponent(thread.id)}` : `${listRoute.value}/${encodeURIComponent(thread.id)}`
 }
 
 // Read or unread without opening it: the row changes at once, and the list and
@@ -311,10 +316,11 @@ async function saveRead(thread: ThreadListItem) {
   }
   mark(!read)
   try {
-    await dashboardApi(`/api/dashboard/organizations/${organizationId.value}/guest-threads/${encodeURIComponent(thread.id)}/${read ? 'read' : 'unread'}`, {
+    await dashboardApi(`${conversationPath(thread)}/${read ? 'read' : 'unread'}`, {
       method: 'POST',
-      validate: (value: unknown): value is { unread: boolean } => typeof value === 'object' && value !== null && Reflect.get(value, 'unread') === !read,
+      validate: (value: unknown): value is { read: boolean } => typeof value === 'object' && value !== null && Reflect.get(value, 'read') === read,
     })
+    refreshConversationUnreadCount()
   } catch (error) {
     mark(read)
     toast.add({ color: 'error', title: read ? 'Could not mark as read' : 'Could not mark as unread', description: getErrorMessage(error, 'Try again') })
@@ -323,12 +329,35 @@ async function saveRead(thread: ThreadListItem) {
   await refresh()
 }
 
+function conversationPath(thread: ThreadListItem) {
+  return `/api/dashboard/organizations/${organizationId.value}/conversations/${encodeURIComponent(thread.id)}`
+}
+
+// Archive files the conversation away for this member alone; a new message from someone else brings it back.
+async function archive(thread: ThreadListItem) {
+  if (toggling.has(thread.id)) return
+  toggling.add(thread.id)
+  try {
+    await dashboardApi(`${conversationPath(thread)}/archive`, {
+      method: 'POST',
+      body: { archived: true },
+      validate: (value: unknown): value is { archived: boolean } => typeof value === 'object' && value !== null && Reflect.get(value, 'archived') === true,
+    })
+    refreshConversationUnreadCount()
+  } catch (error) {
+    toast.add({ color: 'error', title: 'Could not archive the conversation', description: getErrorMessage(error, 'Try again') })
+  } finally {
+    toggling.delete(thread.id)
+  }
+  await refresh()
+}
+
 // The menu's counts are the list's, read with it.
 watch(data, page => { if (page?.unread) unreadCounts.value = page.unread }, { immediate: true })
 
 watch(realtime.event, (event) => {
-  // notification.read: this member read or marked a conversation on another device or tab.
-  if (props.personalScope || !event || (event.type !== 'access.changed' && event.type !== 'notification.read' && !('threadId' in event))) return
+  // MESSAGE_ACK: this member read, marked or archived a conversation on another device or tab.
+  if (props.personalScope || !event || !['access.changed', 'MESSAGE_CREATE', 'MESSAGE_UPDATE', 'MESSAGE_ACK', 'CONVERSATION_LEAVE'].includes(event.type)) return
   if (organizationId.value && event.organizationId !== organizationId.value) return
   void refresh()
 })

@@ -189,7 +189,7 @@ export async function getDomainEvents(db: D1Database, domainId: string) {
            payload_json ->> '$.afterState' AS after_state,
            payload_json ->> '$.metadata' AS metadata, created_at
     FROM activity_entries
-    WHERE kind = 'audit' AND payload_json ->> '$.entityType' = 'domain' AND payload_json ->> '$.entityId' = ?
+    WHERE payload_json ->> '$.entityType' = 'domain' AND payload_json ->> '$.entityId' = ?
     ORDER BY created_at DESC
     LIMIT 100
   `, [domainId])

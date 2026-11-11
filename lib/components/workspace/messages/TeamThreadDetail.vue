@@ -1,7 +1,7 @@
 <template>
   <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
     <div v-if="!thread" class="py-4" :class="dashboardGutterClass">
-      <UAlert color="error" title="Team conversation could not be loaded" :description="getErrorMessage(error || threadError, 'This conversation is not available to your membership')" :actions="[{ label: 'Reload', color: 'neutral', variant: 'outline', onClick: () => refreshNuxtData(`team-threads:${dashboard.organizationId.value}`) }]" />
+      <UAlert color="error" title="Team conversation could not be loaded" :description="getErrorMessage(error || threadError, 'This conversation is not available to your membership')" :actions="[{ label: 'Reload', color: 'neutral', variant: 'outline', onClick: () => refreshNuxtData(conversationKey) }]" />
     </div>
     <template v-else-if="thread">
       <div v-if="error || threadError" class="py-3" :class="dashboardGutterClass">
@@ -75,6 +75,7 @@ const session = authClient.useSession()
 const userId = computed(() => session.value.data?.user.id)
 const { locale } = useI18n()
 const path = computed(() => `/api/dashboard/team/threads/${encodeURIComponent(props.threadId)}`)
+const conversationKey = `team-conversation:${dashboard.organizationId.value}:${props.threadId}`
 let loadedCount = 20
 let historyAnchor: { createdAt: string; id: string } | null = null
 const key = `team-messages:${dashboard.organizationId.value}:${props.threadId}`
@@ -105,7 +106,7 @@ function senderName(message: TeamMessage) { return message.automatic ? 'Sent aut
 // The job strip opens the task sheet; closing the job there posts the person's own message here.
 const jobOpen = ref(false)
 async function jobChanged() {
-  await refreshNuxtData(`team-threads:${dashboard.organizationId.value}`)
+  await refreshNuxtData(conversationKey)
   await refresh()
 }
 function failedDeliveries(message: TeamMessage) { return message.deliveries.filter(delivery => delivery.status === 'failed') }
@@ -168,7 +169,6 @@ async function send() {
     // Clear only the exact committed draft; a failed receipt/reconciliation keeps the keyed retry.
     await refresh()
     if (error.value) throw error.value
-    await refreshNuxtData(`team-threads:${dashboard.organizationId.value}`)
     draft.value = ''
     photos.value = []
     attempt.value = null
@@ -177,20 +177,27 @@ async function send() {
   } catch (error) { actionError.value = getErrorMessage(error, 'Your message could not be sent') }
   finally { sending.value = false }
 }
+/*
+  Opening the conversation reads it through to the newest message shown, while
+  the page is visible; the read GET wrote nothing. A conversation with only
+  this member's own messages has nothing to read.
+*/
 const visibility = useDocumentVisibility()
 let readThrough = ''
 let markingRead = false
 async function markRead() {
   if (!import.meta.client || visibility.value !== 'visible' || !data.value || markingRead) return
   const latest = data.value.messages[0]?.id ?? ''
-  if (!latest || latest === readThrough) return
+  if (!latest || latest === readThrough || !data.value.messages.some(message => message.automatic || message.senderId !== userId.value)) return
   markingRead = true
   try {
-    await api(`${path.value}/read`, { method: 'POST', validate: (value): value is { status: 'read'; lastReadAt: string } => isRecord(value) && value.status === 'read' && typeof value.lastReadAt === 'string' })
+    await api(`/api/dashboard/organizations/${encodeURIComponent(dashboard.organizationId.value ?? '')}/conversations/${encodeURIComponent(props.threadId)}/read`, {
+      method: 'POST', body: { messageId: latest },
+      validate: (value): value is { read: true; lastReadMessageId: string } => isRecord(value) && value.read === true && typeof value.lastReadMessageId === 'string',
+    })
     readThrough = latest
     readError.value = ''
-    await refreshNuxtData(`team-threads:${dashboard.organizationId.value}`)
-    refreshNotificationUnreadCounts()
+    refreshConversationUnreadCount()
   } catch (error) { readError.value = getErrorMessage(error, 'Read state could not be saved') }
   finally {
     markingRead = false
@@ -199,6 +206,8 @@ async function markRead() {
 }
 watch([data, visibility], markRead, { immediate: true })
 const realtime = useDashboardInvalidations()
-watch(realtime.event, event => { if (event?.type === 'team_thread.changed' && event.organizationId === dashboard.organizationId.value && event.teamThreadId === props.threadId) void refresh() })
+watch(realtime.event, event => {
+  if ((event?.type === 'MESSAGE_CREATE' || event?.type === 'MESSAGE_UPDATE') && event.organizationId === dashboard.organizationId.value && event.conversationId === props.threadId) void refresh()
+})
 watch(realtime.connectionEpoch, epoch => { if (epoch > 0) void refresh() })
 </script>

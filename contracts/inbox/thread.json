@@ -156,19 +156,13 @@
       {
         "id": "00000000-0000-4000-8000-000000000011",
         "sentAt": "2026-11-05T19:00:00.000Z",
-        "text": "You archived this conversation",
-        "type": "event"
-      },
-      {
-        "id": "00000000-0000-4000-8000-000000000012",
-        "sentAt": "2026-11-05T19:00:00.000Z",
-        "text": "You moved this conversation back to Messages",
+        "text": "Payment received",
         "type": "event"
       },
       {
         "author": "You",
         "body": "Check-in is from 4 PM.",
-        "id": "00000000-0000-4000-8000-000000000013",
+        "id": "00000000-0000-4000-8000-000000000012",
         "label": null,
         "photos": [],
         "receipt": "Not delivered",

@@ -51,6 +51,7 @@
 
 <script setup lang="ts">
 import { getErrorMessage } from '~/utils/errors'
+import { isRecord } from '~/utils/api-clients'
 import { isThreadDetailResponse, isThreadDetails, type ThreadDetails } from './guest-thread-client'
 import MessagePhotoViewer, { type MessagePhotoViewerState } from './MessagePhotoViewer.vue'
 import ReportDialog from './ReportDialog.vue'
@@ -95,7 +96,16 @@ async function move(transition: 'archive' | 'unarchive' | 'report' | 'block' | '
   saving.value = transition
   moveError.value = null
   try {
-    await api(`${path.value}/operations/${transition}`, { method: 'POST', body: reason === undefined ? { idempotencyKey } : { idempotencyKey, reason }, validate: isThreadDetailResponse })
+    if (transition === 'archive' || transition === 'unarchive') {
+      // Archive is this member's own filing (D2): the conversation's read and archive state, not an operation on it.
+      const archived = transition === 'archive'
+      await api(`/api/dashboard/organizations/${dashboard.organizationId.value}/conversations/${encodeURIComponent(props.threadId)}/archive`, {
+        method: 'POST', body: { archived },
+        validate: (value: unknown): value is { archived: boolean } => isRecord(value) && value.archived === archived,
+      })
+    } else {
+      await api(`${path.value}/operations/${transition}`, { method: 'POST', body: reason === undefined ? { idempotencyKey } : { idempotencyKey, reason }, validate: isThreadDetailResponse })
+    }
     attemptKeys.delete(attempt)
     reporting.value = null
     open.value = false

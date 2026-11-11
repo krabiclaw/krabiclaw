@@ -308,9 +308,9 @@ async function answerChange(requestId: string, decision: 'accept' | 'decline') {
       })
       return
     }
-    await applicationFetch('/api/account/bookings/change', {
+    await applicationFetch(`/api/public/booking-changes/${encodeURIComponent(props.threadId)}/${encodeURIComponent(requestId)}`, {
       method: 'POST',
-      body: { thread_id: props.threadId, request_id: requestId, decision },
+      body: { decision },
       validate: (value: unknown): value is BookingChangeView => isRecord(value) && ['accepted', 'declined'].includes(String(value.status)),
     })
     // Read the conversation after the answer, not through a refresh that a read
@@ -426,7 +426,7 @@ watch(realtime.event, (event) => {
   if (event.organizationId !== dashboard.organizationId.value) return
   // Access changes invalidate the cached identity, including hydration data and in-flight reads.
   if (event.type === 'access.changed') clear()
-  if (event.type === 'access.changed' || ('threadId' in event && event.threadId === props.threadId)) void refresh()
+  if (event.type === 'access.changed' || ((event.type === 'MESSAGE_CREATE' || event.type === 'MESSAGE_UPDATE') && event.conversationId === props.threadId)) void refresh()
 })
 
 watch(error, cause => {
@@ -448,35 +448,37 @@ watch(realtime.connectionEpoch, (epoch) => {
 const documentVisibility = useDocumentVisibility()
 useIntervalFn(() => { if (props.personalScope && documentVisibility.value === 'visible') void refresh() }, 15_000)
 
-// Reading is an explicit receipt on the shown entries, never a GET mutation; the server's ledger owns read state.
-const acknowledgedEntryIds = new Set<string>()
-let acknowledgedScope: string | null = null
+/*
+  Opening a conversation reads it through to the newest message shown, while
+  the page is visible: one position for this reader, never a GET that writes.
+  Every stream item but a day header is a message; the reader's own are
+  "You", and a conversation with only those has nothing to read.
+*/
+let readThrough: string | null = null
 let markingRead = false
 const readScope = computed(() => `${session.value.data?.user.id ?? ''}:${props.threadId}:${props.personalScope}`)
-const shownEntryIds = computed(() => thread.value?.stream.filter(item => item.type !== 'day').map(item => item.id) ?? [])
+const shownMessages = computed(() => thread.value?.stream.filter(item => item.type !== 'day') ?? [])
+const fromSomeoneElse = computed(() => shownMessages.value.some(item => item.type !== 'message' || item.author !== 'You'))
+const readPath = computed(() => props.personalScope ? `${threadPath.value}/read` : `/api/dashboard/organizations/${dashboard.organizationId.value}/conversations/${encodeURIComponent(props.threadId)}/read`)
 
-async function acknowledgeVisibleEntries() {
-  if (!import.meta.client || markingRead || !props.personalScope || documentVisibility.value !== 'visible' || pending.value) return
+async function readThroughNewest() {
+  if (!import.meta.client || markingRead || documentVisibility.value !== 'visible' || pending.value || !fromSomeoneElse.value) return
+  const newest = shownMessages.value.at(-1)?.id
+  const target = newest ? `${readScope.value}:${newest}` : null
+  if (!newest || target === readThrough) return
   markingRead = true
-  await nextTick()
   try {
-    while (props.personalScope && documentVisibility.value === 'visible' && !pending.value) {
-      const scope = readScope.value
-      if (acknowledgedScope !== scope) { acknowledgedEntryIds.clear(); acknowledgedScope = scope }
-      const batch = shownEntryIds.value.filter(id => !acknowledgedEntryIds.has(id)).slice(0, 200)
-      if (!batch.length) { readError.value = null; return }
-      await applicationFetch<{ acknowledged: number }>(`${threadPath.value}/read`, {
-        method: 'POST', body: { entry_ids: batch },
-        validate: (value): value is { acknowledged: number } => isRecord(value) && typeof value.acknowledged === 'number' && Number.isSafeInteger(value.acknowledged) && value.acknowledged >= 0,
-      })
-      if (readScope.value === scope) for (const id of batch) acknowledgedEntryIds.add(id)
-      // A guest's read is not a notification; their Messages count is asked again here.
-      refreshNotificationUnreadCounts()
-    }
+    await (props.personalScope ? applicationFetch : dashboardApi)(readPath.value, {
+      method: 'POST', body: { messageId: newest },
+      validate: (value): value is { read: true; lastReadMessageId: string } => isRecord(value) && value.read === true && typeof value.lastReadMessageId === 'string',
+    })
+    readThrough = target
+    readError.value = null
+    refreshConversationUnreadCount()
   } catch (cause) { readError.value = getErrorMessage(cause, 'Message read state could not be saved') }
   finally { markingRead = false }
 }
-watch([() => shownEntryIds.value.join('|'), documentVisibility, pending, readScope], acknowledgeVisibleEntries, { immediate: true })
+watch([() => shownMessages.value.at(-1)?.id, documentVisibility, pending, readScope], readThroughNewest, { immediate: true })
 
 /*
   Following the conversation: it opens at the newest message; one arriving

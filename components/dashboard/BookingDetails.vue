@@ -13,7 +13,6 @@
       <UButton v-if="!embedded && recordLevel.to.value" :to="recordLevel.to.value" icon="i-lucide-x" color="neutral" variant="ghost" aria-label="Close booking details" />
     </template>
     <UAlert v-if="error" color="error" variant="soft" title="Booking details could not be loaded" :description="getErrorMessage(error, 'Booking request failed')" />
-    <UAlert v-if="notificationReadError" color="error" variant="soft" :description="getErrorMessage(notificationReadError, 'Booking alerts could not be marked read')" />
     <div v-else class="min-w-0 [overflow-wrap:anywhere]">
       <UAlert v-if="actionError" class="mb-5" color="error" variant="soft" icon="i-lucide-circle-alert" :description="actionError" />
       <template v-if="booking">
@@ -272,8 +271,6 @@ const chrome = computed(() => (props.embedded
   : { id: props.personalScope ? 'account-booking-details' : 'booking-details', title: pageTitle.value, column: 'record' as const }))
 
 const { resource, booking, error, presentation, noun, pageTitle, orgSlug, purchase, refresh: refreshDetails } = await useBookingDetails(props.bookingType, props.bookingId, props.personalScope)
-const notificationReadError = useAcknowledgeScheduleNotifications(() =>
-  props.embedded || props.personalScope || error.value ? undefined : resource.value?.unreadNotificationIds)
 watchEffect(() => {
   if (error.value && !booking.value) showError(error.value)
 })
@@ -335,9 +332,9 @@ async function answerChange(decision: 'accept' | 'decline') {
   answering.value = decision
   actionError.value = null
   try {
-    await applicationFetch('/api/account/bookings/change', {
+    await applicationFetch(`/api/public/booking-changes/${encodeURIComponent(booking.value.threadId)}/${encodeURIComponent(change.requestId)}`, {
       method: 'POST',
-      body: { thread_id: booking.value.threadId, request_id: change.requestId, decision },
+      body: { decision },
       validate: (value: unknown): value is Record<string, unknown> => isRecord(value),
     })
     await refreshDetails()
@@ -409,8 +406,8 @@ function openCancel() {
 }
 
 watch(realtime.event, (event) => {
-  if (!event || (event.type !== 'thread.changed' && event.type !== 'delivery.changed')) return
-  if (event.threadId === booking.value?.threadId) void refreshDetails()
+  if (!event || (event.type !== 'MESSAGE_CREATE' && event.type !== 'MESSAGE_UPDATE')) return
+  if (event.conversationId === booking.value?.threadId) void refreshDetails()
 })
 watch(realtime.connectionEpoch, (epoch) => {
   if (epoch > 0) void refreshDetails()

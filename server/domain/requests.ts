@@ -1,4 +1,5 @@
 import { openingMessageQueries } from '~/server/domain/guest-threads/opening'
+import { CURRENT_GUEST_SQL, SUBMISSION_EVENT, messageQueries } from '~/server/domain/conversations'
 import { z } from 'zod'
 import { HTTPError } from 'nitro'
 import { guestVisitRefundQueries, guestVisitRefundKey } from '~/server/domain/payments/visit-refund'
@@ -15,14 +16,13 @@ import { formAnswerSnapshotsSchema } from '~/shared/form-questions'
 import type { ProductKind } from '~/shared/product-details'
 
 /**
- * The inbox.
+ * A guest's conversation with the business (`conversations` of kind contact
+ * or booking; server/domain/conversations.ts holds what every conversation
+ * shares). It is NOT the booking: the booked record is a `bookings` row of any
+ * kind (a class, a consultation, a table or a stay at a home), which the
+ * conversation names in `booking_id`. Every booking has its conversation.
  *
- * A request is one conversation thread with a guest and its workflow state.
- * It is NOT the booking: the booked record is a `bookings` row of any kind (a
- * class, a consultation, a table or a stay at a home), which links back here
- * through `request_id`. Every booking has its conversation.
- *
- * A contact thread has none and is not forced into the booking model.
+ * A contact conversation has none and is not forced into the booking model.
  */
 
 const guest = z.object({ name: z.string(), email: z.string(), phone: z.string().nullable(), locale: z.string().optional() })
@@ -44,21 +44,22 @@ const threadPayload = z.object({
   provenance: z.object({ source: z.string(), external_reference: z.string().nullable(), actor_user_id: z.string().nullable(), idempotency_key: z.string(), fingerprint: z.string(), guest_acknowledgement: z.boolean(), creation_kind: z.enum(['ordinary', 'checkout']), creation_status: z.enum(['pending', 'confirmed']), followups_completed: z.boolean() }).optional(),
   guest: z.object({ name: z.string().nullable(), email: z.string().nullable(), phone: z.string().nullable(), locale: z.string().optional() }),
   participant: z.object({ kind: z.literal('channel'), title: z.string().trim().min(1) }).strict().optional(),
-  notes: z.string().nullable(),
+  // The dates a channel's guest asked about before booking (an Airbnb inquiry), as the channel's live feed gave them.
+  inquiry: z.object({ live_feed_event_id: z.string(), check_in_date: z.string(), check_out_date: z.string() }).passthrough().optional(),
   ip_hash: z.string().nullable(),
   cancellation,
 }).refine(payload => payload.participant !== undefined || payload.guest.name !== null, 'A booking conversation names its guest or its channel')
 
 const threadScope = z.object({
-  id: z.string(), organization_id: z.string(),  location_id: z.string().nullable(),
-  user_id: z.string().nullable(), review_id: z.string().nullable(),
-  archived_at: z.string().nullable(), archived_by_user_id: z.string().nullable(), blocked_at: z.string().nullable(),
-  created_at: z.string(), updated_at: z.string(),
+  id: z.string(), organization_id: z.string(),  location_id: z.string().nullable(), booking_id: z.string().nullable(),
+  user_id: z.string().nullable(), blocked_at: z.string().nullable(),
+  created_at: z.string(), last_message_at: z.string(),
 })
 
 export const guestRequestSchema = z.discriminatedUnion('kind', [
   threadScope.extend({ kind: z.literal('contact'), payload: z.object({
-    guest, subject: z.string().nullable(), message: z.string(), consent_at: z.string().nullable(), ip_hash: z.string().nullable(),
+    // The guest's words are their first message in the conversation, not a copy here.
+    guest, subject: z.string().nullable(), consent_at: z.string().nullable(), ip_hash: z.string().nullable(),
     // Where the message came from, when a form or ChatGPT escalation says so.
     source: z.string().nullable().optional(), route_context: z.string().nullable().optional(),
     suggested_summary: z.string().nullable().optional(), agent_metadata: z.unknown().optional(),
@@ -158,35 +159,32 @@ export function participantLabel(request: GuestRequest): string {
   return request.payload.guest.name
 }
 
-/** Resource ownership belongs to the current request and the booking linked to it. */
-export const REQUEST_CURRENT_BUYER_SQL = `r.user_id IS NOT NULL
- AND NOT EXISTS(SELECT 1 FROM bookings b WHERE b.request_id=r.id AND (b.user_id IS NULL OR b.user_id<>r.user_id OR b.organization_id<>r.organization_id OR r.kind<>'booking'))`
-
 export async function getGuestRequest(db: DbClient, id: string, organizationId?: string, kind?: GuestRequestKind, buyerUserId?:string): Promise<GuestRequest | null> {
-  const row = await queryFirst<Record<string, unknown>>(db, `SELECT r.* FROM requests r WHERE r.id = ? AND r.kind IN ('contact', 'booking')${organizationId ? ' AND r.organization_id = ?' : ''}${kind ? ' AND r.kind = ?' : ''}${buyerUserId?` AND r.user_id=? AND ${REQUEST_CURRENT_BUYER_SQL}`:''}`, [id, ...(organizationId ? [organizationId] : []), ...(kind ? [kind] : []),...(buyerUserId?[buyerUserId]:[])])
+  const row = await queryFirst<Record<string, unknown>>(db, `SELECT r.* FROM conversations r WHERE r.id = ? AND r.kind IN ('contact', 'booking')${organizationId ? ' AND r.organization_id = ?' : ''}${kind ? ' AND r.kind = ?' : ''}${buyerUserId?` AND r.user_id=? AND ${CURRENT_GUEST_SQL('r')}`:''}`, [id, ...(organizationId ? [organizationId] : []), ...(kind ? [kind] : []),...(buyerUserId?[buyerUserId]:[])])
   if (!row) return null
   const request = parseGuestRequest(row)
   if (request.kind === 'booking' && request.payload.participant) {
-    const mapped = await queryFirst(db, `SELECT ct.request_id FROM channel_threads ct
+    const mapped = await queryFirst(db, `SELECT ct.conversation_id FROM channel_threads ct
       JOIN product_stay_configs c ON c.organization_id = ct.organization_id AND c.product_id = ct.product_id
-      WHERE ct.request_id = ? AND ct.organization_id = ? AND c.location_id = ?`, [request.id, request.organization_id, request.location_id])
-    if (!mapped) throw new HTTPError({ statusCode: 500, message: 'Channel conversation has no matching home mapping', data: { code: 'CHANNEL_THREAD_MAPPING_INVALID', field: 'request_id' } })
+      WHERE ct.conversation_id = ? AND ct.organization_id = ? AND c.location_id = ?`, [request.id, request.organization_id, request.location_id])
+    if (!mapped) throw new HTTPError({ statusCode: 500, message: 'Channel conversation has no matching home mapping', data: { code: 'CHANNEL_THREAD_MAPPING_INVALID', field: 'conversation_id' } })
   }
   return request
 }
 
 /**
  * Every booking with what it booked, one row each: its product, who handles
- * it, its unit, and a fingerprint of every fact a plan made from it depends
- * on, for guarded writes. offering_id is the product a business offers.
+ * it, its unit, its guest conversation (conversation_id), and a fingerprint of
+ * every fact a plan made from it depends on, for guarded writes. offering_id is
+ * the product a business offers.
  */
 export const BOOKING_RECORDS_SQL = `(
-    SELECT b.id, b.request_id, b.organization_id, b.status, b.party_size, b.party_size_is_minimum, b.starts_at, b.ends_at, b.timezone,
+    SELECT b.id, (SELECT conv.id FROM conversations conv WHERE conv.booking_id = b.id AND conv.kind = 'booking') AS conversation_id, b.organization_id, b.status, b.party_size, b.party_size_is_minimum, b.starts_at, b.ends_at, b.timezone,
            b.location_id, b.product_id, CASE WHEN b.product_session_id IS NULL THEN 'nights' ELSE 'slot' END AS unit,
            p.kind AS product_kind, b.product_id AS offering_id, p.name AS product_name, sc.internal_name AS product_internal_name, c.assigned_member_id, b.user_id,
            b.no_show_at, b.created_at, b.received_at, b.updated_at, b.version,
            json_extract(b.policy_json, '$.advance_notice_minutes') AS advance_notice_minutes,
-           json_array(b.version, b.status, b.request_id, b.product_id, b.product_session_id, b.starts_at, b.ends_at, b.timezone, b.updated_at) AS fingerprint
+           json_array(b.version, b.status, b.product_id, b.product_session_id, b.starts_at, b.ends_at, b.timezone, b.updated_at) AS fingerprint
       FROM bookings b
       JOIN products p ON p.id = b.product_id AND p.organization_id = b.organization_id
       LEFT JOIN product_booking_configs c ON c.product_id = b.product_id AND c.organization_id = b.organization_id
@@ -195,7 +193,7 @@ export const BOOKING_RECORDS_SQL = `(
 
 /** One row of BOOKING_RECORDS_SQL. received_at is null for a booking imported or known before KrabiClaw received it. */
 export interface BookedRecord extends Omit<ThreadOperationalRecord, 'review_id'> {
-  request_id: string | null
+  conversation_id: string | null
   offering_id: string
   created_at: string
   received_at: string | null
@@ -232,73 +230,68 @@ export function bookedRecordGuard(record: Pick<BookedRecord, 'organization_id' |
 export async function getThreadOperationalRecord(db: DbClient, requestId: string): Promise<ThreadOperationalRecord | null> {
   const record = await queryFirst<Omit<ThreadOperationalRecord, 'party_size_is_minimum'> & { party_size_is_minimum: number }>(db, `
     SELECT br.unit, br.id, br.status, br.party_size, br.party_size_is_minimum, br.starts_at, br.ends_at, br.timezone, br.location_id, br.product_id, br.product_kind, br.product_name, br.product_internal_name,
-           br.assigned_member_id, br.organization_id, br.user_id, br.no_show_at, owner.review_id, br.advance_notice_minutes
-      FROM ${BOOKING_RECORDS_SQL} br
-      JOIN requests owner ON owner.id = br.request_id AND owner.kind = 'booking' AND owner.organization_id = br.organization_id
-     WHERE br.request_id = ?
+           br.assigned_member_id, br.organization_id, br.user_id, br.no_show_at,
+           (SELECT rv.id FROM reviews rv WHERE rv.organization_id = br.organization_id AND rv.booking_id = br.id ORDER BY rv.created_at LIMIT 1) AS review_id, br.advance_notice_minutes
+      FROM conversations owner
+      JOIN ${BOOKING_RECORDS_SQL} br ON br.id = owner.booking_id AND br.organization_id = owner.organization_id
+     WHERE owner.id = ? AND owner.kind = 'booking'
      LIMIT 1
   `, [requestId])
   if (record) return { ...record, party_size_is_minimum: Number(record.party_size_is_minimum) === 1 }
   const request = await queryFirst<{ kind: GuestRequestKind; uncaptured_checkout: number | null }>(db, `
     SELECT r.kind,
       (json_extract(r.payload_json, '$.provenance.creation_kind') = 'checkout'
-       AND NOT EXISTS (SELECT 1 FROM bookings b WHERE b.request_id = r.id)
+       AND r.booking_id IS NULL
        AND EXISTS (
          SELECT 1 FROM payment_checkout_holds h
          JOIN payments p ON p.id = h.payment_id AND p.organization_id = h.organization_id AND p.subject_type = 'booking'
-         WHERE h.request_id = r.id AND h.organization_id = r.organization_id
+         WHERE h.conversation_id = r.id AND h.organization_id = r.organization_id
            AND h.status IN ('active', 'released') AND h.converted_booking_id IS NULL
            AND p.captured_amount = 0 AND p.subject_id IS NULL
            AND p.idempotency_key = 'checkout:' || r.organization_id || ':' || json_extract(r.payload_json, '$.provenance.idempotency_key')
        )) AS uncaptured_checkout
-    FROM requests r WHERE r.id = ?
+    FROM conversations r WHERE r.id = ?
   `, [requestId])
   if (request?.uncaptured_checkout === 1) return null
   // A channel's conversation before its guest booked (an Airbnb inquiry) has no booking yet.
-  if (request?.kind === 'booking' && await queryFirst(db, 'SELECT request_id FROM channel_threads WHERE request_id = ?', [requestId])) return null
+  if (request?.kind === 'booking' && await queryFirst(db, 'SELECT conversation_id FROM channel_threads WHERE conversation_id = ?', [requestId])) return null
   if (request && request.kind !== 'contact') throw new HTTPError({ statusCode: 404, message: 'The conversation has no matching booking', data: { code: 'REQUEST_OPERATIONAL_RECORD_NOT_FOUND', request_id: requestId } })
   return null
 }
 
 /**
- * The thread and the activity entry that opens it.
+ * A guest conversation and the messages that open it: a contact's own words
+ * (`words`, the guest's first message), or a booking's sentence (`opening`, from
+ * `openingSentence`) and the guest's note.
  *
- * `claimedBy` is the row whose existence this thread depends on — the booking
- * written earlier in the same batch. A conditional claim that
- * finds no room inserts zero rows WITHOUT raising, so a thread written before
- * it would commit anyway and leave a conversation about a seat nobody holds.
- * Carrying the claim's existence into this insert is what ties them together.
- *
- * A new thread has not been archived or blocked by anyone, so it carries neither state.
+ * `claimedBy` is the row whose existence this conversation depends on — the
+ * booking or the checkout hold written earlier in the same batch. A
+ * conditional claim that finds no room inserts zero rows WITHOUT raising, so a
+ * conversation written before it would commit anyway and leave a conversation
+ * about a seat nobody holds. Carrying the claim's existence into this insert is
+ * what ties them together. The messages are written only where the
+ * conversation was.
  */
-/**
- * A guest thread and its submission, and, for a booking, the
- * messages that open its conversation: the booking's own sentence (`opening`,
- * from `openingSentence`) and the guest's note.
- */
-export function requestInsertQueries(request: Omit<GuestRequest, 'archived_at' | 'archived_by_user_id' | 'blocked_at'>, claimedBy?: BatchQuery, opening?: { body: string }): BatchQuery[] {
+export function requestInsertQueries(request: Omit<GuestRequest, 'blocked_at' | 'last_message_at'>, claimedBy?: BatchQuery, first?: { opening: string; note: string | null } | { words: string }): BatchQuery[] {
   const provenance = request.kind === 'booking' && 'provenance' in request.payload ? request.payload.provenance : undefined
-  const values = [request.id, request.kind, request.organization_id, request.location_id, request.user_id, request.review_id,
-    JSON.stringify(request.payload), request.created_at, request.updated_at]
+  const values = [request.id, request.kind, request.organization_id, request.location_id, request.booking_id, request.user_id,
+    JSON.stringify(request.payload), request.created_at, request.created_at]
+  const insert = `INSERT INTO conversations (id, kind, organization_id, location_id, booking_id, user_id, payload_json, last_message_at, created_at)`
+  const written = { sql: 'c.created_at = ?', params: [request.created_at] }
+  const messages: BatchQuery[] = !first ? [] : 'words' in first
+    ? messageQueries({ conversationId: request.id, authorKind: 'guest', authorUserId: request.user_id, channel: 'web', body: first.words || null,
+        eventName: SUBMISSION_EVENT, dedupeKey: `conversation:${request.id}:submission`, occurredAt: request.created_at, guard: written }).queries
+    : openingMessageQueries({ conversationId: request.id, body: first.opening, note: first.note, guestUserId: request.user_id,
+        openedByUserId: provenance?.actor_user_id ?? request.user_id, at: request.created_at })
   return [{
-    query: claimedBy
-      ? `INSERT INTO requests (id, kind, organization_id, location_id, user_id, review_id, payload_json, created_at, updated_at)
-      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (${claimedBy.query})`
-      : `INSERT INTO requests (id, kind, organization_id, location_id, user_id, review_id, payload_json, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    query: claimedBy ? `${insert} SELECT ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (${claimedBy.query})` : `${insert} VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     params: claimedBy ? [...values, ...(claimedBy.params ?? [])] : values,
-  }, {
-    query: `INSERT INTO activity_entries (id, request_id, kind, scope_kind, actor_kind, actor_user_id, channel, payload_json, dedupe_key, sequence, occurred_at, created_at)
-      SELECT ?, id, 'submission', 'request', ?, ?, ?, json_object('kind', kind), ?, 1, created_at, created_at FROM requests WHERE id = ? AND changes() = 1`,
-    params: [crypto.randomUUID(), provenance?.actor_user_id ? 'member' : 'guest', provenance?.actor_user_id ?? request.user_id, provenance?.actor_user_id ? 'system' : 'web', `request:${request.id}:submission`, request.id],
-  }, ...(opening ? openingMessageQueries({ target: { requestId: request.id }, body: opening.body, note: 'notes' in request.payload ? request.payload.notes : null, guestUserId: request.user_id, at: request.created_at }) : []),
-  publicResourceCacheInvalidationQuery(request.organization_id, 'guest-thread-create')]
+  }, ...messages, publicResourceCacheInvalidationQuery(request.organization_id, 'guest-thread-create')]
 }
 
 /**
  * A booking's conversation, written in the booking's own batch and only where
- * the booking landed (`claimedBy`): every booking has one. The host who took
- * it, the channel it came from, or the guest who booked it opens it. Its guest
+ * the booking landed and has none yet: every booking has one. Its guest
  * contact is what the booking was made with; the conversation belongs to the
  * booking's guest account.
  */
@@ -306,22 +299,14 @@ export function bookingConversationQueries(input: {
   organizationId: string; bookingId: string; requestId: string; locationId: string | null; userId: string; now: string
   guest: { name: string | null; email: string | null; phone: string | null }
   participant?: { kind: 'channel'; title: string }
-  openedBy: { userId: string } | 'channel' | 'guest'
 }): BatchQuery[] {
-  const host = typeof input.openedBy === 'object' ? input.openedBy.userId : null
-  const payload: ThreadPayload = { guest: input.guest, ...(input.participant ? { participant: input.participant } : {}), notes: null, ip_hash: null, cancellation: { token_hash: null, expires_at: null, used_at: null } }
+  const payload: ThreadPayload = { guest: input.guest, ...(input.participant ? { participant: input.participant } : {}), ip_hash: null, cancellation: { token_hash: null, expires_at: null, used_at: null } }
   threadPayload.parse(payload)
   return [{
-    query: `INSERT INTO requests (id, kind, organization_id, location_id, user_id, review_id, payload_json, created_at, updated_at)
-      SELECT ?, 'booking', ?, ?, ?, NULL, ?, ?, ? WHERE EXISTS (SELECT 1 FROM bookings WHERE organization_id = ? AND id = ? AND request_id IS NULL)`,
-    params: [input.requestId, input.organizationId, input.locationId, input.userId, JSON.stringify(payload), input.now, input.now, input.organizationId, input.bookingId],
-  }, {
-    query: `INSERT INTO activity_entries (id, request_id, kind, scope_kind, actor_kind, actor_user_id, channel, payload_json, dedupe_key, sequence, occurred_at, created_at)
-      SELECT ?, id, 'submission', 'request', ?, ?, 'system', json_object('kind', kind, 'booking_id', ?), ?, 1, created_at, created_at FROM requests WHERE id = ? AND changes() = 1`,
-    params: [crypto.randomUUID(), host ? 'member' : input.openedBy === 'guest' ? 'guest' : 'system', host, input.bookingId, `request:${input.requestId}:submission`, input.requestId],
-  }, {
-    query: 'UPDATE bookings SET request_id = ? WHERE id = ? AND organization_id = ? AND request_id IS NULL AND EXISTS (SELECT 1 FROM requests WHERE id = ?)',
-    params: [input.requestId, input.bookingId, input.organizationId, input.requestId],
+    query: `INSERT INTO conversations (id, kind, organization_id, location_id, booking_id, user_id, payload_json, last_message_at, created_at)
+      SELECT ?, 'booking', ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM bookings WHERE organization_id = ? AND id = ?)
+        AND NOT EXISTS (SELECT 1 FROM conversations WHERE kind = 'booking' AND booking_id = ?)`,
+    params: [input.requestId, input.organizationId, input.locationId, input.bookingId, input.userId, JSON.stringify(payload), input.now, input.now, input.organizationId, input.bookingId, input.bookingId],
   }, publicResourceCacheInvalidationQuery(input.organizationId, 'guest-thread-create')]
 }
 
@@ -334,20 +319,20 @@ export function bookingConversationQueries(input: {
  */
 export function bookingContactQuery(input: { organizationId: string; bookingId: string; version: number; updatedAt: string; locationId: string | null; guest: { name: string | null; email: string | null; phone: string | null } }): BatchQuery {
   return {
-    query: `UPDATE requests SET location_id = ?, payload_json = json_set(payload_json, '$.guest.name', ?, '$.guest.email', ?, '$.guest.phone', ?)
+    query: `UPDATE conversations SET location_id = ?, payload_json = json_set(payload_json, '$.guest.name', ?, '$.guest.email', ?, '$.guest.phone', ?)
       WHERE kind = 'booking' AND (json_type(payload_json, '$.participant') IS 'object' OR ? IS NOT NULL)
-        AND id = (SELECT request_id FROM bookings WHERE organization_id = ? AND id = ? AND version = ? AND updated_at = ?)`,
+        AND booking_id = (SELECT id FROM bookings WHERE organization_id = ? AND id = ? AND version = ? AND updated_at = ?)`,
     params: [input.locationId, input.guest.name, input.guest.email, input.guest.phone, input.guest.name, input.organizationId, input.bookingId, input.version, input.updatedAt],
   }
 }
 
-interface GuestThreadInput { name: string; email: string; phone?: string | null; locale?: string; notes?: string | null; ipHash?: string | null }
+interface GuestThreadInput { name: string; email: string; phone?: string | null; locale?: string; ipHash?: string | null }
 /** A site or operator booking's thread: its guest gave a name and an email. */
 export type GuestThreadPayload = ThreadPayload & { guest: { name: string; email: string } }
 export function threadPayloadForGuest(input: GuestThreadInput): GuestThreadPayload {
   return {
     guest: { name: input.name, email: input.email, phone: input.phone ?? null, ...(input.locale === undefined ? {} : { locale: input.locale }) },
-    notes: input.notes ?? null, ip_hash: input.ipHash ?? null,
+    ip_hash: input.ipHash ?? null,
     cancellation: { token_hash: null, expires_at: null, used_at: null },
   }
 }
@@ -419,7 +404,7 @@ export async function cancelBookingRequest(db: DbClient, input: {
     if (!request || request.kind === 'contact' || !request.payload.cancellation.used_at || !cancelled || cancelled.status !== 'cancelled' || cancelled.organization_id !== input.organizationId) return null
     if (input.buyerUserId ? request.user_id !== input.buyerUserId || cancelled.user_id !== input.buyerUserId
       : request.payload.cancellation.token_hash !== input.tokenHash || !request.payload.cancellation.expires_at || request.payload.cancellation.expires_at <= input.now) return null
-    const entry = await queryFirst<{ payload_json: string }>(db, 'SELECT payload_json FROM activity_entries WHERE request_id = ? AND dedupe_key = ?', [input.id, `booking:${cancelled.id}:guest-cancel`])
+    const entry = await queryFirst<{ payload_json: string }>(db, 'SELECT payload_json FROM messages WHERE conversation_id = ? AND dedupe_key = ?', [input.id, `booking:${cancelled.id}:guest-cancel`])
     if (!entry) return null
     const before = JSON.parse(entry.payload_json).beforeStatus
     if (!['pending', 'confirmed'].includes(before)) throw new Error('Cancellation audit has no valid prior status')
@@ -451,28 +436,25 @@ export async function cancelBookingRequest(db: DbClient, input: {
   })
   const [consumed, released] = await executeBatch(db, [
     {
-      query: `UPDATE requests SET
-          payload_json = json_set(payload_json, '$.cancellation.used_at', ?), updated_at = ?
+      query: `UPDATE conversations SET payload_json = json_set(payload_json, '$.cancellation.used_at', ?)
         WHERE id = ? AND organization_id = ? AND kind = ?
           AND ${input.buyerUserId ? 'user_id = ?' : "json_extract(payload_json, '$.cancellation.token_hash') = ? AND json_extract(payload_json, '$.cancellation.expires_at') > ?"}
           AND json_extract(payload_json, '$.cancellation.used_at') IS NULL AND (${refund.guard?.query ?? '1=1'})
-          AND EXISTS (SELECT 1 FROM bookings WHERE id = ? AND organization_id = ? AND request_id = ? AND status = ?${input.buyerUserId ? ' AND user_id = ?' : ''}) RETURNING *`,
-      params: [input.now, input.now, input.id, input.organizationId, input.kind, ...(input.buyerUserId ? [input.buyerUserId] : [input.tokenHash, input.now]), ...(refund.guard?.params ?? []), record.id, input.organizationId, input.id, record.status, ...(input.buyerUserId ? [input.buyerUserId] : [])],
+          AND EXISTS (SELECT 1 FROM bookings WHERE id = ? AND organization_id = ? AND id = conversations.booking_id AND status = ?${input.buyerUserId ? ' AND user_id = ?' : ''}) RETURNING *`,
+      params: [input.now, input.id, input.organizationId, input.kind, ...(input.buyerUserId ? [input.buyerUserId] : [input.tokenHash, input.now]), ...(refund.guard?.params ?? []), record.id, input.organizationId, record.status, ...(input.buyerUserId ? [input.buyerUserId] : [])],
     },
     {
       query: `UPDATE bookings SET status = 'cancelled', cancelled_at = ?, cancellation_reason = 'guest_cancelled', version = version + 1, updated_at = ?
-        WHERE id = ? AND organization_id = ? AND request_id = ? AND status = ?${input.buyerUserId ? ' AND user_id = ?' : ''}
-          AND EXISTS (SELECT 1 FROM requests WHERE id = ? AND organization_id = ?
+        WHERE id = ? AND organization_id = ? AND status = ?${input.buyerUserId ? ' AND user_id = ?' : ''}
+          AND EXISTS (SELECT 1 FROM conversations WHERE id = ? AND organization_id = ? AND booking_id = bookings.id
             AND json_extract(payload_json, '$.cancellation.used_at') = ?)`,
-      params: [input.now, input.now, record.id, input.organizationId, input.id, record.status, ...(input.buyerUserId ? [input.buyerUserId] : []), input.id, input.organizationId, input.now],
+      params: [input.now, input.now, record.id, input.organizationId, record.status, ...(input.buyerUserId ? [input.buyerUserId] : []), input.id, input.organizationId, input.now],
     },
-    {
-      query: `INSERT INTO activity_entries (id, request_id, kind, scope_kind, actor_kind, event_name, payload_json, dedupe_key, sequence, occurred_at, created_at)
-        SELECT ?, ?, 'operation', 'request', 'guest', ?, ?, ?,
-          COALESCE((SELECT MAX(sequence) FROM activity_entries WHERE request_id = ?), 0) + 1, ?, ?
-        WHERE changes() = 1`,
-      params: [crypto.randomUUID(), input.id, 'booking.cancel', JSON.stringify({ action: 'cancel', beforeStatus: record.status, afterStatus: 'cancelled', operational_booking_id: record.id, request_id: input.id, ...(input.buyerUserId ? { actor_user_id: input.buyerUserId } : {}) }), `booking:${record.id}:guest-cancel`, input.id, input.now, input.now],
-    },
+    // The one record of the guest's cancellation: KrabiClaw's message, by the guest.
+    ...messageQueries({ conversationId: input.id, authorKind: 'krabiclaw', authorUserId: current.user_id, eventName: 'booking.cancel',
+      payload: { action: 'cancel', beforeStatus: record.status, afterStatus: 'cancelled', operational_booking_id: record.id },
+      dedupeKey: `booking:${record.id}:guest-cancel`, occurredAt: input.now,
+      guard: { sql: "EXISTS (SELECT 1 FROM bookings cancelled WHERE cancelled.id = c.booking_id AND cancelled.status = 'cancelled' AND cancelled.cancelled_at = ?)", params: [input.now] } }).queries,
     ...refund.queries,
     ...(await import('~/server/domain/guest-threads/repository')).conversationTaskQueries(input.id, input.now),
   ], { operation: 'Cancel booking request' })

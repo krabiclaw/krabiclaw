@@ -4,8 +4,8 @@ import type { CloudflareEnv } from '~/server/utils/auth'
 import { formatCalendarDate, formatTimestamp } from '~/utils/timezone'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import { notifyReviewRequest } from '~/server/utils/notifications'
-import { appendEntry } from '~/server/domain/guest-threads/entries'
-import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
+import { appendMessage } from '~/server/domain/conversations'
+import { publishConversationEvent } from '~/server/cloudflare/guest-inbox-events'
 import {
   createReviewRequest,
   getReviewBookingContext,
@@ -36,8 +36,8 @@ export async function sendReviewRequestForBooking(
   if (!request.user_id) throw new Error('Review request is not linked to a guest identity')
   const reviewUrl = `${publicUrl}/review-submit?token=${encodeURIComponent(token)}`
   const threadId = context.request_id
-  const entry = await appendEntry(db, {
-    threadId, kind: 'operation', actorKind: 'system',
+  const entry = await appendMessage(db, {
+    conversationId: threadId, authorKind: 'krabiclaw', authorUserId: null,
     eventName: 'review.requested', body: 'Review invitation sent',
     dedupeKey: `review-request:${request.id}`,
   })
@@ -60,7 +60,7 @@ export async function sendReviewRequestForBooking(
       userId: request.user_id,
       // One invitation retains its link and receipt across retries. The
       // receipt is never sent twice once Resend accepted it.
-      delivery: { guestThreadId: threadId, sourceEntryId: entry.id },
+      delivery: { conversationId: threadId, messageId: entry.id },
     })
     await markReviewRequestSendSuccess(db, request.id)
   } catch (error) {
@@ -74,7 +74,7 @@ export async function sendReviewRequestForBooking(
   // Delivery publishes before the invitation's success marker is written.
   // Open apps must read again after that write to clear its outstanding card.
   try {
-    await publishGuestInboxThreadEvent(env, db, { threadId, type: 'thread.changed' })
+    await publishConversationEvent(env, db, { conversationId: threadId, type: 'MESSAGE_CREATE' })
   } catch (cause) {
     throw new HTTPError({ statusCode: 503, message: 'The review invitation was sent, but open apps could not be updated. Reload to see its saved status.',
       data: { code: 'DASHBOARD_PUBLICATION_FAILED', field: 'realtime', committed: true, request_id: request.id }, cause })

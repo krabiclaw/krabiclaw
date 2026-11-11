@@ -21,7 +21,7 @@ export function anonymousLinkQueries(from: string, to: string, now: string): Bat
     { query: 'DELETE FROM user_notification_preferences WHERE user_id = ?', params: [from] },
     // Re-pointing who a record belongs to is not activity on it, so
     // updated_at — the version booking changes compare against — stays.
-    ...['requests', 'bookings', 'review_requests', 'reviews'].map(table => ({
+    ...['conversations', 'bookings', 'review_requests', 'reviews'].map(table => ({
       query: `UPDATE ${table} SET user_id = ? WHERE user_id = ?`,
       params: [to, from],
     })),
@@ -30,18 +30,11 @@ export function anonymousLinkQueries(from: string, to: string, now: string): Bat
       params: [to, from],
     })),
     { query: 'UPDATE payments SET claimed_user_id = ? WHERE claimed_user_id = ?', params: [to, from] },
-    {
-      query: "UPDATE activity_entries SET actor_user_id=? WHERE kind='acknowledgement' AND actor_user_id=? AND parent_id IN (SELECT id FROM activity_entries WHERE kind='notification' AND scope_kind='global' AND target_user_id=?)",
-      params: [to, from, from],
-    },
-    {
-      query: "UPDATE activity_entries SET actor_user_id=? WHERE kind='acknowledgement' AND actor_kind='guest' AND scope_kind='request' AND actor_user_id=? AND request_id IN (SELECT id FROM requests WHERE user_id=?)",
-      params: [to, from, to],
-    },
-    {
-      query: "UPDATE activity_entries SET target_user_id=? WHERE kind='notification' AND scope_kind='global' AND target_user_id=?",
-      params: [to, from],
-    },
+    // What the guest wrote is the account's, and so is how far they read: where
+    // both identities read one conversation, the account keeps its own position.
+    { query: 'UPDATE messages SET author_user_id = ? WHERE author_user_id = ?', params: [to, from] },
+    { query: 'UPDATE OR IGNORE conversation_participants SET user_id = ? WHERE user_id = ?', params: [to, from] },
+    { query: 'DELETE FROM conversation_participants WHERE user_id = ?', params: [from] },
     { query: 'UPDATE media_assets SET created_by_user_id = ? WHERE created_by_user_id = ?', params: [to, from] },
   ]
 }
@@ -59,9 +52,9 @@ export function anonymousLinkQueries(from: string, to: string, now: string): Bat
 export async function linkGuestIdentitiesByVerifiedEmail(db: DbClient, user: { id: string; email: string; emailVerified: boolean; isAnonymous?: boolean | null }): Promise<void> {
   if (!user.emailVerified || user.isAnonymous) return
   const identities = await queryAll<{ user_id: string }>(db, `
-    SELECT DISTINCT r.user_id FROM requests r JOIN user u ON u.id = r.user_id AND u."isAnonymous" = 1
+    SELECT DISTINCT r.user_id FROM conversations r JOIN user u ON u.id = r.user_id AND u."isAnonymous" = 1
     WHERE lower(r.payload_json ->> '$.guest.email') = lower(?)
-      AND NOT EXISTS (SELECT 1 FROM requests other WHERE other.user_id = r.user_id AND lower(other.payload_json ->> '$.guest.email') IS NOT lower(?))`,
+      AND NOT EXISTS (SELECT 1 FROM conversations other WHERE other.user_id = r.user_id AND lower(other.payload_json ->> '$.guest.email') IS NOT lower(?))`,
   [user.email, user.email])
   const now = new Date().toISOString()
   for (const { user_id: from } of identities) await executeBatch(db, anonymousLinkQueries(from, user.id, now), { operation: 'verified-email-guest-link' })

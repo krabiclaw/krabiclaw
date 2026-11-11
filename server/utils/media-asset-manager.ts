@@ -127,8 +127,7 @@ const OWNER_TABLES = {
   content_document: 'content_documents', review: 'reviews',
   review_request: 'review_requests',
   content_block: 'content_blocks',
-  activity_entry: 'activity_entries',
-  team_message: 'team_messages',
+  message: 'messages',
 } as const satisfies Record<MediaPlacementOwnerType, string>
 
 export function mediaPlacementOwnerQuery(input: {
@@ -146,10 +145,10 @@ export function mediaPlacementOwnerQuery(input: {
       JOIN content_documents root ON root.id = COALESCE(owner.root_id, owner.id)
       WHERE owner.id = ? AND owner.organization_id = ?`, params,
   }
-  // A message belongs to the organization through the thread it was said in.
-  if (input.ownerType === 'activity_entry') return {
-    query: `SELECT r.location_id FROM activity_entries e JOIN requests r ON r.id = e.request_id
-      WHERE e.id = ? AND r.organization_id = ?`, params,
+  // A message is at the place of the conversation it was said in.
+  if (input.ownerType === 'message') return {
+    query: `SELECT c.location_id FROM messages m JOIN conversations c ON c.id = m.conversation_id AND c.organization_id = m.organization_id
+      WHERE m.id = ? AND m.organization_id = ?`, params,
   }
   // Product ownership exists before its optional publication row. Draft homes
   // still own their photos. Product locations are a many relationship
@@ -550,8 +549,8 @@ export async function listMediaAssets(
   const conditions = [`ma.organization_id = ?`, `ma.status = 'active'`, `ma.generation_key IS NULL`]
   const params: SqlBindValue[] = [organizationId]
   // A photo sent in a conversation is the conversation's, not the website's.
-  if (opts.ownerType !== 'activity_entry' && opts.ownerType !== 'team_message' && opts.ownerType !== 'task') {
-    conditions.push(`NOT EXISTS (SELECT 1 FROM media_placements sent WHERE sent.asset_id = ma.id AND sent.organization_id = ma.organization_id AND sent.owner_type IN ('activity_entry', 'team_message', 'task'))`)
+  if (opts.ownerType !== 'message' && opts.ownerType !== 'task') {
+    conditions.push(`NOT EXISTS (SELECT 1 FROM media_placements sent WHERE sent.asset_id = ma.id AND sent.organization_id = ma.organization_id AND sent.owner_type IN ('message', 'task'))`)
   }
   if (opts.kind) { conditions.push(`ma.kind = ?`); params.push(opts.kind) }
   if (opts.search) { conditions.push(`ma.file_name LIKE ? ESCAPE '\\'`); params.push(`%${opts.search.replace(/[\\%_]/g, '\\$&')}%`) }

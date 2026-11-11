@@ -115,7 +115,7 @@ function eventQuery(principal: MemberAccessPrincipal, row: OpportunityRow, event
 }
 
 const SUBJECT: Partial<Record<BusinessProgressOperation, TaskRow['subject_type']>> = {
-  'article.update': 'article', 'article.publish': 'article', 'article.distribute': 'article', 'post.publish': 'post', 'product.payment': 'product', 'stay.gap': 'product', 'booking.welcome': 'request',
+  'article.update': 'article', 'article.publish': 'article', 'article.distribute': 'article', 'post.publish': 'post', 'product.payment': 'product', 'stay.gap': 'product', 'booking.welcome': 'conversation',
 }
 
 /**

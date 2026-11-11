@@ -1,6 +1,7 @@
 import { organizationTool, paginationInputSchema, pageInfoObject, type McpToolDefinition } from './shared'
 import { NOT_HANDLED, requiredString, type McpExecutorContext } from './execution'
-import { memberAccessPrincipal, assertAssignedBookingAccess } from '~/server/utils/member-access'
+import { memberAccessPrincipal } from '~/server/utils/member-access'
+import { assertConversationAccess } from '~/server/domain/conversations'
 import { stayAccessFor, updateStayHome } from '~/server/domain/stays'
 import { cancelScheduledGuestMessage, deleteMessageTemplate, guestThreadMessagingContext, listMessageTemplates, listScheduledGuestMessages, saveMessageTemplate } from '~/server/domain/guest-messaging'
 import { cancelSendLaterMessage, createSendLaterMessage, listSendLaterMessages } from '~/server/domain/send-later'
@@ -56,17 +57,17 @@ export const GUEST_MESSAGING_TOOLS: McpToolDefinition[] = [
   organizationTool({ name: 'delete_message_template', domain: 'guest_messaging', minimumRole: 'admin', description: 'Delete an automatic message using its current version and cancel its pending messages. Earlier delivery snapshots remain recorded; an in-flight send cannot be recalled.',
     inputSchema: { template_id: text, expected_version: { type: 'integer', minimum: 1 } }, required: ['template_id', 'expected_version'], outputSchema: { type: 'object', properties: { template_id: text, status: { const: 'deleted' } }, required: ['template_id', 'status'] } }),
   organizationTool({ name: 'get_guest_messaging_context', domain: 'guest_messaging', minimumRole: 'member', description: 'Read what a canonical guest conversation is about: its booked record (a stay or booking: what, where, for how many and when, in its own timezone), and for a home its listing and stay, including private check-in instructions the host may choose to share. An inquiry has no record; a channel inquiry can have a home without a booked stay.',
-    inputSchema: { request_id: text }, required: ['request_id'], outputSchema: { type: 'object', properties: { requestId: text, home: messagingHome, stay: messagingStay, record: messagingRecord }, required: ['requestId', 'home', 'stay', 'record'] } }),
+    inputSchema: { conversation_id: text }, required: ['conversation_id'], outputSchema: { type: 'object', properties: { conversationId: text, home: messagingHome, stay: messagingStay, record: messagingRecord }, required: ['conversationId', 'home', 'stay', 'record'] } }),
   organizationTool({ name: 'update_stay_arrival_guide', domain: 'guest_messaging', minimumRole: 'admin', description: 'Save one home\'s private arrival guide: check-in method and instructions, wifi, directions, house manual and checkout instructions. Fields left out keep their values; null removes one. Saving does not send anything to a guest or publish it on the site. For a connected Airbnb home, supplied check-in, wifi, directions and house-manual fields return editor links in airbnb_unsynced for the host to check and edit in Airbnb. Checkout instructions are saved only in KrabiClaw.',
     inputSchema: { anyOf: Object.keys(STAY_ARRIVAL_SCHEMA).map(key => ({ required: [key] })), product_id: text, ...STAY_ARRIVAL_SCHEMA }, required: ['product_id'], outputSchema: arrivalGuideResult }),
-  organizationTool({ name: 'list_scheduled_guest_messages', domain: 'guest_messaging', minimumRole: 'admin', description: 'Read automatic guest-message snapshots and visible failure reasons for every booking (bookingId names it, a stay’s included), optionally for one canonical guest conversation, including each stay’s built-in check-in message (templateId null, title “Check-in instructions”). Read provider delivery receipts through get_guest_conversation; no provider result is inferred from a scheduled time.',
-    inputSchema: { request_id: text, ...paginationInputSchema }, outputSchema: { type: 'object', properties: { messages: { type: 'array', items: messageObject }, page_info: pageInfoObject }, required: ['messages', 'page_info'] } }),
+  organizationTool({ name: 'list_scheduled_guest_messages', domain: 'guest_messaging', minimumRole: 'admin', description: 'Read automatic guest-message snapshots and visible failure reasons for every booking (bookingId names it, a stay’s included), optionally for one canonical guest conversation, including each stay’s built-in check-in message (templateId null, title “Check-in instructions”). Read provider delivery receipts through get_conversation; no provider result is inferred from a scheduled time.',
+    inputSchema: { conversation_id: text, ...paginationInputSchema }, outputSchema: { type: 'object', properties: { messages: { type: 'array', items: messageObject }, page_info: pageInfoObject }, required: ['messages', 'page_info'] } }),
   organizationTool({ name: 'cancel_scheduled_guest_message', domain: 'guest_messaging', minimumRole: 'admin', description: 'Cancel one pending automatic guest message. A message already sending, sent or requiring review cannot be cancelled or resent by this operation.',
     inputSchema: { message_id: text }, required: ['message_id'], outputSchema: { type: 'object', properties: { message: { type: 'object', properties: { id: text, status: { const: 'cancelled' } }, required: ['id', 'status'], additionalProperties: false } }, required: ['message'] } }),
-  organizationTool({ name: 'schedule_guest_reply', domain: 'guest_messaging', minimumRole: 'member', description: 'Send your own text reply in a guest conversation later, at send_at (an ISO 8601 instant within the next year). It is sent through the conversation’s reply_channel as your reply, if you can still reach the conversation then. Only you see it pending; cancel it with cancel_scheduled_reply. Text only: send photos now with reply_to_guest.',
-    inputSchema: { request_id: text, message: { ...text, maxLength: 5000, pattern: '^[\\s\\S]*\\S[\\s\\S]*$' }, send_at: { type: 'string', format: 'date-time' } }, required: ['request_id', 'message', 'send_at'], outputSchema: { type: 'object', properties: { reply: replyObject }, required: ['reply'] } }),
+  organizationTool({ name: 'schedule_guest_reply', domain: 'guest_messaging', minimumRole: 'member', description: 'Send your own text reply in a guest conversation later, at send_at (an ISO 8601 instant within the next year). It is sent through the conversation’s reply_channel as your reply, if you can still reach the conversation then. Only you see it pending; cancel it with cancel_scheduled_reply. Text only: send photos now with send_message.',
+    inputSchema: { conversation_id: text, message: { ...text, maxLength: 5000, pattern: '^[\\s\\S]*\\S[\\s\\S]*$' }, send_at: { type: 'string', format: 'date-time' } }, required: ['conversation_id', 'message', 'send_at'], outputSchema: { type: 'object', properties: { reply: replyObject }, required: ['reply'] } }),
   organizationTool({ name: 'list_scheduled_replies', domain: 'guest_messaging', minimumRole: 'member', description: 'Read your own replies scheduled with schedule_guest_reply that have not been sent, and any that failed, optionally for one conversation. Teammates’ scheduled replies are not visible.',
-    inputSchema: { request_id: text }, outputSchema: { type: 'object', properties: { replies: { type: 'array', items: replyObject } }, required: ['replies'] } }),
+    inputSchema: { conversation_id: text }, outputSchema: { type: 'object', properties: { replies: { type: 'array', items: replyObject } }, required: ['replies'] } }),
   organizationTool({ name: 'cancel_scheduled_reply', domain: 'guest_messaging', minimumRole: 'member', description: 'Cancel one of your own scheduled replies before it starts sending.',
     inputSchema: { message_id: text }, required: ['message_id'], outputSchema: { type: 'object', properties: { reply: replyObject }, required: ['reply'] } }),
 ]
@@ -87,8 +88,8 @@ export async function handleGuestMessagingTools(ctx: McpExecutorContext): Promis
       return { template_id: requiredString(args, 'template_id'), status: 'deleted' }
     }
     case 'get_guest_messaging_context': {
-      const saved = await guestThreadMessagingContext(db, principal, requiredString(args, 'request_id'))
-      return { requestId: saved.requestId, record: saved.record, home: saved.home === null ? null : Object.fromEntries(Object.keys(messagingHome.properties).map(key => [key, saved.home![key as keyof NonNullable<typeof saved.home>]])), stay: saved.stay === null ? null : Object.fromEntries(Object.keys(messagingStay.properties).map(key => [key, saved.stay![key as keyof NonNullable<typeof saved.stay>]])) }
+      const saved = await guestThreadMessagingContext(db, principal, requiredString(args, 'conversation_id'))
+      return { conversationId: saved.conversationId, record: saved.record, home: saved.home === null ? null : Object.fromEntries(Object.keys(messagingHome.properties).map(key => [key, saved.home![key as keyof NonNullable<typeof saved.home>]])), stay: saved.stay === null ? null : Object.fromEntries(Object.keys(messagingStay.properties).map(key => [key, saved.stay![key as keyof NonNullable<typeof saved.stay>]])) }
     }
     case 'update_stay_arrival_guide': {
       const { product_id: _productId, ...guide } = args
@@ -96,8 +97,8 @@ export async function handleGuestMessagingTools(ctx: McpExecutorContext): Promis
       return { product_id: saved.home.product_id, guide: Object.fromEntries(Object.keys(guide).map(key => [key, saved.home[key as keyof typeof saved.home]])), channel_push: saved.channel_push, airbnb_unsynced: saved.airbnb_unsynced }
     }
     case 'list_scheduled_guest_messages': {
-      const requestId = typeof args.request_id === 'string' ? args.request_id : null
-      if (requestId !== null) await assertAssignedBookingAccess(db, { ...principal, requestId })
+      const requestId = typeof args.conversation_id === 'string' ? args.conversation_id : null
+      if (requestId !== null) await assertConversationAccess(db, principal, requestId)
       const resource = `scheduled-guest-messages:${access.organizationId}:${requestId}`, window = mcpPageWindow(args, { resource })
       const page = await listScheduledGuestMessages(db, access, window, requestId)
       return { messages: page.messages, page_info: mcpPageInfo(window, page.messages.length, page.pagination.hasMore, { resource }) }
@@ -106,8 +107,8 @@ export async function handleGuestMessagingTools(ctx: McpExecutorContext): Promis
       const saved = await cancelScheduledGuestMessage(db, env, access, requiredString(args, 'message_id'))
       return { message: { id: saved.id, status: saved.status } }
     }
-    case 'schedule_guest_reply': return { reply: await createSendLaterMessage(db, principal, requiredString(args, 'request_id'), { body: args.message, sendAt: args.send_at }) }
-    case 'list_scheduled_replies': return { replies: await listSendLaterMessages(db, principal, typeof args.request_id === 'string' ? args.request_id : null) }
+    case 'schedule_guest_reply': return { reply: await createSendLaterMessage(db, principal, requiredString(args, 'conversation_id'), { body: args.message, sendAt: args.send_at }) }
+    case 'list_scheduled_replies': return { replies: await listSendLaterMessages(db, principal, typeof args.conversation_id === 'string' ? args.conversation_id : null) }
     case 'cancel_scheduled_reply': return { reply: await cancelSendLaterMessage(db, principal, requiredString(args, 'message_id')) }
     default: return NOT_HANDLED
   }

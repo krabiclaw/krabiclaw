@@ -194,7 +194,7 @@ test('Today shows every booking type as a reservation card for its own business,
     ])
     assert.equal((await listOpportunities(db, lawPrincipal)).opportunities.some(opportunity => opportunity.requestId === evaConsultation), false)
     // The sent message is the conversation's, read back from the ledger.
-    assert.equal(await db.prepare("SELECT body FROM activity_entries WHERE request_id = ? AND actor_kind = 'member' AND kind = 'message'").bind(evaConsultation).first('body'), consultationMessage)
+    assert.equal(await db.prepare("SELECT body FROM messages WHERE conversation_id = ? AND author_kind = 'member'").bind(evaConsultation).first('body'), consultationMessage)
   } finally {
     await runtime.dispose()
   }

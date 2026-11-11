@@ -62,8 +62,6 @@ export function useDashboardMenu() {
   /** The Menu tab: the organization's launcher, or the account's. */
   const menuPageTo = computed(() => orgBase.value ? `${orgBase.value}/menu` : '/dashboard/account/menu')
 
-  const notificationsTo = computed(() => orgBase.value ? `${orgBase.value}/notifications` : '/dashboard/account/notifications')
-
   /** Ends the session and returns here after the next sign-in. */
   async function logOut() {
     const redirect = route.fullPath
@@ -74,5 +72,5 @@ export function useDashboardMenu() {
   /** Organization switcher. */
   const scopeModel = computed(() => scopeHeaderModel?.value ?? null)
 
-  return { menuPageTo, notificationsTo, scopeModel, logOut, personal, organization, activeOrganizationId }
+  return { menuPageTo, scopeModel, logOut, personal, organization, activeOrganizationId }
 }

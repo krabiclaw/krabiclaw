@@ -105,11 +105,11 @@ export default defineHandler(async (event) => {
     batchAssertion(
       requestIsSubmittable, requestGuardParams, 'review request state changed during submission', ), batchAssertion(
       `EXISTS (
-        SELECT 1 FROM requests
+        SELECT 1 FROM conversations
         WHERE id = ? AND kind = 'booking'
           AND organization_id = ?
           AND user_id IS ?
-          AND review_id IS NULL
+          AND NOT EXISTS (SELECT 1 FROM reviews booked_review WHERE booked_review.organization_id = conversations.organization_id AND booked_review.booking_id = conversations.booking_id)
       )`, [
         result.context.request_id, result.context.organization_id, reviewUserId, ], 'review booking state changed during submission', ), ]
 
@@ -152,14 +152,7 @@ export default defineHandler(async (event) => {
           AND submitted_at IS NULL
           AND revoked_at IS NULL
           AND expires_at > ?`, params: [
-        now, now, ...requestGuardParams, ], }, batchAssertion('changes() = 1', [], 'review request submission compare-and-set failed'), {
-      query: `UPDATE requests
-        SET review_id = ?, updated_at = ?
-        WHERE id = ? AND kind = 'booking'
-          AND organization_id = ?
-          AND user_id IS ?
-          AND review_id IS NULL`, params: [
-        reviewId, now, result.context.request_id, result.context.organization_id, reviewUserId, ], }, batchAssertion('changes() = 1', [], 'review booking submission compare-and-set failed'), )
+        now, now, ...requestGuardParams, ], }, batchAssertion('changes() = 1', [], 'review request submission compare-and-set failed'), )
 
   if (mediaCount) {
     batch.push(
