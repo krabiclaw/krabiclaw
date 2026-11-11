@@ -138,7 +138,7 @@ const items = ref<LinkItem[]>([])
 const linksPageLocalizationFields = computed(() => [
   { key: 'title', label: 'Title', source: data.value?.page.title },
 ])
-const organizationLocalizationSettingsPath = computed(() => `/dashboard/${route.params.orgSlug}/website/localization`)
+const organizationLocalizationSettingsPath = computed(() => `/dashboard/${route.params.orgSlug}/website/preferences/localization`)
 
 const { data, error, refresh } = await useAsyncData(
   `links-page-editor-${organizationId}`,

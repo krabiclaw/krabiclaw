@@ -165,7 +165,7 @@ export async function assertOrganizationLanguage(
       requires === 'published' ? 'This website language is not published.' : 'Add this website language before authoring its translations.', {
       organization_id: organizationId,
       locale,
-      dashboard_url: row.organization_slug ? `/dashboard/${encodeURIComponent(row.organization_slug)}/website/localization` : null,
+      dashboard_url: row.organization_slug ? `/dashboard/${encodeURIComponent(row.organization_slug)}/website/preferences/localization` : null,
     })
   }
   return { locale, source: false, status: row.locale_status, platform_messages: { ...catalog.messages } }

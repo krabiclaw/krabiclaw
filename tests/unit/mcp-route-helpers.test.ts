@@ -5,14 +5,14 @@ import { asMcpError } from '../../server/utils/mcp-protocol.ts'
 
 test('a tool action carries its dashboard destination without unrelated private details', () => {
   const result = mcpToolErrorResult('This website language is not published.', {
-    code: 'LANGUAGE_NOT_PUBLISHED', dashboard_url: '/dashboard/kanpai/website/localization',
+    code: 'LANGUAGE_NOT_PUBLISHED', dashboard_url: '/dashboard/kanpai/website/preferences/localization',
     credential: 'private-value', customer_email: 'private@example.com',
   }, 'https://krabiclaw.com')
   assert.equal(result.isError, true)
   assert.equal('structuredContent' in result, false)
   assert.deepEqual(JSON.parse(result.content[0]!.text), {
     code: 'LANGUAGE_NOT_PUBLISHED', message: 'This website language is not published.',
-    dashboard_url: 'https://krabiclaw.com/dashboard/kanpai/website/localization',
+    dashboard_url: 'https://krabiclaw.com/dashboard/kanpai/website/preferences/localization',
   })
   assert.equal(JSON.stringify(result).includes('private'), false)
 })

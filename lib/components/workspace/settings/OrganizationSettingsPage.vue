@@ -2,12 +2,375 @@
   <!--
     Website is the site: its content lists, its Brand, and the settings a guest
     never sees, one flat list. Brand is what a guest sees, a list of settings
-    one level below it. Each setting is a leaf below its list.
+    one level below it. Preferences holds status, languages, domains, currency.
+    Each setting is a leaf below its list.
   -->
-  <DashboardIndexPanel :id="surface === 'brand' ? 'organization-brand' : 'organization-website'" :title="navbarTitle" :auto-open="navigationGroups[0]?.items.find(item => item.to)?.to ?? null">
+  <DashboardIndexPanel :id="panelId" :title="navbarTitle" :auto-open="navigationGroups[0]?.items.find(item => item.to)?.to ?? null">
+    <template v-if="surface === 'settings'" #right>
+      <UButton
+        icon="i-lucide-settings"
+        color="neutral"
+        variant="soft"
+        square
+        aria-label="Website preferences"
+        :to="preferencesPath"
+      />
+    </template>
     <UAlert v-if="loadError" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="loadError" />
-    <EditorNavigationList v-else :groups="navigationGroups" :active-item="detailKey" />
+    <template v-else>
+      <!-- Airbnb Parity: Status banner at the top of the Website editor (Airbnb authentic flat grey, no border, no shadow) -->
+      <div v-if="surface === 'settings'" class="mb-4">
+        <button
+          type="button"
+          class="w-full text-left rounded-2xl bg-neutral-100 dark:bg-neutral-800 p-4 sm:p-5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+          data-testid="website-status-banner"
+          @click="statusModalOpen = true"
+        >
+          <div class="flex items-center justify-between gap-3">
+            <div class="flex items-center gap-2.5">
+              <span class="size-2.5 rounded-full shrink-0" :class="statusDotClass" />
+              <span class="text-base font-semibold text-highlighted">{{ statusLabel }}</span>
+            </div>
+            <UIcon name="i-lucide-chevron-right" class="size-5 text-muted shrink-0" />
+          </div>
+          <p class="mt-1.5 text-sm text-muted leading-relaxed">{{ statusDescription }}</p>
+        </button>
+      </div>
+
+      <!-- Airbnb Parity: Featured Pages card with 3-image fan stack (white card with shadow, no border) -->
+      <div v-if="surface === 'settings'" class="mb-6">
+        <div
+          class="group block w-full text-left rounded-3xl p-5 sm:p-6 bg-white dark:bg-neutral-900 shadow-[0_4px_24px_rgba(0,0,0,0.06)] dark:shadow-[0_4px_24px_rgba(0,0,0,0.3)] hover:shadow-[0_6px_28px_rgba(0,0,0,0.09)] transition cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+          tabindex="0"
+          role="link"
+          data-testid="website-pages-featured-card"
+          @click="navigateTo(pagesPath)"
+          @keydown.enter="navigateTo(pagesPath)"
+        >
+          <div>
+            <h2 class="text-base font-semibold text-highlighted">Pages</h2>
+            <p class="mt-0.5 text-sm text-muted">{{ pagesSummary }}</p>
+          </div>
+
+          <!-- Image Fan Stack -->
+          <div v-if="previewImages.length > 0" class="relative flex items-center justify-center h-44 sm:h-52 my-3 select-none">
+            <!-- Left image -->
+            <img
+              v-if="previewImages.length >= 3"
+              :src="previewImages[0]"
+              alt=""
+              class="absolute left-1/2 -translate-x-[115%] w-36 sm:w-44 h-28 sm:h-36 rounded-2xl object-cover shadow-md -rotate-6 opacity-90 transition-transform group-hover:-rotate-8 group-hover:-translate-x-[120%]"
+              loading="lazy"
+              decoding="async"
+            />
+            <!-- Right image -->
+            <img
+              v-if="previewImages.length >= 2"
+              :src="previewImages.length >= 3 ? previewImages[2] : previewImages[1]"
+              alt=""
+              class="absolute left-1/2 translate-x-[15%] w-36 sm:w-44 h-28 sm:h-36 rounded-2xl object-cover shadow-md rotate-6 opacity-90 transition-transform group-hover:rotate-8 group-hover:translate-x-[20%]"
+              loading="lazy"
+              decoding="async"
+            />
+            <!-- Center image with badge -->
+            <div class="relative w-40 sm:w-48 h-32 sm:h-40 rounded-2xl overflow-hidden shadow-xl border-2 border-white/20 z-10 transition-transform group-hover:scale-105">
+              <img
+                :src="previewImages.length >= 3 ? previewImages[1] : previewImages[0]"
+                alt=""
+                class="size-full object-cover"
+                loading="lazy"
+                decoding="async"
+              />
+              <span class="absolute top-2.5 left-2.5 bg-white/95 dark:bg-neutral-900/95 text-neutral-900 dark:text-neutral-100 shadow-sm text-xs font-semibold px-2.5 py-1 rounded-full">
+                {{ pagesCount }} {{ pagesCount === 1 ? 'page' : 'pages' }}
+              </span>
+            </div>
+          </div>
+          <div v-else class="flex flex-col items-center justify-center h-40 my-3 rounded-2xl bg-neutral-100 dark:bg-neutral-800 text-muted">
+            <UIcon name="i-lucide-file-text" class="size-8 mb-1.5 opacity-60" />
+            <span class="text-xs font-medium">{{ pagesCount }} {{ pagesCount === 1 ? 'page' : 'pages' }}</span>
+          </div>
+
+          <!-- Task note under images -->
+          <div class="flex items-center gap-2 pt-2 text-sm font-medium text-highlighted">
+            <span class="size-2 rounded-full shrink-0" :class="pageTasks.length ? 'bg-amber-500' : 'bg-emerald-500'" />
+            <button
+              type="button"
+              class="hover:underline focus:outline-none cursor-pointer"
+              data-testid="pages-task-button"
+              @click.stop="pageTasksModalOpen = true"
+            >
+              {{ pagesTaskText }}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Airbnb Parity: Featured Blog Card -->
+      <div v-if="surface === 'settings'" class="mb-4">
+        <div
+          class="group block w-full text-left rounded-3xl p-5 sm:p-6 bg-white dark:bg-neutral-900 shadow-[0_4px_24px_rgba(0,0,0,0.06)] dark:shadow-[0_4px_24px_rgba(0,0,0,0.3)] hover:shadow-[0_6px_28px_rgba(0,0,0,0.09)] transition cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+          tabindex="0"
+          role="link"
+          data-testid="website-blog-featured-card"
+          @click="navigateTo(blogPath)"
+          @keydown.enter="navigateTo(blogPath)"
+        >
+          <div class="flex items-center justify-between">
+            <h2 class="text-base font-semibold text-highlighted">Blog</h2>
+            <UIcon name="i-lucide-chevron-right" class="size-4 text-muted group-hover:text-highlighted transition" />
+          </div>
+
+          <div v-if="blogPreviewItems.length > 0" class="mt-4 space-y-3">
+            <div
+              v-for="article in blogPreviewItems"
+              :key="article.id"
+              class="flex items-center gap-3.5"
+            >
+              <span class="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-neutral-100 dark:bg-neutral-800">
+                <img
+                  v-if="article.cover?.thumbnail_url || article.cover?.public_url"
+                  :src="article.cover.thumbnail_url || article.cover.public_url || undefined"
+                  alt=""
+                  class="size-full object-cover"
+                  loading="lazy"
+                  decoding="async"
+                />
+                <UIcon v-else name="i-lucide-newspaper" class="size-5 text-muted opacity-70" />
+              </span>
+              <div class="min-w-0 flex-1">
+                <p class="truncate text-sm font-medium text-highlighted">{{ article.title }}</p>
+                <p class="truncate text-xs text-muted mt-0.5">
+                  {{ articleSubtitle(article) }}
+                </p>
+              </div>
+            </div>
+          </div>
+          <div v-else class="mt-3 flex items-center gap-3 text-muted">
+            <span class="flex size-12 shrink-0 items-center justify-center rounded-xl bg-neutral-100 dark:bg-neutral-800">
+              <UIcon name="i-lucide-newspaper" class="size-5 opacity-50" />
+            </span>
+            <p class="text-sm">No articles published yet</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Airbnb Parity: Featured Posts Card -->
+      <div v-if="surface === 'settings'" class="mb-6">
+        <div
+          class="group block w-full text-left rounded-3xl p-5 sm:p-6 bg-white dark:bg-neutral-900 shadow-[0_4px_24px_rgba(0,0,0,0.06)] dark:shadow-[0_4px_24px_rgba(0,0,0,0.3)] hover:shadow-[0_6px_28px_rgba(0,0,0,0.09)] transition cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+          tabindex="0"
+          role="link"
+          data-testid="website-posts-featured-card"
+          @click="navigateTo(postsPath)"
+          @keydown.enter="navigateTo(postsPath)"
+        >
+          <div class="flex items-center justify-between">
+            <h2 class="text-base font-semibold text-highlighted">Posts</h2>
+            <UIcon name="i-lucide-chevron-right" class="size-4 text-muted group-hover:text-highlighted transition" />
+          </div>
+
+          <div v-if="postPreviewItems.length > 0" class="mt-4 space-y-3">
+            <div
+              v-for="post in postPreviewItems"
+              :key="post.id"
+              class="flex items-center gap-3.5"
+            >
+              <span class="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-neutral-100 dark:bg-neutral-800">
+                <img
+                  v-if="post.cover_image_url"
+                  :src="post.cover_image_url"
+                  alt=""
+                  class="size-full object-cover"
+                  loading="lazy"
+                  decoding="async"
+                />
+                <UIcon v-else name="i-lucide-megaphone" class="size-5 text-muted opacity-70" />
+              </span>
+              <div class="min-w-0 flex-1">
+                <p class="truncate text-sm font-medium text-highlighted">{{ post.title }}</p>
+                <p class="truncate text-xs text-muted mt-0.5">
+                  {{ postSubtitle(post) }}
+                </p>
+              </div>
+            </div>
+          </div>
+          <div v-else class="mt-3 flex items-center gap-3 text-muted">
+            <span class="flex size-12 shrink-0 items-center justify-center rounded-xl bg-neutral-100 dark:bg-neutral-800">
+              <UIcon name="i-lucide-megaphone" class="size-5 opacity-50" />
+            </span>
+            <p class="text-sm">No social posts published yet</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Airbnb Parity: Brand Profile Header (media_1794368807915_664e9a97.jpg) -->
+      <div v-if="surface === 'brand'" class="flex flex-col items-center pt-2 pb-6 text-center">
+        <!-- Circular logo container with Edit button overlay -->
+        <div class="relative size-36 sm:size-44 rounded-full p-1 bg-white dark:bg-neutral-900 shadow-[0_4px_24px_rgba(0,0,0,0.08)] dark:shadow-[0_4px_24px_rgba(0,0,0,0.3)] select-none">
+          <div class="relative size-full rounded-full overflow-hidden bg-neutral-100 dark:bg-neutral-800 flex items-center justify-center">
+            <img
+              v-if="brandLogoUrl"
+              :src="brandLogoUrl"
+              :alt="brandName"
+              class="size-full object-cover"
+              loading="lazy"
+              decoding="async"
+            />
+            <span v-else class="text-4xl font-bold text-muted">
+              {{ brandInitial }}
+            </span>
+          </div>
+
+          <!-- Edit button pill overlaid at bottom center -->
+          <button
+            type="button"
+            class="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-1/4 flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-white dark:bg-neutral-900 shadow-md text-sm font-semibold text-highlighted border border-neutral-200 dark:border-neutral-700 hover:scale-105 active:scale-95 transition cursor-pointer z-10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+            data-testid="brand-logo-edit-button"
+            @click="navigateTo(`${brandPath}/logo`)"
+          >
+            <UIcon name="i-lucide-camera" class="size-4 text-highlighted" />
+            <span>Edit</span>
+          </button>
+        </div>
+      </div>
+
+      <EditorNavigationList :groups="navigationGroups" :active-item="detailKey" />
+
+      <!-- Airbnb Parity: Featured Brand ("About the business") card -->
+      <div v-if="surface === 'settings'" class="mt-6 mb-6">
+        <div
+          class="block w-full text-left rounded-3xl p-6 sm:p-7 bg-white dark:bg-neutral-900 shadow-[0_4px_24px_rgba(0,0,0,0.06)] dark:shadow-[0_4px_24px_rgba(0,0,0,0.3)] hover:shadow-[0_6px_28px_rgba(0,0,0,0.09)] transition cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+          tabindex="0"
+          role="link"
+          data-testid="website-brand-featured-card"
+          @click="navigateTo(brandPath)"
+          @keydown.enter="navigateTo(brandPath)"
+        >
+          <h2 class="text-xl sm:text-2xl font-bold text-highlighted tracking-tight">About the business</h2>
+
+          <div class="mt-6 flex items-center justify-between gap-6 sm:gap-10">
+            <!-- Left Column: Avatar + Brand name + Vertical -->
+            <div class="flex flex-col items-center flex-1 min-w-0">
+              <div class="relative size-24 sm:size-28 rounded-full overflow-hidden bg-neutral-100 dark:bg-neutral-800 flex items-center justify-center shadow-md shrink-0">
+                <img
+                  v-if="brandLogoUrl"
+                  :src="brandLogoUrl"
+                  :alt="brandName"
+                  class="size-full object-cover"
+                  loading="lazy"
+                  decoding="async"
+                />
+                <span v-else class="text-2xl font-bold text-muted">
+                  {{ brandInitial }}
+                </span>
+              </div>
+              <h3 class="mt-3 text-lg sm:text-xl font-bold text-highlighted text-center truncate max-w-full">
+                {{ brandName }}
+              </h3>
+              <p class="text-sm text-muted text-center truncate max-w-full">
+                {{ brandVerticalLabel }}
+              </p>
+            </div>
+
+            <!-- Right Column: 3 metrics stacked with dividers -->
+            <div class="flex flex-col justify-center flex-1 min-w-0 divide-y divide-neutral-200 dark:divide-neutral-800">
+              <!-- Reviews count -->
+              <div class="pb-3">
+                <div class="text-xl sm:text-2xl font-bold text-highlighted">
+                  {{ brandReviewsCount }}
+                </div>
+                <div class="text-xs text-muted font-medium">
+                  Reviews
+                </div>
+              </div>
+
+              <!-- Rating -->
+              <div class="py-3">
+                <div class="flex items-center text-xl sm:text-2xl font-bold text-highlighted">
+                  {{ brandRatingText }}<span v-if="brandHasRating" class="text-base sm:text-lg ml-0.5">★</span>
+                </div>
+                <div class="text-xs text-muted font-medium">
+                  Rating
+                </div>
+              </div>
+
+              <!-- Years active -->
+              <div class="pt-3">
+                <div class="text-xl sm:text-2xl font-bold text-highlighted">
+                  {{ brandYearsActive }}
+                </div>
+                <div class="text-xs text-muted font-medium">
+                  {{ brandYearsActive === 1 ? 'Year active' : 'Years active' }}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </template>
   </DashboardIndexPanel>
+
+  <!-- Quick Status Modal/Sheet (Airbnb Parity) -->
+  <UModal v-model:open="statusModalOpen" :ui="{ content: 'max-w-md p-6 sm:p-8 rounded-3xl' }">
+    <template #content>
+      <div class="relative text-center">
+        <UButton
+          icon="i-lucide-x"
+          color="neutral"
+          variant="ghost"
+          aria-label="Close"
+          class="absolute -top-2 -left-2 size-10 rounded-full justify-center"
+          @click="statusModalOpen = false"
+        />
+
+        <div class="pt-4 pb-2 flex justify-center">
+          <img
+            src="/images/website/storefront.webp"
+            alt=""
+            class="size-36 sm:size-44 object-contain"
+            decoding="async"
+          />
+        </div>
+
+        <h2 class="mt-3 text-xl sm:text-2xl font-semibold text-highlighted">
+          {{ isPublished ? 'Take your website offline?' : 'Ready to publish your website?' }}
+        </h2>
+        <p class="mt-2 text-sm text-muted max-w-sm mx-auto leading-relaxed">
+          {{ isPublished
+            ? 'Only members with dashboard access or a preview link will be able to view the site. Visitors will see an offline notice.'
+            : 'Your website will become public immediately and search engines will be able to index it.' }}
+        </p>
+
+        <div class="mt-8 space-y-3">
+          <UButton
+            :label="isPublished ? 'Switch to draft' : 'Publish website'"
+            color="neutral"
+            variant="solid"
+            size="xl"
+            block
+            class="h-12 rounded-xl text-base font-semibold justify-center"
+            :loading="togglingStatus"
+            data-testid="confirm-status-toggle"
+            @click="toggleStatusFromModal"
+          />
+          <UButton
+            label="Cancel"
+            color="neutral"
+            variant="ghost"
+            size="xl"
+            block
+            class="h-10 text-base font-medium justify-center"
+            :disabled="togglingStatus"
+            @click="statusModalOpen = false"
+          />
+        </div>
+      </div>
+    </template>
+  </UModal>
+
+  <!-- Page Tasks Modal (Airbnb Parity) -->
+  <PageTasksModal v-model="pageTasksModalOpen" :tasks="pageTasks" @dismiss="dismissPageTask" />
 
   <!-- Translating the brand is a row on the Brand list; this is the sheet it opens. -->
   <DashboardResourceLocalization
@@ -18,7 +381,7 @@
     :resource-id="organizationId"
     :resource-label="loadedSettings?.name || 'Brand'"
     :fields="brandLocalizationFields"
-    :language-settings-path="`${settingsPath}/localization`"
+    :language-settings-path="`${preferencesPath}/localization`"
   />
 </template>
 
@@ -82,6 +445,10 @@ export interface OrganizationSettingsResponse {
   consultation_mode: 'native' | 'external_url' | 'native_disabled' | null
   inquiry_questions: FormQuestion[]
   inquiry_questions_revision: string
+  vertical?: string
+  reviews_count?: number
+  average_rating?: number
+  created_at?: string
 }
 
 /**
@@ -127,8 +494,12 @@ import { parseSitePalette } from '~/shared/site-palette'
 import { getErrorMessage } from '~/utils/errors'
 import { ORIGINAL_LOGO_PRESENTATION } from '~/shared/media-placement-contract'
 import { formQuestionsSummary } from '~/utils/form-question-editing'
+import PageTasksModal from '~/components/dashboard/PageTasksModal.vue'
+import { isTenantPageListResponse, type PageTask, type TenantPageListRow } from '~/composables/useTenantPageDraft'
+import { getVerticalLabel } from '~/utils/vertical-copy'
+import type { BlogPost } from '~/lib/components/workspace/blog/types'
 
-const props = withDefaults(defineProps<{ surface?: 'brand' | 'settings' }>(), { surface: 'settings' })
+const props = withDefaults(defineProps<{ surface?: 'brand' | 'settings' | 'preferences' }>(), { surface: 'settings' })
 const surface = computed(() => props.surface)
 const dashboardApi = useDashboardApi()
 const route = useRoute()
@@ -137,6 +508,17 @@ const dashboard = useDashboardOrganization()
 const organizationDashboardPath = computed(() => `/dashboard/${String(route.params.orgSlug)}`)
 const brandPath = computed(() => `${organizationDashboardPath.value}/website/brand`)
 const settingsPath = computed(() => `${organizationDashboardPath.value}/website`)
+const preferencesPath = computed(() => `${organizationDashboardPath.value}/website/preferences`)
+const panelId = computed(() => {
+  if (surface.value === 'brand') return 'organization-brand'
+  if (surface.value === 'preferences') return 'organization-preferences'
+  return 'organization-website'
+})
+const navbarTitle = computed(() => {
+  if (surface.value === 'brand') return 'Brand'
+  if (surface.value === 'preferences') return 'Preferences'
+  return 'Website'
+})
 // The level runs while setup is still synchronous: it injects the record the
 // `<RouterView>` above rendered, and an `await` before it would bind nothing.
 const level = useRouteLevel()
@@ -177,6 +559,40 @@ const form = reactive<OrganizationSettingsForm>({
   default_currency: null, status: 'inactive',
   seo_title: '', seo_description: '', canonical_url: '', native_consultations: false,
 })
+
+const statusModalOpen = ref(false)
+const togglingStatus = ref(false)
+const isPublished = computed(() => form.status === 'active')
+const statusLabel = computed(() => {
+  if (form.status === 'active') return 'Published'
+  if (form.status === 'suspended') return 'Suspended'
+  return 'Draft'
+})
+const statusDotClass = computed(() => {
+  if (form.status === 'active') return 'bg-success'
+  if (form.status === 'suspended') return 'bg-error'
+  return 'bg-muted'
+})
+const statusDescription = computed(() => {
+  if (form.status === 'active') return 'Anyone can visit the website, and search engines can list it.'
+  if (form.status === 'suspended') return 'KrabiClaw has suspended this website. Contact support to restore it.'
+  return 'Your website is in draft mode and not visible to the public or search engines. Publish to go live.'
+})
+
+async function toggleStatusFromModal() {
+  if (form.status === 'suspended') return
+  togglingStatus.value = true
+  try {
+    const nextStatus: OrganizationStatus = form.status === 'active' ? 'inactive' : 'active'
+    await patchSettings({ status: nextStatus })
+    form.status = nextStatus
+    statusModalOpen.value = false
+  } catch (error) {
+    editorError.value = getErrorMessage(error, 'Failed to update website status')
+  } finally {
+    togglingStatus.value = false
+  }
+}
 const brandLocalizationFields = computed(() => [
   { key: 'name', label: 'Brand name', source: loadedSettings.value?.name },
   { key: 'brand_description', label: 'Description', source: loadedSettings.value?.brand_description, multiline: true, rows: 6 },
@@ -189,43 +605,188 @@ const STATUS_LABELS: Record<OrganizationStatus, string> = { active: 'Published',
 const domainSummary = computed(() => dashboard.organization.value?.custom_domain || dashboard.organization.value?.public_url || 'Not connected')
 const CONSULTATION_MODE_SUMMARIES = { native: 'Online consultation requests', external_url: 'External scheduler', native_disabled: 'Online requests hidden' } as const
 const brandItems = computed<EditorNavigationItem[]>(() => [
-  { id: 'name', label: 'Brand name', summary: explicitSummary(loadedSettings.value?.name), to: `${brandPath.value}/name` },
-  { id: 'logo', label: 'Logo', summary: loadedSettings.value?.media?.some(item => item.slot === 'logo') ? 'Logo selected' : 'Not set', to: `${brandPath.value}/logo` },
-  { id: 'favicon', label: 'Favicon', summary: loadedSettings.value?.media?.some(item => item.slot === 'favicon') ? 'Icon selected' : 'Not set', to: `${brandPath.value}/favicon` },
-  { id: 'sharing-image', label: 'Social sharing image', summary: loadedSettings.value?.media?.some(item => item.slot === 'social_share') ? 'Image selected' : 'Not set', to: `${brandPath.value}/sharing-image` },
-  { id: 'description', label: 'Description', summary: explicitSummary(loadedSettings.value?.brand_description), to: `${brandPath.value}/description` },
-  { id: 'announcement', label: 'Announcement', summary: loadedSettings.value?.announcement?.enabled ? explicitSummary(loadedSettings.value.announcement.headline) : 'Off', to: `${brandPath.value}/announcement` },
+  { id: 'name', label: 'Brand name', summary: explicitSummary(loadedSettings.value?.name), icon: 'i-lucide-building-2', to: `${brandPath.value}/name` },
+  { id: 'description', label: 'Description', summary: explicitSummary(loadedSettings.value?.brand_description), icon: 'i-lucide-file-text', to: `${brandPath.value}/description` },
+  { id: 'contact', label: 'Contact details', summary: explicitSummary(loadedSettings.value?.contact_email), icon: 'i-lucide-mail', to: `${brandPath.value}/contact` },
+  { id: 'announcement', label: 'Announcement', summary: loadedSettings.value?.announcement?.enabled ? explicitSummary(loadedSettings.value.announcement.headline) : 'Off', icon: 'i-lucide-megaphone', to: `${brandPath.value}/announcement` },
   // Every customer site has its colors; KrabiClaw's own site keeps fixed ones.
-  ...(loadedSettings.value?.palette ? [{ id: 'color', label: 'Colors', summary: paletteSource.value === 'custom' ? 'Your colors' : 'Default colors', to: `${brandPath.value}/color` }] : []),
-  { id: 'font', label: 'Website font', summary: ORGANIZATION_FONT_OPTIONS.find(option => option.value === loadedSettings.value?.font_preset)?.label ?? 'Default', to: `${brandPath.value}/font` },
-  { id: 'contact', label: 'Contact details', summary: explicitSummary(loadedSettings.value?.contact_email), to: `${brandPath.value}/contact` },
+  ...(loadedSettings.value?.palette ? [{ id: 'color', label: 'Colors', summary: paletteSource.value === 'custom' ? 'Your colors' : 'Default colors', icon: 'i-lucide-palette', to: `${brandPath.value}/color` }] : []),
+  { id: 'font', label: 'Website font', summary: ORGANIZATION_FONT_OPTIONS.find(option => option.value === loadedSettings.value?.font_preset)?.label ?? 'Default', icon: 'i-lucide-type', to: `${brandPath.value}/font` },
+  { id: 'favicon', label: 'Favicon', summary: loadedSettings.value?.media?.some(item => item.slot === 'favicon') ? 'Icon selected' : 'Not set', icon: 'i-lucide-globe', to: `${brandPath.value}/favicon` },
+  { id: 'sharing-image', label: 'Social sharing image', summary: loadedSettings.value?.media?.some(item => item.slot === 'social_share') ? 'Image selected' : 'Not set', icon: 'i-lucide-share-2', to: `${brandPath.value}/sharing-image` },
   { id: 'translations', label: 'Translations', summary: 'Translate the brand name and description', icon: 'i-lucide-languages', to: `${brandPath.value}?editMode=translations` },
 ])
-// Flat, values on the rows, the way Edit preferences reads. The site's content
-// lists and its Brand lead, because they are what the site is made of; the
-// settings a visitor never sees follow.
+// The site's content lists and its Brand lead, because they are what the site is made of;
+// Pages is featured above with its 3-image fan stack;
+// preferences (status, languages, domains, currency) live behind the header's settings cog.
+const pagesPath = computed(() => dashboard.organizationPaths.value?.pages ?? `${organizationDashboardPath.value}/website/pages`)
+
+const pageTasksModalOpen = ref(false)
+const dismissedPageTaskIds = ref<Set<string>>(new Set())
+
+const { data: pagesResource } = await useAsyncData(
+  `tenant-pages-summary:${String(organizationId)}`,
+  () => dashboardApi<{ pages: TenantPageListRow[]; tasks?: PageTask[] }>(`/api/editor/organizations/${organizationId}/pages`, { validate: isTenantPageListResponse }),
+)
+
+const pagesList = computed(() => pagesResource.value?.pages ?? [])
+const pageTasks = computed<PageTask[]>(() => {
+  const all = pagesResource.value?.tasks ?? []
+  return all.filter(t => !dismissedPageTaskIds.value.has(t.id))
+})
+
+function dismissPageTask(taskId: string) {
+  dismissedPageTaskIds.value.add(taskId)
+}
+
+const pagesCount = computed(() => pagesList.value.length)
+const pagesSummary = computed(() => {
+  return pagesList.value.map(p => p.title).filter(Boolean).join(' · ')
+})
+
+const previewImages = computed(() => {
+  const images: string[] = []
+  for (const page of pagesList.value) {
+    if (page.image_url && !images.includes(page.image_url)) images.push(page.image_url)
+  }
+  return images
+})
+
+const pagesTaskText = computed(() => {
+  if (pageTasks.value.length === 1) return 'You have 1 task'
+  if (pageTasks.value.length > 1) return `You have ${pageTasks.value.length} tasks`
+  return 'All pages ready'
+})
+
+const blogPath = computed(() => dashboard.organizationPaths.value?.blog ?? `${organizationDashboardPath.value}/website/blog`)
+const postsPath = computed(() => dashboard.organizationPaths.value?.posts ?? `${organizationDashboardPath.value}/website/posts`)
+
+const isBlogSummaryResponse = (value: unknown): value is { posts: BlogPost[] } =>
+  isRecord(value) && Array.isArray(value.posts)
+
+interface PostSummaryItem {
+  id: string
+  title: string
+  status: string
+  published_at?: string | null
+  cover_image_url?: string | null
+  channels?: string[]
+}
+
+const isPostsSummaryResponse = (value: unknown): value is { posts: PostSummaryItem[] } =>
+  isRecord(value) && Array.isArray(value.posts)
+
+const { data: blogResource } = await useAsyncData(
+  `tenant-blog-summary:${String(organizationId)}`,
+  () => dashboardApi<{ posts: BlogPost[] }>(`/api/editor/organizations/${organizationId}/blog/posts`, {
+    query: { limit: 2 },
+    validate: isBlogSummaryResponse,
+  }).catch(() => ({ posts: [] })),
+)
+
+const { data: postsResource } = await useAsyncData(
+  `tenant-posts-summary:${String(organizationId)}`,
+  () => dashboardApi<{ posts: PostSummaryItem[] }>(`/api/editor/organizations/${organizationId}/posts`, {
+    query: { limit: 2 },
+    validate: isPostsSummaryResponse,
+  }).catch(() => ({ posts: [] })),
+)
+
+const blogPreviewItems = computed(() => blogResource.value?.posts?.slice(0, 2) ?? [])
+const postPreviewItems = computed(() => postsResource.value?.posts?.slice(0, 2) ?? [])
+
+function articleSubtitle(article: BlogPost) {
+  const parts: string[] = []
+  if (article.status === 'draft') parts.push('Draft')
+  else if (article.published_at) {
+    parts.push('Published')
+    parts.push(new Date(article.published_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }))
+  } else {
+    parts.push('Published')
+  }
+  if (article.category?.name) parts.push(article.category.name)
+  return parts.join(' · ')
+}
+
+function postSubtitle(post: PostSummaryItem) {
+  const parts: string[] = []
+  if (post.status === 'draft') parts.push('Draft')
+  else if (post.published_at) {
+    parts.push('Published')
+    parts.push(new Date(post.published_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }))
+  } else {
+    parts.push('Published')
+  }
+  const channels = Array.isArray(post.channels) ? post.channels.filter(Boolean) : []
+  if (channels.length === 1) parts.push(channels[0])
+  else if (channels.length > 1) parts.push(`${channels.length} channels`)
+  return parts.join(' · ')
+}
+
 const settingsItems = computed<EditorNavigationItem[]>(() => [
   ...(dashboard.organizationPaths.value ? [
-    { id: 'pages', label: 'Pages', icon: 'i-lucide-file-text', to: dashboard.organizationPaths.value.pages },
-    { id: 'blog', label: 'Blog', icon: 'i-lucide-newspaper', to: dashboard.organizationPaths.value.blog },
-    { id: 'posts', label: 'Posts', icon: 'i-lucide-megaphone', to: dashboard.organizationPaths.value.posts },
     { id: 'qa', label: 'Reviews and Q&A', icon: 'i-lucide-message-circle-question', to: dashboard.organizationPaths.value.qa },
-    { id: 'brand', label: 'Brand', summary: explicitSummary(loadedSettings.value?.name), icon: 'i-lucide-palette', to: brandPath.value },
   ] : []),
-  { id: 'status', label: 'Status', summary: loadedSettings.value ? STATUS_LABELS[loadedSettings.value.status] : 'Not set', to: `${settingsPath.value}/status` },
-  { id: 'domains', label: 'Domains', summary: domainSummary.value, icon: 'i-lucide-globe-2', to: `${settingsPath.value}/domains` },
-  { id: 'localization', label: 'Languages', summary: 'Languages the site is published in', icon: 'i-lucide-languages', to: `${settingsPath.value}/localization` },
   { id: 'inquiry-form', label: 'Inquiry form', summary: loadedSettings.value ? formQuestionsSummary(loadedSettings.value.inquiry_questions) : 'Not set', icon: 'i-lucide-message-square-text', to: `${settingsPath.value}/inquiry-form` },
-  { id: 'currency', label: 'Currency', summary: explicitSummary(loadedSettings.value?.default_currency), to: `${settingsPath.value}/currency` },
   ...(loadedSettings.value?.consultation_mode
     ? [{ id: 'booking', label: 'Schedule page', summary: CONSULTATION_MODE_SUMMARIES[loadedSettings.value.consultation_mode], icon: 'i-lucide-calendar-check', to: `${settingsPath.value}/booking` }]
     : []),
 ])
 
-const navigationGroups = computed(() => [surface.value === 'brand'
-  ? { id: 'brand', items: brandItems.value }
-  : { id: 'settings', items: settingsItems.value }])
-const navbarTitle = computed(() => surface.value === 'brand' ? 'Brand' : 'Website')
+const brandLogoUrl = computed(() => {
+  if (form.logoAssetId) return logoUrl(form.logoAssetId)
+  return loadedSettings.value?.media?.find(item => item.slot === 'logo')?.public_url
+    ?? dashboard.organization.value?.media?.find(item => item.slot === 'logo')?.public_url
+    ?? null
+})
+
+const brandName = computed(() =>
+  form.name?.trim() || loadedSettings.value?.name || dashboard.organization.value?.name || 'Brand'
+)
+
+const brandInitial = computed(() => brandName.value.charAt(0).toUpperCase())
+
+const brandVerticalLabel = computed(() => {
+  const v = loadedSettings.value?.vertical || dashboard.organization.value?.vertical || 'restaurant'
+  return getVerticalLabel(v)
+})
+
+const brandReviewsCount = computed(() => loadedSettings.value?.reviews_count ?? 0)
+
+const brandHasRating = computed(() => Boolean(loadedSettings.value?.average_rating && loadedSettings.value.average_rating > 0))
+
+const brandRatingText = computed(() => {
+  if (!loadedSettings.value?.average_rating || loadedSettings.value.average_rating <= 0) return '—'
+  return Number(loadedSettings.value.average_rating).toFixed(2).replace(/\.?0+$/, '')
+})
+
+const brandYearsActive = computed(() => {
+  const dateStr = loadedSettings.value?.created_at
+  if (!dateStr) return 1
+  const createdYear = new Date(dateStr).getFullYear()
+  const currentYear = new Date().getFullYear()
+  const diff = currentYear - createdYear
+  return Math.max(1, diff)
+})
+
+const preferencesItems = computed<EditorNavigationItem[]>(() => [
+  {
+    id: 'status',
+    label: 'Status',
+    summary: loadedSettings.value ? STATUS_LABELS[loadedSettings.value.status] : 'Not set',
+    status: form.status === 'active' ? 'success' : form.status === 'suspended' ? 'error' : 'neutral',
+    to: `${preferencesPath.value}/status`,
+  },
+  { id: 'localization', label: 'Languages', summary: 'Languages the site is published in', icon: 'i-lucide-languages', to: `${preferencesPath.value}/localization` },
+  { id: 'domains', label: 'Domains', summary: domainSummary.value, icon: 'i-lucide-globe-2', to: `${preferencesPath.value}/domains` },
+  { id: 'currency', label: 'Currency', summary: explicitSummary(loadedSettings.value?.default_currency), to: `${preferencesPath.value}/currency` },
+])
+
+const navigationGroups = computed(() => {
+  if (surface.value === 'brand') return [{ id: 'brand', items: brandItems.value }]
+  if (surface.value === 'preferences') return [{ id: 'preferences', items: preferencesItems.value }]
+  return [{ id: 'settings', items: settingsItems.value }]
+})
 
 // Leaving a section resets its editor. This used to hang off the back button's
 // click handler, which left browser back with stale editor state.

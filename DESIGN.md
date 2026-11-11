@@ -115,7 +115,8 @@ The destinations are files under `O`, and their URLs are their files:
 
 | Destination | URL |
 | --- | --- |
-| Website | `O/website` — Pages, Blog, Posts, Reviews and Q&A, Brand, Status, Domains, Languages, Currency, Website booking |
+| Website | `O/website` — Pages, Blog, Posts, Reviews and Q&A, Brand, Preferences, Website booking |
+| Preferences | `O/website/preferences` and its leaves — Status, Languages, Domains, Currency |
 | Pages | `O/website/pages`, a page `O/website/pages/:pageId`, the Links page `O/website/pages/links` |
 | Blog | `O/website/blog` |
 | Reviews and Q&A | `O/website/qa` |
@@ -619,8 +620,9 @@ Record contact actions use the shell's floating footer without a border.
 
 **One header row, decided by the shell.** As Airbnb's: a tab root opens on its
 large title with its actions on the same row and no bar above it; a pushed
-level puts a round Back first — on its own row above the title on a phone,
-inline before it from `lg` — with the actions at the right of that row; a
+level (such as all Menu sub-pages, Website, Preferences, Listing editor, Team)
+centers its compact title (16px font-semibold) on a single row in between the round
+Back button on the left and any action icons on the right; a
 leaf's sheet has ✕ and its title small and centred, and the leaf's pane its
 title large. Host booking and stay records use the compact status header
 specified below. Back, ✕ and every action are the same round button. Pages

@@ -485,8 +485,10 @@ export async function listBlogPosts(
       p.id, p.title, p.slug, p.summary AS excerpt, (p.metadata_json ->> '$.collection') AS collection, ${ARTICLE_CATEGORY_SELECT}, p.status, p.visibility,
       p.seo_keywords, p.sort_order,
       ${COVER_SELECT},
+      p.author_id, u.name AS author_name,
       p.published_at, p.created_at, p.updated_at
     FROM content_documents p
+    LEFT JOIN user u ON u.id = p.author_id
     ${coverJoinSql('p')}
     ${articleCategoryJoinSql('p')}
     WHERE p.kind = 'article' AND p.row_role = 'root' AND p.organization_id = ? ${status ? 'AND p.status = ?' : ''}
@@ -498,7 +500,12 @@ export async function listBlogPosts(
   const posts = await Promise.all(page.map((record) => {
     const slug = typeof record.slug === 'string' ? record.slug : ''
     const publicPath = slug ? tenantBlogPostPath(slug, articleCollectionOf(record.collection)) : null
-    return contentReviewUrls(attachArticleCategory(attachCoverMedia(attachPublished(record, Boolean(record.published_at)))), publicPath, organizationId, context, env)
+    const withAuthor = {
+      ...record,
+      author: record.author_id ? { id: String(record.author_id), name: record.author_name ? String(record.author_name) : null } : null,
+      author_name: record.author_name ? String(record.author_name) : null,
+    }
+    return contentReviewUrls(attachArticleCategory(attachCoverMedia(attachPublished(withAuthor, Boolean(record.published_at)))), publicPath, organizationId, context, env)
   }))
   return { posts, page_info: mcpPageInfo(window, page.length, rows.length > window.limit, resource) }
 }

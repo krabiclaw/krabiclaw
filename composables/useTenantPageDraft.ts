@@ -61,6 +61,19 @@ export interface TenantPageListRow {
   product_id: string | null
   /** False when the site's template renders a document at this path; see deleteTenantPage. */
   removable: boolean
+  section_count?: number
+  image_url?: string | null
+}
+
+export interface PageTask {
+  id: string
+  pageId: string
+  pageTitle: string
+  headline: string
+  reason: string
+  actionLabel: string
+  to: string
+  imageUrl?: string | null
 }
 
 function isOptionalString(value: unknown): value is string | null {
@@ -87,6 +100,8 @@ export interface TenantPageRow {
   removable: boolean
   /** The delete endpoint takes the timestamp the row was last seen at. */
   updatedAt: string
+  sectionCount?: number
+  imageUrl?: string | null
 }
 
 /**
@@ -99,7 +114,16 @@ export interface TenantPageRow {
 export function tenantPageRows(pages: readonly TenantPageListRow[]): TenantPageRow[] {
   const links = pages.find(page => page.recipe === 'links')
   return [
-    { id: links?.id ?? 'links', recipe: 'links', title: 'Links page', summary: '/links', removable: false, updatedAt: links?.updated_at ?? '' },
+    {
+      id: links?.id ?? 'links',
+      recipe: 'links',
+      title: 'Links page',
+      summary: '/links',
+      removable: false,
+      updatedAt: links?.updated_at ?? '',
+      sectionCount: links?.section_count ?? 0,
+      imageUrl: links?.image_url ?? null,
+    },
     ...pages
       .filter(page => page.recipe !== 'links')
       .sort((left, right) => Number(right.path === '/') - Number(left.path === '/'))
@@ -110,11 +134,13 @@ export function tenantPageRows(pages: readonly TenantPageListRow[]): TenantPageR
         summary: page.path === '/' ? 'Homepage' : page.path,
         removable: page.removable,
         updatedAt: page.updated_at,
+        sectionCount: page.section_count ?? 0,
+        imageUrl: page.image_url ?? null,
       })),
   ]
 }
 
-export function isTenantPageListResponse(value: unknown): value is { pages: TenantPageListRow[] } {
+export function isTenantPageListResponse(value: unknown): value is { pages: TenantPageListRow[]; tasks?: PageTask[] } {
   return isRecord(value) && Array.isArray(value.pages)
     && value.pages.every(page => isRecord(page) && typeof page.id === 'string'
       && typeof page.page_id === 'string' && typeof page.title === 'string' && typeof page.path === 'string'

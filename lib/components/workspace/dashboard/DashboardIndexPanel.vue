@@ -9,24 +9,55 @@
   >
     <template #header>
       <!--
-        One row heads every level, as Airbnb's do: Back when there is somewhere
-        to go back to, the title, and what you can do to the level on the right.
-        On a phone a pushed level's title starts the next line, under Back; from
-        lg Back sits beside it. A control that names what the whole level shows —
-        Today's range — takes the title's place, and the title is announced only.
+        Airbnb parity: A pushed sub-page centers its compact title (16px font-semibold)
+        in between the left Back button and right action icons on a single row,
+        never wrapping the title onto a second row.
+        A tab root without Back (Today, Menu, Catalog) opens on its large title
+        with its actions on the same row.
       -->
-      <div class="shrink-0 items-center gap-x-3" :class="[dashboardGutterClass, column === 'record' ? 'grid min-h-16 grid-cols-[2.5rem_minmax(0,1fr)_2.5rem] py-3' : 'flex flex-wrap gap-y-4 pb-2 pt-4 sm:pt-6']">
-        <slot name="leading"><DashboardNavbarLeading v-if="column !== 'record'" /></slot>
+      <div
+        v-if="isSubPage"
+        class="shrink-0 items-center gap-x-3 grid min-h-16 grid-cols-[minmax(2.5rem,auto)_minmax(0,1fr)_minmax(2.5rem,auto)] py-3"
+        :class="dashboardGutterClass"
+      >
+        <div class="flex items-center justify-start min-w-[2.5rem]">
+          <slot name="leading">
+            <DashboardNavbarLeading v-if="column !== 'record'" />
+          </slot>
+        </div>
+
+        <div v-if="$slots.center" class="flex min-w-0 justify-center items-center text-center">
+          <h1 class="sr-only">{{ title }}</h1>
+          <slot name="center" />
+        </div>
+        <div v-else class="min-w-0 text-center">
+          <h1 class="text-base font-semibold text-highlighted truncate">{{ title }}</h1>
+          <p v-if="lead" class="mt-0.5 text-xs text-muted truncate">{{ lead }}</p>
+        </div>
+
+        <div class="flex shrink-0 items-center justify-end gap-2 min-w-[2.5rem] [&_[data-slot=base]]:h-10 [&_[data-slot=base]]:min-w-10 [&_[data-slot=base]]:justify-center [&_[data-slot=base]]:rounded-full">
+          <slot name="right" />
+          <span :id="actionsId" class="flex items-center gap-2 empty:hidden" />
+        </div>
+      </div>
+
+      <div
+        v-else
+        class="shrink-0 flex flex-wrap items-center gap-x-3 gap-y-4 pb-2 pt-4 sm:pt-6"
+        :class="dashboardGutterClass"
+      >
+        <slot name="leading" />
+
         <div v-if="$slots.center" class="flex min-w-0 flex-1 items-center">
           <h1 class="sr-only">{{ title }}</h1>
           <slot name="center" />
         </div>
-        <div v-else class="min-w-0" :class="column === 'record' ? 'col-start-2 row-start-1 text-center' : ['flex-1', level.to.value ? 'max-lg:order-last max-lg:basis-full' : undefined]">
-          <h1 :class="column === 'record' ? 'text-base font-semibold text-highlighted' : dashboardTitleClass">{{ title }}</h1>
+        <div v-else class="min-w-0 flex-1">
+          <h1 :class="dashboardTitleClass">{{ title }}</h1>
           <p v-if="lead" class="mt-2 text-base text-muted">{{ lead }}</p>
         </div>
-        <!-- Every action is the same round 40px button, whatever size a page asked for. A list editor's controls land in the span (dashboardPanelActionsKey). -->
-        <div class="flex shrink-0 items-center gap-2 [&_[data-slot=base]]:h-10 [&_[data-slot=base]]:min-w-10 [&_[data-slot=base]]:justify-center [&_[data-slot=base]]:rounded-full" :class="column === 'record' ? 'col-start-3 row-start-1 justify-end' : 'ms-auto'">
+
+        <div class="flex shrink-0 items-center gap-2 ms-auto [&_[data-slot=base]]:h-10 [&_[data-slot=base]]:min-w-10 [&_[data-slot=base]]:justify-center [&_[data-slot=base]]:rounded-full">
           <slot name="right" />
           <span :id="actionsId" class="flex items-center gap-2 empty:hidden" />
         </div>
@@ -71,6 +102,7 @@
   its URL's `editMode`, such as its translations, is that mode's screen, and
   choosing a child would leave the mode; it opens one when the mode closes.
 */
+import { useSlots } from 'vue'
 import type { RouteLocationRaw } from 'vue-router'
 import { dashboardColumnWidths, dashboardPanelActionsKey, dashboardLeafParentKey, dashboardGutterClass, dashboardTitleClass, type DashboardColumn } from './dashboardPanelContext'
 
@@ -96,7 +128,12 @@ const props = defineProps<{
   lead?: string
 }>()
 
+const slots = useSlots()
 const level = useRouteLevel()
+const isSubPage = computed((): boolean => {
+  const column: DashboardColumn | undefined = props.column
+  return column === 'record' || Boolean(slots.leading || level.to.value)
+})
 // A level that scrolls itself pads its own rows, so the body gives up its padding.
 const panelUi = computed((): { body?: string } => {
   const fill: boolean = props.fill
