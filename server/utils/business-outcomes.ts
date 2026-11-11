@@ -15,10 +15,10 @@ import { tenantBlogPostPath } from '~/utils/tenant-blog-route'
 import { articleCollectionOf } from '~/server/utils/content/publishing'
 import { getSocialConnections } from '~/server/utils/social-publication'
 import { readStripeCheckoutSetup } from '~/server/utils/stripe-connect'
-import { experiencePublicationBlocker, getProduct } from '~/server/utils/product-management'
+import { stayWeekendPriceSql, experiencePublicationBlocker, getProduct } from '~/server/utils/product-management'
 import { readIntegration } from '~/server/utils/organization-integrations'
 import { getSessionAvailability } from '~/server/utils/availability'
-import { MAX_HOMES_CALENDAR_DAYS, readStayGapCandidates, stayAccessFor } from '~/server/domain/stays'
+import { MAX_HOMES_CALENDAR_DAYS, readStayGapCandidates, STAY_NIGHT_PRICE_SQL, stayAccessFor } from '~/server/domain/stays'
 import { addLocalDays, formatCalendarRange, formatTimestamp, isValidCalendarDate, localDateAt } from '~/utils/timezone'
 import { PRODUCT_DETAIL_FIELDS, type ProductKind } from '~/shared/product-details'
 import { platformLocale } from '~/shared/platform-locales'
@@ -477,7 +477,7 @@ export async function readBusinessProgressReference(
     }
     if (product.kind !== 'stay') throw missing()
     const configuration = await queryFirst<{ updated_at: string } & Record<string, unknown>>(db,
-      `SELECT c.product_id, c.location_id, b.min_nights, b.calendar_rules, b.updated_at FROM product_stay_configs c
+      `SELECT c.product_id, c.location_id, b.min_nights, b.calendar_rules, ${stayWeekendPriceSql('c')} AS weekend_price_minor, b.updated_at FROM product_stay_configs c
         JOIN product_booking_configs b ON b.organization_id = c.organization_id AND b.product_id = c.product_id WHERE c.product_id = ? AND c.organization_id = ?`, [product.id, principal.organizationId])
     if (!configuration) throw missing()
     const from = addLocalDays(interval![1], -1), to = addLocalDays(interval![2], 1)
@@ -486,7 +486,7 @@ export async function readBusinessProgressReference(
       .find(gap => gap.productId === product.id && gap.from === interval![1] && gap.to === interval![2])
     if (!gap) throw missing()
     const [overrides, claims, pushes] = await Promise.all([
-      queryAll(db, 'SELECT * FROM product_nights WHERE product_id = ? AND organization_id = ? ORDER BY date', [product.id, principal.organizationId]),
+      queryAll(db, `SELECT n.*, ${STAY_NIGHT_PRICE_SQL} AS price_minor FROM product_nights n WHERE n.product_id = ? AND n.organization_id = ? ORDER BY n.date`, [product.id, principal.organizationId]),
       queryAll(db, `SELECT n.date,n.booking_id AS stay_id,n.hold_id,n.calendar_link_id,h.status AS hold_status,h.expires_at,
         CASE WHEN h.status = 'active' AND h.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now') THEN 1 ELSE 0 END AS hold_active
         FROM stay_nights n LEFT JOIN payment_checkout_holds h ON h.id=n.hold_id AND h.organization_id=n.organization_id

@@ -626,6 +626,9 @@ export const prices = sqliteTable("prices", {
 	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
 	product_variant_id: text().notNull(),
 	location_id: text(),
+	// A home's dated override or Friday/Saturday rate. Ordinary offers have neither.
+	stay_date: text(),
+	weekend: integer({ mode: "boolean" }).default(false).notNull(),
 	active: integer({ mode: "boolean" }).default(true).notNull(),
 	// Normalized ISO 4217 code, uppercase.
 	currency: text().notNull(),
@@ -652,6 +655,9 @@ export const prices = sqliteTable("prices", {
 	foreignKey({ columns: [table.organization_id, table.location_id], foreignColumns: [business_locations.organization_id, business_locations.id], name: "prices_location_scope_fk" }).onDelete("cascade"),
 	index("prices_variant_validity_idx").on(table.organization_id, table.product_variant_id, table.active, table.valid_from_at, table.valid_until_at),
 	index("prices_location_idx").on(table.organization_id, table.location_id),
+	uniqueIndex("prices_stay_date_unique").on(table.product_variant_id, table.stay_date),
+	uniqueIndex("prices_weekend_unique").on(table.product_variant_id).where(sql`weekend = 1`),
+	check("prices_stay_rate_check", sql`weekend IN (0, 1) AND (stay_date IS NULL OR (weekend = 0 AND date(stay_date, '+0 days') IS stay_date)) AND ((stay_date IS NULL AND weekend = 0) OR (active = 1 AND type = 'one_time' AND location_id IS NULL AND valid_from_at IS NULL AND valid_until_at IS NULL))`),
 	check("prices_active_check", sql`active IN (0, 1)`),
 	check("prices_currency_check", sql`length(currency) = 3 AND currency = upper(currency) AND currency NOT GLOB '*[^A-Z]*'`),
 	check("prices_unit_amount_check", sql`unit_amount >= 0`),
@@ -849,8 +855,8 @@ export const product_booking_configs = sqliteTable("product_booking_configs", {
 	check_out_time: text(),
 	// Nights only: the listing's default minimum stay, imported or supplied by its host.
 	min_nights: integer(),
-	// Nights only: actual optional weekday minimums and weekend price; the default stays in min_nights/the primary Price.
-	calendar_rules: text({ mode: "json" }).$type<import("../../shared/bookings").StayCalendarRules>(),
+	// Nights only: actual optional weekday minimums; the default stays in min_nights.
+	calendar_rules: text({ mode: "json" }).$type<Omit<import("../../shared/bookings").StayCalendarRules, "weekend_price_minor">>(),
 	// Nights only: for stays shorter than 28 nights, and for 28 or more.
 	cancellation_policy: text(),
 	long_term_cancellation_policy: text(),
@@ -878,7 +884,7 @@ export const product_booking_configs = sqliteTable("product_booking_configs", {
 		ELSE check_in_time IS NULL AND check_in_end_time IS NULL AND check_out_time IS NULL AND min_nights IS NULL AND calendar_rules IS NULL AND cancellation_policy IS NULL AND long_term_cancellation_policy IS NULL END`),
 	check("product_booking_configs_times_check", sql`(check_in_time IS NULL OR (check_in_time GLOB '[0-2][0-9]:[0-5][0-9]' AND check_in_time < '24:00')) AND (check_out_time IS NULL OR (check_out_time GLOB '[0-2][0-9]:[0-5][0-9]' AND check_out_time < '24:00'))`),
 	check("product_booking_configs_check_in_end_check", sql`check_in_end_time IS NULL OR (check_in_end_time GLOB '[0-2][0-9]:[0-5][0-9]' AND check_in_end_time < '24:00')`),
-	check("product_booking_configs_calendar_rules_check", sql`calendar_rules IS NULL OR (json_valid(calendar_rules) AND json_type(calendar_rules) = 'object')`),
+	check("product_booking_configs_calendar_rules_check", sql`calendar_rules IS NULL OR (json_valid(calendar_rules) AND json_type(calendar_rules) = 'object' AND json_type(calendar_rules, '$.weekend_price_minor') IS NULL)`),
 	check("product_booking_configs_cancellation_check", sql`cancellation_policy IS NULL OR cancellation_policy IN ('flexible', 'moderate', 'limited', 'firm', 'strict')`),
 	check("product_booking_configs_long_term_cancellation_check", sql`long_term_cancellation_policy IS NULL OR long_term_cancellation_policy IN ('firm', 'strict')`),
 	check("product_booking_configs_party_check", sql`(party_size_min IS NULL OR party_size_min >= 1) AND (party_size_max IS NULL OR party_size_max >= COALESCE(party_size_min, 1))`),
@@ -1356,7 +1362,7 @@ export const message_templates = sqliteTable("message_templates", {
 // A night is bookable when it is not closed and no stay_nights row claims it;
 //   occupancy is never stored here. These rules are what guests and channels
 //   are offered; a stay the host enters themselves is not refused by them.
-// price_minor NULL means the base nightly price applies.
+// A night’s own rate is a prices row for its date.
 // `source`: 'host' (edited in KrabiClaw) or 'import' (read from a channel when
 //   the home was connected).
 // Deletion: cascades from the home.
@@ -1365,7 +1371,6 @@ export const product_nights = sqliteTable("product_nights", {
 	product_id: text().notNull(),
 	date: text().notNull(),
 	closed: integer({ mode: "boolean" }).default(false).notNull(),
-	price_minor: integer(),
 	min_stay_arrival: integer(),
 	max_stay: integer(),
 	closed_to_arrival: integer({ mode: "boolean" }).default(false).notNull(),
@@ -1378,7 +1383,6 @@ export const product_nights = sqliteTable("product_nights", {
 	foreignKey({ columns: [table.organization_id, table.product_id], foreignColumns: [product_stay_configs.organization_id, product_stay_configs.product_id], name: "product_nights_home_scope_fk" }).onDelete("cascade"),
 	check("product_nights_date_check", sql`date(date, '+0 days') IS date`),
 	check("product_nights_flags_check", sql`closed IN (0, 1) AND closed_to_arrival IN (0, 1) AND closed_to_departure IN (0, 1)`),
-	check("product_nights_price_check", sql`price_minor IS NULL OR price_minor >= 0`),
 	check("product_nights_stay_rules_check", sql`(min_stay_arrival IS NULL OR min_stay_arrival >= 1) AND (max_stay IS NULL OR max_stay >= 1)`),
 	check("product_nights_source_check", sql`source IN ('host', 'import')`),
 	check("product_nights_updated_at_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at`),

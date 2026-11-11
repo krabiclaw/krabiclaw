@@ -42,6 +42,17 @@ import { presentationForProduct, type CatalogCounts } from '~/utils/product-pres
 import { resolvePublicTenantOrigin } from '~/server/utils/public-base'
 import { FormQuestionDefinitionError, formQuestionsRevision, normalizeFormQuestionsInput, parseStoredFormQuestions } from '~/shared/form-questions'
 
+/** The home's weekend rate, read alongside the rest of its calendar policy. */
+export function stayWeekendPriceSql(home: string) {
+  return `(SELECT pr.unit_amount FROM product_variants v JOIN prices pr ON pr.organization_id = v.organization_id AND pr.product_variant_id = v.id
+    WHERE v.organization_id = ${home}.organization_id AND v.product_id = ${home}.product_id AND pr.weekend = 1)`
+}
+
+export function readStayCalendarRules(value: unknown, weekendPrice: unknown) {
+  const rules = parseStayCalendarRules(value === null ? null : JSON.parse(String(value)))
+  return weekendPrice === null ? rules : parseStayCalendarRules({ ...rules, weekend_price_minor: weekendPrice })
+}
+
 /** A stored question collection and the revision a form built from it carries. */
 function storedQuestions(value: unknown) {
   const questions = parseStoredFormQuestions(String(value))
@@ -262,7 +273,7 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
     // for each: 184,000 rows for one 365-dish menu.
     { query: `SELECT pr.* FROM product_variants v
       CROSS JOIN prices pr ON pr.organization_id = v.organization_id AND pr.product_variant_id = v.id
-      WHERE v.organization_id = ? AND v.product_id IN (SELECT value FROM json_each(?))
+      WHERE v.organization_id = ? AND v.product_id IN (SELECT value FROM json_each(?)) AND pr.stay_date IS NULL AND pr.weekend = 0
       ORDER BY pr.product_variant_id, pr.valid_from_at, pr.id`, params: [organizationId, ids] },
     { query: `SELECT product_id, organization_id, published FROM product_publications
       WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?)) ORDER BY organization_id`, params: [organizationId, ids] },
@@ -278,7 +289,7 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
     { query: `SELECT product_id, id, path, title FROM content_documents
       WHERE organization_id = ? AND row_role = 'root' AND kind = 'page' AND product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
     // How a home is booked is its booking configuration, presented here with what the home is.
-    { query: `SELECT c.product_id, c.internal_name, c.location_id, b.check_in_time, b.check_in_end_time, b.check_out_time, b.default_capacity AS max_guests, b.min_nights, b.calendar_rules, c.property_type_group, c.property_type,
+    { query: `SELECT c.product_id, c.internal_name, c.location_id, b.check_in_time, b.check_in_end_time, b.check_out_time, b.default_capacity AS max_guests, b.min_nights, b.calendar_rules, ${stayWeekendPriceSql('c')} AS weekend_price_minor, c.property_type_group, c.property_type,
         c.listing_type, c.total_floors, c.listing_floor, c.year_built, c.property_size, c.property_size_unit, c.bedrooms, c.beds, c.bathrooms, c.amenities,
         b.cancellation_policy, b.long_term_cancellation_policy, b.assigned_member_id, b.questions, ${liveHomeSql('p')} AS live
       FROM product_stay_configs c JOIN products p ON p.organization_id = c.organization_id AND p.id = c.product_id
@@ -301,7 +312,7 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
       internal_name: requireTrimmedProductString(row.internal_name, 'stay.internal_name', PRODUCT_LIMITS.name),
       location_id: String(row.location_id), check_in_time: row.check_in_time === null ? null : String(row.check_in_time),
       check_in_end_time: row.check_in_end_time === null ? null : String(row.check_in_end_time), check_out_time: row.check_out_time === null ? null : String(row.check_out_time),
-      max_guests: Number(row.max_guests), min_nights: Number(row.min_nights), calendar_rules: parseStayCalendarRules(row.calendar_rules === null ? null : JSON.parse(String(row.calendar_rules))),
+      max_guests: Number(row.max_guests), min_nights: Number(row.min_nights), calendar_rules: readStayCalendarRules(row.calendar_rules, row.weekend_price_minor),
       ...storedStayListing(row),
       assigned_member_id: row.assigned_member_id === null ? null : String(row.assigned_member_id),
       live: Number(row.live) === 1,
@@ -1084,11 +1095,33 @@ async function stayBookingWrites(db: DbClient, input: {
   const { NIGHTS_BOOKING_FIELDS, prepareProductBookingConfig } = await import('~/server/utils/availability')
   const patch: Parameters<typeof prepareProductBookingConfig>[1]['patch'] = {}
   for (const field of NIGHTS_BOOKING_FIELDS) if (named(field)) Object.assign(patch, { [field]: stay[field] })
+  if (named('calendar_rules')) {
+    const minimums = stay.calendar_rules?.day_of_week_min_nights
+    patch.calendar_rules = minimums ? { day_of_week_min_nights: minimums } : null
+  }
   if (named('max_guests')) patch.default_capacity = stay.max_guests
   if (named('assigned_member_id')) patch.assigned_member_id = stay.assigned_member_id
   if (input.edit?.fields.includes('questions')) Object.assign(patch, { questions: input.edit.questions, expected_questions_revision: input.edit.expectedQuestionsRevision })
   else if (!input.edit && stay.questions.length) Object.assign(patch, { questions: stay.questions, expected_questions_revision: formQuestionsRevision([]) })
-  return (await prepareProductBookingConfig(db, { organizationId: input.organizationId, productId: input.planned.id, actorId: input.actorId, env: input.env, productInSameBatch: !input.edit, productKind: 'stay', patch })).queries
+  const { queries } = await prepareProductBookingConfig(db, { organizationId: input.organizationId, productId: input.planned.id, actorId: input.actorId, env: input.env, productInSameBatch: !input.edit, productKind: 'stay', patch })
+  if (!named('calendar_rules')) return queries
+  const [variant] = input.planned.variants
+  if (!variant || input.planned.variants.length !== 1) throw new Error('A home must have exactly one variant before setting its weekend price')
+  const amount = stay.calendar_rules?.weekend_price_minor
+  if (amount === undefined) {
+    if (input.edit) queries.push({ query: 'DELETE FROM prices WHERE organization_id = ? AND product_variant_id = ? AND weekend = 1', params: [input.organizationId, variant.id] })
+    return queries
+  }
+  const currency = await organizationDefaultCurrency(db, input.organizationId)
+  if (!currency) invalid('Set the organization currency before setting its weekend price')
+  queries.push({
+    query: `INSERT INTO prices (id, organization_id, product_variant_id, weekend, currency, unit_amount, created_by, updated_by)
+      VALUES (?, ?, ?, 1, ?, ?, ?, ?)
+      ON CONFLICT (product_variant_id) WHERE weekend = 1 DO UPDATE SET currency = excluded.currency, unit_amount = excluded.unit_amount,
+        updated_at = excluded.updated_at, updated_by = excluded.updated_by`,
+    params: [crypto.randomUUID(), input.organizationId, variant.id, currency, amount, input.actorId, input.actorId],
+  })
+  return queries
 }
 
 /**
@@ -1699,7 +1732,7 @@ async function planProductUpdate(db: DbClient, input: {
   const writes: BatchQuery[] = changedFields.length ? [
     // Only explicit replacement removes prices; merged omissions remain in the plan.
     ...(writesPrices
-      ? [{ query: 'DELETE FROM prices WHERE organization_id = ? AND product_variant_id IN (SELECT id FROM product_variants WHERE organization_id = ? AND product_id = ?) AND id NOT IN (SELECT value FROM json_each(?))', params: [organizationId, organizationId, productId, keptPrices] }]
+      ? [{ query: 'DELETE FROM prices WHERE organization_id = ? AND product_variant_id IN (SELECT id FROM product_variants WHERE organization_id = ? AND product_id = ?) AND stay_date IS NULL AND weekend = 0 AND id NOT IN (SELECT value FROM json_each(?))', params: [organizationId, organizationId, productId, keptPrices] }]
       : []),
     // Variants are UPSERTED, never dropped and recreated:
     // bookings reference variant identity, and recreating a variant under a
