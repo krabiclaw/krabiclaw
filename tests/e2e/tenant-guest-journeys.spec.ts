@@ -219,6 +219,14 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
         && state.deliveries.some(row => row.purpose === 'guest_acknowledgement' && row.channel === 'email' && row.status === 'sent'),
       )
       expectOwnerDispatch(state)
+
+      const cancellation = new URL('/bookings/cancel', baseURL)
+      cancellation.searchParams.set('id', reservation.conversation_id)
+      cancellation.hash = reservation.cancellation_token
+      await openTenantPage(page, cancellation.href, seededSiteHeaders('restaurant'))
+      await expect(page.getByRole('heading', { name: 'Cancel reservation', exact: true })).toBeVisible()
+      await expect(page.locator('main')).toContainText('Reservation for:')
+      await expect(page.locator('main')).toContainText('Restaurant Journey Test')
     } finally {
       await unlock()
     }
