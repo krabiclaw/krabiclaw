@@ -620,7 +620,7 @@ test('a completed onboarding emails each operator once, with a link to that cust
     assert.deepEqual(ownerMail!.body.to, ['mina@clay-corner.com'])
     assert.equal(ownerMail!.body.subject, 'Welcome to KrabiClaw — congrats on launching Clay Corner!')
     assert.equal(ownerMail!.idempotencyKey, `onboarding-welcome:org-customer:${hashEmail('mina@clay-corner.com')}`)
-    for (const expected of ['Hi Mina,', 'Clay Corner', 'https://clay-corner.krabiclaw.com/', 'dining experience or cuisine', 'Paul', 'Founder, KrabiClaw']) {
+    for (const expected of ['Hi Mina,', 'Clay Corner', 'https://clay-corner.krabiclaw.com/', 'https://krabiclaw.com/dashboard/clay-corner', 'dining experience or cuisine', 'Paul', 'Founder, KrabiClaw']) {
       assert.ok(ownerMail!.body.html.includes(expected), `owner welcome email carries ${expected}`)
     }
     // The conversion is recorded on its own path, once per organization.
