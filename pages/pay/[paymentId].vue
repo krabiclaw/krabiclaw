@@ -181,6 +181,7 @@ type Handoff = Awaited<ReturnType<typeof paymentHandoff>>
 type Review = Awaited<ReturnType<typeof reviewPayment>>
 type Confirmation = Awaited<ReturnType<typeof confirmPayment>>
 const isHandoff = (value: unknown): value is Handoff => isRecord(value) && value.payment_id === paymentId && typeof value.title === 'string' && Number.isSafeInteger(value.subtotal) && typeof value.currency === 'string' && typeof value.stripe_account_id === 'string' && typeof value.publishable_key === 'string' && Array.isArray(value.payment_method_types) && value.payment_method_types.every(type => typeof type === 'string') && ['open', 'paid', 'failed', 'expired', 'processing', 'verifying'].includes(String(value.state))
+  && (value.billing_details === null || (isRecord(value.billing_details) && typeof value.billing_details.name === 'string' && typeof value.billing_details.email === 'string' && (value.billing_details.phone === undefined || typeof value.billing_details.phone === 'string')))
 const isReview = (value: unknown): value is Review => isRecord(value) && typeof value.payment_method_id === 'string' && [value.subtotal, value.tax, value.tax_included, value.surcharge].every(Number.isSafeInteger) && value.total === (value.subtotal as number) + (value.tax as number) + (value.surcharge as number) && isRecord(value.method)
 const isConfirmation = (value: unknown): value is Confirmation => isRecord(value) && typeof value.status === 'string' && typeof value.requires_action === 'boolean'
 const isReturn = (value: unknown): value is PaymentReturn => isRecord(value) && (value.state === 'processing' || value.state === 'refunded' || value.state === 'expired' || (value.state === 'paid' && (
@@ -297,7 +298,10 @@ watch([handoff, mount], async ([value, container]) => {
         rules: { '.AccordionItem': { border: 'none', boxShadow: 'none', paddingLeft: '0px', paddingRight: '0px', backgroundColor: 'transparent' } },
       },
     })
-    paymentElement = elements.create('payment', { layout: { type: 'accordion', defaultCollapsed: false, radios: 'always', spacedAccordionItems: false } })
+    paymentElement = elements.create('payment', {
+      layout: { type: 'accordion', defaultCollapsed: false, radios: 'always', spacedAccordionItems: false },
+      ...(value.billing_details ? { defaultValues: { billingDetails: value.billing_details } } : {}),
+    })
     paymentElement.on('ready', () => { ready.value = true })
     paymentElement.on('change', () => { if (review.value) review.value = null })
     paymentElement.mount(container)
@@ -327,7 +331,12 @@ async function reviewMethod() {
   try {
     const submitted = await elements.submit()
     if (submitted.error) throw new Error(submitted.error.message ?? t('payment.unavailable'))
-    const created = await stripe.createPaymentMethod({ elements })
+    // Stripe can hide contact fields for cards. Include the booking contact when creating the method so Radar receives it before authorization.
+    const billingDetails = handoff.value?.billing_details
+    const created = await stripe.createPaymentMethod({
+      elements,
+      ...(billingDetails ? { params: { billing_details: billingDetails } } : {}),
+    })
     if (created.error || !created.paymentMethod) throw new Error(created.error?.message ?? t('payment.unavailable'))
     review.value = await publicApiMutation<Review>(`/api/public/payments/${encodeURIComponent(paymentId)}/review`, { method: 'POST', body: { claim: claim.value, payment_method_id: created.paymentMethod.id }, validate: isReview })
     if (elements && review.value.total !== review.value.subtotal) elements.update({ amount: review.value.total })

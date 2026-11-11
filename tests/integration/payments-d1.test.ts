@@ -45,7 +45,7 @@ import { selectGoogleAdsCustomer } from '../../server/utils/google-ads.ts'
 import { getStripe } from '../../server/utils/billing.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
 import { approveRefundAuthorization, executeRefund, readPaymentDetails, requirePayment } from '../../server/domain/payments/index.ts'
-import { reviewPayment, confirmPayment, requireClaimedPayment } from '../../server/domain/payments/intent.ts'
+import { reviewPayment, confirmPayment, paymentHandoff, requireClaimedPayment } from '../../server/domain/payments/intent.ts'
 import { reconcilePaymentIntent, processPaymentEvent } from '../../server/domain/payments/events.ts'
 import { canRetryGuestVisitRefund } from '../../server/domain/payments/visit-refund.ts'
 import { mcpFinancialApprovalErrorResult } from '../../server/utils/mcp-financial-handoff.ts'
@@ -1079,10 +1079,12 @@ test('a stay purchase claim cancels Stripe before releasing only its held nights
     nativeStatus = 'requires_payment_method'
     const openHandoff = await app.request(Object.assign(new Request(`https://payments.proof.example/api/public/payments/changing?claim=${claims.get('changing')!}`), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
     assert.equal(openHandoff.status, 200, await openHandoff.clone().text())
+    assert.equal(openHandoff.headers.get('cache-control'), 'private, no-store')
     const open = await openHandoff.json()
     assert.deepEqual(open, {
       payment_id: 'changing', state: 'open', title: 'Cabin', quantity: 1, unit_amount: 20000,
       stay: { product_id: 'cabin', check_in_date: '2099-10-01', check_out_date: '2099-10-03', nights: 2, nightly: [10000, 10000], adults: 1, children: 0, infants: 0, cancellation_policy: 'flexible' },
+      billing_details: { name: 'Guest', email: 'guest@example.com' },
       kind: 'stay', image_url: null, starts_at: null, ends_at: null, timezone: null, party_size: null, product_slug: 'cabin', location_slug: 'cabin-site', free_cancellation_until: null,
       subtotal: 20000, currency: 'USD', expires_at: '2099-09-30T00:00:00.000Z', stripe_account_id: 'acct_seller', publishable_key: 'pk_test_local_boundary',
       payment_method_types: ['card'], customer_session_client_secret: null, bank_verification_url: null, surcharge_basis_points: null,
@@ -1098,7 +1100,7 @@ test('a stay purchase claim cancels Stripe before releasing only its held nights
       assert.equal((await expired.json() as { data: { code: string } }).data.code, 'payment_expired')
       const expiredHandoff = await app.request(Object.assign(new Request(`https://payments.proof.example/api/public/payments/changing?claim=${claims.get('changing')!}`), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
       assert.equal(expiredHandoff.status, 200, await expiredHandoff.clone().text())
-      assert.deepEqual(await expiredHandoff.json(), { ...open, state: 'expired', ...(column === 'checkout_expires_at' ? { expires_at: NOW } : {}) })
+      assert.deepEqual(await expiredHandoff.json(), { ...open, state: 'expired', billing_details: null, ...(column === 'checkout_expires_at' ? { expires_at: NOW } : {}) })
       assert.equal(cancellations, 0)
       assert.deepEqual(await requirePayment(db, ORG, 'changing'), lapsedPayment)
       assert.deepEqual((await db.prepare('SELECT * FROM stay_nights ORDER BY date').all()).results, originalNights)
@@ -1111,7 +1113,7 @@ test('a stay purchase claim cancels Stripe before releasing only its held nights
     assert.equal((await requirePayment(db, ORG, 'changing')).captured_amount, 0)
     const failedHandoff = await app.request(Object.assign(new Request(`https://payments.proof.example/api/public/payments/changing?claim=${claims.get('changing')!}`), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
     assert.equal(failedHandoff.status, 200, await failedHandoff.clone().text())
-    assert.deepEqual(await failedHandoff.json(), { ...open, state: 'failed' })
+    assert.deepEqual(await failedHandoff.json(), { ...open, state: 'failed', billing_details: null })
     const calendar = await readStayCalendar(db, { organizationId: ORG, actorId: 'host', manage: true }, { productId: 'cabin', from: '2099-10-01', to: '2099-10-04' })
     assert.deepEqual(calendar.nights.map(night => [night.date, night.available, night.held_until === null]), [
       ['2099-10-01', true, true], ['2099-10-02', true, true], ['2099-10-03', false, false],
@@ -1133,7 +1135,7 @@ test('ACH Direct Debit payment review and confirmation handles bank account deta
   try {
     const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-proof-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only', STRIPE_SECRET_KEY: 'sk_test_local_boundary' }
     await payable(db, 'ach-payment')
-    const opening = { id: 'ach-request', kind: 'booking' as const, organization_id: ORG, location_id: null, user_id: 'guest', booking_id: null, payload: threadPayloadForGuest({ name: 'Guest', email: 'guest@example.com' }), created_at: NOW }
+    const opening = { id: 'ach-request', kind: 'booking' as const, organization_id: ORG, location_id: null, user_id: 'guest', booking_id: null, payload: threadPayloadForGuest({ name: 'Guest', email: 'guest@example.com', phone: '+12025550114' }), created_at: NOW }
     await db.batch(requestInsertQueries(opening).map(write => db.prepare(write.query).bind(...write.params)))
     await db.prepare("UPDATE payment_checkout_holds SET conversation_id=? WHERE payment_id='ach-payment'").bind(opening.id).run()
     const originalFetch = globalThis.fetch
@@ -1219,7 +1221,9 @@ test('ACH Direct Debit payment review and confirmation handles bank account deta
     const originalHold = await db.prepare("SELECT status, expires_at FROM payment_checkout_holds WHERE payment_id='ach-payment'").first()
     await reconcilePaymentIntent(db, stripe, await requirePayment(db, ORG, 'ach-payment'), declinedIntent, env)
     assert.equal((await requirePayment(db, ORG, 'ach-payment')).captured_amount, 0)
-    assert.equal((await requireClaimedPayment(db, stripe, ORG, 'ach-payment', claim)).state, 'open')
+    const handoff = await paymentHandoff(db, stripe, 'pk_test_local_boundary', ORG, 'ach-payment', claim)
+    assert.equal(handoff.state, 'open')
+    assert.deepEqual(handoff.billing_details, { name: 'Guest', email: 'guest@example.com', phone: '+12025550114' })
     assert.deepEqual(await db.prepare("SELECT status, expires_at FROM payment_checkout_holds WHERE payment_id='ach-payment'").first(), originalHold)
 
     const review = await reviewPayment(db, stripe, ORG, 'ach-payment', claim, 'pm_achproof123', null)
