@@ -246,9 +246,9 @@ export async function stayChangeView(db: DbClient, thread: GuestThreadRow, entry
   if (!organization || !home) throw new Error(`Change request ${entry.id} has no organization or home to show`)
   if (!thread.payload.guest.name) throw new Error(`Change request ${entry.id} is in a conversation with no guest name`)
   const { locale } = await getPersistedSourceLocale(db, thread.organization_id)
-  const side = (terms: Terms) => ({ whenLabel: nightsLabel(terms, locale), partySize: terms.adults + terms.children, totalLabel: formatMinorAmount(terms.total_minor, terms.currency, locale), assignedMemberId: null, assignedMemberName: null })
+  const side = (terms: Terms) => ({ when_label: nightsLabel(terms, locale), party_size: terms.adults + terms.children, total_label: formatMinorAmount(terms.total_minor, terms.currency, locale), assigned_member_id: null, assigned_member_name: null })
   return {
-    type: 'stay', noun: 'stay', guestName: thread.payload.guest.name, locale, vertical: organization.vertical, requestedBy: proposal.initiated_by === 'guest' ? 'guest' : 'business', channel: 'airbnb',
-    before: side(proposal.before), after: side(proposal.after), locationTitle: home.name, originalLocationTitle: home.name, status,
+    type: 'stay', noun: 'stay', guest_name: thread.payload.guest.name, locale, vertical: organization.vertical, requested_by: proposal.initiated_by === 'guest' ? 'guest' : 'business', channel: 'airbnb',
+    before: side(proposal.before), after: side(proposal.after), location_title: home.name, original_location_title: home.name, status,
   }
 }

@@ -347,7 +347,7 @@ test('a home keeps its operator name independent from its public title across CM
   expect(cancelled.data!.status).toBe('cancelled')
   const cancelledWork = await request.get(taskPath)
   await expectStatus(cancelledWork, 200)
-  expect((await cancelledWork.json() as { task: TaskView }).task).toMatchObject({ id: task.id, action: task.action, reservation: { statusLabel: 'Cancelled' } })
+  expect((await cancelledWork.json() as { task: TaskView }).task).toMatchObject({ id: task.id, action: task.action, reservation: { status_label: 'Cancelled' } })
   const past = await request.post(api('stays'), { data: { product_id: productId, check_in_date: localDay(-5), check_out_date: localDay(-3), adults: 1, children: 0, infants: 0,
     guest_name: 'Bo', guest_phone: '+66812345002', guest_email: `bo-${slug}@playwright.example`, total_minor: 100_00, idempotency_key: crypto.randomUUID() } })
   await expectStatus(past, 201)

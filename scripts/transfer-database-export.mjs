@@ -288,8 +288,11 @@ export const TARGET_INVARIANT_QUERIES = {
   localized_resource_owner_scope: `SELECT r.id FROM content_documents r WHERE r.kind = 'resource' AND NOT (
     ${Object.entries(LOCALIZED_OWNER_TABLES).map(([type, table]) => `(r.resource_type = '${type}' AND EXISTS (SELECT 1 FROM ${table} o WHERE o.id = r.resource_id AND ${type === 'organization' ? 'o.id' : 'o.organization_id'} = r.organization_id))`).join(' OR ')})`,
   channel_thread_scope: `SELECT t.external_thread_id FROM channel_threads t JOIN conversations r ON r.id = t.conversation_id
-    JOIN product_stay_configs c ON c.product_id = t.product_id AND c.organization_id = t.organization_id
-    WHERE r.kind <> 'booking' OR r.organization_id <> t.organization_id OR r.location_id IS NOT c.location_id`,
+    LEFT JOIN product_stay_configs c ON c.product_id = t.product_id AND c.organization_id = t.organization_id
+    LEFT JOIN bookings b ON b.id = r.booking_id AND b.organization_id = r.organization_id
+    WHERE r.kind <> 'booking' OR r.organization_id <> t.organization_id OR c.product_id IS NULL
+       OR (CASE WHEN b.id IS NULL THEN r.location_id IS NOT c.location_id
+          ELSE t.product_id IS NOT coalesce(b.booked_product_id, b.product_id) END)`,
   // A conversation titled by its channel is a channel's thread, or a channel reservation's that named no guest.
   channel_participant_addressable: `SELECT r.id FROM conversations r WHERE json_type(r.payload_json, '$.participant') IS NOT NULL
     AND NOT EXISTS (SELECT 1 FROM channel_threads t WHERE t.conversation_id = r.id AND t.organization_id = r.organization_id)

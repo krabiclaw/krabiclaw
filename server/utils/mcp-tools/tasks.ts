@@ -75,7 +75,7 @@ export const TASK_TOOLS: McpToolDefinition[] = [
   }),
   organizationTool({ name: 'defer_opportunity', domain: 'tasks', minimumRole: 'admin', description: 'Set an opportunity aside until a time; it returns then if it still applies.',
     inputSchema: { opportunity_id: { ...text, minLength: 1 }, until: instant }, required: ['opportunity_id', 'until'],
-    outputSchema: { type: 'object', properties: { opportunity: { type: 'object', properties: { id: text, availableAt: text }, required: ['id', 'availableAt'] } }, required: ['opportunity'] },
+    outputSchema: { type: 'object', properties: { opportunity: { type: 'object', properties: { id: text, available_at: text }, required: ['id', 'available_at'] } }, required: ['opportunity'] },
   }),
 ]
 

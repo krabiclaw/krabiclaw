@@ -621,6 +621,8 @@ test('an existing stay timeline is adopted intact; two existing timelines fail e
     assert.equal(await db.prepare('SELECT count(*) FROM messages').first('count(*)'), recorded)
     await db.prepare("DELETE FROM channel_threads").run()
     await db.prepare("UPDATE conversations SET payload_json = ? WHERE id = 'other'").bind(JSON.stringify({ participant: { kind: 'channel', title: 'Unmapped' }, guest: { name: null, email: null, phone: null }, ip_hash: null, cancellation: { token_hash: null, expires_at: null, used_at: null } })).run()
+    assert.equal((await getGuestRequest(db, 'other', ORG))?.booking_id, stay.id)
+    await db.prepare("UPDATE conversations SET booking_id = NULL WHERE id = 'other'").run()
     await assert.rejects(getGuestRequest(db, 'other', ORG), code('CHANNEL_THREAD_MAPPING_INVALID'))
   } finally { globalThis.fetch = realFetch; await runtime.dispose() }
 })

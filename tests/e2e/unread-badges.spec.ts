@@ -15,6 +15,7 @@ test('a new booking, its cancellation and a guest message are unread until read,
   const baseURL = testBaseUrl()
   const unlock = await acquireTenantMutationLock(testInfo, restaurant.organizationId)
   const owner = await playwright.request.newContext({ baseURL })
+  const guest = await playwright.request.newContext({ baseURL })
   await loginAs(owner, baseURL)
   const conversations = `/api/dashboard/organizations/${restaurant.organizationId}/conversations`
   // The one unread statement: the list's counts, which Messages' badge reads too.
@@ -42,7 +43,7 @@ test('a new booking, its cancellation and a guest message are unread until read,
     const before = await unread()
     const tenantHeaders = seededSiteHeaders('restaurant')
     const seating = await openSeating(owner, 2, 2 * 86_400_000)
-    const { requestId: reservationId, cancellationToken } = await bookTable(owner, { name: 'Unread schedule proof', email: `unread-schedule-${Date.now()}@playwright.example`, phone: '+61491570007', partySize: 2, seating })
+    const { requestId: reservationId, cancellationToken } = await bookTable(guest, { name: 'Unread schedule proof', email: `unread-schedule-${Date.now()}@playwright.example`, phone: '+61491570007', partySize: 2, seating })
 
     // The booking's opening message is KrabiClaw's, so it is unread for the team until opened.
     expect(await unread()).toBe(before + 1)
@@ -57,7 +58,7 @@ test('a new booking, its cancellation and a guest message are unread until read,
     expect(await unread()).toBe(before)
 
     // The guest cancels: KrabiClaw's cancellation message is news, so the conversation is unread again.
-    const cancelled = await owner.post(`/api/public/booking-requests/${reservationId}/cancel`, {
+    const cancelled = await guest.post(`/api/public/booking-requests/${reservationId}/cancel`, {
       headers: { ...tenantHeaders, authorization: `Bearer ${cancellationToken}` },
     })
     expect(cancelled.status(), await cancelled.text()).toBe(200)
@@ -73,12 +74,12 @@ test('a new booking, its cancellation and a guest message are unread until read,
     await expect.poll(async () => (await row(reservationId)).unread).toBe(false)
     expect(await unread()).toBe(before)
 
-    const submitted = await owner.post('/api/public/contact', {
+    const submitted = await guest.post('/api/public/contact', {
       headers: tenantHeaders,
       data: { name: 'Unread badge proof', email: `unread-badge-${Date.now()}@playwright.example`, message: 'Is the patio open on Sunday evenings?' },
     })
     expect(submitted.status(), await submitted.text()).toBe(201)
-    const threadId = (await submitted.json() as { request_id: string }).request_id
+    const threadId = (await submitted.json() as { conversation_id: string }).conversation_id
 
     // Counted once, and Messages on the dashboard shows the same number.
     const arrived = await unread()
@@ -110,6 +111,7 @@ test('a new booking, its cancellation and a guest message are unread until read,
   } finally {
     await dashboard.close()
     await owner.dispose()
+    await guest.dispose()
     await unlock()
   }
 })

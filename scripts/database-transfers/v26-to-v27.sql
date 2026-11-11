@@ -166,30 +166,40 @@ ON CONFLICT (id) DO NOTHING;
 -- The frozen terms (server/utils/booking-policy-summary.ts BookingPolicy),
 -- from the reservation's own snapshot (its policy_json, or for a paid one the
 -- copy its checkout froze), else from its location's settings now.
+CREATE TEMP TABLE reservation_policies AS
+WITH sources AS (
+  SELECT r.id, 'booking' AS kind, COALESCE(r.policy_json,
+    (SELECT json_extract(p.price_snapshot_json, '$.reservation') FROM payments p
+      WHERE p.organization_id = r.organization_id AND p.subject_type = 'reservation' AND p.subject_id = r.id ORDER BY p.created_at, p.id LIMIT 1),
+    json_object('advance_notice_minutes', c.advance_notice_minutes, 'minimum_guest_age', c.minimum_guest_age,
+      'accessibility_contact_required', c.accessibility_contact_required, 'deposit_required', c.deposit_required,
+      'deposit_amount', c.deposit_amount, 'deposit_currency', c.deposit_currency, 'deposit_tax_behavior', c.deposit_tax_behavior,
+      'deposit_trigger_party_size', c.deposit_trigger_party_size)) AS terms
+    FROM reservations r
+    JOIN location_reservation_configs c ON c.location_id = r.location_id AND c.organization_id = r.organization_id
+  UNION ALL
+  SELECT p.id, 'payment', json_extract(p.price_snapshot_json, '$.reservation')
+    FROM payments p JOIN payment_checkout_holds h ON h.payment_id = p.id
+   WHERE p.subject_type = 'reservation'
+)
+SELECT id, kind, CASE WHEN json_type(terms) = 'object' THEN json_object(
+  'advance_notice_minutes', NULLIF(json_extract(terms, '$.advance_notice_minutes'), 0),
+  'party_size_min', NULL, 'party_size_max', NULL,
+  'minimum_guest_age', json_extract(terms, '$.minimum_guest_age'),
+  'accessibility_contact_required', json(CASE WHEN json_extract(terms, '$.accessibility_contact_required') = 1 THEN 'true' ELSE 'false' END),
+  'payment', json(CASE WHEN json_extract(terms, '$.deposit_required') = 1 AND json_extract(terms, '$.deposit_amount') IS NOT NULL THEN json_object(
+    'basis', 'per_booking', 'unit_amount', json_extract(terms, '$.deposit_amount'), 'currency', json_extract(terms, '$.deposit_currency'),
+    'tax_behavior', COALESCE(json_extract(terms, '$.deposit_tax_behavior'), 'unspecified'),
+    'min_party_size', json_extract(terms, '$.deposit_trigger_party_size')) ELSE 'null' END)) END AS policy_json
+FROM sources;
+
+SELECT COUNT(*) FROM reservation_policies WHERE policy_json IS NULL;
+
 INSERT INTO bookings (id, organization_id, product_id, product_session_id, product_variant_id, user_id, request_id, party_size, status,
                       cancelled_at, cancellation_reason, no_show_at, policy_json, created_at, updated_at)
 SELECT r.id, r.organization_id, 'table-' || r.location_id, 'table-session-' || r.location_id || '-' || r.starts_at, 'table-variant-' || r.location_id,
-       r.user_id, r.request_id, r.party_size, r.status, r.cancelled_at, r.cancellation_reason, r.no_show_at,
-       json_object(
-         'advance_notice_minutes', NULLIF(COALESCE(json_extract(s.terms, '$.advance_notice_minutes'), c.advance_notice_minutes), 0),
-         'party_size_min', NULL, 'party_size_max', NULL,
-         'minimum_guest_age', COALESCE(json_extract(s.terms, '$.minimum_guest_age'), c.minimum_guest_age),
-         'accessibility_contact_required', json(CASE WHEN COALESCE(json_extract(s.terms, '$.accessibility_contact_required'), c.accessibility_contact_required) = 1 THEN 'true' ELSE 'false' END),
-         'payment', json(CASE
-           WHEN s.terms IS NOT NULL AND json_extract(s.terms, '$.deposit_required') = 1 AND json_extract(s.terms, '$.deposit_amount') IS NOT NULL THEN json_object(
-             'basis', 'per_booking', 'unit_amount', json_extract(s.terms, '$.deposit_amount'), 'currency', json_extract(s.terms, '$.deposit_currency'),
-             'tax_behavior', COALESCE(json_extract(s.terms, '$.deposit_tax_behavior'), 'unspecified'), 'min_party_size', json_extract(s.terms, '$.deposit_trigger_party_size'))
-           WHEN s.terms IS NULL AND c.deposit_required = 1 AND c.deposit_amount IS NOT NULL THEN json_object(
-             'basis', 'per_booking', 'unit_amount', c.deposit_amount, 'currency', c.deposit_currency,
-             'tax_behavior', COALESCE(c.deposit_tax_behavior, 'unspecified'), 'min_party_size', c.deposit_trigger_party_size)
-           ELSE 'null' END)),
-       r.created_at, r.updated_at
-  FROM reservations r
-  JOIN location_reservation_configs c ON c.location_id = r.location_id AND c.organization_id = r.organization_id
-  JOIN (SELECT r2.id, COALESCE(r2.policy_json,
-          (SELECT json_extract(p.price_snapshot_json, '$.reservation') FROM payments p
-            WHERE p.organization_id = r2.organization_id AND p.subject_type = 'reservation' AND p.subject_id = r2.id ORDER BY p.created_at LIMIT 1)) AS terms
-          FROM reservations r2) s ON s.id = r.id WHERE true
+       r.user_id, r.request_id, r.party_size, r.status, r.cancelled_at, r.cancellation_reason, r.no_show_at, p.policy_json, r.created_at, r.updated_at
+  FROM reservations r JOIN reservation_policies p ON p.id = r.id AND p.kind = 'booking' WHERE true
 ON CONFLICT (id) DO NOTHING;
 
 -- Every booking made before terms were frozen: its offering's settings now,
@@ -270,8 +280,10 @@ UPDATE payments
          '$.product_id', 'table-' || location_id,
          '$.variant_id', 'table-variant-' || location_id,
          '$.session_id', 'table-session-' || location_id || '-' || (SELECT h.starts_at FROM payment_checkout_holds h WHERE h.payment_id = payments.id),
-         '$.policy', json((SELECT b.policy_json FROM bookings b WHERE b.id = payments.subject_id)))
+         '$.policy', json((SELECT p.policy_json FROM reservation_policies p WHERE p.id = payments.id AND p.kind = 'payment')))
  WHERE subject_type = 'reservation' AND EXISTS (SELECT 1 FROM payment_checkout_holds h WHERE h.payment_id = payments.id);
+
+DROP TABLE reservation_policies;
 
 UPDATE payment_checkout_holds
    SET product_id = 'table-' || location_id, variant_id = 'table-variant-' || location_id, price_id = 'table-price-' || location_id,
@@ -921,11 +933,12 @@ INSERT INTO activity_entries (id, request_id, kind, scope_kind, actor_kind, acto
 -- 3. Bookings: the slot bookings with their session's window, then the stays.
 INSERT INTO bookings (id, organization_id, user_id, request_id, product_id, product_variant_id, product_session_id, location_id, starts_at, ends_at, timezone,
     party_size, party_size_is_minimum, status, cancelled_at, cancellation_reason, no_show_at, answers, policy_json, version, channel, owner, overbooked, received_at, created_at, updated_at)
-  SELECT b.id, b.organization_id, b.user_id, b.request_id, b.product_id, b.product_variant_id, b.product_session_id, ps.location_id, ps.starts_at, ps.ends_at, ps.timezone,
+  SELECT b.id, b.organization_id, b.user_id, b.request_id, b.product_id, b.product_variant_id, b.product_session_id, ps.location_id, coalesce(reservation.starts_at, ps.starts_at), coalesce(reservation.ends_at, ps.ends_at), coalesce(reservation.timezone, ps.timezone),
          b.party_size, COALESCE(json_extract(r.payload_json, '$.party_size_is_minimum'), 0), b.status, b.cancelled_at, b.cancellation_reason, b.no_show_at,
          COALESCE(json_extract(r.payload_json, '$.answers'), '[]'), json_set(b.policy_json, '$.cancellation', json('null')), 1, 'direct', 'app', 0, b.created_at, b.created_at, b.updated_at
     FROM old_bookings b
     JOIN product_sessions ps ON ps.organization_id = b.organization_id AND ps.id = b.product_session_id
+    LEFT JOIN reservations reservation ON reservation.id = b.id AND reservation.organization_id = b.organization_id
     LEFT JOIN old_requests r ON r.id = b.request_id;
 
 -- A stay's frozen terms are the cancellation policy it was booked under; it
@@ -1019,6 +1032,8 @@ INSERT INTO google_calendar_event_links (id, organization_id, integration_revisi
 -- D3: the team's notes were ledger entries on the conversation (each note's
 -- latest revision); they become the booking's one private note, in the order
 -- they were written, and leave the ledger.
+-- must return 0: no stay already carried a host note and ledger notes both.
+SELECT COUNT(*) FROM bookings b WHERE b.private_notes IS NOT NULL AND b.product_session_id IS NULL AND EXISTS (SELECT 1 FROM activity_entries WHERE request_id = b.request_id AND event_name = 'internal_note.added');
 UPDATE bookings SET private_notes = (
     SELECT group_concat(body, char(10) || char(10)) FROM (
       SELECT latest.body FROM (
@@ -1028,8 +1043,6 @@ UPDATE bookings SET private_notes = (
         FROM activity_entries WHERE request_id = bookings.request_id AND event_name IN ('internal_note.added', 'internal_note.updated') AND body IS NOT NULL
       ) latest WHERE latest.revision = 1 ORDER BY latest.first_sequence))
   WHERE private_notes IS NULL AND EXISTS (SELECT 1 FROM activity_entries WHERE request_id = bookings.request_id AND event_name = 'internal_note.added');
--- must return 0: no stay already carried a host note and ledger notes both.
-SELECT COUNT(*) FROM bookings b WHERE b.private_notes IS NOT NULL AND b.product_session_id IS NULL AND EXISTS (SELECT 1 FROM activity_entries WHERE request_id = b.request_id AND event_name = 'internal_note.added');
 DELETE FROM activity_entries WHERE event_name IN ('internal_note.added', 'internal_note.updated');
 
 -- must return no rows: the moved rows hold together.
@@ -1141,7 +1154,7 @@ INSERT INTO messages (id, organization_id, conversation_id, sequence, author_kin
 -- A booking guest's note lived on the conversation when no guest_note message
 -- was written for it: it becomes their message, after the conversation's others.
 INSERT INTO messages (id, organization_id, conversation_id, sequence, author_kind, author_user_id, channel, body, event_name, payload_json, dedupe_key, occurred_at, created_at)
-  SELECT lower(hex(randomblob(16))), r.organization_id, r.id,
+  SELECT 'v27-guest-note:' || r.id, r.organization_id, r.id,
          COALESCE((SELECT MAX(m.sequence) FROM messages m WHERE m.conversation_id = r.id), 0) + 1,
          'guest', r.user_id, 'web', trim(json_extract(r.payload_json, '$.notes')), 'thread.guest_note', '{}',
          'conversation:' || r.id || ':guest-note', r.created_at, r.created_at

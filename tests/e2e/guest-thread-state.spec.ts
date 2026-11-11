@@ -86,8 +86,8 @@ async function loadLocationDay(request: APIRequestContext, date: string, timezon
 }
 
 /**
- * Dated hours replace the day's ordinary periods: a period exactly sixty minutes
- * wide keeps the location open for precisely the one seating added at its start.
+ * Dated hours replace the day's ordinary periods. The fixture's 90-minute table
+ * duration fits once in a 90-minute opening period.
  */
 async function readSpecialHours(request: APIRequestContext): Promise<unknown> {
   const response = await request.get(`/api/organizations/${demoOrganizationId()}/locations/${demoLocationId()}`)
@@ -101,7 +101,7 @@ function restoreSpecialHours(request: APIRequestContext, special: unknown) {
 
 function setLocationSlot(request: APIRequestContext, slot: LocationSlot) {
   const [hours, minutes] = slot.time.split(':').map(Number)
-  const closeMinute = hours! * 60 + minutes! + 60
+  const closeMinute = hours! * 60 + minutes! + 90
   const close = `${String(Math.floor(closeMinute / 60) % 24).padStart(2, '0')}:${String(closeMinute % 60).padStart(2, '0')}`
   return request.patch(`/api/organizations/${demoOrganizationId()}/locations/${demoLocationId()}`, {
     data: {
@@ -223,6 +223,7 @@ test('guest thread state stays source-owned, per-user, tenant-isolated, and idem
   test.skip(!writable, 'Guest-thread writes require disposable local or preview data')
 
   const owner = await playwright.request.newContext({ baseURL })
+  const guest = await playwright.request.newContext({ baseURL })
   const secondOwner = await playwright.request.newContext({ baseURL })
   const foreignOwner = await playwright.request.newContext({ baseURL })
 
@@ -239,9 +240,9 @@ test('guest thread state stays source-owned, per-user, tenant-isolated, and idem
     const subject = 'partnerships'
     const message = `Canonical source detail proof ${nonce}`
     const startedAt = new Date().toISOString()
-    const submission = await owner.post(`/api/public/contact`, {
+    const submission = await guest.post(`/api/public/contact`, {
       headers: seededSiteHeaders('experience'),
-      data: { name: guestName, email: guestEmail, subject, message },
+      data: { name: guestName, email: guestEmail, subject, message, location_id: seededTenant('experience').locations['ao-nang']!.id },
     })
     await expectStatus(submission, 201)
 
@@ -370,7 +371,7 @@ test('guest thread state stays source-owned, per-user, tenant-isolated, and idem
     expect(await loadReplyTasks(owner, organizationSlug(), threadId)).toEqual([{ section: 'open', tasks: [expect.objectContaining({ id: replyTask.id, status: 'open', outcome: null })] }])
     expect(await loadReplyTasks(secondOwner, organizationSlug(), threadId)).toEqual([{ section: 'open', tasks: [expect.objectContaining({ id: replyTask.id, status: 'open' })] }])
   } finally {
-    await Promise.all([owner.dispose(), secondOwner.dispose(), foreignOwner.dispose()])
+    await Promise.all([owner.dispose(), guest.dispose(), secondOwner.dispose(), foreignOwner.dispose()])
   }
 })
 
@@ -386,7 +387,7 @@ async function loadMailbox(request: APIRequestContext, mailbox: Mailbox) {
 async function submitContact(request: APIRequestContext, guestName: string) {
   const response = await request.post('/api/public/contact', {
     headers: seededSiteHeaders('experience'),
-    data: { name: guestName, email: `${guestName.replace(/\W+/g, '-').toLowerCase()}@playwright.example`, subject: 'partnerships', message: `Mailbox proof for ${guestName}` },
+    data: { name: guestName, email: `${guestName.replace(/\W+/g, '-').toLowerCase()}@playwright.example`, subject: 'partnerships', message: `Mailbox proof for ${guestName}`, location_id: seededTenant('experience').locations['ao-nang']!.id },
   })
   await expectStatus(response, 201)
 }
@@ -395,6 +396,7 @@ test('archive and Move to messages file a conversation for the one member, witho
   test.skip(!writable, 'Guest-thread writes require disposable local or preview data')
 
   const owner = await playwright.request.newContext({ baseURL })
+  const guest = await playwright.request.newContext({ baseURL })
   const secondOwner = await playwright.request.newContext({ baseURL })
   const foreignOwner = await playwright.request.newContext({ baseURL })
   try {
@@ -406,8 +408,8 @@ test('archive and Move to messages file a conversation for the one member, witho
     const nonce = Date.now()
     const filedName = `Mailbox filed ${nonce}`
     const newerName = `Mailbox newer ${nonce}`
-    await submitContact(owner, filedName)
-    await submitContact(owner, newerName)
+    await submitContact(guest, filedName)
+    await submitContact(guest, newerName)
 
     const current = await loadMailbox(owner, 'current')
     const filed = current.find(thread => thread.guestName === filedName)
@@ -456,7 +458,7 @@ test('archive and Move to messages file a conversation for the one member, witho
     expect(order.indexOf(newer!.id)).toBeLessThan(order.indexOf(threadId))
 
   } finally {
-    await Promise.all([owner.dispose(), secondOwner.dispose(), foreignOwner.dispose()])
+    await Promise.all([owner.dispose(), guest.dispose(), secondOwner.dispose(), foreignOwner.dispose()])
   }
 })
 
@@ -615,10 +617,6 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
   priorSpecialHours = { value: await readSpecialHours(page.request) }
   await expectStatus(await setLocationSlot(page.request, todaySlot!), 200)
   const todayStart = localDateTimeToInstant(todaySlot!.date, todaySlot!.time, timezone, 'reject')
-  const added = await page.request.post(`/api/editor/organizations/${demoOrganizationId()}/products/${seededTables().id}/sessions`, { data: {
-    location_id: demoLocationId(), starts_at: todayStart.toISOString(), ends_at: new Date(todayStart.getTime() + 60 * 60_000).toISOString(), capacity: 10, idempotency_key: crypto.randomUUID(),
-  } })
-  await expectStatus(added, 201)
   const todaySeating = (await tableSeatings(page.request)).find(session => session.starts_at === todayStart.toISOString())
   expect(todaySeating, 'The seating added for today is offered on the site').toBeDefined()
 
@@ -845,7 +843,7 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
   const detail = await loadThreadDetail(page.request, before.booking.conversation_id, demoOrganizationId())
   const requests = streamChanges(detail).filter(item => item.sentAt >= requestedAt)
   expect(requests).toHaveLength(1)
-  expect(requests[0]!.change).toMatchObject({ requestedBy: 'business', status: 'pending', after: { partySize: targetPartySize } })
+  expect(requests[0]!.change).toMatchObject({ requested_by: 'business', status: 'pending', after: { party_size: targetPartySize } })
   const deliveryResponse = await page.request.get('/api/dev/notifications', {
     headers: devLoginHeaders(),
     params: { organization_id: demoOrganizationId(), since: requestedAt },
@@ -870,7 +868,7 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
       { params: { org: demoSlug() } },
     )
     await expectStatus(afterResponse, 200)
-    expect(await afterResponse.json()).toMatchObject({ booking: { partySize: targetPartySize } })
+    expect(await afterResponse.json()).toMatchObject({ booking: { party_size: targetPartySize } })
     // The proposal reads accepted, and the conversation says so once.
     const afterDetail = await loadThreadDetail(page.request, before.booking.conversation_id, demoOrganizationId())
     expect(streamChanges(afterDetail).find(item => item.id === request.id)?.change.status).toBe('accepted')
@@ -915,7 +913,7 @@ test('buyer conversation approves and declines canonical changes without moving 
       return proposal!
     }
     const first = await requestChange(2)
-    expect(await read()).toMatchObject({ partySize: 1, bookingDate: original.bookingDate, bookingTime: original.bookingTime })
+    expect(await read()).toMatchObject({ party_size: 1, booking_date: original.booking_date, booking_time: original.booking_time })
     expect(await guestUnread(), 'The business’s change request is unread in the guest’s Messages').toBe(unreadBefore + 1)
     await dismissPreviewToolbar(page)
     const guestRead = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === `/api/account/messages/${threadId}/read`)
@@ -935,7 +933,7 @@ test('buyer conversation approves and declines canonical changes without moving 
     await expect(card).toContainText('Changes declined')
     await expect(card).toContainText('Your original booking is unchanged.')
     await expect(card.getByRole('button', { name: 'Accept changes', exact: true })).toHaveCount(0)
-    expect(await read()).toMatchObject({ partySize: 1, bookingDate: original.bookingDate, bookingTime: original.bookingTime })
+    expect(await read()).toMatchObject({ party_size: 1, booking_date: original.booking_date, booking_time: original.booking_time })
     const afterDecline = await loadThreadDetail(owner, threadId, demoOrganizationId())
     expect(streamChanges(afterDecline).find(item => item.id === first.id)?.change.status).toBe('declined')
     expect(streamEvents(afterDecline, 'E2E Buyer’s change was declined')).toHaveLength(1)
@@ -948,7 +946,7 @@ test('buyer conversation approves and declines canonical changes without moving 
     await pending.getByRole('button', { name: 'Accept changes', exact: true }).click()
     await expectStatus(await accepted, 200)
     await expect(card.filter({ hasText: 'Changes accepted' })).toContainText('Your booking has been updated.')
-    expect(await read()).toMatchObject({ partySize: 2, bookingDate: original.bookingDate, bookingTime: original.bookingTime })
+    expect(await read()).toMatchObject({ party_size: 2, booking_date: original.booking_date, booking_time: original.booking_time })
     const final = await loadThreadDetail(owner, threadId, demoOrganizationId())
     expect(streamChanges(final).find(item => item.id === second.id)?.change.status).toBe('accepted')
     expect(streamEvents(final, 'E2E Buyer’s change was accepted')).toHaveLength(1)

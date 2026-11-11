@@ -188,7 +188,7 @@ export async function dismissOpportunity(db: DbClient, principal: MemberAccessPr
   return { id, status: 'dismissed' }
 }
 
-export async function deferOpportunity(db: DbClient, principal: MemberAccessPrincipal, id: string, body: Record<string, unknown>): Promise<{ id: string; availableAt: string }> {
+export async function deferOpportunity(db: DbClient, principal: MemberAccessPrincipal, id: string, body: Record<string, unknown>): Promise<{ id: string; available_at: string }> {
   await authorize(principal)
   const row = await openOpportunity(db, principal, id)
   if (!isValidInstant(body.until) || Date.parse(body.until as string) <= Date.now()) fail(422, 'INVALID_OPPORTUNITY_FIELD', 'until must be a future instant with a timezone offset', 'until')
@@ -199,5 +199,5 @@ export async function deferOpportunity(db: DbClient, principal: MemberAccessPrin
   ], { operation: 'Defer opportunity' })
   if (results[0]?.meta.changes !== 1) fail(409, 'OPPORTUNITY_DECIDED', 'This opportunity was decided while you were looking at it', 'status')
   await publishBusinessInvalidation(principal.env as CloudflareEnv, principal.organizationId)
-  return { id, availableAt: until }
+  return { id, available_at: until }
 }

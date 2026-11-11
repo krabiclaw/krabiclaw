@@ -135,9 +135,9 @@ test('native email replies retain their RFC ancestry through repeated dashboard 
   const items = (thread: InboxThread) => thread.stream.filter((item): item is Exclude<InboxStreamItem, { type: 'day' }> => item.type !== 'day')
   // The ledger behind the view: each entry's channel and payload, which MCP reads out.
   const ledger = async () => {
-    const response = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'get_guest_conversation', args: { organization_id: organizationId, request_id: own[0]!.id } })
+    const response = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'get_conversation', args: { organization_id: organizationId, conversation_id: own[0]!.id } })
     expect(response.status(), await response.text()).toBe(200)
-    return mcpData<{ conversation: { entries: Array<{ id: string; kind: string; channel: string | null; body: string | null; payload: Record<string, unknown> | null }> } }>(await response.json()).conversation.entries
+    return mcpData<{ guest: { messages: Array<{ id: string; author: string; channel: string | null; body: string | null; payload: Record<string, unknown> | null }> } }>(await response.json()).guest.messages
   }
   type EmailReceipt = {
     id: string; conversation_id: string; message_id: string; purpose: string; status: string;
@@ -238,8 +238,8 @@ test('native email replies retain their RFC ancestry through repeated dashboard 
   // requests below prove the received RFC IDs still drive the actual replies.
   const received = (await ledger()).filter(entry => items(final).slice(-2).some(item => item.id === entry.id))
   expect(received).toEqual([
-    expect.objectContaining({ kind: 'message', channel: 'email', body, payload: {} }),
-    expect.objectContaining({ kind: 'message', channel: 'email', body, payload: {} }),
+    expect.objectContaining({ author: 'guest', channel: 'email', body, payload: {} }),
+    expect.objectContaining({ author: 'guest', channel: 'email', body, payload: {} }),
   ])
 
   const replyUrl = `${detailUrl}/operations/reply`

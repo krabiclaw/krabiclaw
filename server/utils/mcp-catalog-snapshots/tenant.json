@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:df30a9d18fbd4767f1dedea4ffabacbc4d370e7292d0bebd2f19bf253bd26e6c",
-  "documentationFingerprint": "sha256:2e2aa67959687b6ac9b97f00a4817bef6e2a625fadffa8d7fe433d2afafadb8f",
+  "fingerprint": "sha256:42c27875cb8687cbee5e076e0eac3723005875553bf14fc229147ed6284f55ef",
+  "documentationFingerprint": "sha256:4ac9a938ae5b82938a3a0e4fd1175ab3ced5d034a6707a2952b60027fdc2e625",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -38009,7 +38009,7 @@
         "properties": {
           "opportunity": {
             "properties": {
-              "availableAt": {
+              "available_at": {
                 "type": "string"
               },
               "id": {
@@ -38018,7 +38018,7 @@
             },
             "required": [
               "id",
-              "availableAt"
+              "available_at"
             ],
             "type": "object"
           }
@@ -47705,7 +47705,7 @@
     {
       "name": "get_conversation",
       "title": "Get conversation",
-      "description": "Read one conversation. A guest conversation returns the guest, their answers to the business’s questions, the booking and every message with proposals, attachments and delivery receipts. A team conversation returns its people and context and its messages newest first (default 20, maximum 100; page back with before and before_id from the oldest loaded message’s createdAt and id). Reading does not mark the conversation read: use mark_conversation_read.",
+      "description": "Read one conversation. A guest conversation returns the guest, their answers to the business’s questions, the booking and every message with proposals, attachments and delivery receipts. A team conversation returns its people and context and its messages newest first (default 20, maximum 100; page back with before and before_id from the oldest loaded message’s created_at and id). Reading does not mark the conversation read: use mark_conversation_read.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -47928,69 +47928,69 @@
                       "properties": {
                         "after": {
                           "properties": {
-                            "assignedMemberId": {
+                            "assigned_member_id": {
                               "type": [
                                 "string",
                                 "null"
                               ]
                             },
-                            "assignedMemberName": {
+                            "assigned_member_name": {
                               "type": [
                                 "string",
                                 "null"
                               ]
                             },
-                            "partySize": {
+                            "party_size": {
                               "type": "integer"
                             },
-                            "whenLabel": {
+                            "when_label": {
                               "type": "string"
                             }
                           },
                           "required": [
-                            "whenLabel",
-                            "partySize",
-                            "assignedMemberId",
-                            "assignedMemberName"
+                            "when_label",
+                            "party_size",
+                            "assigned_member_id",
+                            "assigned_member_name"
                           ],
                           "type": "object"
                         },
                         "before": {
                           "properties": {
-                            "assignedMemberId": {
+                            "assigned_member_id": {
                               "type": [
                                 "string",
                                 "null"
                               ]
                             },
-                            "assignedMemberName": {
+                            "assigned_member_name": {
                               "type": [
                                 "string",
                                 "null"
                               ]
                             },
-                            "partySize": {
+                            "party_size": {
                               "type": "integer"
                             },
-                            "whenLabel": {
+                            "when_label": {
                               "type": "string"
                             }
                           },
                           "required": [
-                            "whenLabel",
-                            "partySize",
-                            "assignedMemberId",
-                            "assignedMemberName"
+                            "when_label",
+                            "party_size",
+                            "assigned_member_id",
+                            "assigned_member_name"
                           ],
                           "type": "object"
                         },
-                        "locationTitle": {
+                        "location_title": {
                           "type": "string"
                         },
                         "message": {
                           "type": "string"
                         },
-                        "originalLocationTitle": {
+                        "original_location_title": {
                           "type": "string"
                         },
                         "status": {
@@ -48009,8 +48009,8 @@
                         "status",
                         "before",
                         "after",
-                        "locationTitle",
-                        "originalLocationTitle"
+                        "location_title",
+                        "original_location_title"
                       ],
                       "type": [
                         "object",
@@ -48219,7 +48219,7 @@
           },
           "team": {
             "properties": {
-              "hasMore": {
+              "has_more": {
                 "type": "boolean"
               },
               "messages": {
@@ -48910,7 +48910,7 @@
             "required": [
               "thread",
               "messages",
-              "hasMore"
+              "has_more"
             ],
             "type": [
               "object",
@@ -73004,7 +73004,7 @@
     {
       "name": "move_stay",
       "title": "Move stay",
-      "description": "Move a guest to another of the host’s homes, for example after a double booking. The nights, turnover and later messages follow the guest, a channel reservation such as an Airbnb one stays on the listing it was booked on, and the new home gets a job to be made ready. Updates availability on both homes’ connected Airbnb listings through Channex. A failed channel update raises CHANNEL_PUSH_FAILED with committed:true: the move is saved; read get_product_booking before retrying. The guest is sent the new address and check-in instructions only when the response’s guest_notified is true. Moving back to the booked listing undoes the move. The new home must be free for every night and have check-in instructions.",
+      "description": "Move a guest to another of the host’s homes, for example after a double booking. The nights, turnover and later messages follow the guest, a channel reservation such as an Airbnb one stays on the listing it was booked on, and the new home gets a job to be made ready. Updates availability on both homes’ connected Airbnb listings through Channex. A failed channel update raises CHANNEL_PUSH_FAILED with committed:true: the move is saved; read get_product_booking before retrying. The response gives the outbox ID for the guest’s new address and check-in instructions. Read list_scheduled_guest_messages for delivery state. Moving back to the booked listing undoes the move. The new home must be free for every night and have check-in instructions.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -73085,9 +73085,9 @@
               "null"
             ]
           },
-          "guest_notified": {
-            "description": "True when the move message was queued in the stay’s guest conversation; every stay has one.",
-            "type": "boolean"
+          "scheduled_message_id": {
+            "description": "The queued message containing the guest’s new address and check-in instructions.",
+            "type": "string"
           },
           "stay": {
             "additionalProperties": false,
@@ -73144,7 +73144,7 @@
         "required": [
           "stay",
           "channel_push",
-          "guest_notified"
+          "scheduled_message_id"
         ],
         "type": "object"
       },
@@ -109444,7 +109444,7 @@
     {
       "name": "update_conversation_group",
       "title": "Update conversation group",
-      "description": "Rename, add people to, remove someone from, or leave a manually created team group. The creator and participating workspace owners/admins can manage it; any participant can leave. Read canManage/canLeave from get_conversation. Direct chats, guest conversations and booking/location conversations are protected. No action deletes the conversation or its messages. New members can read its history; removed members lose access. Use a stable idempotency_key and retry exactly the same action if committed:true is returned.",
+      "description": "Rename, add people to, remove someone from, or leave a manually created team group. The creator and participating workspace owners/admins can manage it; any participant can leave. Read can_manage/can_leave from get_conversation. Direct chats, guest conversations and booking/location conversations are protected. No action deletes the conversation or its messages. New members can read its history; removed members lose access. Use a stable idempotency_key and retry exactly the same action if committed:true is returned.",
       "inputSchema": {
         "additionalProperties": false,
         "oneOf": [
@@ -128446,7 +128446,7 @@
       "toolContracts": {
         "cancel_product_booking": "sha256:90614958b92689b4c273ffc336e9854909c30a54997c7c5fc8da78e0aeb12aeb",
         "confirm_product_booking": "sha256:1c9695ad981f010718a3f36845717ed36a1546018f196b5f0292ac9a07f9fc8d",
-        "get_conversation": "sha256:7b38dd36eba30635bab52f32dabb6480988a456bf0d7ce0a28f37716e4145c74",
+        "get_conversation": "sha256:0bb638b4ce881d5db51291ff262e13633e2b2a6bcbeca21246027deb716fcd84",
         "get_product_booking": "sha256:1a83fe61e11737be78f8fc8bc093d3625144bcd21417ceab9b1576c2c831b305",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_conversation_recipients": "sha256:439170e450547b9261d1f0499d27ef7ca95dd024cacf847719fee4f4c40e249e",
@@ -128459,7 +128459,7 @@
         "request_product_booking_change": "sha256:4b038f01616e29c92a70a69157f3c3fb863aa12fdb42c89f0111b0ca2103680b",
         "send_message": "sha256:8636238ba370bd243b7a3f2d4c1f6a5993223e916e3695bfd8f2a3696f80e6e2",
         "start_conversation": "sha256:a39d46341c069673d967628f78638bb7ddbcf94a8689796860962531e8d2192d",
-        "update_conversation_group": "sha256:c59f8ba58ee8c2feeb2418da95b0691ff6b0140861b2f20cbf79b774ac3492bf"
+        "update_conversation_group": "sha256:ba2e91f788924f66ef33ef7341f8267f9aab72aa9eeae6139927a7be9c040278"
       }
     },
     {
@@ -128576,7 +128576,7 @@
       },
       "toolContracts": {
         "create_post": "sha256:e800e3c19ecf887d09aa70d80dcbe66d985196d2138620b369cb9e1f9cace67a",
-        "get_conversation": "sha256:7b38dd36eba30635bab52f32dabb6480988a456bf0d7ce0a28f37716e4145c74",
+        "get_conversation": "sha256:0bb638b4ce881d5db51291ff262e13633e2b2a6bcbeca21246027deb716fcd84",
         "get_organization_analytics": "sha256:06e0bfe504a9b9183d0429a06162e4af2d760695c842396608752a8f107cb4d9",
         "get_product": "sha256:b2afea3d084c67b0aacc46c8fbdbcf652dfaa2554de42de7bef06b16312f05e1",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",

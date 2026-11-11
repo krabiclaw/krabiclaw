@@ -156,7 +156,7 @@ test.describe('lodging identity boundary', () => {
       expect(conversations.conversations).toEqual([expect.objectContaining({ conversation_id: threadId, kind: 'team', unread: false })])
       expect(conversations.page_info).toEqual({ has_more: false, next_cursor: null })
       const opened = (await teamCall<{ team: { thread: TeamThread } }>('get_conversation', { conversation_id: threadId })).team.thread
-      expect(opened).toMatchObject({ id: threadId, unread: false, stay: null, locationId: null })
+      expect(opened).toMatchObject({ id: threadId, unread: false, stay: null, location_id: null })
       expect(opened.participants.map(member => member.id).sort()).toEqual([fixture.id, invitee.id].sort())
       const message = `The guest room is ready ${crypto.randomUUID()}`
       const idempotencyKey = crypto.randomUUID()
@@ -465,7 +465,7 @@ test.describe('lodging identity boundary', () => {
         }
         for (const [bearer, can_manage] of [[ownerBearer, true], [adminBearer, true], [memberBearer, false]] as const) {
           const group = (await threads(bearer)).find(thread => thread.id === threadId)!
-          expect(group).toMatchObject({ name: initialName, is_group: true, created_by_user_id: fixture.id, can_manage, can_leave: true, bookingId: null, locationId: null })
+          expect(group).toMatchObject({ name: initialName, is_group: true, created_by_user_id: fixture.id, can_manage, can_leave: true, booking_id: null, location_id: null })
           expect(group.participants.map(person => person.id).sort()).toEqual([fixture.id, invitee.id, teammate.id].sort())
         }
         const messageIds: string[] = []
@@ -650,12 +650,12 @@ test.describe('lodging identity boundary', () => {
       const guestName = `Experience team guest ${crypto.randomUUID()}`
       const booked = await request.post(`/api/public/products/${product.slug}/book`, { headers: { 'x-preview-tenant': slug }, data: { product_session_id: sessions[0]!.id, product_variant_id: product.variants[0]!.id, party_size: 1, guest_name: guestName, guest_email: `${slug}@playwright.example`, idempotency_key: crypto.randomUUID() } })
       expect(booked.status(), await booked.text()).toBe(201)
-      const { request_id: requestId } = await booked.json() as { request_id: string }
+      const { conversation_id: requestId } = await booked.json() as { conversation_id: string }
       const bookingPath = `/api/dashboard/bookings/booking/${requestId}?org=${slug}`
       const inboxPath = `/api/dashboard/organizations/${organization.id}/guest-threads/${requestId}`
       const memberBooking = await api.get(bookingPath, { headers: memberBearer })
       expect(memberBooking.status, await memberBooking.text()).toBe(200)
-      expect(await memberBooking.json()).toMatchObject({ booking: { id: requestId, assignedMemberId: memberId, experienceId: product.id, guestName } })
+      expect(await memberBooking.json()).toMatchObject({ booking: { id: requestId, assigned_member_id: memberId, product_id: product.id, guest_name: guestName } })
       await loginAs(memberContext.request, baseURL!, invitee.id)
       const memberPage = await memberContext.newPage()
       let socket: WebSocket | undefined
@@ -680,7 +680,7 @@ test.describe('lodging identity boundary', () => {
       expect((await api.get(inboxPath, { headers: memberBearer })).status).toBe(404)
       const retained = await api.get(bookingPath, { headers: ownerBearer })
       expect(retained.status, await retained.text()).toBe(200)
-      expect(await retained.json()).toMatchObject({ booking: { id: requestId, assignedMemberId: ownerMemberId, experienceId: product.id, guestName } })
+      expect(await retained.json()).toMatchObject({ booking: { id: requestId, assigned_member_id: ownerMemberId, product_id: product.id, guest_name: guestName } })
     } finally {
       try {
         const deleted = await api.post('/api/auth/organization/delete', { headers: ownerBearer, data: { organizationId: organization.id } })

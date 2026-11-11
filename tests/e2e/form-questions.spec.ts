@@ -67,7 +67,7 @@ test('an owner adds an inquiry question in Website, a visitor answers it, and th
     await guest.getByRole('button', { name: 'Send message', exact: true }).click()
     const submitted = await submission
     expect(submitted.status(), await submitted.text()).toBe(201)
-    const requestId = (await submitted.json() as { request_id: string }).request_id
+    const requestId = (await submitted.json() as { conversation_id: string }).conversation_id
     await expect(guest).toHaveURL(/\/contact\/confirmed/)
 
     // The answers are the submission's, kept with the conversation; MCP reads them out (the inbox view does not carry them).

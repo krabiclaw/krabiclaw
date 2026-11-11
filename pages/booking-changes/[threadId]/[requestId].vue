@@ -70,14 +70,14 @@ const fields = computed(() => {
   if (!proposal.value) return []
   const copy = getVerticalCopy(proposal.value.vertical, locale.value)
   const rows = [
-    { label: copy.locationLabel, before: proposal.value.originalLocationTitle, after: proposal.value.locationTitle },
-    { label: copy.dateLabel, before: proposal.value.before.whenLabel, after: proposal.value.after.whenLabel },
-    { label: copy.guestsLabel, before: String(proposal.value.before.partySize), after: String(proposal.value.after.partySize) },
+    { label: copy.locationLabel, before: proposal.value.original_location_title, after: proposal.value.location_title },
+    { label: copy.dateLabel, before: proposal.value.before.when_label, after: proposal.value.after.when_label },
+    { label: copy.guestsLabel, before: String(proposal.value.before.party_size), after: String(proposal.value.after.party_size) },
   ]
   if (proposal.value.type === 'booking') rows.push({
     label: copy.assigneeLabel,
-    before: proposal.value.before.assignedMemberName ?? t('booking.change_unassigned'),
-    after: proposal.value.after.assignedMemberName ?? t('booking.change_unassigned'),
+    before: proposal.value.before.assigned_member_name ?? t('booking.change_unassigned'),
+    after: proposal.value.after.assigned_member_name ?? t('booking.change_unassigned'),
   })
   return rows
 })

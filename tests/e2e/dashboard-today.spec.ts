@@ -386,7 +386,7 @@ test('opportunities follow explicit strategy, the owner’s decisions and actual
     const until = new Date(Date.now() + 86_400_000).toISOString()
     const deferred = await page.request.post(`${tasksApi}/opportunities/${withGoal!.id}/defer`, { data: { until } })
     expect(deferred.status(), await deferred.text()).toBe(200)
-    expect(await deferred.json()).toEqual({ opportunity: { id: withGoal!.id, availableAt: until } })
+    expect(await deferred.json()).toEqual({ opportunity: { id: withGoal!.id, available_at: until } })
     expect(await draftOpportunity()).toBeUndefined()
     const pastDeferral = await page.request.post(`${tasksApi}/opportunities/${withGoal!.id}/defer`, { data: { until: new Date(Date.now() - 60_000).toISOString() } })
     expect(pastDeferral.status(), await pastDeferral.text()).toBe(422)

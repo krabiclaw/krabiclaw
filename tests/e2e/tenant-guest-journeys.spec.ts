@@ -165,7 +165,7 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     })
     expect(persisted.status(), await persisted.text()).toBe(200)
     expect((await persisted.json()).booking).toMatchObject({
-      guestName: 'Pottery Journey Test', guestEmail: email, guestPhone: '+66812345678', requests: 'Please keep the two seats together.',
+      guest_name: 'Pottery Journey Test', guest_email: email, guest_phone: '+66812345678', notes: 'Please keep the two seats together.',
     })
     await expect(page).toHaveURL(/\/bookings\/confirmed/)
     await expect(page.locator('main')).toContainText(/booking|received|confirmed/i)
@@ -298,8 +298,8 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
       params: { org: wheel.slug },
     })
     expect(persisted.status(), await persisted.text()).toBe(200)
-    const persistedBooking = (await persisted.json()).booking as { guestName: string; guestPhone: string | null; bookingDate: string }
-    expect(persistedBooking).toMatchObject({ guestName: 'Cancel Once', guestPhone: null })
+    const persistedBooking = (await persisted.json()).booking as { guest_name: string; guest_phone: string | null; booking_date: string }
+    expect(persistedBooking).toMatchObject({ guest_name: 'Cancel Once', guest_phone: null })
     const threadURL = `${baseURL}/api/dashboard/organizations/${wheel.organizationId}/guest-threads/${body.conversation_id}`
     const pendingThread = await request.get(threadURL)
     expect(pendingThread.status(), await pendingThread.text()).toBe(200)
@@ -316,7 +316,7 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     expect(todayBefore.status(), await todayBefore.text()).toBe(200)
     const todayBeforePayload = await todayBefore.json() as { tasks: TaskSection[] }
     expect(todayBeforePayload.tasks.flatMap(section => section.tasks).filter(task => task.conversation_id === body.conversation_id)).toEqual([])
-    const day = persistedBooking.bookingDate
+    const day = persistedBooking.booking_date
     // Calendar owns confirmed commitments; quests do not repeat its agenda.
     const scheduleParams = { org: wheel.slug, from: day, to: day }
     const scheduleBefore = await request.get(`${baseURL}/api/dashboard/agenda`, { params: scheduleParams })

@@ -164,9 +164,15 @@ export async function getGuestRequest(db: DbClient, id: string, organizationId?:
   if (!row) return null
   const request = parseGuestRequest(row)
   if (request.kind === 'booking' && request.payload.participant) {
-    const mapped = await queryFirst(db, `SELECT ct.conversation_id FROM channel_threads ct
-      JOIN product_stay_configs c ON c.organization_id = ct.organization_id AND c.product_id = ct.product_id
-      WHERE ct.conversation_id = ? AND ct.organization_id = ? AND c.location_id = ?`, [request.id, request.organization_id, request.location_id])
+    const mapped = await queryFirst(db, `SELECT 1 FROM conversations r
+      LEFT JOIN bookings b ON b.id = r.booking_id AND b.organization_id = r.organization_id
+      LEFT JOIN channel_threads ct ON ct.conversation_id = r.id AND ct.organization_id = r.organization_id
+      LEFT JOIN product_stay_configs c ON c.organization_id = ct.organization_id AND c.product_id = ct.product_id
+      WHERE r.id = ? AND r.organization_id = ? AND (
+        (ct.conversation_id IS NULL AND b.owner = 'channel')
+        OR (c.product_id IS NOT NULL AND (CASE WHEN b.id IS NULL THEN c.location_id = r.location_id
+          ELSE ct.product_id = coalesce(b.booked_product_id, b.product_id) END))
+      )`, [request.id, request.organization_id])
     if (!mapped) throw new HTTPError({ statusCode: 500, message: 'Channel conversation has no matching home mapping', data: { code: 'CHANNEL_THREAD_MAPPING_INVALID', field: 'conversation_id' } })
   }
   return request

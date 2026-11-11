@@ -659,7 +659,13 @@ async function loadPublicPageSource(
     // Product offered at both would otherwise drag onto the page.
     if (localizedLocale) {
       collections = projectExactLocalizedCollection('collection', collections, publicLocalizations)
-      products = projectExactLocalizedCollection('product', products, publicLocalizations).map(product => ({
+      // Reservations are labelled by their dining location. Its exact locale
+      // is already part of the public shell, alongside the table's booking facts.
+      const localizedProducts = page === 'reservations' ? products.flatMap(product => {
+        const location = shell.locations.find(place => product.locations.some(scope => scope.location_id === place.id && scope.published && scope.active))
+        return location ? [{ ...product, name: location.title }] : []
+      }) : projectExactLocalizedCollection('product', products, publicLocalizations)
+      products = localizedProducts.map(product => ({
         ...product,
         image: product.image ? projectLocalizedMediaAlt([product.image], publicLocalizations)[0] ?? null : null,
         gallery: projectLocalizedMediaAlt(product.gallery, publicLocalizations),

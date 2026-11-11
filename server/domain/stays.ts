@@ -1171,7 +1171,7 @@ export async function moveStayPhotos(db: DbClient, env: CloudflareEnv & GuestInb
         WHERE mp.organization_id = ? AND mp.owner_type = 'product' AND mp.owner_id = ? AND mp.slot IN ('image', 'gallery') AND mp.status = 'active'
           AND mp.asset_id = json_extract(selected.value, '$.photo_id'))
         OR (SELECT r.id FROM product_stay_photo_rooms r JOIN media_placements m ON m.organization_id = r.organization_id
-          AND m.owner_type = 'stay_photo_room' AND m.owner_id = r.id WHERE r.organization_id = ? AND r.product_id = ?
+          AND m.owner_type = 'stay_photo_room' AND m.owner_id = r.id AND m.status = 'active' WHERE r.organization_id = ? AND r.product_id = ?
           AND m.asset_id = json_extract(selected.value, '$.photo_id')) IS NOT json_extract(selected.value, '$.expected_room_id'))
       )`,
     params: [access.organizationId, productId, roomId, creating ? 1 : 0, access.organizationId, productId, roomId, selected, access.organizationId, productId, access.organizationId, productId],
@@ -1968,7 +1968,7 @@ function stayMovedMessage(stay: Stay, from: StayHome, to: StayHome, instructions
  * ready before arrival, and the guest is told in their conversation. Moving
  * back to the booked listing undoes the move.
  */
-export async function moveStay(db: DbClient, env: StayMutationEnv, access: StayAccess, stayId: string, input: { expected_version: unknown; product_id: unknown }): Promise<StayDetail & { channel_push: SuccessfulChannelPush | null; guest_notified: boolean }> {
+export async function moveStay(db: DbClient, env: StayMutationEnv, access: StayAccess, stayId: string, input: { expected_version: unknown; product_id: unknown }): Promise<StayDetail & { channel_push: SuccessfulChannelPush | null; scheduled_message_id: string }> {
   requireManager(access)
   const current = await getStay(db, access, stayId)
   if (current.status === 'cancelled') fail(409, 'STAY_NOT_EDITABLE', 'This stay is cancelled')
@@ -1989,6 +1989,7 @@ export async function moveStay(db: DbClient, env: StayMutationEnv, access: StayA
   const booked = backOnListing ? null : listing
   const next = current.version + 1
   const now = new Date().toISOString()
+  const scheduledMessageId = crypto.randomUUID()
   const body = stayMovedMessage(current, from, to, config.check_in_instructions)
   if (body.length > 5000) fail(422, 'STAY_MOVE_MESSAGE_TOO_LONG', `The check-in instructions for ${to.internal_name} are too long to send in one message`, 'product_id')
   // The guest keeps their dates; the times are the new home's, or the arrival they said.
@@ -2021,7 +2022,7 @@ export async function moveStay(db: DbClient, env: StayMutationEnv, access: StayA
       {
         query: `INSERT INTO scheduled_guest_messages (id, organization_id, product_id, booking_id, template_id, template_title, template_version, body, due_at, timezone, status, created_at, updated_at)
                 SELECT ?, ?, ?, ?, NULL, ?, 1, ?, ?, ?, 'pending', ?, ? WHERE ${moved}`,
-        params: [crypto.randomUUID(), access.organizationId, to.product_id, stayId, STAY_MOVED_MESSAGE_TITLE, body, now, to.timezone, now, now, ...movedParams],
+        params: [scheduledMessageId, access.organizationId, to.product_id, stayId, STAY_MOVED_MESSAGE_TITLE, body, now, to.timezone, now, now, ...movedParams],
       },
     ], { operation: 'Move stay' })
   } catch (error) {
@@ -2029,6 +2030,7 @@ export async function moveStay(db: DbClient, env: StayMutationEnv, access: StayA
     throw error
   }
   if (results[1]?.meta.changes !== 1) fail(409, 'STAY_VERSION_CONFLICT', 'This stay changed since you opened it; reload it and try again', 'expected_version')
+  if (results.at(-1)?.meta.changes !== 1) throw new Error('The stay moved without its queued guest message')
   await planSourceMessages(db, access.organizationId, stayId)
   const range = [[current.check_in_date, current.check_out_date]] as const
   const released = await pushNights(db, env, access, from.product_id, range)
@@ -2041,7 +2043,7 @@ export async function moveStay(db: DbClient, env: StayMutationEnv, access: StayA
     await publishStayInvalidation(env, { ...released, type: 'stay.changed' }, { version: next })
     await publishStayInvalidation(env, { ...released, type: 'nights.changed' }, { version: next })
     if (!backOnListing) await notifyStayReady(env as CloudflareEnv, db, { organizationId: access.organizationId, stayId, productId: to.product_id, actorUserId: access.actorId })
-    return { ...stay, guest_notified: true }
+    return { ...stay, scheduled_message_id: scheduledMessageId }
   })
 }
 
@@ -2715,7 +2717,7 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
   ...reconcileNightsQueries(organizationId, id, { updated_at: now, version, product_id: landing, ...window, check_in_date: booking.check_in_date, check_out_date: booking.check_out_date }),
   // The conversation the channel opened before the guest booked is the booking's; otherwise the booking opens its own.
   {
-    query: `UPDATE conversations SET booking_id = b.id FROM bookings b JOIN channel_threads t
+    query: `UPDATE conversations SET booking_id = b.id, user_id = b.user_id, location_id = b.location_id FROM bookings b JOIN channel_threads t
         ON t.provider = b.provider AND t.external_booking_id = b.external_booking_id
         AND t.organization_id = b.organization_id AND t.product_id = COALESCE(b.booked_product_id, b.product_id)
       WHERE b.id = ? AND b.organization_id = ? AND b.product_id = ? AND b.version = ?

@@ -171,7 +171,7 @@ test('authored goals and evidence-bound opportunity decisions follow persisted w
       return opportunities.filter(opportunity => opportunity.path === blogPath)
     }
     const offered = await draftOpportunities()
-    expect(offered).toEqual([expect.objectContaining({ statusLine: 'Website', title: `Publish “${edited.title}”`, detail: expect.stringContaining('Complete legal review before publishing.') })])
+    expect(offered).toEqual([expect.objectContaining({ status_line: 'Website', title: `Publish “${edited.title}”`, detail: expect.stringContaining('Complete legal review before publishing.') })])
     const dismissal = { note: 'Do not publish this guide. An attorney must review the consultation instructions first.' }
     expect(await responseBody(await request.post(`${api}/opportunities/${offered[0]!.id}/dismiss`, { data: dismissal }))).toEqual({ opportunity: { id: offered[0]!.id, status: 'dismissed' } })
     // A decision is made once: neither a second dismissal nor an accept changes it.
@@ -196,7 +196,7 @@ test('authored goals and evidence-bound opportunity decisions follow persisted w
     expect(reoffered[0]!.id).not.toBe(offered[0]!.id)
     // A deferral hides it until its time, on the real clock, and then it returns unchanged.
     const until = new Date(Date.now() + 5_000).toISOString()
-    expect(await responseBody(await request.post(`${api}/opportunities/${reoffered[0]!.id}/defer`, { data: { until } }))).toEqual({ opportunity: { id: reoffered[0]!.id, availableAt: until } })
+    expect(await responseBody(await request.post(`${api}/opportunities/${reoffered[0]!.id}/defer`, { data: { until } }))).toEqual({ opportunity: { id: reoffered[0]!.id, available_at: until } })
     expect(await draftOpportunities()).toEqual([])
     await expect.poll(draftOpportunities, { timeout: 15_000 }).toEqual(reoffered)
     // Accepting makes it the owner's task, due today, recorded as business activity.
@@ -311,7 +311,7 @@ test('business progress read-only contract holds on an established business', as
   const first = await responseBody<Progress>(await request.get(`${api}/progress`))
   const second = await responseBody<Progress>(await request.get(`${api}/progress`))
   expect(first.coverage).toMatchObject({
-    sources: ['activity_entries', 'post_publications', 'reviews', 'analytics_events'],
+    sources: ['activity_entries', 'messages', 'post_publications', 'reviews', 'analytics_events'],
     attribution: 'recorded_actor_only', article: 'persisted_change_only', webReply: 'stored_message_only',
     externalReply: 'provider_acceptance_requires_receipt', verification: 'only_the_named_evidence_basis',
   })

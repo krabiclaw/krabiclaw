@@ -369,13 +369,14 @@ export async function recordDeliveryOutcome(
     providerMessageId?: string | null
     error?: string | null
   },
+  more: BatchQuery[] = [],
 ): Promise<GuestThreadDeliveryRow> {
   await executeBatch(db, [{
     query: `UPDATE guest_thread_deliveries
       SET status = ?, provider_message_id = COALESCE(?, provider_message_id), error = ?, updated_at = ?
       WHERE id = ? AND status NOT IN ('accepted', 'sent', 'delivered', 'read')`,
     params: [input.status, input.providerMessageId ?? null, input.error ?? null, new Date().toISOString(), input.deliveryId],
-  }, ...await deliveryTaskQueries(db, input.deliveryId)], { operation: 'Record delivery outcome' })
+  }, ...await deliveryTaskQueries(db, input.deliveryId), ...more], { operation: 'Record delivery outcome' })
   const updated = await getDeliveryById(db, input.deliveryId)
   if (!updated) throw new Error('Guest thread delivery not found')
   return updated

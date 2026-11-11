@@ -2,7 +2,7 @@ import { MEMBER_NAME_SQL } from '~/shared/member-scheduling'
 import { memberBusyIntervals } from '~/server/domain/member-scheduling'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { getGuestRequest } from '~/server/domain/requests'
-import { CURRENT_GUEST_SQL, type MessageRow } from '~/server/domain/conversations'
+import { CURRENT_GUEST_SQL, GUEST_NOTE_EVENT, type MessageRow } from '~/server/domain/conversations'
 import { resolveLocationContact } from '~/server/utils/contact-resolution'
 import type { H3Event } from 'nitro'
 import { HTTPError } from 'nitro'
@@ -181,7 +181,8 @@ async function loadBookingRow(
   return queryFirst<BookingRow>(db, `SELECT r.id, record.id AS booking_id, r.organization_id, s.name AS organization_name, s.vertical,
     record.assigned_member_id, record.policy_json, record.product_kind, record.advance_notice_minutes, record.location_id, l.slug AS location_slug, l.title AS location_title, l.address AS location_address,
     json_extract(r.payload_json, '$.guest.name') AS guest_name, json_extract(r.payload_json, '$.guest.email') AS guest_email, json_extract(r.payload_json, '$.guest.phone') AS guest_phone,
-    (SELECT u.image FROM user u WHERE u.id = r.user_id) AS guest_image_url, record.party_size, record.starts_at, record.ends_at, record.timezone, record.status, json_extract(r.payload_json, '$.notes') AS notes,
+    (SELECT u.image FROM user u WHERE u.id = r.user_id) AS guest_image_url, record.party_size, record.starts_at, record.ends_at, record.timezone, record.status,
+    (SELECT m.body FROM messages m WHERE m.conversation_id = r.id AND m.event_name = '${GUEST_NOTE_EVENT}' ORDER BY m.sequence LIMIT 1) AS notes,
     record.product_id, record.name, record.product_session_id,
     r.id AS conversation_id, record.answers AS answers_json, json_extract(r.payload_json, '$.cancellation.used_at') AS cancellation_used_at, record.created_at, record.updated_at, record.no_show_at, (SELECT rv.id FROM reviews rv WHERE rv.organization_id = record.organization_id AND rv.booking_id = record.id ORDER BY rv.created_at LIMIT 1) AS review_id, record.private_notes
     FROM conversations r
@@ -218,8 +219,8 @@ async function pendingBookingChange(db: DbClient, threadId: string | null): Prom
   if (!thread) return null
   const proposal = (await bookingChangeViews(db, thread, [row])).get(row.id)
   if (!proposal || proposal.status !== 'pending') return null
-  return { message_id: row.id, created_at: row.created_at, before_label: proposal.before.whenLabel, after_label: proposal.after.whenLabel, party_size: proposal.after.partySize,
-    before_assigned_member_name: proposal.before.assignedMemberName, after_assigned_member_name: proposal.after.assignedMemberName }
+  return { message_id: row.id, created_at: row.created_at, before_label: proposal.before.when_label, after_label: proposal.after.when_label, party_size: proposal.after.party_size,
+    before_assigned_member_name: proposal.before.assigned_member_name, after_assigned_member_name: proposal.after.assigned_member_name }
 }
 
 export async function loadDashboardBookingDetails(

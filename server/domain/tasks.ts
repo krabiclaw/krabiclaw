@@ -93,7 +93,7 @@ const stayWindowOf = (row: StoredStay): StayWindow => ({ id: row.id, product_id:
 
 /** A stored end on this local day: the day alone, or an instant within it. */
 function storedOn(column: string, date: string, timezone: string): BatchQuery {
-  return { query: `(${column} = ? OR (${column} >= ? AND ${column} < ?))`,
+  return { query: `(${column} = ? OR (length(${column}) > 10 AND ${column} >= ? AND ${column} < ?))`,
     params: [date, localDateTimeToInstant(date, '00:00', timezone, 'earlier').toISOString(), localDateTimeToInstant(addLocalDays(date, 1), '00:00', timezone, 'earlier').toISOString()] }
 }
 

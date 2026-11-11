@@ -127,7 +127,7 @@ test('MCP Product booking uses public capacity, durable replay, guest identity a
       const detail = (await detailResponse.json() as { thread: InboxThread }).thread
       // Two calls under one key are one proposal in the conversation, waiting for the guest.
       const changeEntries = detail.stream.filter(item => item.type === 'change')
-      expect(changeEntries).toMatchObject([{ change: { requestedBy: 'business', status: 'pending', after: { partySize: 2 } } }])
+      expect(changeEntries).toMatchObject([{ change: { requested_by: 'business', status: 'pending', after: { party_size: 2 } } }])
       const changeId = changeEntries[0]!.id
       const token = createHmac('sha256', 'local-playwright-email-reply-secret').update(`booking-change:v1:${created.conversation_id}:${changeId}`).digest('hex')
       const accepted = await request.post(`${baseURL}/api/public/booking-changes/${created.conversation_id}/${changeId}`, { headers: { authorization: `Bearer ${token}` }, data: { decision: 'accept' } })
@@ -228,8 +228,8 @@ test('MCP Product booking uses public capacity, durable replay, guest identity a
       expect(publicResponse.status(), await publicResponse.text()).toBe(201)
       const publicCreated = await publicResponse.json() as Created
       ids.push(publicCreated.booking_id)
-      expect(publicCreated).toMatchObject({ success: true, status: instant.status, conversation_id: expect.any(String) })
-      expect(publicCreated).not.toHaveProperty('booking_id')
+      expect(publicCreated).toMatchObject({ success: true, status: instant.status, conversation_id: expect.any(String), booking_id: expect.any(String) })
+      expect(publicCreated).not.toHaveProperty('operational_booking_id')
       expect(await read(publicCreated.booking_id)).not.toHaveProperty('guest_user_id')
       const experienceBeforeRequest = await read(publicCreated.booking_id)
       await page.goto(`${baseURL}/dashboard/account/activity/booking/${publicCreated.conversation_id}`)

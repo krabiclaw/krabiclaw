@@ -89,6 +89,11 @@ export function guestVisibleSql(message: string): string {
     OR (${message}.author_kind = 'krabiclaw' AND (${message}.event_name IN ('${SCHEDULED_MESSAGE_EVENT}', '${OPENING_EVENT}', ${GUEST_VISIBLE_EVENTS.map(event => `'${event}'`).join(', ')}))))`
 }
 
+/** The author of a KrabiClaw message records its actor. KrabiClaw is still its sender. */
+function otherSenderSql(message: string): string {
+  return `(${message}.author_kind = 'krabiclaw' OR ${message}.author_user_id IS NOT ?)`
+}
+
 /**
  * Unread, the one statement: the conversation `conversation` has a message
  * from someone other than the viewer that is newer than the viewer's read
@@ -100,7 +105,7 @@ export function unreadSql(conversation: string, viewer: string): { sql: string; 
   return {
     sql: `EXISTS (SELECT 1 FROM messages unread_message
       WHERE unread_message.conversation_id = ${conversation}.id
-        AND unread_message.author_user_id IS NOT ?
+        AND ${otherSenderSql('unread_message')}
         AND (${conversation}.user_id IS NOT ? OR ${guestVisibleSql('unread_message')})
         AND unread_message.sequence > COALESCE((SELECT read_message.sequence FROM conversation_participants reader
           JOIN messages read_message ON read_message.id = reader.last_read_message_id
@@ -114,7 +119,7 @@ async function newestFromSomeoneElse(db: DbClient, conversationId: string, userI
   return await queryFirst<{ id: string; previous_id: string | null }>(db, `
     SELECT m.id, (SELECT before.id FROM messages before WHERE before.conversation_id = m.conversation_id AND before.sequence < m.sequence ORDER BY before.sequence DESC LIMIT 1) AS previous_id
       FROM messages m JOIN conversations c ON c.id = m.conversation_id
-     WHERE m.conversation_id = ? AND m.author_user_id IS NOT ? AND (c.user_id IS NOT ? OR ${guestVisibleSql('m')})
+     WHERE m.conversation_id = ? AND ${otherSenderSql('m')} AND (c.user_id IS NOT ? OR ${guestVisibleSql('m')})
      ORDER BY m.sequence DESC LIMIT 1`, [conversationId, userId, userId])
 }
 

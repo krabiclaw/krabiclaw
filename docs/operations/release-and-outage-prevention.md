@@ -952,14 +952,17 @@ the transfer's ownership, foreign-key and payload replay checks.
 Cloudflare reported WNAM for the new staging database,
 `krabiclaw-staging-v27` (`8acf5e8f-e55f-46a3-87e3-f7967f25c4c2`). The
 snapshot source is the staging environment's own `krabiclaw-staging-v26`.
-Private export, payload and verification manifests live under
+The verified initial load held 116,751 rows across 98 tables. The remote
+readback found 12 tenants, 76 bookings, 111 conversations, 170 messages,
+one native baseline ledger entry and zero foreign-key violations. Private
+export, payload and verification manifests live under
 `~/krabiclaw-db-replacements/v27/`.
 
 After the staging deploy and the old writers finish, run the verified final
 delta against the initial target:
 
 ```sh
-node --experimental-strip-types scripts/pull-production-snapshot.ts --staging --source krabiclaw-staging-v26 --out ~/krabiclaw-db-replacements/v27/staging-v27-final.sqlite --delta-from ~/krabiclaw-db-replacements/v27/staging-v27-initial.sqlite
+node --experimental-strip-types scripts/pull-production-snapshot.ts --staging --source krabiclaw-staging-v26 --out ~/krabiclaw-db-replacements/v27/staging-v27-final.sqlite --delta-from ~/krabiclaw-db-replacements/v27/staging-v27-loaded.sqlite
 ```
 
 Review every changed or deleted row reported by the delta. Verify the active

@@ -27,7 +27,7 @@ test('concurrent guests cannot claim the same final places at a seating', async 
       headers: seededSiteHeaders('restaurant'),
       data: {
         idempotency_key: crypto.randomUUID(), guest_name: `Last places guest ${guest}`, guest_email: `last-seat-${attempt}-${guest}@playwright.example`,
-        guest_phone: '+66812345678', session_id: seating.id, party_size: party,
+        guest_phone: '+66812345678', product_session_id: seating.id, party_size: party,
       },
     })))
     expect(results.map(result => result.status()).sort()).toEqual([201, 409])

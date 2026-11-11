@@ -124,7 +124,7 @@ export async function createInquiry(event: H3Event, input: { organizationId: str
     // The accepted inquiry answers as it was saved, whatever the questions say now.
     const saved = await getGuestRequest(db, id, organizationId, 'contact')
     if (!saved || saved.kind !== 'contact') throw new Error('Replayed inquiry is missing its thread')
-    return result({ success: true, replayed: true, request_id: id, answers: saved.payload.answers, message: 'Your message has been sent. We will be in touch soon.' }, 200)
+    return result({ success: true, replayed: true, conversation_id: id, answers: saved.payload.answers, message: 'Your message has been sent. We will be in touch soon.' }, 200)
   }
   const replayed = await replay()
   if (replayed) return replayed
@@ -179,5 +179,5 @@ export async function createInquiry(event: H3Event, input: { organizationId: str
   // Only the owner notification can fail the request. Measurement is reported beside the
   // committed result: a guest told a confirmed submission failed would submit again.
   raiseSettledFailures('contact submission follow-up', `contactId ${id}`, followUps.slice(0, 1), ['notifyContactSubmitted'])
-  return result({ success: true, replayed: false, request_id: id, answers, measurement: measurementOutcome(followUps[1]!), message: 'Your message has been sent. We will be in touch soon.' }, 201)
+  return result({ success: true, replayed: false, conversation_id: id, answers, measurement: measurementOutcome(followUps[1]!), message: 'Your message has been sent. We will be in touch soon.' }, 201)
 }

@@ -139,9 +139,9 @@ async function loadSource(db: DbClient, thread: GuestThreadRow): Promise<Source>
 
 /** The booking is still exactly what the change was made from, guarded by its own updated_at. */
 function sourceGuard(thread: GuestThreadRow, before: Source): BatchQuery {
-  return { query: `EXISTS (SELECT 1 FROM bookings operational JOIN product_sessions occurrence ON occurrence.id=operational.product_session_id AND occurrence.organization_id=operational.organization_id
+  return { query: `EXISTS (SELECT 1 FROM bookings operational
       WHERE operational.id=? AND operational.organization_id=? AND operational.id=(SELECT booking_id FROM conversations WHERE id=?) AND operational.status=? AND operational.party_size=? AND operational.updated_at=?
-        AND operational.product_session_id=? AND occurrence.starts_at=? AND occurrence.ends_at=? AND occurrence.timezone=? AND occurrence.location_id IS ?)`,
+        AND operational.product_session_id=? AND operational.starts_at=? AND operational.ends_at=? AND operational.timezone=? AND operational.location_id IS ?)`,
     params: [before.recordId, thread.organization_id, thread.id, before.status, before.partySize, before.updatedAt, before.sessionId, before.startsAt, before.endsAt, before.timezone, before.locationId] }
 }
 
@@ -213,7 +213,7 @@ async function validateDestination(db: DbClient, env: CloudflareEnv, thread: Gue
     // its existing allocation; a full destination leaves the record unchanged.
     claim: async (bookingId, now, writeGuard) => {
       const guarded: BatchQuery = { query: `product_session_id = ? AND party_size = ? AND status = ? AND updated_at = ?
-        AND EXISTS (SELECT 1 FROM product_sessions original WHERE original.id=bookings.product_session_id AND original.starts_at=? AND original.ends_at=? AND original.timezone=? AND original.location_id IS ?)
+        AND starts_at=? AND ends_at=? AND timezone=? AND location_id IS ?
         AND EXISTS (SELECT 1 FROM product_sessions target WHERE target.id=? AND target.organization_id=? AND target.starts_at=? AND target.ends_at=? AND target.timezone=? AND target.location_id IS ?)
         AND EXISTS (SELECT 1 FROM product_booking_configs target_config WHERE target_config.organization_id=bookings.organization_id AND target_config.product_id=? AND target_config.assigned_member_id IS ? AND target_config.scheduling_mode=?)
         AND (${service ? eligibility.query : '1'}) AND (${writeGuard?.query ?? '1'})`,
@@ -278,9 +278,9 @@ async function changePresentation(db: DbClient, thread: GuestThreadRow, proposal
   const copy = getVerticalCopy(organization.vertical, guest.locale)
   return {
     ...guest, fromName: organization.name, vertical: organization.vertical, labels, copy,
-    before: { assignedMemberId: proposal.before.assignedMemberId, assignedMemberName: beforeAssignedMemberName, whenLabel: formatTimestamp(proposal.before.startsAt, guest.locale, proposal.before.timezone, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }), partySize: proposal.before.partySize },
-    after: { assignedMemberId: afterAssignedMemberId, assignedMemberName: afterAssignedMemberName, whenLabel: formatTimestamp(startsAt, guest.locale, timezone, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }), partySize: proposal.after.party_size },
-    locationTitle: guest.locationName?.trim() || labels['booking.online']!, originalLocationTitle: original.locationName?.trim() || labels['booking.online']!,
+    before: { assigned_member_id: proposal.before.assignedMemberId, assigned_member_name: beforeAssignedMemberName, when_label: formatTimestamp(proposal.before.startsAt, guest.locale, proposal.before.timezone, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }), party_size: proposal.before.partySize },
+    after: { assigned_member_id: afterAssignedMemberId, assigned_member_name: afterAssignedMemberName, when_label: formatTimestamp(startsAt, guest.locale, timezone, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }), party_size: proposal.after.party_size },
+    location_title: guest.locationName?.trim() || labels['booking.online']!, original_location_title: original.locationName?.trim() || labels['booking.online']!,
     afterStartsAt: startsAt, afterTimezone: timezone,
   }
 }
@@ -312,10 +312,10 @@ async function deliverEmail(db: DbClient, env: ChangeEnv, thread: GuestThreadRow
     }
   }
   if (status !== 'declined') {
-    compare(guest.copy.dateLabel, guest.before.whenLabel, guest.after.whenLabel)
-    compare(guest.copy.assigneeLabel, guest.before.assignedMemberName, guest.after.assignedMemberName)
-    compare(guest.copy.locationLabel, guest.originalLocationTitle, guest.locationTitle)
-    compare(guest.copy.guestsLabel, String(guest.before.partySize), String(guest.after.partySize))
+    compare(guest.copy.dateLabel, guest.before.when_label, guest.after.when_label)
+    compare(guest.copy.assigneeLabel, guest.before.assigned_member_name, guest.after.assigned_member_name)
+    compare(guest.copy.locationLabel, guest.original_location_title, guest.location_title)
+    compare(guest.copy.guestsLabel, String(guest.before.party_size), String(guest.after.party_size))
   }
   const sent = await deliverGuestThreadEmail(db, {
     delivery,
@@ -353,9 +353,9 @@ async function deliverEmail(db: DbClient, env: ChangeEnv, thread: GuestThreadRow
   const [before, after] = [localParts(proposal.before.startsAt, proposal.before.timezone), localParts(guest.afterStartsAt, guest.afterTimezone)]
   const offering = proposal.before.productId ? await queryFirst<{ name: string }>(db, 'SELECT name FROM products WHERE id = ? AND organization_id = ?', [proposal.before.productId, thread.organization_id]) : null
   const current = { date: before.date, time: before.time, nights: null, total: null, partySize: presentation.formatCount(proposal.before.partySize),
-    location: proposal.originalLocationTitle || 'Online', assignee: guest.before.assignedMemberName }
+    location: proposal.originalLocationTitle || 'Online', assignee: guest.before.assigned_member_name }
   const requested = { date: after.date, time: after.time, nights: null, total: null, partySize: presentation.formatCount(proposal.after.party_size),
-    location: proposal.locationTitle || 'Online', assignee: guest.after.assignedMemberName }
+    location: proposal.locationTitle || 'Online', assignee: guest.after.assigned_member_name }
   await notifyBookingChangeOwner(env, db, {
     organizationId: thread.organization_id, organizationName: guest.fromName,
     threadId: thread.id, submissionType: 'booking', submissionId: thread.id, messageId: entryId,
@@ -508,23 +508,23 @@ export async function moveBooking(db: DbClient, env: CloudflareEnv, thread: Gues
   return { changeStatus: 'moved' as const }
 }
 
-type ChangeSide = { whenLabel: string; partySize: number; assignedMemberId: string | null; assignedMemberName: string | null; totalLabel?: string }
+type ChangeSide = { when_label: string; party_size: number; assigned_member_id: string | null; assigned_member_name: string | null; total_label?: string }
 export type BookingChangeView = {
   /** A stay's change (its channel's request) or any other booking's. */
-  type: 'booking' | 'stay'; noun: string; guestName: string; locale: string; vertical: string | null
+  type: 'booking' | 'stay'; noun: string; guest_name: string; locale: string; vertical: string | null
   /** The business proposes and the guest answers; a guest's request on their channel is answered by the business. */
-  requestedBy: 'business' | 'guest'; channel?: 'airbnb'
+  requested_by: 'business' | 'guest'; channel?: 'airbnb'
   before: ChangeSide
   after: ChangeSide
-  locationTitle: string; originalLocationTitle: string
+  location_title: string; original_location_title: string
   status: BookingChangeStatus; message?: string
 }
 
 async function proposalView(db: DbClient, thread: GuestThreadRow, proposal: z.infer<typeof proposalSchema>, state: Pick<BookingChangeView, 'status' | 'message'>): Promise<BookingChangeView> {
   const guest = await changePresentation(db, thread, proposal)
   const summary = await sourceSummary(db, thread)
-  return { type: 'booking', noun: await bookingNoun(db, thread), guestName: summary.guestName, locale: guest.locale, vertical: guest.vertical, requestedBy: 'business',
-    before: guest.before, after: guest.after, locationTitle: guest.locationTitle, originalLocationTitle: guest.originalLocationTitle, ...state }
+  return { type: 'booking', noun: await bookingNoun(db, thread), guest_name: summary.guestName, locale: guest.locale, vertical: guest.vertical, requested_by: 'business',
+    before: guest.before, after: guest.after, location_title: guest.location_title, original_location_title: guest.original_location_title, ...state }
 }
 
 /** Conversation readers reuse the response operation's immutable details and state. */

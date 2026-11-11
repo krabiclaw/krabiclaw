@@ -275,7 +275,7 @@ test('Stripe onboarding recommendations follow real account readiness and clear 
       assert.equal((await recommendations()).some(item => item.operation === 'product.payment'), false, 'actual booking configuration clears payment work on the next read without a day boundary')
 
       const catalogCards = async () => (await listOpportunities(db, principal)).opportunities
-        .filter(item => item.productId === paid.id && item.statusLine === 'Catalog').map(item => item.path)
+        .filter(item => item.product_id === paid.id && item.status_line === 'Catalog').map(item => item.path)
       // Every offering has its host; the card asks for the host's public profile.
       assert.deepEqual(await catalogCards(), ['/dashboard/cliff/team/m-owner/profile'])
       await writeMemberScheduling({ env, organizationId: 'org', userId: 'owner' }, 'm-owner', { expected_updated_at: null, public_name: 'Wheel class host', public_approved: true })

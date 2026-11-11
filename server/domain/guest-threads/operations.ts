@@ -743,8 +743,8 @@ async function executeNoShow(db: DbClient, context: ThreadContext, input: Execut
     ...messageQueries({ id: entryId, conversationId: context.thread.id, authorKind: 'krabiclaw', authorUserId: input.actorUserId, body: 'Marked as a no-show',
       eventName, payload: { action: 'no_show', booking_id: record.id }, dedupeKey, occurredAt: now,
       guard: { sql: `c.organization_id = ? AND NOT EXISTS (SELECT 1 FROM reviews rv WHERE rv.organization_id = c.organization_id AND rv.booking_id = c.booking_id)
-        AND EXISTS (SELECT 1 FROM bookings src WHERE src.id = ? AND src.id = c.booking_id AND src.organization_id = c.organization_id AND src.status = 'confirmed' AND src.no_show_at IS NULL)`,
-      params: [context.thread.organization_id, record.id] } }).queries,
+        AND EXISTS (SELECT 1 FROM bookings src WHERE src.id = ? AND src.id = c.booking_id AND src.organization_id = c.organization_id AND src.status = 'confirmed' AND src.no_show_at IS NULL AND src.starts_at <= ?)`,
+      params: [context.thread.organization_id, record.id, now] } }).queries,
     {
       query: `UPDATE bookings SET no_show_at = ?, updated_at = ?, version = version + 1
         WHERE id = ? AND no_show_at IS NULL AND EXISTS (SELECT 1 FROM messages WHERE id = ?)`,

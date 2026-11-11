@@ -244,7 +244,7 @@ import DashboardConfirmDialog from '~/components/dashboard/DashboardConfirmDialo
 import type { GuestStay, StayDetail, StayHome, StayTurnover } from '~/server/domain/stays'
 import { isChannelManagedStay, STAY_CHANNEL_LABELS, STAY_PAYMENT_METHOD_LABELS, type StayPaymentMethod } from '~/shared/bookings'
 import { bookedPolicyTerms } from '~/shared/stay-cancellation'
-import { GUEST_NOT_MESSAGED_WARNING, isMovedStayResponse } from '~/shared/stay-move'
+import { STAY_MOVE_MESSAGE_QUEUED, isMovedStayResponse } from '~/shared/stay-move'
 import { isCurrencyCode } from '~/shared/currencies'
 import { formatMinorAmount, majorAmountToMinor } from '~/shared/prices'
 import { formatCalendarDate, formatTime, localDateAt } from '~/utils/timezone'
@@ -438,10 +438,10 @@ const canMarkNoShow = computed(() => !props.personalScope && manage.value && det
 async function undoMove() {
   const value = detail.value
   if (!value?.booked_product_id) return
-  if (!await confirmDialog.open({ title: 'Undo this move', description: `The guest goes back to ${value.booked_home_name} and is messaged its address and entry details.`, confirmLabel: 'Undo move', cancelLabel: 'Keep the move' })) return
+  if (!await confirmDialog.open({ title: 'Undo this move', description: `The guest goes back to ${value.booked_home_name} and a message with its address and entry details is queued.`, confirmLabel: 'Undo move', cancelLabel: 'Keep the move' })) return
   await run('undo_move', async () => {
-    const moved = await dashboardApi(`/api/dashboard/stays/${encodeURIComponent(value.id)}/move`, { method: 'POST', validate: isMovedStayResponse, body: { expected_version: value.version, product_id: value.booked_product_id } })
-    if (!moved.stay.guest_notified) toast.add(GUEST_NOT_MESSAGED_WARNING)
+    await dashboardApi(`/api/dashboard/stays/${encodeURIComponent(value.id)}/move`, { method: 'POST', validate: isMovedStayResponse, body: { expected_version: value.version, product_id: value.booked_product_id } })
+    toast.add(STAY_MOVE_MESSAGE_QUEUED)
   }, 'The move could not be undone.')
 }
 

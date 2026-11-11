@@ -1708,8 +1708,8 @@ test.describe('dashboard pane hierarchy', () => {
   test('booking Change is one sheet beside its record on desktop and over it below lg', async ({ page }) => {
     const agenda = await page.request.get('/api/dashboard/agenda', { params: { org: 'ember-slice-demo', from: '2000-01-01', to: '2100-01-01' } })
     expect(agenda.status()).toBe(200)
-    const { items } = await agenda.json() as { items: Array<{ kind: string; productId: string | null; to: string }> }
-    const reservation = items.find(item => item.kind === 'booking' && item.productId === seededTables().id && item.to.includes('/bookings/'))
+    const { items } = await agenda.json() as { items: Array<{ kind: string; product_id: string | null; to: string }> }
+    const reservation = items.find(item => item.kind === 'booking' && item.product_id === seededTables().id && item.to.includes('/bookings/'))
     expect(reservation, 'the demo fixture carries a table booking').toBeTruthy()
     const change = `${reservation!.to}/change`
 
@@ -1729,10 +1729,10 @@ test.describe('dashboard pane hierarchy', () => {
   test('a booking opened from the calendar closes to its day, and from Today to Today', async ({ page }) => {
     const agenda = await page.request.get('/api/dashboard/agenda', { params: { org: 'ember-slice-demo', from: '2000-01-01', to: '2100-01-01' } })
     expect(agenda.status()).toBe(200)
-    const { items } = await agenda.json() as { items: Array<{ kind: string; productId: string | null; dayKey: string; to: string }> }
-    const reservation = items.find(item => item.kind === 'booking' && item.productId === seededTables().id && item.to.includes('/bookings/'))
+    const { items } = await agenda.json() as { items: Array<{ kind: string; product_id: string | null; day_key: string; to: string }> }
+    const reservation = items.find(item => item.kind === 'booking' && item.product_id === seededTables().id && item.to.includes('/bookings/'))
     expect(reservation, 'the demo fixture carries a table booking').toBeTruthy()
-    const day = `${ORG}/calendar/${reservation!.dayKey}`
+    const day = `${ORG}/calendar/${reservation!.day_key}`
     const fromCalendar = `${day}/booking/${reservation!.to.split('/').at(-1)}`
 
     // The same record, mounted under the day: Close is the day and Calendar is the lit tab.

@@ -261,13 +261,13 @@ test('a moved guest takes the nights, turnover and messages to the new home whil
     assert.deepEqual([option!.product_id, option!.taken, option!.has_instructions], [annex, [], true])
 
     const moved = await moveStay(db, env, access, stayId, { expected_version: landed.version, product_id: annex })
-    assert.deepEqual([moved.product_id, moved.booked_product_id, moved.guest_notified], [annex, productId, true])
+    assert.deepEqual([moved.product_id, moved.booked_product_id], [annex, productId])
     const claims = async () => (await db.prepare('SELECT product_id, date FROM stay_nights WHERE booking_id = ? ORDER BY date').bind(stayId).all()).results
     assert.deepEqual(await claims(), ['2027-03-10', '2027-03-11', '2027-03-12'].map(date => ({ product_id: annex, date })))
     assert.deepEqual(await db.prepare("SELECT product_id, starts_at FROM tasks WHERE dedupe_key = ?").bind(`turnover:${stayId}`).first(), { product_id: annex, starts_at: '2027-03-13T18:00:00.000Z' })
     assert.deepEqual(await db.prepare('SELECT kind, status, product_id, title, due_at FROM tasks WHERE dedupe_key = ?').bind(`stay-ready:${stayId}:${annex}`).first(),
       { kind: 'stay_ready', status: 'open', product_id: annex, title: 'Get Annex ready', due_at: '2027-03-10T22:00:00.000Z' })
-    const told = await db.prepare("SELECT product_id, status, body FROM scheduled_guest_messages WHERE booking_id = ? AND template_title = 'Your stay has moved'").bind(stayId).first<{ product_id: string; status: string; body: string }>()
+    const told = await db.prepare("SELECT product_id, status, body FROM scheduled_guest_messages WHERE booking_id = ? AND id = ? AND template_title = 'Your stay has moved'").bind(stayId, moved.scheduled_message_id).first<{ product_id: string; status: string; body: string }>()
     assert.deepEqual([told!.product_id, told!.status], [annex, 'pending'])
     assert.match(told!.body, /Your stay has moved to Annex|your stay has moved to Annex/)
     assert.match(told!.body, /Door code 1234/)

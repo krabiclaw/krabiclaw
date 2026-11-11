@@ -196,10 +196,10 @@ test('a guest change request lands once in the stay conversation, survives a rel
 
     // Read back as a fresh conversation load: pending, with the stay as it is and as the guest asked.
     const pending = (await getGuestThreadDetail(db, stay.conversation_id, ORG))!.entries.find(entry => entry.id === request!.id)!.bookingChange!
-    assert.deepEqual({ status: pending.status, requestedBy: pending.requestedBy, channel: pending.channel, before: pending.before, after: pending.after, locationTitle: pending.locationTitle }, {
-      status: 'pending', requestedBy: 'guest', channel: 'airbnb', locationTitle: 'Cabin',
-      before: { whenLabel: 'Jan 10, 2027 – Jan 13, 2027', partySize: 2, totalLabel: '$450.00', assignedMemberId: null, assignedMemberName: null },
-      after: { whenLabel: 'Jan 10, 2027 – Jan 14, 2027', partySize: 3, totalLabel: '$600.00', assignedMemberId: null, assignedMemberName: null },
+    assert.deepEqual({ status: pending.status, requested_by: pending.requested_by, channel: pending.channel, before: pending.before, after: pending.after, location_title: pending.location_title }, {
+      status: 'pending', requested_by: 'guest', channel: 'airbnb', location_title: 'Cabin',
+      before: { when_label: 'Jan 10, 2027 – Jan 13, 2027', party_size: 2, total_label: '$450.00', assigned_member_id: null, assigned_member_name: null },
+      after: { when_label: 'Jan 10, 2027 – Jan 14, 2027', party_size: 3, total_label: '$600.00', assigned_member_id: null, assigned_member_name: null },
     })
     assert.deepEqual(await stayRow(db, stay.id), { check_in_date: '2027-01-10', check_out_date: '2027-01-13', adults: 2, total_minor: 45_000, version: 1 })
     // The guest's change is the business's to answer: a change task beside the reply task.
