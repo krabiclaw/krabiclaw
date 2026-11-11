@@ -281,8 +281,8 @@ test('an owner answers a guest by quoting their WhatsApp alert, with nothing ask
     await db.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES ('member-mate', 'paid', 'teammate', 'member', 0)").run()
     const teamAccess = (userId: string, role: string, memberId: string) => teamAccessFor(memberAccessPrincipal({ userId, role, organizationId: 'paid' } as never, { env }), memberId, 'send')
     const [mate, ownerSeat] = await Promise.all([teamAccess('teammate', 'member', 'member-mate'), teamAccess('owner', 'owner', 'member-paid')])
-    const teamThread = await createTeamThread(env, db, mate, { memberIds: ['owner'] })
-    const teamAlerted = await sendTeamMessage(env, db, mate, teamThread.id, { body: 'Towels are out', photos: [], idempotencyKey: 'team-alert', senderName: 'Teammate' })
+    const teamThread = await createTeamThread(env, db, mate, { member_user_ids: ['owner'] })
+    const teamAlerted = await sendTeamMessage(env, db, mate, teamThread.id, { body: 'Towels are out', photos: [], idempotency_key: 'team-alert', senderName: 'Teammate' })
     const teamAlert = await db.prepare(`SELECT d.provider_message_id FROM guest_thread_deliveries d
       WHERE d.message_id = ? AND d.channel = 'whatsapp' AND d.provider = 'meta'`).bind(teamAlerted.message.id).first<string>('provider_message_id')
     assert.ok(teamAlert)

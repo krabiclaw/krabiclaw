@@ -104,7 +104,7 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
     const alerted = (messageId: string) => db.prepare("SELECT COUNT(*) AS n FROM guest_thread_deliveries WHERE message_id = ? AND purpose = 'owner_alert' AND channel = 'email'").bind(messageId).first<number>('n')
     assert.equal(await alerted(messages[0]!.id), 1)
     // The app's "Message host" lands in the same conversation.
-    assert.deepEqual(await createTeamThread(env, db, cleaner, { memberIds: ['owner', 'admin'], bookingId: dee.id }), { id: thread.id, created: false })
+    assert.deepEqual(await createTeamThread(env, db, cleaner, { member_user_ids: ['owner', 'admin'], booking_id: dee.id }), { id: thread.id, created: false })
     // A second wake posts nothing twice.
     await runOrganizationJobs(env, db, ORG, now)
     assert.equal((await automatic(thread.id)).length, 1)
@@ -144,7 +144,7 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
     // The cook's own message reads the conversation through for them and is unread for the hosts; the cleaner, no longer seated with it, never sees it.
     assert.equal((await getTeamThread(env, db, owner, cookThreads[0]!.id)).unread, true)
     assert.equal((await getTeamThread(env, db, cook, cookThreads[0]!.id)).unread, false)
-    await assert.rejects(getTeamThread(env, db, cleaner, cookThreads[0]!.id), { status: 404, data: { code: 'TEAM_THREAD_NOT_FOUND', field: 'threadId' } })
+    await assert.rejects(getTeamThread(env, db, cleaner, cookThreads[0]!.id), { status: 404, data: { code: 'TEAM_THREAD_NOT_FOUND', field: 'conversation_id' } })
     // The cook, given the job at 13:10, was told today's turnover and the warning then; a closed job is told about no more.
     assert.deepEqual((await automatic(cookThreads[0]!.id)).map(message => message.key), [jobKey(turnover), `reminder:${turnover.id}:morning:${day(3)}`, `warning:${turnover.id}:${turnover.due_at}`])
     await runOrganizationJobs(env, db, ORG, at(day(3), '14:00'))
@@ -176,7 +176,7 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
     // A person's own message in a job conversation counts as unread for the others, from where they read.
     await markConversationRead(db, { organizationId: ORG, conversationId: thread.id, userId: 'cleaner' })
     assert.equal((await getTeamThread(env, db, cleaner, thread.id)).unread, false)
-    await sendTeamMessage(env, db, owner, thread.id, { body: 'Thanks Cleo', photos: [], idempotencyKey: 'thanks', senderName: 'Olive Owner' })
+    await sendTeamMessage(env, db, owner, thread.id, { body: 'Thanks Cleo', photos: [], idempotency_key: 'thanks', senderName: 'Olive Owner' })
     assert.equal((await getTeamThread(env, db, cleaner, thread.id)).unread, true)
     assert.equal((await getTeamThread(env, db, owner, thread.id)).unread, false)
   } finally {
@@ -239,8 +239,8 @@ test('a consultation gives its attorney jobs that follow the booking and an aler
 
     // Chatting about it reaches the same conversation; an unknown booking does not.
     const partner = await teamAccessFor(memberAccessPrincipal({ userId: 'partner', role: 'owner', organizationId: ORG } as never, { env }), 'partner-member', 'send')
-    assert.deepEqual(await createTeamThread(env, db, partner, { memberIds: ['host'], bookingId: booking.bookingId }), { id: threads[0]!.id, created: false })
-    await assert.rejects(createTeamThread(env, db, partner, { memberIds: ['host'], bookingId: 'not-a-booking' }), /booking/iu)
+    assert.deepEqual(await createTeamThread(env, db, partner, { member_user_ids: ['host'], booking_id: booking.bookingId }), { id: threads[0]!.id, created: false })
+    await assert.rejects(createTeamThread(env, db, partner, { member_user_ids: ['host'], booking_id: 'not-a-booking' }), /booking/iu)
 
     // Any other assigned task with a start time gets its alert on the morning of.
     await db.prepare("INSERT INTO tasks (id, organization_id, kind, assigned_member_id, title, starts_at, timezone, status, dedupe_key, version, created_at, updated_at) VALUES ('plain', ?, 'custom', 'host-member', 'File the motion', '2099-10-01T15:00:00.000Z', 'America/New_York', 'open', 'plain', 1, ?, ?)").bind(ORG, NOW, NOW).run()
