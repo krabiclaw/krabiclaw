@@ -128,6 +128,7 @@ const OWNER_TABLES = {
   review_request: 'review_requests',
   content_block: 'content_blocks',
   message: 'messages',
+  stay_photo_room: 'product_stay_photo_rooms', stay_room_accessibility: 'product_stay_photo_rooms', stay_home_accessibility: 'products',
 } as const satisfies Record<MediaPlacementOwnerType, string>
 
 export function mediaPlacementOwnerQuery(input: {
@@ -287,19 +288,49 @@ export function buildDeleteOwnerPlacementsQuery(input: {
   }
 }
 
+export function deleteProductMediaPlacementsQuery(organizationId: string, productIds: string[]): BatchQuery {
+  const ids = d1JsonStringSet(productIds)
+  return {
+    query: `DELETE FROM media_placements WHERE organization_id = ? AND (
+      (owner_type IN ('product', 'stay_home_accessibility') AND owner_id IN (SELECT value FROM json_each(?)))
+      OR (owner_type IN ('stay_photo_room', 'stay_room_accessibility') AND owner_id IN (
+        SELECT id FROM product_stay_photo_rooms WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?))
+      ))
+    )`,
+    params: [organizationId, ids, organizationId, ids],
+  }
+}
+
 /** Run after a Product's complete photo mutation, never between slot replacements. */
 export function pruneStayPhotoRoomMembershipsQuery(organizationId: string, productId: string): BatchQuery {
   return {
-    query: `DELETE FROM product_stay_photo_room_memberships
-      WHERE organization_id = ? AND product_id = ? AND NOT EXISTS (
-        SELECT 1 FROM media_placements mp JOIN media_assets ma
-          ON ma.organization_id = mp.organization_id AND ma.id = mp.asset_id AND ma.status = 'active'
-        WHERE mp.organization_id = product_stay_photo_room_memberships.organization_id
-          AND mp.owner_type = 'product' AND mp.owner_id = product_stay_photo_room_memberships.product_id
-          AND mp.asset_id = product_stay_photo_room_memberships.asset_id
-          AND mp.slot IN ('image', 'gallery') AND mp.status = 'active'
-      )`,
-    params: [organizationId, productId],
+    query: `DELETE FROM media_placements AS room_photo
+      WHERE room_photo.organization_id = ? AND room_photo.owner_type = 'stay_photo_room'
+        AND room_photo.owner_id IN (SELECT id FROM product_stay_photo_rooms WHERE organization_id = ? AND product_id = ?)
+        AND NOT EXISTS (
+          SELECT 1 FROM media_placements mp JOIN media_assets ma
+            ON ma.organization_id = mp.organization_id AND ma.id = mp.asset_id AND ma.status = 'active'
+          WHERE mp.organization_id = room_photo.organization_id AND mp.owner_type = 'product' AND mp.owner_id = ?
+            AND mp.asset_id = room_photo.asset_id AND mp.slot IN ('image', 'gallery') AND mp.status = 'active'
+        )`,
+    params: [organizationId, organizationId, productId, productId],
+  }
+}
+
+export function addStayPhotoRoomPlacementsQuery(organizationId: string, productId: string, roomId: string, assetIds: string[]): BatchQuery {
+  const now = new Date().toISOString()
+  return {
+    query: `INSERT INTO media_placements (id, organization_id, owner_type, owner_id, slot, asset_id, sort_order, created_at, updated_at)
+      SELECT json_extract(photo.value, '$.id'), ?, 'stay_photo_room', ?, 'photo', json_extract(photo.value, '$.asset'),
+        CASE WHEN EXISTS (SELECT 1 FROM product_stay_photo_rooms WHERE organization_id = ? AND product_id = ? AND id = ?)
+          AND NOT EXISTS (SELECT 1 FROM product_stay_photo_rooms r JOIN media_placements placed
+            ON placed.organization_id = r.organization_id AND placed.owner_type = 'stay_photo_room' AND placed.owner_id = r.id
+            WHERE r.organization_id = ? AND r.product_id = ? AND placed.asset_id = json_extract(photo.value, '$.asset'))
+          THEN COALESCE((SELECT max(sort_order) + 1 FROM media_placements WHERE organization_id = ? AND owner_type = 'stay_photo_room' AND owner_id = ? AND slot = 'photo'), 0)
+            + CAST(photo.key AS INTEGER)
+          ELSE -1 END, ?, ? FROM json_each(?) photo`,
+    params: [organizationId, roomId, organizationId, productId, roomId, organizationId, productId,
+      organizationId, roomId, now, now, JSON.stringify(assetIds.map(asset => ({ asset, id: crypto.randomUUID() })))],
   }
 }
 
@@ -307,9 +338,11 @@ export function pruneStayPhotoRoomMembershipsQuery(organizationId: string, produ
 export function stayAccessibilityEvidenceGuardQueries(organizationId: string, scope: { productId: string } | { assetId: string }): BatchQuery[] {
   return ['product_stay_room_accessibility', 'product_stay_accessibility'].map(table => {
     const room = table === 'product_stay_room_accessibility'
-    const ownerMatch = room ? 'AND proof.room_id = a.room_id' : ''
-    const evidence = `SELECT 1 FROM ${table}_photos proof
-      WHERE proof.organization_id = a.organization_id AND proof.product_id = a.product_id ${ownerMatch} AND proof.feature_code = a.feature_code`
+    const ownerType = room ? 'stay_room_accessibility' : 'stay_home_accessibility'
+    const ownerId = room ? 'a.room_id' : 'a.product_id'
+    const evidence = `SELECT 1 FROM media_placements proof
+      WHERE proof.organization_id = a.organization_id AND proof.owner_type = '${ownerType}'
+        AND proof.owner_id = ${ownerId} AND proof.slot = a.feature_code AND proof.status = 'active'`
     const scoped = 'productId' in scope ? 'a.product_id = ?' : `EXISTS (${evidence} AND proof.asset_id = ?)`
     const owner = room
       ? "SELECT 1 FROM product_stay_photo_rooms room WHERE room.organization_id = a.organization_id AND room.product_id = a.product_id AND room.id = a.room_id AND room.type = 'bedroom'"
@@ -322,7 +355,7 @@ export function stayAccessibilityEvidenceGuardQueries(organizationId: string, sc
         SELECT 1 FROM media_assets ma JOIN media_placements mp ON mp.organization_id = ma.organization_id AND mp.asset_id = ma.id
         WHERE ma.organization_id = proof.organization_id AND ma.id = proof.asset_id AND ma.status = 'active' AND ma.kind = 'image'
           AND ma.generation_key IS NULL AND length(trim(ma.public_url)) > 0
-          AND mp.owner_type = 'product' AND mp.owner_id = proof.product_id AND mp.slot IN ('image', 'gallery') AND mp.status = 'active'))
+          AND mp.owner_type = 'product' AND mp.owner_id = a.product_id AND mp.slot IN ('image', 'gallery') AND mp.status = 'active'))
     )`,
     params: [organizationId, 'productId' in scope ? scope.productId : scope.assetId],
     }
@@ -779,13 +812,10 @@ export async function deleteMediaAsset(db: DbClient, env: MediaProviderEnv, id: 
         provider: pendingAsset.provider,
       },
       onlyIfPreviousChangedOneRow: true,
-    }), {
+    }), ...stayAccessibilityEvidenceGuardQueries(organizationId, { assetId: pendingAsset.id }), {
       query: 'DELETE FROM media_placements WHERE organization_id = ? AND asset_id = ?',
       params: [organizationId, pendingAsset.id],
-    }, {
-      query: 'DELETE FROM product_stay_photo_room_memberships WHERE organization_id = ? AND asset_id = ?',
-      params: [organizationId, pendingAsset.id],
-    }, ...stayAccessibilityEvidenceGuardQueries(organizationId, { assetId: pendingAsset.id }), publicResourceCacheInvalidationQuery(organizationId, 'media-delete')]).catch((error: unknown) => { throw stayAccessibilityEvidenceWriteError(error) })
+    }, publicResourceCacheInvalidationQuery(organizationId, 'media-delete')]).catch((error: unknown) => { throw stayAccessibilityEvidenceWriteError(error) })
     if (Number(result?.meta?.changes ?? 0) !== 1) {
       throw new Error(`Media asset ${pendingAsset.id} changed during deletion`)
     }

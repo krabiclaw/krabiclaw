@@ -19,6 +19,9 @@ export const MEDIA_PLACEMENT_SLOTS = {
   review_request: ['gallery'],
   // The photos a message in a conversation carries, in the order they were sent.
   message: ['attachments'],
+  stay_photo_room: ['photo'],
+  stay_home_accessibility: [],
+  stay_room_accessibility: [],
 } as const
 
 export type MediaPlacementOwnerType = keyof typeof MEDIA_PLACEMENT_SLOTS
@@ -52,7 +55,7 @@ export const INDEXED_MEDIA_PLACEMENT_SLOTS = [
 const ORDERED_PLACEMENTS = new Set([
   'business_location:gallery', 'product:gallery', 'content_document:gallery',
   'content_block:gallery', 'review:gallery', 'review_request:gallery',
-  'organization:compliance_document', 'message:attachments',
+  'organization:compliance_document', 'message:attachments', 'stay_photo_room:photo',
 ])
 
 /**
@@ -85,11 +88,16 @@ export function isMediaCategory(value: unknown): value is MediaCategory {
 
 export const MAX_ORDERED_MEDIA_ASSETS = 50
 
+function isStayAccessibilityOwner(ownerType: string): boolean {
+  return ownerType === 'stay_home_accessibility' || ownerType === 'stay_room_accessibility'
+}
+
 export function isSupportedMediaPlacement(placement: { owner_type: string; slot: string }) {
   const slots = isMediaPlacementOwnerType(placement.owner_type)
     ? MEDIA_PLACEMENT_SLOTS[placement.owner_type]
     : undefined
   return slots?.some(slot => slot === placement.slot) === true
+    || (isStayAccessibilityOwner(placement.owner_type) && /^[a-z_]+$/.test(placement.slot))
     || INDEXED_MEDIA_PLACEMENT_SLOTS.some(pattern => pattern.ownerType === placement.owner_type && pattern.runtime.test(placement.slot))
 }
 
@@ -100,7 +108,7 @@ export function isEditableMediaPlacement(placement: { owner_type: string; slot: 
 }
 
 export function isSingleMediaPlacement(placement: { owner_type: string; slot: string }) {
-  return isSupportedMediaPlacement(placement) && !ORDERED_PLACEMENTS.has(`${placement.owner_type}:${placement.slot}`)
+  return isSupportedMediaPlacement(placement) && !isStayAccessibilityOwner(placement.owner_type) && !ORDERED_PLACEMENTS.has(`${placement.owner_type}:${placement.slot}`)
 }
 
 /** Each asset once, with its first placement determining its order and presentation. */

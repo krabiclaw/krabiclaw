@@ -1,3 +1,4 @@
+import { submittedReviewRequestSql } from '~/server/utils/review-requests'
 import { HTTPError } from 'nitro'
 import { d1JsonStringSet, queryAll, queryFirst, type DbClient } from '~/server/db'
 import { BOOKING_RECORDS_SQL, bookedRecordWindow, getGuestRequest, getThreadOperationalRecord } from '~/server/domain/requests'
@@ -99,7 +100,7 @@ export async function listBusinessOutcomes(
              CASE WHEN review.source = 'direct' THEN review.user_id ELSE review.entered_by_user_id END,
              review_thread.id, review_thread.kind, NULL,
              json_object('entityType', 'review', 'entityId', review.id, 'state', review.status, 'source', review.source,
-               'reviewRequestId', review.review_request_id, 'bookingId', review.booking_id, 'publicationAuthorized', review.publication_authorized, 'revision', review.updated_at), review.created_at
+               'reviewRequestId', ${submittedReviewRequestSql('review')}, 'bookingId', review.booking_id, 'publicationAuthorized', review.publication_authorized, 'revision', review.updated_at), review.created_at
       FROM reviews review LEFT JOIN bookings visit ON visit.id = review.booking_id AND visit.organization_id = review.organization_id
         LEFT JOIN conversations review_thread ON review_thread.booking_id = visit.id AND review_thread.kind = 'booking' AND review_thread.organization_id = review.organization_id
       WHERE review.organization_id = ? AND review.source IN ('direct', 'owner_entered')

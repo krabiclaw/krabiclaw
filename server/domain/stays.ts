@@ -41,7 +41,7 @@ import { listingCalendar } from '~/server/integrations/channex/airbnb-listing'
 import { joinBookingConversationQueries } from '~/server/domain/guest-threads/channel-messages'
 import { toE164 } from '~/utils/phone'
 import { arrangeProductPhotos, readProductPhotos, readStayHomeAccessibility, readStayPhotoRooms, type MediaPlacementItem } from '~/server/utils/media-placement'
-import { deleteMediaAsset, getMediaAsset, updateMediaAssetMetadata } from '~/server/utils/media-asset-manager'
+import { addStayPhotoRoomPlacementsQuery, buildDeleteOwnerPlacementsQuery, deleteMediaAsset, getMediaAsset, updateMediaAssetMetadata } from '~/server/utils/media-asset-manager'
 import { sanitizeFilename, uploadResolvedMediaToAssetStore } from '~/server/utils/media-upload'
 import { MAX_IMAGE_BYTES, RESOLVED_MEDIA_IMAGE_TYPES, sniffMediaMimeType } from '~/server/utils/media-mime'
 import { mediaStillUrl, MAX_ORDERED_MEDIA_ASSETS } from '~/shared/media-placement-contract'
@@ -1123,6 +1123,8 @@ export async function removeStayPhotoRoom(db: DbClient, env: CloudflareEnv & Gue
   if (!home.photo_rooms.some(room => room.id === roomId)) fail(404, 'PHOTO_ROOM_NOT_FOUND', 'That room is not on this home', 'room_id')
   const [removed] = await executeBatch(db, [
     { query: 'DELETE FROM product_stay_photo_rooms WHERE organization_id = ? AND product_id = ? AND id = ? RETURNING id', params: [access.organizationId, productId, roomId] },
+    buildDeleteOwnerPlacementsQuery({ organizationId: access.organizationId, ownerType: 'stay_photo_room', ownerId: roomId }),
+    buildDeleteOwnerPlacementsQuery({ organizationId: access.organizationId, ownerType: 'stay_room_accessibility', ownerId: roomId }),
     publicResourceCacheInvalidationQuery(access.organizationId, 'stay-photo-room-delete'),
   ], { operation: 'Delete stay photo room' })
   const deleted = removed?.results[0]
@@ -1168,29 +1170,27 @@ export async function moveStayPhotos(db: DbClient, env: CloudflareEnv & GuestInb
         SELECT 1 FROM media_placements mp JOIN media_assets ma ON ma.organization_id = mp.organization_id AND ma.id = mp.asset_id AND ma.status = 'active'
         WHERE mp.organization_id = ? AND mp.owner_type = 'product' AND mp.owner_id = ? AND mp.slot IN ('image', 'gallery') AND mp.status = 'active'
           AND mp.asset_id = json_extract(selected.value, '$.photo_id'))
-        OR (SELECT m.room_id FROM product_stay_photo_room_memberships m WHERE m.organization_id = ? AND m.product_id = ?
+        OR (SELECT r.id FROM product_stay_photo_rooms r JOIN media_placements m ON m.organization_id = r.organization_id
+          AND m.owner_type = 'stay_photo_room' AND m.owner_id = r.id WHERE r.organization_id = ? AND r.product_id = ?
           AND m.asset_id = json_extract(selected.value, '$.photo_id')) IS NOT json_extract(selected.value, '$.expected_room_id'))
       )`,
     params: [access.organizationId, productId, roomId, creating ? 1 : 0, access.organizationId, productId, roomId, selected, access.organizationId, productId, access.organizationId, productId],
   }
-  const assignments: BatchQuery = roomId === null ? {
-    query: `DELETE FROM product_stay_photo_room_memberships WHERE organization_id = ? AND product_id = ? AND asset_id IN (SELECT json_extract(value, '$.photo_id') FROM json_each(?))`,
-    params: [access.organizationId, productId, selected],
-  } : {
-    query: `INSERT INTO product_stay_photo_room_memberships (organization_id, product_id, asset_id, room_id)
-      SELECT ?, ?, json_extract(value, '$.photo_id'), ? FROM json_each(?) WHERE true
-      ON CONFLICT (organization_id, product_id, asset_id) DO UPDATE SET room_id = excluded.room_id`,
-    params: [access.organizationId, productId, roomId, selected],
-  }
+  const assignments: BatchQuery[] = [{
+    query: `DELETE FROM media_placements WHERE organization_id = ? AND owner_type = 'stay_photo_room'
+      AND owner_id IN (SELECT id FROM product_stay_photo_rooms WHERE organization_id = ? AND product_id = ?)
+      AND asset_id IN (SELECT json_extract(value, '$.photo_id') FROM json_each(?))`,
+    params: [access.organizationId, access.organizationId, productId, selected],
+  }, ...(roomId === null ? [] : [addStayPhotoRoomPlacementsQuery(access.organizationId, productId, roomId, photos.map(photo => photo.photo_id))])]
   try {
     await executeBatch(db, [
       guard,
       ...(creating ? [stayPhotoRoomInsert(access, productId, roomId!, body.new_room_type as StayPhotoRoomType)] : []),
-      assignments,
+      ...assignments,
       publicResourceCacheInvalidationQuery(access.organizationId, 'stay-photo-move'),
     ], { operation: 'Move stay photos' })
   } catch (error) {
-    if (/NOT NULL constraint failed: product_stay_configs\.updated_at|FOREIGN KEY constraint failed/i.test(error instanceof Error ? error.message : String(error))) {
+    if (/NOT NULL constraint failed: product_stay_configs\.updated_at|media_placements_sort_order_check|FOREIGN KEY constraint failed/i.test(error instanceof Error ? error.message : String(error))) {
       fail(409, 'PHOTOS_CHANGED', 'The photos or destination room changed while saving; reload the photo tour', 'photos')
     }
     throw error

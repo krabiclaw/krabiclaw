@@ -1,3 +1,4 @@
+import { RESOURCE_LOCALIZATIONS_SQL } from '~/shared/content-registries'
 import { PLATFORM_LOCALES, platformLocale } from '~/shared/platform-locales'
 import { prepareContentDocumentDeletion } from '~/server/utils/content/documents'
 import { getPublishedTenantPage } from '~/server/utils/content/pages'
@@ -58,7 +59,7 @@ export async function publishOrganizationLanguage(
   const organization = await queryFirst<{ vertical: string; theme_id: string; values_json: string | null }>(db, `
     SELECT o.vertical, o.theme_id, rl.values_json
       FROM organization o
-      LEFT JOIN resource_localizations rl ON rl.organization_id = o.id AND rl.resource_type = 'organization'
+      LEFT JOIN ${RESOURCE_LOCALIZATIONS_SQL} rl ON rl.organization_id = o.id AND rl.resource_type = 'organization'
         AND rl.resource_id = o.id AND rl.locale = ?
      WHERE o.id = ?
   `, [locale, input.organizationId])
@@ -104,7 +105,6 @@ export async function deleteDisabledOrganizationLanguageContent(
     { query: `UPDATE organization_locales SET locale = NULL WHERE organization_id = ? AND locale = ? AND status <> 'disabled'`, params: [input.organizationId, locale] },
     { query: `DELETE FROM organization_redirects WHERE organization_id = ? AND locale = ?`, params: [input.organizationId, locale] },
     ...documents.flatMap(document => prepareContentDocumentDeletion({ documentId: document.id, organizationId: input.organizationId})),
-    { query: `DELETE FROM resource_localizations WHERE organization_id = ? AND locale = ?`, params: [input.organizationId, locale] },
     { query: `DELETE FROM organization_locales WHERE organization_id = ? AND locale = ? AND is_source = 0 AND status = 'disabled'`, params: [input.organizationId, locale] },
   ]
   await executeBatch(db, statements, { operation: 'delete disabled language content' })

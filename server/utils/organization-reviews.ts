@@ -6,6 +6,7 @@ import { publicLocationIsProtected } from '~/shared/location-sharing'
 import { projectPublicLocationReview, publicReviewLocationProtectedSql } from './public-location-privacy.ts'
 import { d1JsonStringSet } from '../db/d1-limits.ts'
 import type { ReviewCategory } from '~/shared/review-questions'
+import { submittedReviewRequestSql } from '~/server/utils/review-requests'
 
 
 function publicReviewRow(row: Record<string, unknown>, protectedLocation: boolean, publishedOnly: boolean): Record<string, unknown> & { publication_authorized: boolean; verified: boolean } {
@@ -37,7 +38,7 @@ export async function listOrganizationReviews(db: DbClient, organizationId: stri
   const rows = await queryAll<Record<string, unknown>>(db, `
     SELECT r.id, r.organization_id, r.location_id, r.author_name,
            r.rating, r.title, r.content, r.owner_reply, r.owner_reply_at, r.helpful_count, r.status, r.source,
-           review_request_id, entered_by_user_id, collection_method, original_review_date,
+           ${submittedReviewRequestSql('r')} AS review_request_id, entered_by_user_id, collection_method, original_review_date,
            original_reference, google_review_metadata, publication_authorized, created_at, updated_at,
            ${options.publishedOnly ? '' : 'r.private_feedback,'}
            ${publicReviewLocationProtectedSql('r')} AS is_stay_location

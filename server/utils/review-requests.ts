@@ -4,6 +4,12 @@ import { wantsNotification } from '~/server/domain/notification-preferences'
 import { reviewSubject, type ReviewSubject } from '~/shared/review-questions'
 import type { ProductKind } from '~/shared/product-details'
 
+/** A submitted request and its review share the booking's ID. */
+export function submittedReviewRequestSql(review: string): string {
+  return `(SELECT rr.id FROM review_requests rr WHERE rr.organization_id = ${review}.organization_id
+    AND rr.booking_id = ${review}.booking_id AND rr.submitted_at IS NOT NULL AND ${review}.source = 'direct')`
+}
+
 export interface ReviewRequestRow {
   id: string
   organization_id: string

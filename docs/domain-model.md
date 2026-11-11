@@ -29,7 +29,7 @@ extend that model. Never add a second one beside it.
 | Timed inventory | `product_sessions` | server/utils/availability.ts | KrabiClaw |
 | Night inventory | `product_nights` | server/domain/stays.ts | KrabiClaw |
 | Night claim (the nights a booking, a checkout hold or a linked calendar holds at a home, as a session's seats are a slot booking's claim) | `stay_nights` | server/domain/stays.ts | KrabiClaw |
-| Home rooms and accessibility | `product_stay_photo_rooms` `product_stay_photo_room_memberships` `product_stay_photo_room_amenities` `product_stay_room_accessibility` `product_stay_room_accessibility_photos` `product_stay_accessibility` `product_stay_accessibility_photos` | server/domain/stays.ts | KrabiClaw |
+| Home rooms and accessibility | `product_stay_photo_rooms` `product_stay_photo_room_amenities` `product_stay_room_accessibility` `product_stay_accessibility` | server/domain/stays.ts | KrabiClaw |
 | Booked record (a class seat, a consultation, a table or a stay at a home, with the terms frozen when it was made) | `bookings` | server/domain/product-bookings.ts | KrabiClaw |
 | Conversation (a guest's with the business, or the team's: direct, group or a job's), each person's read position and archive, and its messages from people and from KrabiClaw | `conversations` `conversation_participants` `messages` | server/domain/conversations.ts | KrabiClaw |
 | Audit log (who changed what in an organization) | `activity_entries` | server/utils/organization-events.ts | KrabiClaw |
@@ -39,9 +39,9 @@ extend that model. Never add a second one beside it.
 | Reported content | `content_reports` | server/domain/content-reports.ts | KrabiClaw |
 | Work and suggestions | `tasks` `opportunities` `organization_goals` | server/domain/tasks.ts | KrabiClaw |
 | Provider working hours | `member_scheduling` | server/domain/member-scheduling.ts | KrabiClaw |
-| Media | `media_assets` `media_placements` | server/utils/media-placement.ts | Cloudflare Images |
-| Website content | `content_documents` `content_blocks` `article_categories` `article_category_articles` `organization_redirects` | server/utils/content | KrabiClaw |
-| Localization | `resource_localizations` `organization_locales` | server/utils/localization.ts | KrabiClaw |
+| Media and its placements, including a home’s photo rooms and accessibility evidence | `media_assets` `media_placements` | server/utils/media-placement.ts | Cloudflare Images |
+| Website content and localized representations | `content_documents` `content_blocks` `article_categories` `article_category_articles` `organization_redirects` | server/utils/content | KrabiClaw |
+| Site languages | `organization_locales` | server/utils/organization-languages.ts | KrabiClaw |
 | Custom domain | `organization_domains` | server/utils/domains.ts | Cloudflare |
 | Public cache invalidation | `public_resource_cache_invalidations` | server/utils/public-resource-cache.ts | Cloudflare |
 | Social post publication | `post_publications` | server/utils/social-publication.ts | Meta |

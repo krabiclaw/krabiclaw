@@ -1,3 +1,4 @@
+import { RESOURCE_LOCALIZATIONS_SQL } from '~/shared/content-registries'
 import type { ProductKind } from '~/shared/product-details'
 import { catalogNavigation, locationSurfacePath, productSurfaceOf, presentationForProduct, resolveProductPresentation } from '~/utils/product-presentation'
 import { locationTakesTablesSql, PUBLIC_CONTENT_SECTION_QUERIES, PUBLIC_CONTENT_SECTIONS, productCatalogRows, publicContentSectionRows, publicSections, type PublicContentSectionRow } from '~/server/utils/public-shell-query'
@@ -177,10 +178,10 @@ export default definePlugin((nitroApp) => {
       }
       const [resources, pages] = await Promise.all([
         queryAll<{ route_path: string; updated_at: string }>(db, `
-          SELECT route_path, updated_at FROM resource_localizations
+          SELECT route_path, updated_at FROM ${RESOURCE_LOCALIZATIONS_SQL} localized
            WHERE organization_id = ? AND locale = ? AND route_path IS NOT NULL
              AND (resource_type <> 'product' OR resource_id IN (SELECT value FROM json_each(?)))
-             AND (resource_type <> 'business_location' OR resource_id IN (SELECT bl.id FROM business_locations bl WHERE bl.organization_id = resource_localizations.organization_id AND ${publicLocationSql('bl')}))
+             AND (resource_type <> 'business_location' OR resource_id IN (SELECT bl.id FROM business_locations bl WHERE bl.organization_id = localized.organization_id AND ${publicLocationSql('bl')}))
            ORDER BY route_path
         `, [organizationId, candidate.locale, publicProductIds]),
         queryAll<{ path: string; updated_at: string }>(db, `
@@ -199,12 +200,12 @@ export default definePlugin((nitroApp) => {
         const localizedProducts = await queryAll<{ location_path: string | null; slug: string; updated_at: string; kind: ProductKind }>(db, `
           SELECT ll.route_path AS location_path, p.slug, rl.updated_at,
                  p.kind
-            FROM resource_localizations rl
+            FROM ${RESOURCE_LOCALIZATIONS_SQL} rl
             JOIN products p ON p.id = rl.resource_id AND p.organization_id = rl.organization_id
             LEFT JOIN product_locations pl ON pl.product_id = p.id AND pl.organization_id = p.organization_id
              AND pl.published = 1
             LEFT JOIN business_locations bl ON bl.id = pl.location_id AND bl.organization_id = rl.organization_id AND bl.status = 'active'
-            LEFT JOIN resource_localizations ll ON ll.resource_type='business_location' AND ll.resource_id=bl.id AND ll.organization_id=rl.organization_id AND ll.locale=rl.locale
+            LEFT JOIN ${RESOURCE_LOCALIZATIONS_SQL} ll ON ll.resource_type='business_location' AND ll.resource_id=bl.id AND ll.organization_id=rl.organization_id AND ll.locale=rl.locale
            WHERE rl.organization_id = ? AND rl.locale = ? AND rl.resource_type = 'product'
              AND p.id IN (SELECT value FROM json_each(?))
              AND (bl.id IS NOT NULL OR EXISTS (SELECT 1 FROM product_booking_configs bc WHERE bc.product_id=p.id AND bc.organization_id=p.organization_id AND bc.held_online = 1) OR p.order_url IS NOT NULL)

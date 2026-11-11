@@ -96,7 +96,7 @@ export default defineHandler(async (event) => {
       AND rr.submitted_at IS NULL
       AND rr.expires_at > ?
       AND NOT EXISTS (
-        SELECT 1 FROM reviews existing_review WHERE existing_review.review_request_id = rr.id
+        SELECT 1 FROM reviews existing_review WHERE existing_review.organization_id = rr.organization_id AND existing_review.booking_id = rr.booking_id
       )
   )`
   const requestGuardParams = [
@@ -109,7 +109,6 @@ export default defineHandler(async (event) => {
         WHERE id = ? AND kind = 'booking'
           AND organization_id = ?
           AND user_id IS ?
-          AND NOT EXISTS (SELECT 1 FROM reviews booked_review WHERE booked_review.organization_id = conversations.organization_id AND booked_review.booking_id = conversations.booking_id)
       )`, [
         result.context.request_id, result.context.organization_id, reviewUserId, ], 'review booking state changed during submission', ), ]
 
@@ -129,11 +128,11 @@ export default defineHandler(async (event) => {
   batch.push(
     {
       query: `INSERT INTO reviews (
-        id, organization_id, location_id, product_id, booking_id, review_request_id, user_id, author_name, rating, title, content, private_feedback, publication_authorized, status, source, ip_hash, user_agent, created_at, updated_at
+        id, organization_id, location_id, product_id, booking_id, user_id, author_name, rating, title, content, private_feedback, publication_authorized, status, source, ip_hash, user_agent, created_at, updated_at
       )
-      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'direct', ?, ?, ?, ?
+      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'direct', ?, ?, ?, ?
       WHERE ${requestIsSubmittable}`, params: [
-        reviewId, result.context.organization_id, result.context.location_id, result.context.product_id, result.request.booking_id, result.request.id, reviewUserId, authorName, rating,
+        reviewId, result.context.organization_id, result.context.location_id, result.context.product_id, result.request.booking_id, reviewUserId, authorName, rating,
         publish ? title : null, publish ? content : null, privateFeedback, publish ? 1 : 0,
         // A private review is never moderated or published; a public one waits for the owner.
         publish ? 'pending' : 'private',

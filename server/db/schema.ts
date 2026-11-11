@@ -451,7 +451,7 @@ export const media_placements = sqliteTable("media_placements", {
 		foreignColumns: [media_assets.organization_id, media_assets.id],
 		name: "media_placements_asset_scope_fk",
 	}).onDelete("cascade"),
-	check("media_placements_owner_type_check", sql`owner_type IN ('organization', 'business_location', 'product', 'collection', 'content_document', 'content_block', 'review', 'review_request', 'message', 'task')`),
+	check("media_placements_owner_type_check", sql`owner_type IN ('organization', 'business_location', 'product', 'collection', 'content_document', 'content_block', 'review', 'review_request', 'message', 'task', 'stay_photo_room', 'stay_home_accessibility', 'stay_room_accessibility')`),
 	check("media_placements_sort_order_check", sql`sort_order >= 0`),
 	unique("media_placements_org_owner_slot_asset_unique").on(table.owner_type, table.owner_id, table.slot, table.asset_id),
 	unique("media_placements_org_owner_slot_order_unique").on(table.owner_type, table.owner_id, table.slot, table.sort_order),
@@ -1252,19 +1252,6 @@ export const product_stay_photo_rooms = sqliteTable("product_stay_photo_rooms", 
 
 // An asset may belong to one room per home. Its Product image/gallery
 // placements remain the photo source; no row means Additional photos.
-export const product_stay_photo_room_memberships = sqliteTable("product_stay_photo_room_memberships", {
-	organization_id: text().notNull(),
-	product_id: text().notNull(),
-	asset_id: text().notNull(),
-	room_id: text().notNull(),
-}, table => [
-	primaryKey({ columns: [table.organization_id, table.product_id, table.asset_id] }),
-	foreignKey({ columns: [table.organization_id, table.product_id, table.room_id], foreignColumns: [product_stay_photo_rooms.organization_id, product_stay_photo_rooms.product_id, product_stay_photo_rooms.id], name: "product_stay_photo_room_memberships_room_fk" }).onDelete("cascade"),
-	foreignKey({ columns: [table.organization_id, table.asset_id], foreignColumns: [media_assets.organization_id, media_assets.id], name: "product_stay_photo_room_memberships_asset_fk" }).onDelete("cascade"),
-	index("product_stay_photo_room_memberships_room_idx").on(table.organization_id, table.product_id, table.room_id),
-	index("product_stay_photo_room_memberships_asset_idx").on(table.organization_id, table.asset_id),
-]);
-
 // Room references to canonical listing amenities; removing a room keeps the listing facts.
 export const product_stay_photo_room_amenities = sqliteTable("product_stay_photo_room_amenities", {
 	organization_id: text().notNull(),
@@ -1292,19 +1279,6 @@ export const product_stay_room_accessibility = sqliteTable("product_stay_room_ac
 ]);
 
 // Evidence uses stable library asset IDs, never regenerated placement IDs.
-export const product_stay_room_accessibility_photos = sqliteTable("product_stay_room_accessibility_photos", {
-	organization_id: text().notNull(),
-	product_id: text().notNull(),
-	room_id: text().notNull(),
-	feature_code: text().$type<StayRoomAccessibilityFeature>().notNull(),
-	asset_id: text().notNull(),
-}, table => [
-	primaryKey({ columns: [table.organization_id, table.product_id, table.room_id, table.feature_code, table.asset_id] }),
-	foreignKey({ columns: [table.organization_id, table.product_id, table.room_id, table.feature_code], foreignColumns: [product_stay_room_accessibility.organization_id, product_stay_room_accessibility.product_id, product_stay_room_accessibility.room_id, product_stay_room_accessibility.feature_code], name: "product_stay_room_accessibility_photos_answer_fk" }).onDelete("cascade"),
-	foreignKey({ columns: [table.organization_id, table.asset_id], foreignColumns: [media_assets.organization_id, media_assets.id], name: "product_stay_room_accessibility_photos_asset_fk" }).onDelete("restrict"),
-	index("product_stay_room_accessibility_photos_asset_idx").on(table.organization_id, table.asset_id),
-]);
-
 export const product_stay_accessibility = sqliteTable("product_stay_accessibility", {
 	organization_id: text().notNull(),
 	product_id: text().notNull(),
@@ -1315,18 +1289,6 @@ export const product_stay_accessibility = sqliteTable("product_stay_accessibilit
 	foreignKey({ columns: [table.organization_id, table.product_id], foreignColumns: [product_stay_configs.organization_id, product_stay_configs.product_id], name: "product_stay_accessibility_home_fk" }).onDelete("cascade"),
 	check("product_stay_accessibility_feature_check", sql`feature_code IN (${sql.raw(Object.keys(STAY_HOME_ACCESSIBILITY_FEATURES).map(code => `'${code}'`).join(', '))})`),
 	check("product_stay_accessibility_available_check", sql`available IN (0, 1)`),
-]);
-
-export const product_stay_accessibility_photos = sqliteTable("product_stay_accessibility_photos", {
-	organization_id: text().notNull(),
-	product_id: text().notNull(),
-	feature_code: text().$type<StayHomeAccessibilityFeature>().notNull(),
-	asset_id: text().notNull(),
-}, (table) => [
-	primaryKey({ columns: [table.organization_id, table.product_id, table.feature_code, table.asset_id] }),
-	foreignKey({ columns: [table.organization_id, table.product_id, table.feature_code], foreignColumns: [product_stay_accessibility.organization_id, product_stay_accessibility.product_id, product_stay_accessibility.feature_code], name: "product_stay_accessibility_photos_answer_fk" }).onDelete("cascade"),
-	foreignKey({ columns: [table.organization_id, table.asset_id], foreignColumns: [media_assets.organization_id, media_assets.id], name: "product_stay_accessibility_photos_asset_fk" }).onDelete("restrict"),
-	index("product_stay_accessibility_photos_asset_idx").on(table.organization_id, table.asset_id),
 ]);
 
 // Workspace-owned reply text, scheduled for explicitly named offerings
@@ -2161,6 +2123,7 @@ export const review_requests = sqliteTable("review_requests", {
 	uniqueIndex("idx_review_requests_active_booking_unique")
 		.on(table.booking_id)
 		.where(sql`revoked_at IS NULL AND submitted_at IS NULL`),
+	uniqueIndex("review_requests_submitted_booking_unique").on(table.organization_id, table.booking_id).where(sql`submitted_at IS NOT NULL`),
 	index("idx_review_requests_send_due").on(table.organization_id, table.first_sent_at, table.reminder_sent_at, table.submitted_at, table.expires_at),
 	index("review_requests_organization_id_idx").on(table.organization_id),
 ]);
@@ -2171,7 +2134,6 @@ export const reviews = sqliteTable("reviews", {
 	location_id: text().references(() => business_locations.id, { onDelete: "cascade" } ),
 	// The booked visit this review is of; NULL for one entered or imported without one.
 	booking_id: text(),
-	review_request_id: text().references(() => review_requests.id, { onDelete: "set null" } ),
 	user_id: text().references(() => user.id, { onDelete: "set null" } ),
 	product_id: text(),
 	author_name: text(),
@@ -2213,7 +2175,6 @@ export const reviews = sqliteTable("reviews", {
 		name: "reviews_product_scope_fk",
 	}).onDelete("no action"),
 	foreignKey({ columns: [table.organization_id, table.booking_id], foreignColumns: [bookings.organization_id, bookings.id], name: "reviews_booking_scope_fk" }).onDelete("no action"),
-	index("idx_reviews_request_id").on(table.review_request_id),
 	index("reviews_booking_idx").on(table.booking_id),
 	index("reviews_org_user_idx").on(table.organization_id, table.user_id),
 	index("idx_reviews_location_status").on(table.location_id, table.status, table.created_at),
@@ -2574,9 +2535,11 @@ export const user_workspace_state = sqliteTable("user_workspace_state", {
 export const content_documents = sqliteTable("content_documents", {
 	id: text().primaryKey(),
 	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
-	kind: text().$type<typeof CONTENT_DOCUMENT_KINDS[number]>().notNull(),
+	kind: text().$type<typeof CONTENT_DOCUMENT_KINDS[number] | 'resource'>().notNull(),
 	row_role: text().$type<'root' | 'representation'>().notNull(),
 	root_id: text(),
+	resource_type: text(),
+	resource_id: text(),
 	root_role: text().$type<'root'>(),
 	locale: text(),
 	location_id: text().references(() => business_locations.id, { onDelete: "cascade" }),
@@ -2625,6 +2588,9 @@ export const content_documents = sqliteTable("content_documents", {
 	unique("content_documents_scope_role_unique").on(table.organization_id, table.id, table.row_role, table.kind),
 	foreignKey({ columns: [table.organization_id, table.root_id, table.root_role, table.kind], foreignColumns: [table.organization_id, table.id, table.row_role, table.kind], name: "content_documents_root_scope_fk" }).onDelete("cascade"),
 	foreignKey({ columns: [table.organization_id, table.locale, table.row_role], foreignColumns: [organization_locales.organization_id, organization_locales.locale, organization_locales.document_role], name: "content_documents_locale_scope_fk" }).onDelete("cascade"),
+	unique("content_documents_resource_locale_unique").on(table.organization_id, table.resource_type, table.resource_id, table.locale),
+	index("content_documents_resource_idx").on(table.resource_type, table.resource_id),
+	index("content_documents_org_locale_resource_idx").on(table.organization_id, table.locale, table.resource_type),
 	uniqueIndex("content_documents_root_locale_unique").on(table.root_id, table.locale).where(sql`row_role = 'representation'`),
 	uniqueIndex("content_documents_route_unique").on(table.organization_id, table.locale, table.path).where(sql`row_role IN ('root','representation') AND path IS NOT NULL`),
 	uniqueIndex("content_documents_slug_unique").on(table.organization_id, table.kind, table.locale, table.slug).where(sql`row_role IN ('root','representation') AND slug IS NOT NULL`),
@@ -2632,7 +2598,11 @@ export const content_documents = sqliteTable("content_documents", {
 	index("content_documents_org_kind_status_idx").on(table.kind, table.row_role, table.status, table.sort_order),
 	index("content_documents_location_kind_status_idx").on(table.location_id, table.kind, table.row_role, table.status, table.sort_order),
 	check("content_documents_metadata_check", sql`json_valid(metadata_json) AND json_type(metadata_json) IS 'object'`),
-	check("content_documents_role_check", sql`(row_role = 'root' AND root_id IS NULL AND root_role IS NULL AND locale IS NOT NULL) OR (row_role = 'representation' AND root_id IS NOT NULL AND root_id <> id AND root_role = 'root' AND locale IS NOT NULL AND product_id IS NULL AND location_id IS NULL AND scope_path IS NULL AND status IS NULL AND visibility IS NULL AND source IS NULL AND author_id IS NULL AND published_at IS NULL AND first_published_at IS NULL)`),
+	check("content_documents_role_check", sql`(row_role = 'root' AND root_id IS NULL AND root_role IS NULL AND locale IS NOT NULL) OR (row_role = 'representation' AND ((kind = 'resource' AND root_id IS NULL AND root_role IS NULL) OR (kind <> 'resource' AND root_id IS NOT NULL AND root_id <> id AND root_role = 'root')) AND locale IS NOT NULL AND product_id IS NULL AND location_id IS NULL AND scope_path IS NULL AND status IS NULL AND visibility IS NULL AND source IS NULL AND author_id IS NULL AND published_at IS NULL AND first_published_at IS NULL)`),
+	check("content_documents_resource_check", sql`(kind = 'resource' AND row_role = 'representation' AND resource_type IS NOT NULL AND resource_id IS NOT NULL
+	  AND created_by IS NOT NULL AND updated_by IS NOT NULL AND title IS NULL AND slug IS NULL AND summary IS NULL
+	  AND (path IS NULL OR (path LIKE '/' || locale || '/%' AND path NOT LIKE '%?%' AND path NOT LIKE '%#%' AND path NOT LIKE '%//%')))
+	  OR (kind <> 'resource' AND resource_type IS NULL AND resource_id IS NULL)`),
 	check("content_documents_path_check", sql`path IS NULL OR (path LIKE '/%' AND path NOT LIKE '//%')`),
 	check("content_documents_page_copy_check", sql`kind <> 'page' OR (path IS NOT NULL AND title IS NOT NULL)`),
 	check("content_documents_qa_scope_check", sql`kind <> 'qa' OR row_role <> 'root' OR ((location_id IS NULL OR scope_path IS NULL) AND (scope_path IS NULL OR scope_path LIKE '/%'))`),
@@ -2717,41 +2687,6 @@ export const post_publications = sqliteTable("post_publications", {
 	check("post_publications_published_check", sql`state NOT IN ('published', 'removed') OR (published_at IS NOT NULL AND (provider_post_id IS NOT NULL OR (channel = 'instagram' AND json_type(provider_handles_json, '$.container_id') IS 'text')))`),
 	check("post_publications_failed_check", sql`(state IN ('failed', 'unknown')) = (error_code IS NOT NULL)`),
 	check("post_publications_attempt_check", sql`attempt_id IS NULL OR state IN ('preparing', 'publishing')`),
-]);
-
-export const resource_localizations = sqliteTable("resource_localizations", {
-	id: text().primaryKey(),
-	organization_id: text().notNull(),
-	resource_type: text().notNull(),
-	resource_id: text().notNull(),
-	locale: text().notNull(),
-	document_role: text().generatedAlwaysAs(sql`'representation'`),
-	values_json: text().notNull(),
-	route_path: text(),
-	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
-	created_by_user_id: text().notNull(),
-	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
-	updated_by_user_id: text().notNull(),
-}, (table) => [
-	check("resource_localizations_instants_check", sql`(created_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at) AND (updated_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at)`),
-	foreignKey({
-		columns: [table.organization_id, table.locale, table.document_role],
-		foreignColumns: [organization_locales.organization_id, organization_locales.locale, organization_locales.document_role],
-		name: "resource_localizations_organization_locale_fk",
-	}).onDelete("cascade"),
-	unique("resource_localizations_org_resource_locale_unique").on(
-		table.organization_id,
-		table.resource_type,
-		table.resource_id,
-		table.locale,
-	),
-	uniqueIndex("resource_localizations_org_locale_route_unique")
-		.on(table.organization_id, table.locale, table.route_path)
-		.where(sql`route_path IS NOT NULL`),
-	check("resource_localizations_values_json_check", sql`json_valid(values_json) AND json_type(values_json) = 'object'`),
-	check("resource_localizations_route_path_check", sql`route_path IS NULL OR (route_path LIKE '/' || locale || '/%' AND route_path NOT LIKE '%?%' AND route_path NOT LIKE '%#%' AND route_path NOT LIKE '%//%')`),
-	index("resource_localizations_org_locale_type_idx").on(table.organization_id, table.locale, table.resource_type),
-	index("resource_localizations_resource_idx").on(table.resource_type, table.resource_id),
 ]);
 
 // An article's category: a named, ordered grouping the owner manages within
