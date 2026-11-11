@@ -4,19 +4,36 @@
     beneath every record that holds a form (build/form-question-routes.ts); the
     owner says which record they edit and how it is written.
   -->
-  <DashboardIndexPanel id="form-questions" :title="owner.title" :lead="editing ? 'Move questions up or down. The new order is saved when you tap Done.' : owner.lead">
+  <DashboardIndexPanel id="form-questions" :title="owner.title">
     <UAlert v-if="owner.error.value" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="owner.error.value" />
     <template v-else-if="owner.questions.value">
       <UAlert v-if="saveError" class="mb-6" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="saveError" />
+
+      <!-- Standard default questions included on every inquiry form -->
+      <div v-if="!editing" class="mb-6">
+        <h2 class="text-sm font-semibold text-muted mb-3">Included by default</h2>
+        <div class="rounded-2xl border border-default bg-default divide-y divide-default overflow-hidden">
+          <div v-for="item in defaultQuestions" :key="item.label" class="flex items-center justify-between p-4">
+            <div>
+              <p class="text-sm font-medium text-highlighted">{{ item.label }}</p>
+              <p class="text-xs text-muted mt-0.5">{{ item.type }}</p>
+            </div>
+            <span class="text-xs font-medium text-muted rounded-full px-2.5 py-1 bg-accented">
+              {{ item.required ? 'Required' : 'Optional' }}
+            </span>
+          </div>
+        </div>
+      </div>
+
       <DashboardListEditor
         :editing="editing"
         :items="rows"
-        title="Questions"
-        empty-title="No questions yet"
+        title="Custom questions"
+        empty-title="No custom questions yet"
         empty-icon="i-lucide-message-square-text"
         add-label="Add a question"
         :add-to="`${level.path.value}/new`"
-        :addable="!editing && owner.questions.value.length < FORM_QUESTION_LIMITS.questions"
+        :addable="false"
         :disabled="saving"
         reorderable
         @update:editing="setEditing"
@@ -27,11 +44,24 @@
           <UButton v-if="editing" label="Cancel" color="neutral" variant="soft" :disabled="saving" @click="cancelEditing" />
           <template v-else>
             <UButton v-if="owner.localization.value && owner.questions.value.length" icon="i-lucide-languages" aria-label="Translate questions" color="neutral" variant="soft" square :to="translationsPath" />
-            <UButton label="Copy" icon="i-lucide-copy" color="neutral" variant="soft" :disabled="saving" data-testid="form-questions-copy" @click="copying = true" />
           </template>
         </template>
       </DashboardListEditor>
-      <FormQuestionsCopySheet v-model:open="copying" :owner="owner" />
+
+      <!-- Add question button below list (Airbnb parity) -->
+      <div v-if="!editing && owner.questions.value.length < FORM_QUESTION_LIMITS.questions" class="mt-6">
+        <UButton
+          :to="`${level.path.value}/new`"
+          label="Add a question"
+          icon="i-lucide-plus"
+          color="neutral"
+          variant="outline"
+          size="lg"
+          class="h-12 px-6 rounded-xl font-semibold border border-neutral-900 dark:border-white text-highlighted cursor-pointer"
+          data-testid="add-form-question-button"
+        />
+      </div>
+
       <!-- The questions' wording in the site's other languages; what they ask and accept is not translated. -->
       <DashboardResourceLocalization
         v-if="owner.localization.value"
@@ -50,7 +80,6 @@
 <script setup lang="ts">
 import DashboardListEditor from '~/components/dashboard/DashboardListEditor.vue'
 import DashboardResourceLocalization from '~/components/dashboard/DashboardResourceLocalization.vue'
-import FormQuestionsCopySheet from '~/components/dashboard/FormQuestionsCopySheet.vue'
 import { useFormQuestionsOwner } from '~/composables/useFormQuestionsOwner'
 import { FORM_QUESTION_LIMITS, type FormQuestion } from '~/shared/form-questions'
 import { formQuestionRowSummary } from '~/utils/form-question-editing'
@@ -64,7 +93,14 @@ const router = useRouter()
 const editing = ref(false)
 const saving = ref(false)
 const saveError = ref<string | null>(null)
-const copying = ref(false)
+
+const defaultQuestions = [
+  { label: 'Full name', type: 'Short answer', required: true },
+  { label: 'Email address', type: 'Email address', required: true },
+  { label: 'Phone number', type: 'Phone number', required: false },
+  { label: 'Message', type: 'Paragraph', required: true },
+]
+
 // Edit is a mode with its own draft: moves and removals land together on Done.
 const draft = ref<FormQuestion[] | null>(null)
 const shown = computed(() => draft.value ?? owner.questions.value ?? [])

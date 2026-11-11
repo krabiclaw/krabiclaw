@@ -1,5 +1,5 @@
 <template>
-  <UModal v-model:open="modelValue" :ui="{ content: 'max-w-md p-6 sm:p-7 rounded-3xl' }">
+  <UModal v-model:open="modelValue" :ui="{ content: 'divide-y-0 max-w-md p-6 sm:p-7 rounded-3xl' }">
     <template #content>
       <div class="flex items-center justify-between mb-2">
         <h3 class="text-lg sm:text-xl font-semibold text-highlighted">Page tasks</h3>

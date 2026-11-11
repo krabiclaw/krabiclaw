@@ -94,7 +94,9 @@ export default {
     "schedule": "Schedule",
     "privacy": "Privacy Policy",
     "terms": "Terms of Service",
-    "third_party_notices": "Third-Party Notices"
+    "third_party_notices": "Third-Party Notices",
+    "qa": "Q&A",
+    "reviews": "Reviews"
   },
   "booking_policy": {
     "cancellation": "Cancel free up to {window} before the start time. After that, payments aren't refunded automatically.",
