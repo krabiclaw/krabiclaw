@@ -445,7 +445,24 @@ export async function handleContentTools(ctx: McpExecutorContext): Promise<unkno
         const site = resolvePublicSite({ themeId: organizationSite.theme_id });
         const paths = new Set([...site.sitemap.exactPaths, ...Object.values(site.pageDocuments.recipes)]);
         const built_in_pages = [...paths].filter(path => !isPublicLocationPath(path) || hasPublicLocationPages(organizationSite.vertical)).map(path => ({ path, recipe: Object.entries(site.pageDocuments.recipes).find(([, value]) => value === path)?.[0] ?? null, public_url: organization.publicUrl ? new URL(path, organization.publicUrl).toString() : null }));
-        return { built_in_pages, pages: page.items.map(row => ({ ...row, admin_edit_url: pageEditUrl(organization.organizationSlug, row) })), page_info: page.page_info };
+        return {
+          built_in_pages,
+          pages: page.items.map(row => ({
+            id: row.id,
+            page_id: row.page_id,
+            locale: row.locale,
+            path: row.path,
+            title: row.title,
+            page_type: row.page_type,
+            recipe: row.recipe,
+            sort_order: row.sort_order,
+            updated_at: row.updated_at,
+            product_id: row.product_id,
+            removable: row.removable,
+            admin_edit_url: pageEditUrl(organization.organizationSlug, row),
+          })),
+          page_info: page.page_info,
+        };
       } catch (error) {
         return rethrowAsInvalidParams(error);
       }
