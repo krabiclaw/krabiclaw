@@ -49,6 +49,7 @@ function parseReview(value: string | null): PaymentReview | null {
   return review
 }
 
+/** Read the frozen purchase terms shared by the buyer handoff and tax review. */
 function snapshotOf(payment: Payment) {
   const snapshot = JSON.parse(payment.price_snapshot_json) as { title?: unknown; quantity?: unknown; method_configuration_id?: unknown; stay?: unknown; price?: { unit_amount?: unknown; tax_behavior?: unknown }; product_id?: unknown; automatic_tax?: unknown; tax_code?: unknown }
   if (typeof snapshot.title !== 'string' || !Number.isSafeInteger(snapshot.quantity) || typeof snapshot.method_configuration_id !== 'string' || !Number.isSafeInteger(snapshot.price?.unit_amount)
