@@ -42,7 +42,7 @@ test.describe('stateless MCP server', () => {
     const action = JSON.parse(body.result.content[0].text) as { code: string; dashboard_url: string }
     expect(action.code).toBe('LANGUAGE_NOT_ENABLED')
     const destination = new URL(action.dashboard_url)
-    expect(destination.pathname).toMatch(/^\/dashboard\/[^/]+\/website\/localization$/)
+    expect(destination.pathname).toMatch(/^\/dashboard\/[^/]+\/website\/preferences\/localization$/)
 
     const editor = `${baseURL}/api/editor/organizations/${mcpOrganizationId()}`
     const pagesResponse = await request.get(`${editor}/pages`)
