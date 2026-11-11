@@ -15,7 +15,7 @@
         :resource-id="category.id"
         resource-label="category"
         :fields="localizationFields"
-        :language-settings-path="`/dashboard/${route.params.orgSlug}/website/localization`"
+        :language-settings-path="`/dashboard/${route.params.orgSlug}/website/preferences/localization`"
       />
     </template>
     <UForm v-if="category" ref="form" :key="revision" :state="{ name, description, parent }" class="space-y-6" @submit="save">

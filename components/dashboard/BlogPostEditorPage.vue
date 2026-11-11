@@ -51,7 +51,7 @@ const organizationId = useDashboardOrganizationId()
 const postId = String(route.params.postId || '')
 if (!postId) throw createError({ statusCode: 400, statusMessage: 'Post ID is required' })
 
-const organizationLocalizationSettingsPath = `/dashboard/${orgSlug}/website/localization`
+const organizationLocalizationSettingsPath = `/dashboard/${orgSlug}/website/preferences/localization`
 const level = useRouteLevel()
 const isNew = postId === 'new'
 const repository = tenantBlogRepository({ organizationId, orgSlug })

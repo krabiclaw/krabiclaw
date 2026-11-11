@@ -113,7 +113,7 @@ const collectionNavigation = computed<EditorNavigationGroup[]>(() => [{
   ],
 }])
 const collectionLocalizationFields = computed(() => [{ key: 'name', label: 'Name', source: collection.value?.name }])
-const organizationLocalizationSettingsPath = computed(() => `/dashboard/${route.params.orgSlug}/website/localization`)
+const organizationLocalizationSettingsPath = computed(() => `/dashboard/${route.params.orgSlug}/website/preferences/localization`)
 
 const { title: newTitle, firstStep, saveLabel, saveDisabled, save: saveLeaf } = useCreateWalk({
   recordPath: collectionPath,

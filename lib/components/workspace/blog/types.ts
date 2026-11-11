@@ -9,6 +9,9 @@ export interface BlogPost {
   collection?: ArticleCollection | null
   category?: { id: string; name: string; slug: string } | null
   /** Its place in its collection, from 1; 0 until the collection is ordered with it in it. */
+  author_id?: string | null
+  author_name?: string | null
+  author?: { id: string; name?: string | null } | null
   sort_order: number
   seo_keywords?: string | null
   published_at?: string | null
