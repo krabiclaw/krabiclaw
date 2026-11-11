@@ -4,7 +4,6 @@ Every business concept has one model. This page names it. `scripts/check-domain-
 reads the tables below and fails CI when:
 
 - a table in `server/db/schema.ts` is not listed under exactly one concept;
-- a table under **Retiring** still exists;
 - a single-owner column appears on any table other than its owner;
 - a `UNION ALL` in `server/` whose branches read two different tables of one concept.
 
@@ -22,7 +21,8 @@ extend that model. Never add a second one beside it.
 | KrabiClaw subscription | `subscription` | Better Auth Stripe | Better Auth Stripe |
 | Onboarding draft | `onboarding_drafts` | server/utils/onboarding-drafts.ts | KrabiClaw |
 | Place (a branch or a home's address and clock) | `business_locations` | server/utils/location-management.ts | KrabiClaw |
-| Catalog | `products` `product_variants` `prices` `product_publications` `product_locations` `collections` `collection_products` | server/utils/product-management.ts | KrabiClaw (Stripe-shaped) |
+| Catalog | `products` `product_variants` `product_publications` `product_locations` `collections` `collection_products` | server/utils/product-management.ts | KrabiClaw (Stripe-shaped) |
+| Price (offers, table deposits, weekend rates and dated nightly overrides) | `prices` | server/utils/product-management.ts | KrabiClaw |
 | How a product is booked, and who handles it (a session's seats, a table's seatings or a home's nights; party limits, guest terms and what online payment is charged for) | `product_booking_configs` | server/utils/availability.ts | KrabiClaw |
 | Home description and arrival guide | `product_stay_configs` | server/domain/stays.ts | KrabiClaw |
 | When a product can be booked (a class's weekly start times; a table has none, its open time is its location's hours) | `product_availability_rules` | server/utils/availability.ts | KrabiClaw |

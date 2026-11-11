@@ -67,7 +67,7 @@ export interface NightsBookingSettings {
   check_in_end_time: string | null
   check_out_time: string | null
   min_nights: number | null
-  calendar_rules: StayCalendarRules | null
+  calendar_rules: Omit<StayCalendarRules, 'weekend_price_minor'> | null
   cancellation_policy: StayCancellationPolicy | null
   long_term_cancellation_policy: StayLongTermCancellationPolicy | null
 }
@@ -228,6 +228,7 @@ export async function prepareProductBookingConfig(db: DbClient, input: {
   // A home is booked by the night on its business's calendar, paid in full on the site and confirmed when paid.
   if (unit === 'nights' && slotFields.some(field => patch[field] !== undefined)) badRequest('A place to stay is booked by the night; it takes no session length, scheduling, notice, confirmation or payment setting')
   if (unit === 'slot' && NIGHTS_BOOKING_FIELDS.some(field => patch[field] !== undefined)) badRequest('Only a place to stay takes check-in, checkout, minimum nights and cancellation settings')
+  if (patch.calendar_rules && 'weekend_price_minor' in patch.calendar_rules) badRequest('Set the weekend price with the home’s pricing settings')
   if (patch.expected_questions_revision !== undefined && patch.questions === undefined) badRequest('expected_questions_revision is only sent with questions')
   for (const field of ['duration_minutes', 'default_capacity', 'advance_notice_minutes', 'minimum_guest_age'] as const) {
     const value = patch[field]

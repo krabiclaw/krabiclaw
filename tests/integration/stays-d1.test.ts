@@ -1178,6 +1178,10 @@ test('the host sets nights apart from the defaults and resets them', { timeout: 
       weekend_price_minor: 22_000,
     }
     await updateStayHome(env, db, manager, cabin.id, { min_nights: 5, base_price_minor: 17_000, calendar_rules: rules })
+    const weekend = await db.prepare(`SELECT pr.unit_amount, json_type(b.calendar_rules, '$.weekend_price_minor') AS stored_in_rules
+      FROM product_booking_configs b JOIN product_variants v ON v.organization_id = b.organization_id AND v.product_id = b.product_id
+      JOIN prices pr ON pr.organization_id = v.organization_id AND pr.product_variant_id = v.id AND pr.weekend = 1 WHERE b.product_id = ?`).bind(cabin.id).first()
+    assert.deepEqual(weekend, { unit_amount: 22000, stored_in_rules: null })
     await importStayNights(db, env, manager, cabin.id, Array.from({ length: 6 }, (_, offset) => ({
       date: `2026-12-0${offset + 1}`, available: true, price_minor: offset === 2 ? 19_000 : null,
       min_stay_arrival: offset === 2 ? 2 : null, max_stay: null, closed_to_arrival: false, closed_to_departure: false,
@@ -1193,7 +1197,7 @@ test('the host sets nights apart from the defaults and resets them', { timeout: 
     assert.deepEqual((await readStayCalendar(db, manager, policyWindow)).nights.map(night => [night.min_stay_arrival, night.price_minor]), [
       [9, 18_000], [5, 18_000], [2, 19_000], [9, 22_000], [9, 22_000], [9, 18_000],
     ])
-    assert.deepEqual((await db.prepare("SELECT date, min_stay_arrival, price_minor FROM product_nights WHERE product_id = ? AND date >= '2026-12-01' ORDER BY date").bind(cabin.id).all()).results,
+    assert.deepEqual((await db.prepare("SELECT n.date, n.min_stay_arrival, pr.unit_amount AS price_minor FROM product_nights n JOIN product_variants v ON v.organization_id = n.organization_id AND v.product_id = n.product_id LEFT JOIN prices pr ON pr.organization_id = v.organization_id AND pr.product_variant_id = v.id AND pr.stay_date = n.date WHERE n.product_id = ? AND n.date >= '2026-12-01' ORDER BY date").bind(cabin.id).all()).results,
       Array.from({ length: 6 }, (_, offset) => ({ date: `2026-12-0${offset + 1}`, min_stay_arrival: offset === 2 ? 2 : null, price_minor: offset === 2 ? 19_000 : null })))
     const policyHome = await readStayHome(db, manager, cabin.id)
     await assert.rejects(quoteStay(db, ORG, policyHome, { check_in_date: '2026-12-01', check_out_date: '2026-12-06', adults: 1 }), code('STAY_MIN_NIGHTS'))
@@ -1242,7 +1246,7 @@ test('the host changes only the chosen weekdays and moves each night’s own pri
     assert.deepEqual(priced.nights.map(night => [night.date, night.price_minor]), [
       ['2026-11-01', 15_750], ['2026-11-02', 15_000], ['2026-11-03', 15_000], ['2026-11-04', 18_000], ['2026-11-05', 10_499], ['2026-11-06', 15_000], ['2026-11-07', 15_000],
     ])
-    assert.deepEqual((await db.prepare('SELECT date, closed, price_minor, min_stay_arrival FROM product_nights WHERE product_id = ? ORDER BY date').bind(cabin.id).all()).results, [
+    assert.deepEqual((await db.prepare('SELECT n.date, n.closed, pr.unit_amount AS price_minor, n.min_stay_arrival FROM product_nights n JOIN product_variants v ON v.organization_id = n.organization_id AND v.product_id = n.product_id LEFT JOIN prices pr ON pr.organization_id = v.organization_id AND pr.product_variant_id = v.id AND pr.stay_date = n.date WHERE n.product_id = ? ORDER BY n.date').bind(cabin.id).all()).results, [
       { date: '2026-11-01', closed: 0, price_minor: 15_750, min_stay_arrival: null },
       { date: '2026-11-04', closed: 0, price_minor: 18_000, min_stay_arrival: null },
       { date: '2026-11-05', closed: 0, price_minor: 10_499, min_stay_arrival: null },

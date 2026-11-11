@@ -1032,7 +1032,8 @@ test('a stay purchase claim cancels Stripe before releasing only its held nights
       await db.prepare("UPDATE payments SET return_token_hash=?,return_expires_at='2099-01-01T00:00:00.000Z' WHERE id=?").bind(await tokenHash(claim), id).run()
     }
     for (const [date, hold] of [['2099-10-01', 'h:changing'], ['2099-10-02', 'h:changing'], ['2099-10-03', 'h:other-stay']]) {
-      await db.prepare("INSERT INTO product_nights(organization_id,product_id,date,price_minor,min_stay_arrival,source,updated_by) VALUES(?,'cabin',?,10000,1,'host','host')").bind(ORG, date).run()
+      await db.prepare("INSERT INTO product_nights(organization_id,product_id,date,min_stay_arrival,source,updated_by) VALUES(?,'cabin',?,1,'host','host')").bind(ORG, date).run()
+      await db.prepare("INSERT INTO prices(id,organization_id,product_variant_id,stay_date,currency,unit_amount,created_by,updated_by) VALUES(?,?,'cabin-night',?,'USD',10000,'host','host')").bind(`price:${date}`, ORG, date).run()
       await db.prepare("INSERT INTO stay_nights(organization_id,product_id,date,hold_id) VALUES(?,'cabin',?,?)").bind(ORG, date, hold).run()
     }
     const stayPurchase = {

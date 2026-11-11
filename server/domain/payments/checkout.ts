@@ -134,7 +134,7 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
     if (!session) throw new HTTPError({statusCode:404,statusMessage:'Session not found'})
     const config = await requireBookingConfig(db, input.organizationId, input.productId)
     if (!partyPaysOnline(config, input.quantity)) throw new HTTPError({statusCode:409,statusMessage:'This booking is made without paying online'})
-    const rawPrices = await queryAll<Price>(db,'SELECT * FROM prices WHERE organization_id=? AND product_variant_id=?',[input.organizationId,input.variantId])
+    const rawPrices = await queryAll<Price>(db,'SELECT * FROM prices WHERE organization_id=? AND product_variant_id=? AND stay_date IS NULL AND weekend = 0',[input.organizationId,input.variantId])
     price = selectPrice(rawPrices.map(p=>({...p,active:Boolean(p.active)})),{currency:product.currency,location_id:session.location_id,at:now,billing:{type:'one_time'}}) ?? undefined
     if (!price) throw new HTTPError({statusCode:409,statusMessage:'Offering has no current one-time price'})
     if (price.unit_amount === 0) throw new HTTPError({statusCode:409,statusMessage:'Free offerings use the canonical booking flow without checkout'})

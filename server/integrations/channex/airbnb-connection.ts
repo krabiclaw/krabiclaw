@@ -1010,10 +1010,23 @@ export class AirbnbConnection {
     }
     // NULL inherits the canonical home, even after a global host edit leaves this row source='import'.
     // Airbnb's calendar echoes our resolved ARI values; importing those would freeze inheritance.
+    const received = JSON.stringify(inherited)
+    const imported = `FROM json_each(?) d JOIN product_nights n ON n.organization_id = ? AND n.product_id = ? AND n.date = json_extract(d.value, '$.date')
+      WHERE n.source = 'import'`
+    const dates = [received, this.organizationId, mapping.product_id]
     await executeBatch(this.db, [{
-      query: `UPDATE product_nights SET min_stay_arrival = CASE WHEN product_nights.min_stay_arrival IS NULL THEN NULL ELSE json_extract(value, '$.min_stay_arrival') END, price_minor = CASE WHEN product_nights.price_minor IS NULL THEN NULL ELSE json_extract(value, '$.price_minor') END
-        FROM json_each(?) WHERE organization_id = ? AND product_id = ? AND source = 'import' AND date = json_extract(value, '$.date')`,
-      params: [JSON.stringify(inherited), this.organizationId, mapping.product_id],
+      query: `UPDATE product_nights SET min_stay_arrival = json_extract(value, '$.min_stay_arrival')
+        FROM json_each(?) WHERE organization_id = ? AND product_id = ? AND source = 'import' AND date = json_extract(value, '$.date') AND min_stay_arrival IS NOT NULL`,
+      params: dates,
+    }, {
+      query: `DELETE FROM prices WHERE organization_id = ? AND product_variant_id = ? AND stay_date IN
+        (SELECT n.date ${imported} AND json_extract(d.value, '$.price_minor') IS NULL)`,
+      params: [this.organizationId, home.variant_id, ...dates],
+    }, {
+      query: `UPDATE prices SET unit_amount = imported.amount, updated_at = ?, updated_by = ? FROM
+        (SELECT n.date, json_extract(d.value, '$.price_minor') AS amount ${imported}) imported
+        WHERE prices.organization_id = ? AND prices.product_variant_id = ? AND prices.stay_date = imported.date AND imported.amount IS NOT NULL`,
+      params: [new Date().toISOString(), this.userId, ...dates, this.organizationId, home.variant_id],
     }, publicResourceCacheInvalidationQuery(this.organizationId, 'airbnb-calendar-content')], { operation: 'Refresh imported Airbnb calendar' })
     const homeWrite = await unedited(body)
     const detailsWrite = await unedited(details)

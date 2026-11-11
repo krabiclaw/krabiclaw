@@ -22,7 +22,7 @@ import { stayNightlyGroups, AIRBNB_CANCELLATION_CATEGORIES, AIRBNB_LONG_TERM_CAN
 import { validateProductDetails, validateStayAlarmDetails, stayHouseRuleLines } from '~/shared/product-details'
 import { staySafetyLines, stayAlarmLines } from '~/shared/stay-safety'
 import { formatCalendarDate, formatTime, formatTimestamp, isValidTimezone, localDateAt, localDateTimeToInstant } from '~/utils/timezone'
-import { createProduct, getProduct, setProductPublication, stayImportWrittenQuery, updateProduct, type StayImportWrite } from '~/server/utils/product-management'
+import { createProduct, getProduct, readStayCalendarRules, setProductPublication, stayImportWrittenQuery, stayWeekendPriceSql, updateProduct, type StayImportWrite } from '~/server/utils/product-management'
 import type { Product, UpdateProductInput } from '~/server/types/products'
 import { createGuestUser, type CloudflareEnv } from '~/server/utils/auth'
 import { currencyFractionDigits, isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
@@ -436,7 +436,7 @@ async function stayHomes(db: DbClient, access: StayAccess, productId: string | n
 async function stayHomesWhere(db: DbClient, organizationId: string, productId: string | null, scope: { sql: string; params: string[] }): Promise<StayHome[]> {
   const rows = await queryAll<Record<string, unknown>>(db, `
     SELECT p.id AS product_id, (SELECT json_group_array(v.id) FROM product_variants v WHERE v.organization_id = c.organization_id AND v.product_id = c.product_id) AS variant_ids, p.updated_at AS product_updated_at, p.name, c.internal_name, p.description, p.details_json, c.location_id, l.timezone, l.address, l.latitude, l.longitude, l.stay_map_sharing, o.default_currency,
-           b.check_in_time, b.check_in_end_time, b.check_out_time, b.default_capacity AS max_guests, b.min_nights, b.calendar_rules, c.property_type_group, c.property_type,
+           b.check_in_time, b.check_in_end_time, b.check_out_time, b.default_capacity AS max_guests, b.min_nights, b.calendar_rules, ${stayWeekendPriceSql('c')} AS weekend_price_minor, c.property_type_group, c.property_type,
            c.listing_type, c.total_floors, c.listing_floor, c.year_built, c.property_size, c.property_size_unit, c.bedrooms, c.beds, c.bathrooms, c.amenities,
            b.cancellation_policy, b.long_term_cancellation_policy, c.check_in_method, c.check_in_instructions, c.wifi_network, c.wifi_password,
            c.directions, c.house_manual, c.checkout_instructions, b.assigned_member_id, b.questions,
@@ -455,7 +455,7 @@ async function stayHomesWhere(db: DbClient, organizationId: string, productId: s
     SELECT pr.*, v.product_id FROM prices pr
       JOIN product_variants v ON v.organization_id = pr.organization_id AND v.id = pr.product_variant_id
       JOIN product_stay_configs c ON c.organization_id = v.organization_id AND c.product_id = v.product_id
-     WHERE pr.organization_id = ? ${productId ? 'AND v.product_id = ?' : ''} AND v.active = 1
+     WHERE pr.organization_id = ? ${productId ? 'AND v.product_id = ?' : ''} AND v.active = 1 AND pr.stay_date IS NULL AND pr.weekend = 0
      ORDER BY v.sort_order, v.id`, [organizationId, ...(productId ? [productId] : [])])
   const productIds = rows.map(row => String(row.product_id))
   const [photos, photoRooms, accessibility] = await Promise.all([
@@ -476,7 +476,7 @@ async function stayHomesWhere(db: DbClient, organizationId: string, productId: s
     return {
       product_id: String(row.product_id), variant_id: variants[0]!, product_updated_at: String(row.product_updated_at), name: String(row.name), internal_name: String(row.internal_name), location_id: String(row.location_id), timezone: String(row.timezone),
       currency: row.default_currency, base_price_minor: base ? base.unit_amount : null, base_price_tax_behavior: base ? base.tax_behavior : null,
-      check_in_time: nullableText(row.check_in_time), check_in_end_time: nullableText(row.check_in_end_time), check_out_time: nullableText(row.check_out_time), max_guests: Number(row.max_guests), min_nights: Number(row.min_nights), calendar_rules: parseStayCalendarRules(row.calendar_rules === null ? null : JSON.parse(String(row.calendar_rules))),
+      check_in_time: nullableText(row.check_in_time), check_in_end_time: nullableText(row.check_in_end_time), check_out_time: nullableText(row.check_out_time), max_guests: Number(row.max_guests), min_nights: Number(row.min_nights), calendar_rules: readStayCalendarRules(row.calendar_rules, row.weekend_price_minor),
       description: String(row.description), published: Number(row.published) === 1, live: Number(row.live) === 1,
       address: stayAddress(row.address), latitude: nullableNumber(row.latitude), longitude: nullableNumber(row.longitude), stay_map_sharing: parseStayMapSharing(row.stay_map_sharing),
       property_type_group: nullableText(row.property_type_group) as StayPropertyTypeGroup | null,
@@ -1251,6 +1251,10 @@ export async function getStay<A extends StayAccess>(db: DbClient, access: A, sta
   return { ...stay, guest_image_url: row.guest_image_url, payments, online_payment: onlinePayment, paid_minor: paid, payment_status: status } as StayDetailView<A>
 }
 
+/** The price of an inventory date is the dated price of its home's variant. */
+export const STAY_NIGHT_PRICE_SQL = `(SELECT pr.unit_amount FROM product_variants v JOIN prices pr ON pr.organization_id = v.organization_id AND pr.product_variant_id = v.id
+  WHERE v.organization_id = n.organization_id AND v.product_id = n.product_id AND pr.stay_date = n.date)`
+
 /** Every night of [from, to) at one home: whether it is free, its price and rules, and the stay holding it. */
 export async function readStayCalendar<A extends StayAccess>(db: DbClient, access: A, input: { productId: string; from: unknown; to: unknown }): Promise<{ home: StayHome; nights: StayNight[]; stays: Array<StayView<A>> }> {
   const { from, to } = range(input, STAY_CALENDAR_DAYS)
@@ -1325,7 +1329,7 @@ async function homeNights(db: DbClient, organizationId: string, home: StayHome, 
 async function homesNights(db: DbClient, organizationId: string, homes: readonly StayHome[], from: string, to: string): Promise<StayNight[][]> {
   const ids = d1JsonStringSet(homes.map(home => home.product_id))
   const [overrides, claims, pushes, movedAway] = await Promise.all([
-    queryAll<Record<string, unknown>>(db, 'SELECT * FROM product_nights WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?)) AND date >= ? AND date < ?', [organizationId, ids, from, to]),
+    queryAll<Record<string, unknown>>(db, `SELECT n.*, ${STAY_NIGHT_PRICE_SQL} AS price_minor FROM product_nights n WHERE n.organization_id = ? AND n.product_id IN (SELECT value FROM json_each(?)) AND n.date >= ? AND n.date < ?`, [organizationId, ids, from, to]),
     queryAll<{ product_id: string; date: string; stay_id: string | null; held_until: string | null; calendar: StayCalendarChannel | null }>(db, `SELECT stay_nights.product_id, stay_nights.date, stay_nights.booking_id AS stay_id, h.expires_at AS held_until, k.channel AS calendar FROM stay_nights
       LEFT JOIN payment_checkout_holds h ON h.id = stay_nights.hold_id
       LEFT JOIN stay_calendar_links k ON k.id = stay_nights.calendar_link_id
@@ -1437,11 +1441,11 @@ export async function verifyStayCalendarOccupancy(db: DbClient, env: ChannexEnv,
 export async function deliverPendingChannelNights(db: DbClient, env: StayMutationEnv): Promise<{ homes: number }> {
   // Each home on Channex with nights waiting to go, or whose weekend price needs the newly opened dates.
   const homes = await queryAll<{ organization_id: string; product_id: string; due: number }>(db, `SELECT m.organization_id, m.product_id, due FROM (
-      SELECT m.organization_id, m.product_id, m.enabled, c.calendar_rules, EXISTS (SELECT 1 FROM channel_night_pushes p WHERE p.organization_id = m.organization_id AND p.product_id = m.product_id
-        AND p.provider = 'channex' AND p.state = 'pending') AS due
-        FROM product_channel_mappings m LEFT JOIN product_booking_configs c ON c.organization_id = m.organization_id AND c.product_id = m.product_id
-       WHERE m.provider = 'channex') m
-     WHERE due = 1 OR (m.enabled = 1 AND json_extract(m.calendar_rules, '$.weekend_price_minor') IS NOT NULL)`)
+      SELECT m.organization_id, m.product_id, m.enabled, ${stayWeekendPriceSql('m')} AS weekend_price_minor,
+        EXISTS (SELECT 1 FROM channel_night_pushes p WHERE p.organization_id = m.organization_id AND p.product_id = m.product_id
+          AND p.provider = 'channex' AND p.state = 'pending') AS due
+        FROM product_channel_mappings m WHERE m.provider = 'channex') m
+     WHERE due = 1 OR (m.enabled = 1 AND m.weekend_price_minor IS NOT NULL)`)
   const failures: string[] = []
   let delivered = 0
   for (const row of homes) {
@@ -2323,7 +2327,7 @@ function nightAudit(home: StayHome, access: StayAccess, dates: readonly string[]
   const snapshot = {
     query: `SELECT json_object('defaults', json(?), 'nights', json_group_array(json_object(
       'date', d.value, 'override', CASE WHEN n.date IS NULL THEN NULL ELSE json_object(
-        'closed', n.closed, 'price_minor', n.price_minor, 'min_stay_arrival', n.min_stay_arrival,
+        'closed', n.closed, 'price_minor', ${STAY_NIGHT_PRICE_SQL}, 'min_stay_arrival', n.min_stay_arrival,
         'max_stay', n.max_stay, 'closed_to_arrival', n.closed_to_arrival, 'closed_to_departure', n.closed_to_departure,
         'source', n.source, 'updated_at', n.updated_at, 'updated_by', n.updated_by) END)))
       FROM json_each(?) d LEFT JOIN product_nights n ON n.organization_id = ? AND n.product_id = ? AND n.date = d.value`,
@@ -2355,7 +2359,7 @@ export async function setStayNights(db: DbClient, env: StayMutationEnv, access: 
   const home = await readStayHome(db, access, input.product_id)
   const patch: Record<string, number | null> = {}
   if (input.closed !== undefined) { if (typeof input.closed !== 'boolean') fail(422, 'INVALID_STAY_FIELD', 'closed must be true or false', 'closed'); patch.closed = input.closed ? 1 : 0 }
-  if (input.price_minor !== undefined) patch.price_minor = input.price_minor === null ? null : amount(input.price_minor, 'price_minor')
+  const price = input.price_minor === undefined || input.price_minor === null ? input.price_minor : amount(input.price_minor, 'price_minor')
   let percent: number | null = null
   if (input.price_change_percent !== undefined) {
     if (input.price_minor !== undefined) fail(422, 'INVALID_STAY_FIELD', 'Set a nightly price or change it by a percent, not both', 'price_change_percent')
@@ -2369,7 +2373,7 @@ export async function setStayNights(db: DbClient, env: StayMutationEnv, access: 
     if (input[field] !== undefined) { if (typeof input[field] !== 'boolean') fail(422, 'INVALID_STAY_FIELD', `${field} must be true or false`, field); patch[field] = input[field] ? 1 : 0 }
   }
   const reset = input.reset === true
-  if (reset === (Object.keys(patch).length > 0 || percent !== null)) fail(422, 'INVALID_STAY_FIELD', reset ? 'reset cannot be combined with night settings' : 'Name at least one night setting to change, or reset')
+  if (reset === (Object.keys(patch).length > 0 || price !== undefined || percent !== null)) fail(422, 'INVALID_STAY_FIELD', reset ? 'reset cannot be combined with night settings' : 'Name at least one night setting to change, or reset')
   // A percent moves each night's own current price: its set price, read and changed in the one
   // statement so two changes at once both land, or the listing's for that date when it has none.
   const listing = new Map<string, number>()
@@ -2385,26 +2389,48 @@ export async function setStayNights(db: DbClient, env: StayMutationEnv, access: 
   await requireChannelPush(db, env, access.organizationId, home.product_id)
   const now = new Date().toISOString()
   const columns = Object.keys(patch)
-  const nights = JSON.stringify(dates.map(night => ({ date: night, price_minor: listing.get(night) ?? null })))
-  const written = [...columns, ...(percent === null ? [] : ['price_minor'])]
+  const nights = JSON.stringify(dates.map(date => ({
+    id: crypto.randomUUID(), date, price_minor: percent === null ? price ?? null : listing.get(date) ?? null,
+  })))
+  const written = [...columns, ...(price !== undefined || percent !== null ? ['price_minor'] : [])]
   const audit = nightAudit(home, access, dates, 'stay.nights_changed', {
-    from, to, reset, fields: written.join(','), settings: patch,
+    from, to, reset, fields: written.join(','), settings: { ...patch, ...(price === undefined ? {} : { price_minor: price }) },
     ...(weekdays ? { weekdays: weekdays.join(',') } : {}), ...(percent === null ? {} : { price_change_percent: percent }),
   })
   // A night with no price of its own moves from the listing's price as read above; the batch refuses if the listing changed since.
   const listingGuard = { query: "SELECT CASE WHEN EXISTS (SELECT 1 FROM products WHERE organization_id = ? AND id = ? AND updated_at = ?) THEN NULL ELSE json('Stay listing changed') END", params: [access.organizationId, home.product_id, home.product_updated_at] }
+  const datesSql = "SELECT json_extract(value, '$.date') FROM json_each(?)"
+  const priceScope = 'organization_id = ? AND product_variant_id = ?'
+  const priceParams = [access.organizationId, home.variant_id]
+  const prices: BatchQuery[] = []
+  if (reset || price === null) prices.push({
+    query: `DELETE FROM prices WHERE ${priceScope} AND stay_date IN (${datesSql})`, params: [...priceParams, nights],
+  })
+  else if (price !== undefined || percent !== null) prices.push({
+    query: `INSERT INTO prices (id, organization_id, product_variant_id, stay_date, currency, unit_amount, source, created_at, updated_at, created_by, updated_by)
+      SELECT json_extract(d.value, '$.id'), ?, ?, json_extract(d.value, '$.date'), ?,
+        CASE WHEN p.id IS NOT NULL AND ? IS NOT NULL THEN (p.unit_amount * (100 + CAST(? AS INTEGER)) + 50) / 100 ELSE json_extract(d.value, '$.price_minor') END,
+        'host', ?, ?, ?, ?
+      FROM json_each(?) d LEFT JOIN prices p ON p.organization_id = ? AND p.product_variant_id = ? AND p.stay_date = json_extract(d.value, '$.date')
+      WHERE true ON CONFLICT (product_variant_id, stay_date) DO UPDATE SET unit_amount = excluded.unit_amount, currency = excluded.currency,
+        source = excluded.source, updated_at = excluded.updated_at, updated_by = excluded.updated_by`,
+    params: [...priceParams, home.currency, percent, percent, now, now, access.actorId, access.actorId, nights, ...priceParams],
+  })
+  if (percent !== null) prices.push({
+    query: `SELECT CASE WHEN EXISTS (SELECT 1 FROM prices WHERE ${priceScope} AND stay_date IN (${datesSql}) AND unit_amount > 9007199254740991) THEN json('Night price too large') ELSE NULL END`,
+    params: [...priceParams, nights],
+  })
   await executeBatch(db, [
     listingGuard, audit.before,
     reset
-      ? { query: 'DELETE FROM product_nights WHERE organization_id = ? AND product_id = ? AND date IN (SELECT json_extract(value, \'$.date\') FROM json_each(?))', params: [access.organizationId, home.product_id, nights] }
+      ? { query: `DELETE FROM product_nights WHERE organization_id = ? AND product_id = ? AND date IN (${datesSql})`, params: [access.organizationId, home.product_id, nights] }
       : {
-          query: `INSERT INTO product_nights (organization_id, product_id, date, source, updated_at, updated_by, ${written.join(', ')})
-                  SELECT ?, ?, json_extract(value, '$.date'), 'host', ?, ?, ${columns.map(() => '?').join(', ')}${percent === null ? '' : `${columns.length ? ', ' : ''}json_extract(value, '$.price_minor')`} FROM json_each(?) WHERE true
-                  ON CONFLICT (product_id, date) DO UPDATE SET source = 'host', updated_at = excluded.updated_at, updated_by = excluded.updated_by,
-                    ${[...columns.map(column => `${column} = excluded.${column}`), ...(percent === null ? [] : ['price_minor = CASE WHEN product_nights.price_minor IS NULL THEN excluded.price_minor ELSE (product_nights.price_minor * (100 + CAST(? AS INTEGER)) + 50) / 100 END'])].join(', ')}`,
-          params: [access.organizationId, home.product_id, now, access.actorId, ...columns.map(column => patch[column]), nights, ...(percent === null ? [] : [percent])],
+          query: `INSERT INTO product_nights (organization_id, product_id, date, source, updated_at, updated_by${columns.map(column => `, ${column}`).join('')})
+                  SELECT ?, ?, json_extract(value, '$.date'), 'host', ?, ?${columns.map(() => ', ?').join('')} FROM json_each(?) WHERE true
+                  ON CONFLICT (product_id, date) DO UPDATE SET source = 'host', updated_at = excluded.updated_at, updated_by = excluded.updated_by${columns.map(column => `, ${column} = excluded.${column}`).join('')}`,
+          params: [access.organizationId, home.product_id, now, access.actorId, ...columns.map(column => patch[column]), nights],
         },
-    ...(percent === null ? [] : [{ query: "SELECT CASE WHEN EXISTS (SELECT 1 FROM product_nights WHERE organization_id = ? AND product_id = ? AND price_minor > 9007199254740991) THEN json('Night price too large') ELSE NULL END", params: [access.organizationId, home.product_id] }]),
+    ...prices,
     audit.after,
   ], { operation: 'Set stay nights' }).catch(async (cause: unknown) => {
     if (percent !== null && String(cause).includes('Night price too large')) fail(422, 'INVALID_AMOUNT', 'A night’s price would be too large', 'price_change_percent')
@@ -2452,22 +2478,37 @@ export async function importStayNights(db: DbClient, env: GuestInboxPublicationE
   const audit = nightAudit(home, access, nights.map(night => night.date), 'stay.nights_imported', {
     from: nights[0]!.date, to: nights.at(-1)!.date, nights: nights.length, provider: 'channex',
   }, nights)
+  const incoming = JSON.stringify(nights.map(night => ({
+    id: crypto.randomUUID(), date: night.date, closed: night.available ? 0 : 1, price_minor: night.price_minor,
+    min_stay_arrival: night.min_stay_arrival, max_stay: night.max_stay,
+    closed_to_arrival: night.closed_to_arrival ? 1 : 0, closed_to_departure: night.closed_to_departure ? 1 : 0,
+  })))
+  const importedDates = `FROM json_each(?) d JOIN product_nights n ON n.organization_id = ? AND n.product_id = ? AND n.date = json_extract(d.value, '$.date')
+    WHERE n.source = 'import'`
+  const dateParams = [incoming, access.organizationId, home.product_id]
   await executeBatch(db, [
     audit.before,
     {
-      query: `INSERT INTO product_nights (organization_id, product_id, date, closed, price_minor, min_stay_arrival, max_stay, closed_to_arrival, closed_to_departure, source, updated_at, updated_by)
-              SELECT ?, ?, json_extract(value, '$.date'), json_extract(value, '$.closed'), json_extract(value, '$.price_minor'), json_extract(value, '$.min_stay_arrival'),
+      query: `INSERT INTO product_nights (organization_id, product_id, date, closed, min_stay_arrival, max_stay, closed_to_arrival, closed_to_departure, source, updated_at, updated_by)
+              SELECT ?, ?, json_extract(value, '$.date'), json_extract(value, '$.closed'), json_extract(value, '$.min_stay_arrival'),
                      json_extract(value, '$.max_stay'), json_extract(value, '$.closed_to_arrival'), json_extract(value, '$.closed_to_departure'), 'import', ?, ?
                 FROM json_each(?) WHERE true
-              ON CONFLICT (product_id, date) DO UPDATE SET closed = excluded.closed, price_minor = excluded.price_minor, min_stay_arrival = excluded.min_stay_arrival,
+              ON CONFLICT (product_id, date) DO UPDATE SET closed = excluded.closed, min_stay_arrival = excluded.min_stay_arrival,
                 max_stay = excluded.max_stay, closed_to_arrival = excluded.closed_to_arrival, closed_to_departure = excluded.closed_to_departure,
                 updated_at = excluded.updated_at, updated_by = excluded.updated_by
               WHERE product_nights.source = 'import'`,
-      params: [access.organizationId, home.product_id, now, access.actorId, JSON.stringify(nights.map(night => ({
-        date: night.date, closed: night.available ? 0 : 1, price_minor: night.price_minor, min_stay_arrival: night.min_stay_arrival,
-        max_stay: night.max_stay, closed_to_arrival: night.closed_to_arrival ? 1 : 0, closed_to_departure: night.closed_to_departure ? 1 : 0,
-
-      })))],
+      params: [access.organizationId, home.product_id, now, access.actorId, incoming],
+    }, {
+      query: `DELETE FROM prices WHERE organization_id = ? AND product_variant_id = ? AND stay_date IN
+        (SELECT n.date ${importedDates} AND json_extract(d.value, '$.price_minor') IS NULL)`,
+      params: [access.organizationId, home.variant_id, ...dateParams],
+    }, {
+      query: `INSERT INTO prices (id, organization_id, product_variant_id, stay_date, currency, unit_amount, source, created_at, updated_at, created_by, updated_by)
+        SELECT json_extract(d.value, '$.id'), ?, ?, n.date, ?, json_extract(d.value, '$.price_minor'), 'import', ?, ?, ?, ?
+        ${importedDates} AND json_extract(d.value, '$.price_minor') IS NOT NULL
+        ON CONFLICT (product_variant_id, stay_date) DO UPDATE SET currency = excluded.currency, unit_amount = excluded.unit_amount,
+          source = excluded.source, updated_at = excluded.updated_at, updated_by = excluded.updated_by`,
+      params: [access.organizationId, home.variant_id, home.currency, now, now, access.actorId, access.actorId, ...dateParams],
     },
     audit.after,
   ], { operation: 'Import stay nights' })
