@@ -471,6 +471,12 @@ export async function replyThroughChannex(db: DbClient, env: ChannexEnv & Upload
   try {
     const message = await sendChannexMessage(env, input.mapping.external_thread_id, input.body, photo)
     await recordDeliveryOutcome(db, { deliveryId, status: 'accepted', providerMessageId: message.id })
+    // Airbnb's copy of this reply, mirrored while it was being sent, is this reply: it is not kept as a second message.
+    const echo = `channex-message:${message.id}`
+    await executeBatch(db, [
+      { query: `DELETE FROM media_placements WHERE organization_id = ? AND owner_type = 'message' AND owner_id IN (SELECT id FROM messages WHERE dedupe_key = ? AND conversation_id = ?)`, params: [input.mapping.organization_id, echo, input.mapping.conversation_id] },
+      { query: 'DELETE FROM messages WHERE dedupe_key = ? AND conversation_id = ? AND author_kind = ?', params: [echo, input.mapping.conversation_id, 'member'] },
+    ], { operation: 'Drop the mirrored copy of a sent channel reply' })
   } catch (error) {
     await recordDeliveryOutcome(db, { deliveryId, status: 'failed', error: error instanceof Error ? error.message : String(error) })
     return { ok: false, status: 502, code: 'CHANNEL_REPLY_FAILED', field: 'delivery.status', message: 'This reply was not sent. You can retry the same reply.',
