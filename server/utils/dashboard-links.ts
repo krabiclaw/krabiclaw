@@ -122,7 +122,7 @@ export function articleSocialPostPath(orgSlug: string, articleId: string, channe
   return `${organizationBase(orgSlug)}/website/posts/new?${query}`
 }
 
-export function insightsPath(orgSlug: string, query?: { startDate: string; endDate: string; tab?: 'ads' } | { tab: 'reviews'; review: string }): string {
+export function insightsPath(orgSlug: string, query?: { start_date: string; end_date: string; tab?: 'ads' } | { tab: 'reviews'; review: string }): string {
   const path = `${organizationBase(orgSlug)}/insights`
   return query ? `${path}?${new URLSearchParams(query)}` : path
 }

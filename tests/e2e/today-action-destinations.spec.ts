@@ -577,35 +577,35 @@ test('a new article publishes its composed body directly and retries publication
 test('Insights reads a linked report period and preserves preset changes in its URL', async ({ page }) => {
   // A period the business's own analytics cover (they begin when the seed takes it live), unlike any preset.
   const today = localDateAt(new Date(), seededTenant('restaurant').timezone)
-  const range = { startDate: addLocalDays(today, -2), endDate: today }
+  const range = { start_date: addLocalDays(today, -2), end_date: today }
   const linkedPath = insightsPath(orgSlug, range)
   const isReport = (response: import('@playwright/test').Response) => new URL(response.url()).pathname === '/api/dashboard/analytics'
   expect((await page.goto(linkedPath))?.status()).toBe(200)
   await waitForNuxtHydration(page)
   const reportPeriod = page.getByTestId('insights-period').locator('time')
-  await expect(reportPeriod.nth(0)).toHaveAttribute('datetime', range.startDate)
-  await expect(reportPeriod.nth(1)).toHaveAttribute('datetime', range.endDate)
+  await expect(reportPeriod.nth(0)).toHaveAttribute('datetime', range.start_date)
+  await expect(reportPeriod.nth(1)).toHaveAttribute('datetime', range.end_date)
   const linkedUrl = new URL(page.url())
-  const first = await page.request.get('/api/dashboard/analytics', { params: { org: orgSlug, start_date: linkedUrl.searchParams.get('startDate')!, end_date: linkedUrl.searchParams.get('endDate')! } })
+  const first = await page.request.get('/api/dashboard/analytics', { params: { org: orgSlug, start_date: linkedUrl.searchParams.get('start_date')!, end_date: linkedUrl.searchParams.get('end_date')! } })
   expect(first.status(), await first.text()).toBe(200)
-  expect((await first.json()).report.period).toMatchObject({ start_date: range.startDate, end_date: range.endDate })
+  expect((await first.json()).report.period).toMatchObject({ start_date: range.start_date, end_date: range.end_date })
   await expect(page.getByText('Traffic trend', { exact: true })).toBeVisible()
   const datePill = page.getByTestId('insights-date-range-pill')
   await expect(datePill).toBeVisible()
 
   await page.reload()
   await waitForNuxtHydration(page)
-  await expect(reportPeriod.nth(0)).toHaveAttribute('datetime', range.startDate)
-  await expect(reportPeriod.nth(1)).toHaveAttribute('datetime', range.endDate)
-  const updatedRange = { startDate: addLocalDays(today, -6), endDate: today }
+  await expect(reportPeriod.nth(0)).toHaveAttribute('datetime', range.start_date)
+  await expect(reportPeriod.nth(1)).toHaveAttribute('datetime', range.end_date)
+  const updatedRange = { start_date: addLocalDays(today, -6), end_date: today }
   const rangeReport = page.waitForResponse(isReport)
   await datePill.click()
-  await page.locator('#start-date-input').fill(updatedRange.startDate)
-  await page.locator('#end-date-input').fill(updatedRange.endDate)
+  await page.locator('#start-date-input').fill(updatedRange.start_date)
+  await page.locator('#end-date-input').fill(updatedRange.end_date)
   await page.getByRole('button', { name: 'Apply', exact: true }).click()
   const preset = await rangeReport
   expect(preset.status(), await preset.text()).toBe(200)
   const period = (await preset.json() as { report: { period: { start_date: string; end_date: string } } }).report.period
-  expect(period.start_date).toBe(updatedRange.startDate)
-  await expect(page).toHaveURL(insightsPath(orgSlug, { startDate: period.start_date, endDate: period.end_date }))
+  expect(period.start_date).toBe(updatedRange.start_date)
+  await expect(page).toHaveURL(insightsPath(orgSlug, { start_date: period.start_date, end_date: period.end_date }))
 })
