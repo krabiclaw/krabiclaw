@@ -116,11 +116,14 @@ const panelTitle = computed(() => {
 })
 
 const isInstantActive = computed(() => {
-  return editor.form.native_consultations
+  if (isService.value) return editor.form.native_consultations
+  return true
 })
 
 function setBookingMode(instant: boolean) {
-  editor.form.native_consultations = instant
+  if (isService.value) {
+    editor.form.native_consultations = instant
+  }
 }
 
 const instantTitle = computed(() => {

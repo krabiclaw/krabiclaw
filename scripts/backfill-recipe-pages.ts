@@ -94,7 +94,9 @@ async function backfill(db: DbClient, env: CloudflareEnv) {
               id: uid('block'),
               type: def.blockType,
               position: 1,
-              data: { title: def.blockTitle },
+              data: def.blockType === 'faq'
+                ? { title: def.blockTitle, source: 'organization_qa' }
+                : { title: def.blockTitle },
             },
           ],
         },

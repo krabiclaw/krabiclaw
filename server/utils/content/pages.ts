@@ -22,6 +22,7 @@ import {
   type TenantPageSnapshotMetadata,
   type TenantPageType,
 } from '~/utils/tenant-page-blocks'
+import { hasOrganizationEntitlement } from '~/server/utils/billing'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { refreshSocialCard } from '~/server/utils/social-card'
 import { assertExactCanonicalLocale, getPersistedSourceLocale } from '~/server/utils/localization'
@@ -125,9 +126,26 @@ function metadataForInput(input: TenantPageEditorInput, locale: string, path: st
   }
 }
 
-async function assertTenantPageSupport(env: CloudflareEnv, db: DbClient, organizationId: string, input: TenantPageEditorInput, blocks: TenantPageBlock[]) {
+/**
+ * May this site hold a custom page?
+ *
+ * A custom page is a subscription feature a customer buys. KrabiClaw's own site
+ * is the seller, not a subscriber: the platform organization holds no
+ * subscription and never will, so asking `custom_pages` of it refused every
+ * page KrabiClaw publishes about itself (#903).
+ */
+async function organizationMayHoldCustomPages(env: CloudflareEnv, db: DbClient, organizationId: string): Promise<boolean> {
+  const { site } = await loadOrganizationSite(db, organizationId)
+  if (site.slug === 'platform') return true
+  return await hasOrganizationEntitlement(env, organizationId, 'custom_pages')
+}
+
+async function assertTenantPageSupport(env: CloudflareEnv, db: DbClient, organizationId: string, input: TenantPageEditorInput, blocks: TenantPageBlock[], options: { checkCustomPageEntitlement?: boolean } = {}) {
   const pageType = input.pageType ?? 'custom'
   if (!TENANT_PAGE_TYPES.includes(pageType)) badRequest('pageType is invalid')
+  if (pageType === 'custom' && options.checkCustomPageEntitlement !== false && !(await organizationMayHoldCustomPages(env, db, organizationId))) {
+    throw new HTTPError({ statusCode: 402, statusMessage: 'Custom tenant pages require the Growth plan or higher' })
+  }
   await assertLocationGridSupported(db, organizationId, blocks)
   const recipe = input.recipe?.trim() || null
   if (pageType === 'recipe' && !recipe) badRequest('recipe is required for recipe pages')
@@ -820,7 +838,7 @@ export async function prepareTenantPageCreate(db: DbClient, input: TenantPageCre
   })
   const metadata = metadataForInput(effectiveData, locale, path)
   const blocks = normalizeTenantPageBlocks(effectiveData.blocks)
-  await assertTenantPageSupport(input.env, db, input.organizationId, effectiveData, blocks)
+  await assertTenantPageSupport(input.env, db, input.organizationId, effectiveData, blocks, { checkCustomPageEntitlement: !existingPage })
   const pageId = existingPage?.id ?? effectiveData.id ?? crypto.randomUUID()
   const variantId = existingPage ? effectiveData.id ?? crypto.randomUUID() : pageId
   const now = new Date().toISOString()
@@ -1023,7 +1041,7 @@ export async function updateTenantPage(db: DbClient, variantId: string, input: {
   const path = row.path
   const metadata = metadataForInput(effectiveInput, row.locale, path)
   const blocks = normalizeTenantPageBlocks(preserveOmittedBlockMedia(input.data.blocks, currentBlocks))
-  await assertTenantPageSupport(input.env, db, row.organization_id, effectiveInput, blocks)
+  await assertTenantPageSupport(input.env, db, row.organization_id, effectiveInput, blocks, { checkCustomPageEntitlement: row.page_type !== 'custom' && pageType === 'custom' })
   const bindingQueries: BatchQuery[] = []
   if (input.data.productId !== undefined && input.data.productId !== row.product_id) {
     if (row.id !== row.page_id) badRequest('Change the Product binding on the source page, not a translation')

@@ -13,7 +13,7 @@ export function getPlanEntitlements(plan: string): EntitlementsMap {
   const base: EntitlementsMap = {
     plan,
     payments: false,
-    custom_pages: true,
+    custom_pages: false,
     custom_domains: false,
     google_places: false,
     managed_service: false,

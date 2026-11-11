@@ -93,7 +93,7 @@ export async function ensureTenantRecipePages(
         id: uid('block'),
         type: 'faq',
         position: 1,
-        data: { title: 'Q&A' },
+        data: { title: 'Q&A', source: 'organization_qa' },
       });
     } else if (definition.path === '/reviews') {
       blocks.push({

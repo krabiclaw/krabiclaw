@@ -32,9 +32,10 @@ export default defineHandler(async (event) => {
   }
   const title = typeof body.title === 'string' ? body.title.trim() : null
   const content = typeof body.content === 'string' ? body.content.trim() : null
-  const collectionMethod = body.collection_method && OWNER_REVIEW_COLLECTION_METHODS.includes(body.collection_method)
-    ? body.collection_method
-    : 'in_person'
+  if (body.collection_method !== undefined && !OWNER_REVIEW_COLLECTION_METHODS.includes(body.collection_method)) {
+    return jsonResponse({ error: `Invalid collection_method. Allowed values: ${OWNER_REVIEW_COLLECTION_METHODS.join(', ')}` }, { status: 400 })
+  }
+  const collectionMethod = body.collection_method || 'in_person'
   const originalReviewDate = typeof body.original_review_date === 'string' && body.original_review_date.trim()
     ? body.original_review_date.trim()
     : new Date().toISOString()
