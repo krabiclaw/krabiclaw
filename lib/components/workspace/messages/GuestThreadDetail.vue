@@ -138,7 +138,7 @@ import { authClient } from '~/lib/auth-client'
 import MessageComposer, { messageReplyForm, sameMessagePhotos, useMessagePhotoDraft, type MessagePhotoDraft } from './MessageComposer.vue'
 import MessagePhotoViewer, { type MessagePhotoViewerState } from './MessagePhotoViewer.vue'
 import InboxAvatar from './InboxAvatar.vue'
-import { isScheduledMessage, isSendLaterResponse, isSuggestedReplies, useSuggestedReplies } from './guest-messaging-client'
+import { isScheduledMessageResponse, isSuggestedReplies, useSuggestedReplies } from './guest-messaging-client'
 import { dashboardGutterClass } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
 
 /*
@@ -277,14 +277,13 @@ watch([latestGuestMessage, suggestionsOn, suggestionAttempt], async ([messageId,
   }
 }, { immediate: true })
 
-// A pending message is cancelled where it was made: an automatic message by the business, one sent later by its author.
+// A pending message is cancelled in the one outbox: an automatic message by the business, one sent later by its author.
 const cancelling = ref<string | null>(null)
 async function cancelPending(later: InboxPendingMessage) {
   cancelling.value = later.id
   actionError.value = null
   try {
-    if (later.source === 'later') await dashboardApi(`/api/dashboard/organizations/${dashboard.organizationId.value}/send-later/${encodeURIComponent(later.id)}/cancel`, { method: 'POST', validate: isSendLaterResponse })
-    else await dashboardApi(`/api/dashboard/scheduled-guest-messages/${encodeURIComponent(later.id)}/cancel`, { method: 'POST', validate: (value: unknown): value is { message: unknown } => isRecord(value) && isScheduledMessage(value.message) })
+    await dashboardApi(`/api/dashboard/scheduled-guest-messages/${encodeURIComponent(later.id)}/cancel`, { method: 'POST', validate: isScheduledMessageResponse })
     await refresh()
   } catch (err) {
     actionError.value = getErrorMessage(err, 'The message could not be cancelled')
@@ -362,7 +361,7 @@ async function sendReply() {
     sending.value = true
     actionError.value = null
     try {
-      await dashboardApi(`${threadPath.value}/send-later`, { method: 'POST', body: { body, sendAt: sendAt.value, ...(usedSuggestion.value ? { suggestion: usedSuggestion.value } : {}) }, validate: isSendLaterResponse })
+      await dashboardApi(`${threadPath.value}/send-later`, { method: 'POST', body: { body, sendAt: sendAt.value, ...(usedSuggestion.value ? { suggestion: usedSuggestion.value } : {}) }, validate: isScheduledMessageResponse })
       draft.value = ''
       usedSuggestion.value = null
       sendAt.value = null

@@ -677,14 +677,14 @@ export async function executeGuestThreadOperation(db: DbClient, input: ExecuteOp
 
   if (input.action === 'reply') {
     const scheduled = input.idempotencyKey.startsWith('send-later:')
-      ? await queryFirst<{ id: string; status: string; message_id: string | null; user_id: string; body: string }>(db, `SELECT id, status, message_id, user_id, body FROM send_later_messages
-        WHERE id = ? AND organization_id = ? AND conversation_id = ?`,
+      ? await queryFirst<{ id: string; status: string; message_id: string | null; author_user_id: string; body: string }>(db, `SELECT id, status, message_id, author_user_id, body FROM scheduled_guest_messages
+        WHERE id = ? AND organization_id = ? AND conversation_id = ? AND author_user_id IS NOT NULL`,
       [input.idempotencyKey.slice('send-later:'.length), input.organizationId, input.threadId])
       : null
     if (input.idempotencyKey.startsWith('send-later:')) {
       const original = await findMessageByDedupeKey(db, operationDedupeKey(input))
       if (!scheduled || !['sending', 'failed', 'needs_review', 'sent'].includes(scheduled.status)
-        || scheduled.body !== (input.body ?? '').trim() || scheduled.user_id !== (original?.author_user_id ?? input.actorUserId)
+        || scheduled.body !== (input.body ?? '').trim() || scheduled.author_user_id !== (original?.author_user_id ?? input.actorUserId)
         || (original && (original.conversation_id !== input.threadId || original.event_name !== MEMBER_REPLY_EVENT))
         || (scheduled.message_id !== null && scheduled.message_id !== original?.id)) {
         throw new Error('Reply does not match an already-started scheduled message')
@@ -695,14 +695,14 @@ export async function executeGuestThreadOperation(db: DbClient, input: ExecuteOp
       // The original entry owns the author, even when another authorized
       // member retries it. Finish the same scheduled reply after real delivery.
       const entry = await findMessageByDedupeKey(db, operationDedupeKey(input))
-      if (!entry || entry.author_user_id !== scheduled.user_id || entry.body !== scheduled.body) throw new Error('Sent scheduled reply does not match its conversation message')
+      if (!entry || entry.author_user_id !== scheduled.author_user_id || entry.body !== scheduled.body) throw new Error('Sent scheduled reply does not match its conversation message')
       if (scheduled.status !== 'sent') {
         const now = new Date().toISOString()
-        const saved = await execute(db, `UPDATE send_later_messages SET status = 'sent', reason = NULL, error_code = NULL, error_field = NULL,
+        const saved = await execute(db, `UPDATE scheduled_guest_messages SET status = 'sent', reason = NULL, error_code = NULL, error_field = NULL,
           message_id = ?, sent_at = ?, updated_at = ? WHERE id = ? AND status = ? AND (message_id IS NULL OR message_id = ?)`,
         [entry.id, now, now, scheduled.id, scheduled.status, entry.id])
         if (saved.meta.changes !== 1) {
-          const current = await queryFirst<{ status: string; message_id: string | null }>(db, 'SELECT status, message_id FROM send_later_messages WHERE id = ?', [scheduled.id])
+          const current = await queryFirst<{ status: string; message_id: string | null }>(db, 'SELECT status, message_id FROM scheduled_guest_messages WHERE id = ?', [scheduled.id])
           if (current?.status !== 'sent' || current.message_id !== entry.id) throw new Error('Scheduled reply changed before its sent outcome was recorded')
         }
       }

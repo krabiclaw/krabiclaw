@@ -150,9 +150,9 @@ export async function saveMessageTemplate(db: DbClient, env: GuestInboxPublicati
     messagingError(500, 'MESSAGE_TEMPLATE_READBACK_FAILED', 'The automatic message was saved but its value was not returned; reload before saving again', 'template')
   }
   await planTemplateMessages(db, saved, now)
-  const messages = await queryAllPages<ScheduledGuestMessageRow>(db, 'SELECT * FROM scheduled_guest_messages WHERE organization_id = ? AND template_id = ? ORDER BY id', [access.organizationId, saved.id])
+  const messages = await queryAllPages<ScheduledGuestMessageView>(db, `${SCHEDULED_MESSAGE_VIEW_SQL} WHERE m.organization_id = ? AND m.template_id = ? ORDER BY m.id`, [access.organizationId, saved.id])
   try {
-    for (const message of messages) await publishScheduledGuestMessageChange(db, env, message)
+    for (const message of messages) await publishScheduledGuestMessageChange(db, env, message.resolved_conversation_id)
   } catch (cause) {
     throw new HTTPError({ statusCode: 503, message: 'The automatic message was saved, but open apps could not be updated. Reload before editing it again.',
       data: { code: 'DASHBOARD_PUBLICATION_FAILED', field: 'realtime', committed: true, template_id: saved.id, version: saved.version }, cause })
@@ -169,15 +169,19 @@ export async function deleteMessageTemplate(db: DbClient, env: GuestInboxPublica
     query: `UPDATE scheduled_guest_messages SET status = CASE WHEN status = 'pending' THEN 'cancelled' ELSE status END,
       reason = CASE WHEN status = 'pending' THEN 'The automatic message was deleted.' ELSE reason END,
       template_id = NULL, updated_at = ? WHERE organization_id = ? AND template_id = ?
-      AND EXISTS (SELECT 1 FROM message_templates WHERE id = ? AND organization_id = ? AND version = ?) RETURNING organization_id, product_id, booking_id, updated_at`,
+      AND EXISTS (SELECT 1 FROM message_templates WHERE id = ? AND organization_id = ? AND version = ?) RETURNING id`,
     params: [now, access.organizationId, templateId, templateId, access.organizationId, current.version],
   }, {
     query: 'DELETE FROM message_templates WHERE organization_id = ? AND id = ? AND version = ?', params: [access.organizationId, templateId, current.version],
   }, organizationEventQuery({ organizationId: access.organizationId, actorId: access.actorId, eventType: 'message_template.deleted', entityType: 'message_template', entityId: templateId, onlyIfPreviousChangedOneRow: true })], { operation: 'Delete message template' })
   if (results[1]?.meta.changes !== 1) messagingError(409, 'MESSAGE_TEMPLATE_VERSION_CONFLICT', 'This automatic message changed; reload it before deleting', 'expectedVersion')
-  const messages = results[0]?.results as Array<Pick<ScheduledGuestMessageRow, 'organization_id' | 'product_id' | 'booking_id' | 'updated_at'>>
+  const messages = results[0]?.results as Array<Pick<ScheduledGuestMessageRow, 'id'>>
   try {
-    for (const message of messages) await publishScheduledGuestMessageChange(db, env, message)
+    for (const { id } of messages) {
+      const message = await queryFirst<ScheduledGuestMessageView>(db, `${SCHEDULED_MESSAGE_VIEW_SQL} WHERE m.organization_id = ? AND m.id = ?`, [access.organizationId, id])
+      if (!message) messagingError(500, 'SCHEDULED_MESSAGE_NOT_FOUND', 'The saved scheduled message could not be read', 'messageId')
+      await publishScheduledGuestMessageChange(db, env, message.resolved_conversation_id)
+    }
   } catch (cause) {
     throw new HTTPError({ statusCode: 503, message: 'The automatic message was deleted, but open apps could not be updated. Reload to see its saved status.',
       data: { code: 'DASHBOARD_PUBLICATION_FAILED', field: 'realtime', committed: true, template_id: templateId }, cause })
@@ -217,17 +221,24 @@ async function conversationRecord(db: DbClient, organizationId: string, conversa
     phone: record.phone, partySize: record.party_size, timezone: record.timezone, starts: local(window.start), ends: local(window.end), noShow: record.no_show_at !== null }
 }
 
+/**
+ * One outbox row. author_user_id NULL is an automatic message about its booking
+ * (product, booking, title, version and timezone are set); author_user_id set is
+ * a member's own send-later reply in its conversation (they are all null).
+ */
 export interface ScheduledGuestMessageRow {
   id: string
   organization_id: string
-  product_id: string
-  booking_id: string
+  product_id: string | null
+  booking_id: string | null
+  conversation_id: string | null
+  author_user_id: string | null
   template_id: string | null
-  template_title: string
-  template_version: number
+  template_title: string | null
+  template_version: number | null
   body: string
   due_at: string | null
-  timezone: string
+  timezone: string | null
   status: 'pending' | 'sending' | 'sent' | 'failed' | 'needs_review' | 'cancelled' | 'skipped'
   reason: string | null
   error_code: string | null
@@ -239,47 +250,62 @@ export interface ScheduledGuestMessageRow {
   updated_at: string
 }
 
-/** A scheduled message as read, with the guest conversation of its booking it is sent in. */
-const SCHEDULED_MESSAGE_VIEW_SQL = "SELECT m.*, (SELECT c.id FROM conversations c WHERE c.organization_id = m.organization_id AND c.booking_id = m.booking_id AND c.kind = 'booking') AS conversation_id FROM scheduled_guest_messages m"
+// Automatic messages inherit their booking's guest conversation. Replies are
+// addressed to a conversation directly, including inquiries without a booking.
+export const SCHEDULED_MESSAGE_CONVERSATION_SQL = "COALESCE(m.conversation_id, (SELECT c.id FROM conversations c WHERE c.organization_id = m.organization_id AND c.booking_id = m.booking_id AND c.kind = 'booking'))"
+export const SCHEDULED_MESSAGE_VIEW_SQL = `SELECT m.*, ${SCHEDULED_MESSAGE_CONVERSATION_SQL} AS resolved_conversation_id FROM scheduled_guest_messages m`
+export type ScheduledGuestMessageView = ScheduledGuestMessageRow & { resolved_conversation_id: string | null }
 
-export function scheduledGuestMessage(row: ScheduledGuestMessageRow & { conversation_id: string | null }) {
-  if (!row.template_title.trim() || !row.body.trim()) messagingError(500, 'INVALID_SCHEDULED_MESSAGE', 'The scheduled message has no title or text', 'body')
+export function scheduledGuestMessage(row: ScheduledGuestMessageView) {
+  if (!row.body.trim()) messagingError(500, 'INVALID_SCHEDULED_MESSAGE', 'The scheduled message has no text', 'body')
+  if (row.author_user_id === null && (!row.template_title?.trim() || row.booking_id === null || row.timezone === null)) messagingError(500, 'INVALID_SCHEDULED_MESSAGE', 'The automatic message has no title, booking or timezone', 'title')
+  if (row.author_user_id !== null && row.conversation_id === null) messagingError(500, 'INVALID_SCHEDULED_MESSAGE', 'The scheduled reply has no conversation', 'conversationId')
   timestamp(row.created_at, 'createdAt'); timestamp(row.updated_at, 'updatedAt')
   for (const [field, value] of [['dueAt', row.due_at], ['startedAt', row.started_at], ['sentAt', row.sent_at]] as const) if (value !== null) timestamp(value, field)
   if (row.due_at === null && row.status !== 'failed' && row.status !== 'skipped') messagingError(500, 'INVALID_SCHEDULED_MESSAGE', 'The scheduled message has no due time', 'dueAt')
   if ((row.status === 'failed' || row.status === 'needs_review') && (!row.reason?.trim() || !row.error_code?.trim() || !row.error_field?.trim())) messagingError(500, 'INVALID_SCHEDULED_MESSAGE', 'The failed message has incomplete error context', 'errorCode')
   if (row.status === 'sent' && (row.sent_at === null || row.message_id === null)) messagingError(500, 'INVALID_SCHEDULED_MESSAGE', 'The sent message has no message or send time', 'messageId')
-  return { id: row.id, organizationId: row.organization_id, productId: row.product_id, bookingId: row.booking_id, conversationId: row.conversation_id,
+  return { id: row.id, organizationId: row.organization_id, productId: row.product_id, bookingId: row.booking_id, conversationId: row.resolved_conversation_id, authorUserId: row.author_user_id,
     templateId: row.template_id, title: row.template_title, templateVersion: row.template_version, body: row.body, dueAt: row.due_at,
     timezone: row.timezone, status: row.status, reason: row.reason, errorCode: row.error_code, errorField: row.error_field,
     messageId: row.message_id, startedAt: row.started_at, sentAt: row.sent_at, createdAt: row.created_at, updatedAt: row.updated_at }
 }
 
-/** Scheduled messages are guest correspondence: managers read them, for every kind of booking. */
+/** The outbox rows a member may see: automatic messages for managers, and their own send-later replies. */
+export function visibleScheduledMessagesSql(alias: string, access: StayAccess): { query: string; params: [number, string] } {
+  return { query: `((${alias}.author_user_id IS NULL AND ? = 1) OR ${alias}.author_user_id = ?)`, params: [access.manage ? 1 : 0, access.actorId] }
+}
+
+/** The outbox, newest first: every automatic message for managers, and each member's own send-later replies. */
 export async function listScheduledGuestMessages(db: DbClient, access: StayAccess, query: MessageListQuery, conversationId: string | null) {
-  if (!access.manage) messagingError(403, 'MESSAGING_ROLE_REQUIRED', 'Only workspace managers can read scheduled guest messages', 'permissions.operations.update')
   if (conversationId !== null && !await getGuestRequest(db, conversationId, access.organizationId)) {
     messagingError(404, 'THREAD_NOT_FOUND', 'This conversation is not in the workspace', 'conversationId')
   }
-  const rows = await queryAll<ScheduledGuestMessageRow & { conversation_id: string | null }>(db, `${SCHEDULED_MESSAGE_VIEW_SQL}
-    WHERE m.organization_id = ? ${conversationId === null ? '' : "AND m.booking_id = (SELECT c.booking_id FROM conversations c WHERE c.organization_id = m.organization_id AND c.id = ? AND c.kind = 'booking')"}
+  const visible = visibleScheduledMessagesSql('m', access)
+  const rows = await queryAll<ScheduledGuestMessageView>(db, `${SCHEDULED_MESSAGE_VIEW_SQL}
+    WHERE m.organization_id = ? AND ${visible.query} ${conversationId === null ? '' : 'AND resolved_conversation_id = ?'}
     ORDER BY m.created_at DESC, m.id DESC LIMIT ? OFFSET ?`,
-  [access.organizationId, ...(conversationId === null ? [] : [conversationId]), query.limit + 1, query.offset])
+  [access.organizationId, ...visible.params, ...(conversationId === null ? [] : [conversationId]), query.limit + 1, query.offset])
   const page = messageListPage(rows.map(scheduledGuestMessage), query)
   return { messages: page.items, pagination: page.pagination }
 }
 
+/** Cancel one pending outbox message: an automatic one by a manager, a send-later reply by its author only. */
 export async function cancelScheduledGuestMessage(db: DbClient, env: GuestInboxPublicationEnv, access: StayAccess, messageId: string, now = new Date().toISOString()) {
-  manager(access)
-  const results = await executeBatch(db, [{ query: "UPDATE scheduled_guest_messages SET status = 'cancelled', reason = 'Cancelled by a workspace manager.', updated_at = ? WHERE id = ? AND organization_id = ? AND status = 'pending'", params: [now, messageId, access.organizationId] },
+  const found = await queryFirst<Pick<ScheduledGuestMessageRow, 'author_user_id'>>(db, 'SELECT author_user_id FROM scheduled_guest_messages WHERE organization_id = ? AND id = ?', [access.organizationId, messageId])
+  // Another member's reply is not theirs to see: it is not found, as an absent one is.
+  if (!found || (found.author_user_id !== null && found.author_user_id !== access.actorId)) messagingError(404, 'SCHEDULED_MESSAGE_NOT_FOUND', 'This scheduled message does not exist or is not yours', 'messageId')
+  if (found.author_user_id === null) manager(access)
+  const reason = found.author_user_id === null ? 'Cancelled by a workspace manager.' : 'Cancelled by its author.'
+  const results = await executeBatch(db, [{ query: `UPDATE scheduled_guest_messages SET status = 'cancelled', reason = ?, updated_at = ? WHERE id = ? AND organization_id = ? AND author_user_id IS ? AND status = 'pending'`, params: [reason, now, messageId, access.organizationId, found.author_user_id] },
     organizationEventQuery({ organizationId: access.organizationId, actorId: access.actorId, eventType: 'scheduled_message.cancelled', entityType: 'scheduled_guest_message', entityId: messageId, onlyIfPreviousChangedOneRow: true })], { operation: 'Cancel scheduled message' })
-  const current = await queryFirst<ScheduledGuestMessageRow & { conversation_id: string | null }>(db, `${SCHEDULED_MESSAGE_VIEW_SQL} WHERE m.organization_id = ? AND m.id = ?`, [access.organizationId, messageId])
+  const current = await queryFirst<ScheduledGuestMessageView>(db, `${SCHEDULED_MESSAGE_VIEW_SQL} WHERE m.organization_id = ? AND m.id = ?`, [access.organizationId, messageId])
   if (!current) messagingError(404, 'SCHEDULED_MESSAGE_NOT_FOUND', 'This scheduled message is not in the workspace', 'messageId')
   if (results[0]?.meta.changes !== 1) messagingError(409, 'SCHEDULED_MESSAGE_NOT_PENDING', `The message is ${current.status}; only a pending message can be cancelled`, 'status')
   try {
-    await publishScheduledGuestMessageChange(db, env, current)
+    await publishScheduledGuestMessageChange(db, env, current.resolved_conversation_id)
   } catch (cause) {
-    throw new HTTPError({ statusCode: 503, message: 'The automatic message was cancelled, but open apps could not be updated. Reload to see its saved status.',
+    throw new HTTPError({ statusCode: 503, message: 'The scheduled message was cancelled, but open apps could not be updated. Reload to see its saved status.',
       data: { code: 'DASHBOARD_PUBLICATION_FAILED', field: 'realtime', committed: true, message_id: current.id }, cause })
   }
   return scheduledGuestMessage(current)

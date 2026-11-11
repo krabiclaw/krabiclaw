@@ -52,10 +52,8 @@ for (const [concept, cell, module] of concepts) {
     if (!existsSync(join(root, path)) && !existsSync(join(root, `${path}.ts`))) failures.push(`"${concept}" names module ${path}, which does not exist`)
   }
 }
-const retiring = new Map(section('Retiring').flatMap(([cell, concept]) => names(cell).map(table => [table, concept])))
 for (const table of tables.keys()) {
-  if (retiring.has(table)) failures.push(`${table} is a second model of "${retiring.get(table)}" and must be removed`)
-  else if (!conceptOf.has(table)) failures.push(`${table} is in server/db/schema.ts but names no concept in docs/domain-model.md`)
+  if (!conceptOf.has(table)) failures.push(`${table} is in server/db/schema.ts but names no concept in docs/domain-model.md`)
 }
 for (const table of conceptOf.keys()) if (!tables.has(table)) failures.push(`docs/domain-model.md lists ${table}, which is not in server/db/schema.ts`)
 
@@ -82,7 +80,7 @@ for (const path of sources(join(root, 'server'))) {
     const read = statement.split(/UNION ALL/i).map(branch => branch.match(/\bFROM\s+([A-Za-z_]+)/i)?.[1]).filter(table => table && tables.has(table))
     const byConcept = new Map()
     for (const table of read) {
-      const concept = conceptOf.get(table) ?? retiring.get(table)
+      const concept = conceptOf.get(table)
       if (concept) byConcept.set(concept, new Set([...(byConcept.get(concept) ?? []), table]))
     }
     for (const [concept, set] of byConcept) {

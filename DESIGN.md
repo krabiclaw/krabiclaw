@@ -345,7 +345,7 @@ pane and Back, including on reload and deep links.
 | Organization member | that member's public profile and independently authored availability in the named organization |
 | Organization | the shared site: brand, domains, languages, connections |
 | User | account name, avatar, personal preferences and security |
-| Guest messaging | organization automatic messages and their schedules for homes, experiences, consultations and table reservations at `O/messages/automatic`; immutable delivery snapshots at `O/messages/scheduled` or a conversation's `scheduled` child; each member's own send-later replies |
+| Guest messaging | organization automatic messages and their schedules for homes, experiences, consultations and table reservations at `O/messages/automatic`; the one outbox at `O/messages/scheduled`: immutable automatic delivery snapshots for managers and each member's own send-later replies |
 
 Automatic messages use the canonical message-template operations: Message edits
 its name and text, When it is sent edits its trigger, day or hours, local time
@@ -355,7 +355,7 @@ schedule. The one editor serves every vertical. Managers create, change and dele
 Every confirmed stay is also sent its home's check-in instructions by the server;
 that message has no template. In a conversation, "+" adds to the message
 (photos, or Send later), and the conversation's "⋯" holds Messaging settings:
-the person's own Suggested replies switch and their pending Send later replies.
+the person's own Suggested replies switch and the outbox (Sent and upcoming), where their Send later replies are.
 A suggested reply is the composer's placeholder until Use or Tab puts it in the
 field. Scheduled-message history reads the canonical snapshots and reasons;
 managers may cancel pending messages. Neither editor introduces a second sending or scheduling lifecycle.

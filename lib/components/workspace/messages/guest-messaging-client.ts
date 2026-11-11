@@ -34,12 +34,17 @@ function isPagination(value: unknown): boolean {
 export function isMessageTemplatePage(value: unknown): value is MessageTemplatePage {
   return isRecord(value) && isPagination(value.pagination) && Array.isArray(value.templates) && value.templates.every(isMessageTemplate)
 }
+/** An outbox row: an automatic message about a booking, or a member's own send-later reply in a conversation. */
 export function isScheduledMessage(value: unknown): value is ScheduledMessage {
-  return isRecord(value) && ['id', 'organizationId', 'title', 'body'].every(key => typeof value[key] === 'string' && Boolean(value[key]))
-    && typeof value.productId === 'string' && Boolean(value.productId) && typeof value.bookingId === 'string' && Boolean(value.bookingId)
+  const text = (field: unknown) => typeof field === 'string' && Boolean(field)
+  if (!isRecord(value) || !['id', 'organizationId', 'body'].every(key => text(value[key]))) return false
+  const automatic = value.authorUserId === null
+    ? text(value.title) && text(value.productId) && text(value.bookingId) && Number.isSafeInteger(value.templateVersion) && typeof value.timezone === 'string' && isValidTimezone(value.timezone)
+    : text(value.authorUserId) && text(value.conversationId) && value.title === null && value.productId === null && value.bookingId === null && value.templateId === null && value.templateVersion === null && value.timezone === null
+  return automatic
     && ['pending', 'sending', 'sent', 'failed', 'needs_review', 'cancelled', 'skipped'].includes(String(value.status))
     && (value.conversationId === null || typeof value.conversationId === 'string') && (value.templateId === null || typeof value.templateId === 'string')
-    && (value.dueAt === null || isValidInstant(value.dueAt)) && typeof value.timezone === 'string' && isValidTimezone(value.timezone)
+    && (value.dueAt === null || isValidInstant(value.dueAt))
     && ['reason', 'errorCode', 'errorField', 'messageId', 'startedAt', 'sentAt'].every(key => value[key] === null || typeof value[key] === 'string')
     && isValidInstant(value.createdAt) && isValidInstant(value.updatedAt)
 }
@@ -75,13 +80,7 @@ export function messageScheduleLabel(schedule: GuestMessageSchedule, vertical: s
   return `${schedule.offsetDays ? count(schedule.offsetDays, 'day') : schedule.trigger === 'check_in' ? words.checkInDay : words.checkOutDay} at ${schedule.localTime} · ${words.zone}`
 }
 
-export type SendLaterMessage = ReturnType<typeof import('~/server/domain/send-later').sendLaterMessage>
-function isSendLaterMessage(value: unknown): value is SendLaterMessage {
-  return isRecord(value) && typeof value.id === 'string' && typeof value.threadId === 'string' && typeof value.body === 'string'
-    && isValidInstant(value.sendAt) && typeof value.status === 'string' && Number.isSafeInteger(value.version)
-}
-export function isSendLaterResponse(value: unknown): value is { message: SendLaterMessage } { return isRecord(value) && isSendLaterMessage(value.message) }
-export function isSendLaterList(value: unknown): value is { messages: SendLaterMessage[] } { return isRecord(value) && Array.isArray(value.messages) && value.messages.every(isSendLaterMessage) }
+export function isScheduledMessageResponse(value: unknown): value is { message: ScheduledMessage } { return isRecord(value) && isScheduledMessage(value.message) }
 export function isSuggestedReplies(value: unknown): value is { generationId: string; suggestions: string[] } { return isRecord(value) && typeof value.generationId === 'string' && Boolean(value.generationId) && Array.isArray(value.suggestions) && value.suggestions.length > 0 && value.suggestions.length <= 3 && value.suggestions.every(item => typeof item === 'string' && Boolean(item.trim())) }
 
 /** Suggested replies are each person's choice for one workspace in this browser; on until turned off. */

@@ -35,7 +35,7 @@ extend that model. Never add a second one beside it.
 | Audit log (who changed what in an organization) | `activity_entries` | server/utils/organization-events.ts | KrabiClaw |
 | Delivery of a message, an audited event or a task to a person (email, WhatsApp, Airbnb, push) | `guest_thread_deliveries` | server/domain/guest-threads/deliveries.ts | KrabiClaw |
 | Guest message template | `message_templates` | server/domain/scheduled-guest-messages.ts | KrabiClaw |
-| Future guest message | `scheduled_guest_messages` | server/domain/scheduled-guest-messages.ts | KrabiClaw |
+| Future guest message, one outbox (a booking's automatic messages and a member's own send-later replies, one status machine) | `scheduled_guest_messages` | server/domain/scheduled-guest-messages.ts | KrabiClaw |
 | Reported content | `content_reports` | server/domain/content-reports.ts | KrabiClaw |
 | Work and suggestions | `tasks` `opportunities` `organization_goals` | server/domain/tasks.ts | KrabiClaw |
 | Provider working hours | `member_scheduling` | server/domain/member-scheduling.ts | KrabiClaw |
@@ -58,14 +58,6 @@ extend that model. Never add a second one beside it.
 | Analytics | `analytics_events` `analytics_summaries` | server/utils/analytics-report.ts | KrabiClaw |
 | MCP tool audit | `mcp_tool_call_events` | server/utils/mcp-protocol.ts | KrabiClaw |
 | Metered usage | `usage_events` | server/utils/usage-metering.ts | Stripe meters |
-
-## Retiring
-
-Each of these tables is a second model of a concept above. The check fails until it is gone.
-
-| Table | Concept it duplicates |
-|---|---|
-| `send_later_messages` | Future guest message |
 
 ## Single-owner columns
 

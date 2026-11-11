@@ -19,7 +19,6 @@ export type ScheduledTaskName =
   | 'marketing-ad-spend-daily'
   | 'channex-revision-feed'
   | 'scheduled-guest-messages'
-  | 'send-later-messages'
   | 'stay-checkout-holds'
   | 'stay-calendar-links'
   | 'airbnb-sync'
@@ -31,8 +30,8 @@ type TaskLoader = () => Promise<{ default: ScheduledTaskDefinition }>
 
 /** The single source of truth for cron-to-task dispatch in Nitro's scheduled hook. */
 export const SCHEDULED_TASKS: Readonly<Record<string, readonly ScheduledTaskName[]>> = {
-  '*/5 * * * *': ['google-calendar-sync', 'scheduled-guest-messages', 'stay-checkout-holds', 'stay-calendar-links'],
-  '*/2 * * * *': ['public-resource-cache-invalidation', 'airbnb-sync', 'channex-ari-delivery', 'send-later-messages'],
+  '*/5 * * * *': ['google-calendar-sync', 'stay-checkout-holds', 'stay-calendar-links'],
+  '*/2 * * * *': ['public-resource-cache-invalidation', 'airbnb-sync', 'channex-ari-delivery', 'scheduled-guest-messages'],
   '*/10 * * * *': ['domain-reconciliation', 'channex-revision-feed'],
   '0 3 * * *': ['reply-task-expiry', 'jobs-wake-daily', 'analytics-aggregate-daily', 'stripe-ga4-intent-retention', 'stripe-fee-report-request', 'marketing-ad-spend-daily'],
   '0 0 * * SUN': ['google-places-sync'],
@@ -47,7 +46,6 @@ const TASK_LOADERS: Readonly<Record<ScheduledTaskName, TaskLoader>> = {
   'google-calendar-sync': async () => import('./tasks/google-calendar-sync'),
   'channex-revision-feed': async () => import('./tasks/channex-revision-feed'),
   'scheduled-guest-messages': async () => import('./tasks/scheduled-guest-messages'),
-  'send-later-messages': async () => import('./tasks/send-later-messages'),
   'stay-checkout-holds': async () => import('./tasks/stay-checkout-holds'),
   'stay-calendar-links': async () => import('./tasks/stay-calendar-links'),
   'airbnb-sync': async () => import('./tasks/airbnb-sync'),

@@ -794,8 +794,6 @@ export const EXPECTED_TOOL_ANNOTATIONS = {
   list_scheduled_guest_messages: R,
   cancel_scheduled_guest_message: D,
   schedule_guest_reply: { ...D, openWorldHint: true },
-  list_scheduled_replies: R,
-  cancel_scheduled_reply: D,
   append_content_block: { ...W, openWorldHint: true },
   attach_media: { ...W, openWorldHint: true, idempotentHint: true },
   update_menu: { ...D, openWorldHint: true, idempotentHint: true },
