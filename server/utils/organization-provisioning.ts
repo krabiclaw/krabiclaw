@@ -18,7 +18,7 @@ import { platformOperatorEmails } from '~/server/utils/domain-notifications'
 import { getPlatformDomain } from '~/server/utils/dashboard-notification-links'
 import { hashEmail, sendEmail } from '~/server/utils/email-delivery'
 import { renderNotificationEmail } from '~/server/emails/render'
-import { onboardingCompletedMessage } from '~/server/notifications/events'
+import { onboardingCompletedMessage, ownerWelcomeMessage } from '~/server/notifications/events'
 import { HTTPError } from 'nitro'
 import { isAPIError } from 'better-auth/api'
 import { isRecord } from '~/utils/api-clients'
@@ -191,15 +191,19 @@ export async function activateOrganization(db: D1Database, organizationId: strin
  * the activation that already committed; each outcome is reported.
  */
 export async function completeOnboarding(env: SetupEnv, db: D1Database, organizationId: string, origin: { headers: Headers } | null) {
-  const [measurement, operatorEmail] = await Promise.allSettled([
+  const [measurement, operatorEmail, ownerWelcomeEmail] = await Promise.allSettled([
     recordOnboardingComplete(env, db, organizationId, origin),
     emailOperatorOnboardingComplete(env, db, organizationId),
+    emailOwnerWelcome(env, db, organizationId),
   ])
   return {
     measurement: measurementOutcome(measurement),
     operator_email: operatorEmail.status === 'fulfilled'
       ? { status: 'sent' as const }
       : { status: 'failed' as const, reason: operatorEmail.reason instanceof Error ? operatorEmail.reason.message : String(operatorEmail.reason) },
+    owner_welcome_email: ownerWelcomeEmail.status === 'fulfilled'
+      ? { status: 'sent' as const }
+      : { status: 'failed' as const, reason: ownerWelcomeEmail.reason instanceof Error ? ownerWelcomeEmail.reason.message : String(ownerWelcomeEmail.reason) },
   }
 }
 
@@ -252,6 +256,45 @@ async function emailOperatorOnboardingComplete(env: SetupEnv, db: D1Database, or
   })))
   const failures = results.flatMap(result => result.status === 'sent' ? [] : [result.error])
   if (failures.length) throw new Error(`Operator onboarding email failed: ${failures.join('; ')}`)
+}
+
+/** Email a personal founder welcome to the business owner; the provider suppresses retries within its key retention window. */
+async function emailOwnerWelcome(env: SetupEnv, db: D1Database, organizationId: string): Promise<void> {
+  const platformOrganizationId = (await getPlatformOrganization(db)).id
+  if (organizationId === platformOrganizationId) return
+
+  const ownerId = await originatingOwnerId(db, platformOrganizationId, organizationId)
+  if (!ownerId) throw new Error(`Organization ${organizationId} has no owner`)
+  const [business, owner, siteUrl] = await Promise.all([
+    queryFirst<{ name: string; slug: string; vertical: string | null }>(db, 'SELECT name, slug, vertical FROM organization WHERE id = ?', [organizationId]),
+    queryFirst<{ name: string; email: string }>(db, 'SELECT name, email FROM user WHERE id = ?', [ownerId]),
+    organizationPublicUrl(env, db, organizationId),
+  ])
+  if (!business || !owner) throw new Error(`Welcome email for ${organizationId} is missing its business or owner`)
+  if (!siteUrl) throw new Error(`Organization ${organizationId} has no active site address`)
+
+  const platformDomain = getPlatformDomain(env)
+  const dashboardUrl = `https://${platformDomain}/dashboard/${business.slug}`
+  const message = ownerWelcomeMessage({
+    organizationName: business.name,
+    ownerName: owner.name,
+    siteUrl,
+    dashboardUrl,
+    vertical: business.vertical,
+  })
+  const email = await renderNotificationEmail(message, { platformDomain })
+
+  const result = await sendEmail(env, {
+    to: owner.email,
+    fromName: 'Paul at KrabiClaw',
+    replyTo: 'hello@krabiclaw.com',
+    subject: message.title,
+    ...email,
+    idempotencyKey: `onboarding-welcome:${organizationId}:${hashEmail(owner.email)}`,
+  })
+  if (result.status !== 'sent') {
+    throw new Error(`Owner welcome email failed: ${result.error}`)
+  }
 }
 
 // The draft identifies one native organization across interrupted requests.
