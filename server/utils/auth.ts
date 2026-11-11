@@ -438,7 +438,7 @@ function buildAuth(env: CloudflareEnv) {
     await notifications.notifySubscriptionPlan(env, db, input)
   }
   const planStarted = async ({ event, subscription }: { event: Stripe.Event; subscription: StripeSubscription }) => {
-    await notifyPlan({ kind: 'started', eventId: event.id, organizationId: subscription.referenceId, plan: subscription.plan, date: subscription.status === 'trialing' ? subscription.trialEnd : null })
+    await notifyPlan({ kind: 'started', eventId: event.id, organizationId: subscription.referenceId, subscriptionId: subscription.stripeSubscriptionId, plan: subscription.plan, date: subscription.status === 'trialing' ? subscription.trialEnd : null })
   }
 
   const instance = betterAuth({
@@ -771,10 +771,10 @@ function buildAuth(env: CloudflareEnv) {
             const previous = (await loadStripePlans()).find(plan => before.some(item => item.price.id === plan.priceId))
             if (!previous) throw new Error(`Stripe subscription event ${event.id} names no configured plan before the change`)
             if (previous.name === subscription.plan) return
-            await notifyPlan({ kind: 'changed', eventId: event.id, organizationId: subscription.referenceId, plan: subscription.plan, previousPlan: previous.name })
+            await notifyPlan({ kind: 'changed', eventId: event.id, organizationId: subscription.referenceId, subscriptionId: subscription.stripeSubscriptionId, plan: subscription.plan, previousPlan: previous.name })
           },
           onSubscriptionCancel: async ({ event, subscription }) => {
-            await notifyPlan({ kind: 'ending', eventId: event.id, organizationId: subscription.referenceId, plan: subscription.plan, date: subscription.cancelAt ?? subscription.periodEnd })
+            await notifyPlan({ kind: 'ending', eventId: event.id, organizationId: subscription.referenceId, subscriptionId: subscription.stripeSubscriptionId, plan: subscription.plan, date: subscription.cancelAt ?? subscription.periodEnd })
           },
         },
         // The plugin's own /api/auth/stripe/webhook handlers own the

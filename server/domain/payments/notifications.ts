@@ -138,6 +138,8 @@ export async function notifySubscriptionPlan(env: CloudflareEnv, db: DbClient, i
   kind: 'started' | 'changed' | 'ending'
   eventId: string
   organizationId: string
+  /** The Stripe subscription the event is about: the audit row its sends are recorded on names it. */
+  subscriptionId: string | undefined
   plan: string
   previousPlan?: string
   /** When a new plan's free trial ends, or when a plan that will not renew ends. */
@@ -145,6 +147,7 @@ export async function notifySubscriptionPlan(env: CloudflareEnv, db: DbClient, i
 }) {
   const organization = await queryFirst<{ name: string; slug: string }>(db, 'SELECT name,slug FROM organization WHERE id=?', [input.organizationId])
   if (!organization) throw new Error(`Subscription notification has no organization ${input.organizationId}`)
+  if (!input.subscriptionId) throw new Error(`Subscription event ${input.eventId} names no Stripe subscription`)
   const name = (plan: string) => plan.charAt(0).toUpperCase() + plan.slice(1)
   const action = { url: `${dashboardOrigin(env, { orgSlug: organization.slug, locationSlug: null })}/billing`, label: 'Open Plan and billing' }
   const message = subscriptionPlanMessage({
@@ -160,6 +163,7 @@ export async function notifySubscriptionPlan(env: CloudflareEnv, db: DbClient, i
     title: message.title,
     payload: { deep_link: action.url },
     message,
+    entity: { type: 'subscription', id: input.subscriptionId },
     idempotencyKey: `${eventKey}:owner`,
     deliveryEventKey: `${eventKey}:owner`,
   })
