@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:bdc338a6b144788e435e9f57b712511173cb6354de2646e5307c0801fa39af30",
-  "documentationFingerprint": "sha256:8d4932c58edbda797049b755424d1ae76d54c1e7439827225302319e8d987e54",
+  "fingerprint": "sha256:eff8862575e5c735c40e2f48fc4872f5deea84ee8451d67b43f95096561b643d",
+  "documentationFingerprint": "sha256:8a1cc6f46fe369e856313c423c2acb7b69f101a5b611351dd101dad559213a94",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -1277,6 +1277,27 @@
           "content_faq": {
             "additionalProperties": false,
             "properties": {
+              "items": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "title": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "title"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
               "source": {
                 "enum": [
                   "page_qa",
@@ -4730,6 +4751,27 @@
           "content_faq": {
             "additionalProperties": false,
             "properties": {
+              "items": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "title": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "title"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
               "source": {
                 "enum": [
                   "page_qa",
@@ -15084,6 +15126,27 @@
           "content_faq": {
             "additionalProperties": false,
             "properties": {
+              "items": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "title": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "title"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
               "source": {
                 "enum": [
                   "page_qa",
@@ -16744,6 +16807,27 @@
           "content_faq": {
             "additionalProperties": false,
             "properties": {
+              "items": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "title": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "title"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
               "source": {
                 "enum": [
                   "page_qa",
@@ -22493,6 +22577,27 @@
           "content_faq": {
             "additionalProperties": false,
             "properties": {
+              "items": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "title": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "title"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
               "source": {
                 "enum": [
                   "page_qa",
@@ -30516,6 +30621,27 @@
           "content_faq": {
             "additionalProperties": false,
             "properties": {
+              "items": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "title": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "title"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
               "source": {
                 "enum": [
                   "page_qa",
@@ -34334,6 +34460,27 @@
           "content_faq": {
             "additionalProperties": false,
             "properties": {
+              "items": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "title": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "title"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
               "source": {
                 "enum": [
                   "page_qa",
@@ -39529,6 +39676,27 @@
           "content_faq": {
             "additionalProperties": false,
             "properties": {
+              "items": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "title": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "title"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
               "source": {
                 "enum": [
                   "page_qa",
@@ -44420,6 +44588,27 @@
           "content_faq": {
             "additionalProperties": false,
             "properties": {
+              "items": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "title": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "title"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
               "source": {
                 "enum": [
                   "page_qa",
@@ -57702,6 +57891,27 @@
           "content_faq": {
             "additionalProperties": false,
             "properties": {
+              "items": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "title": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "title"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
               "source": {
                 "enum": [
                   "page_qa",
@@ -62182,6 +62392,27 @@
           "content_faq": {
             "additionalProperties": false,
             "properties": {
+              "items": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "title": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "title"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
               "source": {
                 "enum": [
                   "page_qa",
@@ -76735,6 +76966,27 @@
           "content_faq": {
             "additionalProperties": false,
             "properties": {
+              "items": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "title": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "title"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
               "source": {
                 "enum": [
                   "page_qa",
@@ -81712,6 +81964,27 @@
           "content_faq": {
             "additionalProperties": false,
             "properties": {
+              "items": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "title": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "title"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
               "source": {
                 "enum": [
                   "page_qa",
@@ -93860,6 +94133,27 @@
           "content_faq": {
             "additionalProperties": false,
             "properties": {
+              "items": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "title": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "title"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
               "source": {
                 "enum": [
                   "page_qa",
@@ -95819,6 +96113,27 @@
           "content_faq": {
             "additionalProperties": false,
             "properties": {
+              "items": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "title": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "title"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
               "source": {
                 "enum": [
                   "page_qa",
@@ -106295,6 +106610,27 @@
           "content_faq": {
             "additionalProperties": false,
             "properties": {
+              "items": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "title": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "title"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
               "source": {
                 "enum": [
                   "page_qa",
@@ -108000,6 +108336,27 @@
           "content_faq": {
             "additionalProperties": false,
             "properties": {
+              "items": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "title": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "title"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
               "source": {
                 "enum": [
                   "page_qa",
@@ -122392,6 +122749,27 @@
           "content_faq": {
             "additionalProperties": false,
             "properties": {
+              "items": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "title": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "title"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
               "source": {
                 "enum": [
                   "page_qa",
@@ -126214,6 +126592,27 @@
           "content_faq": {
             "additionalProperties": false,
             "properties": {
+              "items": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "title": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "title"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
               "source": {
                 "enum": [
                   "page_qa",
@@ -130686,7 +131085,7 @@
         "text": "Update the catalog from: <items_description> Use get_workspace_context, list_organizations and list_locations to resolve the business and explicit location. Read every relevant list_location_products and list_collections page before matching existing IDs. For a restaurant menu, use update_menu with a stable idempotency_key, the stated sections and prices. Match existing product, variant, price and collection IDs. Omitted items and order remain; use set_collection_products or reorder_collections only when the user requests a complete new order. For other products, use create_product for new entries or update_product for partial edits. Use reconcile_products only when the user requests complete replacement of the supplied entries. Ask for missing prices or booking facts. Use get_product and list_location_products to read back the result, then open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "create_product": "sha256:3b02f96ee076f54533dcec3d72ff98aff6df3508c8039b96963e44b914431a13",
+        "create_product": "sha256:86ffb6cf8f89d0fdebc97fd14a5eb7ce4b47414ea1e5616a6c1806778ceef893",
         "get_product": "sha256:93d845e22274e41fb456c2a8766df4b23d6956376f3d96f8cc066760f3eb6052",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_collections": "sha256:7eb8f62291a619df46fa146bc6142f898aac1de8bda513b7a0bf92182faff563",
@@ -130741,7 +131140,7 @@
       },
       "toolContracts": {
         "attach_media": "sha256:b6f84ecad030ec9ec81a253682c86d6f8a10dc0c3b35564c873c21bbdbace35a",
-        "create_product": "sha256:3b02f96ee076f54533dcec3d72ff98aff6df3508c8039b96963e44b914431a13",
+        "create_product": "sha256:86ffb6cf8f89d0fdebc97fd14a5eb7ce4b47414ea1e5616a6c1806778ceef893",
         "get_product": "sha256:93d845e22274e41fb456c2a8766df4b23d6956376f3d96f8cc066760f3eb6052",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
@@ -130791,14 +131190,14 @@
       },
       "toolContracts": {
         "attach_media": "sha256:b6f84ecad030ec9ec81a253682c86d6f8a10dc0c3b35564c873c21bbdbace35a",
-        "get_site_page": "sha256:4991f484621a89a5c664386fca8d24faea4ce852a275059de9ec33ba04e3ea51",
+        "get_site_page": "sha256:19e8f6df9f3d8dba2fa2a14be053e505abd0564cdf279d649db199c2afdd46d6",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_media_assets": "sha256:97b5782d44d8cf6d41886665ca3b9eb4c48d0f6bedd95989ec2f671c4a651ee7",
         "list_site_pages": "sha256:5a49aa342807192ee45d329880f2f459d1914154e9a04a43562c0ea3587879cc",
         "remove_media": "sha256:70c3ad05014d52e9ce95b1a4363d6ab8b23b0d1ffd37c31b03a3da6684d49943",
         "reorder_media": "sha256:2ba6530e10b65684d8efd9d9543c6e3a62e760a988d7a876abe7962ff0fb7e75",
         "set_media": "sha256:79e758a2b687c65350fa364dd1169fb47edc54c166f71d2c1ccee5a380a1295b",
-        "update_site_page": "sha256:1a5471900a3203b0215956f65d00b00a18459bf28b204542377bbdf93af009a1"
+        "update_site_page": "sha256:b10386a496f526b6783d6e891b3c281ac34ccb15d58d9e6ea7d9378d15ea00ce"
       }
     },
     {
@@ -130814,7 +131213,7 @@
         "get_location": "sha256:5ea35903cf5c7ae17e874fd4c1061dbfbb1b936c3550dedbb2883f74a2aaee1f",
         "get_post": "sha256:084fd73ea9efe150fe8e7812e02a80394a52477719bdab8ed3c33beae8225df8",
         "get_product": "sha256:93d845e22274e41fb456c2a8766df4b23d6956376f3d96f8cc066760f3eb6052",
-        "get_site_page": "sha256:4991f484621a89a5c664386fca8d24faea4ce852a275059de9ec33ba04e3ea51",
+        "get_site_page": "sha256:19e8f6df9f3d8dba2fa2a14be053e505abd0564cdf279d649db199c2afdd46d6",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "save_media_attachment": "sha256:dd3e83b857a53f97fa3f6a27e1788dc247133a954108a09e5f7c200b4a1e3a93",
         "set_media": "sha256:79e758a2b687c65350fa364dd1169fb47edc54c166f71d2c1ccee5a380a1295b"
@@ -130829,9 +131228,9 @@
         "text": "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft ID and revision. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Check for missing brand assets like logo, favicon, social card, palette colors, hero media, and about page story. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result."
       },
       "toolContracts": {
-        "create_product": "sha256:3b02f96ee076f54533dcec3d72ff98aff6df3508c8039b96963e44b914431a13",
+        "create_product": "sha256:86ffb6cf8f89d0fdebc97fd14a5eb7ce4b47414ea1e5616a6c1806778ceef893",
         "get_organization": "sha256:7659406922dc74826fdfd890dc16fb069dbc35c3af276860b62306848b471f06",
-        "get_site_page": "sha256:4991f484621a89a5c664386fca8d24faea4ce852a275059de9ec33ba04e3ea51",
+        "get_site_page": "sha256:19e8f6df9f3d8dba2fa2a14be053e505abd0564cdf279d649db199c2afdd46d6",
         "get_website_draft": "sha256:3fc96867bd2ccb2dbd9ece2124b0b7250cce1219a6da69d014dc81985d1bba23",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
@@ -130842,7 +131241,7 @@
         "save_website_draft": "sha256:6a7e9c21393133afa96ef5bd80d3ca08ced43fc89e669394496d8d4785ed82ab",
         "update_menu": "sha256:947551eb104f6be470aeaab3b3570d0ab9924d01450192f8ac88a77f91de7433",
         "update_organization_settings": "sha256:7191c77fc0ed6eb5ce818283be58acb26679a8cf793cbba600dccb694e8051a6",
-        "update_site_page": "sha256:1a5471900a3203b0215956f65d00b00a18459bf28b204542377bbdf93af009a1"
+        "update_site_page": "sha256:b10386a496f526b6783d6e891b3c281ac34ccb15d58d9e6ea7d9378d15ea00ce"
       }
     },
     {
@@ -130877,14 +131276,14 @@
       },
       "toolContracts": {
         "attach_media": "sha256:b6f84ecad030ec9ec81a253682c86d6f8a10dc0c3b35564c873c21bbdbace35a",
-        "get_site_page": "sha256:4991f484621a89a5c664386fca8d24faea4ce852a275059de9ec33ba04e3ea51",
+        "get_site_page": "sha256:19e8f6df9f3d8dba2fa2a14be053e505abd0564cdf279d649db199c2afdd46d6",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_media_assets": "sha256:97b5782d44d8cf6d41886665ca3b9eb4c48d0f6bedd95989ec2f671c4a651ee7",
         "list_products": "sha256:d586cfff763528e260cc3f640a44ab69c1e6a41d4cc4c28edac2d1cfee1aa837",
         "list_site_pages": "sha256:5a49aa342807192ee45d329880f2f459d1914154e9a04a43562c0ea3587879cc",
         "set_media": "sha256:79e758a2b687c65350fa364dd1169fb47edc54c166f71d2c1ccee5a380a1295b",
         "update_product": "sha256:0de2acdd8a9d3abaa374c93481ca38cf9e666320b1989ab68de06bd7e9549af3",
-        "update_site_page": "sha256:1a5471900a3203b0215956f65d00b00a18459bf28b204542377bbdf93af009a1"
+        "update_site_page": "sha256:b10386a496f526b6783d6e891b3c281ac34ccb15d58d9e6ea7d9378d15ea00ce"
       }
     },
     {

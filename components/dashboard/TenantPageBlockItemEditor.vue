@@ -91,6 +91,16 @@
       </UFormField>
     </template>
 
+    <!-- a question in an FAQ block -->
+    <template v-else-if="isFaq">
+      <UFormField label="Question" required>
+        <UInput :model-value="str('title', ['question'])" autofocus class="w-full" placeholder="e.g. What are your consultation fees?" @update:model-value="set('title', $event)" />
+      </UFormField>
+      <UFormField label="Answer">
+        <UTextarea :model-value="str('description', ['answer'])" :rows="6" autoresize class="w-full" placeholder="Write the answer here..." @update:model-value="set('description', $event)" />
+      </UFormField>
+    </template>
+
     <!-- a grid item -->
     <template v-else>
       <template v-if="field === 'copy'">
@@ -167,6 +177,7 @@ export function useTenantPageBlockRecords(organizationId: string, pageId: string
   const isShowcase = computed(() => block.value?.type === 'showcase' && collectionRef.value === 'items')
   const isLanguage = computed(() => block.value?.type === 'language_reach' && collectionRef.value === 'items')
   const isStep = computed(() => block.value?.type === 'steps' && collectionRef.value === 'items')
+  const isFaq = computed(() => block.value?.type === 'faq' && collectionRef.value === 'items')
   const localeOptions = computed(() => [...(TENANT_PAGE_BLOCK_REGISTRY.language_reach.fields.items?.of?.locale?.options ?? [])])
   // The pictures a record holds, as its block's definition declares them.
   const recordPictures = computed(() => {
@@ -175,8 +186,10 @@ export function useTenantPageBlockRecords(organizationId: string, pageId: string
   })
   const noun = computed(() => {
     const entry = TENANT_PAGE_RECORD_NOUNS[collectionRef.value]
-    const plural = isPerson.value ? 'People' : `${entry.one}s`
-    return { one: entry.one, plural, add: entry.add }
+    const plural = isPerson.value ? 'People' : isFaq.value ? 'Questions' : `${entry.one}s`
+    const one = isPerson.value ? 'Person' : isFaq.value ? 'Question' : entry.one
+    const add = isPerson.value ? 'Add a person' : isFaq.value ? 'Add a question' : entry.add
+    return { one, plural, add }
   })
   const recordSections = computed(() => (block.value ? tenantPageRecordSections(block.value.type, collectionRef.value) : []))
 
@@ -193,6 +206,7 @@ export function useTenantPageBlockRecords(organizationId: string, pageId: string
     if (collectionRef.value === 'steps') return text(item.text)
     if (collectionRef.value === 'tiers') return text(item.description)
     if (isPerson.value) return text(item.title)
+    if (isFaq.value) return text(item.description) || text(item.answer)
     return text(item.description) || text(item.summary) || text(item.body)
   }
 
@@ -265,6 +279,7 @@ export function useTenantPageBlockRecords(organizationId: string, pageId: string
     if (isShowcase.value) return { title: '' }
     if (isLanguage.value) return { title: '', locale: '' }
     if (isStep.value) return { title: '', url: '' }
+    if (isFaq.value) return { title: '', description: '' }
     return { title: '', description: '', value: '', label: '', url: '' }
   }
 
@@ -307,7 +322,7 @@ export function useTenantPageBlockRecords(organizationId: string, pageId: string
     remapMedia(order)
   }
 
-  return { block, records, record, recordTitle, noun, isPerson, isShowcase, isLanguage, isStep, localeOptions, recordPictures, recordSections, listItems, leafSummary, str, set, recordMedia, setRecordMedia, addRecord, removeRecord, move }
+  return { block, records, record, recordTitle, noun, isPerson, isShowcase, isLanguage, isStep, isFaq, localeOptions, recordPictures, recordSections, listItems, leafSummary, str, set, recordMedia, setRecordMedia, addRecord, removeRecord, move }
 }
 </script>
 
@@ -324,7 +339,7 @@ const props = defineProps<{
   field: string | null
 }>()
 
-const { record, isPerson, isShowcase, isLanguage, isStep, localeOptions, recordPictures, str, set, recordMedia, setRecordMedia } = useTenantPageBlockRecords(
+const { record, isPerson, isShowcase, isLanguage, isStep, isFaq, localeOptions, recordPictures, str, set, recordMedia, setRecordMedia } = useTenantPageBlockRecords(
   props.organizationId, props.pageId, props.blockId, props.collection, () => props.recordIndex,
 )
 </script>

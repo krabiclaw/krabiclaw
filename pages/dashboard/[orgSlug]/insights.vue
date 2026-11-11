@@ -354,7 +354,7 @@
                   <p class="text-xs font-medium text-highlighted">Private feedback</p>
                   <p class="mt-1 whitespace-pre-line text-sm text-muted">{{ entry.privateFeedback }}</p>
                 </div>
-                <NuxtLink v-if="canReadAnalytics && entry.status !== 'private'" :to="`/dashboard/${scope?.orgSlug}/website/qa/reviews/${entry.id}`" class="mt-2 inline-block text-xs font-medium text-primary hover:underline">{{ entry.status === 'pending' ? 'Review and publish' : 'Open review' }}</NuxtLink>
+                <NuxtLink v-if="canReadAnalytics && entry.status !== 'private'" :to="`/dashboard/${scope?.orgSlug}/website/reviews/${entry.id}`" class="mt-2 inline-block text-xs font-medium text-primary hover:underline">{{ entry.status === 'pending' ? 'Review and publish' : 'Open review' }}</NuxtLink>
               </article>
               <p v-if="!feedback.recent.length" class="py-4 text-center text-sm text-muted">No guest feedback in this period.</p>
             </div>

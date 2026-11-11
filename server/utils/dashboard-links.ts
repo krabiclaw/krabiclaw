@@ -155,9 +155,9 @@ export function qaEditorPath(orgSlug: string, qaId: string, locationId?: string 
   return scopedTo(`${organizationBase(orgSlug)}/website/qa/${encodeURIComponent(qaId)}`, locationId)
 }
 
-/** A review is a row of the Reviews tab beside Q&A, listed per scope, so its location rides along. */
+/** A review is a row of the Reviews destination, listed per scope, so its location rides along. */
 export function reviewEditorPath(orgSlug: string, reviewId: string, locationId?: string | null): string {
-  return scopedTo(`${organizationBase(orgSlug)}/website/qa/reviews/${encodeURIComponent(reviewId)}`, locationId)
+  return scopedTo(`${organizationBase(orgSlug)}/website/reviews/${encodeURIComponent(reviewId)}`, locationId)
 }
 
 export function locationEditorPath(orgSlug: string, locationSlug: string): string {
