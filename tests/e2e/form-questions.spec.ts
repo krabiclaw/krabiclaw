@@ -27,8 +27,7 @@ test('an owner adds an inquiry question in Website, a visitor answers it, and th
   try {
     const cms = await dashboard.newPage()
     await openTenantPage(cms, `${baseURL}/dashboard/${restaurant.slug}/website`, {})
-    await cms.getByTestId('website-booking-card').click({ timeout: 30_000 })
-    await cms.getByTestId('booking-intake-questions-link').click({ timeout: 30_000 })
+    await cms.getByRole('link', { name: /Inquiry form/ }).click({ timeout: 30_000 })
     await expect(cms).toHaveURL(new RegExp(`/dashboard/${restaurant.slug}/website/inquiry-form$`))
     await cms.getByTestId('list-editor-add').click({ timeout: 30_000 })
     await expect(cms).toHaveURL(/\/website\/inquiry-form\/new$/)
@@ -55,7 +54,9 @@ test('an owner adds an inquiry question in Website, a visitor answers it, and th
 
     // The website index previews the saved form.
     await openTenantPage(cms, `${baseURL}/dashboard/${restaurant.slug}/website`, {})
-    await expect(cms.getByRole('link', { name: /Inquiry form/ })).toContainText(`${saved.inquiry_questions.length} question`)
+    const inquiryFormRow = cms.getByTestId('editor-row-inquiry-form')
+    await expect(inquiryFormRow).toContainText('Inquiry form')
+    await expect(inquiryFormRow).toContainText(`${saved.inquiry_questions.length} question`)
 
     const guest = await browser.newPage()
     await openTenantPage(guest, `${seededSiteURL('restaurant')}/contact`, seededSiteHeaders('restaurant'))
