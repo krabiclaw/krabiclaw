@@ -2115,6 +2115,9 @@ export async function notifyTaskStarting(env: NotificationEnv, db: DbClient, inp
 
 /** Whether a task's start alert for this day already went out on some channel: its sends are keyed by task, alert and day. */
 export async function taskStartingSent(db: DbClient, taskId: string, day: string): Promise<boolean> {
-  return Boolean(await queryFirst(db, 'SELECT 1 FROM guest_thread_deliveries WHERE task_id = ? AND id GLOB ?', [taskId, `${taskId}:owner_alert:*:task_starting:${day}:*`]))
+  // D1 refuses a GLOB pattern this long, so the key's parts are matched by position.
+  const prefix = `${taskId}:owner_alert:`
+  return Boolean(await queryFirst(db, 'SELECT 1 FROM guest_thread_deliveries WHERE task_id = ? AND substr(id, 1, length(?)) = ? AND instr(id, ?) > 0',
+    [taskId, prefix, prefix, `:task_starting:${day}:`]))
 }
 

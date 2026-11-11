@@ -166,7 +166,7 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
     await runOrganizationJobs(env, db, ORG, at(day(5), '08:05'))
     await runOrganizationJobs(env, db, ORG, at(day(5), '08:06'))
     // Its sends are the task's, keyed by the day: the owner's email, once.
-    const alerts = await db.prepare('SELECT channel FROM guest_thread_deliveries WHERE task_id = ? AND id GLOB ?').bind(leeTurnover.id, `${leeTurnover.id}:owner_alert:*:task_starting:${day(5)}:*`).all<{ channel: string }>()
+    const alerts = await db.prepare('SELECT channel FROM guest_thread_deliveries WHERE task_id = ? AND substr(id, 1, length(?)) = ? AND instr(id, ?) > 0').bind(leeTurnover.id, `${leeTurnover.id}:owner_alert:`, `${leeTurnover.id}:owner_alert:`, `:task_starting:${day(5)}:`).all<{ channel: string }>()
     assert.deepEqual(alerts.results.map(row => row.channel), ['email'])
     // The cook, who had it, is told; no conversation of hosts alone is opened.
     const leeThreads = (await teamThreads(owner)).filter(item => item.stay?.id === lee.id)
@@ -206,9 +206,9 @@ test('a consultation gives its attorney jobs that follow the booking and an aler
     await db.prepare(`INSERT INTO member_scheduling(member_id, organization_id, public_name, public_approved, timezone, weekly_json, time_off_json, updated_at, updated_by) VALUES('host-member',?,'Attorney Host',1,'America/New_York','[{"weekday":0,"start":"00:00","end":"23:59"},{"weekday":1,"start":"00:00","end":"23:59"},{"weekday":2,"start":"00:00","end":"23:59"},{"weekday":3,"start":"00:00","end":"23:59"},{"weekday":4,"start":"00:00","end":"23:59"},{"weekday":5,"start":"00:00","end":"23:59"},{"weekday":6,"start":"00:00","end":"23:59"}]','[]',?,'host')`).bind(ORG,NOW).run()
     await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,unit,duration_minutes,default_capacity,confirmation_mode,held_online,scheduling_mode,assigned_member_id,online_payment_required,created_by,updated_by) VALUES('product',?,'slot',60,1,'review',1,'provider','host-member',1,'host','host')").bind(ORG).run()
     await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,timezone,starts_at,ends_at,capacity,status,created_by,updated_by) VALUES('session',?,'product','America/New_York','2099-10-01T13:00:00.000Z','2099-10-01T14:00:00.000Z',1,'scheduled','host','host')").bind(ORG).run()
-    const opening = { id: 'consult-request', kind: 'booking' as const, organization_id: ORG, location_id: null, user_id: null, review_id: null, payload: threadPayloadForGuest({ name: 'Client', email: 'client@example.test' }), created_at: NOW, updated_at: NOW }
-    await db.batch(requestInsertQueries(opening).map(write => db.prepare(write.query).bind(...write.params)))
-    const booking = await claimSessionCapacity(db, { policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1, requestId: opening.id })
+    const opening = { id: 'consult-request', kind: 'booking' as const, organization_id: ORG, location_id: null, user_id: null, payload: threadPayloadForGuest({ name: 'Client', email: 'client@example.test' }), created_at: NOW }
+    const booking = await claimSessionCapacity(db, { policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1,
+      following: bookingId => requestInsertQueries({ ...opening, booking_id: bookingId }, { query: 'SELECT 1 FROM bookings WHERE id = ?', params: [bookingId] }, { opening: 'Consultation for 1', note: null }) })
     const jobs = async () => (await db.prepare("SELECT kind, subject_type, subject_id, assigned_member_id, starts_at, status FROM tasks WHERE kind IN ('consultation_prep', 'consultation_follow_up') ORDER BY kind").all<{ kind: string; status: string }>()).results
     const recompute = () => executeBatch(db, conversationTaskQueries(opening.id, new Date().toISOString()), { operation: 'Recompute consultation jobs' })
     await db.prepare("UPDATE bookings SET status = 'confirmed', cancelled_at = NULL WHERE id = ?").bind(booking.bookingId).run()
