@@ -2,12 +2,15 @@ import { HTTPError } from 'nitro'
 import { execute, executeBatch, queryAllPages, queryFirst, type DbClient } from '~/server/db'
 import { messageDeliveryTaskQueries } from './tasks'
 import { isValidInstant } from '~/utils/timezone'
-import { guestMessageDueAt, messagingError, type ScheduleAnchor } from './guest-message-schedule'
-import { templateSchedule, type MessageTemplateRow, type ScheduledGuestMessageRow } from './guest-messaging'
-import { sendScheduledGuestReply, type OperationOutcome } from './guest-threads/operations'
+import { guestMessageDueAt, messageText, messagingError, type ScheduleAnchor } from './guest-message-schedule'
+import { scheduledGuestMessage, SCHEDULED_MESSAGE_VIEW_SQL, templateSchedule, type MessageTemplateRow, type ScheduledGuestMessageRow, type ScheduledGuestMessageView } from './guest-messaging'
+import { guestReplyDestination, operationDedupeKey, sendScheduledGuestReply, type OperationOutcome } from './guest-threads/operations'
+import { assertConversationAccess, findMessageByDedupeKey } from './conversations'
 import { publishConversationEvent, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 import { ChannexError } from '~/server/integrations/channex/client'
-import { BOOKING_RECORDS_SQL, bookedRecordGuard, bookedRecordWindow, readBookedRecord, type BookedRecord } from './requests'
+import { BOOKING_RECORDS_SQL, bookedRecordGuard, bookedRecordWindow, getGuestRequest, readBookedRecord, type BookedRecord } from './requests'
+import { memberAccessPrincipal, resolveMembership, type MemberAccessPrincipal } from '~/server/utils/member-access'
+import type { CloudflareEnv } from '~/server/utils/auth'
 
 type Plan = Pick<ScheduledGuestMessageRow, 'due_at' | 'status' | 'reason' | 'error_code' | 'error_field'>
 
@@ -17,20 +20,14 @@ function anchors(record: BookedRecord): { check_in: ScheduleAnchor; check_out: S
   return { check_in: window.start, check_out: window.end }
 }
 
-/** The guest conversation of a scheduled message's booking, or null while it has none. */
-async function bookingConversationId(db: DbClient, row: Pick<ScheduledGuestMessageRow, 'organization_id' | 'booking_id'>): Promise<string | null> {
-  return (await queryFirst<{ id: string }>(db, "SELECT id FROM conversations WHERE organization_id = ? AND booking_id = ? AND kind = 'booking'", [row.organization_id, row.booking_id]))?.id ?? null
-}
-
-/** A scheduled message is shown in its booking's conversation; a plan changing there is a change open apps must see. */
+/** A scheduled message belongs to its conversation: a send-later reply's own, or its booking's; every booking has one. */
 export async function publishScheduledGuestMessageChange(
   db: DbClient,
   env: GuestInboxPublicationEnv,
-  row: Pick<ScheduledGuestMessageRow, 'organization_id' | 'booking_id'>,
+  conversationId: string | null,
   type: 'MESSAGE_CREATE' | 'MESSAGE_UPDATE' = 'MESSAGE_UPDATE',
 ): Promise<void> {
-  const conversationId = await bookingConversationId(db, row)
-  if (conversationId === null) messagingError(500, 'INVALID_MESSAGE_BOOKING', `The scheduled message’s booking ${row.booking_id} has no conversation; open apps could not be updated`, 'bookingId')
+  if (conversationId === null) messagingError(500, 'INVALID_MESSAGE_BOOKING', 'The scheduled message has no conversation; open apps could not be updated', 'conversationId')
   await publishConversationEvent(env, db, { conversationId, type })
 }
 
@@ -232,7 +229,42 @@ async function reconcileScheduledGuestMessagePlans(db: DbClient, now: string): P
   return failures
 }
 
-type SendEnv = Parameters<typeof sendScheduledGuestReply>[1]['env'] & GuestInboxPublicationEnv
+/** A send time is a future instant, at most a year ahead. */
+function sendAt(value: unknown, now: string): string {
+  if (typeof value !== 'string' || !isValidInstant(value)) messagingError(422, 'INVALID_MESSAGING_FIELD', 'sendAt must be an ISO 8601 instant', 'sendAt')
+  const instant = new Date(value).toISOString()
+  if (instant <= now) messagingError(422, 'SEND_LATER_IN_PAST', 'Choose a time in the future', 'sendAt')
+  if (Date.parse(instant) - Date.parse(now) > 366 * 86_400_000) messagingError(422, 'SEND_LATER_TOO_FAR', 'Choose a time within the next year', 'sendAt')
+  return instant
+}
+
+/**
+ * A member's own reply, put in the outbox to go out at sendAt as their reply.
+ * Nothing is scheduled to a guest the reply could not reach.
+ */
+export async function scheduleGuestReply(db: DbClient, principal: MemberAccessPrincipal, threadId: string, value: { body: unknown; sendAt: unknown }, now = new Date().toISOString()) {
+  const body = messageText(value.body, 'body', 5000)
+  const due = sendAt(value.sendAt, now)
+  const thread = await getGuestRequest(db, threadId, principal.organizationId)
+  if (!thread) messagingError(404, 'THREAD_NOT_FOUND', 'Thread not found', 'threadId')
+  await assertConversationAccess(db, principal, thread.id)
+  const destination = await guestReplyDestination(db, thread)
+  if (destination.channel === null) messagingError(409, 'GUEST_UNREACHABLE', destination.reason, 'conversation_id')
+  const id = crypto.randomUUID()
+  await execute(db, `INSERT INTO scheduled_guest_messages (id, organization_id, conversation_id, author_user_id, body, due_at, status, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)`, [id, principal.organizationId, thread.id, principal.userId, body, due, now, now])
+  const saved = await queryFirst<ScheduledGuestMessageView>(db, `${SCHEDULED_MESSAGE_VIEW_SQL} WHERE m.organization_id = ? AND m.id = ?`, [principal.organizationId, id])
+  if (!saved) messagingError(500, 'SCHEDULED_MESSAGE_NOT_SAVED', 'The scheduled reply could not be read back', 'messageId')
+  try {
+    await publishScheduledGuestMessageChange(db, principal.env, saved.resolved_conversation_id)
+  } catch (cause) {
+    throw new HTTPError({ statusCode: 503, message: 'Your reply was scheduled, but open apps could not be updated. Reload before scheduling it again.',
+      data: { code: 'DASHBOARD_PUBLICATION_FAILED', field: 'realtime', committed: true, message_id: saved.id }, cause })
+  }
+  return scheduledGuestMessage(saved)
+}
+
+type SendEnv = CloudflareEnv & Parameters<typeof sendScheduledGuestReply>[1]['env'] & GuestInboxPublicationEnv
 type SendFailure = { status: 'failed' | 'needs_review'; reason: string; error_code: string; error_field: string }
 
 /** Every non-sent reply outcome carries its own typed facts; none is generalized here. */
@@ -249,7 +281,7 @@ function sendFailure(outcome: Exclude<OperationOutcome, { ok: true }>): SendFail
   }
 }
 
-async function finishSend(db: DbClient, env: SendEnv, row: ScheduledGuestMessageRow, values: { status: 'sent' | 'failed' | 'needs_review'; reason: string | null; error_code: string | null; error_field: string | null; message_id: string | null; sent_at: string | null }): Promise<void> {
+async function finishSend(db: DbClient, env: SendEnv, row: ScheduledGuestMessageView, values: { status: 'sent' | 'failed' | 'needs_review'; reason: string | null; error_code: string | null; error_field: string | null; message_id: string | null; sent_at: string | null }): Promise<void> {
   const now = new Date().toISOString()
   const [result] = await executeBatch(db, [{
     query: `UPDATE scheduled_guest_messages SET status = ?, reason = ?, error_code = ?, error_field = ?, message_id = ?, sent_at = ?, updated_at = ?
@@ -257,56 +289,87 @@ async function finishSend(db: DbClient, env: SendEnv, row: ScheduledGuestMessage
     params: [values.status, values.reason, values.error_code, values.error_field, values.message_id, values.sent_at, now, row.id],
   }, ...messageDeliveryTaskQueries(row.id, now)], { operation: 'Record scheduled message outcome' })
   if (result?.meta.changes !== 1) messagingError(409, 'SCHEDULED_MESSAGE_NOT_SENDING', 'The scheduled message outcome could not be recorded because it is no longer sending', 'status')
-  await publishScheduledGuestMessageChange(db, env, row, values.message_id === null ? 'MESSAGE_UPDATE' : 'MESSAGE_CREATE')
+  if (row.resolved_conversation_id !== null) await publishScheduledGuestMessageChange(db, env, row.resolved_conversation_id, values.message_id === null ? 'MESSAGE_UPDATE' : 'MESSAGE_CREATE')
+}
+
+/** The idempotency key a row is sent under: a reply's is its author's own, which Inbox Retry reuses. */
+function sendKey(row: Pick<ScheduledGuestMessageRow, 'id' | 'author_user_id'>): string {
+  return row.author_user_id === null ? `scheduled-guest-message:${row.id}` : `send-later:${row.id}`
 }
 
 /**
- * Send one due message. Its plan is refreshed first so a stay or template
- * change since planning wins; a claimed row records its outcome. An error with
- * no typed facts leaves the row visibly sending and fails the run: whether the
- * provider accepted it is unknown, so it is never resent automatically.
+ * Send one due message. An automatic message's plan is refreshed first so a
+ * booking or template change since planning wins; a send-later reply is sent
+ * as its author's own reply only while they can still reach the conversation.
+ * A claimed row records its outcome. A send that threw did not finish: it
+ * fails with its cause and its entry, and is never resent automatically,
+ * because whether the provider accepted it is unknown.
  */
-async function sendScheduledGuestMessage(db: DbClient, env: SendEnv, row: Pick<ScheduledGuestMessageRow, 'id' | 'organization_id' | 'booking_id'>, now: string): Promise<'sent' | 'failed' | 'needs_review' | 'not_due'> {
-  await planSourceMessages(db, row.organization_id, row.booking_id, now)
-  const current = await queryFirst<ScheduledGuestMessageRow>(db, 'SELECT * FROM scheduled_guest_messages WHERE id = ?', [row.id])
+async function sendScheduledGuestMessage(db: DbClient, env: SendEnv, row: Pick<ScheduledGuestMessageRow, 'id' | 'organization_id' | 'booking_id' | 'author_user_id'>, now: string): Promise<'sent' | 'failed' | 'needs_review' | 'not_due'> {
+  if (row.author_user_id === null) {
+    if (row.booking_id === null) messagingError(500, 'INVALID_SCHEDULED_MESSAGE', 'The automatic message has no booking', 'bookingId')
+    await planSourceMessages(db, row.organization_id, row.booking_id, now)
+  }
+  const current = await queryFirst<ScheduledGuestMessageView>(db, `${SCHEDULED_MESSAGE_VIEW_SQL} WHERE m.organization_id = ? AND m.id = ?`, [row.organization_id, row.id])
   if (!current || current.status !== 'pending' || current.due_at === null || current.due_at > now) return 'not_due'
   const claim = await execute(db, `UPDATE scheduled_guest_messages SET status = 'sending', started_at = ?, updated_at = ? WHERE id = ? AND status = 'pending' AND updated_at = ?`,
     [now, now, current.id, current.updated_at])
   if (claim.meta.changes !== 1) return 'not_due'
-  const conversationId = await bookingConversationId(db, current)
+  const sending = { ...current, status: 'sending' as const, started_at: now, updated_at: now }
+  const conversationId = sending.resolved_conversation_id
   if (conversationId === null) {
-    await finishSend(db, env, current, { status: 'failed', reason: 'There is no guest conversation to send through.', error_code: 'CONVERSATION_REQUIRED', error_field: 'conversationId', message_id: null, sent_at: null })
+    await finishSend(db, env, sending, { status: 'failed', reason: 'There is no guest conversation to send through.', error_code: 'CONVERSATION_REQUIRED', error_field: 'conversationId', message_id: null, sent_at: null })
     return 'failed'
   }
+  if (sending.author_user_id !== null) {
+    try {
+      const membership = await resolveMembership(env, { organizationId: sending.organization_id, userId: sending.author_user_id })
+      if (!membership) messagingError(403, 'SEND_LATER_AUTHOR_NOT_MEMBER', 'Its author is no longer a member of this workspace', 'authorUserId')
+      await assertConversationAccess(db, memberAccessPrincipal(membership, { env }), conversationId)
+    } catch (error) {
+      if (!(error instanceof HTTPError)) {
+        // Nothing was sent: the message goes back to pending for the next run, and this run fails.
+        await execute(db, `UPDATE scheduled_guest_messages SET status = 'pending', started_at = NULL, updated_at = ? WHERE id = ? AND status = 'sending'`, [new Date().toISOString(), sending.id])
+        throw error
+      }
+      await finishSend(db, env, sending, { status: 'failed', reason: error.message, error_code: 'SEND_LATER_ACCESS_REVOKED', error_field: 'authorUserId', message_id: null, sent_at: null })
+      return 'failed'
+    }
+  }
+  const idempotencyKey = sendKey(sending)
   let sent: Awaited<ReturnType<typeof sendScheduledGuestReply>>
   try {
-    sent = await sendScheduledGuestReply(db, { threadId: conversationId, organizationId: current.organization_id, body: current.body, idempotencyKey: `scheduled-guest-message:${current.id}`, env })
+    sent = await sendScheduledGuestReply(db, { threadId: conversationId, organizationId: sending.organization_id, body: sending.body, idempotencyKey,
+      ...(sending.author_user_id === null ? {} : { actorUserId: sending.author_user_id }), env })
   } catch (error) {
-    // The Channex send itself records its own outcome on the reply receipt, so a
-    // ChannexError here came from a read before anything was sent.
     const data = error instanceof HTTPError || error instanceof ChannexError ? error.data : null
-    if (!data || typeof data !== 'object' || !('code' in data) || typeof data.code !== 'string' || !('field' in data) || typeof data.field !== 'string') throw error
-    await finishSend(db, env, current, { status: 'failed', reason: (error as Error).message, error_code: data.code, error_field: data.field, message_id: null, sent_at: null })
+    const typed = data && typeof data === 'object' && 'code' in data && typeof data.code === 'string' && 'field' in data && typeof data.field === 'string' ? { code: data.code, field: data.field } : null
+    const entry = await findMessageByDedupeKey(db, operationDedupeKey({ threadId: conversationId, idempotencyKey }))
+    // A send may already have committed before its publication failed. Keep
+    // the sent outcome; the thrown error still fails the run for the caller.
+    const latest = await queryFirst<ScheduledGuestMessageRow>(db, 'SELECT * FROM scheduled_guest_messages WHERE id = ?', [sending.id])
+    if (latest?.status === 'sent' && latest.message_id === entry?.id) throw error
+    await finishSend(db, env, sending, { status: 'failed', reason: error instanceof Error ? error.message : String(error), error_code: typed?.code ?? 'SCHEDULED_MESSAGE_DELIVERY_FAILED', error_field: typed?.field ?? 'delivery', message_id: entry?.id ?? null, sent_at: null })
+    if (!typed) throw error
     return 'failed'
   }
   if (sent.outcome.ok) {
-    if (sent.messageId === null) messagingError(500, 'SCHEDULED_MESSAGE_ENTRY_REQUIRED', 'The scheduled message was sent but its message could not be read', 'messageId')
-    await finishSend(db, env, current, { status: 'sent', reason: null, error_code: null, error_field: null, message_id: sent.messageId, sent_at: new Date().toISOString() })
+    if (sent.messageId === null) messagingError(500, 'SCHEDULED_MESSAGE_ENTRY_REQUIRED', 'The scheduled message was sent but its conversation message could not be read', 'messageId')
+    // A member's reply operation records its own sent outcome, as it does for Inbox Retry.
+    if (sending.author_user_id === null) await finishSend(db, env, sending, { status: 'sent', reason: null, error_code: null, error_field: null, message_id: sent.messageId, sent_at: new Date().toISOString() })
     return 'sent'
   }
   const failure = sendFailure(sent.outcome)
-  await finishSend(db, env, current, { ...failure, message_id: sent.messageId, sent_at: null })
+  await finishSend(db, env, sending, { ...failure, message_id: sent.messageId, sent_at: null })
   return failure.status
 }
 
-/** The production cron: recover plans from persisted sources, then send what is due. */
+/** The production cron: recover automatic plans from persisted sources, then send everything due, each on its own. */
 export async function sendDueScheduledGuestMessages(db: DbClient, env: SendEnv, now = new Date().toISOString()): Promise<{ sent: number; failed: number; needs_review: number }> {
   const failures = await reconcileScheduledGuestMessagePlans(db, now)
-  const due = await queryAllPages<Pick<ScheduledGuestMessageRow, 'id' | 'organization_id' | 'booking_id'>>(db,
-    "SELECT id, organization_id, booking_id FROM scheduled_guest_messages WHERE status = 'pending' AND due_at <= ? ORDER BY due_at, id", [now])
+  const due = await queryAllPages<Pick<ScheduledGuestMessageRow, 'id' | 'organization_id' | 'booking_id' | 'author_user_id'>>(db,
+    "SELECT id, organization_id, booking_id, author_user_id FROM scheduled_guest_messages WHERE status = 'pending' AND due_at <= ? ORDER BY due_at, id", [now])
   const counts = { sent: 0, failed: 0, needs_review: 0 }
-  // Each message is sent on its own; an untyped failure leaves its row
-  // visibly sending and fails the run after every other due message is tried.
   for (const row of due) {
     try {
       const result = await sendScheduledGuestMessage(db, env, row, now)

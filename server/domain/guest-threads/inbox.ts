@@ -1,7 +1,7 @@
 import { HTTPError } from 'nitro'
 import { d1JsonStringSet, queryAll, queryFirst, type DbClient } from '~/server/db'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
-import { listSendLaterMessages } from '~/server/domain/send-later'
+import { SCHEDULED_MESSAGE_CONVERSATION_SQL, visibleScheduledMessagesSql } from '~/server/domain/guest-messaging'
 import { stayAccessFor } from '~/server/domain/stays'
 import type { MemberAccessPrincipal } from '~/server/utils/member-access'
 import { getGuestThreadDetail } from './detail'
@@ -283,21 +283,16 @@ function stream(facts: ThreadFacts, viewer: Viewer, now: Date, canReply: boolean
   return items
 }
 
-/** The thread's messages still to go out: its automatic messages, and the viewer's own send-later messages. */
-async function pendingMessages(db: DbClient, threadId: string, organizationId: string, principal: MemberAccessPrincipal, timeZone: string, now: string): Promise<InboxPendingMessage[]> {
-  const access = await stayAccessFor(principal)
-  const [automatic, later] = await Promise.all([
-    access.manage ? queryAll<{ id: string; template_title: string; body: string; due_at: string; timezone: string }>(db, `
-      SELECT m.id, m.template_title, m.body, m.due_at, m.timezone FROM scheduled_guest_messages m
-        JOIN conversations c ON c.booking_id = m.booking_id AND c.organization_id = m.organization_id AND c.kind = 'booking'
-       WHERE m.organization_id = ? AND c.id = ? AND m.status = 'pending' AND m.due_at IS NOT NULL ORDER BY m.due_at, m.id`, [organizationId, threadId]) : [],
-    listSendLaterMessages(db, principal, threadId, now),
-  ])
-  return [
-    ...automatic.map(row => ({ id: row.id, source: 'automatic' as const, label: row.template_title, sendAt: row.due_at, time: sendTime(row.due_at, row.timezone), body: row.body, cancellable: true })),
-    ...later.filter(row => row.status === 'pending' || row.status === 'sending')
-      .map(row => ({ id: row.id, source: 'later' as const, label: row.body, sendAt: row.sendAt, time: sendTime(row.sendAt, timeZone), body: row.body, cancellable: row.status === 'pending' })),
-  ].sort((a, b) => a.sendAt.localeCompare(b.sendAt))
+/** The thread's messages still to go out: its automatic messages for managers, and the viewer's own send-later replies. */
+async function pendingMessages(db: DbClient, threadId: string, organizationId: string, principal: MemberAccessPrincipal, timeZone: string): Promise<InboxPendingMessage[]> {
+  const visible = visibleScheduledMessagesSql('m', await stayAccessFor(principal))
+  const rows = await queryAll<{ id: string; author_user_id: string | null; template_title: string | null; body: string; due_at: string; timezone: string | null; status: string }>(db, `
+    SELECT m.id, m.author_user_id, m.template_title, m.body, m.due_at, m.timezone, m.status FROM scheduled_guest_messages m
+     WHERE m.organization_id = ? AND ${SCHEDULED_MESSAGE_CONVERSATION_SQL} = ? AND ${visible.query} AND m.due_at IS NOT NULL
+       AND (m.status = 'pending' OR (m.status = 'sending' AND m.author_user_id IS NOT NULL)) ORDER BY m.due_at, m.id`, [organizationId, threadId, ...visible.params])
+  return rows.map(row => row.author_user_id === null
+    ? { id: row.id, source: 'automatic' as const, label: row.template_title!, sendAt: row.due_at, time: sendTime(row.due_at, row.timezone!), body: row.body, cancellable: true }
+    : { id: row.id, source: 'later' as const, label: row.body, sendAt: row.due_at, time: sendTime(row.due_at, timeZone), body: row.body, cancellable: row.status === 'pending' })
 }
 
 async function rawThread(db: DbClient, threadId: string, organizationId: string, viewer: Viewer): Promise<GuestThreadDetailViewModel | null> {
@@ -311,7 +306,7 @@ export async function getInboxThread(db: DbClient, threadId: string, organizatio
   const facts = await threadFacts(db, raw, organizationId, now)
   const [replyComposer, pending] = await Promise.all([
     composer(db, raw.id, organizationId, viewer, facts.channel),
-    viewer.audience === 'member' ? pendingMessages(db, raw.id, organizationId, viewer.principal, facts.timeZone, now.toISOString()) : [],
+    viewer.audience === 'member' ? pendingMessages(db, raw.id, organizationId, viewer.principal, facts.timeZone) : [],
   ])
   const items = stream(facts, viewer, now, replyComposer.available)
   const record = raw.operationalRecord

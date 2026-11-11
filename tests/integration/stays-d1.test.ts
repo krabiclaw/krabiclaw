@@ -1492,7 +1492,11 @@ test('a member reads a stay at a home they look after as its turnover on every r
       () => setStayNights(db, env, cleaner, { product_id: cabin.id, from: '2026-11-10', to: '2026-11-11', closed: true }),
     ]) await assert.rejects(change(), { status: 403, data: { code: 'STAY_ROLE_REQUIRED' } })
     assert.deepEqual(await getStay(db, manager, stay.id), whole)
-    await assert.rejects(listScheduledGuestMessages(db, cleaner, { limit: 20, offset: 0 }, null), { status: 403, data: { code: 'MESSAGING_ROLE_REQUIRED', field: 'permissions.operations.update' } })
+    // The outbox shows a member only their own replies: none of the business's automatic messages the manager reads.
+    await saveMessageTemplate(db, env, manager, null, { title: 'After your stay', body: 'Thanks for staying.', schedule: { trigger: 'check_out', offsetDays: 1, localTime: '10:00', productIds: [cabin.id] } })
+    const managerOutbox = await listScheduledGuestMessages(db, manager, { limit: 20, offset: 0 }, null)
+    assert.ok(managerOutbox.messages.some(message => message.bookingId === stay.id && message.authorUserId === null))
+    assert.deepEqual((await listScheduledGuestMessages(db, cleaner, { limit: 20, offset: 0 }, null)).messages, [])
 
     // The stay's guest conversation is not the member's, and its alerts do not reach them.
     const [ownerMembership, cleanerMembership] = await Promise.all([OWNER, CLEANER].map(userId => resolveOrganizationMembership(env, { organizationId: ORG, userId })))

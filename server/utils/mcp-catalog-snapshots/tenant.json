@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:fe1461be81c2481d0eda5bc7a4849c059993645c6a3c2267127b75ec8a00e4dd",
-  "documentationFingerprint": "sha256:16c934f067fdb1a1ea8691921538b99253004697f88ff05cdfaf8ec39808e561",
+  "fingerprint": "sha256:b33f599e248711ecbfa644338537d478f69357d192c142abff1e5d991adb909f",
+  "documentationFingerprint": "sha256:0dcd6f1c79f1fa3658c037eba1800e68381eda794f8abce2bfb821d28d34f2d0",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -13469,7 +13469,7 @@
     {
       "name": "cancel_scheduled_guest_message",
       "title": "Cancel scheduled guest message",
-      "description": "Cancel one pending automatic guest message. A message already sending, sent or requiring review cannot be cancelled or resent by this operation.",
+      "description": "Cancel one pending outbox message: one of your own send-later replies, or, for a workspace manager, an automatic guest message. A message already sending, sent or requiring review cannot be cancelled or resent by this operation.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -13521,153 +13521,6 @@
         "openWorldHint": false,
         "readOnlyHint": false,
         "title": "Cancel scheduled guest message"
-      },
-      "securitySchemes": [
-        {
-          "scopes": [
-            "tenant"
-          ],
-          "type": "oauth2"
-        }
-      ],
-      "domain": "guest_messaging",
-      "minimumRole": "admin",
-      "requiredEntitlement": null,
-      "fileParams": [],
-      "uiResourceUri": null
-    },
-    {
-      "name": "cancel_scheduled_reply",
-      "title": "Cancel scheduled reply",
-      "description": "Cancel one of your own scheduled replies before it starts sending.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "message_id": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "organization_id": {
-            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
-            "minLength": 1,
-            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
-            "type": "string"
-          }
-        },
-        "required": [
-          "message_id"
-        ],
-        "type": "object"
-      },
-      "outputSchema": {
-        "$defs": {},
-        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
-        "properties": {
-          "reply": {
-            "properties": {
-              "body": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "createdAt": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "entryId": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "errorCode": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "errorField": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "id": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "organizationId": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "reason": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "sendAt": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "sentAt": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "status": {
-                "enum": [
-                  "pending",
-                  "sending",
-                  "sent",
-                  "failed",
-                  "needs_review",
-                  "cancelled"
-                ],
-                "type": "string"
-              },
-              "threadId": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "updatedAt": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "version": {
-                "minimum": 1,
-                "type": "integer"
-              }
-            },
-            "required": [
-              "id",
-              "organizationId",
-              "threadId",
-              "body",
-              "sendAt",
-              "status",
-              "reason",
-              "errorCode",
-              "errorField",
-              "entryId",
-              "version",
-              "sentAt",
-              "createdAt",
-              "updatedAt"
-            ],
-            "type": "object"
-          }
-        },
-        "required": [
-          "reply"
-        ],
-        "type": "object"
-      },
-      "annotations": {
-        "destructiveHint": true,
-        "openWorldHint": false,
-        "readOnlyHint": false,
-        "title": "Cancel scheduled reply"
       },
       "securitySchemes": [
         {
@@ -71852,7 +71705,7 @@
     {
       "name": "list_scheduled_guest_messages",
       "title": "List scheduled guest messages",
-      "description": "Read automatic guest-message snapshots and visible failure reasons for every booking (bookingId names it, a stay’s included), optionally for one canonical guest conversation, including each stay’s built-in check-in message (templateId null, title “Check-in instructions”). Read provider delivery receipts through get_conversation; no provider result is inferred from a scheduled time.",
+      "description": "Read the outbox, newest first, optionally for one canonical guest conversation: your own send-later replies (authorUserId is you), and for workspace managers every automatic guest-message snapshot with its visible failure reason for every booking (bookingId names it, a stay’s included), including each stay’s built-in check-in message (templateId null, title “Check-in instructions”). Teammates’ send-later replies are not visible. Read provider delivery receipts through get_conversation; no provider result is inferred from a scheduled time.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -71887,26 +71740,35 @@
           "messages": {
             "items": {
               "properties": {
+                "authorUserId": {
+                  "description": "The member whose own send-later reply this is; null for an automatic message the business sends.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "body": {
                   "minLength": 1,
                   "type": "string"
                 },
                 "bookingId": {
-                  "description": "The booking the message is about, a stay’s included.",
-                  "minLength": 1,
-                  "type": "string"
+                  "description": "The booking an automatic message is about, a stay’s included; null for a send-later reply.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "conversationId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 },
                 "createdAt": {
                   "minLength": 1,
                   "type": "string"
                 },
                 "dueAt": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "entryId": {
                   "type": [
                     "string",
                     "null"
@@ -71928,21 +71790,23 @@
                   "minLength": 1,
                   "type": "string"
                 },
-                "organizationId": {
-                  "minLength": 1,
-                  "type": "string"
-                },
-                "productId": {
-                  "minLength": 1,
-                  "type": "string"
-                },
-                "reason": {
+                "messageId": {
                   "type": [
                     "string",
                     "null"
                   ]
                 },
-                "requestId": {
+                "organizationId": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "productId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "reason": {
                   "type": [
                     "string",
                     "null"
@@ -71980,15 +71844,24 @@
                 },
                 "templateVersion": {
                   "minimum": 1,
-                  "type": "integer"
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
                 },
                 "timezone": {
-                  "minLength": 1,
-                  "type": "string"
+                  "description": "The booking’s timezone for an automatic message; null for a send-later reply.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 },
                 "title": {
-                  "minLength": 1,
-                  "type": "string"
+                  "description": "The automatic message’s title; null for a send-later reply.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 },
                 "updatedAt": {
                   "minLength": 1,
@@ -72000,7 +71873,8 @@
                 "organizationId",
                 "productId",
                 "bookingId",
-                "requestId",
+                "conversationId",
+                "authorUserId",
                 "templateId",
                 "title",
                 "templateVersion",
@@ -72011,7 +71885,7 @@
                 "reason",
                 "errorCode",
                 "errorField",
-                "entryId",
+                "messageId",
                 "startedAt",
                 "sentAt",
                 "createdAt",
@@ -72052,155 +71926,6 @@
         "openWorldHint": false,
         "readOnlyHint": true,
         "title": "List scheduled guest messages"
-      },
-      "securitySchemes": [
-        {
-          "scopes": [
-            "tenant"
-          ],
-          "type": "oauth2"
-        }
-      ],
-      "domain": "guest_messaging",
-      "minimumRole": "admin",
-      "requiredEntitlement": null,
-      "fileParams": [],
-      "uiResourceUri": null
-    },
-    {
-      "name": "list_scheduled_replies",
-      "title": "List scheduled replies",
-      "description": "Read your own replies scheduled with schedule_guest_reply that have not been sent, and any that failed, optionally for one conversation. Teammates’ scheduled replies are not visible.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "conversation_id": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "organization_id": {
-            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
-            "minLength": 1,
-            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
-            "type": "string"
-          }
-        },
-        "required": [],
-        "type": "object"
-      },
-      "outputSchema": {
-        "$defs": {},
-        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
-        "properties": {
-          "replies": {
-            "items": {
-              "properties": {
-                "body": {
-                  "minLength": 1,
-                  "type": "string"
-                },
-                "createdAt": {
-                  "minLength": 1,
-                  "type": "string"
-                },
-                "entryId": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "errorCode": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "errorField": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "id": {
-                  "minLength": 1,
-                  "type": "string"
-                },
-                "organizationId": {
-                  "minLength": 1,
-                  "type": "string"
-                },
-                "reason": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "sendAt": {
-                  "minLength": 1,
-                  "type": "string"
-                },
-                "sentAt": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "status": {
-                  "enum": [
-                    "pending",
-                    "sending",
-                    "sent",
-                    "failed",
-                    "needs_review",
-                    "cancelled"
-                  ],
-                  "type": "string"
-                },
-                "threadId": {
-                  "minLength": 1,
-                  "type": "string"
-                },
-                "updatedAt": {
-                  "minLength": 1,
-                  "type": "string"
-                },
-                "version": {
-                  "minimum": 1,
-                  "type": "integer"
-                }
-              },
-              "required": [
-                "id",
-                "organizationId",
-                "threadId",
-                "body",
-                "sendAt",
-                "status",
-                "reason",
-                "errorCode",
-                "errorField",
-                "entryId",
-                "version",
-                "sentAt",
-                "createdAt",
-                "updatedAt"
-              ],
-              "type": "object"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "replies"
-        ],
-        "type": "object"
-      },
-      "annotations": {
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false,
-        "readOnlyHint": true,
-        "title": "List scheduled replies"
       },
       "securitySchemes": [
         {
@@ -99875,7 +99600,7 @@
     {
       "name": "schedule_guest_reply",
       "title": "Schedule guest reply",
-      "description": "Send your own text reply in a guest conversation later, at send_at (an ISO 8601 instant within the next year). It is sent through the conversation’s reply_channel as your reply, if you can still reach the conversation then. Only you see it pending; cancel it with cancel_scheduled_reply. Text only: send photos now with send_message.",
+      "description": "Send your own text reply in a guest conversation later, at send_at (an ISO 8601 instant within the next year). It is sent through the conversation’s reply_channel as your reply, if you can still reach the conversation then. Only you see it pending, in list_scheduled_guest_messages; cancel it with cancel_scheduled_guest_message. Text only: send photos now with send_message.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -99911,17 +99636,37 @@
         "$defs": {},
         "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
         "properties": {
-          "reply": {
+          "message": {
             "properties": {
+              "authorUserId": {
+                "description": "The member whose own send-later reply this is; null for an automatic message the business sends.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "body": {
                 "minLength": 1,
                 "type": "string"
+              },
+              "bookingId": {
+                "description": "The booking an automatic message is about, a stay’s included; null for a send-later reply.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "conversationId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "createdAt": {
                 "minLength": 1,
                 "type": "string"
               },
-              "entryId": {
+              "dueAt": {
                 "type": [
                   "string",
                   "null"
@@ -99943,9 +99688,21 @@
                 "minLength": 1,
                 "type": "string"
               },
+              "messageId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "organizationId": {
                 "minLength": 1,
                 "type": "string"
+              },
+              "productId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "reason": {
                 "type": [
@@ -99953,11 +99710,13 @@
                   "null"
                 ]
               },
-              "sendAt": {
-                "minLength": 1,
-                "type": "string"
-              },
               "sentAt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "startedAt": {
                 "type": [
                   "string",
                   "null"
@@ -99970,35 +99729,62 @@
                   "sent",
                   "failed",
                   "needs_review",
-                  "cancelled"
+                  "cancelled",
+                  "skipped"
                 ],
                 "type": "string"
               },
-              "threadId": {
-                "minLength": 1,
-                "type": "string"
+              "templateId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "templateVersion": {
+                "minimum": 1,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "timezone": {
+                "description": "The booking’s timezone for an automatic message; null for a send-later reply.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "title": {
+                "description": "The automatic message’s title; null for a send-later reply.",
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "updatedAt": {
                 "minLength": 1,
                 "type": "string"
-              },
-              "version": {
-                "minimum": 1,
-                "type": "integer"
               }
             },
             "required": [
               "id",
               "organizationId",
-              "threadId",
+              "productId",
+              "bookingId",
+              "conversationId",
+              "authorUserId",
+              "templateId",
+              "title",
+              "templateVersion",
               "body",
-              "sendAt",
+              "dueAt",
+              "timezone",
               "status",
               "reason",
               "errorCode",
               "errorField",
-              "entryId",
-              "version",
+              "messageId",
+              "startedAt",
               "sentAt",
               "createdAt",
               "updatedAt"
@@ -100007,7 +99793,7 @@
           }
         },
         "required": [
-          "reply"
+          "message"
         ],
         "type": "object"
       },

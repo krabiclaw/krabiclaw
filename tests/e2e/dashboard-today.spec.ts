@@ -73,20 +73,21 @@ test('automation remains in Inbox while Today keeps the unanswered inquiry', asy
     })] }])
     const replyTask = todayReplies[0]!.tasks[0]!
     expect(await replyTasks('upcoming')).toEqual([])
-    const pending = await page.request.get(`/api/dashboard/organizations/${organizationId}/send-later`, { params: { threadId } })
+    // The replies are in the one outbox, as the member's own.
+    const outbox = () => page.request.get('/api/dashboard/scheduled-guest-messages', { params: { org: 'ember-slice-demo', request_id: threadId } })
+    const pending = await outbox()
     expect(pending.status(), await pending.text()).toBe(200)
-    expect((await pending.json() as { messages: Array<{ id: string; status: string }> }).messages).toEqual(expect.arrayContaining([expect.objectContaining({ id: messageId, status: 'pending' })]))
+    expect((await pending.json() as { messages: Array<{ id: string; status: string }> }).messages).toEqual(expect.arrayContaining([expect.objectContaining({ id: messageId, status: 'pending', authorUserId: expect.any(String), bookingId: null })]))
     // Cancellation is verified in Inbox's persisted schedule. Healthy sends no
     // longer have a feed card or a feed invalidation to assert against here.
-    const response = await page.request.post(`/api/dashboard/organizations/${organizationId}/send-later/${messageId}/cancel`)
+    const response = await page.request.post(`/api/dashboard/scheduled-guest-messages/${messageId}/cancel`, { params: { org: 'ember-slice-demo' } })
     expect(response.status(), await response.text()).toBe(200)
-    expect(await response.json()).toMatchObject({ message: { id: messageId, status: 'cancelled' } })
+    expect(await response.json()).toMatchObject({ message: { id: messageId, status: 'cancelled', reason: 'Cancelled by its author.' } })
     cancelled = true
-    const persisted = await page.request.get(`/api/dashboard/organizations/${organizationId}/send-later`, { params: { threadId } })
+    const persisted = await outbox()
     expect(persisted.status(), await persisted.text()).toBe(200)
-    // This reader deliberately lists work still scheduled or recently failed;
-    // cancelled work leaves it, as it must leave Upcoming independently below.
-    expect((await persisted.json() as { messages: Array<{ id: string }> }).messages.filter(message => message.id === messageId)).toEqual([])
+    // The outbox keeps the cancelled reply with its status; cancelled work still leaves Upcoming independently below.
+    expect((await persisted.json() as { messages: Array<{ id: string; status: string }> }).messages.filter(message => message.id === messageId).map(message => message.status)).toEqual(['cancelled'])
     // Cancelling a scheduled send answers nothing: the question is still owed.
     expect(await replyTasks('upcoming')).toEqual([])
     expect(await replyTasks('today')).toEqual([{ section: 'open', tasks: [expect.objectContaining({ id: replyTask.id, status: 'open', version: replyTask.version })] }])
@@ -101,11 +102,11 @@ test('automation remains in Inbox while Today keeps the unanswered inquiry', asy
   } finally {
     try {
       if (messageId && !cancelled) {
-        const response = await page.request.post(`/api/dashboard/organizations/${organizationId}/send-later/${messageId}/cancel`)
+        const response = await page.request.post(`/api/dashboard/scheduled-guest-messages/${messageId}/cancel`, { params: { org: 'ember-slice-demo' } })
         expect(response.status(), await response.text()).toBe(200)
       }
       if (futureMessageId) {
-        const response = await page.request.post(`/api/dashboard/organizations/${organizationId}/send-later/${futureMessageId}/cancel`)
+        const response = await page.request.post(`/api/dashboard/scheduled-guest-messages/${futureMessageId}/cancel`, { params: { org: 'ember-slice-demo' } })
         expect(response.status(), await response.text()).toBe(200)
       }
     } finally { await release() }

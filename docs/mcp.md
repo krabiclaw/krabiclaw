@@ -366,10 +366,11 @@ consultations and restaurant tables by product. The scheduler sends
 into each stay's or booking's own conversation, cancels pending
 messages with the booking and moves them with it; every confirmed stay is also
 sent its home's check-in instructions at 10:00 the day before arrival.
-`list_scheduled_guest_messages` exposes pending messages and failures, and
-`cancel_scheduled_guest_message` cancels only a pending message.
-`schedule_guest_reply`, `list_scheduled_replies` and `cancel_scheduled_reply`
-are a member's own send-later replies, visible only to their author.
+`schedule_guest_reply` puts a member's own reply in the same outbox, to be
+sent later as their reply and visible only to them. `list_scheduled_guest_messages`
+exposes the outbox's pending messages and failures (managers see every automatic
+message, each member their own replies), and `cancel_scheduled_guest_message`
+cancels only a pending one.
 Verify actual delivery through the canonical guest conversation's receipts.
 
 These tools share the dashboard and native app's domain operations. New

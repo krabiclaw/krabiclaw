@@ -123,21 +123,9 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Changes one pending automatic message to cancelled.",
+        "read_only_justification": "Changes one pending outbox message, the caller’s own reply or, for a manager, an automatic message, to cancelled.",
         "destructive_justification": "Cancels a queued guest delivery.",
         "open_world_justification": "Changes private queue state without sending a message to a guest."
-      }
-    },
-    "cancel_scheduled_reply": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Changes the caller’s pending scheduled reply to cancelled.",
-        "destructive_justification": "Cancels a queued reply before it starts sending.",
-        "open_world_justification": "Changes only the caller’s private queued reply and does not send an external message."
       }
     },
     "complete_task": {
@@ -1227,21 +1215,9 @@
         "destructiveHint": false
       },
       "justifications": {
-        "read_only_justification": "Reads planned automatic-message snapshots and saved failure states without sending them.",
+        "read_only_justification": "Reads the caller’s own scheduled replies and, for managers, planned automatic-message snapshots and saved failure states without sending them.",
         "destructive_justification": "Does not edit delivery snapshots, cancel queued messages or dispatch sends.",
-        "open_world_justification": "Reads automatic-message plans only for the selected business and accessible homes."
-      }
-    },
-    "list_scheduled_replies": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Reads only the caller’s pending and failed scheduled replies without changing their schedule.",
-        "destructive_justification": "Does not reschedule replies, cancel them or initiate delivery.",
-        "open_world_justification": "Reads only the signed-in user own scheduled replies and recorded failures."
+        "open_world_justification": "Reads outbox messages only for the selected business, the caller’s own replies and the automatic messages a manager may see."
       }
     },
     "list_site_pages": {

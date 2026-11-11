@@ -160,7 +160,7 @@ Airbnb stay are distinct fixtures; never create one to stand in for another.
 | `get_guest_messaging_context` | Read the home and stay behind this guest conversation. | Which arrival instructions belong to this guest's actual home? | Substitute another home's guide when the conversation has no mapped home. |
 | `update_stay_arrival_guide` | Save these wifi and checkout instructions privately for this home. | Keep these arrival details ready for this home's guests. | Publish the private guide or send it automatically merely because it was saved. |
 | `list_scheduled_guest_messages` | Show pending messages and failures for this guest conversation. | Has this stay's check-in message been sent or does it need attention? | Infer delivery from the scheduled time instead of reading conversation receipts. |
-| `cancel_scheduled_guest_message` | Cancel this exact pending automatic guest message. | Do not send that queued arrival message. | Cancel or resend a message already sending, sent or requiring review. |
+| `cancel_scheduled_guest_message` | Cancel this exact pending automatic message or my own scheduled reply. | Do not send that queued arrival message. | Cancel or resend a message already sending, sent or requiring review. |
 
 Verify home publication against the live-home allowance separately: Basic includes
 1 live home and refuses a second; drafts remain free and unlimited. Growth and

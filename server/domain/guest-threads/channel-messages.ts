@@ -78,7 +78,7 @@ export async function joinBookingConversationQueries(db: DbClient, input: { orga
     { query: `INSERT OR IGNORE INTO conversation_participants (conversation_id, organization_id, user_id, last_read_message_id, archived_at, created_at)
         SELECT ?, organization_id, user_id, last_read_message_id, archived_at, created_at FROM conversation_participants WHERE conversation_id = ? AND ${owned}`, params: [input.into, input.from, ...ownedParams] },
     { query: `DELETE FROM conversation_participants WHERE conversation_id = ? AND ${owned}`, params: [input.from, ...ownedParams] },
-    ...['send_later_messages', 'content_reports', 'payment_checkout_holds'].map(table => ({
+    ...['scheduled_guest_messages', 'content_reports', 'payment_checkout_holds'].map(table => ({
       query: `UPDATE ${table} SET conversation_id = ? WHERE conversation_id = ? AND ${owned}`, params: [input.into, input.from, ...ownedParams],
     })),
     { query: `UPDATE google_calendar_event_links SET request_id = ? WHERE request_id = ? AND ${owned}`, params: [input.into, input.from, ...ownedParams] },

@@ -4,7 +4,7 @@ import { memberAccessPrincipal } from '~/server/utils/member-access'
 import { assertConversationAccess } from '~/server/domain/conversations'
 import { stayAccessFor, updateStayHome } from '~/server/domain/stays'
 import { cancelScheduledGuestMessage, deleteMessageTemplate, guestThreadMessagingContext, listMessageTemplates, listScheduledGuestMessages, saveMessageTemplate } from '~/server/domain/guest-messaging'
-import { cancelSendLaterMessage, createSendLaterMessage, listSendLaterMessages } from '~/server/domain/send-later'
+import { scheduleGuestReply } from '~/server/domain/scheduled-guest-messages'
 import { mcpPageInfo, mcpPageWindow } from '~/server/utils/mcp-pagination'
 import { CHANNEL_PUSH_SCHEMA } from '~/shared/channel-push'
 import { AIRBNB_UNSYNCED_SCHEMA, STAY_ARRIVAL_SCHEMA } from './stays'
@@ -22,19 +22,16 @@ const templateFields = { id: text, organizationId: text, title: text, body: text
 const templateObject = { type: 'object', properties: templateFields, required: Object.keys(templateFields) }
 const templateResult = { type: 'object', properties: { template: templateObject }, required: ['template'] }
 const templateInput = { title: { ...text, maxLength: 100 }, body: { ...text, maxLength: 5000 }, schedule }
-const messageFields = { id: text, organizationId: text, productId: text, bookingId: { ...text, description: 'The booking the message is about, a stay’s included.' }, requestId: nullableText, templateId: nullableText, title: text,
-  templateVersion: { type: 'integer', minimum: 1 }, body: text, dueAt: nullableText, timezone: text,
+const messageFields = { id: text, organizationId: text, productId: nullableText, bookingId: { ...nullableText, description: 'The booking an automatic message is about, a stay’s included; null for a send-later reply.' }, conversationId: nullableText,
+  authorUserId: { ...nullableText, description: 'The member whose own send-later reply this is; null for an automatic message the business sends.' }, templateId: nullableText, title: { ...nullableText, description: 'The automatic message’s title; null for a send-later reply.' },
+  templateVersion: { type: ['integer', 'null'], minimum: 1 }, body: text, dueAt: nullableText, timezone: { ...nullableText, description: 'The booking’s timezone for an automatic message; null for a send-later reply.' },
   status: { type: 'string', enum: ['pending', 'sending', 'sent', 'failed', 'needs_review', 'cancelled', 'skipped'] }, reason: nullableText, errorCode: nullableText,
-  errorField: nullableText, entryId: nullableText, startedAt: nullableText, sentAt: nullableText, createdAt: text, updatedAt: text }
+  errorField: nullableText, messageId: nullableText, startedAt: nullableText, sentAt: nullableText, createdAt: text, updatedAt: text }
 const messagingRecord = { type: ['object', 'null'], description: 'The stay or booking (a class, consultation or table) the conversation is about, as its guest reads it; null for an inquiry. starts and ends are local to timezone: a date, or a date and time.',
   properties: { unit: { type: 'string', enum: ['slot', 'nights'], description: 'nights is a stay at a home; slot is a class, consultation or table.' }, status: text, offering: nullableText, location: nullableText, address: nullableText, phone: nullableText,
     partySize: { type: 'integer' }, timezone: text, starts: text, ends: text, noShow: { type: 'boolean' } },
   required: ['unit', 'status', 'offering', 'location', 'address', 'phone', 'partySize', 'timezone', 'starts', 'ends', 'noShow'] }
 const messageObject = { type: 'object', properties: messageFields, required: Object.keys(messageFields) }
-const replyFields = { id: text, organizationId: text, threadId: text, body: text, sendAt: text,
-  status: { type: 'string', enum: ['pending', 'sending', 'sent', 'failed', 'needs_review', 'cancelled'] }, reason: nullableText, errorCode: nullableText,
-  errorField: nullableText, entryId: nullableText, version: { type: 'integer', minimum: 1 }, sentAt: nullableText, createdAt: text, updatedAt: text }
-const replyObject = { type: 'object', properties: replyFields, required: Object.keys(replyFields) }
 const arrivalGuideFields = {
   check_in_method: nullableText, check_in_instructions: nullableText, wifi_network: nullableText, wifi_password: nullableText,
   directions: nullableText, house_manual: nullableText,
@@ -60,16 +57,12 @@ export const GUEST_MESSAGING_TOOLS: McpToolDefinition[] = [
     inputSchema: { conversation_id: text }, required: ['conversation_id'], outputSchema: { type: 'object', properties: { conversationId: text, home: messagingHome, stay: messagingStay, record: messagingRecord }, required: ['conversationId', 'home', 'stay', 'record'] } }),
   organizationTool({ name: 'update_stay_arrival_guide', domain: 'guest_messaging', minimumRole: 'admin', description: 'Save one home\'s private arrival guide: check-in method and instructions, wifi, directions, house manual and checkout instructions. Fields left out keep their values; null removes one. Saving does not send anything to a guest or publish it on the site. For a connected Airbnb home, supplied check-in, wifi, directions and house-manual fields return editor links in airbnb_unsynced for the host to check and edit in Airbnb. Checkout instructions are saved only in KrabiClaw.',
     inputSchema: { anyOf: Object.keys(STAY_ARRIVAL_SCHEMA).map(key => ({ required: [key] })), product_id: text, ...STAY_ARRIVAL_SCHEMA }, required: ['product_id'], outputSchema: arrivalGuideResult }),
-  organizationTool({ name: 'list_scheduled_guest_messages', domain: 'guest_messaging', minimumRole: 'admin', description: 'Read automatic guest-message snapshots and visible failure reasons for every booking (bookingId names it, a stay’s included), optionally for one canonical guest conversation, including each stay’s built-in check-in message (templateId null, title “Check-in instructions”). Read provider delivery receipts through get_conversation; no provider result is inferred from a scheduled time.',
+  organizationTool({ name: 'list_scheduled_guest_messages', domain: 'guest_messaging', minimumRole: 'member', description: 'Read the outbox, newest first, optionally for one canonical guest conversation: your own send-later replies (authorUserId is you), and for workspace managers every automatic guest-message snapshot with its visible failure reason for every booking (bookingId names it, a stay’s included), including each stay’s built-in check-in message (templateId null, title “Check-in instructions”). Teammates’ send-later replies are not visible. Read provider delivery receipts through get_conversation; no provider result is inferred from a scheduled time.',
     inputSchema: { conversation_id: text, ...paginationInputSchema }, outputSchema: { type: 'object', properties: { messages: { type: 'array', items: messageObject }, page_info: pageInfoObject }, required: ['messages', 'page_info'] } }),
-  organizationTool({ name: 'cancel_scheduled_guest_message', domain: 'guest_messaging', minimumRole: 'admin', description: 'Cancel one pending automatic guest message. A message already sending, sent or requiring review cannot be cancelled or resent by this operation.',
+  organizationTool({ name: 'cancel_scheduled_guest_message', domain: 'guest_messaging', minimumRole: 'member', description: 'Cancel one pending outbox message: one of your own send-later replies, or, for a workspace manager, an automatic guest message. A message already sending, sent or requiring review cannot be cancelled or resent by this operation.',
     inputSchema: { message_id: text }, required: ['message_id'], outputSchema: { type: 'object', properties: { message: { type: 'object', properties: { id: text, status: { const: 'cancelled' } }, required: ['id', 'status'], additionalProperties: false } }, required: ['message'] } }),
-  organizationTool({ name: 'schedule_guest_reply', domain: 'guest_messaging', minimumRole: 'member', description: 'Send your own text reply in a guest conversation later, at send_at (an ISO 8601 instant within the next year). It is sent through the conversation’s reply_channel as your reply, if you can still reach the conversation then. Only you see it pending; cancel it with cancel_scheduled_reply. Text only: send photos now with send_message.',
-    inputSchema: { conversation_id: text, message: { ...text, maxLength: 5000, pattern: '^[\\s\\S]*\\S[\\s\\S]*$' }, send_at: { type: 'string', format: 'date-time' } }, required: ['conversation_id', 'message', 'send_at'], outputSchema: { type: 'object', properties: { reply: replyObject }, required: ['reply'] } }),
-  organizationTool({ name: 'list_scheduled_replies', domain: 'guest_messaging', minimumRole: 'member', description: 'Read your own replies scheduled with schedule_guest_reply that have not been sent, and any that failed, optionally for one conversation. Teammates’ scheduled replies are not visible.',
-    inputSchema: { conversation_id: text }, outputSchema: { type: 'object', properties: { replies: { type: 'array', items: replyObject } }, required: ['replies'] } }),
-  organizationTool({ name: 'cancel_scheduled_reply', domain: 'guest_messaging', minimumRole: 'member', description: 'Cancel one of your own scheduled replies before it starts sending.',
-    inputSchema: { message_id: text }, required: ['message_id'], outputSchema: { type: 'object', properties: { reply: replyObject }, required: ['reply'] } }),
+  organizationTool({ name: 'schedule_guest_reply', domain: 'guest_messaging', minimumRole: 'member', description: 'Send your own text reply in a guest conversation later, at send_at (an ISO 8601 instant within the next year). It is sent through the conversation’s reply_channel as your reply, if you can still reach the conversation then. Only you see it pending, in list_scheduled_guest_messages; cancel it with cancel_scheduled_guest_message. Text only: send photos now with send_message.',
+    inputSchema: { conversation_id: text, message: { ...text, maxLength: 5000, pattern: '^[\\s\\S]*\\S[\\s\\S]*$' }, send_at: { type: 'string', format: 'date-time' } }, required: ['conversation_id', 'message', 'send_at'], outputSchema: { type: 'object', properties: { message: messageObject }, required: ['message'] } }),
 ]
 
 export async function handleGuestMessagingTools(ctx: McpExecutorContext): Promise<unknown> {
@@ -97,19 +90,17 @@ export async function handleGuestMessagingTools(ctx: McpExecutorContext): Promis
       return { product_id: saved.home.product_id, guide: Object.fromEntries(Object.keys(guide).map(key => [key, saved.home[key as keyof typeof saved.home]])), channel_push: saved.channel_push, airbnb_unsynced: saved.airbnb_unsynced }
     }
     case 'list_scheduled_guest_messages': {
-      const requestId = typeof args.conversation_id === 'string' ? args.conversation_id : null
-      if (requestId !== null) await assertConversationAccess(db, principal, requestId)
-      const resource = `scheduled-guest-messages:${access.organizationId}:${requestId}`, window = mcpPageWindow(args, { resource })
-      const page = await listScheduledGuestMessages(db, access, window, requestId)
+      const conversationId = typeof args.conversation_id === 'string' ? args.conversation_id : null
+      if (conversationId !== null) await assertConversationAccess(db, principal, conversationId)
+      const resource = `scheduled-guest-messages:${access.organizationId}:${conversationId}`, window = mcpPageWindow(args, { resource })
+      const page = await listScheduledGuestMessages(db, access, window, conversationId)
       return { messages: page.messages, page_info: mcpPageInfo(window, page.messages.length, page.pagination.hasMore, { resource }) }
     }
     case 'cancel_scheduled_guest_message': {
       const saved = await cancelScheduledGuestMessage(db, env, access, requiredString(args, 'message_id'))
       return { message: { id: saved.id, status: saved.status } }
     }
-    case 'schedule_guest_reply': return { reply: await createSendLaterMessage(db, principal, requiredString(args, 'conversation_id'), { body: args.message, sendAt: args.send_at }) }
-    case 'list_scheduled_replies': return { replies: await listSendLaterMessages(db, principal, typeof args.conversation_id === 'string' ? args.conversation_id : null) }
-    case 'cancel_scheduled_reply': return { reply: await cancelSendLaterMessage(db, principal, requiredString(args, 'message_id')) }
+    case 'schedule_guest_reply': return { message: await scheduleGuestReply(db, principal, requiredString(args, 'conversation_id'), { body: args.message, sendAt: args.send_at }) }
     default: return NOT_HANDLED
   }
 }

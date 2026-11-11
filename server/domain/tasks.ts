@@ -191,7 +191,10 @@ export async function turnoverTaskQueries(db: DbClient, input: { organizationId:
   return queries
 }
 
-/** A scheduled message that failed or needs review is someone's work until it is sent, cancelled or skipped. */
+/**
+ * An automatic message that failed or needs review is someone's work until it is sent, cancelled or skipped.
+ * A member's own send-later reply that failed is shown to its author in its conversation instead.
+ */
 export function messageDeliveryTaskQueries(messageId: string, now: string): BatchQuery[] {
   return [{
     // The place is the booked record's (none for an online consultation).
@@ -200,7 +203,7 @@ export function messageDeliveryTaskQueries(messageId: string, now: string): Batc
           (SELECT b.location_id FROM bookings b WHERE b.organization_id = m.organization_id AND b.id = m.booking_id),
           m.timezone, 'open', 'message_delivery:' || m.id, 1, ?, ?
         FROM scheduled_guest_messages m
-       WHERE m.id = ? AND m.status IN ('failed', 'needs_review')
+       WHERE m.id = ? AND m.status IN ('failed', 'needs_review') AND m.author_user_id IS NULL
       ON CONFLICT (dedupe_key) DO NOTHING`,
     params: [crypto.randomUUID(), now, now, messageId],
   }, {

@@ -454,11 +454,11 @@ test('a responsible home member reads its stays as turnovers on every surface un
     expect(memberAgendaBody.items.find(item => item.id === `stay:${stay.id}:arrival`)).toMatchObject({ stayId: stay.id })
     expect(leaks(memberAgendaBody)).toEqual([])
     expect(leaks(todayBody)).toEqual([])
-    // The guest's conversation, scheduled messages, money and changes are the managers'.
+    // The guest's conversation, automatic messages, money and changes are the managers': the member's outbox holds only their own replies.
     await expectStatus(await memberContext.request.get(`/api/dashboard/organizations/${organizationId}/guest-threads/${stay.request_id}`), 404)
     const scheduled = await memberContext.request.get(api('scheduled-guest-messages?limit=20&offset=0'))
-    await expectStatus(scheduled, 403)
-    expect(await scheduled.json()).toMatchObject({ data: { code: 'MESSAGING_ROLE_REQUIRED' } })
+    await expectStatus(scheduled, 200)
+    expect((await scheduled.json() as { messages: unknown[] }).messages).toEqual([])
     for (const [method, path, data] of [
       ['post', `stays/${stay.id}/payments`, { amount_minor: 100, method: 'cash', paid_on: localDay(0), idempotency_key: crypto.randomUUID() }],
       ['patch', `stays/${stay.id}`, { expected_version: stay.version, adults: 1 }],
