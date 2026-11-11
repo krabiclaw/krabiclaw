@@ -22,6 +22,7 @@ import { appendMessage } from '../../server/domain/conversations.ts'
 import { conversationTaskQueries } from '../../server/domain/guest-threads/repository.ts'
 import { listDashboardLocations } from '../../server/utils/dashboard-context.ts'
 import { updateLocation } from '../../server/utils/location-management.ts'
+import { syncPlaceToLocation } from '../../server/utils/google-places.ts'
 import { listPublicBookingSessions } from '../../server/utils/public-session-booking.ts'
 import { createProduct, getProduct, removeProductLocation, updateProduct } from '../../server/utils/product-management.ts'
 import { occurrenceKey } from '../../shared/bookings.ts'
@@ -116,7 +117,7 @@ test('a weekly time puts a session on each of its days inside the place\'s hours
   }
 })
 
-test('a table is seated through its location\'s current hours: wider hours and an opened day add seatings, closing cancels the unbooked ones', { timeout: 120_000 }, async () => {
+test('a table is seated through its location\'s current hours: wider hours and an opened day add seatings, closing cancels the unbooked ones', { timeout: 120_000 }, async (t) => {
   const { runtime, db, env } = await boot()
   try {
     const ZONE = 'Asia/Bangkok'
@@ -179,6 +180,35 @@ test('a table is seated through its location\'s current hours: wider hours and a
     assert.deepEqual(await offered(wednesday), evening('19:30'))
     assert.deepEqual(await offered(tuesday), evening('19:30').map(([time, seats]) => [time, time === '19:30' ? 16 : seats]))
     assert.deepEqual(await offered(monday), [])
+
+    // Keep the opening-time cadence through midnight, including a non-hourly phase.
+    assert.equal((await updateLocation(db, ORG, LOCATION, { special_hours: [
+      { kind: 'hours', date: monday, periods: [{ open_time: '20:15', close_time: '02:15', close_day_offset: 1 }], note: 'Late dinner' },
+    ] }, ACTOR, env)).status, 200)
+    assert.deepEqual((await offered(tuesday)).filter(([time]) => String(time) < '02:15'), [['00:15', 20], ['00:45', 20]])
+
+    const review = (name: string) => ({
+      name: `places/place-id/reviews/${name}`, authorAttribution: { displayName: name }, rating: 5,
+      publishTime: '2026-01-01T00:00:00Z',
+    })
+    const originalFetch = globalThis.fetch
+    const closure = { kind: 'closure', starts_on: tuesday, ends_on: tuesday, note: 'Private event' } as const
+    let racing = false
+    t.mock.method(globalThis, 'fetch', async (...args: Parameters<typeof fetch>) => {
+      if (!String(args[0]).startsWith('https://places.googleapis.com/')) return originalFetch(...args)
+      if (racing) assert.equal((await updateLocation(db, ORG, LOCATION, { special_hours: [closure] }, ACTOR, env)).status, 200)
+      return Response.json({
+        id: 'place-id', rating: racing ? 1 : 5, timeZone: { id: ZONE }, regularOpeningHours: hours(22),
+        reviews: [review(racing ? 'stale-review' : 'current-review')],
+      })
+    })
+    assert.equal((await syncPlaceToLocation(db, 'test-key', ORG, LOCATION, 'place-id', 'import')).reviewsUpserted, 1)
+    assert.deepEqual(await offered(wednesday), evening('20:30'))
+    racing = true
+    await assert.rejects(syncPlaceToLocation(db, 'test-key', ORG, LOCATION, 'place-id', 'import'), { statusCode: 409 })
+    assert.deepEqual((await db.prepare('SELECT author_name FROM reviews WHERE organization_id = ? AND location_id = ?').bind(ORG, LOCATION).all()).results, [{ author_name: 'current-review' }])
+    assert.deepEqual(await db.prepare('SELECT rating FROM business_locations WHERE id = ?').bind(LOCATION).first(), { rating: 5 })
+    assert.deepEqual(await offered(tuesday), [['19:30', 0]])
   } finally {
     await runtime.dispose()
   }

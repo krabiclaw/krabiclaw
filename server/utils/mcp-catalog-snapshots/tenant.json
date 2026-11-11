@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:22ad080ffeaf3df11df60a40b29e45d4ca83614938929e44cacb4e8aac6de94d",
-  "documentationFingerprint": "sha256:5029e1f885c69d4cb366c3c6c7e492c460066a44b89709abe4af3bc3880f43e1",
+  "fingerprint": "sha256:295613f20d3835878ac31bd000bd10e0a6744cb1839c216367a565eebfdd0f65",
+  "documentationFingerprint": "sha256:418b9d62f14b07ddeda6bfde33e5e5e8fdb18f52bcf870c1e3f02e06c0b5c69c",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -13478,7 +13478,8 @@
             "type": "object"
           }
         ],
-        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema."
+        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
+        "type": "object"
       },
       "annotations": {
         "destructiveHint": true,
@@ -56564,7 +56565,8 @@
             "type": "object"
           }
         ],
-        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema."
+        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
+        "type": "object"
       },
       "annotations": {
         "destructiveHint": false,
@@ -128441,13 +128443,13 @@
       "arguments": [],
       "rendered": {
         "description": "Summarize guest and team conversations, pending bookings, and unreplied reviews",
-        "text": "Use get_workspace_context to resolve the requested business. Read all relevant list_conversations pages (guests, Airbnb Support and team conversations, with unread counts) and get_conversation for full contact messages, booking details (classes, consultations and restaurant tables), proposals and delivery receipts. Select actual teammates with list_conversation_recipients. start_conversation reuses direct and explicit stay/location team conversations; manual groups of at least three people are distinct and require a stable idempotency_key. update_conversation_group changes only manual team groups: obey canManage/canLeave; preserve stay/location participants. New members can read group history; removal and leaving end access while retaining messages. Reading does not mark a conversation read; mark_conversation_read and mark_conversation_unread change only the caller’s read position. Summarize unanswered messages and pending bookings. Use send_message with a stable idempotency_key only for the message or photo the user requests, then read it back. Use get_product_booking before confirm_product_booking, reject_product_booking, cancel_product_booking or request_product_booking_change; a table reservation is a product booking and uses the same tools. Booking changes email a proposal and leave the existing allocation unchanged until guest acceptance. Financial actions requiring the dashboard remain incomplete; report the returned handoff instead of claiming completion. Use list_locations and list_location_reviews to read reviews separately; provider reviews and imported Google Q&A remain managed in Google. Report failed deliveries and actions awaiting guest acceptance accurately."
+        "text": "Use get_workspace_context to resolve the requested business. Read all relevant list_conversations pages (guests, Airbnb Support and team conversations, with unread counts) and get_conversation for full contact messages, booking details (classes, consultations and restaurant tables), proposals and delivery receipts. Select actual teammates with list_conversation_recipients. start_conversation reuses direct and explicit stay/location team conversations; manual groups of at least three people are distinct and require a stable idempotency_key. update_conversation_group changes only manual team groups: obey can_manage/can_leave; preserve stay/location participants. New members can read group history; removal and leaving end access while retaining messages. Reading does not mark a conversation read; mark_conversation_read and mark_conversation_unread change only the caller’s read position. Summarize unanswered messages and pending bookings. Use send_message with a stable idempotency_key only for the message or photo the user requests, then read it back. Use get_product_booking before confirm_product_booking, reject_product_booking, cancel_product_booking or request_product_booking_change; a table reservation is a product booking and uses the same tools. Booking changes email a proposal and leave the existing allocation unchanged until guest acceptance. Financial actions requiring the dashboard remain incomplete; report the returned handoff instead of claiming completion. Use list_locations and list_location_reviews to read reviews separately; provider reviews and imported Google Q&A remain managed in Google. Report failed deliveries and actions awaiting guest acceptance accurately."
       },
       "toolContracts": {
-        "cancel_product_booking": "sha256:90614958b92689b4c273ffc336e9854909c30a54997c7c5fc8da78e0aeb12aeb",
+        "cancel_product_booking": "sha256:b2a0843017be63fcd40875779c9f8011ef44f322fef31b7fde19eed876414bc5",
         "confirm_product_booking": "sha256:1c9695ad981f010718a3f36845717ed36a1546018f196b5f0292ac9a07f9fc8d",
         "get_conversation": "sha256:0bb638b4ce881d5db51291ff262e13633e2b2a6bcbeca21246027deb716fcd84",
-        "get_product_booking": "sha256:1a83fe61e11737be78f8fc8bc093d3625144bcd21417ceab9b1576c2c831b305",
+        "get_product_booking": "sha256:20230c21eae72abeb5dadb0c555588a6ef1b336aa125edf5c3df38698c22982b",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_conversation_recipients": "sha256:439170e450547b9261d1f0499d27ef7ca95dd024cacf847719fee4f4c40e249e",
         "list_conversations": "sha256:24cf21b535c6689cb04bc7188bec604110c207a960c8ba5e69e9505150dceca7",

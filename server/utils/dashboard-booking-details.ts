@@ -390,18 +390,18 @@ export async function listDashboardBookingChangeSessions(event: H3Event, input: 
   const elsewhere = input.locationId !== undefined && input.locationId !== row.location_id
   if (elsewhere && row.product_kind !== 'table') throw new HTTPError({ statusCode: 409, message: 'Only a table booking can move to another location' })
   const target = elsewhere
-    ? await queryFirst<{ product_id: string; timezone: string }>(context.db, `SELECT p.id AS product_id, l.timezone FROM products p
+    ? await queryFirst<{ product_id: string; timezone: string; advance_notice_minutes: number | null }>(context.db, `SELECT p.id AS product_id, l.timezone, c.advance_notice_minutes FROM products p
         JOIN product_locations pl ON pl.organization_id = p.organization_id AND pl.product_id = p.id
         JOIN business_locations l ON l.organization_id = pl.organization_id AND l.id = pl.location_id
         JOIN product_booking_configs c ON c.organization_id = p.organization_id AND c.product_id = p.id
        WHERE p.organization_id = ? AND p.kind = 'table' AND pl.location_id = ?`, [row.organization_id, input.locationId])
-    : { product_id: row.product_id, timezone: row.timezone }
+    : { product_id: row.product_id, timezone: row.timezone, advance_notice_minutes: row.advance_notice_minutes }
   if (!target) throw new HTTPError({ statusCode: 404, message: 'That location takes no table bookings' })
   const sessions = await listSessions(context.db, { env: context.env, organizationId: row.organization_id, productId: target.product_id, statuses: ['scheduled'], ...(elsewhere ? { locationId: input.locationId as string } : {}),
     fromInstant: localDateTimeToInstant(input.date, '00:00', target.timezone, 'compatible').toISOString(),
     toInstant: localDateTimeToInstant(addLocalDays(input.date, 1), '00:00', target.timezone, 'compatible').toISOString() })
   // A start inside the offering's advance notice cannot be moved into; the booked one stays shown.
-  return sessions.filter(session => session.id === row.product_session_id || outsideNotice(session.starts_at, row.advance_notice_minutes))
+  return sessions.filter(session => session.id === row.product_session_id || outsideNotice(session.starts_at, target.advance_notice_minutes))
 }
 
 /**

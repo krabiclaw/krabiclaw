@@ -1,5 +1,6 @@
 import { defineHandler } from 'nitro'
 import { readBody } from 'nitro/h3'
+import { HTTPError } from 'h3'
 import { jsonResponse } from '~/server/utils/api-response'
 import { syncPlaceToLocation } from '~/server/utils/google-places'
 import { hasOrganizationEntitlement } from '~/server/utils/billing'
@@ -51,6 +52,7 @@ export default defineHandler(async (event) => {
       },
     })
   } catch (error) {
+    if (error instanceof HTTPError) throw error
     return jsonResponse({ error: error instanceof Error ? error.message : 'Google Maps import failed' }, { status: 502 })
   }
 })

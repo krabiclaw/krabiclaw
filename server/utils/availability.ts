@@ -379,7 +379,15 @@ export async function setProductBookingConfig(db: DbClient, input: Omit<Paramete
   const materialized = throughDate ? prepareSessionMaterialization({ ...input, throughDate }, config, rules, new Map(locations.map(location => [location.id, location])), await canScheduleSessions(db, config)).queries : []
   const online = config.held_online ? await prepareProviderHoursSessions(db, config, { actorId: input.actorId, now: new Date().toISOString() }) : []
   // A table's seatings take its new length, interval and seats in the same batch.
-  const seatings = config.seating_interval_minutes === null ? [] : tableSeatingQueries(config, await tableLocation(db, config), { actorId: input.actorId, now: new Date().toISOString() })
+  const location = config.seating_interval_minutes === null ? null : await tableLocation(db, config)
+  const seatings = location ? tableSeatingQueries(config, location, { actorId: input.actorId, now: new Date().toISOString() }) : []
+  if (location) {
+    const guard = tableLocationSnapshot(config, location)
+    configQueries.push({
+      query: `UPDATE product_booking_configs SET updated_at=CASE WHEN (${guard.query}) THEN updated_at ELSE NULL END WHERE product_id=? AND organization_id=?`,
+      params: [...guard.params!, config.product_id, config.organization_id],
+    })
+  }
   const paymentEnabled = input.patch.online_payment_required === true
   const queries = [...configQueries, ...materialized, ...online, ...seatings, publicResourceCacheInvalidationQuery(input.organizationId, 'product-booking-config')]
   if (queries.length > MAX_D1_BATCH_STATEMENTS) badRequest('This schedule exceeds one atomic update; reduce the requested times')
@@ -529,13 +537,12 @@ export function tableSeatings(config: Pick<ProductBookingConfigRecord, 'duration
   if (!isValidTimezone(location.timezone)) throw new HTTPError({ statusCode: 409, statusMessage: 'The table\'s location has an invalid timezone' })
   const hours = parseOpeningHours(location.opening_hours ? JSON.parse(location.opening_hours) : null)
   const special = parseSpecialHours(location.special_hours ? JSON.parse(location.special_hours) : null)
-  const today = localNow(location.timezone).date
+  const today = localNow(location.timezone, new Date(now)).date
   const seatings: Array<{ starts_at: string; ends_at: string }> = []
   for (let date = today; date < addLocalDays(today, PUBLIC_BOOKING_WINDOW_DAYS); date = addLocalDays(date, 1)) {
     for (const period of getDateIntervals(hours, special, date) ?? []) {
-      // The part of a period before midnight was offered on the day it opened.
-      if (period.start < 0) continue
-      for (let minute = period.start; minute < 1440 && minute + duration <= period.end; minute += interval) {
+      const first = period.start + Math.ceil(Math.max(0, -period.start) / interval) * interval
+      for (let minute = first; minute < 1440 && minute + duration <= period.end; minute += interval) {
         const time = toTimeString(minute)
         if (unresolvableLocalTime(date, time, location.timezone)) continue
         const start = localDateTimeToInstant(date, time, location.timezone, 'reject')
@@ -547,8 +554,10 @@ export function tableSeatings(config: Pick<ProductBookingConfigRecord, 'duration
   return seatings
 }
 
+type TableSeatingConfig = Pick<ProductBookingConfigRecord, 'organization_id' | 'product_id' | 'duration_minutes' | 'seating_interval_minutes' | 'default_capacity'>
+
 /** Write a table's seatings as its location's hours give them now. */
-function tableSeatingQueries(config: ProductBookingConfigRecord, location: SessionLocation, input: { actorId: string; now: string; guard?: BatchQuery }): BatchQuery[] {
+function tableSeatingQueries(config: TableSeatingConfig, location: SessionLocation, input: { actorId: string; now: string; guard?: BatchQuery }): BatchQuery[] {
   return hoursSessionQueries({ organizationId: config.organization_id, productId: config.product_id, locationId: location.id, keyPrefix: `hours:${location.id}:`,
     timezone: location.timezone, capacity: config.default_capacity, slots: tableSeatings(config, location, input.now), actorId: input.actorId, now: input.now, guard: input.guard })
 }
@@ -561,20 +570,37 @@ async function tableLocation(db: DbClient, config: ProductBookingConfigRecord): 
   return location
 }
 
+function tableLocationSnapshot(config: TableSeatingConfig, location: SessionLocation): BatchQuery {
+  return {
+    query: `EXISTS (SELECT 1 FROM product_locations pl
+      JOIN business_locations l ON l.id=pl.location_id AND l.organization_id=pl.organization_id
+      WHERE pl.product_id=? AND pl.organization_id=? AND l.id=? AND l.timezone IS ? AND l.opening_hours IS ? AND l.special_hours IS ?)`,
+    params: [config.product_id, config.organization_id, location.id, location.timezone, location.opening_hours, location.special_hours],
+  }
+}
+
 /**
  * The seatings of the table at this location, as the hours being written give
  * them: every writer of a location's opening hours, special hours or timezone
- * adds these to its batch, behind `guard` (its own write landing). A location
- * without tables gives none.
+ * adds these to its batch before updating the location. Both writes must
+ * still see the location and the seating settings used to plan the change.
  */
-export async function prepareLocationTableSeatings(db: DbClient, input: { organizationId: string; location: SessionLocation; actorId: string; now: string; guard: BatchQuery }): Promise<BatchQuery[]> {
-  const table = await queryFirst<{ product_id: string }>(db, `SELECT p.id product_id FROM product_locations pl
+export async function prepareLocationTableSeatings(db: DbClient, input: { organizationId: string; location: SessionLocation; actorId: string; now: string; guard: BatchQuery }) {
+  const from = `FROM product_locations pl
     JOIN products p ON p.id=pl.product_id AND p.organization_id=pl.organization_id AND p.kind='table'
     JOIN product_booking_configs c ON c.product_id=p.id AND c.organization_id=p.organization_id
-    WHERE pl.organization_id=? AND pl.location_id=?`, [input.organizationId, input.location.id])
-  if (!table) return []
-  const config = await requireBookingConfig(db, input.organizationId, table.product_id)
-  return tableSeatingQueries(config, input.location, input)
+    WHERE pl.organization_id=? AND pl.location_id=?`
+  const scope = [input.organizationId, input.location.id]
+  const config = await queryFirst<TableSeatingConfig>(db, `SELECT c.organization_id,c.product_id,c.duration_minutes,c.seating_interval_minutes,c.default_capacity ${from}`, scope)
+  const guard: BatchQuery = config ? {
+    query: `(${input.guard.query}) AND EXISTS (SELECT 1 ${from}
+      AND c.product_id=? AND c.duration_minutes IS ? AND c.seating_interval_minutes IS ? AND c.default_capacity IS ?)`,
+    params: [...input.guard.params!, ...scope, config.product_id, config.duration_minutes, config.seating_interval_minutes, config.default_capacity],
+  } : {
+    query: `(${input.guard.query}) AND NOT EXISTS (SELECT 1 ${from})`,
+    params: [...input.guard.params!, ...scope],
+  }
+  return { guard, queries: config ? tableSeatingQueries(config, input.location, { ...input, guard }) : [] }
 }
 
 /** How a local wall time that does not exist, or exists twice, is handled. */
@@ -724,7 +750,20 @@ export async function materializeSessions(db: DbClient, input: {
   const config = await requireBookingConfig(db, input.organizationId, input.productId)
   // A table: its location's hours, as they are now.
   if (config.seating_interval_minutes !== null) {
-    const results = await executeBatch(db, tableSeatingQueries(config, await tableLocation(db, config), { actorId: input.actorId, now: new Date().toISOString() }), { operation: 'Materialize table seatings' })
+    const location = await tableLocation(db, config)
+    const snapshot = tableLocationSnapshot(config, location)
+    const guard: BatchQuery = {
+      query: `(${snapshot.query}) AND EXISTS (SELECT 1 FROM product_booking_configs WHERE product_id=? AND organization_id=?
+        AND duration_minutes IS ? AND seating_interval_minutes IS ? AND default_capacity IS ?)`,
+      params: [...snapshot.params!, config.product_id, config.organization_id, config.duration_minutes, config.seating_interval_minutes, config.default_capacity],
+    }
+    const results = await executeBatch(db, [
+      ...tableSeatingQueries(config, location, { actorId: input.actorId, now: new Date().toISOString(), guard }),
+      { query: `SELECT (${guard.query}) AS unchanged`, params: guard.params },
+    ], { operation: 'Materialize table seatings' })
+    if ((results[2]?.results?.[0] as { unchanged: number } | undefined)?.unchanged !== 1) {
+      throw new HTTPError({ statusCode: 409, statusMessage: 'The table or its hours changed. Reload and try again.' })
+    }
     return { created: results[1]?.meta?.changes ?? 0, existing: 0, skipped: [] }
   }
   let providerCreated = 0

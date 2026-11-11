@@ -621,13 +621,14 @@ test('a guest-cancelled stay alerts owners with the whole stay and the member lo
     for (const statement of [
       "INSERT INTO organization (id, name, slug, subdomain, default_currency, timezone, vertical, theme_id) VALUES ('org-turnover', 'Turnover Retreat', 'turnover', 'turnover', 'USD', 'Asia/Bangkok', 'lodging', 'tenant-theme-v1')",
       "INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('turnover-en', 'org-turnover', 'en', 1, 'published')",
-      "INSERT INTO user (id, name, email) VALUES ('owner-turnover', 'Owner', 'owner@provider-proof.com'), ('cleaner-turnover', 'Cleaner', 'cleaner@provider-proof.com')",
-      "INSERT INTO member (id, organizationId, userId, role) VALUES ('member-owner-turnover', 'org-turnover', 'owner-turnover', 'owner'), ('member-cleaner-turnover', 'org-turnover', 'cleaner-turnover', 'member')",
+      "INSERT INTO user (id, name, email) VALUES ('owner-turnover', 'Owner', 'owner@provider-proof.com'), ('cleaner-turnover', 'Cleaner', 'cleaner@provider-proof.com'), ('unassigned-turnover', 'Unassigned', 'unassigned@provider-proof.com')",
+      "INSERT INTO member (id, organizationId, userId, role) VALUES ('member-owner-turnover', 'org-turnover', 'owner-turnover', 'owner'), ('member-cleaner-turnover', 'org-turnover', 'cleaner-turnover', 'member'), ('member-unassigned-turnover', 'org-turnover', 'unassigned-turnover', 'member')",
       "INSERT INTO business_locations (id, organization_id, slug, title, timezone, status) VALUES ('location-turnover', 'org-turnover', 'retreat', 'Retreat', 'Asia/Bangkok', 'active')",
-      "INSERT INTO session (id, expiresAt, token, userId) VALUES ('session-cleaner', unixepoch() + 3600, 'session-token-cleaner', 'cleaner-turnover')",
+      "INSERT INTO session (id, expiresAt, token, userId) VALUES ('session-cleaner', unixepoch() + 3600, 'session-token-cleaner', 'cleaner-turnover'), ('session-unassigned', unixepoch() + 3600, 'session-token-unassigned', 'unassigned-turnover')",
     ]) await db.prepare(statement).run()
     const deviceToken = 'cd'.repeat(32)
     await registerDevice(db, { kind: 'apns', deviceToken, environment: 'sandbox', userId: 'cleaner-turnover', sessionId: 'session-cleaner' })
+    await registerDevice(db, { kind: 'apns', deviceToken: 'ef'.repeat(32), environment: 'sandbox', userId: 'unassigned-turnover', sessionId: 'session-unassigned' })
     const access = { organizationId: 'org-turnover', actorId: 'owner-turnover', manage: true as const }
     const home = await createProduct(db, { env, organizationId: access.organizationId, actor: { actorId: access.actorId }, product: {
       kind: 'stay', name: 'Turnover Cabin', variants: [{ name: 'Turnover Cabin', prices: [{ unit_amount: 15000, currency: 'USD' }] }],
@@ -641,6 +642,7 @@ test('a guest-cancelled stay alerts owners with the whole stay and the member lo
     const to = (address: string) => emails.filter(email => email.to.includes(address))
     assert.equal(to('owner@provider-proof.com').length, 1)
     assert.equal(to('cleaner@provider-proof.com').length, 1)
+    assert.equal(to('unassigned@provider-proof.com').length, 0)
     const [ownerEmail] = to('owner@provider-proof.com')
     const [memberEmail] = to('cleaner@provider-proof.com')
     assert.equal(ownerEmail!.subject, 'Reservation canceled - Ana Silva, Oct 1')

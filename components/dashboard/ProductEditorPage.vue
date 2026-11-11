@@ -1187,7 +1187,7 @@ function hasDetail(field: ProductDetailField): boolean {
 
 const additionalDetails = computed(() => {
   const row = product.value
-  if (!row || arrivalTab.value) return []
+  if (!row || row.kind === 'table' || arrivalTab.value) return []
   const visible = new Set(navigationGroups.value.flatMap(group => group.items.map(item => item.id)))
   return [
     ...definitions.value.filter(field => ![PRICING_NOTE_HANDLE, 'tagline'].includes(field.key) && !isStayFocusedDetail(field.key) && !visible.has(field.key)).map(field => ({ id: field.key, label: field.name, icon: field.icon, to: sectionPath(`attributes/${field.id}`) })),
@@ -1220,6 +1220,12 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
   if (isNew.value) return []
   // A product that failed to load has nothing to summarize; the level shows the failure.
   if (!product.value || loadError.value) return []
+  if (product.value.kind === 'table') {
+    return [{ id: 'table', items: [{
+      id: 'booking', label: sectionLabels.booking, icon: 'i-lucide-calendar-check',
+      summary: bookingSummary(), to: sectionPath('booking'),
+    }] }]
+  }
   if (dishEditor.value || experienceEditor.value || legalEditor.value) {
     const row = product.value
     const prices = row.variants.map(variant => {

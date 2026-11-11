@@ -173,7 +173,7 @@ test.describe('lodging identity boundary', () => {
       expect(JSON.parse(changedRetryResult.content[0].text)).toMatchObject({ status: 409, code: 'IDEMPOTENCY_KEY_REUSED' })
       const nativeRead = await api.get(`${teamPath}/messages?org=${slug}`, { headers: inviteeBearer })
       expect(nativeRead.status, await nativeRead.text()).toBe(200)
-      expect(await nativeRead.json()).toEqual({ messages: [sent.message], has_more: false })
+      expect(await nativeRead.json()).toEqual({ messages: [sent.message], has_more: false, thread: { ...opened, unread: true, last_message_at: sent.message.created_at, last_message: { id: sent.message.id, body: message, author_user_id: fixture.id, attachment_count: 0, created_at: sent.message.created_at } } })
       const teamRows = async (headers: Record<string, string>) => {
         const response = await api.get(`/api/dashboard/organizations/${organization.id}/conversations?kind=team&org=${slug}`, { headers })
         expect(response.status, await response.text()).toBe(200)
@@ -545,7 +545,7 @@ test.describe('lodging identity boundary', () => {
         // The participating admin can manage; an owner's role cannot replace a lost seat.
         const adminRename = await mcpRequest(memberMcp, baseURL!, { method: 'tools/call', toolName: 'update_conversation_group', args: { organization_id: organization.id, conversation_id: threadId, action: 'rename', name: 'Admin handover', idempotency_key: crypto.randomUUID() } })
         expect(adminRename.status(), await adminRename.text()).toBe(200)
-        expect(mcpData<{ status: 'updated'; threadId: string }>(await adminRename.json())).toEqual({ status: 'updated', threadId })
+        expect(mcpData<{ status: 'updated'; conversation_id: string }>(await adminRename.json())).toEqual({ status: 'updated', conversation_id: threadId })
         expect((await threads(ownerBearer)).find(thread => thread.id === threadId)?.name).toBe('Admin handover')
         await page.goto(`${groupPath}/details/members?kind=team`)
         await waitForNuxtHydration(page)

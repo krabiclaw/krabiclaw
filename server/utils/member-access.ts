@@ -415,8 +415,8 @@ export async function reconcileResponsibilities(env: GuestInboxPublicationEnv, d
 
 /** One predicate for a resource's assigned member; user is bound once. */
 export function assignedMemberSql(alias: string, userSql = '?'): string {
-  return `EXISTS (SELECT 1 FROM member m
-    WHERE m.id = ${alias}.assigned_member_id AND m.organizationId = ${alias}.organization_id AND m.userId = ${userSql})`
+  return `EXISTS (SELECT 1 FROM member assigned
+    WHERE assigned.id = ${alias}.assigned_member_id AND assigned.organizationId = ${alias}.organization_id AND assigned.userId = ${userSql})`
 }
 
 /**

@@ -1038,7 +1038,7 @@ test.describe('stateless MCP server', () => {
         expect((await call('set_product_booking_config', { product_id: productId, ...policy })).result.isError).not.toBe(true)
         const policyRead = await request.get(productUrl)
         expect(policyRead.status()).toBe(200)
-        expect((await policyRead.json()).product.booking).toEqual({ duration_minutes: 60, default_capacity: null, ...policy, held_online: false, scheduling_mode: 'business', assigned_member_id: seededTenant('restaurant').memberIds[E2E_ADMIN_ID]!, advance_notice_minutes: null, ...noQuestions })
+        expect((await policyRead.json()).product.booking).toEqual({ duration_minutes: 60, default_capacity: null, ...policy, held_online: false, scheduling_mode: 'business', assigned_member_id: seededTenant('restaurant').memberIds[E2E_ADMIN_ID]!, advance_notice_minutes: null, ...defaults })
         // Weekly times belong to a location. Online, the provider's hours are the schedule, so neither surface takes online weekly times.
         const online = { location_id: null, slots: [{ weekday: 3, start_time: '11:30' }] }
         expect((await call('replace_product_weekly_schedule', { product_id: productId, ...online })).result.isError).toBe(true)
