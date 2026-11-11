@@ -241,7 +241,7 @@ export async function prepareProductBookingConfig(db: DbClient, input: {
   if (patch.accessibility_contact_required !== undefined && typeof patch.accessibility_contact_required !== 'boolean') badRequest('accessibility_contact_required must be boolean')
   if (patch.payment_basis !== undefined && !(PAYMENT_BASES as readonly unknown[]).includes(patch.payment_basis)) badRequest('payment_basis must be per_guest or per_booking')
   if (patch.duration_minutes === 0) badRequest('duration_minutes must be positive')
-  if (patch.seating_interval_minutes !== undefined && kind !== 'table') badRequest('Only a table takes seating_interval_minutes; other offerings start at their weekly times')
+  if (patch.seating_interval_minutes !== undefined && patch.seating_interval_minutes !== null && kind !== 'table') badRequest('Only a table takes seating_interval_minutes; other offerings start at their weekly times')
   if (patch.seating_interval_minutes !== undefined && patch.seating_interval_minutes !== null && (!Number.isSafeInteger(patch.seating_interval_minutes) || (patch.seating_interval_minutes as number) < 5 || (patch.seating_interval_minutes as number) > 1440)) badRequest('seating_interval_minutes must be a whole number of minutes from 5 to 1440')
   if (patch.confirmation_mode !== undefined && patch.confirmation_mode !== 'instant' && patch.confirmation_mode !== 'review') badRequest('confirmation_mode must be instant or review')
   if (patch.online_payment_required !== undefined && typeof patch.online_payment_required !== 'boolean') badRequest('online_payment_required must be boolean')

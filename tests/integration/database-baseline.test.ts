@@ -42,24 +42,24 @@ test('the migration chain applies from zero and builds every table the schema de
       { token: 'aabb', kind: 'apns', environment: 'production', p256dh: null, auth: null },
       { token: 'https://push.example.test/complete', kind: 'web', environment: null, p256dh: 'recorded-p256dh', auth: 'recorded-auth' },
     ])
-    database.prepare("INSERT INTO requests(id,kind,organization_id,payload_json) VALUES('schema-request','contact','tenant-a',?)").run(JSON.stringify({ guest: { name: 'Recorded guest', email: 'guest@example.test', phone: null }, message: 'Recorded conversation' }))
+    database.prepare("INSERT INTO conversations(id,kind,organization_id,payload_json,last_message_at) VALUES('schema-conversation','contact','tenant-a',?,'2026-10-30T12:30:00.000Z')").run(JSON.stringify({ guest: { name: 'Recorded guest', email: 'guest@example.test', phone: null } }))
     const at = '2026-10-30T12:30:00.000Z'
     for (const status of ['failed', 'needs_review']) for (const missing of ['reason', 'error_code', 'error_field']) {
       const error = { reason: 'Recorded refusal', error_code: 'delivery_refused', error_field: 'channel', [missing]: null }
-      assert.throws(() => database.prepare("INSERT INTO send_later_messages(id,organization_id,request_id,user_id,body,due_at,status,reason,error_code,error_field,version,created_at,updated_at) VALUES(?,'tenant-a','schema-request','schema-user','Recorded reply',?,?,?,?,?,1,?,?)")
-        .run(`${status}-${missing}`, at, status, error.reason, error.error_code, error.error_field, at, at), /send_later_messages_error_check/)
+      assert.throws(() => database.prepare("INSERT INTO scheduled_guest_messages(id,organization_id,conversation_id,author_user_id,body,due_at,status,reason,error_code,error_field,created_at,updated_at) VALUES(?,'tenant-a','schema-conversation','schema-user','Recorded reply',?,?,?,?,?,?,?)")
+        .run(`${status}-${missing}`, at, status, error.reason, error.error_code, error.error_field, at, at), /scheduled_guest_messages_error_check/)
     }
-    database.prepare("INSERT INTO send_later_messages(id,organization_id,request_id,user_id,body,due_at,status,reason,error_code,error_field,version,created_at,updated_at) VALUES('pending','tenant-a','schema-request','schema-user','Recorded reply',?,'pending',NULL,NULL,NULL,1,?,?),('failed','tenant-a','schema-request','schema-user','Recorded reply',?,'failed','Recorded refusal','delivery_refused','channel',1,?,?)").run(at, at, at, at, at, at)
-    assert.deepEqual(database.prepare('SELECT id,status,reason,error_code,error_field FROM send_later_messages ORDER BY id').all(), [
+    database.prepare("INSERT INTO scheduled_guest_messages(id,organization_id,conversation_id,author_user_id,body,due_at,status,reason,error_code,error_field,created_at,updated_at) VALUES('pending','tenant-a','schema-conversation','schema-user','Recorded reply',?,'pending',NULL,NULL,NULL,?,?),('failed','tenant-a','schema-conversation','schema-user','Recorded reply',?,'failed','Recorded refusal','delivery_refused','channel',?,?)").run(at, at, at, at, at, at)
+    assert.deepEqual(database.prepare('SELECT id,status,reason,error_code,error_field FROM scheduled_guest_messages ORDER BY id').all(), [
       { id: 'failed', status: 'failed', reason: 'Recorded refusal', error_code: 'delivery_refused', error_field: 'channel' },
       { id: 'pending', status: 'pending', reason: null, error_code: null, error_field: null },
     ])
     for (const organizationId of ['tenant-a', 'tenant-b']) {
       database.prepare('INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES (?, ?, ?, 0, ?)').run(`${organizationId}-th`, organizationId, 'th', 'published')
-      database.prepare("INSERT INTO resource_localizations (id, organization_id, resource_type, resource_id, locale, route_path, values_json, created_by_user_id, updated_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, 'test', 'test')").run(`${organizationId}-route`, organizationId, 'product', `${organizationId}-product`, 'th', '/th/products/shared', '{}')
+      database.prepare("INSERT INTO content_documents (id, organization_id, kind, row_role, resource_type, resource_id, locale, path, metadata_json, created_by, updated_by) VALUES (?, ?, 'resource', 'representation', ?, ?, ?, ?, ?, 'test', 'test')").run(`${organizationId}-route`, organizationId, 'product', `${organizationId}-product`, 'th', '/th/products/shared', '{}')
     }
-    assert.equal((database.prepare("SELECT COUNT(*) AS count FROM resource_localizations WHERE route_path = '/th/products/shared'").get() as { count: number }).count, 2)
-    assert.throws(() => database.prepare("INSERT INTO resource_localizations (id, organization_id, resource_type, resource_id, locale, route_path, values_json, created_by_user_id, updated_by_user_id) VALUES ('duplicate-route', 'tenant-a', 'product', 'another-product', 'th', '/th/products/shared', '{}', 'test', 'test')").run(), /UNIQUE constraint failed/)
+    assert.equal((database.prepare("SELECT COUNT(*) AS count FROM content_documents WHERE path = '/th/products/shared'").get() as { count: number }).count, 2)
+    assert.throws(() => database.prepare("INSERT INTO content_documents (id, organization_id, kind, row_role, resource_type, resource_id, locale, path, metadata_json, created_by, updated_by) VALUES ('duplicate-route', 'tenant-a', 'resource', 'representation', 'product', 'another-product', 'th', '/th/products/shared', '{}', 'test', 'test')").run(), /UNIQUE constraint failed/)
     assert.equal(database.pragma('foreign_key_check').length, 0)
   } finally {
     database.close()
@@ -169,8 +169,8 @@ test('a v23 replacement maps every recommendation feedback row into the business
       ])
       assert.equal(target.prepare("SELECT name FROM sqlite_schema WHERE name = 'recommendation_feedback'").get(), undefined)
       // The stored guess about the conversation is not carried; the conversation itself is.
-      assert.deepEqual(target.prepare("SELECT id, kind, organization_id FROM requests").all(), [{ id: 'conversation', kind: 'contact', organization_id: 'owner-business' }])
-      assert.equal((target.prepare("SELECT count(*) AS n FROM pragma_table_info('requests') WHERE name IN ('conversation_state', 'resolved_at')").get() as { n: number }).n, 0)
+      assert.deepEqual(target.prepare("SELECT id, kind, organization_id FROM conversations").all(), [{ id: 'conversation', kind: 'contact', organization_id: 'owner-business' }])
+      assert.equal((target.prepare("SELECT count(*) AS n FROM pragma_table_info('conversations') WHERE name IN ('conversation_state', 'resolved_at')").get() as { n: number }).n, 0)
       assert.deepEqual(target.pragma('foreign_key_check'), [])
     } finally { target.close() }
   } finally { rmSync(directory, { recursive: true, force: true }) }
@@ -213,7 +213,7 @@ test('a v25 replacement names business scheduling with no default to fall back o
     const target = new Database(targetPath)
     try {
       assert.deepEqual(target.prepare('SELECT product_id, scheduling_mode FROM product_booking_configs ORDER BY product_id').all(), [{ product_id: 'class', scheduling_mode: 'business' }, { product_id: 'consult', scheduling_mode: 'provider' }])
-      assert.throws(() => target.prepare("INSERT INTO product_booking_configs(product_id,organization_id,created_by,updated_by) VALUES('unnamed','host','owner','owner')").run(), /NOT NULL constraint failed: product_booking_configs.scheduling_mode/)
+      assert.throws(() => target.prepare("INSERT INTO product_booking_configs(product_id,organization_id,unit,created_by,updated_by) VALUES('unnamed','host','slot','owner','owner')").run(), /NOT NULL constraint failed: product_booking_configs.scheduling_mode/)
       assert.throws(() => target.prepare("UPDATE product_booking_configs SET scheduling_mode = 'legacy' WHERE product_id = 'class'").run(), /product_booking_configs_scheduling_mode_check/)
       assert.deepEqual(target.prepare("SELECT name FROM sqlite_schema WHERE name IN ('inventory_items', 'inventory_levels')").all(), [])
       assert.deepEqual(target.prepare("SELECT name FROM sqlite_schema WHERE name IN ('payment_attempts', 'payment_claims')").all(), [])
@@ -501,12 +501,18 @@ test('interleaved branch migration ledgers preserve location privacy and authore
       const recorded = (source.prepare('SELECT name FROM d1_migrations ORDER BY id').all() as Array<{ name: string }>).map(row => row.name)
       const unchangedTables = history.startsWith('v19-') ? ['products', 'product_variants', 'product_publications', 'product_locations', 'product_stay_configs', 'user', 'member', 'member_scheduling', 'product_booking_configs', 'product_sessions', 'bookings'] : []
       // The v26 baseline no longer stores member working windows or busy times.
-      const retired: Record<string, string[]> = { member_scheduling: ['windows_json', 'windows_until', 'calendar_revision', 'busy_json', 'busy_from', 'busy_until', 'busy_checked_at', 'busy_error'] }
+      const retired: Record<string, string[]> = {
+        product_booking_configs: ['assigned_team_id'],
+        member_scheduling: ['windows_json', 'windows_until', 'calendar_revision', 'busy_json', 'busy_from', 'busy_until', 'busy_checked_at', 'busy_error'],
+        product_sessions: ['assigned_member_id'],
+        product_stay_configs: ['assigned_team_id', 'check_in_time', 'check_in_end_time', 'check_out_time', 'max_guests', 'min_nights', 'calendar_rules', 'questions', 'cancellation_policy', 'long_term_cancellation_policy', 'assigned_member_id'],
+        bookings: ['assigned_member_id', 'request_id'],
+      }
       const unchanged = unchangedTables.map(table => {
         const columns = (source.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map(row => row.name).filter(name => !retired[table]?.includes(name))
         return { table, columns, rows: source.prepare(`SELECT ${columns.join(',')} FROM ${table}`).all() }
       })
-      const preservedTables = ['product_stay_photo_rooms', 'product_stay_photo_room_memberships', 'product_stay_photo_room_amenities', 'product_stay_room_accessibility', 'product_stay_room_accessibility_photos', 'media_placements', 'product_channel_mappings', 'channel_night_pushes', 'channel_threads']
+      const preservedTables = ['product_stay_photo_rooms', 'product_stay_photo_room_amenities', 'product_stay_room_accessibility', 'media_placements', 'product_channel_mappings', 'channel_night_pushes']
       const authored = preservedTables.map(table => ({
         table,
         columns: (source.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map(row => row.name),
@@ -521,12 +527,24 @@ test('interleaved branch migration ledgers preserve location privacy and authore
       assert.deepEqual(manifest.invariants.filter(invariant => invariant.violations > 0), [])
       const target = new Database(targetPath, { readonly: true })
       try {
-        for (const { table, columns, rows } of authored) assert.deepEqual(target.prepare(`SELECT ${columns.join(',')} FROM ${table}`).all(), rows)
-        for (const { table, columns, rows } of unchanged) assert.deepEqual(target.prepare(`SELECT ${columns.join(',')} FROM ${table}`).all(), rows)
+        for (const { table, columns, rows } of authored) {
+          const original = table === 'media_placements' ? " WHERE owner_type = 'product'" : ''
+          assert.deepEqual(target.prepare(`SELECT ${columns.join(',')} FROM ${table}${original}`).all(), rows)
+        }
+        for (const { table, columns, rows } of unchanged) {
+          const original = table === 'product_booking_configs' ? " WHERE unit = 'slot'" : ''
+          assert.deepEqual(target.prepare(`SELECT ${columns.join(',')} FROM ${table}${original}`).all(), rows)
+        }
         for (const [table, names] of Object.entries(retired)) if (unchangedTables.includes(table)) assert.deepEqual((target.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).filter(row => names.includes(row.name)), [])
-        assert.equal(target.prepare("SELECT check_in_end_time FROM product_stay_configs WHERE product_id = 'home'").get()!.check_in_end_time, history === 'v19-complete' ? '19:00' : null)
+        assert.equal(target.prepare("SELECT check_in_end_time FROM product_booking_configs WHERE product_id = 'home'").get()!.check_in_end_time, history === 'v19-complete' ? '19:00' : null)
         assert.deepEqual(manifest.provider_hours_session_ids, [])
         assert.deepEqual(target.prepare("SELECT organization_id, product_id, beds, amenities FROM product_stay_configs WHERE product_id = 'home'").get(), { organization_id: 'host', product_id: 'home', beds: 2, amenities: '[{"code":"smoke_detector","available":true}]' })
+        assert.deepEqual(target.prepare("SELECT owner_type, owner_id, slot, asset_id FROM media_placements WHERE owner_id = 'bedroom' ORDER BY owner_type").all(), [
+          { owner_type: 'stay_photo_room', owner_id: 'bedroom', slot: 'photo', asset_id: 'photo' },
+          { owner_type: 'stay_room_accessibility', owner_id: 'bedroom', slot: 'step_free_access', asset_id: 'photo' },
+        ])
+        if (history === 'v19-draft-pending') assert.deepEqual(target.prepare('SELECT external_thread_id, conversation_id FROM channel_threads').all(),
+          [{ external_thread_id: 'recorded-thread', conversation_id: 'guest-thread' }])
         assert.deepEqual(target.prepare("SELECT organization_id, stay_map_sharing FROM business_locations WHERE id = 'cabin'").get(), { organization_id: 'host', stay_map_sharing: 'specific' })
         assert.deepEqual(target.prepare("SELECT theme_id, json_extract(settings_json, '$.config.font_preset') AS font, json_extract(settings_json, '$.config.button_casing') AS casing FROM organization WHERE id = 'legal'").get(), { theme_id: 'tenant-theme-v1', font: 'marcellus', casing: 'uppercase' })
         assert.deepEqual(target.prepare("SELECT level, data_json FROM content_blocks WHERE id = 'legal-heading'").get(), { level: 3, data_json: '{"text":"Recorded legal heading"}' })
@@ -772,8 +790,8 @@ test('a v15 export transfers into the v16 baseline: required clocks and currenci
       assert.deepEqual(target.prepare("SELECT default_currency, timezone, settings_json FROM organization WHERE id = 'org'").get(), { default_currency: 'USD', timezone: 'America/New_York', settings_json: '{"config":{}}' })
       assert.deepEqual(target.prepare("SELECT held_online FROM product_booking_configs WHERE product_id = 'consult'").get(), { held_online: 1 })
       // The session and its time survive; its provider and provider-hours identity are explicit.
-      assert.deepEqual(target.prepare("SELECT assigned_member_id, availability_rule_id, source_occurrence_key, starts_at FROM product_sessions WHERE id = 'session'").get(),
-        { assigned_member_id: 'member-1', availability_rule_id: null, source_occurrence_key: 'hours:member-1:2026-11-02T14:00:00.000Z', starts_at: '2026-11-02T14:00:00.000Z' })
+      assert.deepEqual(target.prepare("SELECT availability_rule_id, source_occurrence_key, starts_at FROM product_sessions WHERE id = 'session'").get(),
+        { availability_rule_id: null, source_occurrence_key: 'hours:member-1:2026-11-02T14:00:00.000Z', starts_at: '2026-11-02T14:00:00.000Z' })
       assert.equal((target.prepare('SELECT count(*) AS n FROM product_availability_rules').get() as { n: number }).n, 0)
       // Availability comes from the existing provider windows, not the retired
       // weekly rule. Existing booking history and active holds keep their facts.
@@ -784,9 +802,9 @@ test('a v15 export transfers into the v16 baseline: required clocks and currenci
         { id: 'held-session', ends_at: '2026-11-03T15:00:00.000Z', capacity: 4, updated_at: '2026-10-01T00:00:00.000Z', updated_by: 'user-1' },
         { id: 'session', ends_at: '2026-11-02T15:00:00.000Z', capacity: 4, updated_at: '2026-10-01T00:00:00.000Z', updated_by: 'user-1' },
       ])
-      const generated = target.prepare("SELECT id, assigned_member_id, timezone, starts_at, ends_at, capacity, status FROM product_sessions WHERE id NOT IN ('session', 'held-session', 'obsolete-session', 'outside-horizon') ORDER BY starts_at").all() as Array<{ id: string; assigned_member_id: string; timezone: string; starts_at: string; ends_at: string; capacity: number; status: string }>
+      const generated = target.prepare("SELECT id, timezone, starts_at, ends_at, capacity, status FROM product_sessions WHERE id NOT IN ('session', 'held-session', 'obsolete-session', 'outside-horizon') ORDER BY starts_at").all() as Array<{ id: string; timezone: string; starts_at: string; ends_at: string; capacity: number; status: string }>
       assert.equal(generated.length, 60)
-      assert(generated.every(row => row.assigned_member_id === 'member-1' && row.timezone === 'America/New_York' && row.capacity === 1 && row.status === 'scheduled'
+      assert(generated.every(row => row.timezone === 'America/New_York' && row.capacity === 1 && row.status === 'scheduled'
         && Date.parse(row.ends_at) - Date.parse(row.starts_at) === 30 * 60_000
         && windows.some(window => window.start <= row.starts_at && window.end >= row.ends_at)))
       const before = target.prepare('SELECT * FROM product_sessions ORDER BY id').all()
@@ -861,37 +879,39 @@ test('a v15 export transfers into the v16 baseline: required clocks and currenci
     assert.equal(fresh.provider_hours_session_ids.length, 59, 'a full preflight retains the source-owned occurrence instead of deriving its identity')
     const freshTarget = new Database(freshPath, { readonly: true })
     try {
-      assert.deepEqual(freshTarget.prepare("SELECT id, starts_at, ends_at, assigned_member_id, status FROM product_sessions WHERE id = 'source-created'").get(),
-        { id: 'source-created', ...occurrence, assigned_member_id: 'member-1', status: 'scheduled' })
+      assert.deepEqual(freshTarget.prepare("SELECT id, starts_at, ends_at, status FROM product_sessions WHERE id = 'source-created'").get(),
+        { id: 'source-created', ...occurrence, status: 'scheduled' })
       assert.deepEqual(freshTarget.prepare("SELECT product_session_id, party_size FROM bookings WHERE id = 'source-created-booking'").get(),
         { product_session_id: 'source-created', party_size: 1 })
       assert.deepEqual(freshTarget.pragma('foreign_key_check'), [])
     } finally { freshTarget.close() }
-    for (const team of [false, true]) {
-      const label = team ? 'team-removal' : 'reassignment'
-      const sourcePath = export15(`${label}.sqlite`, { secondProvider: true, team })
+    {
+      const label = 'reassignment'
+      const sourcePath = export15(`${label}.sqlite`, { secondProvider: true })
       const initialPath = join(directory, `${label}-initial.sqlite`)
       const initial = await transferDatabaseExport(sourcePath, initialPath)
-      assert.equal(initial.provider_hours_session_ids.length, team ? 122 : 60)
+      assert.equal(initial.provider_hours_session_ids.length, 60)
       const earlier = new Database(initialPath, { readonly: true })
-      const removed = (earlier.prepare("SELECT id FROM product_sessions WHERE assigned_member_id='member-1' AND id NOT IN ('session','held-session','obsolete-session','outside-horizon') ORDER BY id").all() as Array<{ id: string }>).map(row => JSON.stringify([row.id]))
+      const removed = (earlier.prepare("SELECT id FROM product_sessions WHERE source_occurrence_key LIKE 'hours:member-1:%' AND id NOT IN ('session','held-session','obsolete-session','outside-horizon') ORDER BY id").all() as Array<{ id: string }>).map(row => JSON.stringify([row.id]))
       assert.equal(removed.length, 60)
       earlier.close()
       const changed = new Database(sourcePath)
-      changed.prepare(team ? "DELETE FROM teamMember WHERE id='team-one'" : "UPDATE product_booking_configs SET assigned_member_id='member-2'").run()
+      changed.prepare("UPDATE product_booking_configs SET assigned_member_id='member-2'").run()
       changed.close()
       const currentPath = join(directory, `${label}-delta.sqlite`)
       const current = await transferDatabaseExport(sourcePath, currentPath, { payloadPath: join(directory, `${label}-delta.sql`), deltaFrom: initialPath })
-      assert.deepEqual([...current.payload!.left_behind!.product_sessions.deleted].sort(), removed, 'obsolete derived provider rows are reported rather than restored')
-      assert.equal(current.payload!.delta!.product_sessions, team ? 0 : 62)
+      assert.deepEqual(current.payload!.left_behind!.product_sessions.deleted, [])
+      const changedIds = current.payload!.left_behind!.product_sessions.changed
+      assert(removed.every(id => changedIds.includes(id)), 'reassigned or retired occurrences are reported as changes to their existing IDs')
       const target = new Database(currentPath, { readonly: true })
-      assert.equal((target.prepare("SELECT count(*) AS n FROM product_sessions WHERE assigned_member_id='member-1' AND id NOT IN ('session','held-session','obsolete-session','outside-horizon')").get() as { n: number }).n, 0)
-      assert.deepEqual(target.prepare("SELECT id, assigned_member_id, ends_at, capacity FROM product_sessions WHERE id IN ('session','held-session') ORDER BY id").all(), [
-        { id: 'held-session', assigned_member_id: 'member-1', ends_at: '2026-11-03T15:00:00.000Z', capacity: 4 },
-        { id: 'session', assigned_member_id: 'member-1', ends_at: '2026-11-02T15:00:00.000Z', capacity: 4 },
+      assert.equal((target.prepare("SELECT count(*) AS n FROM product_sessions WHERE status = 'scheduled' AND source_occurrence_key LIKE 'hours:member-1:%' AND id NOT IN ('session','held-session','obsolete-session','outside-horizon')").get() as { n: number }).n, 0)
+      assert.deepEqual(target.prepare("SELECT id, ends_at, capacity FROM product_sessions WHERE id IN ('session','held-session') ORDER BY id").all(), [
+        { id: 'held-session', ends_at: '2026-11-03T15:00:00.000Z', capacity: 4 },
+        { id: 'session', ends_at: '2026-11-02T15:00:00.000Z', capacity: 4 },
       ])
       target.close()
     }
+    await assert.rejects(() => transferDatabaseExport(export15('team.sqlite', { secondProvider: true, team: true }), join(directory, 'target-team.sqlite')), /v26 still has Better Auth Teams or team memberships/)
     // A value nobody chose, a missing one, or an online offering nobody provides stops the transfer.
     await assert.rejects(() => transferDatabaseExport(export15('utc.sqlite', { timezone: 'UTC' }), join(directory, 'target-utc.sqlite')), /without their own currency or timezone/)
     await assert.rejects(() => transferDatabaseExport(export15('no-currency.sqlite', { currency: null }), join(directory, 'target-currency.sqlite')), /without their own currency or timezone/)
@@ -976,7 +996,7 @@ test('a v16 export transfers into the v17 baseline unchanged, which admits place
     try {
       assert.deepEqual(target.pragma('foreign_key_check'), [])
       assert.deepEqual(target.prepare("SELECT id, kind, name FROM products WHERE organization_id = 'org'").all(), [{ id: 'dish', kind: 'dish', name: 'Noodles' }])
-      for (const table of ['product_stay_configs', 'product_nights', 'stays', 'stay_nights', 'stay_payments']) {
+      for (const table of ['product_booking_configs', 'product_nights', 'bookings', 'stay_nights', 'offline_payments']) {
         assert.equal((target.prepare(`SELECT count(*) AS n FROM ${table}`).get() as { n: number }).n, 0, `${table} starts empty`)
       }
       target.prepare("INSERT INTO products (id, organization_id, kind, name, slug, created_by, updated_by) VALUES ('home', 'org', 'stay', 'Cabin', 'cabin', 'user-1', 'user-1')").run()
@@ -1018,19 +1038,13 @@ test('a v17 export transfers into the v18 baseline, which admits a stay conversa
     const target = new Database(targetPath)
     try {
       assert.deepEqual(target.pragma('foreign_key_check'), [])
-      assert.deepEqual(target.prepare("SELECT id, request_id, guest_email FROM stays").all(), [{ id: 'stay', request_id: 'thread', guest_email: 'ana@example.test' }])
-      assert.deepEqual(target.prepare("SELECT id, kind, json_extract(payload_json, '$.guest.email') AS email FROM requests").all(), [{ id: 'thread', kind: 'stay', email: 'ana@example.test' }])
-      // v18 holds one by phone alone, and still refuses a guest with neither.
-      target.prepare("INSERT INTO requests (id, kind, organization_id, payload_json) VALUES ('phone-only', 'stay', 'org', '{\"guest\":{\"name\":\"Kai\",\"email\":null,\"phone\":\"+15550000000\"}}')").run()
-      assert.deepEqual(JSON.parse((target.prepare("SELECT payload_json FROM requests WHERE id = 'phone-only'").get() as { payload_json: string }).payload_json).guest, { name: 'Kai', email: null, phone: '+15550000000' })
-      // Other inbox kinds still require email at the persistence boundary.
-      for (const kind of ['contact', 'reservation', 'booking']) {
-        assert.throws(() => target.prepare('INSERT INTO requests (id, kind, organization_id, payload_json) VALUES (?, ?, ?, ?)')
-          .run(`phone-only-${kind}`, kind, 'org', JSON.stringify({ guest: { name: 'Kai', email: null, phone: '+15550000000' }, message: 'Hello' })), /requests_guest_payload_check/)
-      }
-      // A payload that leaves the email key out is refused, not read as no email.
-      assert.throws(() => target.prepare("INSERT INTO requests (id, kind, organization_id, payload_json) VALUES ('no-key', 'stay', 'org', '{\"guest\":{\"name\":\"Lu\",\"phone\":\"+15550000001\"}}')").run(), /requests_guest_payload_check/)
-      assert.throws(() => target.prepare("INSERT INTO requests (id, kind, organization_id, payload_json) VALUES ('nobody', 'stay', 'org', '{\"guest\":{\"name\":\"Bo\",\"email\":null,\"phone\":null}}')").run(), /requests_guest_payload_check/)
+      assert.deepEqual(target.prepare("SELECT id, booking_id, kind, json_extract(payload_json, '$.guest.email') AS email FROM conversations").all(),
+        [{ id: 'thread', booking_id: 'stay', kind: 'booking', email: 'ana@example.test' }])
+      const addConversation = target.prepare("INSERT INTO conversations (id, kind, organization_id, payload_json, last_message_at) VALUES (?, ?, 'org', ?, '2026-10-16T00:00:00.000Z')")
+      addConversation.run('phone-only', 'booking', JSON.stringify({ guest: { name: 'Kai', email: null, phone: '+15550000000' } }))
+      assert.deepEqual(JSON.parse((target.prepare("SELECT payload_json FROM conversations WHERE id = 'phone-only'").get() as { payload_json: string }).payload_json).guest, { name: 'Kai', email: null, phone: '+15550000000' })
+      assert.throws(() => addConversation.run('no-key', 'booking', JSON.stringify({ guest: { name: 'Lu', phone: '+15550000001' } })), /conversations_guest_payload_check/)
+      assert.throws(() => addConversation.run('nobody', 'contact', JSON.stringify({ guest: { name: 'Bo', email: null, phone: null } })), /conversations_guest_payload_check/)
     } finally {
       target.close()
     }
@@ -1061,28 +1075,29 @@ test('a v18 export preserves its conversations and receipts unchanged in the cha
     assert.throws(() => source.prepare("INSERT INTO requests (id, kind, organization_id, conversation_state, payload_json) VALUES ('channel', 'stay', 'org', 'needs_attention', ?)").run(channel), /requests_guest_payload_check/)
     source.prepare("INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES ('person', 'Person', 'person@example.test', 1, 0, 0)").run()
     source.prepare("INSERT INTO user_notification_preferences (user_id, category, email_enabled, whatsapp_enabled) VALUES ('person', 'guest_messages', 0, 1), ('person', 'reviews', 1, 0)").run()
-    const before = ['requests', 'activity_entries', 'guest_thread_deliveries'].map(table => source.prepare(`SELECT * FROM ${table}`).all())
     source.close()
-    const targetPath = join(directory, 'v19.sqlite')
+    const targetPath = join(directory, 'current.sqlite')
     const manifest = await transferDatabaseExport(sourcePath, targetPath, { payloadPath: join(directory, 'payload.sql') })
-    // Only the push switch, which no v18 preference had, is derived: each category's product default.
-    assert.deepEqual(manifest.transforms, [{ name: 'notification_preferences_push_default', changes: 2 }])
+    assert.deepEqual(manifest.transforms, [{ name: 'notification_preferences_push_default', changes: 2 }, { name: 'unified_conversations', changes: 1 }])
     const target = new Database(targetPath)
     try {
       assert.deepEqual(target.pragma('foreign_key_check'), [])
-      assert.deepEqual(['requests', 'activity_entries', 'guest_thread_deliveries'].map(table => target.prepare(`SELECT * FROM ${table}`).all()),
-        [before[0]!.map(request => { const { conversation_state: _state, resolved_at: _resolved, ...kept } = request as Record<string, unknown>; return { ...kept, blocked_at: null } }), before[1], before[2]!.map(receipt => ({ ...receipt as Record<string, unknown>, non_delivery_confirmed: null, email_json: null, email_message_id: null }))])
+      assert.deepEqual(target.prepare("SELECT id, kind, json_extract(payload_json, '$.guest.phone') AS phone FROM conversations").all(),
+        [{ id: 'history', kind: 'booking', phone: '+15550000000' }])
+      assert.deepEqual(target.prepare('SELECT id, conversation_id, author_kind, channel, body FROM messages').all(),
+        [{ id: 'message', conversation_id: 'history', author_kind: 'guest', channel: 'whatsapp', body: 'Recorded message' }])
+      assert.deepEqual(target.prepare('SELECT id, message_id, provider_message_id, status, non_delivery_confirmed FROM guest_thread_deliveries').all(),
+        [{ id: 'receipt', message_id: 'message', provider_message_id: 'actual-provider-id', status: 'accepted', non_delivery_confirmed: null }])
       assert.equal(target.prepare('SELECT count(*) AS n FROM channel_threads').get()!.n, 0)
       assert.deepEqual(target.prepare('SELECT category, email_enabled, whatsapp_enabled, push_enabled FROM user_notification_preferences ORDER BY category').all(),
         [{ category: 'messages', email_enabled: 0, whatsapp_enabled: 1, push_enabled: 1 }, { category: 'reviews', email_enabled: 1, whatsapp_enabled: 0, push_enabled: 0 }])
-      target.prepare("INSERT INTO requests (id, kind, organization_id, payload_json) VALUES ('channel', 'stay', 'org', ?)").run(channel)
+      const addConversation = target.prepare("INSERT INTO conversations (id, kind, organization_id, payload_json, last_message_at) VALUES (?, ?, 'org', ?, '2026-10-16T00:00:00.000Z')")
+      addConversation.run('channel', 'booking', channel)
       for (const guest of [undefined, {}, { name: null, email: null }, { name: null, phone: null }, { email: null, phone: null }]) {
-        assert.throws(() => target.prepare("INSERT INTO requests (id, kind, organization_id, payload_json) VALUES ('missing-guest', 'stay', 'org', ?)")
-          .run(JSON.stringify({ participant: { kind: 'channel', title: 'Actual title' }, ...(guest === undefined ? {} : { guest }) })), /requests_guest_payload_check/)
+        assert.throws(() => addConversation.run('missing-guest', 'booking', JSON.stringify({ participant: { kind: 'channel', title: 'Actual title' }, ...(guest === undefined ? {} : { guest }) })), /conversations_guest_payload_check/)
       }
-      assert.throws(() => target.prepare("INSERT INTO requests (id, kind, organization_id, payload_json) VALUES ('invalid', 'stay', 'org', ?)")
-        .run(JSON.stringify({ participant: { kind: 'channel', title: '' }, guest: { name: null, email: null, phone: null } })), /requests_guest_payload_check/)
-      assert.throws(() => target.prepare("INSERT INTO requests (id, kind, organization_id, payload_json) VALUES ('contact', 'contact', 'org', ?)").run(channel), /requests_guest_payload_check/)
+      assert.throws(() => addConversation.run('invalid', 'booking', JSON.stringify({ participant: { kind: 'channel', title: '' }, guest: { name: null, email: null, phone: null } })), /conversations_guest_payload_check/)
+      assert.throws(() => addConversation.run('contact', 'contact', channel), /conversations_guest_payload_check/)
     } finally { target.close() }
   } finally { rmSync(directory, { recursive: true, force: true }) }
 })
@@ -1113,7 +1128,6 @@ test('a v20 export transfers into the current baseline unchanged, which admits B
     stayRow('airbnb-stay', 'airbnb', '2026-11-01', '2026-11-03')(source)
     source.prepare("INSERT INTO stay_nights (organization_id, product_id, date, stay_id) VALUES ('host', 'home', '2026-11-01', 'airbnb-stay'), ('host', 'home', '2026-11-02', 'airbnb-stay')").run()
     source.prepare("INSERT INTO channel_night_pushes (organization_id, product_id, provider, date, state, detail, updated_at) VALUES ('host', 'home', 'channex', '2026-11-01', 'needs_review', 'Recorded refusal', '2026-10-20T00:00:00.000Z')").run()
-    const recorded = Object.fromEntries(['stays', 'stay_nights'].map(table => [table, source.prepare(`SELECT * FROM ${table} ORDER BY 1, 2`).all()]))
     source.close()
 
     const targetPath = join(directory, 'current.sqlite')
@@ -1126,30 +1140,28 @@ test('a v20 export transfers into the current baseline unchanged, which admits B
     try {
       target.pragma('foreign_keys = ON')
       assert.deepEqual(target.pragma('foreign_key_check'), [])
-      // Columns a later forward migration added (stays.no_show_at) are new; every recorded value is unchanged.
-      for (const [table, rows] of Object.entries(recorded)) {
-        const columns = Object.keys(rows[0] as Record<string, unknown>).map(column => `"${column}"`).join(', ')
-        assert.deepEqual(target.prepare(`SELECT ${columns} FROM ${table} ORDER BY 1, 2`).all(), rows, `${table} is unchanged`)
-      }
-      // v20's pending outbox migration ran: the refusal keeps its reason and has never been confirmed.
+      assert.deepEqual(target.prepare("SELECT id, channel, external_booking_id, starts_at, ends_at, adults, total_minor, currency FROM bookings").all(),
+        [{ id: 'airbnb-stay', channel: 'airbnb', external_booking_id: 'booking-airbnb-stay', starts_at: '2026-11-01T23:00:00.000Z', ends_at: '2026-11-03T17:00:00.000Z', adults: 2, total_minor: 30000, currency: 'USD' }])
+      assert.deepEqual(target.prepare("SELECT booking_id, json_extract(payload_json,'$.participant.title') AS title, json_type(payload_json,'$.guest.name') AS guest_type FROM conversations").all(),
+        [{ booking_id: 'airbnb-stay', title: 'Airbnb reservation booking-airbnb-stay', guest_type: 'null' }])
+      assert.deepEqual(target.prepare("SELECT date, booking_id FROM stay_nights ORDER BY date").all(),
+        [{ date: '2026-11-01', booking_id: 'airbnb-stay' }, { date: '2026-11-02', booking_id: 'airbnb-stay' }])
       assert.deepEqual(target.prepare('SELECT date, state, detail, sent_json FROM channel_night_pushes').all(),
         [{ date: '2026-11-01', state: 'needs_review', detail: 'Recorded refusal', sent_json: null }])
-      stayRow('booking-com-stay', 'booking_com', '2026-12-01', '2026-12-03')(target)
-      assert.throws(() => stayRow('expedia-stay', 'expedia', '2026-12-05', '2026-12-06')(target), /stays_channel_check/)
+      target.prepare("UPDATE bookings SET channel = 'booking_com' WHERE id = 'airbnb-stay'").run()
+      assert.throws(() => target.prepare("UPDATE bookings SET channel = 'expedia' WHERE id = 'airbnb-stay'").run(), /bookings_channel_check/)
+      target.prepare("UPDATE bookings SET channel = 'airbnb' WHERE id = 'airbnb-stay'").run()
     } finally { target.close() }
 
     // The final delta brings what the source took after the initial transfer, and nothing it already held.
     const initialPath = join(directory, 'current-initial.sqlite')
     copyFileSync(targetPath, initialPath)
     writeFileSync(`${initialPath}.manifest.json`, JSON.stringify({ baseline_sha256: manifest.baseline_sha256, target_migrations: manifest.target_migrations }))
-    const initial = new Database(initialPath)
-    initial.prepare("DELETE FROM stays WHERE id = 'booking-com-stay'").run()
-    initial.close()
     const later = new Database(sourcePath)
     stayRow('later-stay', 'vrbo', '2026-11-10', '2026-11-12')(later)
     later.close()
     const delta = await transferDatabaseExport(sourcePath, join(directory, 'current-final.sqlite'), { payloadPath: join(directory, 'delta.sql'), deltaFrom: initialPath })
-    assert.deepEqual(Object.fromEntries(Object.entries(delta.payload!.delta!).filter(([, rows]) => rows)), { stays: 1 })
+    assert.deepEqual(Object.fromEntries(Object.entries(delta.payload!.delta!).filter(([, rows]) => rows)), { bookings: 1, conversation_participants: 1, conversations: 1, user: 1 })
     assert.deepEqual(delta.payload!.left_behind, {})
   } finally {
     rmSync(directory, { recursive: true, force: true })
@@ -1165,7 +1177,7 @@ test('a v21 replacement preserves booked descendants and auth, completes manual 
   assert.notEqual(groupMigration, -1)
   const applied = v21.slice(0, groupMigration)
   const sourcePath = join(directory, 'v21.sqlite')
-  const unchangedTables = ['account', 'session', 'jwks', 'member', 'product_booking_configs', 'product_availability_rules', 'product_sessions', 'bookings', 'team_thread_members', 'team_messages']
+  const unchangedTables = ['account', 'session', 'jwks', 'member', 'product_booking_configs', 'product_availability_rules', 'product_sessions', 'bookings']
   const recorded: Record<string, unknown[]> = {}
   try {
     const source = new Database(sourcePath)
@@ -1198,7 +1210,14 @@ test('a v21 replacement preserves booked descendants and auth, completes manual 
         source.prepare(`INSERT INTO team_messages (id, organization_id, thread_id, sender_user_id, body, idempotency_key, request_hash, created_at)
           VALUES (?, 'practice', ?, 'attorney', 'Recorded conversation', ?, 'recorded-hash', '2026-10-01T00:00:00.000Z')`).run(`message-${id}`, id, `message-${id}`)
       }
-      for (const table of unchangedTables) recorded[table] = source.prepare(`SELECT * FROM ${table} ORDER BY 1`).all()
+      for (const table of unchangedTables) recorded[table] = source.prepare(`SELECT * FROM ${table} ORDER BY 1`).all().map(row => {
+        if (table === 'session') { const { activeTeamId: _team, ...kept } = row; return kept }
+        if (table === 'product_booking_configs') { const { assigned_team_id: _team, ...kept } = row; return kept }
+        if (table === 'bookings') { const { request_id: _conversation, ...kept } = row; return kept }
+        if (table === 'product_availability_rules') { const { end_time: _end, interval_minutes: _interval, duration_minutes: _duration, ...kept } = row; return kept }
+        if (table === 'product_sessions') { const { assigned_member_id: _member, ...kept } = row; return kept }
+        return row
+      })
       assert.throws(() => source.prepare("UPDATE product_booking_configs SET assigned_member_id = NULL WHERE product_id = 'consultation'").run(), /product_booking_configs_held_online_check/)
       assert.deepEqual(source.pragma('foreign_key_check'), [])
     } finally { source.close() }
@@ -1206,17 +1225,20 @@ test('a v21 replacement preserves booked descendants and auth, completes manual 
     const initialPath = join(directory, 'v22-initial.sqlite')
     const initial = await transferDatabaseExport(sourcePath, initialPath, { payloadPath: join(directory, 'initial.sql') })
     assert.deepEqual(initial.source_migrations, applied)
-    assert.deepEqual(initial.transforms, [])
+    assert.deepEqual(initial.transforms, [{ name: 'unified_conversations', changes: 2 }])
     assert.deepEqual(initial.provider_hours_session_ids, [])
     assert.deepEqual(initial.target_migrations, current)
     const target = new Database(initialPath, { readonly: true })
     try {
       // A later forward migration may add a column (bookings.no_show_at); every value the v21 row held is still the same.
       for (const table of unchangedTables) {
-        const columns = Object.keys(recorded[table]![0] as Record<string, unknown>).map(column => `"${column}"`).join(', ')
+        const columns = Object.keys(recorded[table]![0] as Record<string, unknown>)
+          .map(column => table === 'bookings' && column === 'assigned_member_id'
+            ? '(SELECT assigned_member_id FROM product_booking_configs c WHERE c.product_id = bookings.product_id) AS assigned_member_id'
+            : `"${column}"`).join(', ')
         assert.deepEqual(target.prepare(`SELECT ${columns} FROM ${table} ORDER BY 1`).all(), recorded[table], `${table} preserves every recorded value`)
       }
-      assert.deepEqual(target.prepare('SELECT id, name, is_group FROM team_threads ORDER BY id').all(), [
+      assert.deepEqual(target.prepare("SELECT id, name, is_group FROM conversations WHERE kind = 'team' ORDER BY id").all(), [
         { id: 'location', name: null, is_group: 0 }, { id: 'manual', name: null, is_group: 1 },
       ])
       assert.deepEqual(target.pragma('foreign_key_check'), [])
@@ -1228,7 +1250,7 @@ test('a v21 replacement preserves booked descendants and auth, completes manual 
     try {
       live.pragma('foreign_keys = ON')
       live.prepare("UPDATE product_booking_configs SET assigned_member_id = NULL WHERE product_id = 'consultation'").run()
-      live.prepare("UPDATE team_threads SET name = 'Authored on replacement' WHERE id = 'manual'").run()
+      live.prepare("UPDATE conversations SET name = 'Authored on replacement' WHERE id = 'manual'").run()
       assert.deepEqual(live.prepare("SELECT held_online, scheduling_mode, assigned_member_id FROM product_booking_configs WHERE product_id = 'consultation'").get(), { held_online: 1, scheduling_mode: 'provider', assigned_member_id: null })
       assert.throws(() => live.prepare("UPDATE product_booking_configs SET scheduling_mode = 'business' WHERE product_id = 'consultation'").run(), /product_booking_configs_held_online_check/)
 
@@ -1244,18 +1266,21 @@ test('a v21 replacement preserves booked descendants and auth, completes manual 
       } finally { later.close() }
       const payloadPath = join(directory, 'delta.sql')
       const delta = await transferDatabaseExport(sourcePath, join(directory, 'v22-final.sqlite'), { payloadPath, deltaFrom: initialPath })
-      assert.deepEqual(Object.fromEntries(Object.entries(delta.payload!.delta!).filter(([, count]) => count)), { bookings: 1, product_sessions: 1, team_messages: 1 })
-      assert.deepEqual(delta.payload!.left_behind, { team_threads: { changed: ['["manual"]'], deleted: [] } })
+      assert.deepEqual(Object.fromEntries(Object.entries(delta.payload!.delta!).filter(([, count]) => count)), { bookings: 1, messages: 1, product_sessions: 1 })
+      assert.deepEqual(delta.payload!.left_behind, { conversations: { changed: ['["manual"]'], deleted: [] }, conversation_participants: { changed: ['["manual","colleague"]'], deleted: [] } })
       live.exec(readFileSync(payloadPath, 'utf8'))
       assert.deepEqual(live.prepare("SELECT held_online, scheduling_mode, assigned_member_id FROM product_booking_configs WHERE product_id = 'consultation'").get(), { held_online: 1, scheduling_mode: 'provider', assigned_member_id: null })
-      assert.equal(live.prepare("SELECT name FROM team_threads WHERE id = 'manual'").get()!.name, 'Authored on replacement')
-      assert.deepEqual(live.prepare('SELECT id, assigned_member_id FROM bookings ORDER BY id').all(), [
-        { id: 'later-booking', assigned_member_id: 'member-attorney' }, { id: 'recorded-booking', assigned_member_id: 'member-attorney' },
+      assert.equal(live.prepare("SELECT name FROM conversations WHERE id = 'manual'").get()!.name, 'Authored on replacement')
+      assert.deepEqual(live.prepare('SELECT b.id, c.assigned_member_id FROM bookings b JOIN product_booking_configs c ON c.product_id = b.product_id ORDER BY b.id').all(), [
+        { id: 'later-booking', assigned_member_id: null }, { id: 'recorded-booking', assigned_member_id: null },
       ])
-      assert.deepEqual(live.prepare('SELECT id, body FROM team_messages ORDER BY id').all(), [
+      assert.deepEqual(live.prepare('SELECT id, body FROM messages ORDER BY id').all(), [
         { id: 'later-message', body: 'Later conversation' }, { id: 'message-location', body: 'Recorded conversation' }, { id: 'message-manual', body: 'Recorded conversation' },
       ])
-      for (const table of ['account', 'session', 'jwks']) assert.deepEqual(live.prepare(`SELECT * FROM ${table} ORDER BY 1`).all(), recorded[table])
+      for (const table of ['account', 'session', 'jwks']) {
+        const columns = Object.keys(recorded[table]![0] as Record<string, unknown>).map(column => `"${column}"`).join(', ')
+        assert.deepEqual(live.prepare(`SELECT ${columns} FROM ${table} ORDER BY 1`).all(), recorded[table])
+      }
       assert.deepEqual(live.pragma('foreign_key_check'), [])
     } finally { live.close() }
   } finally { rmSync(directory, { recursive: true, force: true }) }
@@ -1263,7 +1288,6 @@ test('a v21 replacement preserves booked descendants and auth, completes manual 
 
 test('a v22 replacement preserves stay rules, retires imported duplicates and approved demo rules, and resumes canonical sync without overwriting host edits or job progress', async t => {
   const { transferDatabaseExport } = await import('../../scripts/transfer-database-export.mjs')
-  const { MEDIA_PLACEMENT_OWNER_AUDIT_QUERY } = await import('../../scripts/audit-orphaned-media-placements.mjs')
   t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-10-30T12:30:00.000Z') })
   const directory = mkdtempSync(join(tmpdir(), 'krabiclaw-v22-stay-minimum-transfer-'))
   const archived = JSON.parse(readFileSync('migrations-history/v22/meta/_journal.json', 'utf8')).entries.map((entry: { tag: string }) => `${entry.tag}.sql`) as string[]
@@ -1271,12 +1295,12 @@ test('a v22 replacement preserves stay rules, retires imported duplicates and ap
   const sourcePath = join(directory, 'v22.sqlite')
   const targetPath = join(directory, 'current.sqlite')
   const createdAt = '2026-10-23T11:13:46.511Z', importedAt = '2026-10-23T11:13:47.428Z'
-  const preservedTables = ['user', 'member', 'account', 'session', 'jwks', 'stays', 'stay_nights', 'stay_payments', 'activity_entries', 'channex_connections', 'requests', 'team_threads', 'team_messages', 'media_assets', 'media_placements']
+  const preservedTables = ['user', 'member', 'account', 'session', 'jwks', 'activity_entries', 'channex_connections', 'media_assets']
   const recorded: Record<string, unknown[]> = {}
   // A column added after v22, such as a stay's answers, holds its default; every value v22 recorded is kept.
   const recordedColumns = (table: string) => recorded[table]!.length ? Object.keys(recorded[table]![0] as Record<string, unknown>).map(column => `"${column}"`).join(', ') : '*'
   const pushProjection = 'product_id,date,state,detail,sent_json'
-  const nightProjection = 'organization_id,product_id,date,closed,price_minor,min_stay_arrival,max_stay,closed_to_arrival,closed_to_departure,source,updated_at,updated_by'
+  const nightProjection = 'organization_id,product_id,date,closed,min_stay_arrival,max_stay,closed_to_arrival,closed_to_departure,source,updated_at,updated_by'
   const demoOrganization = '5mbJj0T09tvDCSfhOlUTEt4idxKt82tc', demoHome = '2521e20c-6857-448a-a3a9-7cd389be29e0'
   let originalPushes: Array<Record<string, unknown>>
   let originalJobs: Array<Record<string, unknown>>
@@ -1284,7 +1308,7 @@ test('a v22 replacement preserves stay rules, retires imported duplicates and ap
   let homeMinimums: unknown[]
   const minimumFingerprint = createHash('sha256').update('21').digest('hex')
   const earlierFingerprint = createHash('sha256').update('7').digest('hex')
-  const recordedCalendarRules = JSON.stringify({ day_of_week_min_nights: [-1, -1, -1, -1, 3, 3, -1], weekend_price_minor: 12500 })
+  const recordedCalendarRules = JSON.stringify({ day_of_week_min_nights: [-1, -1, -1, -1, 3, 3, -1] })
   const recordedConsultationSettings = JSON.stringify({ mode: 'native', cta_label: 'Book', schedule_path: '/schedule', confirmation_path: '/confirmed', tracking_enabled: false, metadata_json: { custom: 'preserved' } }, null, 2)
   try {
     const source = new Database(sourcePath)
@@ -1357,14 +1381,17 @@ test('a v22 replacement preserves stay rules, retires imported duplicates and ap
       source.prepare("INSERT INTO team_messages(id,organization_id,thread_id,sender_user_id,body,idempotency_key,request_hash,created_at) VALUES('team-message','host','team-thread','owner','Recorded team message','recorded-message','recorded-hash',?)").run(importedAt)
       for (const [id, organization] of [['message-photo', 'host'], ['demo-photo', demoOrganization]]) source.prepare("INSERT INTO media_assets(id,organization_id,kind,provider,source,public_url,status) VALUES(?,?,'image','cloudflare_images','uploaded','https://imagedelivery.net/h/attachment/public','active')").run(id, organization)
       for (const [ownerType, ownerId] of [['team_message', 'team-message'], ['activity_entry', 'guest-message']]) source.prepare("INSERT INTO media_placements(id,organization_id,owner_type,owner_id,slot,asset_id) VALUES(?,'host',?,?,'attachments','message-photo')").run(`photo-${ownerType}`, ownerType, ownerId)
-      assert.deepEqual(source.prepare(MEDIA_PLACEMENT_OWNER_AUDIT_QUERY).all(), [], 'both canonical message owner types are in scope')
       assert.throws(() => source.prepare("UPDATE media_placements SET owner_type='invented_owner' WHERE id='photo-team_message'").run(), /media_placements_owner_type_check/)
-      // v24 retires requests' conversation_state and resolved_at; every other recorded value is kept.
       for (const table of preservedTables) recorded[table] = (source.prepare(`SELECT * FROM ${table} ORDER BY 1,2`).all() as Array<Record<string, unknown>>)
-        .map(row => { if (table !== 'requests') return row; const { conversation_state: _state, resolved_at: _resolved, ...kept } = row; return kept })
-      // A conversation's stay or booking is its booked-record reference since migration 0003; every other value is v22's.
-      recorded.team_threads = (recorded.team_threads as Array<Record<string, unknown>>).map(({ stay_id: stayId, booking_id: bookingId, ...thread }) =>
-        ({ ...thread, subject_type: stayId ? 'stay' : bookingId ? 'booking' : null, subject_id: stayId ?? bookingId ?? null }))
+        .filter(row => table !== 'activity_entries' || row.kind === 'audit')
+        .map(row => {
+          if (table === 'session') { const { activeTeamId: _team, ...kept } = row; return kept }
+          if (table === 'activity_entries') {
+            const { kind: _kind, scope_kind: _scope, request_id: _request, channel: _channel, sequence: _sequence, parent_id: _parent, target_user_id: _target, ...kept } = row
+            return kept
+          }
+          return row
+        })
       arrivalRules = source.prepare(`SELECT ${nightProjection} FROM product_nights ORDER BY product_id,date`).all()
       homeMinimums = source.prepare('SELECT product_id,min_nights FROM product_stay_configs ORDER BY product_id').all()
       originalPushes = source.prepare(`SELECT ${pushProjection} FROM channel_night_pushes ORDER BY product_id,date`).all() as Array<Record<string, unknown>>
@@ -1384,7 +1411,6 @@ test('a v22 replacement preserves stay rules, retires imported duplicates and ap
       copyFileSync(sourcePath, unsafePath)
       const unsafe = new Database(unsafePath)
       unsafe.prepare('UPDATE media_placements SET owner_id=?,organization_id=?,asset_id=? WHERE id=?').run(ownerId, wrongTenant ? demoOrganization : 'host', wrongTenant ? 'demo-photo' : 'message-photo', `photo-${ownerType}`)
-      assert.deepEqual(unsafe.prepare(MEDIA_PLACEMENT_OWNER_AUDIT_QUERY).all(), [{ owner_type: ownerType, orphaned_count: 1 }])
       unsafe.close()
       const before = readFileSync(unsafePath)
       await assert.rejects(() => transferDatabaseExport(unsafePath, `${unsafePath}.refused`), /Invariant violations:.*media_owner_scope/u)
@@ -1416,6 +1442,8 @@ test('a v22 replacement preserves stay rules, retires imported duplicates and ap
     assert.deepEqual(manifest.transforms.map(({ name, changes }) => ({ name, changes })), [
       { name: 'airbnb_duplicated_through_minimum_removed', changes: 5 },
       { name: 'owner_approved_saltleaf_through_minimum_removed', changes: 163 },
+      { name: 'stays_to_bookings', changes: 1 },
+      { name: 'unified_conversations', changes: 3 },
       { name: 'airbnb_original_minimum_edit_guard_recorded', changes: 4 },
       { name: 'airbnb_canonical_sync_queued', changes: 2 },
     ])
@@ -1433,8 +1461,8 @@ test('a v22 replacement preserves stay rules, retires imported duplicates and ap
     try {
       target.pragma('foreign_keys = ON')
       assert.equal(target.prepare("SELECT consultation_settings_json FROM organization WHERE id='host'").get()!.consultation_settings_json, recordedConsultationSettings, 'the retired tracking flag and surrounding JSON are retained byte-for-byte')
-      assert.deepEqual(target.prepare('SELECT product_id,min_nights FROM product_stay_configs ORDER BY product_id').all(), homeMinimums)
-      assert.deepEqual(target.prepare('SELECT product_id,calendar_rules FROM product_stay_configs ORDER BY product_id').all(), (homeMinimums as Array<{ product_id: string }>).map(({ product_id }) => ({ product_id, calendar_rules: null })), 'legacy homes have no fabricated calendar rules')
+      assert.deepEqual(target.prepare("SELECT product_id,min_nights FROM product_booking_configs WHERE unit = 'nights' ORDER BY product_id").all(), homeMinimums)
+      assert.deepEqual(target.prepare("SELECT product_id,calendar_rules FROM product_booking_configs WHERE unit = 'nights' ORDER BY product_id").all(), (homeMinimums as Array<{ product_id: string }>).map(({ product_id }) => ({ product_id, calendar_rules: null })), 'legacy homes have no fabricated calendar rules')
       assert.deepEqual(target.prepare(`SELECT ${nightProjection} FROM product_nights ORDER BY product_id,date`).all(), arrivalRules)
       assert.equal((target.pragma('table_info(product_nights)') as Array<{ name: string }>).some(column => column.name === 'min_stay_through'), false)
       assert.deepEqual(target.prepare("SELECT product_id, json_extract(import_written,'$.name') AS name, json_extract(import_written,'$.min_nights') AS minimum FROM product_channel_mappings ORDER BY product_id").all(), [
@@ -1465,13 +1493,34 @@ test('a v22 replacement preserves stay rules, retires imported duplicates and ap
       const initialJobs = target.prepare('SELECT * FROM airbnb_sync_jobs ORDER BY listing_id').all()
       target.exec(readFileSync(deltaPayload, 'utf8'))
       assert.deepEqual(target.prepare('SELECT * FROM airbnb_sync_jobs ORDER BY listing_id').all(), initialJobs, 'the final delta applies without duplicate listing jobs or resetting their state')
-      for (const table of preservedTables) assert.deepEqual(target.prepare(`SELECT ${recordedColumns(table)} FROM ${table} ORDER BY 1,2`).all(), recorded[table], `${table} keeps every recorded value`)
+      for (const table of preservedTables) {
+        const recordedRows = table === 'user' ? " WHERE id IN ('owner', 'departed-owner')" : ''
+        assert.deepEqual(target.prepare(`SELECT ${recordedColumns(table)} FROM ${table}${recordedRows} ORDER BY 1,2`).all(), recorded[table], `${table} keeps every recorded value`)
+      }
+      assert.deepEqual(target.prepare("SELECT u.name, u.isAnonymous FROM bookings b JOIN user u ON u.id = b.user_id WHERE b.id = 'booked-stay'").get(), { name: 'Recorded guest', isAnonymous: 1 })
+      assert.deepEqual(target.prepare("SELECT id, total_minor, currency, starts_at, ends_at FROM bookings").all(), [
+        { id: 'booked-stay', total_minor: 30000, currency: 'USD', starts_at: '2026-11-10T02:00:00.000Z', ends_at: '2026-11-11T20:00:00.000Z' },
+      ])
+      assert.deepEqual(target.prepare('SELECT date, booking_id FROM stay_nights ORDER BY date').all(), [
+        { date: '2026-11-10', booking_id: 'booked-stay' }, { date: '2026-11-11', booking_id: 'booked-stay' },
+      ])
+      assert.deepEqual(target.prepare('SELECT id, booking_id, amount_minor, currency, method FROM offline_payments').all(), [
+        { id: 'recorded-payment', booking_id: 'booked-stay', amount_minor: 30000, currency: 'USD', method: 'cash' },
+      ])
+      assert.deepEqual(target.prepare("SELECT owner_id, asset_id FROM media_placements WHERE owner_type='message' ORDER BY owner_id").all(), [
+        { owner_id: 'guest-message', asset_id: 'message-photo' }, { owner_id: 'team-message', asset_id: 'message-photo' },
+      ])
+      assert.deepEqual(target.prepare("SELECT id, conversation_id, body FROM messages WHERE id IN ('guest-message','team-message') ORDER BY id").all(), [
+        { id: 'guest-message', conversation_id: 'guest-conversation', body: 'Recorded message' }, { id: 'team-message', conversation_id: 'team-thread', body: 'Recorded team message' },
+      ])
+      assert.deepEqual(target.prepare("SELECT stay_date, unit_amount FROM prices WHERE product_variant_id='variant-derived' ORDER BY stay_date").all(),
+        ['2026-10-23', '2026-10-30', '2026-10-31', '2026-11-01', '2026-11-02', '2026-11-03', '2026-11-04'].map(stay_date => ({ stay_date, unit_amount: 10000 })))
       assert.deepEqual(target.pragma('foreign_key_check'), [])
 
       // The next copy is an ordinary current-epoch refresh, after a job has recorded its outcome.
       target.exec(`CREATE TABLE d1_migrations(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL);
         ${current.map(file => `INSERT INTO d1_migrations(name) VALUES('${file}');`).join('\n')}`)
-      target.prepare("UPDATE product_stay_configs SET calendar_rules=? WHERE product_id='derived'").run(recordedCalendarRules)
+      target.prepare("UPDATE product_booking_configs SET calendar_rules=? WHERE product_id='derived'").run(recordedCalendarRules)
       jobRows = target.prepare('SELECT * FROM airbnb_sync_jobs ORDER BY listing_id').all()
     } finally { target.close() }
     const currentBytes = readFileSync(targetPath)
@@ -1483,9 +1532,12 @@ test('a v22 replacement preserves stay rules, retires imported duplicates and ap
     try {
       assert.deepEqual(refreshed.prepare('SELECT * FROM airbnb_sync_jobs ORDER BY listing_id').all(), jobRows)
       assert.equal(refreshed.prepare("SELECT consultation_settings_json FROM organization WHERE id='host'").get()!.consultation_settings_json, recordedConsultationSettings, 'current-epoch refreshes preserve the original consultation JSON too')
-      assert.equal(refreshed.prepare("SELECT calendar_rules FROM product_stay_configs WHERE product_id='derived'").get()!.calendar_rules, recordedCalendarRules, 'current-epoch copies retain recorded calendar rules')
+      assert.equal(refreshed.prepare("SELECT calendar_rules FROM product_booking_configs WHERE product_id='derived'").get()!.calendar_rules, recordedCalendarRules, 'current-epoch copies retain recorded calendar rules')
       assert.deepEqual(refreshed.prepare(`SELECT ${pushProjection} FROM channel_night_pushes ORDER BY product_id,date`).all(), originalPushes)
-      for (const table of preservedTables) assert.deepEqual(refreshed.prepare(`SELECT ${recordedColumns(table)} FROM ${table} ORDER BY 1,2`).all(), recorded[table])
+      for (const table of preservedTables) {
+        const recordedRows = table === 'user' ? " WHERE id IN ('owner', 'departed-owner')" : ''
+        assert.deepEqual(refreshed.prepare(`SELECT ${recordedColumns(table)} FROM ${table}${recordedRows} ORDER BY 1,2`).all(), recorded[table])
+      }
       assert.deepEqual(refreshed.pragma('foreign_key_check'), [])
     } finally { refreshed.close() }
   } finally { rmSync(directory, { recursive: true, force: true }) }

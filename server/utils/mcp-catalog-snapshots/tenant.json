@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:5f100bc7e6197210a456f9bedfacab6f83395f9da75b28665e19875dcd644e77",
-  "documentationFingerprint": "sha256:cd989be75c36bd11310f1a501ce3409f081c0f4edb9e8f04c2a614b6343395de",
+  "fingerprint": "sha256:f1787ff444e8e6b856c7a85563c9f95871044344e74ed17960d281257b04b75b",
+  "documentationFingerprint": "sha256:c78b6f905007b5c7a02925b69b28a35a85abb5b09cdb9908ab82ed7bcec6bb4e",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -29402,7 +29402,6 @@
                 "organization_id",
                 "product_id",
                 "location_id",
-                "assigned_member_id",
                 "starts_at",
                 "ends_at",
                 "timezone",
@@ -71269,7 +71268,6 @@
                 "organization_id",
                 "product_id",
                 "location_id",
-                "assigned_member_id",
                 "starts_at",
                 "ends_at",
                 "timezone",
@@ -119355,7 +119353,6 @@
               "organization_id",
               "product_id",
               "location_id",
-              "assigned_member_id",
               "starts_at",
               "ends_at",
               "timezone",
@@ -128433,7 +128430,7 @@
         "get_product": "sha256:b2afea3d084c67b0aacc46c8fbdbcf652dfaa2554de42de7bef06b16312f05e1",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
-        "list_product_booking_sessions": "sha256:c3feed62de11467bd12a6fd7885907eba84c469608e6bc20735c686887df971f",
+        "list_product_booking_sessions": "sha256:dd7f33d38984d5063ada647edd2b1dbca7a39b7ac6a31c79addad28cd6a739c1",
         "list_products": "sha256:bd6b30cee8a405d0bcdf6313fa20396a2e287bb3285b977fdc1c27baed9c48f0",
         "save_media_attachment": "sha256:dd3e83b857a53f97fa3f6a27e1788dc247133a954108a09e5f7c200b4a1e3a93"
       }
@@ -128542,7 +128539,7 @@
         "get_product": "sha256:b2afea3d084c67b0aacc46c8fbdbcf652dfaa2554de42de7bef06b16312f05e1",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
-        "list_product_booking_sessions": "sha256:c3feed62de11467bd12a6fd7885907eba84c469608e6bc20735c686887df971f",
+        "list_product_booking_sessions": "sha256:dd7f33d38984d5063ada647edd2b1dbca7a39b7ac6a31c79addad28cd6a739c1",
         "list_products": "sha256:bd6b30cee8a405d0bcdf6313fa20396a2e287bb3285b977fdc1c27baed9c48f0",
         "replace_product_weekly_schedule": "sha256:606256312fe6c64160bcf9bfb31f5bfcc99d5ddf1c84b90fbc9b804389a021b1",
         "set_product_booking_config": "sha256:50969e4450fa9d51c05b4a5b2901f3ceac78a3df29d96e77fc48bfea8d2b21fe",
@@ -128584,7 +128581,7 @@
         "get_product": "sha256:b2afea3d084c67b0aacc46c8fbdbcf652dfaa2554de42de7bef06b16312f05e1",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_conversations": "sha256:24cf21b535c6689cb04bc7188bec604110c207a960c8ba5e69e9505150dceca7",
-        "list_product_booking_sessions": "sha256:c3feed62de11467bd12a6fd7885907eba84c469608e6bc20735c686887df971f",
+        "list_product_booking_sessions": "sha256:dd7f33d38984d5063ada647edd2b1dbca7a39b7ac6a31c79addad28cd6a739c1",
         "list_products": "sha256:bd6b30cee8a405d0bcdf6313fa20396a2e287bb3285b977fdc1c27baed9c48f0",
         "publish_post": "sha256:fbfd1f5ff6cbdc02ecba0e29e88a7efc5bedb5e6b60ad98eca33b6e99016f1b2",
         "send_message": "sha256:8636238ba370bd243b7a3f2d4c1f6a5993223e916e3695bfd8f2a3696f80e6e2",

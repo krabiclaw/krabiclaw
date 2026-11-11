@@ -1105,7 +1105,7 @@ export const bookings = sqliteTable("bookings", {
 }, (table) => [
 	check("bookings_policy_check", sql`json_valid(policy_json) AND json_type(policy_json) = 'object'`),
 	check("bookings_answers_check", sql`json_valid(answers) AND json_type(answers) = 'array'`),
-	check("bookings_status_check", sql`status IN ('pending', 'confirmed', 'cancelled') AND (status = 'cancelled') = (cancelled_at IS NOT NULL)`),
+	check("bookings_status_check", sql`status IN ('pending', 'confirmed', 'cancelled') AND (status = 'cancelled' OR cancelled_at IS NULL)`),
 	check("bookings_instants_check", sql`(cancelled_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', cancelled_at, '+0 days') IS cancelled_at) AND (no_show_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', no_show_at, '+0 days') IS no_show_at) AND (received_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', received_at, '+0 days') IS received_at) AND strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at`),
 	// An instant, or for a nights booking (no session) the local day its home's missing time leaves.
 	check("bookings_window_check", sql`(strftime('%Y-%m-%dT%H:%M:%fZ', starts_at, '+0 days') IS starts_at OR (product_session_id IS NULL AND date(starts_at, '+0 days') IS starts_at))

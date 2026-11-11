@@ -74,13 +74,13 @@ test('automation remains in Inbox while Today keeps the unanswered inquiry', asy
     const replyTask = todayReplies[0]!.tasks[0]!
     expect(await replyTasks('upcoming')).toEqual([])
     // The replies are in the one outbox, as the member's own.
-    const outbox = () => page.request.get('/api/dashboard/scheduled-guest-messages', { params: { org: 'ember-slice-demo', conversation_id: threadId } })
+    const outbox = () => page.request.get('/api/dashboard/scheduled-guest-messages', { params: { org: 'ember-slice-demo', conversation_id: threadId, limit: 25, offset: 0 } })
     const pending = await outbox()
     expect(pending.status(), await pending.text()).toBe(200)
     const pendingMessages = (await pending.json() as { messages: Array<{ id: string; status: string }> }).messages
     expect(pendingMessages).toHaveLength(2)
     for (const id of [messageId, futureMessageId]) {
-      expect(pendingMessages.find(message => message.id === id)).toMatchObject({ id, conversationId: threadId, status: 'pending', authorUserId: expect.any(String), bookingId: null })
+      expect(pendingMessages.find(message => message.id === id)).toMatchObject({ id, conversation_id: threadId, status: 'pending', author_user_id: expect.any(String), booking_id: null })
     }
     // Cancellation is verified in Inbox's persisted schedule. Healthy sends no
     // longer have a feed card or a feed invalidation to assert against here.
@@ -218,15 +218,15 @@ test('the member who handles a branch’s tables gains and loses its table booki
     const ownerBooking = await page.request.get(bookingPath, { params: { org } })
     expect(ownerBooking.status(), await ownerBooking.text()).toBe(200)
     const { booking } = await ownerBooking.json() as { booking: DashboardBookingDetails }
-    expect(booking).toMatchObject({ threadId: reservationId, organizationId, locationId, guestName, status: 'confirmed', bookingDate: day.date, timeZone: slot.timezone, partySize: 2 })
+    expect(booking).toMatchObject({ conversation_id: reservationId, organization_id: organizationId, location_id: locationId, guest_name: guestName, status: 'confirmed', booking_date: day.date, timezone: slot.timezone, party_size: 2 })
     const ownerThread = await page.request.get(`${inboxPath}/${reservationId}`)
     expect(ownerThread.status(), await ownerThread.text()).toBe(200)
     // The conversation is about this reservation at this branch; the record above holds its time, party and status.
     const ownerConversation = (await ownerThread.json() as { thread: InboxThread }).thread
-    expect(ownerConversation).toMatchObject({ id: reservationId, kind: 'guest', guestName, channel: 'direct', home: booking.locationTitle, recordId: booking.id, recordKind: 'booking' })
+    expect(ownerConversation).toMatchObject({ id: reservationId, kind: 'guest', guestName, channel: 'direct', home: booking.location_title, recordId: booking.id, recordKind: 'booking' })
     expect(ownerConversation.when).toEqual(expect.any(String))
     // The thread header's second line: the branch and the reservation's time, as the server wrote them.
-    const headerFacts = `${booking.locationTitle} · ${ownerConversation.when}`
+    const headerFacts = `${booking.location_title} · ${ownerConversation.when}`
 
     const changed = await page.request.post('/api/auth/organization/update-member-role', {
       headers: authRequestHeaders(baseURL!), data: { organizationId, memberId: actor.id, role: 'member' },
@@ -241,20 +241,20 @@ test('the member who handles a branch’s tables gains and loses its table booki
       const agendaResponse = await memberRequest.get('/api/dashboard/agenda', { params: { org, from: day.date, to: day.date } })
       expect(agendaResponse.status(), await agendaResponse.text()).toBe(200)
       const agenda = await agendaResponse.json() as AgendaPayload
-      if (assigned) expect(agenda.items.find(item => item.requestId === reservationId)).toMatchObject({ id: `booking:${reservationId}`, kind: 'booking', requestId: reservationId, locationId, title: guestName, status: 'confirmed', startsAt: slot.starts_at, to: destination })
-      else expect(agenda.items.some(item => item.requestId === reservationId)).toBe(false)
+      if (assigned) expect(agenda.items.find(item => item.conversation_id === reservationId)).toMatchObject({ id: `booking:${reservationId}`, kind: 'booking', conversation_id: reservationId, booking_id: booking.booking_id, location_id: locationId, title: guestName, status: 'confirmed', starts_at: slot.starts_at, to: destination })
+      else expect(agenda.items.some(item => item.conversation_id === reservationId)).toBe(false)
       const response = await memberRequest.get(listPath, { params: { org, location_id: locationId, type: 'booking' } })
       expect(response.status(), await response.text()).toBe(200)
       const { threads } = await response.json() as InboxListPage
-      if (assigned) expect(threads.find(thread => thread.id === reservationId)).toMatchObject({ id: reservationId, kind: 'guest', guestName, home: booking.locationTitle, when: ownerConversation.when })
+      if (assigned) expect(threads.find(thread => thread.id === reservationId)).toMatchObject({ id: reservationId, kind: 'guest', guestName, home: booking.location_title, when: ownerConversation.when })
       else expect(threads.some(thread => thread.id === reservationId)).toBe(false)
       const detail = await memberRequest.get(`${inboxPath}/${reservationId}`)
       expect(detail.status(), await detail.text()).toBe(assigned ? 200 : 404)
       const record = await memberRequest.get(bookingPath, { params: { org } })
       expect(record.status(), await record.text()).toBe(assigned ? 200 : 404)
       if (assigned) {
-        expect((await detail.json() as { thread: InboxThread }).thread).toMatchObject({ id: reservationId, guestName, home: booking.locationTitle, when: ownerConversation.when, recordId: booking.id, recordKind: 'booking' })
-        expect((await record.json() as { booking: DashboardBookingDetails }).booking).toMatchObject({ id: booking.id, threadId: reservationId, guestName, locationId, status: 'confirmed' })
+        expect((await detail.json() as { thread: InboxThread }).thread).toMatchObject({ id: reservationId, guestName, home: booking.location_title, when: ownerConversation.when, recordId: booking.id, recordKind: 'booking' })
+        expect((await record.json() as { booking: DashboardBookingDetails }).booking).toMatchObject({ id: booking.id, conversation_id: reservationId, guest_name: guestName, location_id: locationId, status: 'confirmed' })
         const openedThread = memberPage.waitForResponse(response => response.request().method() === 'GET'
           && new URL(response.url()).pathname === `${inboxPath}/${reservationId}`)
         expect((await memberPage.goto(`${ORG}/messages/${reservationId}`))?.status()).toBe(200)
@@ -298,7 +298,7 @@ test('the member who handles a branch’s tables gains and loses its table booki
         expect(cancelled.status(), await cancelled.text()).toBe(200)
         const read = await page.request.get(`/api/dashboard/bookings/booking/${reservationId}`, { params: { org } })
         expect(read.status(), await read.text()).toBe(200)
-        expect((await read.json() as { booking: DashboardBookingDetails }).booking).toMatchObject({ threadId: reservationId, status: 'cancelled' })
+        expect((await read.json() as { booking: DashboardBookingDetails }).booking).toMatchObject({ conversation_id: reservationId, status: 'cancelled' })
       }
     } catch (error) { failures.push(error) }
     try {

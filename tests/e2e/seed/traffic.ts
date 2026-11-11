@@ -26,7 +26,7 @@ export async function seedTraffic(baseURL: string, manifest: SeedManifest) {
         }
         // The guest then starts what the business offers: a table, a class, a consultation.
         const intent = key === 'restaurant'
-          ? { event_name: 'checkout_start', location_id: tenant.locations.brooklyn!.id }
+          ? { event_name: 'checkout_start', product_id: tenant.products['tables-brooklyn']!.id, location_id: tenant.locations.brooklyn!.id }
           : key === 'experience'
             ? { event_name: 'checkout_start', product_id: tenant.products['wheel-class']!.id, location_id: tenant.locations['ao-nang']!.id }
             : { event_name: 'consultation_cta_click', stage: 'schedule_navigation', page_path: '/services/family' }
