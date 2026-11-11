@@ -587,16 +587,6 @@ export function optionalString(source: Record<string, unknown>, key: string) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
-export function optionalDaysWindow(source: Record<string, unknown>, key: string, max = 90) {
-  const value = source[key];
-  if (value === undefined || value === null) return null;
-  const num = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(num) || num <= 0) {
-    throw mcpProtocolError(MCP_ERROR.invalidParams, `${key} must be a positive number of days (1-${max})`, { field: key, expected: `integer (1-${max})` });
-  }
-  return Math.max(1, Math.min(Math.floor(num), max));
-}
-
 export function requiredStringArray(value: unknown, key: string) {
   if (
     !Array.isArray(value) ||

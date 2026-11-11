@@ -1,3 +1,4 @@
+import { RESOURCE_LOCALIZATIONS_SQL } from '~/shared/content-registries'
 import { queryAll, type DbClient } from '~/server/db'
 import {
   articleCategoryEditorPath, blogEditorPath, brandEditorPath, collectionEditorPath, linksEditorPath,
@@ -98,11 +99,11 @@ export async function getOrganizationLocalizationProgress(
   const params = [input.locale, input.organizationId]
   const [organization, locations, catalog, collections, posts, blog, categories, qa, links, pages] = await Promise.all([
     queryAll<LocalizableRow>(db, `SELECT s.id, s.name, s.vertical, s.brand_description, rl.values_json
-      FROM organization s LEFT JOIN resource_localizations rl ON rl.resource_type = 'organization' AND rl.resource_id = s.id AND rl.locale = ?
+      FROM organization s LEFT JOIN ${RESOURCE_LOCALIZATIONS_SQL} rl ON rl.resource_type = 'organization' AND rl.resource_id = s.id AND rl.locale = ?
         AND rl.organization_id = s.id
       WHERE s.id = ?`, params),
     queryAll<LocalizableRow>(db, `SELECT l.id, l.slug AS location_slug, l.title, l.address, l.description, l.short_description, rl.values_json
-      FROM business_locations l LEFT JOIN resource_localizations rl ON rl.resource_type = 'business_location' AND rl.resource_id = l.id AND rl.locale = ?
+      FROM business_locations l LEFT JOIN ${RESOURCE_LOCALIZATIONS_SQL} rl ON rl.resource_type = 'business_location' AND rl.resource_id = l.id AND rl.locale = ?
         AND rl.organization_id = l.organization_id
       WHERE l.organization_id = ? AND l.status = 'active' ORDER BY l.id`, params),
     // One catalog, one row per product. There is no separate experience query
@@ -114,14 +115,14 @@ export async function getOrganizationLocalizationProgress(
              rl.values_json
         FROM products p
         JOIN product_publications pub ON pub.product_id = p.id AND pub.organization_id = p.organization_id
-        LEFT JOIN resource_localizations rl ON rl.resource_type = 'product' AND rl.resource_id = p.id AND rl.locale = ?
+        LEFT JOIN ${RESOURCE_LOCALIZATIONS_SQL} rl ON rl.resource_type = 'product' AND rl.resource_id = p.id AND rl.locale = ?
           AND rl.organization_id = p.organization_id AND rl.organization_id = pub.organization_id
        WHERE p.organization_id = ? AND p.active = 1
        ORDER BY p.name, p.id`, params),
     queryAll<LocalizableRow>(db, `
       SELECT c.id, c.name, c.description, rl.values_json
         FROM collections c
-        LEFT JOIN resource_localizations rl ON rl.resource_type = 'collection' AND rl.resource_id = c.id AND rl.locale = ?
+        LEFT JOIN ${RESOURCE_LOCALIZATIONS_SQL} rl ON rl.resource_type = 'collection' AND rl.resource_id = c.id AND rl.locale = ?
           AND rl.organization_id = c.organization_id AND rl.organization_id = c.organization_id
        WHERE c.organization_id = ?
        ORDER BY c.sort_order, c.id`, params),
@@ -139,7 +140,7 @@ export async function getOrganizationLocalizationProgress(
     queryAll<LocalizableRow>(db, `
       SELECT c.id, c.name, c.description, rl.values_json
         FROM article_categories c
-        LEFT JOIN resource_localizations rl ON rl.resource_type = 'article_category' AND rl.resource_id = c.id AND rl.locale = ?
+        LEFT JOIN ${RESOURCE_LOCALIZATIONS_SQL} rl ON rl.resource_type = 'article_category' AND rl.resource_id = c.id AND rl.locale = ?
           AND rl.organization_id = c.organization_id
        WHERE c.organization_id = ?
        ORDER BY c.collection, c.sort_order, c.id`, params),

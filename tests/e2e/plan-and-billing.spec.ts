@@ -189,10 +189,10 @@ test.describe('Plan and billing', () => {
     const GROWTH = `/dashboard/${studio.slug}`
     await asOwner(page, baseURL!, GROWTH_OWNER_ID, GROWTH_ID, async () => {
       // The premise, read from the billing API: Growth on a Stripe subscription this key reads.
-      const status = await page.request.get(`/api/billing/status?organizationId=${GROWTH_ID}&includePrice=true`)
+      const status = await page.request.get(`/api/billing/status?organizationId=${GROWTH_ID}&include_price=true`)
       expect(status.status(), await status.text()).toBe(200)
-      const billing = (await status.json() as { billing: { plan: string; stripeSubscriptionId?: string; subscriptionStatus?: string; cancelAtPeriodEnd?: boolean; scheduledPlan?: unknown; subscriptionPrice?: { amount: number; interval: string } } }).billing
-      expect(billing).toMatchObject({ plan: 'growth', subscriptionStatus: 'active', cancelAtPeriodEnd: false, subscriptionPrice: { amount: 4900, interval: 'month' } })
+      const billing = (await status.json() as { billing: { plan: string; stripeSubscriptionId?: string; status?: string; cancelAtPeriodEnd?: boolean; scheduled_plan?: unknown; subscription_price?: { amount: number; interval: string } } }).billing
+      expect(billing).toMatchObject({ plan: 'growth', status: 'active', cancelAtPeriodEnd: false, subscription_price: { amount: 4900, interval: 'month' } })
 
       for (const width of WIDTHS) {
         await page.setViewportSize({ width, height: 1200 })

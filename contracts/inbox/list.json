@@ -16,7 +16,7 @@
       "preview": "Check-in is from 4 PM.",
       "previewFrom": "You",
       "time": "12:00 PM",
-      "unread": true,
+      "unread": false,
       "when": "In 3 days"
     },
     {
@@ -29,7 +29,7 @@
       "preview": "We arrive late, around 9 PM.",
       "previewFrom": "Ana",
       "time": "12:00 PM",
-      "unread": false,
+      "unread": true,
       "when": "Nov 20 – 23"
     }
   ],

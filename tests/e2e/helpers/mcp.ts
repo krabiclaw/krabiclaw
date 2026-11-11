@@ -184,14 +184,14 @@ export async function publishOwnHostProfile(request: APIRequestContext, baseURL:
   const previousScheduling = self!.scheduling
   const { profile: previous } = await call<{ profile: MemberPublicProfile | null }>('get_member_public_profile', { member_id: memberId })
   const published = await call<{ profile: MemberPublicProfile }>('update_member_public_profile', {
-    member_id: memberId, expected_updated_at: previous?.updated_at ?? null,
+    member_id: memberId, updated_at: previous?.updated_at ?? null,
     public_name: publicName, public_photo_url: previous?.public_photo_url ?? null, public_bio: previous?.public_bio ?? null, public_approved: true,
   })
   expect(published.profile).toMatchObject({ public_name: publicName, public_approved: 1 })
   const restore = async () => {
     const profile = { public_name: previous?.public_name ?? null, public_photo_url: previous?.public_photo_url ?? null, public_bio: previous?.public_bio ?? null }
     const { profile: current } = await call<{ profile: MemberPublicProfile }>('get_member_public_profile', { member_id: memberId })
-    await call('update_member_public_profile', { member_id: memberId, expected_updated_at: current.updated_at, ...profile, public_approved: Boolean(previous?.public_approved) })
+    await call('update_member_public_profile', { member_id: memberId, updated_at: current.updated_at, ...profile, public_approved: Boolean(previous?.public_approved) })
     const { profile: restored } = await call<{ profile: MemberPublicProfile }>('get_member_public_profile', { member_id: memberId })
     expect(restored).toMatchObject({ ...profile, public_approved: previous?.public_approved ?? 0 })
     const { scheduling } = await call<{ scheduling: MemberSchedulingRecord }>('get_member_scheduling', { member_id: memberId })

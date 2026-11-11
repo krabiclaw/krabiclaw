@@ -7,10 +7,9 @@ import { H3, H3Event } from 'h3'
 import * as schema from '../../server/db/schema.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
-import { createSession, setProductBookingConfig } from '../../server/utils/availability.ts'
+import { createSession, listSessions, setProductBookingConfig } from '../../server/utils/availability.ts'
 import { createProductBooking } from '../../server/domain/product-bookings.ts'
-import { createTableReservation } from '../../server/domain/table-reservations.ts'
-import { upsertLocationReservationConfig } from '../../server/utils/reservations.ts'
+import { createTables } from './support/table-product.ts'
 import { createStay, updateStayHome, type StayAccess } from '../../server/domain/stays.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
 import { listOpportunities } from '../../server/domain/opportunities.ts'
@@ -86,7 +85,7 @@ async function offering(db: D1Database, env: CloudflareEnv, org: Org, input: { k
   if (input.kind === 'service') await db.prepare(`INSERT INTO member_scheduling (member_id, organization_id, public_name, public_approved, timezone, weekly_json, time_off_json, updated_at, updated_by)
     VALUES (?, ?, 'Attorney Owner', 1, ?, ?, '[]', ?, ?) ON CONFLICT DO NOTHING`).bind(`${org}-owner`, org, ZONE, JSON.stringify([0, 1, 2, 3, 4, 5, 6].map(weekday => ({ weekday, start: '00:00', end: '23:59' }))), new Date().toISOString(), OWNER).run()
   await setProductBookingConfig(db, { organizationId: org, productId: product.id, actorId: OWNER, env, patch: { duration_minutes: 60, default_capacity: 6, confirmation_mode: 'instant',
-    ...(input.kind === 'service' ? { scheduling_mode: 'provider', assigned_member_id: `${org}-owner` } : { scheduling_mode: 'business' }) } })
+    ...(input.kind === 'service' ? { scheduling_mode: 'provider', assigned_member_id: `${org}-owner` } : { scheduling_mode: 'business', assigned_member_id: `${org}-owner` }) } })
   await db.prepare('INSERT INTO product_publications (organization_id, product_id, published, created_by, updated_by) VALUES (?, ?, 1, ?, ?)').bind(org, product.id, OWNER, OWNER).run()
   const startsAt = localDateTimeToInstant(input.day, '10:00', ZONE, 'compatible').toISOString()
   const [session] = await createSession(db, { env, organizationId: org, productId: product.id, locationId: `${org}-site`, startsAt, endsAt: new Date(Date.parse(startsAt) + 3_600_000).toISOString(), actorId: OWNER, idempotencyKey: `${product.id}-session` })
@@ -108,9 +107,9 @@ test('Today shows every booking type as a reservation card for its own business,
     const intake = await offering(db, env, 'law', { kind: 'service', name: 'Initial Case Review', day: inThreeDays })
     const book = async (org: Org, slug: string, sessionId: string, guest: string, party: number, key: string) => {
       const created = await createProductBooking(event(), { organizationId: org, slug, financialWritesAllowed: false, operator: operator(key),
-        body: { guest_name: guest, guest_email: `${key}@proof.example`, session_id: sessionId, party_size: party } })
+        body: { guest_name: guest, guest_email: `${key}@proof.example`, product_session_id: sessionId, party_size: party } })
       assert.equal(created.status, 201, JSON.stringify(created.body))
-      return created.body.request_id as string
+      return created.body.conversation_id as string
     }
     const evaConsultation = await book('law', estate.product.slug, estate.session.id, 'Eva Ortiz', 1, 'eva-consultation')
     const ianConsultation = await book('law', intake.product.slug, intake.session.id, 'Ian Reed', 1, 'ian-consultation')
@@ -123,22 +122,26 @@ test('Today shows every booking type as a reservation card for its own business,
     const manager: StayAccess = { organizationId: 'inn', actorId: OWNER, manage: true }
     const home = await createProduct(db, { env, organizationId: 'inn', actor: { actorId: OWNER }, product: {
       kind: 'stay', name: 'Seaview Cottage', variants: [{ name: 'Night', prices: [{ unit_amount: 15_000, currency: 'USD' }] }],
-      stay: { location_id: 'inn-site', check_in_time: '16:00', check_out_time: '10:00', max_guests: 6, min_nights: 1, assigned_member_id: null, assigned_team_id: null },
+      stay: { location_id: 'inn-site', check_in_time: '16:00', check_out_time: '10:00', max_guests: 6, min_nights: 1, assigned_member_id: 'inn-owner' },
     } })
     const directions = 'Take the coast road past the lighthouse; the cottage is the blue door.'
     await updateStayHome(env, db, manager, home.id, { directions, wifi_network: 'Seaview', wifi_password: 'saltwater' })
     const stay = await createStay(db, env, manager, { product_id: home.id, idempotency_key: 'diana-stay', check_in_date: inTwoDays, check_out_date: addLocalDays(inTwoDays, 3),
-      adults: 2, children: 0, guest_name: 'Diana', guest_surname: 'Lee', guest_email: 'diana@proof.example', total_minor: 45_000 })
-    assert.ok(stay.request_id, 'a stay with a guest email has a conversation')
+      adults: 2, children: 0, guest_name: 'Diana Lee', guest_email: 'diana@proof.example', total_minor: 45_000 })
+    assert.ok(stay.conversation_id, 'a stay with a guest email has a conversation')
 
-    // A table reservation.
-    await upsertLocationReservationConfig(db, { organizationId: 'bistro', locationId: 'bistro-site', patch: { duration_minutes: 90, slot_capacity: 20 }, actorId: OWNER })
-    const table = await createTableReservation(event(), { organizationId: 'bistro', financialWritesAllowed: false, operator: operator('nora-table'),
-      body: { name: 'Nora Park', email: 'nora@proof.example', phone: '+66812345679', date: inTwoDays, time: '18:00', guests: '4', location_id: 'bistro-site' } })
+    // A table reservation: a booking of the bistro's tables at 18:00.
+    const tables = await createTables(db, env, { organizationId: 'bistro', locationId: 'bistro-site', actorId: OWNER, memberId: 'bistro-owner', name: 'Bistro table',
+      durationMinutes: 90, seats: 20, open: '17:00', lastSeating: '20:00' })
+    const evening = localDateTimeToInstant(inTwoDays, '18:00', ZONE, 'compatible').toISOString()
+    const seating = (await listSessions(db, { env, organizationId: 'bistro', productId: tables.id, fromInstant: evening, toInstant: new Date(Date.parse(evening) + 1).toISOString() }))[0]
+    assert.equal(seating?.starts_at, evening)
+    const table = await createProductBooking(event(), { organizationId: 'bistro', slug: tables.slug, financialWritesAllowed: false, operator: operator('nora-table'),
+      body: { guest_name: 'Nora Park', guest_email: 'nora@proof.example', guest_phone: '+66812345679', product_session_id: seating!.id, party_size: 4 } })
     assert.equal(table.status, 201, JSON.stringify(table.body))
 
     const law = await today('law', 'upcoming'), studio = await today('studio', 'upcoming'), inn = await today('inn', 'upcoming'), bistro = await today('bistro', 'upcoming')
-    const shape = (card: TodayReservation) => ({ kind: card.kind, requestId: card.requestId, headline: card.headline, resourceName: card.resourceName, suggestion: card.suggestion?.title ?? null })
+    const shape = (card: TodayReservation) => ({ kind: card.kind, requestId: card.conversation_id, headline: card.headline, resourceName: card.name, suggestion: card.suggestion?.title ?? null })
 
     // Each business sees its own bookings and nothing of another's.
     assert.deepEqual(law.reservations.cards.map(shape), [
@@ -150,18 +153,18 @@ test('Today shows every booking type as a reservation card for its own business,
       { kind: 'booking', requestId: brunoClass, headline: 'Bruno’s group of 3', resourceName: 'Wheel Throwing Class', suggestion: 'Share how to prepare' },
     ])
     assert.deepEqual(inn.reservations.cards.map(shape), [
-      { kind: 'stay', requestId: stay.request_id, headline: 'Diana’s group of 2', resourceName: 'Seaview Cottage', suggestion: 'Share info about your place' },
+      { kind: 'stay', requestId: stay.conversation_id, headline: 'Diana’s group of 2', resourceName: 'Seaview Cottage', suggestion: 'Share info about your place' },
     ])
-    assert.equal(inn.reservations.cards[0]!.stayId, stay.id)
+    assert.equal(inn.reservations.cards[0]!.booking_id, stay.id)
     // A restaurant has no host-written preparation, so its reservation has no suggestion.
     assert.deepEqual(bistro.reservations.cards.map(shape), [
-      { kind: 'reservation', requestId: table.body.request_id, headline: 'Nora’s group of 4', resourceName: 'bistro office', suggestion: null },
+      { kind: 'booking', requestId: table.body.conversation_id, headline: 'Nora’s group of 4', resourceName: 'bistro office', suggestion: null },
     ])
     assert.equal(bistro.reservations.title, 'You have 1 upcoming reservation')
     // Upcoming bookings are not today's.
     for (const org of Object.keys(ORGS) as Org[]) assert.deepEqual((await today(org, 'today')).reservations, { title: null, cards: [] })
     // A booking's suggestion is on its card, not among Today's other opportunities.
-    assert.equal((await today('law', 'today')).opportunities.some(opportunity => opportunity.requestId !== null), false)
+    assert.equal((await today('law', 'today')).opportunities.some(opportunity => opportunity.conversation_id !== null), false)
 
     // The message is written from the offering's and the home's own fields.
     const consultationMessage = law.reservations.cards[0]!.suggestion!.message!
@@ -177,8 +180,8 @@ test('Today shows every booking type as a reservation card for its own business,
     const membership = await resolveOrganizationMembership(env, { organizationId: 'law', userId: OWNER })
     assert.ok(membership)
     const lawPrincipal = memberAccessPrincipal(membership, { env })
-    const listed = (await listOpportunities(db, lawPrincipal)).opportunities.filter(opportunity => opportunity.requestId !== null)
-    assert.deepEqual(listed.map(opportunity => [opportunity.id, opportunity.requestId, opportunity.message]), [[law.reservations.cards[0]!.suggestion!.id, evaConsultation, consultationMessage]])
+    const listed = (await listOpportunities(db, lawPrincipal)).opportunities.filter(opportunity => opportunity.conversation_id !== null)
+    assert.deepEqual(listed.map(opportunity => [opportunity.id, opportunity.conversation_id, opportunity.message]), [[law.reservations.cards[0]!.suggestion!.id, evaConsultation, consultationMessage]])
 
     // The host's message takes the suggestion off the card; the card stays.
     const replied = await executeGuestThreadOperation(db, { threadId: evaConsultation, organizationId: 'law', action: 'reply', body: consultationMessage,
@@ -189,9 +192,9 @@ test('Today shows every booking type as a reservation card for its own business,
       { kind: 'booking', requestId: evaConsultation, headline: 'Eva’s consultation', resourceName: 'Estate Planning Consultation', suggestion: null },
       { kind: 'booking', requestId: ianConsultation, headline: 'Ian’s consultation', resourceName: 'Initial Case Review', suggestion: null },
     ])
-    assert.equal((await listOpportunities(db, lawPrincipal)).opportunities.some(opportunity => opportunity.requestId === evaConsultation), false)
+    assert.equal((await listOpportunities(db, lawPrincipal)).opportunities.some(opportunity => opportunity.conversation_id === evaConsultation), false)
     // The sent message is the conversation's, read back from the ledger.
-    assert.equal(await db.prepare("SELECT body FROM activity_entries WHERE request_id = ? AND actor_kind = 'member' AND kind = 'message'").bind(evaConsultation).first('body'), consultationMessage)
+    assert.equal(await db.prepare("SELECT body FROM messages WHERE conversation_id = ? AND author_kind = 'member'").bind(evaConsultation).first('body'), consultationMessage)
   } finally {
     await runtime.dispose()
   }

@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { resolveBookingPresentation } from '../../utils/booking-presentation.ts'
-import { threadRecordTitle, threadFilterLabel } from '../../lib/components/workspace/messages/guest-thread-client.ts'
+import { threadFilterLabel } from '../../lib/components/workspace/messages/guest-thread-client.ts'
 
-test('resolveBookingPresentation maps service vertical to Consultation', () => {
-  const serviceBooking = resolveBookingPresentation('booking', 'service')
+test('resolveBookingPresentation maps service vertical to Consultation and a table to Reservation', () => {
+  const serviceBooking = resolveBookingPresentation('service', 'service')
   assert.equal(serviceBooking.label, 'Consultation')
   assert.equal(serviceBooking.labelPlural, 'Consultations')
   assert.equal(serviceBooking.noun, 'consultation')
@@ -14,11 +14,11 @@ test('resolveBookingPresentation maps service vertical to Consultation', () => {
   assert.equal(serviceBooking.formatCount(1), '1 client')
   assert.equal(serviceBooking.formatCount(2), '2 clients')
 
-  const serviceReservation = resolveBookingPresentation('reservation', 'service')
+  const serviceReservation = resolveBookingPresentation('table', 'service')
   assert.equal(serviceReservation.label, 'Consultation')
   assert.equal(serviceReservation.counterpartyLabel, 'Client')
 
-  const restaurantReservation = resolveBookingPresentation('reservation', 'restaurant')
+  const restaurantReservation = resolveBookingPresentation('table', 'restaurant')
   assert.equal(restaurantReservation.label, 'Reservation')
   assert.equal(restaurantReservation.labelPlural, 'Reservations')
   assert.equal(restaurantReservation.counterpartyLabel, 'Guest')
@@ -28,27 +28,23 @@ test('resolveBookingPresentation maps service vertical to Consultation', () => {
   assert.equal(restaurantReservation.formatCount(4, true), '4+ guests')
   assert.equal(restaurantReservation.formatCount('4+'), '4+ guests')
 
-  const experienceBooking = resolveBookingPresentation('booking', 'experience')
+  const experienceBooking = resolveBookingPresentation('experience', 'experience')
   assert.equal(experienceBooking.label, 'Booking')
   assert.equal(experienceBooking.counterpartyLabel, 'Guest')
   assert.equal(experienceBooking.partyLabel, 'Guests')
   assert.equal(experienceBooking.formatCount(1), '1 guest')
   assert.equal(experienceBooking.formatCount(2), '2 guests')
+
+  // A restaurant that also runs a class: the table is a reservation, the class a booking.
+  assert.equal(resolveBookingPresentation('experience', 'restaurant').label, 'Booking')
+  assert.equal(resolveBookingPresentation('table', 'restaurant').label, 'Reservation')
 })
 
-test('threadRecordTitle and threadFilterLabel present legal service bookings as Consultation', () => {
-  assert.equal(threadRecordTitle('booking', 'service'), 'Consultation')
+test('threadFilterLabel names a booking filter in the vertical\'s one word for every booking', () => {
   assert.equal(threadFilterLabel('booking', 'service'), 'Consultations')
-
-  assert.equal(threadRecordTitle('booking', 'experience'), 'Experience')
-  assert.equal(threadFilterLabel('booking', 'experience'), 'Experiences')
-
-  assert.equal(threadRecordTitle('reservation', 'restaurant'), 'Reservation')
-  assert.equal(threadFilterLabel('reservation', 'restaurant'), 'Reservations')
-
-  assert.equal(threadRecordTitle('contact', 'service'), 'Message')
+  // A booking may be a class or a table, so its filter uses the word true of both.
+  assert.equal(threadFilterLabel('booking', 'experience'), 'Bookings')
+  assert.equal(threadFilterLabel('booking', 'restaurant'), 'Bookings')
   assert.equal(threadFilterLabel('contact', 'service'), 'Direct messages')
-
-  assert.equal(threadRecordTitle('stay', 'lodging'), 'Stay')
   assert.equal(threadFilterLabel('stay', 'lodging'), 'Stays')
 })

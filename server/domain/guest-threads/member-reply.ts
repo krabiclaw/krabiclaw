@@ -1,9 +1,10 @@
 import { HTTPError } from 'nitro'
 import { queryFirst } from '~/server/db'
-import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
+import { publishConversationEvent } from '~/server/cloudflare/guest-inbox-events'
 import { getGuestRequest } from '~/server/domain/requests'
 import { sendTeamMessage, teamAccessFor } from '~/server/domain/team-messages'
-import { assertAssignedBookingAccess, memberAccessPrincipal, resolveOrganizationMembership } from '~/server/utils/member-access'
+import { memberAccessPrincipal, resolveOrganizationMembership } from '~/server/utils/member-access'
+import { assertConversationAccess, getMessage } from '~/server/domain/conversations'
 import { creationRequestHash } from '~/server/utils/organization-events'
 import { executeGuestThreadOperation, type ExecuteOperationInput } from './operations'
 import type { MessagePhoto } from './attachments'
@@ -74,7 +75,7 @@ async function replyAsMember(env: ExecuteOperationInput['env'], input: { threadI
   if (!thread) return { sent: false, notice: replyNotSent('This conversation no longer exists.'), report: null }
   const membership = await resolveOrganizationMembership(env, { organizationId: thread.organization_id, userId: input.userId })
   if (!membership) return { sent: false, notice: replyNotSent('You are no longer a member of this business.'), report: null }
-  const allowed = await assertAssignedBookingAccess(db, { ...memberAccessPrincipal(membership, { env }), requestId: thread.id })
+  const allowed = await assertConversationAccess(db, memberAccessPrincipal(membership, { env }), thread.id)
     .then(() => true, (error: unknown) => {
       if (error instanceof HTTPError && (error.status === 403 || error.status === 404)) return false
       throw error
@@ -90,7 +91,7 @@ async function replyAsMember(env: ExecuteOperationInput['env'], input: { threadI
   if (!attempt.outcome.ok) return told
   // A reply is not sent until open inboxes show it. A failed refresh fails the email or WhatsApp
   // delivery; its redelivery replays this key, which sends nothing twice and refreshes again.
-  await publishGuestInboxThreadEvent(env, db, { threadId: thread.id, type: 'thread.changed' })
+  await publishConversationEvent(env, db, { conversationId: thread.id, type: 'MESSAGE_CREATE' })
   return told
 }
 
@@ -102,11 +103,11 @@ async function replyToTeamAsMember(env: ExecuteOperationInput['env'], input: { o
   if (!user) throw new Error(`Member ${input.userId} has no user record`)
   const idempotencyKey = await creationRequestHash(input.idempotencyKey)
   return teamAccessFor(memberAccessPrincipal(membership, { env }), membership.memberId, 'send').then(async access => {
-    await sendTeamMessage(env, env.DB, access, input.threadId, { body: input.body, photos: input.files, idempotencyKey, senderName: user.name })
+    await sendTeamMessage(env, env.DB, access, input.threadId, { body: input.body, photos: input.files, idempotency_key: idempotencyKey, senderName: user.name })
     return { sent: true, notice: REPLY_SENT, report: null }
   }).catch(async (error: unknown) => {
     if (error instanceof HTTPError && error.status >= 400 && error.status < 500) return { sent: false, notice: replyNotSent(error.message), report: null }
-    const saved = await queryFirst(env.DB, 'SELECT 1 FROM team_messages WHERE organization_id = ? AND thread_id = ? AND idempotency_key = ?', [input.organizationId, input.threadId, idempotencyKey])
+    const saved = await queryFirst(env.DB, 'SELECT 1 FROM messages WHERE organization_id = ? AND conversation_id = ? AND dedupe_key = ?', [input.organizationId, input.threadId, `team:${input.threadId}:${idempotencyKey}`])
       .catch((readError: unknown) => { throw new AggregateError([error, readError], 'The team reply failed and whether it saved could not be read', { cause: error }) })
     // A message that saved is not sent until its teammates are told and open apps refresh. The
     // failure fails the email or WhatsApp delivery, and its redelivery replays this key, which
@@ -116,14 +117,12 @@ async function replyToTeamAsMember(env: ExecuteOperationInput['env'], input: { o
   })
 }
 
-/** Answers the conversation an alert's entry belongs to, a guest's or the team's, as the member. */
+/** Answers the conversation the alerted message belongs to, a guest's or the team's, as the member. */
 export async function replyToAlertEntry(env: ExecuteOperationInput['env'], input: { entryId: string; userId: string; body: string; files: MessagePhoto[]; idempotencyKey: string }): Promise<MemberReplyOutcome> {
   const { entryId, ...reply } = input
-  const entry = await queryFirst<{ request_id: string | null; organization_id: string | null; team_thread_id: string | null }>(env.DB, `
-    SELECT e.request_id, e.organization_id, t.thread_id AS team_thread_id
-      FROM activity_entries e LEFT JOIN team_messages t ON t.organization_id = e.organization_id AND t.id = substr(e.dedupe_key, 14) AND e.dedupe_key = 'team-message:' || t.id
-     WHERE e.id = ?`, [entryId])
-  if (entry?.organization_id && entry.team_thread_id) return await replyToTeamAsMember(env, { ...reply, organizationId: entry.organization_id, threadId: entry.team_thread_id })
-  if (entry?.request_id) return await replyAsMember(env, { ...reply, threadId: entry.request_id })
-  return { sent: false, notice: replyNotSent('This conversation no longer exists.'), report: null }
+  const message = await getMessage(env.DB, entryId)
+  if (!message) return { sent: false, notice: replyNotSent('This conversation no longer exists.'), report: null }
+  const conversation = await queryFirst<{ kind: string }>(env.DB, 'SELECT kind FROM conversations WHERE id = ?', [message.conversation_id])
+  if (conversation?.kind === 'team') return await replyToTeamAsMember(env, { ...reply, organizationId: message.organization_id, threadId: message.conversation_id })
+  return await replyAsMember(env, { ...reply, threadId: message.conversation_id })
 }

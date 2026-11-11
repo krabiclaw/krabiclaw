@@ -15,18 +15,17 @@ import { NOT_HANDLED, assertDomainSuccess, mutationContextPayload, omit, optiona
 const text = { type: 'string' }
 const nullableText = { type: ['string', 'null'] }
 const agendaItem = { type: 'object', properties: {
-  id: text, kind: { type: 'string', enum: [...AGENDA_KINDS] }, requestId: nullableText,
-  operationalBookingId: nullableText, operationalReservationId: nullableText,
-  stayId: { ...nullableText, description: 'For a stay row, the stay to read with get_stay; one stay is its arrival and its departure.' },
-  productId: nullableText,
-  stayChannel: { type: ['string', 'null'], enum: [...STAY_CHANNELS, null] },
-  stayMoment: { type: ['string', 'null'], enum: ['arrival', 'departure', 'turnover', 'current', null] },
-  assignedMemberId: nullableText, assignedMemberName: nullableText,
-  startsAt: text, endsAt: nullableText, dayKey: text, timeZone: text, showTimeZone: { type: 'boolean' },
-  title: text, subtitle: nullableText, status: text, organizationId: text,
-  locationId: nullableText, locationTitle: nullableText, guestImageUrl: nullableText,
-  resourceImageUrl: nullableText, resourceTitle: nullableText, partySize: { type: ['integer', 'null'] }, to: text,
-}, required: ['id', 'kind', 'requestId', 'operationalBookingId', 'operationalReservationId', 'stayId', 'productId', 'stayChannel', 'stayMoment', 'startsAt', 'endsAt', 'dayKey', 'timeZone', 'title', 'status', 'organizationId', 'locationId', 'partySize'] }
+  id: text, kind: { type: 'string', enum: [...AGENDA_KINDS] }, conversation_id: nullableText,
+  booking_id: { ...nullableText, description: 'The booking to read with get_product_booking. A stay may have a row for its arrival and for its departure.' },
+  product_id: nullableText,
+  stay_channel: { type: ['string', 'null'], enum: [...STAY_CHANNELS, null] },
+  stay_moment: { type: ['string', 'null'], enum: ['arrival', 'departure', 'turnover', 'current', null] },
+  assigned_member_id: nullableText, assigned_member_name: nullableText,
+  starts_at: text, ends_at: nullableText, day_key: text, timezone: text, show_time_zone: { type: 'boolean' },
+  title: text, subtitle: nullableText, status: text, organization_id: text,
+  location_id: nullableText, location_title: nullableText, guest_image_url: nullableText,
+  resource_image_url: nullableText, name: nullableText, party_size: { type: ['integer', 'null'] }, to: text,
+}, required: ['id', 'kind', 'conversation_id', 'booking_id', 'product_id', 'stay_channel', 'stay_moment', 'starts_at', 'ends_at', 'day_key', 'timezone', 'title', 'status', 'organization_id', 'location_id', 'party_size'] }
 const locationMutation = { ...locationMutationSummaryObject, properties: { ...locationMutationSummaryObject.properties, saved_fields: { ...locationObject, required: [], description: 'Persisted values of the fields named in changed_fields.' } }, required: [...locationMutationSummaryObject.required, 'saved_fields'] }
 const calendarMutation = { ...locationMutation, properties: { ...locationMutation.properties, affected_commitments: { type: 'array', items: agendaItem } }, required: [...locationMutation.required, 'affected_commitments'] }
 
@@ -96,14 +95,12 @@ export const LOCATIONS_TOOLS: McpToolDefinition[] = [
     }),
   organizationTool({
       name: 'update_location',
-      description: 'Update a location\'s own details: its name and descriptions, regular opening hours, temporary closures/special hours, contact info, saved map coordinates, and map sharing for its places to stay. Renaming keeps the saved public address. To change its hero media, call set_media with { owner_type: "business_location", owner_id: <location.id>, slot: "hero" }. Only provided fields are changed. Returns the updated location; website details can change immediately. This does not change reservation capacity or a product’s session schedule.',
+      description: 'Update a location\'s own details: its name and descriptions, regular opening hours, temporary closures/special hours, contact info, saved map coordinates, and map sharing for its places to stay. Renaming keeps the saved public address. To change its hero media, call set_media with { owner_type: "business_location", owner_id: <location.id>, slot: "hero" }. Only provided fields are changed. Returns the updated location; website details can change immediately. A restaurant’s table seatings follow these hours: new open time adds seatings, and closed time cancels the unbooked ones; booked seatings stay. Other offerings keep their own weekly schedules.',
       domain: 'locations',
       minimumRole: 'admin',
       inputSchema: {
         location_id: { type: 'string', description: 'Internal location ID returned by list_locations or get_workspace_context.' },
         title: { type: 'string', minLength: 1, maxLength: 200, pattern: '^[\\s\\S]*\\S[\\s\\S]*$', description: 'Location name shown to guests. Renaming keeps its saved public address.' },
-        assigned_member_id: locationObject.properties.assigned_member_id,
-        assigned_team_id: locationObject.properties.assigned_team_id,
         description: { type: ['string', 'null'], description: 'Long description shown on the location page. Pass null to clear it.' },
         short_description: { type: ['string', 'null'], description: 'One-line summary shown on location cards. Pass null to clear it.' },
         status: { type: 'string', enum: ['active', 'inactive'], description: 'Set active to enable the location, or inactive to hide it. Increasing the number of live homes requires the dashboard.' },
@@ -111,10 +108,9 @@ export const LOCATIONS_TOOLS: McpToolDefinition[] = [
         address: postalAddressSchema,
         latitude: { ...locationObject.properties.latitude, description: 'Saved map latitude. Supply longitude in the same call; both null clears the coordinates. Omit both to keep the saved coordinates.' },
         longitude: { ...locationObject.properties.longitude, description: 'Saved map longitude. Supply latitude in the same call; both null clears the coordinates. Omit both to keep the saved coordinates.' },
-        phone: { type: 'string', description: `Public phone number shown to guests on the website and in booking/reservation confirmation emails. ${PHONE_FORMAT}` },
-        email: { type: ['string', 'null'], description: 'Public email shown to guests on the website and in booking/reservation confirmation emails. Pass null to clear it.' },
+        phone: { type: 'string', description: `Public phone number shown to guests on the website and in booking confirmation emails. ${PHONE_FORMAT}` },
+        email: { type: ['string', 'null'], description: 'Public email shown to guests on the website and in booking confirmation emails. Pass null to clear it.' },
         timezone: { type: 'string', description: 'IANA time zone identifier for this location, e.g. Asia/Bangkok. Used to interpret opening hours and booking slots.' },
-        max_capacity: { type: ['number', 'null'], description: 'Stored location capacity metadata; does not limit reservation availability. Reservation seats per start time are controlled by update_reservation_policy.slot_capacity. Pass null to clear the metadata.' },
         opening_hours: openingHoursInputSchema,
         special_hours: specialHoursInputSchema,
       },
@@ -123,7 +119,7 @@ export const LOCATIONS_TOOLS: McpToolDefinition[] = [
     }),
   organizationTool({
       name: 'get_calendar',
-      description: "Read the business’s reservations, bookings, consultations, guest arrivals and departures, published posts and unavailable dates when the user wants to review its calendar. Dates are inclusive local calendar days, with at most 62 days per call. Use kinds to filter the agenda.",
+      description: "Read the business’s bookings (table reservations, classes and consultations), guest arrivals and departures, published posts and unavailable dates when the user wants to review its calendar. Dates are inclusive local calendar days, with at most 62 days per call. Use kinds to filter the agenda.",
       domain: 'locations',
       minimumRole: 'admin',
       inputSchema: {
@@ -131,7 +127,7 @@ export const LOCATIONS_TOOLS: McpToolDefinition[] = [
         assigned_member_id: { type: 'string' },
         from: { ...calendarDateSchema, description: 'First day, YYYY-MM-DD.' },
         to: { ...calendarDateSchema, description: 'Last day, YYYY-MM-DD, inclusive.' },
-        kinds: { type: 'array', items: { type: 'string', enum: ['reservation', 'booking', 'post', 'stay'] }, description: 'Limit to these kinds. Defaults to every kind the location offers. A stay appears on its arrival and its departure day.' },
+        kinds: { type: 'array', items: { type: 'string', enum: [...AGENDA_KINDS] }, description: 'Limit to these kinds. Defaults to every kind the location offers. A stay appears on its arrival and its departure day.' },
       },
       required: ['from', 'to'],
       outputSchema: {
@@ -147,7 +143,7 @@ export const LOCATIONS_TOOLS: McpToolDefinition[] = [
     }),
   organizationTool({
       name: 'block_dates',
-      description: "Close a location for a whole-day date range when the user wants to prevent bookings on those dates. Both endpoints are inclusive. Adds a closure to special hours while retaining existing closures and dated hours. Returns the saved hours; existing bookings and reservations are not cancelled or messaged.",
+      description: "Close a location for a whole-day date range when the user wants to prevent bookings on those dates. Both endpoints are inclusive. Adds a closure to special hours while retaining existing closures and dated hours, and cancels the location’s unbooked table seatings on those dates. Returns the saved hours; existing bookings are not cancelled or messaged.",
       domain: 'locations',
       minimumRole: 'admin',
       inputSchema: {
@@ -161,7 +157,7 @@ export const LOCATIONS_TOOLS: McpToolDefinition[] = [
     }),
   organizationTool({
       name: 'open_dates',
-      description: "Remove temporary closures for an inclusive date range when the user wants to reopen a location. Closure dates outside the range and their notes are preserved. Regularly closed weekdays stay closed; change opening_hours with update_location to open those weekdays. Returns the saved hours without creating or changing existing bookings.",
+      description: "Remove temporary closures for an inclusive date range when the user wants to reopen a location. Closure dates outside the range and their notes are preserved. Regularly closed weekdays stay closed; change opening_hours with update_location to open those weekdays. The location’s table seatings return on the reopened dates. Returns the saved hours without creating or changing existing bookings.",
       domain: 'locations',
       minimumRole: 'admin',
       inputSchema: {
@@ -294,7 +290,7 @@ export async function handleLocationsTools(ctx: McpExecutorContext): Promise<unk
       }))
       return {
         items: agenda.items,
-        available_kinds: agenda.availableKinds,
+        available_kinds: agenda.available_kinds,
         unavailable_dates: unavailable,
         context: await mutationContextPayload(organization, location ? { locationId: location.id } : undefined),
       };
@@ -321,7 +317,7 @@ export async function handleLocationsTools(ctx: McpExecutorContext): Promise<unk
           organization.db,
           organization.organizationId,
           location.id,
-          { special_hours: withNote, expected_updated_at: location.updated_at } as never,
+          { special_hours: withNote, updated_at: location.updated_at } as never,
           organization.userId,
           organization.env,
         );
@@ -341,7 +337,7 @@ export async function handleLocationsTools(ctx: McpExecutorContext): Promise<unk
           changed_fields: ["special_hours"],
           saved_fields: { special_hours: updated.special_hours },
           updated_at: updated.updated_at,
-          affected_commitments: toolName === 'block_dates' ? (await listAgenda(organization.db, { organizationId: organization.organizationId }, { from, to, locationId: location.id, kinds: ['booking', 'reservation'], organizationSlug: organization.organizationSlug, principal: { env: organization.env, membership: organization.membership } })).items.filter(item => item.status === 'pending' || item.status === 'confirmed') : [],
+          affected_commitments: toolName === 'block_dates' ? (await listAgenda(organization.db, { organizationId: organization.organizationId }, { from, to, locationId: location.id, kinds: ['booking'], organizationSlug: organization.organizationSlug, principal: { env: organization.env, membership: organization.membership } })).items.filter(item => item.status === 'pending' || item.status === 'confirmed') : [],
           context,
         },
         toolName === "block_dates" ? `Blocked ${span} at "${updated.title}".` : `Opened ${span} at "${updated.title}".`,

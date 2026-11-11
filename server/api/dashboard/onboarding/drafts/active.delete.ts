@@ -44,7 +44,7 @@ export default defineHandler(async (event) => {
   if (organizationId) {
     const outcome = await deleteAbandonedDraftTenant(env, {
       draftId: draft.id,
-      updatedAt: revision,
+      updated_at: revision,
       organizationId,
       subdomain: draft.subdomain_candidate,
       userId: session.user.id,

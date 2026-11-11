@@ -323,16 +323,16 @@ async function savePageLocalization(locale: string, submitted: Record<string, un
   })
   const body = {
     id: state.variant?.id,
-    pageId: source.page_id,
+    page_id: source.page_id,
     locale,
     path: state.variant?.path ?? source.path,
     title: title.trim(),
     summary: typeof submitted.summary === 'string' ? submitted.summary : '',
-    pageType: source.page_type,
+    page_type: source.page_type,
     recipe: source.recipe || null,
-    ...(state.variant ? { sortOrder: source.sort_order } : {}),
+    ...(state.variant ? { sort_order: source.sort_order } : {}),
     blocks,
-    expectedUpdatedAt: state.variant?.document.updated_at,
+    updated_at: state.variant?.document.updated_at,
   }
   const response = state.variant
     ? await dashboardApi<{ page: TenantPageResponse }>(`/api/editor/organizations/${organizationId}/pages/${state.variant.id}`, { method: 'PATCH', body, validate: isTenantPageResponse })

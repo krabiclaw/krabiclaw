@@ -1,19 +1,18 @@
 import type { ComputedRef } from 'vue'
 import { productEditorKey } from '~/components/dashboard/ProductEditorPage.vue'
 import { organizationSettingsEditorKey } from '~/lib/components/workspace/settings/OrganizationSettingsPage.vue'
-import { useCalendarLocationEditor } from '~/composables/useCalendarLocationEditor'
 import type { FormQuestion } from '~/shared/form-questions'
 import type { FormQuestionWrite } from '~/utils/form-question-editing'
 
 /**
- * The four records that hold a form's questions. The Questions screens are one
+ * The three records that hold a form's questions. The Questions screens are one
  * set of files mounted beneath each of them (`build/form-question-routes.ts`),
  * and the route's `formQuestions` meta names which one a mount edits.
  */
-export type FormQuestionsOwnerKind = 'inquiry' | 'booking' | 'stay' | 'reservations'
+export type FormQuestionsOwnerKind = 'inquiry' | 'booking' | 'stay'
 
 export interface FormQuestionsOwner {
-  /** Which form this is among every form the organization has, as the copy sheet names its sources: `inquiry`, `booking:<product>`, `stay:<product>`, `reservations:<location>`. */
+  /** Which form this is among every form the organization has, as the copy sheet names its sources: `inquiry`, `booking:<product>`, `stay:<product>`. */
   key: string
   title: string
   lead: string
@@ -22,7 +21,7 @@ export interface FormQuestionsOwner {
   questions: ComputedRef<FormQuestion[] | null>
   error: ComputedRef<string | null>
   /** Where the questions' translated wording is stored: the owner's resource and its field. */
-  localization: ComputedRef<{ organizationId: string; resourceType: 'organization' | 'business_location' | 'product'; resourceId: string; field: string; label: string } | null>
+  localization: ComputedRef<{ organizationId: string; resourceType: 'organization' | 'product'; resourceId: string; field: string; label: string } | null>
   /** Replaces the whole list over the revision this owner last read, then re-reads the owner. Throws what the writer refused. */
   write: (questions: readonly FormQuestionWrite[]) => Promise<void>
 }
@@ -63,19 +62,6 @@ export async function useFormQuestionsOwner(): Promise<FormQuestionsOwner> {
       error: editor.loadError,
       localization: computed(() => editor.product.value ? { organizationId: editor.organizationId, resourceType: 'product', resourceId: editor.product.value.id, field: 'questions', label: editor.product.value.name } : null),
       write: questions => editor.saveQuestions(kind, questions),
-    }
-  }
-  if (kind === 'reservations') {
-    const editor = await useCalendarLocationEditor(null)
-    return {
-      get key() { return `reservations:${editor.location.value?.id ?? ''}` },
-      title: 'Questions',
-      get lead() { return `Asked after name, email and phone when a guest reserves at ${editor.location.value?.title ?? 'this location'}. Reservations already made keep the answers they gave.` },
-      requiredDescription: 'Guests can’t reserve without answering',
-      questions: editor.reservationQuestions,
-      error: editor.error,
-      localization: computed(() => editor.location.value ? { organizationId: editor.organizationId, resourceType: 'business_location', resourceId: editor.location.value.id, field: 'reservation_questions', label: editor.location.value.title } : null),
-      write: editor.saveReservationQuestions,
     }
   }
   throw new Error(`Questions are mounted at ${route.path} without the record that owns them`)

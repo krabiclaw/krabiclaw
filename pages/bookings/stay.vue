@@ -28,7 +28,7 @@
         <TenantButton v-if="guestStay.home.location?.maps_url" :href="guestStay.home.location.maps_url" variant="outline" target="_blank" rel="noopener noreferrer">
           {{ t('site.experience_detail.open_in_maps') }}
         </TenantButton>
-        <TenantButton v-if="guestStay.stay.request_id" :href="messageHostUrl" variant="outline">{{ t('stay.message_host') }}</TenantButton>
+        <TenantButton v-if="guestStay.stay.conversation_id" :href="messageHostUrl" variant="outline">{{ t('stay.message_host') }}</TenantButton>
         <p v-if="guestStay.manage_url" class="w-full text-sm text-muted">{{ t('booking.manage_account_help') }}</p>
       </template>
       <template v-if="guestStay.home.arrival_guide" #details>
@@ -73,7 +73,7 @@ const copy = computed(() => getVerticalCopy(organization.vertical, locale.value)
 type ManagedGuestStay = GuestStay & { manage_url: string | null }
 const guestStay = ref<ManagedGuestStay | null>(null)
 const platformDomain = useRuntimeConfig().public.platformDomain
-const messageHostUrl = computed(() => new URL(`/dashboard/account/messages/${encodeURIComponent(guestStay.value!.stay.request_id!)}`, platformDomain).toString())
+const messageHostUrl = computed(() => new URL(`/dashboard/account/messages/${encodeURIComponent(guestStay.value!.stay.conversation_id!)}`, platformDomain).toString())
 const pending = ref(true)
 const loadError = ref<string | null>(null)
 

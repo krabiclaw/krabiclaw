@@ -1,15 +1,15 @@
 <template>
   <!-- Read-only guest details are a description list, not a form: nothing to save. -->
-  <DashboardLeafPanel id="booking-guest" :title="b.booking.value?.guestName ?? ''" :footer="false">
+  <DashboardLeafPanel id="booking-guest" :title="b.booking.value?.guest_name ?? ''" :footer="false">
     <div v-if="b.booking.value" class="space-y-6">
       <dl class="space-y-4">
         <div>
           <dt class="text-sm text-muted">Email</dt>
-          <dd class="mt-1 break-words text-highlighted">{{ b.booking.value.guestEmail }}</dd>
+          <dd class="mt-1 break-words text-highlighted">{{ b.booking.value.guest_email }}</dd>
         </div>
-        <div v-if="b.booking.value.guestPhone">
+        <div v-if="b.booking.value.guest_phone">
           <dt class="text-sm text-muted">Phone</dt>
-          <dd class="mt-1 text-highlighted">{{ formatPhone(b.booking.value.guestPhone) }}</dd>
+          <dd class="mt-1 text-highlighted">{{ formatPhone(b.booking.value.guest_phone) }}</dd>
         </div>
       </dl>
       <div class="flex gap-3">

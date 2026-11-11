@@ -6,17 +6,17 @@
       <div class="divide-y divide-default">
         <article v-for="message in data.messages" :key="message.id" class="space-y-3 py-6 first:pt-0" :data-scheduled-message="message.id">
           <div class="flex items-start justify-between gap-3">
-            <h2 class="font-semibold text-highlighted">{{ message.title }}</h2>
+            <h2 class="font-semibold text-highlighted">{{ message.template_title ?? 'Your reply, sent later' }}</h2>
             <UBadge :color="message.status === 'failed' || message.status === 'needs_review' ? 'error' : message.status === 'sent' ? 'success' : 'neutral'" variant="soft">{{ statusLabels[message.status] }}</UBadge>
           </div>
-          <p v-if="message.dueAt" class="text-sm text-muted"><time :datetime="message.dueAt">{{ atHome(message.dueAt, message.timezone) }}</time> · {{ message.timezone }}</p>
+          <p v-if="message.due_at" class="text-sm text-muted"><time :datetime="message.due_at">{{ atHome(message.due_at, message.timezone) }}</time><template v-if="message.timezone"> · {{ message.timezone }}</template></p>
           <p class="whitespace-pre-wrap break-words text-base">{{ message.body }}</p>
-          <p v-if="message.sentAt" class="text-sm text-muted">Sent {{ atHome(message.sentAt, message.timezone) }}</p>
+          <p v-if="message.sent_at" class="text-sm text-muted">Sent {{ atHome(message.sent_at, message.timezone) }}</p>
           <UAlert v-if="message.reason" :color="message.status === 'failed' || message.status === 'needs_review' ? 'error' : 'neutral'" variant="soft" :description="message.reason" />
           <div class="flex flex-wrap gap-3">
-            <UButton v-if="message.requestId" :to="`${messagesPath}/${encodeURIComponent(message.requestId)}`" label="Open conversation" color="neutral" variant="link" />
-            <UButton v-if="manage && message.templateId" :to="`${messagesPath}/automatic/${encodeURIComponent(message.templateId)}/schedule`" label="Edit automatic message" color="neutral" variant="link" />
-            <UButton v-if="manage && message.status === 'pending'" label="Cancel scheduled message" color="neutral" variant="outline" :loading="cancelling === message.id" :disabled="!!cancelling" @click="cancel(message.id)" />
+            <UButton v-if="message.conversation_id" :to="`${messagesPath}/${encodeURIComponent(message.conversation_id)}`" label="Open conversation" color="neutral" variant="link" />
+            <UButton v-if="manage && message.template_id" :to="`${messagesPath}/automatic/${encodeURIComponent(message.template_id)}/schedule`" label="Edit automatic message" color="neutral" variant="link" />
+            <UButton v-if="cancellable(message)" label="Cancel scheduled message" color="neutral" variant="outline" :loading="cancelling === message.id" :disabled="!!cancelling" @click="cancel(message.id)" />
           </div>
         </article>
       </div>
@@ -32,8 +32,7 @@
 <script setup lang="ts">
 import { authClient } from '~/lib/auth-client'
 import type { organizationRoles } from '~/utils/organization-access'
-import { isScheduledMessage, isScheduledMessagePage, type ScheduledMessage } from './guest-messaging-client'
-import { isRecord } from '~/utils/api-clients'
+import { isScheduledMessagePage, isScheduledMessageResponse, type ScheduledMessage } from './guest-messaging-client'
 import { getErrorMessage } from '~/utils/errors'
 const route = useRoute()
 const dashboard = useDashboardOrganization()
@@ -45,15 +44,19 @@ const cancelling = ref<string | null>(null)
 const messagesPath = computed(() => `/dashboard/${encodeURIComponent(String(route.params.orgSlug))}/messages`)
 const role = computed(() => dashboard.organization.value?.role as keyof typeof organizationRoles | undefined)
 const manage = computed(() => Boolean(role.value && authClient.organization.checkRolePermission({ role: role.value, permissions: { operations: ['update'] } })))
+const session = authClient.useSession()
+// An automatic message is the business's to cancel; a reply sent later is only its author's.
+const cancellable = (message: ScheduledMessage) => message.status === 'pending' && (message.author_user_id === null ? manage.value : message.author_user_id === session.value.data?.user.id)
 const { data, error, status, refresh } = await useAsyncData(() => `scheduled-messages:${dashboard.organizationId.value}:${offset.value}`, () => api('/api/dashboard/scheduled-guest-messages', { query: { limit: 25, offset: offset.value }, validate: isScheduledMessagePage }))
 const statusLabels: Record<ScheduledMessage['status'], string> = { pending: 'Scheduled', sending: 'Sending', sent: 'Sent', failed: 'Failed', needs_review: 'Needs review', cancelled: 'Cancelled', skipped: 'Skipped' }
-function atHome(value: string, timezone: string) { return new Intl.DateTimeFormat(locale.value, { timeZone: timezone, dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) }
+// An automatic message is shown in its booking's clock; a reply sent later in this device's.
+function atHome(value: string, timezone: string | null) { return new Intl.DateTimeFormat(locale.value, { ...(timezone ? { timeZone: timezone } : {}), dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) }
 async function cancel(id: string) {
-  if (cancelling.value || !manage.value) return
+  if (cancelling.value) return
   cancelling.value = id
   actionError.value = ''
   try {
-    await api(`/api/dashboard/scheduled-guest-messages/${encodeURIComponent(id)}/cancel`, { method: 'POST', validate: (value): value is { message: ScheduledMessage } => isRecord(value) && isScheduledMessage(value.message) })
+    await api(`/api/dashboard/scheduled-guest-messages/${encodeURIComponent(id)}/cancel`, { method: 'POST', validate: isScheduledMessageResponse })
     await refresh()
     if (error.value) throw error.value
   } catch (cause) { actionError.value = getErrorMessage(cause, 'The scheduled message could not be cancelled') }

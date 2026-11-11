@@ -15,8 +15,8 @@
 </template>
 
 <script setup lang="ts">
-import { productEditorKey } from '~/components/dashboard/ProductEditorPage.vue'
-import { MINUTE_TIME_PATTERN, timezoneLabel } from '~/utils/timezone'
+import { productEditorKey, scheduleSlotValid } from '~/components/dashboard/ProductEditorPage.vue'
+import { timezoneLabel } from '~/utils/timezone'
 import { getErrorMessage } from '~/utils/errors'
 
 definePageMeta({ layout: 'dashboard' })
@@ -30,7 +30,7 @@ const slots = computed(() => day.value ? p.slotsFor(day.value.value) : [])
 const legal = computed(() => p.product.value?.kind === 'service')
 const scopeError = computed(() => !p.locationId.value || p.location.value?.status !== 'active' ? `Choose an active ${legal.value ? 'office' : 'physical location'} before editing repeating times.` : null)
 const lead = computed(() => `These times repeat every ${day.value?.label ?? 'week'}${p.location.value ? ` in ${timezoneLabel(p.location.value.timezone)}` : ''}. Removing a time leaves appointments with booking history unchanged.`)
-const valid = computed(() => slots.value.every(slot => MINUTE_TIME_PATTERN.test(slot.start_time)) && new Set(slots.value.map(slot => slot.start_time)).size === slots.value.length)
+const valid = computed(() => slots.value.every(scheduleSlotValid) && new Set(slots.value.map(slot => slot.start_time)).size === slots.value.length)
 const dirty = computed(() => day.value && JSON.stringify(slots.value) !== JSON.stringify(p.savedSlotsFor(day.value.value)))
 const recovering = ref(false)
 async function useSavedSchedule() {
@@ -42,7 +42,8 @@ async function useSavedSchedule() {
   finally { recovering.value = false }
 }
 watchEffect(() => {
-  if (level.mode.value !== 'yield' && (!day.value || (p.product.value && !p.loadError.value && !p.product.value.booking))) showError(createError({ statusCode: 404, statusMessage: 'Page not found' }))
+  // A table has no weekly times: its location's hours seat it.
+  if (level.mode.value !== 'yield' && (!day.value || p.product.value?.kind === 'table' || (p.product.value && !p.loadError.value && !p.product.value.booking))) showError(createError({ statusCode: 404, statusMessage: 'Page not found' }))
 })
 watch(() => route.params.weekday, () => p.revert())
 onBeforeRouteLeave(() => { p.revert() })

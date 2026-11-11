@@ -1,17 +1,21 @@
 import { execute, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { hasOrganizationEntitlement } from '~/server/utils/billing'
 import { wantsNotification } from '~/server/domain/notification-preferences'
-import { localDateTimeToInstant } from '~/utils/timezone'
 import { reviewSubject, type ReviewSubject } from '~/shared/review-questions'
+import type { ProductKind } from '~/shared/product-details'
 
-export type ReviewBookingType = 'reservation' | 'booking' | 'stay'
+/** A submitted request and its review share the booking's ID. */
+export function submittedReviewRequestSql(review: string): string {
+  return `(SELECT rr.id FROM review_requests rr WHERE rr.organization_id = ${review}.organization_id
+    AND rr.booking_id = ${review}.booking_id AND rr.submitted_at IS NOT NULL AND ${review}.source = 'direct')`
+}
 
 export interface ReviewRequestRow {
   id: string
   organization_id: string
   location_id: string | null
   user_id: string | null
-  booking_type: ReviewBookingType
+  /** The booking the guest is asked to review. */
   booking_id: string
   token_hash: string
   token: string | null
@@ -28,20 +32,23 @@ export interface ReviewRequestRow {
 }
 
 export interface ReviewBookingContext {
-  booking_type: ReviewBookingType
   booking_id: string
+  /** The booking's conversation, where its invitation is a fact and its review is recorded. */
+  request_id: string
+  /** What the booking holds: a session's seats or a home's nights. */
+  unit: 'slot' | 'nights'
   organization_id: string
   location_id: string | null
-  /** The product a booking or stay was for; a reservation has none. */
+  /** The product a booking or stay was for. */
   product_id: string | null
-  product_kind: string | null
+  product_kind: ProductKind
   product_title: string | null
   user_id: string | null
   guest_name: string | null
   guest_email: string | null
   status: string
   no_show_at: string | null
-  /** When the visit ended: a reservation's or session's end, a stay's checkout in its home's zone. */
+  /** When the visit ended: its booking's end instant; null for a stay whose home had no checkout time. */
   completed_at: string | null
   review_request_sent_at: string | null
   review_submitted_at: string | null
@@ -103,56 +110,37 @@ export function resolveGoogleReviewUrl(location: Pick<ReviewBookingContext, 'goo
   return placeId ? `https://search.google.com/local/writereview?placeid=${encodeURIComponent(placeId)}` : null
 }
 
-type ReviewBookingContextRow = Omit<ReviewBookingContext, 'completed_at' | 'subject'> & {
-  ends_at: string | null
-  check_out_date: string | null
-  check_out_time: string | null
-}
+type ReviewBookingContextRow = Omit<ReviewBookingContext, 'completed_at' | 'subject'> & { ends_at: string }
 
 /**
- * The visit a review is about, read from the operational record that holds
- * it: a reservation, a session booking, or a stay booked on the site. A stay
- * from a channel is reviewed on that channel, so it has no context here.
+ * The visit a review is about, read from its booking: a session booking (a
+ * table, a class, a consultation) or a stay booked directly. A stay from a
+ * channel is reviewed on that channel, so it has no context here.
  */
 export async function getReviewBookingContext(
   db: DbClient,
-  bookingType: ReviewBookingType,
   bookingId: string,
 ): Promise<ReviewBookingContext | null> {
-  const row = await queryFirst<ReviewBookingContextRow>(db, `SELECT r.kind AS booking_type, r.id AS booking_id, r.organization_id, r.location_id, r.user_id,
-    json_extract(r.payload_json, '$.guest.name') AS guest_name, COALESCE(record.guest_email, json_extract(r.payload_json, '$.guest.email')) AS guest_email,
-    record.status, record.no_show_at, record.ends_at, record.check_out_date, record.check_out_time,
+  const row = await queryFirst<ReviewBookingContextRow>(db, `SELECT b.id AS booking_id, r.id AS request_id, CASE WHEN b.product_session_id IS NULL THEN 'nights' ELSE 'slot' END AS unit,
+    r.organization_id, r.location_id, r.user_id,
+    json_extract(r.payload_json, '$.guest.name') AS guest_name, json_extract(r.payload_json, '$.guest.email') AS guest_email,
+    b.status, b.no_show_at, b.ends_at,
     -- Whether the visit was invited and answered is the review_requests record's, not the thread's.
-    (SELECT MIN(rr.first_sent_at) FROM review_requests rr WHERE rr.booking_type = r.kind AND rr.booking_id = r.id) AS review_request_sent_at,
-    (SELECT MIN(rr.submitted_at) FROM review_requests rr WHERE rr.booking_type = r.kind AND rr.booking_id = r.id) AS review_submitted_at, r.review_id,
+    (SELECT MIN(rr.first_sent_at) FROM review_requests rr WHERE rr.booking_id = b.id) AS review_request_sent_at,
+    (SELECT MIN(rr.submitted_at) FROM review_requests rr WHERE rr.booking_id = b.id) AS review_submitted_at,
+    (SELECT rv.id FROM reviews rv WHERE rv.organization_id = b.organization_id AND rv.booking_id = b.id ORDER BY rv.created_at LIMIT 1) AS review_id,
     s.name AS organization_name, s.vertical AS organization_vertical, (SELECT 'https://' || domain FROM organization_domains WHERE organization_id = s.id AND role = 'canonical' AND status = 'active') AS organization_public_url,
     bl.title AS location_title, bl.google_place_id, bl.google_review_url,
-    record.starts_at AS visit_starts_at, record.timezone AS visit_timezone, record.party_size, record.product_id, p.kind AS product_kind, p.name AS product_title
-    FROM requests r JOIN organization s ON s.id = r.organization_id LEFT JOIN business_locations bl ON bl.id = r.location_id
-    -- The visit itself lives on the operational record, never on the thread.
-    JOIN (
-      SELECT b.request_id, b.status, b.no_show_at, ps.timezone, ps.starts_at, ps.ends_at, NULL AS check_out_date, NULL AS check_out_time, b.party_size, ps.product_id, NULL AS guest_email
-        FROM bookings b JOIN product_sessions ps ON ps.id = b.product_session_id
-      UNION ALL
-      SELECT res.request_id, res.status, res.no_show_at, res.timezone, res.starts_at, res.ends_at, NULL, NULL, res.party_size, NULL, NULL FROM reservations res
-      UNION ALL
-      SELECT st.request_id, st.status, st.no_show_at, l.timezone, st.check_in_date || CASE WHEN c.check_in_time IS NULL THEN '' ELSE 'T' || c.check_in_time END, NULL, st.check_out_date, c.check_out_time, st.adults + st.children, st.product_id, st.guest_email
-        FROM stays st JOIN product_stay_configs c ON c.organization_id = st.organization_id AND c.product_id = st.product_id
-        JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
-       WHERE st.channel = 'direct'
-    ) record ON record.request_id = r.id
-    LEFT JOIN products p ON p.organization_id = r.organization_id AND p.id = record.product_id
-    WHERE r.id = ? AND r.kind = ?`, [bookingId, bookingType])
+    b.starts_at AS visit_starts_at, b.timezone AS visit_timezone, b.party_size, b.product_id, p.kind AS product_kind, p.name AS product_title
+    FROM bookings b JOIN conversations r ON r.booking_id = b.id AND r.organization_id = b.organization_id AND r.kind = 'booking'
+    JOIN organization s ON s.id = b.organization_id LEFT JOIN business_locations bl ON bl.id = r.location_id
+    JOIN products p ON p.organization_id = b.organization_id AND p.id = b.product_id
+    WHERE b.id = ? AND b.channel = 'direct'`, [bookingId])
   if (!row) return null
-  const { ends_at, check_out_date, check_out_time, ...context } = row
-  // A stay ends at its home's checkout time on its checkout date, in the home's own zone.
-  const completedAt = bookingType === 'stay'
-    ? check_out_time === null ? null : localDateTimeToInstant(check_out_date!, check_out_time, row.visit_timezone, 'compatible').toISOString()
-    : ends_at!
-  const visitStartsAt = bookingType === 'stay'
-    ? row.visit_starts_at.includes('T') ? localDateTimeToInstant(row.visit_starts_at.slice(0, 10), row.visit_starts_at.slice(11), row.visit_timezone, 'compatible').toISOString() : row.visit_starts_at
-    : row.visit_starts_at
-  return { ...context, visit_starts_at: visitStartsAt, completed_at: completedAt, subject: reviewSubject(bookingType, row.product_kind) }
+  const { ends_at, ...context } = row
+  // A stay whose home had no checkout time ends on a day, not at a moment; it is not invited.
+  const completedAt = ends_at.length === 10 ? null : ends_at
+  return { ...context, completed_at: completedAt, subject: reviewSubject(row.unit === 'nights' ? 'stay' : 'booking', row.product_kind) }
 }
 
 export async function getReviewRequestByToken(
@@ -172,7 +160,7 @@ export async function getReviewRequestByToken(
   `, [tokenHash, new Date().toISOString()])
 
   if (!request) return null
-  const context = await getReviewBookingContext(db, request.booking_type, request.booking_id)
+  const context = await getReviewBookingContext(db, request.booking_id)
   if (!context || context.user_id !== request.user_id) return null
 
   if (opts.markClicked && !request.clicked_at) {
@@ -209,16 +197,15 @@ export async function createReviewRequest(
 
   await execute(db, `
     INSERT OR IGNORE INTO review_requests (
-      id, organization_id, location_id, user_id, booking_type, booking_id,
+      id, organization_id, location_id, user_id, booking_id,
       token_hash, token, expires_at, send_count, created_at, updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
   `, [
     id,
     context.organization_id,
     context.location_id,
     context.user_id,
-    context.booking_type,
     context.booking_id,
     tokenHash,
     token,
@@ -229,16 +216,16 @@ export async function createReviewRequest(
 
   let request = await queryFirst<ReviewRequestRow>(db, `
     SELECT * FROM review_requests
-    WHERE organization_id = ? AND booking_type = ? AND booking_id = ?
+    WHERE organization_id = ? AND booking_id = ?
       AND submitted_at IS NULL AND revoked_at IS NULL
-  `, [context.organization_id, context.booking_type, context.booking_id])
+  `, [context.organization_id, context.booking_id])
 
   // Existing invitations keep their link. Recover older rows only from their
   // actual recorded email, checking the hash before adopting its token.
   if (request && request.token === null) {
     const receipts = await queryAll<{ email_json: string | null }>(db, `
       SELECT d.email_json FROM guest_thread_deliveries d
-      JOIN activity_entries e ON e.id = d.entry_id
+      JOIN messages e ON e.id = d.message_id
       WHERE e.dedupe_key = ? AND d.channel = 'email' AND d.purpose = 'status_update'
     `, [`review-request:${request.id}`])
     let recovered: string | null = null
@@ -296,14 +283,14 @@ export async function markReviewRequestSendFailure(
  * never sent (the record no longer qualifies), and a sent link stops working.
  * Runs in the batch that records the change, after its ledger entry.
  */
-export function revokeReviewRequestQuery(bookingType: ReviewBookingType, requestId: string, entryId: string, now: string): BatchQuery {
+export function revokeReviewRequestQuery(bookingId: string, entryId: string, now: string): BatchQuery {
   return {
     query: `
       UPDATE review_requests
       SET revoked_at = COALESCE(revoked_at, ?), updated_at = ?
-      WHERE booking_type = ? AND booking_id = ? AND submitted_at IS NULL AND revoked_at IS NULL
-        AND EXISTS (SELECT 1 FROM activity_entries WHERE id = ?)
+      WHERE booking_id = ? AND submitted_at IS NULL AND revoked_at IS NULL
+        AND EXISTS (SELECT 1 FROM messages WHERE id = ?)
     `,
-    params: [now, now, bookingType, requestId, entryId],
+    params: [now, now, bookingId, entryId],
   }
 }

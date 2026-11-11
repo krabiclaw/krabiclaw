@@ -192,7 +192,7 @@ async function saveLinksLocalization(locale: string, submitted: Record<string, u
   const response = await dashboardApi<{ localization: LinksTranslation }>(
     `/api/editor/organizations/${organizationId}/localization/content_document/${form.id}/${encodeURIComponent(locale)}`, {
       method: 'PUT', body: { values, content_blocks: blocks,
-        ...(state.translation ? { expected_updated_at: state.translation.updated_at } : {}) }, validate: isLinksTranslation,
+        ...(state.translation ? { updated_at: state.translation.updated_at } : {}) }, validate: isLinksTranslation,
     })
   linkLocalizationStates.set(key, { locale, translation: response.localization })
 }

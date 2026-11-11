@@ -21,7 +21,7 @@ import { notifyChannelStay } from '~/server/utils/notifications'
  * channel_sync_log records each outcome with ids only, never guest details.
  */
 
-export type RevisionOutcome = { status: 'acknowledged'; stay_id: string; overbooked: boolean } | { status: 'ignored_disconnected' }
+export type RevisionOutcome = { status: 'acknowledged'; booking_id: string; overbooked: boolean } | { status: 'ignored_disconnected' }
 
 interface Mapping { organization_id: string; product_id: string; enabled: number }
 
@@ -143,7 +143,7 @@ export async function landBookingRevision(db: DbClient, env: ChannexEnv & GuestI
     const entry = await log(db, { organizationId: mapping.organization_id, productId: mapping.product_id, revisionId, status: 'applied', detail: stay.overbooked ? 'overbooked' : undefined })
     await channexRequest(env, `/booking_revisions/${encodeURIComponent(revisionId)}/ack`, 'POST', {})
     await execute(db, "UPDATE channel_sync_log SET status = 'acknowledged' WHERE id = ?", [entry])
-    return { status: 'acknowledged', stay_id: stay.id, overbooked: stay.overbooked }
+    return { status: 'acknowledged', booking_id: stay.id, overbooked: stay.overbooked }
   } catch (error) {
     await log(db, { organizationId: mapping?.organization_id ?? null, productId: mapping?.product_id ?? null, revisionId, status: 'failed', detail: describeErrorForTelemetry(error) })
     throw error

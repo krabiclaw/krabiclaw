@@ -1,5 +1,5 @@
 import { HTTPError } from 'nitro'
-import { execute, queryAll, queryFirst, type DbClient } from '~/server/db'
+import { execute, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { getOrganizationBillingStatus, getStripe } from '~/server/utils/billing'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { BILLING_METERS, BUSINESS_PLAN_ID, ratePercent, type BillingMeterKey } from '~/shared/billing-model'
@@ -7,15 +7,25 @@ import { planSubscriptionItem } from '~/server/utils/stripe-catalog'
 import { recordPaymentsVolumeBilled } from '~/server/domain/booking-analytics'
 import { tokenHash } from './buyer'
 import { readPaymentsBillingBasis } from './fx'
+import { usageEventInsert } from '~/server/utils/usage-metering'
 
 /**
  * Payments usage is billed by Stripe meters on the business's own plan
  * subscription: captured volume, Stripe's costs and managed ad spend are
  * reported in USD cents as they occur, and the subscription's metered prices
- * bill them on its invoice at the end of the period. `payment_usage_events` is
- * only the outbox that delivers each one to its meter once.
+ * bill them on its invoice at the end of the period. `usage_events` holds the quantity and its Stripe delivery state.
  */
 type UsageKind = 'captured_volume' | 'stripe_cost' | 'stripe_cost_adjustment' | 'ad_spend'
+
+export function paymentUsageEventQuery(event: {
+  organizationId: string; paymentId?: string | null; kind: UsageKind; currency: string; amount: number
+  sourceId: string; occurredAt: string; createdAt?: string; billingBasis?: unknown
+}, guard?: BatchQuery): BatchQuery {
+  return usageEventInsert({
+    organizationId: event.organizationId, resource: event.kind, source: 'payments', provider: 'stripe',
+    quantity: event.amount, unit: event.currency, idempotencyKey: event.sourceId, createdAt: event.createdAt,
+  }, { paymentId: event.paymentId, billingBasis: event.billingBasis, occurredAt: event.occurredAt }, guard)
+}
 
 const USAGE_METER: Record<UsageKind, BillingMeterKey> = {
   captured_volume: 'captured_volume',
@@ -36,12 +46,12 @@ interface UsageEvent { id: string; payment_id: string | null; kind: UsageKind; c
  * the next delivery sends those events again.
  */
 export async function deliverPaymentsUsage(db: DbClient, env: CloudflareEnv, organizationId: string): Promise<{ delivered: number }> {
-  const events = await queryAll<UsageEvent>(db, 'SELECT id,payment_id,kind,currency,amount,source_id,billing_basis_json FROM payment_usage_events WHERE organization_id=? AND delivery_at IS NULL ORDER BY created_at', [organizationId])
+  const events = await queryAll<UsageEvent>(db, 'SELECT id,payment_id,resource AS kind,unit AS currency,quantity AS amount,idempotency_key AS source_id,billing_basis_json FROM usage_events WHERE organization_id=? AND provider_occurred_at IS NOT NULL AND delivery_at IS NULL ORDER BY created_at', [organizationId])
   if (!events.length) return { delivered: 0 }
   const organization = await queryFirst<{ customer: string | null }>(db, 'SELECT "stripeCustomerId" AS customer FROM organization WHERE id=?', [organizationId])
   if (!organization?.customer) {
     const reason = 'The business has no Stripe customer to bill this usage to'
-    await execute(db, 'UPDATE payment_usage_events SET error=? WHERE organization_id=? AND delivery_at IS NULL', [reason, organizationId])
+    await execute(db, 'UPDATE usage_events SET error=? WHERE organization_id=? AND provider_occurred_at IS NOT NULL AND delivery_at IS NULL', [reason, organizationId])
     throw new Error(`${reason}: ${organizationId}`)
   }
   const stripe = getStripe(env)
@@ -59,7 +69,7 @@ export async function deliverPaymentsUsage(db: DbClient, env: CloudflareEnv, org
       }, { idempotencyKey: identifier })
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error)
-      await execute(db, 'UPDATE payment_usage_events SET error=? WHERE id=?', [reason, event.id])
+      await execute(db, 'UPDATE usage_events SET error=? WHERE id=?', [reason, event.id])
       refused.push(`${event.id}: ${reason}`)
       continue
     }
@@ -67,7 +77,7 @@ export async function deliverPaymentsUsage(db: DbClient, env: CloudflareEnv, org
       if (!event.payment_id) throw new Error(`Captured volume ${event.id} has no payment`)
       await recordPaymentsVolumeBilled(db, { organizationId, paymentId: event.payment_id, volumeMinor: basis.amount, currency: basis.currency })
     }
-    await execute(db, 'UPDATE payment_usage_events SET delivery_at=?,error=NULL WHERE id=?', [new Date().toISOString(), event.id])
+    await execute(db, 'UPDATE usage_events SET delivery_at=?,error=NULL WHERE id=?', [new Date().toISOString(), event.id])
     delivered++
   }
   if (refused.length) throw new Error(`Stripe did not take ${refused.length} of ${events.length} usage events for ${organizationId}: ${refused.join('; ')}`)
@@ -81,7 +91,7 @@ export async function deliverPaymentsUsage(db: DbClient, env: CloudflareEnv, org
  */
 export async function paymentsUsage(db: DbClient, env: CloudflareEnv, organizationId: string) {
   const undelivered = await queryAll<{ currency: string; kind: string; amount: number; billing_basis_json: string | null; error: string | null }>(db,
-    'SELECT currency,kind,amount,billing_basis_json,error FROM payment_usage_events WHERE organization_id=? AND delivery_at IS NULL ORDER BY kind,currency', [organizationId])
+    'SELECT unit AS currency,resource AS kind,quantity AS amount,billing_basis_json,error FROM usage_events WHERE organization_id=? AND provider_occurred_at IS NOT NULL AND delivery_at IS NULL ORDER BY kind,currency', [organizationId])
   const pending: Array<{ currency: string; kind: string; event_count: number; amount: number; billing_amount: number; action_required: boolean }> = []
   for (const event of undelivered) {
     const basis = readPaymentsBillingBasis(event.billing_basis_json, event.amount, event.currency)

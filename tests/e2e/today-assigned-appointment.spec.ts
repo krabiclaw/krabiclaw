@@ -14,7 +14,7 @@ const DASHBOARD = `/dashboard/${SLUG}`
 const ACTOR = 'user-e2e-ncls-consultation-owner'
 
 /** GET /api/dashboard/today: the business's stored tasks and, for a manager, its opportunities. */
-type BusinessToday = { tasks: TaskSection[]; opportunities: OpportunityView[]; opportunityIssues: string[]; assignees: TaskPerson[]; resolvedAt: string }
+type BusinessToday = { tasks: TaskSection[]; opportunities: OpportunityView[]; opportunity_issues: string[]; assignees: TaskPerson[]; resolved_at: string }
 
 async function body<T>(response: APIResponse, status: number): Promise<T> {
   expect(response.status(), await response.text()).toBe(status)
@@ -51,7 +51,7 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
   const guestFirstName = guestName.split(' ')[0]!
   try {
     // The consultation's host is this attorney, and publishing it needs their published profile.
-    await body(await page.request.put(schedulePath, { data: { timezone: 'UTC', weekly: [{ weekday: dayDate.getUTCDay(), start: '14:00', end: '14:45' }], time_off: [], expected_updated_at: previousSchedule?.updated_at ?? null, public_name: 'Assigned attorney', public_approved: true } }), 200)
+    await body(await page.request.put(schedulePath, { data: { timezone: 'UTC', weekly: [{ weekday: dayDate.getUTCDay(), start: '14:00', end: '14:45' }], time_off: [], updated_at: previousSchedule?.updated_at ?? null, public_name: 'Assigned attorney', public_approved: true } }), 200)
     scheduleWritten = true
     product = (await body<{ product: Product }>(await page.request.post(`${EDITOR}/products`, { data: {
       kind: 'service', active: true, name: `Today assigned consultation ${Date.now()}`, description: 'A local appointment that verifies the assigned staff dashboard.',
@@ -69,38 +69,36 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
     const session = availability.sessions.find(slot => slot.starts_at === `${day}T14:00:00.000Z`)
     expect(session, 'The saved provider hours expose an actual bookable future consultation').toBeTruthy()
     if (!session) throw new Error('The provider appointment is not bookable')
-    const booked = await body<{ request_id: string; status: string }>(await request.post(`/api/public/products/${product.slug}/book`, { headers, data: {
-      session_id: session.id, variant_id: product.variants[0]!.id, party_size: 1, guest_name: guestName,
+    const booked = await body<{ conversation_id: string; status: string }>(await request.post(`/api/public/products/${product.slug}/book`, { headers, data: {
+      product_session_id: session.id, product_variant_id: product.variants[0]!.id, party_size: 1, guest_name: guestName,
       guest_email: `today-assigned-${Date.now()}@playwright.example`, idempotency_key: crypto.randomUUID(),
     } }), 201)
-    requestId = booked.request_id
+    requestId = booked.conversation_id
     expect(booked.status).toBe('pending')
     const bookingPath = `${DASHBOARD}/bookings/booking/${requestId}`
     const read = await body<{ booking: DashboardBookingDetails }>(
       await page.request.get(`/api/dashboard/bookings/booking/${requestId}`, { params: { org: SLUG } }), 200)
-    expect(read.booking).toMatchObject({ status: 'pending', assignedMemberId: actor.id, locationTitle: 'Online', canReassignProvider: true })
+    expect(read.booking).toMatchObject({ status: 'pending', assigned_member_id: actor.id, location_title: 'Online' })
     await body(await page.request.post('/api/auth/organization/update-member-role', {
       headers: authRequestHeaders(baseURL!), data: { organizationId: ORGANIZATION, memberId: actor.id, role: 'member' },
     }), 200)
     roleChanged = true
     const assignedRead = await body<{ booking: DashboardBookingDetails }>(
       await memberContext.request.get(`/api/dashboard/bookings/booking/${requestId}`, { params: { org: SLUG } }), 200)
-    expect(assignedRead.booking).toMatchObject({ id: requestId, assignedMemberId: actor.id, canReassignProvider: false })
-    const providerPath = `/api/dashboard/bookings/booking/${assignedRead.booking.operationalBookingId}/provider`
-    await body(await memberContext.request.get(providerPath, { params: { org: SLUG } }), 404)
+    expect(assignedRead.booking).toMatchObject({ id: requestId, assigned_member_id: actor.id })
 
     // A member's Today is their own work: no opportunities, nobody to assign to,
     // and only tasks given to them or replies in conversations they handle.
     const today = await body<BusinessToday>(await memberContext.request.get('/api/dashboard/today', { params: { org: SLUG } }), 200)
-    expect(today).toMatchObject({ opportunities: [], opportunityIssues: [], assignees: [] })
+    expect(today).toMatchObject({ opportunities: [], opportunity_issues: [], assignees: [] })
     for (const task of today.tasks.flatMap(section => section.tasks)) {
       expect(task.can, `${task.kind} ${task.id} is not a manager's`).toMatchObject({ assign: false, edit: false })
-      if (task.kind === 'guest_reply') await body(await memberContext.request.get(`/api/dashboard/organizations/${ORGANIZATION}/guest-threads/${task.requestId}`), 200)
+      if (task.kind === 'guest_reply') await body(await memberContext.request.get(`/api/dashboard/organizations/${ORGANIZATION}/guest-threads/${task.conversation_id}`), 200)
       else expect(task.assignee, `${task.kind} ${task.id} is given to the member`).toMatchObject({ type: 'member', id: actor.id, you: true })
     }
     // The consultation is the Calendar's: it is on its day there.
-    const agenda = await body<{ items: Array<{ id: string; requestId: string; startsAt: string; to: string }> }>(await memberContext.request.get('/api/dashboard/agenda', { params: { org: SLUG, from: day, to: day } }), 200)
-    expect(agenda.items.find(item => item.requestId === requestId)).toMatchObject({ id: `booking:${requestId}`, startsAt: session.starts_at, to: bookingPath })
+    const agenda = await body<{ items: Array<{ id: string; conversation_id: string; booking_id: string; starts_at: string; to: string }> }>(await memberContext.request.get('/api/dashboard/agenda', { params: { org: SLUG, from: day, to: day } }), 200)
+    expect(agenda.items.find(item => item.conversation_id === requestId)).toMatchObject({ id: `booking:${requestId}`, booking_id: read.booking.booking_id, starts_at: session.starts_at, to: bookingPath })
 
     const memberPage = await memberContext.newPage()
     await dismissPreviewToolbar(memberPage)
@@ -163,22 +161,15 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
     await memberPage.setViewportSize({ width: 390, height: 844 })
     await expect(todayPanel).toBeHidden()
     await expect(detail).toBeVisible()
-    await expect(detail.getByText('Attorney or legal team', { exact: true })).toBeVisible()
-    await expect(detail.getByRole('link').filter({ hasText: 'Attorney or legal team' })).toHaveCount(0)
+    await expect(detail.getByText('Attorney', { exact: true })).toBeVisible()
+    await expect(detail.getByRole('link').filter({ hasText: /^\s*Attorney\b/ })).toHaveCount(0)
     await dismissPreviewToolbar(page)
     await page.setViewportSize({ width: 390, height: 844 })
     expect((await page.goto(new URL(bookingPath, baseURL!).toString()))?.status()).toBe(200)
+    // The attorney is the practice area's: the owner reads who handles it and changes it on the practice area.
     const ownerDetail = page.locator('#dashboard-panel-booking-details')
-    const providerRead = page.waitForResponse(response => new URL(response.url()).pathname === providerPath)
-    await ownerDetail.getByRole('link').filter({ hasText: 'Attorney or legal team' }).click()
-    const providers = await body<{ members: Array<{ id: string; current: boolean }> }>(await providerRead, 200)
-    expect(providers.members.find(member => member.id === actor.id)?.current).toBe(true)
-    const assignment = page.locator('#dashboard-panel-booking-team-member')
-    await expect(assignment.getByRole('heading', { name: 'Attorney or legal team', exact: true })).toBeVisible()
-    await expect(assignment).toContainText('The time stays the same. Your client must accept before the assigned attorney changes.')
-    await expect(assignment.getByRole('radio', { checked: true })).toHaveAccessibleName('Assigned attorney Current')
-    await assignment.getByRole('button', { name: 'Cancel', exact: true }).click()
-    await expect(page).toHaveURL(new URL(bookingPath, baseURL!).toString())
+    await expect(ownerDetail.getByText('Attorney', { exact: true })).toBeVisible()
+    await expect(ownerDetail.getByRole('link').filter({ hasText: /^\s*Attorney\b/ })).toHaveCount(0)
     await detail.getByRole('button', { name: 'Manage consultation', exact: true }).click()
     await memberPage.getByRole('dialog', { name: 'Manage consultation', exact: true }).getByRole('link', { name: 'Change consultation', exact: true }).click()
     const change = memberPage.locator('#dashboard-panel-booking-change')
@@ -191,23 +182,20 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
     await detail.getByRole('button', { name: 'Manage consultation', exact: true }).click()
     await memberPage.getByRole('dialog', { name: 'Manage consultation', exact: true }).getByRole('button', { name: 'Confirm consultation', exact: true }).click()
     expect((await confirmed).status()).toBe(200)
-    const persisted = await body<{ booking: { status: string; assignedMemberId: string } }>(
+    const persisted = await body<{ booking: { status: string; assigned_member_id: string } }>(
       await page.request.get(`/api/dashboard/bookings/booking/${requestId}`, { params: { org: SLUG } }), 200)
-    expect(persisted.booking).toMatchObject({ status: 'confirmed', assignedMemberId: actor.id })
+    expect(persisted.booking).toMatchObject({ status: 'confirmed', assigned_member_id: actor.id })
     // Confirming the consultation is the review its booking asked for: that task is done, by the member who
     // confirmed it, and nothing else is left on Today for it; the visit itself is the Calendar's.
     const after = await body<BusinessToday>(await memberContext.request.get('/api/dashboard/today', { params: { org: SLUG } }), 200)
-    expect(after.tasks.flatMap(section => section.tasks.map(task => ({ section: section.id, task }))).filter(item => item.task.requestId === requestId)).toEqual([{ section: 'done', task: expect.objectContaining({
-      kind: 'booking_review', status: 'done', person: expect.objectContaining({ name: 'You', you: true }), outcome: expect.objectContaining({ closedBy: 'You' }),
+    expect(after.tasks.flatMap(section => section.tasks.map(task => ({ section: section.id, task }))).filter(item => item.task.conversation_id === requestId)).toEqual([{ section: 'done', task: expect.objectContaining({
+      kind: 'booking_review', status: 'done', person: expect.objectContaining({ name: 'You', you: true }), outcome: expect.objectContaining({ closed_by: 'You' }),
     }) }])
     await memberPage.setViewportSize({ width: 1440, height: 900 })
     await expect(todayPanel).toBeVisible()
     await memberPage.clock.setFixedTime(new Date(`${day}T13:00:00.000Z`))
     await memberPage.reload()
     await expect(detail.getByRole('heading', { name: 'Today', exact: true })).toBeVisible()
-    expect((await memberPage.goto(new URL(`${bookingPath}/team-member`, baseURL!).toString()))?.status()).toBe(200)
-    await expect(memberPage.getByRole('heading', { name: 'Page not found', exact: true })).toBeVisible()
-    await expect(memberPage.locator('#dashboard-panel-booking-team-member')).toHaveCount(0)
     const missingId = crypto.randomUUID()
     const missingRead = memberPage.waitForResponse(response => new URL(response.url()).pathname === `/api/dashboard/bookings/booking/${missingId}`)
     await memberPage.goto(`${DASHBOARD}/bookings/booking/${missingId}/change`)
@@ -216,7 +204,7 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
   } finally {
     try {
       if (requestId) {
-        await body(await page.request.post(`/api/dashboard/organizations/${ORGANIZATION}/guest-threads/${requestId}/operations/cancel`, { data: { idempotencyKey: crypto.randomUUID() } }), 200)
+        await body(await page.request.post(`/api/dashboard/organizations/${ORGANIZATION}/guest-threads/${requestId}/operations/cancel`, { data: { idempotency_key: crypto.randomUUID() } }), 200)
         const cancelled = await body<{ booking: { status: string } }>(await page.request.get(`/api/dashboard/bookings/booking/${requestId}`, { params: { org: SLUG } }), 200)
         expect(cancelled.booking.status).toBe('cancelled')
       }
@@ -226,10 +214,10 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
           // Archive the authored consultation with its attorney configuration and booked history.
           await body(await page.request.patch(`${EDITOR}/products/${product.id}`, { data: { active: false } }), 200)
           const archived = await body<{ product: Product }>(await page.request.get(`${EDITOR}/products/${product.id}`), 200)
-          expect(archived.product).toMatchObject({ active: false, booking: { held_online: true, scheduling_mode: 'provider', assigned_member_id: actor.id, assigned_team_id: null } })
+          expect(archived.product).toMatchObject({ active: false, booking: { held_online: true, scheduling_mode: 'provider', assigned_member_id: actor.id } })
           expect(archived.product.publications).toContainEqual({ organization_id: ORGANIZATION, published: false })
           const history = await body<{ booking: DashboardBookingDetails }>(await page.request.get(`/api/dashboard/bookings/booking/${requestId}`, { params: { org: SLUG } }), 200)
-          expect(history.booking).toMatchObject({ id: requestId, status: 'cancelled', assignedMemberId: actor.id })
+          expect(history.booking).toMatchObject({ id: requestId, status: 'cancelled', assigned_member_id: actor.id })
         } else await body(await page.request.delete(`${EDITOR}/products/${product.id}`), 200)
       }
     } catch (error) { failures.push(error) }
@@ -242,7 +230,7 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
       if (scheduleWritten && previousSchedule) {
         const current = await body<{ scheduling: Schedule }>(await page.request.get(schedulePath), 200)
         const profile = { public_name: previousSchedule.public_name, public_photo_url: previousSchedule.public_photo_url, public_bio: previousSchedule.public_bio }
-        await body(await page.request.put(schedulePath, { data: { timezone: previousSchedule.timezone, weekly: previousSchedule.weekly, time_off: previousSchedule.time_off, expected_updated_at: current.scheduling.updated_at, ...profile, public_approved: Boolean(previousSchedule.public_approved) } }), 200)
+        await body(await page.request.put(schedulePath, { data: { timezone: previousSchedule.timezone, weekly: previousSchedule.weekly, time_off: previousSchedule.time_off, updated_at: current.scheduling.updated_at, ...profile, public_approved: Boolean(previousSchedule.public_approved) } }), 200)
         const restored = await body<{ members: Array<{ id: string; scheduling: Schedule | null }> }>(await page.request.get(`/api/organizations/${ORGANIZATION}/members/scheduling`), 200)
         expect(restored.members.find(member => member.id === actor.id)?.scheduling).toMatchObject({ timezone: previousSchedule.timezone, weekly: previousSchedule.weekly, time_off: previousSchedule.time_off, ...profile, public_approved: previousSchedule.public_approved })
       } else if (scheduleWritten) {

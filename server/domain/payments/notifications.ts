@@ -2,11 +2,10 @@ import type Stripe from 'stripe'
 import { queryFirst, type DbClient } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { isCurrencyCode } from '~/shared/currencies'
-import { ownerPaymentMessage, guestPaymentMessage, stripeAccountAttentionMessage, type GuestPaymentNotificationKind, type PaymentNotificationEvent } from '~/server/notifications/payment-events'
+import { ownerPaymentMessage, guestPaymentMessage, subscriptionPlanMessage, type GuestPaymentNotificationKind, type PaymentNotificationEvent } from '~/server/notifications/payment-events'
 import { notifyFinancialNotification, notifyOwner } from '~/server/utils/notifications'
-import type { StripeConnectedAccount } from '~/server/utils/stripe-connect'
-import { appendEntry } from '~/server/domain/guest-threads/entries'
-import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
+import { appendMessage } from '~/server/domain/conversations'
+import { publishConversationEvent } from '~/server/cloudflare/guest-inbox-events'
 import { dashboardOrigin } from '~/server/utils/dashboard-notification-links'
 import type { Payment } from './index'
 import { buyerPaymentActivityPath } from './buyer'
@@ -22,10 +21,10 @@ export async function notifyPaymentFinancialEvent(db: DbClient, stripe: Stripe, 
 }) {
   const organization = await queryFirst<{ name: string; slug: string }>(db, 'SELECT name,slug FROM organization WHERE id=?', [payment.organization_id])
   if (!organization && !await queryFirst(db, 'SELECT organization_id FROM payment_servicing_tenants WHERE organization_id=? AND stripe_account_id=? AND livemode=?', [payment.organization_id, payment.stripe_account_id, payment.livemode])) throw new Error('Payments notification has no tenant or retained servicing identity')
-  // A booking, reservation or stay paid on the site is confirmed to its guest by
+  // A booking or stay paid on the site is confirmed to its guest by
   // the confirmation email, which states what they paid. A failure is told here:
   // a bank or pay-later method can fail after the guest has left the pay page.
-  const checkout = payment.subject_type === 'booking' || payment.subject_type === 'reservation' || payment.subject_type === 'stay'
+  const checkout = payment.subject_type === 'booking'
   const guestKind = (input.kind.startsWith('refund_') || input.kind === 'payment_failed' || (!checkout && input.kind.startsWith('payment_'))) ? input.kind as GuestPaymentNotificationKind : null
   // A deleted merchant and an unclaimed contact have no application audience.
   // The verified return can still claim the purchase and then notify its buyer.
@@ -35,9 +34,9 @@ export async function notifyPaymentFinancialEvent(db: DbClient, stripe: Stripe, 
   let email: string | null = null
   if (guestKind && checkout) {
     // The address the guest booked with, which their confirmation went to.
-    const booked = payment.subject_type === 'stay'
-      ? snapshot.stay?.guest?.email
-      : (await queryFirst<{ email: string | null }>(db, `SELECT json_extract(r.payload_json, '$.guest.email') AS email FROM payment_checkout_holds h JOIN requests r ON r.id = h.request_id AND r.organization_id = h.organization_id WHERE h.payment_id = ? AND h.organization_id = ?`, [payment.id, payment.organization_id]))?.email
+    const booked = snapshot.stay
+      ? snapshot.stay.guest?.email
+      : (await queryFirst<{ email: string | null }>(db, `SELECT json_extract(r.payload_json, '$.guest.email') AS email FROM payment_checkout_holds h JOIN conversations r ON r.id = h.conversation_id AND r.organization_id = h.organization_id WHERE h.payment_id = ? AND h.organization_id = ?`, [payment.id, payment.organization_id]))?.email
     if (typeof booked !== 'string' || !booked) throw new Error('Paid checkout has no guest email to notify')
     email = booked
   } else if (guestKind) {
@@ -50,15 +49,14 @@ export async function notifyPaymentFinancialEvent(db: DbClient, stripe: Stripe, 
     }
   }
   const eventKey = `payments:${payment.stripe_account_id}:${payment.livemode}:${input.nativeId}:${input.status}:${input.kind}`
-  const visitKind = payment.subject_type === 'booking' || payment.subject_type === 'reservation' ? payment.subject_type : null
-  const hold = visitKind && organization ? await queryFirst<{ request_id: string | null }>(db, 'SELECT request_id FROM payment_checkout_holds WHERE payment_id=? AND organization_id=?', [payment.id, payment.organization_id]) : null
-  if (visitKind && organization && !hold?.request_id) throw new Error('Booking payment notification has no canonical guest request')
-  // A stay's conversation opens when its payment is captured; it is the stay's, not the hold's.
-  const stayThread = payment.subject_type === 'stay' && payment.subject_id && organization ? await queryFirst<{ request_id: string | null }>(db, 'SELECT request_id FROM stays WHERE organization_id=? AND id=?', [payment.organization_id, payment.subject_id]) : null
-  const threadId = hold?.request_id ?? stayThread?.request_id ?? null
-  const booking=visitKind&&payment.subject_id&&organization?await queryFirst<{request_id:string|null}>(db,`SELECT request_id FROM ${visitKind==='booking'?'bookings':'reservations'} WHERE organization_id=? AND id=?`,[payment.organization_id,payment.subject_id]):null
-  if(booking&&booking.request_id!==threadId)throw new Error('Booking payment notification request does not match its operational booking')
-  const deepLink = organization ? `${dashboardOrigin(env, { orgSlug: organization.slug, locationSlug: null })}${booking?.request_id?`/bookings/${visitKind}/${encodeURIComponent(booking.request_id)}`:stayThread?`/bookings/stay/${encodeURIComponent(payment.subject_id!)}`:`/earnings/transactions/${encodeURIComponent(payment.id)}`}` : null
+  // A session booking's checkout waits in its guest's conversation; a stay's conversation opens when its payment is captured, with its booking.
+  const nights = Boolean(snapshot.stay)
+  const hold = checkout && !nights && organization ? await queryFirst<{ conversation_id: string | null }>(db, 'SELECT conversation_id FROM payment_checkout_holds WHERE payment_id=? AND organization_id=?', [payment.id, payment.organization_id]) : null
+  if (checkout && !nights && organization && !hold?.conversation_id) throw new Error('Booking payment notification has no guest conversation')
+  const booking = checkout && payment.subject_id && organization ? await queryFirst<{ conversation_id: string | null }>(db, "SELECT (SELECT c.id FROM conversations c WHERE c.booking_id = b.id AND c.kind = 'booking') AS conversation_id FROM bookings b WHERE b.organization_id=? AND b.id=?", [payment.organization_id, payment.subject_id]) : null
+  const threadId = hold?.conversation_id ?? booking?.conversation_id ?? null
+  if (booking && booking.conversation_id !== threadId) throw new Error('Booking payment notification conversation does not match its booking')
+  const deepLink = organization ? `${dashboardOrigin(env, { orgSlug: organization.slug, locationSlug: null })}${booking?.conversation_id ? (nights ? `/bookings/stay/${encodeURIComponent(payment.subject_id!)}` : `/bookings/booking/${encodeURIComponent(booking.conversation_id)}`) : `/earnings/transactions/${encodeURIComponent(payment.id)}`}` : null
   // A purchase refunded because its capacity had gone is refunded without being asked, so the buyer is told why.
   const refundedForCapacity = (input.kind === 'refund_pending' || input.kind === 'refund_succeeded') && await queryFirst(db, "SELECT 1 FROM payment_refunds WHERE payment_id=? AND stripe_refund_id=? AND idempotency_key LIKE 'unfulfillable:%'", [payment.id, input.nativeId])
   const refundReason = !refundedForCapacity ? null : `What you paid for was taken before your payment completed, so your booking could not be made and your payment ${input.kind === 'refund_pending' ? 'will be' : 'has been'} refunded in full.`
@@ -70,15 +68,15 @@ export async function notifyPaymentFinancialEvent(db: DbClient, stripe: Stripe, 
   const ownerMessage = deepLink ? ownerPaymentMessage({ ...event, action: { url: deepLink, label: 'View details' } }) : undefined
   let sourceEntryId: string | null = null
   if (threadId && ownerMessage) {
-    const entry = await appendEntry(db, {
-      threadId, kind: 'operation', actorKind: 'system', channel: 'system',
+    const message = await appendMessage(db, {
+      conversationId: threadId, authorKind: 'krabiclaw', authorUserId: null,
       eventName: `payment.${input.kind}`,
       body: [ownerMessage.title, ...ownerMessage.facts.filter(fact => fact.key === 'amount' || fact.key === 'productTitle').map(fact => `${fact.label}: ${fact.value}`)].join('\n'),
-      payloadJson: { payment_id: payment.id, native_object_id: input.nativeId, status: input.status, amount: input.amount, currency: payment.currency },
+      payload: { payment_id: payment.id, native_object_id: input.nativeId, status: input.status, amount: input.amount, currency: payment.currency },
       dedupeKey: `financial-operation:${eventKey}`,
     })
-    sourceEntryId = entry.id
-    await publishGuestInboxThreadEvent(env, db, { threadId, type: 'thread.changed' })
+    sourceEntryId = message.id
+    await publishConversationEvent(env, db, { conversationId: threadId, type: 'MESSAGE_CREATE' })
   }
   // An account opens its own activity; a guest who never made one reads Stripe's receipt.
   const buyer = guestKind ? payment.buyer_user_id : null
@@ -88,8 +86,11 @@ export async function notifyPaymentFinancialEvent(db: DbClient, stripe: Stripe, 
     : payment.receipt_url?{url:payment.receipt_url,label:'View receipt'}:null
   await notifyFinancialNotification(env, db, {
     organizationId: organization ? payment.organization_id : null,
-    eventKey, ownerMessage, sourceEntryId, threadId, deepLink,
-    guest: guestKind ? { userId: payment.buyer_user_id, email, message: guestPaymentMessage({ ...details, kind: guestKind, action: guestAction }) } : undefined,
+    eventKey, ownerMessage, deepLink,
+    // The payment's message in its booking's conversation; otherwise the audit row of the payment event.
+    source: threadId && sourceEntryId ? { conversationId: threadId, messageId: sourceEntryId } : null,
+    entity: { type: 'payment', id: payment.id },
+    guest: guestKind ? { email, message: guestPaymentMessage({ ...details, kind: guestKind, action: guestAction }) } : undefined,
   })
 }
 
@@ -123,56 +124,46 @@ export async function notifyPayoutState(db: DbClient, env: CloudflareEnv, scope:
     organizationId: scope.organizationId,
     eventKey: `payments:${scope.stripeAccountId}:${Number(scope.livemode)}:${payout.id}:${payout.status}`,
     ownerMessage: ownerPaymentMessage({ ...event, action: details.action }),
+    entity: { type: 'payout', id: payout.id },
     deepLink,
   })
 }
 
-type RequirementEntry = NonNullable<NonNullable<Stripe.V2.Core.Account['requirements']>['entries']>[number]
-
-const isBusinessActionDue = (entry: RequirementEntry) => entry.awaiting_action_from === 'user'
-  && (entry.minimum_deadline.status === 'currently_due' || entry.minimum_deadline.status === 'past_due')
-
 /**
- * What a requirements event hands the business, read from Stripe's own before and
- * after. Filling in Stripe's form also changes the requirements, and is not an alert:
- * only a requirement Stripe finished reviewing, or the first thing due, is.
+ * The business's KrabiClaw plan as Better Auth Stripe's subscription hooks
+ * report it: a new plan, a change of plan, or a plan that will not renew. Its
+ * owners and admins are told once per Stripe event.
  */
-function requirementsHandedToBusiness(changes: Stripe.V2.Core.Event['changes']): RequirementEntry[] {
-  if (!changes?.before || !changes.after) throw new Error('Stripe requirements event has no before and after')
-  const entries = (side: unknown) => (side as Pick<Stripe.V2.Core.Account, 'requirements'>).requirements?.entries ?? []
-  const before = entries(changes.before)
-  const due = entries(changes.after).filter(isBusinessActionDue)
-  const inReview = new Set(before.filter(entry => entry.awaiting_action_from === 'stripe').map(entry => entry.description))
-  return !before.some(isBusinessActionDue) || due.some(entry => inReview.has(entry.description)) ? due : []
-}
-
-/** Stripe's event says what changed and its id says which change, so each one is told once. */
-export async function notifyStripeAccountAttention(db: DbClient, env: CloudflareEnv, event: Stripe.V2.Core.EventNotification, account: StripeConnectedAccount) {
-  let status: 'action_required' | 'restricted'
-  let reasons: string[] = []
-  if (event.type === 'v2.core.account[requirements].updated') {
-    const handed = requirementsHandedToBusiness((await event.fetchEvent()).changes)
-    if (handed.length === 0) return
-    status = 'action_required'
-    reasons = [...new Set(handed.flatMap(entry => entry.errors.map(error => error.description)))]
-  } else if (event.type === 'v2.core.account[configuration.merchant].capability_status_updated') {
-    status = 'restricted'
-  } else return
-  if (account.status !== status) return
-  const organization = await queryFirst<{ name: string; slug: string }>(db, 'SELECT name,slug FROM organization WHERE id=?', [account.organizationId])
-  if (!organization) throw new Error('Stripe account attention requires its organization')
-  const eventKey = `payments:${account.stripeAccountId}:${Number(account.livemode)}:${event.id}`
-  const deepLink = `${dashboardOrigin(env, { orgSlug: organization.slug, locationSlug: null })}/payments/payout-method`
-  const message = stripeAccountAttentionMessage({ organizationName: organization.name, status, reasons, action: { url: deepLink, label: 'Review payout setup' } })
+export async function notifySubscriptionPlan(env: CloudflareEnv, db: DbClient, input: {
+  kind: 'started' | 'changed' | 'ending'
+  eventId: string
+  organizationId: string
+  /** The Stripe subscription the event is about: the audit row its sends are recorded on names it. */
+  subscriptionId: string | undefined
+  plan: string
+  previousPlan?: string
+  /** When a new plan's free trial ends, or when a plan that will not renew ends. */
+  date?: Date | null
+}) {
+  const organization = await queryFirst<{ name: string; slug: string }>(db, 'SELECT name,slug FROM organization WHERE id=?', [input.organizationId])
+  if (!organization) throw new Error(`Subscription notification has no organization ${input.organizationId}`)
+  if (!input.subscriptionId) throw new Error(`Subscription event ${input.eventId} names no Stripe subscription`)
+  const name = (plan: string) => plan.charAt(0).toUpperCase() + plan.slice(1)
+  const action = { url: `${dashboardOrigin(env, { orgSlug: organization.slug, locationSlug: null })}/billing`, label: 'Open Plan and billing' }
+  const message = subscriptionPlanMessage({
+    kind: input.kind, organizationName: organization.name, plan: name(input.plan), action,
+    ...(input.previousPlan ? { previousPlan: name(input.previousPlan) } : {}),
+    date: input.date ? new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', dateStyle: 'medium' }).format(input.date) : null,
+  })
+  const eventKey = `subscription:${input.eventId}:${input.kind}`
   await notifyOwner(env, db, {
-    organizationId: account.organizationId,
+    organizationId: input.organizationId,
     organizationName: organization.name,
-    template: 'stripe_account_attention',
+    template: `subscription.plan_${input.kind}`,
     title: message.title,
-    payload: { deep_link: deepLink },
+    payload: { deep_link: action.url },
     message,
-    whatsappTemplate: 'guest_thread_reply_whatsapp',
-    notification: { message: message.facts.find(fact => fact.key === 'message')!.value, severity: 'warning' },
+    entity: { type: 'subscription', id: input.subscriptionId },
     idempotencyKey: `${eventKey}:owner`,
     deliveryEventKey: `${eventKey}:owner`,
   })

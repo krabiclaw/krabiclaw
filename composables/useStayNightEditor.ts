@@ -50,7 +50,7 @@ const nullableText = (value: unknown) => value === null || typeof value === 'str
 /** A night as both calendars and the nights write return it. */
 export function isStayNight(item: unknown): item is StayNight {
   return isRecord(item) && isValidCalendarDate(item.date)
-    && typeof item.available === 'boolean' && typeof item.closed === 'boolean' && nullableText(item.stay_id) && nullableAmount(item.price_minor)
+    && typeof item.available === 'boolean' && typeof item.closed === 'boolean' && nullableText(item.booking_id) && nullableAmount(item.price_minor)
     && (item.calendar === null || item.calendar === 'vrbo')
     && typeof item.min_stay_arrival === 'number' && nullableRule(item.min_stay_arrival) && nullableRule(item.max_stay)
     && typeof item.closed_to_arrival === 'boolean' && typeof item.closed_to_departure === 'boolean'
@@ -67,7 +67,7 @@ export function isPlaceDay(item: unknown): item is PlaceDay {
 }
 
 /** A night a guest or another calendar holds: a stay, a checkout hold or a linked-calendar night. A selection never writes one. */
-export const isBookedNight = (night: StayNight) => Boolean(night.stay_id || night.held_until || night.calendar)
+export const isBookedNight = (night: StayNight) => Boolean(night.booking_id || night.held_until || night.calendar)
 
 /** 0 Sunday to 6 Saturday, as the nights write reads weekdays. */
 export const nightWeekday = (date: string) => new Date(`${date}T00:00:00Z`).getUTCDay()
@@ -87,9 +87,9 @@ export function stayNightSource(api: ReturnType<typeof useDashboardApi>, signal:
   return {
     id: home => home.product_id,
     held: isBookedNight,
-    label: night => night.stay_id ? 'Reserved' : night.held_until ? 'Checkout hold' : night.calendar ? `Unavailable from ${STAY_CHANNEL_LABELS[night.calendar]}` : night.closed ? 'Blocked by you' : 'Available',
+    label: night => night.booking_id ? 'Reserved' : night.held_until ? 'Checkout hold' : night.calendar ? `Unavailable from ${STAY_CHANNEL_LABELS[night.calendar]}` : night.closed ? 'Blocked by you' : 'Available',
     // What holds nights a selection cannot change: a reservation is managed from its stay, a linked calendar from its channel, a hold by its guest's checkout.
-    heldExplanation: booked => booked.some(night => night.stay_id)
+    heldExplanation: booked => booked.some(night => night.booking_id)
       ? 'Booked nights belong to their reservations. Open the stay to manage it.'
       : booked.some(night => night.calendar)
         ? `${STAY_CHANNEL_LABELS[booked.find(night => night.calendar)!.calendar!]}'s calendar holds these nights. Change them there.`

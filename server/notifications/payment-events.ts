@@ -137,31 +137,49 @@ export function guestPaymentMessage(event: GuestPaymentNotificationEvent): Notif
   return paymentMessage(event, 'guest')
 }
 
-/** Stripe asking the business for something: no money moved, so it states what Stripe says instead of an amount. */
-export function stripeAccountAttentionMessage(input: {
+/**
+ * The business's own KrabiClaw plan: a new plan, a change of plan, or a plan
+ * set not to renew. Stripe emails the receipts, renewal and trial reminders and
+ * failed payments itself (docs/payments/payments.md).
+ */
+export function subscriptionPlanMessage(input: {
+  kind: 'started' | 'changed' | 'ending'
   organizationName: string
-  status: 'action_required' | 'restricted'
-  /** Stripe's own words for what it refused. */
-  reasons: readonly string[]
+  plan: string
+  /** The plan the business moved from, for a change. */
+  previousPlan?: string
+  /** The day a new plan's free trial ends, or the day a plan that will not renew ends. */
+  date?: string | null
   action: NotificationAction
 }): MemberAlertMessage {
-  const required = input.status === 'action_required'
-  const statement = required ? 'Stripe needs more information from the business.' : 'Stripe has restricted card payments. Open Stripe onboarding to review the required action.'
+  const facts: NotificationFact[] = [{ key: 'plan', label: 'Plan', value: input.plan, lead: true }]
+  let title: string
+  let intro: string
+  if (input.kind === 'started') {
+    title = `Your new plan: ${input.plan}`
+    intro = `${input.organizationName} is on ${input.plan}.`
+    if (input.date) facts.push({ key: 'trialEnds', label: 'Free trial ends', value: input.date })
+  } else if (input.kind === 'changed') {
+    if (!input.previousPlan) throw new Error('A plan change names the plan it replaced')
+    title = `Your plan changed to ${input.plan}`
+    intro = `${input.organizationName} moved from ${input.previousPlan} to ${input.plan}.`
+    facts.push({ key: 'previousPlan', label: 'Previous plan', value: input.previousPlan })
+  } else {
+    if (!input.date) throw new Error('A plan that will not renew names the day it ends')
+    title = `Your ${input.plan} plan will not renew`
+    intro = `${input.plan} stays on until ${input.date}. After that, ${input.organizationName} is on Basic.`
+    facts.push({ key: 'endsOn', label: 'Ends on', value: input.date, lead: true })
+  }
   return {
-    title: required ? 'Stripe needs more information' : 'Stripe restricted card payments',
-    preheader: `Stripe account · ${input.organizationName}`,
+    title,
+    preheader: `${input.plan} · ${input.organizationName}`,
     hero: null,
-    intro: statement,
-    // These keys are the ones the approved WhatsApp alert template carries.
-    facts: [
-      { key: 'guestName', label: 'Business', value: input.organizationName, lead: true },
-      { key: 'subject', label: 'Stripe account', value: required ? 'Action required' : 'Restricted', lead: true },
-      { key: 'message', label: 'Stripe says', value: input.reasons.join(' ') || statement, lead: true },
-    ],
+    intro,
+    facts,
     primaryAction: input.action,
     category: 'organization_and_billing',
     emailPurpose: 'transactional',
-    emailReason: `You received this email because you receive payment account notifications for ${input.organizationName}.`,
+    emailReason: `You received this email because you receive billing notifications for ${input.organizationName}.`,
     organizationName: input.organizationName,
   }
 }

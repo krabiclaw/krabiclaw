@@ -1,3 +1,4 @@
+import { RESOURCE_LOCALIZATIONS_SQL } from '~/shared/content-registries'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import {
   parseLocalizedResourceType,
@@ -41,7 +42,7 @@ export async function loadExactPublicLocalizations(
   if (language.source) throw new HTTPError({ statusCode: 404, statusMessage: 'Primary-language routes are unprefixed' })
   const rows = await queryAll<StoredPublicLocalizationRow>(db, `
     SELECT rl.resource_type, rl.resource_id, rl.locale, rl.values_json, rl.route_path, p.kind AS product_kind
-      FROM resource_localizations rl
+      FROM ${RESOURCE_LOCALIZATIONS_SQL} rl
       LEFT JOIN products p ON rl.resource_type = 'product' AND p.id = rl.resource_id AND p.organization_id = rl.organization_id
      WHERE rl.organization_id = ?  AND rl.locale = ?
      ORDER BY rl.resource_type, rl.resource_id

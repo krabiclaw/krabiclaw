@@ -7,7 +7,7 @@ export default defineHandler(async (event) => {
   const query = getQuery(event)
   return jsonResponse(await loadDashboardReviewFeedback(event, {
     days: typeof query.days === 'string' ? Number(query.days) : undefined,
-    startDate: typeof query.startDate === 'string' ? query.startDate : undefined,
-    endDate: typeof query.endDate === 'string' ? query.endDate : undefined,
+    startDate: typeof query.start_date === 'string' ? query.start_date : undefined,
+    endDate: typeof query.end_date === 'string' ? query.end_date : undefined,
   }))
 })

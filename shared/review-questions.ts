@@ -33,10 +33,10 @@ export type ReviewCategory = typeof REVIEW_CATEGORIES[ReviewSubject][number]['ke
 
 export const REVIEW_CATEGORY_KEYS = [...new Set(REVIEW_SUBJECTS.flatMap(subject => REVIEW_CATEGORIES[subject].map(category => category.key)))] as ReviewCategory[]
 
-/** What a booked visit is reviewed as: a reservation, a stay, or a booking of a consultation or an experience. */
-export function reviewSubject(bookingType: 'reservation' | 'booking' | 'stay', productKind: string | null): ReviewSubject {
-  if (bookingType === 'reservation') return 'restaurant'
+/** What a booked visit is reviewed as: a stay, or a booking of a table, a consultation or an experience. */
+export function reviewSubject(bookingType: 'booking' | 'stay', productKind: string | null): ReviewSubject {
   if (bookingType === 'stay') return 'lodging'
+  if (productKind === 'table') return 'restaurant'
   if (productKind === 'service') return 'legal_consultation'
   if (productKind === 'experience') return 'experience'
   throw new Error(`A ${productKind ?? 'missing'} product has no review questions`)

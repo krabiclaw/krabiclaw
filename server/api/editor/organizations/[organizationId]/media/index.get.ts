@@ -9,8 +9,8 @@ export default defineHandler(async (event) => {
   const query = getQuery(event)
   const id = typeof query.id === 'string' ? query.id : undefined
   const kind = typeof query.kind === 'string' ? query.kind : undefined
-  const ownerType = typeof query.ownerType === 'string' ? query.ownerType : undefined
-  const ownerId = typeof query.ownerId === 'string' ? query.ownerId : undefined
+  const ownerType = typeof query.owner_type === 'string' ? query.owner_type : undefined
+  const ownerId = typeof query.owner_id === 'string' ? query.owner_id : undefined
   const slot = typeof query.slot === 'string' ? query.slot : undefined
   const search = typeof query.search === 'string' ? query.search : undefined
   const parsedLimit = typeof query.limit === 'string' ? Number.parseInt(query.limit, 10) : Number.NaN

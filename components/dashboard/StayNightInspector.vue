@@ -224,7 +224,7 @@ function confirmClosed() {
   pendingClosed.value = null
 }
 watch(() => props.nights, () => { pendingClosed.value = null })
-const stayIds = computed(() => [...new Set(stayBooked.value.flatMap(night => night.stay_id ? [night.stay_id] : []))])
+const stayIds = computed(() => [...new Set(stayBooked.value.flatMap(night => night.booking_id ? [night.booking_id] : []))])
 const holdExpiries = computed(() => props.homes.length === 1
   ? [...new Set(stayBooked.value.flatMap(night => night.held_until ? [night.held_until] : []))].sort().map(at => ({ at, timezone: props.homes[0]!.timezone }))
   : [])

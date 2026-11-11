@@ -1,6 +1,6 @@
 <template>
   <NuxtLayout :name="site.layout">
-    <GuestCancelPage kind="booking" />
+    <GuestCancelPage />
   </NuxtLayout>
 </template>
 

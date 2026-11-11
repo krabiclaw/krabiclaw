@@ -10,7 +10,7 @@ import { CONVERSION_EVENT_CATALOG, ORGANIZATION_CONVERSION_EVENT_NAMES, type Con
 // 30 days ending today in the business's own clock, which is not UTC's date
 // for much of the day in Bangkok or New York.
 const localDate = (timeZone: string, at: number) => new Intl.DateTimeFormat('en-CA', { timeZone }).format(at)
-const rangeIn = (timeZone: string) => ({ startDate: localDate(timeZone, Date.now() - 29 * 86_400_000), endDate: localDate(timeZone, Date.now()) })
+const rangeIn = (timeZone: string) => ({ start_date: localDate(timeZone, Date.now() - 29 * 86_400_000), end_date: localDate(timeZone, Date.now()) })
 const businesses = [
   { user: 'user-e2e-ncls-owner', key: 'legal', words: ['Viewed a practice area', 'Clicked Book a consultation or called', 'Requested a consultation', 'Scheduled'] },
   { user: 'user-e2e-kikuzuki-owner', key: 'restaurant', words: ['Viewed a dish', 'Started a reservation or called', 'Reserved', 'Seated'] },
@@ -31,7 +31,7 @@ for (const business of businesses) {
 
     // The expected counts are read through the analytics query MCP exposes, not the report the page renders.
     const query = async (args: Record<string, unknown>) => {
-      const response = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'query_organization_analytics', args: { organization_id: organizationId, mode: 'breakdown', start_date: range.startDate, end_date: range.endDate, limit: 200, ...args } })
+      const response = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'query_organization_analytics', args: { organization_id: organizationId, mode: 'breakdown', start_date: range.start_date, end_date: range.end_date, limit: 200, ...args } })
       expect(response.status()).toBe(200)
       return mcpData<{ rows: Array<{ dimensions: Record<string, string>; metrics: Record<string, number> }>; next_cursor: string | null; totals: Record<string, { value: number }> }>(await response.json())
     }

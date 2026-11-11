@@ -33,6 +33,7 @@
             :loading="sessionsPending"
             :guests="partySize"
             :show-party-size="showPartySize"
+            :guests-min="guestsMin"
             :guests-max="guestsMax"
             :show-minimum-at-limit="false"
             @update:guests="partySize = $event"
@@ -61,6 +62,7 @@
             :answer-errors="formQuestions.answerErrors.value"
             :questions-notice="formQuestions.notice.value"
             :default-country="defaultPhoneCountry"
+            :phone-required="phoneRequired"
             :loading="submitting"
             :submit-text="paymentRequired ? t('payment.continue_to_pay') : confirmationMode === 'review' ? t('booking.request_appointment') : t('site.experience_detail.confirm_booking')"
             @submit="submitBooking"
@@ -76,9 +78,9 @@ import type { SessionBookingController } from '~/composables/useSessionBooking'
 import { formatTime } from '~/utils/timezone'
 import { PUBLIC_BOOKING_WINDOW_DAYS } from '~/shared/bookings'
 // A paid booking is not confirmed in the dialog: the guest goes on to pay, so the button says so.
-const props = defineProps<{ controller: SessionBookingController; confirmationMode: 'instant' | 'review'; paymentRequired: boolean }>()
+const props = defineProps<{ controller: SessionBookingController; confirmationMode: 'instant' | 'review'; paymentRequired: boolean; phoneRequired?: boolean }>()
 const { bookingStep, contactForm, formQuestions, defaultPhoneCountry, sellableVariants, selectedVariantId, variantPriceLabel, sessionsPending,
-  availabilityDates, referenceDate, timeSelection, partySize, showPartySize, allowTimezoneSelection, guestTimezone, bookingTimezone, timezoneOptions, guestsMax, bookingError, submitting, submitBooking } = props.controller
+  availabilityDates, referenceDate, timeSelection, partySize, showPartySize, allowTimezoneSelection, guestTimezone, bookingTimezone, timezoneOptions, guestsMin, guestsMax, bookingError, submitting, submitBooking } = props.controller
 const { t, locale } = useI18n()
 const variantGroup = useId()
 </script>

@@ -13,7 +13,7 @@ export default defineHandler(async (event) => {
   await assertRoleAllows({ organizationId: organization.id, role: organization.role, permissions: { analytics: ['read'] } })
   const query = getQuery(event)
   return jsonResponse(googleAdsInsightsSchema.parse(await loadGoogleAdsInsights(cloudflareEnv(event), organization.id, {
-    startDate: typeof query.startDate === 'string' ? query.startDate : undefined,
-    endDate: typeof query.endDate === 'string' ? query.endDate : undefined,
+    startDate: typeof query.start_date === 'string' ? query.start_date : undefined,
+    endDate: typeof query.end_date === 'string' ? query.end_date : undefined,
   })), { headers: { 'cache-control': 'private, no-store' } })
 })

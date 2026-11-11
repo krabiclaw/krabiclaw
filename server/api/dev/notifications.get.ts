@@ -20,27 +20,16 @@ export default defineHandler(async (event) => {
   if (locationId) { filters.push('gt.location_id = ?'); binds.push(locationId) }
   if (since) { filters.push('d.created_at >= ?'); binds.push(since) }
 
-  const notifications = await queryAll(db, `
-    SELECT id, organization_id, location_id, parent_id AS source_entry_id,
-           scope_kind AS scope, json_extract(payload_json, '$.severity') AS severity, event_name AS template, json_extract(payload_json, '$.title') AS title, created_at
-    FROM activity_entries
-    WHERE kind = 'notification'
-      AND (? IS NULL OR organization_id = ?)
-      AND (? IS NULL OR location_id = ?)
-      AND (? IS NULL OR created_at >= ?)
-    ORDER BY created_at DESC
-    LIMIT ?
-  `, [organizationId, organizationId, locationId, locationId, since, since, limit])
   const deliveries = await queryAll(db, `
-    SELECT d.id, e.request_id, d.entry_id, d.channel, d.provider, d.purpose,
+    SELECT d.id, m.conversation_id, d.message_id, d.channel, d.provider, d.purpose,
            d.status, d.provider_message_id, d.email_json, d.email_message_id, d.error, d.created_at, d.updated_at
     FROM guest_thread_deliveries d
-    JOIN activity_entries e ON e.id = d.entry_id
-    JOIN requests gt ON gt.id = e.request_id
+    JOIN messages m ON m.id = d.message_id
+    JOIN conversations gt ON gt.id = m.conversation_id
     ${filters.length > 0 ? `WHERE ${filters.join(' AND ')}` : ''}
     ORDER BY d.created_at DESC
     LIMIT ?
   `, [...binds, limit])
 
-  return jsonResponse({ notifications, deliveries })
+  return jsonResponse({ deliveries })
 })

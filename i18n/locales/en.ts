@@ -17,7 +17,6 @@ export default {
     }
   },
   "reservations": {
-    "deposit_label": "Reservation deposit",
     "confirmed": "Reservation confirmed"
   },
   "forms": {

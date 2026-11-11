@@ -14,6 +14,6 @@ const value = String(route.params.concern)
 if (!['content', 'schedule'].includes(value)) throw createError({ statusCode: 404, statusMessage: 'Automatic message concern not found' })
 const concern = value as 'content' | 'schedule'
 const editor = inject(automaticMessageEditorKey)!
-const counterparty = computed(() => editor.vertical.value === 'service' ? resolveBookingPresentation('booking', 'service').counterpartyNoun : 'guest')
+const counterparty = computed(() => editor.vertical.value === 'service' ? resolveBookingPresentation('service', 'service').counterpartyNoun : 'guest')
 const zone = computed(() => scheduleVocabulary(editor.vertical.value).zone)
 </script>

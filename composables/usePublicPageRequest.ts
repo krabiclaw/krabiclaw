@@ -17,7 +17,6 @@ export type PublicPageDataset =
   | 'photos'
   | 'qa'
   | 'blogPost'
-  | 'reservationPolicies'
 
 export interface PublicPageRequest {
   page: string | null;
@@ -110,7 +109,7 @@ export function getPublicPageRequest(path: string): Omit<PublicPageRequest, "loc
     return {
       page: "reservations",
       location: null,
-      datasets: ['content', 'reservationPolicies'],
+      datasets: ['content', 'products'],
       blogSlug: null,
     };
   if (path.startsWith("/qa"))

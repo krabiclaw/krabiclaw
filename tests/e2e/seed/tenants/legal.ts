@@ -72,7 +72,7 @@ export async function seedLegal(createTenant: CreateTenant): Promise<SeedTenant>
 
     // What consultations cost, with the questions clients ask on that page.
     await tool('create_site_page', {
-      path: '/pricing', title: 'Pricing', pageType: 'custom', locale: 'en',
+      path: '/pricing', title: 'Pricing', page_type: 'custom', locale: 'en',
       blocks: [
         { type: 'hero', data: { title: 'Pricing', subtitle: 'Free consultations for clients who qualify for legal aid.' } },
         { type: 'faq', data: { source: 'page_qa', title: 'Questions about cost' } },
@@ -87,7 +87,7 @@ export async function seedLegal(createTenant: CreateTenant): Promise<SeedTenant>
     const hero = page.blocks.find(block => block.type === 'hero')
     if (!hero) throw new Error('Harbor Legal Aid\'s home page has no hero')
     await tool('replace_content_block', {
-      block_id: hero.id, expected_updated_at: hero.updated_at,
+      block_id: hero.id, updated_at: hero.updated_at,
       data: { title: hero.data.title ?? 'Harbor Legal Aid', subtitle: 'Free legal help for families in Wake County.', cta_label: 'Request a consultation', cta_url: '/schedule' },
     })
     await tool('append_content_block', {

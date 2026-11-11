@@ -150,9 +150,8 @@ export async function recordOrganizationConversionEvent(db: DbClient, origin: { 
   if (!(rule.stages as readonly ConversionStage[]).includes(input.stage)) throw new Error(`Invalid stage for ${input.eventName}`)
   if (rule.entityType !== null && input.entityType !== rule.entityType) throw new Error(`Invalid entity type for ${input.eventName}`)
   if ((input.entityType && !input.entityId) || (!input.entityType && input.entityId)) throw new Error('entityType and entityId must be supplied together')
-  if (input.eventName === 'checkout_start' && (input.entityType ? input.entityType !== 'product' : !input.locationId)) {
-    throw new Error('Checkout requires a product or a reservation location')
-  }
+  // Every checkout is a product's, a table's included.
+  if (input.eventName === 'checkout_start' && input.entityType !== 'product') throw new Error('Checkout requires a product')
   if (input.eventName === 'consultation_cta_click') {
     const validScheduleEntity = input.entityType === undefined || input.entityType === null || input.entityType === 'content_document'
     if (input.stage === 'schedule_navigation' && !validScheduleEntity) throw new Error('Invalid entity type for consultation_cta_click')

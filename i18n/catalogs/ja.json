@@ -53,7 +53,6 @@
   "booking.provider_retry": "もう一度試す",
   "booking_policy.deposit_amount": "予約1件の前金：{amount}。",
   "booking_policy.deposit_amount_exclusive": "予約1件の前金：{amount}（税別）。",
-  "reservations.deposit_label": "予約の前金",
   "reservations.confirmed": "席の予約が確定しました",
   "forms.yes": "はい",
   "forms.no": "いいえ",

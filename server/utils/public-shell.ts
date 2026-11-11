@@ -1,3 +1,4 @@
+import { RESOURCE_LOCALIZATIONS_SQL } from '~/shared/content-registries'
 import { publicCacheRevision } from '~/server/utils/edge-cache'
 import { HTTPError } from 'nitro';
 import { oncePerRequest } from '~/server/utils/request-scope'
@@ -115,7 +116,7 @@ export async function loadPublicShellSource(
     `, [organization.id]),
     locale && locale !== sourceLocale ? queryAll<StoredPublicLocalizationRow>(db, `
       SELECT resource_type, resource_id, locale, values_json, route_path
-       FROM resource_localizations
+       FROM ${RESOURCE_LOCALIZATIONS_SQL}
        WHERE organization_id = ? AND locale = ?
          AND resource_type IN ('organization', 'business_location')
     `, [organization.id, locale]) : [],

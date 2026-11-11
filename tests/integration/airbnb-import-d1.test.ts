@@ -291,7 +291,7 @@ async function connected(db: D1Database, env: CloudflareEnv, channex: FakeChanne
   return connection
 }
 
-const form = { missingDetails: { email: 'Stay@Example.test', phone: '+1 435 555 0100' } }
+const form = { missingDetails: { email: 'Stay@Example.test', phone: '+1 435 555 0100', assigned_member_id: 'm-owner' } }
 const manager = { organizationId: ORG, actorId: OWNER, manage: true } as const
 
 /** Tell the fake which Channex room type and rate plan the import's reads are about. */
@@ -324,9 +324,9 @@ test('a listing imports through every stage into a home Channex and KrabiClaw ag
   try {
     const connection = await connected(db, env, channex)
     const details = await connection.details(LISTING)
-    // The organization has no contact details yet, so the import asks for them once.
+    // The organization has no contact details yet, so the import asks for them once, and always for the member who looks after the home.
     // Children and infants are not asked: Airbnb counts neither.
-    assert.deepEqual(details.missingFields, ['email', 'phone'])
+    assert.deepEqual(details.missingFields, ['email', 'phone', 'assigned_member_id'])
     assert.deepEqual({ timezone: details.fields.timezone, checkIn: details.checkInTime, checkInEnd: details.checkInEndTime, checkOut: details.checkOutTime }, { timezone: TZ, checkIn: '16:00', checkInEnd: '21:00', checkOut: '10:00' })
     // Translate provider aliases without rejecting categories Channex can validate itself.
     assert.equal(details.fields.propertyType, 'holiday_home')
@@ -340,19 +340,19 @@ test('a listing imports through every stage into a home Channex and KrabiClaw ag
     assert.equal(started.stage, 'property')
     // Asking again returns the same import; nothing is created twice.
     assert.deepEqual(await connection.prepare(LISTING, form), started)
-    // What the host typed is now the organization's contact, so the next listing will not ask.
+    // What the host typed is now the organization's contact, so the next listing asks only who looks after it.
     assert.deepEqual(await db.prepare('SELECT contact_email, contact_phone FROM organization WHERE id = ?').bind(ORG).first(), { contact_email: 'stay@example.test', contact_phone: '+1 435 555 0100' })
-    assert.deepEqual((await connection.details(LISTING)).missingFields, [])
+    assert.deepEqual((await connection.details(LISTING)).missingFields, ['assigned_member_id'])
     const productId = started.product_id
 
-    const home = await db.prepare(`SELECT p.kind, p.name, c.check_in_time, c.check_in_end_time, c.check_out_time, c.max_guests, c.min_nights, l.title AS location, l.timezone, l.email, pr.unit_amount, pr.currency
-      FROM products p JOIN product_stay_configs c ON c.product_id = p.id JOIN business_locations l ON l.id = c.location_id
-      JOIN product_variants v ON v.product_id = p.id JOIN prices pr ON pr.product_variant_id = v.id WHERE p.id = ?`).bind(productId).first()
+    const home = await db.prepare(`SELECT p.kind, p.name, b.check_in_time, b.check_in_end_time, b.check_out_time, b.default_capacity AS max_guests, b.min_nights, l.title AS location, l.timezone, l.email, pr.unit_amount, pr.currency
+      FROM products p JOIN product_stay_configs c ON c.product_id = p.id JOIN product_booking_configs b ON b.product_id = p.id JOIN business_locations l ON l.id = c.location_id
+      JOIN product_variants v ON v.product_id = p.id JOIN prices pr ON pr.product_variant_id = v.id AND pr.stay_date IS NULL AND pr.weekend = 0 WHERE p.id = ?`).bind(productId).first()
     // Check-in and checkout are Airbnb's window, not anything the client sent.
     assert.deepEqual(home, { kind: 'stay', name: 'Cliff Cabin', check_in_time: '16:00', check_in_end_time: '21:00', check_out_time: '10:00', max_guests: 4, min_nights: 5, location: 'Cliff Cabin', timezone: TZ, email: 'Stay@Example.test', unit_amount: 18_950, currency: 'USD' })
-    const nights = await db.prepare("SELECT COUNT(*) AS total, SUM(closed) AS closed, SUM(closed_to_departure) AS ctd, MAX(price_minor) AS top FROM product_nights WHERE product_id = ? AND source = 'import'").bind(productId).first()
+    const nights = await db.prepare("SELECT COUNT(*) AS total, SUM(n.closed) AS closed, SUM(n.closed_to_departure) AS ctd, MAX(pr.unit_amount) AS top FROM product_nights n JOIN product_variants v ON v.organization_id = n.organization_id AND v.product_id = n.product_id LEFT JOIN prices pr ON pr.organization_id = v.organization_id AND pr.product_variant_id = v.id AND pr.stay_date = n.date WHERE n.product_id = ? AND n.source = 'import'").bind(productId).first()
     assert.deepEqual(nights, { total: 500, closed: 1, ctd: 1, top: 21_000 })
-    const first = await db.prepare('SELECT date, price_minor, min_stay_arrival, max_stay FROM product_nights WHERE product_id = ? ORDER BY date LIMIT 1').bind(productId).first()
+    const first = await db.prepare('SELECT n.date, pr.unit_amount AS price_minor, n.min_stay_arrival, n.max_stay FROM product_nights n JOIN product_variants v ON v.organization_id = n.organization_id AND v.product_id = n.product_id LEFT JOIN prices pr ON pr.organization_id = v.organization_id AND pr.product_variant_id = v.id AND pr.stay_date = n.date WHERE n.product_id = ? ORDER BY n.date LIMIT 1').bind(productId).first()
     assert.deepEqual(first, { date: today(), price_minor: 21_000, min_stay_arrival: 2, max_stay: 30 })
 
     const stages: string[] = []
@@ -548,8 +548,8 @@ test('actual dated, weekday and weekend rules survive default edits, protected r
     assert.deepEqual((await readStayHome(db, manager, productId)).calendar_rules, { day_of_week_min_nights: [2, -1, -1, -1, -1, -1, -1], weekend_price_minor: 22500 })
     const monday = addDays(firstDate, (8 - new Date(`${firstDate}T00:00:00Z`).getUTCDay()) % 7 || 7)
     const tuesday = addDays(monday, 1)
-    assert.deepEqual(await db.prepare('SELECT min_stay_arrival, price_minor FROM product_nights WHERE product_id = ? AND date = ?').bind(productId, tuesday).first(), { min_stay_arrival: null, price_minor: null })
-    assert.deepEqual(await db.prepare('SELECT min_stay_arrival, price_minor FROM product_nights WHERE product_id = ? AND date = ?').bind(productId, firstDate).first(), { min_stay_arrival: 11, price_minor: 21000 })
+    assert.deepEqual(await db.prepare('SELECT n.min_stay_arrival, pr.unit_amount AS price_minor FROM product_nights n JOIN product_variants v ON v.organization_id = n.organization_id AND v.product_id = n.product_id LEFT JOIN prices pr ON pr.organization_id = v.organization_id AND pr.product_variant_id = v.id AND pr.stay_date = n.date WHERE n.product_id = ? AND n.date = ?').bind(productId, tuesday).first(), { min_stay_arrival: null, price_minor: null })
+    assert.deepEqual(await db.prepare('SELECT n.min_stay_arrival, pr.unit_amount AS price_minor FROM product_nights n JOIN product_variants v ON v.organization_id = n.organization_id AND v.product_id = n.product_id LEFT JOIN prices pr ON pr.organization_id = v.organization_id AND pr.product_variant_id = v.id AND pr.stay_date = n.date WHERE n.product_id = ? AND n.date = ?').bind(productId, firstDate).first(), { min_stay_arrival: 11, price_minor: 21000 })
     await updateStayHome(env, db, manager, productId, { min_nights: 9, base_price_minor: 20000 })
     assert.equal(((channex.settings.find(settings => settings.availability_settings)!.availability_settings as { availability_settings: { booking_lead_time: number } }).availability_settings).booking_lead_time, 48)
     assert.deepEqual((channex.settings.find(settings => settings.availability_settings)!.availability_settings as { availability_settings: { seasonal_min_nights: unknown } }).availability_settings.seasonal_min_nights, seasonal)
@@ -588,7 +588,7 @@ test('actual dated, weekday and weekend rules survive default edits, protected r
     assert.equal(refreshedPage.headers.get('x-bootstrap-cache'), 'MISS')
     assert(refreshed.content.kept_host_edits.includes('calendar_rules'))
     assert.deepEqual((await readStayHome(db, manager, productId)).calendar_rules, authoredRules)
-    assert.deepEqual(await db.prepare('SELECT source, min_stay_arrival, price_minor FROM product_nights WHERE product_id = ? AND date = ?').bind(productId, monday).first(), { source: 'host', min_stay_arrival: 4, price_minor: 23000 })
+    assert.deepEqual(await db.prepare('SELECT n.source, n.min_stay_arrival, pr.unit_amount AS price_minor FROM product_nights n JOIN product_variants v ON v.organization_id = n.organization_id AND v.product_id = n.product_id LEFT JOIN prices pr ON pr.organization_id = v.organization_id AND pr.product_variant_id = v.id AND pr.stay_date = n.date WHERE n.product_id = ? AND n.date = ?').bind(productId, monday).first(), { source: 'host', min_stay_arrival: 4, price_minor: 23000 })
     assert.deepEqual(channex.ratePlans.get(channex.ratePlan)!.min_stay_arrival, [3, 10, 10, 10, 10, 10, 10])
     const remote = await listingCalendar(env, channex.channelId, LISTING, TZ)
     assert.deepEqual(remote.filter(night => [monday, tuesday, addDays(monday, 7)].includes(night.date)).map(night => [night.date, night.minStay, night.rate]), [[monday, 4, '230'], [tuesday, 10, '210'], [addDays(monday, 7), 3, '210']])
@@ -1035,8 +1035,7 @@ test('a sync request is checked against the plan once, then KrabiClaw imports, a
     await db.prepare(`INSERT INTO member_scheduling (member_id, organization_id, timezone, weekly_json, time_off_json, public_name, public_bio, public_approved, updated_at, updated_by)
       VALUES ('m-owner', ?, ?, '[]', '[]', 'Owner Host', NULL, 1, '2026-10-15T00:00:00.000Z', ?)`).bind(ORG, TZ, OWNER).run()
     for (const name of ['Dune Hut', 'Reef Hut']) {
-      const made = await createStayHome(env, db, manager, stayHomeInput({ name, timezone: TZ, address: `1 ${name} Rd`, city: 'Moab', country: 'US', check_in_time: '15:00', check_out_time: '11:00', max_guests: 2, min_nights: 1, base_price_minor: 100_00 }), name)
-      await updateStayHome(env, db, manager, made.product_id, { assigned_member_id: 'm-owner' })
+      const made = await createStayHome(env, db, manager, stayHomeInput({ name, timezone: TZ, address: `1 ${name} Rd`, city: 'Moab', country: 'US', check_in_time: '15:00', check_out_time: '11:00', max_guests: 2, min_nights: 1, base_price_minor: 100_00, assigned_member_id: 'm-owner' }), name)
       assert.equal((await updateStayHome(env, db, manager, made.product_id, { published: true })).home.live, true)
     }
 
@@ -1261,9 +1260,10 @@ test('a full-plan sync swap stops its old home before activation and reconnects 
     channex.listings.push('listing-88', 'listing-99')
     const first = await connection.prepare(LISTING, form)
     await importAll(connection, db, channex, first.product_id)
-    const second = await connection.prepare('listing-88', { missingDetails: {} })
+    assert.equal(await db.prepare('SELECT assigned_member_id FROM product_booking_configs WHERE product_id = ?').bind(first.product_id).first('assigned_member_id'), 'm-owner')
+    const second = await connection.prepare('listing-88', { missingDetails: { assigned_member_id: 'm-owner' } })
     await importAll(connection, db, channex, second.product_id)
-    const replacement = await connection.prepare('listing-99', { missingDetails: {} })
+    const replacement = await connection.prepare('listing-99', { missingDetails: { assigned_member_id: 'm-owner' } })
     await advanceTo(connection, db, channex, replacement.product_id, 'draft')
     assert.equal(await countActiveHomes(db, ORG), 2)
     const queued = await requestAirbnbSync(env, db, ORG, OWNER, { sync: [{ listing_id: 'listing-99' }], stop: [first.product_id] })
@@ -1465,7 +1465,7 @@ for (const authored of [false, true]) {
       assert.equal((await connection.prepare(LISTING, form)).product_id, productId)
       const home = await readStayHome(db, manager, productId)
       assert.deepEqual([home.min_nights, home.base_price_minor], authored ? [9, 20000] : [2, 18950])
-      assert.deepEqual((await db.prepare('SELECT date, min_stay_arrival, price_minor FROM product_nights WHERE product_id = ? AND date IN (?, ?) ORDER BY date').bind(productId, explicit, inherited).all()).results,
+      assert.deepEqual((await db.prepare('SELECT n.date, n.min_stay_arrival, pr.unit_amount AS price_minor FROM product_nights n JOIN product_variants v ON v.organization_id = n.organization_id AND v.product_id = n.product_id LEFT JOIN prices pr ON pr.organization_id = v.organization_id AND pr.product_variant_id = v.id AND pr.stay_date = n.date WHERE n.product_id = ? AND n.date IN (?, ?) ORDER BY n.date').bind(productId, explicit, inherited).all()).results,
         [{ date: explicit, min_stay_arrival: 2, price_minor: 18950 }, { date: inherited, min_stay_arrival: null, price_minor: null }])
       await updateStayHome(env, db, manager, productId, { min_nights: 11, base_price_minor: 23000 })
       const calendar = await readStayCalendar(db, manager, { productId, from: explicit, to: addDays(inherited, 1) })
@@ -1490,7 +1490,11 @@ test('a source-owned legacy default becomes inheritance after a refused canonica
     const productId = (await connection.prepare(LISTING, form)).product_id
     await importAll(connection, db, channex, productId)
     // A pre-v23 source import materialized each resolved default instead of recording inheritance.
-    await db.prepare("UPDATE product_nights SET min_stay_arrival = COALESCE(min_stay_arrival, 5), price_minor = COALESCE(price_minor, 18950) WHERE product_id = ? AND source = 'import'").bind(productId).run()
+    await db.prepare("UPDATE product_nights SET min_stay_arrival = COALESCE(min_stay_arrival, 5) WHERE product_id = ? AND source = 'import'").bind(productId).run()
+    await db.prepare(`INSERT INTO prices (id, organization_id, product_variant_id, stay_date, currency, unit_amount, source, created_by, updated_by)
+      SELECT 'legacy-rate:' || n.date, n.organization_id, v.id, n.date, 'USD', 18950, 'import', 'system', 'system'
+      FROM product_nights n JOIN product_variants v ON v.organization_id = n.organization_id AND v.product_id = n.product_id
+      WHERE n.product_id = ? AND n.source = 'import' ON CONFLICT (product_variant_id, stay_date) DO NOTHING`).bind(productId).run()
     globalThis.fetch = async (input, init = {}) => {
       const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input : input.url)
       if (init.method === 'PUT' && url.pathname.endsWith('/availability_settings')) return new Response('Default refused', { status: 400 })
@@ -1505,7 +1509,7 @@ test('a source-owned legacy default becomes inheritance after a refused canonica
     globalThis.fetch = channex.fetch as typeof fetch
     const refreshed = await connection.refreshContent(productId)
     assert(refreshed.content.kept_host_edits.includes('min_nights'))
-    assert.deepEqual((await db.prepare('SELECT date, min_stay_arrival, price_minor FROM product_nights WHERE product_id = ? AND date IN (?, ?) ORDER BY date').bind(productId, explicit, inherited).all()).results,
+    assert.deepEqual((await db.prepare('SELECT n.date, n.min_stay_arrival, pr.unit_amount AS price_minor FROM product_nights n JOIN product_variants v ON v.organization_id = n.organization_id AND v.product_id = n.product_id LEFT JOIN prices pr ON pr.organization_id = v.organization_id AND pr.product_variant_id = v.id AND pr.stay_date = n.date WHERE n.product_id = ? AND n.date IN (?, ?) ORDER BY n.date').bind(productId, explicit, inherited).all()).results,
       [{ date: explicit, min_stay_arrival: 2, price_minor: null }, { date: inherited, min_stay_arrival: null, price_minor: null }])
     const calendar = await readStayCalendar(db, manager, { productId, from: explicit, to: addDays(inherited, 1) })
     assert.deepEqual(calendar.nights.map(night => [night.date, night.min_stay_arrival, night.price_minor]), [[explicit, 2, 20000], [inherited, 9, 20000]])
@@ -1789,6 +1793,11 @@ test('the import asks only for required contact details and preserves provider b
     channex.availabilityRules = realRules
     // Only the fields Airbnb left out may be supplied.
     await assert.rejects(connection.prepare(LISTING, { missingDetails: { ...form.missingDetails, city: 'Elsewhere' } }), { status: 422, data: { code: 'ONLY_MISSING_DETAILS' } })
+    // Airbnb never says who looks after a home: the host names a member of this organization, or nothing is created.
+    const { assigned_member_id: _member, ...withoutMember } = form.missingDetails
+    await assert.rejects(connection.prepare(LISTING, { missingDetails: withoutMember }), { status: 422, data: { code: 'MISSING_DETAIL', field: 'details.assigned_member_id' } })
+    await assert.rejects(connection.prepare(LISTING, { missingDetails: { ...form.missingDetails, assigned_member_id: 'm-elsewhere' } }), { status: 422, data: { code: 'INVALID_DETAIL', field: 'details.assigned_member_id' } })
+    assert.equal(await count(db, 'products'), 0)
     const policies = channex.booking.cancellation_policy_settings
     // Untranslated provider terms do not block the home or acquire a different local policy.
     channex.booking = { ...channex.booking, cancellation_policy_settings: { cancellation_policy_category: 'super_strict_30', lts_cancellation_policy_id: 'CANCEL_LONG_TERM_FAIR' } }
@@ -1813,7 +1822,7 @@ test('the import asks only for required contact details and preserves provider b
     assert.equal((await readStayHome(db, manager, started.product_id)).min_nights, 9)
     assert.equal(Object.hasOwn(JSON.parse(String(await db.prepare('SELECT import_written FROM product_channel_mappings WHERE product_id = ?').bind(started.product_id).first('import_written'))) as Record<string, unknown>, 'min_nights'), false)
     // It books under the listing's own policies: Firm, and Strict Long Term.
-    assert.deepEqual(await db.prepare('SELECT check_in_time, check_in_end_time, check_out_time, cancellation_policy, long_term_cancellation_policy FROM product_stay_configs WHERE product_id = ?').bind(started.product_id).first(),
+    assert.deepEqual(await db.prepare('SELECT check_in_time, check_in_end_time, check_out_time, cancellation_policy, long_term_cancellation_policy FROM product_booking_configs WHERE product_id = ?').bind(started.product_id).first(),
       { check_in_time: '16:00', check_in_end_time: '01:00', check_out_time: '10:00', cancellation_policy: 'firm', long_term_cancellation_policy: 'strict' })
     assert.deepEqual(channex.roomTypes, [])
     const property = JSON.parse(String(await db.prepare('SELECT import_property FROM product_channel_mappings WHERE product_id = ?').bind(started.product_id).first('import_property'))) as Record<string, unknown>

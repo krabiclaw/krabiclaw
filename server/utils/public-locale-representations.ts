@@ -1,3 +1,4 @@
+import { RESOURCE_LOCALIZATIONS_SQL } from '~/shared/content-registries'
 import { HTTPError } from 'nitro'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { queryAll, type DbClient } from '~/server/db'
@@ -91,7 +92,7 @@ export async function listPublicLocaleRepresentations(
   const candidates = input.resource
     ? await queryAll<{ locale: string; route_path: string }>(db, `
         SELECT rl.locale, ${derivesRoute ? "'/' || rl.locale || ?" : 'rl.route_path'} AS route_path
-          FROM resource_localizations rl
+          FROM ${RESOURCE_LOCALIZATIONS_SQL} rl
           JOIN organization_locales sl
             ON sl.organization_id = rl.organization_id AND sl.locale = rl.locale
          WHERE rl.organization_id = ?

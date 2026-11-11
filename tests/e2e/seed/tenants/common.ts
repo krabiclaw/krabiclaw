@@ -33,14 +33,14 @@ export async function seedMedia(owner: SeedClient, tenant: SeedTenant, key: stri
 /** A published host or attorney profile; guests see it beside what the member provides. */
 export async function publishProfile(tool: Tool, memberId: string, publicName: string, publicBio: string) {
   const { profile } = await tool<{ profile: { updated_at: string } | null }>('get_member_public_profile', { member_id: memberId })
-  await tool('update_member_public_profile', { member_id: memberId, expected_updated_at: profile?.updated_at ?? null, public_name: publicName, public_bio: publicBio, public_approved: true })
+  await tool('update_member_public_profile', { member_id: memberId, updated_at: profile?.updated_at ?? null, public_name: publicName, public_bio: publicBio, public_approved: true })
 }
 
 /** Working hours in the member's own clock; provider-scheduled offerings are booked inside them. */
 export async function setWorkingHours(tool: Tool, memberId: string, timezone: string, weekdays: number[], start: string, end: string) {
   const { scheduling } = await tool<{ scheduling: { updated_at: string } | null }>('get_member_scheduling', { member_id: memberId })
   await tool('set_member_scheduling', {
-    member_id: memberId, expected_updated_at: scheduling?.updated_at ?? null, timezone,
+    member_id: memberId, updated_at: scheduling?.updated_at ?? null, timezone,
     weekly: weekdays.map(weekday => ({ weekday, start, end })), time_off: [],
   })
 }
@@ -56,5 +56,5 @@ export async function seedArticle(tool: Tool, categoryId: string, title: string,
     idempotency_key: `seed-article-${categoryId}`, title, category_id: categoryId,
     content_blocks: [{ type: 'markdown', data: { markdown: body, editor_mode: 'rich' } }],
   })
-  await tool('publish_blog_post', { post_id: post.id, expected_updated_at: post.updated_at })
+  await tool('publish_blog_post', { post_id: post.id, updated_at: post.updated_at })
 }

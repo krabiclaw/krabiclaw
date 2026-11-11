@@ -6,7 +6,6 @@ import { addLocalDays, localDateAt, localDateTimeToInstant, isValidTimezone, isV
 import { MEMBER_BUSY_SCOPES, MEMBER_NAME_SQL, type WorkingHours, type SchedulingInterval } from '~/shared/member-scheduling'
 import { hasOrganizationEntitlement } from '~/server/utils/billing'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
-import { getOrganizationTeamsData } from '~/server/utils/dashboard-members'
 import { getR2KeyFromPublicUrl } from '~/server/utils/cloudflare-r2'
 
 export interface SchedulingActor { env: CloudflareEnv; userId: string; organizationId: string }
@@ -80,7 +79,8 @@ export async function readMemberScheduling(db: DbClient, env: CloudflareEnv, org
  const conflicts = checking ? await queryAll<{ session_id: string; starts_at: string; ends_at: string; booking_count: number; total: number }>(db, `
   SELECT s.id session_id,s.starts_at,s.ends_at,count(b.id) booking_count,count(*) OVER() total
   FROM bookings b JOIN product_sessions s ON s.id=b.product_session_id AND s.organization_id=b.organization_id
-  WHERE b.organization_id=? AND b.assigned_member_id=? AND b.status IN ('pending','confirmed') AND s.ends_at>strftime('%Y-%m-%dT%H:%M:%fZ','now')
+   JOIN product_booking_configs c ON c.product_id=b.product_id AND c.organization_id=b.organization_id
+  WHERE b.organization_id=? AND c.assigned_member_id=? AND b.status IN ('pending','confirmed') AND s.ends_at>strftime('%Y-%m-%dT%H:%M:%fZ','now')
    AND EXISTS(SELECT 1 FROM json_each(?) busy WHERE json_extract(busy.value,'$.start')<s.ends_at AND json_extract(busy.value,'$.end')>s.starts_at)
   GROUP BY s.id,s.starts_at,s.ends_at ORDER BY s.starts_at,s.id LIMIT 25`, [organizationId,memberId,JSON.stringify(busy)]) : []
  return {
@@ -94,15 +94,15 @@ export async function readMemberScheduling(db: DbClient, env: CloudflareEnv, org
   calendar_status:!row.calendar_account_id || !JSON.parse(row.calendar_ids_json).length?'internal':!linked?'disconnected':'ready',
  }
 }
-export async function writeMemberScheduling(actor: SchedulingActor, memberId: string, input: {timezone?: string; weekly?: WorkingHours[]; time_off?: SchedulingInterval[]; expected_updated_at: string | null; public_name?: string | null; public_photo_url?: string | null; public_bio?: string | null; public_approved?: boolean}) {
+export async function writeMemberScheduling(actor: SchedulingActor, memberId: string, input: {timezone?: string; weekly?: WorkingHours[]; time_off?: SchedulingInterval[]; updated_at: string | null; public_name?: string | null; public_photo_url?: string | null; public_bio?: string | null; public_approved?: boolean}) {
  const fields=['timezone','weekly','time_off','public_name','public_photo_url','public_bio','public_approved'] as const
- if(!input || typeof input!=='object' || Array.isArray(input) || (input.expected_updated_at!==null && (typeof input.expected_updated_at!=='string' || !isValidInstant(input.expected_updated_at))) || Object.keys(input).some(key=>key!=='expected_updated_at' && !fields.includes(key as typeof fields[number])) || !fields.some(key=>input[key]!==undefined))throw new HTTPError({statusCode:400,message:'Choose the settings to change and provide their current revision'})
+ if(!input || typeof input!=='object' || Array.isArray(input) || (input.updated_at!==null && (typeof input.updated_at!=='string' || !isValidInstant(input.updated_at))) || Object.keys(input).some(key=>key!=='updated_at' && !fields.includes(key as typeof fields[number])) || !fields.some(key=>input[key]!==undefined))throw new HTTPError({statusCode:400,message:'Choose the settings to change and provide their current revision'})
  if(input.timezone!==undefined && (typeof input.timezone!=='string' || !isValidTimezone(input.timezone)))throw new HTTPError({statusCode:400,message:'Choose an IANA timezone'})
  if(input.public_approved!==undefined && typeof input.public_approved!=='boolean')throw new HTTPError({statusCode:400,message:'Approval must be boolean'})
  const member = await requireSchedulingAccess(actor,memberId)
  const db=actor.env.DB
  const current=await queryFirst<MemberScheduling>(db,'SELECT * FROM member_scheduling WHERE organization_id=? AND member_id=?',[actor.organizationId,memberId])
- if ((current?.updated_at??null)!==input.expected_updated_at) throw new HTTPError({statusCode:409,message:'Member settings changed; reload before saving'})
+ if ((current?.updated_at??null)!==input.updated_at) throw new HTTPError({statusCode:409,message:'Member settings changed; reload before saving'})
  if(input.public_approved!==undefined) await requireSchedulingAccess(actor,memberId,true)
  const suppliedHours=input.timezone!==undefined || input.weekly!==undefined || input.time_off!==undefined
  if(current?.timezone==null && suppliedHours && (input.timezone===undefined || input.weekly===undefined || input.time_off===undefined))throw new HTTPError({statusCode:400,message:'Set timezone, weekly hours and time off together the first time hours are saved'})
@@ -127,7 +127,7 @@ export async function writeMemberScheduling(actor: SchedulingActor, memberId: st
  SELECT ?,?,?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM member WHERE id=? AND organizationId=?)
   AND (? IS NULL OR EXISTS(SELECT 1 FROM member_scheduling WHERE member_id=? AND organization_id=? AND updated_at=?))
  ON CONFLICT(member_id) DO UPDATE SET ${updates.map(field=>`${field}=excluded.${field}`).join(',')}
- WHERE member_scheduling.organization_id=excluded.organization_id AND member_scheduling.updated_at IS ?`,params:[memberId,actor.organizationId,timezone,weekly===null?null:JSON.stringify(weekly),timeOff===null?null:JSON.stringify(timeOff),publicName,input.public_photo_url===undefined?current?.public_photo_url??null:input.public_photo_url,input.public_bio===undefined?current?.public_bio??null:input.public_bio,Number(approved),now,actor.userId,memberId,actor.organizationId,input.expected_updated_at,memberId,actor.organizationId,input.expected_updated_at,input.expected_updated_at]},
+ WHERE member_scheduling.organization_id=excluded.organization_id AND member_scheduling.updated_at IS ?`,params:[memberId,actor.organizationId,timezone,weekly===null?null:JSON.stringify(weekly),timeOff===null?null:JSON.stringify(timeOff),publicName,input.public_photo_url===undefined?current?.public_photo_url??null:input.public_photo_url,input.public_bio===undefined?current?.public_bio??null:input.public_bio,Number(approved),now,actor.userId,memberId,actor.organizationId,input.updated_at,memberId,actor.organizationId,input.updated_at,input.updated_at]},
  {query:"SELECT CASE WHEN changes() = 1 THEN NULL ELSE json('Member settings changed; reload before saving') END"},
  publicResourceCacheInvalidationQuery(actor.organizationId,'member-profile')],{operation:'Save member settings'}).catch(error=>{
   if(error instanceof Error && /malformed JSON/.test(error.message))throw new HTTPError({statusCode:409,message:'Member settings changed; reload before saving',cause:error})
@@ -218,7 +218,7 @@ export async function memberSchedulingList(actor: SchedulingActor) {
  const {roleAllows}=await import('~/server/utils/member-access')
  const admin=await roleAllows({...membership,permissions:{members:['read']}})
  const members=await queryAll<{id:string;name:string;image:string|null;is_self:number}>(actor.env.DB,`SELECT m.id,${MEMBER_NAME_SQL} name,u.image,m.userId=? AS is_self FROM member m JOIN user u ON u.id=m.userId LEFT JOIN member_scheduling ms ON ms.member_id=m.id AND ms.organization_id=m.organizationId WHERE m.organizationId=? AND (?=1 OR m.userId=?)`,[actor.userId,actor.organizationId,Number(admin),actor.userId])
- return { members: await Promise.all(members.map(async ({is_self,...member})=>({...member,self:Boolean(is_self),scheduling:await readMemberScheduling(actor.env.DB,actor.env,actor.organizationId,member.id)}))), teams: admin ? await getOrganizationTeamsData(actor.env, actor.organizationId) : [] }
+ return { members: await Promise.all(members.map(async ({is_self,...member})=>({...member,self:Boolean(is_self),scheduling:await readMemberScheduling(actor.env.DB,actor.env,actor.organizationId,member.id)}))) }
 }
 export async function connectPersonalCalendar(actor:SchedulingActor, memberId:string, accountId:string) {
  const member=await requireSchedulingAccess(actor,memberId)

@@ -1,11 +1,11 @@
 import { HTTPError } from 'nitro'
 import { executeBatch, queryAll, queryFirst, type DbClient } from '~/server/db'
-import { ASSIGNED_SERVICE_SQL, assertLocationAccess, assertProductAccess, assignedResponsibilitySql, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
+import { ASSIGNED_SERVICE_SQL, assertLocationAccess, assertProductAccess, locationMemberSql, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import { updateLocation } from '~/server/utils/location-management'
 import { organizationEventQuery } from '~/server/utils/organization-events'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
 import { sessionHeldCapacitySql } from '~/server/utils/availability'
-import { CAPACITY_CONSUMING_SQL, RESERVATION_CAPACITY_CONSUMING_SQL, stayGuestFirstName } from '~/shared/bookings'
+import { CAPACITY_CONSUMING_SQL, stayGuestFirstName } from '~/shared/bookings'
 import { MEMBER_NAME_SQL } from '~/shared/member-scheduling'
 import { closeDates, closureOnDate, datedHours, dateRuns, getDateIntervals, openDates, parseOpeningHours, parseSpecialHours } from '~/shared/reservation-hours'
 import { parsePostalAddress } from '~/utils/postal-address'
@@ -35,7 +35,7 @@ export interface PlaceDay {
   /** Blocked by the host: a location's closure, or every writable session of the offering that day cancelled. */
   closed: boolean
   held: PlaceHold | null
-  /** Reservations on the day, or sessions a guest holds. */
+  /** Table bookings on the day, or sessions a guest holds. */
   booked: number
   /** Sessions no guest holds; a location has none. */
   free: number | null
@@ -59,7 +59,7 @@ export interface Place {
 export interface PlacesCalendar { from: string; to: string; manage: boolean; places: Array<{ place: Place; days: PlaceDay[] }> }
 
 interface LocationRow { id: string; slug: string; title: string; status: string; timezone: string; address: string | null; opening_hours: string | null; special_hours: string | null; updated_at: string }
-interface OfferingRow { id: string; name: string; kind: 'experience' | 'service'; timezone: string; scheduling_mode: string; assigned_member_id: string | null; assigned_team_id: string | null; provider_name: string | null; locations: string | null }
+interface OfferingRow { id: string; name: string; kind: 'experience' | 'service'; timezone: string; scheduling_mode: string; assigned_member_id: string | null; provider_name: string | null; locations: string | null }
 interface SessionRow { id: string; product_id: string; timezone: string; starts_at: string; status: 'scheduled' | 'cancelled'; claimed: number; updated_at: string }
 
 function fail(statusCode: number, message: string, field?: string): never {
@@ -85,11 +85,13 @@ async function listPlaces(db: DbClient, principal: MemberAccessPrincipal, only?:
     SELECT l.id, l.slug, l.title, l.status, l.timezone, l.address, l.opening_hours, l.special_hours, l.updated_at
     FROM business_locations l
     WHERE l.organization_id = ? AND (? IS NULL OR l.id = ?)
-      ${only ? '' : 'AND EXISTS (SELECT 1 FROM location_reservation_configs c WHERE c.organization_id = l.organization_id AND c.location_id = l.id)'}
-      ${everyLocation ? '' : `AND ${assignedResponsibilitySql('l')}`}
-    ORDER BY l.title, l.id`, [organizationId, only?.id ?? null, only?.id ?? null, ...(everyLocation ? [] : [userId, userId])])
+      ${only ? '' : `AND EXISTS (SELECT 1 FROM product_locations pl JOIN products p ON p.id = pl.product_id AND p.organization_id = pl.organization_id
+        JOIN product_booking_configs c ON c.organization_id = p.organization_id AND c.product_id = p.id
+        WHERE pl.organization_id = l.organization_id AND pl.location_id = l.id AND p.kind = 'table')`}
+      ${everyLocation ? '' : `AND ${locationMemberSql('l.organization_id', 'l.id')}`}
+    ORDER BY l.title, l.id`, [organizationId, only?.id ?? null, only?.id ?? null, ...(everyLocation ? [] : [userId])])
   const offerings = only && only.kind !== 'offering' ? [] : await queryAll<OfferingRow>(db, `
-    SELECT p.id, p.name, p.kind, c.scheduling_mode, c.assigned_member_id, c.assigned_team_id,
+    SELECT p.id, p.name, p.kind, c.scheduling_mode, c.assigned_member_id,
            COALESCE((SELECT l.timezone FROM product_locations pl JOIN business_locations l ON l.id = pl.location_id AND l.organization_id = pl.organization_id WHERE pl.organization_id = p.organization_id AND pl.product_id = p.id ORDER BY l.title LIMIT 1),
              (SELECT ms.timezone FROM member_scheduling ms WHERE ms.member_id = c.assigned_member_id AND ms.organization_id = c.organization_id), o.timezone) AS timezone,
            (SELECT ${MEMBER_NAME_SQL} FROM member m JOIN user u ON u.id = m.userId LEFT JOIN member_scheduling ms ON ms.member_id = m.id AND ms.organization_id = m.organizationId WHERE m.id = c.assigned_member_id AND m.organizationId = c.organization_id) AS provider_name,
@@ -97,7 +99,7 @@ async function listPlaces(db: DbClient, principal: MemberAccessPrincipal, only?:
     FROM products p JOIN product_booking_configs c ON c.product_id = p.id AND c.organization_id = p.organization_id JOIN organization o ON o.id = p.organization_id
     WHERE p.organization_id = ? AND p.kind IN ('experience', 'service') AND (? IS NULL OR p.id = ?)
       ${everyOffering ? '' : `AND ${ASSIGNED_SERVICE_SQL}`}
-    ORDER BY p.name, p.id`, [organizationId, only?.id ?? null, only?.id ?? null, ...(everyOffering ? [] : [userId, userId])])
+    ORDER BY p.name, p.id`, [organizationId, only?.id ?? null, only?.id ?? null, ...(everyOffering ? [] : [userId])])
   return { locations, offerings }
 }
 
@@ -128,7 +130,7 @@ function locationDays(row: LocationRow, window: string[], reservations: Map<stri
 function offeringDays(row: OfferingRow, window: string[], sessions: Map<string, SessionRow[]>): PlaceDay[] {
   const provider = row.scheduling_mode === 'provider'
   const first = stayGuestFirstName(row.provider_name)
-  const hoursText = provider ? `Outside ${row.assigned_member_id && first ? `${first}'s` : 'the team\'s'} hours` : 'No session on this day'
+  const hoursText = provider ? `Outside ${first ? `${first}'s` : 'the provider\'s'} hours` : 'No session on this day'
   return window.map((date) => {
     const onDay = sessions.get(date) ?? []
     const booked = onDay.filter(session => session.claimed > 0).length
@@ -161,13 +163,16 @@ async function readSessions(db: DbClient, organizationId: string, productIds: st
   return byProduct
 }
 
-async function readReservations(db: DbClient, organizationId: string, locationIds: string[], from: string, to: string): Promise<Map<string, Map<string, number>>> {
+/** A restaurant's table bookings on each of its days, keyed by location then local date. */
+async function readTableBookings(db: DbClient, organizationId: string, locationIds: string[], from: string, to: string): Promise<Map<string, Map<string, number>>> {
   const byLocation = new Map<string, Map<string, number>>()
   if (!locationIds.length) return byLocation
   const rows = await queryAll<{ location_id: string; timezone: string; starts_at: string }>(db, `
-    SELECT r.location_id, r.timezone, r.starts_at FROM reservations r
-    WHERE r.organization_id = ? AND r.location_id IN (SELECT value FROM json_each(?)) AND ${RESERVATION_CAPACITY_CONSUMING_SQL}
-      AND r.starts_at >= ? AND r.starts_at < ?`, [organizationId, JSON.stringify(locationIds), `${addLocalDays(from, -1)}T00:00:00.000Z`, `${addLocalDays(to, 1)}T00:00:00.000Z`])
+    SELECT s.location_id, s.timezone, s.starts_at FROM bookings b
+      JOIN product_sessions s ON s.id = b.product_session_id AND s.organization_id = b.organization_id
+      JOIN products p ON p.id = b.product_id AND p.organization_id = b.organization_id AND p.kind = 'table'
+    WHERE b.organization_id = ? AND s.location_id IN (SELECT value FROM json_each(?)) AND ${CAPACITY_CONSUMING_SQL}
+      AND s.starts_at >= ? AND s.starts_at < ?`, [organizationId, JSON.stringify(locationIds), `${addLocalDays(from, -1)}T00:00:00.000Z`, `${addLocalDays(to, 1)}T00:00:00.000Z`])
   for (const row of rows) {
     const date = localDateAt(new Date(row.starts_at), row.timezone)
     if (date < from || date >= to) continue
@@ -185,7 +190,7 @@ export async function readPlacesCalendar(db: DbClient, principal: MemberAccessPr
   if (only && !locations.length && !offerings.length) fail(404, 'Place not found')
   const span = dates(from, to)
   const [reservations, sessions, manageLocations, manageOfferings] = await Promise.all([
-    readReservations(db, principal.organizationId, locations.map(location => location.id), from, to),
+    readTableBookings(db, principal.organizationId, locations.map(location => location.id), from, to),
     readSessions(db, principal.organizationId, offerings.map(offering => offering.id), from, to),
     roleAllows({ ...principal, permissions: { locations: ['update'] } }),
     roleAllows({ ...principal, permissions: { products: ['update'] } }),
@@ -208,7 +213,7 @@ export async function readPlacesCalendar(db: DbClient, principal: MemberAccessPr
 export async function setPlaceDates(db: D1Database, principal: MemberAccessPrincipal, input: { kind: string; id: string; body: Record<string, unknown> }): Promise<{ place: Place; days: PlaceDay[] }> {
   const { kind, id, body } = input
   if (kind !== 'location' && kind !== 'offering') fail(404, 'Place not found')
-  const unknown = Object.keys(body).find(key => !['from', 'to', 'weekdays', 'closed', 'expected_updated_at'].includes(key))
+  const unknown = Object.keys(body).find(key => !['from', 'to', 'weekdays', 'closed', 'updated_at'].includes(key))
   if (unknown) fail(400, `${unknown} is not a date setting`, unknown)
   const { from, to } = readWindow({ from: body.from, to: body.to })
   if (typeof body.closed !== 'boolean') fail(400, 'closed must be true or false', 'closed')
@@ -219,7 +224,7 @@ export async function setPlaceDates(db: D1Database, principal: MemberAccessPrinc
     }
     weekdays = body.weekdays as number[]
   }
-  if (body.expected_updated_at !== undefined && typeof body.expected_updated_at !== 'string') fail(400, 'expected_updated_at must be a timestamp', 'expected_updated_at')
+  if (body.updated_at !== undefined && typeof body.updated_at !== 'string') fail(400, 'updated_at must be a timestamp', 'updated_at')
   const last = addLocalDays(to, -1)
   let runs: Array<{ from: string; to: string }>
   try { runs = dateRuns(from, last, weekdays) } catch (cause) { fail(400, cause instanceof Error ? cause.message : 'No date in this range falls on the chosen weekdays', 'weekdays') }
@@ -233,7 +238,7 @@ export async function setPlaceDates(db: D1Database, principal: MemberAccessPrinc
     const special = parseSpecialHours(row.special_hours ? JSON.parse(row.special_hours) : null)
     const result = await updateLocation(db, principal.organizationId, row.id, {
       special_hours: closed ? closeDates(special, from, last, weekdays) : openDates(special, from, last, weekdays),
-      expected_updated_at: typeof body.expected_updated_at === 'string' ? body.expected_updated_at : row.updated_at,
+      updated_at: typeof body.updated_at === 'string' ? body.updated_at : row.updated_at,
     }, principal.userId, principal.env)
     if (result.status >= 400) {
       const data = result.data as { error?: string; code?: string; field?: string }

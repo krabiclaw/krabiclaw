@@ -1,35 +1,35 @@
 <template>
   <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
     <div v-if="!thread" class="py-4" :class="dashboardGutterClass">
-      <UAlert color="error" title="Team conversation could not be loaded" :description="getErrorMessage(error || threadError, 'This conversation is not available to your membership')" :actions="[{ label: 'Reload', color: 'neutral', variant: 'outline', onClick: () => refreshNuxtData(`team-threads:${dashboard.organizationId.value}`) }]" />
+      <UAlert color="error" title="Team conversation could not be loaded" :description="getErrorMessage(error || threadError, 'This conversation is not available to your membership')" :actions="[{ label: 'Reload', color: 'neutral', variant: 'outline', onClick: () => refreshNuxtData(conversationKey) }]" />
     </div>
     <template v-else-if="thread">
       <div v-if="error || threadError" class="py-3" :class="dashboardGutterClass">
         <UAlert color="error" title="Messages could not be loaded" :description="getErrorMessage(error || threadError, 'Team message request failed')" :actions="[{ label: 'Reload', color: 'neutral', variant: 'outline', onClick: () => refresh() }]" />
       </div>
       <div v-if="thread.stay || thread.record || thread.location" class="pb-2 pt-3" :class="dashboardGutterClass">
-        <span v-if="thread.stay" class="text-sm text-muted">{{ thread.stay.homeName }} · {{ thread.stay.checkInDate }} – {{ thread.stay.checkOutDate }}</span>
+        <span v-if="thread.stay" class="text-sm text-muted">{{ thread.stay.name }} · {{ thread.stay.check_in_date }} – {{ thread.stay.check_out_date }}</span>
         <span v-else class="text-sm text-muted">{{ thread.record?.title ?? thread.location?.title }}</span>
         <TaskCard v-if="thread.job" class="mt-3" :task="thread.job" data-testid="team-thread-job" @open="jobOpen = true" />
       </div>
       <div ref="scroller" class="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         <UChatMessages :auto-scroll="{ size: 'sm' }" :ui="{ root: ['gap-0 py-4', dashboardGutterClass] }">
-          <UButton v-if="data?.hasMore" class="mx-auto mb-4" color="neutral" variant="ghost" :loading="loadingMore" @click="loadMore">Earlier messages</UButton>
+          <UButton v-if="data?.has_more" class="mx-auto mb-4" color="neutral" variant="ghost" :loading="loadingMore" @click="loadMore">Earlier messages</UButton>
           <template v-for="(message, index) in messages" :key="message.id">
-            <p v-if="index === 0 || day(messages[index - 1]!.createdAt) !== day(message.createdAt)" class="pb-2 pt-6 text-center text-xs font-medium text-highlighted">{{ day(message.createdAt) }}</p>
+            <p v-if="index === 0 || day(messages[index - 1]!.created_at) !== day(message.created_at)" class="pb-2 pt-6 text-center text-xs font-medium text-highlighted">{{ day(message.created_at) }}</p>
             <div v-if="message.automatic" :id="message.id" :data-team-message="message.id" data-automatic class="mx-auto my-3 max-w-[min(36rem,86%)] rounded-2xl border border-default px-4 py-3 text-sm">
-              <p class="mb-1 text-xs text-muted">Sent automatically · {{ formatClockTime(message.createdAt) }}</p>
+              <p class="mb-1 text-xs text-muted">Sent automatically · {{ formatClockTime(message.created_at) }}</p>
               <p class="whitespace-pre-wrap break-words">{{ message.body }}</p>
             </div>
             <UChatMessage
-              v-else :id="message.id" :data-team-message="message.id" :role="message.senderId === userId ? 'user' : 'assistant'" :side="message.senderId === userId ? 'right' : 'left'" :parts="[]" :avatar="{ src: author(message)?.image ?? undefined, alt: senderName(message) }" :class="startsRun(message, index) ? 'pt-4' : 'pt-1'" :ui="{ header: message.senderId === userId ? 'mb-1 text-xs text-muted' : 'mb-1 ps-12 text-xs text-muted', container: 'items-end gap-2 pb-0', leading: 'mt-0 min-h-0', leadingAvatar: endsRun(message, index) ? undefined : 'invisible', body: 'min-w-0 max-w-[min(36rem,86%)]' }">
-              <template v-if="startsRun(message, index)" #header><span class="font-medium text-highlighted">{{ senderName(message) }}</span><span class="ms-1.5">{{ formatClockTime(message.createdAt) }}</span></template>
+              v-else :id="message.id" :data-team-message="message.id" :role="message.author_user_id === userId ? 'user' : 'assistant'" :side="message.author_user_id === userId ? 'right' : 'left'" :parts="[]" :avatar="{ src: author(message)?.image ?? undefined, alt: senderName(message) }" :class="startsRun(message, index) ? 'pt-4' : 'pt-1'" :ui="{ header: message.author_user_id === userId ? 'mb-1 text-xs text-muted' : 'mb-1 ps-12 text-xs text-muted', container: 'items-end gap-2 pb-0', leading: 'mt-0 min-h-0', leadingAvatar: endsRun(message, index) ? undefined : 'invisible', body: 'min-w-0 max-w-[min(36rem,86%)]' }">
+              <template v-if="startsRun(message, index)" #header><span class="font-medium text-highlighted">{{ senderName(message) }}</span><span class="ms-1.5">{{ formatClockTime(message.created_at) }}</span></template>
               <template #body>
                 <div v-if="message.attachments.length" class="mb-1 grid max-w-sm gap-1" :class="message.attachments.length > 1 ? 'grid-cols-2' : 'grid-cols-1'">
                   <button v-for="(photo, at) in message.attachments" :key="photo.id" type="button" :aria-label="`Open photo ${at + 1} from ${senderName(message)}`" class="overflow-hidden rounded-2xl bg-elevated focus-visible:ring-2 focus-visible:ring-primary" @click="viewer = { photos: message.attachments, at }"><img :src="photo.url" :width="photo.width ?? undefined" :height="photo.height ?? undefined" alt="" class="size-full max-h-80 object-cover" :class="message.attachments.length > 1 ? 'aspect-square' : undefined" loading="lazy"></button>
                 </div>
                 <p v-if="message.body" class="whitespace-pre-wrap break-words rounded-2xl bg-elevated px-4 py-3 text-base leading-normal">{{ message.body }}</p>
-                <UButton v-if="message.senderId !== userId" color="neutral" variant="link" size="xs" class="mt-1 p-0 text-muted" @click="reportError = null; reporting = message">Report</UButton>
+                <UButton v-if="message.author_user_id !== userId" color="neutral" variant="link" size="xs" class="mt-1 p-0 text-muted" @click="reportError = null; reporting = message">Report</UButton>
                 <div v-if="failedDeliveries(message).length" class="mt-1 text-xs text-error" data-team-delivery-failure>
                   <p>Message saved. {{ failedDeliveries(message).length === 1 ? 'A notification failed.' : `${failedDeliveries(message).length} notifications failed.` }}</p>
                   <UCollapsible v-if="failedDeliveries(message).some(delivery => delivery.error)">
@@ -75,17 +75,18 @@ const session = authClient.useSession()
 const userId = computed(() => session.value.data?.user.id)
 const { locale } = useI18n()
 const path = computed(() => `/api/dashboard/team/threads/${encodeURIComponent(props.threadId)}`)
+const conversationKey = `team-conversation:${dashboard.organizationId.value}:${props.threadId}`
 let loadedCount = 20
-let historyAnchor: { createdAt: string; id: string } | null = null
+let historyAnchor: { created_at: string; id: string } | null = null
 const key = `team-messages:${dashboard.organizationId.value}:${props.threadId}`
 // A reconnect re-reads the loaded history window, including arrivals beyond one page.
 const { data, pending, error, refresh } = await useAsyncData(key, async (_app, { signal }) => {
   let page = await api(`${path.value}/messages`, { query: { limit: Math.min(100, loadedCount) }, signal, validate: isTeamMessagesResponse })
-  const beforeAnchor = (oldest: TeamMessage) => historyAnchor && (oldest.createdAt > historyAnchor.createdAt || oldest.createdAt === historyAnchor.createdAt && oldest.id > historyAnchor.id)
-  while (page.hasMore && (page.messages.length < loadedCount || beforeAnchor(page.messages.at(-1)!))) {
+  const beforeAnchor = (oldest: TeamMessage) => historyAnchor && (oldest.created_at > historyAnchor.created_at || oldest.created_at === historyAnchor.created_at && oldest.id > historyAnchor.id)
+  while (page.has_more && (page.messages.length < loadedCount || beforeAnchor(page.messages.at(-1)!))) {
     const oldest = page.messages.at(-1)!
-    const older = await api(`${path.value}/messages`, { query: { limit: Math.min(100, Math.max(20, loadedCount - page.messages.length)), before: oldest.createdAt, beforeId: oldest.id }, signal, validate: isTeamMessagesResponse })
-    page = { messages: [...page.messages, ...older.messages], hasMore: older.hasMore }
+    const older = await api(`${path.value}/messages`, { query: { limit: Math.min(100, Math.max(20, loadedCount - page.messages.length)), before: oldest.created_at, before_id: oldest.id }, signal, validate: isTeamMessagesResponse })
+    page = { messages: [...page.messages, ...older.messages], has_more: older.has_more }
   }
   return page
 })
@@ -100,21 +101,21 @@ const viewer = ref<MessagePhotoViewerState | null>(null)
 const sending = ref(false)
 const attempt = ref<{ key: string; body: string; photos: MessagePhotoDraft[] } | null>(null)
 const scroller = useTemplateRef<HTMLElement>('scroller')
-function author(message: TeamMessage) { return props.thread?.participants.find(member => member.id === message.senderId) }
-function senderName(message: TeamMessage) { return message.automatic ? 'Sent automatically' : message.senderId === userId.value ? 'You' : author(message)?.name ?? 'Former member' }
+function author(message: TeamMessage) { return props.thread?.participants.find(member => member.id === message.author_user_id) }
+function senderName(message: TeamMessage) { return message.automatic ? 'Sent automatically' : message.author_user_id === userId.value ? 'You' : author(message)?.name ?? 'Former member' }
 // The job strip opens the task sheet; closing the job there posts the person's own message here.
 const jobOpen = ref(false)
 async function jobChanged() {
-  await refreshNuxtData(`team-threads:${dashboard.organizationId.value}`)
+  await refreshNuxtData(conversationKey)
   await refresh()
 }
 function failedDeliveries(message: TeamMessage) { return message.deliveries.filter(delivery => delivery.status === 'failed') }
 function day(at: string) { return new Intl.DateTimeFormat(locale.value, { dateStyle: 'medium' }).format(new Date(at)) }
 function formatClockTime(at: string) { return new Intl.DateTimeFormat(locale.value, { hour: 'numeric', minute: '2-digit' }).format(new Date(at)) }
-function startsRun(message: TeamMessage, index: number) { const before = messages.value[index - 1]; return !before || before.automatic || before.senderId !== message.senderId || day(before.createdAt) !== day(message.createdAt) }
-function endsRun(message: TeamMessage, index: number) { const after = messages.value[index + 1]; return !after || after.automatic || after.senderId !== message.senderId || day(after.createdAt) !== day(message.createdAt) }
+function startsRun(message: TeamMessage, index: number) { const before = messages.value[index - 1]; return !before || before.automatic || before.author_user_id !== message.author_user_id || day(before.created_at) !== day(message.created_at) }
+function endsRun(message: TeamMessage, index: number) { const after = messages.value[index + 1]; return !after || after.automatic || after.author_user_id !== message.author_user_id || day(after.created_at) !== day(message.created_at) }
 async function loadMore() {
-  if (loadingMore.value || pending.value || !data.value?.hasMore) return
+  if (loadingMore.value || pending.value || !data.value?.has_more) return
   loadingMore.value = true
   pageError.value = ''
   const previousCount = loadedCount
@@ -122,9 +123,9 @@ async function loadMore() {
   const before = data.value.messages.at(-1)!
   const height = scroller.value?.scrollHeight ?? 0
   try {
-    const older = await api(`${path.value}/messages`, { query: { limit: 20, before: before.createdAt, beforeId: before.id }, validate: isTeamMessagesResponse })
+    const older = await api(`${path.value}/messages`, { query: { limit: 20, before: before.created_at, before_id: before.id }, validate: isTeamMessagesResponse })
     const oldest = older.messages.at(-1) ?? before
-    historyAnchor = { id: oldest.id, createdAt: oldest.createdAt }
+    historyAnchor = { id: oldest.id, created_at: oldest.created_at }
     loadedCount = previousRows + older.messages.length
     // Reconcile from the top to the requested cursor; a concurrent arrival cannot leave a gap.
     await refresh()
@@ -146,7 +147,7 @@ async function report(reason: string) {
   reportSaving.value = true
   reportError.value = null
   try {
-    await api(`${path.value}/messages/${encodeURIComponent(message.id)}/report`, { method: 'POST', body: { reason, idempotencyKey: reportKeys.get(message.id) }, validate: isReportResponse })
+    await api(`${path.value}/messages/${encodeURIComponent(message.id)}/report`, { method: 'POST', body: { reason, idempotency_key: reportKeys.get(message.id) }, validate: isReportResponse })
     reportKeys.delete(message.id)
     reporting.value = null
   } catch (error) { reportError.value = getErrorMessage(error, 'The report could not be sent') } finally { reportSaving.value = false }
@@ -164,11 +165,10 @@ async function send() {
   sending.value = true
   actionError.value = ''
   try {
-    await api(`${path.value}/messages`, { method: 'POST', body: selected.length ? messageReplyForm(body, selected, current.key) : { body, idempotencyKey: current.key }, validate: isTeamMessageResponse })
+    await api(`${path.value}/messages`, { method: 'POST', body: selected.length ? messageReplyForm(body, selected, current.key) : { body, idempotency_key: current.key }, validate: isTeamMessageResponse })
     // Clear only the exact committed draft; a failed receipt/reconciliation keeps the keyed retry.
     await refresh()
     if (error.value) throw error.value
-    await refreshNuxtData(`team-threads:${dashboard.organizationId.value}`)
     draft.value = ''
     photos.value = []
     attempt.value = null
@@ -177,20 +177,27 @@ async function send() {
   } catch (error) { actionError.value = getErrorMessage(error, 'Your message could not be sent') }
   finally { sending.value = false }
 }
+/*
+  Opening the conversation reads it through to the newest message shown, while
+  the page is visible; the read GET wrote nothing. A conversation with only
+  this member's own messages has nothing to read.
+*/
 const visibility = useDocumentVisibility()
 let readThrough = ''
 let markingRead = false
 async function markRead() {
   if (!import.meta.client || visibility.value !== 'visible' || !data.value || markingRead) return
   const latest = data.value.messages[0]?.id ?? ''
-  if (!latest || latest === readThrough) return
+  if (!latest || latest === readThrough || !data.value.messages.some(message => message.automatic || message.author_user_id !== userId.value)) return
   markingRead = true
   try {
-    await api(`${path.value}/read`, { method: 'POST', validate: (value): value is { status: 'read'; lastReadAt: string } => isRecord(value) && value.status === 'read' && typeof value.lastReadAt === 'string' })
+    await api(`/api/dashboard/organizations/${encodeURIComponent(dashboard.organizationId.value ?? '')}/conversations/${encodeURIComponent(props.threadId)}/read`, {
+      method: 'POST', body: { message_id: latest },
+      validate: (value): value is { read: true; last_read_message_id: string } => isRecord(value) && value.read === true && typeof value.last_read_message_id === 'string',
+    })
     readThrough = latest
     readError.value = ''
-    await refreshNuxtData(`team-threads:${dashboard.organizationId.value}`)
-    refreshNotificationUnreadCounts()
+    refreshConversationUnreadCount()
   } catch (error) { readError.value = getErrorMessage(error, 'Read state could not be saved') }
   finally {
     markingRead = false
@@ -199,6 +206,8 @@ async function markRead() {
 }
 watch([data, visibility], markRead, { immediate: true })
 const realtime = useDashboardInvalidations()
-watch(realtime.event, event => { if (event?.type === 'team_thread.changed' && event.organizationId === dashboard.organizationId.value && event.teamThreadId === props.threadId) void refresh() })
+watch(realtime.event, event => {
+  if ((event?.type === 'MESSAGE_CREATE' || event?.type === 'MESSAGE_UPDATE') && event.organization_id === dashboard.organizationId.value && event.conversation_id === props.threadId) void refresh()
+})
 watch(realtime.connectionEpoch, epoch => { if (epoch > 0) void refresh() })
 </script>

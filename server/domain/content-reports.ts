@@ -9,16 +9,17 @@ import { renderNotificationEmail } from '~/server/emails/render'
 import { contentReportedMessage } from '~/server/notifications/events'
 import { getPlatformOrganization } from '~/server/utils/platform-organization'
 import { teamMessageRemovalQueries } from '~/server/domain/team-messages'
-import { publishDashboardInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
+import { publishConversationEvent, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 
 /**
- * Members report a guest conversation or a team message, and block a guest,
+ * Members report a guest conversation or a message in a team conversation, and block a guest,
  * for App Store guideline 1.2. Every report is emailed to the KrabiClaw
  * operator addresses and waits in Platform reports, where staff remove the
  * content and ban its author's account, or dismiss it, within 24 hours.
  */
 
-export type ContentReportSubject = 'guest_thread' | 'team_message'
+/** A guest conversation, or one message of a team conversation. */
+export type ContentReportSubject = 'conversation' | 'message'
 export type ContentReportEnv = Parameters<typeof sendEmail>[0] & DashboardNotificationLinkEnv & { PLATFORM_OWNER_EMAILS?: string }
 export type ContentReportStatus = 'open' | 'removed' | 'dismissed'
 
@@ -28,8 +29,8 @@ export interface ContentReport {
   organizationName: string
   organizationSlug: string
   subject: ContentReportSubject
-  requestId: string | null
-  teamMessageId: string | null
+  conversationId: string | null
+  messageId: string | null
   reporter: { id: string; name: string; email: string } | null
   author: { id: string; name: string; email: string; banned: boolean } | null
   reason: string
@@ -60,17 +61,17 @@ export function contentReportInsert(report: {
   organizationId: string
   reporterUserId: string
   subject: ContentReportSubject
-  requestId: string | null
-  teamMessageId: string | null
+  conversationId: string | null
+  messageId: string | null
   authorUserId: string | null
   reason: string
   excerpt: string
   blocked: boolean
 }): BatchQuery {
   return {
-    query: `INSERT INTO content_reports (id, organization_id, reporter_user_id, subject, request_id, team_message_id, author_user_id, reason, excerpt, blocked, status)
+    query: `INSERT INTO content_reports (id, organization_id, reporter_user_id, subject, conversation_id, message_id, author_user_id, reason, excerpt, blocked, status)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open') ON CONFLICT (id) DO NOTHING`,
-    params: [report.id, report.organizationId, report.reporterUserId, report.subject, report.requestId, report.teamMessageId,
+    params: [report.id, report.organizationId, report.reporterUserId, report.subject, report.conversationId, report.messageId,
       report.authorUserId, report.reason, report.excerpt, report.blocked ? 1 : 0],
   }
 }
@@ -81,30 +82,22 @@ export function contentReportInsert(report: {
  * rather than answered with the report it first filed.
  */
 export async function assertSameReport(db: DbClient, id: string, expected: {
-  subject: ContentReportSubject; requestId: string | null; teamMessageId: string | null; reason: string; blocked: boolean
+  subject: ContentReportSubject; conversationId: string | null; messageId: string | null; reason: string; blocked: boolean
 }): Promise<void> {
-  const filed = await queryFirst<{ subject: string; request_id: string | null; team_message_id: string | null; reason: string; blocked: number }>(db,
-    'SELECT subject, request_id, team_message_id, reason, blocked FROM content_reports WHERE id = ?', [id])
+  const filed = await queryFirst<{ subject: string; conversation_id: string | null; message_id: string | null; reason: string; blocked: number }>(db,
+    'SELECT subject, conversation_id, message_id, reason, blocked FROM content_reports WHERE id = ?', [id])
   if (!filed) fail(500, 'CONTENT_REPORT_NOT_WRITTEN', 'The report was not saved', 'reportId')
-  if (filed.subject !== expected.subject || filed.request_id !== expected.requestId || filed.team_message_id !== expected.teamMessageId
+  if (filed.subject !== expected.subject || filed.conversation_id !== expected.conversationId || filed.message_id !== expected.messageId
     || filed.reason !== expected.reason || (filed.blocked === 1) !== expected.blocked) {
     fail(409, 'IDEMPOTENCY_KEY_REUSED', 'This key already filed a different report. Send a new key.', 'idempotencyKey')
   }
 }
 
-/**
- * The guest's latest words in a conversation: what a report of it is about. A
- * contact request's first words are the request itself, not a message entry.
- */
-export async function guestThreadExcerpt(db: DbClient, requestId: string): Promise<string> {
+/** The guest's latest words in a conversation: what a report of it is about. */
+export async function guestThreadExcerpt(db: DbClient, conversationId: string): Promise<string> {
   const rows = await queryAll<{ body: string }>(db, `
-    SELECT body FROM (
-      SELECT body, sequence FROM activity_entries
-       WHERE request_id = ? AND kind = 'message' AND actor_kind = 'guest' AND body IS NOT NULL AND trim(body) <> ''
-      UNION ALL
-      SELECT json_extract(payload_json, '$.message') AS body, 0 AS sequence FROM requests
-       WHERE id = ? AND kind = 'contact' AND trim(COALESCE(json_extract(payload_json, '$.message'), '')) <> ''
-    ) ORDER BY sequence DESC LIMIT 3`, [requestId, requestId])
+    SELECT body FROM messages WHERE conversation_id = ? AND author_kind = 'guest' AND body IS NOT NULL AND trim(body) <> ''
+     ORDER BY sequence DESC LIMIT 3`, [conversationId])
   return rows.map(row => row.body).reverse().join('\n\n').slice(0, 2000) || 'The guest has sent no text.'
 }
 
@@ -119,7 +112,7 @@ const REPORT_SELECT = `
 
 interface ReportRow {
   id: string; organization_id: string; organization_name: string; organization_slug: string
-  subject: ContentReportSubject; request_id: string | null; team_message_id: string | null
+  subject: ContentReportSubject; conversation_id: string | null; message_id: string | null
   reporter_user_id: string | null; reporter_name: string | null; reporter_email: string | null
   author_user_id: string | null; author_name: string | null; author_email: string | null; author_banned: number | null
   reason: string; excerpt: string; blocked: number; status: ContentReportStatus; resolved_at: string | null; created_at: string
@@ -132,8 +125,8 @@ function toReport(row: ReportRow): ContentReport {
     organizationName: row.organization_name,
     organizationSlug: row.organization_slug,
     subject: row.subject,
-    requestId: row.request_id,
-    teamMessageId: row.team_message_id,
+    conversationId: row.conversation_id,
+    messageId: row.message_id,
     reporter: row.reporter_user_id ? { id: row.reporter_user_id, name: row.reporter_name ?? '', email: row.reporter_email ?? '' } : null,
     author: row.author_user_id ? { id: row.author_user_id, name: row.author_name ?? '', email: row.author_email ?? '', banned: row.author_banned === 1 } : null,
     reason: row.reason,
@@ -216,17 +209,15 @@ export async function resolveContentReport(env: CloudflareEnv & GuestInboxPublic
   if ((claimed?.meta?.changes ?? 0) !== 1) fail(409, 'CONTENT_REPORT_RESOLVED', 'This report has already been decided', 'reportId')
   if (input.decision === 'dismiss') return await readReport(db, report.id)
 
-  const message = report.teamMessageId
-    ? await queryFirst<{ thread_id: string }>(db, 'SELECT thread_id FROM team_messages WHERE organization_id = ? AND id = ?', [report.organizationId, report.teamMessageId])
-    : null
-  const thread = report.requestId
-    ? await queryFirst<{ location_id: string | null }>(db, 'SELECT location_id FROM requests WHERE organization_id = ? AND id = ?', [report.organizationId, report.requestId])
-    : null
-  const removal: BatchQuery[] = report.subject === 'team_message'
-    ? report.teamMessageId
-      ? teamMessageRemovalQueries(report.organizationId, report.teamMessageId)
+  // The conversation the removal changes: the message's, or the blocked guest's.
+  const changed = report.messageId
+    ? (await queryFirst<{ conversation_id: string }>(db, 'SELECT conversation_id FROM messages WHERE organization_id = ? AND id = ?', [report.organizationId, report.messageId]))?.conversation_id ?? null
+    : report.conversationId
+  const removal: BatchQuery[] = report.subject === 'message'
+    ? report.messageId
+      ? teamMessageRemovalQueries(report.organizationId, report.messageId)
       : []
-    : [{ query: 'UPDATE requests SET blocked_at = COALESCE(blocked_at, ?) WHERE organization_id = ? AND id = ?', params: [now, report.organizationId, report.requestId] }]
+    : [{ query: 'UPDATE conversations SET blocked_at = COALESCE(blocked_at, ?) WHERE organization_id = ? AND id = ?', params: [now, report.organizationId, report.conversationId] }]
   try {
     // Removal is idempotent and the ban is skipped once it holds, so reopening
     // the report lets staff retry the whole decision.
@@ -245,12 +236,6 @@ export async function resolveContentReport(env: CloudflareEnv & GuestInboxPublic
     throw cause
   }
   // Open inboxes drop the removed message or the blocked conversation now.
-  const occurredAt = new Date().toISOString()
-  if (message) {
-    await publishDashboardInvalidation(env, { eventId: crypto.randomUUID(), type: 'team_thread.changed', organizationId: report.organizationId, teamThreadId: message.thread_id, occurredAt })
-  }
-  if (report.requestId && thread) {
-    await publishDashboardInvalidation(env, { eventId: crypto.randomUUID(), type: 'thread.changed', organizationId: report.organizationId, locationId: thread.location_id, threadId: report.requestId, occurredAt })
-  }
+  if (changed) await publishConversationEvent(env, db, { conversationId: changed, type: 'MESSAGE_UPDATE' })
   return await readReport(db, report.id)
 }

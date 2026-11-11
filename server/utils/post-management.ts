@@ -398,7 +398,7 @@ export async function createPost(
 }
 
 /**
- * Changes what the caller names. `expected_updated_at` is the caller's own
+ * Changes what the caller names. `updated_at` is the caller's own
  * token; nothing reads a fresh one on its behalf. Editing the words, the call
  * to action or the media marks the post as authored (`manual`).
  */
@@ -434,7 +434,7 @@ export async function updatePost(
   if (data.location_id !== undefined) changes.location_id = data.location_id
   if (data.call_to_action) changes.metadata = { call_to_action: data.call_to_action }
   await updateContentDocument(db, postId, {
-    expected_updated_at: input.expectedUpdatedAt, changes,
+    updated_at: input.expectedUpdatedAt, changes,
     additionalQueriesAfter: [
       // Removing the call to action removes the key; json_set would store a JSON null.
       ...(data.call_to_action === null ? [{ query: "UPDATE content_documents SET metadata_json = json_remove(metadata_json, '$.call_to_action') WHERE id = ? AND organization_id = ?", params: [postId, organizationId] }] : []),

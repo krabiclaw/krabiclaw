@@ -5,7 +5,7 @@ import { Miniflare } from 'miniflare'
 
 const NOW = '2026-09-27T00:00:00.000Z'
 
-/** One tenant's guest graph: a booked session, a reserved table, and the threads, review request, review and product page that hang off them. */
+/** One tenant's guest graph: a booked session, a booked table, and the threads, review request, review and product page that hang off them. */
 function tenantGraph(org: string): string[] {
   const location = `${org}-location`
   const product = `${org}-product`
@@ -25,18 +25,24 @@ function tenantGraph(org: string): string[] {
     `INSERT INTO products (kind, id,organization_id,name,slug,created_by,updated_by) VALUES ('experience', '${product}','${org}','Class','class','t','t')`,
     `INSERT INTO product_variants (id,organization_id,product_id,name,created_by,updated_by) VALUES ('${variant}','${org}','${product}','Standard','t','t')`,
     `INSERT INTO product_locations (organization_id,product_id,location_id,active,published,created_by,updated_by) VALUES ('${org}','${product}','${location}',1,1,'t','t')`,
-    `INSERT INTO product_booking_configs (product_id,organization_id,duration_minutes,default_capacity,scheduling_mode,created_by,updated_by) VALUES ('${product}','${org}',60,4,'business','t','t')`,
+    `INSERT INTO product_booking_configs (product_id,organization_id,unit,duration_minutes,default_capacity,scheduling_mode,created_by,updated_by) VALUES ('${product}','${org}','slot',60,4,'business','t','t')`,
     `INSERT INTO product_availability_rules (id,organization_id,product_id,location_id,timezone,weekday,start_time,created_by,updated_by) VALUES ('${rule}','${org}','${product}','${location}','Asia/Bangkok',1,'10:00','t','t')`,
     `INSERT INTO product_sessions (id,organization_id,product_id,location_id,availability_rule_id,timezone,starts_at,ends_at,capacity,status,created_by,updated_by)
       VALUES ('${session}','${org}','${product}','${location}','${rule}','Asia/Bangkok','2099-01-05T03:00:00.000Z','2099-01-05T04:00:00.000Z',4,'scheduled','t','t')`,
-    `INSERT INTO location_reservation_configs (location_id,organization_id,slot_capacity,created_by,updated_by) VALUES ('${location}','${org}',2,'t','t')`,
-    `INSERT INTO requests (id,kind,organization_id,location_id,user_id,payload_json,created_at,updated_at) VALUES ('${bookingThread}','booking','${org}','${location}','${guest}',${payload},'${NOW}','${NOW}')`,
-    `INSERT INTO requests (id,kind,organization_id,location_id,user_id,payload_json,created_at,updated_at) VALUES ('${reservationThread}','reservation','${org}','${location}','${guest}',${payload},'${NOW}','${NOW}')`,
-    `INSERT INTO bookings (id,organization_id,product_id,product_session_id,product_variant_id,user_id,request_id,party_size,status) VALUES ('${org}-booking','${org}','${product}','${session}','${variant}','${guest}','${bookingThread}',1,'confirmed')`,
-    `INSERT INTO reservations (id,organization_id,location_id,user_id,request_id,timezone,starts_at,ends_at,party_size,status) VALUES ('${org}-reservation','${org}','${location}','${guest}','${reservationThread}','Asia/Bangkok','2099-01-06T09:00:00.000Z','2099-01-06T11:00:00.000Z',2,'confirmed')`,
-    `INSERT INTO review_requests (id,organization_id,location_id,user_id,booking_type,booking_id,token_hash,expires_at) VALUES ('${org}-review-request','${org}','${location}','${guest}','booking','${bookingThread}','${org}-token','2099-02-01T00:00:00.000Z')`,
-    `INSERT INTO reviews (id,organization_id,location_id,user_id,review_request_id,booking_id,booking_type,product_id,rating,status) VALUES ('${org}-review','${org}','${location}','${guest}','${org}-review-request','${bookingThread}','booking','${product}',5,'published')`,
-    `UPDATE requests SET review_id = '${org}-review' WHERE id = '${bookingThread}'`,
+    `INSERT INTO products (kind, id,organization_id,name,slug,created_by,updated_by) VALUES ('table', '${org}-tables','${org}','Tables','tables','t','t')`,
+    `INSERT INTO product_variants (id,organization_id,product_id,name,created_by,updated_by) VALUES ('${org}-table','${org}','${org}-tables','Table','t','t')`,
+    `INSERT INTO product_locations (organization_id,product_id,location_id,active,published,created_by,updated_by) VALUES ('${org}','${org}-tables','${location}',1,1,'t','t')`,
+    `INSERT INTO product_booking_configs (product_id,organization_id,unit,duration_minutes,default_capacity,scheduling_mode,payment_basis,assigned_member_id,created_by,updated_by) VALUES ('${org}-tables','${org}','slot',120,2,'business','per_booking','${org}-member','t','t')`,
+    `INSERT INTO product_sessions (id,organization_id,product_id,location_id,timezone,starts_at,ends_at,capacity,status,created_by,updated_by)
+      VALUES ('${org}-seating','${org}','${org}-tables','${location}','Asia/Bangkok','2099-01-06T09:00:00.000Z','2099-01-06T11:00:00.000Z',2,'scheduled','t','t')`,
+    `INSERT INTO bookings (id,organization_id,product_id,product_session_id,product_variant_id,location_id,starts_at,ends_at,timezone,user_id,party_size,policy_json,status) VALUES ('${org}-booking','${org}','${product}','${session}','${variant}','${location}','2099-01-05T03:00:00.000Z','2099-01-05T04:00:00.000Z','Asia/Bangkok','${guest}',1,'{"advance_notice_minutes":null,"party_size_min":null,"party_size_max":null,"minimum_guest_age":null,"accessibility_contact_required":false,"payment":null,"cancellation":null}','confirmed')`,
+    `INSERT INTO bookings (id,organization_id,product_id,product_session_id,product_variant_id,location_id,starts_at,ends_at,timezone,user_id,party_size,policy_json,status) VALUES ('${org}-reservation','${org}','${org}-tables','${org}-seating','${org}-table','${location}','2099-01-06T09:00:00.000Z','2099-01-06T11:00:00.000Z','Asia/Bangkok','${guest}',2,'{"advance_notice_minutes":null,"party_size_min":null,"party_size_max":null,"minimum_guest_age":null,"accessibility_contact_required":false,"payment":null,"cancellation":null}','confirmed')`,
+    `INSERT INTO review_requests (id,organization_id,location_id,user_id,booking_id,token_hash,expires_at) VALUES ('${org}-review-request','${org}','${location}','${guest}','${org}-booking','${org}-token','2099-02-01T00:00:00.000Z')`,
+    `INSERT INTO reviews (id,organization_id,location_id,user_id,booking_id,product_id,rating,status) VALUES ('${org}-review','${org}','${location}','${guest}','${org}-booking','${product}',5,'published')`,
+    `INSERT INTO conversations (id,kind,organization_id,location_id,booking_id,user_id,payload_json,last_message_at,created_at) VALUES ('${bookingThread}','booking','${org}','${location}','${org}-booking','${guest}',${payload},'${NOW}','${NOW}')`,
+    `INSERT INTO conversations (id,kind,organization_id,location_id,booking_id,user_id,payload_json,last_message_at,created_at) VALUES ('${reservationThread}','booking','${org}','${location}','${org}-reservation','${guest}',${payload},'${NOW}','${NOW}')`,
+    `INSERT INTO messages (id,organization_id,conversation_id,sequence,author_kind,author_user_id,channel,body,dedupe_key,occurred_at,created_at) VALUES ('${org}-guest-message','${org}','${bookingThread}',1,'guest','${guest}','web','Hello','${org}-guest-message','${NOW}','${NOW}')`,
+    `INSERT INTO conversation_participants (conversation_id,organization_id,user_id,last_read_message_id,created_at) VALUES ('${bookingThread}','${org}','${guest}','${org}-guest-message','${NOW}')`,
     `INSERT INTO content_documents (id,organization_id,kind,row_role,locale,product_id,title,path,metadata_json) VALUES ('${org}-product-page','${org}','page','root','en','${product}','Class','/class','{"page_type":"custom"}')`,
   ]
 }
@@ -51,16 +57,21 @@ function lodgingGraph(org: string): string[] {
   return [
     `INSERT INTO products (kind, id,organization_id,name,slug,created_by,updated_by) VALUES ('stay', '${home}','${org}','Cabin','cabin','t','t')`,
     `INSERT INTO product_locations (organization_id,product_id,location_id,active,published,created_by,updated_by) VALUES ('${org}','${home}','${location}',1,1,'t','t')`,
-    `INSERT INTO product_stay_configs (product_id,organization_id,location_id,check_in_time,check_out_time,max_guests,min_nights,assigned_member_id,created_by,updated_by) VALUES ('${home}','${org}','${location}','15:00','11:00',4,1,'${member}','t','t')`,
-    `INSERT INTO stays (id,organization_id,product_id,channel,owner,status,check_in_date,check_out_date,adults,guest_name,total_minor,currency) VALUES ('${stay}','${org}','${home}','direct','app','confirmed','2099-01-05','2099-01-07',2,'Ana',30000,'USD')`,
+    `INSERT INTO product_stay_configs (product_id,organization_id,location_id,created_by,updated_by) VALUES ('${home}','${org}','${location}','t','t')`,
+    `INSERT INTO product_booking_configs (product_id,organization_id,unit,scheduling_mode,online_payment_required,check_in_time,check_out_time,default_capacity,min_nights,assigned_member_id,created_by,updated_by) VALUES ('${home}','${org}','nights','business',1,'15:00','11:00',4,1,'${member}','t','t')`,
+    `INSERT INTO product_variants (id,organization_id,product_id,name,created_by,updated_by) VALUES ('${home}-night','${org}','${home}','Night','t','t')`,
+    `INSERT INTO bookings (id,organization_id,user_id,product_id,product_variant_id,location_id,starts_at,ends_at,timezone,party_size,adults,children,infants,channel,owner,status,policy_json,total_minor,currency)
+      VALUES ('${stay}','${org}','${org}-guest','${home}','${home}-night','${location}','2099-01-05T08:00:00.000Z','2099-01-07T04:00:00.000Z','Asia/Bangkok',2,2,0,0,'direct','app','confirmed','{"advance_notice_minutes":null,"party_size_min":null,"party_size_max":null,"minimum_guest_age":null,"accessibility_contact_required":false,"payment":null,"cancellation":null}',30000,'USD')`,
+    `INSERT INTO conversations (id,kind,organization_id,location_id,booking_id,user_id,payload_json,last_message_at,created_at) VALUES ('${stay}-thread','booking','${org}','${location}','${stay}','${org}-guest','{"guest":{"name":"Ana","email":null,"phone":null},"ip_hash":null,"cancellation":{"token_hash":null,"expires_at":null,"used_at":null}}','${NOW}','${NOW}')`,
+    `INSERT INTO stay_nights (organization_id,product_id,date,booking_id) VALUES ('${org}','${home}','2099-01-05','${stay}'),('${org}','${home}','2099-01-06','${stay}')`,
     `INSERT INTO channex_connections (organization_id,status,group_id) VALUES ('${org}','not_connected','${org}-group')`,
     `INSERT INTO product_channel_mappings (organization_id,product_id,provider,listing_id,channel_id,import_stage) VALUES ('${org}','${home}','channex','${org}-listing','${org}-channel','property')`,
     `INSERT INTO message_templates (id,organization_id,title,body,version,created_at,updated_at) VALUES ('${org}-template','${org}','Welcome','Hello',1,'${NOW}','${NOW}')`,
-    `INSERT INTO scheduled_guest_messages (id,organization_id,product_id,subject_type,subject_id,template_id,template_title,template_version,body,due_at,timezone,status,created_at,updated_at)
-      VALUES ('${org}-scheduled','${org}','${home}','stay','${stay}','${org}-template','Welcome',1,'Hello','2099-01-05T08:00:00.000Z','Asia/Bangkok','pending','${NOW}','${NOW}')`,
-    `INSERT INTO team_threads (id,organization_id,subject_type,subject_id,participants_key,last_message_at) VALUES ('${thread}','${org}','stay','${stay}','${member}','${NOW}')`,
-    `INSERT INTO team_thread_members (thread_id,organization_id,member_id) VALUES ('${thread}','${org}','${member}')`,
-    `INSERT INTO team_messages (id,organization_id,thread_id,sender_user_id,body,idempotency_key,request_hash) VALUES ('${org}-team-message','${org}','${thread}','${org}-guest','Cleaned','k','h')`,
+    `INSERT INTO scheduled_guest_messages (id,organization_id,product_id,booking_id,template_id,template_title,template_version,body,due_at,timezone,status,created_at,updated_at)
+      VALUES ('${org}-scheduled','${org}','${home}','${stay}','${org}-template','Welcome',1,'Hello','2099-01-05T08:00:00.000Z','Asia/Bangkok','pending','${NOW}','${NOW}')`,
+    `INSERT INTO conversations (id,kind,organization_id,booking_id,participants_key,last_message_at,created_at) VALUES ('${thread}','team','${org}','${stay}','${member}','${NOW}','${NOW}')`,
+    `INSERT INTO conversation_participants (conversation_id,organization_id,user_id,created_at) VALUES ('${thread}','${org}','${org}-guest','${NOW}')`,
+    `INSERT INTO messages (id,organization_id,conversation_id,sequence,author_kind,author_user_id,body,dedupe_key,occurred_at,created_at) VALUES ('${org}-team-message','${org}','${thread}',1,'member','${org}-guest','Cleaned','team:${thread}:k','${NOW}','${NOW}')`,
   ]
 }
 
@@ -80,7 +91,7 @@ async function rowsOwnedBy(db: D1Database, org: string): Promise<Record<string, 
 }
 
 /**
- * A booking or reservation pins the session, variant and thread it holds, a
+ * A booking — a class seat or a table — pins the session and variant it holds, a conversation pins its booking, a
  * product page and a product review pin their product, and a session pins the
  * rule that generated it, so deleting any of those parents alone is refused.
  * Deleting the organization removes both sides in one statement and must
@@ -108,19 +119,21 @@ test('guest records refuse an ordinary parent delete and cascade away with their
     for (const [parent, statement] of [
       ['product session', "DELETE FROM product_sessions WHERE id = 'doomed-session'"],
       ['product variant', "DELETE FROM product_variants WHERE id = 'doomed-variant'"],
-      ['booking thread', "DELETE FROM requests WHERE id = 'doomed-booking-thread'"],
-      ['reservation thread', "DELETE FROM requests WHERE id = 'doomed-reservation-thread'"],
+      ['booked class seat', "DELETE FROM bookings WHERE id = 'doomed-booking'"],
+      ['table booking', "DELETE FROM bookings WHERE id = 'doomed-reservation'"],
+      ['table seating', "DELETE FROM product_sessions WHERE id = 'doomed-seating'"],
       // The same pins hold for what a product page, a product review and a
       // generated session name.
       ['product', "DELETE FROM products WHERE id = 'doomed-product'"],
       ['availability rule', "DELETE FROM product_availability_rules WHERE id = 'doomed-rule'"],
-      // A stay pins its home. Conversations, tasks and scheduled messages name their stay by subject_type/subject_id and go with the organization.
-      ['stay home', "DELETE FROM product_stay_configs WHERE product_id = 'doomed-home'"],
+      // A stay pins its home: the booking names the home's one variant. Its guest and team conversations name it and go with the organization.
+      ['stay home', "DELETE FROM products WHERE id = 'doomed-home'"],
+      ['stay', "DELETE FROM bookings WHERE id = 'doomed-stay'"],
     ] as const) {
       await assert.rejects(db.prepare(statement).run(), /FOREIGN KEY constraint failed/, `deleting the ${parent} alone must be refused`)
     }
     assert.equal(await db.prepare("SELECT count(*) AS n FROM bookings WHERE id = 'doomed-booking'").first('n'), 1)
-    assert.equal(await db.prepare("SELECT count(*) AS n FROM reservations WHERE id = 'doomed-reservation'").first('n'), 1)
+    assert.equal(await db.prepare("SELECT count(*) AS n FROM bookings WHERE id = 'doomed-reservation'").first('n'), 1)
 
     await db.prepare("DELETE FROM organization WHERE id = 'doomed'").run()
 

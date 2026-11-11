@@ -31,7 +31,7 @@ test.describe('stateless MCP server', () => {
       { toolName: 'get_blog_post', args: { post_id: missingId } },
       { toolName: 'get_post', args: { post_id: missingId } },
       { toolName: 'get_payment', args: { payment_id: missingId } },
-      { toolName: 'get_guest_conversation', args: { request_id: missingId } },
+      { toolName: 'get_conversation', args: { conversation_id: missingId } },
       { toolName: 'get_member_scheduling', args: { member_id: missingId } },
       { toolName: 'get_member_public_profile', args: { member_id: missingId } },
       { toolName: 'update_media_asset', args: { asset_id: missingId, alt_text: 'Missing asset' } },

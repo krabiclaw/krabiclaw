@@ -162,8 +162,8 @@ import { CHANNEL_MARKS, channelNote, isBookedNight, isPlaceDay, isStayNight, nig
 import StayNightInspector from './StayNightInspector.vue'
 
 type Home = Pick<StayHome, 'product_id' | 'name' | 'internal_name' | 'timezone' | 'currency' | 'base_price_minor' | 'min_nights' | 'calendar_rules' | 'address'>
-// A manager reads each stay's surname and channel; a member's turnover has neither.
-type GridStay = Pick<StayTurnover, 'id' | 'product_id' | 'guest_name' | 'adults' | 'children' | 'check_in_date' | 'check_out_date'> & Partial<Pick<Stay, 'guest_surname' | 'channel'>>
+// A manager reads each stay's channel; a member's turnover has none.
+type GridStay = Pick<StayTurnover, 'id' | 'product_id' | 'guest_name' | 'adults' | 'children' | 'check_in_date' | 'check_out_date'> & Partial<Pick<Stay, 'channel'>>
 interface HomesPayload { from: string; to: string; homes: { home: Home; nights: StayNight[] }[]; stays: GridStay[]; manage: boolean }
 interface PlacesPayload { from: string; to: string; places: { place: Place; days: PlaceDay[] }[]; manage: boolean }
 interface GridBar { key: string; date: string; column: number; span: number; label: string; title: string; to: RouteLocationRaw; stayId: string | null; channel: StayChannel | null }
@@ -235,7 +235,7 @@ const isHomesPayload = (value: unknown): value is HomesPayload => isWindow(value
   && value.homes.every(entry => isRecord(entry) && isHome(entry.home) && Array.isArray(entry.nights) && entry.nights.length === SPAN
     && entry.nights.every((night, index) => isStayNight(night) && night.date === dates.value[index]))
   && value.stays.every(stay => isRecord(stay) && typeof stay.id === 'string' && typeof stay.product_id === 'string' && isText(stay.guest_name) && isCount(stay.adults) && isCount(stay.children)
-    && (value.manage ? isText(stay.guest_surname) && Object.hasOwn(STAY_CHANNEL_LABELS, String(stay.channel)) : !('guest_surname' in stay) && !('channel' in stay)) && isValidCalendarDate(stay.check_in_date) && isValidCalendarDate(stay.check_out_date))
+    && (value.manage ? Object.hasOwn(STAY_CHANNEL_LABELS, String(stay.channel)) : !('channel' in stay)) && isValidCalendarDate(stay.check_in_date) && isValidCalendarDate(stay.check_out_date))
 const isPlacesPayload = (value: unknown): value is PlacesPayload => isWindow(value) && Array.isArray(value.places)
   && value.places.every(entry => isRecord(entry) && isPlace(entry.place) && Array.isArray(entry.days) && entry.days.length === SPAN && entry.days.every((day, index) => isPlaceDay(day) && day.date === dates.value[index]))
 
@@ -265,7 +265,7 @@ if (import.meta.client) {
 const CHANNEL_BARS: Record<StayChannel, { color: string; mark: string }> = {
   airbnb: { color: '#FF385C', mark: '' }, vrbo: { color: '#245ABC', mark: 'V' }, booking_com: { color: '#003580', mark: 'B.' }, direct: { color: 'var(--kc-navy)', mark: '' },
 }
-const guestName = (stay: GridStay) => [stay.guest_name, stay.guest_surname].filter(Boolean).join(' ') || 'Guest name not provided'
+const guestName = (stay: GridStay) => stay.guest_name || 'Guest name not provided'
 // Adults and children count as guests; infants do not, as Airbnb counts them.
 const guestCount = (stay: GridStay) => `${stay.adults + stay.children} ${stay.adults + stay.children === 1 ? 'guest' : 'guests'}`
 const addressOf = (home: Home) => home.address ? [home.address.address, home.address.city].filter(Boolean).join(', ') : 'No address'
@@ -290,19 +290,19 @@ const homeRows = computed<GridRow[]>(() => {
     .map(({ home, nights }) => {
       const bars: GridBar[] = []
       nights.forEach((night, index) => {
-        const holder = night.stay_id ?? (night.calendar ? `calendar:${night.calendar}` : null)
+        const holder = night.booking_id ?? (night.calendar ? `calendar:${night.calendar}` : null)
         if (!holder) return
         const last = bars.at(-1)
         if (last?.key.startsWith(`${holder}:`) && last.column + last.span === index + 1) { last.span += 1; return }
-        if (!night.stay_id) {
+        if (!night.booking_id) {
           const label = STAY_CHANNEL_LABELS[night.calendar!]
           bars.push({ key: `${holder}:${night.date}`, date: night.date, stayId: null, channel: night.calendar, column: index + 1, span: 1, label, title: `Unavailable from ${label}`, to: homeTo(home.product_id, night.date) })
           return
         }
-        const stay = stays.get(night.stay_id)
+        const stay = stays.get(night.booking_id)
         const label = stay ? `${guestName(stay)} · ${guestCount(stay)}` : 'Reserved'
-        bars.push({ key: `${holder}:${night.date}`, date: night.date, stayId: night.stay_id, channel: stay?.channel ?? null, column: index + 1, span: 1, label,
-          to: { path: `/dashboard/${orgSlug}/calendar/stay/${encodeURIComponent(night.stay_id)}`, query: route.query },
+        bars.push({ key: `${holder}:${night.date}`, date: night.date, stayId: night.booking_id, channel: stay?.channel ?? null, column: index + 1, span: 1, label,
+          to: { path: `/dashboard/${orgSlug}/calendar/stay/${encodeURIComponent(night.booking_id)}`, query: route.query },
           title: stay ? `${[label, ...(stay.channel ? [STAY_CHANNEL_LABELS[stay.channel]] : [])].join(' · ')} · ${formatCalendarDate(stay.check_in_date, 'en', { month: 'short', day: 'numeric' })} – ${formatCalendarDate(stay.check_out_date, 'en', { month: 'short', day: 'numeric' })}` : label })
       })
       const gaps = unbookableGaps(nights)
@@ -318,7 +318,7 @@ const placeRows = computed<GridRow[]>(() => (placesData.value?.places ?? [])
   .filter(entry => matches(entry.place.name, entry.place.detail) && (!freeOnly.value || !entry.days.some(day => day.booked > 0)))
   .map(({ place, days }) => {
     const id = `${place.kind}:${place.id}`
-    const scope = place.kind === 'location' ? { locationId: place.id } : { product_id: place.id }
+    const scope = place.kind === 'location' ? { location_id: place.id } : { product_id: place.id }
     const bars = days.flatMap((day, index): GridBar[] => day.booked ? [{ key: `${id}:${day.date}`, date: day.date, stayId: null, channel: null, column: index + 1, span: 1, label: `${day.booked} booked`, title: day.held?.kind === 'booked' ? day.held.text : `${day.booked} booked`, to: { path: `/dashboard/${orgSlug}/calendar/${day.date}`, query: scope } }] : [])
     const cells = days.map((day): GridCell => {
       const label = day.held?.kind === 'hours' || day.held?.kind === 'inactive' ? 'Closed' : day.closed ? 'Blocked' : day.free ? `${day.free} free` : ''
@@ -359,7 +359,7 @@ function freeLabel(home: Home, night: StayNight) {
 /** A night the channel has not confirmed: still queued for it, or refused and needing review. */
 const channelState = (night: StayNight) => night.channel?.state === 'pending' || night.channel?.state === 'needs_review' ? night.channel.state : null
 function nightTitle(home: Home, night: StayNight, gap?: string) {
-  const state = night.stay_id ? 'Booked' : night.held_until ? 'Checkout hold' : night.calendar ? `Unavailable from ${STAY_CHANNEL_LABELS[night.calendar]}` : night.closed ? 'Blocked' : 'Available'
+  const state = night.booking_id ? 'Booked' : night.held_until ? 'Checkout hold' : night.calendar ? `Unavailable from ${STAY_CHANNEL_LABELS[night.calendar]}` : night.closed ? 'Blocked' : 'Available'
   const note = channelNote(night)
   return `${home.internal_name} · ${formatCalendarDate(night.date, 'en', { weekday: 'short', month: 'short', day: 'numeric' })} · ${state} · ${price(home, night)}${gap ? ` · ${gap}` : ''}${note ? ` · ${note}` : night.channel?.state === 'pushed' ? ' · On Airbnb' : ''}`
 }
@@ -368,7 +368,7 @@ function homeTo(productId: string, date?: string) {
 }
 /** One place's own calendar on a date: the month narrowed to the location, or the offering's calendar. */
 function placeTo(place: Place, date: string) {
-  return { path: `/dashboard/${orgSlug}/calendar`, query: { ...(place.kind === 'location' ? { locationId: place.id } : { product_id: place.id, date }), month: date.slice(0, 7) } }
+  return { path: `/dashboard/${orgSlug}/calendar`, query: { ...(place.kind === 'location' ? { location_id: place.id } : { product_id: place.id, date }), month: date.slice(0, 7) } }
 }
 // Nothing moves the selection or the rows while a save runs: its read-back compares the rows it wrote.
 function setQuery(changes: LocationQueryRaw) {

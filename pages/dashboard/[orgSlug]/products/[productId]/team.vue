@@ -2,7 +2,7 @@
   <DashboardLeafPanel
     id="product-team"
     :title="p.sectionLabels.team"
-    lead="Choose the host or team responsible for this home’s stays and guest conversations."
+    lead="Choose the host responsible for this home’s stays and guest conversations."
     :saving="p.saving.value"
     :disabled="p.saveDisabled.value"
     :save-label="p.saveLabel.value"
@@ -10,7 +10,7 @@
     @cancel="p.revert"
     @save="p.save"
   >
-    <ResponsibilityPicker v-if="p.isNew.value || p.product.value" v-model:member-id="p.form.stay_member_id" v-model:team-id="p.form.stay_team_id" :organization-id="p.organizationId" :disabled="p.saving.value" />
+    <ResponsibilityPicker v-if="p.isNew.value || p.product.value" v-model:member-id="p.form.stay_member_id" :organization-id="p.organizationId" :disabled="p.saving.value" required />
   </DashboardLeafPanel>
 </template>
 

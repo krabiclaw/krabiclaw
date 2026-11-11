@@ -9,9 +9,9 @@ import { readPaymentOrder } from './orders'
 import { recordPaymentRefunded } from '~/server/domain/booking-analytics'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 
-/** What a guest paid on the site for one booking, reservation or stay, net of refunds; null when it was not paid online. */
-export async function paidOnline(db: DbClient, organizationId: string, subjectType: 'booking' | 'reservation' | 'stay', subjectId: string): Promise<{ amount: number; currency: CurrencyCode } | null> {
-  const rows = await queryAll<{ amount: number; currency: string }>(db, 'SELECT SUM(captured_amount - refunded_amount) AS amount, currency FROM payments WHERE organization_id=? AND subject_type=? AND subject_id=? AND captured_amount>0 GROUP BY currency', [organizationId, subjectType, subjectId])
+/** What a guest paid on the site for one booking, net of refunds; null when it was not paid online. */
+export async function paidOnline(db: DbClient, organizationId: string, bookingId: string): Promise<{ amount: number; currency: CurrencyCode } | null> {
+  const rows = await queryAll<{ amount: number; currency: string }>(db, "SELECT SUM(captured_amount - refunded_amount) AS amount, currency FROM payments WHERE organization_id=? AND subject_type='booking' AND subject_id=? AND captured_amount>0 GROUP BY currency", [organizationId, bookingId])
   if (rows.length > 1) throw new Error('Payments for one booking are in more than one currency')
   const row = rows[0]
   if (!row) return null
@@ -25,7 +25,7 @@ export interface Payment {
   buyer_user_id: string | null
   stripe_account_id: string
   livemode: number
-  subject_type: 'booking' | 'order' | 'reservation' | 'invoice' | 'stay'
+  subject_type: 'booking' | 'order' | 'invoice'
   subject_id: string | null
   location_id: string | null
   currency: string
@@ -92,14 +92,14 @@ export async function readPaymentDetails(db:DbClient,env:CloudflareEnv,organizat
  const [refundRows,disputeRows,booking,order,stripeFacts]=await Promise.all([
   queryAll<{id:string;amount:number;status:string;stripe_refund_id:string|null}>(db,'SELECT * FROM payment_refunds WHERE payment_id=?',[recorded.id]),
   queryAll<{id:string;stripe_dispute_id:string;amount:number;currency:string;reason:string;status:string;evidence_due_at:string|null;updated_at:string}>(db,'SELECT * FROM payment_disputes WHERE payment_id=?',[recorded.id]),
-  recorded.subject_type==='booking'||recorded.subject_type==='reservation'?queryFirst<{request_id:string|null}>(db,`SELECT request_id FROM ${recorded.subject_type==='booking'?'bookings':'reservations'} WHERE id=? AND organization_id=?`,[recorded.subject_id,organizationId]):Promise.resolve(null),
+  recorded.subject_type==='booking'?queryFirst<{conversation_id:string|null}>(db,`SELECT (SELECT c.id FROM conversations c WHERE c.booking_id=b.id AND c.kind='booking') AS conversation_id FROM bookings b WHERE b.id=? AND b.organization_id=?`,[recorded.subject_id,organizationId]):Promise.resolve(null),
    readPaymentOrder(db,organizationId,recorded.id),
   stripePaymentFacts(env,recorded),
  ])
  const payment=visiblePayment(stripeFacts?{...recorded,captured_amount:stripeFacts.captured,refunded_amount:stripeFacts.refunded}:recorded)
  // Stripe's refunds, with the note and author only we hold; a refund not yet sent to Stripe exists only here.
  const refunds=stripeFacts?[...stripeFacts.refunds.map(refund=>({...refundRows.find(row=>row.stripe_refund_id===refund.id),id:refundRows.find(row=>row.stripe_refund_id===refund.id)?.id??refund.id,stripe_refund_id:refund.id,amount:refund.amount,status:refund.status??'pending'})),...refundRows.filter(row=>!row.stripe_refund_id)]:refundRows
- return {payment,refunds,disputes:stripeFacts?stripeFacts.disputes.map(dispute=>{const row=disputeRows.find(item=>item.stripe_dispute_id===dispute.id);return {id:row?.id??dispute.id,stripe_dispute_id:dispute.id,amount:dispute.amount,currency:dispute.currency.toUpperCase(),reason:dispute.reason,status:dispute.status,evidence_due_at:dispute.evidence_details?.due_by?new Date(dispute.evidence_details.due_by*1000).toISOString():null,updated_at:row?.updated_at??new Date(dispute.created*1000).toISOString()}}):disputeRows,visit:booking?.request_id?{kind:payment.subject_type,request_id:booking.request_id}:null,order}
+ return {payment,refunds,disputes:stripeFacts?stripeFacts.disputes.map(dispute=>{const row=disputeRows.find(item=>item.stripe_dispute_id===dispute.id);return {id:row?.id??dispute.id,stripe_dispute_id:dispute.id,amount:dispute.amount,currency:dispute.currency.toUpperCase(),reason:dispute.reason,status:dispute.status,evidence_due_at:dispute.evidence_details?.due_by?new Date(dispute.evidence_details.due_by*1000).toISOString():null,updated_at:row?.updated_at??new Date(dispute.created*1000).toISOString()}}):disputeRows,visit:booking?.conversation_id?{kind:payment.subject_type,conversation_id:booking.conversation_id}:null,order}
 }
 export type PaymentsEarningsType = 'paid' | 'refunded'
 export async function listPayments(db: DbClient, principal: FinancialPrincipal, input: { from: string; to: string; after?: string; limit?: number; location_id?: string; earnings_type?: PaymentsEarningsType }) {
@@ -131,12 +131,12 @@ export async function paymentSummary(db: DbClient, principal: FinancialPrincipal
   const amounts = await queryAll(db, `SELECT currency, SUM(captured_amount) AS captured_amount, SUM(refunded_amount) AS refunded_amount,
     COALESCE((SELECT SUM(d.amount) FROM payment_disputes d JOIN payments p2 ON p2.id=d.payment_id WHERE p2.organization_id=p.organization_id AND d.currency=p.currency AND p2.created_at>=? AND p2.created_at<? AND d.status NOT IN ('won','warning_closed')),0) AS disputed_amount
     FROM payments p WHERE organization_id=? AND created_at>=? AND created_at<? GROUP BY currency`, [from,to,principal.organizationId,from,to])
-  const usage = await queryAll(db, `SELECT currency, kind, SUM(amount) AS amount, SUM(CASE WHEN delivery_at IS NULL THEN 1 ELSE 0 END) AS pending_delivery FROM payment_usage_events WHERE organization_id=? AND provider_occurred_at>=? AND provider_occurred_at<? GROUP BY currency,kind`, [principal.organizationId,from,to])
+  const usage = await queryAll(db, `SELECT unit AS currency, resource AS kind, SUM(quantity) AS amount, SUM(CASE WHEN delivery_at IS NULL THEN 1 ELSE 0 END) AS pending_delivery FROM usage_events WHERE organization_id=? AND provider_occurred_at>=? AND provider_occurred_at<? GROUP BY unit,resource`, [principal.organizationId,from,to])
   return { organization_id: principal.organizationId, timezone: 'UTC', from, to, amounts, usage, usage_status: 'Stripe meters bill captured volume on the plan subscription; Stripe costs follow once Stripe itemizes them', source: 'Stripe authenticated projections', refreshed_at: new Date().toISOString() }
 }
 
 /** Only an explicit authenticated dashboard or native-app approval may approve this request. MCP receives a handoff. */
-export type RefundAuthorizationAction = 'refund' | 'reject_booking' | 'cancel_booking' | 'cancel_reservation' | 'cancel_stay'
+export type RefundAuthorizationAction = 'refund' | 'reject_booking' | 'cancel_booking'
 /** How long a business has to approve a refund it asked for. */
 export const AUTHORIZATION_WINDOW_SECONDS = 600
 export async function requestRefundAuthorization(db: DbClient, principal: FinancialPrincipal, paymentId: string, amount: number | null, action: RefundAuthorizationAction = 'refund', note?: string) {
@@ -151,9 +151,9 @@ export async function requestRefundAuthorization(db: DbClient, principal: Financ
 export async function approveRefundAuthorization(db: DbClient, principal: FinancialPrincipal, id: string) {
   await authorizePayments(principal, 'refund')
   const now = new Date().toISOString()
-  const result = await execute(db, `UPDATE payment_authorizations SET approved_at=COALESCE(approved_at,?) WHERE id=? AND organization_id=? AND user_id=? AND action IN ('refund','reject_booking','cancel_booking','cancel_reservation','cancel_stay') AND expires_at>? AND consumed_at IS NULL`, [now,id,principal.organizationId,principal.userId,now])
+  const result = await execute(db, `UPDATE payment_authorizations SET approved_at=COALESCE(approved_at,?) WHERE id=? AND organization_id=? AND user_id=? AND action IN ('refund','reject_booking','cancel_booking') AND expires_at>? AND consumed_at IS NULL`, [now,id,principal.organizationId,principal.userId,now])
   if (result.meta.changes !== 1) {
-    const replay=await queryFirst(db,`SELECT a.id FROM payment_authorizations a WHERE a.id=? AND a.organization_id=? AND a.user_id=? AND a.approved_at IS NOT NULL AND a.consumed_at IS NOT NULL AND EXISTS(SELECT 1 FROM payment_refunds r JOIN payments p ON p.id=r.payment_id WHERE r.payment_id=a.payment_id AND (r.idempotency_key='approved:'||a.id OR (a.action='reject_booking' AND r.idempotency_key='rejected:'||p.subject_id) OR (a.action='cancel_booking' AND r.idempotency_key='cancelled:'||p.subject_id) OR (a.action='cancel_reservation' AND r.idempotency_key='cancelled-reservation:'||p.subject_id) OR (a.action='cancel_stay' AND r.idempotency_key='cancelled-stay:'||p.subject_id)))`,[id,principal.organizationId,principal.userId])
+    const replay=await queryFirst(db,`SELECT a.id FROM payment_authorizations a WHERE a.id=? AND a.organization_id=? AND a.user_id=? AND a.approved_at IS NOT NULL AND a.consumed_at IS NOT NULL AND EXISTS(SELECT 1 FROM payment_refunds r JOIN payments p ON p.id=r.payment_id WHERE r.payment_id=a.payment_id AND (r.idempotency_key='approved:'||a.id OR (a.action='reject_booking' AND r.idempotency_key='rejected:'||p.subject_id) OR (a.action='cancel_booking' AND r.idempotency_key='cancelled:'||p.subject_id)))`,[id,principal.organizationId,principal.userId])
     if(!replay)throw new HTTPError({statusCode:409,statusMessage:'Financial authorization expired or unavailable'})
   }
 }

@@ -7,7 +7,7 @@
 </template>
 
 <script setup lang="ts">
-import { GUEST_NOT_MESSAGED_WARNING, isMovedStayResponse } from '~/shared/stay-move'
+import { STAY_MOVE_MESSAGE_QUEUED, isMovedStayResponse } from '~/shared/stay-move'
 import { getErrorMessage } from '~/utils/errors'
 import { ApiClientError } from '~/utils/api-clients'
 
@@ -53,11 +53,11 @@ async function save() {
   saving.value = true
   error.value = ''
   try {
-    const moved = await api(`/api/dashboard/stays/${encodeURIComponent(stayId)}/move`, {
-      method: 'POST', body: { expected_version: stay.version, product_id: selected.value },
+    await api(`/api/dashboard/stays/${encodeURIComponent(stayId)}/move`, {
+      method: 'POST', body: { version: stay.version, product_id: selected.value },
       validate: isMovedStayResponse,
     })
-    if (!moved.stay.guest_notified) toast.add(GUEST_NOT_MESSAGED_WARNING)
+    toast.add(STAY_MOVE_MESSAGE_QUEUED)
     await refreshNuxtData(`${String(route.params.orgSlug)}-stay:${stayId}`)
     await navigateTo(level.to.value ?? `/dashboard/${encodeURIComponent(String(route.params.orgSlug))}/bookings/stay/${encodeURIComponent(stayId)}`)
   } catch (cause) {

@@ -48,12 +48,15 @@ export interface Collection {
   updated_by: string
 }
 
-/** What generating this product's occurrences starts from. Sessions keep their own. */
-export type ProductBookingConfig = Pick<import('~/server/utils/availability').ProductBookingConfigRecord, 'duration_minutes' | 'default_capacity' | 'confirmation_mode' | 'online_payment_required' | 'held_online' | 'scheduling_mode' | 'assigned_member_id' | 'assigned_team_id' | 'advance_notice_minutes' | 'questions' | 'questions_revision'>
+/** What generating a session offering's occurrences starts from (unit `slot`). Sessions keep their own. */
+export type ProductBookingConfig = Pick<import('~/server/utils/availability').ProductBookingConfigRecord, 'duration_minutes' | 'seating_interval_minutes' | 'default_capacity' | 'confirmation_mode' | 'online_payment_required' | 'held_online' | 'scheduling_mode' | 'assigned_member_id' | 'advance_notice_minutes' | 'questions' | 'questions_revision' | 'party_size_min' | 'party_size_max' | 'minimum_guest_age' | 'accessibility_contact_required' | 'payment_basis' | 'payment_min_party_size'>
 
 /**
  * A place to stay: the one location it is at and its stay settings. Times are
- * local HH:MM in that location's timezone.
+ * local HH:MM in that location's timezone. How the home is booked (times,
+ * guests, minimum nights, cancellation, who looks after it and its questions)
+ * is stored as its booking configuration, unit `nights`, and presented here;
+ * `Product.booking` is a session offering's.
  */
 export interface ProductStayConfig {
   /** Short operator-only home identity; never published or sent as the Airbnb title. */
@@ -98,7 +101,6 @@ export interface ProductStayConfig {
   long_term_cancellation_policy: StayLongTermCancellationPolicy | null
   /** Who looks after the home: their stays are what an assigned member sees. */
   assigned_member_id: string | null
-  assigned_team_id: string | null
   /** Whether the home is live, so billed: active at its active location, and published or syncing with Airbnb. Read only. */
   live: boolean
   /** The host's own questions asked with each direct stay, and the revision a form built from them carries. */
@@ -111,7 +113,7 @@ export type StayListingField = 'property_type_group' | 'property_type' | 'listin
 export type ProductStayConfigInput = Omit<ProductStayConfig, StayListingField | 'internal_name' | 'photo_rooms' | 'accessibility' | 'check_in_end_time' | 'calendar_rules' | 'live' | 'questions' | 'questions_revision'> & Partial<Pick<ProductStayConfig, Exclude<StayListingField, 'amenity_answers'> | 'internal_name' | 'check_in_end_time' | 'calendar_rules'>> & { amenity_answers?: import('~/shared/stay-listing').StayAmenityAnswerPatch[] }
 
 /** Who looks after a product: workspace state the public site never carries. */
-export type StaffAssignment = 'assigned_member_id' | 'assigned_team_id'
+export type StaffAssignment = 'assigned_member_id'
 
 /** Membership of one product in one collection, carrying its position there. */
 export interface CollectionMembership {
@@ -217,7 +219,7 @@ export type ProductVariantPatchInput = Omit<Partial<ProductVariantInput>, 'price
 
 export type UpdateProductInput = Partial<Omit<CreateProductInput, 'source' | 'variants' | 'stay' | 'details'>> & {
   /** The Product updated_at from the caller's read; a stale snapshot refuses the entire edit. */
-  expected_updated_at?: string
+  updated_at?: string
   /** Stay settings to change. The location a home is at is fixed when it is created. */
   stay?: Partial<Omit<ProductStayConfig, 'location_id' | 'photo_rooms' | 'amenity_answers' | 'accessibility' | 'questions' | 'questions_revision'>> & { amenity_answers?: import('~/shared/stay-listing').StayAmenityAnswerPatch[]
     /** The complete replacement question list, sent with the revision it replaces. */

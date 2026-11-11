@@ -3,7 +3,7 @@
     <UAlert v-if="error || !thread" color="error" title="Conversation is unavailable" :description="getErrorMessage(error, 'This conversation is not available to your membership')" />
     <template v-else>
       <EditorNavigationList :groups="groups" :active-item="level.child.value" />
-      <UButton v-if="thread.canLeave" class="mt-8" color="error" variant="ghost" label="Leave conversation" @click="leaving = true" />
+      <UButton v-if="thread.can_leave" class="mt-8" color="error" variant="ghost" label="Leave conversation" @click="leaving = true" />
     </template>
     <UAlert v-if="actionError" class="mt-6" color="error" :description="actionError" />
     <UButton v-if="actionError && !thread" class="mt-4" color="neutral" variant="outline" label="Retry leaving conversation" :loading="saving" @click="leave" />
@@ -28,8 +28,8 @@ const leaving = ref(false)
 const saving = ref(false)
 const actionError = ref('')
 const groups = computed(() => [{ id: 'conversation', items: [
-  ...(thread.value?.canManage ? [{ id: 'name', label: 'Name', summary: thread.value.name ?? 'No name', to: `${level.path.value}/name?view=team` }] : []),
-  { id: 'members', label: 'Members', summary: `${thread.value?.participants.length ?? 0} people`, icon: 'i-lucide-users', to: `${level.path.value}/members?view=team` },
+  ...(thread.value?.can_manage ? [{ id: 'name', label: 'Name', summary: thread.value.name ?? 'No name', to: `${level.path.value}/name?kind=team` }] : []),
+  { id: 'members', label: 'Members', summary: `${thread.value?.participants.length ?? 0} people`, icon: 'i-lucide-users', to: `${level.path.value}/members?kind=team` },
 ] }])
 async function leave() {
   if (saving.value) return
@@ -38,7 +38,7 @@ async function leave() {
   try {
     await operate({ action: 'leave' })
     leaving.value = false
-    await navigateTo({ path: `/dashboard/${encodeURIComponent(String(route.params.orgSlug))}/messages`, query: { view: 'team' } }, { replace: true })
+    await navigateTo({ path: `/dashboard/${encodeURIComponent(String(route.params.orgSlug))}/messages`, query: { kind: 'team' } }, { replace: true })
   } catch (error) { leaving.value = false; actionError.value = getErrorMessage(error, 'The conversation could not be left') }
   finally { saving.value = false }
 }

@@ -96,7 +96,7 @@
           </div>
           <p v-if="row.skip_reason" class="mt-3 text-sm text-muted">{{ row.skip_reason }}</p>
           <ul v-if="row.issues.length" class="mt-3 list-disc space-y-1 ps-5 text-sm text-error"><li v-for="issue in row.issues" :key="issue">{{ issue }}</li></ul>
-          <UButton v-if="row.existing_stay_id" :to="stayPath(row.existing_stay_id)" label="View existing stay" color="neutral" variant="link" class="mt-2" />
+          <UButton v-if="row.existing_booking_id" :to="stayPath(row.existing_booking_id)" label="View existing stay" color="neutral" variant="link" class="mt-2" />
           <details v-if="row.state === 'needs_attention' && row.source_id" class="mt-4 border-t border-default pt-4">
             <summary class="cursor-pointer font-medium">Correct this reservation's source details</summary>
             <p class="mt-3 text-sm text-muted">Enter only values you can confirm from the original record. Property and reservation identity stay fixed; resolve overlapping bookings in their own records.</p>
@@ -116,7 +116,7 @@
         <div v-for="outcome in receipt.outcomes" :key="outcome.source_id" class="rounded-xl border border-default p-4 text-sm">
           <p class="font-medium" :class="outcome.state === 'failed' ? 'text-error' : 'text-highlighted'">{{ outcome.source_id }} · {{ outcome.state === 'failed' && outcome.committed ? 'Saved; needs attention' : outcomeLabels[outcome.state] }}</p>
           <p v-if="outcome.detail" class="mt-1 text-muted">{{ outcome.detail }}</p>
-          <UButton v-if="outcome.stay_id" :to="stayPath(outcome.stay_id)" label="View saved stay" color="neutral" variant="link" />
+          <UButton v-if="outcome.booking_id" :to="stayPath(outcome.booking_id)" label="View saved stay" color="neutral" variant="link" />
         </div>
         <p v-for="block in receipt.blocks" :key="`${block.product_id}:${block.from}`" class="text-sm" :class="block.state === 'failed' ? 'text-error' : 'text-muted'">{{ block.from }}–{{ block.to }} · {{ block.state === 'saved' ? 'Closed dates saved' : block.state === 'pending' ? 'Waiting to save' : block.committed ? 'Saved; needs attention' : 'Not saved' }}<template v-if="block.detail">: {{ block.detail }}</template></p>
       </div>

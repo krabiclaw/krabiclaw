@@ -13,7 +13,7 @@ export type ChannelPushCompletion = ChannelPush | Error | null
 
 /** Publish committed state before reporting every failed completion step. */
 export async function completeChannelPush<T extends object>(outcome: ChannelPushCompletion, context: {
-  product_id: string; updated_at?: string; ranges?: ReadonlyArray<readonly [string, string]>; stay_id?: string; version?: number
+  product_id: string; updated_at?: string; ranges?: ReadonlyArray<readonly [string, string]>; booking_id?: string; version?: number
 }, complete: () => Promise<T>): Promise<T & { channel_push: SuccessfulChannelPush | null }> {
   let completed: { ok: true; value: T } | { ok: false; error: unknown }
   try { completed = { ok: true, value: await complete() } } catch (error) { completed = { ok: false, error } }
@@ -116,7 +116,7 @@ function clock(instant: string): string {
 
 function ariValues(night: StayNight, home: StayHome): AriValues {
   return {
-    availability: night.stay_id !== null || night.held_until !== null || night.calendar !== null ? 0 : 1,
+    availability: night.booking_id !== null || night.held_until !== null || night.calendar !== null ? 0 : 1,
     rate: night.price_minor === null ? null : rate(night.price_minor, home.currency),
     min_stay_arrival: night.min_stay_arrival,
     max_stay: night.max_stay ?? 0,

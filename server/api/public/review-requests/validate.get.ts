@@ -22,7 +22,7 @@ export default defineHandler(async (event) => {
   const firstName = guestName.split(/\s+/)[0]!
 
   return jsonResponse({
-    request: { id: result.request.id, bookingType: result.request.booking_type, expiresAt: result.request.expires_at },
+    request: { id: result.request.id, bookingType: context.unit === 'nights' ? 'stay' : 'booking', expiresAt: result.request.expires_at },
     organization: { id: context.organization_id, name: context.organization_name },
     visit: {
       subject: context.subject,

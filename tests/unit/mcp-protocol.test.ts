@@ -61,7 +61,7 @@ test('domain failures preserve actions and recovery receipts without private det
 
   const reason = 'Channex rejected part of the update.'
   const details: Record<string, unknown> = {
-    code: 'CHANNEL_PUSH_FAILED', field: 'channel_push', committed: true, product_id: 'home-1', stay_id: 'stay-1', version: 3,
+    code: 'CHANNEL_PUSH_FAILED', field: 'channel_push', committed: true, product_id: 'home-1', booking_id: 'stay-1', version: 3,
     updated_at: '2030-01-01T00:00:00.000Z', reason,
     ranges: [{ from: '2030-01-01', to: '2030-01-03', provider_payload: 'private-value' }],
     channel_push: { state: 'needs_review', detail: reason, provider_payload: { credential: 'private-value' } },
@@ -70,7 +70,7 @@ test('domain failures preserve actions and recovery receipts without private det
   const channelError = Object.assign(new Error(reason), { statusCode: 503, data: details })
   assert.equal(asMcpError(channelError).kind, 'transport')
   const recovery = {
-    status: 503, code: 'CHANNEL_PUSH_FAILED', field: 'channel_push', committed: true, product_id: 'home-1', stay_id: 'stay-1', version: 3,
+    status: 503, code: 'CHANNEL_PUSH_FAILED', field: 'channel_push', committed: true, product_id: 'home-1', booking_id: 'stay-1', version: 3,
     updated_at: '2030-01-01T00:00:00.000Z', reason, ranges: [{ from: '2030-01-01', to: '2030-01-03' }],
     channel_push: { state: 'needs_review', detail: reason },
   }
@@ -82,7 +82,7 @@ test('domain failures preserve actions and recovery receipts without private det
   details.code = 'CHANNEL_PUSH_FAILED'
   details.ranges = [{ from: 'private@example.com', to: '2030-01-03' }]
   details.channel_push = { state: 'needs_review', detail: '' }
-  details.stay_id = 'private@example.com'
+  details.booking_id = 'private@example.com'
   details.version = -1
   details.updated_at = 'private@example.com'
   details.channel_outcome = 'unknown'
@@ -118,7 +118,7 @@ test('asMcpError and mcpToolErrorResult preserve structured field, hint, and ent
     data: {
       code: 'BOOKING_NOT_FOUND',
       booking_id: 'book_123',
-      field: 'operational_booking_id',
+      field: 'booking_id',
       hint: 'Call list_product_bookings to view valid records.',
       private_token: 'secret-leaked',
     },
@@ -129,7 +129,7 @@ test('asMcpError and mcpToolErrorResult preserve structured field, hint, and ent
     status: 404,
     code: 'BOOKING_NOT_FOUND',
     booking_id: 'book_123',
-    field: 'operational_booking_id',
+    field: 'booking_id',
     hint: 'Call list_product_bookings to view valid records.',
   })
 
@@ -140,7 +140,7 @@ test('asMcpError and mcpToolErrorResult preserve structured field, hint, and ent
     code: 'BOOKING_NOT_FOUND',
     message: "Operational booking 'book_123' not found",
     booking_id: 'book_123',
-    field: 'operational_booking_id',
+    field: 'booking_id',
     hint: 'Call list_product_bookings to view valid records.',
   })
 })

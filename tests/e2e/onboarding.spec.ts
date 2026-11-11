@@ -145,7 +145,7 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   // The draft holds the typed name as a manual business, with no Google place.
   const saved = await page.request.get('/api/dashboard/onboarding/drafts/active')
   expect(saved.status(), await saved.text()).toBe(200)
-  const initialDraft = (await saved.json() as { draft: { draftId: string; organizationId: string; updatedAt: string } }).draft
+  const initialDraft = (await saved.json() as { draft: { draftId: string; organizationId: string; updated_at: string } }).draft
   expect(initialDraft).toMatchObject({ sourceType: 'manual', placeId: null, details: { name, currency: 'THB', timezone: 'Asia/Bangkok' } })
   await expect(page.getByText('Your answers have not been saved yet.', { exact: true })).toHaveCount(0)
 
@@ -197,10 +197,10 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   // Another editor saves the same draft. Exit must report the stale revision,
   // keep the owner's edit on screen and leave the newer persisted answer intact.
   const competingSave = await page.request.post('/api/dashboard/onboarding/drafts/active', {
-    data: { draftId: initialDraft.draftId, expectedUpdatedAt: initialDraft.updatedAt, details: { phone: '+66821234567' } },
+    data: { draftId: initialDraft.draftId, updated_at: initialDraft.updated_at, details: { phone: '+66821234567' } },
   })
   expect(competingSave.status(), await competingSave.text()).toBe(200)
-  const competingRevision = (await competingSave.json() as { updatedAt: string }).updatedAt
+  const competingRevision = (await competingSave.json() as { updated_at: string }).updated_at
   const failedExitResponse = page.waitForResponse(response => response.request().method() === 'POST'
     && new URL(response.url()).pathname === '/api/dashboard/onboarding/drafts/active')
   await page.getByRole('button', { name: 'Save & exit', exact: true }).click()
@@ -212,7 +212,7 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   const newerDraft = await page.request.get('/api/dashboard/onboarding/drafts/active')
   expect(newerDraft.status(), await newerDraft.text()).toBe(200)
   expect((await newerDraft.json() as { draft: unknown }).draft).toMatchObject({
-    draftId: initialDraft.draftId, organizationId: initialDraft.organizationId, updatedAt: competingRevision,
+    draftId: initialDraft.draftId, organizationId: initialDraft.organizationId, updated_at: competingRevision,
     details: { name, phone: '+66821234567', currency: 'THB', timezone: 'Asia/Bangkok' },
   })
 
@@ -488,17 +488,17 @@ test('an owner changes their restaurant draft to lodging, restores it and opens 
 
   const saved = await page.request.get('/api/dashboard/onboarding/drafts/active')
   expect(saved.status(), await saved.text()).toBe(200)
-  const draft = (await saved.json() as { draft: { draftId: string; updatedAt: string; vertical: string; products: unknown[]; details: { name: string } } }).draft
+  const draft = (await saved.json() as { draft: { draftId: string; updated_at: string; vertical: string; products: unknown[]; details: { name: string } } }).draft
   expect(draft).toMatchObject({ vertical: 'lodging', products: [], details: { name } })
   // The server refuses a generic onboarding item for a home, before changing
   // the draft. Homes are created with their own required stay settings later.
   const invalidProduct = await page.request.post('/api/dashboard/onboarding/drafts/active', {
-    data: { draftId: draft.draftId, expectedUpdatedAt: draft.updatedAt, products: [{ name: 'A home is not an experience', category: 'Homes', amountMinor: null }] },
+    data: { draftId: draft.draftId, updated_at: draft.updated_at, products: [{ name: 'A home is not an experience', category: 'Homes', amountMinor: null }] },
   })
   expect(invalidProduct.status(), await invalidProduct.text()).toBe(400)
   const unchanged = await page.request.get('/api/dashboard/onboarding/drafts/active')
   expect(unchanged.status(), await unchanged.text()).toBe(200)
-  expect((await unchanged.json() as { draft: unknown }).draft).toMatchObject({ draftId: draft.draftId, updatedAt: draft.updatedAt, vertical: 'lodging', products: [] })
+  expect((await unchanged.json() as { draft: unknown }).draft).toMatchObject({ draftId: draft.draftId, updated_at: draft.updated_at, vertical: 'lodging', products: [] })
 
   // A cold load reads the selected vertical from the persisted draft.
   await page.goto('/dashboard/onboarding/type')

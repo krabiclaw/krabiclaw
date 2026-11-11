@@ -1,11 +1,10 @@
 import { execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import type { WebhookEventPayload } from 'resend'
-import { notifyBuyerThread } from '~/server/utils/notification-center'
 import type { ReplyEmailEnv } from '~/server/utils/submission-messages'
 import { buildReplyToAddress } from '~/server/utils/reply-address'
 import { emailSender, getEmailDeliveryMode, isEmailMessageId, sendEmail, type EmailInput } from '~/server/utils/email-delivery'
 import { isRecord } from '~/server/utils/type-guards'
-import { publishGuestInboxThreadEvent, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
+import { publishConversationEvent, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 import type {
   GuestThreadDeliveryChannel,
   GuestThreadDeliveryPurpose,
@@ -38,23 +37,23 @@ function readEmailSnapshot(json: string): EmailSnapshot {
   return snapshot as unknown as EmailSnapshot
 }
 
-/** Only this request and this recipient can contribute email ancestry. */
-async function conversationEmailParent(db: DbClient, delivery: GuestThreadDeliveryRow, threadId: string, sequence: number, recipient: string) {
+/** Only this conversation and this recipient can contribute email ancestry. */
+async function conversationEmailParent(db: DbClient, delivery: GuestThreadDeliveryRow, conversationId: string, sequence: number, recipient: string) {
   const candidates = await queryAll<{
     id: string; sequence: number; created_at: string; payload_json: string | null
     email_json: string | null; email_message_id: string | null; provider: string | null
   }>(db, `
-    SELECT e.id, e.sequence, e.created_at, e.payload_json, NULL AS email_json, NULL AS email_message_id, NULL AS provider
-    FROM activity_entries e
-    WHERE e.request_id = ? AND e.sequence < ? AND e.actor_kind = 'guest' AND e.channel = 'email'
+    SELECT m.id, m.sequence, m.created_at, m.payload_json, NULL AS email_json, NULL AS email_message_id, NULL AS provider
+    FROM messages m
+    WHERE m.conversation_id = ? AND m.sequence < ? AND m.author_kind = 'guest' AND m.channel = 'email'
     UNION ALL
-    SELECT d.id, e.sequence, d.created_at, NULL, d.email_json, d.email_message_id, d.provider
-    FROM guest_thread_deliveries d JOIN activity_entries e ON e.id = d.entry_id
-    WHERE e.request_id = ? AND e.sequence <= ? AND d.id <> ?
+    SELECT d.id, m.sequence, d.created_at, NULL, d.email_json, d.email_message_id, d.provider
+    FROM guest_thread_deliveries d JOIN messages m ON m.id = d.message_id
+    WHERE m.conversation_id = ? AND m.sequence <= ? AND d.id <> ?
       AND d.channel = 'email' AND d.purpose <> 'owner_alert'
       AND d.status IN ('accepted', 'sent', 'delivered', 'read')
     ORDER BY sequence DESC, created_at DESC, id DESC
-  `, [threadId, sequence, threadId, sequence, delivery.id])
+  `, [conversationId, sequence, conversationId, sequence, delivery.id])
   let parent: { subject: string | null; messageId: string } | null = null
   let knownSubject: string | null = null
   const references: string[] = []
@@ -98,23 +97,17 @@ async function conversationEmailParent(db: DbClient, delivery: GuestThreadDelive
  * thread: each keeps the subject of the first alert sent to that recipient and
  * answers the alert before it, so every mail client threads them, not only
  * Gmail by subject. Alerts to other recipients, and the guest's own emails, are
- * never its ancestry. An alert about no conversation starts no thread.
+ * never its ancestry. An alert about no message (a payout, a task) starts no thread.
  */
 async function alertEmailParent(db: DbClient, delivery: GuestThreadDeliveryRow, recipient: string) {
-  // The alert's conversation: its guest conversation, or its team message's team conversation (the key the reply path reads).
-  const anchor = await queryFirst<{ request_id: string | null; team_thread_id: string | null }>(db, `
-    SELECT a.request_id, tm.thread_id AS team_thread_id FROM activity_entries a
-    LEFT JOIN team_messages tm ON tm.organization_id = a.organization_id AND tm.id = substr(a.dedupe_key, 14) AND a.dedupe_key = 'team-message:' || tm.id
-    WHERE a.id = ?`, [delivery.entry_id])
-  if (!anchor) throw new Error(`Alert delivery ${delivery.id} has no ledger entry`)
-  if (!anchor.request_id && !anchor.team_thread_id) return {}
-  const entries = anchor.request_id ? 'activity_entries e'
-    : "team_messages tm JOIN activity_entries e ON e.dedupe_key = 'team-message:' || tm.id AND e.organization_id = tm.organization_id"
+  if (!delivery.message_id) return {}
   const earlier = await queryAll<{ email_json: string; email_message_id: string | null; provider: string }>(db, `
-    SELECT d.email_json, d.email_message_id, d.provider FROM ${entries} JOIN guest_thread_deliveries d ON d.entry_id = e.id
-    WHERE ${anchor.request_id ? 'e.request_id' : 'tm.thread_id'} = ? AND d.id <> ? AND d.channel = 'email' AND d.purpose = 'owner_alert'
+    SELECT d.email_json, d.email_message_id, d.provider FROM messages anchor
+    JOIN messages m ON m.conversation_id = anchor.conversation_id
+    JOIN guest_thread_deliveries d ON d.message_id = m.id
+    WHERE anchor.id = ? AND d.id <> ? AND d.channel = 'email' AND d.purpose = 'owner_alert'
       AND d.email_json IS NOT NULL AND d.status IN ('accepted', 'sent', 'delivered', 'read')
-    ORDER BY d.created_at, d.id`, [anchor.request_id ?? anchor.team_thread_id, delivery.id])
+    ORDER BY d.created_at, d.id`, [delivery.message_id, delivery.id])
   const alerts = earlier.map(row => ({ ...row, snapshot: readEmailSnapshot(row.email_json) }))
     .filter(row => row.snapshot.message.to.trim().toLowerCase() === recipient)
   // The first alert to this recipient starts the thread with its own subject.
@@ -133,18 +126,20 @@ export async function deliverReceiptEmail(db: DbClient, input: {
   env: ReplyEmailEnv; delivery: GuestThreadDeliveryRow; threadId: string | null; email: EmailInput
 }): Promise<GuestThreadDeliveryRow> {
   let delivery = await getDeliveryById(db, input.delivery.id)
-  if (!delivery || delivery.entry_id !== input.delivery.entry_id || delivery.channel !== 'email') throw new Error('Email delivery does not match its ledger entry')
+  if (!delivery || delivery.message_id !== input.delivery.message_id || delivery.activity_entry_id !== input.delivery.activity_entry_id
+    || delivery.task_id !== input.delivery.task_id || delivery.channel !== 'email') throw new Error('Email delivery does not match what it sends')
   if (delivery.provider !== (getEmailDeliveryMode(input.env) === 'provider' ? 'resend' : 'log_only')) throw new Error('Email delivery mode differs from its recorded provider')
-  const entry = await queryFirst<{ request_id: string | null; sequence: number | null }>(db, 'SELECT request_id, sequence FROM activity_entries WHERE id = ?', [delivery.entry_id])
-  if (!entry || entry.request_id !== input.threadId) throw new Error('Email delivery does not belong to the targeted conversation')
+  // A guest's email is about one message of one conversation; an alert may be about a message, an audited event or a task.
+  const message = delivery.message_id ? await queryFirst<{ conversation_id: string; sequence: number }>(db, 'SELECT conversation_id, sequence FROM messages WHERE id = ?', [delivery.message_id]) : null
+  if (delivery.message_id && !message) throw new Error(`Email delivery ${delivery.id} names message ${delivery.message_id}, which does not exist`)
+  if (input.threadId !== null && message?.conversation_id !== input.threadId) throw new Error('Email delivery does not belong to the targeted conversation')
   const threaded = input.threadId !== null
-  if (threaded && entry.sequence === null) throw new Error('Conversation email delivery has no ledger sequence')
   try {
     if (!isDeliverySent(delivery) && !delivery.provider_message_id) {
       if (delivery.email_json === null) {
         const recipient = input.email.to.trim().toLowerCase()
         const ancestry = delivery.purpose === 'owner_alert' ? await alertEmailParent(db, delivery, recipient)
-          : threaded ? await conversationEmailParent(db, delivery, input.threadId!, entry.sequence!, recipient) : {}
+          : threaded ? await conversationEmailParent(db, delivery, input.threadId!, message!.sequence, recipient) : {}
         const snapshot: EmailSnapshot = {
           preparedAt: new Date().toISOString(),
           sender: delivery.provider === 'resend' || input.env.EMAIL_FROM?.trim() ? emailSender(input.env, input.email.fromName) : null,
@@ -179,10 +174,13 @@ export async function deliverReceiptEmail(db: DbClient, input: {
   }
 }
 
+/** What one send is of: a message, an audited event, or a task. */
+export type DeliverySubject = { messageId: string } | { activityEntryId: string } | { taskId: string }
+
 export async function createDeliveryReceipt(
   db: DbClient,
   input: {
-    entryId: string
+    subject: DeliverySubject
     channel: GuestThreadDeliveryChannel
     provider: GuestThreadDeliveryProvider
     purpose: GuestThreadDeliveryPurpose
@@ -193,12 +191,14 @@ export async function createDeliveryReceipt(
   const now = new Date().toISOString()
   await execute(db, `
       INSERT INTO guest_thread_deliveries
-        (id, entry_id, channel, provider, purpose, status, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)
+        (id, message_id, activity_entry_id, task_id, channel, provider, purpose, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
       ON CONFLICT(id) DO NOTHING
     `, [
       id,
-      input.entryId,
+      'messageId' in input.subject ? input.subject.messageId : null,
+      'activityEntryId' in input.subject ? input.subject.activityEntryId : null,
+      'taskId' in input.subject ? input.subject.taskId : null,
       input.channel,
       input.provider,
       input.purpose,
@@ -268,11 +268,12 @@ export function compareDeliveryStatus(current: string | null, incoming: GuestThr
  */
 /** Whether a reply reached the guest decides whether the business still owes one: the reply tasks change with the receipt. */
 async function deliveryTaskQueries(db: DbClient, deliveryId: string): Promise<BatchQuery[]> {
-  const entry = await queryFirst<{ request_id: string | null }>(db, 'SELECT e.request_id FROM guest_thread_deliveries d JOIN activity_entries e ON e.id = d.entry_id WHERE d.id = ?', [deliveryId])
-  if (!entry?.request_id) return []
+  const message = await queryFirst<{ conversation_id: string; kind: string }>(db, `SELECT m.conversation_id, c.kind FROM guest_thread_deliveries d
+    JOIN messages m ON m.id = d.message_id JOIN conversations c ON c.id = m.conversation_id WHERE d.id = ?`, [deliveryId])
+  if (!message || message.kind === 'team') return []
   // The conversation repository reads receipts through this module; it is loaded when used, not at import.
   const { conversationTaskQueries } = await import('./repository')
-  return conversationTaskQueries(entry.request_id, new Date().toISOString())
+  return conversationTaskQueries(message.conversation_id, new Date().toISOString())
 }
 
 export async function advanceDeliveryStatus(
@@ -347,9 +348,11 @@ export async function applyResendEmailEvent(
   if (!identity.meta.changes) throw new Error('Email delivery RFC identity changed during webhook processing')
   const changed = await advanceDeliveryStatus(db, delivery, status, status === 'failed' ? resendFailureReason(event) : null)
   if (!changed) return 'unchanged'
-  const entry = await queryFirst<{ request_id: string | null }>(db, 'SELECT request_id FROM activity_entries WHERE id = ?', [delivery.entry_id])
-  if (!entry) throw new Error(`Activity entry ${delivery.entry_id} for delivery ${delivery.id} not found`)
-  if (entry.request_id) await publishGuestInboxThreadEvent(env, db, { threadId: entry.request_id, type: 'delivery.changed' })
+  if (delivery.message_id) {
+    const message = await queryFirst<{ conversation_id: string }>(db, 'SELECT conversation_id FROM messages WHERE id = ?', [delivery.message_id])
+    if (!message) throw new Error(`Message ${delivery.message_id} for delivery ${delivery.id} not found`)
+    await publishConversationEvent(env, db, { conversationId: message.conversation_id, type: 'MESSAGE_UPDATE' })
+  }
   return 'advanced'
 }
 
@@ -366,13 +369,14 @@ export async function recordDeliveryOutcome(
     providerMessageId?: string | null
     error?: string | null
   },
+  more: BatchQuery[] = [],
 ): Promise<GuestThreadDeliveryRow> {
   await executeBatch(db, [{
     query: `UPDATE guest_thread_deliveries
       SET status = ?, provider_message_id = COALESCE(?, provider_message_id), error = ?, updated_at = ?
       WHERE id = ? AND status NOT IN ('accepted', 'sent', 'delivered', 'read')`,
     params: [input.status, input.providerMessageId ?? null, input.error ?? null, new Date().toISOString(), input.deliveryId],
-  }, ...await deliveryTaskQueries(db, input.deliveryId)], { operation: 'Record delivery outcome' })
+  }, ...await deliveryTaskQueries(db, input.deliveryId), ...more], { operation: 'Record delivery outcome' })
   const updated = await getDeliveryById(db, input.deliveryId)
   if (!updated) throw new Error('Guest thread delivery not found')
   return updated
@@ -392,22 +396,18 @@ export async function deliverGuestThreadEmail(
     fromName: string
     subject: string
     email: { html: string; text: string }
-    submissionId: string
+    conversationId: string
   },
 ): Promise<GuestThreadDeliveryRow> {
   if (input.delivery.channel !== 'email') throw new Error('Delivery channel is not email')
-  await notifyBuyerThread(db, {
-    threadId: input.submissionId, entryId: input.delivery.entry_id,
-    title: input.subject, message: input.fromName,
-    conversation: input.delivery.purpose === 'member_reply' || input.delivery.purpose === 'scheduled_message',
-  })
+  if (!input.delivery.message_id) throw new Error('A guest email is about a message')
   if (isDeliverySent(input.delivery) && !input.delivery.error) return input.delivery
   return deliverReceiptEmail(db, {
-    delivery: input.delivery, env: input.env, threadId: input.submissionId,
+    delivery: input.delivery, env: input.env, threadId: input.conversationId,
     email: {
       to: input.to, fromName: input.fromName, subject: input.subject,
       ...input.email, emailPurpose: 'transactional',
-      replyTo: await buildReplyToAddress(input.env, input.delivery.entry_id, { kind: 'guest' }),
+      replyTo: await buildReplyToAddress(input.env, input.delivery.message_id, { kind: 'guest' }),
     },
   })
 }
@@ -421,8 +421,8 @@ export async function deliverGuestThreadEmail(
 export async function listThreadDeliveries(db: DbClient, threadId: string): Promise<GuestThreadDeliveryRow[]> {
   return queryAll<GuestThreadDeliveryRow>(db, `
     SELECT d.* FROM guest_thread_deliveries d
-    JOIN activity_entries e ON e.id = d.entry_id
-    WHERE e.request_id = ?
+    JOIN messages m ON m.id = d.message_id
+    WHERE m.conversation_id = ?
     ORDER BY d.created_at DESC
   `, [threadId])
 }
