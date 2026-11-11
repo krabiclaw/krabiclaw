@@ -39,10 +39,10 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
           await this.storage.put('publications', (await this.storage.get('publications') ?? 0) + 1)
         }
         if (event.type === 'MESSAGE_CREATE') {
-          const review = await this.db.prepare("SELECT rr.first_sent_at FROM review_requests rr JOIN conversations c ON c.booking_id = rr.booking_id AND c.kind = 'booking' WHERE c.id = ?").bind(event.conversationId).first()
+          const review = await this.db.prepare("SELECT rr.first_sent_at FROM review_requests rr JOIN conversations c ON c.booking_id = rr.booking_id AND c.kind = 'booking' WHERE c.id = ?").bind(event.conversation_id).first()
           if (review) {
             if (await this.storage.get('failSuccess')) { await this.storage.delete('failSuccess'); return new Response('controlled success publication failure', { status: 503 }) }
-            await this.storage.put('successPublications', [...await this.storage.get('successPublications') ?? [], { threadId: event.conversationId, firstSentAt: review.first_sent_at }])
+            await this.storage.put('successPublications', [...await this.storage.get('successPublications') ?? [], { threadId: event.conversation_id, firstSentAt: review.first_sent_at }])
           }
         }
         return new Response(null, { status: 204 })

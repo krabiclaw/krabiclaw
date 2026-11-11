@@ -554,7 +554,7 @@ test('Resend delivery events move a guest-thread delivery forward only and publi
     await db.prepare("INSERT INTO guest_thread_deliveries (id, message_id, channel, provider, purpose, status, provider_message_id) VALUES ('delivery-proof', 'entry-proof', 'email', 'resend', 'member_reply', 'sent', 'email-proof')").run()
     const env = { GUEST_INBOX_HUBS: hubs }
     const status = async () => (await getDeliveryById(db, 'delivery-proof'))!.status
-    const published = async () => (await (await hubs.get(hubs.idFromName('org-proof')).fetch('https://guest-inbox.internal/observed')).json()) as { type: string; conversationId: string }[]
+    const published = async () => (await (await hubs.get(hubs.idFromName('org-proof')).fetch('https://guest-inbox.internal/observed')).json()) as { type: string; conversation_id: string }[]
 
     assert.equal(await applyResendEmailEvent(db, env, emailEvent('email.sent', 'email-proof')), 'unchanged')
     for (const type of ['email.delivery_delayed', 'email.opened', 'email.clicked']) {
@@ -565,7 +565,7 @@ test('Resend delivery events move a guest-thread delivery forward only and publi
 
     assert.equal(await applyResendEmailEvent(db, env, emailEvent('email.delivered', 'email-proof')), 'advanced')
     assert.equal(await status(), 'delivered')
-    assert.deepEqual((await published()).map(event => [event.type, event.conversationId]), [['MESSAGE_UPDATE', 'thread-proof']])
+    assert.deepEqual((await published()).map(event => [event.type, event.conversation_id]), [['MESSAGE_UPDATE', 'thread-proof']])
 
     // Duplicates, a late `sent`, a complaint and a late failure all leave delivered.
     for (const event of [
