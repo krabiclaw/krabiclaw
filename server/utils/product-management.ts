@@ -2424,23 +2424,30 @@ async function uniqueCollectionSlug(db: DbClient, organizationId: string, locati
 }
 
 export async function updateCollection(db: DbClient, input: {
-  organizationId: string; collectionId: string; patch: UpdateCollectionInput; actor: Actor
+  organizationId: string; collectionId: string; patch: UpdateCollectionInput; actor: Actor; expectedUpdatedAt?: string
 }): Promise<Collection> {
   const existing = await queryFirst<Row>(db, 'SELECT * FROM collections WHERE organization_id = ? AND id = ?', [input.organizationId, input.collectionId])
   if (!existing) notFound('Collection not found')
-  const now = new Date().toISOString()
-  await executeBatch(db, [{
+  const expected = input.expectedUpdatedAt
+  const now = new Date(Math.max(Date.now(), Date.parse(String(existing.updated_at)) + 1)).toISOString()
+  const [updated] = await executeBatch(db, [{
     query: `UPDATE collections SET name = ?, description = ?, sort_order = ?, updated_at = ?, updated_by = ?
-            WHERE organization_id = ? AND id = ?`,
+            WHERE organization_id = ? AND id = ?${expected === undefined ? '' : ' AND updated_at = ?'}`,
     params: [
       input.patch.name === undefined ? String(existing.name) : requireTrimmedProductString(input.patch.name, 'name', PRODUCT_LIMITS.collectionName),
       input.patch.description === undefined ? existing.description : normalizeOptionalProductString(input.patch.description, 'description', PRODUCT_LIMITS.collectionDescription),
       input.patch.sort_order ?? Number(existing.sort_order), now, input.actor.actorId,
       input.organizationId, input.collectionId,
+      ...(expected === undefined ? [] : [expected]),
     ],
-  }, publicResourceCacheInvalidationQuery(String(existing.organization_id), 'collection_updated')], { operation: 'Update collection' })
+  }, publicResourceCacheInvalidationQuery(input.organizationId, 'collection_updated', { query: 'changes() = 1', params: [] })], { operation: 'Update collection' })
+  if (updated?.meta.changes !== 1) {
+    if (expected !== undefined) conflict('This section changed while you were editing. Reopen setup to continue.')
+    notFound('Collection not found')
+  }
   const row = await queryFirst<Row>(db, 'SELECT * FROM collections WHERE organization_id = ? AND id = ?', [input.organizationId, input.collectionId])
-  return (await mapCollectionRows(db, input.organizationId, [row!]))[0]!
+  if (!row) notFound('Collection not found')
+  return (await mapCollectionRows(db, input.organizationId, [row]))[0]!
 }
 
 export async function deleteCollection(db: DbClient, input: { organizationId: string; collectionId: string }): Promise<void> {

@@ -141,7 +141,9 @@ export default defineHandler(async (event) => {
     if (!value || value.length > max) throw new HTTPError({ statusCode: 400, statusMessage: `Enter a name of 1 to ${max} characters` })
     if (step === 'section') {
       if (!section) await createCollection(db, { organizationId: organization.id, collection: { name: value, location_id: locationId }, actor, firstAtLocation: true })
-      else if (value !== section.name) await updateCollection(db, { organizationId: organization.id, collectionId: section.id, patch: { name: value }, actor })
+      else if (value !== section.name) await updateCollection(db, {
+        organizationId: organization.id, collectionId: section.id, patch: { name: value }, actor, expectedUpdatedAt: section.updated_at,
+      })
     } else if (!section) {
       throw new Error('First dish setup is missing its section')
     } else if (!dish) {
