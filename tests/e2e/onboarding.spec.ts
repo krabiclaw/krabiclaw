@@ -420,6 +420,49 @@ test('a new experience site saves its first experience privately until booking s
   }
 })
 
+for (const setup of [
+  { vertical: 'restaurant', path: '/products/first-menu', question: 'What should your first menu section be called?' },
+  { vertical: 'experience', path: '/products/first-experience', question: 'Give your experience a title' },
+  { vertical: 'service', path: '/first-practice-area', question: 'Name your first practice area' },
+] as const) {
+  test(`a new ${setup.vertical} website opens its first guided offering step and stays private`, async ({ page, request, baseURL }) => {
+    await dismissPreviewToolbar(page)
+    await loginAs(page.request, baseURL!, 'user-e2e-onboarding-wizard')
+    const discarded = await page.request.delete('/api/dashboard/onboarding/drafts/active')
+    expect(discarded.status(), await discarded.text()).toBe(200)
+
+    const created = await page.request.post('/api/dashboard/onboarding/drafts/active', {
+      data: {
+        source_type: 'manual', vertical: setup.vertical, name: `E2E ${setup.vertical} ${Date.now().toString(36)}`,
+        details: { source_locale: 'en', country: 'TH', city: 'Ao Nang', street_address: '88 Moo 2', currency: 'THB', timezone: 'Asia/Bangkok' },
+      },
+    })
+    expect(created.status(), await created.text()).toBe(200)
+    const { organization_id: organizationId } = await created.json() as { organization_id: string }
+    try {
+      await page.goto('/dashboard/onboarding')
+      await expect(page.locator('[data-onboarding-hydrated="true"]')).toBeVisible()
+      await expect(page.locator('[data-onboarding-step="review"]')).toBeVisible()
+      const activation = page.waitForResponse(response => response.request().method() === 'POST'
+        && /\/api\/dashboard\/onboarding\/drafts\/[^/]+\/activate$/.test(new URL(response.url()).pathname))
+      await page.getByRole('button', { name: 'Create my site', exact: true }).click()
+      const activated = await activation
+      expect(activated.status(), await activated.text()).toBe(200)
+      const outcome = await activated.json() as { organization_slug: string; subdomain: string; public_url: string }
+      await expect(page).toHaveURL(url => url.pathname === `/dashboard/${outcome.organization_slug}${setup.path}`)
+      await expect(page.getByRole('heading', { name: setup.question, exact: true })).toBeVisible()
+      await expect(page.getByRole('button', { name: 'Next', exact: true })).toBeDisabled()
+      const anonymous = await readLocalTenant(request, outcome.subdomain, outcome.public_url)
+      expect(anonymous.status(), await anonymous.text()).toBe(404)
+    } finally {
+      const removed = await page.request.post('/api/auth/organization/delete', {
+        headers: authRequestHeaders(baseURL!), data: { organizationId },
+      })
+      expect(removed.status(), await removed.text()).toBe(200)
+    }
+  })
+}
+
 test('an owner changes their restaurant draft to lodging and saves their first home as a draft', async ({ page, baseURL, request }, testInfo) => {
   test.setTimeout(90_000)
   await page.setViewportSize({ width: 1440, height: 900 })
