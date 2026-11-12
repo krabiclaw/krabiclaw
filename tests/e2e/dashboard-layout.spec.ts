@@ -5,7 +5,7 @@ import { authRequestHeaders, loginAs } from './helpers/auth'
 import { mcpData, mcpRequest } from './helpers/mcp'
 import { isAccountActivityResponse, isBuyerPaymentEntry, type BuyerPaymentEntry } from '../../shared/account-activity'
 import { paymentMoney } from '../../shared/payment-display'
-import { isBookingDetailsResponse } from '../../composables/useBookingDetails'
+import { isBookingDetailsResponse } from '../../composables/useDashboardBooking'
 import type { DashboardArticleCategory } from '../../composables/useArticleCategories'
 import type { NotificationPreferenceMap } from '../../composables/useNotificationPreferences'
 import type { SessionAvailability } from '../../server/utils/availability'
@@ -1639,7 +1639,9 @@ test.describe('dashboard pane hierarchy', () => {
         await expect(page.getByTestId(`account-activity-${item.kind}-${item.id}`)).toContainText(item.title)
       }
       const ownedDetails = await Promise.all(activity.activities.map(async (item) => {
-        const read = await page.request.get(`/api/account/bookings/${item.kind}/${encodeURIComponent(item.id)}`)
+        const path = item.booking_id ? `/api/account/bookings/${encodeURIComponent(item.booking_id)}`
+          : `/api/account/bookings/${item.kind}/${encodeURIComponent(item.id)}`
+        const read = await page.request.get(path)
         expect(read.status(), await read.text()).toBe(200)
         const detail = await read.json()
         expect(isBookingDetailsResponse(detail), 'the independent account detail read returns the owned record').toBe(true)
