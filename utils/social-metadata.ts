@@ -203,6 +203,20 @@ export interface ComposedSocialTags {
 export const OG_IMAGE_WIDTH = 1200
 export const OG_IMAGE_HEIGHT = 630
 
+export const PLATFORM_DEFAULT_TITLE = 'KrabiClaw | Open-Source Websites, Bookings & Payments'
+
+/**
+ * Format a page title for the KrabiClaw platform frame, ensuring brand prefix
+ * or suffix is applied without stutter (e.g. duplicate '| KrabiClaw').
+ */
+export function formatPlatformTitle(title?: string | null): string {
+  if (!title) return PLATFORM_DEFAULT_TITLE
+  const trimmed = title.trim()
+  if (!trimmed) return PLATFORM_DEFAULT_TITLE
+  if (trimmed.startsWith('KrabiClaw |') || trimmed.startsWith('KrabiClaw —') || trimmed === 'KrabiClaw') return trimmed
+  return `${trimmed} | KrabiClaw`
+}
+
 const TITLE_MAX_LENGTH = 70
 export const DESCRIPTION_MAX_LENGTH = 160
 

@@ -284,7 +284,7 @@ export default defineNuxtConfig({
 
   site: {
     url: 'https://krabiclaw.com',
-    name: 'KrabiClaw - AI Website Builder',
+    name: 'KrabiClaw | Open-Source Websites, Bookings & Payments',
     description: 'Beautiful websites powered by AI. Build your business website in minutes with our SaaS platform.',
     defaultLocale: 'en',
   },
