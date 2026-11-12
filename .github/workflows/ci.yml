@@ -69,6 +69,8 @@ jobs:
       matrix:
         shard: [1, 2, 3, 4]
     env:
+      YARN_ENABLE_GLOBAL_CACHE: "false"
+      YARN_CACHE_FOLDER: .yarn/cache
       BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
       PLATFORM_OWNER_EMAILS: ${{ secrets.PLATFORM_OWNER_EMAILS }}
       STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY_E2E }}
@@ -98,10 +100,10 @@ jobs:
       - name: Restore Yarn package cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
-          path: ~/.yarn/berry/cache
-          key: yarn-${{ runner.os }}-${{ hashFiles('yarn.lock') }}
-          restore-keys: yarn-${{ runner.os }}-
-      - run: corepack yarn install --immutable
+          path: .yarn/cache
+          key: yarn-playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('yarn.lock', '.yarnrc.yml') }}
+      - name: Install browser test dependencies
+        run: corepack yarn install --immutable
       # playwright.config.ts prepares an empty local D1 and the build, and its
       # global setup seeds the synthetic businesses through the app's own
       # boundaries (tests/e2e/seed). No production data reaches a pull request.
@@ -145,6 +147,8 @@ jobs:
       group: staging-deployment
       cancel-in-progress: false
     env:
+      YARN_ENABLE_GLOBAL_CACHE: "false"
+      YARN_CACHE_FOLDER: .yarn/cache
       STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY_TEST }}
       STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET_STAGING }}
       NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${{ secrets.NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY }}
@@ -171,9 +175,8 @@ jobs:
       - name: Restore Yarn package cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
-          path: ~/.yarn/berry/cache
-          key: yarn-${{ runner.os }}-${{ hashFiles('yarn.lock') }}
-          restore-keys: yarn-${{ runner.os }}-
+          path: .yarn/cache
+          key: yarn-playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('yarn.lock', '.yarnrc.yml') }}
       - run: corepack yarn install --immutable
       - name: Build staging Worker
         run: yarn build
