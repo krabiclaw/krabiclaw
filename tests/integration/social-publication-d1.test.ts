@@ -490,7 +490,7 @@ test('publication: one result and one external post per target; a failure is the
       assert.equal(fact.event, 'post.publication')
       assert.equal(fact.subject.kind, 'post_publication')
       assert.equal(fact.subject.id, fact.source.id)
-      assert.deepEqual(fact.actor, { kind: 'member', userId: 'publisher' })
+      assert.deepEqual(fact.actor, { kind: 'member', user_id: 'publisher' })
       assert.equal(fact.state, 'published')
       assert.equal(fact.verification.status, 'verified')
     }
@@ -557,7 +557,7 @@ test('publication: one result and one external post per target; a failure is the
       WHERE p.post_id = ? AND p.channel = 'facebook'`).bind(third.post.id).first<{ actor_user_id: string }>()
     assert.equal(retryInitiator?.actor_user_id, 'publisher')
     const retriedFact = (await progress()).outcomes.find(fact => fact.source.table === 'post_publications' && fact.source.id === retried.outcomes[0]!.publication_id)
-    assert.deepEqual(retriedFact?.actor, { kind: 'member', userId: 'publisher' })
+    assert.deepEqual(retriedFact?.actor, { kind: 'member', user_id: 'publisher' })
     assert.equal(retriedFact?.verification.status, 'verified')
     const attempts = await db.prepare(`SELECT actor_user_id, payload_json FROM activity_entries WHERE event_name = 'post.publication_started'
       AND json_extract(payload_json, '$.metadata.post_id') = ?`).bind(third.post.id).all<{ actor_user_id: string; payload_json: string }>()
