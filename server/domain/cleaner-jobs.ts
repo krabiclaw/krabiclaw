@@ -184,7 +184,8 @@ export async function runOrganizationJobs(env: CloudflareEnv, db: DbClient, orga
         const seated = seatUsers.get(threadId) ?? []
         // A prior booking's team only needs to know its prep is no longer theirs.
         const details = subject?.id === thread.subject_id && view ? `${view.sheet.heading.toLowerCase()} ${about} ${view.sheet.title}${view.sheet.date ? `, ${view.sheet.date}` : ''}` : prep ? 'prep for this session' : 'this job'
-        const body = `${task.status === 'open' ? 'No longer yours' : 'Cancelled'}: ${details}.`
+        const label = { open: 'No longer yours', done: 'Completed', skipped: 'Skipped', cancelled: 'Cancelled' }[task.status]
+        const body = `${label}: ${details}.`
         await post({ id: thread.subject_id, unit: subject?.unit ?? 'slot' }, [], endKey, body, seated.filter(userId => !hostUsers.includes(userId)), threadId)
       }
       if (task.status !== 'open' || !view || !task.assigned_member_id) continue
