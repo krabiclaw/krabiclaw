@@ -9,7 +9,7 @@
       <div v-if="!inline && desktop && calendar" class="grid w-80 shrink-0 grid-cols-2 overflow-hidden rounded-xl border border-default">
         <label v-for="field in dateFields" :key="field.key" class="relative px-3 py-2 first:border-r first:border-default" :class="dateField === field.key ? 'ring-2 ring-inset ring-inverted rounded-xl' : undefined">
           <span class="block text-[10px] font-bold uppercase text-default">{{ field.label }}</span>
-          <input type="date" class="peer stay-date-input w-full bg-transparent pr-5 text-sm text-default outline-none" :class="field.value ? undefined : 'opacity-0 focus:opacity-100'" :aria-label="field.label" :value="field.value ?? ''" :min="field.key === 'checkIn' ? today : earliestCheckOut ?? undefined" :max="lastDate" :disabled="field.key === 'checkOut' && !checkIn" @focus="dateField = field.key" @change="field.key === 'checkIn' ? typeCheckIn($event) : typeCheckOut($event)">
+          <input type="date" class="peer stay-date-input w-full bg-transparent pr-5 text-sm text-default outline-none" :class="field.value ? undefined : 'opacity-0 focus:opacity-100'" :aria-label="field.label" :value="field.value ?? ''" :min="field.key === 'checkIn' ? today : earliestCheckOut ?? undefined" :max="lastDate ?? undefined" :disabled="field.key === 'checkOut' && !checkIn" @focus="dateField = field.key" @change="field.key === 'checkIn' ? typeCheckIn($event) : typeCheckOut($event)">
           <span v-if="!field.value" class="pointer-events-none absolute bottom-2 left-3 text-sm text-muted peer-focus:hidden">{{ t('stay.add_date') }}</span>
           <button v-if="field.value" type="button" class="absolute right-2 bottom-2 flex size-5 items-center justify-center" :aria-label="t(field.key === 'checkIn' ? 'stay.clear_check_in' : 'stay.clear_check_out')" @click="field.key === 'checkIn' ? clearDates() : clearCheckOut()"><span aria-hidden="true">×</span></button>
         </label>
@@ -20,13 +20,12 @@
       <div v-if="calendarPending && !calendar" class="grid grid-cols-7 gap-2">
         <div v-for="i in 35" :key="i" class="size-10 animate-pulse rounded-full bg-muted" />
       </div>
-      <p v-else-if="calendarError" role="alert" class="rounded-lg border border-red-500/30 bg-red-500/5 px-4 py-3 text-sm text-error">{{ calendarError }}</p>
-      <!-- Nothing on the calendar can start a stay: say so instead of a month of struck days. -->
-      <div v-else-if="calendar && !checkIn && !firstCheckIn" class="rounded-xl border border-default px-4 py-6 text-center">
-        <p class="text-sm text-default">{{ t('stay.no_dates') }}</p>
-        <NuxtLink :to="enquiryPath" class="mt-2 inline-block text-sm font-semibold text-default underline underline-offset-4">{{ t('stay.ask_host') }}</NuxtLink>
-      </div>
-      <template v-else-if="calendar">
+      <p v-if="calendarError" role="alert" class="rounded-lg border border-red-500/30 bg-red-500/5 px-4 py-3 text-sm text-error">{{ calendarError }}</p>
+      <template v-if="calendar">
+        <p v-if="!calendarPending && !firstCheckIn && !checkIn" class="pb-4 text-sm text-muted">
+          {{ t('stay.no_dates', 1) }}
+          <NuxtLink :to="enquiryPath" class="font-semibold text-default underline underline-offset-4">{{ t('stay.ask_host') }}</NuxtLink>
+        </p>
         <!-- Reka owns the month grid, paging and keyboard focus; the booking controller owns which endpoint a date can change. -->
         <TooltipProvider :delay-duration="0" disable-closing-trigger disable-hoverable-content>
         <CalendarRoot
@@ -104,6 +103,7 @@
               </CalendarGridBody>
             </CalendarGrid>
           </div>
+          <CalendarNext v-if="vertical" as-child><button type="button" class="mt-6 w-full rounded-xl bg-muted py-3 text-sm font-semibold disabled:hidden" @click="hoveredDate = null">{{ t('stay.load_dates') }}</button></CalendarNext>
           </div>
         </CalendarRoot>
         </TooltipProvider>
@@ -130,6 +130,7 @@ import { useMediaQuery } from '@vueuse/core'
 import { TooltipContent, TooltipPortal, TooltipProvider, TooltipRoot, TooltipTrigger, CalendarCell, CalendarCellTrigger, CalendarGrid, CalendarGridBody, CalendarGridHead, CalendarGridRow, CalendarHeadCell, CalendarNext, CalendarPrev, CalendarRoot } from 'reka-ui'
 import type { StayBookingController } from '~/composables/useStayBooking'
 import { formatCalendarDate } from '~/utils/timezone'
+import { AVAILABILITY_PAGE_DAYS, MAX_STAY_NIGHTS } from '~/shared/bookings'
 import StayPriceSummary from './StayPriceSummary.vue'
 
 const props = defineProps<{ controller: StayBookingController; /** On the page beside the listing rather than in the booking dialog: no party or total. */ inline?: boolean; place?: string }>()
@@ -138,25 +139,23 @@ const { calendar, calendarPending, calendarError, checkIn, checkOut, dateField, 
   nightCount, rangeLabel, canCheckIn, canCheckOut, checkInHint, checkOutHint, firstCheckIn, earliestCheckOut, night, selectDay, setCheckIn, setCheckOut, clearDates, clearCheckOut, nightsLabel, enquiryPath } = props.controller
 const { t, locale } = useI18n()
 // The nights are read once the calendar is on screen: inline on the page, and in the dialog however it opened, including a press made before hydration.
-onMounted(() => { if (!calendar.value) void props.controller.loadCalendar() })
+onMounted(() => { if (!calendar.value && !calendarPending.value) void props.controller.openCalendar() })
 
 const desktop = useMediaQuery('(min-width: 768px)')
 const wideInline = useMediaQuery('(min-width: 1024px)')
 const vertical = computed(() => !props.inline && !desktop.value)
-const monthCount = computed(() => {
-  if (!vertical.value) return props.inline ? wideInline.value ? 2 : 1 : 2
-  if (!calendar.value || !lastDate.value) return 0
-  const start = calendarPlaceholder.value
-  if (!start) return 0
-  const end = parseDate(lastDate.value)
-  return (end.year - start.year) * 12 + end.month - start.month + 1
-})
+const monthCount = computed(() => props.inline && !wideInline.value ? 1 : 2)
 const today = computed(() => calendar.value?.home.today)
 const calendarPlaceholder = shallowRef<DateValue>()
 watch(calendar, (value) => {
   if (value && !calendarPlaceholder.value) calendarPlaceholder.value = parseDate(checkIn.value ?? value.home.today)
 }, { immediate: true })
-const lastDate = computed(() => calendar.value?.nights.at(-1)?.date)
+const lastDate = props.controller.horizon
+watch([calendarPlaceholder, monthCount], ([value, count]) => {
+  if (!value) return
+  const start = value.set({ day: 1 })
+  void props.controller.loadCalendar(start.toString(), start.add({ months: count }).toString())
+}, { immediate: true })
 watch(checkIn, (value) => {
   if (!value || vertical.value || !calendarPlaceholder.value) return
   const date = parseDate(value)
@@ -177,19 +176,25 @@ function isDateDisabled(value: DateValue): boolean {
 }
 
 const typedDate = (event: Event) => (event.target as HTMLInputElement).value
-function typeCheckIn(event: Event) {
+async function typeCheckIn(event: Event) {
   const date = typedDate(event)
-  if (date) setCheckIn(date)
-  else clearDates()
+  if (date && lastDate.value && date < lastDate.value) {
+    const first = parseDate(date)
+    await props.controller.loadCalendar(date, first.add({ days: AVAILABILITY_PAGE_DAYS }).toString())
+    setCheckIn(date)
+  }
+  else if (!date) clearDates()
   // An empty checkout gives Reka no selected date to bring the typed arrival into view.
   if (date && checkIn.value === date && !vertical.value) calendarPlaceholder.value = parseDate(date)
   // A refused date must not remain in the native input beside a quote for the previous dates.
   ;(event.target as HTMLInputElement).value = checkIn.value ?? ''
 }
-function typeCheckOut(event: Event) {
+async function typeCheckOut(event: Event) {
   const date = typedDate(event)
-  if (date) setCheckOut(date)
-  else clearCheckOut()
+  if (date) {
+    if (checkIn.value && date <= parseDate(checkIn.value).add({ days: MAX_STAY_NIGHTS }).toString()) await props.controller.loadCalendar(checkIn.value, date)
+    setCheckOut(date)
+  } else clearCheckOut()
   if (date && checkOut.value === date && !vertical.value) calendarPlaceholder.value = parseDate(date)
   ;(event.target as HTMLInputElement).value = checkOut.value ?? ''
 }

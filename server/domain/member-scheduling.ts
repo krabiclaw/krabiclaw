@@ -99,7 +99,7 @@ export async function writeMemberScheduling(actor: SchedulingActor, memberId: st
  if(!input || typeof input!=='object' || Array.isArray(input) || (input.updated_at!==null && (typeof input.updated_at!=='string' || !isValidInstant(input.updated_at))) || Object.keys(input).some(key=>key!=='updated_at' && !fields.includes(key as typeof fields[number])) || !fields.some(key=>input[key]!==undefined))throw new HTTPError({statusCode:400,message:'Choose the settings to change and provide their current revision'})
  if(input.timezone!==undefined && (typeof input.timezone!=='string' || !isValidTimezone(input.timezone)))throw new HTTPError({statusCode:400,message:'Choose an IANA timezone'})
  if(input.public_approved!==undefined && typeof input.public_approved!=='boolean')throw new HTTPError({statusCode:400,message:'Approval must be boolean'})
- const member = await requireSchedulingAccess(actor,memberId)
+ await requireSchedulingAccess(actor,memberId)
  const db=actor.env.DB
  const current=await queryFirst<MemberScheduling>(db,'SELECT * FROM member_scheduling WHERE organization_id=? AND member_id=?',[actor.organizationId,memberId])
  if ((current?.updated_at??null)!==input.updated_at) throw new HTTPError({statusCode:409,message:'Member settings changed; reload before saving'})
@@ -133,12 +133,6 @@ export async function writeMemberScheduling(actor: SchedulingActor, memberId: st
   if(error instanceof Error && /malformed JSON/.test(error.message))throw new HTTPError({statusCode:409,message:'Member settings changed; reload before saving',cause:error})
   throw error
  })
- // An explicit Hours save also finishes interrupted, idempotent session work.
- // Profile edits never enter that operation.
- if(suppliedHours) {
-  const { materializeMemberSessions } = await import('~/server/utils/availability')
-  await materializeMemberSessions(db, { organizationId: actor.organizationId, userId: member.userId, actorId: actor.userId })
- }
  const saved=await readMemberScheduling(db,actor.env,actor.organizationId,memberId)
  if(!saved)throw new HTTPError({statusCode:500,message:'Saved member settings could not be read back'})
  return saved

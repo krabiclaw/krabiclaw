@@ -23,14 +23,16 @@ export function providerAvailabilityParams(availabilityJson: string, uses = 1): 
  * provider absent from it has no windows there and is unavailable.
  */
 export function providerUnavailableSql(s: string, replacingBooking = 'NULL', convertingPayment = 'NULL', member = providerMemberSql(s)): string {
-  // Inside the member_scheduling subquery the provider is `ms.member_id`; naming it
-  // through ${member} again would deepen an expression SQLite already bounds.
-  const entry = `'$."' || ms.member_id || '"'`
   return `((EXISTS (SELECT 1 FROM products consultation WHERE consultation.id=${s}.product_id AND consultation.organization_id=${s}.organization_id AND consultation.kind='service') AND (
     NOT EXISTS (SELECT 1 FROM product_booking_configs legal WHERE legal.product_id=${s}.product_id AND legal.organization_id=${s}.organization_id AND legal.scheduling_mode='provider')
     OR ${member} IS NULL
     OR NOT EXISTS (SELECT 1 FROM member_scheduling ms WHERE ms.member_id=${member} AND ms.organization_id=${s}.organization_id AND ${PUBLISHED_PROFILE_SQL})
-  )) OR (EXISTS(SELECT 1 FROM product_booking_configs c WHERE c.organization_id=${s}.organization_id AND c.product_id=${s}.product_id AND c.scheduling_mode='provider') AND ${member} IS NULL) OR (${member} IS NOT NULL AND (
+  )) OR (EXISTS(SELECT 1 FROM product_booking_configs c WHERE c.organization_id=${s}.organization_id AND c.product_id=${s}.product_id AND c.scheduling_mode='provider') AND ${member} IS NULL) OR ${providerConflictSql(s, replacingBooking, convertingPayment, member)})`
+}
+
+export function providerConflictSql(s: string, replacingBooking: string, convertingPayment: string, member: string): string {
+  const entry = "'$.\"' || ms.member_id || '\"'"
+  return `(${member} IS NOT NULL AND (
     NOT EXISTS (SELECT 1 FROM member_scheduling ms JOIN member m ON m.id=ms.member_id AND m.organizationId=ms.organization_id
       WHERE ms.member_id=${member} AND ms.organization_id=${s}.organization_id AND ms.timezone IS NOT NULL
       AND EXISTS (SELECT 1 FROM json_each(?, ${entry} || '.windows') w WHERE json_extract(w.value,'$.start')<=${s}.starts_at AND json_extract(w.value,'$.end')>=${s}.ends_at)
@@ -46,5 +48,5 @@ export function providerUnavailableSql(s: string, replacingBooking = 'NULL', con
       WHERE h.organization_id=${s}.organization_id AND held_config.assigned_member_id=${member}
       AND h.status='active' AND h.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now') AND h.payment_id IS NOT ${convertingPayment}
       AND h.session_id<>${s}.id AND h.starts_at<${s}.ends_at AND h.ends_at>${s}.starts_at)
-  )))`
+  ))`
 }

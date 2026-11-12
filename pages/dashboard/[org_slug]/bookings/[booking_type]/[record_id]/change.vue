@@ -64,13 +64,12 @@
 <script setup lang="ts">
 import { bookingEditorKey } from '~/components/dashboard/BookingDetails.vue'
 import type { DashboardBookingDetails } from '~/server/utils/dashboard-booking-details'
-import { formatTimestamp } from '~/utils/timezone'
+import { addLocalDays, formatTimestamp } from '~/utils/timezone'
 import { getErrorMessage } from '~/utils/errors'
 import { getVerticalCopy } from '~/utils/vertical-copy'
 
 definePageMeta({ layout: 'dashboard' })
 
-const route = useRoute()
 const level = useRouteLevel()
 const api = useDashboardApi()
 const b = inject(bookingEditorKey)!
@@ -102,19 +101,19 @@ function seed(record: DashboardBookingDetails | null) {
   draft.sessionId = record.product_session_id ?? ''
 }
 // The booking's own version, never its conversation's: a guest message mid-edit leaves the draft standing.
-watch(() => booking.value?.updated_at, () => seed(booking.value), { immediate: true })
+watch(() => booking.value?.version, () => seed(booking.value), { immediate: true })
 
-type SessionRow = { id: string; starts_at: string; timezone: string; remaining: number | null; assigned_member_id: string | null }
-const isSessionList = (value: unknown): value is { sessions: SessionRow[] } => isRecord(value) && Array.isArray(value.sessions)
-  && value.sessions.every(row => isRecord(row) && typeof row.id === 'string' && typeof row.starts_at === 'string' && typeof row.timezone === 'string' && (row.remaining === null || typeof row.remaining === 'number'))
+type SessionRow = { id: string; product_id: string; starts_at: string; timezone: string; remaining: number | null; assigned_member_id: string | null }
+const isSessionList = (value: unknown): value is { options: SessionRow[] } => isRecord(value) && Array.isArray(value.options)
+  && value.options.every(row => isRecord(row) && typeof row.id === 'string' && typeof row.starts_at === 'string' && typeof row.timezone === 'string' && (row.remaining === null || typeof row.remaining === 'number'))
 // The chosen day's sessions at the chosen location, read for that day alone, so the current one is always among them.
 const { data: sessionData, error: sessionsError, status: sessionsStatus } = await useAsyncData(
   () => `booking-change-sessions:${booking.value?.product_id ?? ''}:${draft.locationId}:${draft.date}`,
   () => {
     const record = booking.value
     if (!record || !record.product_id || !/^\d{4}-\d{2}-\d{2}$/.test(draft.date)) return Promise.resolve(null)
-    return api<{ sessions: SessionRow[] }>(`/api/dashboard/bookings/booking/${encodeURIComponent(String(route.params.record_id))}/sessions`, {
-      query: { date: draft.date, ...(movesBetweenLocations.value ? { location_id: draft.locationId } : {}) }, validate: isSessionList,
+    return api<{ options: SessionRow[] }>(`${dashboardBookingPath(record.booking_id!)}/move-options`, {
+      query: { from: draft.date, to: addLocalDays(draft.date, 1), ...(movesBetweenLocations.value ? { location_id: draft.locationId } : {}) }, validate: isSessionList,
     })
   },
   { watch: [() => draft.date, () => draft.locationId] },
@@ -125,7 +124,7 @@ watch(() => draft.locationId, (locationId, previous) => { if (previous && locati
 const times = computed(() => {
   const record = booking.value
   const byStart = new Map<string, SessionRow>()
-  for (const row of sessionData.value?.sessions ?? []) {
+  for (const row of sessionData.value?.options ?? []) {
     const current = byStart.get(row.starts_at)
     if (!current || row.id === record?.product_session_id || (current.id !== record?.product_session_id && row.assigned_member_id === record?.assigned_member_id)) byStart.set(row.starts_at, row)
   }
@@ -153,15 +152,16 @@ let attempt: { draft: string; key: string } | null = null
 async function send() {
   const record = booking.value
   if (!record || !valid.value || !dirty.value || saving.value) return
-  const proposal = { kind: 'booking' as const, product_session_id: draft.sessionId, party_size: draft.partySize }
+  const productId = sessionData.value?.options.find(option => option.id === draft.sessionId)?.product_id ?? record.product_id
+  const proposal = { product_session_id: draft.sessionId, product_id: productId, party_size: draft.partySize, apply: false }
   const signature = JSON.stringify(proposal)
   if (attempt?.draft !== signature) attempt = { draft: signature, key: crypto.randomUUID() }
   saving.value = true
   error.value = null
   try {
-    await api(`/api/dashboard/bookings/${b.bookingType}/${encodeURIComponent(String(route.params.record_id))}/changes`, {
+    await api(`${dashboardBookingPath(record.booking_id!)}/move`, {
       method: 'POST',
-      body: { ...proposal, updated_at: record.updated_at, idempotency_key: attempt.key },
+      body: { ...proposal, version: record.version, idempotency_key: attempt.key },
       validate: isRecord,
     })
     await b.refresh()

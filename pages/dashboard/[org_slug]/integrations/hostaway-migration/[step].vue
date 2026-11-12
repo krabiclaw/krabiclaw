@@ -216,5 +216,5 @@ const rowLabel = (state: MigrationRow['state']) => ({ ready: 'Ready', existing: 
 const outcomeLabels = { imported: 'Imported', existing: 'Already here', skipped: 'Skipped', failed: 'Not saved', pending: 'Waiting to import' }
 const amount = (minor: number, currency: string) => formatMinorAmount(minor, currency)
 const airbnbPath = computed(() => `/dashboard/${String(route.params.org_slug)}/integrations/airbnb`)
-const stayPath = (id: string) => `/dashboard/${String(route.params.org_slug)}/bookings/stay/${id}`
+const stayPath = (id: string) => `/dashboard/${String(route.params.org_slug)}/bookings/${id}`
 </script>

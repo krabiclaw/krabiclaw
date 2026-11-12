@@ -61,7 +61,7 @@ async function main() {
   `)
   let available
   for (const { slug, location_id } of tables) {
-    const url = new URL(`/api/public/products/${encodeURIComponent(slug)}/sessions`, origin)
+    const url = new URL(`/api/public/products/${encodeURIComponent(slug)}/availability`, origin)
     url.search = new URLSearchParams({ location_id }).toString()
     const { sessions } = await request(url, 200)
     const session = sessions.find(session => !session.is_full && (session.remaining === null || session.remaining >= 2)

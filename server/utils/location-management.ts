@@ -590,30 +590,16 @@ export async function updateLocation(
   // moved since matches nothing and the write is refused rather than applied
   // over someone else's.
   const expectedUpdatedAt = input.updated_at ?? existing.updated_at;
-  // A table here is seated through these hours: its seatings follow them in
-  // the same batch, written only if this update lands.
-  const saved = (field: 'timezone' | 'opening_hours' | 'special_hours') => {
-    const index = sets.findIndex(set => set === `${field} = ?`);
-    return (index >= 0 ? params[index] : existing[field] ?? null) as string | null;
-  };
   const version = { query: 'EXISTS (SELECT 1 FROM business_locations WHERE id = ? AND organization_id = ? AND updated_at = ?)', params: [locationId, organizationId, expectedUpdatedAt] };
-  const seatings = changedFields.some(field => ['timezone', 'opening_hours', 'special_hours'].includes(field))
-    ? await (await import('~/server/utils/availability')).prepareLocationTableSeatings(db, {
-      organizationId, actorId: userId ?? 'system', now,
-      location: { id: locationId, status: existing.status, timezone: saved('timezone')!, opening_hours: saved('opening_hours'), special_hours: saved('special_hours') },
-      guard: version,
-    })
-    : { guard: version, queries: [] };
   const runUpdate = async (boundParams: Array<string | number | null>): Promise<boolean> => {
-    // The cache and session writes see the same snapshot as the location update.
-    const statements: BatchQuery[] = [...seatings.queries, publicResourceCacheInvalidationQuery(organizationId, 'location_updated', seatings.guard)];
+    const statements: BatchQuery[] = [publicResourceCacheInvalidationQuery(organizationId, 'location_updated', version)];
     statements.push({
       query: `
         UPDATE business_locations
         SET ${sets.join(", ")}
-        WHERE id = ? AND organization_id = ? AND (${seatings.guard.query})
+        WHERE id = ? AND organization_id = ? AND (${version.query})
       `,
-      params: [...boundParams, ...seatings.guard.params!],
+      params: [...boundParams, ...version.params!],
     });
     statements.push(organizationEventQuery({
       organizationId,
@@ -634,7 +620,7 @@ export async function updateLocation(
     // An inactive location takes its homes off the live count. Making it
     // active again is guarded by the same home-activation boundary.
     const results = await executeWithinCapacity(env, db, organizationId, [...(writeGuard ? [writeGuard] : []), ...statements], { action: 'make it active', allowHomeActivation: options.allowHomeActivation });
-    const changed = (results[seatings.queries.length + (writeGuard ? 2 : 1)]?.meta?.changes ?? 0) === 1;
+    const changed = (results[writeGuard ? 2 : 1]?.meta?.changes ?? 0) === 1;
     // The saved privacy mode must be visible even if readback or card work fails.
     if (changed) await purgePublicResourceCacheNow(env, organizationId);
     return changed;

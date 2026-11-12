@@ -9,7 +9,7 @@ import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/
 import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
 import { createProduct, deleteProduct, getProduct, removeProductLocation, setProductLocation, setProductPublication, updateProduct } from '../../server/utils/product-management.ts'
-import { addStayHomePhoto, applyChannelBooking, cancelStay, cancelStayAsGuest, createStay, createStayPhotoRoom, deleteStayPayment, getStay, listStays, moveStayPhotos, readStayCalendar, readStayCalendars, readStayGapCandidates, readStayHome, recordStayPayment, removeStayHomePhoto, removeStayPhotoRoom, reorderStayHomePhotos, importStayNights, quoteStay, resumeImportedStay, setStayNights, stayCheckoutPolicy, updateStay, updateStayHome, updateStayHomeAccessibility, updateStayPhotoRoom, type GuestStay, type StayAccess } from '../../server/domain/stays.ts'
+import { addStayHomePhoto, applyChannelBooking, cancelStay, createStay, createStayPhotoRoom, deleteStayPayment, getStay, listStays, moveStayPhotos, readStayCalendar, readStayCalendars, readStayGapCandidates, readStayHome, recordStayPayment, removeStayHomePhoto, removeStayPhotoRoom, reorderStayHomePhotos, importStayNights, quoteStay, resumeImportedStay, setStayNights, stayCheckoutPolicy, updateStay, updateStayHome, updateStayHomeAccessibility, updateStayPhotoRoom, type GuestStay, type StayAccess } from '../../server/domain/stays.ts'
 import { readBusinessProgressReference } from '../../server/utils/business-outcomes.ts'
 import { dismissOpportunity, listOpportunities } from '../../server/domain/opportunities.ts'
 import { listTasks, parseTaskListQuery, taskViewer } from '../../server/domain/tasks.ts'
@@ -18,7 +18,8 @@ import { isDashboardInvalidation, type DashboardInvalidation } from '../../share
 import { getQuery, H3 } from 'nitro/h3'
 import { createAuth } from '../../server/utils/auth.ts'
 import guestStayRoute from '../../server/api/public/guest-stays/[activity_id].get.ts'
-import accountStayRoute from '../../server/api/account/stays/[activity_id].get.ts'
+import accountCancelRoute from '../../server/api/account/bookings/[booking_id]/cancel.post.ts'
+import accountStayRoute from '../../server/api/account/bookings/[booking_id].get.ts'
 import paymentReturnRoute from '../../server/api/public/payments/[payment_id]/return.post.ts'
 import { tokenHash } from '../../server/domain/payments/buyer.ts'
 import { createLocation, updateLocation } from '../../server/utils/location-management.ts'
@@ -53,6 +54,7 @@ const ORG = 'org'
 const OWNER = 'owner-user'
 const CLEANER = 'cleaner-user'
 const OUTSIDER = 'outsider-user'
+type GuestStayAccount = Omit<GuestStay, 'stay'> & { booking: Omit<GuestStay['stay'], 'id'> & { booking_id: string; unit: 'nights' } }
 const NOW = '2026-10-14T00:00:00.000Z'
 const manager: StayAccess = { organizationId: ORG, actorId: OWNER, manage: true }
 const cleaner: StayAccess = { organizationId: ORG, actorId: CLEANER, manage: false, userId: CLEANER }
@@ -1577,8 +1579,8 @@ test('a business’s site shows a guest the stay its signed link names, from any
     }
     const accountRead = (cookie?: string) => {
       const app = new H3()
-      app.get('/api/account/stays/:activity_id', accountStayRoute)
-      return app.request(Object.assign(new Request(`https://proof.example/api/account/stays/${activityId}`, { headers: cookie ? { cookie } : {} }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
+      app.get('/api/account/bookings/:booking_id', accountStayRoute)
+      return app.request(Object.assign(new Request(`https://proof.example/api/account/bookings/${stay.id}`, { headers: cookie ? { cookie } : {} }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
     }
 
     // No session is sent: the link alone opens the stay, as from the email on another device.
@@ -1609,7 +1611,9 @@ test('a business’s site shows a guest the stay its signed link names, from any
     const account = await accountRead(booker.cookie)
     assert.equal(account.status, 200)
     assert.equal(account.headers.get('cache-control'), 'private, no-store')
-    assert.deepEqual((await account.json() as GuestStay).home.location, guestLocation)
+    const accountBooking = await account.json() as GuestStayAccount
+    assert.equal(accountBooking.booking.booking_id, stay.id)
+    assert.deepEqual(accountBooking.home.location, guestLocation)
     assert.equal((await accountRead(otherGuest.cookie)).status, 404)
     assert.equal((await accountRead()).status, 401)
     // Better Auth owns the guest's portrait: the host reads it through the account the stay belongs to.
@@ -1684,8 +1688,8 @@ test('a business’s site shows a guest the stay its signed link names, from any
     await db.prepare("UPDATE bookings SET status = 'pending' WHERE id = ?").bind(stay.id).run()
     for (const response of [await read(ORG, link), await accountRead(booker.cookie)]) {
       assert.equal(response.status, 200)
-      const pending = await response.json() as GuestStay
-      assert.equal(pending.stay.status, 'pending')
+      const pending = await response.json() as GuestStay | GuestStayAccount
+      assert.equal(('booking' in pending ? pending.booking : pending.stay).status, 'pending')
       assert.equal(pending.home.location, null)
       assert.equal(pending.home.arrival_guide, null)
       assert.deepEqual([pending.home.house_rules, pending.home.safety], [[], []])
@@ -1696,18 +1700,47 @@ test('a business’s site shows a guest the stay its signed link names, from any
     // The guest cancels: the moderate policy refunds what it allows through Stripe,
     // and the cancelled stay stops disclosing where it is on either read.
     const realFetch = globalThis.fetch
+    let refunds = 0
+    let nativeRefund: Record<string, unknown> | null = null
     context.mock.method(globalThis, 'fetch', async (request: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(request instanceof Request ? request.url : String(request))
       if (url.origin !== 'https://api.stripe.com') return realFetch(request, init)
+      if (init?.method === 'GET' && url.pathname === '/v1/refunds/re_site_stay') {
+        assert(nativeRefund)
+        return Response.json(nativeRefund)
+      }
       assert.equal(`${init?.method} ${url.pathname}`, 'POST /v1/refunds')
+      refunds++
       const form = new URLSearchParams(String(init?.body))
-      return Response.json({ id: 're_site_stay', object: 'refund', amount: Number(form.get('amount') ?? 45_000), currency: 'usd', status: 'succeeded', payment_intent: form.get('payment_intent'), reason: form.get('reason'), metadata: { krabiclaw_refund_id: form.get('metadata[krabiclaw_refund_id]') } })
+      nativeRefund = { id: 're_site_stay', object: 'refund', amount: Number(form.get('amount') ?? 45_000), currency: 'usd', status: 'succeeded', payment_intent: form.get('payment_intent'), reason: form.get('reason'), metadata: { krabiclaw_refund_id: form.get('metadata[krabiclaw_refund_id]') } }
+      return Response.json(nativeRefund)
     })
-    assert.equal((await cancelStayAsGuest(db, { ...env, STRIPE_TEST_SECRET_KEY: 'sk_test_local_boundary', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' } as never, ORG, stay.id, booker.id)).refund_minor, 7_500)
+    const accountCancel = (cookie: string, version: number) => {
+      const app = new H3()
+      app.post('/api/account/bookings/:booking_id/cancel', accountCancelRoute)
+      const request = new Request(`https://proof.example/api/account/bookings/${stay.id}/cancel`, {
+        method: 'POST', headers: { cookie, origin: 'https://proof.example', 'content-type': 'application/json' }, body: JSON.stringify({ version }),
+      })
+      const runtime = { name: 'cloudflare', cloudflare: { env: { ...env, STRIPE_TEST_SECRET_KEY: 'sk_test_local_boundary', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' } } }
+      return app.request(Object.assign(request, { runtime }))
+    }
+    const bookingVersion = accountBooking.booking.version
+    assert.equal((await accountCancel(otherGuest.cookie, bookingVersion)).status, 404)
+    assert.equal((await accountCancel(booker.cookie, bookingVersion + 1)).status, 409)
+    const cancelledByBuyer = await accountCancel(booker.cookie, bookingVersion)
+    assert.equal(cancelledByBuyer.status, 200, await cancelledByBuyer.clone().text())
+    const cancellation = { success: true, status: 'cancelled', kind: 'stay', refund_minor: 7_500 }
+    assert.deepEqual(await cancelledByBuyer.json(), cancellation)
+    await db.prepare("UPDATE product_booking_configs SET check_in_time=NULL WHERE product_id=?").bind(cabin.id).run()
+    const replay = await accountCancel(booker.cookie, bookingVersion)
+    assert.equal(replay.status, 200, await replay.clone().text())
+    assert.deepEqual(await replay.json(), cancellation)
+    assert.equal(refunds, 1, 'the retry uses the recorded refund after the home changes')
+    await db.prepare("UPDATE product_booking_configs SET check_in_time='16:00' WHERE product_id=?").bind(cabin.id).run()
     for (const response of [await read(ORG, link), await accountRead(booker.cookie)]) {
       assert.equal(response.status, 200)
-      const cancelled = await response.json() as GuestStay
-      assert.equal(cancelled.stay.status, 'cancelled')
+      const cancelled = await response.json() as GuestStay | GuestStayAccount
+      assert.equal(('booking' in cancelled ? cancelled.booking : cancelled.stay).status, 'cancelled')
       assert.equal(cancelled.home.location, null)
       assert.equal(cancelled.home.arrival_guide, null)
       assert.deepEqual([cancelled.home.house_rules, cancelled.home.safety], [[], []])
@@ -1772,7 +1805,7 @@ test('a stay paid on a business’s site returns to that site’s stay confirmat
     app.use((event) => { event.context.organizationId = ORG })
     app.post('/api/public/payments/:payment_id/return', paymentReturnRoute)
     app.get('/api/public/guest-stays/:activity_id', guestStayRoute)
-    app.get('/api/account/stays/:activity_id', accountStayRoute)
+    app.get('/api/account/bookings/:booking_id', accountStayRoute)
     const call = (path: string, init: RequestInit = {}, headers: Record<string, string> = { cookie }) => app.request(Object.assign(new Request(`https://org.proof.example${path}`, { ...init, headers: { ...headers, 'content-type': 'application/json' } }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
 
     const back = await call('/api/public/payments/stay-pay/return', { method: 'POST', body: JSON.stringify({ claim }) })
@@ -1799,10 +1832,10 @@ test('a stay paid on a business’s site returns to that site’s stay confirmat
     assert(body.home.location?.maps_url)
     assert.deepEqual({ address: body.home.location.address, latitude: body.home.location.latitude, longitude: body.home.location.longitude }, { address: location.address, latitude: 8.0326, longitude: 98.822 })
     assert.equal(new URL(body.home.location.maps_url).searchParams.get('q'), '8.0326,98.822')
-    const account = await call(`/api/account/stays/${activityId}`)
+    const account = await call(`/api/account/bookings/${stay.id}`)
     assert.equal(account.status, 200)
-    assert.deepEqual((await account.json() as GuestStay).home.location, body.home.location)
-    assert.equal((await call(`/api/account/stays/${activityId}`, {}, { cookie: checkoutCookie })).status, 404)
+    assert.deepEqual((await account.json() as GuestStayAccount).home.location, body.home.location)
+    assert.equal((await call(`/api/account/bookings/${stay.id}`, {}, { cookie: checkoutCookie })).status, 404)
   } finally {
     await runtime.dispose()
   }

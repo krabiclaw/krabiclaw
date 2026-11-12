@@ -31,7 +31,9 @@ test('a guest who did not come is marked a no-show from the booking record, and 
     for (const [submissionType, mailbox] of [['booking', 'current'], ['booking', 'past']] as const) {
       const listed = (await body<{ threads: InboxRow[] }>(await page.request.get(`/api/dashboard/organizations/${organizationId}/conversations`, { params: { mailbox, type: submissionType } }), 200)).threads
       for (const row of listed) {
-        const { booking } = await body<{ booking: DashboardBookingDetails }>(await page.request.get(`/api/dashboard/bookings/${submissionType}/${row.id}`, { params: { org: slug } }), 200)
+        const { thread } = await body<{ thread: InboxThread }>(await page.request.get(`/api/dashboard/organizations/${organizationId}/guest-threads/${row.id}`), 200)
+        if (!thread.booking_id) throw new Error('Booking conversation has no booking')
+        const { booking } = await body<{ booking: DashboardBookingDetails }>(await page.request.get(`/api/dashboard/bookings/${thread.booking_id}`, { params: { org: slug } }), 200)
         if (booking.can_mark_no_show) { target = { thread: { ...row, submissionType }, details: booking }; break }
       }
       if (target) break
@@ -39,7 +41,7 @@ test('a guest who did not come is marked a no-show from the booking record, and 
     expect(target, 'The studio\'s seed includes an ended, confirmed visit with no review').not.toBeNull()
     const { thread, details } = target!
 
-    await page.goto(`/dashboard/${slug}/bookings/${thread.submissionType}/${thread.id}`)
+    await page.goto(`/dashboard/${slug}/bookings/${details.booking_id}`)
     await waitForNuxtHydration(page)
     await page.getByRole('button', { name: /^Manage / }).click()
     await page.getByRole('button', { name: 'Mark as a no-show', exact: true }).click()
@@ -49,14 +51,14 @@ test('a guest who did not come is marked a no-show from the booking record, and 
     await expect(page.getByTestId('booking-review-state')).toContainText('No-show')
 
     // Read back through other paths: the record, the conversation, and a repeat refused.
-    const after = (await body<{ booking: DashboardBookingDetails }>(await page.request.get(`/api/dashboard/bookings/${thread.submissionType}/${thread.id}`, { params: { org: slug } }), 200)).booking
+    const after = (await body<{ booking: DashboardBookingDetails }>(await page.request.get(`/api/dashboard/bookings/${details.booking_id}`, { params: { org: slug } }), 200)).booking
     expect(after.no_show_at).not.toBeNull()
     expect(after.can_mark_no_show).toBe(false)
     expect(after.status).toBe(details.status)
     // The conversation says it once, as the owner who marked it reads it.
     const conversation = (await body<{ thread: InboxThread }>(await page.request.get(`/api/dashboard/organizations/${organizationId}/guest-threads/${thread.id}`), 200)).thread
     expect(conversation.stream.filter(item => item.type === 'event' && item.text === `You marked the ${thread.submissionType} as a no-show`)).toHaveLength(1)
-    const repeat = await page.request.post(`/api/dashboard/organizations/${organizationId}/guest-threads/${thread.id}/operations/no_show`, { data: { idempotency_key: `repeat-${Date.now()}` } })
+    const repeat = await page.request.post(`/api/dashboard/bookings/${details.booking_id}/no_show`, { params: { org: slug }, data: { version: after.version, idempotency_key: `repeat-${Date.now()}` } })
     expect(repeat.status(), await repeat.text()).toBe(409)
   } finally {
     await release()

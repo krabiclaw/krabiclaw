@@ -30,6 +30,15 @@ import type { OpportunityView } from '../../server/domain/opportunities'
 
 const TIME_ZONE = 'Asia/Bangkok'
 
+type NightBooking = Omit<StayDetail, 'id'> & { booking_id: string; unit: 'nights' }
+type NightBookingReceipt = Pick<NightBooking, 'booking_id' | 'unit' | 'version'> & { channel_push: unknown }
+
+function nightCalendarPath(from: string, to: string, productId?: string) {
+  const query = new URLSearchParams({ unit: 'nights', from, to })
+  if (productId) query.set('product_id', productId)
+  return `bookings/calendar?${query}`
+}
+
 /** GET /api/dashboard/today: the business's stored tasks and, for a manager, its opportunities. */
 type BusinessToday = { reservations: { title: string | null; cards: TodayReservation[] }; tasks: TaskSection[]; opportunities: OpportunityView[]; opportunity_issues: string[]; assignees: TaskPerson[]; resolved_at: string }
 
@@ -53,7 +62,8 @@ async function expectStatus(response: Pick<APIResponse, 'status' | 'text'>, stat
   expect(response.status(), response.status() === status ? undefined : await response.text()).toBe(status)
 }
 
-async function createStayHome(page: Page, baseURL: string, selectDifferentLocation = false, internalName = 'Cliff Cabin') {
+async function createStayHome(page: Page, baseURL: string, options: { selectDifferentLocation?: boolean; internalName?: string; createInForm?: boolean } = {}) {
+  const { selectDifferentLocation = false, internalName = 'Cliff Cabin', createInForm = false } = options
   const request = page.request
   await loginAs(request, baseURL, 'user-e2e-lodging-host')
   const headers = authRequestHeaders(baseURL)
@@ -87,32 +97,42 @@ async function createStayHome(page: Page, baseURL: string, selectDifferentLocati
   const postal = placed.data!.location.address
   const homeAddress = postal && { address: postal.addressLines.join(', '), city: postal.locality ?? null, state: postal.administrativeArea ?? null, country: postal.regionCode, zip_code: postal.postalCode ?? null }
 
-  // The one Product form keeps the home's title and required stay facts together.
-  await page.goto(`/dashboard/${slug}/products/new?kind=stay&location_id=${encodeURIComponent(entryLocation.id)}`)
-  await expect(page).toHaveURL(`/dashboard/${slug}/products/new?kind=stay&location_id=${encodeURIComponent(entryLocation.id)}`)
-  if (selectDifferentLocation) {
-    await page.getByRole('combobox', { name: 'Location*', exact: true }).click()
-    await page.getByRole('option', { name: location.title, exact: true }).click()
+  const productEndpoint = `/api/editor/organizations/${organizationId}/products`
+  let saved: Pick<APIResponse, 'status' | 'text' | 'json'>
+  if (createInForm) {
+    // The creation journeys exercise the form that owns the home's title, location and stay facts.
+    await page.goto(`/dashboard/${slug}/products/new?kind=stay&location_id=${encodeURIComponent(entryLocation.id)}`)
+    await expect(page).toHaveURL(`/dashboard/${slug}/products/new?kind=stay&location_id=${encodeURIComponent(entryLocation.id)}`)
+    if (selectDifferentLocation) {
+      await page.getByRole('combobox', { name: 'Location*', exact: true }).click()
+      await page.getByRole('option', { name: location.title, exact: true }).click()
+    }
+    await page.getByRole('textbox', { name: 'Internal name', exact: true }).fill(internalName)
+    await page.getByRole('textbox', { name: 'Listing title', exact: true }).fill('Cliff Cabin')
+    await page.getByRole('textbox', { name: 'Sleeps' }).fill('4')
+    await page.getByRole('textbox', { name: 'Minimum nights' }).fill('2')
+    await page.getByRole('combobox', { name: 'Looked after by*', exact: true }).click()
+    await page.getByRole('option', { name: ownerName, exact: true }).click()
+    const creation = page.waitForResponse(response => response.request().method() === 'POST'
+      && new URL(response.url()).pathname === productEndpoint)
+    await page.locator('#dashboard-panel-product').getByRole('button', { name: 'Create place to stay', exact: true }).click()
+    saved = await creation
+  } else {
+    // Other journeys start from the same editor write and exercise their own UI boundary.
+    saved = await request.post(productEndpoint, { headers, data: {
+      kind: 'stay', name: 'Cliff Cabin', active: true, idempotency_key: `${slug}-home`, stay: { internal_name: internalName, location_id: location.id, assigned_member_id: ownerMemberId,
+        check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 2 },
+    } })
   }
-  await page.getByRole('textbox', { name: 'Internal name', exact: true }).fill(internalName)
-  await page.getByRole('textbox', { name: 'Listing title', exact: true }).fill('Cliff Cabin')
-  await page.getByRole('textbox', { name: 'Sleeps' }).fill('4')
-  await page.getByRole('textbox', { name: 'Minimum nights' }).fill('2')
-  await page.getByRole('combobox', { name: 'Looked after by*', exact: true }).click()
-  await page.getByRole('option', { name: ownerName, exact: true }).click()
-  const creation = page.waitForResponse(response => response.request().method() === 'POST'
-    && new URL(response.url()).pathname === `/api/editor/organizations/${organizationId}/products`)
-  await page.locator('#dashboard-panel-product').getByRole('button', { name: 'Create place to stay', exact: true }).click()
-  const saved = await creation
   await expectStatus(saved, 201)
-  const savedProductId = (await saved.json() as { product: { id: string } }).product.id
-  await expect(page).toHaveURL(new RegExp(`/dashboard/${slug}/products/(?!new)[^/?]+`))
-  expect(new URL(page.url()).searchParams.get('location_id')).toBe(location.id)
-  const productId = new URL(page.url()).pathname.split('/')[4]!
-  expect(productId).toBe(savedProductId)
+  const productId = (await saved.json() as { product: { id: string } }).product.id
+  const productPage = `/dashboard/${slug}/products/${productId}?location_id=${encodeURIComponent(location.id)}`
+  if (!createInForm) await page.goto(productPage)
+  await expect(page).toHaveURL(url => url.pathname === `/dashboard/${slug}/products/${productId}`
+    && url.searchParams.get('location_id') === location.id)
   expect(productId).toMatch(/^[0-9a-f-]{36}$/)
   const unknownPropertyFacts = { listing_type: null, total_floors: null, listing_floor: null, year_built: null, property_size: null, property_size_unit: null }
-  const home = await call<{ product: { kind: string; unit_label: string; stay: Record<string, unknown> } }>('get_product', { product_id: productId })
+  const home = await call<{ product: { kind: string; slug: string; unit_label: string; stay: Record<string, unknown> } }>('get_product', { product_id: productId })
   expect(home.error).toBeNull()
   expect(home.data!.product).toMatchObject({ kind: 'stay', unit_label: 'night', stay: { internal_name: internalName, location_id: location.id, check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 2, ...unknownPropertyFacts } })
   const api = (path: string) => `${baseURL}/api/dashboard/${path}${path.includes('?') ? '&' : '?'}org=${encodeURIComponent(slug)}`
@@ -179,7 +199,7 @@ test('a home keeps zero beds and unknown provider times through editing and the 
 test('a home keeps its operator name independent from its public title across CMS, calendar and reservation-backed tasks', async ({ page, baseURL }, testInfo) => {
   test.setTimeout(120_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
-  const { request, slug, organizationId, call, api, productId } = await createStayHome(page, baseURL!, false, 'Cabin 3')
+  const { request, slug, organizationId, call, api, productId } = await createStayHome(page, baseURL!, { createInForm: true, internalName: 'Cabin 3' })
   const internalName = 'Cabin 4'
   const publicTitle = 'A quiet cabin above the sea'
   const productPath = `/dashboard/${slug}/products/${productId}`
@@ -226,10 +246,10 @@ test('a home keeps its operator name independent from its public title across CM
   expect(await grid.locator('[data-row-index] button').first().evaluate(element => element.getBoundingClientRect().height)).toBe(64)
   await page.screenshot({ animations: 'disabled', path: testInfo.outputPath('web-calendar-default.png') })
 
-  const created = await request.post(api('stays'), { data: { product_id: productId, check_in_date: localDay(1), check_out_date: localDay(3), adults: 3, children: 0, infants: 0,
+  const created = await request.post(api('bookings'), { data: { product_id: productId, check_in_date: localDay(1), check_out_date: localDay(3), adults: 3, children: 0, infants: 0,
     guest_name: 'Ana Silva', guest_phone: '+66812345001', guest_email: `ana-${slug}@playwright.example`, total_minor: 300_00, idempotency_key: crypto.randomUUID() } })
   await expectStatus(created, 201)
-  const { stay } = await created.json() as { stay: StayDetail }
+  const { booking: stay } = await created.json() as { booking: NightBooking }
   expect(stay.conversation_id).toBeTruthy()
   const questionText = 'Can you send the check-in instructions?'
   const question = await request.post('/api/dev/inbound-whatsapp', { headers: devLoginHeaders(), data: {
@@ -242,7 +262,7 @@ test('a home keeps its operator name independent from its public title across CM
   const task = todayTasks.find(item => item.kind === 'guest_reply' && item.conversation_id === stay.conversation_id)!
   expect(task).toMatchObject({
     status: 'open',
-    booking_id: stay.id,
+    booking_id: stay.booking_id,
     action: { type: 'open', label: 'Reply', path: `/dashboard/${slug}/messages/${stay.conversation_id}` },
     detail: questionText,
     reservation: {
@@ -266,13 +286,13 @@ test('a home keeps its operator name independent from its public title across CM
   await expectStatus(upcoming, 200)
   const upcomingToday = await upcoming.json() as BusinessToday
   const upcomingTasks = upcomingToday.tasks.flatMap(section => section.tasks)
-  expect(upcomingTasks.filter(item => item.booking_id === stay.id).map(item => item.kind).sort()).toEqual(['guest_reply', 'turnover'])
+  expect(upcomingTasks.filter(item => item.booking_id === stay.booking_id).map(item => item.kind).sort()).toEqual(['guest_reply', 'turnover'])
   // Upcoming draws the stay once, as its reservation card; the reply under it is the question alone.
   const upcomingReply = upcomingTasks.find(item => item.id === task.id)!
   expect(upcomingReply).toMatchObject({ version: task.version + 1, action: task.action, detail: task.detail })
   expect(upcomingReply.reservation).toBeUndefined()
-  expect(upcomingToday.reservations.cards.filter(card => card.booking_id === stay.id).map(card => [card.headline, card.name])).toEqual([['Ana’s group of 3', internalName]])
-  expect(upcomingTasks.find(item => item.kind === 'turnover' && item.booking_id === stay.id)).toMatchObject({
+  expect(upcomingToday.reservations.cards.filter(card => card.booking_id === stay.booking_id).map(card => [card.headline, card.name])).toEqual([['Ana’s group of 3', internalName]])
+  expect(upcomingTasks.find(item => item.kind === 'turnover' && item.booking_id === stay.booking_id)).toMatchObject({
     face: 'photo', action: { type: 'complete', label: 'Done' },
   })
   const remaining = await request.get(api('today?kind=guest_reply'))
@@ -281,7 +301,7 @@ test('a home keeps its operator name independent from its public title across CM
 
   await page.goto(`/dashboard/${slug}?range=upcoming`)
   await waitForNuxtHydration(page)
-  const turnoverCard = page.locator(`[data-task-id="${upcomingTasks.find(item => item.kind === 'turnover' && item.booking_id === stay.id)!.id}"]`)
+  const turnoverCard = page.locator(`[data-task-id="${upcomingTasks.find(item => item.kind === 'turnover' && item.booking_id === stay.booking_id)!.id}"]`)
   await expect(turnoverCard.locator('.tc-media')).toHaveCount(0)
   await expect(turnoverCard.getByText('Turnover', { exact: true })).toBeVisible()
   // The card opens its sheet, which holds Done for work a person completes.
@@ -323,7 +343,7 @@ test('a home keeps its operator name independent from its public title across CM
   const restored = await request.patch(api(`stay-homes/${productId}`), { data: { name: publicTitle } })
   await expectStatus(restored, 200)
 
-  const recordedArrival = await call<{ stay: StayDetail }>('update_stay', { booking_id: stay.id, version: stay.version, arrival_time: '18:30' })
+  const recordedArrival = await call<NightBookingReceipt>('update_product_booking', { booking_id: stay.booking_id, version: stay.version, arrival_time: '18:30' })
   expect(recordedArrival.error).toBeNull()
   const replyWithArrival = await request.get(taskPath)
   await expectStatus(replyWithArrival, 200)
@@ -336,22 +356,22 @@ test('a home keeps its operator name independent from its public title across CM
   expect(savedClocks.data!.product.stay).toMatchObject({ check_in_time: null, check_out_time: null })
   await page.goto(`/dashboard/${slug}?range=upcoming&kind=guest_reply`)
   await expect(replyCard.getByText('Checking in · 6:30 PM', { exact: true })).toBeVisible()
-  const clearedArrival = await call<{ stay: StayDetail }>('update_stay', { booking_id: stay.id, version: recordedArrival.data!.stay.version, arrival_time: null })
+  const clearedArrival = await call<NightBookingReceipt>('update_product_booking', { booking_id: stay.booking_id, version: recordedArrival.data!.version, arrival_time: null })
   expect(clearedArrival.error).toBeNull()
   await page.reload()
   await expect(replyCard.getByText('Checking in · Time not set', { exact: true })).toBeVisible()
   await expect(replyCard.getByText(questionText, { exact: true })).toHaveCount(1)
 
-  const cancelled = await call<{ status: string }>('cancel_product_booking', { booking_id: stay.id, version: clearedArrival.data!.stay.version, idempotency_key: crypto.randomUUID() })
+  const cancelled = await call<{ status: string }>('cancel_product_booking', { booking_id: stay.booking_id, version: clearedArrival.data!.version, idempotency_key: crypto.randomUUID() })
   expect(cancelled.error).toBeNull()
   expect(cancelled.data!.status).toBe('cancelled')
   const cancelledWork = await request.get(taskPath)
   await expectStatus(cancelledWork, 200)
   expect((await cancelledWork.json() as { task: TaskView }).task).toMatchObject({ id: task.id, action: task.action, reservation: { status_label: 'Cancelled' } })
-  const past = await request.post(api('stays'), { data: { product_id: productId, check_in_date: localDay(-5), check_out_date: localDay(-3), adults: 1, children: 0, infants: 0,
+  const past = await request.post(api('bookings'), { data: { product_id: productId, check_in_date: localDay(-5), check_out_date: localDay(-3), adults: 1, children: 0, infants: 0,
     guest_name: 'Bo', guest_phone: '+66812345002', guest_email: `bo-${slug}@playwright.example`, total_minor: 100_00, idempotency_key: crypto.randomUUID() } })
   await expectStatus(past, 201)
-  const pastStay = (await past.json() as { stay: StayDetail }).stay
+  const pastStay = (await past.json() as { booking: NightBooking }).booking
   const pastQuestion = await request.post('/api/dev/inbound-whatsapp', { headers: devLoginHeaders(), data: {
     organization_id: organizationId, from: '+66812345002', body: 'Can you send the receipt for my stay?', message_id: crypto.randomUUID(),
   } })
@@ -397,36 +417,37 @@ test('a responsible home member reads its stays as turnovers on every surface un
     const surname = `Surname${marker}`
     const guestEmail = `${slug}@playwright.example`
     const notes = `Private note ${marker}`
-    const made = await page.request.post(api('stays'), { data: { product_id: productId, check_in_date: localDay(0), check_out_date: localDay(2), arrival_time: '15:30', adults: 2, children: 1,
+    const made = await page.request.post(api('bookings'), { data: { product_id: productId, check_in_date: localDay(0), check_out_date: localDay(2), arrival_time: '15:30', adults: 2, children: 1,
       guest_name: `${guestName} ${surname}`, guest_email: guestEmail, private_notes: notes, total_minor: 123_400, idempotency_key: crypto.randomUUID() } })
     await expectStatus(made, 201)
-    const { stay } = await made.json() as { stay: StayDetail }
+    const { booking: stay } = await made.json() as { booking: NightBooking }
     expect(stay.conversation_id).toBeTruthy()
     // Exactly the Turnovers fields, with the values the host saved.
     // The recorded arrival is the stay's start; the member reads the guest's first name.
-    const turnover = { id: stay.id, product_id: productId, location_id: stay.location_id, timezone: stay.timezone, status: stay.status, starts_at: stay.starts_at, ends_at: stay.ends_at, check_in_date: localDay(0), check_out_date: localDay(2),
+    const turnoverFields = { product_id: productId, location_id: stay.location_id, timezone: stay.timezone, status: stay.status, starts_at: stay.starts_at, ends_at: stay.ends_at, check_in_date: localDay(0), check_out_date: localDay(2),
       adults: 2, children: 1, infants: 0, guest_name: guestName, no_show_at: null }
     expect(new Intl.DateTimeFormat('en-GB', { timeZone: stay.timezone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(stay.starts_at))).toBe('15:30')
     const leaks = (body: unknown) => [surname, guestEmail, notes, stay.conversation_id!].filter(secret => JSON.stringify(body).includes(secret))
-    const stayPath = api(`stays/${stay.id}`)
+    const stayPath = api(`bookings/${stay.booking_id}`)
     const memberStay = await memberContext.request.get(stayPath)
     await expectStatus(memberStay, 200)
-    expect(await memberStay.json()).toEqual({ stay: turnover, manage: false })
-    const memberList = await memberContext.request.get(api(`stays?from=${localDay(0)}&to=${localDay(3)}`))
+    expect(await memberStay.json()).toEqual({ booking: { ...turnoverFields, booking_id: stay.booking_id, unit: 'nights' }, manage: false })
+    const memberList = await memberContext.request.get(api(`bookings?unit=nights&from=${localDay(0)}&to=${localDay(3)}`))
     await expectStatus(memberList, 200)
-    expect(await memberList.json()).toEqual({ stays: [turnover], manage: false })
-    for (const path of [`stay-homes/calendar?from=${localDay(0)}&to=${localDay(3)}`, `stay-homes/${productId}/calendar?from=${localDay(0)}&to=${localDay(3)}`]) {
-      const calendar = await memberContext.request.get(api(path))
+    expect(await memberList.json()).toEqual({ bookings: [{ ...turnoverFields, booking_id: stay.booking_id, unit: 'nights', name: 'Cliff Cabin' }], manage: false })
+    for (const product of [undefined, productId]) {
+      const calendar = await memberContext.request.get(api(nightCalendarPath(localDay(0), localDay(3), product)))
       await expectStatus(calendar, 200)
-      expect((await calendar.json() as { stays: unknown[] }).stays).toEqual([turnover])
+      expect((await calendar.json() as { bookings: unknown[] }).bookings).toEqual([{ ...turnoverFields, booking_id: stay.booking_id, unit: 'nights' }])
     }
     // The same projection through MCP, whose output schemas validate it.
+    const turnover = { ...turnoverFields, id: stay.booking_id }
     const memberCall = <T>(name: string, args: Record<string, unknown>) => tool<T>(memberContext.request, baseURL!, organizationId, name, args)
-    expect(await memberCall('get_product_booking', { booking_id: stay.id })).toEqual({ data: { booking_id: stay.id, unit: 'nights', stay: turnover }, error: null })
+    expect(await memberCall('get_product_booking', { booking_id: stay.booking_id })).toEqual({ data: { booking_id: stay.booking_id, unit: 'nights', record: turnover }, error: null })
     // The one booking list names the member's stay by its guest's first name.
     const memberBookings = await memberCall('list_product_bookings', { product_id: productId })
     expect(memberBookings.error).toBeNull()
-    expect((memberBookings.data as { bookings: Array<Record<string, unknown>> }).bookings).toEqual([expect.objectContaining({ booking_id: stay.id, unit: 'nights', guest: { name: guestName }, starts_at: stay.starts_at, ends_at: stay.ends_at })])
+    expect((memberBookings.data as { bookings: Array<Record<string, unknown>> }).bookings).toEqual([expect.objectContaining({ booking_id: stay.booking_id, unit: 'nights', guest: { name: guestName }, starts_at: stay.starts_at, ends_at: stay.ends_at })])
     const memberCalendar = await memberCall<{ stays: unknown[] }>('get_stay_calendar', { product_id: productId, from: localDay(0), to: localDay(3) })
     expect(memberCalendar.data!.stays).toEqual([turnover])
     // The stay checks out in two days: its turnover is the member's Upcoming work, under that day, and Today holds nothing.
@@ -438,20 +459,20 @@ test('a responsible home member reads its stays as turnovers on every surface un
     const upcoming = await memberContext.request.get(api('today?range=upcoming'))
     await expectStatus(upcoming, 200)
     const upcomingBody = await upcoming.json() as BusinessToday
-    const turnoverDay = upcomingBody.tasks.find(section => section.tasks.some(task => task.booking_id === stay.id))
+    const turnoverDay = upcomingBody.tasks.find(section => section.tasks.some(task => task.booking_id === stay.booking_id))
     expect(turnoverDay?.id).toBe(localDay(2))
-    expect(turnoverDay!.tasks.filter(task => task.booking_id === stay.id)).toEqual([expect.objectContaining({
+    expect(turnoverDay!.tasks.filter(task => task.booking_id === stay.booking_id)).toEqual([expect.objectContaining({
       kind: 'turnover', status: 'open', title: 'Cliff Cabin', product_id: productId, conversation_id: null, path: null,
       assignee: { type: 'member', id: memberId, name: 'You', initial: memberName.trim().charAt(0).toUpperCase(), you: true },
       can: { complete: true, skip: true, reopen: false, assign: false, edit: false },
     })])
     // The member reads the turnover as its card does: the guest by first name, never their contact, note or conversation.
     expect(leaks(upcomingBody)).toEqual([])
-    expect(turnoverDay!.tasks.find(task => task.booking_id === stay.id)!.detail).toBe(`${guestName} out`)
+    expect(turnoverDay!.tasks.find(task => task.booking_id === stay.booking_id)!.detail).toBe(`${guestName} out`)
     const memberAgenda = await memberContext.request.get(api(`agenda?from=${localDay(0)}&to=${localDay(3)}`))
     await expectStatus(memberAgenda, 200)
     const memberAgendaBody = await memberAgenda.json() as { items: Array<{ id: string; booking_id: string }> }
-    expect(memberAgendaBody.items.find(item => item.id === `stay:${stay.id}:arrival`)).toMatchObject({ booking_id: stay.id })
+    expect(memberAgendaBody.items.find(item => item.id === `stay:${stay.booking_id}:arrival`)).toMatchObject({ booking_id: stay.booking_id })
     expect(leaks(memberAgendaBody)).toEqual([])
     expect(leaks(todayBody)).toEqual([])
     // The guest's conversation, automatic messages, money and changes are the managers': the member's outbox holds only their own replies.
@@ -460,21 +481,21 @@ test('a responsible home member reads its stays as turnovers on every surface un
     await expectStatus(scheduled, 200)
     expect((await scheduled.json() as { messages: unknown[] }).messages).toEqual([])
     for (const [method, path, data] of [
-      ['post', `stays/${stay.id}/payments`, { amount_minor: 100, method: 'cash', paid_on: localDay(0), idempotency_key: crypto.randomUUID() }],
-      ['patch', `stays/${stay.id}`, { version: stay.version, adults: 1 }],
-      ['post', `stays/${stay.id}/cancel`, { version: stay.version }],
+      ['post', `bookings/${stay.booking_id}/payments`, { amount_minor: 100, method: 'cash', paid_on: localDay(0), idempotency_key: crypto.randomUUID() }],
+      ['patch', `bookings/${stay.booking_id}`, { version: stay.version, adults: 1 }],
+      ['post', `bookings/${stay.booking_id}/cancel`, { version: stay.version }],
     ] as const) {
       const refused = await memberContext.request[method](api(path), { data })
       await expectStatus(refused, 403)
       expect(await refused.json()).toMatchObject({ data: { code: 'STAY_ROLE_REQUIRED' } })
     }
-    const memberMcpPayment = await memberCall('record_stay_payment', { booking_id: stay.id, amount_minor: 100, method: 'cash', paid_on: localDay(0), idempotency_key: crypto.randomUUID() })
+    const memberMcpPayment = await memberCall('record_stay_payment', { booking_id: stay.booking_id, amount_minor: 100, method: 'cash', paid_on: localDay(0), idempotency_key: crypto.randomUUID() })
     expect(memberMcpPayment.data).toBeNull()
     expect(memberMcpPayment.error).toContain('Insufficient permissions')
     // The dashboard's stay screen renders the turnover and nothing of the guest's contact or money.
     const memberPage = await memberContext.newPage()
-    const stayRead = memberPage.waitForResponse(response => response.request().method() === 'GET' && new URL(response.url()).pathname === `/api/dashboard/stays/${stay.id}`)
-    await memberPage.goto(`/dashboard/${slug}/bookings/stay/${stay.id}`)
+    const stayRead = memberPage.waitForResponse(response => response.request().method() === 'GET' && new URL(response.url()).pathname === `/api/dashboard/bookings/${stay.booking_id}`)
+    await memberPage.goto(`/dashboard/${slug}/bookings/${stay.booking_id}`)
     await expectStatus(await stayRead, 200)
     const details = memberPage.locator('#dashboard-panel-stay-details')
     await expect(details.getByRole('heading', { name: `${guestName}’s group of 3`, exact: true })).toBeVisible()
@@ -487,9 +508,9 @@ test('a responsible home member reads its stays as turnovers on every surface un
     // Owners still read the whole stay.
     const ownerStay = await page.request.get(stayPath)
     await expectStatus(ownerStay, 200)
-    expect(await ownerStay.json()).toMatchObject({ manage: true, stay: { id: stay.id, guest_name: `${guestName} ${surname}`, guest_email: guestEmail, private_notes: notes, total_minor: 123_400, conversation_id: stay.conversation_id, payments: [], paid_minor: 0 } })
-    const ownerMcp = await call<{ stay: StayDetail }>('get_product_booking', { booking_id: stay.id })
-    expect(ownerMcp.data!.stay).toMatchObject({ guest_name: `${guestName} ${surname}`, guest_email: guestEmail, private_notes: notes, total_minor: 123_400, conversation_id: stay.conversation_id })
+    expect(await ownerStay.json()).toMatchObject({ manage: true, booking: { booking_id: stay.booking_id, unit: 'nights', guest_name: `${guestName} ${surname}`, guest_email: guestEmail, private_notes: notes, total_minor: 123_400, conversation_id: stay.conversation_id, payments: [], paid_minor: 0 } })
+    const ownerMcp = await call<{ record: StayDetail }>('get_product_booking', { booking_id: stay.booking_id })
+    expect(ownerMcp.data!.record).toMatchObject({ guest_name: `${guestName} ${surname}`, guest_email: guestEmail, private_notes: notes, total_minor: 123_400, conversation_id: stay.conversation_id })
     await expectStatus(await page.request.get(`/api/dashboard/organizations/${organizationId}/guest-threads/${stay.conversation_id}`), 200)
 
     // The team's turnover is a job in the stay's conversation with the host: the
@@ -503,14 +524,14 @@ test('a responsible home member reads its stays as turnovers on every surface un
     await expect.poll(async () => {
       for (const row of await teamRows()) {
         const thread = await teamThread(row.id)
-        if (thread.booking_id === stay.id && thread.job) jobThreadId = thread.id
+        if (thread.booking_id === stay.booking_id && thread.job) jobThreadId = thread.id
       }
       return jobThreadId
     }, { timeout: 30_000, message: 'the hub opens the turnover’s conversation after the stay write' }).not.toBe('')
-    const hosted = await memberContext.request.post(api('team/threads'), { data: { member_user_ids: ['user-e2e-lodging-host'], booking_id: stay.id } })
+    const hosted = await memberContext.request.post(api('team/threads'), { data: { member_user_ids: ['user-e2e-lodging-host'], booking_id: stay.booking_id } })
     await expectStatus(hosted, 200)
     expect((await hosted.json() as { conversation_id: string }).conversation_id).toBe(jobThreadId)
-    expect(await teamThread(jobThreadId)).toMatchObject({ name: 'Cliff Cabin', booking_id: stay.id, job: expect.objectContaining({ kind: 'turnover', status: 'open', title: 'Cliff Cabin', booking_id: stay.id }) })
+    expect(await teamThread(jobThreadId)).toMatchObject({ name: 'Cliff Cabin', booking_id: stay.booking_id, job: expect.objectContaining({ kind: 'turnover', status: 'open', title: 'Cliff Cabin', booking_id: stay.booking_id }) })
     await expect.poll(async () => {
       const read = await memberContext.request.get(api(`team/threads/${jobThreadId}/messages`))
       await expectStatus(read, 200)
@@ -530,9 +551,9 @@ test('a responsible home member reads its stays as turnovers on every surface un
     await expect(sheet.getByText(guestName, { exact: false })).toBeVisible()
     await memberPage.keyboard.press('Escape')
     // The host can move the guest; this business has no other home to move them to.
-    await page.goto(`/dashboard/${slug}/bookings/stay/${stay.id}`)
+    await page.goto(`/dashboard/${slug}/bookings/${stay.booking_id}`)
     await page.getByTestId('stay-move').click()
-    await expect(page).toHaveURL(new RegExp(`/bookings/stay/${stay.id}/move$`))
+    await expect(page).toHaveURL(new RegExp(`/bookings/${stay.booking_id}/move$`))
     await expect(page.locator('#dashboard-panel-stay-move').getByText('You have no other homes to move this guest to.', { exact: true })).toBeVisible()
     await expect(page.locator('#dashboard-panel-stay-move').getByRole('button', { name: 'Move guest', exact: true })).toBeDisabled()
 
@@ -543,13 +564,13 @@ test('a responsible home member reads its stays as turnovers on every surface un
     const homes = await memberContext.request.get(api('stay-homes'))
     await expectStatus(homes, 200)
     expect((await homes.json() as { homes: Array<{ product_id: string }> }).homes.map(home => home.product_id)).not.toContain(productId)
-    const afterList = await memberContext.request.get(api(`stays?from=${localDay(0)}&to=${localDay(3)}`))
+    const afterList = await memberContext.request.get(api(`bookings?unit=nights&from=${localDay(0)}&to=${localDay(3)}`))
     await expectStatus(afterList, 200)
-    expect(await afterList.json()).toEqual({ stays: [], manage: false })
+    expect(await afterList.json()).toEqual({ bookings: [], manage: false })
     // Unassigned, the home's turnover is no longer the member's work.
     const afterUpcoming = await memberContext.request.get(api('today?range=upcoming'))
     await expectStatus(afterUpcoming, 200)
-    expect((await afterUpcoming.json() as BusinessToday).tasks.flatMap(section => section.tasks).filter(task => task.booking_id === stay.id)).toEqual([])
+    expect((await afterUpcoming.json() as BusinessToday).tasks.flatMap(section => section.tasks).filter(task => task.booking_id === stay.booking_id)).toEqual([])
   } finally {
     try {
       const deleted = await page.request.post('/api/auth/organization/delete', { headers, data: { organizationId } })
@@ -561,7 +582,7 @@ test('a responsible home member reads its stays as turnovers on every surface un
 test('a host creates a stay, records its payments and arrival guide, and cancels it with an offline refund', async ({ page, browser, baseURL }) => {
   test.setTimeout(90_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
-  const { request, headers, slug, location, call, api, productId } = await createStayHome(page, baseURL!, true)
+  const { request, headers, slug, location, call, api, productId, home } = await createStayHome(page, baseURL!, { createInForm: true, selectDifferentLocation: true })
   await page.setViewportSize({ width: 390, height: 844 })
 
   const exactAddress: PostalAddress = { regionCode: 'TH', addressLines: ['24 Guest Road'], sublocality: 'Ao Nang', locality: 'Krabi Town', administrativeArea: 'Krabi', postalCode: '81180' }
@@ -588,23 +609,23 @@ test('a host creates a stay, records its payments and arrival guide, and cancels
   await page.getByLabel('Adults', { exact: true }).fill('2')
   await page.getByLabel('Stay total (THB)', { exact: true }).fill('300')
   const [stayCreated] = await Promise.all([
-    page.waitForResponse(response => new URL(response.url()).pathname === '/api/dashboard/stays' && response.request().method() === 'POST'),
+    page.waitForResponse(response => new URL(response.url()).pathname === '/api/dashboard/bookings' && response.request().method() === 'POST'),
     page.getByRole('button', { name: 'Create stay', exact: true }).click(),
   ])
   await expectStatus(stayCreated, 201)
-  const createdReceipt = await stayCreated.json() as { stay: StayDetail & { channel_push: unknown } }
-  await expect(page).toHaveURL(new RegExp(`/bookings/stay/${createdReceipt.stay.id}$`))
-  const stay = await call<{ stay: StayDetail }>('get_product_booking', { booking_id: createdReceipt.stay.id })
+  const createdReceipt = await stayCreated.json() as { booking: NightBooking & { channel_push: unknown } }
+  await expect(page).toHaveURL(new RegExp(`/bookings/${createdReceipt.booking.booking_id}$`))
+  const stay = await call<{ record: StayDetail }>('get_product_booking', { booking_id: createdReceipt.booking.booking_id })
   expect(stay.error).toBeNull()
-  expect(stay.data!.stay).toMatchObject({ product_id: productId, status: 'confirmed', check_in_date: checkIn, check_out_date: checkOut, guest_name: 'Ana Silva', guest_email: `ana-${slug}@playwright.example`, guest_image_url: null, adults: 2, children: 0, infants: 0, total_minor: 300_00, paid_minor: 0, payments: [] })
+  expect(stay.data!.record).toMatchObject({ product_id: productId, status: 'confirmed', check_in_date: checkIn, check_out_date: checkOut, guest_name: 'Ana Silva', guest_email: `ana-${slug}@playwright.example`, guest_image_url: null, adults: 2, children: 0, infants: 0, total_minor: 300_00, paid_minor: 0, payments: [] })
   await expect(page.locator('#dashboard-panel-stay-details').getByText('A', { exact: true })).toHaveCount(2)
   await expect(page.locator('#dashboard-panel-stay-details img[alt="Ana Silva"]')).toHaveCount(0)
-  const overlap = await call('create_stay', { product_id: productId, check_in_date: localDay(1), check_out_date: localDay(3), adults: 1, guest_name: 'Bo', total_minor: 100_00, idempotency_key: `${slug}-b` })
+  const overlap = await call('create_product_booking', { product_slug: home.data!.product.slug, check_in_date: localDay(1), check_out_date: localDay(3), adults: 1, guest_name: 'Bo', total_minor: 100_00, idempotency_key: `${slug}-b` })
   expect(overlap.error).toContain('Another stay or a linked calendar already holds one of these nights')
 
   // Calendar owns arrival/departure activity; Today is the actionable quest feed.
   await page.goto(`/dashboard/${slug}/calendar?view=list`)
-  const arrival = page.locator(`a[href="/dashboard/${slug}/calendar/${checkIn}/stay/${stay.data!.stay.id}?view=list"]`)
+  const arrival = page.locator(`a[href="/dashboard/${slug}/calendar/${checkIn}/booking/${stay.data!.record.id}?view=list"]`)
   await expect(arrival).toContainText('Ana')
   await arrival.click()
   await expect(page.getByRole('heading', { name: 'Ana’s group of 2', level: 2, exact: true })).toBeVisible()
@@ -613,24 +634,24 @@ test('a host creates a stay, records its payments and arrival guide, and cancels
   await page.getByRole('button', { name: 'Record payment' }).click()
   // The recorded row, not the method picker: it names the amount with its method.
   await expect(page.getByRole('listitem').filter({ hasText: /100\.00 · Cash/ })).toBeVisible()
-  const paid = await call<{ stay: StayDetail }>('get_product_booking', { booking_id: stay.data!.stay.id })
+  const paid = await call<{ record: StayDetail }>('get_product_booking', { booking_id: stay.data!.record.id })
   expect(paid.error).toBeNull()
-  expect(paid.data!.stay).toMatchObject({ paid_minor: 100_00, payment_status: 'partial', payments: [{ method: 'cash', amount_minor: 100_00 }] })
-  expect(createdReceipt.stay).toMatchObject({ id: paid.data!.stay.id, product_id: productId, conversation_id: paid.data!.stay.conversation_id, status: 'confirmed', version: 1, check_in_date: checkIn, check_out_date: checkOut, channel_push: null })
-  const messagingContext = await call<{ conversation_id: string; home: Record<string, unknown>; stay: Record<string, unknown>; record: Record<string, unknown> }>('get_guest_messaging_context', { conversation_id: paid.data!.stay.conversation_id })
+  expect(paid.data!.record).toMatchObject({ paid_minor: 100_00, payment_status: 'partial', payments: [{ method: 'cash', amount_minor: 100_00 }] })
+  expect(createdReceipt.booking).toMatchObject({ booking_id: paid.data!.record.id, unit: 'nights', product_id: productId, conversation_id: paid.data!.record.conversation_id, status: 'confirmed', version: 1, check_in_date: checkIn, check_out_date: checkOut, channel_push: null })
+  const messagingContext = await call<{ conversation_id: string; home: Record<string, unknown>; stay: Record<string, unknown>; record: Record<string, unknown> }>('get_guest_messaging_context', { conversation_id: paid.data!.record.conversation_id })
   expect(messagingContext.error).toBeNull()
-  expect(messagingContext.data).toEqual({ conversation_id: paid.data!.stay.conversation_id,
+  expect(messagingContext.data).toEqual({ conversation_id: paid.data!.record.conversation_id,
     home: { product_id: productId, name: 'Cliff Cabin', timezone: TIME_ZONE, check_in_method: null, check_in_instructions: null, wifi_network: null, wifi_password: null, directions: null, house_manual: null, checkout_instructions: [] },
-    stay: { id: paid.data!.stay.id, product_id: productId, status: 'confirmed', check_in_date: checkIn, check_out_date: checkOut, guest_name: paid.data!.stay.guest_name, adults: paid.data!.stay.adults, children: paid.data!.stay.children, infants: paid.data!.stay.infants },
+    stay: { id: paid.data!.record.id, product_id: productId, status: 'confirmed', check_in_date: checkIn, check_out_date: checkOut, guest_name: paid.data!.record.guest_name, adults: paid.data!.record.adults, children: paid.data!.record.children, infants: paid.data!.record.infants },
     // The booked record every conversation names, a stay's at its home's check-in and checkout times.
     record: { unit: 'nights', status: 'confirmed', name: 'Cliff Cabin', location: 'Cliff Cabin location', address: expect.any(String), phone: null,
-      party_size: paid.data!.stay.adults + paid.data!.stay.children, timezone: TIME_ZONE, starts: expect.stringMatching(new RegExp(`^${checkIn}( |$)`)), ends: expect.stringMatching(new RegExp(`^${checkOut}( |$)`)), no_show_at: null },
+      party_size: paid.data!.record.adults + paid.data!.record.children, timezone: TIME_ZONE, starts: expect.stringMatching(new RegExp(`^${checkIn}( |$)`)), ends: expect.stringMatching(new RegExp(`^${checkOut}( |$)`)), no_show_at: null },
   })
   const selectedStays = await call<{ bookings: Array<Record<string, unknown>> }>('list_product_bookings', { product_id: productId })
   expect(selectedStays.error).toBeNull()
-  expect(selectedStays.data!.bookings).toEqual([expect.objectContaining({ booking_id: paid.data!.stay.id, conversation_id: paid.data!.stay.conversation_id, product_id: productId, product_kind: 'stay', product_session_id: null, unit: 'nights', status: 'confirmed', party_size: 2,
-    location_id: location.id, starts_at: paid.data!.stay.starts_at, ends_at: paid.data!.stay.ends_at, timezone: TIME_ZONE, guest: { name: 'Ana Silva' } })])
-  const calendarPath = api(`stay-homes/${productId}/calendar?from=${checkIn}&to=${checkOut}`)
+  expect(selectedStays.data!.bookings).toEqual([expect.objectContaining({ booking_id: paid.data!.record.id, conversation_id: paid.data!.record.conversation_id, product_id: productId, product_kind: 'stay', product_session_id: null, unit: 'nights', status: 'confirmed', party_size: 2,
+    location_id: location.id, starts_at: paid.data!.record.starts_at, ends_at: paid.data!.record.ends_at, timezone: TIME_ZONE, guest: { name: 'Ana Silva' } })])
+  const calendarPath = api(nightCalendarPath(checkIn, checkOut, productId))
   const beforeInvalidCalendarResponse = await request.get(calendarPath)
   expect(beforeInvalidCalendarResponse.status()).toBe(200)
   const beforeInvalidCalendar = await beforeInvalidCalendarResponse.json()
@@ -644,38 +665,41 @@ test('a host creates a stay, records its payments and arrival guide, and cancels
   ] as const) {
     const refused = await call('set_stay_nights', { product_id: productId, from: checkIn, to: checkOut, ...fields })
     expect(JSON.parse(refused.error!)).toMatchObject(refusal)
-    const unchanged = await request.get(calendarPath)
-    expect(unchanged.status()).toBe(200)
-    expect(await unchanged.json()).toEqual(beforeInvalidCalendar)
   }
-  const emptyEdit = await call('update_stay', { booking_id: paid.data!.stay.id, version: paid.data!.stay.version })
-  expect(emptyEdit.error).toContain('Invalid arguments for tool update_stay')
-  const unchangedEdit = await call('update_stay', { booking_id: paid.data!.stay.id, version: paid.data!.stay.version, guest_name: paid.data!.stay.guest_name })
+  const unchanged = await request.get(calendarPath)
+  await expectStatus(unchanged, 200)
+  expect(await unchanged.json()).toEqual(beforeInvalidCalendar)
+  const emptyEdit = await call('update_product_booking', { booking_id: paid.data!.record.id, version: paid.data!.record.version })
+  expect(emptyEdit.error).toContain('Invalid arguments for tool update_product_booking')
+  const unchangedEdit = await call('update_product_booking', { booking_id: paid.data!.record.id, version: paid.data!.record.version, guest_name: paid.data!.record.guest_name })
   expect(JSON.parse(unchangedEdit.error!)).toMatchObject({ status: 422, code: 'INVALID_STAY_FIELD' })
-  const zeroPayment = await call('record_stay_payment', { booking_id: paid.data!.stay.id, amount_minor: 0, method: 'cash', paid_on: checkIn, idempotency_key: `${slug}-zero-payment` })
+  const zeroPayment = await call('record_stay_payment', { booking_id: paid.data!.record.id, amount_minor: 0, method: 'cash', paid_on: checkIn, idempotency_key: `${slug}-zero-payment` })
   expect(zeroPayment.error).toContain('Invalid arguments for tool record_stay_payment')
   type PaymentReceipt = { booking_id: string; payment: Omit<StayDetail['payments'][number], 'created_by'>; currency: string; paid_minor: number; payment_status: string }
-  const paymentArgs = { booking_id: paid.data!.stay.id, amount_minor: 5000, method: 'bank_transfer', paid_on: checkIn, reference: 'Contract payment', note: 'Only this payment', idempotency_key: `${slug}-receipt-payment` }
+  const paymentArgs = { booking_id: paid.data!.record.id, amount_minor: 5000, method: 'bank_transfer', paid_on: checkIn, reference: 'Contract payment', note: 'Only this payment', idempotency_key: `${slug}-receipt-payment` }
   const recordedPayment = await call<PaymentReceipt>('record_stay_payment', paymentArgs)
   expect(recordedPayment.error).toBeNull()
-  const nativePaymentRead = await request.get(api(`stays/${paid.data!.stay.id}`))
+  const nativePaymentRead = await request.get(api(`bookings/${paid.data!.record.id}`))
   expect(nativePaymentRead.status()).toBe(200)
-  const nativePaid = (await nativePaymentRead.json() as { stay: StayDetail }).stay
+  const nativePaid = (await nativePaymentRead.json() as { booking: NightBooking }).booking
   const savedPayment = nativePaid.payments.find(payment => payment.id === recordedPayment.data!.payment.id)!
   expect(savedPayment, 'The receipt identifies the actual persisted payment').toBeDefined()
   const { created_by: _paymentActor, ...expectedPayment } = savedPayment
-  expect(recordedPayment.data).toEqual({ booking_id: paid.data!.stay.id, payment: expectedPayment, currency: 'THB', paid_minor: 15000, payment_status: 'partial' })
+  expect(recordedPayment.data).toEqual({ booking_id: paid.data!.record.id, payment: expectedPayment, currency: 'THB', paid_minor: 15000, payment_status: 'partial' })
   const paymentReplay = await call<PaymentReceipt>('record_stay_payment', paymentArgs)
   expect(paymentReplay.error).toBeNull()
   expect(paymentReplay.data).toEqual(recordedPayment.data)
   const changedPaymentRetry = await call('record_stay_payment', { ...paymentArgs, note: 'A different note' })
   expect(JSON.parse(changedPaymentRetry.error!)).toMatchObject({ status: 409, code: 'IDEMPOTENCY_CONFLICT' })
-  const deletedPayment = await call('delete_stay_payment', { booking_id: paid.data!.stay.id, payment_id: savedPayment.id })
+  const deletedPayment = await call('delete_stay_payment', { booking_id: paid.data!.record.id, payment_id: savedPayment.id })
   expect(deletedPayment.error).toBeNull()
-  expect(deletedPayment.data).toEqual({ booking_id: paid.data!.stay.id, deleted_payment_id: savedPayment.id, currency: 'THB', paid_minor: 10000, payment_status: 'partial' })
-  const restoredPaymentRead = await request.get(api(`stays/${paid.data!.stay.id}`))
+  expect(deletedPayment.data).toEqual({ booking_id: paid.data!.record.id, deleted_payment_id: savedPayment.id, currency: 'THB', paid_minor: 10000, payment_status: 'partial' })
+  const restoredPaymentRead = await request.get(api(`bookings/${paid.data!.record.id}`))
   expect(restoredPaymentRead.status()).toBe(200)
-  expect((await restoredPaymentRead.json()).stay).toEqual(paid.data!.stay)
+  const { id: paidBookingId, ...paidDetails } = paid.data!.record
+  expect((await restoredPaymentRead.json()).booking).toEqual({
+    ...paidDetails, booking_id: paidBookingId, unit: 'nights', available_actions: expect.any(Array),
+  })
 
   const guide = { check_in_method: 'lockbox', check_in_instructions: 'Use the garden lockbox.', wifi_network: 'Cabin guests', wifi_password: 'private-cabin-wifi', directions: 'Use the east entrance.', house_manual: 'Keep the gate closed.', checkout_instructions: [{ task: 'return_keys', details: 'Leave keys in the box.' }] }
   const savedGuide = await request.patch(api(`stay-homes/${productId}`), { headers, data: guide })
@@ -737,31 +761,31 @@ test('a host creates a stay, records its payments and arrival guide, and cancels
 
   // The host cancels the stay, its nights open again, and the offline refund is recorded against it.
   // A guest's own account and receipt reads of a stay they bought are covered in stays-d1: only a checkout gives a stay its guest's account.
-  await page.goto(`/dashboard/${slug}/bookings/stay/${stay.data!.stay.id}`)
+  await page.goto(`/dashboard/${slug}/bookings/${stay.data!.record.id}`)
 
   await page.getByRole('button', { name: 'Cancel stay' }).click()
   await page.getByRole('dialog').getByRole('button', { name: 'Cancel stay' }).click()
   await expect(page.getByText('Cancelled', { exact: true })).toBeVisible()
   const calendar = await call<{ nights: Array<{ date: string; available: boolean }> }>('get_stay_calendar', { product_id: productId, from: checkIn, to: checkOut })
   expect(calendar.data!.nights.map(night => night.available)).toEqual([true, true])
-  const cancelled = await call<{ stay: { status: string; cancelled_at: string | null } }>('get_product_booking', { booking_id: stay.data!.stay.id })
-  expect(cancelled.data!.stay.status).toBe('cancelled')
-  expect(cancelled.data!.stay.cancelled_at).toBeTruthy()
+  const cancelled = await call<{ record: { status: string; cancelled_at: string | null } }>('get_product_booking', { booking_id: stay.data!.record.id })
+  expect(cancelled.data!.record.status).toBe('cancelled')
+  expect(cancelled.data!.record.cancelled_at).toBeTruthy()
 
   await page.getByLabel('Amount (THB)', { exact: true }).fill('-100')
   await page.getByLabel('Reference', { exact: true }).fill('Offline refund after cancellation')
   const [offlineRefund] = await Promise.all([
-    page.waitForResponse(response => response.url().includes(`/stays/${stay.data!.stay.id}/payments`) && response.request().method() === 'POST'),
+    page.waitForResponse(response => response.url().includes(`/bookings/${stay.data!.record.id}/payments`) && response.request().method() === 'POST'),
     page.getByRole('button', { name: 'Record payment', exact: true }).click(),
   ])
   await expectStatus(offlineRefund, 201)
   await expect(page.getByRole('listitem').filter({ hasText: 'Offline refund after cancellation' })).toBeVisible()
-  const refunded = await call<{ stay: StayDetail }>('get_product_booking', { booking_id: stay.data!.stay.id })
+  const refunded = await call<{ record: StayDetail }>('get_product_booking', { booking_id: stay.data!.record.id })
   expect(refunded.error).toBeNull()
-  expect(refunded.data!.stay).toMatchObject({ status: 'cancelled', paid_minor: 0 })
-  expect(refunded.data!.stay.payments.find(payment => payment.reference === 'Offline refund after cancellation')).toMatchObject({ amount_minor: -10000 })
+  expect(refunded.data!.record).toMatchObject({ status: 'cancelled', paid_minor: 0 })
+  expect(refunded.data!.record.payments.find(payment => payment.reference === 'Offline refund after cancellation')).toMatchObject({ amount_minor: -10000 })
 
-  const later = [localDay(10), localDay(13)] as const
+  const later = [localDay(365), localDay(368)] as const
   await page.goto(`/dashboard/${slug}/bookings/stay/new?${new URLSearchParams({ product_id: productId, check_in_date: later[0], check_out_date: later[1] })}`)
   await expect(page.getByRole('heading', { name: 'New stay', exact: true })).toBeVisible()
   await expect(page.getByRole('combobox', { name: 'Home', exact: true })).toHaveCount(0)
@@ -777,41 +801,41 @@ test('a host creates a stay, records its payments and arrival guide, and cancels
   await page.getByLabel('Date received', { exact: true }).fill(checkIn)
   await page.getByRole('textbox', { name: 'Reference', exact: true }).fill('Deposit on booking')
   const [made] = await Promise.all([
-    page.waitForResponse(response => new URL(response.url()).pathname === '/api/dashboard/stays' && response.request().method() === 'POST'),
+    page.waitForResponse(response => new URL(response.url()).pathname === '/api/dashboard/bookings' && response.request().method() === 'POST'),
     page.getByRole('button', { name: 'Create stay', exact: true }).click(),
   ])
   await expectStatus(made, 201)
-  const native = (await made.json() as { stay: StayDetail }).stay
-  await expect(page).toHaveURL(new RegExp(`/bookings/stay/${native.id}$`))
+  const native = (await made.json() as { booking: NightBooking }).booking
+  await expect(page).toHaveURL(new RegExp(`/bookings/${native.booking_id}$`))
   await expect(page.getByRole('listitem').filter({ hasText: /125\.00 · Bank transfer/ })).toBeVisible()
-  const edited = await request.patch(api(`stays/${native.id}`), { headers, data: { version: native.version, guest_name: 'Kai Mendes' } })
+  const edited = await request.patch(api(`bookings/${native.booking_id}`), { headers, data: { version: native.version, guest_name: 'Kai Mendes' } })
   await expectStatus(edited, 200)
-  const nativeRead = await call<{ stay: StayDetail }>('get_product_booking', { booking_id: native.id })
+  const nativeRead = await call<{ record: StayDetail }>('get_product_booking', { booking_id: native.booking_id })
   expect(nativeRead.error).toBeNull()
-  expect(nativeRead.data!.stay).toMatchObject({ guest_name: 'Kai Mendes', check_in_date: later[0], check_out_date: later[1], total_minor: 450_00, paid_minor: 125_00, payment_status: 'partial', payments: [{ amount_minor: 125_00, method: 'bank_transfer', paid_on: checkIn, reference: 'Deposit on booking' }] })
+  expect(nativeRead.data!.record).toMatchObject({ guest_name: 'Kai Mendes', check_in_date: later[0], check_out_date: later[1], total_minor: 450_00, paid_minor: 125_00, payment_status: 'partial', payments: [{ amount_minor: 125_00, method: 'bank_transfer', paid_on: checkIn, reference: 'Deposit on booking' }] })
 
-  const listed = await request.get(api(`stays?from=${later[0]}&to=${later[1]}`))
+  const listed = await request.get(api(`bookings?unit=nights&from=${later[0]}&to=${later[1]}`))
   await expectStatus(listed, 200)
-  expect((await listed.json() as { stays: Array<{ id: string }> }).stays.map(stay => stay.id)).toEqual([native.id])
+  expect((await listed.json() as { bookings: NightBooking[] }).bookings.map(booking => booking.booking_id)).toEqual([native.booking_id])
 
-  const closedNight = localDay(20)
-  const closed = await request.put(api(`stay-homes/${productId}/nights`), { headers, data: { from: closedNight, to: localDay(21), closed: true } })
+  const closedNight = localDay(375)
+  const closed = await request.put(api(`stay-homes/${productId}/nights`), { headers, data: { from: closedNight, to: localDay(376), closed: true } })
   await expectStatus(closed, 200)
-  const nativeCalendar = await request.get(api(`stay-homes/${productId}/calendar?from=${later[0]}&to=${localDay(21)}`))
+  const nativeCalendar = await request.get(api(nightCalendarPath(later[0], localDay(376), productId)))
   await expectStatus(nativeCalendar, 200)
-  const nights = (await nativeCalendar.json() as { nights: Array<{ date: string; available: boolean; booking_id: string | null; closed: boolean }> }).nights
-  expect(nights.filter(night => night.booking_id === native.id).map(night => night.date)).toEqual([later[0], localDay(11), localDay(12)])
+  const nights = (await nativeCalendar.json() as { homes: Array<{ nights: Array<{ date: string; available: boolean; booking_id: string | null; closed: boolean }> }> }).homes[0]!.nights
+  expect(nights.filter(night => night.booking_id === native.booking_id).map(night => night.date)).toEqual([later[0], localDay(366), localDay(367)])
   expect(nights.find(night => night.date === closedNight)).toMatchObject({ available: false, closed: true })
-  const mcpCalendar = await call<{ nights: Array<{ date: string; closed: boolean }> }>('get_stay_calendar', { product_id: productId, from: closedNight, to: localDay(21) })
+  const mcpCalendar = await call<{ nights: Array<{ date: string; closed: boolean }> }>('get_stay_calendar', { product_id: productId, from: closedNight, to: localDay(376) })
   expect(mcpCalendar.data!.nights).toEqual([expect.objectContaining({ date: closedNight, closed: true })])
-  const cancelledByMcp = await call('cancel_product_booking', { booking_id: native.id, version: native.version + 1, reason: 'Contract cancellation', idempotency_key: crypto.randomUUID() })
+  const cancelledByMcp = await call('cancel_product_booking', { booking_id: native.booking_id, version: native.version + 1, reason: 'Contract cancellation', idempotency_key: crypto.randomUUID() })
   expect(cancelledByMcp.error).toBeNull()
-  const cancelledRead = await request.get(api(`stays/${native.id}`))
+  const cancelledRead = await request.get(api(`bookings/${native.booking_id}`))
   expect(cancelledRead.status()).toBe(200)
-  const savedCancellation = (await cancelledRead.json() as { stay: StayDetail }).stay
-  expect(cancelledByMcp.data).toEqual({ booking_id: native.id, unit: 'nights', status: 'cancelled', version: savedCancellation.version,
+  const savedCancellation = (await cancelledRead.json() as { booking: NightBooking }).booking
+  expect(cancelledByMcp.data).toEqual({ booking_id: native.booking_id, unit: 'nights', status: 'cancelled', version: savedCancellation.version,
     cancelled_at: savedCancellation.cancelled_at, cancellation_reason: 'Contract cancellation', channel_push: null })
-  expect(savedCancellation).toMatchObject({ id: native.id, product_id: productId, status: 'cancelled', conversation_id: native.conversation_id,
+  expect(savedCancellation).toMatchObject({ booking_id: native.booking_id, unit: 'nights', product_id: productId, status: 'cancelled', conversation_id: native.conversation_id,
     check_in_date: later[0], check_out_date: later[1], cancellation_reason: 'Contract cancellation' })
 })
 
@@ -3433,7 +3457,7 @@ test('a host lists, pauses and unlists a priced place to stay', async ({ page, b
     const sitemap = await anonymousListing.request.get(new URL('/sitemap.xml', previewURL).href)
     await expectStatus(sitemap, 200)
     expect(await sitemap.text()).not.toContain('/locations')
-    const publicNights = new URL(`/api/public/products/${pricedProduct.data!.product.slug}/nights`, previewURL)
+    const publicNights = new URL(`/api/public/products/${pricedProduct.data!.product.slug}/availability`, previewURL)
     publicNights.searchParams.set('from', localDay(1))
     publicNights.searchParams.set('to', localDay(4))
     const nightsRead = await anonymousListing.request.get(publicNights.href)
@@ -3875,12 +3899,12 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
     const homes = [assignedHome, { product_id: otherHome.id, location_id: locations.data!.locations[0]!.id }]
     const assigned = await call('update_product', { product_id: homes[0]!.product_id, stay: { assigned_member_id: memberId } })
     expect(assigned.error).toBeNull()
-    const stays: Array<{ id: string }> = []
+    const stays: Array<{ booking_id: string }> = []
     for (const [index, home] of homes.entries()) {
-      const made = await page.request.post(api('stays'), { data: { product_id: home.product_id, check_in_date: localDay(0), check_out_date: localDay(2), adults: 2,
+      const made = await page.request.post(api('bookings'), { data: { product_id: home.product_id, check_in_date: localDay(0), check_out_date: localDay(2), adults: 2,
         guest_name: index === 0 ? 'Ana Silva' : 'Private Silva', total_minor: 30_000, idempotency_key: crypto.randomUUID() } })
       await expectStatus(made, 201)
-      stays.push((await made.json() as { stay: { id: string } }).stay)
+      stays.push((await made.json() as { booking: NightBooking }).booking)
     }
 
     if (concern === 'arrival-guide') {
@@ -4391,10 +4415,10 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await expect(openNights).toBeChecked()
       await openNights.click()
       await expect(openNights).not.toBeChecked()
-      const blockedResponse = await page.request.get(`${api(`stay-homes/${assignedHome.product_id}/calendar`)}&from=${localDay(5)}&to=${localDay(8)}`)
+      const blockedResponse = await page.request.get(api(nightCalendarPath(localDay(5), localDay(8), assignedHome.product_id)))
       await expectStatus(blockedResponse, 200)
-      const blocked = await blockedResponse.json() as { nights: import('../../server/domain/stays').StayNight[] }
-      expect(blocked.nights).toEqual([5, 6, 7].map(offset => expect.objectContaining({ date: localDay(offset), closed: true, available: false, price_minor: 320_000, booking_id: null })))
+      const blocked = await blockedResponse.json() as { homes: Array<{ nights: import('../../server/domain/stays').StayNight[] }> }
+      expect(blocked.homes[0]!.nights).toEqual([5, 6, 7].map(offset => expect.objectContaining({ date: localDay(offset), closed: true, available: false, price_minor: 320_000, booking_id: null })))
       await openNights.click()
       await expect(openNights).toBeChecked()
       await inspector.getByRole('button', { name: /^Nightly price/ }).click()
@@ -4419,9 +4443,9 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       }
       await inspector.getByRole('button', { name: 'Save', exact: true }).click()
       await expect(inspector.getByRole('button', { name: 'Custom settings', exact: true })).toBeVisible()
-      const restrictedResponse = await page.request.get(`${api(`stay-homes/${assignedHome.product_id}/calendar`)}&from=${localDay(5)}&to=${localDay(8)}`)
+      const restrictedResponse = await page.request.get(api(nightCalendarPath(localDay(5), localDay(8), assignedHome.product_id)))
       await expectStatus(restrictedResponse, 200)
-      expect((await restrictedResponse.json() as { nights: import('../../server/domain/stays').StayNight[] }).nights)
+      expect((await restrictedResponse.json() as { homes: Array<{ nights: import('../../server/domain/stays').StayNight[] }> }).homes[0]!.nights)
         .toEqual([5, 6, 7].map(offset => expect.objectContaining({ date: localDay(offset), closed: false, price_minor: 420_000, min_stay_arrival: 2, max_stay: 7, closed_to_arrival: true, closed_to_departure: true })))
 
       // Changing only the price across a mixed range preserves each night's own
@@ -4463,16 +4487,17 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       const visibleMonth = new Date(`${localDay(0).slice(0, 7)}-01T00:00:00Z`)
       const visibleFrom = new Date(visibleMonth.getTime() - 7 * 86_400_000).toISOString().slice(0, 10)
       const visibleTo = new Date(Date.UTC(visibleMonth.getUTCFullYear(), visibleMonth.getUTCMonth() + 1, 8)).toISOString().slice(0, 10)
-      const calendarEndpoint = `/api/dashboard/stay-homes/${assignedHome.product_id}/calendar`
+      const isHomeCalendar = (url: URL) => url.pathname === '/api/dashboard/bookings/calendar'
+        && url.searchParams.get('unit') === 'nights' && url.searchParams.get('product_id') === assignedHome.product_id
       const returnedWindows: string[] = []
       const observeCalendarRead = (request: import('@playwright/test').Request) => {
         const url = new URL(request.url())
-        if (request.method() === 'GET' && url.pathname === calendarEndpoint) returnedWindows.push(`${url.searchParams.get('from')}:${url.searchParams.get('to')}`)
+        if (request.method() === 'GET' && isHomeCalendar(url)) returnedWindows.push(`${url.searchParams.get('from')}:${url.searchParams.get('to')}`)
       }
       page.on('request', observeCalendarRead)
-      const visibleMonthRead = page.waitForResponse(response => response.request().method() === 'GET' && new URL(response.url()).pathname === calendarEndpoint
+      const visibleMonthRead = page.waitForResponse(response => response.request().method() === 'GET' && isHomeCalendar(new URL(response.url()))
         && new URL(response.url()).searchParams.get('from') === visibleFrom && new URL(response.url()).searchParams.get('to') === visibleTo, { timeout: 10_000 })
-      const distantSelectionRead = page.waitForResponse(response => response.request().method() === 'GET' && new URL(response.url()).pathname === calendarEndpoint
+      const distantSelectionRead = page.waitForResponse(response => response.request().method() === 'GET' && isHomeCalendar(new URL(response.url()))
         && new URL(response.url()).searchParams.get('from') === distantNight && new URL(response.url()).searchParams.get('to') === localDay(4001), { timeout: 10_000 })
       await calendar.getByRole('button', { name: 'Today', exact: true }).click()
       for (const response of await Promise.all([visibleMonthRead, distantSelectionRead])) await expectStatus(response, 200)
@@ -4502,9 +4527,9 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await inspector.getByRole('button', { name: 'Cancel', exact: true }).click()
       await expect(inspector.getByRole('button', { name: /^Nightly price/ })).toContainText('3,200')
       await expect(inspector.getByText(`${TIME_ZONE} · THB`, { exact: true })).toBeVisible()
-      const cancelledPrice = await page.request.get(`${api(`stay-homes/${assignedHome.product_id}/calendar`)}&from=${localDay(6)}&to=${localDay(9)}`)
+      const cancelledPrice = await page.request.get(api(nightCalendarPath(localDay(6), localDay(9), assignedHome.product_id)))
       await expectStatus(cancelledPrice, 200)
-      expect((await cancelledPrice.json() as { nights: import('../../server/domain/stays').StayNight[] }).nights.map(night => night.price_minor)).toEqual([320_000, 320_000, 320_000])
+      expect((await cancelledPrice.json() as { homes: Array<{ nights: import('../../server/domain/stays').StayNight[] }> }).homes[0]!.nights.map(night => night.price_minor)).toEqual([320_000, 320_000, 320_000])
       await inspector.getByRole('button', { name: 'Custom settings', exact: true }).click()
       await inspector.getByRole('button', { name: 'Reset all night settings', exact: true }).click()
       await expect(inspector.getByText('Remove all selected nights’ custom prices, closures and stay rules.', { exact: false })).toBeVisible()
@@ -4528,10 +4553,10 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await expect(inspector.getByRole('button', { name: /^Minimum nights/ })).toBeDisabled()
       const occupied = await call<{ nights: import('../../server/domain/stays').StayNight[] }>('get_stay_calendar', { product_id: assignedHome.product_id, from: localDay(0), to: localDay(2) })
       expect(occupied.error).toBeNull()
-      expect(occupied.data!.nights).toEqual([0, 1].map(offset => expect.objectContaining({ date: localDay(offset), booking_id: stays[0]!.id, available: false, closed: false, source: null })))
+      expect(occupied.data!.nights).toEqual([0, 1].map(offset => expect.objectContaining({ date: localDay(offset), booking_id: stays[0]!.booking_id, available: false, closed: false, source: null })))
       const calendarStay = inspector.getByRole('link', { name: 'View stay', exact: true })
       const calendarStayURL = new URL((await calendarStay.getAttribute('href'))!, baseURL!)
-      expect(calendarStayURL.pathname).toBe(`/dashboard/${slug}/calendar/stay/${stays[0]!.id}`)
+      expect(calendarStayURL.pathname).toBe(`/dashboard/${slug}/calendar/stay/${stays[0]!.booking_id}`)
       expect(calendarStayURL.searchParams.get('product_id')).toBe(assignedHome.product_id)
       expect(calendarStayURL.searchParams.get('month')).toBe(localDay(0).slice(0, 7))
       await calendarStay.click()
@@ -4557,7 +4582,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await expect(calendar.getByRole('button', { name: 'December', exact: true })).toBeVisible()
       await calendar.getByRole('button', { name: 'View: Year', exact: true }).click()
       await page.getByRole('menuitemcheckbox', { name: 'List', exact: true }).click()
-      await expect(calendar.getByRole('link', { name: /Ana Silva/ })).toHaveAttribute('href', new RegExp(`/calendar/stay/${stays[0]!.id}\\?`))
+      await expect(calendar.getByRole('link', { name: /Ana Silva/ })).toHaveAttribute('href', new RegExp(`/calendar/stay/${stays[0]!.booking_id}\\?`))
       await calendar.getByRole('button', { name: 'View: List', exact: true }).click()
       await page.getByRole('menuitemcheckbox', { name: 'Month', exact: true }).click()
 
@@ -4586,14 +4611,14 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       const todayResponse = await cleaner.request.get(api('today'))
       await expectStatus(todayResponse, 200)
       const today = await todayResponse.json() as BusinessToday
-      const arrivalPath = `/dashboard/${slug}/bookings/stay/${stays[0]!.id}`
+      const arrivalPath = `/dashboard/${slug}/bookings/${stays[0]!.booking_id}`
       expect(today).toMatchObject({ tasks: [], opportunities: [], opportunity_issues: [], assignees: [] })
       const upcomingResponse = await cleaner.request.get(api('today'), { params: { range: 'upcoming' } })
       await expectStatus(upcomingResponse, 200)
       const upcoming = await upcomingResponse.json() as BusinessToday
       expect(upcoming.tasks.map(section => section.id)).toEqual([localDay(2)])
       expect(upcoming.tasks[0]!.tasks).toEqual([expect.objectContaining({
-        kind: 'turnover', status: 'open', title: 'Assigned Cabin', detail: 'Ana out', booking_id: stays[0]!.id, conversation_id: null, path: null,
+        kind: 'turnover', status: 'open', title: 'Assigned Cabin', detail: 'Ana out', booking_id: stays[0]!.booking_id, conversation_id: null, path: null,
         product_id: assignedHome.product_id, location_id: assignedHome.location_id, due_at: null, outcome: null, action: { type: 'complete', label: 'Done' },
         assignee: { type: 'member', id: memberId, name: 'You', initial: expect.any(String), you: true },
         can: { complete: true, skip: true, reopen: false, assign: false, edit: false },
@@ -4605,10 +4630,10 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await expectStatus(assignedAgendaResponse, 200)
       const assignedAgenda = await assignedAgendaResponse.json() as { items: Array<{ id: string; to: string; booking_id: string; location_id: string; name: string }> }
       expect(assignedAgenda.items).toEqual([
-        expect.objectContaining({ id: `stay:${stays[0]!.id}:arrival`, to: arrivalPath, booking_id: stays[0]!.id, name: 'Assigned Cabin', location_id: homes[0]!.location_id }),
-        expect.objectContaining({ id: `stay:${stays[0]!.id}:departure`, to: arrivalPath, booking_id: stays[0]!.id, name: 'Assigned Cabin', location_id: homes[0]!.location_id }),
+        expect.objectContaining({ id: `stay:${stays[0]!.booking_id}:arrival`, to: arrivalPath, booking_id: stays[0]!.booking_id, name: 'Assigned Cabin', location_id: homes[0]!.location_id }),
+        expect.objectContaining({ id: `stay:${stays[0]!.booking_id}:departure`, to: arrivalPath, booking_id: stays[0]!.booking_id, name: 'Assigned Cabin', location_id: homes[0]!.location_id }),
       ])
-      const denied = await cleaner.request.get(api(`stays/${stays[1]!.id}`))
+      const denied = await cleaner.request.get(api(`bookings/${stays[1]!.booking_id}`))
       expect(denied.status()).toBe(404)
       const otherLocation = await cleaner.request.get(api('today'), { params: { range: 'upcoming', location_id: homes[1]!.location_id } })
       await expectStatus(otherLocation, 200)
@@ -4631,7 +4656,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
           const response = await cleaner.request.get(api(`team/threads/${row.id}/messages?limit=1`))
           await expectStatus(response, 200)
           const { thread } = await response.json() as { thread: { id: string; booking_id: string | null; job: { id: string } | null } }
-          if (thread.booking_id === stays[0]!.id && thread.job?.id === turnover.id) jobThread = thread
+          if (thread.booking_id === stays[0]!.booking_id && thread.job?.id === turnover.id) jobThread = thread
         }
         return jobThread?.id ?? ''
       }, { timeout: 30_000, message: 'the organization’s jobs open the cleaner’s conversation for the turnover' }).not.toBe('')
@@ -4652,7 +4677,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       const afterDone = await cleaner.request.get(api('today'))
       await expectStatus(afterDone, 200)
       expect((await afterDone.json() as BusinessToday).tasks).toEqual([{ id: 'done', title: 'Done', subtitle: null, tasks: [expect.objectContaining({
-        id: turnover.id, kind: 'turnover', status: 'done', booking_id: stays[0]!.id, version: reassigned.data!.task.version + 1,
+        id: turnover.id, kind: 'turnover', status: 'done', booking_id: stays[0]!.booking_id, version: reassigned.data!.task.version + 1,
         outcome: { note: 'Fresh linen on both beds', photos: [], closed_at: expect.any(String), closed_by: 'You' },
         can: { complete: false, skip: false, reopen: true, assign: false, edit: false },
       })] }])
@@ -4662,7 +4687,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       const hostTurnovers = await call<{ sections: TaskSection[] }>('list_tasks', { range: 'today', kind: 'turnover' })
       expect(hostTurnovers.error).toBeNull()
       expect(hostTurnovers.data!.sections.flatMap(section => section.tasks).filter(task => task.id === turnover.id))
-        .toEqual([expect.objectContaining({ status: 'done', booking_id: stays[0]!.id, outcome: expect.objectContaining({ note: 'Fresh linen on both beds' }) })])
+        .toEqual([expect.objectContaining({ status: 'done', booking_id: stays[0]!.booking_id, outcome: expect.objectContaining({ note: 'Fresh linen on both beds' }) })])
 
       const cleanerPage = await cleaner.newPage()
       let deliveringSocket: WebSocket | undefined
@@ -4681,14 +4706,14 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await cleanerPage.setViewportSize({ width: 390, height: 844 })
       expect((await cleanerPage.goto(`/dashboard/${slug}`))?.status()).toBe(200)
       await cleanerPage.goto(`/dashboard/${slug}/calendar?view=list`)
-      const arrival = cleanerPage.locator(`a[href="/dashboard/${slug}/calendar/${localDay(0)}/stay/${stays[0]!.id}?view=list"]`)
+      const arrival = cleanerPage.locator(`a[href="/dashboard/${slug}/calendar/${localDay(0)}/booking/${stays[0]!.booking_id}?view=list"]`)
       await expect(arrival).toContainText('Ana')
       await arrival.click()
       await expect(cleanerPage.getByRole('heading', { name: 'Ana’s group of 2', level: 2, exact: true })).toBeVisible()
       await expect(cleanerPage.getByRole('button', { name: 'Cancel stay', exact: true })).toHaveCount(0)
       await expect(cleanerPage.getByRole('button', { name: 'Record payment', exact: true })).toHaveCount(0)
       await cleanerPage.goto(`/dashboard/${slug}/calendar?view=list`)
-      const departure = cleanerPage.locator(`a[href="/dashboard/${slug}/calendar/${localDay(2)}/stay/${stays[0]!.id}?view=list"]`)
+      const departure = cleanerPage.locator(`a[href="/dashboard/${slug}/calendar/${localDay(2)}/stay/${stays[0]!.booking_id}?view=list"]`)
       await expect(departure).toContainText('Ana')
       await departure.click()
       await expect(cleanerPage.getByRole('heading', { name: 'Ana’s group of 2', level: 2, exact: true })).toBeVisible()
@@ -4697,22 +4722,21 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       // ordered later event proves that the intervening other-home event was filtered.
       // The cleaner reads the stay as its turnover: the first name and arrival
       // change in place, while the surname and the host's notes never reach them.
-      const current = await call<{ stay: { version: number } }>('get_product_booking', { booking_id: stays[0]!.id })
-      const renamed = await call<{ stay: { version: number }; saved_fields: Record<string, unknown>; channel_push: unknown }>('update_stay', { booking_id: stays[0]!.id, version: current.data!.stay.version, guest_name: 'Lia' })
+      const current = await call<{ record: { version: number } }>('get_product_booking', { booking_id: stays[0]!.booking_id })
+      const renamed = await call<NightBookingReceipt>('update_product_booking', { booking_id: stays[0]!.booking_id, version: current.data!.record.version, guest_name: 'Lia' })
       expect(renamed.error).toBeNull()
-      expect(renamed.data!.saved_fields).toEqual({ guest_name: 'Lia' })
-      expect(renamed.data!.channel_push).toBeNull()
+      expect(renamed.data).toMatchObject({ booking_id: stays[0]!.booking_id, unit: 'nights', version: current.data!.record.version + 1, channel_push: null })
       await expect(cleanerPage.getByRole('heading', { name: 'Lia’s group of 2', level: 2, exact: true })).toBeVisible()
       await expect(cleanerPage.getByText('Silva')).toHaveCount(0)
-      const privateStay = await call<{ stay: { version: number } }>('get_product_booking', { booking_id: stays[1]!.id })
-      expect((await call('update_stay', { booking_id: stays[1]!.id, version: privateStay.data!.stay.version, private_notes: 'Other home only' })).error).toBeNull()
-      const noted = await call<{ stay: { version: number } }>('update_stay', { booking_id: stays[0]!.id, version: renamed.data!.stay.version, arrival_time: '18:30', private_notes: 'Host-only live note' })
+      const privateStay = await call<{ record: { version: number } }>('get_product_booking', { booking_id: stays[1]!.booking_id })
+      expect((await call('update_product_booking', { booking_id: stays[1]!.booking_id, version: privateStay.data!.record.version, private_notes: 'Other home only' })).error).toBeNull()
+      const noted = await call<NightBookingReceipt>('update_product_booking', { booking_id: stays[0]!.booking_id, version: renamed.data!.version, arrival_time: '18:30', private_notes: 'Host-only live note' })
       expect(noted.error).toBeNull()
       await expect(cleanerPage.getByText(/^6:30\sPM$/u).first()).toBeVisible()
       await expect(cleanerPage.getByText('Host-only live note')).toHaveCount(0)
       // The page can render the note before the socket's frame is recorded here.
       await expect.poll(() => liveEvents.filter(event => 'booking_id' in event).length).toBe(2)
-      expect(liveEvents.filter(event => 'booking_id' in event).map(event => event.booking_id)).toEqual([stays[0]!.id, stays[0]!.id])
+      expect(liveEvents.filter(event => 'booking_id' in event).map(event => event.booking_id)).toEqual([stays[0]!.booking_id, stays[0]!.booking_id])
 
       // A cookie cache read must not keep this socket authorized after sign-out.
       expect((await cleaner.request.get('/api/auth/get-session')).status()).toBe(200)
@@ -4726,7 +4750,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await expectStatus(revoked, 200)
       expect(await revoked.json()).toBeNull()
       const beforeRevokedEvent = liveEvents.length
-      const afterSignOut = await call<{ stay: { version: number } }>('update_stay', { booking_id: stays[0]!.id, version: noted.data!.stay.version, private_notes: 'After session revocation' })
+      const afterSignOut = await call<NightBookingReceipt>('update_product_booking', { booking_id: stays[0]!.booking_id, version: noted.data!.version, private_notes: 'After session revocation' })
       expect(afterSignOut.error).toBeNull()
       await signedOutClosed
       expect(liveEvents).toHaveLength(beforeRevokedEvent)
@@ -4774,10 +4798,10 @@ test('a stay socket in a service organization closes when Better Auth removes it
     const home = (await madeHome.json() as { home: { product_id: string } }).home
     const assigned = await page.request.patch(api(`stay-homes/${home.product_id}`), { data: { assigned_member_id: memberId } })
     await expectStatus(assigned, 200)
-    const made = await page.request.post(api('stays'), { data: { product_id: home.product_id, check_in_date: localDay(0), check_out_date: localDay(2), adults: 1,
+    const made = await page.request.post(api('bookings'), { data: { product_id: home.product_id, check_in_date: localDay(0), check_out_date: localDay(2), adults: 1,
       guest_name: 'Membership Guest', total_minor: 0, idempotency_key: crypto.randomUUID() } })
     await expectStatus(made, 201)
-    const stay = (await made.json() as { stay: { id: string; version: number } }).stay
+    const { booking: stay } = await made.json() as { booking: NightBooking }
 
     const cleanerPage = await cleaner.newPage()
     const sockets: WebSocket[] = []
@@ -4792,16 +4816,16 @@ test('a stay socket in a service organization closes when Better Auth removes it
       })
     })
     const openedRead = cleanerPage.waitForResponse(response => response.request().method() === 'GET'
-      && new URL(response.url()).pathname === `/api/dashboard/stays/${stay.id}`)
-    expect((await cleanerPage.goto(`/dashboard/${slug}/bookings/stay/${stay.id}`))?.status()).toBe(200)
+      && new URL(response.url()).pathname === `/api/dashboard/bookings/${stay.booking_id}`)
+    expect((await cleanerPage.goto(`/dashboard/${slug}/bookings/${stay.booking_id}`))?.status()).toBe(200)
     await expect(cleanerPage.getByRole('heading', { name: 'Membership', level: 2, exact: true })).toBeVisible()
     // The real first-open reconciliation read proves the app socket completed
     // its upgrade before the other device publishes the event under assertion.
     expect((await openedRead).status()).toBe(200)
     // The member reads the stay as its turnover, so the live change is one it shows: the arrival time.
-    const renamed = await page.request.patch(api(`stays/${stay.id}`), { data: { version: stay.version, arrival_time: '18:30' } })
+    const renamed = await page.request.patch(api(`bookings/${stay.booking_id}`), { data: { version: stay.version, arrival_time: '18:30' } })
     await expectStatus(renamed, 200)
-    const version = (await renamed.json() as { stay: { version: number } }).stay.version
+    const version = (await renamed.json() as { booking: NightBooking }).booking.version
     await expect(cleanerPage.getByRole('heading', { name: 'Membership', level: 2, exact: true })).toBeVisible()
     await expect(cleanerPage.getByText(/^6:30\sPM$/u).first()).toBeVisible()
     await expect.poll(() => liveEvents.filter(event => event.type === 'stay.changed').length).toBe(1)
@@ -4811,7 +4835,7 @@ test('a stay socket in a service organization closes when Better Auth removes it
     const removed = await page.request.post('/api/auth/organization/remove-member', { headers, data: { organizationId, memberIdOrEmail: memberId } })
     await expectStatus(removed, 200)
     const beforeRemoval = liveEvents.length
-    const changed = await page.request.patch(api(`stays/${stay.id}`), { data: { version: version, private_notes: 'After membership removal' } })
+    const changed = await page.request.patch(api(`bookings/${stay.booking_id}`), { data: { version: version, private_notes: 'After membership removal' } })
     await expectStatus(changed, 200)
     await closed
     expect(liveEvents).toHaveLength(beforeRemoval)
@@ -4839,23 +4863,24 @@ test('a host selects nights across homes on the multi-calendar and edits them in
   const sea = await makeHome('Sea Loft', '9 Sea Road', 'Ao Nang', 21, 200_000)
   const stayIds: string[] = []
   for (const [checkIn, checkOut] of [[2, 4], [7, 9]] as const) {
-    const made = await request.post(api('stays'), { headers, data: { product_id: productId, check_in_date: localDay(checkIn), check_out_date: localDay(checkOut), adults: 1,
+    const made = await request.post(api('bookings'), { headers, data: { product_id: productId, check_in_date: localDay(checkIn), check_out_date: localDay(checkOut), adults: 1,
       guest_name: 'Grid Guest', total_minor: 0, idempotency_key: crypto.randomUUID() } })
     await expectStatus(made, 201)
-    stayIds.push((await made.json() as { stay: { id: string } }).stay.id)
+    stayIds.push((await made.json() as { booking: NightBooking }).booking.booking_id)
   }
   type Night = import('../../server/domain/stays').StayNight
   const nightsAt = async (home: string, first: number, end: number) => {
-    const response = await request.get(`${api(`stay-homes/${home}/calendar`)}&from=${localDay(first)}&to=${localDay(end)}`)
+    const response = await request.get(api(nightCalendarPath(localDay(first), localDay(end), home)))
     await expectStatus(response, 200)
-    return (await response.json() as { nights: Night[] }).nights
+    return (await response.json() as { homes: Array<{ nights: Night[] }> }).homes[0]!.nights
   }
 
   // The read the grid draws, and the native app reads: every home, its nights, and the stays on them.
-  const window = await request.get(api(`stay-homes/calendar?from=${localDay(1)}&to=${localDay(8)}`))
+  const window = await request.get(api(nightCalendarPath(localDay(1), localDay(8))))
   await expectStatus(window, 200)
-  const read = await window.json() as { homes: Array<{ home: { product_id: string; name: string }; nights: Array<{ date: string; booking_id: string | null; price_minor: number | null }> }>; stays: Array<{ id: string; guest_name: string }> }
+  const read = await window.json() as { homes: Array<{ home: { product_id: string; name: string }; nights: Array<{ date: string; booking_id: string | null; price_minor: number | null }> }>; bookings: NightBooking[] }
   expect(read.homes.map(entry => entry.home.name)).toEqual(['Bay House', 'Cliff Cabin', 'Sea Loft'])
+  expect(read.bookings.map(booking => ({ id: booking.booking_id, unit: booking.unit }))).toEqual(stayIds.map(id => ({ id, unit: 'nights' })))
   expect(read.homes[1]!.nights.map(night => night.booking_id)).toEqual([null, stayIds[0], stayIds[0], null, null, null, stayIds[1]])
   expect(read.homes[0]!.nights.map(night => night.price_minor)).toEqual(Array(7).fill(320_000))
 

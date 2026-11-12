@@ -101,7 +101,7 @@ const stay = {
 const stayBooked = { ...stay, total: '$645.00', paid: '$645.00', balance: null, overlap: false, notes: 'We will bring our dog if that is fine.' }
 const stayCancelled = { ...stay, refund: '$322.50' }
 // A member looking after the home opens the stay itself.
-const stayPreviewUrl = 'https://demo.krabiclaw.com/dashboard/pinecone-stays/bookings/stay/preview-1'
+const stayPreviewUrl = 'https://demo.krabiclaw.com/dashboard/pinecone-stays/bookings/preview-1'
 // A stay Airbnb sent opens the stay: it has a conversation only once the guest writes.
 const airbnbStay = { ...stay, guestName: 'Jamie Rivera', guestEmail: null, guestPhone: null, channel: 'Airbnb', replyUrl: stayPreviewUrl }
 const airbnbBooked = { ...airbnbStay, total: '$1,284.00', paid: null, balance: null, overlap: false, notes: null }

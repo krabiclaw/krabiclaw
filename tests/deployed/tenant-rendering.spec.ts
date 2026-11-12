@@ -202,11 +202,16 @@ test('a guest opens a stay\'s booking dialog, picks nights the calendar allows a
   expect(homePage.status()).toBe(200)
   expect(await homePage.text(), 'the lodging demo home page does not offer the studio').toContain(`href="${stayPath}"`)
   type Night = { date: string; available: boolean; price_minor: number | null; min_stay_arrival: number; max_stay: number | null; closed_to_arrival: boolean; closed_to_departure: boolean }
-  const from = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10)
-  const to = new Date(Date.now() + 120 * 86_400_000).toISOString().slice(0, 10)
-  const read = await page.request.get(`${baseURL}/api/public/products/${slug}/nights?from=${from}&to=${to}`)
-  expect(read.status(), await read.text()).toBe(200)
-  const { home, nights } = await read.json() as { home: { today: string; currency: string }; nights: Night[] }
+  const start = Date.now() - 86_400_000
+  const reads = await Promise.all(Array.from({ length: 4 }, async (_, pageIndex) => {
+    const from = new Date(start + pageIndex * 30 * 86_400_000).toISOString().slice(0, 10)
+    const to = new Date(start + (pageIndex + 1) * 30 * 86_400_000).toISOString().slice(0, 10)
+    const read = await page.request.get(`${baseURL}/api/public/products/${slug}/availability?from=${from}&to=${to}`)
+    expect(read.status(), await read.text()).toBe(200)
+    return await read.json() as { unit: 'nights'; home: { today: string; currency: string }; nights: Night[] }
+  }))
+  const home = reads[0]!.home
+  const nights = [...new Map(reads.flatMap(result => result.nights.map(night => [night.date, night] as const))).values()]
   // The first stay the home's own nights allow, check-in and checkout in one month.
   let chosen: { checkIn: Night; checkOut: string; stayed: Night[]; minimum: number } | null = null
   for (let start = 0; start < nights.length && !chosen; start++) {

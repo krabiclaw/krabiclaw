@@ -4,7 +4,7 @@ import type { PublicProductLocation } from '~/server/utils/public-products'
 import type { PublicStayCalendar, PublicStayNight, StayQuote } from '~/server/domain/stays'
 import { formatMinorAmount } from '~/shared/prices'
 import { isCurrencyCode } from '~/shared/currencies'
-import { MAX_STAY_NIGHTS, STAY_CALENDAR_DAYS } from '~/shared/bookings'
+import { AVAILABILITY_PAGE_DAYS, MAX_STAY_NIGHTS, STAY_CALENDAR_DAYS } from '~/shared/bookings'
 import { addLocalDays, formatCalendarDate, isValidCalendarDate, isValidInstant, localDateAt } from '~/utils/timezone'
 import { getPhoneCountry } from '~/utils/phone'
 import { isRecord, normalizeApiError, publicApiMutation, publicApiRequest } from '~/utils/api-clients'
@@ -63,23 +63,74 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
     return code && isCurrencyCode(code) ? code : null
   })
 
-  async function loadCalendar() {
-    if (calendarPending.value) return
-    calendarPending.value = true
-    calendarError.value = ''
+  const calendarPages = new Map<string, Promise<PublicStayCalendar>>()
+  const horizon = computed(() => calendar.value ? addLocalDays(calendar.value.home.today, STAY_CALENDAR_DAYS) : null)
+  let pendingPages = 0
+
+  async function loadCalendar(start?: string, end?: string, refresh = false) {
     try {
       const timeZone = context.value.location?.timezone
       if (!timeZone) throw new Error('The home has no timezone')
-      const from = localDateAt(new Date(), timeZone)
-      calendar.value = await publicApiRequest<PublicStayCalendar>(`/api/public/products/${encodeURIComponent(context.value.product.slug)}/nights`, {
-        query: { from, to: addLocalDays(from, STAY_CALENDAR_DAYS) },
-        validate: (value): value is PublicStayCalendar => isRecord(value) && isRecord(value.home) && Array.isArray(value.nights),
-      })
-      restoreSelection()
+      const today = localDateAt(new Date(), timeZone)
+      const last = addLocalDays(today, STAY_CALENDAR_DAYS)
+      const from = start && start > today ? start : today
+      const until = end && end < last ? end : last
+      if (until <= from) return
+      const slug = context.value.product.slug
+      const pages: Promise<PublicStayCalendar>[] = []
+      for (let cursor = from; cursor < until;) {
+        const pageEnd = addLocalDays(cursor, AVAILABILITY_PAGE_DAYS)
+        const to = pageEnd < until ? pageEnd : until
+        const key = `${slug}:${cursor}:${to}`
+        if (refresh) calendarPages.delete(key)
+        let loaded = true
+        for (let day = cursor; day <= to && loaded; day = addLocalDays(day, 1)) loaded = Boolean(night(day))
+        if (refresh || !loaded) {
+          let page = calendarPages.get(key)
+          if (!page) {
+            page = publicApiRequest<PublicStayCalendar>(`/api/public/products/${encodeURIComponent(slug)}/availability`, {
+              query: { from: cursor, to },
+              validate: (value): value is PublicStayCalendar => isRecord(value) && value.unit === 'nights' && isRecord(value.home) && Array.isArray(value.nights),
+            }).finally(() => { calendarPages.delete(key) })
+            calendarPages.set(key, page)
+          }
+          pages.push(page)
+        }
+        cursor = to
+      }
+      if (!pages.length) return
+      calendarPending.value = true
+      pendingPages++
+      calendarError.value = ''
+      try {
+        const incoming = await Promise.all(pages)
+        if (slug !== context.value.product.slug) return
+        const nights = new Map(nightsByDate.value)
+        for (const page of incoming) for (const night of page.nights) nights.set(night.date, night)
+        calendar.value = { home: incoming[0]!.home, nights: [...nights.values()].sort((a, b) => a.date.localeCompare(b.date)) }
+      } finally {
+        pendingPages--
+        calendarPending.value = pendingPages > 0
+      }
     } catch (error) {
       calendarError.value = normalizeApiError(error).message
-    } finally {
-      calendarPending.value = false
+    }
+  }
+
+  async function openCalendar() {
+    const { check_in_date: arrival, check_out_date: departure, stay_edit: mode } = route.query
+    if (['dates', 'guests'].includes(String(mode)) && isValidCalendarDate(arrival) && isValidCalendarDate(departure)
+      && departure > arrival && departure <= addLocalDays(arrival, MAX_STAY_NIGHTS)) {
+      await loadCalendar(arrival, departure)
+      restoreSelection()
+    } else {
+      const timezone = context.value.location?.timezone
+      if (!timezone) {
+        calendarError.value = 'The home has no timezone'
+        return
+      }
+      const today = localDateAt(new Date(), timezone)
+      await loadCalendar(today, addLocalDays(today, AVAILABILITY_PAGE_DAYS))
     }
   }
 
@@ -133,7 +184,16 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
   /** A night can start a stay when it is not past, free, open to arrival and some day can end the stay. */
   function canCheckIn(date: string): boolean {
     const value = night(date)
-    return Boolean(calendar.value && date >= calendar.value.home.today && value?.available && !value.closed_to_arrival && !checkOuts(date).next().done)
+    if (!calendar.value || !horizon.value || date < calendar.value.home.today || !value?.available || value.closed_to_arrival) return false
+    if (!checkOuts(date).next().done) return true
+    const earliest = addLocalDays(date, value.min_stay_arrival)
+    if (earliest > horizon.value) return false
+    for (let day = date; day <= earliest; day = addLocalDays(day, 1)) {
+      const known = night(day)
+      if (!known) return true
+      if (day < earliest && !known.available) return false
+    }
+    return false
   }
 
   /** The first night a stay can start, or null when no stay fits the calendar's open nights. */
@@ -173,6 +233,8 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
     const keepsCheckOut = previousCheckOut !== null && [...checkOuts(date)].includes(previousCheckOut)
     checkOut.value = keepsCheckOut ? previousCheckOut : null
     dateField.value = keepsCheckOut ? 'checkIn' : 'checkOut'
+    const end = addLocalDays(date, Math.max(AVAILABILITY_PAGE_DAYS, night(date)!.min_stay_arrival + 1))
+    if (!night(end)) void loadCalendar(date, end)
   }
 
   /** A typed or pressed checkout for the chosen check-in; one that cannot end the stay says why. */
@@ -335,7 +397,8 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
       bookingError.value = formQuestions.handleRefusal(failure) && formQuestions.notice.value ? '' : refusal(error)
       if (failure.code.startsWith('STAY_')) {
         bookingStep.value = 1
-        void loadCalendar()
+        if (checkIn.value && checkOut.value) void loadCalendar(checkIn.value, checkOut.value, true)
+        else void openCalendar()
       }
     } finally {
       submitting.value = false
@@ -353,7 +416,7 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
     checkout, enquiryPath,
     bookingOpen, bookingStep, contactForm, formQuestions, defaultPhoneCountry, calendar, calendarPending, calendarError, checkIn, checkOut, dateField, adults, children, infants, maxGuests,
     quote, quotePending, bookingError, submitting, breakdown, priceSummary, rangeLabel, guestsLabel, nightCount,
-    loadCalendar, night, canCheckIn, canCheckOut, checkInHint, checkOutHint, firstCheckIn, earliestCheckOut, selectDay, setCheckIn, setCheckOut, clearDates, clearCheckOut, openBooking, submitBooking, money, nightsLabel, dateLabel,
+    openCalendar, loadCalendar, horizon, night, canCheckIn, canCheckOut, checkInHint, checkOutHint, firstCheckIn, earliestCheckOut, selectDay, setCheckIn, setCheckOut, clearDates, clearCheckOut, openBooking, submitBooking, money, nightsLabel, dateLabel,
   }
 }
 export type StayBookingController = ReturnType<typeof useStayBooking>

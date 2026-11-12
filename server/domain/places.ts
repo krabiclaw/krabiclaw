@@ -4,7 +4,7 @@ import { ASSIGNED_SERVICE_SQL, assertLocationAccess, assertProductAccess, locati
 import { updateLocation } from '~/server/utils/location-management'
 import { organizationEventQuery } from '~/server/utils/organization-events'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
-import { sessionHeldCapacitySql } from '~/server/utils/availability'
+import { bookingBatchWriteRefused, prepareScheduleClosures, readProjectedSchedule, sessionHeldCapacitySql } from '~/server/utils/availability'
 import { CAPACITY_CONSUMING_SQL, stayGuestFirstName } from '~/shared/bookings'
 import { MEMBER_NAME_SQL } from '~/shared/member-scheduling'
 import { closeDates, closureOnDate, datedHours, dateRuns, getDateIntervals, openDates, parseOpeningHours, parseSpecialHours } from '~/shared/reservation-hours'
@@ -60,7 +60,7 @@ export interface PlacesCalendar { from: string; to: string; manage: boolean; pla
 
 interface LocationRow { id: string; slug: string; title: string; status: string; timezone: string; address: string | null; opening_hours: string | null; special_hours: string | null; updated_at: string }
 interface OfferingRow { id: string; name: string; kind: 'experience' | 'service'; timezone: string; scheduling_mode: string; assigned_member_id: string | null; provider_name: string | null; locations: string | null }
-interface SessionRow { id: string; product_id: string; timezone: string; starts_at: string; status: 'scheduled' | 'cancelled'; claimed: number; updated_at: string }
+interface SessionRow { id: string; product_id: string; timezone: string; starts_at: string; status: 'scheduled' | 'cancelled'; claimed: number; updated_at: string | null }
 
 function fail(statusCode: number, message: string, field?: string): never {
   throw new HTTPError({ statusCode, statusMessage: message, data: { code: statusCode === 404 ? 'PLACE_NOT_FOUND' : 'INVALID_PLACE_DATES', ...(field ? { field } : {}) } })
@@ -146,14 +146,21 @@ function offeringDays(row: OfferingRow, window: string[], sessions: Map<string, 
 async function readSessions(db: DbClient, organizationId: string, productIds: string[], from: string, to: string): Promise<Map<string, Map<string, SessionRow[]>>> {
   const byProduct = new Map<string, Map<string, SessionRow[]>>()
   if (!productIds.length) return byProduct
-  const rows = await queryAll<SessionRow>(db, `
+  const fromInstant = `${addLocalDays(from, -1)}T00:00:00.000Z`
+  const toInstant = `${addLocalDays(to, 1)}T00:00:00.000Z`
+  const [recorded, projected] = await Promise.all([
+    queryAll<SessionRow>(db, `
     SELECT s.id, s.product_id, s.timezone, s.starts_at, s.status, s.updated_at,
            COALESCE((SELECT SUM(b.party_size) FROM bookings b WHERE b.product_session_id = s.id AND ${CAPACITY_CONSUMING_SQL}), 0) + ${sessionHeldCapacitySql('s')} AS claimed
     FROM product_sessions s
     WHERE s.organization_id = ? AND s.product_id IN (SELECT value FROM json_each(?)) AND s.status IN ('scheduled', 'cancelled')
       AND s.starts_at >= ? AND s.starts_at < ?
-    ORDER BY s.starts_at, s.id`, [organizationId, JSON.stringify(productIds), `${addLocalDays(from, -1)}T00:00:00.000Z`, `${addLocalDays(to, 1)}T00:00:00.000Z`])
-  for (const row of rows) {
+    ORDER BY s.starts_at, s.id`, [organizationId, JSON.stringify(productIds), fromInstant, toInstant]),
+    Promise.all(productIds.map(productId => readProjectedSchedule(db, { organizationId, productId, fromInstant, toInstant }))),
+  ])
+  const byId = new Map(recorded.map(session => [session.id, session]))
+  for (const session of projected.flat()) byId.set(session.id, { ...session, claimed: byId.get(session.id)?.claimed ?? 0 })
+  for (const row of byId.values()) {
     const date = localDateAt(new Date(row.starts_at), row.timezone)
     if (date < from || date >= to) continue
     const days = byProduct.get(row.product_id) ?? new Map<string, SessionRow[]>()
@@ -249,17 +256,26 @@ export async function setPlaceDates(db: D1Database, principal: MemberAccessPrinc
     const offering = await queryFirst<{ id: string }>(db, `SELECT p.id FROM products p JOIN product_booking_configs c ON c.product_id = p.id AND c.organization_id = p.organization_id WHERE p.organization_id = ? AND p.id = ? AND p.kind IN ('experience', 'service')`, [principal.organizationId, id])
     if (!offering) fail(404, 'Place not found')
     const sessions = (await readSessions(db, principal.organizationId, [id], from, to)).get(id) ?? new Map<string, SessionRow[]>()
-    const targets = chosen.flatMap(date => (sessions.get(date) ?? []).filter(session => session.claimed === 0 && session.status === (closed ? 'scheduled' : 'cancelled')).map(session => session.id))
+    const projected = closed ? await prepareScheduleClosures(db, {
+      organizationId: principal.organizationId, productId: id, actorId: principal.userId, dates: chosen, now,
+      fromInstant: `${addLocalDays(from, -1)}T00:00:00.000Z`, toInstant: `${addLocalDays(to, 1)}T00:00:00.000Z`,
+    }) : { queries: [], ids: [] }
+    const projectedIds = new Set(projected.ids)
+    const targets = chosen.flatMap(date => (sessions.get(date) ?? []).filter(session => session.updated_at !== null && !projectedIds.has(session.id) && session.claimed === 0 && session.status === (closed ? 'scheduled' : 'cancelled')).map(session => session.id))
     const unclaimed = `NOT EXISTS (SELECT 1 FROM bookings b WHERE b.product_session_id = product_sessions.id AND ${CAPACITY_CONSUMING_SQL})
       AND NOT EXISTS (SELECT 1 FROM payment_checkout_holds h WHERE h.session_id = product_sessions.id AND h.status = 'active' AND h.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`
-    if (targets.length) {
+    if (targets.length || projected.ids.length) {
       await executeBatch(db, [
+        ...projected.queries,
         { query: `UPDATE product_sessions SET status = ?, updated_at = ?, updated_by = ? WHERE organization_id = ? AND product_id = ? AND status = ? AND id IN (SELECT value FROM json_each(?)) AND ${unclaimed}`,
           params: [closed ? 'cancelled' : 'scheduled', now, principal.userId, principal.organizationId, id, closed ? 'scheduled' : 'cancelled', JSON.stringify(targets)] },
         organizationEventQuery({ organizationId: principal.organizationId, locationId: null, actorId: principal.userId, eventType: 'product.updated', entityType: 'product', entityId: id,
-          metadata: { from, to, closed, sessions: targets.length, ...(weekdays ? { weekdays: weekdays.join(',') } : {}) } }),
+          metadata: { from, to, closed, sessions: targets.length + projected.ids.length, ...(weekdays ? { weekdays: weekdays.join(',') } : {}) } }),
         publicResourceCacheInvalidationQuery(principal.organizationId, 'product-session-updated'),
-      ], { operation: 'Set offering dates' })
+      ], { operation: 'Set offering dates' }).catch(error => {
+        if (bookingBatchWriteRefused(error)) throw new HTTPError({ statusCode: 409, statusMessage: 'The schedule changed while saving these days. Reload the calendar and try again.', cause: error })
+        throw error
+      })
     }
   }
   const calendar = await readPlacesCalendar(db, principal, { from, to }, { kind, id })

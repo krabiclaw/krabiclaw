@@ -1,5 +1,5 @@
 import { STAY_ARRIVAL_TEXT_LIMITS, STAY_CHECKOUT_DETAILS_LIMIT } from '~/shared/stay-arrival'
-import { formAnswerInputJsonSchema, formAnswerSnapshotsJsonSchema } from '~/shared/form-questions'
+import { formAnswerSnapshotsJsonSchema } from '~/shared/form-questions'
 import { organizationTool, PHONE_FORMAT, type McpToolDefinition } from './shared'
 import { NOT_HANDLED, requiredString, type McpExecutorContext } from './execution'
 import { CHANNEL_PUSH_SCHEMA } from '~/shared/channel-push'
@@ -10,7 +10,7 @@ import { STAY_HOME_ACCESSIBILITY_FEATURES, STAY_ROOM_ACCESSIBILITY_FEATURES } fr
 import { MAX_ORDERED_MEDIA_ASSETS } from '~/shared/media-placement-contract'
 import { memberAccessPrincipal } from '~/server/utils/member-access'
 import { organizationEventContext } from '~/server/utils/organization-events'
-import { moveStay, createStay, createStayPhotoRoom, deleteStayPayment, moveStayPhotos, readStayCalendar, recordStayPayment, removeStayPhotoRoom, setStayNights, stayAccessFor, updateStay, updateStayHomeAccessibility, updateStayPhotoRoom, STAY_STATUSES, STAY_TURNOVER_FIELDS, type StayAccess, type StayHome, type StayDetail } from '~/server/domain/stays'
+import { createStayPhotoRoom, deleteStayPayment, moveStayPhotos, readStayCalendar, recordStayPayment, removeStayPhotoRoom, setStayNights, stayAccessFor, updateStayHomeAccessibility, updateStayPhotoRoom, STAY_STATUSES, STAY_TURNOVER_FIELDS, type StayAccess, type StayHome, type StayDetail } from '~/server/domain/stays'
 import { MAX_STAY_NIGHTS, STAY_CHANNELS, STAY_PAYMENT_METHODS } from '~/shared/bookings'
 
 const text = { type: 'string', minLength: 1 }
@@ -24,7 +24,6 @@ export const STAY_CALENDAR_RULES_SCHEMA = { type: ['object', 'null'], descriptio
 }, additionalProperties: false }
 const productId = { type: 'string', minLength: 1, description: 'The place to stay: a product of kind stay, from list_products.' }
 const stayId = { type: 'string', minLength: 1, description: 'Stay ID: booking_id from list_product_bookings.' }
-const version = { type: 'integer', minimum: 1, description: 'stay.version from the latest get_product_booking call; a stale version is refused.' }
 const key = { type: 'string', minLength: 1, maxLength: 200, description: 'Caller-supplied durable idempotency key. Reuse only for identical operation arguments.' }
 
 const payment = { type: 'object', properties: { id: text, booking_id: text, amount_minor: { type: 'integer' }, currency: text, method: { type: 'string', enum: [...STAY_PAYMENT_METHODS] }, paid_on: day, reference: nullableText, note: nullableText, created_at: text, created_by: text },
@@ -147,25 +146,19 @@ const calendarHome = { type: 'object', properties: calendarHomeProperties, requi
 const calendarStayProperties = Object.fromEntries(['id', 'product_id', 'channel', 'owner', 'status', 'overbooked', 'starts_at', 'ends_at', 'check_in_date', 'check_out_date', 'adults', 'children', 'infants', 'guest_name'].map(field => [field, stayProperties[field as keyof typeof stayProperties]]))
 const calendarStay = { type: 'object', properties: calendarStayProperties, required: Object.keys(calendarStayProperties), additionalProperties: false }
 const calendar = { type: 'object', properties: { home: calendarHome, nights: { type: 'array', items: night }, stays: { type: 'array', items: { anyOf: [calendarStay, stayTurnover] } }, channel_push: channelPush }, required: ['home', 'nights', 'stays'] }
-const stayReceiptProperties = { id: text, product_id: text, conversation_id: text, status: stayProperties.status, version: stayProperties.version, updated_at: text, check_in_date: day, check_out_date: day }
-const stayReceipt = { type: 'object', properties: stayReceiptProperties, required: Object.keys(stayReceiptProperties), additionalProperties: false }
-const stayMutation = { type: 'object', properties: { stay: stayReceipt, channel_push: channelPush }, required: ['stay', 'channel_push'], additionalProperties: false }
+const nightReceiptProperties = { booking_id: text, unit: { const: 'nights' }, product_id: text, conversation_id: text, status: stayProperties.status, version: stayProperties.version, updated_at: text, check_in_date: day, check_out_date: day, channel_push: channelPush }
+export const nightBookingReceipt = { type: 'object', properties: nightReceiptProperties, required: Object.keys(nightReceiptProperties) }
 const paymentBalanceProperties = { booking_id: text, currency: text, paid_minor: { type: 'integer' }, payment_status: stayDetail.properties.payment_status }
 const paymentReceiptProperties = { id: text, booking_id: text, amount_minor: { type: 'integer' }, currency: text, method: payment.properties.method, paid_on: day, reference: nullableText, note: nullableText, created_at: text }
 const roomResult = { type: 'object', properties: { product_id: text, room: roomIdentity }, required: ['product_id', 'room'], additionalProperties: false }
 const roomDetailsResult = { type: 'object', properties: { product_id: text, updated_at: text, room: STAY_PHOTO_ROOM_SCHEMA }, required: ['product_id', 'updated_at', 'room'], additionalProperties: false }
 const roomDeletionResult = { type: 'object', properties: { product_id: text, deleted_room_id: text, photo_memberships: { type: 'array', description: 'Every photo retained on this home in Product photo order, with its current room assignment. Null means Additional photos.', items: { type: 'object', properties: { photo_id: text, room_id: nullableText }, required: ['photo_id', 'room_id'], additionalProperties: false } } }, required: ['product_id', 'deleted_room_id', 'photo_memberships'], additionalProperties: false }
 const photoAssignmentResult = { type: 'object', properties: { product_id: text, destination_room_id: { ...nullableText, description: 'The saved destination room; null means Additional photos.' }, created_room_id: { ...nullableText, description: 'The newly created room’s ID when new_room_type was supplied; otherwise null.' }, moved_photo_ids: { type: 'array', items: text, minItems: 1, uniqueItems: true, description: 'The selected photo IDs whose assignment was saved.' } }, required: ['product_id', 'destination_room_id', 'created_room_id', 'moved_photo_ids'], additionalProperties: false }
-const guestFields = {
+export const nightBookingFields = {
   check_in_date: day, check_out_date: { ...day, description: 'The morning the guest leaves; the stay holds the nights before it.' }, arrival_time: { ...time, description: 'The local time the guest said they arrive; the stay starts then instead of at the home\'s check-in time. Null or omitted is the check-in time.' },
   adults: { type: 'integer', minimum: 1, maximum: 99 }, children: { type: 'integer', minimum: 0, maximum: 99 }, infants: { type: 'integer', minimum: 0, maximum: 99 },
   guest_name: { type: 'string', minLength: 1, maxLength: 200, description: 'The guest\'s full name.' }, guest_email: { type: ['string', 'null'] },
   guest_phone: { type: ['string', 'null'], description: PHONE_FORMAT }, total_minor: minor, private_notes: { type: ['string', 'null'], maxLength: 2000, description: 'The host\'s own note, never shown to the guest.' },
-}
-
-/** The stay field a host's input is saved as: an arrival time is the stay's start. */
-function savedField(field: string): keyof typeof stayProperties {
-  return field === 'arrival_time' ? 'starts_at' : field as keyof typeof stayProperties
 }
 
 /** A manager's stay trimmed to a schema's fields; a member's turnover is already only what they may read. */
@@ -187,8 +180,9 @@ function roomIdentityResult(room: StayHome['photo_rooms'][number]) {
   return { id: room.id, type: room.type, photo_ids: room.photo_ids, details_version: room.details_version }
 }
 
-function stayMutationReceipt(stay: StayDetail & { channel_push: unknown }) {
-  return { stay: { id: stay.id, product_id: stay.product_id, conversation_id: stay.conversation_id, status: stay.status, version: stay.version, updated_at: stay.updated_at, check_in_date: stay.check_in_date, check_out_date: stay.check_out_date }, channel_push: stay.channel_push }
+export function nightBookingMutation(stay: StayDetail & { channel_push: unknown }) {
+  return { booking_id: stay.id, unit: 'nights', product_id: stay.product_id, conversation_id: stay.conversation_id, status: stay.status, version: stay.version,
+    updated_at: stay.updated_at, check_in_date: stay.check_in_date, check_out_date: stay.check_out_date, channel_push: stay.channel_push }
 }
 
 export const STAYS_TOOLS: McpToolDefinition[] = [
@@ -208,15 +202,6 @@ export const STAYS_TOOLS: McpToolDefinition[] = [
   organizationTool({ name: 'assign_home_photos_to_room', domain: 'stays', minimumRole: 'admin', description: 'Assign existing home photos to one room group, to Additional photos, or to a newly created room. First call get_product: photo IDs are product.image.asset_id and product.gallery[].asset_id; current room membership is product.stay.photo_rooms. Supply exactly one destination: room_id with an existing ID, explicit room_id:null for Additional photos, or new_room_type. Omitting room_id does not mean null. Each selected photo needs its current expected_room_id; changed membership or a removed photo refuses the whole assignment, including new room creation. Returns the destination ID, new room ID if created and moved photo IDs. Changes only KrabiClaw; it does not update Airbnb. Edit Airbnb’s photo tour separately in Airbnb.',
     inputSchema: { product_id: productId, room_id: { ...nullableText, minLength: 1, description: 'Existing room ID from get_product → product.stay.photo_rooms, or explicit null for Additional photos. Omit only when supplying new_room_type.' }, new_room_type: { ...roomType, description: 'Create this room type and assign the photos to it. Omit room_id when using this destination.' }, photos: movePhotos,
       oneOf: [{ required: ['room_id'], not: { required: ['new_room_type'] } }, { required: ['new_room_type'], not: { required: ['room_id'] } }] }, required: ['product_id', 'photos'], outputSchema: photoAssignmentResult }),
-  organizationTool({ name: 'create_stay', domain: 'stays', minimumRole: 'admin', description: 'Add a stay the host took directly and hold its nights. Read get_product for the home’s ID, capacity and currency. Children and infants default to zero; omitted arrival time, contacts and private notes remain unset. The guest gets a guest account under their name and a conversation, as every booking does. Another stay or checkout hold refuses overlapping nights. Takes no payment. Applies automatic guest-message schedules and updates connected Airbnb availability through Channex. Returns the saved stay’s identity, dates, version and channel completion; use get_product_booking for full details. Retry identical arguments with the same key. The retry checks current saved details, so later edits can cause IDEMPOTENCY_CONFLICT; read get_product_booking before another change.',
-    inputSchema: { product_id: productId, ...guestFields, answers: { ...formAnswerInputJsonSchema(), description: 'Answers to the home\'s questions (get_product → stay.questions), as the guest gave them to the host.' }, questions_revision: { type: 'string', description: 'stay.questions_revision the answers were collected against; required with answers.' }, idempotency_key: key }, required: ['product_id', 'check_in_date', 'check_out_date', 'adults', 'guest_name', 'total_minor', 'idempotency_key'],
-    outputSchema: stayMutation }),
-  organizationTool({ name: 'update_stay', domain: 'stays', minimumRole: 'admin', description: 'Change a host-entered stay’s dates, party, guest details, total or notes using stay.version from get_product_booking. Supply at least one changed field; empty and unchanged edits are refused. Omitted fields keep their values. Returns a compact stay receipt and the saved values of supplied fields. Replans pending automatic guest messages and updates connected Airbnb availability through Channex. A failed channel update reports the committed edit; read get_product_booking before retrying. Channel-owned stays must be edited on their channel.',
-    inputSchema: { booking_id: stayId, version, ...guestFields, anyOf: Object.keys(guestFields).map(field => ({ required: [field] })) }, required: ['booking_id', 'version'],
-    outputSchema: { ...stayMutation, properties: { ...stayMutation.properties, saved_fields: { type: 'object', description: 'The saved value of each supplied field; a supplied arrival_time is saved as starts_at.', properties: Object.fromEntries(Object.keys(guestFields).map(savedField).map(field => [field, stayProperties[field]])), minProperties: 1, additionalProperties: false } }, required: [...stayMutation.required, 'saved_fields'] } }),
-  organizationTool({ name: 'move_stay', domain: 'stays', minimumRole: 'admin', description: 'Move a guest to another of the host’s homes, for example after a double booking. The nights, turnover and later messages follow the guest, a channel reservation such as an Airbnb one stays on the listing it was booked on, and the new home gets a job to be made ready. Updates availability on both homes’ connected Airbnb listings through Channex. A failed channel update raises CHANNEL_PUSH_FAILED with committed:true: the move is saved; read get_product_booking before retrying. The response gives the outbox ID for the guest’s new address and check-in instructions. Read list_scheduled_guest_messages for delivery state. Moving back to the booked listing undoes the move. The new home must be free for every night and have check-in instructions.',
-    inputSchema: { booking_id: stayId, version, product_id: { ...productId, description: 'The home to move the guest to: a product of kind stay, from list_products.' } }, required: ['booking_id', 'version', 'product_id'],
-    outputSchema: { ...stayMutation, properties: { ...stayMutation.properties, scheduled_message_id: { type: 'string', description: 'The queued message containing the guest’s new address and check-in instructions.' } }, required: [...stayMutation.required, 'scheduled_message_id'] } }),
   organizationTool({ name: 'record_stay_payment', domain: 'stays', minimumRole: 'admin', description: 'Record money received outside KrabiClaw for a host-entered stay, such as cash or a bank transfer. Read get_product_booking for the stay ID and currency. A negative amount records an offline refund. Returns the exact recorded payment and current paid amount/status, without unrelated guest details or payment history. Moves no money.',
     inputSchema: { booking_id: stayId, amount_minor: { type: 'integer', not: { const: 0 }, description: 'Whole minor units of the stay’s currency from get_product_booking; negative records an offline refund, never zero.' }, method: { type: 'string', enum: [...STAY_PAYMENT_METHODS] }, paid_on: day, reference: { type: 'string', maxLength: 200 }, note: { type: 'string', maxLength: 1000 }, idempotency_key: { ...key, description: 'Reuse only for the identical amount, method, date, reference and note on this stay. Returns the exact recorded payment without a second entry.' } },
     required: ['booking_id', 'amount_minor', 'method', 'paid_on', 'idempotency_key'], outputSchema: { type: 'object', properties: { ...paymentBalanceProperties, payment: { type: 'object', properties: paymentReceiptProperties, required: Object.keys(paymentReceiptProperties), additionalProperties: false } }, required: [...Object.keys(paymentBalanceProperties), 'payment'], additionalProperties: false } }),
@@ -268,16 +253,6 @@ export async function handleStaysTools(ctx: McpExecutorContext): Promise<unknown
     case 'assign_home_photos_to_room': {
       const { home, ...assignment } = await moveStayPhotos(db, env, access, requiredString(args, 'product_id'), { ...(Object.hasOwn(args, 'room_id') ? { room_id: args.room_id } : {}), ...(Object.hasOwn(args, 'new_room_type') ? { new_room_type: args.new_room_type } : {}), photos: args.photos })
       return { product_id: home.product_id, ...assignment }
-    }
-    case 'create_stay': return stayMutationReceipt(await createStay(db, env, access, { ...args, product_id: requiredString(args, 'product_id'), idempotency_key: requiredString(args, 'idempotency_key') }))
-    case 'update_stay': {
-      const { booking_id: _id, ...patch } = args
-      const stay = await updateStay(db, env, access, requiredString(args, 'booking_id'), patch as Record<string, unknown> & { version: unknown })
-      return { ...stayMutationReceipt(stay), saved_fields: Object.fromEntries(Object.keys(guestFields).filter(field => Object.hasOwn(patch, field)).map(savedField).map(field => [field, stay[field]])) }
-    }
-    case 'move_stay': {
-      const stay = await moveStay(db, env, access, requiredString(args, 'booking_id'), { version: args.version, product_id: args.product_id })
-      return { ...stayMutationReceipt(stay), scheduled_message_id: stay.scheduled_message_id }
     }
     case 'record_stay_payment': {
       const { stay, payment: { created_by: _createdBy, ...payment } } = await recordStayPayment(db, env, access, requiredString(args, 'booking_id'), args)

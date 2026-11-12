@@ -201,7 +201,7 @@
           <dd class="text-right text-base text-highlighted">{{ STAY_CHANNEL_LABELS[detail.channel] }}</dd>
         </div>
       </dl>
-      <UButton v-if="manage && detail.status !== 'cancelled'" class="mt-4" color="neutral" variant="outline" label="Move guest" :to="`/dashboard/${encodeURIComponent(String(route.params.org_slug))}/bookings/stay/${encodeURIComponent(detail.id)}/move`" data-testid="stay-move" />
+      <UButton v-if="manage && detail.status !== 'cancelled'" class="mt-4" color="neutral" variant="outline" label="Move guest" :to="`/dashboard/${encodeURIComponent(String(route.params.org_slug))}/bookings/${encodeURIComponent(detail.id)}/move`" data-testid="stay-move" />
       <p v-if="!personalScope && channelManaged" class="mt-4 text-base text-muted">
         Payments, changes and cancellations for this stay are managed on
         <ULink v-if="detail.channel_booking_url" :to="detail.channel_booking_url" target="_blank" rel="noopener noreferrer" class="text-highlighted underline">{{ channelName }}</ULink><template v-else>{{ channelName }}</template>.
@@ -241,7 +241,7 @@ import { isGuestStay, isStayArrivalGuide, stayCheckInWindow } from '~/shared/sta
 import { STAY_CHECK_IN_METHODS } from '~/shared/stay-listing'
 import DashboardIndexPanel from '~/lib/components/workspace/dashboard/DashboardIndexPanel.vue'
 import DashboardConfirmDialog from '~/components/dashboard/DashboardConfirmDialog.vue'
-import type { GuestStay, StayDetail, StayHome, StayTurnover } from '~/server/domain/stays'
+import type { GuestStay, StayHome } from '~/server/domain/stays'
 import { isChannelManagedStay, STAY_CHANNEL_LABELS, STAY_PAYMENT_METHOD_LABELS, type StayPaymentMethod } from '~/shared/bookings'
 import { bookedPolicyTerms } from '~/shared/stay-cancellation'
 import { STAY_MOVE_MESSAGE_QUEUED, isMovedStayResponse } from '~/shared/stay-move'
@@ -266,18 +266,27 @@ const route = useRoute()
 const realtime = useDashboardInvalidations()
 const toast = useToast()
 const confirmDialog = useOverlay().create(DashboardConfirmDialog)
-const dashboardOrganization = useDashboardOrganization()
 const manageOpen = ref(false)
 
-const isStay = (value: unknown): value is { stay: StayDetail; manage?: boolean } => isRecord(value) && isRecord(value.stay) && typeof value.stay.id === 'string'
-  && (value.stay.guest_image_url === null || typeof value.stay.guest_image_url === 'string')
-/** Managers read the whole stay; a member looking after the home reads its turnover. */
-type DashboardStay = { stay: StayDetail; manage: true; can_message_guest: boolean } | { stay: StayTurnover; manage: false }
-const isDashboardStay = (value: unknown): value is DashboardStay => isRecord(value) && isRecord(value.stay) && typeof value.stay.id === 'string'
-  && (value.manage === false || (value.manage === true && typeof value.can_message_guest === 'boolean' && isStay(value)))
-const { data, error, refresh } = await useAsyncData(`${props.personalScope ? 'account' : String(route.params.org_slug)}-stay:${props.stayId}`, (): Promise<DashboardStay | GuestStay> => props.personalScope
-  ? applicationFetch(`/api/account/stays/${encodeURIComponent(props.stayId)}`, { validate: isGuestStay })
-  : dashboardApi(`/api/dashboard/stays/${encodeURIComponent(props.stayId)}`, { validate: isDashboardStay }))
+const canonical = !props.personalScope ? await useDashboardBooking(props.stayId) : null
+const buyer = props.personalScope ? await useAsyncData(`account-stay:${props.stayId}`, async (): Promise<GuestStay> => {
+  const response = await applicationFetch(`/api/account/bookings/${encodeURIComponent(props.stayId)}?lookup=conversation`, {
+    validate: (value): value is Omit<GuestStay, 'stay'> & { booking: Omit<GuestStay['stay'], 'id'> & { booking_id: string } } =>
+      isRecord(value) && isNightBooking(value) && isGuestStay({ ...value, stay: { ...value.booking, id: value.booking.booking_id } }),
+  })
+  return { ...response, stay: { ...response.booking, id: response.booking.booking_id } }
+}) : null
+const error = canonical?.error ?? buyer!.error
+const refresh = canonical?.refresh ?? buyer!.refresh
+const data = computed(() => {
+  if (buyer) return buyer.data.value
+  const response = canonical?.data.value
+  if (!response || response.booking.unit !== 'nights') return null
+  if (response.manage && 'can_message_guest' in response && isNightBooking(response)) {
+    return { ...response, stay: { ...response.booking, id: response.booking.booking_id } }
+  }
+  return { manage: false as const, stay: { ...response.booking, id: response.booking.booking_id } }
+})
 const stay = computed(() => data.value?.stay ?? null)
 /** The whole stay: the guest's own, or a manager's. Null for a member's turnover. */
 const detail = computed(() => !data.value ? null : 'home' in data.value ? data.value.stay : data.value.manage ? data.value.stay : null)
@@ -416,8 +425,8 @@ async function recordPayment() {
   const negative = typed.startsWith('-')
   await run('record', async () => {
     const minor = majorAmountToMinor(negative ? typed.slice(1) : typed, value.currency as Parameters<typeof majorAmountToMinor>[1])
-    await dashboardApi(`/api/dashboard/stays/${encodeURIComponent(value.id)}/payments`, {
-      method: 'POST', validate: isStay,
+    await dashboardApi(`${dashboardBookingPath(value.id)}/payments`, {
+      method: 'POST', validate: isNightBooking,
       body: { amount_minor: negative ? -minor : minor, method: draft.method, paid_on: draft.paid_on, reference: draft.reference || undefined, idempotency_key: draft.key },
     })
     draft.amount = ''
@@ -429,7 +438,7 @@ async function recordPayment() {
 async function deletePayment(paymentId: string) {
   const value = detail.value
   if (!value || isChannelManagedStay(value)) return
-  await run(paymentId, () => dashboardApi(`/api/dashboard/stays/${encodeURIComponent(value.id)}/payments/${encodeURIComponent(paymentId)}`, { method: 'DELETE', validate: isStay }), 'The payment could not be deleted')
+  await run(paymentId, () => dashboardApi(`${dashboardBookingPath(value.id)}/payments/${encodeURIComponent(paymentId)}`, { method: 'DELETE', validate: isNightBooking }), 'The payment could not be deleted')
 }
 
 // A stay paid on the site returns the guest's whole payment, as Airbnb's host cancellation does; the host approves that refund next.
@@ -443,7 +452,7 @@ async function undoMove() {
   if (!value?.booked_product_id) return
   if (!await confirmDialog.open({ title: 'Undo this move', description: `The guest goes back to ${value.booked_home_name} and a message with its address and entry details is queued.`, confirmLabel: 'Undo move', cancelLabel: 'Keep the move' })) return
   await run('undo_move', async () => {
-    await dashboardApi(`/api/dashboard/stays/${encodeURIComponent(value.id)}/move`, { method: 'POST', validate: isMovedStayResponse, body: { version: value.version, product_id: value.booked_product_id } })
+    await dashboardApi(`${dashboardBookingPath(value.id)}/move`, { method: 'POST', validate: isMovedStayResponse, body: { version: value.version, product_id: value.booked_product_id } })
     toast.add(STAY_MOVE_MESSAGE_QUEUED)
   }, 'The move could not be undone.')
 }
@@ -459,10 +468,10 @@ async function markNoShow() {
   busy.value = 'no_show'
   actionError.value = null
   try {
-    await dashboardApi(`/api/dashboard/organizations/${encodeURIComponent(dashboardOrganization.organizationId.value ?? '')}/guest-threads/${encodeURIComponent(value.conversation_id)}/operations/no_show`, {
+    await dashboardApi(`${dashboardBookingPath(value.id)}/no_show`, {
       method: 'POST',
-      body: { idempotency_key: `no-show:${value.id}` },
-      validate: (response: unknown): response is { thread: Record<string, unknown> } => isRecord(response) && isRecord(response.thread),
+      body: { version: value.version, idempotency_key: `no-show:${value.id}` },
+      validate: isDashboardBooking,
     })
     await refresh()
   } catch (cause) {
@@ -483,7 +492,7 @@ async function cancel() {
   busy.value = 'cancel'
   actionError.value = null
   try {
-    await dashboardApi(`/api/dashboard/stays/${encodeURIComponent(value.id)}/cancel`, { method: 'POST', validate: isStay, body: { version: value.version } })
+    await dashboardApi(`${dashboardBookingPath(value.id)}/cancel`, { method: 'POST', validate: isNightBooking, body: { version: value.version } })
     await refresh()
   } catch (cause) {
     const approval = isRecord(cause) && isRecord(cause.data) && isRecord(cause.data.data) && typeof cause.data.data.financial_approval_url === 'string' ? cause.data.data.financial_approval_url : null
@@ -513,8 +522,8 @@ async function cancelAsGuest() {
     : quote.refund_minor > 0 ? `Under the ${policy.value.label} policy you get back ${money(quote.refund_minor)} of the ${money(quote.paid_minor)} you paid.`
       : `Under the ${policy.value.label} policy none of the ${money(quote.paid_minor)} you paid comes back.`
   if (!await confirmDialog.open({ title: 'Cancel your stay?', description, confirmLabel: 'Cancel stay', cancelLabel: 'Keep stay' })) return
-  await run('cancel', () => applicationFetch('/api/account/cancel', {
-    method: 'POST', body: { conversation_id: value.conversation_id },
+  await run('cancel', () => applicationFetch(`/api/account/bookings/${encodeURIComponent(value.id)}/cancel`, {
+    method: 'POST', body: { version: value.version },
     validate: (response: unknown): response is { success: true } => isRecord(response) && response.success === true,
   }), 'Your stay could not be cancelled')
 }

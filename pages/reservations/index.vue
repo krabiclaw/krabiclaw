@@ -89,7 +89,6 @@
       <ProductBookingSteps
         :controller="bookingController"
         :confirmation-mode="activeTable.booking!.confirmation_mode"
-        :payment-required="paymentRequired"
         phone-required
       />
     </BookingModal>
@@ -168,15 +167,9 @@ const bookingController = useSessionBooking(() => {
     sessions: [], contactPhone: typeof location?.phone === 'string' ? location.phone : null,
   }
 })
-const { bookingOpen, bookingStep, submitting, partySize, selectedPrice, openBooking } = bookingController
+const { bookingOpen, bookingStep, submitting, openBooking } = bookingController
 provideMediaPreviews(bookingOpen)
 
-/** A table's deposit is asked of the parties its terms name; a smaller party books without paying. */
-const paymentRequired = computed(() => {
-  const booking = activeTable.value.booking
-  return Boolean(booking?.online_payment_required && (selectedPrice.value?.unit_amount ?? 0) > 0
-    && (booking.payment_min_party_size === null || partySize.value >= booking.payment_min_party_size))
-})
 
 async function openBookingModal(location: ApiRecord) {
   selectedLocationId.value = String(location.id)

@@ -549,7 +549,7 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
   const closerName = row.closed_by_user_id === null ? null : row.closed_by_user_id === viewer.principal.userId ? 'You' : context.users.get(row.closed_by_user_id) ?? 'A former member'
   const closer: TaskPerson | null = closerName === null ? null : { type: 'member', id: row.closed_by_user_id!, name: closerName, initial: initialOf(closerName === 'You' ? context.users.get(row.closed_by_user_id!) ?? 'Y' : closerName), you: closerName === 'You' }
   const conversation = (conversation_id: string | null) => conversation_id ? guestConversationPath(context.slug, conversation_id) : null
-  const stayPath = (booking_id: string) => `/dashboard/${encodeURIComponent(context.slug)}/bookings/stay/${encodeURIComponent(booking_id)}`
+  const stayPath = (booking_id: string) => `/dashboard/${encodeURIComponent(context.slug)}/bookings/${encodeURIComponent(booking_id)}`
   const who = (name: string | null) => name ? firstName(name) : 'Guest'
   let face: TaskView['face'] = product ? 'photo' : 'compact', tag: string | null = null, avatar: TaskView['avatar'] = null
   let status_line: string | null = null, title = '', when: string | null = null, detail: string | null = null, error: string | null = null, path: string | null = null

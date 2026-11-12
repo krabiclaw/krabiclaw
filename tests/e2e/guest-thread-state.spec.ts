@@ -623,13 +623,16 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
   expect(todaySeating, 'The seating added for today is offered on the site').toBeDefined()
 
   const bookingIds: string[] = []
+  const requestIds: string[] = []
   const futureSeating = await openSeating(page.request, 2, 2 * 86_400_000)
   // Two days out, so the change request below is inside the 24-hour change window whatever the hour.
   for (const [name, email, seating] of [
     [guestName, guestEmail, todaySeating!],
     ['Priya Patel', `priya-${now}@example.test`, futureSeating],
   ] as const) {
-    bookingIds.push((await bookTable(page.request, { name, email, phone: '+12025550123', partySize: 2, seating })).requestId)
+    const booked = await bookTable(page.request, { name, email, phone: '+12025550123', partySize: 2, seating })
+    bookingIds.push(booked.bookingId)
+    requestIds.push(booked.requestId)
   }
   const upcomingBookingId = bookingIds[1]!
 
@@ -645,8 +648,8 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
   const agendaResponse = await page.request.get('/api/dashboard/agenda', { params: { org: demoSlug(), from: localToday.date, to: localDateAt(new Date(now + 5 * 86_400_000), timezone) } })
   await expectStatus(agendaResponse, 200)
   const agenda = await agendaResponse.json() as { items: Array<{ id: string; to: string; starts_at: string; ends_at: string }> }
-  const reservation = agenda.items.find(item => item.id === `booking:${bookingIds[0]}`)
-  expect(reservation?.to).toBe(`/dashboard/${demoSlug()}/bookings/booking/${bookingIds[0]}`)
+  const reservation = agenda.items.find(item => item.id === `booking:${requestIds[0]}`)
+  expect(reservation?.to).toBe(`/dashboard/${demoSlug()}/bookings/${bookingIds[0]}`)
   await expect(page.getByRole('tab', { name: 'Today', exact: true })).toBeVisible()
   await expect(page.getByRole('tab', { name: 'Upcoming', exact: true })).toBeVisible()
   const prepCalendar = await page.goto(`${baseURL}${prep[0]!.path}`)
@@ -659,8 +662,8 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
   const upcomingFeed = await upcomingResponse.json() as BusinessToday
   expect(upcomingFeed.tasks.flatMap(section => section.tasks).filter(task => task.kind === 'consultation_prep' && task.product_session_id === futureSeating.id))
     .toMatchObject([{ booking_id: null, status: 'open' }])
-  const upcomingReservation = agenda.items.find(item => item.id === `booking:${upcomingBookingId}`)
-  expect(upcomingReservation?.to).toBe(`/dashboard/${demoSlug()}/bookings/booking/${upcomingBookingId}`)
+  const upcomingReservation = agenda.items.find(item => item.id === `booking:${requestIds[1]}`)
+  expect(upcomingReservation?.to).toBe(`/dashboard/${demoSlug()}/bookings/${upcomingBookingId}`)
   expect(localDateAt(new Date(upcomingReservation!.starts_at), timezone) > localToday.date).toBe(true)
 
   await page.goto(`${baseURL}${reservation!.to}`)
@@ -670,7 +673,7 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
   await expect(page.getByText(guestEmail, { exact: true })).toHaveCount(0)
   const detailPanel = page.locator('#dashboard-panel-booking-details')
   const body = detailPanel.locator(':scope > [data-slot="body"]')
-  const summaryResponse = await page.request.get(`/api/dashboard/bookings/booking/${bookingIds[0]}`, { params: { org: demoSlug() } })
+  const summaryResponse = await page.request.get(`/api/dashboard/bookings/${bookingIds[0]}`, { params: { org: demoSlug() } })
   await expectStatus(summaryResponse, 200)
   const summary = (await summaryResponse.json() as { booking: DashboardBookingDetails }).booking
   expect(summary).toMatchObject({ guest_name: guestName, guest_phone: '+12025550123', party_size: 2 })
@@ -791,10 +794,10 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
   // The team's one private note lives on the booking, saved as a whole when the field is left; it never enters the conversation.
   const note = `Today page note ${Date.now()}`
   const noteContext = `?range=upcoming&location_id=${demoLocationId()}&kinds=booking`
-  const recordPath = `/dashboard/${demoSlug()}/bookings/booking/${bookingIds[0]}`
-  const noteEndpoint = `/api/dashboard/bookings/booking/${bookingIds[0]}/notes`
+  const recordPath = `/dashboard/${demoSlug()}/bookings/${bookingIds[0]}`
+  const noteEndpoint = `/api/dashboard/bookings/${bookingIds[0]}`
   const readBooking = async () => {
-    const read = await page.request.get(`/api/dashboard/bookings/booking/${bookingIds[0]}`, { params: { org: demoSlug() } })
+    const read = await page.request.get(`/api/dashboard/bookings/${bookingIds[0]}`, { params: { org: demoSlug() } })
     await expectStatus(read, 200)
     return (await read.json() as { booking: DashboardBookingDetails }).booking
   }
@@ -804,11 +807,11 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
     const before = await readBooking()
     if (expectedUpdatedAt) expect(before.updated_at).toBe(expectedUpdatedAt)
     await noteInput.fill(written)
-    const noteWrite = page.waitForResponse(response => new URL(response.url()).pathname === noteEndpoint && response.request().method() === 'POST')
+    const noteWrite = page.waitForResponse(response => new URL(response.url()).pathname === noteEndpoint && response.request().method() === 'PATCH')
     await detailPanel.getByText('Private note', { exact: true }).click()
     const noteResponse = await noteWrite
     await expectStatus(noteResponse, 200)
-    expect(noteResponse.request().postDataJSON()).toEqual({ private_notes: written, updated_at: before.updated_at })
+    expect(noteResponse.request().postDataJSON()).toEqual({ private_notes: written, version: before.version })
     // Read back through the booking, not the write's own answer.
     expect((await readBooking()).private_notes).toBe(written)
     await expect(noteInput).toHaveValue(written)
@@ -827,9 +830,9 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
   await expect(page.getByRole('button', { name: 'Send request', exact: true })).toBeVisible()
 
   const changeContext = `?range=upcoming&location_id=${demoLocationId()}&kinds=booking`
-  await page.goto(`${baseURL}/dashboard/${demoSlug()}/bookings/booking/${upcomingBookingId}/change${changeContext}`)
+  await page.goto(`${baseURL}/dashboard/${demoSlug()}/bookings/${upcomingBookingId}/change${changeContext}`)
   const beforeResponse = await page.request.get(
-    `/api/dashboard/bookings/booking/${upcomingBookingId}`,
+    `/api/dashboard/bookings/${upcomingBookingId}`,
     { params: { org: demoSlug() } },
   )
   await expectStatus(beforeResponse, 200)
@@ -841,13 +844,13 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
   const requestedAt = new Date().toISOString()
   const requestCompleted = page.waitForResponse(response =>
     response.request().method() === 'POST'
-    && new URL(response.url()).pathname.endsWith(`/api/dashboard/bookings/booking/${upcomingBookingId}/changes`),
+    && new URL(response.url()).pathname.endsWith(`/api/dashboard/bookings/${upcomingBookingId}/move`),
   )
   await page.getByRole('button', { name: 'Send request', exact: true }).click()
   const changeResponse = await requestCompleted
   expect(changeResponse.status(), await changeResponse.text()).toBe(200)
   await expect(page.getByRole('heading', { name: 'Coming up', exact: true })).toBeVisible({ timeout: 30_000 })
-  await expect(page).toHaveURL(`${baseURL}/dashboard/${demoSlug()}/bookings/booking/${upcomingBookingId}${changeContext}`)
+  await expect(page).toHaveURL(`${baseURL}/dashboard/${demoSlug()}/bookings/${upcomingBookingId}${changeContext}`)
 
   const detail = await loadThreadDetail(page.request, before.booking.conversation_id, demoOrganizationId())
   const requests = streamChanges(detail).filter(item => item.sent_at >= requestedAt)
@@ -873,7 +876,7 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
     await expect(page.getByText('Your booking has been updated.', { exact: true })).toBeVisible()
 
     const afterResponse = await page.request.get(
-      `/api/dashboard/bookings/booking/${upcomingBookingId}`,
+      `/api/dashboard/bookings/${upcomingBookingId}`,
       { params: { org: demoSlug() } },
     )
     await expectStatus(afterResponse, 200)
@@ -890,11 +893,12 @@ test('buyer conversation approves and declines canonical changes without moving 
   releaseDemoLock = await acquireTenantMutationLock(testInfo, demoOrganizationId())
   const owner = await playwright.request.newContext({ baseURL })
   let threadId: string | null = null
+  let changeBookingId: string | null = null
   try {
     await loginAs(owner, baseURL, 'user-e2e-demo-owner')
     await loginAs(page.request, baseURL, 'user-e2e-buyer')
-    // The seating sits at least three full days out whatever the location's clock says relative to this run's.
-    const seating = await openSeating(page.request, 2, 3 * 86_400_000)
+    // A table's recurring hours make it bookable a year ahead.
+    const seating = await openSeating(page.request, 2, 365 * 86_400_000)
     // The guest's own Messages count: their conversations with something from the business they have not read.
     const guestUnread = async () => {
       const response = await page.request.get('/api/account/unread-count')
@@ -902,18 +906,20 @@ test('buyer conversation approves and declines canonical changes without moving 
       return (await response.json() as { count: number }).count
     }
     const unreadBefore = await guestUnread()
-    threadId = (await bookTable(page.request, { name: 'E2E Buyer', email: 'buyer@playwright.example', phone: '+12025550123', partySize: 1, seating })).requestId
+    const booked = await bookTable(page.request, { name: 'E2E Buyer', email: 'buyer@playwright.example', phone: '+12025550123', partySize: 1, seating })
+    threadId = booked.requestId
+    changeBookingId = booked.bookingId
     const read = async () => {
-      const response = await owner.get(`/api/dashboard/bookings/booking/${threadId}`, { params: { org: demoSlug() } })
+      const response = await owner.get(`/api/dashboard/bookings/${booked.bookingId}`, { params: { org: demoSlug() } })
       await expectStatus(response, 200)
-      return (await response.json() as { booking: { updated_at: string; booking_date: string; booking_time: string; party_size: number; location_id: string; product_session_id: string } }).booking
+      return (await response.json() as { booking: { version: number; updated_at: string; booking_date: string; booking_time: string; party_size: number; location_id: string; product_session_id: string } }).booking
     }
     const original = await read()
     const requestChange = async (partySize: number) => {
       const current = await read()
-      const response = await owner.post(`/api/dashboard/bookings/booking/${threadId}/changes`, {
+      const response = await owner.post(`/api/dashboard/bookings/${booked.bookingId}/move`, {
         params: { org: demoSlug() },
-        data: { kind: 'booking', product_session_id: current.product_session_id, party_size: partySize, updated_at: current.updated_at, idempotency_key: crypto.randomUUID() },
+        data: { apply: false, product_session_id: current.product_session_id, party_size: partySize, version: current.version, idempotency_key: crypto.randomUUID() },
       })
       await expectStatus(response, 200)
       const detail = await loadThreadDetail(owner, threadId!, demoOrganizationId())
@@ -995,7 +1001,12 @@ test('buyer conversation approves and declines canonical changes without moving 
     await expectStatus(requestDelivery, 200)
     expect((await requestDelivery.json() as DeliveryList).deliveries.some(delivery => delivery.message_id === customerRequest[0]!.id && delivery.purpose === 'owner_alert' && delivery.status === 'sent')).toBe(true)
   } finally {
-    if (threadId) await expectStatus(await owner.post(`/api/dashboard/organizations/${demoOrganizationId()}/guest-threads/${threadId}/operations/cancel`, { data: { idempotency_key: crypto.randomUUID() } }), 200)
+    if (changeBookingId) {
+      const current = await owner.get(`/api/dashboard/bookings/${changeBookingId}`, { params: { org: demoSlug() } })
+      await expectStatus(current, 200)
+      await expectStatus(await owner.post(`/api/dashboard/bookings/${changeBookingId}/cancel`, { params: { org: demoSlug() },
+        data: { version: (await current.json()).booking.version, idempotency_key: crypto.randomUUID() } }), 200)
+    }
     await owner.dispose()
   }
 })

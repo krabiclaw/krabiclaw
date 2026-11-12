@@ -4,10 +4,7 @@ import { getRouterParam, readBody } from 'nitro/h3'
 import { queryFirst } from '~/server/db'
 import { parseSuggestionUse, recordSuggestionAccepted, suggestedDraft } from '~/server/domain/suggested-reply'
 
-// Canonical guest-thread operation endpoint (issue #442 Locked Decision #8). Every
-// state-mutating guest-thread action in GUEST_THREAD_ACTIONS (confirm, cancel, reply, block, …)
-// flows through here. The inbox must never call source-specific editor endpoints
-// directly.
+// Conversation operations here; booking status changes use the versioned booking API.
 import { jsonResponse } from '~/server/utils/api-response'
 import { requireOrganizationMembership } from '~/server/utils/location-access'
 import { memberAccessPrincipal, roleAllows } from '~/server/utils/member-access'

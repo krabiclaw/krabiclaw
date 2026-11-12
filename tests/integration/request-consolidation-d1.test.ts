@@ -37,6 +37,8 @@ const guestWrites = async (db: D1Database, conversationId: string, body: string,
  * presented.
  */
 test('a thread and the record it refers to commit and cancel as one', { timeout: 120_000 }, async () => {
+  const start = Date.now()
+  const at = (day: number, hour = 0) => new Date(start + (day * 24 + hour) * 3_600_000).toISOString()
   const runtime = new Miniflare({ workers: [{ config: {
     name: 'request-consolidation-proof', compatibilityDate: '2024-11-01',
     manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export default { fetch() { return new Response("ok") } }' } } },
@@ -59,9 +61,9 @@ test('a thread and the record it refers to commit and cancel as one', { timeout:
       `INSERT INTO product_locations (organization_id,product_id,location_id,active,published,created_by,updated_by) VALUES ('${ORG}','product-proof','${LOCATION}',1,1,'${ACTOR}','${ACTOR}')`,
       `INSERT INTO product_booking_configs (product_id,organization_id,unit,duration_minutes,default_capacity,scheduling_mode,created_by,updated_by) VALUES ('product-proof','${ORG}','slot',120,1,'business','${ACTOR}','${ACTOR}')`,
       `INSERT INTO product_sessions (id,organization_id,product_id,location_id,timezone,starts_at,ends_at,capacity,status,created_by,updated_by)
-        VALUES ('session-proof','${ORG}','product-proof','${LOCATION}','Asia/Bangkok','2099-01-05T07:00:00.000Z','2099-01-05T09:00:00.000Z',1,'scheduled','${ACTOR}','${ACTOR}')`,
+        VALUES ('session-proof','${ORG}','product-proof','${LOCATION}','Asia/Bangkok','${at(8, 7)}','${at(8, 9)}',1,'scheduled','${ACTOR}','${ACTOR}')`,
       `INSERT INTO product_sessions (id,organization_id,product_id,location_id,timezone,starts_at,ends_at,capacity,status,created_by,updated_by)
-        VALUES ('session-token','${ORG}','product-proof','${LOCATION}','Asia/Bangkok','2099-01-06T09:00:00.000Z','2099-01-06T11:00:00.000Z',1,'scheduled','${ACTOR}','${ACTOR}')`,
+        VALUES ('session-token','${ORG}','product-proof','${LOCATION}','Asia/Bangkok','${at(9, 9)}','${at(9, 11)}',1,'scheduled','${ACTOR}','${ACTOR}')`,
     ].map(statement => db.prepare(statement)))
 
     // One seat, two guests: the claim carries its own capacity predicate, and
@@ -77,7 +79,7 @@ test('a thread and the record it refers to commit and cancel as one', { timeout:
         following: bookingId => requestInsertQueries({
           id, kind: 'booking', organization_id: ORG, location_id: LOCATION, booking_id: bookingId,
           user_id: null, payload: { ...threadPayloadForGuest({ name: 'Guest', email: 'guest@proof.example', phone: '+66812345678' }), cancellation },
-          created_at: NOW,
+          created_at: at(0),
         }, { query: 'SELECT 1 FROM bookings WHERE id = ?', params: [bookingId] }, { opening: 'Pottery Class for 1', note: null }),
       }).then(() => true, error => { if (error instanceof CapacityUnavailableError) return false; throw error })
     }
@@ -95,7 +97,7 @@ test('a thread and the record it refers to commit and cancel as one', { timeout:
     const record = await getThreadOperationalRecord(db, winner)
     assert.equal(record?.unit, 'slot')
     assert.equal(record?.party_size, 1)
-    assert.equal(record?.starts_at, '2099-01-05T07:00:00.000Z')
+    assert.equal(record?.starts_at, at(8, 7))
 
     const inbox = await listConversations(db, ORG, { userId: ACTOR, principal: OWNER, locationId: LOCATION, type: 'booking', q: 'guest' })
     assert.deepEqual(inbox.map(item => item.id), [winner])
@@ -115,14 +117,14 @@ test('a thread and the record it refers to commit and cancel as one', { timeout:
     // A booking the guest holds an emailed cancellation token for: its seat and
     // its thread commit together, and the seat it holds is the session's last.
     const tokenThread = 'token-proof'
-    assert.equal(await bookSession(tokenThread, 'session-token', { token_hash: 'hash', expires_at: '2099-01-01T00:00:00.000Z', used_at: null }), true)
+    assert.equal(await bookSession(tokenThread, 'session-token', { token_hash: 'hash', expires_at: at(7), used_at: null }), true)
     assert.equal(await bookSession('token-second', 'session-token'), false)
     assert.equal(await db.prepare("SELECT count(*) FROM bookings WHERE product_session_id='session-token'").first('count(*)'), 1)
-    await guestWrites(db, tokenThread, 'Could we sit outside?', '2097-12-31T00:00:00.000Z')
+    await guestWrites(db, tokenThread, 'Could we sit outside?', at(1))
 
     // The token is spendable exactly once, however many times it is presented.
     const cancellations = await Promise.all([1, 2].map(() => cancelBookingRequest(db, {
-      id: tokenThread, organizationId: ORG, kind: 'booking', tokenHash: 'hash', now: '2098-01-01T00:00:00.000Z', env,
+      id: tokenThread, organizationId: ORG, kind: 'booking', tokenHash: 'hash', now: at(2), env,
     })))
     // Both authorized retries observe success; only one spends the capability
     // and changes the record. This also lets failed notification delivery retry.
@@ -132,20 +134,20 @@ test('a thread and the record it refers to commit and cancel as one', { timeout:
     // The guest's cancellation is one message in the conversation, however the owners are told about it.
     assert.equal(await db.prepare("SELECT count(*) FROM messages WHERE conversation_id=? AND event_name='booking.cancel'").bind(tokenThread).first('count(*)'), 1)
     const cancelledThread = await getGuestRequest(db, tokenThread)
-    assert.equal(cancelledThread?.payload.cancellation.used_at, '2098-01-01T00:00:00.000Z')
+    assert.equal(cancelledThread?.payload.cancellation.used_at, at(2))
     // The cancellation answers the question asked before it: no reply is owed.
     assert.deepEqual((await needsReply(db)).map(thread => thread.id), [])
 
-    await guestWrites(db, tokenThread, 'When will my refund arrive?', '2098-01-02T00:00:00.000Z')
+    await guestWrites(db, tokenThread, 'When will my refund arrive?', at(3))
     assert.deepEqual((await needsReply(db)).map(thread => thread.id), [tokenThread])
-    const retry = await cancelBookingRequest(db, { id: tokenThread, organizationId: ORG, kind: 'booking', tokenHash: 'hash', now: '2098-01-03T00:00:00.000Z', env })
+    const retry = await cancelBookingRequest(db, { id: tokenThread, organizationId: ORG, kind: 'booking', tokenHash: 'hash', now: at(4), env })
     assert.equal(retry?.changed, false)
     assert.deepEqual((await needsReply(db)).map(thread => thread.id), [tokenThread], 'a replayed cancellation does not answer a question asked after it')
     assert.equal(await db.prepare("SELECT count(*) FROM messages WHERE conversation_id=? AND event_name='booking.cancel'").bind(tokenThread).first('count(*)'), 1)
 
     // A saved reply that failed to send does not answer the guest, even
     // though it is now the last message in the ledger.
-    const failedReply = await appendMessage(db, { conversationId: tokenThread, authorKind: 'member', authorUserId: ACTOR, channel: 'email', eventName: 'thread.member_reply', body: 'Your refund is on its way.', occurredAt: '2098-01-04T00:00:00.000Z' })
+    const failedReply = await appendMessage(db, { conversationId: tokenThread, authorKind: 'member', authorUserId: ACTOR, channel: 'email', eventName: 'thread.member_reply', body: 'Your refund is on its way.', occurredAt: at(5) })
     const receipt = await createDeliveryReceipt(db, { subject: { messageId: failedReply.id }, channel: 'email', provider: 'resend', purpose: 'member_reply', idempotencyKey: 'cancelled-reply-delivery' })
     await recordDeliveryOutcome(db, { deliveryId: receipt.id, status: 'failed', error: 'Delivery refused' })
     await reconcileConversationTasks(db, tokenThread)
@@ -153,9 +155,9 @@ test('a thread and the record it refers to commit and cancel as one', { timeout:
     await recordDeliveryOutcome(db, { deliveryId: receipt.id, status: 'sent', providerMessageId: 'delivered-cancelled-reply' })
     await reconcileConversationTasks(db, tokenThread)
     assert.deepEqual((await needsReply(db)).map(thread => thread.id), [])
-    await guestWrites(db, tokenThread, 'Thank you. Can you send the receipt?', '2098-01-05T00:00:00.000Z')
+    await guestWrites(db, tokenThread, 'Thank you. Can you send the receipt?', at(6))
     assert.deepEqual((await needsReply(db)).map(thread => thread.id), [tokenThread])
-    await appendMessage(db, { conversationId: tokenThread, authorKind: 'member', authorUserId: ACTOR, channel: 'web', eventName: 'thread.member_reply', body: 'Here is your receipt.', occurredAt: '2098-01-06T00:00:00.000Z' })
+    await appendMessage(db, { conversationId: tokenThread, authorKind: 'member', authorUserId: ACTOR, channel: 'web', eventName: 'thread.member_reply', body: 'Here is your receipt.', occurredAt: at(7) })
     await reconcileConversationTasks(db, tokenThread)
     assert.deepEqual((await needsReply(db)).map(thread => thread.id), [], 'a committed web reply needs no external delivery receipt')
 

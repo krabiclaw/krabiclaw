@@ -764,6 +764,8 @@ export async function notifyOwner(
     entity?: { type: string; id: string }
     /** Native financial event identity, independent of later buyer linking. */
     deliveryEventKey?: string
+    /** A webhook caller can finish a recorded failed send on its next delivery. */
+    surfaceDeliveryFailures?: boolean
     /** Explicit assignment audience from the event snapshot. When supplied, no later assignee is inferred. */
     memberIds?: string[]
     /** KrabiClaw operator addresses copied on operational mail: routing, not a person's preference, so no opt-out link. */
@@ -851,8 +853,9 @@ export async function notifyOwner(
       delivery: threadDelivery(deliveryContext, 'owner_alert', 'email', opts.template, to, opts.deliveryEventKey),
     })
   }))
-  raiseUnrecordedOwnerAlertFailures('notifyOwner', `organization ${opts.organizationId}`, [
-    ...results.map(result => ({ result, task: 'ownerAlert' })), ...operatorResults.map(result => ({ result, task: 'operatorCopy' }))])
+  const sends = [...results.map(result => ({ result, task: 'ownerAlert' })), ...operatorResults.map(result => ({ result, task: 'operatorCopy' }))]
+  const reportFailures = opts.surfaceDeliveryFailures ? raiseFailures : raiseUnrecordedOwnerAlertFailures
+  reportFailures('notifyOwner', `organization ${opts.organizationId}`, sends)
 }
 
 /**
@@ -1228,7 +1231,7 @@ async function stayTurnoverAudience(env: NotificationEnv, db: DbClient, organiza
   const arrival = isBookingDay(stay.starts_at) ? null : new Intl.DateTimeFormat('en-GB', { timeZone: stay.timezone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(stay.starts_at))
   return {
     memberIds: responsible.map(member => member.id),
-    stayUrl: await dashboardPathUrl(env, db, organizationId, `/bookings/stay/${encodeURIComponent(stay.id)}`),
+    stayUrl: await dashboardPathUrl(env, db, organizationId, `/bookings/${encodeURIComponent(stay.id)}`),
     arrival: arrival === null || arrival === checkInTime ? null : formatTime(arrival, 'en-US'),
   }
 }

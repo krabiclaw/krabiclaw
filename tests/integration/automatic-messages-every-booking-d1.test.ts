@@ -7,12 +7,12 @@ import * as schema from '../../server/db/schema.ts'
 import { guestThreadMessagingContext, saveMessageTemplate } from '../../server/domain/guest-messaging.ts'
 import { memberAccessPrincipal } from '../../server/utils/member-access.ts'
 import { sendDueScheduledGuestMessages } from '../../server/domain/scheduled-guest-messages.ts'
-import { createProductBooking } from '../../server/domain/product-bookings.ts'
+import { createProductBooking, quoteTimedBooking } from '../../server/domain/product-bookings.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
 import { moveBooking } from '../../server/domain/guest-threads/booking-changes.ts'
 import { getGuestThreadDetail } from '../../server/domain/guest-threads/detail.ts'
 import { getGuestRequest } from '../../server/domain/requests.ts'
-import { listSessions } from '../../server/utils/availability.ts'
+import { listBookableSessions } from '../../server/utils/availability.ts'
 import { createTables } from './support/table-product.ts'
 import type { GuestThreadRow } from '../../server/domain/guest-threads/types.ts'
 import type { StayAccess } from '../../server/domain/stays.ts'
@@ -113,14 +113,19 @@ test('consultations, classes and table bookings are sent their automatic message
     const dinner = { date: localDateAt(new Date(Date.now() + 7 * 86_400_000), 'Asia/Bangkok'), time: '19:00' }
     const seatingAt = async (time: string) => {
       const at = localDateTimeToInstant(dinner.date, time, 'Asia/Bangkok', 'reject').toISOString()
-      const [seating] = await listSessions(db, { env, organizationId: bistro.organizationId, productId: tables.id, fromInstant: at, toInstant: plus(at, 1) })
+      const [seating] = await listBookableSessions(db, { env, organizationId: bistro.organizationId, productId: tables.id, fromInstant: at, toInstant: plus(at, 1) })
       assert.equal(seating?.starts_at, at)
       return seating!.id
     }
+    const dinnerSession = await seatingAt(dinner.time)
+    const quote = await quoteTimedBooking(db, env, { organizationId: bistro.organizationId, slug: tables.slug, product_session_id: dinnerSession, party_size: 2 })
+    assert.deepEqual({ id: quote.product_session_id, party: quote.party_size, due: quote.total_minor }, { id: dinnerSession, party: 2, due: 0 })
+    assert.equal(await db.prepare('SELECT id FROM product_sessions WHERE id=?').bind(dinnerSession).first('id'), null, 'availability and quotes do not save a projected seating')
     const reserved = await createProductBooking(new H3Event(runAs(bistro.organizationId)), { organizationId: bistro.organizationId, slug: tables.slug, financialWritesAllowed: false, operator: operator('dee-key'),
-      body: { guest_name: 'Dee', guest_email: 'dee@proof.example', guest_phone: '+66812345678', product_session_id: await seatingAt(dinner.time), party_size: 2 } })
+      body: { guest_name: 'Dee', guest_email: 'dee@proof.example', guest_phone: '+66812345678', product_session_id: dinnerSession, party_size: 2 } })
     assert.equal(reserved.status, 201, JSON.stringify(reserved.body))
     const dee = { requestId: String(reserved.body.conversation_id), reservationId: String(reserved.body.booking_id) }
+    assert.equal(await db.prepare('SELECT product_session_id FROM bookings WHERE id=?').bind(dee.reservationId).first('product_session_id'), dinnerSession)
 
     // A conversation names what it is about for whoever replies (suggested replies, MCP): the table, for how many, at its own local time.
     const context = await guestThreadMessagingContext(db, memberAccessPrincipal({ userId: OWNER, organizationId: bistro.organizationId, role: 'owner' }, { env }), dee.requestId)
@@ -166,11 +171,12 @@ test('consultations, classes and table bookings are sent their automatic message
     assert.deepEqual((await jobs(ben.bookingId)).map(job => job.status), ['cancelled', 'cancelled'])
 
     // The studio moves Cy to the next day's class and the table to 20:30: their messages move with them.
-    await moveBooking(db, env, await thread(studio.organizationId, cy.requestId), { userId: OWNER }, { kind: 'booking', product_session_id: 'clay-2', party_size: 1 }, 'move-cy')
+    const version = (bookingId: string) => db.prepare('SELECT version FROM bookings WHERE id = ?').bind(bookingId).first<number>('version')
+    await moveBooking(db, env, await thread(studio.organizationId, cy.requestId), { userId: OWNER }, { kind: 'booking', product_session_id: 'clay-2', party_size: 1, version: await version(cy.bookingId) }, 'move-cy')
     assert.equal(await db.prepare('SELECT product_session_id FROM bookings WHERE id = ?').bind(cy.bookingId).first('product_session_id'), 'clay-2')
     const nextClassDay = localDateAt(new Date(hourOn(6, 16)), 'America/Denver')
     assert.equal((await planned(cy.bookingId, reminder.id))?.due_at, localDateTimeToInstant(addLocalDays(nextClassDay, -1), '09:00', 'America/Denver', 'reject').toISOString())
-    await moveBooking(db, env, await thread(bistro.organizationId, dee.requestId), { userId: OWNER }, { kind: 'booking', product_session_id: await seatingAt('20:30'), party_size: 2 }, 'move-dee')
+    await moveBooking(db, env, await thread(bistro.organizationId, dee.requestId), { userId: OWNER }, { kind: 'booking', product_session_id: await seatingAt('20:30'), party_size: 2, version: await version(dee.reservationId) }, 'move-dee')
     const movedTable = await db.prepare('SELECT s.ends_at FROM bookings b JOIN product_sessions s ON s.id = b.product_session_id WHERE b.id = ?').bind(dee.reservationId).first<string>('ends_at')
     assert.equal(movedTable, plus(localDateTimeToInstant(dinner.date, '20:30', 'Asia/Bangkok', 'reject').toISOString(), 120))
     assert.deepEqual([(await planned(dee.reservationId, thanks.id))?.status, (await planned(dee.reservationId, thanks.id))?.due_at], ['pending', plus(movedTable!, 120)])

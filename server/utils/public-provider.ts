@@ -1,5 +1,6 @@
 import { HTTPError } from 'nitro'
 import { queryAll, queryFirst, type DbClient } from '~/server/db'
+import { findBookableSession } from '~/server/utils/availability'
 import { PUBLISHED_PROFILE_SQL, type PublicProvider } from '~/shared/member-scheduling'
 
 /** The published profile of a host member, when it has one. */
@@ -17,7 +18,7 @@ export async function publicProductHosts(db: DbClient, organizationId: string, p
   if (sessionId !== undefined && (typeof sessionId !== 'string' || !sessionId.trim())) throw new HTTPError({ statusCode: 400, message: 'Session ID must be a nonempty string' })
   const host = await queryFirst<{ member_id: string | null }>(db, 'SELECT assigned_member_id member_id FROM product_booking_configs WHERE product_id=? AND organization_id=?', [productId, organizationId])
   // Every session of an offering is its one host's; a session names which offering, not another host.
-  if (sessionId !== undefined && !await queryFirst(db, 'SELECT 1 FROM product_sessions s WHERE s.id=? AND s.product_id=? AND s.organization_id=?', [sessionId, productId, organizationId])) throw new HTTPError({ statusCode: 404, message: 'Session not found for this offering' })
+  if (sessionId !== undefined && !await findBookableSession(db, { organizationId, productId, sessionId })) throw new HTTPError({ statusCode: 404, message: 'Session not found for this offering' })
   if (!host?.member_id) return []
   return publishedHostProfiles(db, organizationId, host.member_id)
 }

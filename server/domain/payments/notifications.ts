@@ -1,5 +1,5 @@
 import type Stripe from 'stripe'
-import { queryFirst, type DbClient } from '~/server/db'
+import { queryAll, queryFirst, type DbClient } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { isCurrencyCode } from '~/shared/currencies'
 import { ownerPaymentMessage, guestPaymentMessage, subscriptionPlanMessage, type GuestPaymentNotificationKind, type PaymentNotificationEvent } from '~/server/notifications/payment-events'
@@ -7,6 +7,8 @@ import { notifyFinancialNotification, notifyOwner } from '~/server/utils/notific
 import { appendMessage } from '~/server/domain/conversations'
 import { publishConversationEvent } from '~/server/cloudflare/guest-inbox-events'
 import { dashboardOrigin } from '~/server/utils/dashboard-notification-links'
+import { readOrganizationSubscriptions } from '~/server/utils/billing-access'
+import type { StripePlanLoader } from '~/server/utils/better-auth-stripe'
 import type { Payment } from './index'
 import { buyerPaymentActivityPath } from './buyer'
 
@@ -56,7 +58,7 @@ export async function notifyPaymentFinancialEvent(db: DbClient, stripe: Stripe, 
   const booking = checkout && payment.subject_id && organization ? await queryFirst<{ conversation_id: string | null }>(db, "SELECT (SELECT c.id FROM conversations c WHERE c.booking_id = b.id AND c.kind = 'booking') AS conversation_id FROM bookings b WHERE b.organization_id=? AND b.id=?", [payment.organization_id, payment.subject_id]) : null
   const threadId = hold?.conversation_id ?? booking?.conversation_id ?? null
   if (booking && booking.conversation_id !== threadId) throw new Error('Booking payment notification conversation does not match its booking')
-  const deepLink = organization ? `${dashboardOrigin(env, { orgSlug: organization.slug, locationSlug: null })}${booking?.conversation_id ? (nights ? `/bookings/stay/${encodeURIComponent(payment.subject_id!)}` : `/bookings/booking/${encodeURIComponent(booking.conversation_id)}`) : `/earnings/transactions/${encodeURIComponent(payment.id)}`}` : null
+  const deepLink = organization ? `${dashboardOrigin(env, { orgSlug: organization.slug, locationSlug: null })}${booking && payment.subject_id ? `/bookings/${encodeURIComponent(payment.subject_id)}` : `/earnings/transactions/${encodeURIComponent(payment.id)}`}` : null
   // A purchase refunded because its capacity had gone is refunded without being asked, so the buyer is told why.
   const refundedForCapacity = (input.kind === 'refund_pending' || input.kind === 'refund_succeeded') && await queryFirst(db, "SELECT 1 FROM payment_refunds WHERE payment_id=? AND stripe_refund_id=? AND idempotency_key LIKE 'unfulfillable:%'", [payment.id, input.nativeId])
   const refundReason = !refundedForCapacity ? null : `What you paid for was taken before your payment completed, so your booking could not be made and your payment ${input.kind === 'refund_pending' ? 'will be' : 'has been'} refunded in full.`
@@ -129,17 +131,74 @@ export async function notifyPayoutState(db: DbClient, env: CloudflareEnv, scope:
   })
 }
 
-/**
- * The business's KrabiClaw plan as Better Auth Stripe's subscription hooks
- * report it: a new plan, a change of plan, or a plan that will not renew. Its
- * owners and admins are told once per Stripe event.
- */
-export async function notifySubscriptionPlan(env: CloudflareEnv, db: DbClient, input: {
+/** Send the three KrabiClaw plan notices from Better Auth's signed event hook, after its subscription handlers run. */
+export async function notifySubscriptionPlanForEvent(env: CloudflareEnv, db: DbClient, event: Stripe.Event, loadPlans: StripePlanLoader) {
+  if (event.account) return
+  if (event.type === 'checkout.session.completed') {
+    const checkout = event.data.object
+    if (checkout.mode !== 'subscription' || !checkout.metadata?.subscriptionId) return
+    const organizationId = checkout.client_reference_id || checkout.metadata.referenceId
+    if (!organizationId) throw new Error(`Subscription checkout ${event.id} has no reference`)
+    const organization = await queryFirst<{ customer: string | null }>(db, 'SELECT "stripeCustomerId" AS customer FROM organization WHERE id=?', [organizationId])
+    if (!organization) return
+    const subscriptionId = typeof checkout.subscription === 'string' ? checkout.subscription : checkout.subscription?.id
+    const rows = (await readOrganizationSubscriptions(env, [organizationId])).get(organizationId)
+    const saved = rows?.find(row => row.id === checkout.metadata?.subscriptionId && row.stripeSubscriptionId === subscriptionId)
+    if (!subscriptionId || !organization.customer || !saved?.plan || saved.stripeCustomerId !== organization.customer) {
+      throw new Error(`Subscription checkout ${event.id} has no matching Better Auth subscription`)
+    }
+    await notifySubscriptionPlan(env, db, { kind: 'started', eventId: event.id, organizationId, subscriptionId, plan: saved.plan, date: saved.status === 'trialing' ? saved.trialEnd : null })
+    return
+  }
+  if (event.type !== 'customer.subscription.created' && event.type !== 'customer.subscription.updated') return
+  const native = event.data.object
+  // Better Auth's Checkout already announces its own subscription on completion.
+  if (event.type === 'customer.subscription.created' && native.metadata?.subscriptionId) return
+  const previous = event.type === 'customer.subscription.updated' ? event.data.previous_attributes : undefined
+  const willNotRenew = (native.status === 'active' || native.status === 'trialing')
+    && Boolean(native.cancel_at_period_end || native.cancel_at)
+    && !Boolean((previous?.cancel_at_period_end ?? native.cancel_at_period_end)
+      || (previous?.cancel_at !== undefined ? previous.cancel_at : native.cancel_at))
+  const priorItems = previous?.items?.data
+  if (event.type === 'customer.subscription.updated' && !willNotRenew && !priorItems) return
+
+  const customerId = typeof native.customer === 'string' ? native.customer : native.customer.id
+  const organizations = await queryAll<{ id: string }>(db, 'SELECT id FROM organization WHERE "stripeCustomerId"=? LIMIT 2', [customerId])
+  if (organizations.length > 1) throw new Error('Stripe customer belongs to more than one organization')
+  const organization = organizations[0]
+  if (!organization) return
+  const plans = await loadPlans()
+  const planItem = (items: Stripe.SubscriptionItem[]) => items.flatMap(item => {
+    const plan = plans.find(candidate => candidate.priceId === item.price.id)
+    return plan ? [{ item, plan }] : []
+  })
+  const current = planItem(native.items.data)
+  if (!current.length) return
+  if (current.length !== 1) throw new Error(`Stripe subscription ${native.id} has multiple plan items`)
+  const { item, plan } = current[0]!
+  const notice = { eventId: event.id, organizationId: organization.id, subscriptionId: native.id, plan: plan.name }
+  if (event.type === 'customer.subscription.created') {
+    await notifySubscriptionPlan(env, db, { ...notice, kind: 'started', date: native.status === 'trialing' && native.trial_end !== null ? new Date(native.trial_end * 1000) : null })
+    return
+  }
+  const before = priorItems ? planItem(priorItems) : []
+  if (before.length > 1) throw new Error(`Stripe subscription event ${event.id} has multiple prior plan items`)
+  if (before[0] && before[0].plan.name !== plan.name) {
+    await notifySubscriptionPlan(env, db, { ...notice, kind: 'changed', previousPlan: before[0].plan.name })
+  }
+  if (willNotRenew) {
+    const until = native.cancel_at ?? item.current_period_end
+    if (!Number.isFinite(until)) throw new Error(`Stripe subscription event ${event.id} has no cancellation date`)
+    await notifySubscriptionPlan(env, db, { ...notice, kind: 'ending', date: new Date(until * 1000) })
+  }
+}
+
+async function notifySubscriptionPlan(env: CloudflareEnv, db: DbClient, input: {
   kind: 'started' | 'changed' | 'ending'
   eventId: string
   organizationId: string
   /** The Stripe subscription the event is about: the audit row its sends are recorded on names it. */
-  subscriptionId: string | undefined
+  subscriptionId: string
   plan: string
   previousPlan?: string
   /** When a new plan's free trial ends, or when a plan that will not renew ends. */
@@ -147,7 +206,6 @@ export async function notifySubscriptionPlan(env: CloudflareEnv, db: DbClient, i
 }) {
   const organization = await queryFirst<{ name: string; slug: string }>(db, 'SELECT name,slug FROM organization WHERE id=?', [input.organizationId])
   if (!organization) throw new Error(`Subscription notification has no organization ${input.organizationId}`)
-  if (!input.subscriptionId) throw new Error(`Subscription event ${input.eventId} names no Stripe subscription`)
   const name = (plan: string) => plan.charAt(0).toUpperCase() + plan.slice(1)
   const action = { url: `${dashboardOrigin(env, { orgSlug: organization.slug, locationSlug: null })}/billing`, label: 'Open Plan and billing' }
   const message = subscriptionPlanMessage({
@@ -166,5 +224,6 @@ export async function notifySubscriptionPlan(env: CloudflareEnv, db: DbClient, i
     entity: { type: 'subscription', id: input.subscriptionId },
     idempotencyKey: `${eventKey}:owner`,
     deliveryEventKey: `${eventKey}:owner`,
+    surfaceDeliveryFailures: true,
   })
 }

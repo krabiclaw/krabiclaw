@@ -6,13 +6,6 @@ import { PRODUCT_SESSION_STATUSES, type ProductSessionStatus } from '~/shared/bo
 import { defineHandler } from 'nitro'
 import { getRouterParam } from 'nitro/h3'
 
-/**
- * Edit one occurrence: reschedule it, change its seats, or cancel it.
- *
- * This is what replaced the per-date override map. The session is the
- * schedule, so this writes the row bookings already point at, and
- * regeneration will not undo it.
- */
 export default defineHandler(async (event) => {
   const organizationId = getRouterParam(event, 'organization_id')
   const productId = getRouterParam(event, 'product_id')
@@ -22,10 +15,10 @@ export default defineHandler(async (event) => {
     const { db, env, session: auth, organization } = await requireProductAccess(event, organizationId, productId)
     // A product id in the path is not authorized by the site in the path.
     await requireOrganizationProduct(db, { organizationId: organization.id, productId })
-    const body = await readStrictBody<{ starts_at?: unknown; ends_at?: unknown; capacity?: unknown; status?: unknown; updated_at: string }>(event, {
-      starts_at: 'unknown', ends_at: 'unknown', capacity: 'unknown', status: 'unknown', updated_at: 'string',
+    const body = await readStrictBody<{ starts_at?: unknown; ends_at?: unknown; capacity?: unknown; status?: unknown; updated_at: string | null }>(event, {
+      starts_at: 'unknown', ends_at: 'unknown', capacity: 'unknown', status: 'unknown', updated_at: 'nullable-string',
     })
-    if (!body.updated_at || (body.starts_at !== undefined && typeof body.starts_at !== 'string') || (body.ends_at !== undefined && typeof body.ends_at !== 'string')) return jsonResponse({ error: 'Current updated_at and valid time strings are required' }, { status: 400 })
+    if ((body.updated_at !== null && !body.updated_at) || (body.starts_at !== undefined && typeof body.starts_at !== 'string') || (body.ends_at !== undefined && typeof body.ends_at !== 'string')) return jsonResponse({ error: 'Current updated_at and valid time strings are required' }, { status: 400 })
     if (body.status !== undefined && !(PRODUCT_SESSION_STATUSES as readonly unknown[]).includes(body.status)) {
       return jsonResponse({ error: `status must be one of: ${PRODUCT_SESSION_STATUSES.join(', ')}` }, { status: 400 })
     }

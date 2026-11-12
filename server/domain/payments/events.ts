@@ -4,7 +4,7 @@ import { notifyProductBookingCreated } from '~/server/domain/product-bookings'
 import { execute, executeBatch, queryAll, queryFirst, type DbClient, type BatchQuery } from '~/server/db'
 import { isRecord } from '~/server/utils/type-guards'
 import { formAnswerSnapshotsSchema, type FormAnswerSnapshot } from '~/shared/form-questions'
-import { sessionClaimQuery } from '~/server/utils/availability'
+import { assertBookingBatchWrite, sessionClaimQuery } from '~/server/utils/availability'
 import { processStripeWebhookEvent } from '~/server/utils/stripe-webhook-events'
 import { platformLivemode } from '~/server/utils/stripe-connect'
 import { executeRefund, reconcileRefundState, requirePayment, assertMinorAmount, type Payment } from './index'
@@ -180,8 +180,15 @@ export async function commitBooking(db:DbClient,env:CloudflareEnv,payment:Paymen
  }
  try{
   await executeBatch(db,[...claim,
-   {query:`UPDATE payment_checkout_holds SET status='converted',converted_booking_id=? WHERE id=? AND status IN ('active','released') AND EXISTS(SELECT 1 FROM bookings WHERE id=?)`,params:[bookingId,hold.id,bookingId]},
-   {query:`UPDATE payments SET subject_id=?,updated_at=? WHERE id=? AND EXISTS(SELECT 1 FROM bookings WHERE id=?)`,params:[bookingId,now,payment.id,bookingId]},
+   {query:`UPDATE payment_checkout_holds SET status='converted',converted_booking_id=? WHERE id=? AND organization_id=? AND status IN ('active','released') AND EXISTS(SELECT 1 FROM bookings WHERE id=?)`,params:[bookingId,hold.id,payment.organization_id,bookingId]},
+   {query:`UPDATE payments SET subject_id=?,updated_at=? WHERE id=? AND organization_id=? AND EXISTS(SELECT 1 FROM bookings WHERE id=?)`,params:[bookingId,now,payment.id,payment.organization_id,bookingId]},
+   // A refused inventory claim changes nothing. A committed booking requires
+   // its conversation and its checkout association in the same transaction.
+   assertBookingBatchWrite({ query: `NOT EXISTS (SELECT 1 FROM bookings WHERE id=?) OR EXISTS (
+     SELECT 1 FROM payment_checkout_holds h JOIN payments p ON p.id=h.payment_id AND p.organization_id=h.organization_id
+       JOIN conversations c ON c.organization_id=p.organization_id AND c.booking_id=p.subject_id AND c.kind='booking'
+     WHERE h.id=? AND h.organization_id=? AND h.status='converted' AND h.converted_booking_id=? AND p.subject_id=h.converted_booking_id
+       AND (h.session_id IS NULL OR c.id=h.conversation_id))`, params:[bookingId,hold.id,payment.organization_id,bookingId] }),
   ],{operation:'Convert paid booking hold'})
  }catch(error){
   // A night someone else holds by now refuses the batch: the guest is refunded in full. Any other failure is raised unless a concurrent conversion landed.

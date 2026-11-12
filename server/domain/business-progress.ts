@@ -9,7 +9,7 @@ import { publishBusinessInvalidation } from '~/server/cloudflare/guest-inbox-eve
 import { queryOrganizationAnalytics } from '~/server/utils/analytics-query'
 import { addLocalDays, formatCalendarRange, formatTimestamp, localDateAt } from '~/utils/timezone'
 import { articleSocialPostPath, blogCreatePath, blogEditorPath, guestConversationPath, postEditorPath, productEditorPath, productPaymentPath } from '~/server/utils/dashboard-links'
-import { listSessions } from '~/server/utils/availability'
+import { listBookableSessions } from '~/server/utils/availability'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import { readStayGapCandidates, stayAccessFor } from '~/server/domain/stays'
 import { readStripeCheckoutSetup } from '~/server/utils/stripe-connect'
@@ -237,6 +237,11 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
     roleAllows({ ...principal, permissions: { content: ['update'] } }), roleAllows({ ...principal, permissions: { content: ['publish'] } }),
     roleAllows({ ...principal, permissions: { operations: ['update'] } }),
   ])
+  const recommendationSessions = async (kind: 'experience' | 'service' | 'table', days: number) =>
+    (await Promise.all(products.filter(product => product.kind === kind && product.online_payment_required !== null).map(product =>
+      listBookableSessions(db, { env: principal.env, organizationId, productId: product.id, locationId: input.locationId,
+        fromInstant: now.toISOString(), toInstant: new Date(now.getTime() + days * 86_400_000).toISOString() }),
+    ))).flat().sort((a, b) => a.starts_at.localeCompare(b.starts_at))
   const marketing = await marketingPages(db, principal, organization, now, enabled('google_ads') || Boolean(await readIntegration(db, organizationId, 'google_ads')))
   const issues = marketing.issues
   const marketingEvidenceUnavailable = issues.length > 0
@@ -398,7 +403,7 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
       `${base}/calendar?${new URLSearchParams({ product_id: gap.productId, date: gap.from, month: gap.from.slice(0, 7) })}`, 95,
       { goal: goalFor('availability'), locationId: gap.locationId, productId: gap.productId, recency: gap.from, icon: 'i-lucide-calendar-range' })
   } else if (canOperate && (organization.vertical === 'experience' || organization.vertical === 'service')) {
-    const sessions = await listSessions(db, { env: principal.env, organizationId, locationId: input.locationId, fromInstant: now.toISOString(), toInstant: new Date(now.getTime() + 7 * 86_400_000).toISOString() })
+    const sessions = await recommendationSessions(organization.vertical, 7)
     const open = sessions.find(session => session.remaining !== null && session.remaining > 0 && !session.is_full)
     const product = open && products.find(product => product.id === open.product_id)
     if (open && product && canWrite && enabled('social') && canPreparePost) offer('post.create', JSON.stringify(['session', product.id, open.id]),
@@ -407,8 +412,7 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
       postEditorPath(organization.slug, 'new', input.locationId), 85, { productId: product.id, goal: goalFor('social'), locationId: open.location_id, recency: open.starts_at, icon: 'i-lucide-ticket' })
   } else if (canOperate && organization.vertical === 'restaurant') {
     // Each location's tables, today in the location's own calendar: the first seating with room left.
-    const tables = products.filter(product => product.kind === 'table')
-    const sessions = tables.length ? await listSessions(db, { env: principal.env, organizationId, locationId: input.locationId, productIds: tables.map(product => product.id), fromInstant: now.toISOString(), toInstant: new Date(now.getTime() + 86_400_000).toISOString() }) : []
+    const sessions = await recommendationSessions('table', 1)
     const offered = new Set<string>()
     for (const session of sessions) {
       if (!session.location_id || offered.has(session.location_id) || localDateAt(new Date(session.starts_at), session.timezone) !== localDateAt(now, session.timezone)) continue

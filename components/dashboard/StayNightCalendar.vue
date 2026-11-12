@@ -88,7 +88,7 @@
           </div>
           <div v-else-if="data" class="divide-y divide-default border-y border-default">
             <p v-if="!listedStays.length" class="py-10 text-center text-sm text-muted">No stays in {{ placeholder?.year }}.</p>
-            <NuxtLink v-for="stay in listedStays" :key="stay.id" :to="{ path: `/dashboard/${route.params.org_slug}/calendar/stay/${encodeURIComponent(stay.id)}`, query: route.query }" class="flex items-center justify-between gap-4 py-5">
+            <NuxtLink v-for="stay in listedStays" :key="stay.booking_id" :to="{ path: `/dashboard/${route.params.org_slug}/calendar/stay/${encodeURIComponent(stay.booking_id)}`, query: route.query }" class="flex items-center justify-between gap-4 py-5">
               <div>
                 <p class="font-medium text-highlighted">{{ stay.guest_name || 'Guest name not provided' }}</p>
                 <p class="mt-1 text-sm text-muted">{{ formatCalendarDate(stay.check_in_date, 'en', { month: 'short', day: 'numeric' }) }} – {{ formatCalendarDate(stay.check_out_date, 'en', { month: 'short', day: 'numeric', year: 'numeric' }) }}</p>
@@ -155,8 +155,8 @@ import { getErrorMessage } from '~/utils/errors'
 
 type Home = Pick<StayHome, 'product_id' | 'name' | 'internal_name' | 'timezone' | 'currency' | 'base_price_minor' | 'min_nights' | 'calendar_rules' | 'cancellation_policy' | 'long_term_cancellation_policy'>
 // A manager reads each stay's channel; a member's turnover has none.
-type CalendarStay = Pick<StayTurnover, 'id' | 'product_id' | 'check_in_date' | 'check_out_date' | 'guest_name' | 'status'> & Partial<Pick<Stay, 'channel'>>
-interface CalendarPayload { home: Home; nights: StayNight[]; stays: CalendarStay[]; channel_push?: SuccessfulChannelPush | null }
+type CalendarStay = { booking_id: string; unit: 'nights' } & Pick<StayTurnover, 'product_id' | 'check_in_date' | 'check_out_date' | 'guest_name' | 'status'> & Partial<Pick<Stay, 'channel'>>
+interface CalendarPayload { home: Home; nights: StayNight[]; bookings: CalendarStay[]; channel_push?: SuccessfulChannelPush | null }
 const props = defineProps<{ productId: string; homes: Pick<StayHome, 'product_id' | 'name' | 'internal_name' | 'timezone'>[]; manage: boolean; homeError: string; offeringItems: { label: string; value: string }[]; offeringsError?: string }>()
 const route = useRoute()
 const level = useRouteLevel()
@@ -215,7 +215,7 @@ const nullableAmount = (value: unknown) => value === null || typeof value === 'n
 const nullableRule = (value: unknown, maximum: number) => value === null || (typeof value === 'number' && Number.isSafeInteger(value) && value >= 1 && value <= maximum)
 const nullableText = (value: unknown) => value === null || typeof value === 'string'
 function isCalendar(value: unknown): value is CalendarPayload {
-  if (!isRecord(value) || !isRecord(value.home) || !Array.isArray(value.nights) || !Array.isArray(value.stays)) return false
+  if (!isRecord(value) || !isRecord(value.home) || !Array.isArray(value.nights) || !Array.isArray(value.bookings)) return false
   const home = value.home
   if (home.product_id !== props.productId || typeof home.name !== 'string' || typeof home.internal_name !== 'string' || typeof home.timezone !== 'string' || !isCurrencyCode(home.currency)
     || !nullableAmount(home.base_price_minor) || typeof home.min_nights !== 'number' || !nullableRule(home.min_nights, MAX_STAY_NIGHTS)
@@ -223,7 +223,7 @@ function isCalendar(value: unknown): value is CalendarPayload {
     || !(home.long_term_cancellation_policy === null || typeof home.long_term_cancellation_policy === 'string' && Object.hasOwn(STAY_LONG_TERM_CANCELLATION_POLICIES, home.long_term_cancellation_policy))) return false
   if (!isValidTimezone(home.timezone)) return false
   parseStayCalendarRules(home.calendar_rules)
-  if (!value.stays.every(stay => isRecord(stay) && typeof stay.id === 'string' && stay.product_id === props.productId
+  if (!value.bookings.every(stay => isRecord(stay) && stay.unit === 'nights' && typeof stay.booking_id === 'string' && stay.product_id === props.productId
     && isValidCalendarDate(stay.check_in_date) && isValidCalendarDate(stay.check_out_date) && stay.check_out_date > stay.check_in_date
     && nullableText(stay.guest_name) && (props.manage ? Object.hasOwn(channels, String(stay.channel)) : !('channel' in stay)) && typeof stay.status === 'string')) return false
   return (value.channel_push === undefined || isSuccessfulChannelPush(value.channel_push)) && value.nights.every(isStayNight)
@@ -236,20 +236,25 @@ const { data, error, status, refresh } = await useAsyncData(
     const chunks: CalendarPayload[] = []
     for (const range of ranges) {
       for (let from = range.from; from < range.to;) {
-        const limit = addLocalDays(from, 500)
+        const limit = addLocalDays(from, 62)
         const to = limit < range.to ? limit : range.to
-        const payload = await api(`/api/dashboard/stay-homes/${encodeURIComponent(props.productId)}/calendar`, { query: { from, to }, validate: isCalendar, signal })
+        const result = await api('/api/dashboard/bookings/calendar', { query: { unit: 'nights', product_id: props.productId, from, to }, signal,
+          validate: (value): value is { homes: [{ home: Home; nights: StayNight[] }]; bookings: CalendarStay[] } =>
+            isRecord(value) && Array.isArray(value.homes) && value.homes.length === 1 && isRecord(value.homes[0])
+              && isCalendar({ ...value.homes[0], bookings: value.bookings }),
+        })
+        const payload = { ...result.homes[0], bookings: result.bookings }
         if (payload.nights.length !== parseDate(to).compare(parseDate(from)) || payload.nights.some((night, index) => night.date !== addLocalDays(from, index))) throw new Error('The calendar did not return every requested night in order.')
         chunks.push(payload)
         from = to
       }
     }
-    return { home: chunks[0]!.home, nights: chunks.flatMap(chunk => chunk.nights), stays: [...new Map(chunks.flatMap(chunk => chunk.stays).map(stay => [stay.id, stay])).values()] }
+    return { home: chunks[0]!.home, nights: chunks.flatMap(chunk => chunk.nights), bookings: [...new Map(chunks.flatMap(chunk => chunk.bookings).map(stay => [stay.booking_id, stay])).values()] }
   },
   {
     getCachedData(cacheKey, nuxtApp, ctx) {
       if (ctx?.cause === 'refresh:manual' || ctx?.cause === 'refresh:hook') return undefined
-      return nuxtApp.payload.data[cacheKey] as { home: CalendarPayload['home']; nights: CalendarPayload['nights']; stays: CalendarPayload['stays'] } | null | undefined
+      return nuxtApp.payload.data[cacheKey] as { home: CalendarPayload['home']; nights: CalendarPayload['nights']; bookings: CalendarPayload['bookings'] } | null | undefined
     },
   },
 )
@@ -263,7 +268,7 @@ if (import.meta.client) {
   })
 }
 const nightsByDate = computed(() => new Map((data.value?.nights ?? []).map(night => [night.date, night])))
-const staysById = computed(() => new Map((data.value?.stays ?? []).map(stay => [stay.id, stay])))
+const staysById = computed(() => new Map((data.value?.bookings ?? []).map(stay => [stay.booking_id, stay])))
 const night = (day: DateValue) => nightsByDate.value.get(day.toString())
 function stayLabel(day: DateValue) {
   const value = night(day)
@@ -275,7 +280,7 @@ function stayLabel(day: DateValue) {
 }
 const selectedNights = computed(() => selectedDates.value.flatMap(day => nightsByDate.value.get(day.toString()) ?? []))
 const selected = (day: DateValue) => selectedDates.value.some(date => date.toString() === day.toString())
-const listedStays = computed(() => (data.value?.stays ?? []).filter(stay => stay.status !== 'cancelled' && monthRange.value && stay.check_in_date < monthRange.value.to && stay.check_out_date > monthRange.value.from).sort((a, b) => a.check_in_date.localeCompare(b.check_in_date) || a.id.localeCompare(b.id)))
+const listedStays = computed(() => (data.value?.bookings ?? []).filter(stay => stay.status !== 'cancelled' && monthRange.value && stay.check_in_date < monthRange.value.to && stay.check_out_date > monthRange.value.from).sort((a, b) => a.check_in_date.localeCompare(b.check_in_date) || a.booking_id.localeCompare(b.booking_id)))
 const money = (value: number) => data.value ? formatMinorAmount(value, data.value.home.currency) : ''
 const compactMoney = (value: number) => data.value ? minorAmountToMajor(value, data.value.home.currency).replace(/\.0+$/, '') : ''
 /** A night the channel has not confirmed: still queued for it, or refused and needing review. */
