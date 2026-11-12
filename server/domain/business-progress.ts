@@ -394,6 +394,7 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
       } else if (areas.length === 1) {
         const area = areas[0]!
         if (area.page?.path && !area.order_url && (!area.active || !area.publications.some(publication => publication.published)
+          || (!area.booking?.held_online && area.locations.some(location => location.active && !location.published))
           || (await getPublicConsultationSettings(db, organizationId)).mode !== 'native')) {
           offer('product.create', organizationId, 'Continue consultation setup', area.name,
             `${firstPracticeAreaPath(organization.slug)}/${encodeURIComponent(area.id)}`, 110, { icon: 'i-lucide-list-checks' })

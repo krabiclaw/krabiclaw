@@ -158,6 +158,7 @@ export function firstMenuSetupApplies(payload: OnboardingDraftPayload): boolean 
 export interface OnboardingDraftPayload {
   version: 3
   first_menu_skips?: { dish_id: string; price?: true; photo?: true }
+  first_practice_area_attorney?: { product_id: string; member_id: string }
   request?: { key: string; fingerprint: string }
   source: {
     type: DraftSourceType

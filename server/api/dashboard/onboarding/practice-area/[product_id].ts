@@ -1,6 +1,8 @@
 import { defineHandler, HTTPError } from 'nitro'
 import { getQuery, getRouterParam, readBody } from 'nitro/h3'
 import { z } from 'zod'
+import { execute, queryFirst } from '~/server/db'
+import { parseOnboardingDraftPayload } from '~/server/utils/onboarding-drafts'
 import { memberSchedulingList, writeMemberScheduling } from '~/server/domain/member-scheduling'
 import { PRODUCT_LIMITS } from '~/shared/product-limits'
 import { isCurrencyCode } from '~/shared/currencies'
@@ -52,12 +54,13 @@ const handler = defineHandler(async (event) => {
   const actor = { actorId: userId }
   const memberActor = { env, userId, organizationId }
   const target = { db, env, organizationId, productId, actor }
-  const [product, { members }, offices, settings, scopes] = await Promise.all([
+  const [product, { members }, offices, settings, scopes, draft] = await Promise.all([
     getProduct(db, organizationId, productId),
     memberSchedulingList(memberActor),
     listDashboardLocations(db, organizationId),
     getPublicConsultationSettings(db, organizationId),
     bookingScheduleScopes(db, organizationId, [productId]),
+    queryFirst<{ id: string; payload_json: string }>(db, "SELECT id, payload_json FROM onboarding_drafts WHERE organization_id = ? AND status = 'committed' AND vertical = 'service' AND source_type = 'manual'", [organizationId]),
   ])
   if (product.kind !== 'service' || !product.page?.path || product.order_url) throw new HTTPError({ statusCode: 404, message: 'Practice area setup is unavailable' })
   const home = `/dashboard/${encodeURIComponent(organization.slug)}`
@@ -66,6 +69,10 @@ const handler = defineHandler(async (event) => {
   const booking = product.booking
   const attorney = members.find(member => member.id === booking?.assigned_member_id)
   const hasHours = (member: typeof members[number]) => Boolean(member.scheduling?.timezone && member.scheduling.weekly?.length)
+  const pendingChoice = draft ? parseOnboardingDraftPayload(draft.payload_json).first_practice_area_attorney : undefined
+  const pendingId = pendingChoice?.product_id === productId && !(attorney && pendingChoice.member_id === attorney.id && hasHours(attorney))
+    ? pendingChoice.member_id : undefined
+  const selectedAttorney = members.find(member => member.id === pendingId)
   const profileReady = Boolean(attorney?.scheduling?.public_name?.trim() && attorney.scheduling.public_approved === 1)
   const activeOffices = offices.filter(office => office.status === 'active')
   const offeredOffices = activeOffices.filter(candidate => product.locations.some(location => location.location_id === candidate.id && location.active))
@@ -79,12 +86,13 @@ const handler = defineHandler(async (event) => {
   const variant = product.variants.find(candidate => candidate.active)
   if (!variant) throw new HTTPError({ statusCode: 409, message: 'The practice area needs an active consultation option' })
   const scope = format === 'online' ? null : office?.id
+  const officePlacement = product.locations.find(location => location.location_id === scope && location.active)
   const price = scope === undefined ? null : resolveVariantPrice(variant, { currency, location_id: scope })
   const published = product.publications.some(publication => publication.organization_id === organizationId && publication.published)
   const steps: Step[] = [
     { id: 'name', title: 'Name your first practice area', detail: 'For example, Family Law.', complete: true, value: product.name, max_length: PRODUCT_LIMITS.name },
     { id: 'description', title: 'Describe this practice area', detail: 'Tell clients what your firm can help with.', complete: Boolean(product.description?.trim()), value: product.description ?? '', max_length: PRODUCT_LIMITS.description },
-    { id: 'attorney', title: 'Who will meet with clients?', complete: Boolean(attorney && hasHours(attorney)), value: attorney?.id,
+    { id: 'attorney', title: 'Who will meet with clients?', complete: Boolean(attorney && hasHours(attorney) && !pendingId), value: selectedAttorney?.id ?? attorney?.id,
       options: members.map(member => ({ value: member.id, label: member.name })) },
     { id: 'profile', title: 'What name should clients see?', detail: 'This name appears on the consultation page.', complete: profileReady, value: attorney?.scheduling?.public_name ?? '', max_length: 100 },
     { id: 'meeting', title: 'Where will consultations take place?', complete: Boolean(format), value: format, options: [
@@ -100,7 +108,7 @@ const handler = defineHandler(async (event) => {
       currency, currency_symbol: new Intl.NumberFormat('en', { style: 'currency', currency, currencyDisplay: 'narrowSymbol' }).formatToParts(0).find(part => part.type === 'currency')!.value,
       value: price ? minorAmountToMajor(price.unit_amount, currency) : undefined },
     { id: 'requests', title: 'Review requests before confirming?', detail: 'Clients request a time. Your firm confirms it after review.', complete: booking?.confirmation_mode === 'review' && !booking.online_payment_required && booking.default_capacity === 1 && booking.party_size_max === 1 },
-    { id: 'preview', title: 'Preview your consultation', detail: 'Make this practice area available in your private website preview.', complete: published && product.active && settings.mode === 'native' },
+    { id: 'preview', title: 'Preview your consultation', detail: 'Make this practice area available in your private website preview.', complete: published && product.active && settings.mode === 'native' && (scope === null || Boolean(officePlacement?.published)) },
   ]
 
   const method = event.req.method
@@ -120,28 +128,39 @@ const handler = defineHandler(async (event) => {
   const query = getQuery(event)
   const requested = steps.findIndex(step => step.id === query.step)
   const attorneyIndex = steps.findIndex(step => step.id === 'attorney')
-  const selectedAttorney = members.find(member => member.id === query.attorney)
-  const pendingAttorney = query.step === 'hours' && attorneyIndex <= resume ? selectedAttorney : undefined
-  if (query.step === 'hours' && !pendingAttorney) throw new HTTPError({ statusCode: 404, message: 'Choose an attorney first' })
+  const pendingAttorney = (query.step === 'hours' || !query.step && resume === attorneyIndex) && attorneyIndex <= resume
+    ? selectedAttorney : undefined
+  if (query.step === 'hours' && !pendingAttorney) throw new HTTPError({ statusCode: 409, message: 'Reload the guide to continue consultation setup' })
   const index = pendingAttorney ? attorneyIndex : requested >= 0 && requested <= resume ? requested : resume
   const currentHours = pendingAttorney?.scheduling?.weekly?.[0]
   const step: Step = pendingAttorney ? {
     id: 'hours', title: `When does ${pendingAttorney.name} work?`, detail: 'Set a weekly window for consultations.',
-    complete: hasHours(pendingAttorney),
+    complete: hasHours(pendingAttorney), value: pendingAttorney.id,
     schedule: { ...currentHours, timezone: pendingAttorney.scheduling?.timezone ?? (activeOffices.length === 1 ? activeOffices[0]?.timezone ?? undefined : undefined) },
-  } : { ...steps[index]!, ...(index === attorneyIndex && selectedAttorney ? { value: selectedAttorney.id } : {}) }
-  const backUrl = pendingAttorney ? `${stepPath('attorney')}&attorney=${encodeURIComponent(pendingAttorney.id)}` : index > 0 ? stepPath(steps[index - 1]!.id) : home
+  } : steps[index]!
+  const backUrl = pendingAttorney ? stepPath('attorney') : index > 0 ? stepPath(steps[index - 1]!.id) : home
   const response = { step, today_url: home, back_url: backUrl, back_label: 'Back', next_label: step.id === 'preview' ? 'Prepare preview' : step.id === 'requests' ? 'Require review' : 'Next', exit_label: 'Save & exit' }
   if (!submitted) return response
   if (!submitted.success || submitted.data.step !== step.id) throw new HTTPError({ statusCode: 409, message: 'Setup has changed. Reload before continuing.' })
   const { value, schedule, exit } = submitted.data
+  if (pendingAttorney && value !== pendingAttorney.id) throw new HTTPError({ statusCode: 409, message: 'The selected attorney changed. Reload before continuing.' })
   const scheduleEntered = schedule?.weekday !== undefined && Boolean(schedule.start)
+  if (exit && pendingAttorney && (!scheduleEntered || !schedule?.end || !schedule.timezone)) return { next_url: home }
   if (exit && (!value?.trim() && !scheduleEntered || ['preview', 'requests'].includes(step.id))) return { next_url: home }
   const name = value?.trim() ?? ''
   const refuse = (message: string): never => { throw new HTTPError({ statusCode: 400, message }) }
   const update = (patch: Parameters<typeof updateProduct>[1]['patch']) => updateProduct(db, { ...target, patch: { ...patch, updated_at: product.updated_at } })
   const configure = (patch: Parameters<typeof setProductBookingConfig>[1]['patch']) => setProductBookingConfig(db, { ...target, actorId: userId, patch })
   const place = (locationId: string, active: boolean, published: boolean) => setProductLocation(db, { ...target, locationId, active, published })
+
+  async function clearPendingAttorney() {
+    if (!draft || !pendingChoice || pendingChoice.product_id !== productId) return
+    await execute(db, `UPDATE onboarding_drafts SET payload_json = json_remove(payload_json, '$.first_practice_area_attorney')
+      WHERE id = ? AND organization_id = ? AND status = 'committed'
+        AND json_extract(payload_json, '$.first_practice_area_attorney.product_id') = ?
+        AND json_extract(payload_json, '$.first_practice_area_attorney.member_id') = ?`,
+    [draft.id, organizationId, productId, pendingChoice.member_id])
+  }
 
   switch (step.id) {
     case 'name':
@@ -155,8 +174,16 @@ const handler = defineHandler(async (event) => {
     case 'attorney': {
       const selected = members.find(member => member.id === value)
       if (!selected) throw new HTTPError({ statusCode: 400, message: 'Choose an attorney' })
-      if (!hasHours(selected)) return { next_url: exit ? home : `${stepPath('hours')}&attorney=${encodeURIComponent(selected.id)}` }
+      if (!hasHours(selected)) {
+        if (!draft) throw new HTTPError({ statusCode: 409, message: 'The firm’s onboarding draft is unavailable' })
+        const result = await execute(db, `UPDATE onboarding_drafts
+          SET payload_json = json_set(payload_json, '$.first_practice_area_attorney', json_object('product_id', ?, 'member_id', ?))
+          WHERE id = ? AND organization_id = ? AND status = 'committed'`, [productId, selected.id, draft.id, organizationId])
+        if (result.meta.changes !== 1) throw new HTTPError({ statusCode: 409, message: 'The firm’s onboarding draft changed. Reload before continuing.' })
+        return { next_url: exit ? home : stepPath('hours') }
+      }
       if (selected.id !== attorney?.id) await configure({ scheduling_mode: 'provider', assigned_member_id: selected.id })
+      await clearPendingAttorney()
       break
     }
     case 'hours': {
@@ -171,6 +198,7 @@ const handler = defineHandler(async (event) => {
         })
       }
       if (pendingAttorney.id !== attorney?.id) await configure({ scheduling_mode: 'provider', assigned_member_id: pendingAttorney.id })
+      await clearPendingAttorney()
       break
     }
     case 'profile':
@@ -232,7 +260,7 @@ const handler = defineHandler(async (event) => {
       break
     case 'preview':
       if (!product.active) await update({ active: true })
-      if (scope && !product.locations.find(location => location.location_id === scope)?.published) await place(scope, true, true)
+      if (scope && !officePlacement?.published) await place(scope, true, true)
       if (!published) await setProductPublication(db, { ...target, published: true })
       if (settings.mode !== 'native') await setPublicConsultationMode(db, organizationId, 'native')
       break
@@ -246,5 +274,5 @@ const handler = defineHandler(async (event) => {
   return { next_url: exit ? home : next ? stepPath(next) : guide }
 })
 
-export type PracticeAreaGuide = Awaited<ReturnType<typeof handler>>
+export type PracticeAreaGuide = Extract<Awaited<ReturnType<typeof handler>>, { step: Step } | { done: object }>
 export default handler

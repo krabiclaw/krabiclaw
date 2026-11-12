@@ -881,7 +881,7 @@ if (route.query.kind !== undefined && !PRODUCT_KINDS.includes(route.query.kind a
 const suppliedKind = props.practiceAreaSetup ? 'service' : route.query.kind as ProductKind | undefined
 // New entries retain only their caller's exact type, location and menu section.
 const creationScope = [suppliedKind ?? '', locationScope.value ?? '', createCollectionId.value ?? ''].map(encodeURIComponent).join(':')
-const draftKey = `product-draft:${organizationId}:${productId.value}${isNew.value ? `:${creationScope}` : ''}`
+const draftKey = `product-draft:${organizationId}:${productId.value}${isNew.value ? `:${creationScope}` : ''}${props.practiceAreaSetup ? ':first-practice-area' : ''}`
 const draft = useState<ProductForm>(draftKey, () => ({
   kind: '',
   name: '', internal_name: '',
