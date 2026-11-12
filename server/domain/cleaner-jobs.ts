@@ -177,10 +177,12 @@ export async function runOrganizationJobs(env: CloudflareEnv, db: DbClient, orga
       for (const [threadId, thread] of elsewhere) {
         if (threadId === heldIn && task.status === 'open') continue
         const last = lastPost(threadId)
-        if (!last || !isJobPost(last[0])) continue
+        if (prep && (!last || !isJobPost(last[0]))) continue
         if (task.status !== 'open' && task.status !== 'cancelled' && task.closed_by_user_id !== null) continue
         const end = `${task.status === 'open' ? 'released' : task.status === 'cancelled' ? 'cancelled' : 'closed'}:${task.id}`
-        const endKey = postsByThread.get(threadId)?.has(end) ? `${end}:${last[1]}` : end
+        const alreadyTold = postsByThread.get(threadId)?.has(end)
+        if (!prep && alreadyTold) continue
+        const endKey = alreadyTold && last ? `${end}:${last[1]}` : end
         const seated = seatUsers.get(threadId) ?? []
         // A prior booking's team only needs to know its prep is no longer theirs.
         const details = subject?.id === thread.subject_id && view ? `${view.sheet.heading.toLowerCase()} ${about} ${view.sheet.title}${view.sheet.date ? `, ${view.sheet.date}` : ''}` : prep ? 'prep for this session' : 'this job'
@@ -197,8 +199,11 @@ export async function runOrganizationJobs(env: CloudflareEnv, db: DbClient, orga
       const baseKey = jobKey(task)
       // A newer release ends an assignment. A later reactivation is a new post
       // keyed by that message, so retries still announce it once.
-      if (!last || (last[0] !== baseKey && !last[0].startsWith(`${baseKey}:after:`))) {
-        const result = await post(subject, roster.seats, jobKey(task, last?.[1]), lines(view), roster.cleaners, heldIn ?? undefined)
+      const postedForAssignment = heldIn && (prep
+        ? last && (last[0] === baseKey || last[0].startsWith(`${baseKey}:after:`))
+        : postsByThread.get(heldIn)?.has(baseKey))
+      if (!postedForAssignment) {
+        const result = await post(subject, roster.seats, jobKey(task, prep ? last?.[1] : undefined), lines(view), roster.cleaners, heldIn ?? undefined)
         threads.set(result.threadId, { subject_id: subject.id, participants_key: targetKey! })
         heldIn = result.threadId
       }
