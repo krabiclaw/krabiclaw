@@ -85,7 +85,7 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
     roleChanged = true
     const assignedRead = await body<{ booking: DashboardBookingDetails }>(
       await memberContext.request.get(`/api/dashboard/bookings/booking/${requestId}`, { params: { org: SLUG } }), 200)
-    expect(assignedRead.booking).toMatchObject({ id: requestId, assigned_member_id: actor.id })
+    expect(assignedRead.booking).toMatchObject({ conversation_id: requestId, assigned_member_id: actor.id })
 
     // A member's Today is their own work: no opportunities, nobody to assign to,
     // and only tasks given to them or replies in conversations they handle.
@@ -217,7 +217,7 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
           expect(archived.product).toMatchObject({ active: false, booking: { held_online: true, scheduling_mode: 'provider', assigned_member_id: actor.id } })
           expect(archived.product.publications).toContainEqual({ organization_id: ORGANIZATION, published: false })
           const history = await body<{ booking: DashboardBookingDetails }>(await page.request.get(`/api/dashboard/bookings/booking/${requestId}`, { params: { org: SLUG } }), 200)
-          expect(history.booking).toMatchObject({ id: requestId, status: 'cancelled', assigned_member_id: actor.id })
+          expect(history.booking).toMatchObject({ conversation_id: requestId, status: 'cancelled', assigned_member_id: actor.id })
         } else await body(await page.request.delete(`${EDITOR}/products/${product.id}`), 200)
       }
     } catch (error) { failures.push(error) }

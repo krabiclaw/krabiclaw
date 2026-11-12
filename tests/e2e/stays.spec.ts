@@ -376,7 +376,7 @@ test('a responsible home member reads its stays as turnovers on every surface un
     const { token } = await offered.json() as { token: string }
     const accepted = await memberContext.request.post(`/api/invite-links/${token}/accept`, { data: {} })
     await expectStatus(accepted, 200)
-    const { memberId } = await accepted.json() as { memberId: string }
+    const { member_id: memberId } = await accepted.json() as { member_id: string }
     const memberSession = await memberContext.request.get('/api/auth/get-session')
     await expectStatus(memberSession, 200)
     const memberName = (await memberSession.json() as { user: { name: string } }).user.name
@@ -3827,7 +3827,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
     const token = (await offered.json() as { token: string }).token
     const accepted = await cleaner.request.post(`/api/invite-links/${encodeURIComponent(token)}/accept`, { data: {} })
     await expectStatus(accepted, 200)
-    const memberId = (await accepted.json() as { memberId: string }).memberId
+    const { member_id: memberId } = await accepted.json() as { member_id: string }
     const listedMembers = await page.request.get('/api/auth/organization/list-members', { params: { organizationId } })
     await expectStatus(listedMembers, 200)
     const ownerMemberId = (await listedMembers.json() as { members: Array<{ id: string; role: string }> }).members.find(member => member.role === 'owner')!.id
@@ -4760,7 +4760,7 @@ test('a stay socket in a service organization closes when Better Auth removes it
     await expectStatus(offered, 201)
     const accepted = await cleaner.request.post(`/api/invite-links/${encodeURIComponent((await offered.json() as { token: string }).token)}/accept`, { data: {} })
     await expectStatus(accepted, 200)
-    const memberId = (await accepted.json() as { memberId: string }).memberId
+    const { member_id: memberId } = await accepted.json() as { member_id: string }
     const listedMembers = await page.request.get('/api/auth/organization/list-members', { params: { organizationId } })
     await expectStatus(listedMembers, 200)
     const ownerMemberId = (await listedMembers.json() as { members: Array<{ id: string; role: string }> }).members.find(member => member.role === 'owner')!.id

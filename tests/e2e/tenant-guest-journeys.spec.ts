@@ -359,6 +359,10 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     const cancelEntries = cancelledLedger.messages.filter(entry => entry.event === 'booking.cancel')
     expect(cancelEntries).toHaveLength(1)
     expect(thread.stream.filter(item => item.type === 'event' && item.id === cancelEntries[0]!.id)).toMatchObject([{ text: expect.stringMatching(/ canceled the booking$/) }])
+    const todayAfter = await request.get(`${baseURL}/api/dashboard/today`, { params: { org: wheel.slug } })
+    expect(todayAfter.status(), await todayAfter.text()).toBe(200)
+    const todayAfterPayload = await todayAfter.json() as { tasks: TaskSection[] }
+    expect(todayAfterPayload.tasks.flatMap(section => section.tasks).filter(task => task.conversation_id === body.conversation_id && task.status === 'open')).toEqual([])
     const scheduleAfter = await request.get(`${baseURL}/api/dashboard/agenda`, { params: scheduleParams })
     expect(scheduleAfter.status(), await scheduleAfter.text()).toBe(200)
     expect((await scheduleAfter.json() as { items: Array<{ id: string }> }).items.some(item => item.id === `booking:${body.conversation_id}`)).toBe(false)
