@@ -30,7 +30,6 @@ export type DashboardBookingType = 'booking'
 export type DashboardRecordType = DashboardBookingType | 'order' | 'payment'
 
 interface BookingRow {
-  id: string
   assigned_member_id: string | null
   booking_id: string
   organization_id: string
@@ -70,7 +69,7 @@ interface BookingRow {
 
 
 export interface DashboardBookingDetails {
-  id: string
+  payment_id: string | null
   assigned_member_id: string | null
   assigned_member_name: string | null
   provider_conflict: boolean
@@ -178,7 +177,7 @@ async function loadBookingRow(
   // When, for how many and against what all live on the booking the thread
   // refers to, not on the thread. The thread carries the conversation and the
   // guest.
-  return queryFirst<BookingRow>(db, `SELECT r.id, record.id AS booking_id, r.organization_id, s.name AS organization_name, s.vertical,
+  return queryFirst<BookingRow>(db, `SELECT record.id AS booking_id, r.organization_id, s.name AS organization_name, s.vertical,
     record.assigned_member_id, record.policy_json, record.product_kind, record.advance_notice_minutes, record.location_id, l.slug AS location_slug, l.title AS location_title, l.address AS location_address,
     json_extract(r.payload_json, '$.guest.name') AS guest_name, json_extract(r.payload_json, '$.guest.email') AS guest_email, json_extract(r.payload_json, '$.guest.phone') AS guest_phone,
     (SELECT u.image FROM user u WHERE u.id = r.user_id) AS guest_image_url, record.party_size, record.starts_at, record.ends_at, record.timezone, record.status,
@@ -305,11 +304,12 @@ async function composeBookingDetails(
     return {payment:paymentDisplay(detail.payment),refunds:paymentRefundsDisplay(detail.refunds),order:paymentOrderDisplay(detail.order)}
   }))
   const guestCanRetryCancellation = Boolean(reader.buyerUserId && row.status === 'cancelled' && row.cancellation_used_at
-    && await canRetryGuestVisitRefund(db, { organizationId: row.organization_id, bookingId: row.booking_id, requestId: row.id, buyerUserId: reader.buyerUserId }))
+    && await canRetryGuestVisitRefund(db, { organizationId: row.organization_id, bookingId: row.booking_id, requestId: row.conversation_id, buyerUserId: reader.buyerUserId }))
   const { policy_json: _policy, location_address, answers_json, cancellation_used_at: _cancellation, advance_notice_minutes: _notice,
     review_id: _review, private_notes, location_title, ...booking } = row
   return {
     ...booking,
+    payment_id: null,
     assigned_member_name: provider?.name ?? null,
     provider_conflict: providerConflict,
     type,
@@ -362,15 +362,15 @@ export async function requestDashboardBookingChange(
   if (!row) throw new HTTPError({ statusCode: 404, message: 'Booking not found' })
   await assertBookingAccess(context, row)
   if (!input.body || typeof input.body !== 'object' || !('idempotency_key' in input.body) || typeof input.body.idempotency_key !== 'string' || !input.body.idempotency_key || input.body.idempotency_key.length > 100) throw new HTTPError({ statusCode: 400, message: 'Request key is required' })
-  const threadId = row.id
-  const thread = await getGuestRequest(context.db, row.id, row.organization_id, input.type)
+  const threadId = row.conversation_id
+  const thread = await getGuestRequest(context.db, row.conversation_id, row.organization_id, input.type)
   if (!thread) throw new HTTPError({ statusCode: 404, message: 'Booking not found' })
   if (input.type === 'booking') await assertAssignedBookingAccess(context.db, { ...memberAccessPrincipal(context.organization, { env: context.env }), bookingId: row.booking_id })
   // `apply` moves it now and tells the guest; otherwise the guest is asked first.
   if ('apply' in input.body && input.body.apply === true) await moveBooking(context.db, context.env, thread, { userId: context.userId }, input.body, input.body.idempotency_key)
   else await requestBookingChange(context.db, context.env, thread, context.userId, input.body, input.body.idempotency_key)
   await publishConversationEvent(context.env, context.db, { conversationId: threadId, type: 'MESSAGE_UPDATE' })
-  return await loadDashboardBookingDetails(event, { type: input.type, bookingId: row.id })
+  return await loadDashboardBookingDetails(event, { type: input.type, bookingId: row.conversation_id })
 }
 
 /**
@@ -427,8 +427,8 @@ export async function setDashboardBookingNote(
   const written = await execute(context.db, `UPDATE bookings SET private_notes = ?, version = version + 1, updated_at = ?
     WHERE organization_id = ? AND id = ? AND updated_at = ?`, [note || null, now, row.organization_id, row.booking_id, payload.updated_at])
   if (written.meta.changes !== 1) throw new HTTPError({ statusCode: 409, message: 'This booking changed since you opened it. Reload and try again.' })
-  await publishConversationEvent(context.env, context.db, { conversationId: row.id, type: 'MESSAGE_UPDATE' })
-  return await loadDashboardBookingDetails(event, { type: input.type, bookingId: row.id })
+  await publishConversationEvent(context.env, context.db, { conversationId: row.conversation_id, type: 'MESSAGE_UPDATE' })
+  return await loadDashboardBookingDetails(event, { type: input.type, bookingId: row.conversation_id })
 }
 
 export function isDashboardBookingType(value: string | undefined): value is DashboardBookingType {
@@ -468,7 +468,7 @@ async function composePurchaseDetails(db: DbClient, env: CloudflareEnv, scope: B
     assigned_member_id: null, assigned_member_name: null, provider_conflict: false,
     // A purchase asks no questions.
     answers: [],
-    id: paymentId,
+    payment_id: paymentId,
     booking_id: null,
     type: detail.order ? 'order' : 'payment',
     organization_id: payment.organization_id,

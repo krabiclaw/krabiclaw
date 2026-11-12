@@ -106,8 +106,8 @@ export interface PayoutDetail {
 
 export async function connectedStripe(db: DbClient, env: CloudflareEnv, organizationId: string) {
   const account = await getStripeConnectedAccount(db, organizationId)
-  if (!account?.stripeAccountId) throw new HTTPError({ statusCode: 404, statusMessage: 'Stripe account not connected' })
-  return { stripe: paymentsStripe(env, account.livemode), options: { stripeAccount: account.stripeAccountId } }
+  if (!account?.stripe_account_id) throw new HTTPError({ statusCode: 404, statusMessage: 'Stripe account not connected' })
+  return { stripe: paymentsStripe(env, account.livemode), options: { stripeAccount: account.stripe_account_id } }
 }
 
 /**

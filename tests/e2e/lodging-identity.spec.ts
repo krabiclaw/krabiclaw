@@ -656,7 +656,7 @@ test.describe('lodging identity boundary', () => {
       const inboxPath = `/api/dashboard/organizations/${organization.id}/guest-threads/${requestId}`
       const memberBooking = await api.get(bookingPath, { headers: memberBearer })
       expect(memberBooking.status, await memberBooking.text()).toBe(200)
-      expect(await memberBooking.json()).toMatchObject({ booking: { id: requestId, assigned_member_id: memberId, product_id: product.id, guest_name: guestName } })
+      expect(await memberBooking.json()).toMatchObject({ booking: { conversation_id: requestId, assigned_member_id: memberId, product_id: product.id, guest_name: guestName } })
       await loginAs(memberContext.request, baseURL!, invitee.id)
       const memberPage = await memberContext.newPage()
       let socket: WebSocket | undefined
@@ -681,7 +681,7 @@ test.describe('lodging identity boundary', () => {
       expect((await api.get(inboxPath, { headers: memberBearer })).status).toBe(404)
       const retained = await api.get(bookingPath, { headers: ownerBearer })
       expect(retained.status, await retained.text()).toBe(200)
-      expect(await retained.json()).toMatchObject({ booking: { id: requestId, assigned_member_id: ownerMemberId, product_id: product.id, guest_name: guestName } })
+      expect(await retained.json()).toMatchObject({ booking: { conversation_id: requestId, assigned_member_id: ownerMemberId, product_id: product.id, guest_name: guestName } })
     } finally {
       try {
         const deleted = await api.post('/api/auth/organization/delete', { headers: ownerBearer, data: { organizationId: organization.id } })

@@ -283,14 +283,14 @@ Stripe Connect payouts onboarding from the app, after the host chooses Business,
 
 ```json
 {
-  "id": "…", "organizationId": "…", "stripeAccountId": "acct_…", "country": "US", "livemode": false,
-  "status": "action_required", "cardPaymentsStatus": "pending", "surchargeBasisPoints": null,
+  "id": "…", "organizationId": "…", "stripe_account_id": "acct_…", "country": "US", "livemode": false,
+  "status": "action_required", "card_payments_status": "pending", "surcharge_basis_points": null,
   "requirements": [{ "awaitingActionFrom": "user", "deadlineStatus": "currently_due", "description": "Provide a bank account for payouts", "errors": [] }],
-  "stripeRefreshedAt": "2026-10-23T03:00:00.000Z", "lastError": null, "createdAt": "…", "updatedAt": "…"
+  "stripe_refreshed_at": "2026-10-23T03:00:00.000Z", "lastError": null, "createdAt": "…", "updatedAt": "…"
 }
 ```
 
-`status` is one of `creating`, `creation_failed`, `action_required`, `pending_review`, `restricted`, `ready`; `cardPaymentsStatus` one of `active`, `pending`, `restricted`, `unsupported` or `null`.
+`status` is one of `creating`, `creation_failed`, `action_required`, `pending_review`, `restricted`, `ready`; `card_payments_status` one of `active`, `pending`, `restricted`, `unsupported` or `null`.
 
 ### 3.7 Plans
 

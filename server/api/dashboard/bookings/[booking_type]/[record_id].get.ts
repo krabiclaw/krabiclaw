@@ -5,7 +5,7 @@ import { isDashboardRecordType, loadDashboardBookingDetails } from '~/server/uti
 
 export default defineHandler(async (event) => {
   const bookingType = getRouterParam(event, 'booking_type')
-  const bookingId = getRouterParam(event, 'id')
+  const bookingId = getRouterParam(event, 'record_id')
   if (!isDashboardRecordType(bookingType) || !bookingId) {
     throw new HTTPError({ statusCode: 400, message: 'Valid booking type and ID are required' })
   }

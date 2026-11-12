@@ -278,8 +278,8 @@ export interface InboxThread {
   when: string | null
   /** A message in the conversation was translated: the header says "Translation on". */
   translated: boolean
-  /** What Show reservation opens: a stay's id, or the conversation's own id for a booking (the id the booking route takes). */
-  record_id: string | null
+  /** The stored booking attached to this conversation, whether it uses nights or a session. */
+  booking_id: string | null
   record_kind: 'stay' | 'booking' | null
   /** The record in the business's own word: "Reservation", "Consultation", "Experience". */
   record_title: string | null

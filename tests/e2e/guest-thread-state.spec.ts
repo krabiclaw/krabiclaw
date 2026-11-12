@@ -270,7 +270,7 @@ test('guest thread state stays source-owned, per-user, tenant-isolated, and idem
       title: guestName,
       channel: 'direct',
       when: null,
-      record_id: null,
+      booking_id: null,
       record_kind: null,
       composer: { channel: 'email', available: true },
     })

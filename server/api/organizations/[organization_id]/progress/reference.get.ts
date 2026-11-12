@@ -11,7 +11,7 @@ export default defineHandler(async (event) => {
   if (!organizationId) throw new HTTPError({ statusCode: 400, message: 'organizationId is required' })
   const { db, env, organization } = await requireOrganizationMembership(event, organizationId)
   const parsed = businessProgressReferenceSchema.safeParse(getQuery(event))
-  if (!parsed.success) throw new HTTPError({ statusCode: 400, message: 'An explicit operation and subjectId are required', data: parsed.error.flatten() })
+  if (!parsed.success) throw new HTTPError({ statusCode: 400, message: 'An explicit operation and subject_id are required', data: parsed.error.flatten() })
   const reference = await readBusinessProgressReference(db, memberAccessPrincipal(organization.membership, { env, event }), parsed.data)
   return jsonResponse({ reference })
 })

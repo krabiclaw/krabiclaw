@@ -46,7 +46,7 @@ const route = useRoute()
 const router = useRouter()
 const { connect, connectError, connectPending, refreshConnect, account, payout, setAccount } = useConnectAccount()
 const country = ref<string>()
-const needsCountry = computed(() => !account.value?.stripeAccountId)
+const needsCountry = computed(() => !account.value?.stripe_account_id)
 // Read only while a country is still to be chosen; Stripe answers this slowly.
 const { data: countryList, error: countriesError, status: countriesStatus, execute: loadCountries } = useAsyncData(`dashboard-connect-countries:${String(route.params.org_slug)}`,
   () => dashboardApi<{ success: true; countries: string[] }>('/api/dashboard/connect/countries', { validate: (value): value is { success: true; countries: string[] } => isRecord(value) && value.success === true && Array.isArray(value.countries) && value.countries.every(code => typeof code === 'string') }),
@@ -102,7 +102,7 @@ async function startOnboarding() {
 }
 
 async function refreshStatus() {
-  if (account.value === null || account.value.stripeAccountId === null) return
+  if (account.value === null || account.value.stripe_account_id === null) return
   errorMessage.value = null
   try {
     const response = await dashboardApi<{ success: true; account: ConnectedAccount }>('/api/dashboard/connect/status', { method: 'POST', validate: isAccountReply })
@@ -122,7 +122,7 @@ onMounted(() => {
     if (pending || connectError.value || checkedStatus) return
     checkedStatus = true
     // Stripe's own state is asked for whenever setup is still open, not on a button: the status is read, not managed.
-    if (account.value?.stripeAccountId && (route.query.stripe_connect === 'returned' || account.value.status !== 'ready')) {
+    if (account.value?.stripe_account_id && (route.query.stripe_connect === 'returned' || account.value.status !== 'ready')) {
       if (!await refreshStatus()) return
       if (route.query.stripe_connect === 'returned') {
         const query = { ...route.query }

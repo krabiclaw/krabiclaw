@@ -169,7 +169,7 @@ for (const path of sources(join(root, 'server/api'))) {
     }
     function checkQueryReads(node) {
       if (ts.isPropertyAccessExpression(node) && ts.isIdentifier(node.expression)
-        && queryVariables.has(node.expression.text) && node.name.text !== 'organizationId') checkKey(node.name.text)
+        && queryVariables.has(node.expression.text)) checkKey(node.name.text)
       ts.forEachChild(node, checkQueryReads)
     }
     findQueryVariables(file)

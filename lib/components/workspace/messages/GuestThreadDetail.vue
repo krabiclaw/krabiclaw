@@ -167,7 +167,7 @@ watch(() => props.threadId, () => {
   if (!draft.value.trim()) draft.value = written
   window.history.replaceState(state, '')
 }, { immediate: true })
-const requestingChange = computed(() => props.personalScope && route.query.intent === 'booking-change' && thread.value?.record_id && thread.value.composer.channel === 'email')
+const requestingChange = computed(() => props.personalScope && route.query.intent === 'booking-change' && thread.value?.booking_id && thread.value.composer.channel === 'email')
 const changeRequestSent = ref(false)
 watch(() => `${props.threadId}:${String(route.query.intent)}`, () => { changeRequestSent.value = false })
 const sendAt = ref<string | null>(null)

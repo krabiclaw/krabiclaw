@@ -54,7 +54,7 @@ function fail(statusCode: number, code: string, message: string, field?: string)
 
 const keyOf = (value: { operation: string; subjectId: string; evidenceRevision: string; goalId: string | null }) => JSON.stringify([value.operation, value.subjectId, value.evidenceRevision, value.goalId])
 const rowKey = (row: OpportunityRow) => keyOf({ operation: row.operation, subjectId: row.subject_id, evidenceRevision: row.evidence_revision, goalId: row.goal_id })
-const recommendationKey = (item: BusinessRecommendation) => keyOf({ operation: item.operation, subjectId: item.subjectId, evidenceRevision: item.reference.evidenceRevision, goalId: item.goal?.id ?? null })
+const recommendationKey = (item: BusinessRecommendation) => keyOf({ operation: item.operation, subjectId: item.subjectId, evidenceRevision: item.reference.evidence_revision, goalId: item.goal?.id ?? null })
 
 async function authorize(principal: MemberAccessPrincipal) {
   // Opportunities are the owner's decisions about the business; a member is given the tasks they become.
@@ -69,13 +69,13 @@ async function refreshOpportunities(db: DbClient, principal: MemberAccessPrincip
   const results = await executeBatch(db, plan.recommendations.map(item => ({
     query: `INSERT INTO opportunities (id, organization_id, operation, subject_id, evidence_revision, goal_id, goal_revision, status, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?) ON CONFLICT DO NOTHING`,
-    params: [crypto.randomUUID(), organizationId, item.operation, item.subjectId, item.reference.evidenceRevision, item.goal?.id ?? null, item.goal?.revision ?? null, now, now],
+    params: [crypto.randomUUID(), organizationId, item.operation, item.subjectId, item.reference.evidence_revision, item.goal?.id ?? null, item.goal?.updated_at ?? null, now, now],
   })), { operation: 'Record opportunities' })
   const rows = await queryAll<OpportunityRow>(db, `SELECT opportunities.* FROM json_each(?) current
     JOIN opportunities ON organization_id = ? AND status = 'open'
       AND operation = json_extract(current.value, '$[0]') AND subject_id = json_extract(current.value, '$[1]')
       AND evidence_revision = json_extract(current.value, '$[2]') AND goal_id IS json_extract(current.value, '$[3]')`,
-  [JSON.stringify(plan.recommendations.map(item => [item.operation, item.subjectId, item.reference.evidenceRevision, item.goal?.id ?? null])), organizationId])
+  [JSON.stringify(plan.recommendations.map(item => [item.operation, item.subjectId, item.reference.evidence_revision, item.goal?.id ?? null])), organizationId])
   return { plan, rows, changed: results.some(result => (result.meta.changes ?? 0) > 0) }
 }
 
@@ -133,7 +133,7 @@ export async function acceptOpportunity(db: DbClient, principal: MemberAccessPri
     const marketing = plan.marketingEvidenceUnavailable && row.operation === 'article.distribute'
     if (social || marketing) {
       // Re-read the target when its revision can still be proved independently of the failed provider.
-      const current = row.operation === 'social.connect' || (await readRecommendationReference(db, principal, { operation: row.operation, subjectId: row.subject_id }))?.evidenceRevision === row.evidence_revision
+      const current = row.operation === 'social.connect' || (await readRecommendationReference(db, principal, { operation: row.operation, subjectId: row.subject_id }))?.evidence_revision === row.evidence_revision
       if (current) throw new HTTPError({ statusCode: 503, message: 'Could not verify what this opportunity was based on. Reload Today and try again.',
         data: { code: 'OPPORTUNITY_EVIDENCE_UNAVAILABLE', field: 'opportunity_id', operation_completed: false, issues: plan.issues } })
     }

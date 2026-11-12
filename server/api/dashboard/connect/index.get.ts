@@ -20,11 +20,11 @@ export default defineHandler(async (event) => {
   await assertRoleAllows({ organizationId: organization.id, role: organization.role, permissions: { payments: ['integration'] } })
   const account = await getStripeConnectedAccount(db, organization.id)
   let payout: ConnectPayoutMethod | null = null
-  if (account?.stripeAccountId && account.status === 'ready') {
+  if (account?.stripe_account_id && account.status === 'ready') {
     const stripe = paymentsStripe(env, account.livemode)
     const [banks, settings] = await Promise.all([
-      stripe.accounts.listExternalAccounts(account.stripeAccountId, { object: 'bank_account', limit: 100 }).autoPagingToArray({ limit: 10000 }),
-      stripe.accounts.retrieve(account.stripeAccountId),
+      stripe.accounts.listExternalAccounts(account.stripe_account_id, { object: 'bank_account', limit: 100 }).autoPagingToArray({ limit: 10000 }),
+      stripe.accounts.retrieve(account.stripe_account_id),
     ])
     if (!settings.default_currency) throw new HTTPError({ statusCode: 502, statusMessage: 'Stripe account has no default currency', data: { code: 'PAYOUT_CURRENCY_MISSING', field: 'account.default_currency' } })
     const defaultCurrency = settings.default_currency

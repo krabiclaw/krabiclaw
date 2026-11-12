@@ -655,7 +655,7 @@ test('a paid plan adds a third location without counting it', async ({ page, bas
   const failures: unknown[] = []
   let createdLocationId: string | undefined
   const status = async () => {
-    const response = await page.request.get('/api/billing/status', { params: { organizationId: restaurant.organizationId } })
+    const response = await page.request.get('/api/billing/status', { params: { organization_id: restaurant.organizationId } })
     expect(response.status(), await response.text()).toBe(200)
     return (await response.json() as { billing: { plan: string; usage: Record<string, number> } }).billing
   }

@@ -319,7 +319,7 @@ export async function getInboxThread(db: DbClient, threadId: string, organizatio
     home: facts.home,
     when: facts.when,
     translated: items.some(item => item.type === 'message' && item.translated !== null),
-    record_id: record ? record.unit === 'nights' ? record.id : raw.id : null,
+    booking_id: record?.id ?? null,
     record_kind: record ? record.unit === 'nights' ? 'stay' : 'booking' : null,
     record_title: record ? recordTitle(record, raw.organizationVertical) : null,
     activity_path: raw.activityPath,

@@ -72,7 +72,7 @@ test.describe('Plan and billing', () => {
       const BASIC = `/dashboard/${slug}`
       await asOwner(page, baseURL!, BASIC_OWNER_ID, BASIC_ID, async () => {
         // The premise, read from the billing API rather than the page: Starter, no Stripe customer.
-        const status = await page.request.get(`/api/billing/status?organizationId=${BASIC_ID}`)
+        const status = await page.request.get(`/api/billing/status?organization_id=${BASIC_ID}`)
         expect(status.status(), await status.text()).toBe(200)
         const billing = (await status.json() as { billing: { plan: string; stripeCustomerId?: string; stripeSubscriptionId?: string } }).billing
         expect(billing.plan).toBe('free')
@@ -189,7 +189,7 @@ test.describe('Plan and billing', () => {
     const GROWTH = `/dashboard/${studio.slug}`
     await asOwner(page, baseURL!, GROWTH_OWNER_ID, GROWTH_ID, async () => {
       // The premise, read from the billing API: Growth on a Stripe subscription this key reads.
-      const status = await page.request.get(`/api/billing/status?organizationId=${GROWTH_ID}&include_price=true`)
+      const status = await page.request.get(`/api/billing/status?organization_id=${GROWTH_ID}&include_price=true`)
       expect(status.status(), await status.text()).toBe(200)
       const billing = (await status.json() as { billing: { plan: string; stripeSubscriptionId?: string; status?: string; cancelAtPeriodEnd?: boolean; scheduled_plan?: unknown; subscription_price?: { amount: number; interval: string } } }).billing
       expect(billing).toMatchObject({ plan: 'growth', status: 'active', cancelAtPeriodEnd: false, subscription_price: { amount: 4900, interval: 'month' } })
@@ -249,7 +249,7 @@ test.describe('Plan and billing', () => {
       // The owner comes back to Plan and billing: the upgrade leaf no longer applies once the plan is Business.
       expect(upgradeRequests[0]).toMatchObject({ returnUrl: new URL(`${GROWTH}/billing`, baseURL).toString(), successUrl: new URL(`${GROWTH}/billing?success=true&plan=business`, baseURL).toString() })
       // The organization is still on Growth.
-      const unchanged = await page.request.get(`/api/billing/status?organizationId=${GROWTH_ID}`)
+      const unchanged = await page.request.get(`/api/billing/status?organization_id=${GROWTH_ID}`)
       expect((await unchanged.json() as { billing: { plan: string } }).billing.plan).toBe('growth')
     })
   })

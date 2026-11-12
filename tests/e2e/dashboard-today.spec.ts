@@ -223,7 +223,7 @@ test('the member who handles a branch’s tables gains and loses its table booki
     expect(ownerThread.status(), await ownerThread.text()).toBe(200)
     // The conversation is about this reservation at this branch; the record above holds its time, party and status.
     const ownerConversation = (await ownerThread.json() as { thread: InboxThread }).thread
-    expect(ownerConversation).toMatchObject({ id: reservationId, kind: 'guest', title: guestName, channel: 'direct', home: booking.location_title, record_id: booking.id, record_kind: 'booking' })
+    expect(ownerConversation).toMatchObject({ id: reservationId, kind: 'guest', title: guestName, channel: 'direct', home: booking.location_title, booking_id: booking.booking_id, record_kind: 'booking' })
     expect(ownerConversation.when).toEqual(expect.any(String))
     // The thread header's second line: the branch and the reservation's time, as the server wrote them.
     const headerFacts = `${booking.location_title} · ${ownerConversation.when}`
@@ -253,8 +253,8 @@ test('the member who handles a branch’s tables gains and loses its table booki
       const record = await memberRequest.get(bookingPath, { params: { org } })
       expect(record.status(), await record.text()).toBe(assigned ? 200 : 404)
       if (assigned) {
-        expect((await detail.json() as { thread: InboxThread }).thread).toMatchObject({ id: reservationId, title: guestName, home: booking.location_title, when: ownerConversation.when, record_id: booking.id, record_kind: 'booking' })
-        expect((await record.json() as { booking: DashboardBookingDetails }).booking).toMatchObject({ id: booking.id, conversation_id: reservationId, guest_name: guestName, location_id: locationId, status: 'confirmed' })
+        expect((await detail.json() as { thread: InboxThread }).thread).toMatchObject({ id: reservationId, title: guestName, home: booking.location_title, when: ownerConversation.when, booking_id: booking.booking_id, record_kind: 'booking' })
+        expect((await record.json() as { booking: DashboardBookingDetails }).booking).toMatchObject({ booking_id: booking.booking_id, conversation_id: reservationId, guest_name: guestName, location_id: locationId, status: 'confirmed' })
         const openedThread = memberPage.waitForResponse(response => response.request().method() === 'GET'
           && new URL(response.url()).pathname === `${inboxPath}/${reservationId}`)
         expect((await memberPage.goto(`${ORG}/messages/${reservationId}`))?.status()).toBe(200)
@@ -327,7 +327,7 @@ test('opportunities follow explicit strategy, the owner’s decisions and actual
   const marker = `Lanternfish${Date.now()}`
   const editor = `/api/editor/organizations/${organizationId}/blog`
   const tasksApi = `/api/organizations/${organizationId}`
-  let goal: { id: string; revision: string } | null = null
+  let goal: { id: string; updated_at: string } | null = null
   let postId: string | null = null
   let categoryId: string | null = null
   const readToday = async () => {
@@ -372,10 +372,10 @@ test('opportunities follow explicit strategy, the owner’s decisions and actual
 
     // The owner chooses channels explicitly; unrelated intent wording is not a relevance algorithm.
     const intent = `Help prospective guests choose us ${marker}`
-    const goalRequest = { idempotencyKey: crypto.randomUUID(), intent, strategy: { channels: ['blog', 'social'], payments: false, availability: false } }
+    const goalRequest = { idempotency_key: crypto.randomUUID(), intent, strategy: { channels: ['blog', 'social'], payments: false, availability: false } }
     const saved = await page.request.post(`${tasksApi}/goals`, { data: goalRequest })
     expect(saved.status(), await saved.text()).toBe(201)
-    goal = (await saved.json() as { goal: { id: string; revision: string } }).goal
+    goal = (await saved.json() as { goal: { id: string; updated_at: string } }).goal
     expect((await readGoals()).find(value => value.id === goal!.id)?.strategy).toMatchObject({ channels: ['blog', 'social'] })
     // The strategy is now the opportunity's reason, recorded as a new opportunity for the new goal.
     const withGoal = await draftOpportunity()
@@ -449,7 +449,7 @@ test('opportunities follow explicit strategy, the owner’s decisions and actual
     try {
       if (goal) {
         const current = (await readGoals()).find(priority => priority.id === goal!.id)
-        if (current && current.status === 'active') expect((await page.request.patch(`/api/organizations/${organizationId}/goals/${goal.id}`, { data: { revision: current.revision, status: 'archived' } })).status()).toBe(200)
+        if (current && current.status === 'active') expect((await page.request.patch(`/api/organizations/${organizationId}/goals/${goal.id}`, { data: { updated_at: current.updated_at, status: 'archived' } })).status()).toBe(200)
       }
       if (postId) expect((await page.request.delete(`${editor}/${postId}`)).status()).toBe(200)
       if (categoryId) expect((await page.request.delete(`${editor}/categories/${categoryId}`)).status()).toBe(200)

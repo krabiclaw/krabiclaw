@@ -42,8 +42,8 @@ export interface BusinessOutcomeReceipt {
   channel: string
   provider: string
   status: string
-  providerMessageId: string | null
-  nonDeliveryConfirmed?: boolean | null
+  provider_message_id: string | null
+  non_delivery_confirmed?: boolean | null
 }
 
 export interface BusinessOutcome {
@@ -52,26 +52,26 @@ export interface BusinessOutcome {
   source: { table: 'activity_entries' | 'messages' | 'post_publications' | 'reviews' | 'analytics_events'; id: string }
   event: BusinessOutcomeEvent
   subject: { kind: string; id: string }
-  actor: { kind: 'guest' | 'member' | 'system' | 'cloudflare' | 'user' | 'agent' | 'unknown'; userId: string | null }
-  occurredAt: string
+  actor: { kind: 'guest' | 'member' | 'system' | 'cloudflare' | 'user' | 'agent' | 'unknown'; user_id: string | null }
+  occurred_at: string
   /** The recorded domain state, not an invented universal completion state. */
   state: string | null
-  changedFields: string[]
-  requestedFields?: string[]
+  changed_fields: string[]
+  requested_fields?: string[]
   revision: string | null
   references: Array<{ kind: string; id: string }>
   /** Existing metadata and recorded beforeState/afterState, including booleans and source revisions; no inferred completion. */
   details?: Record<string, unknown>
   value?: ConversionValue
-  moneyOwner?: 'customer_business' | 'platform'
+  money_owner?: 'customer_business' | 'platform'
   measurement?: {
     stage: string
     surface: string
-    conversionType: string | null
+    conversion_type: string | null
     attribution: AttributionTouch | null
-    attributedAt: string | null
-    originEventId: string | null
-    assignedMemberId: string | null
+    attributed_at: string | null
+    origin_event_id: string | null
+    assigned_member_id: string | null
   }
   verification: {
     status: 'verified' | 'unconfirmed' | 'failed'
@@ -82,14 +82,14 @@ export interface BusinessOutcome {
 
 export interface BusinessOutcomePage {
   outcomes: BusinessOutcome[]
-  pagination: { limit: number; offset: number; hasMore: boolean; nextOffset: number | null }
+  pagination: { limit: number; offset: number; has_more: boolean; next_offset: number | null }
   coverage: {
-    supportedEvents: readonly BusinessOutcomeEvent[]
+    supported_events: readonly BusinessOutcomeEvent[]
     sources: readonly BusinessOutcome['source']['table'][]
     attribution: 'recorded_actor_only'
     article: 'persisted_change_only'
-    webReply: 'stored_message_only'
-    externalReply: 'provider_acceptance_requires_receipt'
+    web_reply: 'stored_message_only'
+    external_reply: 'provider_acceptance_requires_receipt'
     verification: 'only_the_named_evidence_basis'
     unverified: readonly ['public_visibility', 'operation_completion', 'recipient_notification', 'conversation_resolution', 'business_goal_achievement', 'attendance_or_fulfilment', 'causal_revenue_attribution']
   }
@@ -97,8 +97,8 @@ export interface BusinessOutcomePage {
 
 export interface BusinessProgressReference {
   operation: BusinessProgressOperation
-  subjectId: string
-  evidenceRevision: string
+  subject_id: string
+  evidence_revision: string
   evidence: {
     kind: 'article'
     status: string | null

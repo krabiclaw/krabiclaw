@@ -152,7 +152,7 @@ test.describe('stateless MCP server', () => {
       const reordered = await newChanges()
       expect(reordered).toHaveLength(1)
       expect(reordered[0]).toMatchObject({ actor: { kind: 'member', userId: E2E_ADMIN_ID }, verification: { status: 'verified', basis: 'persisted_change' } })
-      expect(reordered[0]!.changedFields).toEqual(['media.gallery'])
+      expect(reordered[0]!.changed_fields).toEqual(['media.gallery'])
       await call('reorder_media', { placement, moves: [{ asset_id: second, before_asset_id: first }] })
       expect(await galleryOrder()).toEqual([second, first])
       expect(await newChanges()).toEqual(reordered)

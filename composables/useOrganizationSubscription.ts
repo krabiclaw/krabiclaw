@@ -16,7 +16,7 @@ async function organizationSubscriptionId(
   dashboardApi: ReturnType<typeof useDashboardApi>,
   organizationId: string,
 ): Promise<{ id?: string; status?: string; plan: string; canUpdate: boolean; actions: BillingStatus['actions'] }> {
-  const response = await dashboardApi('/api/billing/status', { query: { organizationId }, validate: isBillingResponse })
+  const response = await dashboardApi('/api/billing/status', { query: { organization_id: organizationId }, validate: isBillingResponse })
   return { id: response.billing.stripeSubscriptionId, status: response.billing.status, plan: response.billing.plan, canUpdate: response.billing.can_update, actions: response.billing.actions }
 }
 

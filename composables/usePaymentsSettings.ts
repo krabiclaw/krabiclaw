@@ -1,3 +1,5 @@
+import type { StripeConnectedAccount, StripeConnectStatus, StripeCapabilityStatus, StripeConnectRequirement } from '~/server/utils/stripe-connect'
+import type { ConnectPayoutMethod } from '~/server/api/dashboard/connect/index.get'
 import { isKnownBillingPlan, isNewSalePlan, type billingPlanActions } from '~/shared/billing-model'
 import { isCurrencyCode } from '~/shared/currencies'
 import type { PaymentMethodRow } from '~/server/utils/billing-customer'
@@ -10,9 +12,9 @@ import type { HomesQuote } from '~/server/utils/billing'
  * serves both and a leaf's refresh updates the row it came from.
  */
 
-export interface BillingStatus { can_update: boolean; actions: ReturnType<typeof billingPlanActions>; organizationId: string; plan: string; stripeCustomerId?: string; stripeSubscriptionId?: string; status?: string; periodEnd?: string; cancelAtPeriodEnd?: boolean; billingInterval?: 'month'; subscription_price?: { name: string; amount: number; currency: string; interval: 'month'; meters: string[]; trial: { end: string; missing_payment_method: 'cancel' | 'create_invoice' | 'pause' } | null }; usage: { homes: number }; scheduled_plan?: { plan: string; at: string } | null }
+export interface BillingStatus { can_update: boolean; actions: ReturnType<typeof billingPlanActions>; organization_id: string; plan: string; stripeCustomerId?: string; stripeSubscriptionId?: string; status?: string; periodEnd?: string; cancelAtPeriodEnd?: boolean; billingInterval?: 'month'; subscription_price?: { name: string; amount: number; currency: string; interval: 'month'; meters: string[]; trial: { end: string; missing_payment_method: 'cancel' | 'create_invoice' | 'pause' } | null }; usage: { homes: number }; scheduled_plan?: { plan: string; at: string } | null }
 export const isBillingResponse = (value: unknown): value is { success: true; billing: BillingStatus } =>
-  isRecord(value) && value.success === true && isRecord(value.billing) && typeof value.billing.organizationId === 'string' && isKnownBillingPlan(value.billing.plan)
+  isRecord(value) && value.success === true && isRecord(value.billing) && typeof value.billing.organization_id === 'string' && isKnownBillingPlan(value.billing.plan)
   && typeof value.billing.can_update === 'boolean' && isRecord(value.billing.actions)
   && (value.billing.actions.label === null || typeof value.billing.actions.label === 'string') && typeof value.billing.actions.restore === 'boolean'
   && Array.isArray(value.billing.actions.changes) && value.billing.actions.changes.every(change => isRecord(change) && isNewSalePlan(change.plan) && (change.timing === 'immediate' || change.timing === 'period_end'))
@@ -72,43 +74,27 @@ export async function useOrganizationServices(requirements?: 'strategy') {
   return { servicesResource: data, services: computed(() => data.value?.services), servicesError: error, refreshServices: refresh }
 }
 
-export type ConnectStatus = 'creating' | 'creation_failed' | 'action_required' | 'pending_review' | 'restricted' | 'ready'
-type CapabilityStatus = 'active' | 'pending' | 'restricted' | 'unsupported'
-export interface ConnectRequirement { awaitingActionFrom: 'stripe' | 'user'; deadlineStatus: 'currently_due' | 'eventually_due' | 'past_due'; description: string; errors: string[] }
-export interface PayoutMethod { bank_name: string | null; last4: string; currency: string; schedule: { interval: string; delay_days: number } }
-export interface ConnectedAccount {
-  id: string
-  organizationId: string
-  stripeAccountId: string | null
-  country: string | null
-  livemode: boolean
-  status: ConnectStatus
-  cardPaymentsStatus: CapabilityStatus | null
-  surchargeBasisPoints: number | null
-  requirements: ConnectRequirement[]
-  stripeRefreshedAt: string | null
-  lastError: string | null
-  createdAt: string
-  updatedAt: string
-}
-const CONNECT_STATUSES = new Set<ConnectStatus>(['creating', 'creation_failed', 'action_required', 'pending_review', 'restricted', 'ready'])
-const CAPABILITY_STATUSES = new Set<CapabilityStatus>(['active', 'pending', 'restricted', 'unsupported'])
-const isRequirement = (value: unknown): value is ConnectRequirement => isRecord(value)
+export type ConnectedAccount = StripeConnectedAccount
+export type PayoutMethod = ConnectPayoutMethod
+
+const CONNECT_STATUSES = new Set<StripeConnectStatus>(['creating', 'creation_failed', 'action_required', 'pending_review', 'restricted', 'ready'])
+const CAPABILITY_STATUSES = new Set<StripeCapabilityStatus>(['active', 'pending', 'restricted', 'unsupported'])
+const isRequirement = (value: unknown): value is StripeConnectRequirement => isRecord(value)
   && (value.awaitingActionFrom === 'stripe' || value.awaitingActionFrom === 'user')
   && (value.deadlineStatus === 'currently_due' || value.deadlineStatus === 'eventually_due' || value.deadlineStatus === 'past_due')
   && typeof value.description === 'string' && Array.isArray(value.errors) && value.errors.every(error => typeof error === 'string')
 export const isConnectedAccount = (value: unknown): value is ConnectedAccount => isRecord(value)
-  && typeof value.id === 'string' && typeof value.organizationId === 'string'
-  && (value.stripeAccountId === null || typeof value.stripeAccountId === 'string')
+  && typeof value.id === 'string' && typeof value.organization_id === 'string'
+  && (value.stripe_account_id === null || typeof value.stripe_account_id === 'string')
   && (value.country === null || typeof value.country === 'string')
   && typeof value.livemode === 'boolean'
-  && typeof value.status === 'string' && CONNECT_STATUSES.has(value.status as ConnectStatus)
-  && (value.cardPaymentsStatus === null || (typeof value.cardPaymentsStatus === 'string' && CAPABILITY_STATUSES.has(value.cardPaymentsStatus as CapabilityStatus)))
-  && (value.surchargeBasisPoints === null || Number.isSafeInteger(value.surchargeBasisPoints))
+  && typeof value.status === 'string' && CONNECT_STATUSES.has(value.status as StripeConnectStatus)
+  && (value.card_payments_status === null || (typeof value.card_payments_status === 'string' && CAPABILITY_STATUSES.has(value.card_payments_status as StripeCapabilityStatus)))
+  && (value.surcharge_basis_points === null || Number.isSafeInteger(value.surcharge_basis_points))
   && Array.isArray(value.requirements) && value.requirements.every(isRequirement)
-  && (value.stripeRefreshedAt === null || typeof value.stripeRefreshedAt === 'string')
-  && (value.lastError === null || typeof value.lastError === 'string')
-  && typeof value.createdAt === 'string' && typeof value.updatedAt === 'string'
+  && (value.stripe_refreshed_at === null || typeof value.stripe_refreshed_at === 'string')
+  && (value.last_error === null || typeof value.last_error === 'string')
+  && typeof value.created_at === 'string' && typeof value.updated_at === 'string'
 const isPayoutMethod = (value: unknown): value is PayoutMethod | null => value === null || (isRecord(value) && (value.bank_name === null || typeof value.bank_name === 'string') && typeof value.last4 === 'string' && typeof value.currency === 'string' && isRecord(value.schedule) && typeof value.schedule.interval === 'string' && Number.isSafeInteger(value.schedule.delay_days))
 export interface AccountResponse { success: true; account: ConnectedAccount | null; payout: PayoutMethod | null }
 const isAccountResponse = (value: unknown): value is AccountResponse =>
@@ -130,7 +116,7 @@ export function useConnectAccount() {
 }
 
 /** Stripe's status, in the words the payout rows use. */
-export function connectStatusPresentation(status: ConnectStatus | undefined): { label: string; description: string } {
+export function connectStatusPresentation(status: StripeConnectStatus | undefined): { label: string; description: string } {
   switch (status) {
     case 'ready': return { label: 'Ready', description: 'Stripe has enabled card payments for this business.' }
     case 'action_required': return { label: 'Action required', description: 'Stripe needs more information from the business before card payments can be enabled.' }
@@ -157,7 +143,7 @@ export async function usePaymentMethods() {
     () => {
       const organizationId = dashboard.organization.value?.id
       if (!organizationId) throw new Error('Organization context is unavailable')
-      return applicationFetch<Methods>('/api/billing/payment-methods', { query: { organizationId }, validate: isMethods })
+      return applicationFetch<Methods>('/api/billing/payment-methods', { query: { organization_id: organizationId }, validate: isMethods })
     },
   )
   return { methods: data, methodsError: error, refreshMethods: refresh }

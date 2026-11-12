@@ -30,7 +30,7 @@ const rows = computed<EditorNavigationItem[]>(() => [
   { id: 'payout-method', label: 'How you get paid', to: to('payout-method'), ...(payout.value
     ? { summary: `${payout.value.bank_name ?? 'Bank account'}, ••••${payout.value.last4} (${payout.value.currency})`, status: 'success' as const }
     : { summary: connectStatusPresentation(account.value?.status).description, status: account.value ? 'neutral' as const : undefined }) },
-  ...(account.value?.status === 'ready' ? [{ id: 'surcharge', label: 'Card surcharge', to: to('surcharge'), summary: account.value.surchargeBasisPoints === null ? 'Off. Pass credit card fees on to the buyer.' : `On at ${account.value.surchargeBasisPoints / 100}%.` }] : []),
+  ...(account.value?.status === 'ready' ? [{ id: 'surcharge', label: 'Card surcharge', to: to('surcharge'), summary: account.value.surcharge_basis_points === null ? 'Off. Pass credit card fees on to the buyer.' : `On at ${account.value.surcharge_basis_points / 100}%.` }] : []),
 ])
 const groups = computed<EditorNavigationGroup[]>(() => [{ id: 'payouts', items: rows.value }])
 const firstRow = computed(() => rows.value[0]?.to ?? null)

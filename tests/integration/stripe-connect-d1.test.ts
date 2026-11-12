@@ -60,7 +60,7 @@ test('connected account reservation is organization-scoped and claimed by one st
     // A failed creation is claimed again, as is one left unfinished for over a minute.
     await db.prepare("UPDATE stripe_connected_accounts SET status='creation_failed', last_error='Stripe refused' WHERE organization_id='org'").run()
     const retried = await reserveStripeConnectedAccount(db, { organizationId: 'org', livemode: false })
-    assert.deepEqual([retried.id, retried.status, retried.lastError], [first.id, 'creating', null])
+    assert.deepEqual([retried.id, retried.status, retried.last_error], [first.id, 'creating', null])
     await assert.rejects(reserveStripeConnectedAccount(db, { organizationId: 'org', livemode: false }), { statusCode: 409, data: { code: 'CONNECT_SETUP_IN_PROGRESS' } })
     await db.prepare("UPDATE stripe_connected_accounts SET updated_at='2026-01-01T00:00:00.000Z' WHERE organization_id='org'").run()
     assert.equal((await reserveStripeConnectedAccount(db, { organizationId: 'org', livemode: false })).id, first.id)
@@ -104,9 +104,9 @@ test('Stripe account projection preserves provider identity and derives onboardi
 
     const connected = await getStripeConnectedAccount(db, 'org')
     assert.ok(connected)
-    assert.equal(connected.stripeAccountId, 'acct_test')
+    assert.equal(connected.stripe_account_id, 'acct_test')
     assert.equal(connected.status, 'ready')
-    assert.equal(connected.cardPaymentsStatus, 'active')
+    assert.equal(connected.card_payments_status, 'active')
     assert.deepEqual(connected.requirements, [])
     // The country is the one Stripe reported for the account.
     assert.equal(await db.prepare("SELECT country FROM stripe_connected_accounts WHERE stripe_account_id='acct_test'").first('country'), 'US')
@@ -230,7 +230,7 @@ test('Stripe onboarding recommendations follow real account readiness and clear 
       const started = await starting
       assert.equal(started.status, 200)
       assert.equal(started.body.onboarding_url, 'https://connect.stripe.com/d/setup/e/acct_payouts/abc')
-      assert.equal((started.body.account as { stripeAccountId: string }).stripeAccountId, 'acct_payouts')
+      assert.equal((started.body.account as { stripe_account_id: string }).stripe_account_id, 'acct_payouts')
       // Stripe takes only https returns, so the app's are a platform page that hands back to krabiclaw://payouts/<outcome>.
       assert.deepEqual((links[0]!.use_case as { account_onboarding: Record<string, unknown> }).account_onboarding, {
         collection_options: { fields: 'eventually_due', future_requirements: 'include' },

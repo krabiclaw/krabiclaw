@@ -174,16 +174,16 @@ export async function listBusinessOutcomes(
     const outcome: BusinessOutcome = {
       id: ledger(row) ? row.source_id : `${row.source_table}:${row.source_id}`,
       source: { table: row.source_table, id: row.source_id }, event: row.event_name, subject,
-      actor: { kind: row.actor_kind, userId: row.actor_user_id }, occurredAt: row.occurred_at,
+      actor: { kind: row.actor_kind, user_id: row.actor_user_id }, occurred_at: row.occurred_at,
       state: providerStatus === 'unconfirmed' ? 'unknown' : text(payload.state) ?? text(payload.afterStatus) ?? text(payload.status) ?? text(after.status),
-      changedFields: noConfirmedChanges ? [] : Array.isArray(metadata.changed_fields) ? metadata.changed_fields.filter((field): field is string => typeof field === 'string') : [],
+      changed_fields: noConfirmedChanges ? [] : Array.isArray(metadata.changed_fields) ? metadata.changed_fields.filter((field): field is string => typeof field === 'string') : [],
       revision: text(payload.revision) ?? text(metadata.revision) ?? text(metadata.current_revision) ?? text(after.revision) ?? text(after.updated_at),
       references: row.request_id && subject.id !== row.request_id ? [{ kind: 'guest_thread', id: row.request_id }] : [],
       verification: {
         status, basis: metadata.verification_basis === 'provider_acceptance' ? 'provider_acceptance' : row.source_table === 'post_publications' ? 'provider_publication'
           : row.source_table === 'analytics_events' ? 'recorded_conversion' : storedReply ? 'stored_web_reply' : externalSend ? 'provider_acceptance' : 'persisted_change',
         receipts: deliveries.map(receipt => ({ id: receipt.id, channel: receipt.channel, provider: receipt.provider, status: receipt.status,
-          providerMessageId: receipt.provider_message_id })),
+          provider_message_id: receipt.provider_message_id })),
       },
     }
     const details = ledger(row) ? {
@@ -193,7 +193,7 @@ export async function listBusinessOutcomes(
     } : row.source_table === 'analytics_events' ? metadata : payload
     if (Object.keys(details).length) outcome.details = details
     if (noConfirmedChanges && Array.isArray(metadata.changed_fields)) {
-      outcome.requestedFields = metadata.changed_fields.filter((field): field is string => typeof field === 'string')
+      outcome.requested_fields = metadata.changed_fields.filter((field): field is string => typeof field === 'string')
     }
     const operationId = text(metadata.operation_id)
     if (operationId) outcome.references.push({ kind: 'operation', id: operationId })
@@ -202,18 +202,18 @@ export async function listBusinessOutcomes(
     const paymentId = text(metadata.payment_id)
     if (paymentId) outcome.references.push({ kind: 'offline_payment', id: paymentId })
     if (metadata.provider === 'google_ads') {
-      outcome.verification.receipts.push({ id: row.source_id, channel: 'google_ads', provider: 'google_ads', status, providerMessageId: text(metadata.provider_request_id) })
+      outcome.verification.receipts.push({ id: row.source_id, channel: 'google_ads', provider: 'google_ads', status, provider_message_id: text(metadata.provider_request_id) })
     }
     if (row.source_table === 'post_publications') {
       const postId = text(payload.postId)
       if (postId) outcome.references.push({ kind: 'post', id: postId })
-      outcome.verification.receipts.push({ id: row.source_id, channel: row.channel!, provider: row.channel!, status: String(payload.state), providerMessageId: text(payload.providerPostId) })
+      outcome.verification.receipts.push({ id: row.source_id, channel: row.channel!, provider: row.channel!, status: String(payload.state), provider_message_id: text(payload.providerPostId) })
     }
     if (row.source_table === 'analytics_events') {
       const actor = isRecord(payload.actor) ? payload.actor : null
       const kind = actor?.type
       if (actor && text(actor.id) && (kind === 'staff' || kind === 'user' || kind === 'agent')) {
-        outcome.actor = { kind: kind === 'staff' ? 'member' : kind, userId: actor.id as string }
+        outcome.actor = { kind: kind === 'staff' ? 'member' : kind, user_id: actor.id as string }
       }
       const name = text(payload.event_name) as OrganizationConversionEventName | null
       if (!name || !(name in CONVERSION_EVENT_CATALOG) || typeof payload.stage !== 'string' || typeof payload.surface !== 'string') invalidEvidence(row, 'Measured conversion has invalid event evidence')
@@ -223,25 +223,25 @@ export async function listBusinessOutcomes(
           || !Number.isSafeInteger(value.amount_minor) || !/^[A-Z]{3}$/.test(String(value.currency))
           || (value.collected_minor !== undefined && !Number.isSafeInteger(value.collected_minor))) invalidEvidence(row, 'Measured conversion has invalid monetary evidence')
         outcome.value = value as unknown as ConversionValue
-        outcome.moneyOwner = payload.conversion_type === 'subscription' ? 'platform' : 'customer_business'
+        outcome.money_owner = payload.conversion_type === 'subscription' ? 'platform' : 'customer_business'
       }
       const properties = isRecord(payload.properties) ? payload.properties : {}
       outcome.state = payload.stage
       outcome.measurement = {
-        stage: payload.stage, surface: payload.surface, conversionType: text(payload.conversion_type),
+        stage: payload.stage, surface: payload.surface, conversion_type: text(payload.conversion_type),
         attribution: isRecord(payload.attribution) ? payload.attribution as unknown as AttributionTouch : null,
-        attributedAt: text(payload.attributed_at), originEventId: text(payload.origin_event_id), assignedMemberId: text(properties.member_id),
+        attributed_at: text(payload.attributed_at), origin_event_id: text(payload.origin_event_id), assigned_member_id: text(properties.member_id),
       }
     }
     return outcome
   })
-  const hasMore = rows.length > limit
+  const has_more = rows.length > limit
   return {
-    outcomes, pagination: { limit, offset, hasMore, nextOffset: hasMore ? offset + limit : null },
+    outcomes, pagination: { limit, offset, has_more, next_offset: has_more ? offset + limit : null },
     coverage: {
-      supportedEvents: BUSINESS_OUTCOME_EVENTS, sources: ['activity_entries', 'messages', 'post_publications', 'reviews', 'analytics_events'],
-      attribution: 'recorded_actor_only', article: 'persisted_change_only', webReply: 'stored_message_only',
-      externalReply: 'provider_acceptance_requires_receipt', verification: 'only_the_named_evidence_basis',
+      supported_events: BUSINESS_OUTCOME_EVENTS, sources: ['activity_entries', 'messages', 'post_publications', 'reviews', 'analytics_events'],
+      attribution: 'recorded_actor_only', article: 'persisted_change_only', web_reply: 'stored_message_only',
+      external_reply: 'provider_acceptance_requires_receipt', verification: 'only_the_named_evidence_basis',
       unverified: ['public_visibility', 'operation_completion', 'recipient_notification', 'conversation_resolution', 'business_goal_achievement', 'attendance_or_fulfilment', 'causal_revenue_attribution'],
     },
   }
@@ -385,24 +385,24 @@ export async function readBookingWelcomes(db: DbClient, organizationId: string, 
 export async function readBusinessProgressReference(
   db: DbClient,
   principal: MemberAccessPrincipal,
-  input: { operation: BusinessProgressOperation; subjectId: string },
+  input: { operation: BusinessProgressOperation; subject_id: string },
 ): Promise<BusinessProgressReference> {
   await assertOrganizationWideAccess(db, principal)
-  if (typeof input.subjectId !== 'string' || !input.subjectId.trim() || !(BUSINESS_PROGRESS_OPERATIONS as readonly string[]).includes(input.operation)) {
-    throw new HTTPError({ statusCode: 400, message: 'An explicit supported operation and subjectId are required', data: { code: 'INVALID_PROGRESS_REFERENCE', field: 'subjectId' } })
+  if (typeof input.subject_id !== 'string' || !input.subject_id.trim() || !(BUSINESS_PROGRESS_OPERATIONS as readonly string[]).includes(input.operation)) {
+    throw new HTTPError({ statusCode: 400, message: 'An explicit supported operation and subject_id are required', data: { code: 'INVALID_PROGRESS_REFERENCE', field: 'subject_id' } })
   }
-  const missing = () => new HTTPError({ statusCode: 404, message: 'Progress subject not found', data: { code: 'PROGRESS_SUBJECT_NOT_FOUND', field: 'subjectId' } })
+  const missing = () => new HTTPError({ statusCode: 404, message: 'Progress subject not found', data: { code: 'PROGRESS_SUBJECT_NOT_FOUND', field: 'subject_id' } })
   const coordinates = (): [string, string, string] => {
     let value: unknown
-    try { value = JSON.parse(input.subjectId) } catch (error) { if (error instanceof SyntaxError) throw missing(); throw error }
+    try { value = JSON.parse(input.subject_id) } catch (error) { if (error instanceof SyntaxError) throw missing(); throw error }
     if (!Array.isArray(value) || value.length !== 3 || value.some(part => typeof part !== 'string' || !part)) throw missing()
     return value as [string, string, string]
   }
   const result = async (evidence: BusinessProgressReference['evidence'], sources: unknown = evidence): Promise<BusinessProgressReference> => ({
-    ...input, evidence, evidenceRevision: await creationRequestHash({ operation: input.operation, subjectId: input.subjectId, sources }),
+    ...input, evidence, evidence_revision: await creationRequestHash({ operation: input.operation, subjectId: input.subject_id, sources }),
   })
   if (['article.create', 'post.create', 'social.connect', 'google_ads.connect', 'payments.connect'].includes(input.operation)) {
-    if (input.subjectId !== principal.organizationId && input.operation !== 'post.create') throw missing()
+    if (input.subject_id !== principal.organizationId && input.operation !== 'post.create') throw missing()
     const organization = await queryFirst<{ updated_at: string; slug: string }>(db, 'SELECT updated_at, slug FROM organization WHERE id = ?', [principal.organizationId])
     if (!organization) throw missing()
     if (input.operation === 'social.connect') {
@@ -418,12 +418,12 @@ export async function readBusinessProgressReference(
     if (input.operation === 'payments.connect') {
       const setup = await readStripeCheckoutSetup(db, principal.organizationId, principal.env)
       return result({ kind: 'payment_setup', missing: setup.missing,
-        account: setup.connected ? { status: setup.connected.status, cardPaymentsStatus: setup.connected.cardPaymentsStatus, updatedAt: setup.connected.updatedAt } : null },
+        account: setup.connected ? { status: setup.connected.status, cardPaymentsStatus: setup.connected.card_payments_status, updatedAt: setup.connected.updated_at } : null },
       { missing: setup.missing, account: setup.connected ? { id: setup.connected.id, status: setup.connected.status,
-        cardPaymentsStatus: setup.connected.cardPaymentsStatus, requirements: setup.connected.requirements, livemode: setup.connected.livemode } : null })
+        cardPaymentsStatus: setup.connected.card_payments_status, requirements: setup.connected.requirements, livemode: setup.connected.livemode } : null })
     }
     let availability: unknown = null
-    if (input.operation === 'post.create' && input.subjectId !== principal.organizationId) {
+    if (input.operation === 'post.create' && input.subject_id !== principal.organizationId) {
       const [kind, resourceId, occurrence] = coordinates()
       if (kind === 'session') {
         const session = await getSessionAvailability(db, principal.env, principal.organizationId, resourceId, occurrence)
@@ -442,7 +442,7 @@ export async function readBusinessProgressReference(
   }
   if (input.operation === 'post.publish') {
     const post = await queryFirst<{ id: string; status: string | null; updated_at: string } & Record<string, unknown>>(db,
-      "SELECT id, title, slug, summary, metadata_json, status, visibility, published_at, updated_at FROM content_documents WHERE id = ? AND organization_id = ? AND kind = 'social_post' AND row_role = 'root'", [input.subjectId, principal.organizationId])
+      "SELECT id, title, slug, summary, metadata_json, status, visibility, published_at, updated_at FROM content_documents WHERE id = ? AND organization_id = ? AND kind = 'social_post' AND row_role = 'root'", [input.subject_id, principal.organizationId])
     if (!post) throw missing()
     const [publications, media] = await Promise.all([
       recommendationPublications(db, principal.organizationId, [post.id]),
@@ -451,7 +451,7 @@ export async function readBusinessProgressReference(
     return result({ kind: 'post', status: post.status, updatedAt: post.updated_at, publications }, { post, publications, media: [...media.values()].flat() })
   }
   if (input.operation === 'product.readiness') {
-    const product = await getProduct(db, principal.organizationId, input.subjectId)
+    const product = await getProduct(db, principal.organizationId, input.subject_id)
     const blocker = await experiencePublicationBlocker(db, principal.organizationId, product, principal.env as CloudflareEnv)
     if (!blocker) throw missing()
     const evidence = { kind: 'product_readiness' as const, missing: blocker }
@@ -464,7 +464,7 @@ export async function readBusinessProgressReference(
     const interval = input.operation === 'stay.gap' ? coordinates() : null
     if (interval && (!isValidCalendarDate(interval[1]) || !isValidCalendarDate(interval[2]) || interval[2] <= interval[1]
       || (Date.parse(interval[2]) - Date.parse(interval[1])) / 86_400_000 + 2 > MAX_HOMES_CALENDAR_DAYS)) throw missing()
-    const productId = interval ? interval[0] : input.subjectId
+    const productId = interval ? interval[0] : input.subject_id
     const product = await queryFirst<{ id: string; kind: string; updated_at: string }>(db, 'SELECT id, kind, updated_at FROM products WHERE id = ? AND organization_id = ?', [productId, principal.organizationId])
     if (!product) throw missing()
     if (input.operation === 'product.payment') {
@@ -500,7 +500,7 @@ export async function readBusinessProgressReference(
     const document = await queryFirst<{ id: string; status: string | null; updated_at: string } & Record<string, unknown>>(db, `
       SELECT id, title, slug, summary, status, visibility, published_at, seo_keywords, metadata_json, updated_at
       FROM content_documents WHERE id = ? AND organization_id = ? AND kind = 'article' AND row_role = 'root'
-    `, [input.subjectId, principal.organizationId])
+    `, [input.subject_id, principal.organizationId])
     if (!document) throw missing()
     const [blocks, categories, activity, documentMedia] = await Promise.all([
       queryAll<{ id: string } & Record<string, unknown>>(db, 'SELECT id, parent_block_id, type, position, level, data_json FROM content_blocks WHERE document_id = ? ORDER BY position, id', [document.id]),
@@ -517,14 +517,14 @@ export async function readBusinessProgressReference(
       media: media.map(item => ({ placementId: item.placement_id, assetId: item.asset_id, assetUpdatedAt: item.updated_at })),
       ...(input.operation === 'article.distribute' ? { distribution: await readArticleDistribution(db, principal, document.id) } : {}),
     }
-    return { ...input, evidenceRevision: await creationRequestHash({ operation: input.operation, document, blocks, categories, media, activityEntryId: evidence.activityEntryId, ...(evidence.distribution ? { distribution: evidence.distribution } : {}) }), evidence }
+    return { ...input, evidence_revision: await creationRequestHash({ operation: input.operation, document, blocks, categories, media, activityEntryId: evidence.activityEntryId, ...(evidence.distribution ? { distribution: evidence.distribution } : {}) }), evidence }
   }
   if (input.operation === 'booking.welcome') {
-    const [welcome] = await readBookingWelcomes(db, principal.organizationId, { now: new Date(), requestId: input.subjectId })
+    const [welcome] = await readBookingWelcomes(db, principal.organizationId, { now: new Date(), requestId: input.subject_id })
     if (!welcome) throw missing()
     return result({ kind: 'booking_welcome', record: { kind: welcome.kind, id: welcome.recordId, status: welcome.status, startsAt: welcome.startsAt }, message: welcome.message })
   }
-  const request = await getGuestRequest(db, input.subjectId, principal.organizationId)
+  const request = await getGuestRequest(db, input.subject_id, principal.organizationId)
   if (!request) throw missing()
   const [commitment, latestGuest, latestReply, latestMember] = await Promise.all([
     getThreadOperationalRecord(db, request.id),
@@ -539,5 +539,5 @@ export async function readBusinessProgressReference(
     latestMemberEntryId: latestMember?.id ?? null,
     commitment: commitment ? { kind: commitment.unit === 'nights' ? 'stay' as const : 'booking' as const, id: commitment.id, status: commitment.status, startsAt: commitment.starts_at, endsAt: commitment.ends_at } : null,
   }
-  return { ...input, evidenceRevision: await creationRequestHash({ operation: input.operation, evidence, commitment, deliveries }), evidence }
+  return { ...input, evidence_revision: await creationRequestHash({ operation: input.operation, evidence, commitment, deliveries }), evidence }
 }

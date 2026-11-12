@@ -82,7 +82,7 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
   let answers: FormAnswerSnapshot[] = []
   // A seat is paid per guest; a table's deposit once for the booking; a stay once for its nights.
   const purchaseQuantity = input.unit === 'slot' ? paidQuantity(await requireBookingConfig(db, input.organizationId, input.productId), input.quantity) : 1
-  let connected: Pick<StripeConnectedAccount, 'stripeAccountId' | 'livemode'> | undefined
+  let connected: Pick<StripeConnectedAccount, 'stripe_account_id' | 'livemode'> | undefined
   let projectionTitle: string
   let projectionTaxCode: string | null
   let automaticTax: boolean | undefined
@@ -120,7 +120,7 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
       stay = frozenStay
       policy = snapshot.policy as unknown as BookingPolicy
     }
-    connected = { stripeAccountId: frozen.stripe_account_id, livemode: frozen.livemode === 1 }
+    connected = { stripe_account_id: frozen.stripe_account_id, livemode: frozen.livemode === 1 }
     projectionTitle=snapshot.title
     projectionTaxCode=snapshot.tax_code
     price = frozenPrice
@@ -166,7 +166,7 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
     methodConfigurationId = acceptance.methodConfigurationId
     automaticTax = acceptance.automaticTax
   }
-  if(!price || !connected?.stripeAccountId || automaticTax === undefined || !methodConfigurationId)throw new Error('Immutable checkout price or connected account is missing')
+  if(!price || !connected?.stripe_account_id || automaticTax === undefined || !methodConfigurationId)throw new Error('Immutable checkout price or connected account is missing')
   const stripe = paymentsStripe(env, connected.livemode)
   const amount = price.unit_amount*purchaseQuantity
   assertMinorAmount(amount)
@@ -206,7 +206,7 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
     const purchase = { title: projectionTitle, tax_code: projectionTaxCode, price, quantity: purchaseQuantity, automatic_tax: automaticTax, method_configuration_id: methodConfigurationId, request_fingerprint: input.requestFingerprint, billing_fx: billingFx,
       policy, ...(input.unit === 'slot' ? { product_id: input.productId, variant_id: input.variantId, session_id: input.sessionId, answers } : { stay }) }
     try { await executeBatch(db,[
-      { query: `INSERT INTO payments(id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,subject_id,location_id,currency,amount,price_snapshot_json,idempotency_key,checkout_expires_at,return_token,return_token_hash,return_expires_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, params:[id,input.organizationId,input.buyerUserId,connected.stripeAccountId,Number(connected.livemode),'booking',null,input.unit === 'slot' ? session!.location_id : stay!.location_id,price.currency,amount,JSON.stringify(purchase),key,expiresAt,returnToken,returnHash,new Date(Date.now()+86400000).toISOString(),now,now] },
+      { query: `INSERT INTO payments(id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,subject_id,location_id,currency,amount,price_snapshot_json,idempotency_key,checkout_expires_at,return_token,return_token_hash,return_expires_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, params:[id,input.organizationId,input.buyerUserId,connected.stripe_account_id,Number(connected.livemode),'booking',null,input.unit === 'slot' ? session!.location_id : stay!.location_id,price.currency,amount,JSON.stringify(purchase),key,expiresAt,returnToken,returnHash,new Date(Date.now()+86400000).toISOString(),now,now] },
       ...preceding, hold, ...following,
       ...input.following(id),
       // No capacity, no purchase: without a hold nothing refers to this row.
@@ -224,8 +224,8 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
     }
   }
   // A signed-in buyer's Customer at this business: the Payment Element offers, saves and removes their cards here only.
-  const customer=input.buyerUserId?await connectedBuyerCustomer(db,stripe,input.buyerUserId,connected.stripeAccountId,connected.livemode):null
-  const surcharge = await surchargeBasisPoints(db, input.organizationId, connected.stripeAccountId)
+  const customer=input.buyerUserId?await connectedBuyerCustomer(db,stripe,input.buyerUserId,connected.stripe_account_id,connected.livemode):null
+  const surcharge = await surchargeBasisPoints(db, input.organizationId, connected.stripe_account_id)
   try {
     const intent = await stripe.paymentIntents.create({
       amount, currency: price.currency.toLowerCase(),
@@ -240,7 +240,7 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
       metadata: { krabiclaw_payment_id: id },
       // Stripe reports, per card, whether a surcharge may apply and how much at most; the amount is set when the buyer confirms.
       ...(surcharge !== null ? { amount_details: { surcharge: { enforce_validation: 'enabled' } } } : {}),
-    } as Stripe.PaymentIntentCreateParams, { stripeAccount: connected.stripeAccountId, idempotencyKey: key })
+    } as Stripe.PaymentIntentCreateParams, { stripeAccount: connected.stripe_account_id, idempotencyKey: key })
     if (intent.livemode !== connected.livemode || !intent.client_secret) throw new Error('Stripe returned a PaymentIntent outside the connected mode')
     await execute(db,'UPDATE payments SET stripe_payment_intent_id=?,updated_at=? WHERE id=?',[intent.id,new Date().toISOString(),id])
   } catch(error) {

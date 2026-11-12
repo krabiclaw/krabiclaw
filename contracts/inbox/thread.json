@@ -2,6 +2,7 @@
   "thread": {
     "activity_path": null,
     "avatar_initial": "M",
+    "booking_id": "00000000-0000-4000-8000-000000000003",
     "channel": "airbnb",
     "composer": {
       "available": true,
@@ -16,13 +17,12 @@
         "body": "Enjoy your stay!",
         "cancellable": true,
         "due_at": "2026-11-08T23:00:00.000Z",
-        "id": "00000000-0000-4000-8000-000000000003",
+        "id": "00000000-0000-4000-8000-000000000004",
         "label": "Enjoy your stay!",
         "source": "later",
         "time": "Sun, Nov 8, 4:00 PM"
       }
     ],
-    "record_id": "00000000-0000-4000-8000-000000000004",
     "record_kind": "stay",
     "record_title": "Reservation",
     "stream": [

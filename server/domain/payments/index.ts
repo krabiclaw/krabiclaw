@@ -116,8 +116,8 @@ export async function listPayments(db: DbClient, principal: FinancialPrincipal, 
 export async function paymentPayouts(db: DbClient, env: CloudflareEnv, principal: FinancialPrincipal, after?: string) {
   await authorizePayments(principal, 'payouts')
   const account = await getStripeConnectedAccount(db, principal.organizationId)
-  if (!account?.stripeAccountId) return { organization_id: principal.organizationId, configured: false, balance: null, payouts: [], next_cursor: null, source: 'Stripe account not connected', refreshed_at: null }
-  const stripe = paymentsStripe(env, account.livemode), options = { stripeAccount: account.stripeAccountId }
+  if (!account?.stripe_account_id) return { organization_id: principal.organizationId, configured: false, balance: null, payouts: [], next_cursor: null, source: 'Stripe account not connected', refreshed_at: null }
+  const stripe = paymentsStripe(env, account.livemode), options = { stripeAccount: account.stripe_account_id }
   const [balance, payouts] = await Promise.all([stripe.balance.retrieve({}, options), stripe.payouts.list({ limit: 50, ...(after ? { starting_after: after } : {}) }, options)])
   if (balance.livemode !== account.livemode || payouts.data.some(row => row.livemode !== account.livemode)) throw new Error('Stripe payout mode does not match connected account')
   const nextCursor = payouts.has_more ? payouts.data.at(-1)?.id : null

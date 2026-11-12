@@ -668,7 +668,7 @@ test('a reply is sent with the message id Channex returns, and any Channex error
     assert.ok(refusedEntry)
     const refusedProgress = (await listBusinessOutcomes(db, principal, { limit: 100 })).outcomes.find(outcome => outcome.id === refusedEntry.id)
     assert.deepEqual(refusedProgress?.verification, { status: 'failed', basis: 'provider_acceptance', receipts: [{
-      id: `guest-thread-channex:${result.conversation_id}:refused`, channel: 'airbnb', provider: 'channex', status: 'failed', providerMessageId: null,
+      id: `guest-thread-channex:${result.conversation_id}:refused`, channel: 'airbnb', provider: 'channex', status: 'failed', provider_message_id: null,
     }] })
     assert.equal((await getGuestThreadDetail(db, result.conversation_id, ORG))!.deliveryFailures.length, 3)
 
@@ -694,7 +694,7 @@ test('a reply is sent with the message id Channex returns, and any Channex error
     assert.deepEqual(await db.prepare('SELECT status, provider_message_id, error FROM guest_thread_deliveries WHERE message_id = ?').bind(refusedEntry.id).first(),
       { status: 'accepted', provider_message_id: `accepted-${provider.sends}`, error: null })
     const recoveredProgress = (await listBusinessOutcomes(db, principal, { limit: 100 })).outcomes.find(outcome => outcome.id === refusedEntry.id)
-    assert.deepEqual([recoveredProgress?.verification.status, recoveredProgress?.verification.receipts.map(receipt => [receipt.status, receipt.providerMessageId])],
+    assert.deepEqual([recoveredProgress?.verification.status, recoveredProgress?.verification.receipts.map(receipt => [receipt.status, receipt.provider_message_id])],
       ['verified', [['accepted', `accepted-${provider.sends}`]]])
   } finally { releaseRetry?.(); globalThis.fetch = realFetch; await runtime.dispose() }
 })

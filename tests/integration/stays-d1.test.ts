@@ -1347,7 +1347,7 @@ test('gap recommendations follow live listing state, effective night rules and a
     assert.ok(membership)
     const principal = memberAccessPrincipal(membership, { env })
     for (const [from, to] of [['invalid', gap.to], ['2027-02-30', gap.to], [gap.from, gap.from], [gap.to, gap.from], ['2027-05-03', '2027-08-03'], ['0000-01-01', '0000-01-02'], ['9999-12-30', '9999-12-31']]) {
-      await assert.rejects(readBusinessProgressReference(db, principal, { operation: 'stay.gap', subjectId: JSON.stringify([cabin.id, from, to]) }), { status: 404, data: { code: 'PROGRESS_SUBJECT_NOT_FOUND', field: 'subjectId' } })
+      await assert.rejects(readBusinessProgressReference(db, principal, { operation: 'stay.gap', subject_id: JSON.stringify([cabin.id, from, to]) }), { status: 404, data: { code: 'PROGRESS_SUBJECT_NOT_FOUND', field: 'subjectId' } })
     }
     // The gap opportunities Today offers the owner, by the subject each one records.
     const gapOpportunities = async () => {

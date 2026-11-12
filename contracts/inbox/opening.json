@@ -2,6 +2,7 @@
   "thread": {
     "activity_path": null,
     "avatar_initial": "A",
+    "booking_id": "site-stay",
     "channel": "direct",
     "composer": {
       "available": true,
@@ -12,7 +13,6 @@
     "id": "00000000-0000-4000-8000-000000000002",
     "kind": "guest",
     "pending": [],
-    "record_id": "site-stay",
     "record_kind": "stay",
     "record_title": "Reservation",
     "stream": [

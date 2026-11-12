@@ -40,7 +40,7 @@ const sheetOpen = ref(false)
 
 // Show reservation keeps the list it was reached through. A conversation with no record has none.
 const reservationTo = computed(() => {
-  if (!thread.value?.record_id) return null
+  if (!thread.value?.booking_id) return null
   const query = new URLSearchParams()
   for (const [key, value] of Object.entries(route.query)) if (typeof value === 'string') query.set(key, value)
   const search = query.toString()

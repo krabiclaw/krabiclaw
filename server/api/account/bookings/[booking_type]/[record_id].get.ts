@@ -7,7 +7,7 @@ import {isDashboardRecordType,loadBuyerBookingDetails} from '~/server/utils/dash
 export default defineHandler(async event=>{
  const env=cloudflareEnv(event),session=await getAuthSession(event,env)
  if(!session)throw new HTTPError({statusCode:401,statusMessage:'Sign in to view your booking'})
- const bookingType=getRouterParam(event,'booking_type'),bookingId=getRouterParam(event,'id')
+ const bookingType=getRouterParam(event,'booking_type'),bookingId=getRouterParam(event,'record_id')
  if(!isDashboardRecordType(bookingType)||!bookingId)throw new HTTPError({statusCode:400,statusMessage:'Valid record type and ID are required'})
  const booking=await loadBuyerBookingDetails(env.DB,env,session.user.id,bookingType,bookingId)
  return jsonResponse({booking},{headers:{'cache-control':'private, no-store'}})
