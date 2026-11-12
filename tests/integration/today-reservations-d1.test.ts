@@ -7,7 +7,7 @@ import { H3, H3Event } from 'h3'
 import * as schema from '../../server/db/schema.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
-import { createSession, listSessions, setProductBookingConfig } from '../../server/utils/availability.ts'
+import { createSession, listBookableSessions, setProductBookingConfig } from '../../server/utils/availability.ts'
 import { createProductBooking } from '../../server/domain/product-bookings.ts'
 import { createTables } from './support/table-product.ts'
 import { createStay, updateStayHome, type StayAccess } from '../../server/domain/stays.ts'
@@ -134,7 +134,7 @@ test('Today shows every booking type as a reservation card for its own business,
     const tables = await createTables(db, env, { organizationId: 'bistro', locationId: 'bistro-site', actorId: OWNER, memberId: 'bistro-owner', name: 'Bistro table',
       durationMinutes: 90, seats: 20, open: '17:00', lastSeating: '20:00' })
     const evening = localDateTimeToInstant(inTwoDays, '18:00', ZONE, 'compatible').toISOString()
-    const seating = (await listSessions(db, { env, organizationId: 'bistro', productId: tables.id, fromInstant: evening, toInstant: new Date(Date.parse(evening) + 1).toISOString() }))[0]
+    const seating = (await listBookableSessions(db, { env, organizationId: 'bistro', productId: tables.id, fromInstant: evening, toInstant: new Date(Date.parse(evening) + 1).toISOString() }))[0]
     assert.equal(seating?.starts_at, evening)
     const table = await createProductBooking(event(), { organizationId: 'bistro', slug: tables.slug, financialWritesAllowed: false, operator: operator('nora-table'),
       body: { guest_name: 'Nora Park', guest_email: 'nora@proof.example', guest_phone: '+66812345679', product_session_id: seating!.id, party_size: 4 } })

@@ -1,12 +1,12 @@
 import { MEMBER_NAME_SQL } from '~/shared/member-scheduling'
 import { memberBusyIntervals } from '~/server/domain/member-scheduling'
 import type { CloudflareEnv } from '~/server/utils/auth'
-import { getGuestRequest } from '~/server/domain/requests'
+import { getGuestRequest, getThreadOperationalRecord, requestActions } from '~/server/domain/requests'
 import { CURRENT_GUEST_SQL, GUEST_NOTE_EVENT, type MessageRow } from '~/server/domain/conversations'
 import { resolveLocationContact } from '~/server/utils/contact-resolution'
 import type { H3Event } from 'nitro'
 import { HTTPError } from 'nitro'
-import { execute, queryAll, queryFirst, type DbClient } from '~/server/db'
+import { queryAll, queryFirst, type DbClient } from '~/server/db'
 import { getDashboardMemberContext } from '~/server/utils/dashboard-context'
 import { assertAssignedBookingAccess, memberAccessPrincipal, roleAllows } from '~/server/utils/member-access'
 import { formatBookingPolicySummary, parseBookingPolicy, type FormattedBookingPolicySummary } from '~/server/utils/booking-policy-summary'
@@ -15,10 +15,9 @@ import type { ProductKind } from '~/shared/product-details'
 import { getSourceLocale } from '~/server/utils/organization-locales'
 import { loadOwnerPictures } from '~/server/notifications/hero'
 import { addLocalDays, isValidCalendarDate, localDateTimeToInstant, localPartsAt } from '~/utils/timezone'
-import { listSessions } from '~/server/utils/availability'
+import { listBookableSessions } from '~/server/utils/availability'
 import { formatPostalAddress, parsePostalAddress } from '~/utils/postal-address'
-import { moveBooking, requestBookingChange, bookingChangeViews } from '~/server/domain/guest-threads/booking-changes'
-import { publishConversationEvent } from '~/server/cloudflare/guest-inbox-events'
+import { bookingChangeViews } from '~/server/domain/guest-threads/booking-changes'
 import { isBookingComplete, type BookingStatus } from '~/shared/bookings'
 import { readPaymentDetails } from '~/server/domain/payments'
 import { formAnswerSnapshotsSchema, type FormAnswerSnapshot } from '~/shared/form-questions'
@@ -32,6 +31,7 @@ export type DashboardRecordType = DashboardBookingType | 'order' | 'payment'
 interface BookingRow {
   assigned_member_id: string | null
   booking_id: string
+  version: number
   organization_id: string
   organization_name: string
   vertical: string
@@ -76,6 +76,9 @@ export interface DashboardBookingDetails {
   /** A future provider occurrence the caller may reassign through Better Auth. */
   updated_at: string
   booking_id: string | null
+  version: number | null
+  unit: 'slot' | null
+  available_actions: string[]
   type: DashboardRecordType
   /** What was booked: a table reads as a reservation. Null for a purchase. */
   product_kind: ProductKind | null
@@ -173,11 +176,12 @@ async function loadBookingRow(
   scope: BookingScope,
   type: DashboardBookingType,
   bookingId: string,
+  lookup: 'booking' | 'conversation' = 'conversation',
 ): Promise<BookingRow | null> {
   // When, for how many and against what all live on the booking the thread
   // refers to, not on the thread. The thread carries the conversation and the
   // guest.
-  return queryFirst<BookingRow>(db, `SELECT record.id AS booking_id, r.organization_id, s.name AS organization_name, s.vertical,
+  return queryFirst<BookingRow>(db, `SELECT record.id AS booking_id, record.version, r.organization_id, s.name AS organization_name, s.vertical,
     record.assigned_member_id, record.policy_json, record.product_kind, record.advance_notice_minutes, record.location_id, l.slug AS location_slug, l.title AS location_title, l.address AS location_address,
     json_extract(r.payload_json, '$.guest.name') AS guest_name, json_extract(r.payload_json, '$.guest.email') AS guest_email, json_extract(r.payload_json, '$.guest.phone') AS guest_phone,
     (SELECT u.image FROM user u WHERE u.id = r.user_id) AS guest_image_url, record.party_size, record.starts_at, record.ends_at, record.timezone, record.status,
@@ -187,12 +191,12 @@ async function loadBookingRow(
     FROM conversations r
     JOIN organization s ON s.id = r.organization_id
     JOIN (
-      SELECT b.id, b.organization_id, b.status, b.party_size, b.starts_at, b.ends_at, b.timezone, b.location_id, b.product_id, p.name, b.product_session_id, cfg.assigned_member_id, b.created_at, b.updated_at, b.policy_json, p.kind AS product_kind, cfg.advance_notice_minutes, b.no_show_at, b.answers, b.private_notes
+      SELECT b.id, b.version, b.organization_id, b.status, b.party_size, b.starts_at, b.ends_at, b.timezone, b.location_id, b.product_id, p.name, b.product_session_id, cfg.assigned_member_id, b.created_at, b.updated_at, b.policy_json, p.kind AS product_kind, cfg.advance_notice_minutes, b.no_show_at, b.answers, b.private_notes
         FROM bookings b JOIN products p ON p.id = b.product_id
         LEFT JOIN product_booking_configs cfg ON cfg.product_id = b.product_id AND cfg.organization_id = b.organization_id
     ) record ON record.id = r.booking_id AND record.organization_id = r.organization_id
     LEFT JOIN business_locations l ON l.id = record.location_id
-    WHERE r.id = ? AND r.kind = ? AND ${scope.buyerUserId ? `r.user_id = ? AND ${CURRENT_GUEST_SQL('r')}` : 'r.organization_id = ?'}`, [bookingId, type, scope.buyerUserId ?? scope.organizationId])
+    WHERE ${lookup === 'booking' ? 'record.id' : 'r.id'} = ? AND record.product_session_id IS NOT NULL AND r.kind = ? AND ${scope.buyerUserId ? `r.user_id = ? AND ${CURRENT_GUEST_SQL('r')}` : 'r.organization_id = ?'}`, [bookingId, type, scope.buyerUserId ?? scope.organizationId])
 }
 
 async function assertBookingAccess(context: BookingAccessContext, row: BookingRow) {
@@ -224,14 +228,14 @@ async function pendingBookingChange(db: DbClient, threadId: string | null): Prom
 
 export async function loadDashboardBookingDetails(
   event: H3Event,
-  input: { type: DashboardRecordType; bookingId: string; organizationSlug?: string | null },
+  input: { type: DashboardRecordType; bookingId: string; organizationSlug?: string | null; lookup?: 'booking' | 'conversation' },
 ): Promise<DashboardBookingDetails> {
   const context = await bookingContext(event, input.organizationSlug)
   if (input.type === 'order' || input.type === 'payment') {
     if (!await roleAllows({ organizationId: context.organization.id, role: context.organization.role, permissions: { payments: ['read'] } })) throw new HTTPError({ statusCode: 403, message: 'Payments access is required' })
     return composePurchaseDetails(context.db, context.env, { organizationId: context.organization.id }, input.bookingId)
   }
-  const row = await loadBookingRow(context.db, { organizationId: context.organization.id }, input.type, input.bookingId)
+  const row = await loadBookingRow(context.db, { organizationId: context.organization.id }, input.type, input.bookingId, input.lookup)
   if (!row) throw new HTTPError({ statusCode: 404, message: 'Booking not found' })
   await assertBookingAccess(context, row)
   const canReadPayments=await roleAllows({organizationId:context.organization.id,role:context.organization.role,permissions:{payments:['read']}})
@@ -258,9 +262,10 @@ export async function loadBuyerBookingDetails(
   userId: string,
   type: DashboardRecordType,
   bookingId: string,
+  lookup: 'booking' | 'conversation' = 'conversation',
 ): Promise<DashboardBookingDetails> {
   if (type === 'order' || type === 'payment') return composePurchaseDetails(db, env, { buyerUserId: userId }, bookingId)
-  const row = await loadBookingRow(db, { buyerUserId: userId }, type, bookingId)
+  const row = await loadBookingRow(db, { buyerUserId: userId }, type, bookingId, lookup)
   if (!row) throw new HTTPError({ statusCode: 404, message: 'Booking not found' })
   return composeBookingDetails(db, row, type, { env, buyerUserId: userId })
 }
@@ -309,6 +314,11 @@ async function composeBookingDetails(
     review_id: _review, private_notes, location_title, ...booking } = row
   return {
     ...booking,
+    unit: 'slot',
+    available_actions: reader.buyerUserId ? [] : [
+      'edit',
+      ...requestActions(await getThreadOperationalRecord(db, row.conversation_id), now).map(action => action === 'change' ? 'move' : action),
+    ],
     payment_id: null,
     assigned_member_name: provider?.name ?? null,
     provider_conflict: providerConflict,
@@ -353,26 +363,6 @@ async function reviewInvitationState(db: DbClient, bookingId: string, now: strin
   return { state: 'sent', at: request.first_sent_at }
 }
 
-export async function requestDashboardBookingChange(
-  event: H3Event,
-  input: { type: DashboardBookingType; bookingId: string; body: unknown },
-): Promise<DashboardBookingDetails> {
-  const context = await bookingContext(event)
-  const row = await loadBookingRow(context.db, { organizationId: context.organization.id }, input.type, input.bookingId)
-  if (!row) throw new HTTPError({ statusCode: 404, message: 'Booking not found' })
-  await assertBookingAccess(context, row)
-  if (!input.body || typeof input.body !== 'object' || !('idempotency_key' in input.body) || typeof input.body.idempotency_key !== 'string' || !input.body.idempotency_key || input.body.idempotency_key.length > 100) throw new HTTPError({ statusCode: 400, message: 'Request key is required' })
-  const threadId = row.conversation_id
-  const thread = await getGuestRequest(context.db, row.conversation_id, row.organization_id, input.type)
-  if (!thread) throw new HTTPError({ statusCode: 404, message: 'Booking not found' })
-  if (input.type === 'booking') await assertAssignedBookingAccess(context.db, { ...memberAccessPrincipal(context.organization, { env: context.env }), bookingId: row.booking_id })
-  // `apply` moves it now and tells the guest; otherwise the guest is asked first.
-  if ('apply' in input.body && input.body.apply === true) await moveBooking(context.db, context.env, thread, { userId: context.userId }, input.body, input.body.idempotency_key)
-  else await requestBookingChange(context.db, context.env, thread, context.userId, input.body, input.body.idempotency_key)
-  await publishConversationEvent(context.env, context.db, { conversationId: threadId, type: 'MESSAGE_UPDATE' })
-  return await loadDashboardBookingDetails(event, { type: input.type, bookingId: row.conversation_id })
-}
-
 /**
  * The scheduled sessions a booking can move to on one local day, for whoever
  * may change that booking: its booked provider reads them without product
@@ -380,55 +370,33 @@ export async function requestDashboardBookingChange(
  * at the location named (its own when none is). The booking's current session
  * is among them when it is that day.
  */
-export async function listDashboardBookingChangeSessions(event: H3Event, input: { bookingId: string; date: unknown; locationId?: unknown }) {
-  if (typeof input.date !== 'string' || !isValidCalendarDate(input.date)) throw new HTTPError({ statusCode: 400, message: 'date must be a calendar date' })
+export async function listDashboardBookingChangeSessions(event: H3Event, input: { bookingId: string; from?: unknown; to?: unknown; locationId?: unknown }) {
   if (input.locationId !== undefined && (typeof input.locationId !== 'string' || !input.locationId)) throw new HTTPError({ statusCode: 400, message: 'location_id must name a location' })
   const context = await bookingContext(event)
-  const row = await loadBookingRow(context.db, { organizationId: context.organization.id }, 'booking', input.bookingId)
+  const row = await loadBookingRow(context.db, { organizationId: context.organization.id }, 'booking', input.bookingId, 'booking')
   if (!row) throw new HTTPError({ statusCode: 404, message: 'Booking not found' })
   await assertBookingAccess(context, row)
   const elsewhere = input.locationId !== undefined && input.locationId !== row.location_id
   if (elsewhere && row.product_kind !== 'table') throw new HTTPError({ statusCode: 409, message: 'Only a table booking can move to another location' })
   const target = elsewhere
-    ? await queryFirst<{ product_id: string; timezone: string; advance_notice_minutes: number | null }>(context.db, `SELECT p.id AS product_id, l.timezone, c.advance_notice_minutes FROM products p
+    ? await queryFirst<{ product_id: string; timezone: string; location_title: string }>(context.db, `SELECT p.id AS product_id, l.timezone, l.title AS location_title FROM products p
         JOIN product_locations pl ON pl.organization_id = p.organization_id AND pl.product_id = p.id
         JOIN business_locations l ON l.organization_id = pl.organization_id AND l.id = pl.location_id
         JOIN product_booking_configs c ON c.organization_id = p.organization_id AND c.product_id = p.id
-       WHERE p.organization_id = ? AND p.kind = 'table' AND pl.location_id = ?`, [row.organization_id, input.locationId])
-    : { product_id: row.product_id, timezone: row.timezone, advance_notice_minutes: row.advance_notice_minutes }
+       WHERE p.organization_id = ? AND p.kind = 'table' AND p.active = 1 AND pl.active = 1 AND pl.location_id = ?`, [row.organization_id, input.locationId])
+    : { product_id: row.product_id, timezone: row.timezone, location_title: row.location_title }
   if (!target) throw new HTTPError({ statusCode: 404, message: 'That location takes no table bookings' })
-  const sessions = await listSessions(context.db, { env: context.env, organizationId: row.organization_id, productId: target.product_id, statuses: ['scheduled'], ...(elsewhere ? { locationId: input.locationId as string } : {}),
-    fromInstant: localDateTimeToInstant(input.date, '00:00', target.timezone, 'compatible').toISOString(),
-    toInstant: localDateTimeToInstant(addLocalDays(input.date, 1), '00:00', target.timezone, 'compatible').toISOString() })
-  // A start inside the offering's advance notice cannot be moved into; the booked one stays shown.
-  return sessions.filter(session => session.id === row.product_session_id || outsideNotice(session.starts_at, target.advance_notice_minutes))
-}
-
-/**
- * The team's private note on a booking: one text on the booking itself
- * (bookings.private_notes), replaced as a whole and guarded by the booking as
- * the member read it. An empty note removes it.
- */
-export async function setDashboardBookingNote(
-  event: H3Event,
-  input: { type: DashboardBookingType; bookingId: string; body: unknown },
-): Promise<DashboardBookingDetails> {
-  const context = await bookingContext(event)
-  const row = await loadBookingRow(context.db, { organizationId: context.organization.id }, input.type, input.bookingId)
-  if (!row) throw new HTTPError({ statusCode: 404, message: 'Booking not found' })
-  await assertBookingAccess(context, row)
-  if (!input.body || typeof input.body !== 'object' || Array.isArray(input.body)) throw new HTTPError({ statusCode: 400, message: 'private_notes and updated_at are required' })
-  const payload = input.body as Record<string, unknown>
-  if (typeof payload.private_notes !== 'string') throw new HTTPError({ statusCode: 400, message: 'private_notes must be text' })
-  const note = payload.private_notes.trim()
-  if (note.length > 2000) throw new HTTPError({ statusCode: 400, message: 'Note must be at most 2000 characters' })
-  if (typeof payload.updated_at !== 'string' || !payload.updated_at) throw new HTTPError({ statusCode: 400, message: 'updated_at is required' })
-  const now = new Date().toISOString()
-  const written = await execute(context.db, `UPDATE bookings SET private_notes = ?, version = version + 1, updated_at = ?
-    WHERE organization_id = ? AND id = ? AND updated_at = ?`, [note || null, now, row.organization_id, row.booking_id, payload.updated_at])
-  if (written.meta.changes !== 1) throw new HTTPError({ statusCode: 409, message: 'This booking changed since you opened it. Reload and try again.' })
-  await publishConversationEvent(context.env, context.db, { conversationId: row.conversation_id, type: 'MESSAGE_UPDATE' })
-  return await loadDashboardBookingDetails(event, { type: input.type, bookingId: row.conversation_id })
+  const from = input.from ?? localDateOf(row)
+  const to = input.to ?? (isValidCalendarDate(from) ? addLocalDays(from, 7) : null)
+  if (!isValidCalendarDate(from) || !isValidCalendarDate(to) || to <= from || to > addLocalDays(from, 31)) {
+    throw new HTTPError({ statusCode: 422, message: 'Request up to 31 calendar days' })
+  }
+  const locationId = elsewhere ? input.locationId as string : row.location_id
+  const sessions = await listBookableSessions(context.db, { env: context.env, organizationId: row.organization_id, productId: target.product_id, locationId,
+    fromInstant: localDateTimeToInstant(from, '00:00', target.timezone, 'compatible').toISOString(),
+    toInstant: localDateTimeToInstant(to, '00:00', target.timezone, 'compatible').toISOString() })
+  return sessions.map(session => ({ ...session, product_session_id: session.id, location_title: target.location_title,
+    remaining: session.id === row.product_session_id && session.remaining !== null ? session.remaining + row.party_size : session.remaining }))
 }
 
 export function isDashboardBookingType(value: string | undefined): value is DashboardBookingType {
@@ -470,6 +438,9 @@ async function composePurchaseDetails(db: DbClient, env: CloudflareEnv, scope: B
     answers: [],
     payment_id: paymentId,
     booking_id: null,
+    version: null,
+    unit: null,
+    available_actions: [],
     type: detail.order ? 'order' : 'payment',
     organization_id: payment.organization_id,
     organization_name: payment.organization_name,

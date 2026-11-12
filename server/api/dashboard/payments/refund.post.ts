@@ -4,10 +4,10 @@ import {getDashboardContext} from '~/server/utils/dashboard-context'
 import {jsonResponse,readRequiredBody} from '~/server/utils/api-response'
 import {requestRefundAuthorization,approveRefundAuthorization,refundPayment,executeRefund,requirePayment} from '~/server/domain/payments'
 import {queryFirst} from '~/server/db'
-import {executeGuestThreadOperation} from '~/server/domain/guest-threads/operations'
+import {executeBookingStatus} from '~/server/domain/guest-threads/operations'
 import {paymentsStripe} from '~/server/utils/stripe-connect'
 import {visitRefundKey,type VisitRefundAction} from '~/server/domain/payments/visit-refund'
-import {cancelStay,stayAccessFor} from '~/server/domain/stays'
+import {stayAccessFor} from '~/server/domain/stays'
 import {memberAccessPrincipal} from '~/server/utils/member-access'
 import {notifyStayCancelled} from '~/server/utils/notifications'
 export default defineHandler(async event=>{
@@ -25,7 +25,7 @@ export default defineHandler(async event=>{
  if(paid&&(paid.subject_type!=='booking'||!paid.subject_id)) throw new HTTPError({statusCode:409,statusMessage:'Authorization is not for a booking payment'})
  const booked=paid?await queryFirst<{conversation_id:string|null;status:string;version:number;nights:number}>(db,"SELECT (SELECT c.id FROM conversations c WHERE c.booking_id=b.id AND c.kind='booking') AS conversation_id,b.status,b.version,b.product_session_id IS NULL AS nights FROM bookings b WHERE b.id=? AND b.organization_id=?",[paid.subject_id,organization.id]):null
  if(paid&&!booked) throw new HTTPError({statusCode:409,statusMessage:'Paid booking is unavailable'})
- // A stay is cancelled from its own screen, with its nights and channel; any other booking through its conversation.
+ // A stay has channel publication and sends its cancellation receipt with the refunded amount.
  if(paid&&booked&&authorization.action==='cancel_booking'&&booked.nights===1){
   const payment=paid,stay=booked
   const key=visitRefundKey('cancel',payment.subject_id!)
@@ -33,7 +33,10 @@ export default defineHandler(async event=>{
   const access=await stayAccessFor(memberAccessPrincipal(organization,{env,event}))
   const failures:unknown[]=[]
   try {
-   await cancelStay(db,env,access,payment.subject_id!,{version:stay.version,reason:authorization.note,authorization_id:body.authorization_id})
+   await executeBookingStatus(db, {
+    env, organizationId: organization.id, actorUserId: userId, bookingId: payment.subject_id!, threadId: stay.conversation_id,
+    action: 'cancel', version: stay.version, reason: authorization.note ?? undefined, financialAuthorizationId: body.authorization_id, stayAccess: access,
+   })
   } catch(error) {
    // A first cancellation must commit before money moves. An already approved
    // durable refund still completes when its cancelled stay's repair fails.
@@ -65,7 +68,9 @@ export default defineHandler(async event=>{
   const action:VisitRefundAction=authorization.action==='reject_booking'?'reject':'cancel'
   const payment=paid,booking=booked
   if(!booking.conversation_id) throw new HTTPError({statusCode:409,statusMessage:'Paid booking request is unavailable'})
-  const outcome=await executeGuestThreadOperation(db,{threadId:booking.conversation_id,organizationId:organization.id,action,actorUserId:userId,idempotencyKey:`paid-${action}:${body.authorization_id}`,financialAuthorizationId:body.authorization_id,...(authorization.note?{body:authorization.note}:{}),env})
+  const status=await executeBookingStatus(db,{threadId:booking.conversation_id,organizationId:organization.id,bookingId:payment.subject_id!,version:booking.version,action,actorUserId:userId,idempotencyKey:`paid-${action}:${body.authorization_id}`,financialAuthorizationId:body.authorization_id,...(authorization.note?{body:authorization.note}:{}),env})
+  if(status.kind!=='booking') throw new Error('Timed booking refund changed its inventory unit')
+  const {outcome}=status
   const key=visitRefundKey(action,payment.subject_id!)
   const refund=await queryFirst(db,'SELECT id FROM payment_refunds WHERE payment_id=? AND idempotency_key=?',[payment.id,key])
   if(!refund) throw new HTTPError({statusCode:409,statusMessage:outcome.ok?'Refund intent missing':`Booking ${action==='reject'?'rejection':'cancellation'} could not be committed`})

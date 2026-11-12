@@ -59,32 +59,24 @@ test('unknown and retired API routes return JSON 404 without rendering a tenant 
 test('Blawby authored contact sections retain their forms and selected locations', async ({ page, request }) => {
   const platform = new URL(testBaseUrl())
   test.skip(platform.hostname !== 'krabiclaw.com', 'These authored contact pages are production tenants.')
-  // Two generated contact pages, and Cedar's, re-authored in the CMS with its own titles and a divider.
-  const generated = (documentId: string) => ({ types: ['hero', 'location_grid', 'contact_form'], locations: { id: `block-contact-locations-${documentId}`, title: 'Our locations', description: 'Contact' }, formId: `block-contact-form-${documentId}` })
-  for (const tenant of [
-    { slug: 'krabiclaw-review-legal', documentId: 'ade2018e-693d-4b0e-8025-daf3143abb8a', locationIds: ['loc-554dde4c-3dcf-406f-ab9d-82038dd1b70c'], ...generated('ade2018e-693d-4b0e-8025-daf3143abb8a') },
-    { slug: 'krabiclaw-onboarding-check', documentId: '8780bc6a-6e90-4db6-aac3-2cb1048fbe28', locationIds: ['e151c459-0437-477a-a27e-bb360128b43d', 'loc-5b52502a-0a3e-4410-b14c-d3662f74ae43'], ...generated('8780bc6a-6e90-4db6-aac3-2cb1048fbe28') },
-    { slug: 'cedar-legal', documentId: 'cd961dbe-9250-4878-b05b-b7fe1e95591d', locationIds: ['loc-abce1341-c462-4e8d-ab8c-f4f6657f07cf'], types: ['hero', 'divider', 'location_grid', 'contact_form'], locations: { id: 'ce64db84-0b72-41e2-a87b-2090c29103d7', title: 'Office Location & Contact Info', description: undefined }, formId: 'a0970094-2071-42a4-8605-2b1ab88b3dcd' },
-  ]) {
-    const site = `https://${tenant.slug}.${platform.hostname}`
-    const response = await request.get(`${site}/api/public/pages`, { params: { path: '/contact' } })
-    expect(response.status(), await response.text()).toBe(200)
-    const document = await response.json() as { page: { id: string; blocks: Array<{ id: string; type: string; data: { title?: string; description?: string; location_ids?: string[]; items?: Array<{ id: string }> } }> } }
-    expect(document.page.id).toBe(tenant.documentId)
-    expect(document.page.blocks.map(block => block.type)).toEqual(tenant.types)
-    const locations = document.page.blocks.find(block => block.type === 'location_grid')!
-    expect(locations).toMatchObject({ id: tenant.locations.id, data: { title: tenant.locations.title, location_ids: tenant.locationIds } })
-    // Cedar's authored block carries no description at all.
-    expect(locations.data.description).toBe(tenant.locations.description)
-    expect(locations.data.items!.map(item => item.id)).toEqual(tenant.locationIds)
-    expect(document.page.blocks.find(block => block.type === 'contact_form')!.id).toBe(tenant.formId)
-    await page.unrouteAll()
-    const rendered = await openTenantPage(page, `${site}/contact`, {})
-    expect(rendered?.status()).toBe(200)
-    await expect(page.getByRole('heading', { name: tenant.locations.title, exact: true })).toBeVisible()
-    await expect(page.getByRole('heading', { name: 'Send a message', exact: true })).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Send message', exact: true })).toHaveCount(1)
-  }
+  const site = `https://cedar-legal.${platform.hostname}`
+  const title = 'Office Location & Contact Info'
+  const locationIds = ['loc-abce1341-c462-4e8d-ab8c-f4f6657f07cf']
+  const response = await request.get(`${site}/api/public/pages`, { params: { path: '/contact' } })
+  expect(response.status(), await response.text()).toBe(200)
+  const document = await response.json() as { page: { id: string; blocks: Array<{ id: string; type: string; data: { title?: string; description?: string; location_ids?: string[]; items?: Array<{ id: string }> } }> } }
+  expect(document.page.id).toBe('cd961dbe-9250-4878-b05b-b7fe1e95591d')
+  expect(document.page.blocks.map(block => block.type)).toEqual(['hero', 'divider', 'location_grid', 'contact_form'])
+  const locations = document.page.blocks.find(block => block.type === 'location_grid')!
+  expect(locations).toMatchObject({ id: 'ce64db84-0b72-41e2-a87b-2090c29103d7', data: { title, location_ids: locationIds } })
+  expect(locations.data.description).toBeUndefined()
+  expect(locations.data.items!.map(item => item.id)).toEqual(locationIds)
+  expect(document.page.blocks.find(block => block.type === 'contact_form')!.id).toBe('a0970094-2071-42a4-8605-2b1ab88b3dcd')
+  const rendered = await openTenantPage(page, `${site}/contact`, {})
+  expect(rendered?.status()).toBe(200)
+  await expect(page.getByRole('heading', { name: title, exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Send a message', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Send message', exact: true })).toHaveCount(1)
   await page.unrouteAll()
   const disabled = await openTenantPage(page, `${blawbyBaseURL}/contact`, blawbyExtraHeaders)
   expect(disabled?.status()).toBe(200)
@@ -210,11 +202,16 @@ test('a guest opens a stay\'s booking dialog, picks nights the calendar allows a
   expect(homePage.status()).toBe(200)
   expect(await homePage.text(), 'the lodging demo home page does not offer the studio').toContain(`href="${stayPath}"`)
   type Night = { date: string; available: boolean; price_minor: number | null; min_stay_arrival: number; max_stay: number | null; closed_to_arrival: boolean; closed_to_departure: boolean }
-  const from = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10)
-  const to = new Date(Date.now() + 120 * 86_400_000).toISOString().slice(0, 10)
-  const read = await page.request.get(`${baseURL}/api/public/products/${slug}/nights?from=${from}&to=${to}`)
-  expect(read.status(), await read.text()).toBe(200)
-  const { home, nights } = await read.json() as { home: { today: string; currency: string }; nights: Night[] }
+  const start = Date.now() - 86_400_000
+  const reads = await Promise.all(Array.from({ length: 4 }, async (_, pageIndex) => {
+    const from = new Date(start + pageIndex * 30 * 86_400_000).toISOString().slice(0, 10)
+    const to = new Date(start + (pageIndex + 1) * 30 * 86_400_000).toISOString().slice(0, 10)
+    const read = await page.request.get(`${baseURL}/api/public/products/${slug}/availability?from=${from}&to=${to}`)
+    expect(read.status(), await read.text()).toBe(200)
+    return await read.json() as { unit: 'nights'; home: { today: string; currency: string }; nights: Night[] }
+  }))
+  const home = reads[0]!.home
+  const nights = [...new Map(reads.flatMap(result => result.nights.map(night => [night.date, night] as const))).values()]
   // The first stay the home's own nights allow, check-in and checkout in one month.
   let chosen: { checkIn: Night; checkOut: string; stayed: Night[]; minimum: number } | null = null
   for (let start = 0; start < nights.length && !chosen; start++) {

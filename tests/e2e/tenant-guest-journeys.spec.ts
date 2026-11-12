@@ -83,16 +83,7 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     test.slow()
     const since = new Date().toISOString()
     const email = `pottery-booking-${Date.now()}@playwright.example`
-    // A guest books an occurrence, and occurrences are materialized from the
-    // product's rules. Generation is idempotent, so the journey makes sure
-    // there is something on the calendar to book before it tries.
     const wheel = wheelClass()
-    await loginAs(request, testBaseUrl(), 'user-e2e-pottery-owner')
-    const generated = await request.post(`${testBaseUrl()}/api/editor/organizations/${wheel.organizationId}/products/${wheel.product.id}/sessions/generate`, {
-      headers: seededSiteHeaders('experience'),
-      data: { through: new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10) },
-    })
-    expect(generated.status(), await generated.text()).toBe(200)
     await openTenantPage(page, `${seededSiteURL('experience')}${wheel.pagePath}`, seededSiteHeaders('experience'))
     await waitForNuxtHydration(page)
     // What a guest presses is the labelled control; the checkbox behind it is
@@ -159,9 +150,10 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     const response = await submission
     expect(response.status()).toBe(201)
     expect(response.request().postDataJSON()).toMatchObject({ guest_phone: '+66812345678' })
-    const booked = await response.json() as { conversation_id: string }
+    const booked = await response.json() as { conversation_id: string; booking_id: string }
     expect(booked.conversation_id).toEqual(expect.any(String))
-    const persisted = await request.get(`${testBaseUrl()}/api/dashboard/bookings/booking/${booked.conversation_id}`, {
+    await loginAs(request, testBaseUrl(), 'user-e2e-pottery-owner')
+    const persisted = await request.get(`${testBaseUrl()}/api/dashboard/bookings/${booked.booking_id}`, {
       params: { org: wheel.slug },
     })
     expect(persisted.status(), await persisted.text()).toBe(200)
@@ -244,7 +236,7 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     await page.getByRole('button', { name: 'Send message', exact: true }).click()
     const response = await submission
     expect(response.status()).toBe(201)
-    const { conversation_id } = await response.json() as { conversation_id: string }
+    const { conversation_id } = await response.json() as { conversation_id: string; booking_id: string }
     await expect(page).toHaveURL(/\/contact\/confirmed/)
     const state = await waitForNotifications(request, seededSiteURL('experience'), seededTenant('experience').organizationId, since, conversation_id, state =>
       ownerAlertSent(state)
@@ -299,10 +291,10 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     const created = await submission
     expect(created.status()).toBe(201)
     expect(created.request().postDataJSON()).toMatchObject({ guest_phone: null })
-    const body = await created.json() as { conversation_id: string; cancellation_token: string }
+    const body = await created.json() as { conversation_id: string; booking_id: string; cancellation_token: string }
     expect(JSON.stringify(body)).not.toContain('cancel-once@playwright.example')
     await loginAs(request, baseURL, 'user-e2e-pottery-owner')
-    const persisted = await request.get(`${baseURL}/api/dashboard/bookings/booking/${body.conversation_id}`, {
+    const persisted = await request.get(`${baseURL}/api/dashboard/bookings/${body.booking_id}`, {
       params: { org: wheel.slug },
     })
     expect(persisted.status(), await persisted.text()).toBe(200)

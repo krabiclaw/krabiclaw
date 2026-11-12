@@ -1,4 +1,5 @@
 import { defineHandler } from 'nitro'
+import { nightBooking } from '~/server/utils/dashboard-bookings'
 import { getRouterParam } from 'nitro/h3'
 import { jsonResponse, readRequiredBody } from '~/server/utils/api-response'
 import { getDashboardMemberContext } from '~/server/utils/dashboard-context'
@@ -11,5 +12,6 @@ export default defineHandler(async (event) => {
   const access = await stayAccessFor(memberAccessPrincipal(organization, { env, event }))
   access.audit = organizationEventContext(event, 'dashboard', session.user.id, session.session)
   const body = await readRequiredBody<Record<string, unknown>>(event)
-  return jsonResponse(await setStayNights(db, env, access, { ...body, product_id: getRouterParam(event, 'product_id') ?? '', from: body.from, to: body.to }))
+  const { stays, ...calendar } = await setStayNights(db, env, access, { ...body, product_id: getRouterParam(event, 'product_id') ?? '', from: body.from, to: body.to })
+  return jsonResponse({ ...calendar, bookings: stays.map(nightBooking) })
 })

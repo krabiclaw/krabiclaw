@@ -291,9 +291,9 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Saves a booking — a class, a restaurant table, or for a legal practice a client consultation — with its inbox conversation; emails the guest when acknowledgement is chosen and notifies business staff. A confirmed consultation opens the attorney’s preparation and follow-up jobs, posted to the team as an automatic team message.",
-        "destructive_justification": "Sends notifications that cannot be recalled and uses up bookable places; a booking that requires online payment is refused before it is created.",
-        "open_world_justification": "Can email the supplied guest address, notify business staff and post the attorney’s jobs to the team."
+        "read_only_justification": "Saves a booking — a class, table, legal consultation or direct stay — with its inbox conversation; emails the guest when acknowledgement is chosen and notifies business staff. A confirmed consultation opens the attorney’s preparation and follow-up jobs, posted to the team as an automatic team message.",
+        "destructive_justification": "Sends notifications that cannot be recalled and uses up bookable places or nights; a booking that requires online payment is refused before it is created.",
+        "open_world_justification": "Can notify guests and staff, post work to the team, and update connected Airbnb availability for a stay."
       }
     },
     "create_product_session": {
@@ -330,18 +330,6 @@
         "read_only_justification": "Creates a new source page or a new translated representation with unused IDs/path; existing documents and occupied paths are refused.",
         "destructive_justification": "Adds a new page/representation and preserves existing authored pages/content.",
         "open_world_justification": "A new page on a live website can become public immediately."
-      }
-    },
-    "create_stay": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": true,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Creates a confirmed stay the host took directly, holds its nights, opens its turnover job, plans automatic guest messages and updates connected Airbnb availability; the turnover job is posted to the team as an automatic team message, and this tool takes no payment.",
-        "destructive_justification": "Can queue guest messages that cannot be recalled and changes the nights available for sale; it is not only an additive private note.",
-        "open_world_justification": "Queued guest messages can reach guests, connected Airbnb availability is updated and the turnover job is posted to the team."
       }
     },
     "create_task": {
@@ -1268,16 +1256,16 @@
         "open_world_justification": "Changes only the caller’s private read position within the workspace."
       }
     },
-    "move_stay": {
+    "no_show_product_booking": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": true,
+        "openWorldHint": false,
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Checks the stay’s version and moves the guest to another of the host’s homes: its nights, turnover job and pending guest messages follow the guest, the new home gets a job to make it ready, an Airbnb reservation keeps its booked listing closed, and the jobs are posted to the team as automatic team messages. When the stay has a guest conversation, the guest is messaged the new address and entry details.",
-        "destructive_justification": "Rewrites the stay’s home, the nights it holds, its open jobs and its pending guest messages.",
-        "open_world_justification": "Changes connected Airbnb availability on both homes through Channex, posts the jobs to the team and, when the stay has a guest conversation, sends the guest a message."
+        "read_only_justification": "Records a no-show on the selected booking.",
+        "destructive_justification": "Stops the review invitation and invalidates an outstanding review link.",
+        "open_world_justification": "The guest can no longer submit a review for this booking."
       }
     },
     "open_dates": {
@@ -1575,7 +1563,7 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Replaces one product/location weekly schedule and creates the bookable sessions it describes; booked-history sessions remain while removed unbooked sessions can be cancelled.",
+        "read_only_justification": "Replaces one product/location weekly schedule and changes its future bookable times. Sessions with booking history retain their recorded times and capacity.",
         "destructive_justification": "Replaces rules and cancels unbooked future sessions omitted from the new schedule.",
         "open_world_justification": "Changes public bookable times at the named location."
       }
@@ -1599,9 +1587,9 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Persists a guest-change proposal or immediately applies an allowed non-consultation move, including a table booking moved to another location's tables.",
+        "read_only_justification": "Persists a guest-change proposal or immediately applies an allowed non-consultation move, including a table moved to another location or a guest moved to another home.",
         "destructive_justification": "Sends the guest a proposal or change email and can overwrite the booking’s session and party size.",
-        "open_world_justification": "Emails the booking’s guest; consultations still require client acceptance."
+        "open_world_justification": "Emails the booking’s guest and can update availability for a move between homes. Consultations require client acceptance."
       }
     },
     "save_media_attachment": {
@@ -2012,6 +2000,18 @@
         "open_world_justification": "Can change public product content and push supported listing settings to a connected Airbnb listing."
       }
     },
+    "update_product_booking": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Changes the team's private notes or a host-entered stay.",
+        "destructive_justification": "May replace stay dates and release the previous nights.",
+        "open_world_justification": "Changing a stay's dates can update connected Airbnb availability and scheduled guest messages."
+      }
+    },
     "update_product_session": {
       "annotations": {
         "readOnlyHint": false,
@@ -2046,18 +2046,6 @@
         "read_only_justification": "Version-checks a complete existing-page snapshot, preserves its address, replaces requested body/metadata and changes optional product binding.",
         "destructive_justification": "Can overwrite page metadata/body and remove explicitly confirmed blocks.",
         "open_world_justification": "Published website content can change immediately."
-      }
-    },
-    "update_stay": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": true,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Checks the stay’s version and edits a stay booked on the website or added by the host, moves its turnover job to the new dates, replans pending guest messages and sends changed availability to Airbnb; Airbnb reservations are changed on Airbnb.",
-        "destructive_justification": "Overwrites stay fields, the nights it holds, its turnover job and its pending message plans.",
-        "open_world_justification": "Changes connected Airbnb availability, automatic guest messages and when the team is reminded of the turnover job."
       }
     },
     "update_stay_arrival_guide": {

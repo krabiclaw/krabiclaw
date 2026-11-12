@@ -15,7 +15,7 @@ import { hashEmail } from '../../server/utils/email-delivery.ts'
 import { H3Event } from 'h3'
 import { createProductBooking } from '../../server/domain/product-bookings.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
-import { listSessions } from '../../server/utils/availability.ts'
+import { listBookableSessions } from '../../server/utils/availability.ts'
 import { addLocalDays, localDateAt, localDateTimeToInstant } from '../../utils/timezone.ts'
 import { createTables } from './support/table-product.ts'
 import { listBusinessOutcomes } from '../../server/utils/business-outcomes.ts'
@@ -225,7 +225,7 @@ test('the funnel joins a business site from visit to payment, by source and by l
     const dinnerDate = localDateAt(new Date(Date.now() + 2 * 86_400_000), 'Asia/Bangkok')
     const seating = async (locationId: string) => {
       const at = localDateTimeToInstant(dinnerDate, '19:00', 'Asia/Bangkok', 'reject').toISOString()
-      const [found] = await listSessions(db, { env, organizationId: 'org-funnel', productId: tables[locationId]!.id, fromInstant: at, toInstant: new Date(Date.parse(at) + 60_000).toISOString() })
+      const [found] = await listBookableSessions(db, { env, organizationId: 'org-funnel', productId: tables[locationId]!.id, fromInstant: at, toInstant: new Date(Date.parse(at) + 60_000).toISOString() })
       assert.equal(found?.starts_at, at)
       return found!.id
     }

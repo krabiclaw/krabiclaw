@@ -31,7 +31,15 @@
 
     <!-- Month bar + calendar toggle -->
     <div class="flex shrink-0 items-center justify-between gap-4 border-b border-default px-1 py-3">
-      <span class="tenant-display text-lg">{{ monthLabel }}</span>
+      <div class="flex items-center gap-2">
+        <button v-if="month" type="button" class="rounded-full p-2 disabled:opacity-30" :aria-label="t('stay.previous_month')" :disabled="!previousMonth || previousMonth < firstMonth" @click="previousMonth && emit('update:month', previousMonth)">
+          <TenantIcon name="chevron-left" class="size-4" />
+        </button>
+        <span class="tenant-display text-lg">{{ monthLabel }}</span>
+        <button v-if="month" type="button" class="rounded-full p-2 disabled:opacity-30" :aria-label="t('stay.next_month')" :disabled="!nextMonth || !lastMonth || nextMonth > lastMonth" @click="nextMonth && emit('update:month', nextMonth)">
+          <TenantIcon name="chevron-right" class="size-4" />
+        </button>
+      </div>
       <button
         type="button"
         class="flex size-9 items-center justify-center rounded-full border border-default text-default transition-colors"
@@ -73,7 +81,7 @@
 
     <!-- Day-grouped scrollable slot list -->
     <div v-else ref="scrollRef" class="min-h-0 flex-1 overflow-y-auto px-1 py-2">
-      <p v-if="dates.length > 0 && days.length === 0" class="py-6 text-sm text-muted">{{ t('site.experience_detail.no_availability', { count: dates.length }) }}</p>
+      <p v-if="days.length === 0" class="py-6 text-sm text-muted">{{ t('stay.no_dates', 1) }}</p>
       <section v-for="day in days" :key="day.key" :ref="(el) => setDayRef(el, day.key)" class="pt-4 first:pt-0">
         <h3 class="tenant-display mb-3 text-lg">{{ day.label }}</h3>
         <!-- Airbnb's times: a grid of pills, the chosen one filled. -->
@@ -116,6 +124,7 @@
 </template>
 
 <script setup lang="ts">
+import { parseDate } from '@internationalized/date'
 import { formatCalendarDate, formatTime, addLocalDays } from '~/utils/timezone'
 export interface RawSlotAvailability {
   time_slot: string
@@ -141,6 +150,8 @@ export interface TimeSlotSelection {
 const props = withDefaults(defineProps<{
   dates: RawDateAvailability[]
   referenceDate?: string
+  month?: string
+  lastMonth?: string
   loading?: boolean
   modelValue?: TimeSlotSelection | null
   guests: number
@@ -173,6 +184,7 @@ const resolvedChooseSeatingLabel = computed(() => props.chooseSeatingLabel || t(
 const emit = defineEmits<{
   'update:modelValue': [value: TimeSlotSelection]
   'update:guests': [value: number]
+  'update:month': [value: string]
   next: []
 }>()
 
@@ -215,7 +227,11 @@ const days = computed(() => {
   }).filter((d) => d.slots.length > 0)
 })
 
+const firstMonth = computed(() => referenceDate.value ? `${referenceDate.value.slice(0, 7)}-01` : '')
+const previousMonth = computed(() => props.month ? parseDate(props.month).subtract({ months: 1 }).toString() : null)
+const nextMonth = computed(() => props.month ? parseDate(props.month).add({ months: 1 }).toString() : null)
 const monthLabel = computed(() => {
+  if (props.month) return formatCalendarDate(props.month, locale.value, { month: 'long', year: 'numeric' })
   if (props.dates.length === 0) return ''
   const first = props.dates[0]!.date
   const last = props.dates[props.dates.length - 1]!.date
@@ -260,11 +276,11 @@ const weekdayLabels = computed(() => Array.from({ length: 7 }, (_, index) =>
 ))
 
 const calendarDays = computed(() => {
-  if (props.dates.length === 0) return []
+  if (!props.month && props.dates.length === 0) return []
   const byKey = Object.fromEntries(days.value.map((d) => [d.key, d]))
   const todayKey = referenceDate.value
-  const first = props.dates[0]!.date
-  const last = props.dates[props.dates.length - 1]!.date
+  const first = props.month ?? props.dates[0]!.date
+  const last = nextMonth.value ? addLocalDays(nextMonth.value, -1) : props.dates[props.dates.length - 1]!.date
   const out: Array<{ key: string; dayNum: number; hasSeats: boolean; isToday: boolean }> = []
   let cursor = first
   while (cursor <= last) {
@@ -279,7 +295,7 @@ const calendarDays = computed(() => {
 })
 
 const leadingBlanks = computed(() => {
-  if (props.dates.length === 0) return 0
-  return new Date(`${props.dates[0]!.date}T00:00:00Z`).getUTCDay()
+  const first = props.month ?? props.dates[0]?.date
+  return first ? new Date(`${first}T00:00:00Z`).getUTCDay() : 0
 })
 </script>

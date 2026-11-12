@@ -53,7 +53,7 @@ const { data: homes, error: homesError } = await useAsyncData(
 const todayKey = today(getLocalTimeZone()).toString()
 const { data: places, error: placesError } = await useAsyncData(
   () => `calendar-places:${String(route.params.org_slug)}`,
-  () => api('/api/dashboard/places/calendar', { query: { from: todayKey, to: parseDate(todayKey).add({ days: 1 }).toString() }, validate: (value): value is { places: unknown[] } => isRecord(value) && Array.isArray(value.places) }),
+  () => api('/api/dashboard/bookings/calendar', { query: { unit: 'slot', from: todayKey, to: parseDate(todayKey).add({ days: 1 }).toString() }, validate: (value): value is { places: unknown[] } => isRecord(value) && Array.isArray(value.places) }),
 )
 const { data: products, error: productsError } = await useAsyncData(
   () => `calendar-offerings:${organizationId}:${dashboard.organization.value?.role ?? ''}`,

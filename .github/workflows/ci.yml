@@ -69,6 +69,8 @@ jobs:
       matrix:
         shard: [1, 2, 3, 4]
     env:
+      YARN_ENABLE_GLOBAL_CACHE: "false"
+      YARN_CACHE_FOLDER: .yarn/cache
       BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
       PLATFORM_OWNER_EMAILS: ${{ secrets.PLATFORM_OWNER_EMAILS }}
       STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY_E2E }}
@@ -87,6 +89,10 @@ jobs:
       MCP_CIMD_CLIENT_URL: https://staging.krabiclaw.com/api/auth/oauth2/test-client-metadata
       MCP_PRIVATE_CIMD_CLIENT_URL: https://staging.krabiclaw.com/api/auth/oauth2/test-private-client-metadata
       PLAYWRIGHT_WORKERS: "1"
+      # The pinned Playwright 1.64 sharder reads these relative weights. Its
+      # default equal counts gave the lodging shard twice the browser work.
+      # Recheck each --list partition and timing when changing the pin or suite.
+      PWTEST_SHARD_WEIGHTS: "54:74:36:30"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -96,12 +102,20 @@ jobs:
           node-version: "24.18.1"
       - run: corepack enable
       - name: Restore Yarn package cache
+        id: playwright_yarn
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
-          path: ~/.yarn/berry/cache
-          key: yarn-${{ runner.os }}-${{ hashFiles('yarn.lock') }}
-          restore-keys: yarn-${{ runner.os }}-
-      - run: corepack yarn install --immutable
+          path: .yarn/cache
+          key: yarn-playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('yarn.lock', '.yarnrc.yml') }}
+      - name: Install browser test dependencies
+        env:
+          PLAYWRIGHT_PACKAGE_CACHE_HIT: ${{ steps.playwright_yarn.outputs.cache-hit }}
+        run: |
+          if [ "$PLAYWRIGHT_PACKAGE_CACHE_HIT" = "true" ]; then
+            corepack yarn install --immutable --immutable-cache
+          else
+            corepack yarn install --immutable
+          fi
       # playwright.config.ts prepares an empty local D1 and the build, and its
       # global setup seeds the synthetic businesses through the app's own
       # boundaries (tests/e2e/seed). No production data reaches a pull request.
@@ -145,6 +159,8 @@ jobs:
       group: staging-deployment
       cancel-in-progress: false
     env:
+      YARN_ENABLE_GLOBAL_CACHE: "false"
+      YARN_CACHE_FOLDER: .yarn/cache
       STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY_TEST }}
       STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET_STAGING }}
       NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${{ secrets.NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY }}
@@ -169,12 +185,20 @@ jobs:
           node-version: "24.18.1"
       - run: corepack enable
       - name: Restore Yarn package cache
+        id: playwright_yarn
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
-          path: ~/.yarn/berry/cache
-          key: yarn-${{ runner.os }}-${{ hashFiles('yarn.lock') }}
-          restore-keys: yarn-${{ runner.os }}-
-      - run: corepack yarn install --immutable
+          path: .yarn/cache
+          key: yarn-playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('yarn.lock', '.yarnrc.yml') }}
+      - name: Install browser test dependencies
+        env:
+          PLAYWRIGHT_PACKAGE_CACHE_HIT: ${{ steps.playwright_yarn.outputs.cache-hit }}
+        run: |
+          if [ "$PLAYWRIGHT_PACKAGE_CACHE_HIT" = "true" ]; then
+            corepack yarn install --immutable --immutable-cache
+          else
+            corepack yarn install --immutable
+          fi
       - name: Build staging Worker
         run: yarn build
       - name: Capture Nuxt build ID

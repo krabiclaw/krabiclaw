@@ -236,17 +236,17 @@ import type { ComputedRef, InjectionKey, Ref } from 'vue'
 import type { LocationQueryRaw } from 'vue-router'
 import type { Product } from '~/server/types/products'
 import type { DashboardLocation } from '~/composables/useDashboardOrganization'
-import type { SessionAvailability } from '~/server/utils/availability'
+import type { BookableSession } from '~/server/utils/availability'
 import type { CalendarRowItem } from '~/lib/components/workspace/dashboard/AgendaRow.vue'
 import type { AgendaItem, AgendaKind, AgendaLocation, AgendaPayload } from '~/server/utils/dashboard-agenda'
 
-export type CalendarSessionItem = CalendarRowItem & { kind: 'session'; day_key: string; session: SessionAvailability }
+export type CalendarSessionItem = CalendarRowItem & { kind: 'session'; day_key: string; session: BookableSession }
 export type CalendarItem = AgendaItem | CalendarSessionItem
 
 /** A booking opens beneath its calendar day, so the calendar stays beside it. */
 export function calendarRecordPath(dayPath: string, item: CalendarItem): string | undefined {
-  if (item.kind === 'session' || item.kind === 'post') return undefined
-  return `${dayPath}/${item.kind}/${encodeURIComponent((item.kind === 'stay' ? item.booking_id : item.kind === 'booking' ? item.conversation_id : null) ?? item.id.slice(item.kind.length + 1))}`
+  if (item.kind === 'session' || item.kind === 'post' || !item.booking_id) return undefined
+  return `${dayPath}/booking/${encodeURIComponent(item.booking_id)}`
 }
 
 /** The location the calendar is showing, owned by this level and read by the day leaf below it. */

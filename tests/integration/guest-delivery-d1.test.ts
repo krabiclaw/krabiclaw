@@ -5,7 +5,7 @@ import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/
 import * as schema from '../../server/db/schema.ts'
 import { threadPayloadForGuest, requestInsertQueries, getGuestRequest, getThreadOperationalRecord, readBookedRecord } from '../../server/domain/requests.ts'
 import { receiveGuestWebReply } from '../../server/domain/guest-threads/inbound-email.ts'
-import { claimSessionCapacity, listSessions } from '../../server/utils/availability.ts'
+import { claimSessionCapacity, listBookableSessions } from '../../server/utils/availability.ts'
 import { createTables } from './support/table-product.ts'
 import test, { mock } from 'node:test'
 import { Miniflare } from 'miniflare'
@@ -31,7 +31,7 @@ import { getResendClient, resendData } from '../../server/utils/resend.ts'
 import { getReviewBookingContext } from '../../server/utils/review-requests.ts'
 import { renderNotificationEmail } from '../../server/emails/render.ts'
 import { reviewRequestMessage } from '../../server/notifications/guest-events.ts'
-import { addLocalDays, formatTimestamp, localDateAt, localDateTimeToInstant } from '../../utils/timezone.ts'
+import { addLocalDays, formatCalendarDate, formatTimestamp, localDateAt, localDateTimeToInstant } from '../../utils/timezone.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 
 /** The open reply tasks of a conversation, by dedupe key: the guest entry each one is about. */
@@ -169,7 +169,7 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
     const tables = await createTables(db, env, { organizationId: 'org-proof', locationId: 'booking-location', actorId: 'user-proof', memberId: 'member-proof', name: 'Booking table',
       durationMinutes: 120, seats: 10, weekdays: [1], open: '16:00', lastSeating: '20:00' })
     // The first Monday seating the tables' weekly rule put on the calendar.
-    const [seating] = await listSessions(db, { env, organizationId: 'org-proof', productId: tables.id, fromInstant: new Date().toISOString(), toInstant: new Date(Date.now() + 8 * 86_400_000).toISOString() })
+    const [seating] = await listBookableSessions(db, { env, organizationId: 'org-proof', productId: tables.id, fromInstant: new Date().toISOString(), toInstant: new Date(Date.now() + 8 * 86_400_000).toISOString() })
     assert.equal(seating && formatTimestamp(seating.starts_at, 'en', 'Asia/Bangkok', { weekday: 'long', hour: 'numeric', minute: '2-digit' }), 'Monday 4:00 PM')
     const tablePolicy = JSON.stringify({ advance_notice_minutes: null, party_size_min: null, party_size_max: null, minimum_guest_age: null, accessibility_contact_required: false, payment: null })
     await claimSessionCapacity(db, { env, organizationId: 'org-proof', productId: tables.id, sessionId: seating!.id, productVariantId: tables.variants[0]!.id, partySize: 1, userId: 'guest-proof', policyJson: tablePolicy,
@@ -186,9 +186,9 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
     const propose = async (key: string, partySize: number) => {
       const current = await getGuestRequest(db, 'change-proof')
       assert(current)
-      const booked = await db.prepare("SELECT updated_at FROM bookings WHERE id=(SELECT booking_id FROM conversations WHERE id='change-proof')").first<string>('updated_at')
+      const booked = await db.prepare("SELECT version FROM bookings WHERE id=(SELECT booking_id FROM conversations WHERE id='change-proof')").first<number>('version')
       assert(booked)
-      await requestBookingChange(db, env, current, 'user-proof', { kind: 'booking', product_session_id: seating!.id, party_size: partySize, updated_at: booked }, key)
+      await requestBookingChange(db, env, current, 'user-proof', { kind: 'booking', product_session_id: seating!.id, party_size: partySize, version: booked }, key)
       const requestId = await db.prepare('SELECT id FROM messages WHERE dedupe_key = ?').bind(`booking-change-request:change-proof:${key}`).first<string>('id')
       assert(requestId)
       return { threadId: 'change-proof', requestId, token: createHmac('sha256', env.EMAIL_REPLY_SECRET).update(`booking-change:v1:change-proof:${requestId}`).digest('hex'), decision: 'accept' as const }
@@ -205,10 +205,10 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
     assert.equal(await db.prepare("SELECT party_size FROM bookings WHERE id=(SELECT booking_id FROM conversations WHERE id='change-proof')").first('party_size'), 1, 'notification leaves the original booking unchanged while awaiting the buyer')
     const proposalThread = await getGuestRequest(db, 'change-proof')
     assert(proposalThread)
-    const proposalRevision = await db.prepare("SELECT json_extract(payload_json, '$.updated_at') AS revision FROM messages WHERE id = ?").bind(proposal.requestId).first<string>('revision')
+    const proposalRevision = await db.prepare("SELECT json_extract(payload_json, '$.version') AS revision FROM messages WHERE id = ?").bind(proposal.requestId).first<number>('revision')
     assert(proposalRevision)
     const replayProposal = () => requestBookingChange(db, env, proposalThread, 'user-proof', {
-      kind: 'booking', product_session_id: seating!.id, party_size: 2, updated_at: proposalRevision,
+      kind: 'booking', product_session_id: seating!.id, party_size: 2, version: proposalRevision,
     }, 'first-change')
     // The original request may finish while the guest answers it. A late
     // proposal projection must not reopen the completed conversation.
@@ -239,7 +239,7 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
     const stale = await propose('stale-change', 3)
     // Anything that moves the record makes the open proposal stale. What moved
     // it is not the subject; that it moved is.
-    await db.prepare("UPDATE bookings SET party_size = 5, updated_at = ? WHERE id=(SELECT booking_id FROM conversations WHERE id='change-proof')").bind(new Date(Date.now() + 1000).toISOString()).run()
+    await db.prepare("UPDATE bookings SET party_size = 5, version = version + 1, updated_at = ? WHERE id=(SELECT booking_id FROM conversations WHERE id='change-proof')").bind(new Date(Date.now() + 1000).toISOString()).run()
     await assert.rejects(respondToBookingChange(db, env, stale), /changed since the request/)
     const concurrent = await propose('concurrent-change', 4)
     const [decision, cancellation] = await Promise.allSettled([respondToBookingChange(db, env, concurrent), executeGuestThreadOperation(db, {
@@ -416,7 +416,7 @@ test('a replayed status email sends its recorded content and refuses a supersede
       message: 'Booking is cancelled, but the guest email failed. Retry with the same idempotency key.',
       mutation_applied: true, operation_completed: false, conversation_id: 'booking-status', retry_with_same_idempotency_key: true,
       record: {
-        unit: 'slot', id: 'reservation-status', status: 'cancelled', party_size: 2, party_size_is_minimum: false,
+        unit: 'slot', id: 'reservation-status', status: 'cancelled', version: 2, party_size: 2, party_size_is_minimum: false,
         starts_at: '2098-10-01T11:00:00.000Z', ends_at: '2098-10-01T13:00:00.000Z', timezone: 'Asia/Bangkok',
         location_id: 'location-status', product_id: 'table-status', product_kind: 'table', product_name: 'Dining room', product_internal_name: null, assigned_member_id: null, no_show_at: null, review_id: null, advance_notice_minutes: null,
         organization_id: 'org-status', user_id: null,
@@ -507,15 +507,18 @@ test('a failed stay cancellation email retries its recorded content after displa
       kind: 'stay', name: 'Original Cabin', variants: [{ name: 'Original Cabin', prices: [{ unit_amount: 15000, currency: 'USD' }] }],
       stay: { location_id: 'location-stay-cancel', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 2, assigned_member_id: 'member-stay-cancel' },
     } })
-    const walkIn = await createStay(db, env, access, { product_id: home.id, idempotency_key: 'stay-walk-in', check_in_date: '2098-11-01', check_out_date: '2098-11-03',
+    const today = localDateAt(new Date(), 'Asia/Bangkok')
+    const walkIn = await createStay(db, env, access, { product_id: home.id, idempotency_key: 'stay-walk-in', check_in_date: addLocalDays(today, 45), check_out_date: addLocalDays(today, 47),
       adults: 2, guest_name: 'Bo', guest_email: 'walkin@provider-proof.com', total_minor: 30000 })
     assert(walkIn.conversation_id)
     // The guest of a host-entered stay is an anonymous Better Auth user; their verified sign-in with this email joins it, so the stay has its management link.
     assert.equal(await buildBuyerRequestActivityUrl(env,db,{organizationId:access.organizationId,threadId:walkIn.conversation_id}),`https://proof.example/dashboard/account/activity/stay/${walkIn.conversation_id}`)
     // The guest bought this one on the site; the real checkout conversion makes it theirs.
     const signed=await createAuth(env).api.signInAnonymous({headers:new Headers(),returnHeaders:true})
+    const checkIn = addLocalDays(today, 14)
+    const checkOut = addLocalDays(today, 16)
     const stay = await buyStay(db, { id: 'stay-cancellation-email', organizationId: access.organizationId, productId: home.id, locationId: 'location-stay-cancel', timezone: 'Asia/Bangkok',
-      checkIn: '2098-10-01', checkOut: '2098-10-03', adults: 2, nightlyMinor: 15000, currency: 'USD', buyerUserId: signed.response!.user.id,
+      checkIn, checkOut, adults: 2, nightlyMinor: 15000, currency: 'USD', buyerUserId: signed.response!.user.id,
       guest: { name: 'Ana', email: 'guest@provider-proof.com', phone: null, notes: null } })
     // The host cancels it, with the full refund they approved.
     const principal = { organizationId: access.organizationId, userId: access.actorId, role: 'owner' }
@@ -538,7 +541,9 @@ test('a failed stay cancellation email retries its recorded content after displa
     for (const body of [original.body.text, original.body.html]) {
       assert.match(body, /Original Retreat/u)
       assert.match(body, /Original Cabin/u)
-      assert.match(body, /2098/u)
+      for (const date of [checkIn, checkOut]) {
+        assert(body.includes(formatCalendarDate(date, 'en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })))
+      }
     }
     const entry = await db.prepare('SELECT * FROM messages WHERE dedupe_key = ?').bind(`stay-cancellation:${stay.id}`).first<{ id: string; body: string; payload_json: string; event_name: string }>()
     assert(entry)
@@ -635,7 +640,9 @@ test('a guest-cancelled stay alerts owners with the whole stay and the member lo
       stay: { location_id: 'location-turnover', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 2, assigned_member_id: 'member-cleaner-turnover' },
     } })
     // A site checkout saves the guest's whole name in guest_name.
-    const stay = await createStay(db, env, access, { product_id: home.id, idempotency_key: 'turnover-alert', check_in_date: '2098-10-01', check_out_date: '2098-10-03', arrival_time: '15:30',
+    const checkIn = addLocalDays(localDateAt(new Date(), 'Asia/Bangkok'), 14)
+    const checkOut = addLocalDays(checkIn, 2)
+    const stay = await createStay(db, env, access, { product_id: home.id, idempotency_key: 'turnover-alert', check_in_date: checkIn, check_out_date: checkOut, arrival_time: '15:30',
       adults: 2, children: 1, guest_name: 'Ana Silva', guest_email: 'guest@provider-proof.com', notes: 'Door code 4411', total_minor: 30000 })
     await notifyStayCancelled(env, db, access.organizationId, stay.id, 'guest', 12345)
 
@@ -645,10 +652,15 @@ test('a guest-cancelled stay alerts owners with the whole stay and the member lo
     assert.equal(to('unassigned@provider-proof.com').length, 0)
     const [ownerEmail] = to('owner@provider-proof.com')
     const [memberEmail] = to('cleaner@provider-proof.com')
-    assert.equal(ownerEmail!.subject, 'Reservation canceled - Ana Silva, Oct 1')
+    const subjectDay = formatCalendarDate(checkIn, 'en-US', { month: 'short', day: 'numeric' })
+    const dateLabel = (date: string) => formatCalendarDate(date, 'en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
+    const checkInLabel = `${dateLabel(checkIn)} · 4:00 PM`
+    const checkOutLabel = `${dateLabel(checkOut)} · 10:00 AM`
+    const memberSubject = `Reservation canceled - Ana, ${subjectDay}`
+    assert.equal(ownerEmail!.subject, `Reservation canceled - Ana Silva, ${subjectDay}`)
     for (const fact of ['guest@provider-proof.com', '$123.45', '3:30 PM']) assert(ownerEmail!.text.includes(fact), `the owner's alert states ${fact}`)
-    assert.equal(memberEmail!.subject, 'Reservation canceled - Ana, Oct 1')
-    for (const fact of ['Place to stay\nTurnover Cabin', 'Guest\nAna\n', 'Check-in\nWed, Oct 1, 2098 · 4:00 PM', 'Check-out\nFri, Oct 3, 2098 · 10:00 AM', 'Arriving\n3:30 PM', 'Guests\n3\n', `https://proof.example/dashboard/turnover/bookings/stay/${stay.id}`]) assert(memberEmail!.text.includes(fact), `the member's alert states ${fact}`)
+    assert.equal(memberEmail!.subject, memberSubject)
+    for (const fact of ['Place to stay\nTurnover Cabin', 'Guest\nAna\n', `Check-in\n${checkInLabel}`, `Check-out\n${checkOutLabel}`, 'Arriving\n3:30 PM', 'Guests\n3\n', `https://proof.example/dashboard/turnover/bookings/${stay.id}`]) assert(memberEmail!.text.includes(fact), `the member's alert states ${fact}`)
     for (const secret of ['Silva', 'guest@provider-proof.com', '$123.45', 'Door code', stay.conversation_id!]) {
       assert(!memberEmail!.text.includes(secret) && !memberEmail!.html.includes(secret), `the member's alert leaves out ${secret}`)
     }
@@ -657,7 +669,7 @@ test('a guest-cancelled stay alerts owners with the whole stay and the member lo
     assert.equal(pushes[0]!.url, `https://api.sandbox.push.apple.com/3/device/${deviceToken}`)
     // The icon is the member's unread conversations, the count Messages shows: a stay's guest conversation is not theirs.
     assert.deepEqual(pushes[0]!.body, {
-      aps: { alert: { title: 'Reservation canceled - Ana, Oct 1', body: 'Turnover Cabin · Wed, Oct 1, 2098 · 4:00 PM – Fri, Oct 3, 2098 · 10:00 AM' }, sound: 'default', badge: 0 },
+      aps: { alert: { title: memberSubject, body: `Turnover Cabin · ${checkInLabel} – ${checkOutLabel}` }, sound: 'default', badge: 0 },
       organization_id: access.organizationId, user_id: 'cleaner-turnover', kind: 'stay', booking_id: stay.id,
     })
   } finally {
@@ -715,9 +727,9 @@ test('a booking move into a full session leaves the original booking exactly as 
     assert.match(JSON.parse(classMail!.email_json).message.html,/href="https:\/\/proof\.example\/dashboard\/account\/activity\/booking\/move-proof"/)
     const current = await getGuestRequest(db, 'move-proof')
     assert(current)
-    const booked = await db.prepare("SELECT updated_at FROM bookings WHERE id='booking-move'").first<string>('updated_at')
+    const booked = await db.prepare("SELECT version FROM bookings WHERE id='booking-move'").first<number>('version')
     assert(booked)
-    await requestBookingChange(db, env, current, 'user-move', { kind: 'booking', product_session_id: 'session-to', party_size: 1, updated_at: booked }, 'full-session')
+    await requestBookingChange(db, env, current, 'user-move', { kind: 'booking', product_session_id: 'session-to', party_size: 1, version: booked }, 'full-session')
     await db.prepare("UPDATE bookings SET party_size=2 WHERE id='booking-other'").run()
     const requestId = await db.prepare('SELECT id FROM messages WHERE dedupe_key = ?').bind('booking-change-request:move-proof:full-session').first<string>('id')
     assert(requestId)
@@ -785,8 +797,8 @@ test('a guest writing while the business edits a table booking does not refuse t
     // One whole local day, two days out, in the branches' own clock.
     const day = addLocalDays(localDateAt(new Date(), 'Asia/Bangkok'), 2)
     const window = { fromInstant: localDateTimeToInstant(day, '00:00', 'Asia/Bangkok', 'compatible').toISOString(), toInstant: localDateTimeToInstant(addLocalDays(day, 1), '00:00', 'Asia/Bangkok', 'compatible').toISOString() }
-    const oldTownSeatings = await listSessions(db, { env, organizationId: 'org-table', productId: oldTown.id, ...window })
-    const harbourSeatings = await listSessions(db, { env, organizationId: 'org-table', productId: harbour.id, ...window })
+    const oldTownSeatings = await listBookableSessions(db, { env, organizationId: 'org-table', productId: oldTown.id, ...window })
+    const harbourSeatings = await listBookableSessions(db, { env, organizationId: 'org-table', productId: harbour.id, ...window })
     // Seven seatings a day at each branch: 17:00 through 20:00 every 30 minutes.
     assert.deepEqual(oldTownSeatings.map(session => formatTimestamp(session.starts_at, 'en', 'Asia/Bangkok', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })),
       ['17:00', '17:30', '18:00', '18:30', '19:00', '19:30', '20:00'])
@@ -811,7 +823,7 @@ test('a guest writing while the business edits a table booking does not refuse t
     assert.notEqual(thread.last_message_at, threadBefore, 'the guest message moved the conversation')
 
     // The owner's change, sent with the booking version they read, is the booking's: it goes through.
-    assert.deepEqual(await moveBooking(db, env, thread, { userId: 'user-table' }, { kind: 'booking', product_session_id: third.id, party_size: 4, updated_at: read.updated_at }, 'move-later'), { changeStatus: 'moved' })
+    assert.deepEqual(await moveBooking(db, env, thread, { userId: 'user-table' }, { kind: 'booking', product_session_id: third.id, party_size: 4, version: read.version }, 'move-later'), { changeStatus: 'moved' })
     const moved = await getThreadOperationalRecord(db, 'table-thread')
     assert.deepEqual({ id: moved?.id, starts_at: moved?.starts_at, party_size: moved?.party_size, location_id: moved?.location_id, product_id: moved?.product_id },
       { id: bookingId, starts_at: third.starts_at, party_size: 4, location_id: 'loc-old-town', product_id: oldTown.id })
@@ -820,23 +832,23 @@ test('a guest writing while the business edits a table booking does not refuse t
     const beforeProposal = await readBookedRecord(db, 'org-table', bookingId)
     assert(beforeProposal)
     await receiveGuestWebReply(env, { threadId: 'table-thread', userId: 'guest-table', body: 'Thank you!', photos: [], idempotencyKey: 'guest-midedit-2' })
-    assert.deepEqual(await requestBookingChange(db, env, (await getGuestRequest(db, 'table-thread'))!, 'user-table', { kind: 'booking', product_session_id: first.id, party_size: 4, updated_at: beforeProposal.updated_at }, 'propose-earlier'),
+    assert.deepEqual(await requestBookingChange(db, env, (await getGuestRequest(db, 'table-thread'))!, 'user-table', { kind: 'booking', product_session_id: first.id, party_size: 4, version: beforeProposal.version }, 'propose-earlier'),
       { changeStatus: 'awaiting_guest_acceptance' })
     assert.equal((await getThreadOperationalRecord(db, 'table-thread'))?.starts_at, third.starts_at, 'a proposal leaves the booking where it is until the guest accepts')
 
     // A table moves to another branch's tables: the same booking, now at the harbour.
     const beforeBranch = await readBookedRecord(db, 'org-table', bookingId)
     assert(beforeBranch)
-    assert.deepEqual(await moveBooking(db, env, (await getGuestRequest(db, 'table-thread'))!, { userId: 'user-table' }, { kind: 'booking', product_session_id: harbourSeatings[0].id, party_size: 4, updated_at: beforeBranch.updated_at }, 'move-harbour'), { changeStatus: 'moved' })
+    assert.deepEqual(await moveBooking(db, env, (await getGuestRequest(db, 'table-thread'))!, { userId: 'user-table' }, { kind: 'booking', product_session_id: harbourSeatings[0].id, product_id: harbour.id, party_size: 4, version: beforeBranch.version }, 'move-harbour'), { changeStatus: 'moved' })
     const atHarbour = await readBookedRecord(db, 'org-table', bookingId)
     assert.deepEqual({ location_id: atHarbour?.location_id, product_id: atHarbour?.product_id, starts_at: atHarbour?.starts_at, party_size: atHarbour?.party_size },
       { location_id: 'loc-harbour', product_id: harbour.id, starts_at: harbourSeatings[0].starts_at, party_size: 4 })
     assert.equal(await db.prepare('SELECT product_variant_id FROM bookings WHERE id = ?').bind(bookingId).first('product_variant_id'), harbour.variants[0]!.id, 'it holds the harbour tables\' own option')
 
     // The booking itself changed after the owner read it: that change, and only that, refuses theirs.
-    await assert.rejects(moveBooking(db, env, (await getGuestRequest(db, 'table-thread'))!, { userId: 'user-table' }, { kind: 'booking', product_session_id: harbourSeatings[1]!.id, party_size: 4, updated_at: beforeBranch.updated_at }, 'move-stale'),
+    await assert.rejects(moveBooking(db, env, (await getGuestRequest(db, 'table-thread'))!, { userId: 'user-table' }, { kind: 'booking', product_session_id: harbourSeatings[1]!.id, product_id: harbour.id, party_size: 4, version: beforeBranch.version }, 'move-stale'),
       { statusCode: 409, message: 'The booking changed. Reload before moving it.' })
-    await assert.rejects(requestBookingChange(db, env, (await getGuestRequest(db, 'table-thread'))!, 'user-table', { kind: 'booking', product_session_id: harbourSeatings[1]!.id, party_size: 4, updated_at: beforeBranch.updated_at }, 'propose-stale'),
+    await assert.rejects(requestBookingChange(db, env, (await getGuestRequest(db, 'table-thread'))!, 'user-table', { kind: 'booking', product_session_id: harbourSeatings[1]!.id, product_id: harbour.id, party_size: 4, version: beforeBranch.version }, 'propose-stale'),
       { statusCode: 409, message: 'The booking changed. Reload before sending a request.' })
     assert.equal((await readBookedRecord(db, 'org-table', bookingId))?.starts_at, harbourSeatings[0].starts_at, 'a refused change moved nothing')
   } finally { await runtime.dispose() }

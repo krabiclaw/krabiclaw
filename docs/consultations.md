@@ -1,8 +1,9 @@
 # Native consultation booking contract
 
 Owner decisions of 2026-10-01 supersede reservation-only assumptions in #1201,
-#1202 and #1203. Consultations use Product → Variant → Price → Session → Booking.
-Restaurant reservations remain independent. NCLS is online; no physical office, Clio migration or live catalog provisioning
+#1202 and #1203. Consultations use Product → Variant → Price → Session → Booking,
+with the same availability and booking operations as restaurant tables and
+experiences. NCLS is online; no physical office, Clio migration or live catalog provisioning
 is required. The initial implementation supports an explicitly configured single
 calendar. The owner's subsequent review supersedes the single-operator target:
 team members must have individual recurring availability and explicit service
@@ -18,21 +19,19 @@ operator, and historical booked assignments are not backfilled or rewritten.
 
 ## Shared interfaces across the four feature PRs
 
-- Identities: a booking is two records. `request_id` is `requests.id`, the guest
-  thread (conversation, guest snapshot, cancellation link); `booking_id`
-  is `bookings.id`, the seat on a session. Every created-booking response names
-  both; a booking that requires payment answers with its checkout instead, and
-  the two ids exist once the payment captures. Neither is called `booking_id`.
+- `conversation_id` names the guest thread and `booking_id` names `bookings.id`.
+  A booking that requires online payment returns its checkout before creating
+  the final booking. The booking's `version` guards edits.
 - Config: `ProductBookingConfig` in `server/utils/availability.ts` and
   `product_booking_configs` in `server/db/schema.ts`. `confirmation_mode` is
-  instant/review, default instant. `online_timezone` explicitly configures online
-  scheduling. `calendar_group` opts Products into a tenant-scoped single calendar.
+  instant/review, default instant. Online scheduling uses the assigned attorney's
+  timezone and hours. The offering's local 500-day window applies to all clients.
 - Review: pending and confirmed consume capacity. Confirm moves pending to
   confirmed without claiming again; cancel/reject releases the allocation once.
   Canonical operations live in `server/domain/guest-threads/operations.ts`.
 - Exclusion: `sessionClaimQuery`, `claimSessionCapacity` and `listSessions` in
-  `server/utils/availability.ts` share capacity semantics. Enrolled Products
-  exclude overlapping live bookings across the same organization/calendar group.
+  `server/utils/availability.ts` share capacity semantics. Distinct bookings for
+  the same attorney cannot claim overlapping times in the organization.
   Adjacent UTC intervals are permitted; unrelated classes remain independent.
 - Payment policy: `online_payment_required` defaults false. A positive Price
   does not imply online collection: pay-later experiences preserve their behavior.
@@ -81,8 +80,9 @@ without a physical location, including booking policy, timezone and weekly slots
 
 `server/utils/availability.ts` exports `SessionAllocationInput`,
 `sessionAllocationPredicate(input): BatchQuery`, `sessionClaimQuery` and
-`sessionMoveQuery`. The same predicate guards inserts and accepted moves; future
-checkout holds must participate here and exclude only their own authenticated
+`sessionMoveQuery`. The same predicate guards inserts and accepted moves. A
+calendar read projects openings without writing inventory. Checkout holds
+participate in the same allocation and exclude only their own authenticated
 hold during conversion. Do not add another overlap policy.
 
 `server/domain/guest-threads/operations.ts` exports
@@ -97,9 +97,9 @@ the refund once. Foundation has no dependency on finance tables or provider stat
 Lifecycle activity events include `booking.created`, `booking.confirm`,
 `booking.reject`, `booking.cancel` and accepted change operations. Payloads carry
 `booking_id` and `conversation_id`; downstream consumers read the canonical
-Booking after commit. Dashboard detail is addressed by its thread `id` (the request
-ID in its route) and exposes `operationalBookingId` for operations on the Booking
-itself.
+Booking after commit. Dashboard and iOS read `/api/dashboard/bookings/:booking_id`.
+Proposals resolve through the guest conversation; their receipt reports the
+recorded decision separately from the current booking.
 
 ## Local proof and completed review
 
@@ -118,11 +118,9 @@ save wording, and stronger lifecycle/capacity replay assertions. The recommendat
 to erase booked test Products was replaced by the isolated opt-in and canonical
 archival cleanup above; deletion would violate the existing history contract.
 
-Foundation deliberately returns `payment_required` for a required positive Price
-until #1169 supplies authenticated capture/hold conversion. It never fabricates
-payment success. The combined PR includes #1202 booking MCP operations. Calendar provider
-OAuth/projection, financial provider calls, production catalog provisioning,
-deployment and production activation are separate operations.
+Required online payments use the shared authenticated checkout, hold and capture
+operations. MCP directs the operator to the authenticated financial surface when
+the operation requires online payment or refund approval.
 
 ## Owner visual review and provider direction
 

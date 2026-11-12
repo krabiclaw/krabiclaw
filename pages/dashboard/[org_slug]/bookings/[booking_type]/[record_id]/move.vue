@@ -21,13 +21,12 @@ const level = useRouteLevel()
 const api = useDashboardApi()
 const toast = useToast()
 const stayId = String(route.params.record_id ?? '')
-if (route.params.booking_type !== 'stay') throw createError({ statusCode: 404, statusMessage: 'Page not found', fatal: true })
 
 const isOptions = (value: unknown): value is { options: MoveOption[] } => isRecord(value) && Array.isArray(value.options)
-const isManagedStay = (value: unknown): value is { stay: MoveStayRecord; manage: true } => isRecord(value) && value.manage === true && isRecord(value.stay) && typeof value.stay.version === 'number'
+const isManagedStay = (value: unknown): value is { booking: MoveStayRecord; manage: true } => isRecord(value) && value.manage === true && isRecord(value.booking) && value.booking.unit === 'nights' && typeof value.booking.version === 'number'
 const { data, error: loadError } = await useAsyncData(`stay-move:${stayId}`, async () => {
-  const path = `/api/dashboard/stays/${encodeURIComponent(stayId)}`
-  const [{ stay }, { options }] = await Promise.all([api(path, { validate: isManagedStay }), api(`${path}/move-options`, { validate: isOptions })])
+  const path = dashboardBookingPath(stayId)
+  const [{ booking: stay }, { options }] = await Promise.all([api(path, { validate: isManagedStay }), api(`${path}/move-options`, { validate: isOptions })])
   return { stay, options }
 })
 
@@ -53,18 +52,18 @@ async function save() {
   saving.value = true
   error.value = ''
   try {
-    await api(`/api/dashboard/stays/${encodeURIComponent(stayId)}/move`, {
+    await api(`${dashboardBookingPath(stayId)}/move`, {
       method: 'POST', body: { version: stay.version, product_id: selected.value },
       validate: isMovedStayResponse,
     })
     toast.add(STAY_MOVE_MESSAGE_QUEUED)
-    await refreshNuxtData(`${String(route.params.org_slug)}-stay:${stayId}`)
-    await navigateTo(level.to.value ?? `/dashboard/${encodeURIComponent(String(route.params.org_slug))}/bookings/stay/${encodeURIComponent(stayId)}`)
+    await refreshNuxtData(dashboardBookingKey(String(route.params.org_slug), stayId))
+    await navigateTo(level.to.value ?? `/dashboard/${encodeURIComponent(String(route.params.org_slug))}/bookings/${encodeURIComponent(stayId)}`)
   } catch (cause) {
     error.value = getErrorMessage(cause, 'The guest could not be moved.')
     // The move is saved when its channel push or publication fails: the stay and its options are reloaded so the next attempt is not a version conflict.
     if (cause instanceof ApiClientError && (cause.data.committed === true || (isRecord(cause.data.data) && cause.data.data.committed === true))) {
-      await Promise.all([refreshNuxtData(`stay-move:${stayId}`), refreshNuxtData(`${String(route.params.org_slug)}-stay:${stayId}`)])
+      await Promise.all([refreshNuxtData(`stay-move:${stayId}`), refreshNuxtData(dashboardBookingKey(String(route.params.org_slug), stayId))])
     }
   } finally {
     saving.value = false

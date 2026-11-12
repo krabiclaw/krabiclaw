@@ -19,7 +19,7 @@ const next = (date: string) => new Date(Date.parse(`${date}T00:00:00Z`) + 86_400
 
 interface Calendar { manage: boolean; places: Array<{ place: { kind: string; id: string; name: string; detail: string; provider: { member_id: string; name: string } | null }; days: PlaceDay[] }> }
 async function readCalendar(request: APIRequestContext, slug: string, from: string, to: string): Promise<Calendar> {
-  const response = await request.get(`${baseURL}/api/dashboard/places/calendar?org=${encodeURIComponent(slug)}&from=${from}&to=${to}`)
+  const response = await request.get(`${baseURL}/api/dashboard/bookings/calendar?unit=slot&org=${encodeURIComponent(slug)}&from=${from}&to=${to}`)
   expect(response.status(), await response.text()).toBe(200)
   return await response.json() as Calendar
 }

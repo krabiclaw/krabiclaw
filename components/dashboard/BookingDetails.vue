@@ -443,11 +443,11 @@ async function writeNote(current: DashboardBookingDetails) {
   noteError.value = null
   try {
     const response = await dashboardApi<{ booking: DashboardBookingDetails }>(
-      `/api/dashboard/bookings/${props.bookingType}/${encodeURIComponent(props.bookingId)}/notes`,
+      dashboardBookingPath(props.bookingId),
       {
-        method: 'POST',
+        method: 'PATCH',
         // Guarded by the booking as it was read: an edit since then is not overwritten.
-        body: { private_notes: noteDraft.value, updated_at: current.updated_at },
+        body: { private_notes: noteDraft.value, version: current.version },
         validate: isBookingDetailsResponse,
       },
     )
@@ -470,17 +470,17 @@ async function runAction(action: string) {
   actionError.value = null
   try {
     if (props.personalScope) {
-      await applicationFetch('/api/account/cancel', {
+      await applicationFetch(`/api/account/bookings/${encodeURIComponent(booking.value.booking_id!)}/cancel`, {
         method: 'POST',
-        body: { conversation_id: booking.value.conversation_id },
+        body: { version: booking.value.version },
         validate: (value: unknown): value is { success: true } => isRecord(value) && value.success === true,
       })
       await refreshNuxtData(`account-activity:${session.value.data?.user.id}`)
     } else {
-      await dashboardApi(`/api/dashboard/organizations/${booking.value.organization_id}/guest-threads/${booking.value.conversation_id}/operations/${action}`, {
+      await dashboardApi(`${dashboardBookingPath(props.bookingId)}/${action}`, {
         method: 'POST',
-        body: { idempotency_key: actionAttempt.value.key, ...(note ? { body: note } : {}) },
-        validate: (value: unknown): value is { thread: Record<string, unknown> } => isRecord(value) && isRecord(value.thread),
+        body: { version: booking.value.version, idempotency_key: actionAttempt.value.key, ...(note ? { reason: note } : {}) },
+        validate: isBookingDetailsResponse,
       })
     }
     await refreshDetails()

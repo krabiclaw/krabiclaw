@@ -163,8 +163,8 @@ import StayNightInspector from './StayNightInspector.vue'
 
 type Home = Pick<StayHome, 'product_id' | 'name' | 'internal_name' | 'timezone' | 'currency' | 'base_price_minor' | 'min_nights' | 'calendar_rules' | 'address'>
 // A manager reads each stay's channel; a member's turnover has none.
-type GridStay = Pick<StayTurnover, 'id' | 'product_id' | 'guest_name' | 'adults' | 'children' | 'check_in_date' | 'check_out_date'> & Partial<Pick<Stay, 'channel'>>
-interface HomesPayload { from: string; to: string; homes: { home: Home; nights: StayNight[] }[]; stays: GridStay[]; manage: boolean }
+type GridStay = { booking_id: string; unit: 'nights' } & Pick<StayTurnover, 'product_id' | 'guest_name' | 'adults' | 'children' | 'check_in_date' | 'check_out_date'> & Partial<Pick<Stay, 'channel'>>
+interface HomesPayload { from: string; to: string; homes: { home: Home; nights: StayNight[] }[]; bookings: GridStay[]; manage: boolean }
 interface PlacesPayload { from: string; to: string; places: { place: Place; days: PlaceDay[] }[]; manage: boolean }
 interface GridBar { key: string; date: string; column: number; span: number; label: string; title: string; to: RouteLocationRaw; stayId: string | null; channel: StayChannel | null }
 /** One day on one row as the grid draws it: its label, whether it reads open, and what holds it. */
@@ -231,10 +231,10 @@ const isPlace = (value: unknown): value is Place => isRecord(value) && (value.ki
   && isText(value.slug) && typeof value.timezone === 'string' && isValidTimezone(value.timezone) && isText(value.updated_at)
   && (value.provider === null || isRecord(value.provider) && typeof value.provider.member_id === 'string' && typeof value.provider.name === 'string')
 const isWindow = (value: unknown): value is Record<string, unknown> & { manage: boolean } => isRecord(value) && value.from === from.value && value.to === to.value && typeof value.manage === 'boolean'
-const isHomesPayload = (value: unknown): value is HomesPayload => isWindow(value) && Array.isArray(value.homes) && Array.isArray(value.stays)
+const isHomesPayload = (value: unknown): value is HomesPayload => isWindow(value) && Array.isArray(value.homes) && Array.isArray(value.bookings)
   && value.homes.every(entry => isRecord(entry) && isHome(entry.home) && Array.isArray(entry.nights) && entry.nights.length === SPAN
     && entry.nights.every((night, index) => isStayNight(night) && night.date === dates.value[index]))
-  && value.stays.every(stay => isRecord(stay) && typeof stay.id === 'string' && typeof stay.product_id === 'string' && isText(stay.guest_name) && isCount(stay.adults) && isCount(stay.children)
+  && value.bookings.every(stay => isRecord(stay) && stay.unit === 'nights' && typeof stay.booking_id === 'string' && typeof stay.product_id === 'string' && isText(stay.guest_name) && isCount(stay.adults) && isCount(stay.children)
     && (value.manage ? Object.hasOwn(STAY_CHANNEL_LABELS, String(stay.channel)) : !('channel' in stay)) && isValidCalendarDate(stay.check_in_date) && isValidCalendarDate(stay.check_out_date))
 const isPlacesPayload = (value: unknown): value is PlacesPayload => isWindow(value) && Array.isArray(value.places)
   && value.places.every(entry => isRecord(entry) && isPlace(entry.place) && Array.isArray(entry.days) && entry.days.length === SPAN && entry.days.every((day, index) => isPlaceDay(day) && day.date === dates.value[index]))
@@ -243,8 +243,8 @@ const cacheKey = () => `${words.testId}-grid:${orgSlug}:${from.value}`
 const { data, error, status, refresh } = await useAsyncData<HomesPayload | PlacesPayload>(
   cacheKey,
   (_nuxtApp, { signal }) => homesView
-    ? api('/api/dashboard/stay-homes/calendar', { query: { from: from.value, to: to.value }, validate: isHomesPayload, signal })
-    : api('/api/dashboard/places/calendar', { query: { from: from.value, to: to.value }, validate: isPlacesPayload, signal }),
+    ? api('/api/dashboard/bookings/calendar', { query: { unit: 'nights', from: from.value, to: to.value }, validate: isHomesPayload, signal })
+    : api('/api/dashboard/bookings/calendar', { query: { unit: 'slot', from: from.value, to: to.value }, validate: isPlacesPayload, signal }),
   {
     getCachedData(key, nuxtApp, ctx) {
       if (ctx?.cause === 'refresh:manual' || ctx?.cause === 'refresh:hook') return undefined
@@ -252,8 +252,8 @@ const { data, error, status, refresh } = await useAsyncData<HomesPayload | Place
     },
   },
 )
-const homesData = computed(() => data.value && 'homes' in data.value ? data.value : null)
-const placesData = computed(() => data.value && 'places' in data.value ? data.value : null)
+const homesData = computed(() => homesView ? data.value as HomesPayload | null : null)
+const placesData = computed(() => !homesView ? data.value as PlacesPayload | null : null)
 
 if (import.meta.client) {
   onMounted(() => {
@@ -284,7 +284,7 @@ const matches = (name: string, detail: string) => !appliedSearch.value || `${nam
 // A stay's bar spans the run of nights it holds on screen; a run cut by the window's edge still names its guest.
 // A linked calendar's nights are a bar of their own, named for the channel.
 const homeRows = computed<GridRow[]>(() => {
-  const stays = new Map((homesData.value?.stays ?? []).map(stay => [stay.id, stay]))
+  const stays = new Map((homesData.value?.bookings ?? []).map(stay => [stay.booking_id, stay]))
   return (homesData.value?.homes ?? [])
     .filter(entry => (city.value === ALL_CITIES || (cityOf(entry.home) ?? NO_CITY) === city.value) && matches(entry.home.internal_name, addressOf(entry.home)) && (!freeOnly.value || !entry.nights.some(isBookedNight)))
     .map(({ home, nights }) => {

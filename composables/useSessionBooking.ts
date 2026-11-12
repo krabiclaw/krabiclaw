@@ -1,10 +1,12 @@
 import type { MaybeRefOrGetter } from 'vue'
+import { BOOKING_HORIZON_DAYS } from '~/shared/bookings'
+import { parseDate } from '@internationalized/date'
 import type { PublicProduct } from '~/server/types/products'
 import type { PublicProductLocation, PublicProductSession } from '~/server/utils/public-products'
 import type { CurrencyCode } from '~/shared/currencies'
 import { selectPrice } from '~/shared/prices'
 import { formatProductMoney } from '~/utils/product-money'
-import { isValidInstant, isValidTimezone, localDateAt, localPartsAt, TIMEZONE_OPTIONS } from '~/utils/timezone'
+import { addLocalDays, isValidInstant, isValidTimezone, localDateAt, localPartsAt, TIMEZONE_OPTIONS } from '~/utils/timezone'
 import { getErrorMessage } from '~/utils/errors'
 import { getPhoneCountry } from '~/utils/phone'
 import { isRecord, normalizeApiError, publicApiRequest, publicApiMutation } from '~/utils/api-clients'
@@ -20,11 +22,21 @@ export interface SessionBookingContext {
   product: PublicProduct
   currency: CurrencyCode
   /** The branch it is booked at, as far as booking reads it; null online. */
-  location: Pick<PublicProductLocation, 'id' | 'slug' | 'title' | 'address'> | null
+  location: Pick<PublicProductLocation, 'id' | 'slug' | 'title' | 'address'> & { timezone?: string } | null
   sessions: PublicProductSession[]
   showPartySize?: boolean
   /** The place's phone, offered on the receipt for a guest whose plans change. */
   contactPhone?: string | null
+}
+
+export function fetchSessionAvailability(slug: string, location_id: string, dates?: { from: string; to: string; time_zone?: string }) {
+  return publicApiRequest<{ unit: 'slot'; timezone: string | null; sessions: PublicProductSession[] }>(
+    `/api/public/products/${encodeURIComponent(slug)}/availability`, {
+      query: { location_id, ...dates },
+      validate: (value): value is { unit: 'slot'; timezone: string | null; sessions: PublicProductSession[] } =>
+        isRecord(value) && value.unit === 'slot' && (value.timezone === null || (typeof value.timezone === 'string' && isValidTimezone(value.timezone))) && Array.isArray(value.sessions),
+    },
+  )
 }
 
 /** The public Product booking flow, shared by product pages, online consultations and a restaurant's tables. */
@@ -73,21 +85,30 @@ export function useSessionBooking(input: MaybeRefOrGetter<SessionBookingContext>
    */
   const sessions = ref<PublicProductSession[]>([...context.value.sessions])
   const sessionsPending = ref(false)
+  const offeringTimezone = ref<string | null>(null)
+  const month = ref<string | undefined>()
+  let sessionRequest = 0
   const allowTimezoneSelection = computed(() => !showPartySize.value && context.value.location === null)
   const guestTimezone = ref<string | null>(null)
   const bookingTimezone = computed(() => allowTimezoneSelection.value && guestTimezone.value
-    ? guestTimezone.value : sessions.value[0]?.timezone ?? null)
+    ? guestTimezone.value : context.value.location?.timezone ?? offeringTimezone.value ?? sessions.value[0]?.timezone ?? null)
   const timezoneOptions = computed(() => [...new Set(['UTC', sessions.value[0]?.timezone, bookingTimezone.value, ...TIMEZONE_OPTIONS].filter((zone): zone is string => Boolean(zone)))].sort())
   onMounted(() => {
     if (allowTimezoneSelection.value) guestTimezone.value = new Intl.DateTimeFormat().resolvedOptions().timeZone
   })
-  watch(bookingTimezone, () => { timeSelection.value = null })
+  watch(guestTimezone, () => {
+    timeSelection.value = null
+    if (bookingOpen.value) void loadSessions()
+  })
   // A page that books more than one product (a restaurant's tables at each of its
   // locations) starts each one over: its option, its times and its form.
   watch(() => context.value.product.id, () => {
     selectedVariantId.value = sellableVariants.value.length === 1 ? sellableVariants.value[0]!.id : null
     timeSelection.value = null
     sessions.value = [...context.value.sessions]
+    offeringTimezone.value = null
+    month.value = undefined
+    sessionRequest++
     bookingStep.value = 1
     selectedPartySize.value = guestsMin.value
     bookingError.value = ''
@@ -192,31 +213,37 @@ export function useSessionBooking(input: MaybeRefOrGetter<SessionBookingContext>
    * failed — it does not claim there is nothing to book, which is a different
    * fact and the one this page used to state wrongly.
    */
+  const calendarMonth = computed(() => month.value ?? (referenceDate.value ? `${referenceDate.value.slice(0, 7)}-01` : undefined))
+  const lastCalendarMonth = computed(() => referenceDate.value ? `${addLocalDays(referenceDate.value, BOOKING_HORIZON_DAYS - 1).slice(0, 7)}-01` : undefined)
+
   async function loadSessions() {
-    if (sessionsPending.value) return
+    const request = ++sessionRequest
     sessionsPending.value = true
+    bookingError.value = ''
     try {
-      const response = await publicApiRequest<{ success: true; sessions: PublicProductSession[] }>(
-        // This page is one branch's page, so it asks for that branch's
-        // occurrences. Two branches running the same class at the same hour
-        // would otherwise be indistinguishable by date and time alone.
-        `/api/public/products/${encodeURIComponent(context.value.product.slug)}/sessions?location_id=${encodeURIComponent(context.value.location?.id ?? 'online')}`,
-        {
-          validate: (value): value is { success: true; sessions: PublicProductSession[] } =>
-            isRecord(value) && value.success === true && Array.isArray(value.sessions),
-        },
-      )
+      const from = month.value
+      const dates = from ? { from, to: parseDate(from).add({ months: 1 }).toString(), time_zone: bookingTimezone.value ?? undefined } : undefined
+      const response = await fetchSessionAvailability(context.value.product.slug, context.value.location?.id ?? 'online', dates)
+      if (request !== sessionRequest) return
+      offeringTimezone.value = response.timezone
       sessions.value = response.sessions
     } catch (error) {
-      bookingError.value = getErrorMessage(error, t('booking.sessions_failed'))
+      if (request === sessionRequest) bookingError.value = getErrorMessage(error, t('booking.sessions_failed'))
     } finally {
-      sessionsPending.value = false
+      if (request === sessionRequest) sessionsPending.value = false
     }
+  }
+
+  function changeMonth(date: string) {
+    month.value = date
+    timeSelection.value = null
+    void loadSessions()
   }
 
   async function openBooking() {
     bookingStep.value = 1
     bookingError.value = ''
+    month.value ??= calendarMonth.value
     await loadSessions()
   }
 
@@ -228,7 +255,9 @@ export function useSessionBooking(input: MaybeRefOrGetter<SessionBookingContext>
 
   /** A guest pressing a time on the page arrives in the form with it chosen. */
   async function openBookingAt(session: PublicProductSession) {
-    timeSelection.value = { sessionId: session.id, day: localDateOf(session), time: localTimeOf(session), label: sessionDayLabel(session) }
+    const date = localDateOf(session)
+    month.value = `${date.slice(0, 7)}-01`
+    timeSelection.value = { sessionId: session.id, day: date, time: localTimeOf(session), label: sessionDayLabel(session) }
     await openBooking()
   }
 
@@ -248,6 +277,40 @@ export function useSessionBooking(input: MaybeRefOrGetter<SessionBookingContext>
     return `${format.format(new Date(session.starts_at))} – ${format.format(new Date(session.ends_at))}`
   }
 
+
+  const timedQuote = ref<{ payment_required: boolean } | null>(null)
+  const quotePending = ref(false)
+  watch([timeSelection, selectedVariantId, partySize], () => { timedQuote.value = null })
+
+  async function reviewSelection() {
+    const session = selectedSession.value
+    const variant = selectedVariantId.value
+    if (!session || quotePending.value) return
+    if (!variant) {
+      bookingError.value = t('site.product_detail.choose_option')
+      return
+    }
+    quotePending.value = true
+    bookingError.value = ''
+    const party = partySize.value
+    try {
+      const result = await publicApiRequest<{ quote: { unit: 'slot'; product_session_id: string; payment_required: boolean } }>(
+        `/api/public/products/${encodeURIComponent(context.value.product.slug)}/quote`, {
+          query: { product_session_id: session.id, product_variant_id: variant, party_size: party },
+          validate: (value): value is { quote: { unit: 'slot'; product_session_id: string; payment_required: boolean } } =>
+            isRecord(value) && isRecord(value.quote) && value.quote.unit === 'slot'
+            && value.quote.product_session_id === session.id && typeof value.quote.payment_required === 'boolean',
+        },
+      )
+      if (selectedSession.value?.id !== session.id || selectedVariantId.value !== variant || partySize.value !== party) return
+      timedQuote.value = result.quote
+      bookingStep.value = 2
+    } catch (error) {
+      bookingError.value = getErrorMessage(error, t('booking.sessions_failed'))
+    } finally {
+      quotePending.value = false
+    }
+  }
 
   async function submitBooking(contact: ContactFormState) {
     const session = selectedSession.value
@@ -349,7 +412,7 @@ export function useSessionBooking(input: MaybeRefOrGetter<SessionBookingContext>
   }
 
     return { bookingOpen, bookingStep, contactForm, formQuestions, defaultPhoneCountry, partySize, showPartySize, allowTimezoneSelection, guestTimezone, bookingTimezone, timezoneOptions, selectedVariantId, selectedPrice, sellableVariants, variantPriceLabel,
-      timeSelection, submitting, bookingError, sessions, sessionsPending, availabilityDates, referenceDate, guestsMin, guestsMax,
+      timeSelection, submitting, timedQuote, quotePending, reviewSelection, bookingError, sessions, sessionsPending, availabilityDates, referenceDate, calendarMonth, lastCalendarMonth, changeMonth, guestsMin, guestsMax,
       selectedSession, loadSessions, openBooking, openBookingAt, upcomingSessions,
       sessionDayLabel, sessionTimeLabel, submitBooking }
 }

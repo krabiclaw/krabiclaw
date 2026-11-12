@@ -13,7 +13,6 @@ export type ScheduledTaskName =
   | 'analytics-aggregate-daily'
   | 'google-places-sync'
   | 'review-request-automation'
-  | 'sessions-materialize'
   | 'stripe-ga4-intent-retention'
   | 'stripe-fee-report-request'
   | 'marketing-ad-spend-daily'
@@ -35,7 +34,7 @@ export const SCHEDULED_TASKS: Readonly<Record<string, readonly ScheduledTaskName
   '*/10 * * * *': ['domain-reconciliation', 'channex-revision-feed'],
   '0 3 * * *': ['reply-task-expiry', 'jobs-wake-daily', 'analytics-aggregate-daily', 'stripe-ga4-intent-retention', 'stripe-fee-report-request', 'marketing-ad-spend-daily'],
   '0 0 * * SUN': ['google-places-sync'],
-  '0 * * * *': ['review-request-automation', 'sessions-materialize'],
+  '0 * * * *': ['review-request-automation'],
   // Staging only ([env.staging.triggers]): the Channex certification run needs imports, pending
   // night delivery and the revision-feed backup. Each reads only its own Channex queue table.
   '1-59/2 * * * *': ['airbnb-sync', 'channex-ari-delivery'],
@@ -56,7 +55,6 @@ const TASK_LOADERS: Readonly<Record<ScheduledTaskName, TaskLoader>> = {
   'domain-reconciliation': async () => import('./tasks/domain-reconciliation'),
   'analytics-aggregate-daily': async () => import('./tasks/analytics-aggregate-daily'),
   'stripe-ga4-intent-retention': async () => import('./tasks/stripe-ga4-intent-retention'),
-  'sessions-materialize': async () => import('./tasks/sessions-materialize'),
   'google-places-sync': async () => import('./tasks/google-places-sync'),
   'review-request-automation': async () => import('./tasks/review-request-automation'),
   'stripe-fee-report-request': async () => import('./tasks/stripe-fee-report-request'),

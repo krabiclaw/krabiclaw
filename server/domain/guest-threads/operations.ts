@@ -1,10 +1,12 @@
 import { HTTPError } from 'nitro'
+import { bookingStatusQuery } from '~/server/domain/bookings'
 import { visitRefundQueries } from '~/server/domain/payments/visit-refund'
 import { recordBookingCancelled, recordBookingDecision } from '~/server/domain/booking-analytics'
 import { execute, executeBatch, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { shouldSendRealEmail } from '~/server/utils/email-delivery'
 import type { ReplyEmailEnv } from '~/server/utils/submission-messages'
 import { canMarkNoShow, getGuestRequest, getThreadOperationalRecord, requestActions, requestSummary, type GuestRequest, type ThreadOperationalRecord } from '~/server/domain/requests'
+import type { StayAccess } from '~/server/domain/stays'
 import { revokeReviewRequestQuery } from '~/server/utils/review-requests'
 import { deliverGuestThreadEmail, getDeliveryById, isDeliverySent } from './deliveries'
 import { MEMBER_REPLY_EVENT, SCHEDULED_MESSAGE_EVENT, findMessageByDedupeKey, messageQueries, parseMessagePayload, type MessageRow } from '~/server/domain/conversations'
@@ -39,7 +41,7 @@ import type {
 // (server/domain/tasks.ts): a reply, a cancellation, archiving or blocking
 // closes it. There is no separate resolve or reopen. Archiving is each
 // person's own (conversations.ts archiveQuery), not an operation here.
-export const GUEST_THREAD_ACTIONS = new Set(['confirm', 'reject', 'cancel', 'no_show', 'reply', 'report', 'block', 'unblock', 'accept_change', 'decline_change', 'retry'])
+export const GUEST_THREAD_ACTIONS = new Set(['reply', 'report', 'block', 'unblock', 'accept_change', 'decline_change', 'retry'])
 
 type SuccessfulOperationOutcome = { ok: true; status: 200; thread: GuestThreadRow; availableActions: string[] }
 
@@ -73,6 +75,7 @@ export type ExecuteOperationInput = {
   actorUserId: string
   financialAuthorizationId?: string
   financialWritesAllowed?: boolean
+  version?: number
 }
 
 interface ThreadContext {
@@ -192,9 +195,10 @@ function operationEntryQueries(
       sql: `c.organization_id = ? AND c.kind = ? AND c.last_message_at = ?
         AND EXISTS (SELECT 1 FROM bookings src
                      WHERE src.id = c.booking_id AND src.organization_id = c.organization_id AND src.status = ? AND src.product_session_id IS NOT NULL AND src.ends_at > strftime('%Y-%m-%dT%H:%M:%fZ','now')
+                       AND src.version = ?
                        AND json_array(src.id,src.party_size,src.product_id,src.starts_at,src.ends_at,src.timezone,src.location_id,src.party_size_is_minimum)=json_array(?,CAST(? AS INTEGER),?,?,?,?,?,CAST(? AS INTEGER)))
         AND (${financialGuard?.query ?? '1=1'})`,
-      params: [context.thread.organization_id, plan.kind, context.thread.last_message_at, plan.beforeStatus,
+      params: [context.thread.organization_id, plan.kind, context.thread.last_message_at, plan.beforeStatus, record.version,
         record.id, record.party_size, record.product_id, record.starts_at, record.ends_at, record.timezone, record.location_id, Number(record.party_size_is_minimum),
         ...(financialGuard?.params ?? [])],
     },
@@ -209,20 +213,14 @@ function operationEntryQueries(
  * transition is guarded on the status the caller read, so two dashboards
  * confirming at once cannot both win.
  */
-function sourceUpdateQuery(context: ThreadContext, plan: SourceMutationPlan, input: ExecuteOperationInput, entryId: string, now: string): BatchQuery {
-  const stamps = plan.afterStatus === 'cancelled' ? ', cancelled_at = COALESCE(cancelled_at, ?), cancellation_reason = ?' : ''
-  const stampParams = plan.afterStatus === 'cancelled' ? [now, plan.action === 'reject' ? 'host_rejected' : 'host_cancelled'] : []
+function sourceUpdateQuery(context: ThreadContext, plan: SourceMutationPlan, entryId: string, now: string): BatchQuery {
   // The first ledger insert already checked the live source and end time.
   // This statement follows it in the same atomic batch, without a second clock gate.
-  return {
-    query: `
-      UPDATE bookings
-      SET status = ?, updated_at = ?, version = version + 1${stamps}
-      WHERE id = ? AND status = ?
-        AND EXISTS (SELECT 1 FROM messages WHERE id = ?)
-    `,
-    params: [plan.afterStatus, now, ...stampParams, context.record!.id, plan.beforeStatus, entryId],
-  }
+  return bookingStatusQuery({
+    organizationId: context.thread.organization_id, bookingId: context.record!.id, now,
+    guard: { query: 'status = ? AND EXISTS (SELECT 1 FROM messages WHERE id = ?)', params: [plan.beforeStatus, entryId] },
+    ...(plan.afterStatus === 'cancelled' ? { status: 'cancelled', reason: plan.action === 'reject' ? 'host_rejected' : 'host_cancelled' } : { status: 'confirmed' }),
+  })
 }
 
 function deliveryReceiptQuery(
@@ -399,6 +397,7 @@ async function executeSourceMutation(
 
   const plan = sourceMutationPlan(context, input.action)
   if (!plan) return conflict(`"${input.action}" is not a valid action for the current state`)
+  if (input.version !== undefined && context.record.version !== input.version) return conflict('This booking changed since you opened it. Reload and try again.')
   const summary = await requestSummary(db, context.thread)
 
   const entryId = crypto.randomUUID()
@@ -414,7 +413,7 @@ async function executeSourceMutation(
     ? await visitRefundQueries(db,{action:plan.action,organizationId:context.thread.organization_id,actorUserId:input.actorUserId,bookingId:context.record.id,authorizationId:input.financialAuthorizationId,financialWritesAllowed:input.financialWritesAllowed,note:input.body,committed:{query:'EXISTS(SELECT 1 FROM messages WHERE id=?)',params:[entryId]},now}) : {queries:[],guard:null}
   const queries = [
     ...operationEntryQueries(context, plan, input, entryId, dedupeKey, now, email,refundPlan.guard),
-    sourceUpdateQuery(context, plan, input, entryId, now),
+    sourceUpdateQuery(context, plan, entryId, now),
     ...refundPlan.queries,
     // An approval closes the booking's review; a cancellation also answers what the guest asked before it.
     ...conversationTaskQueries(context.thread.id, now),
@@ -670,10 +669,36 @@ async function executeUnblock(db: DbClient, context: ThreadContext): Promise<Ope
   return await successfulOutcome(db, context)
 }
 
-export async function executeGuestThreadOperation(db: DbClient, input: ExecuteOperationInput): Promise<OperationOutcome> {
+export async function executeBookingStatus(db: DbClient, input: Omit<ExecuteOperationInput, 'threadId'> & {
+  action: 'confirm' | 'reject' | 'cancel' | 'no_show'
+  bookingId: string
+  threadId?: string | null
+  version: number
+  stayAccess?: StayAccess
+}) {
+  if (!Number.isSafeInteger(input.version) || input.version < 1) throw new HTTPError({ statusCode: 400, message: 'Booking version is required' })
+  const record = await queryFirst<{ unit: 'slot' | 'nights'; conversation_id: string | null }>(db, `SELECT CASE WHEN b.product_session_id IS NULL THEN 'nights' ELSE 'slot' END AS unit,
+    (SELECT c.id FROM conversations c WHERE c.booking_id=b.id AND c.organization_id=b.organization_id AND c.kind='booking') AS conversation_id
+    FROM bookings b WHERE b.id=? AND b.organization_id=?`, [input.bookingId, input.organizationId])
+  if (!record) throw new HTTPError({ statusCode: 404, message: 'Booking not found' })
+  if (input.threadId && input.threadId !== record.conversation_id) throw new HTTPError({ statusCode: 404, message: 'Booking conversation not found' })
+  if (record.unit === 'nights' && input.action === 'cancel') {
+    if (input.stayAccess?.organizationId !== input.organizationId || input.stayAccess.actorId !== input.actorUserId) throw new HTTPError({ statusCode: 403, message: 'Organization access required' })
+    const { cancelStay } = await import('~/server/domain/stays')
+    const stay = await cancelStay(db, input.env, input.stayAccess, input.bookingId, {
+      version: input.version, reason: input.reason ?? input.body, authorization_id: input.financialAuthorizationId, financial_writes_allowed: input.financialWritesAllowed,
+    })
+    return { kind: 'stay' as const, stay }
+  }
+  if (!record.conversation_id) throw new HTTPError({ statusCode: 409, message: 'The booking conversation is missing' })
+  return { kind: 'booking' as const, outcome: await executeGuestThreadOperation(db, { ...input, threadId: record.conversation_id }, input.bookingId) }
+}
+
+export async function executeGuestThreadOperation(db: DbClient, input: ExecuteOperationInput, bookingId?: string): Promise<OperationOutcome> {
   if (!input.idempotencyKey) return { ok: false, status: 400, reason: 'missing_idempotency_key' }
   const context = await loadThreadContext(db, input.threadId, input.organizationId)
   if ('ok' in context) return context
+  if (bookingId && context.record?.id !== bookingId) return { ok: false, status: 404, reason: 'source_not_found' }
 
   if (input.action === 'reply') {
     const scheduled = input.idempotencyKey.startsWith('send-later:')
@@ -737,14 +762,15 @@ async function executeNoShow(db: DbClient, context: ThreadContext, input: Execut
   const existing = await findMessageByDedupeKey(db, dedupeKey)
   if (existing) return entryMatchesRequest(existing, eventName) ? await successfulOutcome(db, context) : conflict()
   const now = new Date().toISOString()
+  if (input.version !== undefined && record.version !== input.version) return conflict('This booking changed since you opened it. Reload and try again.')
   if (!canMarkNoShow(record, now)) return conflict('Only a confirmed visit that has started and has no review can be marked as a no-show')
   const entryId = crypto.randomUUID()
   await executeBatch(db, [
     ...messageQueries({ id: entryId, conversationId: context.thread.id, authorKind: 'krabiclaw', authorUserId: input.actorUserId, body: 'Marked as a no-show',
       eventName, payload: { action: 'no_show', booking_id: record.id }, dedupeKey, occurredAt: now,
       guard: { sql: `c.organization_id = ? AND NOT EXISTS (SELECT 1 FROM reviews rv WHERE rv.organization_id = c.organization_id AND rv.booking_id = c.booking_id)
-        AND EXISTS (SELECT 1 FROM bookings src WHERE src.id = ? AND src.id = c.booking_id AND src.organization_id = c.organization_id AND src.status = 'confirmed' AND src.no_show_at IS NULL AND src.starts_at <= ?)`,
-      params: [context.thread.organization_id, record.id, now] } }).queries,
+        AND EXISTS (SELECT 1 FROM bookings src WHERE src.id = ? AND src.id = c.booking_id AND src.organization_id = c.organization_id AND src.status = 'confirmed' AND src.no_show_at IS NULL AND src.version = ?)`,
+      params: [context.thread.organization_id, record.id, record.version] } }).queries,
     {
       query: `UPDATE bookings SET no_show_at = ?, updated_at = ?, version = version + 1
         WHERE id = ? AND no_show_at IS NULL AND EXISTS (SELECT 1 FROM messages WHERE id = ?)`,

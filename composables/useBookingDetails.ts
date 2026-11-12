@@ -12,20 +12,6 @@ import type { DashboardBookingDetails, DashboardRecordType } from '~/server/util
  * the chrome needs the same title the body does. Both call this; the shared
  * `useAsyncData` key means that is one request, not two.
  */
-export function isBookingDetailsResponse(value: unknown): value is { booking: DashboardBookingDetails } {
-  return isRecord(value)
-    && isRecord(value.booking)
-    && (value.booking.type === 'booking'
-      ? typeof value.booking.conversation_id === 'string' && typeof value.booking.booking_id === 'string' && value.booking.payment_id === null
-      : (value.booking.type === 'order' || value.booking.type === 'payment') && typeof value.booking.payment_id === 'string'
-        && value.booking.conversation_id === null && value.booking.booking_id === null)
-    && typeof value.booking.organization_id === 'string'
-    && (value.booking.guest_name === null || typeof value.booking.guest_name === 'string')
-    && (value.booking.notes === null || typeof value.booking.notes === 'string')
-    && Array.isArray(value.booking.answers)
-    && (value.booking.policy === null || isRecord(value.booking.policy))
-}
-
 // A purchase is not a booking of anything; its one word is the same for every vertical.
 const PURCHASE: BookingPresentation = {
   noun: 'purchase',
@@ -47,14 +33,23 @@ export async function useBookingDetails(bookingType: DashboardRecordType, bookin
   onBeforeUnmount(() => clearInterval(clock))
   // The account reads its own booking from the account API; the business reads the organization's.
   const dashboardApi = personalScope ? applicationFetch : useDashboardApi()
-  const endpoint = `/api/${personalScope ? 'account' : 'dashboard'}/bookings/${bookingType}/${encodeURIComponent(bookingId)}`
+  const endpoint = personalScope && bookingType === 'booking'
+    ? `/api/account/bookings/${encodeURIComponent(bookingId)}?lookup=conversation`
+    : `/api/${personalScope ? 'account' : 'dashboard'}/bookings/${bookingType}/${encodeURIComponent(bookingId)}`
   const orgSlug = computed(() => personalScope ? 'account' : String(route.params.org_slug || ''))
 
   const key = computed(() => `dashboard-booking:${orgSlug.value}:${bookingType}:${bookingId}`)
-  const { data: resource, error, refresh: reread } = await useAsyncData<{ booking: DashboardBookingDetails }>(
-    key,
-    () => dashboardApi(endpoint, { validate: isBookingDetailsResponse }),
+  const canonical = !personalScope && bookingType === 'booking'
+    ? await useDashboardBooking(bookingId)
+    : null
+  const details = canonical ?? await useAsyncData<{ booking: DashboardBookingDetails }>(
+    key, () => dashboardApi(endpoint, { validate: isBookingDetailsResponse }),
   )
+  const { error, refresh: reread } = details
+  const resource = computed<{ booking: DashboardBookingDetails } | null>({
+    get: () => isBookingDetailsResponse(details.data.value) ? details.data.value : null,
+    set: (value) => { if (value && details.data.value && isRecord(details.data.value)) Object.assign(details.data.value, value) },
+  })
 
   const booking = computed(() => resource.value?.booking ?? null)
 

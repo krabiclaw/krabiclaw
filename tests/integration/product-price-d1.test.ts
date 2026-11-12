@@ -27,7 +27,7 @@ import { AmbiguousPriceError } from '../../shared/prices.ts'
 import { groupProductsByCollection } from '../../utils/product-presentation.ts'
 import { CapacityUnavailableError, claimSessionCapacity, listSessions, sessionMoveQuery, setProductBookingConfig } from '../../server/utils/availability.ts'
 import { loadPublicSiteProductDetail, loadPublicProductCollection, loadPublicProductDetail, loadPublicProductSessions } from '../../server/utils/public-products.ts'
-import { listPublicBookingSessions } from '../../server/utils/public-session-booking.ts'
+import { readPublicProductAvailability } from '../../server/utils/public-session-booking.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 
 const ORG = 'org'
@@ -55,6 +55,12 @@ async function boot() {
   }
   const env = { ...await runtime.getBindings<CloudflareEnv>(), DB: db } as CloudflareEnv
   return { runtime, db, env }
+}
+
+async function listPublicBookingSessions(db: Parameters<typeof readPublicProductAvailability>[0], organizationId: string, slug: string, env: Parameters<typeof readPublicProductAvailability>[3], location_id?: string) {
+  const result = await readPublicProductAvailability(db, organizationId, slug, env, { location_id })
+  assert.equal(result.unit, 'slot')
+  return result
 }
 
 test('product kind narrows organization and location catalogues before pagination', { timeout: 120_000 }, async () => {
@@ -111,7 +117,7 @@ test('public experiences require a configured booking flow and retain full or te
 
     const external = await createProduct(db, { organizationId: ORG, actor: ACTOR, product: { kind: 'experience', name: 'External Booking', active: true, order_url: 'https://booking.example/omakase' }, publication: { published: true } })
     assert.deepEqual(await visible(), [external.id])
-    assert.deepEqual(await listPublicBookingSessions(db, ORG, external.slug, env), { success: true, product: { id: external.id, name: external.name, slug: external.slug }, sessions: [] })
+    assert.deepEqual(await listPublicBookingSessions(db, ORG, external.slug, env), { unit: 'slot', product: { id: external.id, name: external.name, slug: external.slug }, timezone: null, sessions: [] })
 
     const tomorrow = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10)
     const start = `${tomorrow}T12:00:00.000Z`, end = `${tomorrow}T13:00:00.000Z`

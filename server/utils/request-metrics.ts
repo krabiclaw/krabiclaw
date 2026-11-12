@@ -17,6 +17,7 @@ export interface RequestDataMetrics {
   startedAt: number
   phases: Record<string, number>
   resources: Map<string, number>
+  externalCalls: Partial<Record<'google_calendar_free_busy' | 'better_auth_google_refresh', number>>
   finalized: boolean
   // A telemetry write that failed. It never replaces the operation's own
   // outcome; the request's [data-request] record reports it.
@@ -25,7 +26,7 @@ export interface RequestDataMetrics {
 
 const metricsByEvent = new WeakMap<object, RequestDataMetrics>()
 const databaseByEvent = new WeakMap<object, D1Database>()
-const databaseTargets = new WeakMap<D1Database, D1Database>()
+const databaseTargets = new WeakMap<D1Database, { primary: D1Database; metrics: RequestDataMetrics }>()
 const statementTargets = new WeakMap<object, { target: object; query: string }>()
 const SLOW_D1_QUERY_MS = 1000
 
@@ -56,6 +57,7 @@ export function getRequestDataMetrics(event: HTTPEvent): RequestDataMetrics {
       startedAt: performance.now(),
       phases: {},
       resources: new Map(),
+      externalCalls: {},
       finalized: false,
       telemetryErrors: [],
     }
@@ -254,12 +256,17 @@ export function instrumentD1(event: H3Event, database: D1Database | D1DatabaseSe
     },
   }) as D1Database
   databaseByEvent.set(event, proxy)
-  databaseTargets.set(proxy, primary)
+  databaseTargets.set(proxy, { primary, metrics })
   return proxy
 }
 
 export function unwrapInstrumentedD1(database: D1Database): D1Database {
-  return databaseTargets.get(database) ?? database
+  return databaseTargets.get(database)?.primary ?? database
+}
+
+export function recordRequestExternalCall(database: D1Database, operation: keyof RequestDataMetrics['externalCalls']) {
+  const calls = databaseTargets.get(database)?.metrics.externalCalls
+  if (calls) calls[operation] = (calls[operation] ?? 0) + 1
 }
 
 export function finalizeRequestMetrics<T>(
@@ -380,6 +387,7 @@ export async function flushRequestMetrics(event: HTTPEvent, response: Response) 
     d1SqlDurationMs: Number(metrics.d1SqlDurationMs.toFixed(2)),
     d1MetaCount: metrics.d1MetaCount,
     d1Colos: [...metrics.d1Colos],
+    externalCalls: metrics.externalCalls,
     resource: [...metrics.resources.keys()].join(',') || new URL(event.req.url).pathname,
     cacheStatus,
     attemptCount: 1,

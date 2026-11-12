@@ -4,25 +4,10 @@ import { authRequestHeaders, loginAs } from './helpers/auth'
 import { mcpData, mcpRequest } from './helpers/mcp'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { seededTenant } from './seed/manifest'
-import { tenantHostIsAddressable, testBaseUrl } from './test-env'
-import { environmentTenantAliasSlug } from '../../server/utils/tenant-hosts'
+import { readLocalTenant } from './test-env'
 import { formatMinorAmount } from '../../shared/prices'
 import { starterPalette } from '../../shared/site-palette'
 import type { Product } from '../../server/types/products'
-
-/**
- * The subdomain the site is stored under, from the host this environment frames
- * it at.
- *
- * Staging addresses a tenant as `<subdomain>-staging.krabiclaw.com`,
- * so the first label of that hostname carries the environment suffix and is not
- * the stored value. Everywhere else the first label IS the subdomain.
- */
-function organizationSubdomain(origin: string): string {
-  const hostname = new URL(origin).hostname
-  const alias = environmentTenantAliasSlug(hostname, { NUXT_PUBLIC_PLATFORM_DOMAIN: testBaseUrl() })
-  return alias ? alias : hostname.split('.')[0]!
-}
 
 // The manual-name path of the new-site flow, driven the way an owner drives it:
 // the welcome screen, then one question per route, each advanced by the shell's
@@ -151,38 +136,30 @@ test('a new owner builds a draft and creates a site through the routed flow', as
 
   const previewFrame = page.locator('iframe[title="Site preview"]')
   await expect(previewFrame).toHaveAttribute('src', /preview_token=/)
-  const organizationOrigin = new URL((await previewFrame.getAttribute('src'))!).origin
-  if (tenantHostIsAddressable()) {
-    const preview = page.frameLocator('iframe[title="Site preview"]')
-    await expect(preview.locator('body')).toContainText(name)
-    await expect(preview.locator('body')).not.toContainText('did not match its contract')
+  const organizationURL = new URL((await previewFrame.getAttribute('src'))!)
+  expect(organizationURL.hostname).toMatch(/^[a-z0-9-]+\.localhost$/)
+  const subdomain = organizationURL.hostname.slice(0, -'.localhost'.length)
+  const preview = page.frameLocator('iframe[title="Site preview"]')
+  await expect(preview.locator('body')).toContainText(name)
+  await expect(preview.locator('body')).not.toContainText('did not match its contract')
 
-    // The token authorized the first load and became a cookie, so navigating
-    // inside the preview keeps working without it. This is the whole point of
-    // the mechanism: the pending site is the real site, and its own links
-    // resolve.
-    const frame = page.frame({ url: /preview_token=/ })
-    expect(frame).not.toBeNull()
-    await frame!.evaluate(() => { window.location.href = window.location.pathname })
-    await frame!.waitForURL(`${organizationOrigin}/`)
-    await expect(preview.locator('body')).toContainText(name)
-    const config = await frame!.evaluate(async () => {
-      const response = await fetch('/api/public/config')
-      return { status: response.status, body: await response.json() }
-    })
-    expect(config.status).toBe(200)
-    expect(config.body).toMatchObject({ success: true, config: { default_currency: 'THB' } })
-  }
+  // The preview cookie keeps the pending site accessible as its own links open.
+  const frame = page.frame({ url: /preview_token=/ })
+  expect(frame).not.toBeNull()
+  await frame!.evaluate(() => { window.location.href = window.location.pathname })
+  await frame!.waitForURL(`${organizationURL.origin}/`)
+  await expect(preview.locator('body')).toContainText(name)
+  const config = await frame!.evaluate(async () => {
+    const response = await fetch('/api/public/config')
+    return { status: response.status, body: await response.json() }
+  })
+  expect(config.status).toBe(200)
+  expect(config.body).toMatchObject({ success: true, config: { default_currency: 'THB' } })
 
   // Nobody else can see it yet. `request` has its own cookie jar, so this asks
   // for the site carrying neither a preview token nor the preview cookie the
-  // framed load leaves behind, and gets something that is not the site. Off an
-  // addressable tenant host the run carries tenant identity in a header, the way
-  // every other tenant spec here does.
-  const asAnyone = tenantHostIsAddressable()
-    ? { url: `${organizationOrigin}/`, headers: {} }
-    : { url: `${baseURL}/`, headers: { 'x-preview-tenant': organizationSubdomain(organizationOrigin) } }
-  const anonymousPreview = await request.get(asAnyone.url, { headers: asAnyone.headers })
+  // framed load leaves behind.
+  const anonymousPreview = await readLocalTenant(request, subdomain, '/')
   expect(anonymousPreview.status()).toBe(404)
   expect(await anonymousPreview.text()).not.toContain(name)
 
@@ -307,7 +284,7 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   // Review: the answers, and the address the next press claims.
   await expect(step('review')).toContainText(name)
   const liveHost = (await step('review').getByText('Your site goes live at').locator('strong').textContent())!.trim()
-  expect(liveHost).toBe(new URL(organizationOrigin).host)
+  expect(liveHost).toBe(organizationURL.host)
 
   // There is no done screen. Activation lands the owner in their new
   // organization's dashboard, so leaving the flow is how the press reports it
@@ -332,11 +309,11 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   // host the pane framed names the subdomain, not the slug. The organization is
   // the site, so the subdomain is the organization's own.
   const context = await (await page.request.get('/api/dashboard/context', { params: { org: created!.slug } })).json() as { organization: { subdomain: string | null } }
-  expect(context.organization.subdomain).toBe(organizationSubdomain(organizationOrigin))
+  expect(context.organization.subdomain).toBe(subdomain)
 
   // And the request that a moment ago did not get the site now does, with no
   // preview token anywhere: that is what activation means.
-  const live = await request.get(asAnyone.url, { headers: asAnyone.headers })
+  const live = await readLocalTenant(request, subdomain, '/')
   expect(live.status()).toBe(200)
   const liveHtml = await live.text()
   expect(liveHtml).toContain(name)
@@ -355,9 +332,9 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   expect(ownCollections).toEqual([expect.objectContaining({ name: 'Small plates', slug: heldCollection.slug, location_id: null })])
 
   // An anonymous visitor's menu shows the dish, priced, under that section.
-  const visitor = await browser.newContext({ extraHTTPHeaders: asAnyone.headers })
+  const visitor = await browser.newContext()
   const menu = await visitor.newPage()
-  const menuResponse = await menu.goto(new URL('menu', asAnyone.url).href)
+  const menuResponse = await menu.goto(new URL('/menu', organizationURL).href)
   expect(menuResponse?.status()).toBe(200)
   const section = menu.locator('section').filter({ has: menu.getByRole('heading', { level: 2, name: 'Small plates', exact: true }) })
   await expect(section).toHaveCount(1)

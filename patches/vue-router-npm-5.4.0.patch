@@ -1,0 +1,15 @@
+diff --git a/dist/vue-router.js b/dist/vue-router.js
+index 17294a1a8b5dfe809017bf9f47daf33faed25abd..0d1d1f46e6752a76f70cefbbd16f4a0359b0364d 100644
+--- a/dist/vue-router.js
++++ b/dist/vue-router.js
+@@ -1108,7 +1108,9 @@ const RouterViewImpl = /*#__PURE__*/ defineComponent({
+ 				if (vnode.component.isUnmounted) matchedRoute.instances[currentName] = null;
+ 			};
+ 			const onVnodeSettled = (vnode) => nextTick(() => {
+-				if (settledRoute === route || routeToDisplay.value !== route || vnode.el.getRootNode() !== app._container.getRootNode()) return;
++				// A pending async root has no element yet, only its placeholder comment.
++				while (!vnode.el && vnode.component) vnode = vnode.component.subTree;
++				if (settledRoute === route || routeToDisplay.value !== route || vnode.el?.getRootNode() !== app._container.getRootNode()) return;
+ 				const from = settledRoute;
+ 				settledRoute = route;
+ 				for (const callback of onRouteRenderedCallbacks) callback(route, from);

@@ -1,4 +1,3 @@
-import { outsideNotice } from '~/shared/availability-settings'
 import { HTTPError } from 'nitro'
 import { getSourceLocale } from '~/server/utils/organization-locales'
 import type { GoogleReviewMetadata } from '~/shared/google-review'
@@ -6,7 +5,7 @@ import type { PublicLocationDisclosure } from '~/types/public-location'
 import { projectPublicLocation, type PublicLocationPrivacySource } from '~/shared/location-sharing'
 import { projectPublicLocationReview, publicLocationPrivacySql } from '~/server/utils/public-location-privacy'
 import { queryAll, queryFirst, type DbClient } from '~/server/db'
-import { bookingWindow, listSessions } from '~/server/utils/availability'
+import { readPublicBookingSessions } from '~/server/utils/public-session-booking'
 import { getProductBySlug, hydrateProductMedia, listCollections, listLocationProducts, listOrganizationProducts, publicProduct } from '~/server/utils/product-management'
 import { assertProductKind } from '~/shared/product-details'
 import type { Collection, ProductBookingConfig, ProductPresentation, ProductSurface, PublicProduct, SiteProductSurface, StaffAssignment } from '~/server/types/products'
@@ -98,7 +97,7 @@ export interface PublicProductSession {
   remaining: number | null
   is_full: boolean
   /** When this occurrence was scheduled, and so when its seats went on sale. */
-  created_at: string
+  created_at: string | null
 }
 
 export interface PublicProductDetail extends PublicProductCollection {
@@ -476,56 +475,18 @@ export async function loadPublicProductApiDetail(
   return loadPublicProductDetail(env, db, organizationId, productSurfaceOf(organization.vertical, product), previewAuthorized, locationSlug, productSlug, locale)
 }
 
-/**
- * The occurrences of this product a guest can claim a seat on, at this branch.
- *
- * Read here, with the page, so the dates are in the HTML the server sends.
- * Loading them after hydration meant a crawler was told "no availability"
- * about a product with a full calendar, while a browser was shown the truth.
- *
- * Materialized sessions only, scoped to this branch and to the public booking
- * window — the same three facts `/api/public/products/{slug}/sessions` reads,
- * which the page still calls to refresh them. A product that takes no bookings
- * has no calendar to read, so it costs no query.
- */
+/** Put the first page of the same availability feed in the server-rendered product. */
 export async function loadPublicProductSessions(
   db: DbClient,
   detail: PublicProductDetail,
   env: CloudflareEnv,
 ): Promise<PublicProductSession[]> {
-  // A saved draft can be previewed before it is bookable. Its public booking
-  // API keeps its publication gate; previewing never opens that write path.
   if (!detail.product.active || !detail.booking || detail.scope_required
     || !detail.product.publications.some(publication => publication.organization_id === detail.organization.id && publication.published)) return []
-  // A branch with no zone cannot state when anything starts, so it offers
-  // nothing here rather than a time in a zone nobody chose.
-  if (!detail.location) {
-    if (!detail.booking.held_online) return []
-    const { listPublicBookingSessions } = await import('~/server/utils/public-session-booking')
-    return (await listPublicBookingSessions(db, detail.organization.id, detail.product.slug, env, 'online')).sessions.filter(session => !session.is_full)
-  }
-  if (!detail.product.locations.some(location => location.location_id === detail.location!.id && location.active && location.published)) return []
-  const window = bookingWindow(detail.location.timezone)
-  const sessions = await listSessions(db, {
-    env,
-    organizationId: detail.organization.id,
-    productId: detail.product.id,
-    locationId: detail.location.id,
-    fromInstant: window.fromInstant,
-    toInstant: window.toInstant,
-    statuses: ['scheduled'],
-  })
-  return sessions
-    .filter(session => !session.is_full && outsideNotice(session.starts_at, detail.booking!.advance_notice_minutes))
-    .map(session => ({
-      id: session.id,
-      starts_at: session.starts_at,
-      ends_at: session.ends_at,
-      timezone: session.timezone,
-      remaining: session.remaining,
-      is_full: session.is_full,
-      created_at: session.created_at,
-    }))
+  const locationId = detail.location?.id
+  if (locationId && !detail.product.locations.some(location => location.location_id === locationId && location.active && location.published)) return []
+  if (!locationId && !detail.booking.held_online) return []
+  return (await readPublicBookingSessions(db, detail.organization.id, detail.product, env, { location_id: locationId ?? 'online' })).sessions.filter(session => !session.is_full)
 }
 
 /**

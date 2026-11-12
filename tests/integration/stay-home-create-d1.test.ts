@@ -14,6 +14,7 @@ import { getLocation, updateLocation } from '../../server/utils/location-managem
 import { getProduct } from '../../server/utils/product-management.ts'
 import { createStayHome, quoteStay, readPublicStayCalendar, readStayHome, stayHomeInput } from '../../server/domain/stays.ts'
 import { STAY_HOME_ACCESSIBILITY_FEATURES } from '../../shared/stay-accessibility.ts'
+import { addLocalDays, localDateAt } from '../../utils/timezone.ts'
 
 // A home added by hand through the native app's route: its details are
 // checked field by field, it becomes a new location and an unpublished stay,
@@ -316,19 +317,26 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     assert.equal(((await call(owner, 'GET')).body.homes as Array<{ product_id: string; published: boolean }>).find(home => home.product_id === made.product_id)!.published, true)
     assert.deepEqual(await db.prepare('SELECT published FROM product_publications WHERE product_id = ?').bind(made.product_id).all().then(result => result.results), [{ published: 1 }])
 
-    // The last allowed checkout is a date the guest can choose, not an
-    // unread endpoint beyond a calendar that otherwise promises 500 nights.
+    // The first calendar page opens today. The final page includes the last
+    // checkout date, with prices for the three nights a guest can occupy.
     const publishedHome = await readStayHome(db, { organizationId: ORG, actorId: 'owner', manage: true }, made.product_id)
-    const firstDate = new Intl.DateTimeFormat('en-CA', { timeZone: publishedHome.timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
-    const lastDate = new Date(Date.parse(`${firstDate}T00:00:00Z`) + 500 * 86_400_000).toISOString().slice(0, 10)
-    const publicCalendar = await readPublicStayCalendar(db, ORG, (await getProduct(db, ORG, made.product_id)).slug, { from: firstDate, to: lastDate })
-    assert.equal(publicCalendar.nights.length, 501)
-    assert.equal(publicCalendar.nights[0]!.date, firstDate)
-    assert.deepEqual(publicCalendar.nights.at(-1), { date: lastDate, available: true, price_minor: 210_00, min_stay_arrival: 3, max_stay: null, closed_to_arrival: false, closed_to_departure: false })
-    const lastArrival = new Date(Date.parse(`${lastDate}T00:00:00Z`) - 3 * 86_400_000).toISOString().slice(0, 10)
+    const publicSlug = (await getProduct(db, ORG, made.product_id)).slug
+    const firstDate = localDateAt(new Date(), publishedHome.timezone)
+    const lastDate = addLocalDays(firstDate, 500)
+    const firstPage = await readPublicStayCalendar(db, ORG, publicSlug, { from: firstDate, to: addLocalDays(firstDate, 31) })
+    assert.deepEqual(firstPage.nights.map(night => night.date), Array.from({ length: 32 }, (_, day) => addLocalDays(firstDate, day)))
+    await assert.rejects(readPublicStayCalendar(db, ORG, publicSlug, { from: firstDate, to: lastDate }), {
+      status: 422, data: { code: 'INVALID_RANGE', field: 'to' },
+    })
+    const lastArrival = addLocalDays(lastDate, -3)
+    const beyondHorizon = addLocalDays(lastDate, 1)
+    const lastPage = await readPublicStayCalendar(db, ORG, publicSlug, { from: lastArrival, to: beyondHorizon })
+    assert.deepEqual(lastPage.nights, [0, 1, 2, 3].map(day => ({
+      date: addLocalDays(lastArrival, day), available: day < 3, price_minor: 210_00, min_stay_arrival: 3,
+      max_stay: null, closed_to_arrival: false, closed_to_departure: false,
+    })))
     const lastQuote = await quoteStay(db, ORG, publishedHome, { check_in_date: lastArrival, check_out_date: lastDate, adults: 1 })
     assert.deepEqual({ check_in_date: lastQuote.check_in_date, check_out_date: lastQuote.check_out_date, nights: lastQuote.nights, total_minor: lastQuote.total_minor }, { check_in_date: lastArrival, check_out_date: lastDate, nights: 3, total_minor: 630_00 })
-    const beyondHorizon = new Date(Date.parse(`${lastDate}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10)
     await assert.rejects(quoteStay(db, ORG, publishedHome, { check_in_date: lastArrival, check_out_date: beyondHorizon, adults: 1 }), { status: 422, data: { code: 'STAY_TOO_FAR_AHEAD', field: 'check_out_date' } })
 
     // Adding homes is never refused on Basic: new homes are drafts. The plan covers one live home,

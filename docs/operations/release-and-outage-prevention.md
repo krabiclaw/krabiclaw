@@ -365,7 +365,7 @@ calendar groups with provider-owned working hours (the Calendly model):
 - `organization.timezone` is a new NOT NULL column (`organization_timezone_check`), moved out of `settings_json.config.default_timezone` with no `'UTC'` fallback. Both are Better Auth required organization fields validated in `server/utils/auth.ts`.
 - `business_locations.timezone` is NOT NULL (`business_locations_timezone_check`).
 - `product_booking_configs.held_online` replaces `online_timezone`. Online offerings require `scheduling_mode='provider'` and an assigned member or team (`product_booking_configs_held_online_check`).
-- `calendar_group` is retired everywhere (`product_booking_configs`, `payment_checkout_holds`). Online offering bookable slots are persisted from provider working hours (`member_scheduling.windows_json`) in each provider's timezone. Archived epoch transfers invoke the same provider-hours generator before auditing and writing the payload; missing provider hours stop the transfer. The manifest inventories derived session IDs and source signatures so `--delta-from` retains their canonical occurrences and unchanged audit timestamps, reports actual source deletions, and inserts only new rows without overwriting replacement writes. Repeated generation preserves unchanged slot timestamps, bookings and active checkout holds.
+- `calendar_group` is retired everywhere (`product_booking_configs`, `payment_checkout_holds`). The v16 replacement used provider working hours in the provider’s timezone. Current transfers preserve the source session IDs, bookings and holds, and validate required provider hours for archived exports. The runtime reads openings from those hours when a guest requests dates.
 - `product_availability_rules.location_id` is NOT NULL; online weekly rule templates are deleted.
 - `product_sessions` enforces `product_sessions_online_provider_check` (`location_id IS NOT NULL OR assigned_member_id IS NOT NULL`). Existing online sessions take their provider's identity and `hours:<member>:<starts_at>` occurrence keys.
 
@@ -942,10 +942,11 @@ migrations to its private copy, then moves the records through
 `scripts/database-transfers/v26-to-v27.sql`. The new D1 applies the v27
 baseline through its native migration ledger.
 
-The transfer materializes table seatings through each location's opening and
-special hours. Check future seatings before loading the replacement. The staging
-Worker has no session-materialization cron, and the production cron runs hourly.
-A late reservation from v26 keeps the same seating ID in the final delta.
+The original v27 cutover materialized table seatings for the old stored-session
+feed. The current availability route reads authored hours and claims directly.
+It creates no inventory, and new transfers preserve existing session IDs without
+generating empty seatings. A late reservation from v26 keeps the same seating ID
+in the final delta. The hourly review request job is independent of availability.
 
 The 2026-11-11 staging preflight preserved 116,742 rows across 98 tables.
 The transfer folded four groups of duplicate provider sessions after checking

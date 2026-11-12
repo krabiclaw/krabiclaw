@@ -1,58 +1,82 @@
-import { outsideNotice } from '~/shared/availability-settings'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { HTTPError } from 'nitro'
 import { queryAll, queryFirst, type DbClient } from '~/server/db'
-import { bookingWindow, listSessions, PUBLIC_BOOKING_WINDOW_DAYS } from '~/server/utils/availability'
+import { bookingWindow, listBookableSessions } from '~/server/utils/availability'
 import { getProductBySlug, listOrganizationProducts, productBookingReadiness } from '~/server/utils/product-management'
+import type { PublicProduct } from '~/server/types/products'
+import { readPublicStayCalendar } from '~/server/domain/stays'
 import { isCurrencyCode } from '~/shared/currencies'
+import { AVAILABILITY_PAGE_DAYS } from '~/shared/bookings'
+import { addLocalDays, isValidCalendarDate, isValidTimezone, localDateAt, localDateTimeToInstant } from '~/utils/timezone'
 import { publicTenantVisibilitySql } from '~/server/utils/public-base'
 
-export async function listPublicBookingSessions(db: DbClient, organizationId: string, slug: string, env: CloudflareEnv, requestedScope?: unknown) {
-  const product = await getProductBySlug(db, organizationId, slug)
-  if (!product?.active || !product.publications.some(publication => publication.organization_id === organizationId && publication.published)
-    || (!product.order_url && !product.booking) || ((product.kind === 'experience' || product.booking) && !(await productBookingReadiness(db, organizationId, product, { env })).ready)) {
+type AvailabilityInput = { location_id?: unknown; from?: unknown; to?: unknown; time_zone?: unknown }
+
+function publicOffering(product: PublicProduct | null, organizationId: string): product is PublicProduct {
+  return Boolean(product?.active && product.publications.some(publication => publication.organization_id === organizationId && publication.published))
+}
+
+export async function readPublicProductAvailability(db: DbClient, organizationId: string, slug: string, env: CloudflareEnv, input: AvailabilityInput) {
+  const product = await getProductBySlug(db, organizationId, slug, 'kind-only')
+  if (!product) throw new HTTPError({ statusCode: 404, statusMessage: 'Product not found' })
+  if (product.kind === 'stay') return { unit: 'nights' as const, ...await readPublicStayCalendar(db, organizationId, slug, { from: input.from, to: input.to }) }
+  if (!publicOffering(product, organizationId)) throw new HTTPError({ statusCode: 404, statusMessage: 'Product not found' })
+  if (!product.order_url && !(await productBookingReadiness(db, organizationId, product, { env })).ready) {
     throw new HTTPError({ statusCode: 404, statusMessage: 'Product not found' })
   }
-  if (product.order_url) return { success: true, product: { id: product.id, name: product.name, slug }, sessions: [] }
+  return readPublicBookingSessions(db, organizationId, product, env, input)
+}
 
-  // A session belongs to a location, and a branch that has stopped selling
-  // this product does not offer its occurrences either.
-  const sellingLocations = new Set((await queryAll<{ location_id: string }>(db, `
-    SELECT pl.location_id FROM product_locations pl
-      JOIN business_locations l ON l.id = pl.location_id AND l.organization_id = ? AND l.status = 'active'
-     WHERE pl.product_id = ? AND pl.active = 1 AND pl.published = 1
-  `, [organizationId, product.id])).map(row => row.location_id))
-
-  const onlineOnly = requestedScope === 'online'
-  const requestedLocation = typeof requestedScope === 'string' && !onlineOnly ? requestedScope : null
-  if (requestedLocation && !sellingLocations.has(requestedLocation)) {
-    throw new HTTPError({ statusCode: 404, statusMessage: 'This product is not on sale at that location' })
+export async function readPublicBookingSessions(db: DbClient, organizationId: string, product: PublicProduct, env: CloudflareEnv, input: AvailabilityInput) {
+  if (!publicOffering(product, organizationId) || (!product.booking && !product.order_url)) {
+    throw new HTTPError({ statusCode: 404, statusMessage: 'Product not found' })
+  }
+  const result = { unit: 'slot' as const, product: { id: product.id, name: product.name, slug: product.slug } }
+  if (product.order_url) return { ...result, timezone: null, sessions: [] }
+  const requested = input.location_id
+  if (requested !== undefined && typeof requested !== 'string') throw new HTTPError({ statusCode: 422, statusMessage: 'Invalid location_id' })
+  if ((input.from !== undefined || input.to !== undefined)
+    && (!isValidCalendarDate(input.from) || !isValidCalendarDate(input.to) || input.to <= input.from || input.to > addLocalDays(input.from, AVAILABILITY_PAGE_DAYS))) {
+    throw new HTTPError({ statusCode: 422, statusMessage: `Request up to ${AVAILABILITY_PAGE_DAYS} days with from and exclusive to dates` })
   }
 
-  // Each session is offered in its own zone — its location's, or its
-  // provider's online — so the read is broad and each is windowed in its own.
-  const fromInstant = new Date().toISOString()
-  const toInstant = new Date(Date.now() + (PUBLIC_BOOKING_WINDOW_DAYS + 2) * 86_400_000).toISOString()
-  const sessions = await listSessions(db, {
-    env,
-    organizationId: product.organization_id, productId: product.id,
-    fromInstant, toInstant, statuses: ['scheduled'],
-  })
+  const locations = requested === 'online' ? [] : await queryAll<{ id: string | null; timezone: string }>(db, `
+    SELECT l.id, l.timezone FROM product_locations pl
+      JOIN business_locations l ON l.id = pl.location_id AND l.organization_id = ? AND l.status = 'active'
+     WHERE pl.product_id = ? AND pl.active = 1 AND pl.published = 1
+       AND (? IS NULL OR l.id = ?)
+  `, [organizationId, product.id, requested ?? null, requested ?? null])
+  if (product.booking?.held_online && (requested === undefined || requested === 'online')) {
+    const provider = await queryFirst<{ id: null; timezone: string }>(db, `
+      SELECT NULL AS id, ms.timezone FROM product_booking_configs c
+        JOIN member_scheduling ms ON ms.member_id = c.assigned_member_id AND ms.organization_id = c.organization_id
+       WHERE c.organization_id = ? AND c.product_id = ? AND ms.timezone IS NOT NULL
+    `, [organizationId, product.id])
+    if (provider) locations.push(provider)
+  }
+  if (requested !== undefined && !locations.length) throw new HTTPError({ statusCode: 404, statusMessage: 'This product is not on sale at that location' })
+
+  if (input.time_zone !== undefined && (typeof input.time_zone !== 'string' || !isValidTimezone(input.time_zone))) throw new HTTPError({ statusCode: 422, statusMessage: 'Invalid time_zone' })
+  const displayTimezone = input.time_zone as string | undefined
+  const now = new Date()
+  const sessions = (await Promise.all(locations.map(async ({ id, timezone }) => {
+    const dateZone = displayTimezone ?? timezone
+    const today = localDateAt(now, dateZone)
+    const from = typeof input.from === 'string' ? input.from : today
+    const to = typeof input.to === 'string' ? input.to : addLocalDays(from, AVAILABILITY_PAGE_DAYS)
+    const window = bookingWindow(timezone, undefined, now.toISOString())
+    const midnight = (date: string) => localDateTimeToInstant(date, '00:00', dateZone, 'compatible').toISOString()
+    const fromInstant = from <= today ? window.fromInstant : midnight(from)
+    const requestedEnd = midnight(to)
+    const toInstant = requestedEnd < window.toInstant ? requestedEnd : window.toInstant
+    if (fromInstant >= toInstant) return []
+    return listBookableSessions(db, { env, organizationId, productId: product.id, locationId: id, fromInstant, toInstant, now: now.toISOString() })
+  }))).flat()
   return {
-    success: true,
-    product: { id: product.id, name: product.name, slug },
-    sessions: sessions
-      .filter(session => { const window = bookingWindow(session.timezone); return session.starts_at >= window.fromInstant && session.starts_at < window.toInstant })
-      // A start inside the offering's advance notice is not offered; the claim refuses it too.
-      .filter(session => outsideNotice(session.starts_at, product.booking?.advance_notice_minutes ?? null))
-      .filter(session => onlineOnly ? session.location_id === null && product.booking?.held_online : (requestedLocation
-        ? session.location_id === requestedLocation
-        : session.location_id === null ? product.booking?.held_online : sellingLocations.has(session.location_id)))
-      .map(session => ({
-        id: session.id, starts_at: session.starts_at, ends_at: session.ends_at, location_id: session.location_id,
-        timezone: session.timezone, remaining: session.remaining, is_full: session.is_full,
-        created_at: session.created_at,
-      })),
+    ...result,
+    timezone: locations.length === 1 ? locations[0]!.timezone : null,
+    sessions: sessions.map(({ id, starts_at, ends_at, location_id, timezone, remaining, is_full, created_at }) =>
+      ({ id, starts_at, ends_at, location_id, timezone, remaining, is_full, created_at })),
   }
 }
 

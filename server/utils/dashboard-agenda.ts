@@ -322,7 +322,7 @@ export async function listAgenda(
       ? `/dashboard/account/activity/${row.kind}/${encodeURIComponent(row.id)}`
       : row.kind === 'post'
         ? postEditorPath(query.organizationSlug ?? scope.organizationId, row.id)
-        : `/dashboard/${query.organizationSlug ?? scope.organizationId}/bookings/${row.kind}/${encodeURIComponent(row.id)}`
+        : `/dashboard/${query.organizationSlug ?? scope.organizationId}/bookings/${encodeURIComponent(row.operational_id!)}`
     return [{
       assigned_member_id:row.assigned_member_id,assigned_member_name:row.assigned_member_name,
       id: `${row.kind}:${row.id}`, conversation_id: row.kind === 'post' ? null : row.id, booking_id: row.kind === 'booking' ? row.operational_id : null, product_id: row.product_id, stay_channel: null, stay_moment: null, kind: row.kind, starts_at,
@@ -369,7 +369,7 @@ export async function listAgenda(
         status: stay.status, organization_id: stay.organization_id, location_id: stay.location_id, location_title: stay.location_title,
         guest_image_url: stay.guest_image_url, guest_first_name: scope.buyerUserId ? null : stayGuestFirstName(stay.guest_name), overbooked: !staff && Number(stay.overbooked) === 1, check_out_date: stay.check_out_date,
         resource_image_url: pictures.get(`${stay.organization_id}\nproduct\n${stay.product_id}`) ?? null, name: stay.product_name, party_size: stay.party_size,
-        to: scope.buyerUserId ? `/dashboard/account/activity/stay/${encodeURIComponent(stay.conversation_id)}` : `/dashboard/${organizationPath}/bookings/stay/${encodeURIComponent(stay.id)}`,
+        to: scope.buyerUserId ? `/dashboard/account/activity/stay/${encodeURIComponent(stay.conversation_id)}` : `/dashboard/${organizationPath}/bookings/${encodeURIComponent(stay.id)}`,
       })
     }
   }

@@ -6,7 +6,7 @@ import { Miniflare } from 'miniflare'
 import { generateSQLiteDrizzleJson,generateSQLiteMigration } from 'drizzle-kit/api'
 import * as schema from '../../server/db/schema.ts'
 import { writeMemberScheduling, readMemberScheduling, memberSchedulingList, requireSchedulingAccess, workingWindows, selectBusyCalendars } from '../../server/domain/member-scheduling.ts'
-import { claimSessionCapacity } from '../../server/utils/availability.ts'
+import { claimSessionCapacity, listBookableSessions } from '../../server/utils/availability.ts'
 import { handleBookingsTools } from '../../server/utils/mcp-tools/bookings.ts'
 import type { McpExecutorContext } from '../../server/utils/mcp-tools/execution.ts'
 import { publicProductHosts } from '../../server/utils/public-provider.ts'
@@ -14,6 +14,7 @@ import { storeCalendarSelection, readCalendarIntegration, disconnectCalendar, sy
 import { MEMBER_BUSY_SCOPES } from '../../shared/member-scheduling.ts'
 import { roleSatisfies } from '../../server/utils/mcp-auth.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
+import { localDateTimeToInstant } from '../../utils/timezone.ts'
 
 test('member self-service uses Better Auth permissions, public approval is admin-only, and selected disconnected busy data fails closed for only that member', {timeout:120000},async(t)=>{
  const runtime=new Miniflare({workers:[{config:{name:'member-scheduling-proof',compatibilityDate:'2024-11-01',manifest:{mainModule:'index.mjs',modules:{'index.mjs':{type:'esm',contents:'export class Hub {fetch(){return new Response(null,{status:204})}} export default {fetch(){return new Response("ok")}}'}}},exports:{Hub:{type:'durable-object',storage:'sqlite'}},env:{DB:{type:'d1'},GUEST_INBOX_HUBS:{type:'durable-object',worker:'member-scheduling-proof',exportName:'Hub'}}}}]})
@@ -158,28 +159,28 @@ test('member self-service uses Better Auth permissions, public approval is admin
   assert.deepEqual(await stable(),stableBefore,'profile edits retain all schedule, window and calendar bytes')
   assert.deepEqual((await db.prepare('SELECT * FROM product_sessions ORDER BY id').all()).results,sessionsBefore,'profile saves never materialize sessions')
   const shorterHours=profileOnly.weekly!.map(slot=>({...slot,end:'16:00'}))
-  const completionStart=`${day}T16:00:00.000Z`
-  await db.prepare("CREATE TRIGGER refuse_member_sessions BEFORE INSERT ON product_sessions WHEN NEW.product_id='one' BEGIN SELECT RAISE(ABORT,'Injected session completion failure'); END").run()
-  let afterFailedProfile:Awaited<ReturnType<typeof writeMemberScheduling>>|null=null
+  const fromInstant=localDateTimeToInstant(day,'16:00',profileOnly.timezone!).toISOString()
+  const toInstant=localDateTimeToInstant(day,'17:00',profileOnly.timezone!).toISOString()
+  const readLateOpening=()=>listBookableSessions(db,{env,organizationId:'org',productId:'one',locationId:null,fromInstant,toInstant})
+  const availableBefore=await readLateOpening()
+  assert.deepEqual(availableBefore.map(session=>[session.starts_at,session.remaining,session.created_at]),[[fromInstant,1,null]])
+  const beforeHoursInvalidations=await invalidations()
+  await db.prepare("CREATE TRIGGER refuse_member_invalidation BEFORE INSERT ON public_resource_cache_invalidations WHEN NEW.organization_id='org' AND NEW.reason='member-profile' BEGIN SELECT RAISE(ABORT,'Injected member settings invalidation failure'); END").run()
   try {
-   await assert.rejects(()=>writeMemberScheduling(own,'member-one',{updated_at:profileOnly.updated_at,weekly:shorterHours}),/Injected session completion failure/)
-   const pending=await readMemberScheduling(db,env,'org','member-one')
-   assert.deepEqual(pending!.weekly,shorterHours,'the reported failure can follow a persisted Hours change')
-   assert.deepEqual((await db.prepare('SELECT * FROM product_sessions ORDER BY id').all()).results,sessionsBefore,'a failed session batch commits no partial slots')
-   const pendingBytes=await stable()
-   afterFailedProfile=await writeMemberScheduling(own,'member-one',{updated_at:pending!.updated_at,public_bio:'Profile after a visible Hours failure'})
-   assert.deepEqual(await stable(),pendingBytes,'a profile edit does not complete or change pending Hours work')
+   await assert.rejects(()=>writeMemberScheduling(own,'member-one',{updated_at:profileOnly.updated_at,weekly:shorterHours}),/Injected member settings invalidation failure/)
+   assert.deepEqual(await readMemberScheduling(db,env,'org','member-one'),profileOnly,'an invalidation failure rolls back the Hours change and revision')
+   assert.equal(await invalidations(),beforeHoursInvalidations)
+   assert.deepEqual(await readLateOpening(),availableBefore,'the previous Hours still determine availability after rollback')
    assert.deepEqual((await db.prepare('SELECT * FROM product_sessions ORDER BY id').all()).results,sessionsBefore)
-  } finally {await db.prepare('DROP TRIGGER refuse_member_sessions').run()}
-  assert(afterFailedProfile)
-  const completed=await writeMemberScheduling(own,'member-one',{updated_at:afterFailedProfile.updated_at,weekly:shorterHours})
-  const completedSlot=await db.prepare("SELECT status FROM product_sessions WHERE product_id='one' AND starts_at=?").bind(completionStart).first()
-  assert.deepEqual(completedSlot,{status:'scheduled'},'an explicit unchanged Hours retry finishes canonical session materialization')
-  const completedBytes=await stable()
-  const completedSessions=(await db.prepare('SELECT * FROM product_sessions ORDER BY id').all()).results
-  await writeMemberScheduling(own,'member-one',{updated_at:completed.updated_at,timezone:completed.timezone!,weekly:completed.weekly!,time_off:completed.time_off!})
-  assert.deepEqual(await stable(),completedBytes,'unchanged Hours retain all window and calendar bytes')
-  assert.deepEqual((await db.prepare('SELECT * FROM product_sessions ORDER BY id').all()).results,completedSessions,'idempotent Hours completion retains every persisted session byte')
+  } finally {await db.prepare('DROP TRIGGER refuse_member_invalidation').run()}
+  const savedHours=await writeMemberScheduling(own,'member-one',{updated_at:profileOnly.updated_at,weekly:shorterHours})
+  assert.deepEqual((await readMemberScheduling(db,env,'org','member-one'))?.weekly,shorterHours)
+  assert.equal(await invalidations(),beforeHoursInvalidations+1)
+  assert.deepEqual(await readLateOpening(),[],'the shortened Hours immediately remove the late opening')
+  const savedBytes=await stable()
+  await writeMemberScheduling(own,'member-one',{updated_at:savedHours.updated_at,timezone:savedHours.timezone!,weekly:savedHours.weekly!,time_off:savedHours.time_off!})
+  assert.deepEqual(await stable(),savedBytes,'unchanged Hours retain all window and calendar bytes')
+  assert.deepEqual((await db.prepare('SELECT * FROM product_sessions ORDER BY id').all()).results,sessionsBefore,'Hours edits and availability reads preserve saved sessions')
   await db.prepare("UPDATE member_scheduling SET calendar_account_id='missing-account',calendar_ids_json='[\"busy-calendar\"]' WHERE member_id='member-one'").run()
   const unreadable=await readMemberScheduling(db,env,'org','member-one')
   assert.equal(unreadable?.calendar_status,'disconnected')
