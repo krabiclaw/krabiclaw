@@ -73,8 +73,7 @@ redeploy a healthy production Worker to repeat browser checks.
 
 For every iOS App Store submission, select **Automatically release this
 version** in App Store Connect and verify the selection before submitting for
-review. Qualify the exact build against production before submission so Apple
-can publish it as soon as it is approved.
+review.
 
 GitHub workflow runs and Cloudflare's native deployment history are sufficient
 release evidence. Do not invent a second mapping between Git commits and Worker
