@@ -199,6 +199,22 @@ rooms and capacity. Both clients use the steps returned by the server and save
 the home as an unpublished draft. Airbnb sync requires Business and opens the
 existing connection and listing picker.
 
+After creating a private website, the server opens the first offering guide
+when the business needs one. Restaurant and experience owners who already
+added an offering during website setup keep it and go to Today.
+
+- **Restaurant** creates a section and its first dish, then asks for an optional
+  price and photo before opening the private location menu.
+- **Experiences** saves the guest-facing title and description, resolves the
+  location and host, then asks for duration, capacity, price, and the first
+  session time. The private preview shows the saved session without taking bookings.
+- **Legal Services** starts with the practice area, then asks who handles the
+  consultation and where it takes place. It collects any missing hours, duration,
+  fee, and request review before preparing the private Blawby page.
+
+Today links owners back to the server-selected resume step. Booky Boo opens
+these three workspaces in Safari, which runs the same guided routes.
+
 Lodging homes have their own addresses and timezones. Add a home as a draft,
 configure its listing and nightly calendar, then publish it. For Airbnb listings,
 request synchronization: the live-home allowance is checked before work is

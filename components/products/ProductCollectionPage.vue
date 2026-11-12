@@ -319,7 +319,7 @@ const emptyCollectionMessage = computed(() => (isExperiences.value
   : t('site.products.empty')))
 const { previewAuthorized } = useTenantOrganization()
 const previewMenu = computed(() => previewAuthorized && props.presentation.locationCollectionSegment === 'menu')
-const menuLocationVisible = (entry: PublicProduct['locations'][number]) => entry.published || previewMenu.value
+const menuLocationVisible = (entry: PublicProduct['locations'][number]) => previewMenu.value ? entry.active : entry.published
 const locationMap = computed(() => new Map(props.locations.map(location => [location.id, location])))
 // Section flags govern chooser destinations; the full locations still scope prices and collections.
 const locationChoices = computed(() => {
