@@ -19,6 +19,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { register } from 'node:module'
 import { resolve } from 'node:path'
+import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
@@ -371,21 +372,30 @@ export async function auditTargetInvariants(target) {
   // object is gone on purpose.
   const media = target.prepare("SELECT id, public_url FROM media_assets WHERE status = 'active' AND provider = 'cloudflare_r2' AND public_url IS NOT NULL").all()
   const unserved = []
+  let dnsRetries = 0
   for (let offset = 0; offset < media.length; offset += 12) {
     const batch = await Promise.all(media.slice(offset, offset + 12).map(async (row) => {
-      try {
-        const response = await fetch(String(row.public_url), { method: 'HEAD', signal: AbortSignal.timeout(20_000) })
-        return response.status === 200 ? null : `${row.id} ${row.public_url}: HTTP ${response.status}`
-      } catch (error) {
-        // undici's "fetch failed" says nothing; the reason is its cause.
-        const cause = error instanceof Error && error.cause instanceof Error ? error.cause : null
-        const detail = cause ? [Reflect.get(cause, 'code'), Reflect.get(cause, 'syscall'), Reflect.get(cause, 'hostname'), cause.message].filter(Boolean).join(' ') : null
-        return `${row.id} ${row.public_url}: ${error instanceof Error ? error.message : String(error)}${detail ? ` (${detail})` : ''}`
+      for (let attempt = 1; ; attempt++) {
+        try {
+          const response = await fetch(String(row.public_url), { method: 'HEAD', signal: AbortSignal.timeout(20_000) })
+          return response.status === 200 ? null : `${row.id} ${row.public_url}: HTTP ${response.status}`
+        } catch (error) {
+          // "fetch failed" says nothing; the reason is its cause.
+          const cause = error instanceof Error && error.cause instanceof Error ? error.cause : null
+          const code = cause && Reflect.get(cause, 'code')
+          if (attempt < 3 && (code === 'ENOTFOUND' || code === 'EAI_AGAIN')) {
+            dnsRetries++
+            await delay(250 * attempt)
+            continue
+          }
+          const detail = cause ? [code, Reflect.get(cause, 'syscall'), Reflect.get(cause, 'hostname'), cause.message].filter(Boolean).join(' ') : null
+          return `${row.id} ${row.public_url}: ${error instanceof Error ? error.message : String(error)}${detail ? ` (${detail})` : ''} after ${attempt} attempt(s)`
+        }
       }
     }))
     unserved.push(...batch.filter(Boolean))
   }
-  results.push({ name: 'media_objects_are_served', violations: unserved.length, unserved })
+  results.push({ name: 'media_objects_are_served', violations: unserved.length, unserved, dns_retries: dnsRetries })
   return results
 }
 
@@ -1401,6 +1411,8 @@ export function printTransferReport(manifest) {
     console.log(`${entry.table.padEnd(width)}  ${String(entry.source_rows).padStart(6)}  ${String(entry.target_rows).padStart(6)}${entry.source_rows === entry.target_rows ? '' : '  (changed by a forward migration or transform)'}`)
   }
   console.log(`Transforms: ${manifest.transforms.filter(transform => transform.changes > 0).map(transform => `${transform.name}=${transform.changes}`).join(', ') || 'no changes'}`)
+  const media = manifest.invariants.find(result => result.name === 'media_objects_are_served')
+  if (media?.dns_retries) console.log(`Media audit repeated ${media.dns_retries} failed DNS lookup(s); all active R2 media returned HTTP 200.`)
   for (const [table, rows] of Object.entries(manifest.payload?.left_behind ?? {})) {
     if (rows.changed.length) console.log(`Not carried, changed since the initial export: ${table} ${rows.changed.length}: ${rows.changed.join(' ')}`)
     if (rows.deleted.length) console.log(`Not carried, deleted since the initial export: ${table} ${rows.deleted.length}: ${rows.deleted.join(' ')}`)

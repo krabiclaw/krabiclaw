@@ -6,6 +6,39 @@ import { join } from 'node:path'
 import test from 'node:test'
 import Database from 'better-sqlite3'
 
+test('the media transfer audit retries failed DNS lookups without accepting missing assets', async (t) => {
+  const { auditTargetInvariants } = await import('../../scripts/transfer-database-export.mjs')
+  const database = new Database(':memory:')
+  try {
+    database.exec(readFileSync('migrations/0000_baseline.sql', 'utf8'))
+    database.exec(readFileSync('migrations/0001_session_prep_tasks.sql', 'utf8'))
+    database.exec("INSERT INTO organization (id, name, slug, default_currency, timezone) VALUES ('tenant', 'Test tenant', 'tenant', 'USD', 'America/New_York')")
+    const asset = database.prepare("INSERT INTO media_assets (id, organization_id, kind, provider, source, public_url) VALUES (?, 'tenant', 'image', 'cloudflare_r2', 'upload', ?)")
+    for (const name of ['reachable', 'unresolved', 'missing']) asset.run(name, `https://media.example.test/${name}`)
+    const requests = new Map<string, number>()
+    t.mock.method(globalThis, 'fetch', async (url: string, init: RequestInit) => {
+      assert.equal(init.method, 'HEAD')
+      const name = new URL(url).pathname.slice(1)
+      const count = (requests.get(name) ?? 0) + 1
+      requests.set(name, count)
+      if (name === 'unresolved' || (name === 'reachable' && count === 1)) {
+        throw new TypeError('fetch failed', { cause: Object.assign(new Error('name not resolved'), { code: 'ENOTFOUND' }) })
+      }
+      return new Response(null, { status: name === 'missing' ? 404 : 200 })
+    })
+    const media = (await auditTargetInvariants(database)).find(row => row.name === 'media_objects_are_served')
+    assert.ok(media)
+    assert.equal(media.violations, 2)
+    assert.deepEqual(new Set(media.unserved), new Set([
+      'unresolved https://media.example.test/unresolved: fetch failed (ENOTFOUND name not resolved) after 3 attempt(s)',
+      'missing https://media.example.test/missing: HTTP 404',
+    ]))
+    assert.deepEqual(Object.fromEntries(requests), { reachable: 2, unresolved: 3, missing: 1 })
+  } finally {
+    database.close()
+  }
+})
+
 test('the migration chain applies from zero and builds every table the schema declares', () => {
   const database = new Database(':memory:')
   database.pragma('foreign_keys = ON')
