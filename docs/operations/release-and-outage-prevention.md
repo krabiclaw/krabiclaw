@@ -73,7 +73,9 @@ redeploy a healthy production Worker to repeat browser checks.
 
 For every iOS App Store submission, select **Automatically release this
 version** in App Store Connect and verify the selection before submitting for
-review.
+review. When submitting a build to an existing external TestFlight group,
+select **Automatically notify testers** so the build becomes available to that
+group after Beta App Review.
 
 GitHub workflow runs and Cloudflare's native deployment history are sufficient
 release evidence. Do not invent a second mapping between Git commits and Worker
