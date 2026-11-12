@@ -128,6 +128,7 @@ test('hourly materialization reaches the next page with a rate-limited KV cursor
     assert.ok(offered.length > 0)
     assert.ok(offered.every(row => row.remaining === 10 && row.location_id === LOCATION))
     await run()
+    await run()
     assert.deepEqual((await sessions()).map(row => row.id), offered.map(row => row.id))
   } finally { await runtime.dispose() }
 })
