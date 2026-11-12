@@ -4713,7 +4713,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await expect(cleanerPage.getByRole('button', { name: 'Cancel stay', exact: true })).toHaveCount(0)
       await expect(cleanerPage.getByRole('button', { name: 'Record payment', exact: true })).toHaveCount(0)
       await cleanerPage.goto(`/dashboard/${slug}/calendar?view=list`)
-      const departure = cleanerPage.locator(`a[href="/dashboard/${slug}/calendar/${localDay(2)}/stay/${stays[0]!.booking_id}?view=list"]`)
+      const departure = cleanerPage.locator(`a[href="/dashboard/${slug}/calendar/${localDay(2)}/booking/${stays[0]!.booking_id}?view=list"]`)
       await expect(departure).toContainText('Ana')
       await departure.click()
       await expect(cleanerPage.getByRole('heading', { name: 'Ana’s group of 2', level: 2, exact: true })).toBeVisible()

@@ -157,7 +157,7 @@ export async function notifySubscriptionPlanForEvent(env: CloudflareEnv, db: DbC
   const previous = event.type === 'customer.subscription.updated' ? event.data.previous_attributes : undefined
   const willNotRenew = (native.status === 'active' || native.status === 'trialing')
     && Boolean(native.cancel_at_period_end || native.cancel_at)
-    && !Boolean((previous?.cancel_at_period_end ?? native.cancel_at_period_end)
+    && !((previous?.cancel_at_period_end ?? native.cancel_at_period_end)
       || (previous?.cancel_at !== undefined ? previous.cancel_at : native.cancel_at))
   const priorItems = previous?.items?.data
   if (event.type === 'customer.subscription.updated' && !willNotRenew && !priorItems) return
