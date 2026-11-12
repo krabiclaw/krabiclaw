@@ -317,6 +317,9 @@ const collectionLabel = computed(() => {
 const emptyCollectionMessage = computed(() => (isExperiences.value
   ? t('site.experiences.empty')
   : t('site.products.empty')))
+const { previewAuthorized } = useTenantOrganization()
+const previewMenu = computed(() => previewAuthorized && props.presentation.locationCollectionSegment === 'menu')
+const menuLocationVisible = (entry: PublicProduct['locations'][number]) => entry.published || previewMenu.value
 const locationMap = computed(() => new Map(props.locations.map(location => [location.id, location])))
 // Section flags govern chooser destinations; the full locations still scope prices and collections.
 const locationChoices = computed(() => {
@@ -345,8 +348,8 @@ const productLocationId = (product: PublicProduct, collectionLocationId: string 
   // being read in. Only under a site-wide collection is there nothing to say
   // which branch it belongs to, and then it has no single route.
   if (collectionLocationId && locationMap.value.has(collectionLocationId)
-    && product.locations.some(entry => entry.location_id === collectionLocationId && entry.published)) return collectionLocationId
-  const here = product.locations.filter(entry => entry.published && locationMap.value.has(entry.location_id))
+    && product.locations.some(entry => entry.location_id === collectionLocationId && menuLocationVisible(entry))) return collectionLocationId
+  const here = product.locations.filter(entry => menuLocationVisible(entry) && locationMap.value.has(entry.location_id))
   return here.length === 1 ? here[0]!.location_id : null
 }
 const locationSlug = (id: string) => {
@@ -380,7 +383,7 @@ const isAvailable = (product: PublicProduct, collectionLocationId: string | null
   // nowhere read as available.
   const offeredHere = id
     ? product.locations.some(entry => entry.location_id === id && entry.active)
-    : product.locations.some(entry => entry.active && entry.published && locationMap.value.has(entry.location_id))
+    : product.locations.some(entry => entry.active && menuLocationVisible(entry) && locationMap.value.has(entry.location_id))
   if (!offeredHere && !product.booking?.held_online && !product.order_url) return false
   // On sale means the merchant is selling it here. A product priced in words —
   // "Market price" — is on sale; an amount is what online checkout needs, and
@@ -405,7 +408,7 @@ const productHref = (product: PublicProduct, collectionLocationId: string | null
 const priceScopes = (product: PublicProduct, collectionLocationId: string | null = null) => {
   const locationId = productLocationId(product, collectionLocationId)
   return locationId ? [locationId] : [
-    ...product.locations.filter(location => location.published && locationMap.value.has(location.location_id)).map(location => location.location_id),
+    ...product.locations.filter(location => menuLocationVisible(location) && locationMap.value.has(location.location_id)).map(location => location.location_id),
     ...(product.booking?.held_online || product.order_url ? [null] : []),
   ]
 }

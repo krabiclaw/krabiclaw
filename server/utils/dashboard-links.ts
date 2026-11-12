@@ -94,6 +94,10 @@ export function firstHomeSetupPath(orgSlug: string): string {
   return `/dashboard/${encodeURIComponent(orgSlug)}/products?kind=stay`
 }
 
+export function firstMenuSectionSetupPath(orgSlug: string, locationId: string): string {
+  return scopedTo(`${organizationBase(orgSlug)}/products/first-menu`, locationId)
+}
+
 export function productEditorPath(orgSlug: string, productId: string, locationId?: string | null): string {
   return scopedTo(`${organizationBase(orgSlug)}/products/${encodeURIComponent(productId)}`, locationId)
 }

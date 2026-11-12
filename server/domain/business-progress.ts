@@ -8,7 +8,8 @@ import { businessGoalStrategySchema, createBusinessGoalSchema, updateBusinessGoa
 import { publishBusinessInvalidation } from '~/server/cloudflare/guest-inbox-events'
 import { queryOrganizationAnalytics } from '~/server/utils/analytics-query'
 import { addLocalDays, formatCalendarRange, formatTimestamp, localDateAt } from '~/utils/timezone'
-import { articleSocialPostPath, blogCreatePath, blogEditorPath, firstHomeSetupPath, guestConversationPath, postEditorPath, productEditorPath, productPaymentPath } from '~/server/utils/dashboard-links'
+import { articleSocialPostPath, blogCreatePath, blogEditorPath, firstHomeSetupPath, firstMenuSectionSetupPath, guestConversationPath, postEditorPath, productEditorPath, productPaymentPath } from '~/server/utils/dashboard-links'
+import { firstMenuSetupApplies, parseOnboardingDraftPayload } from '~/server/utils/onboarding-drafts'
 import { listBookableSessions } from '~/server/utils/availability'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import { readStayGapCandidates, stayAccessFor } from '~/server/domain/stays'
@@ -350,8 +351,8 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
         postEditorPath(organization.slug, 'new', input.locationId), 30, { goal: goalFor('social'), icon: 'i-lucide-camera' })
     }
   }
-  const firstRun = !input.locationId && organization.status === 'inactive' && Boolean(await queryFirst(db,
-    "SELECT 1 FROM onboarding_drafts WHERE organization_id=? AND status='committed' LIMIT 1", [organizationId]))
+  const firstRun = !input.locationId && organization.status === 'inactive' && await queryFirst<{ payload_json: string }>(db,
+    "SELECT payload_json FROM onboarding_drafts WHERE organization_id=? AND status='committed' LIMIT 1", [organizationId])
   const canManagePayments = await roleAllows({ ...principal, permissions: { payments: ['integration'] } })
   if (firstRun) {
     const [domain, canConnectDomain, canUpdateBilling, canAddProduct] = await Promise.all([
@@ -370,10 +371,21 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
       service: ['service', 'Add a consultation', 'Give clients a way to request a consultation.'],
     } as const
     const nextProduct = firstProduct[organization.vertical as keyof typeof firstProduct]
-    if (canAddProduct && nextProduct && !products.some(product => product.kind === nextProduct[0])) {
+    if (canAddProduct && nextProduct) {
       const [kind, title, detail] = nextProduct
-      offer('product.create', organizationId, title, detail, kind === 'stay' ? firstHomeSetupPath(organization.slug) : `${productEditorPath(organization.slug, 'new')}?kind=${kind}`, 110,
-        { icon: 'i-lucide-list-checks' })
+      const existing = products.filter(product => product.kind === kind).length
+      const menuLocations = kind === 'dish' && existing <= 1 && firstMenuSetupApplies(parseOnboardingDraftPayload(firstRun.payload_json))
+        ? await queryAll<{ id: string }>(db, "SELECT id FROM business_locations WHERE organization_id=? AND status='active' LIMIT 2", [organizationId])
+        : []
+      const menuLocation = menuLocations.length === 1 ? menuLocations[0] : undefined
+      if (menuLocation) {
+        offer('product.create', organizationId, existing ? 'Preview your first menu' : 'Set up your menu',
+          existing ? 'See how your dish looks on your private website.' : detail,
+          firstMenuSectionSetupPath(organization.slug, menuLocation.id), 110, { icon: 'i-lucide-list-checks' })
+      } else if (!existing) {
+        offer('product.create', organizationId, title, detail, kind === 'stay'
+          ? firstHomeSetupPath(organization.slug) : `${productEditorPath(organization.slug, 'new')}?kind=${kind}`, 110, { icon: 'i-lucide-list-checks' })
+      }
     }
   }
   const paymentGoal = goalFor('payments')

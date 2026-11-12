@@ -17,7 +17,7 @@ import { execute, executeBatch, queryAll, queryFirst, type BatchQuery } from '~/
 import { resourceLocalizationDeletionQueries } from '~/server/utils/localization'
 import { getProduct, planProductCreateWrites, publishStayProducts, slugCandidate } from '~/server/utils/product-management'
 import { updateLocation } from '~/server/utils/location-management'
-import { getDraftMedia, normalizeOnboardingDraftInput, onboardingPublicationMissingFields, readOnboardingDraft, upsertActiveOnboardingDraft, type OnboardingDraftInput, onboardingDraftWriteGuard, onboardingPageBlocks, onboardingPagePath, onboardingPageType, parseOnboardingDraftPayload, readActiveOnboardingDraft, type OnboardingDraftPayload, type SavedOnboardingDraft } from '~/server/utils/onboarding-drafts'
+import { firstMenuSetupApplies, getDraftMedia, normalizeOnboardingDraftInput, onboardingPublicationMissingFields, readOnboardingDraft, upsertActiveOnboardingDraft, type OnboardingDraftInput, onboardingDraftWriteGuard, onboardingPageBlocks, onboardingPagePath, onboardingPageType, parseOnboardingDraftPayload, readActiveOnboardingDraft, type OnboardingDraftPayload, type SavedOnboardingDraft } from '~/server/utils/onboarding-drafts'
 import { createMediaAsset, deleteProductMediaPlacementsQuery, insertInitialMediaPlacements, type CreateInput } from '~/server/utils/media-asset-manager'
 import { applyOnboardingTenantPages, getPublishedTenantPage, prepareTenantPageDelete, refreshTenantPageCard } from '~/server/utils/content/pages'
 import { activateOrganization, completeOnboarding, createOrganization, provisionOrganization, type OrganizationProvisioningResult } from '~/server/utils/organization-provisioning'
@@ -173,6 +173,7 @@ export async function activateOnboardingDraft(env: CloudflareEnv, db: D1Database
     return {
       organization_id: organizationId, organization_slug: organization.slug, subdomain: draft.subdomain_candidate,
       vertical: payload.preview.vertical,
+      first_menu_setup: firstMenuSetupApplies(payload),
       location_id: locations[0]!.id, location_slug: locations[0]!.slug, public_url: publicUrl, ...completion,
     }
   } catch (error) {

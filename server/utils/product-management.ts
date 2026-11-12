@@ -1333,6 +1333,7 @@ export async function createProduct(db: DbClient, input: {
   page?: ProductPageInput
   idempotencyKey?: string
   booking?: { data: ProductBookingSetupInput; env: CloudflareEnv }
+  firstMenuSection?: { id: string; locationId: string }
 }): Promise<Product> {
   const key = input.idempotencyKey?.trim()
   if (input.idempotencyKey !== undefined && (!key || key.length > 200)) invalid('idempotency_key must be 1 to 200 characters')
@@ -1340,7 +1341,8 @@ export async function createProduct(db: DbClient, input: {
   const pageInput = productPageInput(input.product, env, input.page)
   const product = input.product
   const dedupeKey = key ? creationDedupeKey('product', input.organizationId, key) : null
-  const requestHash = dedupeKey ? await creationRequestHash({ product, page: pageInput?.data ?? null, publication: input.publication ?? null, booking: input.booking?.data ?? null }) : null
+  const menu = input.firstMenuSection
+  const requestHash = dedupeKey ? await creationRequestHash({ product, page: pageInput?.data ?? null, publication: input.publication ?? null, booking: input.booking?.data ?? null, ...(menu ? { firstMenuSection: menu } : {}) }) : null
   const replay = async (): Promise<Product | null> => {
     if (!dedupeKey) return null
     const record = await readCreationRecord(db, dedupeKey)
@@ -1365,6 +1367,22 @@ export async function createProduct(db: DbClient, input: {
     assertVariantPricesConsistent(planned)
     const now = new Date().toISOString()
     const writes = [...productWrites(input.organizationId, planned, input.actor, now, 'insert'), ...await stayBookingWrites(db, { organizationId: input.organizationId, planned, actorId: input.actor.actorId, env })]
+    if (menu) {
+      if (planned.kind !== 'dish' || input.publication?.published !== false) invalid('First menu setup requires an unpublished dish')
+      const section = await queryFirst(db, `SELECT 1 FROM collections c JOIN business_locations l
+        ON l.organization_id = c.organization_id AND l.id = c.location_id
+        WHERE c.organization_id = ? AND c.id = ? AND l.id = ? AND l.status = 'active'`, [input.organizationId, menu.id, menu.locationId])
+      if (!section) notFound('Menu section not found at this location')
+      writes.push(
+        collectionProductsGuard(input.organizationId, menu.id, [], input.actor),
+        {
+          query: `INSERT INTO product_locations (organization_id, product_id, location_id, active, published, created_at, updated_at, created_by, updated_by)
+            VALUES (?, ?, ?, 1, 0, ?, ?, ?, ?)`,
+          params: [input.organizationId, planned.id, menu.locationId, now, now, input.actor.actorId, input.actor.actorId],
+        },
+        ...collectionProductsWrites(input.organizationId, menu.id, [planned.id], input.actor, now),
+      )
+    }
     if (input.booking) {
       await assertBookableOffering(db, input.organizationId, planned, input.booking.data.location_id)
       const { prepareProductBookingSetup } = await import('~/server/utils/availability')
@@ -1396,6 +1414,7 @@ export async function createProduct(db: DbClient, input: {
       // A competing creation can claim the slug or page before the audit key.
       const concurrent = await replay()
       if (concurrent) return concurrent
+      if (menu && /collection_products_sort_order_check|FOREIGN KEY constraint failed/.test(error instanceof Error ? error.message : String(error))) collectionProductsChanged(menu.id, error)
       if (isProductPageConflict(error)) conflict('Product already has a canonical page')
       if (input.booking) {
         const { bookingConfigurationWriteError } = await import('~/server/utils/availability')
@@ -2370,21 +2389,27 @@ export async function listCollections(db: DbClient, input: {
 }
 
 export async function createCollection(db: DbClient, input: {
-  organizationId: string; collection: CreateCollectionInput; actor: Actor
+  organizationId: string; collection: CreateCollectionInput; actor: Actor; firstAtLocation?: true
 }): Promise<Collection> {
   const name = requireTrimmedProductString(input.collection.name, 'name', PRODUCT_LIMITS.collectionName)
+  if (input.collection.location_id && !await queryFirst(db, 'SELECT 1 FROM business_locations WHERE organization_id = ? AND id = ?', [input.organizationId, input.collection.location_id])) {
+    notFound('Location not found')
+  }
   const slug = await uniqueCollectionSlug(db, input.organizationId, input.collection.location_id ?? null, name)
   const id = crypto.randomUUID()
   const now = new Date().toISOString()
   await executeBatch(db, [{
     query: `INSERT INTO collections (id, organization_id, location_id, name, slug, description, sort_order, created_at, updated_at, created_by, updated_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            ${input.firstAtLocation ? 'WHERE NOT EXISTS (SELECT 1 FROM collections WHERE organization_id = ? AND location_id = ?)' : ''}`,
     params: [id, input.organizationId, input.collection.location_id ?? null, name, slug,
       normalizeOptionalProductString(input.collection.description, 'description', PRODUCT_LIMITS.collectionDescription),
-      input.collection.sort_order ?? 0, now, now, input.actor.actorId, input.actor.actorId],
+      input.collection.sort_order ?? 0, now, now, input.actor.actorId, input.actor.actorId,
+      ...(input.firstAtLocation ? [input.organizationId, input.collection.location_id ?? null] : [])],
   }, publicResourceCacheInvalidationQuery(input.organizationId, 'collection_created')], { operation: 'Create collection' })
   const row = await queryFirst<Row>(db, 'SELECT * FROM collections WHERE organization_id = ? AND id = ?', [input.organizationId, id])
-  return (await mapCollectionRows(db, input.organizationId, [row!]))[0]!
+  if (!row) conflict('A menu section already exists at this location. Reopen menu setup to continue.')
+  return (await mapCollectionRows(db, input.organizationId, [row]))[0]!
 }
 
 async function uniqueCollectionSlug(db: DbClient, organizationId: string, locationId: string | null, base: string): Promise<string> {

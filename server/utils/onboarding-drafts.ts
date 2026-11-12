@@ -151,8 +151,13 @@ export interface DraftContentRecord {
   asset_id?: string | null
 }
 
+export function firstMenuSetupApplies(payload: OnboardingDraftPayload): boolean {
+  return payload.preview.vertical === 'restaurant' && payload.source.type === 'manual' && payload.preview.products.length === 0
+}
+
 export interface OnboardingDraftPayload {
   version: 3
+  first_menu_skips?: { dish_id: string; price?: true; photo?: true }
   request?: { key: string; fingerprint: string }
   source: {
     type: DraftSourceType
