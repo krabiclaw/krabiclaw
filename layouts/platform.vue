@@ -14,6 +14,7 @@
 <script setup lang="ts">
 import PlatformHeader from '~/components/platform/PlatformHeader.vue'
 import PlatformCommandSearchModal from '~/components/platform/search/PlatformCommandSearchModal.vue'
+import { formatPlatformTitle } from '~/utils/social-metadata'
 import '~/assets/css/platform-entry.css'
 
 const { fontPreset } = usePublicSiteBrand()
@@ -33,7 +34,7 @@ const section = computed(() => route.meta.articleCollection === 'docs' ? 'docs' 
 // so a visitor never sees a light frame first.
 useHead(() => ({
   htmlAttrs: { class: section.value === 'docs' ? 'dark platform-documentation' : 'dark', 'data-theme': 'dark', style: 'color-scheme: dark' },
-  titleTemplate: (title) => title ? `${title} | KrabiClaw` : 'KrabiClaw | AI Website Platform'
+  titleTemplate: (title) => formatPlatformTitle(title)
 }))
 </script>
 
