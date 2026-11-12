@@ -11,8 +11,11 @@ export type BookingStatus = typeof BOOKING_STATUSES[number]
  * @see https://docs.channex.io/api-v.1-documentation/airbnb-api.md
  */
 export const MAX_STAY_NIGHTS = 1125
-/** The dated inventory shared by the guest calendar and the Channex import/push. */
-export const STAY_CALENDAR_DAYS = 500
+/** How far ahead a guest can book, measured on the offering's local calendar. */
+export const BOOKING_HORIZON_DAYS = 500
+export const AVAILABILITY_PAGE_DAYS = 31
+/** The dated inventory also shared with the Channex import/push. */
+export const STAY_CALENDAR_DAYS = BOOKING_HORIZON_DAYS
 
 /** Optional listing rules actually supplied by its host or imported channel. */
 export interface StayCalendarRules {
@@ -105,12 +108,8 @@ export function isBookingComplete(booking: { status: BookingStatus; ends_at: str
  *
  * Deliberately built from the rule and the INTENDED local start, never the
  * actual `starts_at`. Rescheduling a session changes its instant but not this
- * key, so regeneration finds the existing row and leaves it alone instead of
- * recreating the occurrence at its original time.
+ * key, so the calendar keeps the original occurrence attached to the saved row.
  */
 export function occurrenceKey(ruleId: string, localDate: string, localStartTime: string): string {
   return `${ruleId}:${localDate}T${localStartTime}`
 }
-
-/** How far ahead a guest can book, in days. The public page and the session generator read the same number. */
-export const PUBLIC_BOOKING_WINDOW_DAYS = 31

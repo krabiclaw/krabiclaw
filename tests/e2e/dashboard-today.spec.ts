@@ -190,6 +190,7 @@ test('the member who handles a branch’s tables gains and loses its table booki
   let reassigned = false
   let actor: Member | undefined
   let reservationId: string | null = null
+  let bookingId: string | null = null
   let memberContext: BrowserContext | null = null
   const failures: unknown[] = []
   const assign = async (memberId: string) => {
@@ -211,10 +212,12 @@ test('the member who handles a branch’s tables gains and loses its table booki
     const slot = await openSeating(request, 2, 2 * 86_400_000)
     const day = { date: new Intl.DateTimeFormat('en-CA', { timeZone: slot.timezone }).format(new Date(slot.starts_at)) }
     const guestName = `Branch${Date.now()} Guest`
-    reservationId = (await bookTable(request, { name: guestName, email: `branch-assignment-${Date.now()}@playwright.example`, phone: '+61491570007', partySize: 2, seating: slot })).requestId
+    const made = await bookTable(request, { name: guestName, email: `branch-assignment-${Date.now()}@playwright.example`, phone: '+61491570007', partySize: 2, seating: slot })
+    reservationId = made.requestId
+    bookingId = made.bookingId
     expect(reservationId).toEqual(expect.any(String))
-    const bookingPath = `/api/dashboard/bookings/booking/${reservationId}`
-    const destination = `${ORG}/bookings/booking/${reservationId}`
+    const bookingPath = `/api/dashboard/bookings/${bookingId}`
+    const destination = `${ORG}/bookings/${bookingId}`
     const ownerBooking = await page.request.get(bookingPath, { params: { org } })
     expect(ownerBooking.status(), await ownerBooking.text()).toBe(200)
     const { booking } = await ownerBooking.json() as { booking: DashboardBookingDetails }
@@ -294,9 +297,11 @@ test('the member who handles a branch’s tables gains and loses its table booki
   } finally {
     try {
       if (reservationId) {
-        const cancelled = await page.request.post(`${inboxPath}/${reservationId}/operations/cancel`, { data: { idempotency_key: crypto.randomUUID() } })
+        const current = await page.request.get(`/api/dashboard/bookings/${bookingId}`, { params: { org } })
+        expect(current.status(), await current.text()).toBe(200)
+        const cancelled = await page.request.post(`/api/dashboard/bookings/${bookingId}/cancel`, { params: { org }, data: { version: (await current.json()).booking.version, idempotency_key: crypto.randomUUID() } })
         expect(cancelled.status(), await cancelled.text()).toBe(200)
-        const read = await page.request.get(`/api/dashboard/bookings/booking/${reservationId}`, { params: { org } })
+        const read = await page.request.get(`/api/dashboard/bookings/${bookingId}`, { params: { org } })
         expect(read.status(), await read.text()).toBe(200)
         expect((await read.json() as { booking: DashboardBookingDetails }).booking).toMatchObject({ conversation_id: reservationId, status: 'cancelled' })
       }

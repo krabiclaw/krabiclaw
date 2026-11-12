@@ -1,4 +1,4 @@
-import { usesTenantHeader } from '../../server/utils/tenant-hosts'
+import type { APIRequestContext } from '@playwright/test'
 import { SEED_SUBDOMAINS } from './seed/manifest'
 import type { SeedTenantKey } from '../../config/development-auth-fixtures'
 
@@ -14,9 +14,8 @@ export function testBaseUrl() {
   return `http://localhost:${port}`
 }
 
-function usesSharedTenantHost(base: URL): boolean {
-  return ['localhost', '127.0.0.1', '[::1]'].includes(base.hostname)
-    || usesTenantHeader(base.hostname)
+function tenantPreviewHeaders(subdomain: string): Record<string, string> {
+  return { 'x-preview-tenant': subdomain }
 }
 
 /** A seeded business's public site: the local Worker, named by its subdomain header. */
@@ -25,19 +24,16 @@ export function seededSiteURL(_key: SeedTenantKey): string {
 }
 
 export function seededSiteHeaders(key: SeedTenantKey): Record<string, string> {
-  return { 'x-preview-tenant': SEED_SUBDOMAINS[key] }
+  return tenantPreviewHeaders(SEED_SUBDOMAINS[key])
 }
 
-/**
- * Can a tenant be reached at its own hostname here?
- *
- * The local Worker preserves <tenant>.localhost, so iframe previews use their
- * real tenant hostname. Shared preview origins that require x-preview-tenant
- * cannot convey tenant identity from an iframe URL.
- */
-export function tenantHostIsAddressable(): boolean {
-  const base = new URL(testBaseUrl())
-  return base.hostname === 'localhost' || !usesSharedTenantHost(base)
+/** Chromium navigates tenant subdomains. Node requests name the tenant on the local Worker. */
+export function readLocalTenant(request: APIRequestContext, subdomain: string, target: URL | string, params?: Record<string, string | number | boolean>) {
+  const url = new URL(testBaseUrl())
+  const { pathname, search } = new URL(target, url)
+  url.pathname = pathname
+  url.search = search
+  return request.get(url.href, { headers: tenantPreviewHeaders(subdomain), params })
 }
 
 export function devLoginHeaders(): Record<string, string> | undefined {

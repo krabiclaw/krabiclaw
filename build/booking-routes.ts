@@ -47,19 +47,23 @@ export function mountBookingRoutes(pages: PageNode[]): void {
   const calendar = nodeAt(pages, CALENDAR_PATH)
   const day = nodeAt(pages, DAY_PATH)
   if (!booking || !today || !calendar || !day) throw new Error('The booking, Today, calendar and calendar day pages were not all found; bookings cannot open in their context')
-  const clone = renamed(booking, 'dashboard-org_slug-bookings', 'dashboard-org_slug-calendar-day')
-  clone.path = ':booking_type()/:record_id()'
+  const canonical = renamed(booking, 'dashboard-org_slug-bookings-booking_type', 'dashboard-org_slug-bookings')
+  canonical.path = 'bookings/:record_id()'
+  const clone = renamed(canonical, 'dashboard-org_slug-bookings', 'dashboard-org_slug-calendar-day')
+  clone.path = 'booking/:record_id()'
   day.children = [...(day.children ?? []), clone]
   // A home's occupied night opens its stay directly: its parent is the nightly
   // Calendar, rather than an agenda day whose state belongs to a location.
-  const night = renamed(booking, 'dashboard-org_slug-bookings', 'dashboard-org_slug-calendar-night')
-  night.path = ':booking_type(stay)/:record_id()'
+  const night = renamed(canonical, 'dashboard-org_slug-bookings', 'dashboard-org_slug-calendar-night')
+  night.path = 'stay/:record_id()'
   calendar.children = [...(calendar.children ?? []), night]
   const bookingIndex = pages.indexOf(booking)
   if (bookingIndex === -1) throw new Error('The booking subtree must be a root before it is mounted beneath Today')
   pages.splice(bookingIndex, 1)
-  booking.path = 'bookings/:booking_type()/:record_id()'
-  today.children = [...(today.children ?? []), booking]
+  // These three detail URLs were delivered in notifications. They redirect to the booking ID route.
+  const issued: PageNode = { name: 'dashboard-issued-booking', file: booking.file, path: 'bookings/:booking_type(stay|booking|reservation)/:record_id()' }
+  booking.path = 'bookings/:booking_type(order|payment)/:record_id()'
+  today.children = [...(today.children ?? []), canonical, booking, issued]
 
   const record = nodeAt(pages, ACCOUNT_RECORD_PATH)
   const accountDay = nodeAt(pages, ACCOUNT_DAY_PATH)

@@ -47,7 +47,7 @@ export async function seedTraffic(baseURL: string, manifest: SeedManifest) {
         // Two guests book the studio's wheel class.
         if (key === 'experience') {
           const slug = tenant.products['wheel-class']!.slug
-          const listed = await context.request.get(`/api/public/products/${slug}/sessions`)
+          const listed = await context.request.get(`/api/public/products/${slug}/availability`)
           if (listed.status() !== 200) throw new Error(`${tenant.name}'s class times answered ${listed.status()} ${await listed.text()}`)
           const tomorrow = new Date(Date.now() + 86_400_000).toISOString()
           const open = (await listed.json() as { sessions: Array<{ id: string; is_full: boolean; starts_at: string }> }).sessions

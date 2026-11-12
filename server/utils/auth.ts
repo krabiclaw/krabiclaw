@@ -4,13 +4,11 @@ import { drizzleAdapter } from 'better-auth/adapters/drizzle'
 import { DISCORD_BOT_PERMISSIONS } from '~/server/utils/discord-bot'
 import { loginMethodForPath } from '~/shared/auth/login-method'
 import { admin, anonymous, bearer, emailOTP, genericOAuth, getOrgAdapter, hasPermission, jwt, lastLoginMethod, organization, phoneNumber, type UserWithAnonymous } from 'better-auth/plugins'
-import { stripe as betterAuthStripe, type Subscription as StripeSubscription } from '@better-auth/stripe'
+import { stripe as betterAuthStripe } from '@better-auth/stripe'
 import { oauthProvider } from '@better-auth/oauth-provider'
 import { cimd } from '@better-auth/cimd'
 import { fetchCimdMetadataResource } from '~/server/utils/cimd-metadata-fetch'
 import type { GenericEndpointContext } from '@better-auth/core'
-import type Stripe from 'stripe'
-import type { notifySubscriptionPlan } from '~/server/domain/payments/notifications'
 import { getCurrentAuthEndpointContext } from '@better-auth/core/context'
 import { HTTPError, type H3Event } from 'nitro';
 import { createDb, executeBatch, queryAll, queryFirst, schema, type BatchQuery } from '~/server/db'
@@ -33,7 +31,7 @@ import { ingestStripeFeeReportEvent } from '~/server/domain/payments/costs'
 import { createStripeClient } from '~/server/utils/stripe-client'
 import { deleteBuyerCustomers } from '~/server/utils/billing-customer'
 import { anonymousLinkQueries, linkGuestIdentitiesByVerifiedEmail } from '~/server/utils/guest-accounts'
-import { unwrapInstrumentedD1 } from '~/server/utils/request-metrics'
+import { recordRequestExternalCall, unwrapInstrumentedD1 } from '~/server/utils/request-metrics'
 import { timingSafeEqualText } from '~/server/utils/dev-route-auth'
 import { notifyOrganizationInvited } from '~/server/utils/notifications'
 import { assertNoPendingInvitation } from '~/server/utils/email-invitations'
@@ -432,14 +430,6 @@ function buildAuth(env: CloudflareEnv) {
   if (!env.STRIPE_SECRET_KEY) throw new Error('STRIPE_SECRET_KEY is required')
   const stripeClient = createStripeClient(env.STRIPE_SECRET_KEY)
   const loadStripePlans = createStripePlanLoader(stripeClient, env)
-  // Loaded when a subscription webhook arrives, as the onEvent work below is.
-  const notifyPlan = async (input: Parameters<typeof notifySubscriptionPlan>[2]) => {
-    const notifications = await import('~/server/domain/payments/notifications')
-    await notifications.notifySubscriptionPlan(env, db, input)
-  }
-  const planStarted = async ({ event, subscription }: { event: Stripe.Event; subscription: StripeSubscription }) => {
-    await notifyPlan({ kind: 'started', eventId: event.id, organizationId: subscription.referenceId, subscriptionId: subscription.stripeSubscriptionId, plan: subscription.plan, date: subscription.status === 'trialing' ? subscription.trialEnd : null })
-  }
 
   const instance = betterAuth({
     baseURL: authBaseUrl,
@@ -758,31 +748,10 @@ function buildAuth(env: CloudflareEnv) {
               permissions: { billing: ['update'] },
             }, ctx)
           },
-          // The business is told its new plan, a change of plan, and a plan
-          // that will not renew. Stripe emails everything else it bills for
-          // (docs/payments/payments.md).
-          // Through Checkout, or a subscription made in Stripe.
-          onSubscriptionComplete: planStarted,
-          onSubscriptionCreated: planStarted,
-          onSubscriptionUpdate: async ({ event, subscription }) => {
-            // Stripe names the items the subscription had before this event when they changed.
-            const before = (event.data.previous_attributes as Partial<Stripe.Subscription> | undefined)?.items?.data
-            if (!before) return
-            const previous = (await loadStripePlans()).find(plan => before.some(item => item.price.id === plan.priceId))
-            if (!previous) throw new Error(`Stripe subscription event ${event.id} names no configured plan before the change`)
-            if (previous.name === subscription.plan) return
-            await notifyPlan({ kind: 'changed', eventId: event.id, organizationId: subscription.referenceId, subscriptionId: subscription.stripeSubscriptionId, plan: subscription.plan, previousPlan: previous.name })
-          },
-          onSubscriptionCancel: async ({ event, subscription }) => {
-            await notifyPlan({ kind: 'ending', eventId: event.id, organizationId: subscription.referenceId, subscriptionId: subscription.stripeSubscriptionId, plan: subscription.plan, date: subscription.cancelAt ?? subscription.periodEnd })
-          },
         },
         // The plugin's own /api/auth/stripe/webhook handlers own the
         // `subscription` table, and Stripe's delivery retries are the retry
-        // mechanism. This hook adds analytics, the billed counts each new
-        // subscription and period starts with, the extras past Basic returned
-        // to drafts when a plan ends, and fee report ingestion; a throw here
-        // returns a non-2xx so Stripe redelivers the event.
+        // mechanism. A throw in this signed event hook reaches Stripe.
         onEvent: async (event) => {
           await handleStripeGa4Event(env, db, stripeClient, event)
           const { reportBillingUsageForSubscriptionEvent } = await import('~/server/utils/billing')
@@ -790,6 +759,8 @@ function buildAuth(env: CloudflareEnv) {
           const { returnExtrasToDraftsForPlanEnd } = await import('~/server/utils/billing-plan-end')
           await returnExtrasToDraftsForPlanEnd(env, d1, event)
           await ingestStripeFeeReportEvent(db, stripeClient, env, event)
+          const { notifySubscriptionPlanForEvent } = await import('~/server/domain/payments/notifications')
+          await notifySubscriptionPlanForEvent(env, db, event, loadStripePlans)
         },
       }),
       organizationDeletionCleanupPlugin(env),
@@ -1017,7 +988,7 @@ export async function findAuthUsersByIds(env: CloudflareEnv, userIds: Array<stri
  * organization names by `account_id`, the user it belongs to, and the scopes
  * Better Auth recorded across every link of it.
  */
-type LinkedAccount = Pick<Account, 'id' | 'userId' | 'providerId' | 'accountId' | 'scope'>
+type LinkedAccount = Pick<Account, 'id' | 'userId' | 'providerId' | 'accountId' | 'scope' | 'accessTokenExpiresAt'>
 
 /** Reads a linked account through Better Auth's adapter. Null when it has been unlinked. */
 /** Whose linked account a connection acts through: the provider identity's owner, by name and email. */
@@ -1034,7 +1005,7 @@ export async function readLinkedAccount(env: CloudflareEnv, accountId: string): 
   return context.adapter.findOne<LinkedAccount>({
     model: 'account',
     where: [{ field: 'id', value: accountId }],
-    select: ['id', 'userId', 'providerId', 'accountId', 'scope'],
+    select: ['id', 'userId', 'providerId', 'accountId', 'scope', 'accessTokenExpiresAt'],
   })
 }
 
@@ -1067,6 +1038,10 @@ export async function linkedAccountAccessToken(
     })
   }
   if (!token.accessToken) throw new Error(`Better Auth returned no access token for the linked ${account.providerId} account.`)
+  if (account.providerId === 'google' && account.accessTokenExpiresAt && token.accessTokenExpiresAt
+    && new Date(token.accessTokenExpiresAt).getTime() > new Date(account.accessTokenExpiresAt).getTime()) {
+    recordRequestExternalCall(env.DB, 'better_auth_google_refresh')
+  }
   return { accessToken: token.accessToken, accessTokenExpiresAt: token.accessTokenExpiresAt }
 }
 

@@ -15,9 +15,9 @@ export async function visitRefundQueries(db:DbClient,input:{action:VisitRefundAc
  const payment=await queryFirst<Payment>(db,"SELECT * FROM payments WHERE organization_id=? AND subject_type='booking' AND subject_id=? AND captured_amount>refunded_amount",[input.organizationId,input.bookingId])
  if(!payment)return {queries:[],guard:null}
  if(input.financialWritesAllowed===false){
-  const destination=await queryFirst<{slug:string;conversation_id:string|null;nights:number}>(db,`SELECT o.slug,(SELECT c.id FROM conversations c WHERE c.booking_id=b.id AND c.kind='booking') AS conversation_id,b.product_session_id IS NULL AS nights FROM organization o JOIN bookings b ON b.organization_id=o.id WHERE o.id=? AND b.id=?`,[input.organizationId,input.bookingId])
-  if(!destination?.slug||!destination.conversation_id)throw new HTTPError({statusCode:409,statusMessage:'Paid booking dashboard destination is unavailable'})
-  const url=destination.nights===1?`/dashboard/${encodeURIComponent(destination.slug)}/bookings/stay/${encodeURIComponent(input.bookingId)}`:`/dashboard/${encodeURIComponent(destination.slug)}/bookings/booking/${encodeURIComponent(destination.conversation_id)}`
+  const destination=await queryFirst<{slug:string}>(db,'SELECT o.slug FROM organization o JOIN bookings b ON b.organization_id=o.id WHERE o.id=? AND b.id=?',[input.organizationId,input.bookingId])
+  if(!destination?.slug)throw new HTTPError({statusCode:409,statusMessage:'Paid booking dashboard destination is unavailable'})
+  const url=`/dashboard/${encodeURIComponent(destination.slug)}/bookings/${encodeURIComponent(input.bookingId)}`
   throw new HTTPError({statusCode:409,statusMessage:`This paid booking requires a refund before ${input.action==='reject'?'rejection':'cancellation'} can complete. Open its dashboard details to review and approve the financial action. The booking has not changed.`,data:{code:'financial_action_required',dashboard_url:url}})
  }
  const member=await queryFirst<{role:string}>(db,'SELECT role FROM member WHERE organizationId=? AND userId=?',[input.organizationId,input.actorUserId])

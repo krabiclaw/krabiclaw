@@ -651,8 +651,8 @@ test.describe('lodging identity boundary', () => {
       const guestName = `Experience team guest ${crypto.randomUUID()}`
       const booked = await request.post(`/api/public/products/${product.slug}/book`, { headers: { 'x-preview-tenant': slug }, data: { product_session_id: sessions[0]!.id, product_variant_id: product.variants[0]!.id, party_size: 1, guest_name: guestName, guest_email: `${slug}@playwright.example`, idempotency_key: crypto.randomUUID() } })
       expect(booked.status(), await booked.text()).toBe(201)
-      const { conversation_id: requestId } = await booked.json() as { conversation_id: string }
-      const bookingPath = `/api/dashboard/bookings/booking/${requestId}?org=${slug}`
+      const { conversation_id: requestId, booking_id: bookingId } = await booked.json() as { conversation_id: string; booking_id: string }
+      const bookingPath = `/api/dashboard/bookings/${bookingId}?org=${slug}`
       const inboxPath = `/api/dashboard/organizations/${organization.id}/guest-threads/${requestId}`
       const memberBooking = await api.get(bookingPath, { headers: memberBearer })
       expect(memberBooking.status, await memberBooking.text()).toBe(200)

@@ -19,27 +19,23 @@
               </label>
             </div>
           </fieldset>
-          <!-- A guest is choosing a time, so the empty state says what they
-               asked: nothing in the window they can book. -->
-          <p v-if="!bookingError && !sessionsPending && availabilityDates.length === 0" class="py-10 text-center text-sm text-muted">
-            {{ t('site.experience_detail.no_availability', { count: PUBLIC_BOOKING_WINDOW_DAYS }) }}
-          </p>
-          <template v-else>
-          <BookingTimezoneSelect v-if="allowTimezoneSelection && bookingTimezone" :model-value="bookingTimezone" :options="timezoneOptions" class="mb-3" @update:model-value="guestTimezone = $event" />
+          <BookingTimezoneSelect v-if="allowTimezoneSelection && bookingTimezone" :model-value="bookingTimezone" :options="timezoneOptions" @update:model-value="guestTimezone = $event" />
           <BookingTimeStep
             v-model="timeSelection"
             :dates="availabilityDates"
             :reference-date="referenceDate"
-            :loading="sessionsPending"
+            :month="calendarMonth"
+            :last-month="lastCalendarMonth"
+            @update:month="changeMonth"
+            :loading="sessionsPending || quotePending"
             :guests="partySize"
             :show-party-size="showPartySize"
             :guests-min="guestsMin"
             :guests-max="guestsMax"
             :show-minimum-at-limit="false"
             @update:guests="partySize = $event"
-            @next="bookingStep = 2"
+            @next="reviewSelection"
           />
-          </template>
           <p v-if="bookingError" role="alert" class="mt-4 rounded-lg border border-red-500/30 bg-red-500/5 px-4 py-3 text-sm text-error">
             {{ bookingError }}
           </p>
@@ -64,7 +60,7 @@
             :default-country="defaultPhoneCountry"
             :phone-required="phoneRequired"
             :loading="submitting"
-            :submit-text="paymentRequired ? t('payment.continue_to_pay') : confirmationMode === 'review' ? t('booking.request_appointment') : t('site.experience_detail.confirm_booking')"
+            :submit-text="timedQuote?.payment_required ? t('payment.continue_to_pay') : confirmationMode === 'review' ? t('booking.request_appointment') : t('site.experience_detail.confirm_booking')"
             @submit="submitBooking"
           />
         </div>
@@ -76,11 +72,10 @@ import BookingTimeStep from '~/components/booking/BookingTimeStep.vue'
 import BookingTimezoneSelect from '~/components/booking/BookingTimezoneSelect.vue'
 import type { SessionBookingController } from '~/composables/useSessionBooking'
 import { formatTime } from '~/utils/timezone'
-import { PUBLIC_BOOKING_WINDOW_DAYS } from '~/shared/bookings'
 // A paid booking is not confirmed in the dialog: the guest goes on to pay, so the button says so.
-const props = defineProps<{ controller: SessionBookingController; confirmationMode: 'instant' | 'review'; paymentRequired: boolean; phoneRequired?: boolean }>()
+const props = defineProps<{ controller: SessionBookingController; confirmationMode: 'instant' | 'review'; phoneRequired?: boolean }>()
 const { bookingStep, contactForm, formQuestions, defaultPhoneCountry, sellableVariants, selectedVariantId, variantPriceLabel, sessionsPending,
-  availabilityDates, referenceDate, timeSelection, partySize, showPartySize, allowTimezoneSelection, guestTimezone, bookingTimezone, timezoneOptions, guestsMin, guestsMax, bookingError, submitting, submitBooking } = props.controller
+  availabilityDates, referenceDate, calendarMonth, lastCalendarMonth, changeMonth, timeSelection, partySize, showPartySize, allowTimezoneSelection, guestTimezone, bookingTimezone, timezoneOptions, guestsMin, guestsMax, bookingError, submitting, timedQuote, quotePending, reviewSelection, submitBooking } = props.controller
 const { t, locale } = useI18n()
 const variantGroup = useId()
 </script>

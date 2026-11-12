@@ -6,6 +6,8 @@ import * as schema from '../../server/db/schema.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import { memberAccessPrincipal } from '../../server/utils/member-access.ts'
 import { readPlacesCalendar, setPlaceDates, type PlaceDay } from '../../server/domain/places.ts'
+import { addLocalDays, localDateAt } from '../../utils/timezone.ts'
+import { replaceWeeklySchedule } from '../../server/utils/availability.ts'
 import { parseSpecialHours } from '../../shared/reservation-hours.ts'
 
 // The places calendar: restaurant locations, experiences and consultations as
@@ -192,6 +194,23 @@ test('blocking and opening a place’s days writes a location’s closures and a
     assert.deepEqual(state(consultations.days), ['09:blocked::0:0', '10:blocked::1:0', '11:blocked::0:0', '12:blocked::0:0', '13:blocked::0:0', '14:open:hours:0:0', '15:open:hours:0:0'])
     assert.equal((await db.prepare("SELECT status FROM product_sessions WHERE id = 'family-1-a'").first<string>('status')), 'scheduled')
     assert.equal((await db.prepare("SELECT status FROM product_sessions WHERE id = 'family-1-b'").first<string>('status')), 'cancelled')
+    let futureDay = addLocalDays(localDateAt(new Date(), ZONE), 365)
+    if (new Date(`${futureDay}T12:00:00Z`).getUTCDay() === 1) futureDay = addLocalDays(futureDay, 1)
+    const future = { from: futureDay, to: addLocalDays(futureDay, 1) }
+    const weekday = new Date(`${futureDay}T12:00:00Z`).getUTCDay()
+    await replaceWeeklySchedule(db, { organizationId: ORG, productId: 'class', locationId: 'brooklyn', actorId: OWNER, slots: [{ weekday, start_time: '18:00' }] })
+    const stored = () => db.prepare("SELECT COUNT(*) AS n FROM product_sessions WHERE product_id='class' AND starts_at >= ?").bind(`${futureDay}T00:00:00.000Z`).first('n')
+    const openDay = (await readPlacesCalendar(db, owner, future, { kind: 'offering', id: 'class' })).places[0]!.days[0]!
+    assert.equal(openDay.free, 1)
+    assert.equal(await stored(), 0)
+    const [blockedFuture] = (await write('offering', 'class', { ...future, closed: true })).days
+    assert.equal(blockedFuture?.closed, true)
+    assert.equal(blockedFuture.free, 0)
+    assert.equal(await stored(), 1)
+    const [openedFuture] = (await write('offering', 'class', { ...future, closed: false })).days
+    assert.equal(openedFuture?.closed, false)
+    assert.equal(openedFuture.free, 1)
+    assert.equal(await stored(), 1)
   } finally {
     await runtime.dispose()
   }

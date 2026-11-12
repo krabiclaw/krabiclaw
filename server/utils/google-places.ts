@@ -138,8 +138,8 @@ export async function syncPlaceToLocation(
   placeId: string,
   scope: 'import' | 'provider',
 ): Promise<{ place: PlaceDetails; reviewsUpserted: number }> {
-  const current = await queryFirst<{ timezone: string; status: string; special_hours: string | null; updated_at: string; google_place_id: string | null }>(db,
-    'SELECT timezone, status, special_hours, updated_at, google_place_id FROM business_locations WHERE id = ? AND organization_id = ?', [locationId, organizationId])
+  const current = await queryFirst<{ updated_at: string; google_place_id: string | null }>(db,
+    'SELECT updated_at, google_place_id FROM business_locations WHERE id = ? AND organization_id = ?', [locationId, organizationId])
   if (!current) throw new HTTPError({ statusCode: 404, statusMessage: 'Location not found' })
   if (scope === 'provider' && current.google_place_id !== placeId) throw new HTTPError({ statusCode: 409, statusMessage: 'The location is no longer connected to this Google place' })
   const place = await getPlaceDetails(apiKey, placeId)
@@ -149,11 +149,6 @@ export async function syncPlaceToLocation(
     query: 'EXISTS (SELECT 1 FROM business_locations WHERE id = ? AND organization_id = ? AND updated_at = ? AND google_place_id IS ?)',
     params: [locationId, organizationId, current.updated_at, current.google_place_id],
   }
-  const seatings = scope === 'import' ? await (await import('~/server/utils/availability')).prepareLocationTableSeatings(db, {
-    organizationId, actorId: 'system', now,
-    location: { id: locationId, status: current.status, timezone: place.timezone ?? current.timezone, opening_hours: serializeOpeningHours(place.openingHours), special_hours: current.special_hours },
-    guard: version,
-  }) : { guard: version, queries: [] }
 
   const location = scope === 'import'
     ? { query: `
@@ -171,7 +166,7 @@ export async function syncPlaceToLocation(
       google_place_id = ?,
       last_synced_at = ?,
       updated_at = ?
-    WHERE id = ? AND organization_id = ? AND (${seatings.guard.query})
+    WHERE id = ? AND organization_id = ? AND (${version.query})
   `, params: [
       place.phone,
       place.websiteUrl,
@@ -188,7 +183,7 @@ export async function syncPlaceToLocation(
       now,
       locationId,
       organizationId,
-      ...seatings.guard.params!,
+      ...version.params!,
     ] }
     : { query: `
     UPDATE business_locations SET
@@ -197,13 +192,13 @@ export async function syncPlaceToLocation(
       review_count = ?,
       last_synced_at = ?,
       updated_at = ?
-    WHERE id = ? AND organization_id = ? AND (${seatings.guard.query})
-  `, params: [place.mapsUrl, place.rating, place.ratingCount, now, now, locationId, organizationId, ...seatings.guard.params!] }
+    WHERE id = ? AND organization_id = ? AND (${version.query})
+  `, params: [place.mapsUrl, place.rating, place.ratingCount, now, now, locationId, organizationId, ...version.params!] }
 
   // The whole batch checks the old version before the location write advances it.
-  const reviews = googleReviewUpserts({ organizationId, locationId }, place.reviews, now, seatings.guard)
-  const results = await executeBatch(db, [...seatings.queries,
-    ...staleGoogleReviewDeletes({ organizationId, locationId }, place.reviews, seatings.guard),
+  const reviews = googleReviewUpserts({ organizationId, locationId }, place.reviews, now, version)
+  const results = await executeBatch(db, [
+    ...staleGoogleReviewDeletes({ organizationId, locationId }, place.reviews, version),
     ...reviews, location])
   if (Number(results.at(-1)?.meta?.changes ?? 0) !== 1) {
     throw new HTTPError({ statusCode: 409, statusMessage: 'The location changed while Google Maps was syncing. Reload it and try again.' })

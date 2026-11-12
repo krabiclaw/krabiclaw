@@ -137,21 +137,21 @@ async function commit() {
       guest_email: draft.value.guest_email.trim() || null, guest_phone: draft.value.guest_phone.trim() || null, total_minor: amount(draft.value.total), private_notes: draft.value.private_notes.trim() || null, idempotency_key: draft.value.key,
       ...(draft.value.record_payment ? { payment: { amount_minor: amount(draft.value.payment_amount), method: draft.value.payment_method, paid_on: draft.value.payment_date, reference: draft.value.payment_reference.trim() || null } } : {}),
     }
-    const result = await api('/api/dashboard/stays', { method: 'POST', body: draft.value.attempt, signal: mutation.signal, validate: (value): value is { stay: { id: string } } => isRecord(value) && isRecord(value.stay) && typeof value.stay.id === 'string' && Boolean(value.stay.id) && Object.hasOwn(value.stay, 'channel_push') && isSuccessfulChannelPush(value.stay.channel_push) })
+    const result = await api('/api/dashboard/bookings', { method: 'POST', body: draft.value.attempt, signal: mutation.signal, validate: (value): value is { booking: { booking_id: string } } => isRecord(value) && isRecord(value.booking) && typeof value.booking.booking_id === 'string' && Boolean(value.booking.booking_id) && Object.hasOwn(value.booking, 'channel_push') && isSuccessfulChannelPush(value.booking.channel_push) })
     if (mutation.signal.aborted) return
     const { payment, idempotency_key: _key, arrival_time, ...fields } = draft.value.attempt
     const selectedHome = home.value!
     const arrival = typeof arrival_time === 'string' ? arrival_time : selectedHome.check_in_time
     const startsAt = arrival ? localDateTimeToInstant(draft.value.check_in_date, arrival, selectedHome.timezone, 'reject').toISOString() : draft.value.check_in_date
     const expected = { ...fields, guest_phone: draft.value.guest_phone.trim() ? toE164(draft.value.guest_phone.trim()) : null }
-    await api(`/api/dashboard/stays/${encodeURIComponent(result.stay.id)}`, { signal: mutation.signal, validate: (value): value is { stay: { id: string } } => isRecord(value) && isRecord(value.stay) && value.stay.id === result.stay.id && value.stay.status === 'confirmed' && value.stay.starts_at === startsAt
-      && Object.entries(expected).every(([field, wanted]) => (value.stay as Record<string, unknown>)[field] === wanted)
-      && value.stay.currency === home.value?.currency && Array.isArray(value.stay.payments)
-      && (!isRecord(payment) || value.stay.payments.some(saved => isRecord(saved) && saved.amount_minor === payment.amount_minor && saved.method === payment.method && saved.paid_on === payment.paid_on && saved.reference === payment.reference)) })
+    await api(`/api/dashboard/bookings/${encodeURIComponent(result.booking.booking_id)}`, { signal: mutation.signal, validate: (value): value is { booking: { booking_id: string } } => isRecord(value) && isRecord(value.booking) && value.booking.booking_id === result.booking.booking_id && value.booking.status === 'confirmed' && value.booking.starts_at === startsAt
+      && Object.entries(expected).every(([field, wanted]) => (value.booking as Record<string, unknown>)[field] === wanted)
+      && value.booking.currency === home.value?.currency && Array.isArray(value.booking.payments)
+      && (!isRecord(payment) || value.booking.payments.some(saved => isRecord(saved) && saved.amount_minor === payment.amount_minor && saved.method === payment.method && saved.paid_on === payment.paid_on && saved.reference === payment.reference)) })
     if (mutation.signal.aborted) return
     await refreshNuxtData(Object.keys(nuxtApp.payload.data).filter(key => key.startsWith(`today-${orgSlug}-`) || key.startsWith(`stay-night-calendar:${orgSlug}:`)))
     if (mutation.signal.aborted) return
-    await navigateTo(`/dashboard/${encodeURIComponent(orgSlug)}/bookings/stay/${encodeURIComponent(result.stay.id)}`, { replace: true })
+    await navigateTo(`/dashboard/${encodeURIComponent(orgSlug)}/bookings/${encodeURIComponent(result.booking.booking_id)}`, { replace: true })
     clearNuxtState(draftKey, { reset: true })
   } catch (cause) {
     actionError.value = getErrorMessage(cause, 'The stay could not be created.')

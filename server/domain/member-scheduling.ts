@@ -7,6 +7,7 @@ import { MEMBER_BUSY_SCOPES, MEMBER_NAME_SQL, type WorkingHours, type Scheduling
 import { hasOrganizationEntitlement } from '~/server/utils/billing'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
 import { getR2KeyFromPublicUrl } from '~/server/utils/cloudflare-r2'
+import { recordRequestExternalCall } from '~/server/utils/request-metrics'
 
 export interface SchedulingActor { env: CloudflareEnv; userId: string; organizationId: string }
 export interface MemberScheduling {
@@ -99,7 +100,7 @@ export async function writeMemberScheduling(actor: SchedulingActor, memberId: st
  if(!input || typeof input!=='object' || Array.isArray(input) || (input.updated_at!==null && (typeof input.updated_at!=='string' || !isValidInstant(input.updated_at))) || Object.keys(input).some(key=>key!=='updated_at' && !fields.includes(key as typeof fields[number])) || !fields.some(key=>input[key]!==undefined))throw new HTTPError({statusCode:400,message:'Choose the settings to change and provide their current revision'})
  if(input.timezone!==undefined && (typeof input.timezone!=='string' || !isValidTimezone(input.timezone)))throw new HTTPError({statusCode:400,message:'Choose an IANA timezone'})
  if(input.public_approved!==undefined && typeof input.public_approved!=='boolean')throw new HTTPError({statusCode:400,message:'Approval must be boolean'})
- const member = await requireSchedulingAccess(actor,memberId)
+ await requireSchedulingAccess(actor,memberId)
  const db=actor.env.DB
  const current=await queryFirst<MemberScheduling>(db,'SELECT * FROM member_scheduling WHERE organization_id=? AND member_id=?',[actor.organizationId,memberId])
  if ((current?.updated_at??null)!==input.updated_at) throw new HTTPError({statusCode:409,message:'Member settings changed; reload before saving'})
@@ -133,12 +134,6 @@ export async function writeMemberScheduling(actor: SchedulingActor, memberId: st
   if(error instanceof Error && /malformed JSON/.test(error.message))throw new HTTPError({statusCode:409,message:'Member settings changed; reload before saving',cause:error})
   throw error
  })
- // An explicit Hours save also finishes interrupted, idempotent session work.
- // Profile edits never enter that operation.
- if(suppliedHours) {
-  const { materializeMemberSessions } = await import('~/server/utils/availability')
-  await materializeMemberSessions(db, { organizationId: actor.organizationId, userId: member.userId, actorId: actor.userId })
- }
  const saved=await readMemberScheduling(db,actor.env,actor.organizationId,memberId)
  if(!saved)throw new HTTPError({statusCode:500,message:'Saved member settings could not be read back'})
  return saved
@@ -178,6 +173,7 @@ async function memberBusy(env: CloudflareEnv, row: MemberScheduling, span: { fro
  for (let from = Date.parse(span.from); from < Date.parse(span.until); from += 30 * 86400000) starts.push(from)
  const chunks = await Promise.all(starts.map(async from => {
   const timeMax = new Date(Math.min(from + 30 * 86400000, Date.parse(span.until))).toISOString()
+  recordRequestExternalCall(env.DB, 'google_calendar_free_busy')
   const response = await fetch('https://www.googleapis.com/calendar/v3/freeBusy', { method: 'POST', headers: { Authorization: `Bearer ${token.accessToken}`, 'content-type': 'application/json' }, body: JSON.stringify({ timeMin: new Date(from).toISOString(), timeMax, items: ids.map(id => ({ id })) }) })
   if (!response.ok) throw new HTTPError({ statusCode: 502, message: `Google busy-calendar check failed (${response.status})` })
   const data = await response.json() as { calendars: Record<string, { errors?: { reason: string }[]; busy: SchedulingInterval[] }> }

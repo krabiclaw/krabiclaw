@@ -203,7 +203,7 @@
           <section v-if="canBook && !enquiryOnly && !isStay" class="border-t border-default pt-8 lg:hidden">
             <div class="flex flex-wrap items-baseline justify-between gap-4">
               <h2 class="tenant-display text-2xl text-default sm:text-3xl">{{ t('site.experience_detail.upcoming_availability') }}</h2>
-              <TenantButton v-if="upcomingSessions.length" variant="ghost" control-id="product-booking-toggle" @click="openBooking">
+              <TenantButton variant="ghost" control-id="product-booking-toggle" @click="openBooking">
                 {{ t('site.experience_detail.see_all_dates') }} →
               </TenantButton>
             </div>
@@ -211,7 +211,7 @@
             <p v-if="bookingError" role="alert" class="mt-4 text-sm text-error">{{ bookingError }}</p>
             <UpcomingSessions v-else-if="upcomingSessions.length" class="mt-5 grid gap-3 space-y-0! sm:grid-cols-2" :sessions="upcomingSessions" :day-label="sessionDayLabel" :time-label="sessionTimeLabel" :pick-label="sessionPickLabel" control-id="product-booking-toggle" :show-remaining="vertical !== 'service'" @pick="openBookingAt" />
             <p v-else-if="sessionsPending" class="mt-4 text-sm text-muted">{{ t('site.experience_detail.processing') }}</p>
-            <p v-else class="mt-4 text-sm text-muted">{{ t('site.experience_detail.no_availability', { count: PUBLIC_BOOKING_WINDOW_DAYS }) }}</p>
+            <p v-else class="mt-4 text-sm text-muted">{{ t('site.experience_detail.no_availability', { count: AVAILABILITY_PAGE_DAYS }) }}</p>
           </section>
 
           <section v-if="includedItems.length || whatToBring.length" class="mt-10 grid gap-8 border-t border-default pt-10 sm:grid-cols-2">
@@ -354,8 +354,8 @@
               <p v-if="bookingError" role="alert" class="text-sm text-error">{{ bookingError }}</p>
               <UpcomingSessions v-else-if="upcomingSessions.length" :sessions="upcomingSessions" :day-label="sessionDayLabel" :time-label="sessionTimeLabel" :pick-label="sessionPickLabel" control-id="product-booking-toggle" :show-remaining="vertical !== 'service'" @pick="openBookingAt" />
               <p v-else-if="sessionsPending" class="text-sm text-muted">{{ t('site.experience_detail.processing') }}</p>
-              <p v-else class="text-sm text-muted">{{ t('site.experience_detail.no_availability', { count: PUBLIC_BOOKING_WINDOW_DAYS }) }}</p>
-              <TenantButton v-if="upcomingSessions.length" variant="ghost" block :to="stayEnquiryTo" :control-id="isStay ? undefined : 'product-booking-toggle'" @click="openBooking">
+              <p v-else class="text-sm text-muted">{{ t('site.experience_detail.no_availability', { count: AVAILABILITY_PAGE_DAYS }) }}</p>
+              <TenantButton variant="ghost" block :to="stayEnquiryTo" :control-id="isStay ? undefined : 'product-booking-toggle'" @click="openBooking">
                 {{ t('site.experience_detail.see_all_dates') }}
               </TenantButton>
             </template>
@@ -461,7 +461,7 @@
         :can-go-back="bookingStep > 1 && !submitting"
         @back="bookingStep = 1"
       >
-        <ProductBookingSteps :controller="bookingController" :confirmation-mode="booking.confirmation_mode" :payment-required="booking.online_payment_required && (bookingController.selectedPrice.value?.unit_amount ?? 0) > 0 && (booking.payment_min_party_size === null || bookingController.partySize.value >= booking.payment_min_party_size)" :phone-required="product.kind === 'table'" />
+        <ProductBookingSteps :controller="bookingController" :confirmation-mode="booking.confirmation_mode" :phone-required="product.kind === 'table'" />
       </BookingModal>
       <BookingModal
         v-else-if="isStay && canBook && stayBooking.bookingStep.value === 2"
@@ -530,9 +530,9 @@ import StayDatesStep from '~/components/booking/StayDatesStep.vue'
 import { useStayBooking } from '~/composables/useStayBooking'
 import BookingTimezoneSelect from '~/components/booking/BookingTimezoneSelect.vue'
 import BookingScopeSelect from '~/components/booking/BookingScopeSelect.vue'
-import { PUBLIC_BOOKING_WINDOW_DAYS } from '~/shared/bookings'
+import { AVAILABILITY_PAGE_DAYS } from '~/shared/bookings'
 import type { PublicTenantPage } from '~/server/utils/public-tenant-pages'
-import { isRecord, publicApiRequest } from '~/utils/api-clients'
+import { fetchSessionAvailability, useSessionBooking } from '~/composables/useSessionBooking'
 import MediaGallery from '~/components/MediaGallery.vue'
 import StayFeatureList from '~/components/products/StayFeatureList.vue'
 import ProductVariantPrices from '~/components/products/ProductVariantPrices.vue'
@@ -848,19 +848,18 @@ const { data: initialSessions, error: initialSessionsError } = await useAsyncDat
   if (import.meta.server) {
     const event = useRequestEvent()!
     const { cloudflareEnv } = await import('~/server/utils/api-response')
-    const { listPublicBookingSessions } = await import('~/server/utils/public-session-booking')
-    return (await listPublicBookingSessions(cloudflareEnv(event).DB, props.organizationId, props.product.slug, cloudflareEnv(event), props.location?.id ?? 'online')).sessions.filter(session => !session.is_full)
+    const { readPublicBookingSessions } = await import('~/server/utils/public-session-booking')
+    const env = cloudflareEnv(event)
+    return (await readPublicBookingSessions(env.DB, props.organizationId, props.product, env, { location_id: props.location?.id ?? 'online' })).sessions.filter(session => !session.is_full)
   }
-  return (await publicApiRequest<{ success: true; sessions: PublicProductSession[] }>(`/api/public/products/${encodeURIComponent(props.product.slug)}/sessions?location_id=${encodeURIComponent(props.location?.id ?? 'online')}`, {
-    validate: (value): value is { success: true; sessions: PublicProductSession[] } => isRecord(value) && value.success === true && Array.isArray(value.sessions),
-  })).sessions.filter(session => !session.is_full)
+  return (await fetchSessionAvailability(props.product.slug, props.location?.id ?? 'online')).sessions.filter(session => !session.is_full)
 })
 if (initialSessionsError.value) throw initialSessionsError.value
 if (!initialSessions.value) throw createError({ statusCode: 500, statusMessage: 'Appointment availability was not returned' })
 const bookingController = useSessionBooking(() => ({ organizationId: props.organizationId,
     organizationName: props.location?.title ?? props.organizationName!, product: props.product, currency: props.currency,
     location: props.location, sessions: initialSessions.value!, showPartySize: props.vertical !== 'service' }))
-const { bookingOpen, bookingStep, submitting, sessions: bookingSessions, sessionsPending, loadSessions, openBooking: openSessionBooking, openBookingAt,
+const { bookingOpen, bookingStep, submitting, sessions: bookingSessions, sessionsPending, openBooking: openSessionBooking, openBookingAt,
   upcomingSessions, sessionDayLabel, sessionTimeLabel, bookingError, allowTimezoneSelection, bookingTimezone, timezoneOptions, guestTimezone } = bookingController
 
 function openBooking() {
@@ -881,7 +880,6 @@ onMounted(() => {
   trackProductView(props.product.id, props.location?.id ?? null, offer.value && !enquiryOnly.value
     ? { product_id: props.product.id, name: props.product.name, currency: offer.value.currency, price: ga4Major(offer.value.unit_amount, offer.value.currency) }
     : null)
-  if (props.booking && canBook.value) void loadSessions()
   // A page that places this offering's booking (?book=1) arrives with its booking open.
   if (useRoute().query.book === '1' && canBook.value && !enquiryOnly.value && !canOrderExternally.value) {
     if (isStay.value) stayBooking.bookingOpen.value = true
@@ -1013,11 +1011,8 @@ const schemaPlace = computed(() => props.location ? ({
 /**
  * The seat on one occurrence, priced the way the page prices it.
  *
- * A seat is on sale from the moment its occurrence exists — `created_at` on the
- * session row — until the class begins. Both ends are recorded facts, so the
- * markup states the window rather than the instant the page happened to render:
- * a `new Date()` here would differ between the server and the hydrated client
- * and change on every request.
+ * Stored sessions can state when they were created. A projected opening has
+ * no creation timestamp, so it only states when the offer closes.
  */
 function sessionOffer(session: PublicProductSession) {
   const price = offer.value
@@ -1029,7 +1024,7 @@ function sessionOffer(session: PublicProductSession) {
     availability: isAvailable.value && !session.is_full
       ? 'https://schema.org/InStock'
       : 'https://schema.org/SoldOut',
-    validFrom: session.created_at,
+    ...(session.created_at ? { validFrom: session.created_at } : {}),
     validThrough: session.starts_at,
     url: canonicalProductUrl.value,
   }

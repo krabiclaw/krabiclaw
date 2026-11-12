@@ -49,10 +49,10 @@ const locationId = typeof route.query.locationId === 'string' ? route.query.loca
 const location = locationId ? dashboard.locations.value.find(location => location.id === locationId) : null
 if (locationId && !location) throw createError({ statusCode: 404, statusMessage: 'That conversation location is not available in this workspace' })
 const { data: members, error: membersError } = await useAsyncData(`team-members:${dashboard.organizationId.value}`, () => api('/api/dashboard/team/members', { validate: isTeamMembersResponse }))
-const { data: stayData, error: stayError } = await useAsyncData(`team-compose-stay:${dashboard.organizationId.value}:${stayId}`, () => stayId ? api(`/api/dashboard/stays/${encodeURIComponent(stayId)}`, {
-  validate: (value): value is { stay: StayTurnover } => isRecord(value) && isRecord(value.stay) && value.stay.id === stayId && typeof value.stay.check_in_date === 'string' && typeof value.stay.check_out_date === 'string',
+const { data: stayData, error: stayError } = await useAsyncData(`team-compose-stay:${dashboard.organizationId.value}:${stayId}`, () => stayId ? api(dashboardBookingPath(stayId), {
+  validate: (value): value is { booking: Omit<StayTurnover, 'id'> & { booking_id: string } } => isRecord(value) && isRecord(value.booking) && value.booking.booking_id === stayId && typeof value.booking.check_in_date === 'string' && typeof value.booking.check_out_date === 'string',
 }) : Promise.resolve(null))
-const stay = computed(() => stayData.value?.stay)
+const stay = computed(() => stayData.value?.booking)
 const visibleMembers = computed(() => members.value?.members.filter(member => member.id !== session.value.data?.user.id && `${member.name} ${member.email}`.toLocaleLowerCase().includes(search.value.toLocaleLowerCase())) ?? [])
 function toggle(id: string, checked: boolean) { selected.value = checked ? [...selected.value, id] : selected.value.filter(memberId => memberId !== id) }
 async function start() {

@@ -10,8 +10,9 @@ import { HTTPError } from 'nitro'
 import { Miniflare } from 'miniflare'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import * as schema from '../../server/db/schema.ts'
-import { claimSessionCapacity, setProductBookingConfig } from '../../server/utils/availability.ts'
-import { createProductBooking } from '../../server/domain/product-bookings.ts'
+import { claimSessionCapacity, listBookableSessions, setProductBookingConfig } from '../../server/utils/availability.ts'
+import { createProductBooking, quoteTimedBooking } from '../../server/domain/product-bookings.ts'
+import { projectStripeConnectedAccount, reserveStripeConnectedAccount } from '../../server/utils/stripe-connect.ts'
 import { H3Event } from 'h3'
 import { ingestStripeFeeReport, stripeFeeMinor, stripeFeeScaled } from '../../server/domain/payments/costs.ts'
 import { buyerActivities, buyerPaymentActivityPath, claimCheckoutReturn, tokenHash } from '../../server/domain/payments/buyer.ts'
@@ -156,10 +157,11 @@ test('guest table cancellation refunds until 24 hours before the start, through 
  }
 })
 
-test('a table deposit is the table price once, only for parties at its threshold, and a booking keeps the terms it was made with', { timeout: 120_000 }, async () => {
+test('a table deposit is the table price once, only for parties at its threshold, and a booking keeps the terms it was made with', { timeout: 120_000 }, async t => {
  const { db, runtime } = await boot()
  try {
-  const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_URL: 'https://payments.proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-proof-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only', STRIPE_SECRET_KEY: 'sk_test_local_boundary' } as CloudflareEnv
+  const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_URL: 'https://payments.proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-proof-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only',
+    STRIPE_SECRET_KEY: 'sk_live_mock', STRIPE_TEST_SECRET_KEY: 'sk_test_local_boundary', STRIPE_TEST_PUBLISHABLE_KEY: 'pk_test_mock', STRIPE_TEST_PAYMENTS_METHOD_CONFIGURATION: 'pmc_parent' } as CloudflareEnv
   await diningTables(db)
   // Tables for twenty, a $100 deposit from parties of six, and a seating tomorrow.
   const soon = new Date(Date.now() + 26 * 3_600_000)
@@ -190,8 +192,42 @@ test('a table deposit is the table price once, only for parties at its threshold
   assert.match(booked.items[2]!.text, /\$100\.00/u)
   assert.deepEqual(await db.prepare('SELECT COUNT(*) n FROM payments').first('n'), 0)
 
+  // The configured demo business can start a real checkout for the projected next seating.
+  await db.prepare("UPDATE organization SET subdomain='demo' WHERE id=?").bind(ORG).run()
+  await db.prepare("INSERT INTO subscription(id,plan,referenceId,status,seats) VALUES('test-plan','business',?,'active',1)").bind(ORG).run()
+  const reserved = await reserveStripeConnectedAccount(db, { organizationId: ORG, livemode: false })
+  await projectStripeConnectedAccount(db, { reservationId: reserved.id, organizationId: ORG, stripeAccountId: 'acct_seller', country: 'TH', livemode: false, cardPaymentsStatus: 'active', cardPaymentsResolutions: [], requirements: [], stripeRefreshedAt: new Date().toISOString() })
+  const realFetch = globalThis.fetch
+  let intents = 0
+  t.mock.method(globalThis, 'fetch', async (request: RequestInfo | URL, init?: RequestInit) => {
+   const url = new URL(request instanceof Request ? request.url : String(request))
+   if (url.origin !== 'https://api.stripe.com') return realFetch(request, init)
+   if (url.pathname === '/v2/core/accounts/acct_seller') return Response.json({ id: 'acct_seller', livemode: false, dashboard: 'express', identity: { country: 'TH' }, defaults: { responsibilities: { fees_collector: 'application', losses_collector: 'stripe' } }, configuration: { merchant: { capabilities: { card_payments: { status: 'active', status_details: [] } } } }, requirements: { entries: [] } })
+   if (url.pathname === '/v1/payment_method_configurations') return Response.json({ data: [{ id: 'pmc_child', parent: 'pmc_parent', active: true }], has_more: false })
+   assert.equal(`${init?.method} ${url.pathname}`, 'POST /v1/payment_intents')
+   assert.equal(new URLSearchParams(String(init?.body)).get('amount'), '10000')
+   intents++
+   return Response.json({ id: 'pi_table_deposit', client_secret: 'pi_table_deposit_secret', livemode: false })
+  })
+  const nextTime = new Date(soon.getTime() + 30 * 60_000).toISOString()
+  const [session] = await listBookableSessions(db, { env, organizationId: ORG, productId: 'tables', fromInstant: nextTime, toInstant: new Date(Date.parse(nextTime) + 1).toISOString() })
+  assert(session)
+  const quote = await quoteTimedBooking(db, env, { organizationId: ORG, slug: 'tables', product_session_id: session.id, party_size: 6 })
+  assert.equal(quote.total_minor, 10_000)
+  assert.equal(await db.prepare('SELECT id FROM product_sessions WHERE id=?').bind(session.id).first('id'), null)
+  const paidInput = { organizationId: ORG, slug: 'tables',
+   operator: { userId: 'host', idempotencyKey: 'six-paid', source: 'operator', externalReference: null, guestAcknowledgement: false },
+   body: { guest_name: 'Six', guest_email: 'six@example.com', guest_phone: '+12025550123', product_session_id: session.id, party_size: 6 } }
+  const paid = await createProductBooking(event('/api/dashboard/bookings'), paidInput)
+  assert.equal(paid.status, 201, JSON.stringify(paid.body))
+  assert.deepEqual(await db.prepare('SELECT h.session_id, h.quantity, h.amount, s.starts_at FROM payment_checkout_holds h JOIN product_sessions s ON s.id=h.session_id WHERE h.payment_id=?').bind(paid.body.payment_id).first(),
+   { session_id: session.id, quantity: 6, amount: 10_000, starts_at: nextTime })
+
   // The business later asks two days' notice and caps parties at four.
   await setProductBookingConfig(db, { organizationId: ORG, productId: 'tables', actorId: 'host', env, patch: { advance_notice_minutes: 2880, party_size_max: 4 } })
+  const replay = await createProductBooking(event('/api/dashboard/bookings'), paidInput)
+  assert.equal(replay.status, 200, JSON.stringify(replay.body))
+  assert.deepEqual({ payment: replay.body.payment_id, claim: replay.body.purchase_claim, intents }, { payment: paid.body.payment_id, claim: paid.body.purchase_claim, intents: 1 })
 
   // The guest's receipt, read back through the business's receipt endpoint, still states the terms they booked.
   const app = new H3()
@@ -421,7 +457,7 @@ test('MCP paid booking cancellation and rejection hand off without preparing mon
      const handoff = mcpFinancialApprovalErrorResult(error,env.NUXT_PUBLIC_PLATFORM_DOMAIN,error.statusMessage!)
      assert(handoff)
      assert.equal('structuredContent' in handoff, false)
-     assert.deepEqual(JSON.parse(handoff.content[0]!.text), { status: 409, message: error.statusMessage, success: false, operation_completed: false, action_required: true, code: 'financial_action_required', dashboard_url: 'https://proof.example/dashboard/payments/bookings/booking/paid-request' })
+     assert.deepEqual(JSON.parse(handoff.content[0]!.text), { status: 409, message: error.statusMessage, success: false, operation_completed: false, action_required: true, code: 'financial_action_required', dashboard_url: `https://proof.example/dashboard/payments/bookings/${booking.bookingId}` })
      assert.equal(handoff.isError,true)
      return true
     })
@@ -2115,8 +2151,16 @@ test('Better Auth Stripe tells the business its new plan, its change of plan and
   }))
   const trialing = subscription('growth', { status: 'trialing', trial_start: 1_790_000_000, trial_end: 1_791_209_600 })
   const realFetch = globalThis.fetch
+  let refuseEndingOwnerEmail = true
   t.mock.method(globalThis, 'fetch', async (request: RequestInfo | URL, init?: RequestInit) => {
    const url = new URL(request instanceof Request ? request.url : String(request))
+   if (url.hostname === 'api.resend.com' && init?.method === 'POST') {
+    const mail = JSON.parse(String(init.body)) as { subject: string; to: string[] }
+    if (refuseEndingOwnerEmail && mail.subject === 'Your Business plan will not renew' && mail.to.includes('owner@krabiclaw-proof.com')) {
+     refuseEndingOwnerEmail = false
+     return Response.json({ name: 'internal_server_error', message: 'Plan email temporarily unavailable' }, { status: 500 })
+    }
+   }
    if (url.hostname !== 'api.stripe.com') return realFetch(request, init)
    const catalog = publishedCatalogResponse(url)
    if (catalog) {
@@ -2130,16 +2174,18 @@ test('Better Auth Stripe tells the business its new plan, its change of plan and
   })
   const auth = createAuth(env)
   const signer = new Stripe('sk_test_signer')
-  const deliver = async (event: Record<string, unknown>) => {
+  const deliver = async (event: Record<string, unknown>, status = 200) => {
    const payload = JSON.stringify({ object: 'event', api_version: '2025-10-29.clover', created: 1_790_000_000, livemode: false, ...event })
    const response = await auth.handler(new Request('https://proof.example/api/auth/stripe/webhook', {
     method: 'POST', headers: { 'content-type': 'application/json', 'stripe-signature': await signer.webhooks.generateTestHeaderStringAsync({ payload, secret }) }, body: payload,
    }))
-   assert.equal(response.status, 200)
+   assert.equal(response.status, status)
   }
   const subjects = () => sentMail(emails).map(sent => [sent.subject, String(sent.to)]).sort()
 
   // Checkout completes with a free trial.
+  await deliver({ id: 'evt_checkout_created', type: 'customer.subscription.created', data: { object: trialing } })
+  assert.equal(emails.length, 0, 'the Checkout subscription has one start notice on completion')
   await deliver({ id: 'evt_checkout', type: 'checkout.session.completed', data: { object: { id: 'cs_plan', object: 'checkout.session', mode: 'subscription', subscription: 'sub_plan', client_reference_id: ORG, metadata: { subscriptionId: 'sub-row', referenceId: ORG } } } })
   assert.deepEqual(subjects(), [['Your new plan: Growth', 'admin@krabiclaw-proof.com'], ['Your new plan: Growth', 'owner@krabiclaw-proof.com']])
   const started = sentMail(emails)[0]!.html
@@ -2158,8 +2204,11 @@ test('Better Auth Stripe tells the business its new plan, its change of plan and
   assert.deepEqual(subjects().slice(2), [['Your plan changed to Business', 'admin@krabiclaw-proof.com'], ['Your plan changed to Business', 'owner@krabiclaw-proof.com']])
   assert.match(sentMail(emails)[2]!.html, /Payments moved from Growth to Business\./u)
 
-  // The owner cancels at the end of the period; Stripe redelivers that event too.
-  const ending = { id: 'evt_ending', type: 'customer.subscription.updated', data: { object: subscription('business', { cancel_at_period_end: true }), previous_attributes: { cancel_at_period_end: false } } }
+  // A trial set to end sends a notice too. Stripe retries only the failed delivery.
+  const ending = { id: 'evt_ending', type: 'customer.subscription.updated', data: { object: subscription('business', { status: 'trialing', cancel_at_period_end: true, trial_start: period.current_period_start, trial_end: period.current_period_end }), previous_attributes: { cancel_at_period_end: false } } }
+  await deliver(ending, 400)
+  assert.deepEqual(await db.prepare("SELECT plan,status,cancelAtPeriodEnd FROM subscription WHERE id='sub-row'").first(), { plan: 'business', status: 'trialing', cancelAtPeriodEnd: 1 })
+  assert.equal(await db.prepare("SELECT COUNT(*) n FROM guest_thread_deliveries WHERE channel='email' AND status='failed' AND error LIKE '%Plan email temporarily unavailable%'").first('n'), 1)
   await deliver(ending)
   await deliver(ending)
   assert.equal(emails.length, 6)
@@ -2168,7 +2217,7 @@ test('Better Auth Stripe tells the business its new plan, its change of plan and
   assert.match(notRenewing[0]!.html, /Business stays on until Oct 21, 2026\. After that, Payments is on Basic\./u)
 
   // Read back apart from the sends: Better Auth's subscription, and each email Resend accepted.
-  assert.deepEqual(await db.prepare("SELECT plan, status, cancelAtPeriodEnd FROM subscription WHERE id='sub-row'").first(), { plan: 'business', status: 'active', cancelAtPeriodEnd: 1 })
+  assert.deepEqual(await db.prepare("SELECT plan, status, cancelAtPeriodEnd FROM subscription WHERE id='sub-row'").first(), { plan: 'business', status: 'trialing', cancelAtPeriodEnd: 1 })
   assert.deepEqual((await db.prepare("SELECT json_extract(email_json, '$.message.subject') subject, count(*) n FROM guest_thread_deliveries WHERE channel='email' AND provider='resend' AND status='sent' GROUP BY subject ORDER BY subject").all()).results, [
    { subject: 'Your Business plan will not renew', n: 2 }, { subject: 'Your new plan: Growth', n: 2 }, { subject: 'Your plan changed to Business', n: 2 },
   ])

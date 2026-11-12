@@ -1,4 +1,5 @@
 import { expect, type APIRequestContext } from '@playwright/test'
+import { addLocalDays, localDateAt } from '../../../utils/timezone'
 import { seededTenant } from '../seed/manifest'
 import { seededSiteHeaders, testBaseUrl } from '../test-env'
 
@@ -12,15 +13,16 @@ export function seededTables(location: 'brooklyn' | 'williamsburg' = 'brooklyn')
 }
 
 /** The seatings a guest is offered on the site, read through the product's public sessions. */
-export async function tableSeatings(request: APIRequestContext, location: 'brooklyn' | 'williamsburg' = 'brooklyn') {
-  const response = await request.get(`${testBaseUrl()}/api/public/products/${seededTables(location).slug}/sessions`, { headers: seededSiteHeaders('restaurant') })
+export async function tableSeatings(request: APIRequestContext, location: 'brooklyn' | 'williamsburg' = 'brooklyn', from?: string) {
+  const response = await request.get(`${testBaseUrl()}/api/public/products/${seededTables(location).slug}/availability`, { headers: seededSiteHeaders('restaurant'), params: from ? { from, to: addLocalDays(from, 31) } : undefined })
   expect(response.status(), await response.text()).toBe(200)
   return (await response.json() as { sessions: TableSeating[] }).sessions
 }
 
 /** The first seating at least `afterMs` ahead with room for the party. */
 export async function openSeating(request: APIRequestContext, partySize: number, afterMs = 0, location: 'brooklyn' | 'williamsburg' = 'brooklyn') {
-  const seating = (await tableSeatings(request, location))
+  const from = afterMs > 28 * 86_400_000 ? localDateAt(new Date(Date.now() + afterMs), seededTenant('restaurant').timezone) : undefined
+  const seating = (await tableSeatings(request, location, from))
     .find(session => !session.is_full && (session.remaining === null || session.remaining >= partySize) && Date.parse(session.starts_at) > Date.now() + afterMs)
   if (!seating) throw new Error(`The seeded restaurant has no seating for ${partySize}`)
   return seating

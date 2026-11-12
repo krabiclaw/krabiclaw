@@ -285,13 +285,11 @@ collects an invoice.
 
 ## KrabiClaw plan emails
 
-KrabiClaw emails a business's owners and admins three things about its own
-plan, from Better Auth Stripe's
-[subscription hooks](https://www.better-auth.com/docs/plugins/stripe): its new
-plan (`onSubscriptionComplete`, or `onSubscriptionCreated` for a subscription
-made in Stripe), a change of plan (`onSubscriptionUpdate`, when Stripe's event
-shows the plan price changed) and a plan that will not renew
-(`onSubscriptionCancel`). Stripe sends every other email about the
+KrabiClaw emails a business's owners and admins when its plan starts, changes,
+or is set to end without renewal, including during a free trial. Better Auth
+Stripe's signed [event hook](https://www.better-auth.com/docs/plugins/stripe)
+sends these notices after the plugin handles subscription state. Stripe
+redelivers the event if a notice fails. Stripe sends every other email about the
 subscription. These are Stripe account settings that cannot be turned on from
 code, so the owner turns them on in the platform Stripe account, live and in
 the sandbox used for testing:

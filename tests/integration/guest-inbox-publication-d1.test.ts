@@ -5,7 +5,7 @@ import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/
 import * as schema from '../../server/db/schema.ts'
 import { publishConversationEvent, publishDashboardInvalidation } from '../../server/cloudflare/guest-inbox-events.ts'
 import { createProductBooking } from '../../server/domain/product-bookings.ts'
-import { listSessions } from '../../server/utils/availability.ts'
+import { listBookableSessions } from '../../server/utils/availability.ts'
 import { createTables } from './support/table-product.ts'
 import { H3Event } from 'h3'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
@@ -36,10 +36,11 @@ test('inbox publication failures are visible and table booking receipts reflect 
               if (action === 'cancel') await this.env.DB.prepare("UPDATE bookings SET status='cancelled',cancelled_at=?1,updated_at=?1 WHERE id=" + booked.replace('?', '?2')).bind(new Date().toISOString(), event.conversation_id).run()
               // The table's seating an hour later.
               if (action === 'move') {
-                await this.env.DB.prepare(\`UPDATE bookings SET product_session_id=(SELECT later.id FROM product_sessions later JOIN product_sessions booked ON booked.id=bookings.product_session_id
-                  WHERE later.product_id=bookings.product_id AND later.starts_at=strftime('%Y-%m-%dT%H:%M:%fZ',booked.starts_at,'+1 hour')),updated_at=? WHERE id=\${booked}\`).bind(new Date().toISOString(), event.conversation_id).run()
-                // A move takes the seating's time and place with it.
-                await this.env.DB.prepare('UPDATE bookings SET starts_at=s.starts_at,ends_at=s.ends_at,timezone=s.timezone,location_id=s.location_id,version=bookings.version+1 FROM product_sessions s WHERE s.id=bookings.product_session_id AND bookings.id=' + booked).bind(event.conversation_id).run()
+                await this.env.DB.prepare(\`UPDATE bookings SET product_session_id=later.id,starts_at=later.starts_at,ends_at=later.ends_at,
+                  timezone=later.timezone,location_id=later.location_id,version=bookings.version+1,updated_at=?
+                  FROM product_sessions later JOIN product_sessions current ON current.product_id=later.product_id
+                  WHERE current.id=bookings.product_session_id AND bookings.id=\${booked}
+                    AND later.starts_at=strftime('%Y-%m-%dT%H:%M:%fZ',current.starts_at,'+1 hour')\`).bind(new Date().toISOString(), event.conversation_id).run()
               }
             }
           }
@@ -105,13 +106,16 @@ test('inbox publication failures are visible and table booking receipts reflect 
     // The dining room's tables: Monday seatings every half hour from 16:00 to 20:00.
     const tables = await createTables(db, reservationEnv, { organizationId: 'healthy', locationId: 'reservation-location', actorId: 'reservation-owner', memberId: 'reservation-member', name: 'Dining tables',
       durationMinutes: 120, seats: 10, weekdays: [1], open: '16:00', lastSeating: '20:00' })
-    const [seating] = await listSessions(db, { env: reservationEnv, organizationId: 'healthy', productId: tables.id, fromInstant: new Date().toISOString(), toInstant: new Date(Date.now() + 8 * 86_400_000).toISOString() })
+    const seatings = await listBookableSessions(db, { env: reservationEnv, organizationId: 'healthy', productId: tables.id, fromInstant: new Date().toISOString(), toInstant: new Date(Date.now() + 8 * 86_400_000).toISOString() })
+    const laterStart = (startsAt: string) => new Date(Date.parse(startsAt) + 3_600_000).toISOString()
+    const starts = new Set(seatings.map(row => row.starts_at))
+    const seating = seatings.find(row => starts.has(laterStart(row.starts_at)))
     assert(seating)
-    const create = (key: string) => {
+    const create = (key: string, sessionId = seating.id) => {
       const request = Object.assign(new Request('https://proof.example/api/mcp'), { runtime: { cloudflare: { env: reservationEnv } } })
       return createProductBooking(new H3Event(request), { organizationId: 'healthy', slug: tables.slug, financialWritesAllowed: false,
         operator: { userId: 'reservation-owner', idempotencyKey: key, source: 'operator', externalReference: null, guestAcknowledgement: false },
-        body: { guest_name: 'Guest', guest_email: 'guest@proof.example', guest_phone: '+66812345678', product_session_id: seating.id, party_size: 1 } })
+        body: { guest_name: 'Guest', guest_email: 'guest@proof.example', guest_phone: '+66812345678', product_session_id: sessionId, party_size: 1 } })
     }
     const hub = namespace.get(namespace.idFromName('healthy'))
     const arm = (action: string) => hub.fetch('https://guest-inbox.internal/arm', { method: 'POST', body: action })
@@ -123,6 +127,9 @@ test('inbox publication failures are visible and table booking receipts reflect 
     assert.equal(cancelled.body.status, persistedCancelled)
     assert.equal(cancelled.body.message, 'This booking was cancelled.')
 
+    const later = seatings.find(session => session.starts_at === laterStart(seating.starts_at))
+    assert(later)
+    assert.equal((await create('later-seating-guest', later.id)).status, 201)
     const movable = await create('move-during-replay')
     assert.equal(movable.status, 201)
     await db.prepare("UPDATE conversations SET payload_json=json_set(payload_json,'$.provenance.followups_completed',json('false')) WHERE id=?").bind(movable.body.conversation_id).run()

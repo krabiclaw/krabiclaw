@@ -304,14 +304,15 @@ async function main() {
 
     const start = today(spec.timezone)
     const end = addDays(start, CALENDAR_DAYS)
-    // A stay list spans at most 400 days, and stays can be booked up to 500 ahead.
-    const stays = new Map<string, Stay>()
-    for (const [from, to] of [[start, addDays(start, 400)], [addDays(start, 400), end]]) {
-      for (const stay of (await call<{ stays: Stay[] }>('GET', `/api/dashboard/stays?${q}&from=${from}&to=${to}&product_id=${home.product_id}`)).data.stays) stays.set(stay.id, stay)
+    const stays = new Map<string, Omit<Stay, 'id'> & { booking_id: string }>()
+    for (let from = start; from < end;) {
+      const to = [addDays(from, 62), end].sort()[0]!
+      for (const booking of (await call<{ bookings: (Omit<Stay, 'id'> & { booking_id: string })[] }>('GET', `/api/dashboard/bookings?unit=nights&${q}&from=${from}&to=${to}&product_id=${home.product_id}`)).data.bookings) stays.set(booking.booking_id, booking)
+      from = to
     }
     for (const stay of [...stays.values()].filter(row => row.status !== 'cancelled')) {
-      await call('POST', `/api/dashboard/stays/${stay.id}/cancel?${q}`, { expected_version: stay.version, reason: 'Lodging demo reset' })
-      console.log(`Cancelled stay ${stay.id} (${stay.check_in_date} to ${stay.check_out_date}) at ${spec.name}`)
+      await call('POST', `/api/dashboard/bookings/${stay.booking_id}/cancel?${q}`, { version: stay.version, reason: 'Lodging demo reset' })
+      console.log(`Cancelled stay ${stay.booking_id} (${stay.check_in_date} to ${stay.check_out_date}) at ${spec.name}`)
     }
 
     const nights = (body: Record<string, unknown>) => call('PUT', `/api/dashboard/stay-homes/${home.product_id}/nights?${q}`, body)

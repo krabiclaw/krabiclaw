@@ -12,9 +12,10 @@ type Created = { success: boolean; booking_id: string; conversation_id: string; 
 
 const missingProviderConfiguration = paymentsProviderConfigured ? [] : ['payments.configuration']
 
-test('MCP Product booking uses public capacity, durable replay, guest identity and canonical inbox transitions', async ({ page, request, baseURL }, testInfo) => {
+test('MCP Product booking uses public capacity, durable replay, guest identity and canonical inbox transitions', async ({ page, baseURL }, testInfo) => {
   test.setTimeout(120_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Writes and log-only delivery require isolated local D1')
+  const request = page.request
   const clayhouse = seededTenant('experience')
   const org = clayhouse.organizationId
   const wheelClass = clayhouse.products['wheel-class']!
@@ -26,7 +27,7 @@ test('MCP Product booking uses public capacity, durable replay, guest identity a
     const beforeConfiguration = await request.get(editor)
     expect(beforeConfiguration.status(), await beforeConfiguration.text()).toBe(200)
     const priorBooking = (await beforeConfiguration.json()).product.booking as ProductBookingConfig | null
-    expect(priorBooking).not.toBeNull()
+    expect(priorBooking).toMatchObject({ duration_minutes: 120, default_capacity: 8, confirmation_mode: 'instant', online_payment_required: false })
     const call = async <T>(name: string, args: Record<string, unknown>): Promise<T> => {
       const response = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: name, args: { organization_id: org, ...args } })
       expect(response.status()).toBe(200)
@@ -40,19 +41,16 @@ test('MCP Product booking uses public capacity, durable replay, guest identity a
     const context = await call<{ context: { organization_slug: string } }>('get_organization', {})
     const orgSlug = context.context.organization_slug
     expect(orgSlug).toBeTruthy()
-    const read = (id: string) => call<{ guest: { email: string; phone: string | null }; provenance: { source: string; external_reference: string; guest_acknowledgement: boolean }; record: { id: string; status: string; party_size: number }; updated_at: string }>('get_product_booking', { booking_id: id })
+    const read = (id: string) => call<{ guest: { email: string; phone: string | null }; provenance: { source: string; external_reference: string; guest_acknowledgement: boolean }; record: { id: string; status: string; party_size: number }; version: number; updated_at: string }>('get_product_booking', { booking_id: id })
     const configure = async (confirmation_mode: 'review' | 'instant', online_payment_required = false) => {
       const res = await request.put(`${editor}/booking`, { data: { duration_minutes: 120, default_capacity: 8, confirmation_mode, online_payment_required } })
       expect(res.status(), await res.text()).toBe(200)
     }
     const ids: string[] = []
     try {
-      // Two days out, clear of any advance notice: the booking below is changed.
-      const from = new Date(Date.now() + 2 * 86400000).toISOString()
-      const to = new Date(Date.now() + 28 * 86400000).toISOString()
-      await configure('instant')
-      const generated = await request.post(`${editor}/sessions/generate`, { data: { through: to.slice(0, 10) } })
-      expect(generated.status(), await generated.text()).toBe(200)
+      // Book and move a projected class a year ahead through the real MCP boundary.
+      const from = new Date(Date.now() + 365 * 86_400_000).toISOString()
+      const to = new Date(Date.now() + 393 * 86_400_000).toISOString()
       const listed = await call<{ sessions: Array<{ id: string; starts_at: string; remaining: number | null; is_full: boolean }> }>('list_product_booking_sessions', { product_id: product, from, to })
       const available = listed.sessions.filter(s => !s.is_full && (s.remaining === null || s.remaining >= 2))
       expect(available.length).toBeGreaterThanOrEqual(3)
@@ -105,11 +103,10 @@ test('MCP Product booking uses public capacity, durable replay, guest identity a
       expect(listedBooking).not.toHaveProperty('guest_json')
       expect(listedBooking).not.toHaveProperty('provenance_json')
 
-      const dashboard = await request.get(`${baseURL}/api/dashboard/bookings/booking/${created.conversation_id}?org=${encodeURIComponent(orgSlug)}`)
+      const dashboard = await request.get(`${baseURL}/api/dashboard/bookings/${created.booking_id}?org=${encodeURIComponent(orgSlug)}`)
       expect(dashboard.status(), await dashboard.text()).toBe(200)
       expect((await dashboard.json()).booking).toMatchObject({ status: 'pending', conversation_id: created.conversation_id, booking_id: created.booking_id })
-      await loginAs(page.request, baseURL!, 'user-e2e-pottery-owner')
-      await page.goto(`${baseURL}/dashboard/${encodeURIComponent(orgSlug)}/bookings/booking/${created.conversation_id}`)
+      await page.goto(`${baseURL}/dashboard/${encodeURIComponent(orgSlug)}/bookings/${created.booking_id}`)
       await expect(page.getByText('MCP Guest', { exact: true }).first()).toBeVisible()
       const notifications = await request.get(`${baseURL}/api/dev/notifications?organization_id=${org}&since=${encodeURIComponent(since)}`, { headers: devLoginHeaders() })
       expect(notifications.status()).toBe(200)
@@ -117,7 +114,7 @@ test('MCP Product booking uses public capacity, durable replay, guest identity a
       const deliveries = state.deliveries.filter((row: { conversation_id: string }) => row.conversation_id === created.conversation_id)
       expect(deliveries.some((row: { purpose: string; status: string }) => row.purpose === 'owner_alert' && row.status === 'sent')).toBe(true)
       expect(deliveries.filter((row: { purpose: string }) => row.purpose === 'guest_acknowledgement')).toHaveLength(0)
-      const proposals = { booking_id: created.booking_id, product_session_id: available[1]!.id, party_size: 2, updated_at: stored.updated_at, idempotency_key: crypto.randomUUID() }
+      const proposals = { booking_id: created.booking_id, product_session_id: available[1]!.id, party_size: 2, version: stored.version, idempotency_key: crypto.randomUUID() }
       const proposed = await call<{ change_status: string }>('request_product_booking_change', proposals)
       expect(proposed.change_status).toBe('awaiting_guest_acceptance')
       await call('request_product_booking_change', proposals)
@@ -149,7 +146,7 @@ test('MCP Product booking uses public capacity, durable replay, guest identity a
       expect(acceptedReplayNotifications.status()).toBe(200)
       expect((await acceptedReplayNotifications.json()).deliveries.filter((row: { conversation_id: string }) => row.conversation_id === created.conversation_id)).toEqual(acceptedDeliveries)
 
-      const declineProposal = { ...proposals, product_session_id: available[2]!.id, updated_at: changed.updated_at, idempotency_key: crypto.randomUUID() }
+      const declineProposal = { ...proposals, product_session_id: available[2]!.id, version: changed.version, idempotency_key: crypto.randomUUID() }
       expect((await call<{ change_status: string }>('request_product_booking_change', declineProposal)).change_status).toBe('awaiting_guest_acceptance')
       const declineDetail = await request.get(`${baseURL}/api/dashboard/organizations/${org}/guest-threads/${created.conversation_id}`)
       expect(declineDetail.status()).toBe(200)
@@ -176,11 +173,11 @@ test('MCP Product booking uses public capacity, durable replay, guest identity a
       expect(declinedReplayNotifications.status()).toBe(200)
       expect((await declinedReplayNotifications.json()).deliveries.filter((row: { conversation_id: string }) => row.conversation_id === created.conversation_id)).toEqual(declinedDeliveries)
 
-      const confirmation = { booking_id: created.booking_id, idempotency_key: crypto.randomUUID() }
+      const confirmation = { booking_id: created.booking_id, version: (await read(created.booking_id)).version, idempotency_key: crypto.randomUUID() }
       expect((await call<{ ok: boolean }>('confirm_product_booking', confirmation)).ok).toBe(true)
       expect((await call<{ ok: boolean }>('confirm_product_booking', confirmation)).ok).toBe(true)
       expect((await read(created.booking_id)).record.status).toBe('confirmed')
-      const cancellation = { booking_id: created.booking_id, idempotency_key: crypto.randomUUID() }
+      const cancellation = { booking_id: created.booking_id, version: (await read(created.booking_id)).version, idempotency_key: crypto.randomUUID() }
       expect((await call<{ ok: boolean }>('cancel_product_booking', cancellation)).ok).toBe(true)
       expect((await call<{ ok: boolean }>('cancel_product_booking', cancellation)).ok).toBe(true)
       expect((await read(created.booking_id)).record.status).toBe('cancelled')
@@ -192,14 +189,14 @@ test('MCP Product booking uses public capacity, durable replay, guest identity a
       expect((await acknowledgedDeliveries.json()).deliveries.filter((row: { conversation_id: string; purpose: string; status: string }) => row.conversation_id === pending.conversation_id && row.purpose === 'guest_acknowledgement' && row.status === 'sent')).toHaveLength(1)
       ids.push(pending.booking_id)
       expect(pending.status).toBe('pending')
-      const rejection = { booking_id: pending.booking_id, idempotency_key: crypto.randomUUID() }
+      const rejection = { booking_id: pending.booking_id, version: (await read(pending.booking_id)).version, idempotency_key: crypto.randomUUID() }
       expect((await call<{ ok: boolean }>('reject_product_booking', rejection)).ok).toBe(true)
       expect((await call<{ ok: boolean }>('reject_product_booking', rejection)).ok).toBe(true)
       expect((await read(pending.booking_id)).record.status).toBe('cancelled')
       const pendingCancel = await call<Created>('create_product_booking', { ...args, idempotency_key: crypto.randomUUID() })
       ids.push(pendingCancel.booking_id)
       expect(pendingCancel.status).toBe('pending')
-      expect((await call<{ ok: boolean }>('cancel_product_booking', { booking_id: pendingCancel.booking_id, idempotency_key: crypto.randomUUID() })).ok).toBe(true)
+      expect((await call<{ ok: boolean }>('cancel_product_booking', { booking_id: pendingCancel.booking_id, version: (await read(pendingCancel.booking_id)).version, idempotency_key: crypto.randomUUID() })).ok).toBe(true)
       expect((await read(pendingCancel.booking_id)).record.status).toBe('cancelled')
       const beforePaymentPolicy = await request.get(editor)
       expect(beforePaymentPolicy.status()).toBe(200)
@@ -255,7 +252,8 @@ test('MCP Product booking uses public capacity, durable replay, guest identity a
       expect((await foreign.json()).result.isError).toBe(true)
     } finally {
       for (const id of ids) {
-        if ((await read(id)).record.status !== 'cancelled') await call('cancel_product_booking', { booking_id: id, idempotency_key: crypto.randomUUID() })
+        const booking = await read(id)
+        if (booking.record.status !== 'cancelled') await call('cancel_product_booking', { booking_id: id, version: booking.version, idempotency_key: crypto.randomUUID() })
       }
       // The questions are restated unchanged, so the restore carries no revision to guard.
       const { questions_revision: _revision, ...priorWritable } = priorBooking!

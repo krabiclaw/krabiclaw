@@ -768,6 +768,8 @@ export const EXPECTED_TOOL_ANNOTATIONS = {
   list_product_bookings: R,
   list_product_booking_sessions: R,
   confirm_product_booking: { ...D, openWorldHint: true, idempotentHint: true },
+  no_show_product_booking: { ...D, idempotentHint: true },
+  update_product_booking: { ...D, openWorldHint: true },
   reject_product_booking: { ...D, openWorldHint: true, idempotentHint: true },
   cancel_product_booking: { ...D, openWorldHint: true, idempotentHint: true },
   request_product_booking_change: { ...D, openWorldHint: true, idempotentHint: true },
@@ -778,9 +780,6 @@ export const EXPECTED_TOOL_ANNOTATIONS = {
   delete_home_room: { ...D, openWorldHint: true },
   assign_home_photos_to_room: { ...D, openWorldHint: true },
   // Creation also plans guest sends and updates connected availability.
-  create_stay: { ...D, openWorldHint: true, idempotentHint: true },
-  update_stay: { ...D, openWorldHint: true },
-  move_stay: { ...D, openWorldHint: true },
   record_stay_payment: { ...W, idempotentHint: true },
   delete_stay_payment: D,
   // A percent price change compounds when repeated, so the tool is not idempotent.

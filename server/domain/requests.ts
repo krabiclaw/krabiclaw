@@ -1,10 +1,12 @@
 import { openingMessageQueries } from '~/server/domain/guest-threads/opening'
+import { bookingStatusQuery } from '~/server/domain/bookings'
 import { CURRENT_GUEST_SQL, SUBMISSION_EVENT, messageQueries } from '~/server/domain/conversations'
 import { z } from 'zod'
 import { HTTPError } from 'nitro'
 import { guestVisitRefundQueries, guestVisitRefundKey } from '~/server/domain/payments/visit-refund'
 import { executeRefund, requirePayment } from '~/server/domain/payments'
 import { paymentsStripe } from '~/server/utils/stripe-connect'
+import { ownedBuyerRequest } from '~/server/domain/payments/buyer'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { recordBookingCancelled } from '~/server/domain/booking-analytics'
 import { executeBatch, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
@@ -97,6 +99,7 @@ export interface ThreadOperationalRecord {
   unit: 'slot' | 'nights'
   id: string
   status: BookingStatus
+  version: number
   party_size: number
   /** The guest said "this many or more". */
   party_size_is_minimum: boolean
@@ -236,7 +239,7 @@ export function bookedRecordGuard(record: Pick<BookedRecord, 'organization_id' |
 export async function getThreadOperationalRecord(db: DbClient, requestId: string): Promise<ThreadOperationalRecord | null> {
   const record = await queryFirst<Omit<ThreadOperationalRecord, 'party_size_is_minimum'> & { party_size_is_minimum: number }>(db, `
     SELECT br.unit, br.id, br.status, br.party_size, br.party_size_is_minimum, br.starts_at, br.ends_at, br.timezone, br.location_id, br.product_id, br.product_kind, br.product_name, br.product_internal_name,
-           br.assigned_member_id, br.organization_id, br.user_id, br.no_show_at,
+           br.assigned_member_id, br.organization_id, br.user_id, br.no_show_at, br.version,
            (SELECT rv.id FROM reviews rv WHERE rv.organization_id = br.organization_id AND rv.booking_id = br.id ORDER BY rv.created_at LIMIT 1) AS review_id, br.advance_notice_minutes
       FROM conversations owner
       JOIN ${BOOKING_RECORDS_SQL} br ON br.id = owner.booking_id AND br.organization_id = owner.organization_id
@@ -361,7 +364,8 @@ export function requestActions(record: ThreadOperationalRecord | null, now: stri
  * invitation without cancelling the visit.
  */
 export function canMarkNoShow(record: ThreadOperationalRecord | null, now: string): record is ThreadOperationalRecord {
-  return Boolean(record && record.status === 'confirmed' && record.no_show_at === null && record.review_id === null && record.starts_at <= now)
+  return Boolean(record && record.status === 'confirmed' && record.no_show_at === null && record.review_id === null
+    && record.starts_at <= (isBookingDay(record.starts_at) ? localDateAt(new Date(now), record.timezone) : now))
 }
 
 export function canCancelBookingRequest(record: ThreadOperationalRecord | null, now: string): record is ThreadOperationalRecord {
@@ -396,20 +400,49 @@ export async function requestSummary(db: DbClient, request: GuestRequest, knownR
  * booking moves to cancelled. Cancelling the operational
  * record is what releases the seats — the thread holds none.
  */
-export async function cancelBookingRequest(db: DbClient, input: {
-  id: string; organizationId: string; kind: BookingRequest['kind']; now: string; env: CloudflareEnv
-} & ({ tokenHash: string; buyerUserId?: never } | { buyerUserId: string; tokenHash?: never })): Promise<{ request: BookingRequest; record: ThreadOperationalRecord; wasConfirmed: boolean; changed: boolean } | null> {
+type GuestCancellationActor = { tokenHash: string; buyerUserId?: never } | { buyerUserId: string; tokenHash?: never }
+type GuestCancellation = { now: string; env: CloudflareEnv }
+
+export async function cancelGuestBooking(db: DbClient, input: GuestCancellation & (
+  | { id: string; organizationId: string; tokenHash: string }
+  | { bookingId: string; organizationId?: string; buyerUserId: string; version: number }
+)): Promise<{ kind: 'booking' } | { kind: 'stay'; refund_minor: number } | null> {
+  let target: Parameters<typeof cancelBookingRequest>[1]
+  if ('bookingId' in input) {
+    const owned = await ownedBuyerRequest(db, input.buyerUserId, input.bookingId, 'booking')
+    if (input.organizationId && owned.organization_id !== input.organizationId) return null
+    if (owned.unit === 'nights') {
+      const { cancelStayAsGuest } = await import('~/server/domain/stays')
+      const { refund_minor } = await cancelStayAsGuest(db, input.env, owned.organization_id, owned.booking_id, input.buyerUserId, input.now, input.version)
+      return { kind: 'stay', refund_minor }
+    }
+    target = { id: owned.conversation_id, organizationId: owned.organization_id, buyerUserId: input.buyerUserId, version: input.version, now: input.now, env: input.env, kind: 'booking' }
+  } else target = { ...input, kind: 'booking' }
+  const cancelled = await cancelBookingRequest(db, target)
+  if (!cancelled) return null
+  const { notifyGuestCancellation } = await import('~/server/utils/notifications')
+  await notifyGuestCancellation(input.env, db, cancelled)
+  return { kind: 'booking' }
+}
+
+export async function cancelBookingRequest(db: DbClient, input: GuestCancellation & {
+  id: string; organizationId: string; kind: BookingRequest['kind']; version?: number
+} & GuestCancellationActor): Promise<{ request: BookingRequest; record: ThreadOperationalRecord; wasConfirmed: boolean; changed: boolean } | null> {
   const current = await getGuestRequest(db, input.id, input.organizationId, input.kind)
   if (!current || current.kind === 'contact') return null
   const record = await getThreadOperationalRecord(db, current.id)
   if (!record || record.organization_id !== input.organizationId || record.unit !== 'slot') return null
-  if (input.buyerUserId && (current.user_id !== input.buyerUserId || record.user_id !== input.buyerUserId)) return null
+  function authorized(request: BookingRequest, booked: ThreadOperationalRecord) {
+    if (input.buyerUserId) return request.user_id === input.buyerUserId && booked.user_id === input.buyerUserId
+    const capability = request.payload.cancellation
+    return capability.token_hash === input.tokenHash && capability.expires_at !== null && capability.expires_at > input.now
+  }
+  if (!authorized(current, record)) return null
   async function readCancelled(changed = false) {
     const request = await getGuestRequest(db, input.id, input.organizationId, input.kind)
     const cancelled = await getThreadOperationalRecord(db, input.id)
     if (!request || request.kind === 'contact' || !request.payload.cancellation.used_at || !cancelled || cancelled.status !== 'cancelled' || cancelled.organization_id !== input.organizationId) return null
-    if (input.buyerUserId ? request.user_id !== input.buyerUserId || cancelled.user_id !== input.buyerUserId
-      : request.payload.cancellation.token_hash !== input.tokenHash || !request.payload.cancellation.expires_at || request.payload.cancellation.expires_at <= input.now) return null
+    if (!authorized(request, cancelled)) return null
     const entry = await queryFirst<{ payload_json: string }>(db, 'SELECT payload_json FROM messages WHERE conversation_id = ? AND dedupe_key = ?', [input.id, `booking:${cancelled.id}:guest-cancel`])
     if (!entry) return null
     const before = JSON.parse(entry.payload_json).beforeStatus
@@ -426,6 +459,9 @@ export async function cancelBookingRequest(db: DbClient, input: {
     return { request, record: cancelled, wasConfirmed: before === 'confirmed', changed }
   }
   if (record.status === 'cancelled') return await readCancelled()
+  if (input.version !== undefined && record.version !== input.version) {
+    throw new HTTPError({ statusCode: 409, message: 'This booking changed since you opened it. Reload and try again.' })
+  }
   if (!canCancelBookingRequest(record, input.now)) return null
   // The offering's advance notice closes the guest's own cancellation as it closes booking; the business can still cancel.
   if (record.advance_notice_minutes !== null && !outsideNotice(record.starts_at, record.advance_notice_minutes, Date.parse(input.now))) {
@@ -446,16 +482,14 @@ export async function cancelBookingRequest(db: DbClient, input: {
         WHERE id = ? AND organization_id = ? AND kind = ?
           AND ${input.buyerUserId ? 'user_id = ?' : "json_extract(payload_json, '$.cancellation.token_hash') = ? AND json_extract(payload_json, '$.cancellation.expires_at') > ?"}
           AND json_extract(payload_json, '$.cancellation.used_at') IS NULL AND (${refund.guard?.query ?? '1=1'})
-          AND EXISTS (SELECT 1 FROM bookings WHERE id = ? AND organization_id = ? AND id = conversations.booking_id AND status = ?${input.buyerUserId ? ' AND user_id = ?' : ''}) RETURNING *`,
-      params: [input.now, input.id, input.organizationId, input.kind, ...(input.buyerUserId ? [input.buyerUserId] : [input.tokenHash, input.now]), ...(refund.guard?.params ?? []), record.id, input.organizationId, record.status, ...(input.buyerUserId ? [input.buyerUserId] : [])],
+          AND EXISTS (SELECT 1 FROM bookings WHERE id = ? AND organization_id = ? AND id = conversations.booking_id AND version = ? AND status = ?${input.buyerUserId ? ' AND user_id = ?' : ''}) RETURNING *`,
+      params: [input.now, input.id, input.organizationId, input.kind, ...(input.buyerUserId ? [input.buyerUserId] : [input.tokenHash, input.now]), ...(refund.guard?.params ?? []), record.id, input.organizationId, record.version, record.status, ...(input.buyerUserId ? [input.buyerUserId] : [])],
     },
-    {
-      query: `UPDATE bookings SET status = 'cancelled', cancelled_at = ?, cancellation_reason = 'guest_cancelled', version = version + 1, updated_at = ?
-        WHERE id = ? AND organization_id = ? AND status = ?${input.buyerUserId ? ' AND user_id = ?' : ''}
-          AND EXISTS (SELECT 1 FROM conversations WHERE id = ? AND organization_id = ? AND booking_id = bookings.id
-            AND json_extract(payload_json, '$.cancellation.used_at') = ?)`,
-      params: [input.now, input.now, record.id, input.organizationId, record.status, ...(input.buyerUserId ? [input.buyerUserId] : []), input.id, input.organizationId, input.now],
-    },
+    bookingStatusQuery({ organizationId: input.organizationId, bookingId: record.id, status: 'cancelled', reason: 'guest_cancelled', now: input.now,
+      guard: { query: `changes() = 1 AND version = ? AND status = ?${input.buyerUserId ? ' AND user_id = ?' : ''}
+        AND EXISTS (SELECT 1 FROM conversations WHERE id = ? AND organization_id = ? AND booking_id = bookings.id
+          AND json_extract(payload_json, '$.cancellation.used_at') = ?)`,
+        params: [record.version, record.status, ...(input.buyerUserId ? [input.buyerUserId] : []), input.id, input.organizationId, input.now] } }),
     // The one record of the guest's cancellation: KrabiClaw's message, by the guest.
     ...messageQueries({ conversationId: input.id, authorKind: 'krabiclaw', authorUserId: current.user_id, eventName: 'booking.cancel',
       payload: { action: 'cancel', beforeStatus: record.status, afterStatus: 'cancelled', booking_id: record.id },

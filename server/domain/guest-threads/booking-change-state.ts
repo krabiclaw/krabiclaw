@@ -10,7 +10,9 @@ function sourceMatchesSql(proposal: string, owner: string): string {
   const guest = ['guest.name', 'guest.email', 'guest.phone'].map(field => `json_extract(${owner}.payload_json,'$.${field}')`).join(',')
   return `(EXISTS (SELECT 1 FROM bookings b
       WHERE b.id=${owner}.booking_id AND b.organization_id=${owner}.organization_id AND ${owner}.kind='booking' AND b.product_session_id IS NOT NULL
-        AND b.updated_at = json_extract(${proposal}.payload_json, '$.updated_at')
+        AND CASE WHEN json_type(${proposal}.payload_json, '$.version') = 'integer'
+          THEN b.version = json_extract(${proposal}.payload_json, '$.version')
+          ELSE b.updated_at = json_extract(${proposal}.payload_json, '$.updated_at') END
         AND json_array('booking',b.product_session_id,b.id,b.status,b.party_size,b.starts_at,b.ends_at,b.timezone,b.location_id,b.product_id,b.party_size_is_minimum,${guest})=json_array(${recorded})))`
 }
 

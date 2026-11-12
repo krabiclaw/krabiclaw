@@ -4,10 +4,10 @@ import {CURRENT_GUEST_SQL} from '~/server/domain/conversations'
 import {loadOwnerPictures} from '~/server/notifications/hero'
 import {accountActivityPath,isAccountActivityItem,isBuyerPaymentEntry,type AccountActivityItem,type AccountActivityResponse,type BuyerPaymentEntry} from '~/shared/account-activity'
 
-export async function ownedBuyerRequest(db:DbClient,userId:string,conversation_id:string) {
+export async function ownedBuyerRequest(db:DbClient,userId:string,id:string,lookup:'conversation'|'booking'='conversation') {
  // The conversation's booking is the buyer's: CURRENT_GUEST_SQL holds it to the conversation's own guest.
- const owned=await queryFirst<{organization_id:string;booking_id:string;unit:'slot'|'nights'}>(db,`SELECT r.organization_id,b.id booking_id,CASE WHEN b.product_session_id IS NULL THEN 'nights' ELSE 'slot' END unit FROM conversations r JOIN bookings b ON b.id=r.booking_id AND b.organization_id=r.organization_id
-  WHERE r.id=? AND r.user_id=? AND r.kind='booking' AND ${CURRENT_GUEST_SQL('r')}`,[conversation_id,userId])
+ const owned=await queryFirst<{organization_id:string;booking_id:string;conversation_id:string;unit:'slot'|'nights'}>(db,`SELECT r.organization_id,b.id booking_id,r.id conversation_id,CASE WHEN b.product_session_id IS NULL THEN 'nights' ELSE 'slot' END unit FROM conversations r JOIN bookings b ON b.id=r.booking_id AND b.organization_id=r.organization_id
+  WHERE ${lookup==='booking'?'b.id':'r.id'}=? AND r.user_id=? AND r.kind='booking' AND ${CURRENT_GUEST_SQL('r')}`,[id,userId])
  if(!owned)throw new HTTPError({statusCode:404,statusMessage:'Owned booking not found'})
  return owned
 }

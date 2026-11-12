@@ -310,14 +310,11 @@ test('a v25 replacement names business scheduling with no default to fall back o
       assert.deepEqual(target.prepare("SELECT id, idempotency_key, checkout_expires_at, return_token FROM payments WHERE id = 'test-payment'").all(), [{ id: 'test-payment', idempotency_key: 'checkout:host:hosted', checkout_expires_at: '2026-10-06T01:18:32.658Z', return_token: 'token' }])
       assert.deepEqual(target.prepare('SELECT id, status FROM opportunities').all(), [{ id: 'current', status: 'open' }])
       assert.deepEqual(target.prepare("SELECT starts_at, ends_at, capacity FROM product_sessions WHERE product_id = 'table-dining-room' AND starts_at LIKE '2026-11-12%' AND status = 'scheduled' ORDER BY starts_at").all(), [
-        { starts_at: '2026-11-12T18:15:00.000Z', ends_at: '2026-11-12T19:45:00.000Z', capacity: 12 },
         { starts_at: '2026-11-12T18:45:00.000Z', ends_at: '2026-11-12T20:15:00.000Z', capacity: 12 },
       ])
       assert.deepEqual(target.pragma('foreign_key_check'), [])
     } finally { target.close() }
-    assert(!manifest.hours_session_ids.includes('table-session-dining-room-2026-11-12T18:45:00.000Z'))
     const delta = await transferDatabaseExport(sourcePath, join(directory, 'v27-delta.sqlite'), { payloadPath: join(directory, 'payload-delta.sql'), deltaFrom: targetPath })
-    assert.deepEqual(delta.hours_session_ids, manifest.hours_session_ids)
     assert.equal(delta.payload?.delta?.product_sessions, 0)
     // A reservation taken by the old Worker claims the very same seating after the repoint.
     const oldWriter = new Database(sourcePath)
@@ -325,7 +322,7 @@ test('a v25 replacement names business scheduling with no default to fall back o
     oldWriter.close()
     const bookedDeltaPath = join(directory, 'v27-booked-delta.sqlite')
     const bookedDelta = await transferDatabaseExport(sourcePath, bookedDeltaPath, { payloadPath: join(directory, 'payload-booked-delta.sql'), deltaFrom: targetPath })
-    assert.equal(bookedDelta.payload?.delta?.product_sessions, 0)
+    assert.equal(bookedDelta.payload?.delta?.product_sessions, 1)
     assert.equal(bookedDelta.payload?.delta?.bookings, 1)
     const booked = new Database(bookedDeltaPath, { readonly: true })
     try {
@@ -648,7 +645,6 @@ test('interleaved branch migration ledgers preserve location privacy and authore
         }
         for (const [table, names] of Object.entries(retired)) if (unchangedTables.includes(table)) assert.deepEqual((target.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).filter(row => names.includes(row.name)), [])
         assert.equal(target.prepare("SELECT check_in_end_time FROM product_booking_configs WHERE product_id = 'home'").get()!.check_in_end_time, history === 'v19-complete' ? '19:00' : null)
-        assert.deepEqual(manifest.hours_session_ids, [])
         assert.deepEqual(target.prepare("SELECT organization_id, product_id, beds, amenities FROM product_stay_configs WHERE product_id = 'home'").get(), { organization_id: 'host', product_id: 'home', beds: 2, amenities: '[{"code":"smoke_detector","available":true}]' })
         assert.deepEqual(target.prepare("SELECT owner_type, owner_id, slot, asset_id FROM media_placements WHERE owner_id = 'bedroom' ORDER BY owner_type").all(), [
           { owner_type: 'stay_photo_room', owner_id: 'bedroom', slot: 'photo', asset_id: 'photo' },
@@ -846,7 +842,7 @@ test('a v15 export transfers into the v16 baseline: required clocks and currenci
   const { transferDatabaseExport } = await import('../../scripts/transfer-database-export.mjs')
   const { workingWindows } = await import('../../server/domain/member-scheduling.ts')
   const { drizzle } = await import('drizzle-orm/better-sqlite3')
-  const { prepareProviderHoursSessions } = await import('../../server/utils/availability.ts')
+  const { listBookableSessions } = await import('../../server/utils/availability.ts')
   const now = '2026-10-13T00:00:00.000Z'
   t.mock.timers.enable({ apis: ['Date'], now: new Date(now) })
   const directory = mkdtempSync(join(tmpdir(), 'krabiclaw-v15-transfer-'))
@@ -894,7 +890,7 @@ test('a v15 export transfers into the v16 baseline: required clocks and currenci
     const targetPath = join(directory, 'v16.sqlite')
     const sourcePath = export15('v15.sqlite')
     const initialPayload = join(directory, 'initial.sql')
-    const manifest = await transferDatabaseExport(sourcePath, targetPath, { payloadPath: initialPayload })
+    await transferDatabaseExport(sourcePath, targetPath, { payloadPath: initialPayload })
     const target = new Database(targetPath)
     try {
       assert.deepEqual(target.pragma('foreign_key_check'), [])
@@ -906,22 +902,23 @@ test('a v15 export transfers into the v16 baseline: required clocks and currenci
       assert.equal((target.prepare('SELECT count(*) AS n FROM product_availability_rules').get() as { n: number }).n, 0)
       // Availability comes from the existing provider windows, not the retired
       // weekly rule. Existing booking history and active holds keep their facts.
-      assert.equal(manifest.hours_session_ids.length, 60, '31 days × two half-hour slots minus two pre-existing source occurrences')
-      assert.match(manifest.hours_session_source_hashes['outside-horizon'], /^[a-f0-9]{64}$/)
-      assert.deepEqual(target.prepare("SELECT status, updated_by FROM product_sessions WHERE id = 'outside-horizon'").get(), { status: 'cancelled', updated_by: 'system' })
+      assert.deepEqual(target.prepare("SELECT status, updated_by FROM product_sessions WHERE id = 'outside-horizon'").get(), { status: 'scheduled', updated_by: 'user-1' })
       assert.deepEqual(target.prepare("SELECT id, ends_at, capacity, updated_at, updated_by FROM product_sessions WHERE id IN ('session', 'held-session') ORDER BY id").all(), [
         { id: 'held-session', ends_at: '2026-11-03T15:00:00.000Z', capacity: 4, updated_at: '2026-10-01T00:00:00.000Z', updated_by: 'user-1' },
         { id: 'session', ends_at: '2026-11-02T15:00:00.000Z', capacity: 4, updated_at: '2026-10-01T00:00:00.000Z', updated_by: 'user-1' },
       ])
-      const generated = target.prepare("SELECT id, timezone, starts_at, ends_at, capacity, status FROM product_sessions WHERE id NOT IN ('session', 'held-session', 'obsolete-session', 'outside-horizon') ORDER BY starts_at").all() as Array<{ id: string; timezone: string; starts_at: string; ends_at: string; capacity: number; status: string }>
-      assert.equal(generated.length, 60)
-      assert(generated.every(row => row.timezone === 'America/New_York' && row.capacity === 1 && row.status === 'scheduled'
-        && Date.parse(row.ends_at) - Date.parse(row.starts_at) === 30 * 60_000
-        && windows.some(window => window.start <= row.starts_at && window.end >= row.ends_at)))
       const before = target.prepare('SELECT * FROM product_sessions ORDER BY id').all()
-      const config = target.prepare("SELECT * FROM product_booking_configs WHERE product_id = 'consult'").get()
-      const queries = await prepareProviderHoursSessions(drizzle(target) as unknown as Parameters<typeof prepareProviderHoursSessions>[0], config as Parameters<typeof prepareProviderHoursSessions>[1], { actorId: 'another-operator', now: '2026-10-13T00:01:00.000Z' })
-      assert.equal(target.transaction(() => queries.reduce((changes, query) => changes + target.prepare(query.query).run(...query.params!).changes, 0))(), 0, 'unchanged provider-hours generation changes no timestamps or rows')
+      assert.equal(before.length, 4)
+      const sessions = await listBookableSessions(drizzle(target) as unknown as Parameters<typeof listBookableSessions>[0], {
+        organizationId: 'org', productId: 'consult', env: {} as Parameters<typeof listBookableSessions>[1]['env'],
+        locationId: null, fromInstant: '2026-10-13T00:01:00.000Z', toInstant: '2026-11-25T00:00:00.000Z',
+      })
+      assert(sessions.some(row => row.id === 'outside-horizon'), 'an existing occurrence beyond the old horizon keeps its ID')
+      const projected = sessions.filter(row => row.created_at === null)
+      assert(projected.length > 60)
+      assert(projected.every(row => row.timezone === 'America/New_York' && row.capacity === 1 &&
+        Date.parse(row.ends_at) - Date.parse(row.starts_at) === 30 * 60_000 &&
+        windows.some(window => window.start <= row.starts_at && window.end >= row.ends_at)))
       assert.deepEqual(target.prepare('SELECT * FROM product_sessions ORDER BY id').all(), before)
     } finally {
       target.close()
@@ -930,98 +927,54 @@ test('a v15 export transfers into the v16 baseline: required clocks and currenci
     const deltaPayload = join(directory, 'delta.sql')
     t.mock.timers.tick(60_000)
     const delta = await transferDatabaseExport(sourcePath, deltaPath, { payloadPath: deltaPayload, deltaFrom: targetPath })
-    assert.deepEqual(delta.hours_session_ids, manifest.hours_session_ids)
     assert.equal(Object.values(delta.payload!.delta!).reduce((total, rows) => total + rows, 0), 0, 'unchanged source creates no manufactured derived keys')
     assert.deepEqual(delta.payload!.left_behind, {}, 'unchanged source does not delete or change initial derived slots')
-    assert.deepEqual(delta.hours_session_source_hashes, manifest.hours_session_source_hashes)
     const replay = new Database(':memory:')
     try {
       for (const entry of JSON.parse(readFileSync('migrations/meta/_journal.json', 'utf8')).entries) replay.exec(readFileSync(`migrations/${entry.tag}.sql`, 'utf8'))
       replay.exec(readFileSync(initialPayload, 'utf8'))
       replay.exec(readFileSync(deltaPayload, 'utf8'))
       assert.deepEqual(replay.pragma('foreign_key_check'), [])
-      assert.equal((replay.prepare('SELECT count(*) AS n FROM product_sessions').get() as { n: number }).n, 64)
+      assert.equal((replay.prepare('SELECT count(*) AS n FROM product_sessions').get() as { n: number }).n, 4)
     } finally { replay.close() }
     const source = new Database(sourcePath)
     source.prepare("DELETE FROM product_sessions WHERE id = 'obsolete-session'").run()
     source.close()
     const deletion = await transferDatabaseExport(sourcePath, join(directory, 'deleted.sqlite'), { payloadPath: join(directory, 'deleted.sql'), deltaFrom: targetPath })
-    assert.deepEqual(deletion.hours_session_ids, manifest.hours_session_ids)
-    assert.deepEqual(deletion.payload!.left_behind!.product_sessions, { changed: [], deleted: ['["obsolete-session"]'] }, 'real source deletion remains visible; derived identities survive')
+    assert.deepEqual(deletion.payload!.left_behind!.product_sessions, { changed: [], deleted: ['["obsolete-session"]'] }, 'real source deletion remains visible')
     const edited = new Database(sourcePath)
     edited.prepare("UPDATE product_sessions SET updated_at = '2026-10-13T00:01:00.000Z' WHERE id = 'outside-horizon'").run()
     edited.close()
     const editDelta = await transferDatabaseExport(sourcePath, join(directory, 'edited.sqlite'), { payloadPath: join(directory, 'edited.sql'), deltaFrom: targetPath })
-    assert.deepEqual(editDelta.payload!.left_behind!.product_sessions.changed, ['["outside-horizon"]'], 'a real source edit stays visible even when canonical slot facts are unchanged')
-    // A claim arriving on the old source protects its occurrence even when
-    // the initial target had derived a cancellation beyond its horizon.
+    assert.deepEqual(editDelta.payload!.left_behind!.product_sessions.changed, ['["outside-horizon"]'], 'a real source edit stays visible')
+    // A claim arriving on the old source retains its occurrence and facts.
     const claimed = new Database(sourcePath)
     claimed.prepare("INSERT INTO bookings (id, organization_id, product_id, product_session_id, product_variant_id, party_size) VALUES ('late-source-booking', 'org', 'consult', 'outside-horizon', 'consult-default', 1)").run()
     claimed.close()
     const claimPath = join(directory, 'claimed.sqlite')
     const claimDelta = await transferDatabaseExport(sourcePath, claimPath, { payloadPath: join(directory, 'claimed.sql'), deltaFrom: targetPath })
     assert.equal(claimDelta.payload!.delta!.bookings, 1)
-    assert.deepEqual(claimDelta.payload!.left_behind!.product_sessions.changed, ['["outside-horizon"]'], 'a real claim stays visible and does not inherit an earlier derived status')
+    assert.deepEqual(claimDelta.payload!.left_behind!.product_sessions.changed, ['["outside-horizon"]'], 'the prior edit stays visible after the claim')
     const claimTarget = new Database(claimPath, { readonly: true })
     assert.deepEqual(claimTarget.prepare("SELECT status, updated_at, updated_by FROM product_sessions WHERE id = 'outside-horizon'").get(), { status: 'scheduled', updated_at: '2026-10-13T00:01:00.000Z', updated_by: 'user-1' })
     claimTarget.close()
-    // A source-created occurrence that collides with a derived replacement
-    // identity needs explicit reconciliation; a delta cannot overwrite it.
-    const earlier = new Database(targetPath, { readonly: true })
-    const occurrence = earlier.prepare('SELECT starts_at, ends_at FROM product_sessions WHERE id = ?').get(manifest.hours_session_ids[0]) as { starts_at: string; ends_at: string }
-    earlier.close()
-    const changedHours = new Database(sourcePath)
-    changedHours.prepare("UPDATE member_scheduling SET time_off_json = ? WHERE member_id = 'member-1'").run(JSON.stringify([{ start: occurrence.starts_at, end: occurrence.ends_at }]))
-    changedHours.close()
-    const hoursPath = join(directory, 'changed-hours.sqlite')
-    const hoursDelta = await transferDatabaseExport(sourcePath, hoursPath, { payloadPath: join(directory, 'changed-hours.sql'), deltaFrom: targetPath })
-    assert(hoursDelta.payload!.left_behind!.product_sessions.changed.includes(JSON.stringify([manifest.hours_session_ids[0]])), 'a provider-hours edit changes its derived occurrence and remains visible')
-    const hoursTarget = new Database(hoursPath, { readonly: true })
-    assert.deepEqual(hoursTarget.prepare('SELECT status, updated_by FROM product_sessions WHERE id = ?').get(manifest.hours_session_ids[0]), { status: 'cancelled', updated_by: 'system' })
-    hoursTarget.close()
-    const collision = new Database(sourcePath)
-    collision.prepare("INSERT INTO product_sessions (id, organization_id, product_id, assigned_member_id, source_occurrence_key, timezone, starts_at, ends_at, created_by, updated_by) VALUES ('source-created', 'org', 'consult', 'member-1', ?, 'America/New_York', ?, ?, 'user-1', 'user-1')").run(`hours:member-1:${occurrence.starts_at}`, occurrence.starts_at, occurrence.ends_at)
-    collision.prepare("INSERT INTO bookings (id, organization_id, product_id, product_session_id, product_variant_id, party_size) VALUES ('source-created-booking', 'org', 'consult', 'source-created', 'consult-default', 1)").run()
-    collision.close()
-    await assert.rejects(() => transferDatabaseExport(sourcePath, join(directory, 'conflict.sqlite'), { payloadPath: join(directory, 'conflict.sql'), deltaFrom: targetPath }),
-      error => error instanceof Error && error.message === `Source session source-created occupies initial derived session ${manifest.hours_session_ids[0]}; explicitly reconcile this occurrence before a creations-only delta. No replacement rows were overwritten.`)
-    const freshPath = join(directory, 'fresh-source.sqlite')
-    const fresh = await transferDatabaseExport(sourcePath, freshPath, { payloadPath: join(directory, 'fresh-source.sql') })
-    assert.equal(fresh.hours_session_ids.length, 59, 'a full preflight retains the source-owned occurrence instead of deriving its identity')
-    const freshTarget = new Database(freshPath, { readonly: true })
+    const occurrence = { starts_at: '2026-10-20T13:00:00.000Z', ends_at: '2026-10-20T13:30:00.000Z' }
+    const oldWriter = new Database(sourcePath)
+    oldWriter.prepare("INSERT INTO product_sessions (id, organization_id, product_id, assigned_member_id, source_occurrence_key, timezone, starts_at, ends_at, created_by, updated_by) VALUES ('source-created', 'org', 'consult', 'member-1', ?, 'America/New_York', ?, ?, 'user-1', 'user-1')").run(`hours:member-1:${occurrence.starts_at}`, occurrence.starts_at, occurrence.ends_at)
+    oldWriter.prepare("INSERT INTO bookings (id, organization_id, product_id, product_session_id, product_variant_id, party_size) VALUES ('source-created-booking', 'org', 'consult', 'source-created', 'consult-default', 1)").run()
+    oldWriter.close()
+    const newClaimPath = join(directory, 'new-claim.sqlite')
+    const newClaim = await transferDatabaseExport(sourcePath, newClaimPath, { payloadPath: join(directory, 'new-claim.sql'), deltaFrom: targetPath })
+    assert.equal(newClaim.payload!.delta!.product_sessions, 1)
+    assert.equal(newClaim.payload!.delta!.bookings, 2)
+    const newClaimTarget = new Database(newClaimPath, { readonly: true })
     try {
-      assert.deepEqual(freshTarget.prepare("SELECT id, starts_at, ends_at, status FROM product_sessions WHERE id = 'source-created'").get(),
+      assert.deepEqual(newClaimTarget.prepare("SELECT id, starts_at, ends_at, status FROM product_sessions WHERE id = 'source-created'").get(),
         { id: 'source-created', ...occurrence, status: 'scheduled' })
-      assert.deepEqual(freshTarget.prepare("SELECT product_session_id, party_size FROM bookings WHERE id = 'source-created-booking'").get(),
+      assert.deepEqual(newClaimTarget.prepare("SELECT product_session_id, party_size FROM bookings WHERE id = 'source-created-booking'").get(),
         { product_session_id: 'source-created', party_size: 1 })
-      assert.deepEqual(freshTarget.pragma('foreign_key_check'), [])
-    } finally { freshTarget.close() }
-    {
-      const label = 'reassignment'
-      const sourcePath = export15(`${label}.sqlite`, { secondProvider: true })
-      const initialPath = join(directory, `${label}-initial.sqlite`)
-      const initial = await transferDatabaseExport(sourcePath, initialPath)
-      assert.equal(initial.hours_session_ids.length, 60)
-      const earlier = new Database(initialPath, { readonly: true })
-      const removed = (earlier.prepare("SELECT id FROM product_sessions WHERE source_occurrence_key LIKE 'hours:member-1:%' AND id NOT IN ('session','held-session','obsolete-session','outside-horizon') ORDER BY id").all() as Array<{ id: string }>).map(row => JSON.stringify([row.id]))
-      assert.equal(removed.length, 60)
-      earlier.close()
-      const changed = new Database(sourcePath)
-      changed.prepare("UPDATE product_booking_configs SET assigned_member_id='member-2'").run()
-      changed.close()
-      const currentPath = join(directory, `${label}-delta.sqlite`)
-      const current = await transferDatabaseExport(sourcePath, currentPath, { payloadPath: join(directory, `${label}-delta.sql`), deltaFrom: initialPath })
-      assert.deepEqual(current.payload!.left_behind!.product_sessions.deleted, [])
-      const changedIds = current.payload!.left_behind!.product_sessions.changed
-      assert(removed.every(id => changedIds.includes(id)), 'reassigned or retired occurrences are reported as changes to their existing IDs')
-      const target = new Database(currentPath, { readonly: true })
-      assert.equal((target.prepare("SELECT count(*) AS n FROM product_sessions WHERE status = 'scheduled' AND source_occurrence_key LIKE 'hours:member-1:%' AND id NOT IN ('session','held-session','obsolete-session','outside-horizon')").get() as { n: number }).n, 0)
-      assert.deepEqual(target.prepare("SELECT id, ends_at, capacity FROM product_sessions WHERE id IN ('session','held-session') ORDER BY id").all(), [
-        { id: 'held-session', ends_at: '2026-11-03T15:00:00.000Z', capacity: 4 },
-        { id: 'session', ends_at: '2026-11-02T15:00:00.000Z', capacity: 4 },
-      ])
-      target.close()
-    }
+      assert.deepEqual(newClaimTarget.pragma('foreign_key_check'), [])
+    } finally { newClaimTarget.close() }
     await assert.rejects(() => transferDatabaseExport(export15('team.sqlite', { secondProvider: true, team: true }), join(directory, 'target-team.sqlite')), /v26 still has Better Auth Teams or team memberships/)
     // A value nobody chose, a missing one, or an online offering nobody provides stops the transfer.
     await assert.rejects(() => transferDatabaseExport(export15('utc.sqlite', { timezone: 'UTC' }), join(directory, 'target-utc.sqlite')), /without their own currency or timezone/)
@@ -1337,7 +1290,6 @@ test('a v21 replacement preserves booked descendants and auth, completes manual 
     const initial = await transferDatabaseExport(sourcePath, initialPath, { payloadPath: join(directory, 'initial.sql') })
     assert.deepEqual(initial.source_migrations, applied)
     assert.deepEqual(initial.transforms, [{ name: 'unified_conversations', changes: 2 }])
-    assert.deepEqual(initial.hours_session_ids, [])
     assert.deepEqual(initial.target_migrations, current)
     const target = new Database(initialPath, { readonly: true })
     try {

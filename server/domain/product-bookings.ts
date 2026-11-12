@@ -1,6 +1,6 @@
 import { publishConversationEvent } from '~/server/cloudflare/guest-inbox-events'
 import { planSourceMessages } from '~/server/domain/scheduled-guest-messages'
-import { CapacityUnavailableError, claimSessionCapacity, partyPaysOnline, partySizeRefusal, requireBookingConfig } from '~/server/utils/availability'
+import { CapacityUnavailableError, claimSessionCapacity, paidQuantity, partyPaysOnline, partySizeRefusal, requireBookingConfig, resolveBookingSession, sessionAllocationPredicate } from '~/server/utils/availability'
 import { cloudflareEnv, cleanString } from '~/server/utils/api-response'
 import { isReservedTestDomain, shouldSendRealEmail } from '~/server/utils/email-delivery'
 import { notifyBookingCreated, raiseSettledFailures } from '~/server/utils/notifications'
@@ -9,7 +9,7 @@ import { resolveLocationContact } from '~/server/utils/contact-resolution'
 import { toE164 } from '~/utils/phone'
 import { queryAll, queryFirst, type DbClient } from '~/server/db'
 import { bookingPolicy, formatBookingPolicySummary } from '~/server/utils/booking-policy-summary'
-import { getProduct, resolveVariantPrice } from '~/server/utils/product-management'
+import { readTimedBookingPrice } from '~/server/domain/bookings'
 import { isCurrencyCode } from '~/shared/currencies'
 import { getSourceLocale } from '~/server/utils/organization-locales'
 import { assertExactCanonicalLocale, assertPublicOrganizationLanguage } from '~/server/utils/localization'
@@ -27,21 +27,125 @@ import { createPaymentCheckout } from '~/server/domain/payments/checkout'
 import { paidOnline } from '~/server/domain/payments'
 import { hasOrganizationEntitlement } from '~/server/utils/billing'
 import { isRecord } from '~/server/utils/type-guards'
-import { pushStayHoldNights, quoteStay, readPublicStayHome, type StayQuote } from '~/server/domain/stays'
+import { createStay, pushStayHoldNights, quoteStay, readPublicStayHome, stayAccessFor, type StayQuote } from '~/server/domain/stays'
 import { requireChannelPush } from '~/server/integrations/channex/ari'
 import { acceptFormAnswers } from '~/server/domain/form-questions'
 import { formAnswerSnapshotsSchema, formAnswersFingerprint } from '~/shared/form-questions'
 import type { ProductKind } from '~/shared/product-details'
+import type { MemberAccessPrincipal } from '~/server/utils/member-access'
 
 export interface BookingCreationContext {
   organizationId: string
   slug: string
+  productId?: string
   body: Record<string, unknown>
   financialWritesAllowed?: boolean
   operator?: BookingOperator
 }
 
 function creationResult(body: Record<string, unknown>, options: { status: number }) { return { body, status: options.status } }
+
+interface BookingContact {
+  name: string
+  email: string
+  phone: string | null
+  notes: string | null
+  locale: string
+  idempotencyKey: string
+}
+
+async function bookingRateLimit(db: DbClient, env: CloudflareEnv, ipHash: string, email: string): Promise<string | null> {
+  if (import.meta.dev || env.E2E_ALLOW_DEV_ROUTES === 'true') return null
+  const now = Date.now()
+  const hourWindow = Math.floor(now / 3_600_000)
+  const today = new Date(now).toISOString().slice(0, 10)
+  if (!await incrementHourlyRateLimit(db, `rate:book:ip:${ipHash}:${hourWindow}`, IP_HOURLY_LIMIT, 3_600_000)) {
+    return 'Too many requests. Please try again later.'
+  }
+  if (!await incrementHourlyRateLimit(db, `rate:book:email:${await hashIdentifier(email)}:${today}`, EMAIL_DAILY_LIMIT, 86_400_000)) {
+    return 'Too many booking requests from this email. Please try again tomorrow.'
+  }
+  return null
+}
+
+function readTimedSelection(input: { product_session_id?: unknown; product_variant_id?: unknown; party_size?: unknown }) {
+  const sessionId = cleanString(input.product_session_id, 64)
+  const requestedVariantId = cleanString(input.product_variant_id, 64)
+  const partySize = typeof input.party_size === 'number' || typeof input.party_size === 'string' ? Number(input.party_size) : Number.NaN
+  if (!Number.isInteger(partySize) || partySize < 1 || partySize > 99) {
+    return { failure: creationResult({ error: 'Party size must be a whole number between 1 and 99.' }, { status: 400 }) }
+  }
+  if (!sessionId) return { failure: creationResult({ error: 'A session is required' }, { status: 400 }) }
+  return { sessionId, requestedVariantId, partySize }
+}
+
+function publicTimedOffering(db: DbClient, organizationId: string, slug: string, productId?: string) {
+  return queryFirst<{ id: string; name: string; kind: ProductKind; order_url: string | null }>(db, `
+    SELECT p.id, p.name, p.kind, p.order_url FROM products p
+      JOIN product_publications pub ON pub.product_id = p.id AND pub.organization_id = p.organization_id
+      JOIN product_booking_configs cfg ON cfg.product_id = p.id AND cfg.organization_id = p.organization_id AND cfg.unit = 'slot'
+     WHERE pub.organization_id = ? AND pub.published = 1 AND p.slug = ? AND p.active = 1
+       AND (? IS NULL OR p.id = ?) LIMIT 1
+  `, [organizationId, slug, productId ?? null, productId ?? null])
+}
+
+async function timedBookingTerms(db: DbClient, env: CloudflareEnv, input: {
+  organizationId: string; productId: string; sessionId: string; requestedVariantId: string | null
+  partySize: number; currency: string; actorId: string; now: string
+}) {
+  const { organizationId, productId, requestedVariantId, partySize } = input
+  const [resolved, config, variants] = await Promise.all([
+    resolveBookingSession(db, { ...input, env }),
+    requireBookingConfig(db, organizationId, productId),
+    queryAll<{ id: string; name: string }>(db, 'SELECT id,name FROM product_variants WHERE product_id=? AND organization_id=? AND active=1', [productId, organizationId]),
+  ])
+  if (!variants.length) return { failure: creationResult({ error: 'This product has no bookable option' }, { status: 409 }) }
+  if (!requestedVariantId && variants.length > 1) return { failure: creationResult({ error: 'Choose an option before booking' }, { status: 400 }) }
+  const variant = requestedVariantId ? variants.find(candidate => candidate.id === requestedVariantId) : variants[0]
+  if (!variant) return { failure: creationResult({ error: 'That option is not available for this product' }, { status: 400 }) }
+  const partyRefusal = partySizeRefusal(config, partySize)
+  if (partyRefusal) return { failure: creationResult({ error: partyRefusal, code: 'party_size_unavailable' }, { status: 400 }) }
+  if (!isCurrencyCode(input.currency)) throw new Error(`Unsupported organization currency: ${input.currency}`)
+  const price = await readTimedBookingPrice(db, { organizationId, variantId: variant.id, currency: input.currency, locationId: resolved.session.location_id, now: input.now })
+  if (!price) return { failure: creationResult({ error: 'A current one-time price is required for this offering', code: 'price_unavailable' }, { status: 409 }) }
+  const requiresPayment = partyPaysOnline(config, partySize) && price.unit_amount > 0
+  return { resolved, config, variant, price, requiresPayment, policy: bookingPolicy(config, price) }
+}
+
+function throwQuoteFailure(failure: ReturnType<typeof creationResult>): never {
+  const { error, ...data } = failure.body
+  if (typeof error !== 'string') throw new Error('Booking quote failure has no message')
+  throw new HTTPError({ statusCode: failure.status, message: error, data })
+}
+
+/** Read the same terms a timed booking will use, without claiming inventory. */
+export async function quoteTimedBooking(db: DbClient, env: CloudflareEnv, input: {
+  organizationId: string; slug: string; product_session_id?: unknown; product_variant_id?: unknown; party_size?: unknown
+}) {
+  const selection = readTimedSelection(input)
+  if (selection.failure) throwQuoteFailure(selection.failure)
+  const [offering, organization] = await Promise.all([
+    publicTimedOffering(db, input.organizationId, input.slug),
+    queryFirst<{ default_currency: string }>(db, "SELECT default_currency FROM organization WHERE id=? AND status='active'", [input.organizationId]),
+  ])
+  if (!offering || !organization) throw new HTTPError({ statusCode: 404, message: 'Product not found' })
+  if (offering.order_url) throw new HTTPError({ statusCode: 409, message: 'Book this product on its configured external website.', data: { external_url: offering.order_url } })
+  const now = new Date().toISOString()
+  const terms = await timedBookingTerms(db, env, { ...selection, organizationId: input.organizationId, productId: offering.id, currency: organization.default_currency, actorId: 'system', now })
+  if (terms.failure) throwQuoteFailure(terms.failure)
+  const { resolved, config, variant, price, requiresPayment, policy } = terms
+  const allocation = await sessionAllocationPredicate(db, { env, organizationId: input.organizationId, productId: offering.id, sessionId: resolved.session.id, partySize: selection.partySize, now, resolved, preview: true })
+  if (!await queryFirst(db, `SELECT 1 WHERE ${allocation.query}`, allocation.params)) {
+    throw new HTTPError({ statusCode: 409, message: 'This time no longer has capacity for your party', data: { code: 'capacity_unavailable' } })
+  }
+  if (requiresPayment && !await hasOrganizationEntitlement(env, input.organizationId, 'payments')) {
+    throw new HTTPError({ statusCode: 409, message: 'Payments entitlement is required to collect online payment', data: { code: 'payment_required' } })
+  }
+  const { id, location_id, starts_at, ends_at, timezone } = resolved.session
+  return { unit: 'slot' as const, product_id: offering.id, product_variant_id: variant.id, product_session_id: id, party_size: selection.partySize,
+    location_id, starts_at, ends_at, timezone, currency: price.currency, tax_behavior: price.tax_behavior,
+    total_minor: requiresPayment ? price.unit_amount * paidQuantity(config, selection.partySize) : 0, payment_required: requiresPayment, policy }
+}
 
 /** Creation delivery is shared by ordinary claims and authenticated Checkout conversion. */
 export async function notifyProductBookingCreated(env: CloudflareEnv, db: DbClient, organizationId: string, requestId: string, cancellationToken?: string) {
@@ -91,50 +195,78 @@ export async function notifyProductBookingCreated(env: CloudflareEnv, db: DbClie
   return creation.status
 }
 
-/**
- * Claim seats on a session.
- *
- * The guest names a SESSION, not a date and a time: the occurrence is a real
- * row, so there is nothing to re-derive and nothing to disagree about. The
- * claim carries its own capacity predicate, so this route does no
- * check-then-write — the insert either takes the seats or takes none.
- */
+/** The authenticated member creates a booking through the selected offering's inventory. */
+export async function createMemberBooking(event: H3Event, input: {
+  principal: MemberAccessPrincipal; productId: string; body: Record<string, unknown>
+  operator: Omit<BookingOperator, 'userId'>; financialWritesAllowed?: boolean
+}) {
+  const { principal, productId, body, operator } = input
+  const { organizationId, userId, env } = principal
+  const db = env.DB
+  const product = await queryFirst<{ slug: string; unit: 'slot' | 'nights' }>(db, `SELECT p.slug, cfg.unit FROM products p
+    JOIN product_booking_configs cfg ON cfg.product_id=p.id AND cfg.organization_id=p.organization_id
+    WHERE p.organization_id=? AND p.id=?`, [organizationId, productId])
+  if (!product) throw new HTTPError({ statusCode: 404, message: 'Bookable offering not found' })
+  if (product.unit === 'nights') {
+    const access = await stayAccessFor(principal)
+    const stay = await createStay(db, env, access, { ...body, product_id: productId, idempotency_key: operator.idempotencyKey })
+    return { kind: 'stay' as const, stay, status: 201 as const }
+  }
+  const result = await createProductBooking(event, {
+    organizationId, slug: product.slug, productId, body,
+    financialWritesAllowed: input.financialWritesAllowed, operator: { ...operator, userId },
+  })
+  return { kind: 'booking' as const, ...result }
+}
+
+/** Create a booking or hold using the offering's canonical inventory unit. */
 export async function createProductBooking(event: H3Event, context: BookingCreationContext) {
-  const { organizationId, slug, body, operator } = context
-  if (!organizationId || !slug) return creationResult({ error: 'organizationId and slug required' }, { status: 400 })
+  const { organizationId, slug, productId, body, operator } = context
+  if (!organizationId || !slug) return creationResult({ error: 'Organization and slug are required' }, { status: 400 })
 
   const env = cloudflareEnv(event)
   const db = env.DB
   if (!db) return creationResult({ error: 'Database not available' }, { status: 500 })
 
-  const organization = await queryFirst<{ id: string; slug: string; name: string | null; default_currency: string; vertical: string | null; public_url: string | null }>(db, `SELECT id, slug, name, default_currency, vertical, (SELECT 'https://' || domain FROM organization_domains WHERE organization_id = organization.id AND role = 'canonical' AND status = 'active') AS public_url FROM organization WHERE id = ? AND status = 'active' LIMIT 1`, [organizationId])
-  if (!organization) return creationResult({ error: 'Organization not found' }, { status: 404 })
+  const [organization, offering] = await Promise.all([
+    queryFirst<{ id: string; slug: string; default_currency: string; vertical: string | null }>(db, "SELECT id, slug, default_currency, vertical FROM organization WHERE id = ? AND status = 'active'", [organizationId]),
+    queryFirst<{ kind: ProductKind }>(db, 'SELECT kind FROM products WHERE organization_id = ? AND slug = ? AND (? IS NULL OR id = ?)', [organizationId, slug, productId ?? null, productId ?? null]),
+  ])
+  const nights = offering?.kind === 'stay'
+  if (!organization) {
+    if (nights) stayBookingError(404, 'ORGANIZATION_NOT_FOUND', 'Organization not found', 'organization_id')
+    return creationResult({ error: 'Organization not found' }, { status: 404 })
+  }
   const locale = body.locale === undefined ? await getSourceLocale(db, organizationId) : assertExactCanonicalLocale(body.locale)
-
   const guestName = cleanString(body.guest_name, 100)
   const guestEmail = cleanString(body.guest_email, 254)
   const guestPhone = cleanString(body.guest_phone, 30)
   const normalizedGuestPhone = guestPhone ? toE164(guestPhone) : null
-  if (guestPhone && !normalizedGuestPhone) return creationResult({ error: 'A valid phone number is required.' }, { status: 400 })
-  const sessionId = cleanString(body.product_session_id, 64)
-  const requestedVariantId = cleanString(body.product_variant_id, 64)
   const notes = cleanString(body.notes, 1000)
-  const pageEventId = readPageEventId(body.page_event_id)
-  const partySizeValue = typeof body.party_size === 'number' || typeof body.party_size === 'string' ? Number(body.party_size) : Number.NaN
-  if (!Number.isInteger(partySizeValue) || partySizeValue < 1 || partySizeValue > 99) {
-    return creationResult({ error: 'Party size must be a whole number between 1 and 99.' }, { status: 400 })
-  }
-  const partySize = partySizeValue
-
-  if (!guestName) return creationResult({ error: 'Name is required' }, { status: 400 })
-  if (!guestEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(guestEmail)) return creationResult({ error: 'A valid email address is required' }, { status: 400 })
-  // Reserved test domains (example.com and friends) hard-bounce and must never
-  // be accepted where the environment sends real email.
-  if (shouldSendRealEmail(env) && isReservedTestDomain(guestEmail)) return creationResult({ error: 'Please enter a real email address.' }, { status: 422 })
-  if (!sessionId) return creationResult({ error: 'A session is required' }, { status: 400 })
-
   const idempotencyKey = operator?.idempotencyKey ?? (typeof body.idempotency_key === 'string' ? body.idempotency_key.trim() : '')
-  if (!idempotencyKey || idempotencyKey.length > 200) return creationResult({ error: 'A stable booking request key is required' }, { status: 400 })
+  const invalid = (code: string, message: string, field: string, slotStatus = 400) => {
+    if (nights) stayBookingError(422, code, message, field)
+    return creationResult({ error: message }, { status: slotStatus })
+  }
+  if (!guestName) return invalid('GUEST_NAME_REQUIRED', 'Name is required', 'guest_name')
+  if (!guestEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(guestEmail)) return invalid('GUEST_EMAIL_INVALID', 'A valid email address is required', 'guest_email')
+  // Reserved test domains hard-bounce where the environment sends real email.
+  if (shouldSendRealEmail(env) && isReservedTestDomain(guestEmail)) return invalid('GUEST_EMAIL_INVALID', 'Please enter a real email address.', 'guest_email', 422)
+  if (guestPhone && !normalizedGuestPhone) return invalid('GUEST_PHONE_INVALID', 'A valid phone number is required.', 'guest_phone')
+  if (!idempotencyKey || idempotencyKey.length > 200) return invalid('IDEMPOTENCY_KEY_REQUIRED', 'A stable booking request key is required', 'idempotency_key')
+
+  if (nights) {
+    if (operator || context.financialWritesAllowed === false) {
+      throw new HTTPError({ statusCode: 409, statusMessage: 'Book these nights through the business’s payment workflow', data: { code: 'financial_action_required' } })
+    }
+    return createNightCheckout(event, env, db, context, { name: guestName, email: guestEmail, phone: normalizedGuestPhone, notes, locale, idempotencyKey })
+  }
+
+  const selection = readTimedSelection(body)
+  if (selection.failure) return selection.failure
+  const { sessionId, requestedVariantId, partySize } = selection
+  const pageEventId = readPageEventId(body.page_event_id)
+
   const threadId = await hashIdentifier(JSON.stringify(operator ? [organizationId, idempotencyKey] : ['website-booking', organizationId, idempotencyKey]))
   const fingerprint = await hashIdentifier(JSON.stringify({ slug, sessionId, requestedVariantId, partySize, guestName, guestEmail, phone: normalizedGuestPhone, notes, answers: formAnswersFingerprint(body.answers), source: operator?.source ?? 'website', externalReference: operator?.externalReference ?? null, guestAcknowledgement: operator?.guestAcknowledgement ?? true }))
   const replay = async () => {
@@ -167,14 +299,16 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
   const existing = await replay()
   if (existing) return existing
 
-  const checkoutAttempt = await queryFirst<{ price_snapshot_json: string; fingerprint: string | null }>(db, `SELECT p.price_snapshot_json, json_extract(r.payload_json,'$.provenance.fingerprint') AS fingerprint
-    FROM payments p JOIN conversations r ON r.id=? AND r.organization_id=p.organization_id
+  const checkoutAttempt = await queryFirst<{ price_snapshot_json: string; fingerprint: string | null; party_size: number }>(db, `
+    SELECT p.price_snapshot_json, json_extract(r.payload_json,'$.provenance.fingerprint') AS fingerprint, h.quantity AS party_size
+    FROM payments p JOIN payment_checkout_holds h ON h.payment_id=p.id AND h.organization_id=p.organization_id
+    JOIN conversations r ON r.id=h.conversation_id AND r.id=? AND r.organization_id=p.organization_id
     WHERE p.idempotency_key=? AND p.organization_id=?`, [threadId, `checkout:${organizationId}:${idempotencyKey}`, organizationId])
   if (checkoutAttempt) {
     if (checkoutAttempt.fingerprint !== fingerprint) return creationResult({ error: 'This key already identifies a different checkout request. Read its purchase before continuing.', code: 'idempotency_conflict' }, { status: 409 })
     const snapshot: unknown = JSON.parse(checkoutAttempt.price_snapshot_json)
     if (!isRecord(snapshot) || typeof snapshot.product_id !== 'string' || typeof snapshot.variant_id !== 'string'
-      || snapshot.session_id !== sessionId || snapshot.quantity !== partySize || requestedVariantId && snapshot.variant_id !== requestedVariantId) {
+      || snapshot.session_id !== sessionId || checkoutAttempt.party_size !== partySize || requestedVariantId && snapshot.variant_id !== requestedVariantId) {
       return creationResult({ error: 'Checkout retry does not match its saved purchase', code: 'idempotency_conflict' }, { status: 409 })
     }
     if (context.financialWritesAllowed === false) throw new HTTPError({ statusCode: 409, statusMessage: 'Continue this purchase through the business’s payment workflow', data: { code: 'financial_action_required', dashboard_url: `/dashboard/${encodeURIComponent(organization.slug)}/products/${encodeURIComponent(snapshot.product_id)}/booking` } })
@@ -188,12 +322,7 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
   }
 
   await assertPublicOrganizationLanguage(db, organizationId, locale)
-  const product = await queryFirst<{ id: string; name: string; kind: ProductKind; order_url: string | null }>(db, `
-    SELECT p.id, p.name, p.kind, p.order_url FROM products p
-      JOIN product_publications pub ON pub.product_id = p.id AND pub.organization_id = p.organization_id
-      JOIN product_booking_configs cfg ON cfg.product_id = p.id AND cfg.unit = 'slot'
-     WHERE pub.organization_id = ? AND pub.published = 1 AND p.slug = ? AND p.active = 1 LIMIT 1
-  `, [organizationId, slug])
+  const product = await publicTimedOffering(db, organizationId, slug, productId)
   if (!product) return creationResult({ error: 'Product not found' }, { status: 404 })
   if (!operator && product.order_url) return creationResult({ error: 'Book this product on its configured external website.', external_url: product.order_url }, { status: 409 })
   // A restaurant calls a table's guest when plans change, so a table booking needs a phone number.
@@ -202,72 +331,24 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
   // checkout's thread carries them, and capture uses what was accepted now.
   const answers = await acceptFormAnswers(db, { kind: 'booking', organizationId, productId: product.id }, { locale, answers: body.answers, questionsRevision: body.questions_revision, revisionRequired: false })
 
-  const session = await queryFirst<{ id: string; location_id: string | null; starts_at: string; ends_at: string; timezone: string }>(db, `
-    SELECT s.id, s.location_id, s.starts_at, s.ends_at, s.timezone
-      FROM product_sessions s
-     WHERE s.id = ? AND s.product_id = ? AND s.organization_id = ? AND s.status = 'scheduled'
-       -- A branch that has stopped selling this product does not take seats
-       -- for it, whatever the site and the product itself still say.
-       AND (s.location_id IS NULL OR EXISTS (
-         SELECT 1 FROM product_locations pl
-           JOIN business_locations l ON l.id = pl.location_id AND l.organization_id = ? AND l.status = 'active'
-          WHERE pl.product_id = s.product_id AND pl.location_id = s.location_id
-            AND pl.active = 1 AND pl.published = 1
-       ))
-  `, [sessionId, product.id, organization.id, organizationId])
-  if (!session) return creationResult({ error: 'That session is not open for booking' }, { status: 404 })
-
-  // What is being bought is a variant. Adult and child seats, or a class and
-  // its private package, are different things at different prices, so the
-  // guest's choice is carried here — never resolved by sort order. One active
-  // variant is not a choice; several with none named is a request that cannot
-  // be filled.
-  const variants = await queryAll<{ id: string }>(db, `
-    SELECT id FROM product_variants
-     WHERE product_id = ? AND organization_id = ? AND active = 1
-     ORDER BY sort_order, id
-  `, [product.id, organization.id])
-  if (variants.length === 0) return creationResult({ error: 'This product has no bookable option' }, { status: 409 })
-  if (requestedVariantId && !variants.some(variant => variant.id === requestedVariantId)) {
-    return creationResult({ error: 'That option is not available for this product' }, { status: 400 })
-  }
-  if (!requestedVariantId && variants.length > 1) {
-    return creationResult({ error: 'Choose an option before booking' }, { status: 400 })
-  }
-  const productVariantId = requestedVariantId || variants[0]!.id
-
-  const full = await getProduct(db, organization.id, product.id)
+  const now = new Date().toISOString()
+  const terms = await timedBookingTerms(db, env, {
+    ...selection, organizationId, productId: product.id, currency: organization.default_currency, actorId: operator?.userId ?? 'system', now,
+  })
+  if (terms.failure) return terms.failure
+  const { resolved, variant, config, price, requiresPayment, policy } = terms
+  const session = resolved.session
+  const productVariantId = variant.id
   const presentation = resolveBookingPresentation(product.kind, organization.vertical)
-  const config = await requireBookingConfig(db, organization.id, product.id)
-  const partyRefusal = partySizeRefusal(config, partySize)
-  if (partyRefusal) return creationResult({ error: partyRefusal, code: 'party_size_unavailable' }, { status: 400 })
-  if (!isCurrencyCode(organization.default_currency)) throw new Error(`Unsupported organization currency: ${organization.default_currency}`)
-  const variant = full.variants.find(candidate => candidate.id === productVariantId)
-  if (!variant) throw new Error('The selected variant is missing')
-  const price = resolveVariantPrice(variant, { currency: organization.default_currency, location_id: session.location_id, at: new Date().toISOString() })
-  if (!price || price.type !== 'one_time') return creationResult({ error: 'A current one-time price is required for this offering', code: 'price_unavailable' }, { status: 409 })
-  const requiresPayment = partyPaysOnline(config, partySize) && price.unit_amount > 0
-  const policy = bookingPolicy(config, price)
   if (requiresPayment && context.financialWritesAllowed === false) {
     throw new HTTPError({ statusCode: 409, statusMessage: 'This booking requires online payment. Review the offering in the dashboard and complete its payment workflow before a booking can be created.', data: {
       code: 'financial_action_required', dashboard_url: `/dashboard/${encodeURIComponent(organization.slug)}/products/${encodeURIComponent(product.id)}/booking`,
     } })
   }
 
-  const clientIp = getClientIp(event)
-  const ipHash = await hashClientIp(clientIp)
-  const emailHash = await hashIdentifier(guestEmail)
-  const e2eOverride = env.E2E_ALLOW_DEV_ROUTES === 'true'
-  if (!operator && !import.meta.dev && !e2eOverride) {
-    const hourWindow = Math.floor(Date.now() / 3_600_000)
-    const today = new Date().toISOString().split('T')[0]
-    if (!await incrementHourlyRateLimit(db, `rate:book:ip:${ipHash}:${hourWindow}`, IP_HOURLY_LIMIT, 3_600_000)) {
-      return creationResult({ error: 'Too many requests. Please try again later.' }, { status: 429 })
-    }
-    if (!await incrementHourlyRateLimit(db, `rate:book:email:${emailHash}:${today}`, EMAIL_DAILY_LIMIT, 86_400_000)) {
-      return creationResult({ error: 'Too many booking requests from this email. Please try again tomorrow.' }, { status: 429 })
-    }
-  }
+  const ipHash = await hashClientIp(getClientIp(event))
+  const limited = !operator && await bookingRateLimit(db, env, ipHash, guestEmail)
+  if (limited) return creationResult({ error: limited }, { status: 429 })
 
   const cancellation = await createReplayableReservationCancelToken(env.EMAIL_REPLY_SECRET ?? '', threadId)
   const cancellationTokenHash = await hashReservationCancelToken(cancellation.token)
@@ -276,7 +357,6 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
   // this booking's guest snapshot and is never copied onto that user.
   const userId = operator ? null : await ensureInteractionUser(event, env)
 
-  const now = new Date().toISOString()
   const payload = threadPayloadForGuest({ name: guestName, email: guestEmail, phone: normalizedGuestPhone, locale, ipHash })
   // The booking's own message opens its conversation, stated where and when it is.
   const place = session.location_id === null ? null
@@ -296,7 +376,7 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
     // authenticated capture alone creates its operational Booking and activity.
     const checkout = await createPaymentCheckout(db, env, {
       unit: 'slot', organizationId, buyerUserId: userId, productId: product.id, variantId: productVariantId,
-      sessionId: session.id, answers, requestId: threadId, requestFingerprint: await hashIdentifier(JSON.stringify({ guestName, guestEmail, phone: normalizedGuestPhone, notes })), quantity: partySize, idempotencyKey: checkoutKey,
+      sessionId: session.id, resolved, answers, requestId: threadId, requestFingerprint: await hashIdentifier(JSON.stringify({ guestName, guestEmail, phone: normalizedGuestPhone, notes })), quantity: partySize, idempotencyKey: checkoutKey,
       origin: operator ? null : { request: event.req, pageEventId },
       following: paymentId => requestInsertQueries({
         kind: 'booking', id: threadId, organization_id: organizationId, location_id: session.location_id,
@@ -315,7 +395,7 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
     const claim = await claimSessionCapacity(db, {
       env,
       organizationId: organization.id, productId: product.id, sessionId: session.id,
-      productVariantId, partySize, userId, policyJson: JSON.stringify(policy), answers,
+      productVariantId, partySize, userId, policyJson: JSON.stringify(policy), answers, resolved,
       following: bookingId => [
         ...requestInsertQueries({
           kind: 'booking', id: threadId, organization_id: organization.id,
@@ -400,7 +480,7 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
   return creationResult({
     success: true, conversation_id: threadId, booking_id: operationalBookingId, status: record.status, replayed: false, starts_at: record.starts_at, ends_at: record.ends_at, timezone: record.timezone, presentation, ...(operator ? {} : { cancellation_token: cancellation.token, quoted_value: quotedValueOf(followUps[1]!), measurement }),
     message: record.status === 'cancelled' ? 'This booking was cancelled.' : record.status === 'pending' ? `Your request for ${record.product_name} on ${whenLabel} is awaiting review.` : `Your ${presentation.noun} for ${record.product_name} on ${whenLabel} is confirmed.`,
-    policy_summary: formatBookingPolicySummary(policy, locale, full.kind),
+    policy_summary: formatBookingPolicySummary(policy, locale, product.kind),
   }, { status: 201 })
 }
 
@@ -415,49 +495,25 @@ function stayBookingError(statusCode: number, code: string, message: string, fie
  * channel closes them at once, and capture confirms the stay. A retry with the
  * same key returns the same checkout without quoting the nights it holds.
  */
-export async function createStayBooking(event: H3Event, context: { organizationId: string; slug: string; body: Record<string, unknown> }) {
+async function createNightCheckout(event: H3Event, env: CloudflareEnv, db: DbClient, context: BookingCreationContext, contact: BookingContact) {
   const { organizationId, slug, body } = context
-  const env = cloudflareEnv(event)
-  const db = env.DB
-  if (!db) throw new HTTPError({ statusCode: 500, statusMessage: 'Database not available' })
-  const organization = await queryFirst<{ id: string }>(db, "SELECT id FROM organization WHERE id = ? AND status = 'active'", [organizationId])
-  if (!organization) stayBookingError(404, 'ORGANIZATION_NOT_FOUND', 'Organization not found', 'organization_id')
-  if (body.locale !== undefined) assertExactCanonicalLocale(body.locale)
-
-  const guestName = cleanString(body.guest_name, 100)
-  const guestEmail = cleanString(body.guest_email, 254)
-  const guestPhone = cleanString(body.guest_phone, 30)
-  const notes = cleanString(body.notes, 1000)
-  if (!guestName) stayBookingError(422, 'GUEST_NAME_REQUIRED', 'Name is required', 'guest_name')
-  if (!guestEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(guestEmail)) stayBookingError(422, 'GUEST_EMAIL_INVALID', 'A valid email address is required', 'guest_email')
-  if (shouldSendRealEmail(env) && isReservedTestDomain(guestEmail)) stayBookingError(422, 'GUEST_EMAIL_INVALID', 'Please enter a real email address.', 'guest_email')
-  const phone = guestPhone ? toE164(guestPhone) : null
-  if (guestPhone && !phone) stayBookingError(422, 'GUEST_PHONE_INVALID', 'A valid phone number is required.', 'guest_phone')
-  const idempotencyKey = typeof body.idempotency_key === 'string' ? body.idempotency_key.trim() : ''
-  if (!idempotencyKey || idempotencyKey.length > 200) stayBookingError(422, 'IDEMPOTENCY_KEY_REQUIRED', 'A stable booking request key is required', 'idempotency_key')
+  const { name, email, phone, notes, locale, idempotencyKey } = contact
 
   const home = await readPublicStayHome(db, organizationId, slug)
   const request = { product_id: home.product_id, check_in_date: body.check_in_date, check_out_date: body.check_out_date, adults: body.adults, children: body.children ?? 0, infants: body.infants ?? 0 }
-  const fingerprint = await hashIdentifier(JSON.stringify({ slug, ...request, guest: { name: guestName, email: guestEmail, phone, notes }, answers: formAnswersFingerprint(body.answers) }))
+  const fingerprint = await hashIdentifier(JSON.stringify({ slug, ...request, guest: { name, email, phone, notes }, answers: formAnswersFingerprint(body.answers) }))
 
   const retrying = await queryFirst(db, 'SELECT 1 FROM payments WHERE idempotency_key = ? AND organization_id = ?', [`checkout:${organizationId}:${idempotencyKey}`, organizationId])
   // A new checkout checks and freezes the answers with the purchase; a retry is
   // held to the purchase it froze, answers included, and does not read the
   // questions again (createPaymentCheckout reads `guest` only for a new checkout).
-  const answers = retrying ? [] : await acceptFormAnswers(db, { kind: 'booking', organizationId, productId: home.product_id }, { locale: typeof body.locale === 'string' ? body.locale : null, answers: body.answers, questionsRevision: body.questions_revision, revisionRequired: false })
-  const guest = { name: guestName, email: guestEmail, phone, notes, answers }
+  const answers = retrying ? [] : await acceptFormAnswers(db, { kind: 'booking', organizationId, productId: home.product_id }, { locale, answers: body.answers, questionsRevision: body.questions_revision, revisionRequired: false })
+  const guest = { name, email, phone, notes, answers }
   // The quote's refusals name the rule a guest's choice breaks; they come before rate limits and payment setup.
   const quoted: StayQuote | null = retrying ? null : await quoteStay(db, organizationId, home, request)
   const quote = async () => quoted ?? await quoteStay(db, organizationId, home, request)
-  if (!retrying) {
-    const e2eOverride = env.E2E_ALLOW_DEV_ROUTES === 'true'
-    if (!import.meta.dev && !e2eOverride) {
-      const hourWindow = Math.floor(Date.now() / 3_600_000)
-      const today = new Date().toISOString().split('T')[0]
-      if (!await incrementHourlyRateLimit(db, `rate:book:ip:${await hashClientIp(getClientIp(event))}:${hourWindow}`, IP_HOURLY_LIMIT, 3_600_000)) stayBookingError(429, 'RATE_LIMITED', 'Too many requests. Please try again later.', 'guest_email')
-      if (!await incrementHourlyRateLimit(db, `rate:book:email:${await hashIdentifier(guestEmail)}:${today}`, EMAIL_DAILY_LIMIT, 86_400_000)) stayBookingError(429, 'RATE_LIMITED', 'Too many booking requests from this email. Please try again tomorrow.', 'guest_email')
-    }
-  }
+  const limited = !retrying && await bookingRateLimit(db, env, await hashClientIp(getClientIp(event)), email)
+  if (limited) stayBookingError(429, 'RATE_LIMITED', limited, 'guest_email')
   await requireChannelPush(db, env, organizationId, home.product_id)
   const stay = quoted
     ? { product_id: quoted.product_id, check_in_date: quoted.check_in_date, check_out_date: quoted.check_out_date, adults: quoted.adults, children: quoted.children, infants: quoted.infants }

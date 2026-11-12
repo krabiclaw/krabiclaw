@@ -255,9 +255,10 @@ are managed with `list_product_booking_sessions`, `list_product_bookings`,
 `reject_product_booking`, `cancel_product_booking`, and
 `request_product_booking_change`. Creation requires tenant admin/owner access;
 authorized members can read and manage their assigned bookings through the shared
-assignment and permission checks. Select a real Session ID from the canonical
-session listing; it includes pending capacity
-and tenant-scoped cross-Product online calendar exclusion. A booking is handled by
+assignment and permission checks. Use the session ID returned for the requested
+dates. An opening projected from recurring hours is saved only when a claim
+succeeds. The listing counts pending capacity and overlapping bookings for the
+same attorney. A booking is handled by
 its product's assigned member (`set_product_booking_config`); booking list results
 include that `assigned_member_id` and accept it as a filter.
 
@@ -273,12 +274,13 @@ before allocating capacity or creating a Booking, request, Checkout, hold, payme
 or authorization. Only a valid explicit zero Price skips required collection.
 MCP never changes the payment requirement to make a booking succeed.
 
-Every creation requires a caller `idempotency_key`, `source`, and explicit
-`guest_acknowledgement` boolean; `external_reference` and `guest_phone` are optional.
-The tenant/key-derived request ID and existing unique constraints protect the
+Every creation requires a caller `idempotency_key`. `source`, `external_reference`
+and `guest_phone` are optional. A timed booking sends a guest acknowledgement
+when the caller explicitly sets `guest_acknowledgement: true`.
+The tenant and key identify the operation, and existing unique constraints protect the
 atomic claim/thread batch from concurrent duplicate creation. A durable
 normalized fingerprint rejects reuse with different details. Provenance is in
-`requests.payload_json.provenance`, including operator, source, external reference,
+the conversation's guest payload, including operator, source, external reference,
 acknowledgement choice and `creation_kind: ordinary`. Failed follow-up delivery
 remains incomplete and may be resumed with the same key using canonical delivery
 receipts. Successful replay does not send again. The canonical cancellation-token utility signs a stable per-request capability using the existing email signing secret so a failed guest acknowledgement can retry with the original cancellation link; only its hash is stored. Owner alerts, inbox and audit
@@ -291,7 +293,8 @@ An existing appointment import must have a separately supported audited contract
 it must never be represented as a new payment or fabricated paid Stripe record.
 
 `booking_id` means `bookings.id`. `conversation_id` means the guest inbox
-thread ID. No booking tool or public booking response returns a `booking_id`.
+thread ID. Use the `booking_id` from creation or the booking list and the
+current `version` from `get_product_booking` for changes.
 Review confirmation/rejection and cancellation invoke the canonical guest-thread
 operation service with durable operation keys and guest status messages. Confirm
 approves a pending booking; reject declines a pending booking; cancel ends a
@@ -301,12 +304,14 @@ Booking or creating financial records. Repeating this handoff creates no refund
 authorization. The result states `success: false`, `operation_completed: false`,
 `action_required: true` and `code: "financial_action_required"`; clients must keep
 the absolute `dashboard_url` and report the operation as incomplete. Changes
-invoke the existing immutable guest proposal flow: they do not mutate the booking
-until guest acceptance, and acceptance retains review status and operational ID.
+can be sent as a proposal that keeps the existing allocation until guest
+acceptance. Consultations require client acceptance. An allowed move with
+`apply: true` changes the allocation immediately. Read back the booking and
+report the returned `change_status` for a timed change.
 
 A table booking is a booking: the same tools read, cancel and change it, and
 `request_product_booking_change` may move it to a session of the business's table
-product at another location. It takes the booking's `updated_at` from `get_product_booking`; a guest message in the
+product at another location. It takes the booking's `version` from `get_product_booking`; a guest message in the
 conversation does not refuse the business's change.
 
 ## Lodging homes, stays and nightly calendars
@@ -317,14 +322,17 @@ booking, and `get_stay_calendar` reads
 nightly availability, prices and restrictions. Members read only the homes they
 are assigned to; owners and admins manage the organization's homes.
 
-`create_stay` records a stay the host took directly and holds its nights. It takes
+`create_product_booking` records a stay the host took directly when supplied
+with check-in, checkout, guests and the agreed total. It holds its nights and takes
 no payment, applies existing automatic guest-message schedules and updates
 availability on the home's connected Airbnb listing through Channex. A failed
 channel update returns `CHANNEL_PUSH_FAILED` with `committed:true`: the stay was
 saved. Read the calendar and channel state before retrying with the same
-`idempotency_key`. `update_stay` and `cancel_product_booking` change only
-host-owned stays under their current `version`; channel-owned stays
-change on their source channel. `record_stay_payment` records external money,
+`idempotency_key`. Use `update_product_booking` to change dates or details and
+`request_product_booking_change` with `apply: true` to move a stay to a different
+home. `cancel_product_booking` cancels a host-owned stay. These operations use
+the current `version`; channel-owned stays remain subject to their channel's
+rules. `record_stay_payment` records external money,
 including a negative refund record, and `delete_stay_payment` removes a mistaken
 record. Neither moves money. MCP cancellation cannot execute an online refund;
 use the authenticated dashboard financial flow when one is required.

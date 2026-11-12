@@ -58,7 +58,7 @@ export async function seedExperience(createTenant: CreateTenant): Promise<SeedTe
     // conversation in its past mailbox (an ended booking with nothing unread).
     const wheel = tenant.products['wheel-class']!
     const startsAt = new Date(Date.now() + 15_000)
-    const endsAt = new Date(startsAt.getTime() + 60_000)
+    const endsAt = new Date(startsAt.getTime() + 5_000)
     const { sessions: [session] } = await tool<{ sessions: Array<{ id: string }> }>('create_product_session', {
       product_id: wheel.id, location_id: aoNang.id, starts_at: startsAt.toISOString(), ends_at: endsAt.toISOString(), capacity: 4, idempotency_key: 'seed-experience-ended-class',
     })

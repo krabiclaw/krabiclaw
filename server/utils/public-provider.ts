@@ -1,5 +1,6 @@
 import { HTTPError } from 'nitro'
 import { queryAll, queryFirst, type DbClient } from '~/server/db'
+import { findBookableSession } from '~/server/utils/availability'
 import { PUBLISHED_PROFILE_SQL, type PublicProvider } from '~/shared/member-scheduling'
 
 /** The published profile of a host member, when it has one. */
@@ -15,9 +16,13 @@ function publishedHostProfiles(db: DbClient, organizationId: string, memberId: s
  */
 export async function publicProductHosts(db: DbClient, organizationId: string, productId: string, sessionId?: unknown): Promise<PublicProvider[]> {
   if (sessionId !== undefined && (typeof sessionId !== 'string' || !sessionId.trim())) throw new HTTPError({ statusCode: 400, message: 'Session ID must be a nonempty string' })
-  const host = await queryFirst<{ member_id: string | null }>(db, 'SELECT assigned_member_id member_id FROM product_booking_configs WHERE product_id=? AND organization_id=?', [productId, organizationId])
-  // Every session of an offering is its one host's; a session names which offering, not another host.
-  if (sessionId !== undefined && !await queryFirst(db, 'SELECT 1 FROM product_sessions s WHERE s.id=? AND s.product_id=? AND s.organization_id=?', [sessionId, productId, organizationId])) throw new HTTPError({ statusCode: 404, message: 'Session not found for this offering' })
+  const host = await queryFirst<{ member_id: string | null; saved_session: number }>(db, `
+    SELECT c.assigned_member_id AS member_id, EXISTS (
+      SELECT 1 FROM product_sessions s WHERE s.organization_id=c.organization_id AND s.product_id=c.product_id AND s.id=?
+    ) AS saved_session FROM product_booking_configs c WHERE c.product_id=? AND c.organization_id=?
+  `, [sessionId ?? null, productId, organizationId])
+  // A saved session identifies the offering even after its time or availability changes.
+  if (sessionId !== undefined && !host?.saved_session && !await findBookableSession(db, { organizationId, productId, sessionId })) throw new HTTPError({ statusCode: 404, message: 'Session not found for this offering' })
   if (!host?.member_id) return []
   return publishedHostProfiles(db, organizationId, host.member_id)
 }
