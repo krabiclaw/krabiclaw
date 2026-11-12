@@ -49,9 +49,10 @@ export default defineScheduledTask({
     let created = 0
     let existing = 0
     const skipped: MaterializeSessionsResult['skipped'] = []
-    const failures: Array<{ product_id: string; error: string }> = []
+    const page = products.slice(0, PRODUCTS_PER_RUN)
+    const failures: Error[] = []
 
-    for (const product of products.slice(0, PRODUCTS_PER_RUN)) {
+    for (const product of page) {
       try {
         const result = await materializeSessions(env.DB, {
           organizationId: product.organization_id, productId: product.product_id,
@@ -60,16 +61,23 @@ export default defineScheduledTask({
         created += result.created
         existing += result.existing
         skipped.push(...result.skipped)
-      } catch (error) {
+      } catch (cause) {
         // One product's broken rule — an invalid timezone, a cadence with no
         // anchor — does not stop the others from being generated.
-        failures.push({ product_id: product.product_id, error: error instanceof Error ? error.message : String(error) })
+        failures.push(new Error(`Could not materialize sessions for ${product.product_id}`, { cause }))
       }
-      await env.ORGANIZATION_CACHE.put(CURSOR_KEY, product.product_id)
     }
 
-    const hasMore = products.length > PRODUCTS_PER_RUN
-    if (!hasMore) await env.ORGANIZATION_CACHE.delete(CURSOR_KEY)
-    return { result: { products: Math.min(products.length, PRODUCTS_PER_RUN), created, existing, skipped, failures, hasMore, through } }
+    // KV permits one write per second to a key. Save the completed page once;
+    // a full pass from the start has no cursor to write or delete.
+    const next = products.length > PRODUCTS_PER_RUN ? page.at(-1)?.product_id : undefined
+    try {
+      if (next !== undefined) await env.ORGANIZATION_CACHE.put(CURSOR_KEY, next)
+      else if (after !== null) await env.ORGANIZATION_CACHE.delete(CURSOR_KEY)
+    } catch (cause) {
+      failures.push(new Error('Could not save session materialization progress', { cause }))
+    }
+    if (failures.length) throw new AggregateError(failures, 'Session materialization did not finish')
+    return { result: { products: page.length, created, existing, skipped, hasMore: next !== undefined, through } }
   },
 })
