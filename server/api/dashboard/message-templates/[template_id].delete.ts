@@ -14,6 +14,6 @@ export default defineHandler(async (event) => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) messagingError(422, 'INVALID_MESSAGING_FIELD', 'Provide an object containing the current version', 'version')
   const body = value as Record<string, unknown>
   if (Object.keys(body).some(key => key !== 'version')) messagingError(422, 'INVALID_MESSAGING_FIELD', 'Provide the current version only', 'version')
-  await deleteMessageTemplate(db, env, access, messageText(getRouterParam(event, 'template_id'), 'templateId', 200), body.version)
+  await deleteMessageTemplate(db, env, access, messageText(getRouterParam(event, 'template_id'), 'template_id', 200), body.version)
   return jsonResponse({ status: 'deleted' })
 })

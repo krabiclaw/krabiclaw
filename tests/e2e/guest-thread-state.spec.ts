@@ -623,10 +623,11 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
   expect(todaySeating, 'The seating added for today is offered on the site').toBeDefined()
 
   const bookingIds: string[] = []
+  const futureSeating = await openSeating(page.request, 2, 2 * 86_400_000)
   // Two days out, so the change request below is inside the 24-hour change window whatever the hour.
   for (const [name, email, seating] of [
     [guestName, guestEmail, todaySeating!],
-    ['Priya Patel', `priya-${now}@example.test`, await openSeating(page.request, 2, 2 * 86_400_000)],
+    ['Priya Patel', `priya-${now}@example.test`, futureSeating],
   ] as const) {
     bookingIds.push((await bookTable(page.request, { name, email, phone: '+12025550123', partySize: 2, seating })).requestId)
   }
@@ -639,19 +640,25 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
   const todayResponse = await page.request.get('/api/dashboard/today', { params: { org: demoSlug() } })
   await expectStatus(todayResponse, 200)
   const todayFeed = await todayResponse.json() as BusinessToday
-  expect(todayFeed.tasks.flatMap(section => section.tasks).filter(task => task.conversation_id === bookingIds[0]).map(task => task.kind)).toContain('consultation_prep')
+  const prep = todayFeed.tasks.flatMap(section => section.tasks).filter(task => task.kind === 'consultation_prep' && task.product_session_id === todaySeating!.id)
+  expect(prep).toMatchObject([{ booking_id: null, status: 'open', path: expect.stringContaining(`/calendar?date=${localToday.date}`) }])
   const agendaResponse = await page.request.get('/api/dashboard/agenda', { params: { org: demoSlug(), from: localToday.date, to: localDateAt(new Date(now + 5 * 86_400_000), timezone) } })
   await expectStatus(agendaResponse, 200)
-  const agenda = await agendaResponse.json() as { items: Array<{ id: string; to: string; startsAt: string }> }
+  const agenda = await agendaResponse.json() as { items: Array<{ id: string; to: string; starts_at: string; ends_at: string }> }
   const reservation = agenda.items.find(item => item.id === `booking:${bookingIds[0]}`)
   expect(reservation?.to).toBe(`/dashboard/${demoSlug()}/bookings/booking/${bookingIds[0]}`)
   await expect(page.getByRole('tab', { name: 'Today', exact: true })).toBeVisible()
   await expect(page.getByRole('tab', { name: 'Upcoming', exact: true })).toBeVisible()
+  const prepCalendar = await page.goto(`${baseURL}${prep[0]!.path}`)
+  expect(prepCalendar?.status()).toBe(200)
+  await expect(page.getByRole('heading', { name: 'Calendar', exact: true })).toBeVisible()
+  await expect(page.getByText('The calendar could not be loaded')).toHaveCount(0)
 
   const upcomingResponse = await page.request.get('/api/dashboard/today', { params: { org: demoSlug(), range: 'upcoming' } })
   await expectStatus(upcomingResponse, 200)
   const upcomingFeed = await upcomingResponse.json() as BusinessToday
-  expect(upcomingFeed.tasks.flatMap(section => section.tasks).filter(task => task.conversation_id === upcomingBookingId).map(task => task.kind)).toContain('consultation_prep')
+  expect(upcomingFeed.tasks.flatMap(section => section.tasks).filter(task => task.kind === 'consultation_prep' && task.product_session_id === futureSeating.id))
+    .toMatchObject([{ booking_id: null, status: 'open' }])
   const upcomingReservation = agenda.items.find(item => item.id === `booking:${upcomingBookingId}`)
   expect(upcomingReservation?.to).toBe(`/dashboard/${demoSlug()}/bookings/booking/${upcomingBookingId}`)
   expect(localDateAt(new Date(upcomingReservation!.starts_at), timezone) > localToday.date).toBe(true)

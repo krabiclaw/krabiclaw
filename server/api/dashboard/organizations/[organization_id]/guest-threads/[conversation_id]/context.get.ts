@@ -7,7 +7,7 @@ import { guestThreadMessagingContext } from '~/server/domain/guest-messaging'
 import { messageText } from '~/server/domain/guest-message-schedule'
 
 export default defineHandler(async (event) => {
-  const organizationId = messageText(getRouterParam(event, 'organization_id'), 'organizationId', 200)
+  const organizationId = messageText(getRouterParam(event, 'organization_id'), 'organization_id', 200)
   const requestId = messageText(getRouterParam(event, 'conversation_id'), 'conversation_id', 200)
   const { db, env, organization } = await requireOrganizationMembership(event, organizationId)
   return jsonResponse(await guestThreadMessagingContext(db, memberAccessPrincipal(organization.membership, { env, event }), requestId))

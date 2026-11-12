@@ -2745,7 +2745,7 @@ test.describe('dashboard pane hierarchy', () => {
     expect(discarded.status(), await discarded.text()).toBe(200)
     const name = `E2E Organization ${Date.now().toString(36)}`
     const draft = await page.request.post('/api/dashboard/onboarding/drafts/active', {
-      data: { source_type: 'manual', vertical: 'restaurant', name, details: { sourceLocale: 'en', country: 'TH', city: 'Ao Nang', streetAddress: '88 Moo 2', currency: 'THB', timezone: 'Asia/Bangkok' } },
+      data: { source_type: 'manual', vertical: 'restaurant', name, details: { source_locale: 'en', country: 'TH', city: 'Ao Nang', street_address: '88 Moo 2', currency: 'THB', timezone: 'Asia/Bangkok' } },
     })
     expect(draft.status(), await draft.text()).toBe(200)
     const { organization_id: organizationId } = await draft.json() as { organization_id: string }

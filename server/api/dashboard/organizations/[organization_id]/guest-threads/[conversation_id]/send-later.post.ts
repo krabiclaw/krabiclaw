@@ -9,7 +9,7 @@ import { parseSuggestionUse, recordSuggestionAccepted, suggestedDraft } from '~/
 
 /** Put the caller's own reply in the outbox for this conversation: { body, due_at, suggestion? }. A scheduled draft is a used draft, metered when it is scheduled. */
 export default defineHandler(async (event) => {
-  const organizationId = messageText(getRouterParam(event, 'organization_id'), 'organizationId', 200)
+  const organizationId = messageText(getRouterParam(event, 'organization_id'), 'organization_id', 200)
   const threadId = messageText(getRouterParam(event, 'conversation_id'), 'conversation_id', 200)
   const { db, env, organization } = await requireOrganizationMembership(event, organizationId)
   const body = await readBody<{ body?: unknown; due_at?: unknown; suggestion?: unknown } | null>(event)

@@ -8,7 +8,7 @@ import { messageText } from '~/server/domain/guest-message-schedule'
 
 /** One to three draft replies to the guest's latest message; nothing is sent or stored. */
 export default defineHandler(async (event) => {
-  const organizationId = messageText(getRouterParam(event, 'organization_id'), 'organizationId', 200)
+  const organizationId = messageText(getRouterParam(event, 'organization_id'), 'organization_id', 200)
   const threadId = messageText(getRouterParam(event, 'conversation_id'), 'conversation_id', 200)
   const { db, env, organization } = await requireOrganizationMembership(event, organizationId)
   return jsonResponse(await suggestGuestReplies(db, env as unknown as Record<string, unknown>, memberAccessPrincipal(organization.membership, { env, event }), threadId))

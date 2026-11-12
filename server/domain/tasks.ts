@@ -410,7 +410,7 @@ interface Context {
   paymentOpportunities: Set<string>
   people: Map<string, { name: string; userId: string }>
   users: Map<string, string>
-  products: Map<string, { name: string; imageUrl: string | null }>
+  products: Map<string, { name: string; kind: ProductKind; imageUrl: string | null }>
   locations: Map<string, string>
   stays: Map<string, StayFacts>
   replyStays: Map<string, StayContextFacts & { same_day_arrival: boolean }>
@@ -480,8 +480,8 @@ async function loadContext(db: DbClient, viewer: TaskViewer, rows: TaskRow[]): P
   }
   const productIds = [...new Set([...ids(row => row.product_id), ...stays.map(stay => stay.product_id)])]
   const [products, pictures] = await Promise.all([
-    queryAll<{ id: string; name: string | null }>(db, `
-      SELECT p.id, CASE WHEN p.kind = 'stay' THEN c.internal_name ELSE p.name END AS name
+    queryAll<{ id: string; name: string | null; kind: ProductKind }>(db, `
+      SELECT p.id, p.kind, CASE WHEN p.kind = 'stay' THEN c.internal_name ELSE p.name END AS name
       FROM products p LEFT JOIN product_stay_configs c ON c.organization_id = p.organization_id AND c.product_id = p.id
       WHERE p.organization_id = ? AND p.id IN (SELECT value FROM json_each(?))`, [organizationId, d1JsonStringSet(productIds)]),
     loadOwnerPictures(db, organizationId, 'product', productIds, { organizationFallback: false }),
@@ -502,7 +502,7 @@ async function loadContext(db: DbClient, viewer: TaskViewer, rows: TaskRow[]): P
     users: new Map(members.map(member => [member.userId, member.name])),
     products: new Map(products.map(product => {
       if (!product.name?.trim()) throw new Error(`Product ${product.id} has no name for this task`)
-      return [product.id, { name: product.name, imageUrl: pictures.get(product.id)?.imageUrl ?? null }]
+      return [product.id, { name: product.name, kind: product.kind, imageUrl: pictures.get(product.id)?.imageUrl ?? null }]
     })),
     locations: new Map(locations.map(location => [location.id, location.title])),
     stays: new Map(stays.map(stay => [stay.id, stay])),
@@ -695,9 +695,14 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
       status_line = [heading, row.location_id ? context.locations.get(row.location_id) : null].filter(Boolean).join(' · ')
       detail = `${day(row.starts_at)}, ${time(row.starts_at)}`
       if (product_session_id) {
-        const query = new URLSearchParams({ product_id: row.product_id!, date: localDateAt(new Date(row.starts_at), zone) })
+        const query = new URLSearchParams({ date: localDateAt(new Date(row.starts_at), zone) })
         if (row.location_id) query.set('location_id', row.location_id)
-        path = `/dashboard/${encodeURIComponent(context.slug)}/calendar/sessions/${encodeURIComponent(product_session_id)}?${query}`
+        const calendar = `/dashboard/${encodeURIComponent(context.slug)}/calendar`
+        if (product.kind === 'table') path = `${calendar}?${query}`
+        else {
+          query.set('product_id', row.product_id!)
+          path = `${calendar}/sessions/${encodeURIComponent(product_session_id)}?${query}`
+        }
       }
       sheet = { heading, title, date: day(row.starts_at), checkout: null, checkin: null }
       break

@@ -8,7 +8,7 @@ import { messageText } from '~/server/domain/guest-message-schedule'
 
 /** Mark as unread: the newest message from someone else is unread again for this member. */
 export default defineHandler(async (event) => {
-  const organizationId = messageText(getRouterParam(event, 'organization_id'), 'organizationId', 200)
+  const organizationId = messageText(getRouterParam(event, 'organization_id'), 'organization_id', 200)
   const conversationId = messageText(getRouterParam(event, 'conversation_id'), 'conversation_id', 200)
   const { db, env, principal } = await memberConversation(event, organizationId, conversationId)
   const unread = await markConversationUnread(db, { organizationId, conversationId, userId: principal.userId })

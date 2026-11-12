@@ -8,7 +8,7 @@ import { messageText } from '~/server/domain/guest-message-schedule'
 
 /** Archive or unarchive the conversation for this member alone: { archived: boolean }. */
 export default defineHandler(async (event) => {
-  const organizationId = messageText(getRouterParam(event, 'organization_id'), 'organizationId', 200)
+  const organizationId = messageText(getRouterParam(event, 'organization_id'), 'organization_id', 200)
   const conversationId = messageText(getRouterParam(event, 'conversation_id'), 'conversation_id', 200)
   const body = await readStrictBody<{ archived?: boolean }>(event, { archived: 'boolean' })
   if (typeof body.archived !== 'boolean') throw new HTTPError({ statusCode: 400, message: 'Say whether the conversation is archived', data: { code: 'INVALID_BODY_FIELD', field: 'archived' } })

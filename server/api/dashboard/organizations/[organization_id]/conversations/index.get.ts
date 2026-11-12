@@ -7,7 +7,7 @@ import { messageText } from '~/server/domain/guest-message-schedule'
 
 /** Every conversation the member sees (guests, Airbnb Support, the team), newest first, with the unread counts of each kind. */
 export default defineHandler(async (event) => {
-  const organizationId = messageText(getRouterParam(event, 'organization_id'), 'organizationId', 200)
+  const organizationId = messageText(getRouterParam(event, 'organization_id'), 'organization_id', 200)
   const payload = await loadOrganizationConversations(event, organizationId, parseGuestThreadListQuery(getQuery(event)))
   return jsonResponse(finalizeRequestMetrics(event, 'dashboard-conversations', payload))
 })
