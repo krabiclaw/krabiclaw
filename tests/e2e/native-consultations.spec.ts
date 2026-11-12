@@ -109,8 +109,14 @@ test('native online review uses canonical Products, holds capacity, and releases
   test.setTimeout(120_000)
   test.skip(process.env.NATIVE_CONSULTATION_PROOF !== 'true' || !['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Explicit opt-in in an isolated disposable checkout only; never mutate shared suite fixtures')
   const analyticsFailures: string[] = []
+  const calendarNavigationErrors: string[] = []
   page.on('response', response => {
-    if (/\/api\/(analytics\/track|public\/conversion-events)$/.test(new URL(response.url()).pathname) && response.status() >= 400) analyticsFailures.push(`${response.status()} ${response.url()}`)
+    if (/\/api\/(analytics\/(track|interactions)|public\/conversion-events)$/.test(new URL(response.url()).pathname) && response.status() >= 400) analyticsFailures.push(`${response.status()} ${response.url()}`)
+  })
+  page.on('request', request => {
+    if (new URL(request.url()).pathname !== '/api/browser-errors') return
+    const report = request.postData()
+    if (report?.includes('/calendar') && report.includes('getRootNode')) calendarNavigationErrors.push(report)
   })
   await loginAs(page.request, baseURL!, 'user-e2e-ncls-consultation-owner')
   const legal = seededTenant('legal')
@@ -382,7 +388,6 @@ test('native online review uses canonical Products, holds capacity, and releases
     await expect(pagesList.getByText(service.title, { exact: true })).toBeVisible()
     await page.goto(`${dashboard}/website/pages/${service.id}`)
     await expect(page.locator('#dashboard-panel-organization-page')).toContainText(service.title)
-    await page.setExtraHTTPHeaders(headers)
     const wrongRoute = await request.get(`/experiences/${products[0]!.slug}`, { headers })
     expect(wrongRoute.status()).toBe(404)
     const publicBefore = await request.get(`/api/public/pages?path=${service.path}`, { headers })
@@ -402,6 +407,7 @@ test('native online review uses canonical Products, holds capacity, and releases
     expect(scheduleSource.status(), await scheduleSource.text()).toBe(200)
     const authoredSchedule: PublicTenantPage = (await scheduleSource.json()).page
     expect(authoredSchedule.blocks.length).toBeGreaterThan(0)
+    await page.setExtraHTTPHeaders(headers)
     await openTenantPage(page, new URL('/schedule', baseURL).href, {})
     const scheduleArticle = page.locator('[data-tenant-page]')
     await expect(scheduleArticle).toHaveCount(1)
@@ -590,7 +596,9 @@ test('native online review uses canonical Products, holds capacity, and releases
     await expect(bookingDialog).toBeVisible()
     const modalTimezone = bookingDialog.getByRole('button', { name: 'Time zone', exact: true })
     await expect(modalTimezone).toContainText('(America/New_York)')
-    await expect(bookingDialog.getByRole('button', { name: /10:00 AM/ }).first()).toBeVisible()
+    const newYorkTime = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' })
+      .format(new Date(`${day}T14:00:00Z`))
+    await expect(bookingDialog.getByRole('button', { name: `${newYorkTime} Available`, exact: true }).first()).toBeVisible()
     await page.setViewportSize({ width: 390, height: 844 })
     await modalTimezone.click()
     await expect(timezonePopup).toBeVisible()
@@ -616,13 +624,18 @@ test('native online review uses canonical Products, holds capacity, and releases
     await expect(bookingDialog.getByRole('button', { name: /more guests|fewer guests/i })).toHaveCount(0)
     await bookingDialog.getByRole('button', { name: /2:00 PM/ }).first().click()
     await page.setViewportSize({ width: 390, height: 844 })
-    // The same working hours open a date 52 weeks later without any scheduler run.
-    const yearAhead = new Date(Date.parse(day) + 364 * 86_400_000).toISOString().slice(0, 10)
-    const sessions = await Promise.all(products.map(async product => {
-      const response = await request.get(`/api/public/products/${product.slug}/availability?location_id=online&from=${yearAhead}&to=${new Date(Date.parse(yearAhead) + 86_400_000).toISOString().slice(0, 10)}`, { headers })
+    // The same working hours open the same weekday over a year later without a scheduler run.
+    const yearAhead = new Date(Date.parse(day) + 371 * 86_400_000).toISOString().slice(0, 10)
+    const nextDay = new Date(Date.parse(yearAhead) + 86_400_000).toISOString().slice(0, 10)
+    const yearAheadSession = async (product: Product) => {
+      const response = await request.get(`/api/public/products/${product.slug}/availability`, { headers, params: { location_id: 'online', from: yearAhead, to: nextDay } })
       expect(response.status(), await response.text()).toBe(200)
-      return (await response.json()).sessions.find((session: { starts_at: string }) => session.starts_at.startsWith(yearAhead))
-    }))
+      const session = (await response.json()).sessions.find((session: { starts_at: string }) => session.starts_at === `${yearAhead}T14:00:00.000Z`)
+      expect(session).toMatchObject({ id: expect.any(String), ends_at: `${yearAhead}T14:45:00.000Z` })
+      return session
+    }
+    const sessions = await Promise.all(products.map(yearAheadSession))
+    for (const session of sessions) expect(session).toMatchObject({ remaining: 1, is_full: false })
     for(const [sessionId,status]of [[sessions[1].id,404],['missing-session',404],['',400]]) {
       const invalidProvider=await request.get(`/api/public/products/${products[0]!.slug}/provider`,{headers,params:{product_session_id:String(sessionId)}})
       expect(invalidProvider.status(),await invalidProvider.text()).toBe(status)
@@ -633,6 +646,8 @@ test('native online review uses canonical Products, holds capacity, and releases
     const book = (index: number) => request.post(`/api/public/products/${products[index]!.slug}/book`, { headers, data: { product_session_id: sessions[index].id, product_variant_id: products[index]!.variants[0]!.id, party_size: 1, guest_name: `Local review ${index}`, guest_email: `consultation-${stamp}-${index}@playwright.example`, idempotency_key: crypto.randomUUID() } })
     const results = await Promise.all([book(0), book(1)])
     expect(results.map(result => result.status()).sort()).toEqual([201, 409])
+    const competingProduct = products[results.findIndex(result => result.status() === 409)]!
+    expect(await yearAheadSession(competingProduct)).toMatchObject({ remaining: 0, is_full: true })
     const pending = await results.find(result => result.status() === 201)!.json()
     expect(pending).toMatchObject({ status: 'pending', conversation_id: expect.any(String) })
     expect(pending.booking_id).toEqual(expect.any(String))
@@ -648,8 +663,7 @@ test('native online review uses canonical Products, holds capacity, and releases
       const reject = await page.request.post(`/api/dashboard/bookings/${pending.booking_id}/reject`, { params: { org: legal.slug }, data: { version: pendingDetails.version, idempotency_key: key } })
       expect(reject.status(), await reject.text()).toBe(200)
     }
-    const remaining = await request.get(`/api/public/products/${products[0]!.slug}/availability?location_id=online&from=${yearAhead}&to=${new Date(Date.parse(yearAhead) + 86_400_000).toISOString().slice(0, 10)}`, { headers })
-    expect((await remaining.json()).sessions.find((session: { id: string }) => session.id === sessions[0].id)).toMatchObject({ remaining: 1, is_full: false })
+    expect(await yearAheadSession(competingProduct)).toMatchObject({ remaining: 1, is_full: false })
     const dialog = bookingDialog
     await dialog.getByRole('button', { name: /2:00 PM/ }).first().click()
     await dialog.getByRole('button', { name: 'Continue', exact: true }).click()
@@ -667,6 +681,7 @@ test('native online review uses canonical Products, holds capacity, and releases
     await expect(page.getByText('Request received', { exact: true })).toBeVisible()
     await expect(page.getByText('Your request is waiting for confirmation from the business.', { exact: true })).toBeVisible()
     expect(analyticsFailures).toEqual([])
+    await page.setExtraHTTPHeaders({})
     for (let replay = 0; replay < 2; replay++) {
       const current = await page.request.get(`/api/dashboard/bookings/${browserBooking.booking_id}`, { params: { org: legal.slug } })
       expect(current.status(), await current.text()).toBe(200)
@@ -689,13 +704,16 @@ test('native online review uses canonical Products, holds capacity, and releases
     const policyDialog = page.getByRole('dialog', { name: browserBooking.policy_summary.heading, exact: true })
     await expect(policyDialog.getByText(cancellationTerms, { exact: true })).toBeVisible()
     await policyDialog.getByRole('button', { name: `Close ${browserBooking.policy_summary.heading}`, exact: true }).click()
-    await page.getByRole('link', { name: `Attorney ${host.name}`, exact: true }).click()
-    await expect(page.getByRole('heading', { name: 'Attorney', exact: true })).toBeVisible()
-    await expect(page.getByRole('radio', { name: `${host.name} Current`, exact: true })).toBeChecked()
-    await expect(page.getByText('Current', { exact: true })).toBeVisible()
-    await expect(page.getByText('Add working hours before moving this consultation to another attorney.', { exact: true })).toHaveCount(0)
-    // A change of attorney is a request the client accepts; with the current attorney chosen there is nothing to send.
-    await expect(page.getByRole('button', { name: 'Send request', exact: true })).toBeDisabled()
+    // A booked attorney is a read-only fact. Changing the consultation itself still needs client acceptance.
+    await expect(page.getByText('Attorney', { exact: true })).toBeVisible()
+    await expect(page.getByText(host.name, { exact: true })).toBeVisible()
+    await expect(page.getByRole('link', { name: `Attorney ${host.name}`, exact: true })).toHaveCount(0)
+    await page.getByRole('button', { name: 'Manage consultation', exact: true }).click()
+    const activeActions = page.getByRole('dialog', { name: 'Manage consultation', exact: true })
+    await expect(activeActions.getByRole('link', { name: 'Change consultation', exact: true })).toHaveAttribute('href', `${dashboard}/bookings/${browserBooking.booking_id}/change`)
+    await activeActions.getByRole('button', { name: 'Close Manage consultation', exact: true }).click()
+    expect(calendarNavigationErrors).toEqual([])
+    await page.setExtraHTTPHeaders(headers)
     for (const mode of ['external_url', 'native_disabled', 'native'] as const) {
       const switchMode = await page.request.put(`${editor}/consultation`, { data: { mode } })
       expect(switchMode.status(), await switchMode.text()).toBe(200)
@@ -766,6 +784,7 @@ test('native online review uses canonical Products, holds capacity, and releases
     expect(browserCancel.status(), await browserCancel.text()).toBe(200)
     const cancelledBrowserDetails = await page.request.get(`/api/dashboard/bookings/${browserBooking.booking_id}?org=${legal.slug}`)
     expect((await cancelledBrowserDetails.json()).booking.status).toBe('cancelled')
+    await page.setExtraHTTPHeaders({})
     await page.goto(`${dashboard}/bookings/${browserBooking.booking_id}`)
     await expect(page.getByRole('link', { name: `Attorney ${host.name}`, exact: true })).toHaveCount(0)
     await page.getByRole('button', { name: 'Manage consultation', exact: true }).click()
@@ -801,9 +820,9 @@ test('native online review uses canonical Products, holds capacity, and releases
       expect(await cancel.json()).toEqual({ success: true, kind: 'booking' })
       const cancelledDetails = await page.request.get(`/api/dashboard/bookings/${instant.booking_id}?org=${legal.slug}`)
       expect((await cancelledDetails.json()).booking.status).toBe('cancelled')
-      const released = await request.get(`/api/public/products/${products[0]!.slug}/availability?location_id=online`, { headers })
-      expect((await released.json()).sessions.find((session: { id: string }) => session.id === sessions[0].id).remaining).toBe(1)
+      expect(await yearAheadSession(products[0]!)).toMatchObject({ id: sessions[0].id, remaining: 1, is_full: false })
     }
     const invalidCancel = await request.post(`/api/public/booking-requests/${instant.conversation_id}/cancel`, { headers: { ...headers, authorization: 'Bearer invalid-cancellation-token' } })
     expect(invalidCancel.status(), await invalidCancel.text()).toBe(404)
+    expect(analyticsFailures).toEqual([])
 })

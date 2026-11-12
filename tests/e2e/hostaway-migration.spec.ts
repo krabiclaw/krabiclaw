@@ -119,22 +119,27 @@ test('a host moves unpaid occupancy in batches, reviews manual-only homes and re
   // Read independently of the import writer: the stay is confirmed and unpaid, and its real calendar nights are taken.
   const stay = await page.request.get(`/api/dashboard/bookings/${stayId}?org=${slug}`)
   await status(stay, 200)
-  expect(await stay.json()).toMatchObject({ stay: { product_id: productId, status: 'confirmed', guest_name: 'Morgan from 1A', check_in_date: checkIn, check_out_date: checkOut, payment_status: 'unpaid', paid_minor: 0 } })
+  expect(await stay.json()).toMatchObject({ booking: { booking_id: stayId, unit: 'nights', product_id: productId, status: 'confirmed', guest_name: 'Morgan from 1A', check_in_date: checkIn, check_out_date: checkOut, payment_status: 'unpaid', paid_minor: 0 } })
   const calendar = await page.request.get(`/api/dashboard/bookings/calendar?unit=nights&product_id=${productId}&org=${slug}&from=${day(0)}&to=${day(3)}`)
   await status(calendar, 200)
-  const nights = (await calendar.json() as { nights: Array<{ available: boolean; booking_id: string | null }> }).nights
+  type Calendar = { homes: Array<{ home: { product_id: string }; nights: Array<{ available: boolean; booking_id: string | null; closed: boolean }> }> }
+  const importedHomes = (await calendar.json() as Calendar).homes
+  expect(importedHomes.map(entry => entry.home.product_id)).toEqual([productId])
+  const nights = importedHomes[0]!.nights
   expect(nights).toHaveLength(3)
   expect(nights.map(night => ({ available: night.available, booking_id: night.booking_id }))).toEqual(Array.from({ length: 3 }, () => ({ available: false, booking_id: stayId })))
   const manualCalendar = await page.request.get(`/api/dashboard/bookings/calendar?unit=nights&product_id=${manualProductId}&org=${slug}&from=${day(2)}&to=${day(4)}`)
   await status(manualCalendar, 200)
-  expect((await manualCalendar.json() as { nights: Array<{ available: boolean; closed: boolean }> }).nights.map(night => ({ available: night.available, closed: night.closed }))).toEqual([{ available: false, closed: true }, { available: false, closed: true }])
+  const manualHomes = (await manualCalendar.json() as Calendar).homes
+  expect(manualHomes.map(entry => entry.home.product_id)).toEqual([manualProductId])
+  expect(manualHomes[0]!.nights.map(night => ({ available: night.available, closed: night.closed }))).toEqual([{ available: false, closed: true }, { available: false, closed: true }])
   const otaStayId = receipt.outcomes.find(outcome => outcome.source_id === '700006')!.booking_id!
-  await page.goto(`/dashboard/${slug}/bookings/stay/${otaStayId}`)
+  await page.goto(`/dashboard/${slug}/bookings/${otaStayId}`)
   await expect(page.getByText('Payments, changes and cancellations for this stay are managed on', { exact: false })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Record payment', exact: true })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Cancel stay', exact: true })).toHaveCount(0)
   await expect(page.getByRole('link', { name: 'Message guest', exact: true })).toHaveCount(0)
-  await page.goto(`/dashboard/${slug}/bookings/stay/${stayId}`)
+  await page.goto(`/dashboard/${slug}/bookings/${stayId}`)
   await expect(page.getByRole('button', { name: 'Record payment', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Cancel stay', exact: true })).toBeVisible()
 

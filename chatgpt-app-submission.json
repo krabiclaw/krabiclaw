@@ -1563,7 +1563,7 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Replaces one product/location weekly schedule and creates the bookable sessions it describes; booked-history sessions remain while removed unbooked sessions can be cancelled.",
+        "read_only_justification": "Replaces one product/location weekly schedule and changes its future bookable times. Sessions with booking history retain their recorded times and capacity.",
         "destructive_justification": "Replaces rules and cancels unbooked future sessions omitted from the new schedule.",
         "open_world_justification": "Changes public bookable times at the named location."
       }

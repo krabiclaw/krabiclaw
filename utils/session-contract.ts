@@ -5,7 +5,7 @@ import { isRecord } from '~/utils/api-clients'
 export function isSessionAvailability(value: unknown): value is BookableSession {
   return isRecord(value)
     && ['id', 'organization_id', 'product_id', 'timezone', 'starts_at', 'ends_at'].every(field => typeof value[field] === 'string')
-    && ['location_id', 'availability_rule_id', 'source_occurrence_key', 'created_at', 'updated_at'].every(field => value[field] === null || typeof value[field] === 'string')
+    && ['location_id', 'availability_rule_id', 'source_occurrence_key', 'created_at', 'updated_at', 'created_by', 'updated_by'].every(field => value[field] === null || typeof value[field] === 'string')
     && typeof value.status === 'string' && (PRODUCT_SESSION_STATUSES as readonly string[]).includes(value.status)
     && (value.capacity === null || Number.isSafeInteger(value.capacity))
     && (value.remaining === null || Number.isSafeInteger(value.remaining))

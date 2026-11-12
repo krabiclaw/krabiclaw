@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:64c8ec5e1c928227e85ab32fc31f65097604dad80509acd5c5422424b7a307ac",
-  "documentationFingerprint": "sha256:96137fea9d1823e7038a0c99e8f2a05ea364daf6df76126dd7de31201f572e5b",
+  "fingerprint": "sha256:5d39d5308877959f43413e9baf88c974a331f9a0173e8419bc5434a2114fc10f",
+  "documentationFingerprint": "sha256:70bace66bde759c2892ad0916d9152719b9a5e45ed1659421fb87ffbb2d06b6b",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -97308,7 +97308,7 @@
     {
       "name": "replace_product_weekly_schedule",
       "title": "Replace product weekly schedule",
-      "description": "Replace a product’s weekly time slots at one location when the user wants to change its recurring schedule. Times are in that location’s timezone and use the product duration/capacity. A restaurant table product has no weekly slots: it is seated through its location’s opening hours. An online offering has no weekly slots: it is booked in its provider’s working hours (set_member_scheduling). An empty slots array clears that schedule. Sessions with any booking history are preserved; removed future sessions without bookings are cancelled, and re-added unbooked slots can reopen with current defaults.",
+      "description": "Replace a product’s weekly time slots at one location when the user wants to change its recurring schedule. Times are in that location’s timezone and use the product duration/capacity. A restaurant table product has no weekly slots: it is seated through its location’s opening hours. An online offering has no weekly slots: it is booked in its provider’s working hours (set_member_scheduling). An empty slots array clears that schedule. Future times are calculated from the saved rules. Sessions with booking history keep their recorded times and capacity. Returns the saved rules and the count of recorded future sessions cancelled by the change.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -97363,6 +97363,7 @@
         "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
         "properties": {
           "cancelled": {
+            "minimum": 0,
             "type": "integer"
           },
           "rules": {
@@ -97412,60 +97413,10 @@
               "type": "object"
             },
             "type": "array"
-          },
-          "sessions": {
-            "additionalProperties": false,
-            "properties": {
-              "created": {
-                "type": "integer"
-              },
-              "existing": {
-                "type": "integer"
-              },
-              "skipped": {
-                "items": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "local_date": {
-                      "type": "string"
-                    },
-                    "local_start_time": {
-                      "type": "string"
-                    },
-                    "reason": {
-                      "enum": [
-                        "ambiguous_local_time",
-                        "nonexistent_local_time",
-                        "location_closed"
-                      ],
-                      "type": "string"
-                    },
-                    "rule_id": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "rule_id",
-                    "local_date",
-                    "local_start_time",
-                    "reason"
-                  ],
-                  "type": "object"
-                },
-                "type": "array"
-              }
-            },
-            "required": [
-              "created",
-              "existing",
-              "skipped"
-            ],
-            "type": "object"
           }
         },
         "required": [
           "rules",
-          "sessions",
           "cancelled"
         ],
         "type": "object"
@@ -128652,7 +128603,7 @@
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_product_booking_sessions": "sha256:06526c6170e88700736a723c638488475c76c1db82bcc7082ab478e28ce83a51",
         "list_products": "sha256:bd6b30cee8a405d0bcdf6313fa20396a2e287bb3285b977fdc1c27baed9c48f0",
-        "replace_product_weekly_schedule": "sha256:606256312fe6c64160bcf9bfb31f5bfcc99d5ddf1c84b90fbc9b804389a021b1",
+        "replace_product_weekly_schedule": "sha256:114e8115176adaa1707ba8ca9cae7026ffd2ab4803fa566c727b7bd7c2c83e9b",
         "set_product_booking_config": "sha256:50969e4450fa9d51c05b4a5b2901f3ceac78a3df29d96e77fc48bfea8d2b21fe",
         "update_product": "sha256:76ac8761f201285b2ba6f59554164a8fca0bb6a3331b1544e8e206329b7a226d"
       }

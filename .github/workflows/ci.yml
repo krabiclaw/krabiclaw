@@ -89,6 +89,10 @@ jobs:
       MCP_CIMD_CLIENT_URL: https://staging.krabiclaw.com/api/auth/oauth2/test-client-metadata
       MCP_PRIVATE_CIMD_CLIENT_URL: https://staging.krabiclaw.com/api/auth/oauth2/test-private-client-metadata
       PLAYWRIGHT_WORKERS: "1"
+      # The pinned Playwright 1.64 sharder reads these relative weights. Its
+      # default equal counts gave the lodging shard twice the browser work.
+      # Recheck each --list partition and timing when changing the pin or suite.
+      PWTEST_SHARD_WEIGHTS: "54:74:36:30"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:

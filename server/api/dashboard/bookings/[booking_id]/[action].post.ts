@@ -12,7 +12,9 @@ export default defineHandler(async event => {
   if (action !== 'confirm' && action !== 'reject' && action !== 'cancel' && action !== 'no_show') throw new HTTPError({ statusCode: 404, message: 'Booking action not found' })
   const context = await dashboardBookingContext(event)
   const { db, env, organization, userId, access, principal, bookingId, booking } = context
-  if (booking.unit === 'nights' && !access.manage) return jsonResponse({ error: 'Managing stays requires an owner or admin', code: 'STAY_ROLE_REQUIRED' }, { status: 403 })
+  if (booking.unit === 'nights' && !access.manage) {
+    throw new HTTPError({ statusCode: 403, message: 'Only organization owners and admins can change stays', data: { code: 'STAY_ROLE_REQUIRED' } })
+  }
   await assertGuestOperations(principal)
   await assertConversationAccess(db, principal, booking.conversation_id)
   const body = await readRequiredBody<Record<string, unknown>>(event)

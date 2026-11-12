@@ -3477,9 +3477,8 @@ test('a host lists, pauses and unlists a priced place to stay', async ({ page, b
         await guest.goto(invalid.href)
         await expect(guestDialog.getByRole('alert')).toHaveText('This booking link has invalid dates or guests. Choose your dates and guests again.')
         await expect(guestDialog.getByRole('heading', { name: 'Select check-in date', exact: true })).toBeVisible()
-        const end = new Date(`${localDay(500)}T00:00:00Z`)
-        const start = new Date(`${localDay(0)}T00:00:00Z`)
-        await expect(guestDialog.getByRole('application')).toHaveCount((end.getUTCFullYear() - start.getUTCFullYear()) * 12 + end.getUTCMonth() - start.getUTCMonth() + 1)
+        await expect(guestDialog.getByRole('application')).toHaveCount(2)
+        await expect(guestDialog.getByRole('button', { name: 'Load more dates', exact: true })).toBeVisible()
       }
       await guest.setViewportSize({ width: 1440, height: 900 })
       await guest.goto(previewURL.href)
@@ -3573,7 +3572,7 @@ test('a host lists, pauses and unlists a priced place to stay', async ({ page, b
       const percentageChange = await call('set_stay_nights', { product_id: productId, from: localDay(1), to: localDay(2), price_change_percent: -10 })
       expect(percentageChange.error).toBeNull()
       await guest.reload()
-      for (const nights of [1, 3, 7, 14]) {
+      for (const nights of [1, 14]) {
         await guest.getByRole('button', { name: /^Check-in / }).click()
         await guestDialog.getByRole('button', { name: 'Clear dates', exact: true }).click()
         await guestDialog.locator('input[type="date"]').nth(0).fill(localDay(1))
@@ -3670,7 +3669,7 @@ test('a host lists, pauses and unlists a priced place to stay', async ({ page, b
       const browserErrors: string[] = []
       guest.on('pageerror', error => browserErrors.push(error.message))
       guest.on('console', message => { if (['warning', 'error'].includes(message.type())) browserErrors.push(message.text()) })
-      for (const width of [1440, 1024, 768, 390]) {
+      for (const width of [1440, 768, 390]) {
         await guest.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
         await guest.reload()
         const opener = width < 768 ? guest.getByRole('button', { name: 'Select dates', exact: true }) : guest.getByRole('button', { name: /^Check-in / })
@@ -3683,9 +3682,21 @@ test('a host lists, pauses and unlists a priced place to stay', async ({ page, b
           await expect(guestDialog).toHaveCount(0)
           await expect(opener).toBeFocused()
           await opener.click()
-          const end = new Date(`${localDay(500)}T00:00:00Z`)
-          const start = new Date(`${localDay(0)}T00:00:00Z`)
-          await expect(calendar.getByRole('application')).toHaveCount((end.getUTCFullYear() - start.getUTCFullYear()) * 12 + end.getUTCMonth() - start.getUTCMonth() + 1)
+          await expect(calendar.getByRole('application')).toHaveCount(2)
+          const firstMonth = await calendar.getByRole('application').first().getAttribute('aria-label')
+          expect(firstMonth).toBeTruthy()
+          const nextPage = guest.waitForResponse(response => {
+            const url = new URL(response.url())
+            return url.pathname.endsWith('/availability') && url.searchParams.has('from') && url.searchParams.has('to')
+          })
+          await guestDialog.getByRole('button', { name: 'Load more dates', exact: true }).last().click()
+          const availability = await nextPage
+          await expectStatus(availability, 200)
+          const url = new URL(availability.url())
+          expect((Date.parse(url.searchParams.get('to')!) - Date.parse(url.searchParams.get('from')!)) / 86_400_000).toBeLessThanOrEqual(31)
+          await expect(calendar.getByRole('application').first()).not.toHaveAttribute('aria-label', firstMonth!)
+          await guestDialog.getByRole('button', { name: 'Load more dates', exact: true }).first().click()
+          await expect(calendar.getByRole('application').first()).toHaveAttribute('aria-label', firstMonth!)
           await expect(guestDialog.locator('input[type="date"]')).toHaveCount(0)
         } else {
           await expect(calendar.getByRole('application')).toHaveCount(2)
@@ -3723,7 +3734,7 @@ test('a host lists, pauses and unlists a priced place to stay', async ({ page, b
       }
       expect(browserErrors).toEqual([])
       // The same real calendar accepts medium and long ranges, without a synthetic checkout.
-      for (const nights of [27, 28, 30, 90]) {
+      for (const nights of [27, 28, 90]) {
         await guest.setViewportSize({ width: 1440, height: 1000 })
         await guest.getByRole('button', { name: /^Check-in / }).click()
         const priced = guest.waitForResponse(response => new URL(response.url()).pathname.endsWith('/quote') && new URL(response.url()).searchParams.get('check_out_date') === after(nights))

@@ -119,19 +119,21 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
 
   async function openCalendar() {
     const { check_in_date: arrival, check_out_date: departure, stay_edit: mode } = route.query
-    if (['dates', 'guests'].includes(String(mode)) && isValidCalendarDate(arrival) && isValidCalendarDate(departure)
-      && departure > arrival && departure <= addLocalDays(arrival, MAX_STAY_NIGHTS)) {
+    const timezone = context.value.location?.timezone
+    if (!timezone) {
+      calendarError.value = 'The home has no timezone'
+      return
+    }
+    const today = localDateAt(new Date(), timezone)
+    const returning = !restoredSelection && ['dates', 'guests'].includes(String(mode))
+    if (returning && isValidCalendarDate(arrival) && isValidCalendarDate(departure)
+      && arrival >= today && departure > arrival && departure <= addLocalDays(today, STAY_CALENDAR_DAYS)
+      && departure <= addLocalDays(arrival, MAX_STAY_NIGHTS)) {
       await loadCalendar(arrival, departure)
-      restoreSelection()
     } else {
-      const timezone = context.value.location?.timezone
-      if (!timezone) {
-        calendarError.value = 'The home has no timezone'
-        return
-      }
-      const today = localDateAt(new Date(), timezone)
       await loadCalendar(today, addLocalDays(today, AVAILABILITY_PAGE_DAYS))
     }
+    if (returning) restoreSelection()
   }
 
   /** A canceled pay-page purchase returns its actual choices; the fresh quote still decides whether they can be booked. */

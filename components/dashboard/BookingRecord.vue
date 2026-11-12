@@ -7,9 +7,14 @@
 <script setup lang="ts">
 import BookingDetails from '~/components/dashboard/BookingDetails.vue'
 import StayDetails from '~/components/dashboard/StayDetails.vue'
-import { getErrorMessage } from '~/utils/errors'
+import { normalizeApiError } from '~/utils/api-clients'
+import { getErrorMessage, showNotFound } from '~/utils/errors'
 
 const props = defineProps<{ bookingId: string; editorPath: string; embedded?: boolean }>()
 const { data, error } = await useDashboardBooking(props.bookingId)
 const unit = computed(() => data.value?.booking.unit)
+
+watchEffect(() => {
+  if (!props.embedded && error.value && [403, 404].includes(normalizeApiError(error.value).statusCode)) showNotFound()
+})
 </script>

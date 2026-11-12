@@ -1009,12 +1009,14 @@ test.describe('stateless MCP server', () => {
         expect(savedSchedule.status(), await savedSchedule.text()).toBe(200)
         const httpRules = await request.get(`${productUrl}/availability?location_id=${locationId}`)
         expect(httpRules.status(), await httpRules.text()).toBe(200)
-        expect((await httpRules.json()).rules).toEqual([expect.objectContaining({
+        const before = (await httpRules.json()).rules as Array<{ id: string; timezone: string }>
+        expect(before).toEqual([expect.objectContaining({
           product_id: productId, location_id: locationId, weekday: 2, start_time: '10:00',
         })])
-        const repeated = mcpData<{ rules: Array<{ id: string; timezone: string }>; sessions: { created: number } }>(await call('replace_product_weekly_schedule', { product_id: productId, ...schedule }))
-        expect(repeated.sessions.created).toBe(0)
+        const repeated = mcpData<{ rules: typeof before; cancelled: number }>(await call('replace_product_weekly_schedule', { product_id: productId, ...schedule }))
+        expect(repeated).toEqual({ rules: before, cancelled: 0 })
         const rules = await request.get(`${productUrl}/availability?location_id=${locationId}`)
+        expect(rules.status(), await rules.text()).toBe(200)
         expect((await rules.json()).rules).toEqual(repeated.rules)
         expect(repeated.rules[0]).toHaveProperty('capacity', null)
         const retiredSlots = { ...schedule, slots: [{ weekday: 2, start_time: '10:00', capacity: 0 }] }
@@ -1136,17 +1138,17 @@ test.describe('stateless MCP server', () => {
       const read = async () => {
         const response = await request.get(`${url}/sessions`)
         expect(response.status(), await response.text()).toBe(200)
-        return (await response.json()).sessions as Array<{ id: string; location_id: string | null; source_occurrence_key: string; timezone: string; starts_at: string; ends_at: string; capacity: number; status: string; claimed: number; remaining: number }>
+        return (await response.json()).sessions as Array<{ id: string; location_id: string | null; source_occurrence_key: string; timezone: string; starts_at: string; ends_at: string; capacity: number; status: string; claimed: number; remaining: number; created_at: string | null }>
       }
       const target = (await read()).find(row => row.location_id === brooklynLocationId() && row.starts_at > new Date().toISOString())
-      expect(target).toBeTruthy()
+      expect(target).toMatchObject({ created_at: null, capacity: 10, claimed: 0, remaining: 10 })
       const booked = await request.post(`${baseURL}/api/public/products/${created.slug}/book`, {
         headers: seededSiteHeaders('restaurant'),
         data: { product_session_id: target!.id, guest_name: 'Pizza Class Guest', guest_email: `session-authority-${Date.now()}@example.test`, party_size: 6, idempotency_key: crypto.randomUUID() },
       })
       expect(booked.status(), await booked.text()).toBe(201)
       const before = (await read()).find(row => row.id === target!.id)!
-      expect(before).toMatchObject({ capacity: 10, claimed: 6, remaining: 4 })
+      expect(before).toMatchObject({ created_at: expect.any(String), capacity: 10, claimed: 6, remaining: 4 })
       // The CMS availability writer clears the weekly times; the booked occurrence keeps its authority.
       const clearing = await request.put(`${url}/availability`, { data: { location_id: brooklynLocationId(), slots: [] } })
       expect(clearing.status(), await clearing.text()).toBe(200)

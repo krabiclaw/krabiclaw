@@ -148,6 +148,8 @@ export interface ProductSession {
   /** When the occurrence came into existence, which is when its seats went on sale. */
   created_at: string
   updated_at: string
+  created_by: string
+  updated_by: string
 }
 
 /** A session with its claimed seats resolved. `remaining` is null when uncapped. */
@@ -157,10 +159,12 @@ export interface SessionAvailability extends ProductSession {
   is_full: boolean
 }
 
-/** Projected openings have no row and therefore no persistence timestamps. */
-type SessionFacts = Omit<ProductSession, 'created_at' | 'updated_at'> & {
+/** Projected openings have no saved timestamps or authors. */
+type SessionFacts = Omit<ProductSession, 'created_at' | 'updated_at' | 'created_by' | 'updated_by'> & {
   created_at: string | null
   updated_at: string | null
+  created_by: string | null
+  updated_by: string | null
 }
 export type BookableSession = SessionFacts & Pick<SessionAvailability, 'claimed' | 'remaining' | 'is_full'>
 
@@ -726,7 +730,7 @@ export async function prepareProductBookingSetup(db: DbClient, input: {
         authored.push({ session: {
           id, ...instants, organization_id: input.organizationId, product_id: input.productId, location_id: location.id,
           availability_rule_id: null, source_occurrence_key: null, timezone: location.timezone, capacity,
-          status: 'scheduled', created_at: input.now, updated_at: input.now,
+          status: 'scheduled', created_at: input.now, updated_at: input.now, created_by: input.actorId, updated_by: input.actorId,
         } })
       }
     }
@@ -825,7 +829,7 @@ export async function listSessions(db: DbClient, input: {
   const availability = providers.members.length ? await memberAvailabilityJson(db, input.env, input.organizationId, { from: providers.from!, until: providers.until! }, providers.members) : '{}'
   const sessions = await queryAll<SessionAvailability>(db, `
     SELECT s.id, s.organization_id, s.product_id, s.location_id, s.availability_rule_id,
-           s.source_occurrence_key, s.timezone, s.starts_at, s.ends_at, s.capacity, s.status, s.created_at, s.updated_at,
+           s.source_occurrence_key, s.timezone, s.starts_at, s.ends_at, s.capacity, s.status, s.created_at, s.updated_at, s.created_by, s.updated_by,
            COALESCE((
              SELECT SUM(b.party_size) FROM bookings b
              WHERE b.product_session_id = s.id AND ${CAPACITY_CONSUMING_SQL}
@@ -989,7 +993,7 @@ function projectOpenings(schedule: SlotSchedule, input: SlotRange, now: string):
     const facts = {
       ...slot, organization_id: input.organizationId, product_id: input.productId, location_id: locationId,
       availability_rule_id: rule?.id ?? null, source_occurrence_key: key, timezone, capacity,
-      status: 'scheduled' as const, created_at: null, updated_at: null,
+      status: 'scheduled' as const, created_at: null, updated_at: null, created_by: null, updated_by: null,
     }
     result.push({ session: { ...facts, id: projectedId(facts) }, rule })
   }
@@ -1078,7 +1082,8 @@ async function readOpenings(db: DbClient, input: SlotRange, schedule: SlotSchedu
       (opening.rule && existing.source_occurrence_key !== slot.source_occurrence_key && existing.availability_rule_id === null &&
         existing.source_occurrence_key !== null && existing.starts_at === slot.starts_at)
     )) {
-      const session = { ...slot, id: existing.id, created_at: existing.created_at, updated_at: existing.updated_at }
+      const session = { ...slot, id: existing.id, created_at: existing.created_at, updated_at: existing.updated_at,
+        created_by: existing.created_by, updated_by: existing.updated_by }
       const refresh = existing.status !== 'scheduled' || existing.ends_at !== slot.ends_at || existing.capacity !== slot.capacity ||
         existing.timezone !== slot.timezone || existing.source_occurrence_key !== slot.source_occurrence_key ? existing : undefined
       selected.set(instantKey(session), { ...opening, session, refresh })
