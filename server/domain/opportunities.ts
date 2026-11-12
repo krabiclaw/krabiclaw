@@ -45,7 +45,7 @@ export interface OpportunityView {
 const AREA: Record<BusinessProgressOperation, string> = {
   'article.create': 'Website', 'article.update': 'Website', 'article.publish': 'Website', 'article.distribute': 'Social',
   'post.create': 'Social', 'post.publish': 'Social', 'social.connect': 'Social', 'google_ads.connect': 'Marketing',
-  'payments.connect': 'Payments', 'product.payment': 'Payments', 'product.readiness': 'Catalog', 'stay.gap': 'Calendar', 'guest_thread.reply': 'Messages', 'booking.welcome': 'Messages',
+  'payments.connect': 'Payments', 'domain.connect': 'Website', 'product.create': 'Catalog', 'product.payment': 'Payments', 'product.readiness': 'Catalog', 'stay.gap': 'Calendar', 'guest_thread.reply': 'Messages', 'booking.welcome': 'Messages',
 }
 
 function fail(statusCode: number, code: string, message: string, field?: string): never {

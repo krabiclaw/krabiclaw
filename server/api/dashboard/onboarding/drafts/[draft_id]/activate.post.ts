@@ -3,6 +3,7 @@ import { getRouterParam, readBody } from 'nitro/h3'
 import { cloudflareEnv, jsonResponse } from '~/server/utils/api-response'
 import { getAuthSession } from '~/server/utils/auth'
 import { activateOnboardingDraft } from '~/server/utils/onboarding-apply'
+import { firstHomeSetupPath } from '~/server/utils/dashboard-links'
 import { activateSessionOrganization } from '~/server/utils/session-organization'
 
 export default defineHandler(async (event) => {
@@ -19,7 +20,14 @@ export default defineHandler(async (event) => {
     draftId,
     updated_at: body.updated_at,
     origin: event.req,
+    initialVisibility: 'inactive',
     activateSession: organizationId => activateSessionOrganization(event, env, organizationId),
   })
-  return jsonResponse({ success: true, ...result })
+  return jsonResponse({
+    success: true,
+    ...result,
+    next_url: result.vertical === 'lodging'
+      ? firstHomeSetupPath(result.organization_slug)
+      : `/dashboard/${encodeURIComponent(result.organization_slug)}`,
+  })
 })

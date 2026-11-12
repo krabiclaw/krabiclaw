@@ -1,9 +1,21 @@
 <template>
   <div class="flex size-full min-h-0 flex-col overflow-hidden bg-muted text-highlighted">
-    <div class="grid min-h-0 flex-1 overflow-hidden lg:grid-cols-[minmax(24rem,45%)_1fr]">
+    <div class="grid min-h-0 flex-1 overflow-hidden" :class="{ 'lg:grid-cols-[minmax(24rem,45%)_1fr]': !isWelcome }">
       <!-- The step column. One question at a time, its own header and footer. -->
-      <div class="flex min-h-0 flex-col border-r border-default bg-default">
-        <div v-if="currentStep && !pushAskHome" class="flex shrink-0 items-center py-3" :class="dashboardGutterClass">
+      <div class="relative flex min-h-0 flex-col bg-default" :class="isWelcome ? 'overflow-y-auto' : 'border-r border-default'">
+        <UButton
+          v-if="isWelcome && currentStep"
+          class="absolute end-4 top-4 z-10 rounded-full sm:end-6 sm:top-6"
+          icon="i-lucide-x"
+          variant="soft"
+          color="neutral"
+          :aria-label="canSave || state.draftId ? 'Save & exit' : 'Exit'"
+          :title="canSave || state.draftId ? 'Save & exit' : 'Exit'"
+          :loading="exiting"
+          :disabled="busy || (Boolean(state.draftId) && !canSave)"
+          @click="saveAndExit"
+        />
+        <div v-if="currentStep && !isWelcome" class="flex shrink-0 items-center py-3" :class="dashboardGutterClass">
           <UButton
             color="neutral"
             variant="outline"
@@ -15,25 +27,26 @@
           />
         </div>
 
-        <div class="min-h-0 flex-1 overflow-y-auto pb-6" :class="dashboardGutterClass" :inert="busy">
-          <PushAsk v-if="pushAskHome" class="py-6" title="Your site is live" :lede="pushAskLede" @done="router.push(pushAskHome)" />
-          <p v-else-if="restoreError" class="py-16 text-sm text-error" role="alert">{{ getErrorMessage(restoreError, 'Your saved answers could not be loaded.') }}</p>
+        <div :class="isWelcome ? 'shrink-0' : [dashboardGutterClass, 'min-h-0 flex-1 overflow-y-auto pb-6']" :inert="busy">
+          <p v-if="restoreError" class="py-16 text-sm text-error" role="alert">{{ getErrorMessage(restoreError, 'Your saved answers could not be loaded.') }}</p>
           <template v-else>
-            <NuxtPage @advance="goNext" @uploading="uploading = $event" />
+            <NuxtPage v-if="currentStep" :step="currentStep" @advance="goNext" @uploading="uploading = $event" />
             <UCheckbox v-if="currentStep?.id === 'review' && state.vertical === 'lodging'" v-model="migrateHostaway" class="pb-6" label="Move existing stays from Hostaway after creating my site" />
           </template>
         </div>
 
-        <div v-if="currentStep && !restoreError && !pushAskHome" class="shrink-0 border-t border-default py-3" :class="dashboardGutterClass">
-          <p v-if="!canSave" class="mb-3 text-sm text-muted">
+        <div v-if="currentStep && !restoreError" class="shrink-0" :class="isWelcome ? 'mx-auto w-full max-w-sm px-5 pb-8' : [dashboardGutterClass, 'border-t border-default py-3']">
+          <p v-if="!canSave && !isWelcome" class="mb-3 text-sm text-muted">
             {{ state.draftId ? 'Finish the required details to save your changes.' : 'Your answers have not been saved yet.' }}
           </p>
-          <p v-if="draft.error.value" class="mb-3 text-sm text-error">{{ draft.error.value }}</p>
+          <p v-if="draft.error.value || flowError" class="mb-3 text-sm text-error" role="alert">{{ draft.error.value || flowError }}</p>
           <div class="flex items-center justify-between gap-4">
-            <UButton variant="link" color="neutral" label="Back" :disabled="busy" @click="goBack" />
+            <UButton v-if="!isWelcome" variant="link" color="neutral" label="Back" :disabled="busy" @click="goBack" />
             <UButton
+              :class="{ 'w-full justify-center': isWelcome }"
+              :size="isWelcome ? 'lg' : undefined"
               :label="nextLabel"
-              :loading="draft.busy.value"
+              :loading="advancing || draft.busy.value"
               :disabled="!canAdvance || busy"
               @click="goNext"
             />
@@ -42,7 +55,7 @@
       </div>
 
       <OnboardingPreviewPane
-        v-if="!isMobilePreviewViewport"
+        v-if="!isWelcome && !isMobilePreviewViewport"
         class="hidden lg:flex"
         :iframe-src="iframeSrc"
         :organization-locations="previewLocations"
@@ -50,7 +63,7 @@
         selected-page="home"
         :organization-status="organizationStatus"
         :organization-domain="organizationDomain"
-        :vertical="state.vertical"
+        :vertical="state.vertical ?? undefined"
         :empty-visual-url="preDraftVisual.url"
         :empty-visual-alt="preDraftVisual.alt"
         home-only
@@ -59,7 +72,7 @@
     </div>
 
     <USlideover
-      v-if="isMobilePreviewViewport"
+      v-if="!isWelcome && isMobilePreviewViewport"
       v-model:open="mobilePreviewOpenForViewport"
       title="Site preview"
       description="Close to keep answering."
@@ -75,7 +88,7 @@
           selected-page="home"
           :organization-status="organizationStatus"
           :organization-domain="organizationDomain"
-          :vertical="state.vertical"
+          :vertical="state.vertical ?? undefined"
           :empty-visual-url="preDraftVisual.url"
           :empty-visual-alt="preDraftVisual.alt"
           home-only
@@ -90,15 +103,12 @@
 import { tenantOrganizationOrigin } from '~/utils/tenant-organization-origin'
 import { useDashboardTopNavAction } from '~/composables/useDashboardTopNavActions'
 import {
-  onboardingStep,
   onboardingStepPath,
   useOnboardingState,
-  useOnboardingSteps,
+  useOnboardingPlan,
 } from '~/composables/useOnboardingFlow'
 import { useOnboardingDraft } from '~/composables/useOnboardingDraft'
 import { dashboardGutterClass } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
-import PushAsk from '~/components/dashboard/PushAsk.vue'
-import { notificationCategoryLabels } from '~/shared/notification-categories'
 
 // This route creates a new site, so it has no org or site of its own yet: there
 // is no orgSlug segment, so the dashboard layout requests no context, and it
@@ -110,101 +120,109 @@ const router = useRouter()
 const config = useRuntimeConfig()
 const state = useOnboardingState()
 const draft = useOnboardingDraft()
-const { steps, indexOf, nextOf, previousOf, resumeStep } = useOnboardingSteps()
+const plan = useOnboardingPlan()
+const advancing = ref(false)
+const flowError = ref<string | null>(null)
 const exiting = ref(false)
 const migrateHostaway = ref(false)
 const uploading = ref(false)
-const busy = computed(() => draft.busy.value || exiting.value || uploading.value)
+const busy = computed(() => draft.busy.value || advancing.value || exiting.value || uploading.value)
 onBeforeRouteLeave(() => !draft.busy.value && !uploading.value)
 onBeforeRouteUpdate(() => !draft.busy.value && !uploading.value)
 
-const currentStep = computed(() => onboardingStep(String(route.params.step ?? '')))
+const requestedId = computed(() => String(route.params.step ?? 'type'))
+const currentStep = computed(() => plan.value?.steps.find(step => step.id === requestedId.value))
+const isWelcome = computed(() => requestedId.value === 'type')
+const canSave = computed(() => plan.value?.canSave === true)
+const canAdvance = computed(() => currentStep.value?.canAdvance === true)
+const nextLabel = computed(() => currentStep.value?.nextLabel)
 
-const pushSubscription = usePushSubscription()
-// The dashboard the new site opens on, once the push ask is answered.
-const pushAskHome = ref<string | null>(null)
-const pushAskLede = computed(() => {
-  const labels = notificationCategoryLabels([state.value.vertical])
-  return `Get new ${labels.reservations_bookings.toLowerCase()} and ${labels.messages.toLowerCase()} as they arrive.`
+// Restore the persisted answers before the server chooses the entry step.
+const nuxtApp = useNuxtApp()
+const { data: initialPlan, error: restoreError } = await useAsyncData('onboarding-flow', async () => {
+  await draft.restore()
+  return nuxtApp.runWithContext(() => draft.readFlow())
 })
-const previousStep = computed(() => currentStep.value ? previousOf(currentStep.value.id) : null)
-const nextStep = computed(() => currentStep.value ? nextOf(currentStep.value.id) : null)
-const nextLabel = computed(() => currentStep.value?.nextLabel?.(state.value)
-  ?? (currentStep.value?.optional && !currentStep.value.complete(state.value) ? 'Skip for now' : 'Next'))
-const canAdvance = computed(() => {
-  const step = currentStep.value
-  if (!step) return false
-  return step.intro || step.optional || step.complete(state.value)
-})
-const canSave = computed(() => steps.value.every(step => step.intro || step.optional || step.complete(state.value)))
+plan.value = initialPlan.value ?? null
 
-// ─── Entering the flow ────────────────────────────────────────────────────────
-// The answers live in useState, which a page load starts empty, so every entry
-// point reads the saved draft back before a step renders: the welcome screen, a
-// step reloaded mid-flow, a step URL opened cold. This component is the parent
-// route — step-to-step navigation keeps it mounted — so the draft is fetched
-// once per page load and never again while the flow runs.
-const requested = currentStep.value
-// Starting from an empty form would save blanks over the draft, so a draft
-// that cannot be read stops the flow here.
-const { error: restoreError } = await useAsyncData('onboarding-draft', () => draft.restore())
-if (!restoreError.value) {
-  if (route.params.step && !requested) {
-    // Not a step at all.
-    await navigateTo('/dashboard/onboarding', { replace: true })
-  } else if (requested) {
-    // A step the owner has not reached, or one that no longer applies to the
-    // answers they gave, is not theirs to land on: an empty form there would
-    // save blanks over the draft. Send them to the step the draft stopped at.
-    // Only the requested URL is judged; once the flow is running, Next decides
-    // where it goes.
-    const resume = resumeStep.value
-    if (indexOf(requested.id) === -1 || indexOf(requested.id) > indexOf(resume.id)) {
-      await navigateTo(onboardingStepPath(resume.id), { replace: true })
-    }
+if (plan.value) {
+  const { steps, resumeStep } = plan.value
+  const requested = steps.findIndex(step => step.id === requestedId.value)
+  const resume = steps.findIndex(step => step.id === resumeStep)
+  if (requested === -1 || requested > resume || (!route.params.step && state.value.draftId && resumeStep !== 'type')) {
+    await navigateTo(onboardingStepPath(resumeStep), { replace: true })
   }
 }
 
+// Keep button state in sync with the server as the owner edits. Next checks
+// the current answers even when a single-choice control advances immediately.
+watch(draft.flowAnswers, (answers, _, onCleanup) => {
+  const request = new AbortController()
+  const timer = setTimeout(async () => {
+    try {
+      plan.value = await draft.readFlow(answers, request.signal)
+      flowError.value = null
+    } catch (error) {
+      if (!request.signal.aborted) flowError.value = getErrorMessage(error, 'Could not check your answers.')
+    }
+  }, 160)
+  onCleanup(() => {
+    clearTimeout(timer)
+    request.abort()
+  })
+})
+
 async function goBack() {
-  if (busy.value) return
-  const target = previousStep.value
-  await router.push(target ? onboardingStepPath(target.id) : '/dashboard/onboarding')
+  if (busy.value || !plan.value) return
+  const index = plan.value.steps.findIndex(step => step.id === requestedId.value)
+  const previous = plan.value.steps[index - 1]
+  await router.push(previous ? onboardingStepPath(previous.id) : '/dashboard/onboarding')
 }
 
 async function goNext() {
-  const step = currentStep.value
-  if (!step || !canAdvance.value || busy.value) return
+  if (busy.value) return
+  advancing.value = true
+  try {
+    const flow = await draft.readFlow()
+    plan.value = flow
+    flowError.value = null
+    const index = flow.steps.findIndex(step => step.id === requestedId.value)
+    const step = flow.steps[index]
+    if (!step?.canAdvance || (step.save && !flow.canSave)) return
+    if (!flow.steps.some(candidate => candidate.id === 'products')) state.value.products = []
+    if (step.save && !await draft.save()) return
 
-  // The first save creates the site, so it waits for the currency and the clock the site cannot exist without.
-  if (!['type', 'language', 'business', 'location', 'hours'].includes(step.id) && !await draft.save()) return
-
-  if (step.action === 'commit') {
-    if (!await draft.activate()) return
-    const created = state.value.created
-    const home = created?.organization_slug
-      ? `/dashboard/${created.organization_slug}${migrateHostaway.value && state.value.vertical === 'lodging' ? '/integrations/hostaway-migration' : ''}`
-      : '/dashboard'
-    // The site takes requests from here on, so this is when to offer push — once, where the browser can still be asked.
-    // The site exists either way: a browser whose push state cannot be read is reported and not asked.
-    await pushSubscription.refresh().catch(error => globalThis.reportError(error))
-    if (pushSubscription.state.value.askable) {
-      pushAskHome.value = home
+    if (step.action === 'commit') {
+      if (!await draft.activate()) return
+      const created = state.value.created
+      const home = created && migrateHostaway.value && state.value.vertical === 'lodging'
+        ? `/dashboard/${encodeURIComponent(created.organization_slug)}/integrations/hostaway-migration`
+        : created?.next_url ?? '/dashboard'
+      await router.push(home)
       return
     }
-    await router.push(home)
-    return
-  }
 
-  const target = nextStep.value
-  if (target) await router.push(onboardingStepPath(target.id))
+    const next = flow.steps[index + 1]
+    if (next) await router.push(onboardingStepPath(next.id))
+  } catch (error) {
+    flowError.value = getErrorMessage(error, 'Could not continue setup.')
+  } finally {
+    advancing.value = false
+  }
 }
 
 async function saveAndExit() {
   if (restoreError.value || busy.value || (state.value.draftId && !canSave.value)) return
   exiting.value = true
   try {
-    if (canSave.value && !await draft.save()) return
+    const flow = await draft.readFlow()
+    plan.value = flow
+    if (state.value.draftId && !flow.canSave) return
+    if (!flow.steps.some(step => step.id === 'products')) state.value.products = []
+    if (flow.canSave && !await draft.save()) return
     await router.push('/dashboard')
+  } catch (error) {
+    flowError.value = getErrorMessage(error, 'Could not exit setup.')
   } finally {
     exiting.value = false
   }
@@ -251,10 +269,6 @@ const iframeSrc = computed(() => {
 })
 
 const PRE_DRAFT_VISUALS: Record<string, { url: string; alt: string }> = {
-  welcome: {
-    url: 'https://imagedelivery.net/Frxyb2_d_vGyiaXhS5xqCg/65141776-f50d-4a1e-e223-774747d55000/w=800',
-    alt: 'Start building your business website',
-  },
   type: {
     url: 'https://imagedelivery.net/Frxyb2_d_vGyiaXhS5xqCg/48434034-9751-4d60-3c88-83c0dea5c600/w=800',
     alt: 'Choose your business type',
@@ -270,12 +284,10 @@ useHead({
   link: Object.values(PRE_DRAFT_VISUALS).map(visual => ({ rel: 'preload', as: 'image', href: visual.url })),
 })
 // Until the first save there is no site to frame, so the pane carries an
-// illustration rather than an empty column. The welcome screen has no step, and
-// a step with no illustration of its own keeps showing the last one instead of
-// blanking mid-flow.
-const lastVisual = ref(PRE_DRAFT_VISUALS.welcome!)
+// illustration. Steps without their own keep showing the previous one.
+const lastVisual = ref(PRE_DRAFT_VISUALS.type!)
 watchEffect(() => {
-  const visual = PRE_DRAFT_VISUALS[currentStep.value?.id ?? 'welcome']
+  const visual = PRE_DRAFT_VISUALS[requestedId.value]
   if (visual) lastVisual.value = visual
 })
 const preDraftVisual = computed(() => iframeSrc.value ? { url: '', alt: '' } : lastVisual.value)
@@ -323,16 +335,9 @@ onMounted(() => {
   }
 })
 
-// Step order changes with the answers (the products step does not exist for a
-// service business), so a step that no longer applies redirects to the one
-// that does.
-//
-// A failed save belongs to the step it was attempted on. The message used to
-// outlive the step and follow the owner around the flow, so a save that failed
-// on one screen was still being reported at the bottom of the next one — which
-// is what made a 500 on the products step look like Back itself was broken.
-watch([currentStep, () => indexOf(currentStep.value?.id ?? 'type')], async ([step], [previous]) => {
-  if ((step as typeof currentStep.value)?.id !== (previous as typeof currentStep.value)?.id) draft.error.value = null
-  if (route.params.step && !currentStep.value) await router.replace('/dashboard/onboarding')
+// Errors from a failed save belong to the screen where it was attempted.
+watch(requestedId, () => {
+  draft.error.value = null
+  if (!currentStep.value && plan.value) void router.replace(onboardingStepPath(plan.value.resumeStep))
 })
 </script>

@@ -69,7 +69,7 @@ const destination = computed(() => props.booking?.to ?? props.opportunity?.path 
 const reservation = computed(() => props.booking
   ? { ...props.booking, conversation: null }
   : props.task?.reservation ? { ...props.task.reservation, note_label: null } : null)
-const statusLine = computed(() => props.task?.status_line ?? (props.opportunity ? `Suggested · ${props.opportunity.status_line}` : null))
+const statusLine = computed(() => props.task?.status_line ?? null)
 const title = computed(() => props.booking?.headline ?? props.task?.title ?? props.opportunity!.title)
 const detail = computed(() => props.task?.detail ?? props.opportunity?.detail ?? null)
 const mediaSrc = computed(() => cfImageVariant(props.task?.image_url, { width: 900, height: 600, fit: 'cover', format: 'auto' }) || props.task?.image_url || undefined)

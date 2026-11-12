@@ -9576,6 +9576,31 @@
                           "minItems": 7,
                           "type": "array"
                         },
+                        "direct_discounts": {
+                          "additionalProperties": false,
+                          "description": "Direct website bookings only. Only the largest eligible percentage applies.",
+                          "properties": {
+                            "last_minute_percent": {
+                              "description": "For bookings made 14 days or less before arrival",
+                              "maximum": 99,
+                              "minimum": 1,
+                              "type": "integer"
+                            },
+                            "monthly_percent": {
+                              "description": "For stays of 28 nights or more",
+                              "maximum": 99,
+                              "minimum": 1,
+                              "type": "integer"
+                            },
+                            "weekly_percent": {
+                              "description": "For stays of 7 nights or more",
+                              "maximum": 99,
+                              "minimum": 1,
+                              "type": "integer"
+                            }
+                          },
+                          "type": "object"
+                        },
                         "weekend_price_minor": {
                           "description": "Whole minor units of the organization currency, e.g. cents.",
                           "minimum": 0,
@@ -11445,6 +11470,31 @@
                           "maxItems": 7,
                           "minItems": 7,
                           "type": "array"
+                        },
+                        "direct_discounts": {
+                          "additionalProperties": false,
+                          "description": "Direct website bookings only. Only the largest eligible percentage applies.",
+                          "properties": {
+                            "last_minute_percent": {
+                              "description": "For bookings made 14 days or less before arrival",
+                              "maximum": 99,
+                              "minimum": 1,
+                              "type": "integer"
+                            },
+                            "monthly_percent": {
+                              "description": "For stays of 28 nights or more",
+                              "maximum": 99,
+                              "minimum": 1,
+                              "type": "integer"
+                            },
+                            "weekly_percent": {
+                              "description": "For stays of 7 nights or more",
+                              "maximum": 99,
+                              "minimum": 1,
+                              "type": "integer"
+                            }
+                          },
+                          "type": "object"
                         },
                         "weekend_price_minor": {
                           "description": "Whole minor units of the organization currency, e.g. cents.",
@@ -26366,6 +26416,31 @@
                     "minItems": 7,
                     "type": "array"
                   },
+                  "direct_discounts": {
+                    "additionalProperties": false,
+                    "description": "Direct website bookings only. Only the largest eligible percentage applies.",
+                    "properties": {
+                      "last_minute_percent": {
+                        "description": "For bookings made 14 days or less before arrival",
+                        "maximum": 99,
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "monthly_percent": {
+                        "description": "For stays of 28 nights or more",
+                        "maximum": 99,
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "weekly_percent": {
+                        "description": "For stays of 7 nights or more",
+                        "maximum": 99,
+                        "minimum": 1,
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
                   "weekend_price_minor": {
                     "description": "Whole minor units of the organization currency, e.g. cents.",
                     "minimum": 0,
@@ -28224,6 +28299,31 @@
                         "maxItems": 7,
                         "minItems": 7,
                         "type": "array"
+                      },
+                      "direct_discounts": {
+                        "additionalProperties": false,
+                        "description": "Direct website bookings only. Only the largest eligible percentage applies.",
+                        "properties": {
+                          "last_minute_percent": {
+                            "description": "For bookings made 14 days or less before arrival",
+                            "maximum": 99,
+                            "minimum": 1,
+                            "type": "integer"
+                          },
+                          "monthly_percent": {
+                            "description": "For stays of 28 nights or more",
+                            "maximum": 99,
+                            "minimum": 1,
+                            "type": "integer"
+                          },
+                          "weekly_percent": {
+                            "description": "For stays of 7 nights or more",
+                            "maximum": 99,
+                            "minimum": 1,
+                            "type": "integer"
+                          }
+                        },
+                        "type": "object"
                       },
                       "weekend_price_minor": {
                         "description": "Whole minor units of the organization currency, e.g. cents.",
@@ -54733,6 +54833,31 @@
                         "minItems": 7,
                         "type": "array"
                       },
+                      "direct_discounts": {
+                        "additionalProperties": false,
+                        "description": "Direct website bookings only. Only the largest eligible percentage applies.",
+                        "properties": {
+                          "last_minute_percent": {
+                            "description": "For bookings made 14 days or less before arrival",
+                            "maximum": 99,
+                            "minimum": 1,
+                            "type": "integer"
+                          },
+                          "monthly_percent": {
+                            "description": "For stays of 28 nights or more",
+                            "maximum": 99,
+                            "minimum": 1,
+                            "type": "integer"
+                          },
+                          "weekly_percent": {
+                            "description": "For stays of 7 nights or more",
+                            "maximum": 99,
+                            "minimum": 1,
+                            "type": "integer"
+                          }
+                        },
+                        "type": "object"
+                      },
                       "weekend_price_minor": {
                         "description": "Whole minor units of the organization currency, e.g. cents.",
                         "minimum": 0,
@@ -66228,6 +66353,31 @@
                     "maxItems": 7,
                     "minItems": 7,
                     "type": "array"
+                  },
+                  "direct_discounts": {
+                    "additionalProperties": false,
+                    "description": "Direct website bookings only. Only the largest eligible percentage applies.",
+                    "properties": {
+                      "last_minute_percent": {
+                        "description": "For bookings made 14 days or less before arrival",
+                        "maximum": 99,
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "monthly_percent": {
+                        "description": "For stays of 28 nights or more",
+                        "maximum": 99,
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "weekly_percent": {
+                        "description": "For stays of 7 nights or more",
+                        "maximum": 99,
+                        "minimum": 1,
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
                   },
                   "weekend_price_minor": {
                     "description": "Whole minor units of the organization currency, e.g. cents.",
@@ -86163,6 +86313,31 @@
                           "minItems": 7,
                           "type": "array"
                         },
+                        "direct_discounts": {
+                          "additionalProperties": false,
+                          "description": "Direct website bookings only. Only the largest eligible percentage applies.",
+                          "properties": {
+                            "last_minute_percent": {
+                              "description": "For bookings made 14 days or less before arrival",
+                              "maximum": 99,
+                              "minimum": 1,
+                              "type": "integer"
+                            },
+                            "monthly_percent": {
+                              "description": "For stays of 28 nights or more",
+                              "maximum": 99,
+                              "minimum": 1,
+                              "type": "integer"
+                            },
+                            "weekly_percent": {
+                              "description": "For stays of 7 nights or more",
+                              "maximum": 99,
+                              "minimum": 1,
+                              "type": "integer"
+                            }
+                          },
+                          "type": "object"
+                        },
                         "weekend_price_minor": {
                           "description": "Whole minor units of the organization currency, e.g. cents.",
                           "minimum": 0,
@@ -88073,6 +88248,31 @@
                           "maxItems": 7,
                           "minItems": 7,
                           "type": "array"
+                        },
+                        "direct_discounts": {
+                          "additionalProperties": false,
+                          "description": "Direct website bookings only. Only the largest eligible percentage applies.",
+                          "properties": {
+                            "last_minute_percent": {
+                              "description": "For bookings made 14 days or less before arrival",
+                              "maximum": 99,
+                              "minimum": 1,
+                              "type": "integer"
+                            },
+                            "monthly_percent": {
+                              "description": "For stays of 28 nights or more",
+                              "maximum": 99,
+                              "minimum": 1,
+                              "type": "integer"
+                            },
+                            "weekly_percent": {
+                              "description": "For stays of 7 nights or more",
+                              "maximum": 99,
+                              "minimum": 1,
+                              "type": "integer"
+                            }
+                          },
+                          "type": "object"
                         },
                         "weekend_price_minor": {
                           "description": "Whole minor units of the organization currency, e.g. cents.",
@@ -102695,6 +102895,31 @@
                     "minItems": 7,
                     "type": "array"
                   },
+                  "direct_discounts": {
+                    "additionalProperties": false,
+                    "description": "Direct website bookings only. Only the largest eligible percentage applies.",
+                    "properties": {
+                      "last_minute_percent": {
+                        "description": "For bookings made 14 days or less before arrival",
+                        "maximum": 99,
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "monthly_percent": {
+                        "description": "For stays of 28 nights or more",
+                        "maximum": 99,
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "weekly_percent": {
+                        "description": "For stays of 7 nights or more",
+                        "maximum": 99,
+                        "minimum": 1,
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
                   "weekend_price_minor": {
                     "description": "Whole minor units of the organization currency, e.g. cents.",
                     "minimum": 0,
@@ -116424,6 +116649,31 @@
                     "minItems": 7,
                     "type": "array"
                   },
+                  "direct_discounts": {
+                    "additionalProperties": false,
+                    "description": "Direct website bookings only. Only the largest eligible percentage applies.",
+                    "properties": {
+                      "last_minute_percent": {
+                        "description": "For bookings made 14 days or less before arrival",
+                        "maximum": 99,
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "monthly_percent": {
+                        "description": "For stays of 28 nights or more",
+                        "maximum": 99,
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "weekly_percent": {
+                        "description": "For stays of 7 nights or more",
+                        "maximum": 99,
+                        "minimum": 1,
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
                   "weekend_price_minor": {
                     "description": "Whole minor units of the organization currency, e.g. cents.",
                     "minimum": 0,
@@ -118406,6 +118656,31 @@
                         "maxItems": 7,
                         "minItems": 7,
                         "type": "array"
+                      },
+                      "direct_discounts": {
+                        "additionalProperties": false,
+                        "description": "Direct website bookings only. Only the largest eligible percentage applies.",
+                        "properties": {
+                          "last_minute_percent": {
+                            "description": "For bookings made 14 days or less before arrival",
+                            "maximum": 99,
+                            "minimum": 1,
+                            "type": "integer"
+                          },
+                          "monthly_percent": {
+                            "description": "For stays of 28 nights or more",
+                            "maximum": 99,
+                            "minimum": 1,
+                            "type": "integer"
+                          },
+                          "weekly_percent": {
+                            "description": "For stays of 7 nights or more",
+                            "maximum": 99,
+                            "minimum": 1,
+                            "type": "integer"
+                          }
+                        },
+                        "type": "object"
                       },
                       "weekend_price_minor": {
                         "description": "Whole minor units of the organization currency, e.g. cents.",
@@ -128433,18 +128708,18 @@
         "text": "Update the catalog from: <items_description> Use get_workspace_context, list_organizations and list_locations to resolve the business and explicit location. Read every relevant list_location_products and list_collections page before matching existing IDs. For a restaurant menu, use update_menu with a stable idempotency_key, the stated sections and prices. Match existing product, variant, price and collection IDs. Omitted items and order remain; use set_collection_products or reorder_collections only when the user requests a complete new order. For other products, use create_product for new entries or update_product for partial edits. Use reconcile_products only when the user requests complete replacement of the supplied entries. Ask for missing prices or booking facts. Use get_product and list_location_products to read back the result, then open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "create_product": "sha256:de3e65a1a63086940417c4307644f1368a210f3face38dea55138c73ffd4270a",
-        "get_product": "sha256:b2afea3d084c67b0aacc46c8fbdbcf652dfaa2554de42de7bef06b16312f05e1",
+        "create_product": "sha256:f7e979538daf37680ab576caa9a7e21728858fcb53da524b409476f3092a9dba",
+        "get_product": "sha256:114fce9013309b4bd92ea1bd3012b7fc9b6293a09be3cef9c7402c86df8fe954",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_collections": "sha256:7eb8f62291a619df46fa146bc6142f898aac1de8bda513b7a0bf92182faff563",
         "list_location_products": "sha256:7c79f573c07df88cb92d7506531a53fd493d7b5e6480511e4fb98e5dd331886b",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_organizations": "sha256:1d699ce3820543aed0a3f9b17007d6f33a3c498d17a73f77de0971943a98d30a",
-        "reconcile_products": "sha256:c529aeb98e729ceb0f3647171e615ba0c5ad804dffe40794fc7d64c2feadf938",
+        "reconcile_products": "sha256:776775d2b51ce5e5f27c5e08d9a522548b4be7f979d89cc7f03ecb7adcf747d2",
         "reorder_collections": "sha256:c8ad3c90e1fe802222fc5c184e33daa7f2f71b24f6161eddc408f1b1e485a59b",
         "set_collection_products": "sha256:7d92dda53c08f4ebcf2f11cfc3a4c2cc6f7465ad97b9190d9997fea30e0cc81d",
         "update_menu": "sha256:947551eb104f6be470aeaab3b3570d0ab9924d01450192f8ac88a77f91de7433",
-        "update_product": "sha256:76ac8761f201285b2ba6f59554164a8fca0bb6a3331b1544e8e206329b7a226d"
+        "update_product": "sha256:afed95fa490fdae7aed3b9d4e6f5db435e1ab4c8d3909b260fbe380a82f9d461"
       }
     },
     {
@@ -128488,8 +128763,8 @@
       },
       "toolContracts": {
         "attach_media": "sha256:b6f84ecad030ec9ec81a253682c86d6f8a10dc0c3b35564c873c21bbdbace35a",
-        "create_product": "sha256:de3e65a1a63086940417c4307644f1368a210f3face38dea55138c73ffd4270a",
-        "get_product": "sha256:b2afea3d084c67b0aacc46c8fbdbcf652dfaa2554de42de7bef06b16312f05e1",
+        "create_product": "sha256:f7e979538daf37680ab576caa9a7e21728858fcb53da524b409476f3092a9dba",
+        "get_product": "sha256:114fce9013309b4bd92ea1bd3012b7fc9b6293a09be3cef9c7402c86df8fe954",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_product_booking_sessions": "sha256:06526c6170e88700736a723c638488475c76c1db82bcc7082ab478e28ce83a51",
@@ -128556,7 +128831,7 @@
         "attach_media": "sha256:b6f84ecad030ec9ec81a253682c86d6f8a10dc0c3b35564c873c21bbdbace35a",
         "get_location": "sha256:eeb473e44df629a24ceb82a2db6873a6b1f108dd852c2fa923f605a637439f34",
         "get_post": "sha256:fd95e9d97a5f0624dda58886752832eee80a1fef08c9c7a64d8c2af4ff3481d1",
-        "get_product": "sha256:b2afea3d084c67b0aacc46c8fbdbcf652dfaa2554de42de7bef06b16312f05e1",
+        "get_product": "sha256:114fce9013309b4bd92ea1bd3012b7fc9b6293a09be3cef9c7402c86df8fe954",
         "get_site_page": "sha256:19e8f6df9f3d8dba2fa2a14be053e505abd0564cdf279d649db199c2afdd46d6",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "save_media_attachment": "sha256:dd3e83b857a53f97fa3f6a27e1788dc247133a954108a09e5f7c200b4a1e3a93",
@@ -128572,7 +128847,7 @@
         "text": "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft_id and updated_at. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Check for missing brand assets like logo, favicon, social card, palette colors, hero media, and about page story. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result."
       },
       "toolContracts": {
-        "create_product": "sha256:de3e65a1a63086940417c4307644f1368a210f3face38dea55138c73ffd4270a",
+        "create_product": "sha256:f7e979538daf37680ab576caa9a7e21728858fcb53da524b409476f3092a9dba",
         "get_organization": "sha256:7659406922dc74826fdfd890dc16fb069dbc35c3af276860b62306848b471f06",
         "get_site_page": "sha256:19e8f6df9f3d8dba2fa2a14be053e505abd0564cdf279d649db199c2afdd46d6",
         "get_website_draft": "sha256:c9a35d9cbeeac75d7f0be22022549499d6f881100f1ef31851ba08ec238baed5",
@@ -128598,14 +128873,14 @@
       },
       "toolContracts": {
         "get_location": "sha256:eeb473e44df629a24ceb82a2db6873a6b1f108dd852c2fa923f605a637439f34",
-        "get_product": "sha256:b2afea3d084c67b0aacc46c8fbdbcf652dfaa2554de42de7bef06b16312f05e1",
+        "get_product": "sha256:114fce9013309b4bd92ea1bd3012b7fc9b6293a09be3cef9c7402c86df8fe954",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_product_booking_sessions": "sha256:06526c6170e88700736a723c638488475c76c1db82bcc7082ab478e28ce83a51",
         "list_products": "sha256:bd6b30cee8a405d0bcdf6313fa20396a2e287bb3285b977fdc1c27baed9c48f0",
         "replace_product_weekly_schedule": "sha256:114e8115176adaa1707ba8ca9cae7026ffd2ab4803fa566c727b7bd7c2c83e9b",
         "set_product_booking_config": "sha256:50969e4450fa9d51c05b4a5b2901f3ceac78a3df29d96e77fc48bfea8d2b21fe",
-        "update_product": "sha256:76ac8761f201285b2ba6f59554164a8fca0bb6a3331b1544e8e206329b7a226d"
+        "update_product": "sha256:afed95fa490fdae7aed3b9d4e6f5db435e1ab4c8d3909b260fbe380a82f9d461"
       }
     },
     {
@@ -128624,7 +128899,7 @@
         "list_products": "sha256:bd6b30cee8a405d0bcdf6313fa20396a2e287bb3285b977fdc1c27baed9c48f0",
         "list_site_pages": "sha256:5a49aa342807192ee45d329880f2f459d1914154e9a04a43562c0ea3587879cc",
         "set_media": "sha256:79e758a2b687c65350fa364dd1169fb47edc54c166f71d2c1ccee5a380a1295b",
-        "update_product": "sha256:76ac8761f201285b2ba6f59554164a8fca0bb6a3331b1544e8e206329b7a226d",
+        "update_product": "sha256:afed95fa490fdae7aed3b9d4e6f5db435e1ab4c8d3909b260fbe380a82f9d461",
         "update_site_page": "sha256:d1e8cc9a99c9970e6f8c84785867979a71b4adb09725cd72fe7d81c9af6350cb"
       }
     },
@@ -128640,14 +128915,14 @@
         "create_post": "sha256:a2a95f5e752b47a10f2d42dfaaca0caca19afd2a4110adc3fd97dad2eb8a763a",
         "get_conversation": "sha256:9ecff07dc40a9054c6c234c1ecfaea30669ec0c52f232feb7cdb0145ab0401e4",
         "get_organization_analytics": "sha256:4fcc7f6cef537aa552200cc74b666d866684657015427e256651d7791140b814",
-        "get_product": "sha256:b2afea3d084c67b0aacc46c8fbdbcf652dfaa2554de42de7bef06b16312f05e1",
+        "get_product": "sha256:114fce9013309b4bd92ea1bd3012b7fc9b6293a09be3cef9c7402c86df8fe954",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_conversations": "sha256:24cf21b535c6689cb04bc7188bec604110c207a960c8ba5e69e9505150dceca7",
         "list_product_booking_sessions": "sha256:06526c6170e88700736a723c638488475c76c1db82bcc7082ab478e28ce83a51",
         "list_products": "sha256:bd6b30cee8a405d0bcdf6313fa20396a2e287bb3285b977fdc1c27baed9c48f0",
         "publish_post": "sha256:752fb1e9c0267e6ba03088081fa8a0e5c5f8034640f03df3c52078a8df8f95d4",
         "send_message": "sha256:8636238ba370bd243b7a3f2d4c1f6a5993223e916e3695bfd8f2a3696f80e6e2",
-        "update_product": "sha256:76ac8761f201285b2ba6f59554164a8fca0bb6a3331b1544e8e206329b7a226d"
+        "update_product": "sha256:afed95fa490fdae7aed3b9d4e6f5db435e1ab4c8d3909b260fbe380a82f9d461"
       }
     }
   ]

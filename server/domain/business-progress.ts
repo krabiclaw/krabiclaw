@@ -8,7 +8,7 @@ import { businessGoalStrategySchema, createBusinessGoalSchema, updateBusinessGoa
 import { publishBusinessInvalidation } from '~/server/cloudflare/guest-inbox-events'
 import { queryOrganizationAnalytics } from '~/server/utils/analytics-query'
 import { addLocalDays, formatCalendarRange, formatTimestamp, localDateAt } from '~/utils/timezone'
-import { articleSocialPostPath, blogCreatePath, blogEditorPath, guestConversationPath, postEditorPath, productEditorPath, productPaymentPath } from '~/server/utils/dashboard-links'
+import { articleSocialPostPath, blogCreatePath, blogEditorPath, firstHomeSetupPath, guestConversationPath, postEditorPath, productEditorPath, productPaymentPath } from '~/server/utils/dashboard-links'
 import { listBookableSessions } from '~/server/utils/availability'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import { readStayGapCandidates, stayAccessFor } from '~/server/domain/stays'
@@ -21,6 +21,7 @@ import { querySearchAnalytics } from '~/server/utils/google-search-console'
 import { getSocialConnections } from '~/server/utils/social-publication'
 import { experiencePublicationBlocker, getProduct, resolveVariantPrice } from '~/server/utils/product-management'
 import type { CurrencyCode } from '~/shared/currencies'
+import { errorChainForTelemetry } from '~/shared/error-telemetry'
 
 interface GoalRow {
   id: string; intent: string; constraints: string | null; target_at: string | null; status: BusinessGoal['status']; strategy_json: string | null
@@ -172,7 +173,11 @@ async function marketingPages(db: DbClient, principal: MemberAccessPrincipal, or
       nativeUnavailable = true
       nativeSessions = null
       pages.length = 0
-      issues.push(`Website performance could not be read: ${error instanceof Error ? error.message : String(error)}`)
+      console.error('website_performance_read_failed', {
+        organization_id: principal.organizationId,
+        error_chain: errorChainForTelemetry(error),
+      })
+      issues.push('Website performance could not be loaded. Try again later.')
     }
   }
   for (const provider of ['google_ads', 'google_search_console'] as const) {
@@ -215,8 +220,8 @@ async function marketingPages(db: DbClient, principal: MemberAccessPrincipal, or
 export async function readBusinessRecommendations(db: DbClient, principal: MemberAccessPrincipal, input: { now?: Date; locationId?: string } = {}) {
   await authorize(db, principal)
   const now = input.now ?? new Date(), organizationId = principal.organizationId
-  const organization = await queryFirst<{ slug: string; name: string; vertical: string; timezone: string; default_currency: CurrencyCode; analytics_data_start_at: string | null }>(db,
-    'SELECT slug,name,vertical,timezone,default_currency,analytics_data_start_at FROM organization WHERE id=?', [organizationId])
+  const organization = await queryFirst<{ slug: string; name: string; vertical: string; status: string; timezone: string; default_currency: CurrencyCode; analytics_data_start_at: string | null }>(db,
+    'SELECT slug,name,vertical,status,timezone,default_currency,analytics_data_start_at FROM organization WHERE id=?', [organizationId])
   if (!organization) throw new HTTPError({ statusCode: 404, message: 'Organization not found' })
   if (input.locationId && !await queryFirst(db, 'SELECT id FROM business_locations WHERE id=? AND organization_id=?', [input.locationId, organizationId])) throw new HTTPError({ statusCode: 404, message: 'Location not found' })
   const goals = (await queryAllPages<GoalRow>(db, "SELECT id, intent, constraints, target_at, status, strategy_json, created_by_user_id, updated_by_user_id, created_at, updated_at FROM organization_goals WHERE organization_id = ? AND status = 'active' ORDER BY updated_at DESC, id DESC", [organizationId])).map(goalOf)
@@ -345,10 +350,37 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
         postEditorPath(organization.slug, 'new', input.locationId), 30, { goal: goalFor('social'), icon: 'i-lucide-camera' })
     }
   }
+  const firstRun = !input.locationId && organization.status === 'inactive' && Boolean(await queryFirst(db,
+    "SELECT 1 FROM onboarding_drafts WHERE organization_id=? AND status='committed' LIMIT 1", [organizationId]))
+  const canManagePayments = await roleAllows({ ...principal, permissions: { payments: ['integration'] } })
+  if (firstRun) {
+    const [domain, canConnectDomain, canUpdateBilling, canAddProduct] = await Promise.all([
+      queryFirst(db, "SELECT id FROM organization_domains WHERE organization_id=? AND type='custom' AND status<>'deleted' LIMIT 1", [organizationId]),
+      hasOrganizationEntitlement(principal.env, organizationId, 'custom_domains'),
+      roleAllows({ ...principal, permissions: { billing: ['update'] } }),
+      roleAllows({ ...principal, permissions: { products: ['create'] } }),
+    ])
+    if (!domain && (canConnectDomain || canUpdateBilling)) offer('domain.connect', organizationId,
+      'Connect a custom domain', 'Use your own website address.', `${base}/website/preferences/domains`, 120, { icon: 'i-lucide-globe' })
+
+    const firstProduct = {
+      lodging: ['stay', 'Add your first home', 'Start your listing.'],
+      experience: ['experience', 'Add your first experience', 'Give guests something to book.'],
+      restaurant: ['dish', 'Add your first dish', 'Start your menu.'],
+      service: ['service', 'Add a consultation', 'Give clients a way to request a consultation.'],
+    } as const
+    const nextProduct = firstProduct[organization.vertical as keyof typeof firstProduct]
+    if (canAddProduct && nextProduct && !products.some(product => product.kind === nextProduct[0])) {
+      const [kind, title, detail] = nextProduct
+      offer('product.create', organizationId, title, detail, kind === 'stay' ? firstHomeSetupPath(organization.slug) : `${productEditorPath(organization.slug, 'new')}?kind=${kind}`, 110,
+        { icon: 'i-lucide-list-checks' })
+    }
+  }
   const paymentGoal = goalFor('payments')
-  if (canOperate && (paymentGoal || organization.vertical === 'experience' && await hasOrganizationEntitlement(principal.env, organizationId, 'payments'))) {
+  const canRecommendBookingPayments = canOperate && (paymentGoal || organization.vertical === 'experience' && await hasOrganizationEntitlement(principal.env, organizationId, 'payments'))
+  if (canRecommendBookingPayments || firstRun && canManagePayments) {
     const unpaid: RecommendationProduct[] = []
-    for (const product of products.filter(product => product.online_payment_required === 0)) {
+    for (const product of canRecommendBookingPayments ? products.filter(product => product.online_payment_required === 0) : []) {
       const offering = await getProduct(db, organizationId, product.id)
       const locations = input.locationId ? [input.locationId] : [null, ...offering.locations.map(location => location.location_id)]
       if (offering.variants.some(variant => variant.active && locations.some(locationId => {
@@ -356,11 +388,15 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
         return price !== null && price.unit_amount > 0
       }))) unpaid.push(product)
     }
-    if (unpaid.length) {
+    if (unpaid.length || firstRun && canManagePayments) {
       const setup = await readStripeCheckoutSetup(db, organizationId, principal.env)
-      if (setup.missing.includes('payments.configuration')) issues.push('Payment setup is unavailable because the payment configuration is incomplete.')
+      if (unpaid.length && setup.missing.includes('payments.configuration')) issues.push('Payment setup is unavailable because the payment configuration is incomplete.')
       const waiting = setup.connected?.status === 'pending_review'
-      if (setup.missing.length && !waiting) offer('payments.connect', organizationId, setup.connected ? 'Finish your payment setup' : organization.vertical === 'service' ? 'Set up payments for your consultations' : 'Set up payments for your experiences',
+      const needsConnect = setup.missing.some(field => ['payments.account', 'payments.account_ready', 'payments.account_mode'].includes(field))
+      if (firstRun && canManagePayments && needsConnect && !waiting) {
+        offer('payments.connect', organizationId, setup.connected ? 'Finish setting up payments' : 'Set up payments',
+          'Connect with Stripe.', `${base}/payments/payout-method`, 130, { icon: 'i-lucide-credit-card' })
+      } else if (canManagePayments && unpaid.length && setup.missing.length && !waiting) offer('payments.connect', organizationId, setup.connected ? 'Finish your payment setup' : organization.vertical === 'service' ? 'Set up payments for your consultations' : 'Set up payments for your experiences',
         'Complete the existing Stripe setup before requiring payment at booking. A subscription alone does not activate payment acceptance.',
         `${base}/payments/payout-method`, 100, { goal: paymentGoal, icon: 'i-lucide-credit-card' })
       if (!setup.missing.length) for (const product of unpaid) offer('product.payment', product.id, `Take payment when ${organization.vertical === 'service' ? 'clients' : 'guests'} book “${product.name}”`,
@@ -434,6 +470,7 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
   }
   const unique = new Map<string, Candidate>()
   for (const candidate of candidates) {
+    if (firstRun && !candidate.requestId && !['payments.connect', 'domain.connect', 'product.create', 'product.readiness'].includes(candidate.operation)) continue
     const key = candidate.operation === 'post.create' ? 'post.create' : candidate.operation === 'stay.gap' ? `stay.gap:${candidate.productId}` : `${candidate.operation}:${candidate.subjectId}`, previous = unique.get(key)
     if (!previous || candidate.rank > previous.rank) unique.set(key, candidate)
   }

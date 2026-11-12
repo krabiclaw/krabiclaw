@@ -1586,7 +1586,7 @@ test('a host previews the saved guest page around an unsaved draft without recor
     const url = new URL(outgoing.url())
     if (outgoing.frame() !== page.mainFrame() && ['/api/analytics/track', '/api/analytics/interactions', '/api/public/conversion-events'].includes(url.pathname)) previewCollections.push(url.pathname)
   })
-  const previewURL = await test.step('the listing preview shows marketing details without post-booking rules and safety', async () => {
+  const previewURL = await test.step('the listing preview shows marketing and safety details without post-booking rules', async () => {
     await expect(previewLink).toHaveAttribute('href', /editMode=preview/)
     await previewLink.click()
     await expect(page).toHaveURL(url => url.pathname.endsWith(`/products/${productId}/name`) && url.searchParams.get('location_id') === location.id && url.searchParams.get('editMode') === 'preview' && url.searchParams.get('previewViewport') === 'desktop')
@@ -1602,7 +1602,8 @@ test('a host previews the saved guest page around an unsaved draft without recor
     }
     await expect(preview.locator('article')).toContainText('6 guests')
     await expect(preview.locator('article')).toContainText('Add your dates to see the cancellation policy for your stay.')
-    await expect(preview.locator('#things-to-know')).toHaveCount(0)
+    const guestSafety = preview.locator('#things-to-know')
+    await expect(guestSafety.getByRole('listitem')).toHaveText([...authoredSafetyLines, 'Smoke alarm'])
     const productURL = new URL(previewURL)
     productURL.pathname = productURL.pathname.replace(/^\/stays\//, '/api/public/stays/')
     const publicRead = await readLocalTenant(request, slug, productURL)
@@ -1615,7 +1616,6 @@ test('a host previews the saved guest page around an unsaved draft without recor
     } })
     expect(publicProduct.details).toEqual(pageSeed.data!.product.details)
     await expect(preview.getByRole('heading', { name: 'Safety & property', exact: true })).toHaveCount(0)
-    for (const line of authoredSafetyLines) await expect(preview.getByText(line, { exact: true })).toHaveCount(0)
     await expect(preview.getByText('This draft camera detail must be cleared by No.', { exact: true })).toHaveCount(0)
     for (const key of ['pets_allowed', 'events_allowed', 'smoking_allowed', 'quiet_hours', 'commercial_photography_allowed', 'quiet_hours_start', 'quiet_hours_end', 'house_rules']) expect(publicProduct.details).not.toHaveProperty(key)
     await expect(preview.getByRole('heading', { name: 'House rules', exact: true })).toHaveCount(0)

@@ -1,22 +1,29 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { currencyForCountry, currencyFractionDigits, isCurrencyCode } from '../../shared/currencies.ts'
-import { ONBOARDING_STEPS, type OnboardingFlowState } from '../../composables/useOnboardingFlow.ts'
+import { onboardingFlow } from '../../server/utils/onboarding-flow.ts'
 
-const step = (id: string) => {
-  const found = ONBOARDING_STEPS.find(entry => entry.id === id)
+const answers = {
+  vertical: 'restaurant' as const,
+  source: 'manual' as const,
+  placeId: null,
+  name: 'Cozy Cafe',
+  sourceLocale: 'en',
+  streetAddress: '',
+  city: '',
+  country: '',
+  timezone: 'Asia/Bangkok',
+  currency: null,
+  phone: '',
+  productCount: 0,
+  heroHeadline: '',
+}
+
+const step = (id: string, overrides: Partial<Parameters<typeof onboardingFlow>[0]> = {}) => {
+  const found = onboardingFlow({ ...answers, ...overrides }).steps.find(entry => entry.id === id)
   assert.ok(found, `the flow has no '${id}' step`)
   return found
 }
-
-// The wizard's authored answers, with only the fields these assertions read.
-// An address may be partial; the currency still needs an explicit answer.
-const answers = (over: Partial<OnboardingFlowState['details']> = {}) => ({
-  details: {
-    name: 'Cozy Cafe', city: 'Krabi', streetAddress: '123 Main Street', addressLine2: '',
-    region: 'Krabi', postalCode: '', country: '', phone: '', currency: null, ...over,
-  },
-} as OnboardingFlowState)
 
 test('any ISO 4217 code is a currency; Stripe answers which ones the business can charge in', () => {
   for (const code of ['THB', 'USD', 'KRW', 'CHF', 'NZD', 'MXN', 'BRL', 'AED', 'ZAR', 'NGN']) assert.equal(isCurrencyCode(code), true, code)
@@ -42,26 +49,21 @@ test('proposes a default currency for known countries without restricting option
 })
 
 test('the optional location step accepts authored partial addresses', () => {
-  const location = step('location')
-  assert.equal(location.optional, true)
-  const noAddress = { country: '', city: '', streetAddress: '' }
-  assert.equal(location.complete(answers(noAddress)), false)
+  assert.equal(step('location').canAdvance, true)
+  assert.equal(step('location').nextLabel, 'Skip for now')
   for (const authored of [{ country: 'TH' }, { city: 'Krabi' }, { streetAddress: '123 Main Street' }]) {
-    assert.equal(location.complete(answers({ ...noAddress, ...authored })), true)
+    assert.equal(step('location', authored).nextLabel, 'Next')
   }
 })
 
 test('the currency step is not complete until the currency is answered', () => {
-  const currency = step('currency')
-  assert.equal(currency.complete(answers({ currency: null })), false)
-  assert.equal(currency.complete(answers({ currency: 'THB' })), true)
-  // It is not optional, so the flow cannot be walked past it without an answer.
-  assert.notEqual(currency.optional, true)
-  assert.notEqual(currency.intro, true)
+  assert.equal(step('currency').canAdvance, false)
+  assert.equal(step('currency', { currency: 'THB' }).canAdvance, true)
+  assert.equal(onboardingFlow(answers).resumeStep, 'currency')
 })
 
 test('the currency step is asked before anything is priced', () => {
-  const order = ONBOARDING_STEPS.map(entry => entry.id)
+  const order = onboardingFlow(answers).steps.map(entry => entry.id)
   assert.ok(order.indexOf('currency') > order.indexOf('location'), 'the country must be answered first')
   assert.ok(order.indexOf('currency') < order.indexOf('products'), 'prices must not be entered first')
   assert.ok(order.indexOf('currency') < order.indexOf('review'))

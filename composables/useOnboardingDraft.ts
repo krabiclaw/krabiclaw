@@ -1,7 +1,8 @@
 import { applicationFetch } from '~/composables/dashboardFetch'
 import { isRecord } from '~/utils/api-clients'
 import { parseOpeningHours, parseSpecialHours, type OpeningHours } from '~/shared/reservation-hours'
-import { useOnboardingState, type OnboardingPlacePreview } from '~/composables/useOnboardingFlow'
+import type { OnboardingFlow } from '~/shared/onboarding-flow'
+import { emptyOnboardingState, useOnboardingState, type OnboardingPlacePreview } from '~/composables/useOnboardingFlow'
 import { formatPostalAddress, postalAddressFromAnswers } from '~/utils/postal-address'
 import { isOrganizationFontPreset } from '~/shared/organization-fonts'
 import { LOGO_SHAPES, type LogoShape } from '~/shared/media-placement-contract'
@@ -79,6 +80,26 @@ export function useOnboardingDraft() {
         category: product.category.trim(),
         unit_amount: product.amountMinor,
       }))
+  }
+
+  const flowAnswers = computed(() => {
+    const { vertical, source, placeId, details, hours, products, brand } = state.value
+    const { name, sourceLocale, streetAddress, city, country, currency, phone } = details
+    return {
+      vertical, source, placeId, name, sourceLocale, streetAddress, city, country, currency, phone,
+      timezone: hours.timezone, productCount: products.length, heroHeadline: brand.heroHeadline,
+    }
+  })
+
+  function readFlow(answers = flowAnswers.value, signal?: AbortSignal) {
+    return applicationFetch<OnboardingFlow>('/api/dashboard/onboarding/flow', {
+      method: 'POST',
+      body: answers,
+      signal,
+      validate: (value): value is OnboardingFlow => isRecord(value)
+        && Array.isArray(value.steps) && typeof value.resumeStep === 'string'
+        && typeof value.canSave === 'boolean' && Array.isArray(value.businessTypes),
+    })
   }
 
   /** Save the answers so far. Every step calls this; the site follows the draft. */
@@ -162,10 +183,11 @@ export function useOnboardingDraft() {
         { method: 'POST', body: { updated_at: state.value.draftRevision }, validate: (value): value is Record<string, unknown> => isRecord(value) },
       )
       if (res.success !== true || typeof res.organization_slug !== 'string' || !res.organization_slug
+        || typeof res.next_url !== 'string' || !res.next_url.startsWith('/dashboard/')
         || typeof res.subdomain !== 'string' || !res.subdomain || typeof res.organization_id !== 'string' || !res.organization_id) {
         throw new Error(typeof res.error === 'string' ? res.error : 'The published website could not be read.')
       }
-      state.value.created = { organization_slug: res.organization_slug, subdomain: res.subdomain }
+      state.value.created = { organization_slug: res.organization_slug, subdomain: res.subdomain, next_url: res.next_url }
       trackOrganizationCreated(res.organization_id)
       return true
     } catch (cause) {
@@ -247,7 +269,10 @@ export function useOnboardingDraft() {
       validate: (value): value is Record<string, unknown> => isRecord(value),
     })
     const draft = isRecord(res.draft) ? res.draft : null
-    if (!draft) return false
+    if (!draft) {
+      state.value = emptyOnboardingState()
+      return false
+    }
     if (typeof draft.draft_id !== 'string' || typeof draft.updated_at !== 'string') throw new Error('Saved website draft identity and revision are unavailable')
     const details = isRecord(draft.details) ? draft.details : {}
     const config = isRecord(draft.config) ? draft.config : {}
@@ -316,5 +341,5 @@ export function useOnboardingDraft() {
     return true
   }
 
-  return { busy, error, save, seedFromPlace, activate, restore, activeDraftOrganizationId, discard, addressSummary }
+  return { busy, error, flowAnswers, readFlow, save, seedFromPlace, activate, restore, activeDraftOrganizationId, discard, addressSummary }
 }

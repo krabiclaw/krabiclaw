@@ -1,14 +1,12 @@
 <template>
-  <OnboardingStepScreen v-if="step" :step="step" @advance="emit('advance')" @uploading="emit('uploading', $event)" />
+  <OnboardingStepScreen :step="step" @advance="emit('advance')" @uploading="emit('uploading', $event)" />
 </template>
 
 <script setup lang="ts">
 import OnboardingStepScreen from '~/lib/components/workspace/onboarding/OnboardingStepScreen.vue'
-import { onboardingStep } from '~/composables/useOnboardingFlow'
+import type { OnboardingStep } from '~/shared/onboarding-flow'
 
 definePageMeta({ layout: 'dashboard' })
-
-const route = useRoute()
+defineProps<{ step: OnboardingStep }>()
 const emit = defineEmits<{ advance: []; uploading: [value: boolean] }>()
-const step = computed(() => onboardingStep(String(route.params.step ?? '')))
 </script>

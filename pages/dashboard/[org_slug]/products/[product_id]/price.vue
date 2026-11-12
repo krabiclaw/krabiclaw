@@ -3,7 +3,6 @@
     v-if="nightlyPrice"
     id="product-price"
     title="Nightly price"
-    lead="Your base price for one night."
     desktop-cancel
     :saving="p.saving.value"
     :disabled="p.saveDisabled.value"
@@ -16,6 +15,16 @@
       <UFormField :label="`Per night (${p.currency})`">
         <UInput v-model="p.form.variants[0].price_major" inputmode="decimal" class="w-full" :ui="{ base: 'py-6 text-4xl text-center font-semibold' }" data-testid="product-price" />
       </UFormField>
+      <UFormField :label="`Weekend price (${p.currency})`" hint="Friday and Saturday nights">
+        <UInput v-model="p.form.weekend_price_major" inputmode="decimal" placeholder="Same as base price" class="w-full" />
+      </UFormField>
+      <div class="space-y-4 border-t border-default pt-5">
+        <h2 class="font-semibold">Direct booking discounts</h2>
+        <UFormField v-for="(discount, key) in STAY_DIRECT_DISCOUNTS" :key="key" :label="discount.label" :description="discount.detail">
+          <UInputNumber :model-value="p.form.direct_discounts[key] ?? 0" :min="0" :max="99" :increment="false" :decrement="false" class="w-24"
+            @update:model-value="p.form.direct_discounts[key] = $event ?? 0" />
+        </UFormField>
+      </div>
       <UButton
         :to="{ name: 'dashboard-org_slug-calendar', params: { org_slug: String(route.params.org_slug) }, query: { product_id: p.product.value.id } }"
         label="Open nightly calendar"
@@ -33,6 +42,7 @@
 
 <script setup lang="ts">
 import EditorNavigationList, { type EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
+import { STAY_DIRECT_DISCOUNTS } from '~/shared/bookings'
 import { productEditorKey } from '~/components/dashboard/ProductEditorPage.vue'
 
 definePageMeta({ layout: 'dashboard' })

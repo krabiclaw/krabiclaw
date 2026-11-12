@@ -15,8 +15,8 @@ the presentation can evolve. Organization creation and account personalization
 are the first experience to review for a warmer, more enjoyable CMS. Build on
 the existing setup, brand controls and real-site preview.
 
-Booky Boo currently serves lodging on iOS; eventual web/app parity means shared
-domain behavior, authorization and outcome meanings. The owner reports that
+Booky Boo serves lodging on iOS and opens the shared web flow for workspace
+creation. It refreshes the workspace list when the app returns to the foreground. The owner reports that
 Kikuzuki, NCLS and Pottery House use Android, with active usage currently
 reported for Kikuzuki's messenger inbox and NCLS's MCP blog updates. These are
 owner-reported observations, not measured adoption or validation of a redesign.
@@ -30,7 +30,7 @@ Evaluate the CMS on Android as well as desktop.
 - Personal name/photo, an organization's brand and a member's public
   professional profile have different owners. Connect their entrances where
   useful while preserving their explicit scope and canonical operations.
-- `ONBOARDING_STEPS` owns sequence, applicability and completion conditions;
+- `server/utils/onboarding-flow.ts` owns sequence, applicability and completion conditions;
   `useOnboardingDraft` owns draft save, restore and activation calls. Brand
   media uploads use the existing draft-media operation and update its revision.
   The shell and step controls render those decisions. A reskin adds no
@@ -48,12 +48,12 @@ Evaluate the CMS on Android as well as desktop.
 
 | Moment | Existing surface / owner | Outcome and independent readback |
 | --- | --- | --- |
-| Arrive or resume | `/dashboard/onboarding` welcome; onboarding shell and active-draft reader | **Get started** opens type; **Pick up where you left off** opens the persisted draft's applicable incomplete step. Welcome arrival and the start/resume action are distinct observations. |
-| Describe the organization | `/dashboard/onboarding/:step`; `ONBOARDING_STEPS` and `OnboardingStepScreen` | Collect type, language, name, optional address, required timezone and currency. Before the first save, answers are client state. |
+| Arrive or resume | `/dashboard/onboarding` welcome; onboarding shell and active-draft reader | New owners start on Business type. Owners with a saved draft land on the first incomplete required step, or review when the required answers are complete. |
+| Describe the organization | `/dashboard/onboarding/:step`; server flow projection and `OnboardingStepScreen` | Collect type, language, name, optional address, required timezone and currency. Before the first save, answers are client state. |
 | First save | Currency advance or Save & exit when required details are complete; `useOnboardingDraft.save()` and shared provisioning | Create one real pending Better Auth organization. Read its draft and tenant through the existing readers; missing required state is an error. |
 | Make it theirs | Contact, applicable products and look steps; existing location/catalog/brand writers | Save answers to that same organization. Read the saved content and its real-site preview. Legal Services and lodging skip initial products. |
 | Inspect the site | Existing desktop preview pane and narrow-screen Site preview action | Render the pending tenant with its preview access. A preview is distinct from publication. |
-| Activate | Review; `useOnboardingDraft.activate()` and `activateOrganization` | Activate the organization, set session scope and close the draft. Independently load the public site and organization state. |
+| Activate | Review; `useOnboardingDraft.activate()` and `activateOrganization` | Activate the organization, set session scope and close the draft. Verify the private site on Today and anonymously, then publish it using Website status. |
 | Personalize the account | `/dashboard/account/profile/personal`; `AccountProfilePage` | Save name through Better Auth, photo through the account-avatar operation, and phone through verification. Read the session afresh and inspect the rendered profile. |
 
 ### Bounded first presentation work
@@ -129,7 +129,16 @@ customer-site renderer and its stay routes. Creating the site does not create a
 home or enable online payments: homes and their calendars are configured after
 site setup, and direct paid stay bookings require Business and Stripe setup.
 
-One screen per question, one question per URL, under `/dashboard/onboarding`: `type → language → business → location → hours → currency → contact → [products] → look → review`. `ONBOARDING_STEPS` in `composables/useOnboardingFlow.ts` is the only place that order is written down — Back, Next, the skipped steps and where a resumed draft lands all read it. `composables/useOnboardingDraft.ts` owns every server call; the step screens own presentation and nothing else.
+Manual lodging setup in Catalog uses the same server steps on web and iOS:
+address, property, space, map pin, location sharing, capacity, amenities,
+photos, title, description highlights, description, minimum stay, prices,
+discounts, and safety disclosures. Finish creates a private listing. The public
+listing shows the saved safety details before guests book.
+The listing editor owns publication and subsequent changes. Weekly, monthly,
+and last-minute discounts apply to direct booking quotes, using the largest
+eligible percentage. They do not change channel rates.
+
+One screen per question, one question per URL, under `/dashboard/onboarding`: `type → language → business → location → hours → currency → contact → [products] → look → review`. The welcome route renders Business type with no answer selected. A saved draft opens at its resume step. `POST /api/dashboard/onboarding/flow` evaluates the current answers and returns the ordered steps, their labels, whether they can advance or save, and the resume step. It does not write the draft. Web renders that result and Booky Boo opens the same authenticated web flow.
 
 The header offers **Exit** while the required creation details are incomplete,
 with explicit notice that answers have not been saved. Once those details are
@@ -143,7 +152,7 @@ upload must finish before saving or navigating away from its editor.
 - The `business` step starts with a manual Name field and an **Import from Google Maps** action. Import opens `lib/components/workspace/location/GooglePlacePicker.vue`, the same picker add-location and Settings → Integrations → Google Maps use. It calls Places API (New) Autocomplete through `POST /api/dashboard/google-places/autocomplete` and, for the chosen prediction, Place Details through `POST /api/dashboard/google-places/details`, both with one client-generated session token that the Details call ends; the API key stays on the server. Picking a prediction is the confirmation: it records the `google_place_id` and seeds the location, contact and hours screens, which stay editable. **Enter details manually** returns to the manual path with the typed name. No surface accepts a Google Maps link.
 - The first save requires the creation details to be complete, normally on leaving the currency step or through **Save & exit** once those answers are available. It creates the active draft through `POST /api/dashboard/onboarding/drafts/active`: a manual draft, or a Google Places draft carrying only the `google_place_id`, for which the server fetches the full Place Details, reviews included. That same first save also provisions the **real tenant**, pending, as a new organization named after the brand, created through Better Auth with the currency and timezone it cannot exist without (both required organization fields, so the hours and currency steps come before it), through the same `provisionOrganization()` the only other entry point uses, `POST /api/organizations`, with `activate: false`. Both pass the target organization explicitly — `/dashboard/onboarding` is the "New Organization" entry point, so a draft never carries one and the first save creates it and records it on the draft; `POST /api/organizations` takes the organization from the dashboard route's `org` query or an explicit `organization_id`.
 - Every following save re-applies the whole draft to that site through `applyOnboardingDraftToSite()`, which is a full rebuild and idempotent. The preview pane frames the site itself, on its own subdomain, carrying the site's preview token — there is no separate draft renderer. The site's address is claimed at the first save and does not change if the brand name does.
-- `activate()` makes it public via `POST /api/dashboard/onboarding/drafts/[draft_id]/activate`: it re-applies the draft, flips `onboarding_status` to `active`, makes the organization the session's active one, and closes the draft. Abandoning the draft removes the pending site through `DELETE /api/dashboard/onboarding/drafts/active` (see [Deleting a tenant](#deleting-a-tenant)).
+- `activate()` commits it as a private website via `POST /api/dashboard/onboarding/drafts/[draft_id]/activate`: it re-applies the draft, flips `onboarding_status` to `active`, makes the organization the session's active one, and closes the draft. Today previews the site and opens Website status to make it public on its included address. Abandoning the draft removes the pending site through `DELETE /api/dashboard/onboarding/drafts/active` (see [Deleting a tenant](#deleting-a-tenant)).
 - Adding a location to an *existing* organization walks the same step table, as the `add-location` flow: a strict subset — `business → location → hours → contact → review`, with no business type, no brand and no activation, because the organization already has all three. It is not routed; `pages/dashboard/[org_slug]/locations/new.vue` is the whole walk and holds the current step itself. It writes nothing until the last step, and creates exclusively through `POST /api/dashboard/locations`, which takes either the picked `google_place_id` (fetching Place Details and importing its reviews) or a typed `name`.
 
 ## Content state model
@@ -164,7 +173,15 @@ Generated placeholder rows are no longer part of onboarding or site creation. Te
 | 7 | Story — about, founder story, FAQ seeds | Optional | Dashboard CMS |
 | 8 | Channels — Facebook/Instagram, ChatGPT app install, ChowBot intro | Optional | Dashboard (not part of the onboarding flow) |
 | 9 | Team — invite admins/editors | Optional, explicitly skippable | Dashboard settings |
-| 10 | Final review and **Create my site** | Required to publish on the included site address; a custom domain is optional after setup | `/dashboard/onboarding/review`; optional domain setup at `/dashboard/[orgSlug]/website/domains` |
+| 10 | Final review and **Create my site** | Creates a private site on the included address; the owner can publish from Today | `/dashboard/onboarding/review`; optional domain setup at `/dashboard/[orgSlug]/website/preferences/domains` |
+
+| Screen | Previous copy | Current copy |
+| --- | --- | --- |
+| Business | What kind of business is this? / What language is your website in? / What is your business called? | Business type / Website language / Business name |
+| Place | Where should guests find you? / When are you open? / What currency do you price in? / What is your business contact number? | Business address / Hours and time zone / Pricing currency / Business phone |
+| Offer | What is on the menu? / What can guests book? / Last look at the front of house | Menu / Experiences / Website design |
+| Review | Here is your site so far, with status badges on each answer | Review your website. Show completed answers and the private site's address. |
+
 
 ### Location-level (once per location, including the first)
 
@@ -174,6 +191,13 @@ Only asked again on **add-location** (the `add-location` flow), which never re-c
 - Notification routing for this location
 - Location hero/media (uses location media only; it remains empty until supplied)
 - Optional location-specific notes
+
+After creating a lodging website, Catalog shows **Add your first home** and
+**Import from Airbnb**. Booky Boo uses the same choices from the stay-homes
+response. Manual setup starts with the address, then asks for property type,
+rooms and capacity. Both clients use the steps returned by the server and save
+the home as an unpublished draft. Airbnb sync requires Business and opens the
+existing connection and listing picker.
 
 Lodging homes have their own addresses and timezones. Add a home as a draft,
 configure its listing and nightly calendar, then publish it. For Airbnb listings,

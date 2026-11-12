@@ -90,6 +90,10 @@ export function catalogPath(orgSlug: string, locationId?: string | null): string
   return scopedTo(`${organizationBase(orgSlug)}/products`, locationId)
 }
 
+export function firstHomeSetupPath(orgSlug: string): string {
+  return `/dashboard/${encodeURIComponent(orgSlug)}/products?kind=stay`
+}
+
 export function productEditorPath(orgSlug: string, productId: string, locationId?: string | null): string {
   return scopedTo(`${organizationBase(orgSlug)}/products/${encodeURIComponent(productId)}`, locationId)
 }

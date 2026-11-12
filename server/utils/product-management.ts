@@ -845,7 +845,7 @@ function stayPropertyType(stay: Record<string, unknown>): Pick<ProductStayConfig
 }
 
 /** What a home is and offers, checked against the stay vocabularies. A field left out is unsaid. */
-function planStayListing(stay: Record<string, unknown>): Pick<ProductStayConfig, StayListingField> {
+export function planStayListing(stay: Record<string, unknown>): Pick<ProductStayConfig, StayListingField> {
   const answers = plannedAmenityAnswers([], stay)
   const totalFloors = stayCount(stay, 'total_floors', 1, Number.MAX_SAFE_INTEGER, 1)
   const listingFloor = stayCount(stay, 'listing_floor', 1, Number.MAX_SAFE_INTEGER, 1)
@@ -1088,8 +1088,8 @@ async function stayBookingWrites(db: DbClient, input: {
   const patch: Parameters<typeof prepareProductBookingConfig>[1]['patch'] = {}
   for (const field of NIGHTS_BOOKING_FIELDS) if (named(field)) Object.assign(patch, { [field]: stay[field] })
   if (named('calendar_rules')) {
-    const minimums = stay.calendar_rules?.day_of_week_min_nights
-    patch.calendar_rules = minimums ? { day_of_week_min_nights: minimums } : null
+    const { weekend_price_minor: _weekendPrice, ...bookingRules } = stay.calendar_rules ?? {}
+    patch.calendar_rules = parseStayCalendarRules(bookingRules)
   }
   if (named('max_guests')) patch.default_capacity = stay.max_guests
   if (named('assigned_member_id')) patch.assigned_member_id = stay.assigned_member_id

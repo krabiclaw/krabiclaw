@@ -1,3 +1,4 @@
+import { onboardingOffersProducts } from '~/server/utils/onboarding-flow'
 import { platformLocale } from '~/shared/platform-locales'
 import { parseOpeningHours, parseSpecialHours, type OpeningHours, type SpecialHours } from '~/shared/reservation-hours'
 import type { OrganizationVertical } from '~/utils/vertical-copy'
@@ -334,7 +335,7 @@ export function buildOnboardingDraftPayload(input: {
   brandDraft?: DraftBrandInput | null
   products?: DraftProductInput[] | null
 }): OnboardingDraftPayload {
-  if (input.products?.length && input.vertical !== 'restaurant' && input.vertical !== 'experience') throw new HTTPError({ statusCode: 400, statusMessage: 'This business type adds its offerings after website setup' })
+  if (input.products?.length && !onboardingOffersProducts(input.vertical)) throw new HTTPError({ statusCode: 400, statusMessage: 'This business type adds its offerings after website setup' })
   const source_locale = input.details.source_locale ? platformLocale(input.details.source_locale) : null
   if (!source_locale) throw new HTTPError({ statusCode: 400, statusMessage: 'Choose a supported website language' })
   const brandName = input.details.name || input.name

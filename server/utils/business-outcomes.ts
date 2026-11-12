@@ -407,6 +407,15 @@ export async function readBusinessProgressReference(
   const result = async (evidence: BusinessProgressEvidence, sources: unknown = evidence): Promise<BusinessProgressReference> => ({
     ...input, evidence: progressWire(evidence), evidence_revision: await creationRequestHash({ operation: input.operation, subjectId: input.subject_id, sources }),
   })
+  if (input.operation === 'domain.connect' || input.operation === 'product.create') {
+    if (input.subject_id !== principal.organizationId) throw missing()
+    if (input.operation === 'domain.connect') {
+      const domains = await queryAll<{ id: string }>(db, "SELECT id FROM organization_domains WHERE organization_id=? AND type='custom' AND status<>'deleted' ORDER BY id", [principal.organizationId])
+      return result({ kind: 'domain_setup', domainIds: domains.map(domain => domain.id) })
+    }
+    const products = await queryAll<{ id: string }>(db, "SELECT id FROM products WHERE organization_id=? AND active=1 AND kind<>'table' ORDER BY id", [principal.organizationId])
+    return result({ kind: 'catalog_setup', productIds: products.map(product => product.id) })
+  }
   if (['article.create', 'post.create', 'social.connect', 'google_ads.connect', 'payments.connect'].includes(input.operation)) {
     if (input.subject_id !== principal.organizationId && input.operation !== 'post.create') throw missing()
     const organization = await queryFirst<{ updated_at: string; slug: string }>(db, 'SELECT updated_at, slug FROM organization WHERE id = ?', [principal.organizationId])

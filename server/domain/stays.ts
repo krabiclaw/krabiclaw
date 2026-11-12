@@ -1,3 +1,4 @@
+import { PUBLISHED_PROFILE_SQL } from '~/shared/member-scheduling'
 import { HTTPError } from 'nitro'
 import { bookingStatusQuery } from '~/server/domain/bookings'
 import { CURRENT_GUEST_SQL } from '~/server/domain/conversations'
@@ -5,10 +6,10 @@ import { notifyStayReady, stayReadyRevisionQueries, stayReadyTaskQueries, turnov
 import { PRODUCT_LIMITS } from '~/shared/product-limits'
 import { formAnswersFingerprint, formAnswerSnapshotsSchema, formQuestionsRevision, parseStoredFormQuestions, type FormAnswerSnapshot, type FormQuestion } from '~/shared/form-questions'
 import { acceptFormAnswers } from '~/server/domain/form-questions'
-import { AVAILABILITY_PAGE_DAYS, MAX_STAY_NIGHTS, NIGHT_PRICE_CHANGE_PERCENT, STAY_CALENDAR_DAYS, changeNightPrice, parseStayCalendarRules, resolveStayNightPolicy, type StayCalendarRules, STAY_CHANNELS, STAY_CHANNEL_LABELS, isChannelManagedStay, STAY_PAYMENT_METHODS, stayGuestFirstName, type StayChannel, type StayPaymentMethod } from '~/shared/bookings'
+import { AVAILABILITY_PAGE_DAYS, MAX_STAY_NIGHTS, NIGHT_PRICE_CHANGE_PERCENT, STAY_CALENDAR_DAYS, STAY_DIRECT_DISCOUNTS, stayChannelCalendarRules, changeNightPrice, parseStayCalendarRules, resolveStayNightPolicy, type StayCalendarRules, STAY_CHANNELS, STAY_CHANNEL_LABELS, isChannelManagedStay, STAY_PAYMENT_METHODS, stayGuestFirstName, type StayChannel, type StayPaymentMethod } from '~/shared/bookings'
 import { loadOwnerPictures } from '~/server/notifications/hero'
 import { d1JsonStringSet, execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
-import { assertRoleAllows, assignedMemberSql, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
+import { assertResponsibleMember, assertRoleAllows, assignedMemberSql, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import { organizationEventQuery, type OrganizationEvent } from '~/server/utils/organization-events'
 import { createLocation, updateLocation, type UpdateLocationInput } from '~/server/utils/location-management'
 import { liveHomeSql } from '~/server/utils/billing'
@@ -25,7 +26,7 @@ import { validateProductDetails, validateStayAlarmDetails, stayHouseRuleLines } 
 import { staySafetyLines, stayAlarmLines } from '~/shared/stay-safety'
 import { formatCalendarDate, formatTime, formatTimestamp, isValidTimezone, localDateAt, localDateTimeToInstant } from '~/utils/timezone'
 import { createProduct, getProduct, readStayCalendarRules, setProductPublication, stayImportWrittenQuery, stayWeekendPriceSql, updateProduct, type StayImportWrite } from '~/server/utils/product-management'
-import type { Product, UpdateProductInput } from '~/server/types/products'
+import type { Product, ProductStayConfig, UpdateProductInput } from '~/server/types/products'
 import { createGuestUser, type CloudflareEnv } from '~/server/utils/auth'
 import { currencyFractionDigits, isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import { selectPrice, type Price, type PriceTaxBehavior } from '~/shared/prices'
@@ -205,6 +206,7 @@ export interface StayHome {
   calendar_rules: StayCalendarRules | null
   /** The product's description, the listing text guests read; empty when the host has written none. */
   description: string
+  host_profile_published: boolean
   /** Whether the home is listed on the site: its product's publication there. */
   published: boolean
   /** Whether the home is live, so billed: active at its active location, and published or syncing with Airbnb. A home not live is a free draft. */
@@ -446,6 +448,8 @@ async function stayHomesWhere(db: DbClient, organizationId: string, productId: s
            c.listing_type, c.total_floors, c.listing_floor, c.year_built, c.property_size, c.property_size_unit, c.bedrooms, c.beds, c.bathrooms, c.amenities,
            b.cancellation_policy, b.long_term_cancellation_policy, c.check_in_method, c.check_in_instructions, c.wifi_network, c.wifi_password,
            c.directions, c.house_manual, c.checkout_instructions, b.assigned_member_id, b.questions,
+           EXISTS(SELECT 1 FROM member_scheduling ms WHERE ms.organization_id = c.organization_id
+             AND ms.member_id = b.assigned_member_id AND ${PUBLISHED_PROFILE_SQL}) AS host_profile_published,
            COALESCE((SELECT pp.published FROM product_publications pp WHERE pp.organization_id = c.organization_id AND pp.product_id = c.product_id), 0) AS published,
            ${liveHomeSql('p')} AS live, m.enabled AS channel_enabled, m.import_stage AS channel_stage, m.listing_id AS airbnb_listing_id
       FROM product_stay_configs c
@@ -501,6 +505,7 @@ async function stayHomesWhere(db: DbClient, organizationId: string, productId: s
       wifi_network: nullableText(row.wifi_network), wifi_password: nullableText(row.wifi_password),
       directions: nullableText(row.directions), house_manual: nullableText(row.house_manual),
       checkout_instructions: JSON.parse(String(row.checkout_instructions)) as StayCheckoutInstruction[],
+      host_profile_published: Number(row.host_profile_published) === 1,
       assigned_member_id: row.assigned_member_id === null ? null : String(row.assigned_member_id),
       ...(() => { const questions = parseStoredFormQuestions(String(row.questions)); return { questions, questions_revision: formQuestionsRevision(questions) } })(),
       channel: row.channel_stage === null ? null : {
@@ -591,6 +596,9 @@ export interface NewStayHome {
   max_guests: number
   min_nights: number
   calendar_rules?: StayCalendarRules | null
+  listing?: Pick<ProductStayConfig, 'property_type_group' | 'property_type' | 'bedrooms' | 'beds' | 'bathrooms'> & Partial<Pick<ProductStayConfig, 'listing_type' | 'amenities'>>
+  description?: string
+  details?: Parameters<typeof createProduct>[1]['product']['details']
   base_price_minor: number | null
   /** Left out, a new home starts on Airbnb's own: NEW_HOME_CANCELLATION_POLICIES. */
   cancellation_policy?: StayCancellationPolicy | null
@@ -652,7 +660,7 @@ export function stayHomeInput(body: Record<string, unknown>): NewStayHome {
   }
   const home: NewStayHome = {
     name: name(true)!, ...(Object.hasOwn(body, 'internal_name') ? { internal_name: text('internal_name', PRODUCT_LIMITS.name, true)! } : {}), timezone: timezone(true)!,
-    ...homeAddress(body, ''),
+    ...homeAddress(body),
     phone: text('phone', 32, false), email: text('email', 254, false),
     check_in_time: time('check_in_time', false), check_in_end_time: time('check_in_end_time', false), check_out_time: time('check_out_time', false),
     max_guests: maxGuests(true)!, min_nights: minNights(true)!,
@@ -675,8 +683,12 @@ function homeCalendarRules(value: unknown): StayCalendarRules | null {
   }
 }
 
+export function stayHomeSetupAddress(body: Record<string, unknown>) {
+  return { ...homeAddress(body), timezone: homeDetails(body).timezone(true)! }
+}
+
 /** A home's address read from a request; each problem names its field under the prefix. */
-function homeAddress(body: Record<string, unknown>, prefix: string): Pick<NewStayHome, 'address' | 'city' | 'state' | 'country' | 'zip_code'> {
+function homeAddress(body: Record<string, unknown>, prefix = ''): Pick<NewStayHome, 'address' | 'city' | 'state' | 'country' | 'zip_code'> {
   const { text } = homeDetails(body)
   const named = <T>(read: () => T): T => {
     try { return read() } catch (error) {
@@ -824,7 +836,7 @@ export async function updateStayHome(env: CloudflareEnv, db: DbClient, access: S
     if (price !== null) patch.variants = [{ id: variant.id, prices: [base ? { id: base.id, unit_amount: price } : { unit_amount: price, location_id: home.location_id }] }]
     else if (base) patch.variants = [{ id: variant.id, prices_mode: 'replace', prices: variant.prices.filter(other => other.id !== base.id).map(other => ({ id: other.id })) }]
   }
-  const pushes = pricing || ('min_nights' in body && nights !== home.min_nights) || ('calendar_rules' in body && JSON.stringify(stay.calendar_rules) !== JSON.stringify(home.calendar_rules))
+  const pushes = pricing || ('min_nights' in body && nights !== home.min_nights) || ('calendar_rules' in body && JSON.stringify(stayChannelCalendarRules(stay.calendar_rules)) !== JSON.stringify(stayChannelCalendarRules(home.calendar_rules)))
   // Clearing an already absent base price still asks for channel completion,
   // but creates no product pricing patch for updateProduct to preflight.
   if (pushes && patch.variants === undefined && patch.stay?.min_nights === undefined) await requireChannelPush(db, env, access.organizationId, productId)
@@ -876,8 +888,26 @@ export async function updateStayHome(env: CloudflareEnv, db: DbClient, access: S
  * a location. A home added by hand and one imported from a channel are made
  * here, the same way. The key replays every write.
  */
-export async function createStayHome(env: Parameters<typeof createLocation>[0], db: DbClient, access: StayAccess, home: NewStayHome, idempotencyKey: string): Promise<StayHome> {
+export async function createStayHome(env: Parameters<typeof createLocation>[0], db: DbClient, access: StayAccess, home: NewStayHome, idempotencyKey: string, existingLocationId?: string): Promise<StayHome> {
   requireManager(access)
+  await assertResponsibleMember(db, access.organizationId, home)
+  const locationId = existingLocationId ?? await createStayHomeLocation(env, db, access, home, idempotencyKey)
+  const product = await createProduct(db, {
+    organizationId: access.organizationId, actor: { actorId: access.actorId }, idempotencyKey, env,
+    // On the site unpublished, like a product added in the editor, so it can carry photos and a page.
+    publication: { published: false },
+    product: {
+      kind: 'stay', name: home.name, ...(home.details === undefined ? {} : { details: home.details }), ...(home.description === undefined ? {} : { description: home.description }),
+      ...(home.base_price_minor === null ? {} : { variants: [{ name: home.name, prices: [{ unit_amount: home.base_price_minor, location_id: locationId }] }] }),
+      stay: { ...home.listing, ...(home.internal_name === undefined ? {} : { internal_name: home.internal_name }), location_id: locationId, check_in_time: home.check_in_time, check_in_end_time: home.check_in_end_time, check_out_time: home.check_out_time, max_guests: home.max_guests, min_nights: home.min_nights, calendar_rules: home.calendar_rules, assigned_member_id: home.assigned_member_id,
+        ...(home.cancellation_policy === undefined ? {} : { cancellation_policy: home.cancellation_policy }),
+        ...(home.long_term_cancellation_policy === undefined ? {} : { long_term_cancellation_policy: home.long_term_cancellation_policy }) },
+    },
+  })
+  return await readStayHome(db, access, product.id)
+}
+
+async function createStayHomeLocation(env: Parameters<typeof createLocation>[0], db: DbClient, access: StayAccess, home: NewStayHome, idempotencyKey: string) {
   const located = await createLocation(env, db as D1Database, access.organizationId, {
     title: home.name, timezone: home.timezone, phone: home.phone, email: home.email,
     address: postalAddress(home),
@@ -885,20 +915,7 @@ export async function createStayHome(env: Parameters<typeof createLocation>[0], 
   if (located.status !== 201) locationFailure(located)
   const location = 'location' in located.data ? located.data.location : undefined
   if (!location || typeof location.id !== 'string' || !location.id.trim()) fail(502, 'INVALID_LOCATION_RESPONSE', 'Location creation did not return the location id', 'data.location.id')
-  const locationId = location.id
-  const product = await createProduct(db, {
-    organizationId: access.organizationId, actor: { actorId: access.actorId }, idempotencyKey, env,
-    // On the site unpublished, like a product added in the editor, so it can carry photos and a page.
-    publication: { published: false },
-    product: {
-      kind: 'stay', name: home.name,
-      ...(home.base_price_minor === null ? {} : { variants: [{ name: home.name, prices: [{ unit_amount: home.base_price_minor, location_id: locationId }] }] }),
-      stay: { ...(home.internal_name === undefined ? {} : { internal_name: home.internal_name }), location_id: locationId, check_in_time: home.check_in_time, check_in_end_time: home.check_in_end_time, check_out_time: home.check_out_time, max_guests: home.max_guests, min_nights: home.min_nights, calendar_rules: home.calendar_rules, assigned_member_id: home.assigned_member_id,
-        ...(home.cancellation_policy === undefined ? {} : { cancellation_policy: home.cancellation_policy }),
-        ...(home.long_term_cancellation_policy === undefined ? {} : { long_term_cancellation_policy: home.long_term_cancellation_policy }) },
-    },
-  })
-  return await readStayHome(db, access, product.id)
+  return location.id
 }
 
 /**
@@ -1507,7 +1524,7 @@ export function touchesAirbnbSettings(patch: UpdateProductInput, previous: Updat
       || (Object.keys(AIRBNB_GUEST_CONTROLS) as Array<keyof typeof AIRBNB_GUEST_CONTROLS>).some(key => patch.details?.[key] !== previous.details?.[key]),
     cancellation: (['cancellation_policy', 'long_term_cancellation_policy'] as const).some(changed),
     availability: (patch.stay?.min_nights !== undefined && patch.stay.min_nights !== previous.stay?.min_nights)
-      || (patch.stay?.calendar_rules !== undefined && JSON.stringify(patch.stay.calendar_rules) !== JSON.stringify(previous.stay?.calendar_rules)),
+      || (patch.stay?.calendar_rules !== undefined && JSON.stringify(stayChannelCalendarRules(patch.stay.calendar_rules)) !== JSON.stringify(stayChannelCalendarRules(previous.stay?.calendar_rules))),
   }
   return sections.booking || sections.cancellation || sections.availability ? sections : null
 }
@@ -2928,7 +2945,11 @@ export async function quoteStay(db: DbClient, organizationId: string, home: Stay
   const restriction = stayNightRestriction(stayed, departure)
   if (restriction) fail(restriction.statusCode, restriction.code, restriction.message, restriction.field, restriction.detail)
   if (home.base_price_tax_behavior === null) fail(409, 'STAY_BASE_PRICE_REQUIRED', 'This home has no base nightly price', 'base_price_minor')
-  const nightly = stayed.map(night => ({ date: night.date, price_minor: night.price_minor! }))
+  const discounts = home.calendar_rules?.direct_discounts
+  const leadDays = days(today, checkIn)
+  const discount = Math.max(0, ...Object.entries(STAY_DIRECT_DISCOUNTS).map(([key, rule]) =>
+    rule.eligible(count_, leadDays) ? discounts?.[key as keyof typeof STAY_DIRECT_DISCOUNTS] ?? 0 : 0))
+  const nightly = stayed.map(night => ({ date: night.date, price_minor: discount ? changeNightPrice(night.price_minor!, -discount) : night.price_minor! }))
   const total = nightly.reduce((sum, night) => sum + night.price_minor, 0)
   if (!Number.isSafeInteger(total) || total < 1) fail(409, 'STAY_TOTAL_INVALID', 'These nights have no amount to pay', 'check_in_date')
   const monthly = count_ >= LONG_TERM_STAY_NIGHTS

@@ -660,6 +660,7 @@ export function domainUpdateMessage(input: DomainEventInput): MemberAlertMessage
 }
 
 export interface OnboardingCompletedInput {
+  privateSite?: boolean
   organizationName: string
   ownerName: string
   ownerEmail: string
@@ -700,7 +701,7 @@ export function contentReportedMessage(input: ContentReportedInput): MemberAlert
 
 export function onboardingCompletedMessage(input: OnboardingCompletedInput): MemberAlertMessage {
   return {
-    title: `${input.organizationName} is live on KrabiClaw`,
+    title: input.privateSite ? `${input.organizationName} finished setup on KrabiClaw` : `${input.organizationName} is live on KrabiClaw`,
     preheader: `${input.ownerName} finished onboarding`,
     hero: null,
     facts: facts(
@@ -709,7 +710,7 @@ export function onboardingCompletedMessage(input: OnboardingCompletedInput): Mem
       fact('site', 'Site', input.siteUrl),
     ),
     primaryAction: { url: input.viewCustomerUrl, label: 'View customer' },
-    secondaryAction: { url: input.siteUrl, label: 'Open site' },
+    secondaryAction: input.privateSite ? undefined : { url: input.siteUrl, label: 'Open site' },
     category: 'organization_and_billing',
     emailPurpose: 'transactional',
     emailReason: `You received this email because ${input.organizationName} completed setup and you receive KrabiClaw business onboarding alerts.`,
@@ -717,6 +718,7 @@ export function onboardingCompletedMessage(input: OnboardingCompletedInput): Mem
 }
 
 export interface OwnerWelcomeInput {
+  privateSite?: boolean
   organizationName: string
   ownerName: string
   siteUrl: string
@@ -746,15 +748,17 @@ export function ownerWelcomeMessage(input: OwnerWelcomeInput): MemberAlertMessag
   const greeting = firstName(input.ownerName)
   const verticalPrompt = welcomeVerticalPrompt(input.vertical, input.organizationName)
   const body = [
-    `I saw that you just launched ${input.organizationName} on KrabiClaw (${input.siteUrl}) — congratulations!`,
+    input.privateSite
+      ? `I saw that you set up ${input.organizationName} on KrabiClaw. You can preview and publish your website from Today.`
+      : `I saw that you just launched ${input.organizationName} on KrabiClaw (${input.siteUrl}) — congratulations!`,
     `I’m Paul, the founder of KrabiClaw. I wanted to reach out personally to welcome you and see how setup went.`,
     verticalPrompt,
     `Excited to have you on board,\n\n**Paul**  \nFounder, KrabiClaw`,
   ].join('\n\n')
 
   return {
-    title: `Welcome to KrabiClaw — congrats on launching ${input.organizationName}!`,
-    preheader: `Welcome to KrabiClaw — your site is live at ${input.siteUrl}`,
+    title: input.privateSite ? 'Welcome to KrabiClaw' : `Welcome to KrabiClaw — congrats on launching ${input.organizationName}!`,
+    preheader: input.privateSite ? 'Your website is ready to preview' : `Welcome to KrabiClaw — your site is live at ${input.siteUrl}`,
     hero: null,
     intro: `Hi ${greeting},`,
     body,
@@ -763,11 +767,11 @@ export function ownerWelcomeMessage(input: OwnerWelcomeInput): MemberAlertMessag
       fact('site', 'Site', input.siteUrl, true),
     ),
     primaryAction: { url: input.dashboardUrl, label: 'Open your dashboard' },
-    secondaryAction: { url: input.siteUrl, label: 'View your site' },
+    secondaryAction: input.privateSite ? undefined : { url: input.siteUrl, label: 'View your site' },
     finePrint: 'You can reply directly to this email to reach me.',
     category: 'organization_and_billing',
     emailPurpose: 'transactional',
-    emailReason: `You received this email because you launched ${input.organizationName} on KrabiClaw.`,
+    emailReason: `You received this email because you set up ${input.organizationName} on KrabiClaw.`,
   }
 }
 

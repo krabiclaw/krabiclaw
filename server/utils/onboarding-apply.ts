@@ -113,6 +113,7 @@ export async function activateOnboardingDraft(env: CloudflareEnv, db: D1Database
   updated_at: string
   origin: { headers: Headers } | null
   activateSession?: (_organizationId: string) => Promise<void>
+  initialVisibility?: 'active' | 'inactive'
 }) {
   const draft = await queryFirst<SavedOnboardingDraft | null>(db,
     'SELECT * FROM onboarding_drafts WHERE id = ? AND user_id = ? LIMIT 1', [input.draftId, input.userId])
@@ -130,8 +131,8 @@ export async function activateOnboardingDraft(env: CloudflareEnv, db: D1Database
   }
   const existing = organizationId ? await queryFirst<{ onboarding_status: string }>(db,
     'SELECT onboarding_status FROM organization WHERE id = ?', [organizationId]) : null
-  const live = existing?.onboarding_status === 'active'
-  if (!live) {
+  const activated = existing?.onboarding_status === 'active'
+  if (!activated) {
     if (draft.updated_at !== input.updated_at) throw new HTTPError({ statusCode: 409, statusMessage: 'Website draft changed; read it before publishing', data: { code: 'ONBOARDING_DRAFT_CHANGED', draft_id: draft.id } })
     const revision = new Date(Math.max(Date.now(), Date.parse(draft.updated_at) + 1)).toISOString()
     const claim = await execute(db, "UPDATE onboarding_drafts SET updated_at = ? WHERE id = ? AND user_id = ? AND status = 'active' AND updated_at = ?", [revision, draft.id, input.userId, draft.updated_at])
@@ -139,16 +140,16 @@ export async function activateOnboardingDraft(env: CloudflareEnv, db: D1Database
     draft.updated_at = revision
   }
   try {
-    if (!live) {
+    if (!activated) {
       const target = await ensureOnboardingTarget(env, db, input.userId, { ...draft, source_locale: sourceLocale, default_currency: currency, timezone })
       if ('error' in target) throw new HTTPError({ statusCode: target.status, statusMessage: target.error, data: target.data })
       organizationId = target.target.organizationId
-      const applied = await applyOnboardingDraft(env, db, { userId: input.userId, target: target.target, payload, draft, activate: true })
+      const applied = await applyOnboardingDraft(env, db, { userId: input.userId, target: target.target, payload, draft, activate: input.initialVisibility ?? 'active' })
       if ('error' in applied) throw new HTTPError({ statusCode: applied.status, statusMessage: applied.error })
     }
     if (!organizationId) throw new Error('Activated website has no organization')
     const now = new Date().toISOString()
-    if (live) await execute(db, "UPDATE onboarding_drafts SET status = 'committed', committed_at = COALESCE(committed_at, ?), updated_at = ? WHERE id = ? AND user_id = ? AND organization_id = ? AND EXISTS (SELECT 1 FROM organization WHERE id = ? AND onboarding_status = 'active')", [now, now, draft.id, input.userId, organizationId, organizationId])
+    if (activated) await execute(db, "UPDATE onboarding_drafts SET status = 'committed', committed_at = COALESCE(committed_at, ?), updated_at = ? WHERE id = ? AND user_id = ? AND organization_id = ? AND EXISTS (SELECT 1 FROM organization WHERE id = ? AND onboarding_status = 'active')", [now, now, draft.id, input.userId, organizationId, organizationId])
     const completion = await completeOnboarding(env, db, organizationId, input.origin)
     try {
       if (input.activateSession) await input.activateSession(organizationId)
@@ -171,13 +172,14 @@ export async function activateOnboardingDraft(env: CloudflareEnv, db: D1Database
     }
     return {
       organization_id: organizationId, organization_slug: organization.slug, subdomain: draft.subdomain_candidate,
+      vertical: payload.preview.vertical,
       location_id: locations[0]!.id, location_slug: locations[0]!.slug, public_url: publicUrl, ...completion,
     }
   } catch (error) {
     const recorded = await queryFirst<{ organization_id: string | null; onboarding_status: string | null }>(db,
       'SELECT d.organization_id, o.onboarding_status FROM onboarding_drafts d LEFT JOIN organization o ON o.id = d.organization_id WHERE d.id = ?', [draft.id])
     const current = await queryFirst<{ updated_at: string; status: string }>(db, 'SELECT updated_at, status FROM onboarding_drafts WHERE id = ? AND user_id = ?', [draft.id, input.userId])
-    if (!live && current && (current.updated_at !== draft.updated_at || current.status !== 'active') && recorded?.onboarding_status !== 'active') throw new HTTPError({ statusCode: 409, statusMessage: 'Website draft changed; retry the same request', data: { code: 'ONBOARDING_DRAFT_CHANGED', draft_id: draft.id, organization_id: recorded?.organization_id ?? null }, cause: error })
+    if (!activated && current && (current.updated_at !== draft.updated_at || current.status !== 'active') && recorded?.onboarding_status !== 'active') throw new HTTPError({ statusCode: 409, statusMessage: 'Website draft changed; retry the same request', data: { code: 'ONBOARDING_DRAFT_CHANGED', draft_id: draft.id, organization_id: recorded?.organization_id ?? null }, cause: error })
     const statusCode = error && typeof error === 'object' && 'statusCode' in error ? Number(error.statusCode) : 500
     const details = error && typeof error === 'object' && 'data' in error && error.data && typeof error.data === 'object' ? error.data : {}
     const message = error && typeof error === 'object' && 'statusMessage' in error && typeof error.statusMessage === 'string' ? error.statusMessage : error instanceof Error ? error.message : String(error)
@@ -300,7 +302,7 @@ export async function applyOnboardingDraft(
     target: OnboardingTarget
     payload: OnboardingDraftPayload
     draft: Pick<SavedOnboardingDraft, 'id' | 'user_id' | 'updated_at'>
-    activate?: boolean
+    activate?: 'active' | 'inactive'
   },
 ): Promise<{ locationSlug: string | null } | { error: string; status: number }> {
   const { userId, payload } = input
@@ -576,6 +578,6 @@ export async function applyOnboardingDraft(
   }
   await publishStayProducts(env, deletedHomes)
   for (const page of productPages) await refreshTenantPageCard(db, env, page, userId)
-  if (input.activate) await activateOrganization(db, organizationId, writeGuard, input.draft)
+  if (input.activate) await activateOrganization(db, organizationId, writeGuard, input.draft, input.activate)
   return { locationSlug }
 }

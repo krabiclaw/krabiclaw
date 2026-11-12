@@ -276,9 +276,12 @@
 
           <WhoYouMeet v-if="booking || isStay" class="mt-10" :organization-id="organizationId" :product-id="product.id" :slug="product.slug" :session-id="bookingController.selectedSession.value?.id" :contact-to="enquiryPath" />
 
-          <section v-if="!isStay && thingsToKnow.length" id="things-to-know" class="mt-10 scroll-mt-24 border-t border-default pt-10">
+          <section v-if="isStay ? guestSafety.length : thingsToKnow.length" id="things-to-know" class="mt-10 scroll-mt-24 border-t border-default pt-10">
             <h2 class="tenant-display text-2xl text-default sm:text-3xl">{{ t('site.experience_detail.things_to_know') }}</h2>
-            <div class="mt-5 grid gap-x-10 gap-y-6 sm:grid-cols-2">
+            <ul v-if="isStay" class="mt-5 grid gap-x-10 gap-y-4 sm:grid-cols-2">
+              <li v-for="line in guestSafety" :key="line" class="whitespace-pre-wrap break-words text-sm leading-6 text-muted">{{ line }}</li>
+            </ul>
+            <div v-else class="mt-5 grid gap-x-10 gap-y-6 sm:grid-cols-2">
               <div v-for="detail in thingsToKnow" :key="detail.key">
                 <h3 class="text-sm font-semibold text-default">{{ detail.label }}</h3>
                 <ul class="mt-2 space-y-1.5">
@@ -515,7 +518,7 @@ import { productLocationCollectionPath, staySpecLabels } from '~/utils/product-p
 import { extractDietarySchemaUrls, type ProductCollectionSibling } from '~/utils/product-seo'
 import type { ProductDetailValue } from '~/shared/product-details'
 import { EXPERIENCE_ATTRIBUTE_HANDLES, productDetailFields, productDetailKey, PRICING_NOTE_HANDLE, STAY_DESCRIPTION_DETAIL_KEYS, STAY_HOUSE_RULE_DETAIL_KEYS, STAY_LOCATION_DETAIL_KEYS } from '~/shared/product-details'
-import { STAY_SAFETY_DETAIL_KEYS } from '~/shared/stay-safety'
+import { STAY_SAFETY_DETAIL_KEYS, staySafetyLines, stayAlarmLines } from '~/shared/stay-safety'
 import type { PublicProductBooking, PublicProductLocation, PublicProductReview, PublicProductSession } from '~/server/utils/public-products'
 import { addressPlaceName, formatPostalAddress, schemaPostalAddress } from '~/utils/postal-address'
 import { formatTime } from '~/utils/timezone'
@@ -612,6 +615,11 @@ const stayAmenityGroups = computed(() => {
   })).filter(group => group.amenities.length)
 })
 const descriptionOpen = ref(false)
+const guestSafety = computed(() => {
+  const stay = props.product.stay
+  if (!stay) return []
+  return [...staySafetyLines(props.product.details), ...stayAlarmLines(stay.amenity_answers, props.product.details)]
+})
 const descriptionLong = computed(() => isStay.value && ((props.product.description?.length ?? 0) > 400 || stayDescriptionDetails.value.length > 0))
 const descriptionClamped = computed(() => descriptionLong.value && !descriptionOpen.value)
 const stayAmenitiesList = computed(() => {

@@ -20,23 +20,14 @@
                 <UInput v-model="form.postalCode" class="w-full" inputmode="numeric" placeholder="ZIP or postal code" />
               </UFormField>
               <UFormField label="Country">
-                <USelectMenu
+                <CountrySelect
                   v-model="countryCode"
                   :items="countries"
-                  value-key="code"
-                  label-key="name"
                   class="w-full"
                   placeholder="Select country"
                   :search-input="{ placeholder: 'Search country...', icon: 'i-lucide-search' }"
                   :filter-fields="['name', 'code', 'dialCode']"
-                >
-                  <template #leading>
-                    <span v-if="country" class="flex size-5 items-center text-lg">{{ country.emoji }}</span>
-                  </template>
-                  <template #item-leading="{ item }">
-                    <span class="flex size-5 items-center text-lg">{{ item.emoji }}</span>
-                  </template>
-                </USelectMenu>
+                />
               </UFormField>
             </div>
           </div>
@@ -107,11 +98,10 @@ const countries = listPhoneCountries()
 // One country for the whole intake: the Location step names it, it is what the
 // Currency step proposes from, and it is the country the Contact step reads a
 // national phone number in. Nothing seeds it but the owner or the Google place.
-const countryCode = computed<CountryCode | undefined>({
+const countryCode = computed<CountryCode | undefined, string | undefined>({
   get: () => getPhoneCountry(form.value.country)?.code,
   set: (value) => { form.value.country = value ? value : '' },
 })
-const country = computed(() => getPhoneCountry(countryCode.value))
 
 const canSubmit = computed(() => {
   if (props.section === 'currency') return !!form.value.currency

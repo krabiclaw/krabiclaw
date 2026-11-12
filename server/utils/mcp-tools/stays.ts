@@ -11,7 +11,7 @@ import { MAX_ORDERED_MEDIA_ASSETS } from '~/shared/media-placement-contract'
 import { memberAccessPrincipal } from '~/server/utils/member-access'
 import { organizationEventContext } from '~/server/utils/organization-events'
 import { createStayPhotoRoom, deleteStayPayment, moveStayPhotos, readStayCalendar, recordStayPayment, removeStayPhotoRoom, setStayNights, stayAccessFor, updateStayHomeAccessibility, updateStayPhotoRoom, STAY_STATUSES, STAY_TURNOVER_FIELDS, type StayAccess, type StayHome, type StayDetail } from '~/server/domain/stays'
-import { MAX_STAY_NIGHTS, STAY_CHANNELS, STAY_PAYMENT_METHODS } from '~/shared/bookings'
+import { MAX_STAY_NIGHTS, STAY_DIRECT_DISCOUNTS, STAY_CHANNELS, STAY_PAYMENT_METHODS } from '~/shared/bookings'
 
 const text = { type: 'string', minLength: 1 }
 const nullableText = { type: ['string', 'null'] }
@@ -21,6 +21,8 @@ const minor = { type: 'integer', minimum: 0, description: 'Whole minor units of 
 export const STAY_CALENDAR_RULES_SCHEMA = { type: ['object', 'null'], description: 'Actual optional listing rules. Null removes them. Dated overrides take precedence over weekday minimums, then the required default. Friday/Saturday use the weekend price when supplied.', properties: {
   day_of_week_min_nights: { type: 'array', minItems: 7, maxItems: 7, items: { anyOf: [{ type: 'integer', const: -1 }, { type: 'integer', minimum: 1, maximum: MAX_STAY_NIGHTS }] }, description: 'Monday-first minimum nights. -1 means this weekday inherits the listing default.' },
   weekend_price_minor: minor,
+  direct_discounts: { type: 'object', additionalProperties: false, description: 'Direct website bookings only. Only the largest eligible percentage applies.',
+    properties: Object.fromEntries(Object.entries(STAY_DIRECT_DISCOUNTS).map(([key, { detail }]) => [key, { type: 'integer', minimum: 1, maximum: 99, description: detail }])) },
 }, additionalProperties: false }
 const productId = { type: 'string', minLength: 1, description: 'The place to stay: a product of kind stay, from list_products.' }
 const stayId = { type: 'string', minLength: 1, description: 'Stay ID: booking_id from list_product_bookings.' }

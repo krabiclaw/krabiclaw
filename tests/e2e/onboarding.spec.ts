@@ -1,7 +1,7 @@
 import { expect, test, type APIRequestContext } from '@playwright/test'
 import { dismissPreviewToolbar } from './helpers'
 import { authRequestHeaders, loginAs } from './helpers/auth'
-import { mcpData, mcpRequest } from './helpers/mcp'
+import { mcpData, mcpRequest, publishOwnHostProfile } from './helpers/mcp'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { seededTenant } from './seed/manifest'
 import { readLocalTenant } from './test-env'
@@ -12,8 +12,8 @@ import type { Product } from '../../server/types/products'
 // The manual-name path of the new-site flow, driven the way an owner drives it:
 // the welcome screen, then one question per route, each advanced by the shell's
 // own footer; the preview pane framing the owner's pending site on its own
-// subdomain; and activation making that site public inside a NEW organization
-// that becomes the session's active one.
+// subdomain; and activation committing a private site in a new organization.
+// The owner then publishes from Today.
 //
 // Another tenant already holds an organization-wide collection with the slug
 // this owner's menu section takes. A collection slug is unique within its
@@ -82,14 +82,15 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   // a click that lands on pre-hydration markup has no handler, so wait for the
   // screen to say it is hydrated rather than merely present.
   await expect(page.locator('[data-onboarding-hydrated="true"]')).toBeVisible()
-  await page.getByRole('button', { name: 'Get started', exact: true }).click()
 
-  // A single-choice step is answered by the press itself: no Next to confirm it.
+  // The welcome picker requires a business type before Continue.
   await expect(step('type')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Exit', exact: true })).toBeEnabled()
   await expect(page.getByRole('button', { name: 'Save & exit', exact: true })).toHaveCount(0)
-  await expect(page.getByText('Your answers have not been saved yet.', { exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Continue', exact: true })).toBeDisabled()
+  await expect(step('type').locator('[aria-pressed="true"]')).toHaveCount(0)
   await page.getByRole('button', { name: 'Restaurant, café or bar' }).click()
+  await page.getByRole('button', { name: 'Continue', exact: true }).click()
   await expect(step('language')).toBeVisible()
   await page.getByRole('button', { name: 'English', exact: true }).click()
 
@@ -132,6 +133,10 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   expect(saved.status(), await saved.text()).toBe(200)
   const initialDraft = (await saved.json() as { draft: { draft_id: string; organization_id: string; updated_at: string } }).draft
   expect(initialDraft).toMatchObject({ source_type: 'manual', google_place_id: null, details: { name, currency: 'THB', timezone: 'Asia/Bangkok' } })
+  const nativeWorkspaces = await page.request.get('/api/account/organizations?onboarding_status=active')
+  expect(nativeWorkspaces.status()).toBe(200)
+  expect((await nativeWorkspaces.json()).organizations).not.toContainEqual(expect.objectContaining({ id: initialDraft.organization_id }))
+
   await expect(page.getByText('Your answers have not been saved yet.', { exact: true })).toHaveCount(0)
 
   const previewFrame = page.locator('iframe[title="Site preview"]')
@@ -214,7 +219,6 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   // resume opens review; Back still reaches the saved optional contact answer.
   await page.goto('/dashboard/onboarding')
   await expect(page.locator('[data-onboarding-hydrated="true"]')).toBeVisible()
-  await page.getByRole('button', { name: 'Pick up where you left off', exact: true }).click()
   await expect(step('review')).toBeVisible()
   await page.getByRole('button', { name: 'Back', exact: true }).click()
   await expect(step('look')).toBeVisible()
@@ -283,7 +287,7 @@ test('a new owner builds a draft and creates a site through the routed flow', as
 
   // Review: the answers, and the address the next press claims.
   await expect(step('review')).toContainText(name)
-  const liveHost = (await step('review').getByText('Your site goes live at').locator('strong').textContent())!.trim()
+  const liveHost = (await step('review').getByText('Your site stays private until you publish it.').locator('strong').textContent())!.trim()
   expect(liveHost).toBe(organizationURL.host)
 
   // There is no done screen. Activation lands the owner in their new
@@ -300,6 +304,10 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   const organizations = await (await page.request.get('/api/auth/organization/list')).json() as Array<{ id: string; name: string; slug: string }>
   const created = organizations.find(organization => organization.id === organizationId)
   expect(created?.name).toBe(name)
+  const activatedWorkspaces = await page.request.get('/api/account/organizations?onboarding_status=active')
+  expect(activatedWorkspaces.status()).toBe(200)
+  expect((await activatedWorkspaces.json()).organizations).toContainEqual(expect.objectContaining({ id: organizationId, name }))
+
   await expect(page).toHaveURL(new RegExp(`/dashboard/${created!.slug}$`))
   const postLogin = await page.request.get('/api/post-login', { maxRedirects: 0 })
   expect(postLogin.status()).toBe(302)
@@ -311,8 +319,25 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   const context = await (await page.request.get('/api/dashboard/context', { params: { org: created!.slug } })).json() as { organization: { subdomain: string | null } }
   expect(context.organization.subdomain).toBe(subdomain)
 
-  // And the request that a moment ago did not get the site now does, with no
-  // preview token anywhere: that is what activation means.
+  const website = page.getByTestId('today-website')
+  await expect(website).toContainText('Private')
+  const stillPrivate = await readLocalTenant(request, subdomain, '/')
+  expect(stillPrivate.status()).toBe(404)
+  expect(await stillPrivate.text()).not.toContain(name)
+  await expect(website.frameLocator('iframe').locator('body')).toContainText(name)
+  const suggestions = page.getByTestId('today-opportunities')
+  await expect(suggestions.getByRole('link', { name: /Set up payments/ })).toHaveAttribute('href', /\/payments\/payout-method$/)
+  await suggestions.getByRole('link', { name: /Connect a custom domain/ }).click()
+  await expect(page.getByRole('link', { name: 'View plans' })).toHaveAttribute('href', /\/billing\/upgrade\?plan=growth$/)
+  await expect(page.getByRole('button', { name: 'Connect domain' })).toHaveCount(0)
+  await expect(page.getByText('Private', { exact: true })).toBeVisible()
+  await page.getByRole('link', { name: 'View plans' }).click()
+  await expect(page.getByRole('radio', { name: /^Growth/ })).toBeChecked()
+  await page.goto(`/dashboard/${created!.slug}`)
+  await website.getByRole('link', { name: 'Publish website' }).click()
+  await page.getByRole('button', { name: 'Make public' }).click()
+  await expect(website).toContainText('Live')
+  // Publishing makes the same site public, without a preview token.
   const live = await readLocalTenant(request, subdomain, '/')
   expect(live.status()).toBe(200)
   const liveHtml = await live.text()
@@ -395,7 +420,9 @@ test('a new experience site saves its first experience privately until booking s
   }
 })
 
-test('an owner changes their restaurant draft to lodging, restores it and opens the home editor', async ({ page, baseURL }) => {
+test('an owner changes their restaurant draft to lodging and saves their first home as a draft', async ({ page, baseURL, request }, testInfo) => {
+  test.setTimeout(90_000)
+  await page.setViewportSize({ width: 1440, height: 900 })
   await dismissPreviewToolbar(page)
   await loginAs(page.request, baseURL!, 'user-e2e-onboarding-wizard')
   const previous = await page.request.get('/api/dashboard/onboarding/drafts/active')
@@ -418,11 +445,13 @@ test('an owner changes their restaurant draft to lodging, restores it and opens 
   await expect(step('type')).toBeVisible()
   await expect(step('type').getByRole('button')).toHaveCount(4)
   await page.getByRole('button', { name: 'Restaurant, café or bar', exact: true }).click()
+  await page.getByRole('button', { name: 'Continue', exact: true }).click()
   await expect(step('language')).toBeVisible()
   await page.getByRole('button', { name: 'English', exact: true }).click()
   await expect(step('business')).toBeVisible()
   await page.getByLabel('Name', { exact: true }).fill(name)
   await advance('Next', 'location')
+  await page.getByRole('textbox', { name: 'Street address' }).fill('88 Moo 2')
   await page.getByPlaceholder('City', { exact: true }).fill('Ao Nang')
   await step('location').getByText('Select country').click()
   await page.getByPlaceholder('Search country...').fill('Thailand')
@@ -448,6 +477,7 @@ test('an owner changes their restaurant draft to lodging, restores it and opens 
   await page.goto('/dashboard/onboarding/type')
   await expect(step('type').getByRole('button', { name: 'Restaurant, café or bar', exact: true })).toHaveAttribute('aria-pressed', 'true')
   await page.getByRole('button', { name: 'Lodging or vacation rentals', exact: true }).click()
+  await page.getByRole('button', { name: 'Continue', exact: true }).click()
   await expect(step('language')).toBeVisible()
   await page.getByRole('button', { name: 'English', exact: true }).click()
   await expect(step('business')).toBeVisible()
@@ -482,7 +512,6 @@ test('an owner changes their restaurant draft to lodging, restores it and opens 
   await expect(step('type').getByRole('button', { name: 'Lodging or vacation rentals', exact: true })).toHaveAttribute('aria-pressed', 'true')
   await page.goto('/dashboard/onboarding')
   await expect(page.locator('[data-onboarding-hydrated="true"]')).toBeVisible()
-  await page.getByRole('button', { name: 'Pick up where you left off', exact: true }).click()
   await expect(step('review')).toBeVisible()
   await page.getByRole('button', { name: 'Create my site', exact: true }).click()
   await expect(page).not.toHaveURL(/\/dashboard\/onboarding/)
@@ -491,7 +520,7 @@ test('an owner changes their restaurant draft to lodging, restores it and opens 
   const organizations = await (await page.request.get('/api/auth/organization/list')).json() as Array<{ id: string; name: string; slug: string }>
   const created = organizations.find(organization => organization.id === session.session.activeOrganizationId)
   expect(created?.name).toBe(name)
-  await expect(page).toHaveURL(new RegExp(`/dashboard/${created!.slug}$`))
+  await expect(page).toHaveURL(`/dashboard/${created!.slug}/products?kind=stay`)
   const context = await page.request.get('/api/dashboard/context', { params: { org: created!.slug } })
   expect(context.status(), await context.text()).toBe(200)
   expect((await context.json() as { organization: { id: string; vertical: string } }).organization).toMatchObject({ id: created!.id, vertical: 'lodging' })
@@ -499,15 +528,234 @@ test('an owner changes their restaurant draft to lodging, restores it and opens 
   expect(products.status(), await products.text()).toBe(200)
   expect((await products.json() as { products: unknown[] }).products).toEqual([])
 
-  await page.goto(`/dashboard/${created!.slug}/products`)
-  await page.getByTestId('catalog-add').click()
-  await expect(page).toHaveURL(new RegExp(`/dashboard/${created!.slug}/products/new$`))
-  await page.locator('#dashboard-panel-product').getByText('Place to stay', { exact: true }).click()
-  await expect(page.getByRole('radio', { name: 'Place to stay', exact: true })).toBeChecked()
-  await page.getByRole('textbox', { name: 'Internal name', exact: true }).fill('Home 1')
-  await page.getByRole('textbox', { name: 'Listing title', exact: true }).fill('My first home')
-  await expect(page.getByLabel('Check-in from', { exact: true })).toBeVisible()
-  await expect(page.getByLabel('Sleeps', { exact: true })).toBeVisible()
+  const choices = page.getByTestId('first-home-setup')
+  await expect(choices).toBeVisible()
+  await choices.getByRole('link', { name: /Import from Airbnb/ }).click()
+  await expect(page.getByText('Your Airbnb homes, one calendar', { exact: true })).toBeVisible()
+  await page.goBack()
+  await choices.getByRole('link', { name: /Add your first home/ }).click()
+  await expect(page).toHaveURL(`/dashboard/${created!.slug}/products/new?kind=stay&setup=guided`)
+  await expect(page.getByRole('heading', { name: 'Where is your place?' })).toBeVisible()
+  await expect(page.getByRole('textbox', { name: 'Street address' })).toHaveValue('88 Moo 2')
+  await expect(page.getByRole('textbox', { name: 'City or town' })).toHaveValue('Ao Nang')
+  await page.screenshot({ path: testInfo.outputPath('01-home-address.png') })
+  await page.getByRole('button', { name: 'Next', exact: true }).click()
+
+  await expect(page.getByRole('heading', { name: 'Which of these best describes your place?' })).toBeVisible()
+  const house = page.getByRole('button', { name: 'House', exact: true })
+  await house.click()
+  await page.screenshot({ path: testInfo.outputPath('02-home-property-type.png') })
+  await page.getByRole('button', { name: 'Next', exact: true }).click()
+
+  await expect(page.getByRole('heading', { name: 'What space will guests have?' })).toBeVisible()
+  await page.getByRole('button', { name: 'Back', exact: true }).click()
+  await expect(house).toHaveAttribute('aria-pressed', 'true')
+  const next = page.getByRole('button', { name: 'Next', exact: true })
+  await next.click()
+  await page.getByRole('button', { name: /^Private room/ }).click()
+  await page.getByRole('button', { name: 'Save & exit' }).click()
+  await page.getByRole('link', { name: /Continue your listing/ }).click()
+  await expect(page.getByRole('button', { name: /^Private room/ })).toHaveAttribute('aria-pressed', 'true')
+  await page.screenshot({ path: testInfo.outputPath('03-home-access.png') })
+  const lookup = page.waitForResponse(response => response.url().startsWith('https://photon.komoot.io/api/'))
+  await page.route('https://photon.komoot.io/api/**', route => route.fulfill({
+    headers: { 'access-control-allow-origin': '*' },
+    json: { features: [{ geometry: { coordinates: [98.823, 8.045] } }] },
+  }))
+  await next.click()
+  await expect(page.getByRole('heading', { name: 'Is the pin in the right spot?' })).toBeVisible()
+  await lookup
+  const map = page.getByTestId('stay-setup-map')
+  await expect(map).toHaveAttribute('aria-busy', 'false')
+  await expect(map).toHaveAttribute('data-map-zoom', '13')
+  const bounds = await map.boundingBox()
+  expect(bounds).not.toBeNull()
+  const { x, y, width, height } = bounds!
+  await page.mouse.move(x + width / 2, y + height / 2)
+  await page.mouse.down()
+  await page.mouse.move(x + width / 2 + 70, y + height / 2 + 32, { steps: 8 })
+  await page.mouse.up()
+  await expect(page.getByTestId('stay-setup-map')).toHaveAttribute('data-pin-placed', 'true')
+  await page.screenshot({ path: testInfo.outputPath('04-home-pin.png') })
+  await next.click()
+  await expect(page.getByRole('heading', { name: 'Choose how guests see your location' })).toBeVisible()
+  await page.getByRole('switch', { name: /specific location/ }).click()
+  await expect(page.getByText('Guests see the precise pin.')).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('05-home-visibility.png') })
+  await next.click()
+  await expect(page.getByRole('heading', { name: 'Share some basics about your place' })).toBeVisible()
+  await page.getByLabel('Guests', { exact: true }).fill('4')
+  await page.getByLabel('Bedrooms', { exact: true }).fill('2')
+  await page.getByLabel('Beds', { exact: true }).fill('3')
+  await page.getByLabel('Bathrooms', { exact: true }).fill('1.5')
+  await expect(page.getByRole('textbox', { name: 'Listing title' })).toHaveCount(0)
+  await page.screenshot({ path: testInfo.outputPath('06-home-rooms-capacity.png') })
+  await page.getByRole('button', { name: 'Next', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Tell guests what your place offers' })).toBeVisible()
+  await page.getByRole('button', { name: 'Wifi', exact: true }).first().click()
+  await page.screenshot({ path: testInfo.outputPath('07-home-amenities.png') })
+  await next.click()
+  await expect(page.getByRole('heading', { name: 'Add photos of your place' })).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('08-home-photos-empty.png') })
+  await page.getByLabel('Add photos', { exact: true }).setInputFiles([
+    'tests/e2e/seed/media/venue.avif', 'tests/e2e/seed/media/room.avif', 'tests/e2e/seed/media/social.avif',
+    'tests/e2e/seed/media/class.avif', 'tests/e2e/seed/media/office.avif',
+  ])
+  await expect(page.getByAltText('Listing photo 5')).toBeVisible()
+  const secondPhoto = page.getByAltText('Listing photo 2')
+  await expect(secondPhoto).toBeVisible()
+  const newCover = await secondPhoto.getAttribute('src')
+  await page.getByRole('button', { name: 'Move photo 2 forward' }).click()
+  await expect(page.getByAltText('Listing photo 1')).toHaveAttribute('src', newCover!)
+  await page.screenshot({ path: testInfo.outputPath('08-home-photos.png') })
+  await next.click()
+  await expect(page.getByRole('heading', { name: 'Give your listing a title' })).toBeVisible()
+  await expect(page.getByRole('textbox', { name: 'Listing title' })).toHaveAttribute('maxlength', '50')
+  await page.getByRole('textbox', { name: 'Listing title' }).fill('My first home')
+  await page.screenshot({ path: testInfo.outputPath('09-home-title.png') })
+  await next.click()
+  await expect(page.getByRole('heading', { name: 'What stands out about your place?' })).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('10-home-highlights-empty.png') })
+  await page.getByRole('button', { name: 'Peaceful', exact: true }).click()
+  await page.getByRole('button', { name: 'Spacious', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Unique', exact: true })).toBeDisabled()
+  await page.screenshot({ path: testInfo.outputPath('10-home-highlights.png') })
+  await next.click()
+  await expect(page.getByRole('heading', { name: 'Write your listing description' })).toBeVisible()
+  await expect(page.getByRole('textbox', { name: 'Listing description' })).toHaveValue('Slow down and unwind in a peaceful setting. Settle in with plenty of room to spread out.')
+  await expect(page.getByRole('textbox', { name: 'Listing description' })).toHaveAttribute('maxlength', '500')
+  await page.getByRole('textbox', { name: 'Listing description' }).fill('A quiet place to stay near the beach.')
+  await page.screenshot({ path: testInfo.outputPath('10-home-description.png') })
+  await next.click()
+  await expect(page.getByRole('heading', { name: 'Set a minimum stay' })).toBeVisible()
+  await page.getByLabel('Minimum nights', { exact: true }).fill('2')
+  await page.screenshot({ path: testInfo.outputPath('11-home-booking.png') })
+  await next.click()
+  await expect(page.getByRole('heading', { name: 'Now, set your prices' })).toBeVisible()
+  await page.getByRole('textbox', { name: 'Base price', exact: true }).fill('1500')
+  const weekendAdjustment = page.getByRole('spinbutton', { name: 'Weekend adjustment', exact: true })
+  await weekendAdjustment.fill('-10')
+  await weekendAdjustment.blur()
+  await expect(page.getByText('฿1,350', { exact: true })).toBeVisible()
+  await weekendAdjustment.fill('20')
+  await weekendAdjustment.blur()
+  await expect(weekendAdjustment).toHaveValue('+20')
+  await expect(page.getByText('฿1,800', { exact: true })).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('12-home-pricing.png') })
+  await next.click()
+  await expect(page.getByRole('heading', { name: 'Add discounts' })).toBeVisible()
+  for (const name of ['Last-minute discount', 'Weekly discount', 'Monthly discount']) {
+    await page.getByRole('checkbox', { name, exact: true }).check()
+  }
+  await page.screenshot({ path: testInfo.outputPath('13-home-discounts.png') })
+  await next.click()
+  await expect(page.getByRole('heading', { name: 'Share safety details' })).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('14-home-disclosures-empty.png') })
+  await page.getByRole('checkbox', { name: 'Exterior security cameras' }).check()
+  const finishHome = page.getByRole('button', { name: 'Finish', exact: true })
+  await expect(finishHome).toBeDisabled()
+  await page.getByRole('textbox', { name: 'Exterior security cameras: details' }).fill('The front door camera records the entry path.')
+  await page.screenshot({ path: testInfo.outputPath('14-home-disclosures.png') })
+  const beforeSave = await page.request.get(`/api/editor/organizations/${created!.id}/products`)
+  expect(await beforeSave.json()).toMatchObject({ products: [] })
+  const submitted = page.waitForRequest(request => new URL(request.url()).pathname === '/api/dashboard/stay-homes/setup')
+  await finishHome.click()
+  const saveRequest = await submitted
+  const locationId = saveRequest.postDataJSON().answers.location_id
+  expect(locationId).toEqual(expect.any(String))
+  const photoIds = saveRequest.postDataJSON().answers.photo_ids as string[]
+  expect(photoIds).toHaveLength(5)
+  const { latitude, longitude } = saveRequest.postDataJSON().answers
+  expect(latitude).toEqual(expect.any(Number))
+  expect(longitude).toEqual(expect.any(Number))
+  expect([latitude, longitude]).not.toEqual([8.045, 98.823])
+  await expect(page).toHaveURL(new RegExp(`/dashboard/${created!.slug}/products/(?!new)[^/?]+$`))
+
+  const replay = await page.request.post(saveRequest.url(), { data: saveRequest.postDataJSON() })
+  expect(replay.status(), await replay.text()).toBe(201)
+  expect(await replay.json()).toMatchObject({ to: new URL(page.url()).pathname })
+  const homes = await page.request.get('/api/dashboard/stay-homes', { params: { org: created!.slug } })
+  expect(homes.status(), await homes.text()).toBe(200)
+  expect(await homes.json()).toMatchObject({
+    first_home_setup: null,
+    homes: [{ name: 'My first home', location_id: locationId, max_guests: 4, property_type_group: 'houses', property_type: 'house',
+      listing_type: 'private_room', amenities: ['wireless_internet'], description: 'A quiet place to stay near the beach.',
+      latitude, longitude, stay_map_sharing: 'specific', photos: photoIds.map(id => ({ id })),
+      bedrooms: 2, beds: 3, bathrooms: 1.5, min_nights: 2, base_price_minor: 150000,
+      calendar_rules: { weekend_price_minor: 180000, direct_discounts: { last_minute_percent: 7, weekly_percent: 10, monthly_percent: 20 } }, live: false, address: { address: '88 Moo 2', city: 'Ao Nang', country: 'TH' } }],
+  })
+  const afterSave = await page.request.get(`/api/editor/organizations/${created!.id}/products`)
+  const { products: savedProducts } = await afterSave.json() as { products: Product[] }
+  expect(savedProducts).toHaveLength(1)
+  expect(savedProducts[0]!.publications).toEqual([{ organization_id: created!.id, published: false }])
+  expect(savedProducts[0]!.details).toMatchObject({
+    exterior_security_cameras: true,
+    exterior_security_cameras_details: 'The front door camera records the entry path.',
+    noise_decibel_monitors: false, weapons_on_property: false,
+  })
+  const finishListing = page.getByRole('link', { name: /Complete steps to publish/ })
+  await expect(finishListing).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('11-home-saved-draft.png') })
+  await finishListing.click()
+  await expect(page.getByRole('heading', { name: 'Complete steps to publish' })).toBeVisible()
+  await expect(page.getByRole('link', { name: /Nightly price.*Nightly price set/ })).toBeVisible()
+  await expect(page.getByRole('link', { name: /Host profile.*Required to publish/ })).toBeVisible()
+  await expect(page.getByRole('link', { name: /Publish listing/ })).toHaveCount(0)
+  await page.screenshot({ path: testInfo.outputPath('16-home-publish-steps.png') })
+  const listing = savedProducts[0]!
+  const productUrl = `/api/editor/organizations/${created!.id}/products/${listing.id}`
+  {
+    await page.goto(`/dashboard/${created!.slug}/products/${listing.id}`)
+    await page.locator('#dashboard-panel-product').getByRole('link', { name: 'View', exact: true }).click()
+    const preview = page.getByRole('dialog', { name: 'Listing preview', exact: true })
+    await expect(preview.frameLocator('iframe').getByRole('heading', { name: 'My first home', exact: true })).toBeVisible()
+    const safety = preview.frameLocator('iframe').locator('#things-to-know')
+    await expect(safety).toContainText('Exterior security cameras')
+    await expect(safety).toContainText('The front door camera records the entry path.')
+    await expect(preview.getByText('Private preview', { exact: true })).toHaveCount(0)
+    await preview.getByRole('tab', { name: 'Desktop view', exact: true }).focus()
+    await page.keyboard.press('ArrowRight')
+    await expect(preview.getByRole('tab', { name: 'Mobile view', exact: true })).toHaveAttribute('aria-selected', 'true')
+    await expect(preview.locator('iframe')).toHaveCSS('max-width', '390px')
+    await page.screenshot({ path: testInfo.outputPath('18-home-mobile-preview.png') })
+    await preview.getByRole('tab', { name: 'Desktop view', exact: true }).click()
+    await expect(preview.getByRole('tab', { name: 'Desktop view', exact: true })).toHaveAttribute('aria-selected', 'true')
+    await page.screenshot({ path: testInfo.outputPath('17-home-guest-preview.png') })
+    await safety.scrollIntoViewIfNeeded()
+    await page.screenshot({ path: testInfo.outputPath('19-home-guest-safety.png') })
+  }
+
+  // Publish only this disposable workspace to verify the same quote a real guest pays.
+  if (!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname)) return
+  const hostless = await page.request.put(`${productUrl}/publication`, { data: { published: true } })
+  expect(hostless.status(), await hostless.text()).toBe(409)
+  await publishOwnHostProfile(page.request, baseURL!, created!.id, 'My first home host')
+  await page.goto(`/dashboard/${created!.slug}/products/${listing.id}/publication`)
+  await expect(page.getByRole('link', { name: /Host profile.*Profile published/ })).toBeVisible()
+  await expect(page.getByRole('link', { name: /Publish listing/ })).toBeVisible()
+  const published = await page.request.put(`${productUrl}/publication`, { data: { published: true } })
+  expect(published.status(), await published.text()).toBe(200)
+  await page.goto(`/dashboard/${created!.slug}`)
+  const website = page.getByTestId('today-website')
+  await website.getByRole('link', { name: 'Publish website' }).click()
+  await page.getByRole('button', { name: 'Make public' }).click()
+  await expect(website).toContainText('Live')
+  const subdomain = (await context.json() as { organization: { subdomain: string } }).organization.subdomain
+  const guestPage = await readLocalTenant(request, subdomain, `/stays/${listing.slug}`)
+  expect(guestPage.status(), await guestPage.text()).toBe(200)
+  expect(await guestPage.text()).toContain('The front door camera records the entry path.')
+  const quote = `/api/public/products/${listing.slug}/quote`
+  const dateInThailand = new Date(new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Bangkok' }) + 'T00:00:00Z')
+  const day = (offset: number) => new Date(dateInThailand.getTime() + offset * 86400000).toISOString().slice(0, 10)
+  const lastMinute = [day(2), day(3)].reduce((total, date) => {
+    const weekday = new Date(date + 'T00:00:00Z').getUTCDay()
+    return total + (weekday === 5 || weekday === 6 ? 167400 : 139500)
+  }, 0)
+  for (const [nights, total] of [[2, lastMinute], [7, 999000], [28, 3552000]] as const) {
+    const response = await readLocalTenant(request, subdomain, quote, { check_in_date: day(2), check_out_date: day(2 + nights), adults: 1 })
+    expect(response.status(), await response.text()).toBe(200)
+    expect(await response.json()).toMatchObject({ quote: { nights, total_minor: total } })
+  }
 })
 
 // Kikuzuki's own listing, answered by the real Places API (New) through the
@@ -533,6 +781,7 @@ test('a new owner picks their Google listing and it seeds location, contact and 
   await page.goto('/dashboard/onboarding/type')
   await expect(page.locator('[data-onboarding-hydrated="true"]')).toBeVisible()
   await page.getByRole('button', { name: 'Restaurant, café or bar' }).click()
+  await page.getByRole('button', { name: 'Continue', exact: true }).click()
   await expect(step('language')).toBeVisible()
   await page.getByRole('button', { name: 'English', exact: true }).click()
   await expect(step('business')).toBeVisible()

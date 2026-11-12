@@ -22,11 +22,9 @@
         <UFormField label="Postal code" :ui="{ label: 'text-xs font-normal text-muted' }" class="px-4 py-3 focus-within:ring-2 focus-within:ring-inset focus-within:ring-primary"><UInput v-model="editor.detailsForm.postalCode" :disabled="editor.saving.value" variant="none" :ui="{ base: 'px-0 py-0' }" class="w-full" /></UFormField>
         <UFormField label="Country" :ui="{ label: 'text-xs font-normal text-muted' }" class="px-4 py-3 focus-within:ring-2 focus-within:ring-inset focus-within:ring-primary">
           <div class="flex items-center gap-2">
-            <USelectMenu
+            <CountrySelect
               v-model="countryCode"
               :items="countries"
-              value-key="code"
-              label-key="name"
               aria-label="Country"
               class="min-w-0 flex-1"
               variant="none"
@@ -34,7 +32,6 @@
               :disabled="editor.saving.value"
               placeholder="Select country"
               :search-input="{ placeholder: 'Search country...' }"
-              :filter-fields="['name', 'code']"
             />
             <UButton v-if="countryCode" icon="i-lucide-x" aria-label="Clear country" color="neutral" variant="link" :disabled="editor.saving.value" @click="countryCode = undefined" />
           </div>
@@ -51,7 +48,7 @@
 
 <script setup lang="ts">
 import { useLocationEditor } from '~/lib/components/workspace/settings/LocationSettingsPage.vue'
-import { getPhoneCountry, listPhoneCountries, type CountryCode } from '~/utils/phone'
+import { getPhoneCountry, listPhoneCountries } from '~/utils/phone'
 import { isNavigationFailure } from 'vue-router'
 import { getErrorMessage } from '~/utils/errors'
 
@@ -61,7 +58,7 @@ const navigationError = ref('')
 const countries = listPhoneCountries()
 const countryCode = computed({
   get: () => getPhoneCountry(editor.detailsForm.regionCode)?.code,
-  set: (value: CountryCode | null | undefined) => { editor.detailsForm.regionCode = value ?? '' },
+  set: (value: string | undefined) => { editor.detailsForm.regionCode = value ?? '' },
 })
 const addressLines = computed(() => {
   const lines = editor.detailsForm.addressLines.split('\n')

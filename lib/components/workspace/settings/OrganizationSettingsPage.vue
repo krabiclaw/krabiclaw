@@ -409,12 +409,14 @@
         <p class="mt-2 text-sm text-muted max-w-sm mx-auto leading-relaxed">
           {{ isPublished
             ? 'Only members with dashboard access or a preview link will be able to view the site. Visitors will see an offline notice.'
-            : 'Your website will become public immediately and search engines will be able to index it.' }}
+            : 'Anyone can visit your website once it’s public.' }}
         </p>
+        <p v-if="!isPublished && loadedSettings?.public_url" class="mt-3 break-all text-sm">{{ loadedSettings.public_url }}</p>
+        <UAlert v-if="editorError" class="mt-4" color="error" :description="editorError" />
 
         <div class="mt-8 space-y-3">
           <UButton
-            :label="isPublished ? 'Switch to draft' : 'Publish website'"
+            :label="isPublished ? 'Switch to draft' : 'Make public'"
             color="neutral"
             variant="solid"
             size="xl"
@@ -424,6 +426,7 @@
             data-testid="confirm-status-toggle"
             @click="toggleStatusFromModal"
           />
+          <UButton v-if="publishingFromToday" label="Preview" color="neutral" variant="ghost" block :to="todayPath" />
           <UButton
             label="Cancel"
             color="neutral"
@@ -498,6 +501,7 @@ export type OrganizationStatus = 'active' | 'inactive' | 'suspended'
 
 export interface OrganizationSettingsResponse {
   theme?: string
+  public_url?: string | null
   status: OrganizationStatus
   name?: string | null
   brand_description?: string | null
@@ -632,6 +636,8 @@ const form = reactive<OrganizationSettingsForm>({
 
 const statusModalOpen = ref(false)
 const togglingStatus = ref(false)
+const publishingFromToday = computed(() => route.query.publish === '1')
+const todayPath = computed(() => `/dashboard/${encodeURIComponent(String(route.params.org_slug))}`)
 const isPublished = computed(() => form.status === 'active')
 const statusLabel = computed(() => {
   if (form.status === 'active') return 'Published'
@@ -652,11 +658,13 @@ const statusDescription = computed(() => {
 async function toggleStatusFromModal() {
   if (form.status === 'suspended') return
   togglingStatus.value = true
+  editorError.value = null
   try {
     const nextStatus: OrganizationStatus = form.status === 'active' ? 'inactive' : 'active'
     await patchSettings({ status: nextStatus })
     form.status = nextStatus
     statusModalOpen.value = false
+    if (nextStatus === 'active' && publishingFromToday.value) await navigateTo(todayPath.value)
   } catch (error) {
     editorError.value = getErrorMessage(error, 'Failed to update website status')
   } finally {
@@ -905,7 +913,9 @@ const navigationGroups = computed(() => {
 })
 
 const autoOpenDestination = computed(() => {
-  if (surface.value === 'settings') return pagesPath.value
+  if (surface.value === 'settings') {
+    return publishingFromToday.value ? { path: pagesPath.value, query: { publish: '1' } } : pagesPath.value
+  }
   return navigationGroups.value[0]?.items.find(item => item.to)?.to ?? null
 })
 
@@ -1021,6 +1031,9 @@ watch(settingsResource, (resource) => {
   if (!resource) return
   fillForm(resource.settings.settings)
   originalSignature.value = editorSignature(detailKey.value)
+}, { immediate: true })
+watch([() => loadedSettings.value?.status, publishingFromToday], ([status, requested]) => {
+  if (props.surface === 'settings' && status === 'inactive' && requested) statusModalOpen.value = true
 }, { immediate: true })
 watch(detailKey, () => resetDraft())
 

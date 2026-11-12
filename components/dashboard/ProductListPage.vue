@@ -13,8 +13,33 @@
     <UAlert v-if="loadError" color="error" variant="soft" icon="i-lucide-triangle-alert" title="Catalog could not be loaded" :description="loadError" />
     <template v-else>
       <DashboardFilterPills id="catalog-kind" v-model="kind" label="Kind" :items="kindFilters" class="mb-8" />
+      <UButton v-if="kind === 'stay' && canResumeHomeSetup && !(showFirstHomeSetup && firstHomeSetup)" :to="resumeHomeSetupTo" color="neutral" variant="outline" class="mb-6" label="Continue your listing" />
+      <section v-if="showFirstHomeSetup && firstHomeSetup" class="mx-auto max-w-2xl space-y-5" data-testid="first-home-setup">
+        <h2 class="text-2xl font-semibold tracking-tight sm:text-3xl">{{ firstHomeSetup.title }}</h2>
+        <div class="grid gap-3 sm:grid-cols-2">
+          <NuxtLink
+            v-for="choice in firstHomeChoices"
+            :key="choice.to"
+            :to="choice.to"
+            class="flex flex-col gap-4 rounded-2xl border border-default p-5 hover:border-accented"
+          >
+            <UIcon :name="choice.icon" class="size-7" aria-hidden="true" />
+            <div>
+              <span class="block font-semibold">{{ choice.label }}</span>
+              <span class="mt-1 block text-sm text-muted">{{ choice.detail }}</span>
+            </div>
+          </NuxtLink>
+        </div>
+      </section>
+      <UAlert
+        v-else-if="showFirstHomeSetup && setupError"
+        color="error"
+        variant="soft"
+        title="Home setup could not be loaded"
+        :description="getErrorMessage(setupError, 'The request failed')"
+      />
       <OrganizationLocationSelector
-        v-if="items.length"
+        v-else-if="items.length"
         :items="items"
         :active-item="level.child.value"
         :label-heading-level="2"
@@ -22,12 +47,14 @@
         missing-image-hint="Add one in this item’s photo editor."
         data-testid="catalog-grid"
       />
-      <UEmpty v-else icon="i-lucide-store" :title="`No ${activeFilterLabel.toLowerCase()} yet`" />
+      <UEmpty v-else-if="!showFirstHomeSetup || !setupPending" icon="i-lucide-store" :title="`No ${activeFilterLabel.toLowerCase()} yet`" />
     </template>
   </DashboardIndexPanel>
 </template>
 
 <script setup lang="ts">
+import { authClient } from '~/lib/auth-client'
+import { staySetupDraftKey } from '~/shared/stay-home-setup'
 import { catalogProductItem } from '~/components/dashboard/CatalogProductList.vue'
 import OrganizationLocationSelector, { type OrganizationLocationSelectorItem } from '~/components/dashboard/OrganizationLocationSelector.vue'
 import type { ProductKind } from '~/shared/product-details'
@@ -105,6 +132,50 @@ const items = computed<OrganizationLocationSelectorItem[]>(() => [
     to: `${level.path.value}/${product.id}`,
   }))),
 ])
+
+interface HomeSetupAction { label: string; detail: string; to: string }
+interface FirstHomeSetup { title: string; manual: HomeSetupAction; airbnb: HomeSetupAction & { can_connect: boolean } }
+
+function isHomeSetupAction(value: unknown): value is HomeSetupAction {
+  return isRecord(value) && typeof value.label === 'string' && typeof value.detail === 'string'
+    && typeof value.to === 'string' && value.to.startsWith('/dashboard/')
+}
+
+const { organization } = useDashboardOrganization()
+const dashboardApi = useDashboardApi()
+const showFirstHomeSetup = computed(() => kind.value === 'stay' && organization.value?.vertical === 'lodging' && !offered('stay'))
+const { data: setup, error: setupError, pending: setupPending } = await useAsyncData(
+  () => `first-home-setup:${organizationId}`,
+  () => showFirstHomeSetup.value
+    ? dashboardApi('/api/dashboard/stay-homes', {
+        validate: (value): value is { first_home_setup: FirstHomeSetup | null } => {
+          if (!isRecord(value)) return false
+          const setup = value.first_home_setup
+          return setup === null || (isRecord(setup) && typeof setup.title === 'string'
+            && isHomeSetupAction(setup.manual) && isRecord(setup.airbnb)
+            && typeof setup.airbnb.can_connect === 'boolean' && isHomeSetupAction(setup.airbnb))
+        },
+      })
+    : Promise.resolve({ first_home_setup: null }),
+  { watch: [showFirstHomeSetup] },
+)
+const firstHomeSetup = computed(() => setup.value?.first_home_setup)
+const resumeHomeSetupTo = computed(() => router.resolve({ path: `${level.path.value}/new`, query: { kind: 'stay', setup: 'guided' } }).fullPath)
+const setupSession = authClient.useSession()
+const hasSavedHomeSetup = ref(false)
+const canResumeHomeSetup = computed(() => route.query.setup === 'resume' || hasSavedHomeSetup.value)
+onMounted(async () => {
+  try {
+    const user = setupSession.value.data?.user ?? (await authClient.getSession()).data?.user
+    hasSavedHomeSetup.value = !!user && !!localStorage.getItem(staySetupDraftKey(organizationId, user.id))
+  } catch {
+    hasSavedHomeSetup.value = false
+  }
+})
+const firstHomeChoices = computed(() => firstHomeSetup.value ? [
+  { ...firstHomeSetup.value.manual, ...(canResumeHomeSetup.value ? { label: 'Continue your listing', detail: 'Pick up where you left off.' } : {}), icon: 'i-lucide-house-plus' },
+  { ...firstHomeSetup.value.airbnb, icon: 'i-simple-icons-airbnb' },
+] : [])
 
 useSeoMeta({ title: 'Catalog | KrabiClaw Dashboard', robots: 'noindex, nofollow' })
 </script>
