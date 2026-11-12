@@ -11,6 +11,7 @@ import {
   deleteProductBookingConfig,
   replaceWeeklySchedule,
   claimSessionCapacity,
+  bookingWindow,
   listSessions,
   materializeSessions,
   sessionMoveQuery,
@@ -29,6 +30,7 @@ import { occurrenceKey } from '../../shared/bookings.ts'
 import { addLocalDays, formatTimestamp, localDateTimeToInstant, localNow } from '../../utils/timezone.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 import { assertAssignedBookingAccess, memberAccessPrincipal } from '../../server/utils/member-access.ts'
+import sessionsMaterialize from '../../server/tasks/sessions-materialize.ts'
 
 const ORG = 'org-sessions'
 const LOCATION = 'loc-sessions'
@@ -83,6 +85,53 @@ function addRule(db: D1Database, id: string, over: Partial<{ weekday: number; st
     .bind(id, ORG, PRODUCT, over.location_id === undefined ? LOCATION : over.location_id, over.timezone ?? 'Asia/Bangkok', over.weekday ?? 0,
       over.start_time ?? '14:00', ACTOR, ACTOR).run()
 }
+
+test('hourly materialization reaches the next page with a rate-limited KV cursor', { timeout: 120_000 }, async () => {
+  const { runtime, db, env } = await boot()
+  try {
+    const openingHours = { periods: Array.from({ length: 7 }, (_, day) => ({
+      open: { day, hour: 17, minute: 0 }, close: { day, hour: 22, minute: 0 },
+    })) }
+    assert.equal((await updateLocation(db, ORG, LOCATION, { opening_hours: openingHours }, ACTOR, env)).status, 200)
+    await addRule(db, 'hourly-class', { start_time: '18:00' })
+    // These offerings fill the first page. The public class, which has a weekly time but
+    // no sessions yet, can only be reached if the cursor survives the first invocation.
+    await db.batch([
+      db.prepare(`WITH RECURSIVE catalog(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM catalog WHERE n<50)
+        INSERT INTO products(kind,id,organization_id,name,slug,created_by,updated_by)
+        SELECT 'experience','a-offering-'||n,?,'Offering '||n,'a-offering-'||n,?,? FROM catalog`).bind(ORG, ACTOR, ACTOR),
+      db.prepare(`INSERT INTO product_booking_configs(product_id,organization_id,unit,duration_minutes,default_capacity,scheduling_mode,assigned_member_id,created_by,updated_by)
+        SELECT id,organization_id,'slot',120,10,'business','class-host',?,? FROM products WHERE organization_id=? AND id LIKE 'a-offering-%'`).bind(ACTOR, ACTOR, ORG),
+    ])
+    const kv = env.ORGANIZATION_CACHE!
+    let written: boolean
+    const claimWrite = () => {
+      if (written) throw new Error('KV PUT failed: 429 Too Many Requests')
+      written = true
+    }
+    const run = () => {
+      written = false
+      return sessionsMaterialize.run({ name: 'sessions-materialize', context: { cloudflare: { env: {
+        ...env, ORGANIZATION_CACHE: {
+          get: kv.get.bind(kv),
+          put: async (key: string, value: string) => { claimWrite(); await kv.put(key, value) },
+          delete: async (key: string) => { claimWrite(); await kv.delete(key) },
+        },
+      } } } })
+    }
+    const sessions = () => listSessions(db, { env, organizationId: ORG, productId: PRODUCT, ...bookingWindow('Asia/Bangkok') })
+    assert.deepEqual(await sessions(), [])
+    await run()
+    assert.deepEqual(await sessions(), [])
+    await run()
+    const offered = await sessions()
+    assert.ok(offered.length > 0)
+    assert.ok(offered.every(row => row.remaining === 10 && row.location_id === LOCATION))
+    await run()
+    await run()
+    assert.deepEqual((await sessions()).map(row => row.id), offered.map(row => row.id))
+  } finally { await runtime.dispose() }
+})
 
 test('a weekly time puts a session on each of its days inside the place\'s hours, once', { timeout: 120_000 }, async () => {
   const { runtime, db, env } = await boot()
