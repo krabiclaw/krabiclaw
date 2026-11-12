@@ -4,7 +4,7 @@ import sharp from 'sharp'
 import { authRequestHeaders, loginAs } from './helpers/auth'
 import { mcpRequest, publishOwnHostProfile } from './helpers/mcp'
 import { waitForNuxtHydration } from './helpers'
-import { devLoginHeaders } from './test-env'
+import { devLoginHeaders, readLocalTenant } from './test-env'
 import { bookTable, openSeating } from './helpers/tables'
 import { localDateAt } from '../../utils/timezone'
 import { isDashboardInvalidation, type DashboardInvalidation } from '../../shared/dashboard-invalidations'
@@ -60,13 +60,6 @@ async function tool<T>(request: APIRequestContext, baseURL: string, organization
 // of time with "Response has been disposed".
 async function expectStatus(response: Pick<APIResponse, 'status' | 'text'>, status: number) {
   expect(response.status(), response.status() === status ? undefined : await response.text()).toBe(status)
-}
-
-// Chromium resolves tenant subdomains of localhost, while Node's API client
-// depends on the runner's DNS. Name the same local tenant in the request header.
-function readTenant(request: APIRequestContext, baseURL: string, slug: string, target: URL | string, params?: Record<string, string | number | boolean>) {
-  const path = typeof target === 'string' ? target : `${target.pathname}${target.search}`
-  return request.get(new URL(path, baseURL).href, { headers: { 'x-preview-tenant': slug }, params })
 }
 
 async function createStayHome(page: Page, baseURL: string, options: { selectDifferentLocation?: boolean; internalName?: string; createInForm?: boolean } = {}) {
@@ -195,7 +188,7 @@ test('a home keeps zero beds and unknown provider times through editing and the 
   await expect(preview.getByRole('heading', { name: 'Cliff Cabin', level: 1, exact: true })).toBeVisible()
   const previewURL = new URL((await previewIframe.getAttribute('src'))!, baseURL!)
   previewURL.pathname = previewURL.pathname.replace(/^\/stays\//, '/api/public/stays/')
-  const publicRead = await readTenant(request, baseURL!, slug, previewURL)
+  const publicRead = await readLocalTenant(request, slug, previewURL)
   await expectStatus(publicRead, 200)
   const product = (await publicRead.json() as { product: Product }).product
   expect(product.stay).toMatchObject({ beds: 0, bathrooms: 1, check_in_time: null, check_out_time: '10:00',
@@ -1614,7 +1607,7 @@ test('a host previews the saved guest page around an unsaved draft without recor
     await expect(preview.locator('#things-to-know')).toHaveCount(0)
     const productURL = new URL(previewURL)
     productURL.pathname = productURL.pathname.replace(/^\/stays\//, '/api/public/stays/')
-    const publicRead = await readTenant(request, baseURL!, slug, productURL)
+    const publicRead = await readLocalTenant(request, slug, productURL)
     await expectStatus(publicRead, 200)
     const publicProduct = (await publicRead.json() as { product: { details: Record<string, unknown> } }).product
     expect(publicProduct).toMatchObject({ description: listingDescription, details: listingDetails, stay: {
@@ -1678,7 +1671,7 @@ test('a host previews the saved guest page around an unsaved draft without recor
     const anonymous = await browser.newContext()
     try {
       previewURL.searchParams.delete('preview_token')
-      const hidden = await readTenant(anonymous.request, baseURL!, slug, previewURL)
+      const hidden = await readLocalTenant(anonymous.request, slug, previewURL)
       expect(hidden.status()).toBe(404)
       expect(await hidden.text()).not.toContain('Cliff Cabin')
     } finally {
@@ -1909,7 +1902,7 @@ test('a host edits the shared lodging location and protects its exact address an
   await expect(sharingGuest.locator('article')).not.toContainText('12 Test Road')
   const sharingPublicURL = new URL((await sharingFrame.getAttribute('src'))!, baseURL!)
   sharingPublicURL.pathname = sharingPublicURL.pathname.replace(/^\/stays\//, '/api/public/stays/')
-  const specificPublic = await readTenant(request, baseURL!, slug, sharingPublicURL)
+  const specificPublic = await readLocalTenant(request, slug, sharingPublicURL)
   await expectStatus(specificPublic, 200)
   const specificPublicData = await specificPublic.json() as { location: PublicLocationDisclosure; product: Product }
   expect(specificPublicData.location).toMatchObject({ address: null, maps_url: null, ...mapPin, stay_map_sharing: 'specific', public_area: { approximate: false, center: mapPin } })
@@ -1933,7 +1926,7 @@ test('a host edits the shared lodging location and protects its exact address an
   const savedGeneral = await call<{ location: { stay_map_sharing: string; address: PostalAddress | null } }>('get_location', { location_id: location.id })
   expect(savedGeneral.error).toBeNull()
   expect(savedGeneral.data!.location).toMatchObject({ stay_map_sharing: 'general', address: changedAddress })
-  const generalPublic = await readTenant(request, baseURL!, slug, sharingPublicURL)
+  const generalPublic = await readLocalTenant(request, slug, sharingPublicURL)
   await expectStatus(generalPublic, 200)
   const generalPublicData = await generalPublic.json() as { location: PublicLocationDisclosure }
   expect(generalPublicData.location).toMatchObject({ address: null, maps_url: null, latitude: null, longitude: null, stay_map_sharing: 'general', public_area: { approximate: true } })
@@ -1943,7 +1936,7 @@ test('a host edits the shared lodging location and protects its exact address an
   expect(JSON.stringify(generalPublicData)).not.toContain('98.822')
   const generalGuestURL = new URL(sharingPublicURL)
   generalGuestURL.pathname = generalGuestURL.pathname.replace(/^\/api\/public\/stays\//, '/stays/')
-  const generalHTML = await readTenant(request, baseURL!, slug, generalGuestURL)
+  const generalHTML = await readLocalTenant(request, slug, generalGuestURL)
   await expectStatus(generalHTML, 200)
   const generalMarkup = await generalHTML.text()
   for (const privateFact of ['12 Test Road', '8.0326', '98.822']) expect(generalMarkup).not.toContain(privateFact)
@@ -2079,7 +2072,7 @@ test('a host distinguishes absent alarms from unanswered alarms and clears their
   await expect(page).toHaveURL(`${baseURL}${root}/guest-safety${locationQuery}`)
   await previewLink.click()
   await expect(publicSafety).toHaveCount(0)
-  const absentPublic = await readTenant(request, baseURL!, slug, publicURL)
+  const absentPublic = await readLocalTenant(request, slug, publicURL)
   await expectStatus(absentPublic, 200)
   expect((await absentPublic.json() as { product: Product }).product.stay!.amenity_answers).toEqual([{ code: 'smoke_detector', available: false }])
   const absentSchema = JSON.parse((await preview.locator('script[type="application/ld+json"]').textContent())!) as { '@graph': Array<Record<string, unknown>> }
@@ -3106,7 +3099,7 @@ test('moving a photo into the empty room publishes the authored photo tour, and 
     await waitForNuxtHydration(authoredPreviewFrame!)
     const publicProductURL = new URL((await previewIframe.getAttribute('src'))!, baseURL)
     publicProductURL.pathname = publicProductURL.pathname.replace(/^\/stays\//, '/api/public/stays/')
-    const authoredPublicRead = await readTenant(request, baseURL!, slug, publicProductURL)
+    const authoredPublicRead = await readLocalTenant(request, slug, publicProductURL)
     await expectStatus(authoredPublicRead, 200)
     const authoredPublicProduct = (await authoredPublicRead.json() as { product: PhotoProduct }).product
     expect(authoredPublicProduct.stay.photo_rooms).toEqual(authoredRooms)
@@ -3452,7 +3445,7 @@ test('a host lists, pauses and unlists a priced place to stay', async ({ page, b
     const locationSlug = savedLocation.data!.location.slug
     await expect(guest.locator('header a[href="/locations"], footer a[href="/locations"]')).toHaveCount(0)
     for (const path of ['/locations', `/locations/${locationSlug}`, '/api/public/locations', `/api/public/locations/${locationSlug}`, `/api/public/locations/${locationSlug}/photos`, '/api/public/page?page=locations&datasets=location']) {
-      const removed = await readTenant(anonymousListing.request, baseURL!, slug, path)
+      const removed = await readLocalTenant(anonymousListing.request, slug, path)
       await expectStatus(removed, 404)
     }
     const homesIndex = await guest.goto(new URL('/stays', previewURL).href)
@@ -3464,13 +3457,13 @@ test('a host lists, pauses and unlists a priced place to stay', async ({ page, b
     await expect(guest.locator('header a[href^="/locations"], footer a[href^="/locations"]')).toHaveCount(0)
     await homeCard.click()
     await expect(guest.getByRole('button', { name: 'Check availability', exact: true }).last()).toBeVisible()
-    const sitemap = await readTenant(anonymousListing.request, baseURL!, slug, '/sitemap.xml')
+    const sitemap = await readLocalTenant(anonymousListing.request, slug, '/sitemap.xml')
     await expectStatus(sitemap, 200)
     expect(await sitemap.text()).not.toContain('/locations')
     const publicNights = new URL(`/api/public/products/${pricedProduct.data!.product.slug}/availability`, previewURL)
     publicNights.searchParams.set('from', localDay(1))
     publicNights.searchParams.set('to', localDay(4))
-    const nightsRead = await readTenant(anonymousListing.request, baseURL!, slug, publicNights)
+    const nightsRead = await readLocalTenant(anonymousListing.request, slug, publicNights)
     await expectStatus(nightsRead, 200)
     const calendar = await nightsRead.json() as PublicStayCalendar
     expect(calendar.home).toMatchObject({ currency: 'THB', min_nights: 2, base_price_minor: 150_00 })
@@ -3607,7 +3600,7 @@ test('a host lists, pauses and unlists a priced place to stay', async ({ page, b
     await test.step('the calendar keeps its month and edits the chosen endpoint across short and long stays', async () => {
       const inheritedNight = await call('set_stay_nights', { product_id: productId, from: localDay(1), to: localDay(2), price_minor: null })
       expect(inheritedNight.error).toBeNull()
-      const inheritedQuote = await readTenant(anonymousListing.request, baseURL!, slug, `/api/public/products/${pricedProduct.data!.product.slug}/quote`, {
+      const inheritedQuote = await readLocalTenant(anonymousListing.request, slug, `/api/public/products/${pricedProduct.data!.product.slug}/quote`, {
         check_in_date: localDay(1), check_out_date: localDay(2), adults: 1,
       })
       await expectStatus(inheritedQuote, 200)
@@ -3815,7 +3808,7 @@ test('a host lists, pauses and unlists a priced place to stay', async ({ page, b
     await expect(guest.getByRole('heading', { name: 'Cliff Cabin', level: 1, exact: true })).toBeVisible()
     await expect(guest.getByText('Temporarily unavailable', { exact: true }).last()).toBeVisible()
     await expect(guest.getByRole('button', { name: /^(Check availability|Reserve|Send enquiry)$/ })).toHaveCount(0)
-    const pausedRead = await readTenant(anonymousListing.request, baseURL!, slug, previewURL.pathname.replace(/^\/stays\//, '/api/public/stays/'))
+    const pausedRead = await readLocalTenant(anonymousListing.request, slug, previewURL.pathname.replace(/^\/stays\//, '/api/public/stays/'))
     await expectStatus(pausedRead, 200)
     expect((await pausedRead.json() as { product: Product }).product).toMatchObject({ name: 'Cliff Cabin', active: false })
 
@@ -4358,7 +4351,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       const publicURL = new URL((await publicIframe.getAttribute('src'))!, baseURL!)
       expect(publicURL.searchParams.get('preview_token')).toBeTruthy()
       publicURL.pathname = publicURL.pathname.replace(/^\/stays\//, '/api/public/stays/')
-      const publicResponse = await readTenant(page.request, baseURL!, slug, publicURL)
+      const publicResponse = await readLocalTenant(page.request, slug, publicURL)
       await expectStatus(publicResponse, 200)
       const publicPayload = await publicResponse.json() as { product: { details: Record<string, unknown>; stay: Record<string, unknown> } }
       expect(publicPayload.product.details).toEqual(publicRules.data!.product.details)
