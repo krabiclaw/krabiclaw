@@ -101,7 +101,7 @@
 
         <div id="consultations" class="grid scroll-mt-32 gap-10 items-start" :class="isStay ? 'mt-8 md:grid-cols-[minmax(0,1fr)_280px] xl:grid-cols-[minmax(0,1fr)_360px]' : 'mt-14 lg:grid-cols-[1fr_380px]'">
         <div class="min-w-0">
-          <p v-if="!canBook && !canEnquire && !canOrderExternally" role="status" class="rounded-xl border border-default bg-elevated p-5 text-muted lg:hidden">{{ scopeRequired ? t('booking.choose_location') : vertical === 'service' && !offer ? t('booking.price_unavailable_contact') : t('site.common.temporarily_unavailable') }}</p>
+          <p v-if="!privateExperiencePreview && !canBook && !canEnquire && !canOrderExternally" role="status" class="rounded-xl border border-default bg-elevated p-5 text-muted lg:hidden">{{ scopeRequired ? t('booking.choose_location') : vertical === 'service' && !offer ? t('booking.price_unavailable_contact') : t('site.common.temporarily_unavailable') }}</p>
 
           <!-- Airbnb's overview under the photos: what kind of place, where, and its size. -->
           <div v-if="isStay" class="pb-6">
@@ -200,7 +200,12 @@
           <!-- The next few sessions, on the page: a guest sees when it runs
                before they open anything. On a wide product page they travel in
                the booking card instead, as Airbnb's do. -->
-          <section v-if="canBook && !enquiryOnly && !isStay" class="border-t border-default pt-8 lg:hidden">
+          <section v-if="privateExperiencePreview && upcomingSessions.length" class="border-t border-default pt-8">
+            <h2 class="tenant-display text-2xl text-default sm:text-3xl">{{ t('site.experience_detail.upcoming_availability') }}</h2>
+            <p v-if="priceLabel" class="mt-2 text-muted lg:hidden">{{ priceLabel }} {{ t('site.experience_detail.per_person') }}</p>
+            <UpcomingSessions class="mt-5 grid gap-3 space-y-0! sm:grid-cols-2" :sessions="upcomingSessions" :day-label="sessionDayLabel" :time-label="sessionTimeLabel" show-remaining />
+          </section>
+          <section v-else-if="canBook && !enquiryOnly && !isStay" class="border-t border-default pt-8 lg:hidden">
             <div class="flex flex-wrap items-baseline justify-between gap-4">
               <h2 class="tenant-display text-2xl text-default sm:text-3xl">{{ t('site.experience_detail.upcoming_availability') }}</h2>
               <TenantButton variant="ghost" control-id="product-booking-toggle" @click="openBooking">
@@ -364,7 +369,7 @@
             </template>
 
             <p v-if="vertical === 'service' && !isStay && !product.order_url" class="text-sm text-muted">{{ booking?.confirmation_mode === 'review' ? t('booking.review_notice') : t('booking.instant_notice') }}</p>
-            <p v-if="!canBook && !canEnquire && !canOrderExternally" class="rounded-lg bg-default px-4 py-3 text-center text-sm font-semibold text-muted">
+            <p v-if="!privateExperiencePreview && !canBook && !canEnquire && !canOrderExternally" class="rounded-lg bg-default px-4 py-3 text-center text-sm font-semibold text-muted">
               {{ scopeRequired ? t('booking.choose_location') : vertical === 'service' && !offer ? t('booking.price_unavailable') : t('site.common.temporarily_unavailable') }}
             </p>
           </div>
@@ -571,6 +576,11 @@ const props = defineProps<{
 }>()
 
 const displayTitle = computed(() => props.product.name)
+const { previewAuthorized } = useTenantOrganization()
+const privateExperiencePreview = computed(() => previewAuthorized && props.product.kind === 'experience' && (
+  !props.product.publications.some(row => row.organization_id === props.organizationId && row.published)
+  || Boolean(props.location && !props.product.locations.some(row => row.location_id === props.location?.id && row.published))
+))
 /** A place to stay is booked by its nights, paid in full; its booking is not a session's. */
 const isStay = computed(() => props.product.kind === 'stay')
 const bookingInteractive = useMounted()
@@ -704,9 +714,9 @@ const isAvailable = computed(() =>
 const canOrderExternally = computed(() => isAvailable.value && Boolean(props.product.order_url))
 const externalActionLabel = computed(() => props.product.kind === 'experience' || props.product.kind === 'service' || props.product.kind === 'stay' ? t('site.experience_detail.book_now') : t('site.cta.order_now'))
 const canEnquire = computed(() => props.product.kind !== 'experience' && isAvailable.value && !props.product.order_url && enquiryOnly.value)
-const canBook = computed(() => isStay.value
+const canBook = computed(() => !privateExperiencePreview.value && (isStay.value
   ? !props.scopeRequired && isAvailable.value && offer.value !== null
-  : !props.scopeRequired && Boolean(props.booking) && isAvailable.value && !props.product.order_url && !enquiryOnly.value && (props.vertical !== 'service' || offer.value !== null))
+  : !props.scopeRequired && Boolean(props.booking) && isAvailable.value && !props.product.order_url && !enquiryOnly.value && (props.vertical !== 'service' || offer.value !== null)))
 
 
 
@@ -997,7 +1007,6 @@ const structuredDataType = computed(() => {
 // request the way the breadcrumbs are, so a tenant's markup stays on the
 // tenant's own domain.
 const requestURL = useRequestURL()
-const { previewAuthorized } = useTenantOrganization()
 const publicRoute = useRoute()
 const publicShareUrl = computed(() => new URL(publicRoute.path, requestURL.origin).toString())
 // A place to stay has no external link: it is booked on this page, which is its canonical URL.

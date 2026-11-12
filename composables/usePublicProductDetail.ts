@@ -100,7 +100,7 @@ export async function usePublicProductDetail(routeKind: ProductSurface) {
           ? await loadPublicSiteProductDetail(env, db, organizationId, siteWideSurface, previewAuthorized, productSlug, locale, scope.value)
           : await loadPublicProductDetail(env, db, organizationId, routeKind, previewAuthorized, locationSlug, productSlug, locale)
         if (!detail) return null
-        return publicProductDetailPayload(db, env, detail)
+        return publicProductDetailPayload(db, env, detail, siteWideSurface === 'experiences' && previewAuthorized)
       }
       const path = siteWideSurface
         ? `/api/public/${siteWideSurface}/${encodeURIComponent(productSlug)}`

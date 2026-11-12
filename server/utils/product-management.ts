@@ -680,7 +680,7 @@ async function loadProductSlugs(db: DbClient, organizationId: string): Promise<M
   return new Map(rows.map(row => [row.slug, row.id]))
 }
 
-async function organizationDefaultCurrency(db: DbClient, organizationId: string): Promise<CurrencyCode> {
+export async function organizationDefaultCurrency(db: DbClient, organizationId: string): Promise<CurrencyCode> {
   // Currency comes from an explicit site when the caller has one. With no site
   // context the caller must supply the currency on the price itself; there is
   // no platform default standing in for a merchant's decision.
