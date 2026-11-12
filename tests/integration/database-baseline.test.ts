@@ -77,12 +77,14 @@ test('session prep migration keeps the completed task and delivery history for b
       INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES ('staff', 'studio', 'host', 'member', 1);
       INSERT INTO products (id, organization_id, kind, slug, name, created_by, updated_by)
         VALUES ('class', 'studio', 'experience', 'class', 'Wheel class', 'host', 'host');
+      INSERT INTO product_variants (id, organization_id, product_id, name, created_by, updated_by)
+        VALUES ('seat', 'studio', 'class', 'Seat', 'host', 'host');
       INSERT INTO product_booking_configs (product_id, organization_id, unit, duration_minutes, scheduling_mode, assigned_member_id, created_by, updated_by)
         VALUES ('class', 'studio', 'slot', 60, 'business', 'staff', 'host', 'host');
       INSERT INTO product_sessions (id, organization_id, product_id, timezone, starts_at, ends_at, capacity, created_by, updated_by)
         VALUES ('session', 'studio', 'class', 'Asia/Bangkok', '2099-10-01T13:00:00.000Z', '2099-10-01T14:00:00.000Z', 8, 'host', 'host');
-      INSERT INTO bookings (id, organization_id, product_id, product_session_id, starts_at, ends_at, timezone, party_size, policy_json)
-        SELECT guest.id, s.organization_id, s.product_id, s.id, s.starts_at, s.ends_at, s.timezone, guest.size, '{}'
+      INSERT INTO bookings (id, organization_id, product_id, product_variant_id, product_session_id, starts_at, ends_at, timezone, party_size, policy_json)
+        SELECT guest.id, s.organization_id, s.product_id, 'seat', s.id, s.starts_at, s.ends_at, s.timezone, guest.size, '{}'
         FROM product_sessions s CROSS JOIN (SELECT 'one' AS id, 3 AS size UNION ALL SELECT 'two', 1) guest;
       INSERT INTO tasks (id, organization_id, kind, subject_type, subject_id, product_id, assigned_member_id, starts_at, due_at, timezone, status, closed_at, dedupe_key, created_at, updated_at)
         SELECT 'prep-' || id, organization_id, 'consultation_prep', 'booking', id, product_id, 'staff', starts_at, starts_at, timezone,
@@ -91,7 +93,19 @@ test('session prep migration keeps the completed task and delivery history for b
       INSERT INTO guest_thread_deliveries (id, task_id, channel, provider, purpose, status)
         SELECT 'delivery-' || id, id, 'email', 'log_only', 'task_starting', 'sent' FROM tasks;
     `)
+    const details = { name: 'Clayhouse', streetAddress: '88 Moo 2', addressLine2: null, postalCode: '81180', websiteUrl: null, openingHours: { periods: [] }, specialHours: null, sourceLocale: 'en' }
+    const asset = { draftAssetId: 'media-1', cloudflareImageId: 'cf-1', publicUrl: 'https://example.test/media', thumbnailUrl: null, mimeType: 'image/png', fileName: 'logo.png', fileSize: 1234 }
+    database.prepare("INSERT INTO onboarding_drafts (id, user_id, name, vertical, source_type, payload_json) VALUES ('draft', 'host', 'Clayhouse', 'experience', 'manual', ?)")
+      .run(JSON.stringify({ version: 3, source: { details }, preview: { media: [{ slot: 'logo', asset }] } }))
+    database.prepare("INSERT INTO stripe_connected_accounts (id, organization_id, livemode, requirements_json) VALUES ('stripe', 'studio', 0, ?)")
+      .run(JSON.stringify([{ awaitingActionFrom: 'user', deadlineStatus: 'currently_due', description: 'Verify address', errors: ['Missing address'] }]))
     database.exec(readFileSync('migrations/0001_session_prep_tasks.sql', 'utf8'))
+    const draft = JSON.parse(database.prepare('SELECT payload_json FROM onboarding_drafts').pluck().get() as string)
+    assert.deepEqual(draft.source.details, { name: 'Clayhouse', street_address: '88 Moo 2', address_line_2: null, postal_code: '81180', website_url: null, opening_hours: { periods: [] }, special_hours: null, source_locale: 'en' })
+    assert.deepEqual(draft.preview.media, [{ slot: 'logo', asset: { asset_id: 'media-1', cloudflare_image_id: 'cf-1', public_url: 'https://example.test/media', thumbnail_url: null, mime_type: 'image/png', file_name: 'logo.png', file_size: 1234 } }])
+    assert.deepEqual(JSON.parse(database.prepare('SELECT requirements_json FROM stripe_connected_accounts').pluck().get() as string), [
+      { awaiting_action_from: 'user', deadline_status: 'currently_due', description: 'Verify address', errors: ['Missing address'] },
+    ])
     assert.deepEqual(database.prepare('SELECT id, subject_type, subject_id, status FROM tasks ORDER BY id').all(), [
       { id: 'prep-one', subject_type: 'booking', subject_id: 'one', status: 'cancelled' },
       { id: 'prep-two', subject_type: 'product_session', subject_id: 'session', status: 'done' },
