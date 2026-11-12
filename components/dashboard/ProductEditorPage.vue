@@ -13,7 +13,7 @@
           <div v-if="creationHomeLocation" class="mt-2 flex flex-wrap items-center gap-x-3 text-sm text-muted">
             <span v-if="creationHomeLocation.address">{{ formatPostalAddress(creationHomeLocation.address) }}</span>
             <NuxtLink
-              :to="`/dashboard/${encodeURIComponent(String(route.params.org_slug))}/locations/${encodeURIComponent(creationHomeLocation.slug)}/address`"
+              :to="creationHomeAddressPath"
               class="underline underline-offset-4"
             >{{ creationHomeLocation.address ? 'Edit address' : 'Add address' }}</NuxtLink>
           </div>
@@ -928,15 +928,22 @@ const creationSubmitted = useState(`${draftKey}:submitted`, () => false)
 const creationPhoto = useState<CoverPhotoAsset | null>(`${draftKey}:photo`, () => null)
 const creationPrice = useState(`${draftKey}:price`, () => '')
 let commitNavigation = false
-onBeforeRouteLeave(() => !isNew.value || !saving.value || commitNavigation)
+let editingCreationAddress = false
+onBeforeRouteLeave((to) => {
+  if (isNew.value && saving.value && !commitNavigation) return false
+  editingCreationAddress = isNew.value && to.path === creationHomeAddressPath.value
+})
 onBeforeRouteUpdate((to, from) => !isNew.value || !saving.value || commitNavigation || to.path === from.path
   && JSON.stringify([to.query.kind, to.query.location_id, to.query.collection_id]) === JSON.stringify([from.query.kind, from.query.location_id, from.query.collection_id]))
 onUnmounted(() => {
-  if (productId.value === 'new' && !creationSubmitted.value) clearNuxtState([draftKey, createKeyName, `${draftKey}:created`, `${draftKey}:submitted`, `${draftKey}:photo`, `${draftKey}:price`])
+  if (productId.value === 'new' && !creationSubmitted.value && !editingCreationAddress) clearNuxtState([draftKey, createKeyName, `${draftKey}:created`, `${draftKey}:submitted`, `${draftKey}:photo`, `${draftKey}:price`])
 })
 const creationKind = computed({ get: () => form.kind || undefined, set: value => { form.kind = value ?? '' } })
 const creationKinds = PRODUCT_KINDS.map(value => ({ value, label: PRODUCT_KIND_LABELS[value], icon: PRODUCT_KIND_ICONS[value] }))
 const creationHomeLocation = computed(() => organizationLocations.value.find(location => location.id === form.stay_location_id))
+const creationHomeAddressPath = computed(() => creationHomeLocation.value
+  ? `/dashboard/${encodeURIComponent(String(route.params.org_slug))}/locations/${encodeURIComponent(creationHomeLocation.value.slug)}/address`
+  : undefined)
 const creationLocations = computed(() => organizationLocations.value.map(entry => ({ label: entry.title, value: entry.id })))
 const creationMembers = computed(() => (schedulingMembers.value?.members ?? []).map(member => ({ label: member.name, value: member.id })))
 const stayMemberChoice = computed({ get: () => form.stay_member_id ?? undefined, set: (value: string | undefined) => { form.stay_member_id = value ?? null } })

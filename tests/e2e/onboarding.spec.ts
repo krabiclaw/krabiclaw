@@ -530,6 +530,8 @@ test('an owner changes their restaurant draft to lodging and saves their first h
 
   const choices = page.getByTestId('first-home-setup')
   await expect(choices).toBeVisible()
+  await page.goto(`/dashboard/${created!.slug}/products`)
+  await expect(choices).toBeVisible()
   await choices.getByRole('link', { name: /Import from Airbnb/ }).click()
   await expect(page.getByText('Your Airbnb homes, one calendar', { exact: true })).toBeVisible()
   await page.goBack()

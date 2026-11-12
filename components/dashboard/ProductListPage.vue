@@ -143,7 +143,8 @@ function isHomeSetupAction(value: unknown): value is HomeSetupAction {
 
 const { organization } = useDashboardOrganization()
 const dashboardApi = useDashboardApi()
-const showFirstHomeSetup = computed(() => kind.value === 'stay' && organization.value?.vertical === 'lodging' && !offered('stay'))
+const showFirstHomeSetup = computed(() => organization.value?.vertical === 'lodging' && !offered('stay')
+  && (kind.value === 'stay' || (kind.value === 'all' && items.value.length === 0)))
 const { data: setup, error: setupError, pending: setupPending } = await useAsyncData(
   () => `first-home-setup:${organizationId}`,
   () => showFirstHomeSetup.value

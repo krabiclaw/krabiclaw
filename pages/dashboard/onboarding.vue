@@ -15,14 +15,16 @@
           :disabled="busy || (Boolean(state.draftId) && !canSave)"
           @click="saveAndExit"
         />
-        <div v-if="currentStep && !isWelcome" class="flex shrink-0 items-center py-3" :class="dashboardGutterClass">
+        <div v-if="restoreError || (currentStep && !isWelcome)" class="flex shrink-0 items-center py-3" :class="dashboardGutterClass">
+          <UButton v-if="restoreError" color="neutral" variant="outline" size="sm" label="Exit" to="/dashboard/account" />
           <UButton
+            v-else
             color="neutral"
             variant="outline"
             size="sm"
             :label="canSave || state.draftId ? 'Save & exit' : 'Exit'"
             :loading="exiting"
-            :disabled="Boolean(restoreError) || busy || (Boolean(state.draftId) && !canSave)"
+            :disabled="busy || (Boolean(state.draftId) && !canSave)"
             @click="saveAndExit"
           />
         </div>
@@ -181,12 +183,15 @@ async function goBack() {
 
 async function goNext() {
   if (busy.value) return
+  const startingRoute = router.currentRoute.value
+  const stepId = requestedId.value
   advancing.value = true
   try {
     const flow = await draft.readFlow()
+    if (router.currentRoute.value !== startingRoute) return
     plan.value = flow
     flowError.value = null
-    const index = flow.steps.findIndex(step => step.id === requestedId.value)
+    const index = flow.steps.findIndex(step => step.id === stepId)
     const step = flow.steps[index]
     if (!step?.canAdvance || (step.save && !flow.canSave)) return
     if (!flow.steps.some(candidate => candidate.id === 'products')) state.value.products = []
@@ -315,7 +320,7 @@ watch(() => state.value.preview?.previewToken, (token) => {
   }
 })
 
-useDashboardTopNavAction(() => state.value.preview
+useDashboardTopNavAction(() => !isWelcome.value && !restoreError.value && state.value.preview
   ? {
       key: 'onboarding-preview',
       icon: 'i-lucide-eye',

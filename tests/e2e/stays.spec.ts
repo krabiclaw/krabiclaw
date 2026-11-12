@@ -110,6 +110,12 @@ async function createStayHome(page: Page, baseURL: string, options: { selectDiff
     }
     await page.getByRole('textbox', { name: 'Internal name', exact: true }).fill(internalName)
     await page.getByRole('textbox', { name: 'Listing title', exact: true }).fill('Cliff Cabin')
+    if (selectDifferentLocation) {
+      await page.getByRole('link', { name: /^(Add|Edit) address$/ }).click()
+      await expect(page.getByRole('heading', { name: 'Address', exact: true })).toBeVisible()
+      await page.goBack()
+      await expect(page.getByRole('textbox', { name: 'Listing title', exact: true })).toHaveValue('Cliff Cabin')
+    }
     await page.getByRole('textbox', { name: 'Sleeps' }).fill('4')
     await page.getByRole('textbox', { name: 'Minimum nights' }).fill('2')
     await page.getByRole('combobox', { name: 'Looked after by*', exact: true }).click()
