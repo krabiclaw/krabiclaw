@@ -975,7 +975,15 @@ binding, baseline and foreign keys, then exercise table, class, consultation
 and stay booking through the guest site and read back the assigned member's
 tasks and conversations through staging MCP.
 
-Keep the production binding on v26 until compatible iOS is released. The
-production cutover uses a separate WNAM replacement and its own initial
-snapshot and final delta from `krabiclaw-production-v26`. Keep the old
+Production uses its own replacement, `krabiclaw-production-v27`
+(`e2e1b8cf-9246-4cfa-bced-548f1ffca0c4`). Cloudflare reported WNAM before
+it was bound. The read-only November 12 rehearsal transferred 239,208 rows
+across 98 tables with zero foreign-key violations. Load the unbound replacement
+and take its final delta from `krabiclaw-production-v26`. Keep the old
 databases available through verification and rollback.
+
+On November 12 the owner approved deploying v27 before iOS App Review.
+The published iOS 1.5 build 35 uses the previous API. iOS 1.6 build 37
+points at production and Apple needs the new API to test the demo workspace.
+After the v27 deployment, verify the production demo sign-in, Today, Messages
+and a stay before submitting build 37. Use manual release after Apple approval.
