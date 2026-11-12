@@ -105,9 +105,9 @@ jobs:
           key: yarn-playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('yarn.lock', '.yarnrc.yml') }}
       - name: Install browser test dependencies
         env:
-          YARN_CACHE_HIT: ${{ steps.playwright_yarn.outputs.cache-hit }}
+          PLAYWRIGHT_PACKAGE_CACHE_HIT: ${{ steps.playwright_yarn.outputs.cache-hit }}
         run: |
-          if [ "$YARN_CACHE_HIT" = "true" ]; then
+          if [ "$PLAYWRIGHT_PACKAGE_CACHE_HIT" = "true" ]; then
             corepack yarn install --immutable --immutable-cache
           else
             corepack yarn install --immutable
@@ -188,9 +188,9 @@ jobs:
           key: yarn-playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('yarn.lock', '.yarnrc.yml') }}
       - name: Install browser test dependencies
         env:
-          YARN_CACHE_HIT: ${{ steps.playwright_yarn.outputs.cache-hit }}
+          PLAYWRIGHT_PACKAGE_CACHE_HIT: ${{ steps.playwright_yarn.outputs.cache-hit }}
         run: |
-          if [ "$YARN_CACHE_HIT" = "true" ]; then
+          if [ "$PLAYWRIGHT_PACKAGE_CACHE_HIT" = "true" ]; then
             corepack yarn install --immutable --immutable-cache
           else
             corepack yarn install --immutable
