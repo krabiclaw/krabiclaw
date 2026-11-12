@@ -98,12 +98,20 @@ jobs:
           node-version: "24.18.1"
       - run: corepack enable
       - name: Restore Yarn package cache
+        id: playwright_yarn
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: .yarn/cache
           key: yarn-playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('yarn.lock', '.yarnrc.yml') }}
       - name: Install browser test dependencies
-        run: corepack yarn install --immutable
+        env:
+          YARN_CACHE_HIT: ${{ steps.playwright_yarn.outputs.cache-hit }}
+        run: |
+          if [ "$YARN_CACHE_HIT" = "true" ]; then
+            corepack yarn install --immutable --immutable-cache
+          else
+            corepack yarn install --immutable
+          fi
       # playwright.config.ts prepares an empty local D1 and the build, and its
       # global setup seeds the synthetic businesses through the app's own
       # boundaries (tests/e2e/seed). No production data reaches a pull request.
@@ -173,11 +181,20 @@ jobs:
           node-version: "24.18.1"
       - run: corepack enable
       - name: Restore Yarn package cache
+        id: playwright_yarn
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: .yarn/cache
           key: yarn-playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('yarn.lock', '.yarnrc.yml') }}
-      - run: corepack yarn install --immutable
+      - name: Install browser test dependencies
+        env:
+          YARN_CACHE_HIT: ${{ steps.playwright_yarn.outputs.cache-hit }}
+        run: |
+          if [ "$YARN_CACHE_HIT" = "true" ]; then
+            corepack yarn install --immutable --immutable-cache
+          else
+            corepack yarn install --immutable
+          fi
       - name: Build staging Worker
         run: yarn build
       - name: Capture Nuxt build ID
