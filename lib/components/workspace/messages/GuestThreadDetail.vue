@@ -70,8 +70,8 @@
                   class="max-w-full whitespace-pre-wrap rounded-[18px] px-3.5 py-2.5 text-base [overflow-wrap:anywhere]"
                   :class="[item.mine ? 'rounded-br-md bg-inverted text-inverted' : 'rounded-bl-md bg-elevated text-default', message.sending ? 'opacity-60' : '']"
                 >{{ message.translated && originals.has(message.id) ? message.translated.original : message.body }}</div>
-                <p v-if="message.unshownFiles" class="mx-1 mt-0.5 flex items-center gap-1.5 text-xs text-muted">
-                  <UIcon name="i-lucide-paperclip" class="size-3.5 shrink-0" />{{ message.unshownFiles === 1 ? 'Sent a file that can’t be shown here' : `Sent ${message.unshownFiles} files that can’t be shown here` }}
+                <p v-if="message.unshown_files" class="mx-1 mt-0.5 flex items-center gap-1.5 text-xs text-muted">
+                  <UIcon name="i-lucide-paperclip" class="size-3.5 shrink-0" />{{ message.unshown_files === 1 ? 'Sent a file that can’t be shown here' : `Sent ${message.unshown_files} files that can’t be shown here` }}
                 </p>
                 <p v-if="message.translated" class="mx-1 mt-0.5 text-xs text-muted">
                   Translated · <button type="button" class="text-highlighted underline underline-offset-2" @click="toggleOriginal(message.id)">{{ originals.has(message.id) ? 'Show translation' : 'Show original' }}</button>
@@ -167,12 +167,12 @@ watch(() => props.threadId, () => {
   if (!draft.value.trim()) draft.value = written
   window.history.replaceState(state, '')
 }, { immediate: true })
-const requestingChange = computed(() => props.personalScope && route.query.intent === 'booking-change' && thread.value?.recordId && thread.value.composer.channel === 'email')
+const requestingChange = computed(() => props.personalScope && route.query.intent === 'booking-change' && thread.value?.record_id && thread.value.composer.channel === 'email')
 const changeRequestSent = ref(false)
 watch(() => `${props.threadId}:${String(route.query.intent)}`, () => { changeRequestSent.value = false })
 const sendAt = ref<string | null>(null)
 // The business that asked for a change: the one whose inbox this is, or, in a guest's own inbox, the one they are writing to.
-const currentBusiness = computed(() => props.personalScope ? thread.value?.guestName : dashboard.organization.value?.name)
+const currentBusiness = computed(() => props.personalScope ? thread.value?.title : dashboard.organization.value?.name)
 const actionError = ref<string | null>(null)
 const readError = ref<string | null>(null)
 
@@ -203,9 +203,9 @@ const rows = computed<Row[]>(() => {
   const items: Array<StreamItem | MessageItem> = [...current.stream]
   if (attempt.value && sending.value) {
     items.push({
-      type: 'message', id: `pending:${attempt.value.key}`, side: mineSide.value, author: 'You', label: null, sentAt: new Date().toISOString(),
-      time: 'Sending', body: attempt.value.body || null, translated: null, receipt: null, retryable: false, unshownFiles: 0, sending: true,
-      photos: attempt.value.photos.map((photo, at) => ({ id: `${attempt.value!.key}:${at}`, url: photo.url, thumbnailUrl: photo.url, width: null, height: null })),
+      type: 'message', id: `pending:${attempt.value.key}`, side: mineSide.value, author: 'You', label: null, sent_at: new Date().toISOString(),
+      time: 'Sending', body: attempt.value.body || null, translated: null, receipt: null, retryable: false, unshown_files: 0, sending: true,
+      photos: attempt.value.photos.map((photo, at) => ({ id: `${attempt.value!.key}:${at}`, url: photo.url, thumbnail_url: photo.url, width: null, height: null })),
     })
   }
   const out: Row[] = []
@@ -242,7 +242,7 @@ const suggestionsOn = useSuggestedReplies(() => dashboard.organizationId.value)
 const suggestions = ref<string[]>([])
 const generationId = ref<string | null>(null)
 // The draft the field was filled from, sent with the reply so the server meters it; edits keep it.
-const usedSuggestion = ref<{ generationId: string; index: number } | null>(null)
+const usedSuggestion = ref<{ generation_id: string; index: number } | null>(null)
 const suggestionError = ref<string | null>(null)
 const suggestionAttempt = ref(0)
 const dismissedFor = ref<string | null>(null)
@@ -260,7 +260,7 @@ const suggestionsHidden = computed(() => suggestions.value.length > 0 && !sugges
 function recallSuggestions() { recalledFor.value = latestGuestMessage.value }
 function useSuggestion(option: string, index: number) {
   draft.value = option
-  usedSuggestion.value = generationId.value ? { generationId: generationId.value, index } : null
+  usedSuggestion.value = generationId.value ? { generation_id: generationId.value, index } : null
 }
 // Clearing the field lets go of the draft it came from.
 watch(draft, words => { if (!words.trim()) usedSuggestion.value = null })
@@ -271,7 +271,7 @@ watch([latestGuestMessage, suggestionsOn, suggestionAttempt], async ([messageId,
   if (props.personalScope || !on || !messageId || !import.meta.client) return
   try {
     const result = await dashboardApi(`${threadPath.value}/suggested-reply`, { method: 'POST', validate: isSuggestedReplies })
-    if (latestGuestMessage.value === messageId) { suggestions.value = result.suggestions; generationId.value = result.generationId }
+    if (latestGuestMessage.value === messageId) { suggestions.value = result.suggestions; generationId.value = result.generation_id }
   } catch (err) {
     suggestionError.value = `Replies could not be suggested: ${getErrorMessage(err, 'Suggested reply request failed')}`
   }

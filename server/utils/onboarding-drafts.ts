@@ -474,16 +474,16 @@ export function parseOnboardingDraftPayload(raw: string): OnboardingDraftPayload
 }
 
 export interface OnboardingDraftInput {
-  draftId?: string
+  draft_id?: string
   updated_at?: string | null
-  idempotencyKey?: string
-  sourceType?: unknown
-  placeId?: unknown
+  idempotency_key?: string
+  source_type?: unknown
+  google_place_id?: unknown
   vertical?: unknown
   name?: unknown
   subdomain?: unknown
   details?: Record<string, unknown> | null
-  brandDraft?: Record<string, unknown> | null
+  brand_draft?: Record<string, unknown> | null
   products?: unknown
 }
 
@@ -509,7 +509,7 @@ function draftImage(raw: unknown, existing: DraftUploadedImage | null): DraftUpl
 
 export function normalizeOnboardingDraftInput(input: OnboardingDraftInput, existing: OnboardingDraftPayload | null, place: DraftPlaceSource | null) {
   if (input.details !== undefined && input.details !== null && (typeof input.details !== 'object' || Array.isArray(input.details))) throw new HTTPError({ statusCode: 400, statusMessage: 'Business details must be an object' })
-  if (input.brandDraft !== undefined && input.brandDraft !== null && (typeof input.brandDraft !== 'object' || Array.isArray(input.brandDraft))) throw new HTTPError({ statusCode: 400, statusMessage: 'Brand details must be an object' })
+  if (input.brand_draft !== undefined && input.brand_draft !== null && (typeof input.brand_draft !== 'object' || Array.isArray(input.brand_draft))) throw new HTTPError({ statusCode: 400, statusMessage: 'Brand details must be an object' })
   const raw = input.details
   const previous = existing?.source.details
   const name = answer(raw, 'name') ?? answer(input as unknown as Record<string, unknown>, 'name') ?? place?.name ?? previous?.name ?? ''
@@ -548,7 +548,7 @@ export function normalizeOnboardingDraftInput(input: OnboardingDraftInput, exist
           return { name: productName, category: answer(product, 'category') ?? '', amountMinor: typeof amount === 'number' ? amount : null }
         })
       })()
-  const brand = input.brandDraft
+  const brand = input.brand_draft
   const config = existing?.preview.config
   const previousHeadline = config?.draft_hero_headline ?? existing?.preview.content.find(content => content.page === 'home' && content.field === 'hero')?.hero_title
   const brandDraft: DraftBrandInput = {

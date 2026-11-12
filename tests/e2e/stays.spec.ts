@@ -61,7 +61,7 @@ async function createStayHome(page: Page, baseURL: string, selectDifferentLocati
   const created = await request.post(`${baseURL}/api/auth/organization/create`, { headers, data: { name: `Stays ${slug}`, slug, default_currency: 'THB', timezone: TIME_ZONE } })
   await expectStatus(created, 200)
   const organizationId = (await created.json() as { id: string }).id
-  const provisioned = await request.post(`${baseURL}/api/organizations`, { headers, data: { organizationId, name: `Stays ${slug}`, subdomain: slug, vertical: 'lodging', sourceLocale: 'en' } })
+  const provisioned = await request.post(`${baseURL}/api/organizations`, { headers, data: { organization_id: organizationId, name: `Stays ${slug}`, subdomain: slug, vertical: 'lodging', source_locale: 'en' } })
   await expectStatus(provisioned, 200)
   expect((await request.post(`${baseURL}/api/auth/organization/set-active`, { headers, data: { organizationId } })).status()).toBe(200)
   const call = <T>(name: string, args: Record<string, unknown>) => tool<T>(request, baseURL, organizationId, name, args)
@@ -3815,7 +3815,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
   const created = await page.request.post('/api/auth/organization/create', { headers, data: { name: `Cleaner ${slug}`, slug, default_currency: 'THB', timezone: TIME_ZONE } })
   await expectStatus(created, 200)
   const organizationId = (await created.json() as { id: string }).id
-  const provisioned = await page.request.post('/api/organizations', { headers, data: { organizationId, name: `Cleaner ${slug}`, subdomain: slug, vertical: 'lodging', sourceLocale: 'en' } })
+  const provisioned = await page.request.post('/api/organizations', { headers, data: { organization_id: organizationId, name: `Cleaner ${slug}`, subdomain: slug, vertical: 'lodging', source_locale: 'en' } })
   await expectStatus(provisioned, 200)
   const api = (path: string) => `/api/dashboard/${path}${path.includes('?') ? '&' : '?'}org=${encodeURIComponent(slug)}`
   const call = <T>(name: string, args: Record<string, unknown>) => tool<T>(page.request, baseURL!, organizationId, name, args)
@@ -4750,7 +4750,7 @@ test('a stay socket in a service organization closes when Better Auth removes it
   const created = await page.request.post('/api/auth/organization/create', { headers, data: { name: `Live ${slug}`, slug, default_currency: 'THB', timezone: TIME_ZONE } })
   await expectStatus(created, 200)
   const organizationId = (await created.json() as { id: string }).id
-  const provisioned = await page.request.post('/api/organizations', { headers, data: { organizationId, name: `Live ${slug}`, subdomain: slug, vertical: 'service', sourceLocale: 'en' } })
+  const provisioned = await page.request.post('/api/organizations', { headers, data: { organization_id: organizationId, name: `Live ${slug}`, subdomain: slug, vertical: 'service', source_locale: 'en' } })
   await expectStatus(provisioned, 200)
   const api = (path: string) => `/api/dashboard/${path}?org=${encodeURIComponent(slug)}`
   const cleaner = await browser.newContext({ baseURL: baseURL! })

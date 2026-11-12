@@ -201,7 +201,7 @@
           <dd class="text-right text-base text-highlighted">{{ STAY_CHANNEL_LABELS[detail.channel] }}</dd>
         </div>
       </dl>
-      <UButton v-if="manage && detail.status !== 'cancelled'" class="mt-4" color="neutral" variant="outline" label="Move guest" :to="`/dashboard/${encodeURIComponent(String(route.params.orgSlug))}/bookings/stay/${encodeURIComponent(detail.id)}/move`" data-testid="stay-move" />
+      <UButton v-if="manage && detail.status !== 'cancelled'" class="mt-4" color="neutral" variant="outline" label="Move guest" :to="`/dashboard/${encodeURIComponent(String(route.params.org_slug))}/bookings/stay/${encodeURIComponent(detail.id)}/move`" data-testid="stay-move" />
       <p v-if="!personalScope && channelManaged" class="mt-4 text-base text-muted">
         Payments, changes and cancellations for this stay are managed on
         <ULink v-if="detail.channel_booking_url" :to="detail.channel_booking_url" target="_blank" rel="noopener noreferrer" class="text-highlighted underline">{{ channelName }}</ULink><template v-else>{{ channelName }}</template>.
@@ -275,7 +275,7 @@ const isStay = (value: unknown): value is { stay: StayDetail; manage?: boolean }
 type DashboardStay = { stay: StayDetail; manage: true; can_message_guest: boolean } | { stay: StayTurnover; manage: false }
 const isDashboardStay = (value: unknown): value is DashboardStay => isRecord(value) && isRecord(value.stay) && typeof value.stay.id === 'string'
   && (value.manage === false || (value.manage === true && typeof value.can_message_guest === 'boolean' && isStay(value)))
-const { data, error, refresh } = await useAsyncData(`${props.personalScope ? 'account' : String(route.params.orgSlug)}-stay:${props.stayId}`, (): Promise<DashboardStay | GuestStay> => props.personalScope
+const { data, error, refresh } = await useAsyncData(`${props.personalScope ? 'account' : String(route.params.org_slug)}-stay:${props.stayId}`, (): Promise<DashboardStay | GuestStay> => props.personalScope
   ? applicationFetch(`/api/account/stays/${encodeURIComponent(props.stayId)}`, { validate: isGuestStay })
   : dashboardApi(`/api/dashboard/stays/${encodeURIComponent(props.stayId)}`, { validate: isDashboardStay }))
 const stay = computed(() => data.value?.stay ?? null)
@@ -285,7 +285,7 @@ const channelManaged = computed(() => detail.value !== null && isChannelManagedS
 const manage = computed(() => !props.personalScope && data.value !== null && 'manage' in data.value! && data.value.manage === true)
 const home = computed(() => data.value && 'home' in data.value ? data.value.home : null)
 const { data: hostHomeData, error: homeError, refresh: refreshHostHome } = await useAsyncData(
-  computed(() => `${props.personalScope ? 'account' : String(route.params.orgSlug)}-stay-home:${stay.value?.product_id ?? props.stayId}`),
+  computed(() => `${props.personalScope ? 'account' : String(route.params.org_slug)}-stay-home:${stay.value?.product_id ?? props.stayId}`),
   async (): Promise<{ home: StayHome } | null> => {
     if (props.personalScope || !stay.value) return null
     const productId = stay.value.product_id
@@ -318,7 +318,7 @@ const messagePath = computed(() => {
   const id = encodeURIComponent(detail.value.conversation_id)
   if (props.personalScope) return `/dashboard/account/messages/${id}`
   if (!data.value || !('manage' in data.value) || !data.value.manage || !data.value.can_message_guest) return null
-  return `/dashboard/${encodeURIComponent(String(route.params.orgSlug))}/messages/${id}`
+  return `/dashboard/${encodeURIComponent(String(route.params.org_slug))}/messages/${id}`
 })
 const callPhone = computed(() => !props.personalScope ? detail.value?.guest_phone ?? null : null)
 const guestAddress = computed(() => home.value?.location?.address ? formatPostalAddress(home.value.location.address) : '')
@@ -326,7 +326,7 @@ const cancellation = computed(() => data.value && 'cancellation' in data.value ?
 const canRequestChange = computed(() => props.personalScope && detail.value !== null && !isChannelManagedStay(detail.value) && Boolean(messagePath.value) && ['pending', 'confirmed'].includes(detail.value.status)
   && (detail.value.ends_at.length === 10 ? detail.value.check_out_date >= localDateAt(new Date(), detail.value.timezone) : Date.parse(detail.value.ends_at) > Date.now()))
 const policy = computed(() => detail.value?.cancellation_policy ? bookedPolicyTerms(detail.value.cancellation_policy) : null)
-const paymentPath = computed(() => detail.value?.online_payment ? `/dashboard/${route.params.orgSlug}/bookings/payment/${encodeURIComponent(detail.value.online_payment.payment_id)}` : '')
+const paymentPath = computed(() => detail.value?.online_payment ? `/dashboard/${route.params.org_slug}/bookings/payment/${encodeURIComponent(detail.value.online_payment.payment_id)}` : '')
 watch(realtime.event, event => {
   if (event?.type === 'stay.changed' && (event.booking_id === props.stayId || (event.booking_id === null && event.product_id === stay.value?.product_id))) {
     void refresh()

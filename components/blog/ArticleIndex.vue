@@ -39,9 +39,9 @@ const { organization } = useTenantOrganization()
 const isPlatform = organization.site.slug === 'platform'
 const organizationName = organization.name
 
-const { posts, categoryTree, index, localeRepresentations } = await usePublishedArticles(props.collection)
+const { posts, categoryTree, index, locale_representations } = await usePublishedArticles(props.collection)
 // The index is read in every language the site publishes; the switcher offers them.
-useState<PublicLocaleRepresentation[]>('public-locale-representations', () => []).value = localeRepresentations.value
+useState<PublicLocaleRepresentation[]>('public-locale-representations', () => []).value = locale_representations.value
 
 const label = computed(() => props.collection === 'docs' ? t('site.footer.docs') : t('site.footer.blog'))
 const title = computed(() => index.value?.title?.trim() || label.value)

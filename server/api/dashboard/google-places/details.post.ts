@@ -18,10 +18,10 @@ export default defineHandler(async (event) => {
   const session = await getAuthSession(event, env)
   if (!session?.user?.id) return jsonResponse({ error: 'Authentication required' }, { status: 401 })
 
-  const body = await readBody(event) as { placeId?: unknown; sessionToken?: unknown } | undefined
-  const placeId = typeof body?.placeId === 'string' ? body.placeId.trim() : ''
-  if (!placeId || placeId.length > 300) return jsonResponse({ error: 'placeId is required and at most 300 characters' }, { status: 400 })
-  if (!isPlacesSessionToken(body?.sessionToken)) return jsonResponse({ error: 'sessionToken must be a UUID' }, { status: 400 })
+  const body = await readBody(event) as { google_place_id?: unknown; session_token?: unknown } | undefined
+  const placeId = typeof body?.google_place_id === 'string' ? body.google_place_id.trim() : ''
+  if (!placeId || placeId.length > 300) return jsonResponse({ error: 'google_place_id is required and at most 300 characters' }, { status: 400 })
+  if (!isPlacesSessionToken(body?.session_token)) return jsonResponse({ error: 'session_token must be a UUID' }, { status: 400 })
 
   const apiKey = env.GOOGLE_PLACES_API_KEY as string | undefined
   if (!apiKey) return jsonResponse({ error: 'Google Places API key not configured' }, { status: 503 })
@@ -33,21 +33,21 @@ export default defineHandler(async (event) => {
 
   let place
   try {
-    place = await getPlaceDetails(apiKey, placeId, { sessionToken: body.sessionToken })
+    place = await getPlaceDetails(apiKey, placeId, { sessionToken: body.session_token })
   } catch (error) {
     return jsonResponse({ error: error instanceof Error ? error.message : 'Could not fetch place details. Try again.' }, { status: 502 })
   }
 
   return jsonResponse({
-    placeId: place.placeId,
+    google_place_id: place.placeId,
     name: place.name,
     address: place.address,
     phone: place.phone,
-    mapsUrl: place.mapsUrl,
-    websiteUrl: place.websiteUrl,
+    maps_url: place.mapsUrl,
+    website_url: place.websiteUrl,
     rating: place.rating,
-    ratingCount: place.ratingCount,
-    openingHours: place.openingHours,
+    review_count: place.ratingCount,
+    opening_hours: place.openingHours,
     timezone: place.timezone,
   })
 })

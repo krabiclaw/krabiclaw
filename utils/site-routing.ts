@@ -34,7 +34,7 @@ export interface PublicSiteDefinition {
    * documents a route still binds by path alone — only needed where a route
    * file claims the path, because a claimed path is one the catch-all cannot
    * reach. `prefixes` are subtrees served as documents. Unclaimed paths are
-   * rendered by pages/[...tenantPath].vue on every site.
+   * rendered by pages/[...tenant_path].vue on every site.
    */
   pageDocuments: {
     recipes: Record<string, string> & { home: string }

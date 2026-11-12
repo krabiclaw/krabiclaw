@@ -27,7 +27,7 @@ export async function useOrganizationBilling() {
   const route = useRoute()
   const dashboardApi = useDashboardApi()
   const { data, error, refresh } = await useAsyncData(
-    `dashboard-billing:${String(route.params.orgSlug || '')}`,
+    `dashboard-billing:${String(route.params.org_slug || '')}`,
     () => dashboardApi('/api/billing/status', { query: { include_price: 'true' }, validate: isBillingResponse }),
   )
   return { billing: computed(() => data.value?.billing ?? null), billingError: error, refreshBilling: refresh }
@@ -67,7 +67,7 @@ export const isServices = (value: unknown): value is ServicesContract => isRecor
 export async function useOrganizationServices(requirements?: 'strategy') {
   const route = useRoute()
   const dashboardApi = useDashboardApi()
-  const { data, error, refresh } = await useAsyncData(`dashboard-services:${String(route.params.orgSlug)}:${requirements ?? 'state'}`, () => dashboardApi('/api/dashboard/services', { query: requirements ? { requirements } : undefined, validate: (value): value is ServicesContract => isServices(value) && (requirements === undefined || (isRecord(value) && isRecord(value.requirements) && isRecord(value.requirements.strategy) && typeof value.requirements.strategy.paid_plan === 'boolean')) }))
+  const { data, error, refresh } = await useAsyncData(`dashboard-services:${String(route.params.org_slug)}:${requirements ?? 'state'}`, () => dashboardApi('/api/dashboard/services', { query: requirements ? { requirements } : undefined, validate: (value): value is ServicesContract => isServices(value) && (requirements === undefined || (isRecord(value) && isRecord(value.requirements) && isRecord(value.requirements.strategy) && typeof value.requirements.strategy.paid_plan === 'boolean')) }))
   // Unknown until read: a failed read shows its error and offers no service action.
   return { servicesResource: data, services: computed(() => data.value?.services), servicesError: error, refreshServices: refresh }
 }
@@ -75,7 +75,7 @@ export async function useOrganizationServices(requirements?: 'strategy') {
 export type ConnectStatus = 'creating' | 'creation_failed' | 'action_required' | 'pending_review' | 'restricted' | 'ready'
 type CapabilityStatus = 'active' | 'pending' | 'restricted' | 'unsupported'
 export interface ConnectRequirement { awaitingActionFrom: 'stripe' | 'user'; deadlineStatus: 'currently_due' | 'eventually_due' | 'past_due'; description: string; errors: string[] }
-export interface PayoutMethod { bankName: string | null; last4: string; currency: string; schedule: { interval: string; delayDays: number } }
+export interface PayoutMethod { bank_name: string | null; last4: string; currency: string; schedule: { interval: string; delay_days: number } }
 export interface ConnectedAccount {
   id: string
   organizationId: string
@@ -109,7 +109,7 @@ export const isConnectedAccount = (value: unknown): value is ConnectedAccount =>
   && (value.stripeRefreshedAt === null || typeof value.stripeRefreshedAt === 'string')
   && (value.lastError === null || typeof value.lastError === 'string')
   && typeof value.createdAt === 'string' && typeof value.updatedAt === 'string'
-const isPayoutMethod = (value: unknown): value is PayoutMethod | null => value === null || (isRecord(value) && (value.bankName === null || typeof value.bankName === 'string') && typeof value.last4 === 'string' && typeof value.currency === 'string' && isRecord(value.schedule) && typeof value.schedule.interval === 'string' && Number.isSafeInteger(value.schedule.delayDays))
+const isPayoutMethod = (value: unknown): value is PayoutMethod | null => value === null || (isRecord(value) && (value.bank_name === null || typeof value.bank_name === 'string') && typeof value.last4 === 'string' && typeof value.currency === 'string' && isRecord(value.schedule) && typeof value.schedule.interval === 'string' && Number.isSafeInteger(value.schedule.delay_days))
 export interface AccountResponse { success: true; account: ConnectedAccount | null; payout: PayoutMethod | null }
 const isAccountResponse = (value: unknown): value is AccountResponse =>
   isRecord(value) && value.success === true && (value.account === null || isConnectedAccount(value.account)) && isPayoutMethod(value.payout)
@@ -117,7 +117,7 @@ const isAccountResponse = (value: unknown): value is AccountResponse =>
 export function useConnectAccount() {
   const route = useRoute()
   const dashboardApi = useDashboardApi()
-  const { data, error, status, refresh } = useAsyncData(`dashboard-connect:${String(route.params.orgSlug)}`, () => dashboardApi<AccountResponse>('/api/dashboard/connect', { validate: isAccountResponse }), { server: false, lazy: true })
+  const { data, error, status, refresh } = useAsyncData(`dashboard-connect:${String(route.params.org_slug)}`, () => dashboardApi<AccountResponse>('/api/dashboard/connect', { validate: isAccountResponse }), { server: false, lazy: true })
   const pending = computed(() => status.value === 'idle' || status.value === 'pending')
   const account = computed(() => data.value?.account ?? null)
   const payout = computed(() => data.value?.payout ?? null)
@@ -153,7 +153,7 @@ export async function usePaymentMethods() {
   const route = useRoute()
   const dashboard = useDashboardOrganization()
   const { data, error, refresh } = await useAsyncData(
-    `payment-methods:${String(route.params.orgSlug)}`,
+    `payment-methods:${String(route.params.org_slug)}`,
     () => {
       const organizationId = dashboard.organization.value?.id
       if (!organizationId) throw new Error('Organization context is unavailable')

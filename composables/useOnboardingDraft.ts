@@ -89,28 +89,28 @@ export function useOnboardingDraft() {
       const res = await applicationFetch<Record<string, unknown>>('/api/dashboard/onboarding/drafts/active', {
         method: 'POST',
         body: {
-          draftId: state.value.draftId ?? undefined,
+          draft_id: state.value.draftId ?? undefined,
           updated_at: state.value.draftRevision,
-          sourceType: state.value.source ?? 'manual',
-          placeId: state.value.placeId,
+          source_type: state.value.source ?? 'manual',
+          google_place_id: state.value.placeId,
           name: state.value.details.name.trim(),
           vertical: state.value.vertical,
           details: serializeDetails(),
-          brandDraft: serializeBrandDraft(),
+          brand_draft: serializeBrandDraft(),
           products: serializeProducts(),
         },
         validate: (value): value is Record<string, unknown> => isRecord(value),
       })
-      if (res.success !== true || typeof res.draftId !== 'string' || typeof res.updated_at !== 'string' || typeof res.organizationId !== 'string'
-        || typeof res.previewToken !== 'string' || typeof res.draftName !== 'string'
-        || typeof res.subdomainCandidate !== 'string') {
+      if (res.success !== true || typeof res.draft_id !== 'string' || typeof res.updated_at !== 'string' || typeof res.organization_id !== 'string'
+        || typeof res.preview_token !== 'string' || typeof res.name !== 'string'
+        || typeof res.subdomain_candidate !== 'string') {
         throw new Error(typeof res.error === 'string' ? res.error : 'Could not save your answers. Please try again.')
       }
-      state.value.draftId = res.draftId
+      state.value.draftId = res.draft_id
       state.value.draftRevision = res.updated_at
       state.value.preview = {
-        draftId: res.draftId, organizationId: res.organizationId, previewToken: res.previewToken,
-        draftName: res.draftName, subdomainCandidate: res.subdomainCandidate,
+        draftId: res.draft_id, organizationId: res.organization_id, previewToken: res.preview_token,
+        draftName: res.name, subdomainCandidate: res.subdomain_candidate,
       }
       return true
     } catch (cause) {
@@ -128,7 +128,7 @@ export function useOnboardingDraft() {
    */
   function seedFromPlace(preview: OnboardingPlacePreview) {
     state.value.source = 'google_places'
-    state.value.placeId = preview.placeId
+    state.value.placeId = preview.google_place_id
     const details = state.value.details
     details.name = preview.name ?? ''
     // Places answers with the address already split, so every field seeds from
@@ -142,7 +142,7 @@ export function useOnboardingDraft() {
     details.country = address?.regionCode ?? ''
     // The server hands the place's number over in E.164.
     details.phone = preview.phone ?? ''
-    state.value.hours.hours = parseOpeningHours((preview.openingHours ?? null) as OpeningHours)
+    state.value.hours.hours = parseOpeningHours((preview.opening_hours ?? null) as OpeningHours)
     state.value.hours.specialHours = null
     state.value.hours.timezone = preview.timezone ?? ''
   }
@@ -198,7 +198,7 @@ export function useOnboardingDraft() {
       validate: (value): value is Record<string, unknown> => isRecord(value),
     })
     const draft = isRecord(res.draft) ? res.draft : null
-    return draft && typeof draft.organizationId === 'string' ? draft.organizationId : null
+    return draft && typeof draft.organization_id === 'string' ? draft.organization_id : null
   }
 
   /**
@@ -251,7 +251,7 @@ export function useOnboardingDraft() {
     })
     const draft = isRecord(res.draft) ? res.draft : null
     if (!draft) return false
-    if (typeof draft.draftId !== 'string' || typeof draft.updated_at !== 'string') throw new Error('Saved website draft identity and revision are unavailable')
+    if (typeof draft.draft_id !== 'string' || typeof draft.updated_at !== 'string') throw new Error('Saved website draft identity and revision are unavailable')
     const details = isRecord(draft.details) ? draft.details : {}
     const config = isRecord(draft.config) ? draft.config : {}
     const text = (value: unknown) => typeof value === 'string' ? value : ''
@@ -262,15 +262,15 @@ export function useOnboardingDraft() {
     const openingHours = parseOpeningHours(details.openingHours as OpeningHours)
     const specialHours = parseSpecialHours(details.specialHours)
 
-    const logoImage = restoredImage(draft.logoImage)
-    const heroImage = restoredImage(draft.heroImage)
+    const logoImage = restoredImage(draft.logo_image)
+    const heroImage = restoredImage(draft.hero_image)
 
-    state.value.draftId = draft.draftId
+    state.value.draftId = draft.draft_id
     state.value.draftRevision = draft.updated_at
     if (!ALL_VERTICALS.includes(draft.vertical as OrganizationVertical)) throw new Error(`Saved website draft has an unknown business type: ${String(draft.vertical)}`)
     state.value.vertical = draft.vertical as OrganizationVertical
-    state.value.source = draft.sourceType === 'google_places' ? 'google_places' : 'manual'
-    state.value.placeId = typeof draft.placeId === 'string' && draft.placeId ? draft.placeId : null
+    state.value.source = draft.source_type === 'google_places' ? 'google_places' : 'manual'
+    state.value.placeId = typeof draft.google_place_id === 'string' && draft.google_place_id ? draft.google_place_id : null
     state.value.details.sourceLocale = typeof details.sourceLocale === 'string' ? details.sourceLocale : null
     state.value.details.name = text(details.name)
     state.value.details.city = text(details.city)
@@ -302,18 +302,18 @@ export function useOnboardingDraft() {
         ? [{
             name: entry.name,
             category: typeof entry.category === 'string' ? entry.category : '',
-            amountMinor: typeof entry.amountMinor === 'number' ? entry.amountMinor : null,
+            amountMinor: typeof entry.unit_amount === 'number' ? entry.unit_amount : null,
           }]
         : [])
       : []
 
-    if (typeof draft.organizationId === 'string' && typeof draft.previewToken === 'string' && typeof draft.subdomainCandidate === 'string') {
+    if (typeof draft.organization_id === 'string' && typeof draft.preview_token === 'string' && typeof draft.subdomain_candidate === 'string') {
       state.value.preview = {
-        draftId: draft.draftId,
-        organizationId: draft.organizationId,
-        previewToken: draft.previewToken,
-        draftName: typeof draft.draftName === 'string' ? draft.draftName : state.value.details.name,
-        subdomainCandidate: draft.subdomainCandidate,
+        draftId: draft.draft_id,
+        organizationId: draft.organization_id,
+        previewToken: draft.preview_token,
+        draftName: typeof draft.name === 'string' ? draft.name : state.value.details.name,
+        subdomainCandidate: draft.subdomain_candidate,
       }
     }
     return true

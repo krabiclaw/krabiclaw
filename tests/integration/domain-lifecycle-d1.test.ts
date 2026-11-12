@@ -58,7 +58,7 @@ test('a stale domain result changes nothing and permanent subdomain reservations
     await deleteCustomDomain(env, db, 'custom', 'system')
     assert.equal((await db.prepare("SELECT status FROM organization_domains WHERE id='custom'").first())?.status, 'deleted')
     // The deletion and its audit row commit together.
-    assert.ok((await listDashboardEvents(db, 'audit', {})).events.some(event => event.event_type === 'domain_deleted'))
+    assert.ok((await listDashboardEvents(db, 'audit', {})).events.some(event => event.event_name === 'domain_deleted'))
     assert.equal((await listDashboardEvents(db, 'other', {})).events.length, 0)
     // The audit trail belongs to the organization it describes: deleting the
     // organization takes its entries with it rather than stranding them.

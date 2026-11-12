@@ -8,21 +8,16 @@ import { getVerticalCopy } from '~/utils/vertical-copy'
 /** One of the visits a guest account has booked, as the account's Today lists it. The business's Today is tasks (server/domain/tasks.ts). */
 export const todayCardSchema = z.object({
   id: z.string(), to: z.string(), eyebrow: z.string(), headline: z.string(), description: z.string().nullable(),
-  imageUrl: z.string().nullable(), imageIcon: z.string(),
-  locationId: z.string().nullable(),
-  bookingKind: z.enum(['booking', 'stay']),
-  stayId: z.string().nullable(),
-  productId: z.string().nullable(),
-  occurrenceAt: z.iso.datetime({ offset: true }).nullable(), timeZone: z.string(),
+  image_url: z.string().nullable(), image_icon: z.string(),
 })
 export type TodayCard = z.infer<typeof todayCardSchema>
-export const todayFeedSchema = z.object({ cards: z.array(todayCardSchema), resolvedAt: z.string() })
+export const todayFeedSchema = z.object({ cards: z.array(todayCardSchema), resolved_at: z.string() })
 export type TodayFeedPayload = z.infer<typeof todayFeedSchema>
 
 /** A guest account's visit as a Today card. */
-export function agendaToTodayCard(item: AgendaItem, input: { resolvedAt: string }): TodayCard {
+export function agendaToTodayCard(item: AgendaItem, input: { resolved_at: string }): TodayCard {
   if (item.kind !== 'booking' && item.kind !== 'stay') throw new Error('Today cards require a booking or stay')
-  const referenceDay = localDateAt(new Date(input.resolvedAt), item.timezone)
+  const referenceDay = localDateAt(new Date(input.resolved_at), item.timezone)
   const distance = Math.round((Date.parse(`${item.day_key}T00:00:00Z`) - Date.parse(`${referenceDay}T00:00:00Z`)) / 86_400_000)
   const when = distance <= 0 ? 'today' : distance === 1 ? 'tomorrow' : `in ${distance} days`
   const guests = item.party_size && item.party_size > 0 ? `${item.party_size} ${item.party_size === 1 ? 'guest' : 'guests'}` : ''
@@ -31,9 +26,7 @@ export function agendaToTodayCard(item: AgendaItem, input: { resolvedAt: string 
     eyebrow: item.stay_moment === 'current' ? 'Currently hosting' : !item.starts_at.includes('T') ? 'Time not set' : formatTimestamp(item.starts_at, 'en', item.timezone, { hour: 'numeric', minute: '2-digit' }),
     headline: `${item.title} ${when}${guests ? ` for ${guests}` : ''}`,
     description: [...new Set([item.subtitle, item.location_title].filter((part): part is string => !!part && part !== item.title))].join(' · ') || null,
-    imageUrl: item.resource_image_url, imageIcon: item.kind === 'booking' ? 'i-lucide-ticket' : item.kind === 'stay' ? 'i-lucide-house' : 'i-lucide-map-pin',
-    locationId: item.location_id, bookingKind: item.kind, stayId: item.kind === 'stay' ? item.booking_id : null, productId: item.product_id,
-    occurrenceAt: item.stay_moment === 'current' || !item.starts_at.includes('T') ? null : item.starts_at, timeZone: item.timezone,
+    image_url: item.resource_image_url, image_icon: item.kind === 'booking' ? 'i-lucide-ticket' : 'i-lucide-house',
   }
 }
 

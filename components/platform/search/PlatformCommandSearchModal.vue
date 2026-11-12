@@ -363,8 +363,8 @@ async function runSearch() {
       query: {
         q: normalized,
         surface: props.surface,
-        orgSlug: typeof route.params.orgSlug === 'string' ? route.params.orgSlug : '',
-        locationSlug: typeof route.params.locationSlug === 'string' ? route.params.locationSlug : '',
+        orgSlug: typeof route.params.org_slug === 'string' ? route.params.org_slug : '',
+        locationSlug: typeof route.params.location_slug === 'string' ? route.params.location_slug : '',
       },
     })
     if (requestId !== requestSequence) return

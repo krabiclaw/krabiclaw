@@ -229,10 +229,10 @@ const AUTOCOMPLETE_FIELD_MASK = [
 
 /** One place prediction, as the business picker shows it. */
 export interface GooglePlaceSuggestion {
-  placeId: string
+  google_place_id: string
   name: string
-  addressLabel: string
-  fullText: string
+  address_label: string
+  full_text: string
 }
 
 interface RawPlacePrediction {
@@ -277,7 +277,7 @@ export async function autocompletePlaces(
     const secondary = prediction?.structuredFormat?.secondaryText?.text
     if (typeof placeId !== 'string' || !placeId || typeof name !== 'string' || !name || typeof fullText !== 'string') return []
     if (secondary !== undefined && typeof secondary !== 'string') return []
-    return [{ placeId, name, addressLabel: secondary ?? '', fullText }]
+    return [{ google_place_id: placeId, name, address_label: secondary ?? '', full_text: fullText }]
   })
 }
 

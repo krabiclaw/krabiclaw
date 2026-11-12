@@ -109,8 +109,8 @@ const tasksModalOpen = ref(false)
 const dismissedTaskIds = ref<Set<string>>(new Set())
 
 const linksPath = computed(() => router.resolve({
-  name: 'dashboard-orgSlug-website-pages-links',
-  params: { orgSlug: route.params.orgSlug },
+  name: 'dashboard-org_slug-website-pages-links',
+  params: { org_slug: route.params.org_slug },
 }).path)
 
 const { data, error, status, refresh } = await useAsyncData(

@@ -24,7 +24,7 @@ import { memberAccessPrincipal, resolveMembership } from '../../server/utils/mem
 import { acceptOpportunity, listOpportunities } from '../../server/domain/opportunities.ts'
 import { writeMemberScheduling } from '../../server/domain/member-scheduling.ts'
 import { getTask, taskViewer } from '../../server/domain/tasks.ts'
-import bookingConfigRoute from '../../server/api/editor/organizations/[organizationId]/products/[productId]/booking.put.ts'
+import bookingConfigRoute from '../../server/api/editor/organizations/[organization_id]/products/[product_id]/booking.put.ts'
 import { readBusinessRecommendations } from '../../server/domain/business-progress.ts'
 
 async function withD1(run: (db: D1Database) => Promise<void>) {
@@ -167,7 +167,7 @@ test('Stripe onboarding recommendations follow real account readiness and clear 
     const app = new H3()
     app.post('/api/dashboard/connect', connectStartRoute)
     app.post('/api/dashboard/connect/status', connectStatusRoute)
-    app.put('/api/editor/organizations/:organizationId/products/:productId/booking', bookingConfigRoute)
+    app.put('/api/editor/organizations/:organization_id/products/:product_id/booking', bookingConfigRoute)
     const login = await createAuth(env).api.signInEmail({ body: { email: 'owner@example.test', password: 'PayoutsProof123!' }, asResponse: true })
     const token = login.headers.get('set-auth-token')!
     const cookie = login.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
@@ -220,16 +220,16 @@ test('Stripe onboarding recommendations follow real account readiness and clear 
       assert.deepEqual(await call('/status', app_), { status: 409, body: { status: 409, statusText: 'Stripe onboarding has not started', message: 'Stripe onboarding has not started', data: { code: 'CONNECT_NOT_STARTED' } } })
       // A cookie session still needs a same-origin browser request; the app's bearer session does not.
       assert.equal((await call('', { cookie })).status, 403)
-      assert.equal((await call('', app_, { returnTo: 'web' })).status, 422)
+      assert.equal((await call('', app_, { return_to: 'web' })).status, 422)
       assert.equal(created, false)
-      const starting = call('', app_, { returnTo: 'app' })
+      const starting = call('', app_, { return_to: 'app' })
       await createStarted
       // A second Add payout method while Stripe is still creating the account is refused in words, not with Stripe's idempotency error.
-      assert.deepEqual(await call('', app_, { returnTo: 'app' }), { status: 409, body: { status: 409, statusText: 'Payout setup is already starting for this business. Finish it in the window where it opened, or try again in a minute.', message: 'Payout setup is already starting for this business. Finish it in the window where it opened, or try again in a minute.', data: { code: 'CONNECT_SETUP_IN_PROGRESS' } } })
+      assert.deepEqual(await call('', app_, { return_to: 'app' }), { status: 409, body: { status: 409, statusText: 'Payout setup is already starting for this business. Finish it in the window where it opened, or try again in a minute.', message: 'Payout setup is already starting for this business. Finish it in the window where it opened, or try again in a minute.', data: { code: 'CONNECT_SETUP_IN_PROGRESS' } } })
       releaseCreate()
       const started = await starting
       assert.equal(started.status, 200)
-      assert.equal(started.body.onboardingUrl, 'https://connect.stripe.com/d/setup/e/acct_payouts/abc')
+      assert.equal(started.body.onboarding_url, 'https://connect.stripe.com/d/setup/e/acct_payouts/abc')
       assert.equal((started.body.account as { stripeAccountId: string }).stripeAccountId, 'acct_payouts')
       // Stripe takes only https returns, so the app's are a platform page that hands back to krabiclaw://payouts/<outcome>.
       assert.deepEqual((links[0]!.use_case as { account_onboarding: Record<string, unknown> }).account_onboarding, {

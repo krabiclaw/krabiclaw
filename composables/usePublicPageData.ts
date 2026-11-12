@@ -104,11 +104,11 @@ export const usePublicPageData = async (options: {
     onMounted(() => void asyncData.execute());
   }
   const { data, error, pending, refresh } = asyncData
-  const localeRepresentations = useState<PublicLocaleRepresentation[]>('public-locale-representations', () => [])
+  const locale_representations = useState<PublicLocaleRepresentation[]>('public-locale-representations', () => [])
   if (options.routeOwned !== false) {
     watch(
-      () => data.value?.localeRepresentations,
-      representations => { localeRepresentations.value = representations ?? [] },
+      () => data.value?.locale_representations,
+      representations => { locale_representations.value = representations ?? [] },
       { immediate: true },
     )
   }
@@ -234,7 +234,7 @@ export const usePublicPageData = async (options: {
     if (asyncData.error.value) throwPublicPageError(asyncData.error.value)
   }
   if (options.routeOwned !== false) {
-    localeRepresentations.value = data.value?.localeRepresentations ?? []
+    locale_representations.value = data.value?.locale_representations ?? []
   }
   await shell.ready
   if (options.routeOwned !== false && shell.error.value) throwPublicPageError(shell.error.value)
@@ -264,6 +264,6 @@ export const usePublicPageData = async (options: {
     productsByCollection,
     collections,
     error,
-    localeRepresentations,
+    locale_representations,
   };
 };

@@ -5,7 +5,7 @@ import { cloudflareEnv, jsonResponse } from '~/server/utils/api-response'
 import { getAuthSession } from '~/server/utils/auth'
 import { acceptInviteLink } from '~/server/utils/invite-links'
 
-// POST /api/invite-links/:token/accept → { organization: { id, name }, role, memberId }
+// POST /api/invite-links/:token/accept → { organization: { id, name }, role, member_id }
 // The signed-in caller joins the link's organization with the link's role.
 export default defineHandler(async (event) => {
   const env = cloudflareEnv(event)

@@ -265,10 +265,10 @@ export async function listConversations(
       const others = people.filter(person => person.conversation_id === row.id && person.user_id !== opts.userId).map(person => person.name)
       const title = row.name ?? row.record_title ?? (others.length ? others.join(', ') : 'You')
       return {
-        id: row.id, kind: 'team', guestName: title, avatarInitial: initial(title), channel: 'direct',
+        id: row.id, kind: 'team', title, avatar_initial: initial(title), channel: 'direct',
         home: row.record_unit === 'nights' ? row.record_title : row.location_title, when,
         preview: message ? messagePreview(message.text, message.photos) : '',
-        previewFrom: message ? message.actorUserId === opts.userId ? 'You' : message.actorName ? firstName(message.actorName) : 'KrabiClaw' : null,
+        preview_from: message ? message.actorUserId === opts.userId ? 'You' : message.actorName ? firstName(message.actorName) : 'KrabiClaw' : null,
         time, unread: row.unread === 1,
       } satisfies InboxRow
     }
@@ -282,13 +282,13 @@ export async function listConversations(
     return {
       id: row.id,
       kind: support ? 'support' : 'guest',
-      guestName: shownName,
-      avatarInitial: initial(shownName),
+      title: shownName,
+      avatar_initial: initial(shownName),
       channel: row.reply_channel === 'airbnb' ? 'airbnb' : 'direct',
       home: row.location_title,
       when: support ? null : when ?? (inquiry ? formatCalendarRange(inquiry.check_in_date, inquiry.check_out_date, 'en-US') : null),
       preview: message ? messagePreview(message.text, message.photos) : '',
-      previewFrom: message ? previewFrom(message, { guestName: row.reply_channel === 'airbnb' ? guestName : firstName(guestName), viewerId: opts.userId, buyer: Boolean(opts.buyerAudience), business: row.organization_name }) : null,
+      preview_from: message ? previewFrom(message, { guestName: row.reply_channel === 'airbnb' ? guestName : firstName(guestName), viewerId: opts.userId, buyer: Boolean(opts.buyerAudience), business: row.organization_name }) : null,
       time,
       unread: row.unread === 1,
     } satisfies InboxRow

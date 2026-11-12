@@ -90,8 +90,8 @@ export function useNewLocation(organizationId: string, openKey: NewLocationSecti
   const draft = useState(`location-draft-${organizationId}-${NEW_LOCATION_SLUG}`, blankLocationDraft)
   const creating = ref(false)
   const createError = ref<string | null>(null)
-  const isNew = computed(() => route.params.locationSlug === NEW_LOCATION_SLUG)
-  const recordPath = computed(() => `/dashboard/${String(route.params.orgSlug)}/locations/${NEW_LOCATION_SLUG}`)
+  const isNew = computed(() => route.params.location_slug === NEW_LOCATION_SLUG)
+  const recordPath = computed(() => `/dashboard/${String(route.params.org_slug)}/locations/${NEW_LOCATION_SLUG}`)
 
   async function commit() {
     creating.value = true
@@ -114,7 +114,7 @@ export function useNewLocation(organizationId: string, openKey: NewLocationSecti
       if (!response) return
       draft.value = blankLocationDraft()
       await dashboard.refresh()
-      await navigateTo(`/dashboard/${String(route.params.orgSlug)}/locations/${response.location.slug}`, { replace: true })
+      await navigateTo(`/dashboard/${String(route.params.org_slug)}/locations/${response.location.slug}`, { replace: true })
     } finally {
       creating.value = false
     }
@@ -226,7 +226,7 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
     status: 'active',
   })
   const addressDraftKeys = ['addressLines', 'regionCode', 'locality', 'sublocality', 'administrativeArea', 'postalCode'] as const
-  const organizationLocalizationSettingsPath = computed(() => `/dashboard/${route.params.orgSlug}/website/preferences/localization`)
+  const organizationLocalizationSettingsPath = computed(() => `/dashboard/${route.params.org_slug}/website/preferences/localization`)
   const locationLocalizationFields = computed(() => [
     { key: 'title', label: 'Name', source: location.value?.title },
     { key: 'short_description', label: 'Short description', source: location.value?.short_description },
@@ -358,7 +358,7 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
   }
 
   async function refreshLocationReads(requestedLocationId: string | null) {
-    const orgSlug = String(route.params.orgSlug)
+    const orgSlug = String(route.params.org_slug)
     const keys = [`dashboard-location-overview:${organizationId}:${requestedLocationId}`, `dashboard-org-locations:${orgSlug}`, `dashboard-org-locations:${orgSlug}:all`]
     const reads = await Promise.allSettled([refreshLocationWorkspace(), refreshNuxtData(keys)])
     const failures = reads.flatMap(result => result.status === 'rejected' ? [getErrorMessage(result.reason, 'Failed to reload location')] : [])

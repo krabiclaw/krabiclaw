@@ -145,10 +145,10 @@ function serviceContent(canBook: boolean): PublicTenantPage {
 // Guarded by the same abandoned-instance condition as the check above: a page
 // nobody is looking at any more has nothing to announce.
 if (data.value?.page) {
-  if (!data.value.page.localeRepresentations) {
+  if (!data.value.page.locale_representations) {
     throw createError({ statusCode: 500, statusMessage: 'Tenant page locale representations were not returned' })
   }
-  useState<PublicLocaleRepresentation[]>('public-locale-representations', () => []).value = data.value.page.localeRepresentations
+  useState<PublicLocaleRepresentation[]>('public-locale-representations', () => []).value = data.value.page.locale_representations
 }
 
 useSocialMetadata(() => page.value && ({

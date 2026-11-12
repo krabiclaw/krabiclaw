@@ -19,7 +19,7 @@ import { useSuggestedReplies } from './guest-messaging-client'
 const props = defineProps<{ manage: boolean }>()
 const emit = defineEmits<{ navigate: [] }>()
 const route = useRoute()
-const listPath = computed(() => `/dashboard/${encodeURIComponent(String(route.params.orgSlug))}/messages`)
+const listPath = computed(() => `/dashboard/${encodeURIComponent(String(route.params.org_slug))}/messages`)
 const links = computed(() => [
   // The business's automatic messages and its schedule are for those who manage messaging.
   ...(props.manage ? [{ label: 'Automatic messages', icon: 'i-lucide-message-square-text', to: `${listPath.value}/automatic` }] : []),

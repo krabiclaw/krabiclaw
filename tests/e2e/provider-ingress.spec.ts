@@ -125,7 +125,7 @@ test('native email replies retain their RFC ancestry through repeated dashboard 
   const listed = await fetchPhase('find contact thread', `/api/dashboard/organizations/${organizationId}/conversations`, {})
   expect(listed.status(), await listed.text()).toBe(200)
   const { threads } = await listed.json() as { threads: InboxRow[] }
-  const own = threads.filter(thread => thread.guestName === name)
+  const own = threads.filter(thread => thread.title === name)
   expect(own, `no guest thread named ${name} in the restaurant's ${threads.length} threads`).toHaveLength(1)
   const detailUrl = `/api/dashboard/organizations/${organizationId}/guest-threads/${own[0]!.id}`
   const initialResponse = await fetchPhase('read initial entries', detailUrl, {})

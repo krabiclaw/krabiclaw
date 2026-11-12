@@ -15,6 +15,7 @@ import { requireOrganizationMembership } from '~/server/utils/location-access'
 import { memberAccessPrincipal, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import { assertConversationAccess, assertGuestOperations, type ConversationRow } from '~/server/domain/conversations'
 import type { CloudflareEnv } from '~/server/utils/auth'
+import { messageListPage } from '~/server/domain/guest-message-schedule'
 
 export interface DashboardGuestThreadListQuery {
   limit?: number
@@ -81,9 +82,8 @@ const GUEST_THREAD_LIST_PARAMS = new Set([
 
 /** The extra row proves whether another page exists; no total is inferred. */
 export function guestThreadListPage(rows: InboxRow[], query: Pick<DashboardGuestThreadListQuery, 'limit' | 'offset'>): InboxListPage {
-  const limit = query.limit ?? 100, offset = query.offset ?? 0
-  const hasMore = rows.length > limit
-  return { threads: rows.slice(0, limit), pagination: { limit, offset, hasMore, nextOffset: hasMore ? offset + limit : null } }
+  const { items: threads, pagination } = messageListPage(rows, { limit: query.limit ?? 100, offset: query.offset ?? 0 })
+  return { threads, pagination }
 }
 
 /** The list response the dashboard and the app read, with its unread counts; the contract fixtures in contracts/inbox are generated from it. */

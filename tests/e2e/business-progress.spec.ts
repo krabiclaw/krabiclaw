@@ -30,10 +30,10 @@ test('authored goals and evidence-bound opportunity decisions follow persisted w
   const editor = `/api/editor/organizations/${organization.id}/blog`
   const member = await playwrightRequest.newContext({ baseURL })
   try {
-    const provisioned = await responseBody<{ organizationId: string }>(await request.post('/api/organizations', {
-      data: { organizationId: organization.id, name, subdomain: slug, vertical: 'service', sourceLocale: 'en' },
+    const provisioned = await responseBody<{ organization_id: string }>(await request.post('/api/organizations', {
+      data: { organization_id: organization.id, name, subdomain: slug, vertical: 'service', source_locale: 'en' },
     }))
-    expect(provisioned.organizationId).toBe(organization.id)
+    expect(provisioned.organization_id).toBe(organization.id)
     await responseBody(await member.get(`${api}/progress`), 401)
     const intent = { idempotencyKey: crypto.randomUUID(), intent: 'Explain consultation preparation clearly to prospective clients.', constraints: 'I have twenty minutes for writing this week.' }
     const concurrentCreates = await Promise.all([request.post(`${api}/goals`, { data: intent }), request.post(`${api}/goals`, { data: intent })])
@@ -146,7 +146,7 @@ test('authored goals and evidence-bound opportunity decisions follow persisted w
       name: guestName, email: 'buyer@playwright.example', subject: 'general', consent: true, message: 'Which documents should I bring to my legal consultation?',
     } }), 201)
     const inbox = await responseBody<{ threads: InboxRow[] }>(await request.get(`/api/dashboard/organizations/${organization.id}/conversations`, { params: { type: 'contact' } }))
-    const contacts = inbox.threads.filter(thread => thread.guestName === guestName)
+    const contacts = inbox.threads.filter(thread => thread.title === guestName)
     expect(contacts).toHaveLength(1)
     const threadId = contacts[0]!.id
     const threadUrl = `/api/dashboard/organizations/${organization.id}/guest-threads/${threadId}`

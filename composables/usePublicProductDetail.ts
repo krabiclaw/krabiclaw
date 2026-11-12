@@ -56,8 +56,8 @@ export function isPublicProductDetailPayload(value: unknown): value is PublicPro
       && typeof sibling.name === 'string'
       && typeof sibling.slug === 'string')
     && typeof value.stayCheckoutAvailable === 'boolean'
-    && Array.isArray(value.localeRepresentations)
-    && value.localeRepresentations.every(item => isRecord(item)
+    && Array.isArray(value.locale_representations)
+    && value.locale_representations.every(item => isRecord(item)
       && typeof item.locale === 'string'
       && typeof item.label === 'string'
       && typeof item.route_path === 'string'
@@ -74,13 +74,13 @@ export async function usePublicProductDetail(routeKind: ProductSurface) {
   // a vertical's product page names the branch first. Same payload either way,
   // so one composable serves both.
   const routeSlug = String(route.params.slug ?? '')
-  const productSlugParam = String(route.params.productSlug ?? '')
+  const productSlugParam = String(route.params.product_slug ?? '')
   const siteWideSurface = (routeKind === 'experiences' || routeKind === 'stays') && productSlugParam === '' ? routeKind : null
   const locationSlug = siteWideSurface ? '' : routeSlug
   const productSlug = siteWideSurface ? routeSlug : productSlugParam
   const scope = computed(() => typeof route.query.location_id === 'string' ? route.query.location_id : null)
   const locale = typeof route.params.locale === 'string' ? route.params.locale : useState<string>('public-locale').value
-  const localeRepresentations = useState<PublicLocaleRepresentation[]>('public-locale-representations', () => [])
+  const locale_representations = useState<PublicLocaleRepresentation[]>('public-locale-representations', () => [])
   if (!organizationId || !productSlug || (!siteWideSurface && !locationSlug)) throw createError({ statusCode: 404, statusMessage: 'Product not found', fatal: true })
 
   const { data, error } = await useAsyncData<PublicProductDetailPayload | null>(
@@ -122,7 +122,7 @@ export async function usePublicProductDetail(routeKind: ProductSurface) {
     if (failure) nuxtApp.runWithContext(() => showError(failure))
   }, { flush: 'sync' })
   if (!data.value) throw createError({ statusCode: 404, statusMessage: 'Product not found', fatal: true })
-  localeRepresentations.value = data.value.localeRepresentations
+  locale_representations.value = data.value.locale_representations
   return { organizationId, detail: data as Ref<PublicProductDetailPayload> }
 }
 

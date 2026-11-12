@@ -96,7 +96,7 @@ async function createTenant(baseURL: string, plan: TenantPlan): Promise<{ owner:
   const organization = await owner.auth<{ id: string }>('organization/create', {
     name: plan.name, slug: plan.slug, default_currency: plan.currency, timezone: plan.timezone,
   })
-  await owner.json('POST', '/api/organizations', { organizationId: organization.id, name: plan.name, subdomain: plan.subdomain, vertical: plan.vertical, sourceLocale: 'en' })
+  await owner.json('POST', '/api/organizations', { organization_id: organization.id, name: plan.name, subdomain: plan.subdomain, vertical: plan.vertical, source_locale: 'en' })
   await owner.auth('organization/set-active', { organizationId: organization.id })
   if (plan.subscription) await subscribe(baseURL, owner, organization.id, plan.subscription)
   for (const fixture of members) {

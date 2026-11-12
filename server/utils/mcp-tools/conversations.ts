@@ -148,7 +148,7 @@ export async function handleConversationTools(ctx: McpExecutorContext): Promise<
       const window = mcpPageWindow(args, resource)
       const options = { ...filter, principal, userId, limit: window.limit + 1, offset: window.offset }
       const [rows, unread] = await Promise.all([listConversations(db, organizationId, options), countUnreadConversations(db, organizationId, options)])
-      const conversations = rows.slice(0, window.limit).map(row => ({ conversation_id: row.id, kind: row.kind, title: row.guestName, channel: row.channel, home: row.home, when: row.when, preview: row.preview, preview_from: row.previewFrom, time: row.time, unread: row.unread }))
+      const conversations = rows.slice(0, window.limit).map(row => ({ conversation_id: row.id, kind: row.kind, title: row.title, channel: row.channel, home: row.home, when: row.when, preview: row.preview, preview_from: row.preview_from, time: row.time, unread: row.unread }))
       return { conversations, unread, page_info: mcpPageInfo(window, conversations.length, rows.length > window.limit, resource) }
     }
     case 'list_conversation_recipients': return { current_user_id: userId, members: await listTeamMembers(env, await teamAccess(ctx, principal, 'read')) }

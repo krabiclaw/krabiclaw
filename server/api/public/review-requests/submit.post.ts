@@ -169,7 +169,7 @@ export default defineHandler(async (event) => {
     organizationId: result.context.organization_id, organizationName: result.context.organization_name, locationId: result.context.location_id, reviewId, authorName, rating,
     content: publish ? content : null, hasPrivateFeedback: privateFeedback !== null, visitRequestId: result.context.request_id, })
 
-  return jsonResponse({ success: true, reviewId, status: publish ? 'pending' : 'private' }, { status: 201 })
+  return jsonResponse({ success: true, review_id: reviewId, status: publish ? 'pending' : 'private' }, { status: 201 })
 })
 import { defineHandler, HTTPError } from 'nitro';
 import { getHeader } from 'nitro/h3';

@@ -106,11 +106,11 @@ const googleReportKeys = new Map([
   ['query_google_ads_report', ['adGroupId', 'campaignId', 'campaignName', 'conversionsValue', 'costMicros']],
 ])
 const snakeCase = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/
-const retiredRevisionKeys = new Set(['expected_updated_at', 'product_updated_at'])
+const retiredWireKeys = new Set(['expected_updated_at', 'product_updated_at', 'expected_version', 'operational_booking_id', 'operational_id', 'assigned_team_id'])
 function checkMcpSchema(tool, schema, keys) {
   if (!schema || typeof schema !== 'object') return
   for (const key of Object.keys(schema.properties ?? {})) {
-    if ((!snakeCase.test(key) && !keys.has(key)) || retiredRevisionKeys.has(key)) failures.push(`MCP ${tool}: ${key} must use its canonical column or snake_case name`)
+    if ((!snakeCase.test(key) && !keys.has(key)) || retiredWireKeys.has(key)) failures.push(`MCP ${tool}: ${key} must use its canonical column or snake_case name`)
   }
   for (const value of Object.values(schema)) checkMcpSchema(tool, value, keys)
 }
@@ -121,24 +121,39 @@ for (const tool of catalog.tools) {
   checkMcpSchema(tool.name, tool.outputSchema, keys)
 }
 
-// Literal request schemas and direct query reads expose accepted fields
-// without mistaking local variables or provider data for REST keys.
+// File-based route parameters are part of the web and server route contract.
+for (const directory of ['pages', 'server/api']) {
+  for (const path of sources(join(root, directory))) {
+    const route = path.slice(root.length + 1)
+    for (const [, key] of route.matchAll(/\[(?:\.\.\.)?([A-Za-z][A-Za-z0-9_]*)\]/g)) {
+      if (!snakeCase.test(key) || retiredWireKeys.has(key)) failures.push(`${route}: route parameter ${key} must use its canonical column or snake_case name`)
+    }
+  }
+}
+
+// Literal request schemas, inline response envelopes and direct query reads
+// expose wire keys without including local variables or nested provider data.
 for (const path of sources(join(root, 'server/api'))) {
   const route = path.slice(root.length + 1)
   const file = ts.createSourceFile(route, readFileSync(path, 'utf8'), ts.ScriptTarget.Latest)
+  const appRoute = /^server\/api\/(account|analytics|billing|dashboard|editor|invite-links|organizations|public)\b/.test(route)
   const checkKey = key => {
-    if (!snakeCase.test(key) || retiredRevisionKeys.has(key)) {
+    if (!snakeCase.test(key) || retiredWireKeys.has(key)) {
       failures.push(`${route}: ${key} must use its canonical column or snake_case name`)
     }
   }
+  const checkProperties = properties => {
+    for (const { name } of properties) {
+      if (name && (ts.isIdentifier(name) || ts.isStringLiteral(name))) checkKey(name.text)
+    }
+  }
   function visit(node) {
-    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'readStrictBody') {
-      const fields = node.arguments[1]
-      if (fields && ts.isObjectLiteralExpression(fields)) {
-        for (const { name } of fields.properties) {
-          if (name && (ts.isIdentifier(name) || ts.isStringLiteral(name))) checkKey(name.text)
-        }
-      }
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
+      const name = node.expression.text
+      const literal = name === 'readStrictBody' ? node.arguments[1] : appRoute && name === 'jsonResponse' ? node.arguments[0] : undefined
+      if (literal && ts.isObjectLiteralExpression(literal)) checkProperties(literal.properties)
+      const bodyType = node.typeArguments?.[0]
+      if (appRoute && (name === 'readBody' || name === 'readRequiredBody') && bodyType && ts.isTypeLiteralNode(bodyType)) checkProperties(bodyType.members)
     }
     ts.forEachChild(node, visit)
   }

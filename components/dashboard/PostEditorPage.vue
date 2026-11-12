@@ -82,7 +82,7 @@ const dashboardApi = useDashboardApi()
 const toast = useToast()
 const dashboard = useDashboardOrganization()
 const organizationId = useDashboardOrganizationId()
-const postId = String(route.params.postId ?? '')
+const postId = String(route.params.post_id ?? '')
 const isNew = postId === 'new'
 const scopeLocationId = useLocationScope()
 const editor = usePostEditor(organizationId, scopeLocationId)
@@ -260,7 +260,7 @@ const viewUrl = computed(() => {
 })
 const publicUrl = computed(() => post.value?.status === 'published' ? viewUrl.value : null)
 const { previewButton, previewPath, previewOpen, previewViewport, previewFailure, changePreviewViewport, restorePreviewFocus } = useDashboardContentPreview(computed(() => loadError.value || (!viewUrl.value ? 'The saved post could not be loaded for preview.' : '')))
-const organizationLocalizationSettingsPath = `/dashboard/${route.params.orgSlug}/website/preferences/localization`
+const organizationLocalizationSettingsPath = `/dashboard/${route.params.org_slug}/website/preferences/localization`
 const postLocalizationFields = computed(() => [{ key: 'title', label: 'Title', source: post.value?.title }, { key: 'summary', label: 'Caption', source: post.value?.body, multiline: true, rows: 6 }, ...(isRecord(post.value?.call_to_action) ? [{ key: 'metadata.call_to_action.label', label: 'Link button label', source: post.value.call_to_action.label }] : [])])
 useSeoMeta({ title: `${isNew ? 'New post' : 'Post'} | KrabiClaw Dashboard`, robots: 'noindex, nofollow' })
 </script>

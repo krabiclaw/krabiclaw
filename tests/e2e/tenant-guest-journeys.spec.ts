@@ -311,7 +311,7 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     const threadURL = `${baseURL}/api/dashboard/organizations/${wheel.organizationId}/guest-threads/${body.conversation_id}`
     const pendingThread = await request.get(threadURL)
     expect(pendingThread.status(), await pendingThread.text()).toBe(200)
-    expect((await pendingThread.json() as { thread: InboxThread }).thread).toMatchObject({ id: body.conversation_id, guestName: 'Cancel Once', recordKind: 'booking' })
+    expect((await pendingThread.json() as { thread: InboxThread }).thread).toMatchObject({ id: body.conversation_id, title: 'Cancel Once', record_kind: 'booking' })
     // Whether a reply is owed is the ledger's, which MCP reads out; the inbox view keeps it on the server.
     const conversationLedger = async () => {
       const response = await mcpRequest(request, baseURL, { method: 'tools/call', toolName: 'get_conversation', args: { organization_id: wheel.organizationId, conversation_id: body.conversation_id } })

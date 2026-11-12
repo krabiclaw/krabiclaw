@@ -585,8 +585,8 @@ async function loadPublicPageSource(
     throw new HTTPError({ statusCode: 404, statusMessage: 'Localized page was not found' })
   }
   const contentRows: OrganizationContent[] = tenantPage ? tenantPageToContentRows(tenantPage) : []
-  const localeRepresentations = ownRepresentations
-    ?? (!representationResource && tenantPage?.localeRepresentations ? tenantPage.localeRepresentations : await readLocaleRepresentations())
+  const locale_representations = ownRepresentations
+    ?? (!representationResource && tenantPage?.locale_representations ? tenantPage.locale_representations : await readLocaleRepresentations())
   options.signal?.throwIfAborted()
   sourceShell.platformMessages = language.platform_messages
   const shell = (() => {
@@ -763,7 +763,7 @@ async function loadPublicPageSource(
     qaList,
     blogPost: requestedDatasets.has("blogPost") ? blogPost : null,
     tablePolicySummaries,
-    localeRepresentations,
+    locale_representations,
   };
   const payload = pagePayload;
 

@@ -1,21 +1,20 @@
 {
   "thread": {
-    "activityPath": null,
-    "avatarInitial": "A",
+    "activity_path": null,
+    "avatar_initial": "A",
     "channel": "direct",
     "composer": {
       "available": true,
       "channel": "email",
       "reason": null
     },
-    "guestName": "Ana Ruiz",
     "home": "74 D · Sky",
     "id": "00000000-0000-4000-8000-000000000002",
     "kind": "guest",
     "pending": [],
-    "recordId": "site-stay",
-    "recordKind": "stay",
-    "recordTitle": "Reservation",
+    "record_id": "site-stay",
+    "record_kind": "stay",
+    "record_title": "Reservation",
     "stream": [
       {
         "id": "day:00000000-0000-4000-8000-000000000013",
@@ -30,12 +29,12 @@
         "photos": [],
         "receipt": null,
         "retryable": false,
-        "sentAt": "2026-11-05T19:00:00.000Z",
+        "sent_at": "2026-11-05T19:00:00.000Z",
         "side": "guest",
         "time": "12:00 PM",
         "translated": null,
         "type": "message",
-        "unshownFiles": 0
+        "unshown_files": 0
       },
       {
         "author": "Ana Ruiz",
@@ -45,14 +44,15 @@
         "photos": [],
         "receipt": null,
         "retryable": false,
-        "sentAt": "2026-11-05T19:00:00.000Z",
+        "sent_at": "2026-11-05T19:00:00.000Z",
         "side": "guest",
         "time": null,
         "translated": null,
         "type": "message",
-        "unshownFiles": 0
+        "unshown_files": 0
       }
     ],
+    "title": "Ana Ruiz",
     "translated": false,
     "when": "Nov 20 – 23"
   }

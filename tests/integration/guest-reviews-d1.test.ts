@@ -310,7 +310,7 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
     const opened = await call('GET', `/api/public/review-requests/validate?token=${encodeURIComponent(dinnerToken)}`)
     assert.equal(opened.status, 200, JSON.stringify(opened.body))
     assert.deepEqual((opened.body.questions as Array<{ key: string }>).map(question => question.key), ['food', 'service', 'atmosphere'])
-    assert.deepEqual(opened.body.displayNames, ['Guest', 'Guest dinner'])
+    assert.deepEqual(opened.body.display_names, ['Guest', 'Guest dinner'])
     assert.equal((await call('GET', `/api/public/review-requests/validate?token=${encodeURIComponent(lessonToken)}`)).status, 404, 'a revoked link is not available')
 
     // Refusals: a question this visit was not asked, public text without consent, consent without text.
@@ -331,7 +331,7 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
       publish: true, displayName: 'Guest', title: 'Great pasta', content: 'The pasta was the best we had all trip.', privateFeedback: 'The patio heater was broken.' })
     assert.equal(dinner.status, 201)
     assert.equal(dinner.body.status, 'pending')
-    const dinnerReviewId = String(dinner.body.reviewId)
+    const dinnerReviewId = String(dinner.body.review_id)
     assert.deepEqual((await db.prepare('SELECT category, rating FROM review_category_ratings WHERE review_id = ? ORDER BY category').bind(dinnerReviewId).all()).results,
       [{ category: 'atmosphere', rating: 3 }, { category: 'food', rating: 5 }], 'the skipped question has no score')
     assert.equal((await call('POST', '/api/public/review-requests/submit', { token: dinnerToken, rating: 5, publish: false })).status, 404, 'a link is answered once')
@@ -340,7 +340,7 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
     const consultation = await call('POST', '/api/public/review-requests/submit', { token: await tokenFor('consultation'), rating: 2, categories: { next_steps: 2 }, publish: false, privateFeedback: 'I left unsure what to file next.' })
     assert.equal(consultation.status, 201)
     assert.equal(consultation.body.status, 'private')
-    const consultationReviewId = String(consultation.body.reviewId)
+    const consultationReviewId = String(consultation.body.review_id)
     const progressMembership = await resolveMembership(env, { organizationId: 'org', userId: 'owner' })
     assert(progressMembership)
     const reviewProgress = await listBusinessOutcomes(db, memberAccessPrincipal(progressMembership, { env }), { limit: 100 })

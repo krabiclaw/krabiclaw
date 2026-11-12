@@ -658,7 +658,7 @@ test('a guest-cancelled stay alerts owners with the whole stay and the member lo
     // The icon is the member's unread conversations, the count Messages shows: a stay's guest conversation is not theirs.
     assert.deepEqual(pushes[0]!.body, {
       aps: { alert: { title: 'Reservation canceled - Ana, Oct 1', body: 'Turnover Cabin · Wed, Oct 1, 2098 · 4:00 PM – Fri, Oct 3, 2098 · 10:00 AM' }, sound: 'default', badge: 0 },
-      organizationId: access.organizationId, userId: 'cleaner-turnover', kind: 'stay', stayId: stay.id,
+      organization_id: access.organizationId, user_id: 'cleaner-turnover', kind: 'stay', booking_id: stay.id,
     })
   } finally {
     await runtime.dispose()

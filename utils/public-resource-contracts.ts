@@ -122,7 +122,7 @@ export interface PublicPagePayload {
   tablePolicySummaries: Record<string, FormattedBookingPolicySummary>
   products: Product[]
   collections: Collection[]
-  localeRepresentations: PublicLocaleRepresentation[]
+  locale_representations: PublicLocaleRepresentation[]
 }
 
 export interface PublicLocaleRepresentation {
@@ -210,8 +210,8 @@ export const isPublicPagePayload = (
   && value.products.every(isPublicProduct)
   && Array.isArray(value.collections)
   && value.collections.every(isPublicCollection)
-  && Array.isArray(value.localeRepresentations)
-  && value.localeRepresentations.every(item => isRecord(item)
+  && Array.isArray(value.locale_representations)
+  && value.locale_representations.every(item => isRecord(item)
     && typeof item.locale === 'string'
     && typeof item.label === 'string'
     && typeof item.route_path === 'string'

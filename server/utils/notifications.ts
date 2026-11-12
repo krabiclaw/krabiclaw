@@ -554,9 +554,9 @@ async function dashboardPathUrl(env: NotificationEnv, db: DbClient, organization
 
 /** What a push opens: a conversation, a stay, a task, or a page. */
 type MemberNotificationTarget =
-  | { kind: 'guest' | 'team'; threadId: string }
-  | { kind: 'stay'; stayId: string }
-  | { kind: 'task'; taskId: string }
+  | { kind: 'guest' | 'team'; conversation_id: string }
+  | { kind: 'stay'; booking_id: string }
+  | { kind: 'task'; task_id: string }
   | { kind: 'link'; url: string }
 
 /** Every member alert uses the same channel delivery and receipt implementation. */
@@ -624,8 +624,8 @@ function memberNotificationSends(
       title: input.message.title, body: input.message.preheader,
       image: input.message.quote?.photos[0]?.imageUrl ?? null,
       url: async () => input.message.primaryAction.url,
-      threadId: input.target.kind === 'guest' || input.target.kind === 'team' ? input.target.threadId : null,
-      data: { organizationId: input.organizationId, userId: recipient.userId, ...input.target },
+      threadId: input.target.kind === 'guest' || input.target.kind === 'team' ? input.target.conversation_id : null,
+      data: { organization_id: input.organizationId, user_id: recipient.userId, ...input.target },
     },
   })))
   return sends
@@ -831,8 +831,8 @@ export async function notifyOwner(
       context: deliveryContext,
       pushTemplate: opts.template, whatsappTemplate: opts.whatsappTemplate ?? null,
       eventKey: opts.deliveryEventKey,
-      target: stayId ? { kind: 'stay', stayId }
-        : !scheduleUrl && deliveryContext.conversationId ? { kind: 'guest', threadId: deliveryContext.conversationId }
+      target: stayId ? { kind: 'stay', booking_id: stayId }
+        : !scheduleUrl && deliveryContext.conversationId ? { kind: 'guest', conversation_id: deliveryContext.conversationId }
           : { kind: 'link', url: read.primaryAction.url },
     })
   }))
@@ -1596,7 +1596,7 @@ export async function notifyBookingChangeOwner(
 ) {
   const { submissionType, change } = opts
   // A stay's members read its changes without money; the projection needs the stay.
-  if (submissionType === 'stay' && !opts.stay) throw new HTTPError({ statusCode: 500, message: 'A stay change alert needs its stay to tell the members who look after the home', data: { code: 'STAY_REQUIRED', field: 'stay', thread_id: opts.threadId } })
+  if (submissionType === 'stay' && !opts.stay) throw new HTTPError({ statusCode: 500, message: 'A stay change alert needs its stay to tell the members who look after the home', data: { code: 'STAY_REQUIRED', field: 'stay', conversation_id: opts.threadId } })
   const replyUrl = await buildOwnerThreadInboxUrl(env, db, opts)
   // The record's own noun, which its presentation resolved from what was booked: a table's is a reservation.
   const presentation = change.recordKind === 'consultation' || opts.vertical === 'service'
@@ -1610,7 +1610,7 @@ export async function notifyBookingChangeOwner(
   const ownerMessage = bookingChangeMessage(input)
   const stay = opts.stay ? await queryFirst<{ id: string; product_id: string; starts_at: string; timezone: string; check_in_time: string | null }>(db, `SELECT b.id, b.product_id, b.starts_at, b.timezone, c.check_in_time
     FROM bookings b JOIN product_booking_configs c ON c.organization_id = b.organization_id AND c.product_id = b.product_id WHERE b.organization_id = ? AND b.id = ? AND b.product_id = ?`, [opts.organizationId, opts.stay.id, opts.stay.product_id]) : null
-  if (opts.stay && !stay) throw new HTTPError({ statusCode: 500, message: 'The changed stay is not at its home', data: { code: 'STAY_REQUIRED', field: 'stay', thread_id: opts.threadId } })
+  if (opts.stay && !stay) throw new HTTPError({ statusCode: 500, message: 'The changed stay is not at its home', data: { code: 'STAY_REQUIRED', field: 'stay', conversation_id: opts.threadId } })
   const audience = stay ? await stayTurnoverAudience(env, db, opts.organizationId, stay, stay.check_in_time) : null
   await notifyOwner(env, db, {
     organizationId: opts.organizationId, organizationName: opts.organizationName, locationId: opts.locationId,
@@ -1698,7 +1698,7 @@ export async function notifyGuestThreadReply(
     ...opts, organizationName: business, context: threadContext,
     template: 'guest_thread_reply_email', pushTemplate: 'guest_thread_reply_push',
     whatsappTemplate: 'guest_thread_reply_whatsapp', payload, message: ownerMessage,
-    target: { kind: 'guest', threadId: opts.threadId },
+    target: { kind: 'guest', conversation_id: opts.threadId },
   })))
   raiseUnrecordedOwnerAlertFailures('notifyGuestThreadReply', `thread ${opts.threadId}`, results.map(result => ({ result, task: 'ownerAlert' })))
 }
@@ -1815,7 +1815,7 @@ export async function notifyAirbnbInquiry(env: NotificationEnv, db: DbClient, in
   if (!thread) throw new Error(`Inquiry conversation ${input.threadId} does not exist`)
   if (thread.blocked_at !== null) return
   const asked = await getMessage(db, input.messageId)
-  if (!asked || asked.conversation_id !== thread.id || asked.author_kind !== 'guest' || !asked.body?.trim()) throw new HTTPError({ statusCode: 500, message: 'The inquiry conversation has no message from the guest', data: { code: 'CHANNEL_INQUIRY_MESSAGE_MISSING', field: 'request_id', request_id: thread.id } })
+  if (!asked || asked.conversation_id !== thread.id || asked.author_kind !== 'guest' || !asked.body?.trim()) throw new HTTPError({ statusCode: 500, message: 'The inquiry conversation has no message from the guest', data: { code: 'CHANNEL_INQUIRY_MESSAGE_MISSING', field: 'conversation_id', conversation_id: thread.id } })
   const [home, record, replyUrl, photos] = await Promise.all([
     channelHome(db, thread),
     inquiryRecord(db, thread, input.inquiry),
@@ -1867,7 +1867,7 @@ export async function notifyTeamMessage(env: NotificationEnv, db: DbClient, inpu
     organizationId: input.organizationId, organizationName: organization.name,
     context, template: 'team_message', pushTemplate: 'team_message',
     whatsappTemplate: 'guest_thread_reply_whatsapp', payload: { team_thread_id: input.threadId }, message,
-    target: { kind: 'team', threadId: input.threadId },
+    target: { kind: 'team', conversation_id: input.threadId },
   })))
   raiseUnrecordedOwnerAlertFailures('notifyTeamMessage', `team thread ${input.threadId}`, results.map(result => ({ result, task: 'teamMessage' })))
 }
@@ -2060,7 +2060,7 @@ async function notifyTaskPeople(env: NotificationEnv, db: DbClient, input: { org
       context: { conversationId: null, subject: { taskId: input.taskId } }, eventKey: input.kind === 'assigned' ? `${input.eventKey}:${userId}` : undefined,
       template: input.kind === 'assigned' ? 'task_assigned' : `task_starting:${input.day}`, pushTemplate: input.kind === 'assigned' ? 'task_assigned' : `task_starting:${input.day}`,
       whatsappTemplate: 'guest_thread_reply_whatsapp', payload: { task_id: input.taskId, deep_link: taskUrl }, message,
-      target: { kind: 'task', taskId: input.taskId },
+      target: { kind: 'task', task_id: input.taskId },
     })
     const outcomes = await Promise.allSettled(sends)
     raiseUnrecordedOwnerAlertFailures('notifyTaskPeople', `task ${input.taskId}`, outcomes.map(result => ({ result, task: 'taskAlert' })))

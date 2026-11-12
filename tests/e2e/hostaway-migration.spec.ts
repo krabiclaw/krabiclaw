@@ -21,7 +21,7 @@ test('a host moves unpaid occupancy in batches, reviews manual-only homes and re
   const created = await page.request.post('/api/auth/organization/create', { headers, data: { name: `Migration ${slug}`, slug, default_currency: 'USD', timezone: 'Etc/UTC' } })
   await status(created, 200)
   const organizationId = (await created.json() as { id: string }).id
-  const provisioned = await page.request.post('/api/organizations', { headers, data: { organizationId, name: `Migration ${slug}`, subdomain: slug, vertical: 'lodging', sourceLocale: 'en' } })
+  const provisioned = await page.request.post('/api/organizations', { headers, data: { organization_id: organizationId, name: `Migration ${slug}`, subdomain: slug, vertical: 'lodging', source_locale: 'en' } })
   await status(provisioned, 200)
   const active = await page.request.post('/api/auth/organization/set-active', { headers, data: { organizationId } })
   await status(active, 200)

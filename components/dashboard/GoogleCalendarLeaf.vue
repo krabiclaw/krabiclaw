@@ -22,7 +22,7 @@ import OfferCard from './OfferCard.vue'
 import EditorNavigationList, { type EditorNavigationItem } from '~/components/dashboard/EditorNavigationList.vue'
 import { integrationDefinition } from '~/shared/integrations'
 import { offer } from '~/shared/offers'
-import { integrationsKey } from '~/pages/dashboard/[orgSlug]/integrations.vue'
+import { integrationsKey } from '~/pages/dashboard/[org_slug]/integrations.vue'
 import { INTEGRATION_SCOPES, type GoogleCalendarIntegration } from '~/shared/organization-settings'
 const route = useRoute()
 // The Integrations summary names the KrabiClaw user who linked the account; the leaf's own read does not.
@@ -66,7 +66,7 @@ const howItWorks: EditorNavigationItem[] = [
 ]
 async function run(action:()=>Promise<void>) {
  saving.value=true; failure.value=''
- try { await action(); await refresh(); if(error.value)throw error.value; await refreshNuxtData(`dashboard-integrations:${String(route.params.orgSlug)}`) }
+ try { await action(); await refresh(); if(error.value)throw error.value; await refreshNuxtData(`dashboard-integrations:${String(route.params.org_slug)}`) }
  catch(cause){failure.value=getErrorMessage(cause,'Google Calendar could not be updated.')}
  finally {saving.value=false}
 }

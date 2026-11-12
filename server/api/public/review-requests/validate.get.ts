@@ -33,6 +33,6 @@ export default defineHandler(async (event) => {
     questions: REVIEW_CATEGORIES[context.subject],
     location: { googleReviewUrl: context.location_id ? resolveGoogleReviewUrl(context) : null },
     // The two ways the guest may be named on a public review; they choose one.
-    displayNames: firstName === guestName ? [guestName] : [firstName, guestName],
+    display_names: firstName === guestName ? [guestName] : [firstName, guestName],
   })
 })

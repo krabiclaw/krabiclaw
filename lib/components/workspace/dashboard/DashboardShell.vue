@@ -273,7 +273,7 @@ const impersonatedBy = computed(() => {
 })
 
 const realtimeOrganizationSlug = computed(() => {
-  const slug = router.currentRoute.value.params.orgSlug
+  const slug = router.currentRoute.value.params.org_slug
   return !stoppingImpersonation.value && typeof slug === 'string' ? slug : null
 })
 const realtime = provideDashboardInvalidations(realtimeOrganizationSlug)
@@ -288,7 +288,7 @@ const banner = computed((): { color: 'error' | 'warning'; icon: string; title: s
 })
 
 // Read straight off the route for navigation and routing purposes
-const routeLocationSlug = computed(() => typeof route.params.locationSlug === 'string' ? route.params.locationSlug : null)
+const routeLocationSlug = computed(() => typeof route.params.location_slug === 'string' ? route.params.location_slug : null)
 // The organization's mark is its `logo` media placement, loaded with the
 // dashboard context of the route's organization. There is no second source: a
 // route with no organization context renders no avatar rather than another
@@ -451,8 +451,8 @@ onMounted(async () => {
   let lastSection = ''
   watch(() => [route.name, route.query.tab] as const, ([name, tab]) => {
     const id = organization.value?.id
-    if (!id || typeof name !== 'string' || !name.startsWith('dashboard-orgSlug-')) return
-    const section = `${name.slice('dashboard-orgSlug-'.length)}${typeof tab === 'string' && tab ? `:${tab}` : ''}`
+    if (!id || typeof name !== 'string' || !name.startsWith('dashboard-org_slug-')) return
+    const section = `${name.slice('dashboard-org_slug-'.length)}${typeof tab === 'string' && tab ? `:${tab}` : ''}`
     if (section === lastSection) return
     lastSection = section
     trackDashboardVisited(section, id)

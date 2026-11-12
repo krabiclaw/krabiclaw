@@ -80,7 +80,7 @@ const { data, error } = await useAsyncData<PublicLinksPayload | null>(
 
 if (error.value) throw error.value
 if (!data.value) throw createError({ statusCode: 404, statusMessage: 'Links page not found' })
-useState<PublicLinksPayload['localeRepresentations']>('public-locale-representations', () => []).value = data.value.localeRepresentations
+useState<PublicLinksPayload['locale_representations']>('public-locale-representations', () => []).value = data.value.locale_representations
 
 const linksPage = computed(() => data.value)
 const brandName = computed(() => linksPage.value?.organization.name || linksPage.value?.page.title || '')

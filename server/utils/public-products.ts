@@ -115,7 +115,7 @@ export interface PublicProductDetail extends PublicProductCollection {
    * bookable Product with nothing scheduled.
    */
   booking: PublicProductBooking | null
-  localeRepresentations: PublicLocaleRepresentation[]
+  locale_representations: PublicLocaleRepresentation[]
 }
 
 export interface PublicProductDetailPayload {
@@ -132,7 +132,7 @@ export interface PublicProductDetailPayload {
   sessions: PublicProductSession[]
   collectionName: string
   collectionSiblings: ProductCollectionSibling[]
-  localeRepresentations: PublicLocaleRepresentation[]
+  locale_representations: PublicLocaleRepresentation[]
   /** A place to stay is paid for on the site only once the business's Payments setup is complete; until then it takes enquiries. */
   stayCheckoutAvailable: boolean
 }
@@ -251,7 +251,7 @@ export async function loadPublicProductDetail(
     if (!found || !offeredHere || !publishedHere || !onThisSurface) return null
     const product = found
     if (!product) return null
-    const localeRepresentations = await listPublicLocaleRepresentations(env, db, {
+    const locale_representations = await listPublicLocaleRepresentations(env, db, {
       organizationId: collection.organization.id,
       
       sourcePath: collection.presentation.productPath(location.slug, product.slug),
@@ -262,7 +262,7 @@ export async function loadPublicProductDetail(
       location,
       product,
       booking: product.booking,
-      localeRepresentations,
+      locale_representations,
     }
   }
 
@@ -300,7 +300,7 @@ export async function loadPublicProductDetail(
   const localizedOrganization = organizationLocalization
     ? projectExactLocalizedResource('organization', collection.organization, organizationLocalization)
     : { ...collection.organization, name: '' }
-  const localeRepresentations = await listPublicLocaleRepresentations(env, db, {
+  const locale_representations = await listPublicLocaleRepresentations(env, db, {
     organizationId: collection.organization.id,
     
     sourcePath: collection.presentation.productPath(sourceLocation.slug, sourceProduct.slug),
@@ -314,7 +314,7 @@ export async function loadPublicProductDetail(
     location,
     product,
     booking: sourceProduct.booking,
-    localeRepresentations,
+    locale_representations,
   }
 }
 
@@ -405,10 +405,10 @@ async function projectPublicOffering(
     const translatedOrganization = localizations.find(item => item.resourceType === 'organization' && item.resourceId === organizationId)
     if (translatedOrganization) organization = projectExactLocalizedResource('organization', organization, translatedOrganization)
   }
-  const localeRepresentations = await listPublicLocaleRepresentations(env, db, {
+  const locale_representations = await listPublicLocaleRepresentations(env, db, {
     organizationId, sourcePath, resource: { type: 'product', id: found.id },
   })
-  return { ...collection, organization, products, collections, locations, location, product, booking: found.booking, scopeRequired, onlineAvailable, localeRepresentations }
+  return { ...collection, organization, products, collections, locations, location, product, booking: found.booking, scopeRequired, onlineAvailable, locale_representations }
 }
 
 /** One public response for server rendering and API navigation. */
@@ -428,7 +428,7 @@ export async function publicProductDetailPayload(db: DbClient, env: CloudflareEn
     booking: detail.booking, sessions,
     collectionName: collection?.name ?? '',
     collectionSiblings: collection ? selectProductCollectionSiblings(detail.products, detail.product, collection.id, { currency: detail.currency, location_id: detail.location?.id ?? null, at: new Date().toISOString() }) : [],
-    localeRepresentations: detail.localeRepresentations,
+    locale_representations: detail.locale_representations,
     stayCheckoutAvailable: staySetup !== null && staySetup.missing.length === 0,
   }
 }

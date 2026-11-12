@@ -49,7 +49,7 @@
               <USwitch v-model="publish" label="Share a public review" :description="`${requestData.organization.name} may show it on its website once they’ve checked it.`" data-testid="review-publish" />
               <template v-if="publish">
                 <UFormField label="Show my name as">
-                  <URadioGroup v-model="displayName" :items="requestData.displayNames" />
+                  <URadioGroup v-model="displayName" :items="requestData.display_names" />
                 </UFormField>
                 <UFormField label="Title" hint="Optional">
                   <UInput v-model="title" maxlength="120" class="w-full" />
@@ -168,14 +168,14 @@ const { data: requestData, status: validationStatus, error: validationError } = 
   visit: { subject: string; title: string | null; at: string; locationTitle: string | null }
   questions: Array<{ key: string; label: string }>
   location: { googleReviewUrl: string | null }
-  displayNames: string[]
+  display_names: string[]
 }>(() => `review-request-validation-${token.value}`, () =>
   $fetch('/api/public/review-requests/validate', { query: { token: token.value } }),
 // The link is the guest's private credential: it is read in their browser, as
 // a booking-change link is, never during the server render.
 { server: false })
 const loadError = computed(() => validationError.value ? 'The link may have expired or already been used.' : '')
-watch(requestData, (data) => { if (data && !displayName.value) displayName.value = data.displayNames[0] ?? '' }, { immediate: true })
+watch(requestData, (data) => { if (data && !displayName.value) displayName.value = data.display_names[0] ?? '' }, { immediate: true })
 
 // Each step asks only for what it needs: an overall rating, then — if the guest shares one — the public text.
 const stepValid = computed(() => step.value === 'ratings'
@@ -413,11 +413,11 @@ async function copyAndOpenGoogle() {
 async function optOut() {
   submitError.value = ''
   try {
-    await publicApiMutation<{ optedOut: true }>('/api/public/review-requests/opt-out', {
+    await publicApiMutation<{ opted_out: true }>('/api/public/review-requests/opt-out', {
       method: 'POST',
       body: { token: token.value },
-      validate: (value): value is { optedOut: true } =>
-        isRecord(value) && value.optedOut === true,
+      validate: (value): value is { opted_out: true } =>
+        isRecord(value) && value.opted_out === true,
     })
     optedOut.value = true
   } catch (error) {

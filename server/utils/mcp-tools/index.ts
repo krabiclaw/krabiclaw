@@ -171,13 +171,13 @@ export async function executeMcpToolCall(
     const { row, payload } = toolName === 'get_website_draft'
       ? await readOnboardingDraft(user.db, user.userId, optionalString(normalizedArguments, 'draft_id') ?? undefined)
       : await saveOnboardingDraft(user.env, user.db, user.userId, {
-          draftId: optionalString(normalizedArguments, 'draft_id') ?? undefined,
-          updated_at: optionalString(normalizedArguments, 'updated_at'), idempotencyKey: requiredString(normalizedArguments, 'idempotency_key'),
+          draft_id: optionalString(normalizedArguments, 'draft_id') ?? undefined,
+          updated_at: optionalString(normalizedArguments, 'updated_at'), idempotency_key: requiredString(normalizedArguments, 'idempotency_key'),
           name: normalizedArguments.name, vertical: normalizedArguments.vertical, subdomain: normalizedArguments.subdomain,
           details: { sourceLocale: normalizedArguments.source_locale, currency: normalizedArguments.currency, timezone: normalizedArguments.timezone,
             streetAddress: location?.street_address, addressLine2: location?.address_line_2, city: location?.city, region: location?.region,
             postalCode: location?.postal_code, country: location?.country, phone: location?.phone, websiteUrl: location?.website_url },
-          brandDraft: { heroHeadline: normalizedArguments.hero_headline, heroSubtitle: normalizedArguments.hero_subtitle },
+          brand_draft: { heroHeadline: normalizedArguments.hero_headline, heroSubtitle: normalizedArguments.hero_subtitle },
           products: Array.isArray(normalizedArguments.products) ? normalizedArguments.products.map(product => {
             const item = product as Record<string, unknown>
             return { name: item.name, category: item.category, amountMinor: item.amount_minor }

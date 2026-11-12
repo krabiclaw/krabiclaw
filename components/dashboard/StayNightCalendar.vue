@@ -88,7 +88,7 @@
           </div>
           <div v-else-if="data" class="divide-y divide-default border-y border-default">
             <p v-if="!listedStays.length" class="py-10 text-center text-sm text-muted">No stays in {{ placeholder?.year }}.</p>
-            <NuxtLink v-for="stay in listedStays" :key="stay.id" :to="{ path: `/dashboard/${route.params.orgSlug}/calendar/stay/${encodeURIComponent(stay.id)}`, query: route.query }" class="flex items-center justify-between gap-4 py-5">
+            <NuxtLink v-for="stay in listedStays" :key="stay.id" :to="{ path: `/dashboard/${route.params.org_slug}/calendar/stay/${encodeURIComponent(stay.id)}`, query: route.query }" class="flex items-center justify-between gap-4 py-5">
               <div>
                 <p class="font-medium text-highlighted">{{ stay.guest_name || 'Guest name not provided' }}</p>
                 <p class="mt-1 text-sm text-muted">{{ formatCalendarDate(stay.check_in_date, 'en', { month: 'short', day: 'numeric' }) }} – {{ formatCalendarDate(stay.check_out_date, 'en', { month: 'short', day: 'numeric', year: 'numeric' }) }}</p>
@@ -161,7 +161,7 @@ const props = defineProps<{ productId: string; homes: Pick<StayHome, 'product_id
 const route = useRoute()
 const level = useRouteLevel()
 const router = useRouter()
-const orgSlug = String(route.params.orgSlug)
+const orgSlug = String(route.params.org_slug)
 const api = useDashboardApi(computed(() => ({ orgSlug })))
 const pane = useDashboardPane()
 const homeOption = computed(() => props.homes.find(home => home.product_id === props.productId))
@@ -194,7 +194,7 @@ const selectedRanges = computed(() => {
 })
 const selectedCount = computed(() => selectedDates.value.length)
 const selectedRange = computed(() => selectedRanges.value.length === 1 ? selectedRanges.value[0]! : null)
-const addStayTo = computed(() => ({ path: `/dashboard/${route.params.orgSlug}/bookings/stay/new`, query: { product_id: props.productId, ...(selectedRange.value ? { check_in_date: selectedRange.value.from, check_out_date: selectedRange.value.to } : {}) } }))
+const addStayTo = computed(() => ({ path: `/dashboard/${route.params.org_slug}/bookings/stay/new`, query: { product_id: props.productId, ...(selectedRange.value ? { check_in_date: selectedRange.value.from, check_out_date: selectedRange.value.to } : {}) } }))
 const yearMonths = computed(() => placeholder.value ? Array.from({ length: 12 }, (_, month) => placeholder.value!.set({ month: month + 1, day: 1 })) : [])
 const monthRange = computed(() => {
   const first = placeholder.value?.set({ day: 1 })
@@ -229,7 +229,7 @@ function isCalendar(value: unknown): value is CalendarPayload {
   return (value.channel_push === undefined || isSuccessfulChannelPush(value.channel_push)) && value.nights.every(isStayNight)
 }
 const { data, error, status, refresh } = await useAsyncData(
-  () => `stay-night-calendar:${String(route.params.orgSlug)}:${props.productId}:${readRanges.value.map(range => `${range.from}:${range.to}`).join('|')}`,
+  () => `stay-night-calendar:${String(route.params.org_slug)}:${props.productId}:${readRanges.value.map(range => `${range.from}:${range.to}`).join('|')}`,
   async (_nuxtApp, { signal }) => {
     const ranges = readRanges.value
     if (initialError.value || !ranges.length) return null
@@ -256,7 +256,7 @@ const { data, error, status, refresh } = await useAsyncData(
 
 if (import.meta.client) {
   onMounted(() => {
-    const key = `stay-night-calendar:${String(route.params.orgSlug)}:${props.productId}:${readRanges.value.map(range => `${range.from}:${range.to}`).join('|')}`
+    const key = `stay-night-calendar:${String(route.params.org_slug)}:${props.productId}:${readRanges.value.map(range => `${range.from}:${range.to}`).join('|')}`
     if (useNuxtApp().payload.data[key]) {
       void refresh()
     }
@@ -316,9 +316,9 @@ const editor = useStayNightEditor({
 const { busy, error: writeError } = editor
 const inspectorProps = computed(() => ({ ...editor.inspector.value, dateLabel: dateLabel.value, scope: data.value ? `${data.value.home.timezone} · ${data.value.home.currency}` : '', selectDates: true }))
 const overviewGroups = computed(() => [{ id: 'home', items: [
-  { id: 'price', label: 'Pricing', summary: data.value?.home.base_price_minor == null ? 'No base nightly price set' : `${money(data.value.home.base_price_minor)} per night`, to: `/dashboard/${String(route.params.orgSlug)}/products/${props.productId}/price` },
-  { id: 'availability', label: 'Availability', summary: data.value ? `${data.value.home.min_nights} night minimum` : 'Loading availability…', to: `/dashboard/${String(route.params.orgSlug)}/products/${props.productId}/availability` },
-  { id: 'cancellation', label: 'Cancellations', summary: [data.value?.home.cancellation_policy ? STAY_CANCELLATION_POLICIES[data.value.home.cancellation_policy].label : 'Short-term policy not set', data.value?.home.long_term_cancellation_policy ? STAY_LONG_TERM_CANCELLATION_POLICIES[data.value.home.long_term_cancellation_policy].label : 'Long-term policy not set'].join(' · '), to: `/dashboard/${String(route.params.orgSlug)}/products/${props.productId}/cancellation` },
+  { id: 'price', label: 'Pricing', summary: data.value?.home.base_price_minor == null ? 'No base nightly price set' : `${money(data.value.home.base_price_minor)} per night`, to: `/dashboard/${String(route.params.org_slug)}/products/${props.productId}/price` },
+  { id: 'availability', label: 'Availability', summary: data.value ? `${data.value.home.min_nights} night minimum` : 'Loading availability…', to: `/dashboard/${String(route.params.org_slug)}/products/${props.productId}/availability` },
+  { id: 'cancellation', label: 'Cancellations', summary: [data.value?.home.cancellation_policy ? STAY_CANCELLATION_POLICIES[data.value.home.cancellation_policy].label : 'Short-term policy not set', data.value?.home.long_term_cancellation_policy ? STAY_LONG_TERM_CANCELLATION_POLICIES[data.value.home.long_term_cancellation_policy].label : 'Long-term policy not set'].join(' · '), to: `/dashboard/${String(route.params.org_slug)}/products/${props.productId}/cancellation` },
 ] }])
 function clearSelection() {
   if (busy.value) return

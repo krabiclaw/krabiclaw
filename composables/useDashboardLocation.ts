@@ -13,7 +13,7 @@ export function useDashboardLocation() {
   const route = useRoute()
 
   const routeLocationSlug = computed(() => {
-    const slug = route.params.locationSlug
+    const slug = route.params.location_slug
     return typeof slug === 'string' ? slug : null
   })
 

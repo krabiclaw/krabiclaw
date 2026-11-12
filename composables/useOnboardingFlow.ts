@@ -22,13 +22,13 @@ export interface OnboardingProductDraft {
 
 /** The place the business picker hands back: Place Details for the chosen prediction. */
 export interface OnboardingPlacePreview {
-  placeId: string
+  google_place_id: string
   name: string
   address: PostalAddress | null
   phone?: string | null
-  mapsUrl?: string | null
+  maps_url?: string | null
   timezone?: string | null
-  openingHours?: OpeningHours
+  opening_hours?: OpeningHours
 }
 
 export interface OnboardingDraftPreview {

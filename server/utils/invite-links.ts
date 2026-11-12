@@ -43,9 +43,9 @@ async function openInviteLink(db: DbClient, token: string): Promise<InviteLinkRo
  * What a link offers, for anyone holding it: the workspace's name, the role and
  * when it expires. It names nothing about the workspace's members.
  */
-export async function describeInviteLink(db: DbClient, token: string): Promise<{ organization: { name: string }; role: string; expiresAt: string }> {
+export async function describeInviteLink(db: DbClient, token: string): Promise<{ organization: { name: string }; role: string; expires_at: string }> {
   const link = await openInviteLink(db, token)
-  return { organization: { name: link.organization_name }, role: link.role, expiresAt: link.expires_at }
+  return { organization: { name: link.organization_name }, role: link.role, expires_at: link.expires_at }
 }
 
 /**
@@ -53,7 +53,7 @@ export async function describeInviteLink(db: DbClient, token: string): Promise<{
  * link is claimed first so two people cannot both use it; if Better Auth then
  * refuses the member, the claim is released and its error returned.
  */
-export async function acceptInviteLink(env: CloudflareEnv, token: string, userId: string): Promise<{ organization: { id: string; name: string }; role: string; memberId: string }> {
+export async function acceptInviteLink(env: CloudflareEnv, token: string, userId: string): Promise<{ organization: { id: string; name: string }; role: string; member_id: string }> {
   const link = await openInviteLink(env.DB, token)
   if (await resolveMembership(env, { organizationId: link.organization_id, userId })) {
     refuse(409, 'ALREADY_MEMBER', 'You are already a member of this organization', { organizationId: link.organization_id })
@@ -72,7 +72,7 @@ export async function acceptInviteLink(env: CloudflareEnv, token: string, userId
       body: { userId, organizationId: link.organization_id, role: link.role as typeof INVITE_LINK_ROLES[number] },
     })
     if (!member) throw new Error('Better Auth added no member for an accepted invite link')
-    return { organization: { id: link.organization_id, name: link.organization_name }, role: member.role, memberId: member.id }
+    return { organization: { id: link.organization_id, name: link.organization_name }, role: member.role, member_id: member.id }
   } catch (cause) {
     await execute(env.DB, 'UPDATE organization_invite_links SET used_at = NULL, used_by_user_id = NULL WHERE id = ? AND used_at = ?', [link.id, usedAt])
     throw cause

@@ -17,12 +17,12 @@ import { countActiveHomes } from '../../server/utils/billing.ts'
 import { publishedCatalogResponse } from './support/stripe-published-catalog.ts'
 import { returnExtrasToDraftsForPlanEnd } from '../../server/utils/billing-plan-end.ts'
 import publicPageRoute from '../../server/api/public/page.get.ts'
-import contentRoute from '../../server/api/organizations/[organizationId]/integrations/airbnb/imports/[productId]/content.post.ts'
-import calendarRoute from '../../server/api/organizations/[organizationId]/integrations/airbnb/imports/[productId]/calendar.post.ts'
-import syncPostRoute from '../../server/api/organizations/[organizationId]/integrations/airbnb/sync.post.ts'
-import syncGetRoute from '../../server/api/organizations/[organizationId]/integrations/airbnb/sync.get.ts'
+import contentRoute from '../../server/api/organizations/[organization_id]/integrations/airbnb/imports/[product_id]/content.post.ts'
+import calendarRoute from '../../server/api/organizations/[organization_id]/integrations/airbnb/imports/[product_id]/calendar.post.ts'
+import syncPostRoute from '../../server/api/organizations/[organization_id]/integrations/airbnb/sync.post.ts'
+import syncGetRoute from '../../server/api/organizations/[organization_id]/integrations/airbnb/sync.get.ts'
 import { requestAirbnbSync, runAirbnbSyncJobs } from '../../server/integrations/channex/airbnb-sync.ts'
-import listingsRoute from '../../server/api/organizations/[organizationId]/integrations/airbnb/listings.get.ts'
+import listingsRoute from '../../server/api/organizations/[organization_id]/integrations/airbnb/listings.get.ts'
 import { errorChainForTelemetry } from '../../shared/error-telemetry.ts'
 
 // An Airbnb listing imported as a home, through every stage, against a fake
@@ -634,7 +634,7 @@ test('a connected home can resend its full calendar without tearing down its map
     const { product_id: productId } = await connection.prepare(LISTING, form)
     await importAll(connection, db, channex, productId)
     const app = new H3()
-    app.post('/api/organizations/:organizationId/integrations/airbnb/imports/:productId/calendar', calendarRoute)
+    app.post('/api/organizations/:organization_id/integrations/airbnb/imports/:product_id/calendar', calendarRoute)
     const login = await createAuth(env).api.signInEmail({ body: { email: 'owner@example.test', password: PASSWORD }, asResponse: true })
     assert.equal(login.status, 200)
     const cookie = login.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
@@ -923,8 +923,8 @@ test('the backfill route fills a home imported without content and the listings 
     assert.deepEqual({ photos: before.photos, description: before.description, bedrooms: before.bedrooms, amenities: before.amenities, method: before.check_in_method }, { photos: [], description: '', bedrooms: null, amenities: [], method: null })
 
     const app = new H3()
-    app.get('/api/organizations/:organizationId/integrations/airbnb/listings', listingsRoute)
-    app.post('/api/organizations/:organizationId/integrations/airbnb/imports/:productId/content', contentRoute)
+    app.get('/api/organizations/:organization_id/integrations/airbnb/listings', listingsRoute)
+    app.post('/api/organizations/:organization_id/integrations/airbnb/imports/:product_id/content', contentRoute)
     const login = await createAuth(env).api.signInEmail({ body: { email: 'owner@example.test', password: PASSWORD }, asResponse: true })
     assert.equal(login.status, 200)
     const cookie = login.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
@@ -1040,8 +1040,8 @@ test('a sync request is checked against the plan once, then KrabiClaw imports, a
     }
 
     const app = new H3()
-    app.post('/api/organizations/:organizationId/integrations/airbnb/sync', syncPostRoute)
-    app.get('/api/organizations/:organizationId/integrations/airbnb/sync', syncGetRoute)
+    app.post('/api/organizations/:organization_id/integrations/airbnb/sync', syncPostRoute)
+    app.get('/api/organizations/:organization_id/integrations/airbnb/sync', syncGetRoute)
     const login = await createAuth(env).api.signInEmail({ body: { email: 'owner@example.test', password: PASSWORD }, asResponse: true })
     const token = login.headers.get('set-auth-token')
     assert.ok(token, 'Better Auth answers a bearer token for the app')

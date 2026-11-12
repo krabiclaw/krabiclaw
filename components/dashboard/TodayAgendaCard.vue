@@ -5,7 +5,7 @@
       <p class="quest-card__title">{{ item.headline }}</p>
       <p v-if="item.description" class="quest-card__description">{{ item.description }}</p>
     </div>
-    <UAvatar :src="avatarSrc" alt="" :icon="item.imageIcon" class="quest-card__avatar" :ui="{ icon: 'size-8', image: 'object-cover' }" aria-hidden="true" />
+    <UAvatar :src="avatarSrc" alt="" :icon="item.image_icon" class="quest-card__avatar" :ui="{ icon: 'size-8', image: 'object-cover' }" aria-hidden="true" />
   </NuxtLink>
 </template>
 
@@ -16,7 +16,7 @@ import { cfImageVariant } from '~/utils/cf-image'
 
 /** One of the visits a guest account booked, on that account's Today. */
 const props = defineProps<{ item: TodayCard }>()
-const avatarSrc = computed(() => cfImageVariant(props.item.imageUrl, { width: 160, height: 160, fit: 'cover', format: 'auto' }) || props.item.imageUrl || undefined)
+const avatarSrc = computed(() => cfImageVariant(props.item.image_url, { width: 160, height: 160, fit: 'cover', format: 'auto' }) || props.item.image_url || undefined)
 </script>
 
 <style scoped>

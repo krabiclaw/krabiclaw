@@ -49,7 +49,7 @@ export interface PublicOrganizationLinksPayload {
   }
   page: OrganizationLinksPage
   items: OrganizationLinkItem[]
-  localeRepresentations: PublicLocaleRepresentation[]
+  locale_representations: PublicLocaleRepresentation[]
 }
 
 export interface LinksPageUpdateInput {
@@ -235,7 +235,7 @@ export async function getPublicLinksPage(env: CloudflareEnv, db: DbClient, organ
     },
     page,
     items: publicItems,
-    localeRepresentations: await listPublicLocaleRepresentations(env, db, {
+    locale_representations: await listPublicLocaleRepresentations(env, db, {
       organizationId,
       sourcePath: '/links',
       documentId: sourcePage.id,

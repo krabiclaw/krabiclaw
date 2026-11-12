@@ -1,14 +1,13 @@
 {
   "thread": {
-    "activityPath": null,
-    "avatarInitial": "M",
+    "activity_path": null,
+    "avatar_initial": "M",
     "channel": "airbnb",
     "composer": {
       "available": true,
       "channel": "airbnb",
       "reason": null
     },
-    "guestName": "Mililani",
     "home": "74 D · Sky",
     "id": "00000000-0000-4000-8000-000000000001",
     "kind": "guest",
@@ -23,9 +22,9 @@
         "time": "Sun, Nov 8, 4:00 PM"
       }
     ],
-    "recordId": "00000000-0000-4000-8000-000000000004",
-    "recordKind": "stay",
-    "recordTitle": "Reservation",
+    "record_id": "00000000-0000-4000-8000-000000000004",
+    "record_kind": "stay",
+    "record_title": "Reservation",
     "stream": [
       {
         "id": "day:00000000-0000-4000-8000-000000000005",
@@ -40,14 +39,14 @@
         "photos": [],
         "receipt": null,
         "retryable": false,
-        "sentAt": "2026-11-04T18:16:00.000Z",
+        "sent_at": "2026-11-04T18:16:00.000Z",
         "side": "guest",
         "time": "11:16 AM",
         "translated": {
           "original": "¿En invierno dejan aparcar en la calle?"
         },
         "type": "message",
-        "unshownFiles": 0
+        "unshown_files": 0
       },
       {
         "author": "Mililani",
@@ -58,19 +57,19 @@
           {
             "height": 3,
             "id": "00000000-0000-4000-8000-000000000007",
-            "thumbnailUrl": "https://media.example.test/organizations/org-contract/media/00000000-0000-4000-8000-000000000007.avif",
+            "thumbnail_url": "https://media.example.test/organizations/org-contract/media/00000000-0000-4000-8000-000000000007.avif",
             "url": "https://media.example.test/organizations/org-contract/media/00000000-0000-4000-8000-000000000007.avif",
             "width": 4
           }
         ],
         "receipt": null,
         "retryable": false,
-        "sentAt": "2026-11-04T18:17:00.000Z",
+        "sent_at": "2026-11-04T18:17:00.000Z",
         "side": "guest",
         "time": null,
         "translated": null,
         "type": "message",
-        "unshownFiles": 0
+        "unshown_files": 0
       },
       {
         "author": "You",
@@ -80,12 +79,12 @@
         "photos": [],
         "receipt": null,
         "retryable": false,
-        "sentAt": "2026-11-04T18:23:00.000Z",
+        "sent_at": "2026-11-04T18:23:00.000Z",
         "side": "business",
         "time": "11:23 AM",
         "translated": null,
         "type": "message",
-        "unshownFiles": 0
+        "unshown_files": 0
       },
       {
         "author": "Mililani",
@@ -95,12 +94,12 @@
         "photos": [],
         "receipt": null,
         "retryable": false,
-        "sentAt": "2026-11-04T18:31:00.000Z",
+        "sent_at": "2026-11-04T18:31:00.000Z",
         "side": "guest",
         "time": "11:31 AM",
         "translated": null,
         "type": "message",
-        "unshownFiles": 0
+        "unshown_files": 0
       },
       {
         "id": "day:automatic-contract",
@@ -115,12 +114,12 @@
         "photos": [],
         "receipt": null,
         "retryable": false,
-        "sentAt": "2026-11-05T19:00:00.000Z",
+        "sent_at": "2026-11-05T19:00:00.000Z",
         "side": "business",
         "time": "12:00 PM",
         "translated": null,
         "type": "message",
-        "unshownFiles": 0
+        "unshown_files": 0
       },
       {
         "change": {
@@ -150,12 +149,12 @@
           "vertical": "lodging"
         },
         "id": "00000000-0000-4000-8000-000000000010",
-        "sentAt": "2026-11-05T19:00:00.000Z",
+        "sent_at": "2026-11-05T19:00:00.000Z",
         "type": "change"
       },
       {
         "id": "00000000-0000-4000-8000-000000000011",
-        "sentAt": "2026-11-05T19:00:00.000Z",
+        "sent_at": "2026-11-05T19:00:00.000Z",
         "text": "Payment received",
         "type": "event"
       },
@@ -167,14 +166,15 @@
         "photos": [],
         "receipt": "Not delivered",
         "retryable": true,
-        "sentAt": "2026-11-05T19:00:00.000Z",
+        "sent_at": "2026-11-05T19:00:00.000Z",
         "side": "business",
         "time": "12:00 PM",
         "translated": null,
         "type": "message",
-        "unshownFiles": 0
+        "unshown_files": 0
       }
     ],
+    "title": "Mililani",
     "translated": true,
     "when": "In 3 days"
   }

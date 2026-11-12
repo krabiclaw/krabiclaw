@@ -621,7 +621,7 @@ export async function getPublishedBlogPost(
     const { body: _body, ...article } = post
     return {
       ...article,
-      localeRepresentations: await listPublicLocaleRepresentations(env, db, {
+      locale_representations: await listPublicLocaleRepresentations(env, db, {
         organizationId,
         sourcePath: pathOf(slug),
         documentId: post.id,
@@ -658,7 +658,7 @@ export async function getPublishedBlogPost(
     content_blocks: contentBlocks,
     media: projectLocalizedMediaAlt(social.get(row.id)?.media ?? [], localizations),
     social_image: social.get(row.id)?.social_image ?? null,
-    localeRepresentations: await listPublicLocaleRepresentations(env, db, { organizationId,
+    locale_representations: await listPublicLocaleRepresentations(env, db, { organizationId,
       sourcePath: pathOf(row.source_slug), documentId: row.root_id }),
   }
 }

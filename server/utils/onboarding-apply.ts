@@ -62,22 +62,22 @@ export interface OnboardingDraftRow {
 
 export async function saveOnboardingDraft(env: CloudflareEnv, db: D1Database, userId: string, input: OnboardingDraftInput) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new HTTPError({ statusCode: 400, statusMessage: 'Website answers must be an object' })
-  if (input.idempotencyKey !== undefined && typeof input.idempotencyKey !== 'string' || input.draftId !== undefined && typeof input.draftId !== 'string' || input.updated_at !== undefined && input.updated_at !== null && typeof input.updated_at !== 'string') throw new HTTPError({ statusCode: 400, statusMessage: 'Draft identity, revision and creation key must be text' })
-  const key = input.idempotencyKey?.trim()
+  if (input.idempotency_key !== undefined && typeof input.idempotency_key !== 'string' || input.draft_id !== undefined && typeof input.draft_id !== 'string' || input.updated_at !== undefined && input.updated_at !== null && typeof input.updated_at !== 'string') throw new HTTPError({ statusCode: 400, statusMessage: 'Draft identity, revision and creation key must be text' })
+  const key = input.idempotency_key?.trim()
   const keyedId = key ? `mcp-website-${await creationRequestHash({ userId, key })}` : undefined
-  const existingRow = input.draftId || keyedId
-    ? await queryFirst<SavedOnboardingDraft>(db, 'SELECT * FROM onboarding_drafts WHERE id = ? AND user_id = ?', [input.draftId ?? keyedId!, userId])
+  const existingRow = input.draft_id || keyedId
+    ? await queryFirst<SavedOnboardingDraft>(db, 'SELECT * FROM onboarding_drafts WHERE id = ? AND user_id = ?', [input.draft_id ?? keyedId!, userId])
     : await readActiveOnboardingDraft(db, userId)
-  if (input.draftId && !existingRow) throw new HTTPError({ statusCode: 404, statusMessage: 'Website draft not found' })
+  if (input.draft_id && !existingRow) throw new HTTPError({ statusCode: 404, statusMessage: 'Website draft not found' })
   if (existingRow && input.updated_at !== undefined && input.updated_at !== null && existingRow.updated_at !== input.updated_at) throw new HTTPError({ statusCode: 409, statusMessage: 'Website draft changed; read it before saving', data: { code: 'ONBOARDING_DRAFT_CHANGED', draft_id: existingRow.id } })
   if (existingRow?.status === 'abandoned') throw new HTTPError({ statusCode: 409, statusMessage: 'This website draft was discarded', data: { code: 'ONBOARDING_DRAFT_ABANDONED', draft_id: existingRow.id } })
   const existing = existingRow ? parseOnboardingDraftPayload(existingRow.payload_json) : null
   if (existing && existingRow) existing.preview.subdomainCandidate = existingRow.subdomain_candidate
-  const sourceType = input.sourceType ?? existing?.source.type ?? 'manual'
-  if (sourceType !== 'manual' && sourceType !== 'google_places') throw new HTTPError({ statusCode: 400, statusMessage: 'sourceType must be manual or google_places' })
+  const sourceType = input.source_type ?? existing?.source.type ?? 'manual'
+  if (sourceType !== 'manual' && sourceType !== 'google_places') throw new HTTPError({ statusCode: 400, statusMessage: 'source_type must be manual or google_places' })
   let place: Parameters<typeof normalizeOnboardingDraftInput>[2] = null
   if (sourceType === 'google_places') {
-    const placeId = typeof input.placeId === 'string' ? input.placeId.trim() : existing?.source.placeId
+    const placeId = typeof input.google_place_id === 'string' ? input.google_place_id.trim() : existing?.source.placeId
     if (!placeId) throw new HTTPError({ statusCode: 400, statusMessage: 'Choose a Google place before importing it' })
     if (existing?.source.place?.placeId === placeId) place = existing.source.place
     else {
@@ -88,7 +88,7 @@ export async function saveOnboardingDraft(env: CloudflareEnv, db: D1Database, us
   const payload = normalizeOnboardingDraftInput(input, existing, place)
   const draft = await upsertActiveOnboardingDraft(db, {
     userId, name: payload.preview.brandName, vertical: payload.preview.vertical, sourceType, payload,
-    updated_at: input.updated_at ?? null, draftId: input.draftId, idempotencyKey: key,
+    updated_at: input.updated_at ?? null, draftId: input.draft_id, idempotencyKey: key,
   })
   const saved = await readOnboardingDraft(db, userId, draft.id)
   if (saved.row.status === 'committed') return saved

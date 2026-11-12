@@ -244,7 +244,7 @@ async function organization(): Promise<{ id: string; slug: string }> {
     found = { id: created.data.id, slug: created.data.slug, onboarding_status: 'pending' }
   }
   if (found.onboarding_status !== 'active') {
-    await call('POST', '/api/organizations', { organizationId: found.id, name: DEMO.name, subdomain: DEMO.slug, vertical: 'lodging', sourceLocale: DEMO.sourceLocale })
+    await call('POST', '/api/organizations', { organization_id: found.id, name: DEMO.name, subdomain: DEMO.slug, vertical: 'lodging', source_locale: DEMO.sourceLocale })
     console.log(`Provisioned ${DEMO.slug} as a lodging site`)
   }
   return { id: found.id, slug: found.slug }

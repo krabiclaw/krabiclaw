@@ -4,32 +4,32 @@ import {CURRENT_GUEST_SQL} from '~/server/domain/conversations'
 import {loadOwnerPictures} from '~/server/notifications/hero'
 import {accountActivityPath,isAccountActivityItem,isBuyerPaymentEntry,type AccountActivityItem,type AccountActivityResponse,type BuyerPaymentEntry} from '~/shared/account-activity'
 
-export async function ownedBuyerRequest(db:DbClient,userId:string,requestId:string) {
+export async function ownedBuyerRequest(db:DbClient,userId:string,conversation_id:string) {
  // The conversation's booking is the buyer's: CURRENT_GUEST_SQL holds it to the conversation's own guest.
  const owned=await queryFirst<{organization_id:string;booking_id:string;unit:'slot'|'nights'}>(db,`SELECT r.organization_id,b.id booking_id,CASE WHEN b.product_session_id IS NULL THEN 'nights' ELSE 'slot' END unit FROM conversations r JOIN bookings b ON b.id=r.booking_id AND b.organization_id=r.organization_id
-  WHERE r.id=? AND r.user_id=? AND r.kind='booking' AND ${CURRENT_GUEST_SQL('r')}`,[requestId,userId])
+  WHERE r.id=? AND r.user_id=? AND r.kind='booking' AND ${CURRENT_GUEST_SQL('r')}`,[conversation_id,userId])
  if(!owned)throw new HTTPError({statusCode:404,statusMessage:'Owned booking not found'})
  return owned
 }
 type ActivityRow = {
- kind: 'booking'|'stay'; id:string; request_id:string|null; operational_id:string; organization_id:string;
+ kind: 'booking'|'stay'; id:string; conversation_id:string|null; booking_id:string; organization_id:string;
  organization_name:string; organization_slug:string; title:string; status:string;
  starts_at:string; ends_at:string; timezone:string; created_at:string; location_id:string|null;
  location_title:string|null; product_id:string|null; party_size:number
 }
-type BuyerPaymentRow = {id:string;organization_id:string;organization_name:string|null;organization_slug:string|null;currency:string;captured_amount:number;refunded_amount:number;subject_type:string;subject_id:string;price_snapshot_json:string;created_at:string;order_id:string|null;hold_request_id:string|null;hold_starts_at:string|null;hold_ends_at:string|null;hold_timezone:string|null}
+type BuyerPaymentRow = {id:string;organization_id:string;organization_name:string|null;organization_slug:string|null;currency:string;captured_amount:number;refunded_amount:number;subject_type:string;subject_id:string;price_snapshot_json:string;created_at:string;order_id:string|null;hold_conversation_id:string|null;hold_starts_at:string|null;hold_ends_at:string|null;hold_timezone:string|null}
 async function buyerActivityRows(db:DbClient,userId:string) {
  // Every booking the account made on a business's site, one row each: a stay's ends are its stored instants, or its days where its home had no time.
  const [visits,payments]=await Promise.all([
-  queryAll<ActivityRow>(db,`SELECT CASE WHEN b.product_session_id IS NULL THEN 'stay' ELSE 'booking' END kind,COALESCE(r.id,b.id) id,r.id request_id,b.id operational_id,b.organization_id,o.name organization_name,o.slug organization_slug,p.name title,b.status,b.starts_at,b.ends_at,b.timezone,b.created_at,b.location_id,l.title location_title,b.product_id,b.party_size
+  queryAll<ActivityRow>(db,`SELECT CASE WHEN b.product_session_id IS NULL THEN 'stay' ELSE 'booking' END kind,COALESCE(r.id,b.id) id,r.id conversation_id,b.id booking_id,b.organization_id,o.name organization_name,o.slug organization_slug,p.name title,b.status,b.starts_at,b.ends_at,b.timezone,b.created_at,b.location_id,l.title location_title,b.product_id,b.party_size
    FROM bookings b LEFT JOIN conversations r ON r.booking_id=b.id AND r.kind='booking' JOIN organization o ON o.id=b.organization_id JOIN products p ON p.id=b.product_id AND p.organization_id=b.organization_id LEFT JOIN business_locations l ON l.id=b.location_id AND l.organization_id=b.organization_id
    WHERE b.user_id=? AND b.owner='app' AND (r.id IS NULL OR (r.organization_id=b.organization_id AND r.kind='booking' AND r.user_id=? AND ${CURRENT_GUEST_SQL('r')}))`,[userId,userId]),
-  queryAll<BuyerPaymentRow>(db,`SELECT p.id,p.organization_id,o.name organization_name,o.slug organization_slug,p.currency,p.captured_amount,p.refunded_amount,p.subject_type,p.subject_id,p.price_snapshot_json,p.created_at,po.id order_id,r.id hold_request_id,h.starts_at hold_starts_at,h.ends_at hold_ends_at,COALESCE(s.timezone,CASE WHEN h.session_id IS NOT NULL THEN h.timezone END) hold_timezone FROM payments p LEFT JOIN organization o ON o.id=p.organization_id LEFT JOIN payment_orders po ON po.payment_id=p.id AND po.buyer_user_id=p.buyer_user_id AND po.organization_id=p.organization_id LEFT JOIN payment_checkout_holds h ON h.payment_id=p.id AND h.organization_id=p.organization_id AND h.buyer_user_id=p.buyer_user_id LEFT JOIN conversations r ON r.id=h.conversation_id AND r.organization_id=p.organization_id AND r.user_id=p.buyer_user_id AND ${CURRENT_GUEST_SQL('r')} LEFT JOIN product_sessions s ON s.id=h.session_id AND s.organization_id=p.organization_id WHERE p.buyer_user_id=? ORDER BY p.created_at DESC`,[userId]),
+  queryAll<BuyerPaymentRow>(db,`SELECT p.id,p.organization_id,o.name organization_name,o.slug organization_slug,p.currency,p.captured_amount,p.refunded_amount,p.subject_type,p.subject_id,p.price_snapshot_json,p.created_at,po.id order_id,r.id hold_conversation_id,h.starts_at hold_starts_at,h.ends_at hold_ends_at,COALESCE(s.timezone,CASE WHEN h.session_id IS NOT NULL THEN h.timezone END) hold_timezone FROM payments p LEFT JOIN organization o ON o.id=p.organization_id LEFT JOIN payment_orders po ON po.payment_id=p.id AND po.buyer_user_id=p.buyer_user_id AND po.organization_id=p.organization_id LEFT JOIN payment_checkout_holds h ON h.payment_id=p.id AND h.organization_id=p.organization_id AND h.buyer_user_id=p.buyer_user_id LEFT JOIN conversations r ON r.id=h.conversation_id AND r.organization_id=p.organization_id AND r.user_id=p.buyer_user_id AND ${CURRENT_GUEST_SQL('r')} LEFT JOIN product_sessions s ON s.id=h.session_id AND s.organization_id=p.organization_id WHERE p.buyer_user_id=? ORDER BY p.created_at DESC`,[userId]),
  ])
  return {visits,payments}
 }
 function visitActivity(row:ActivityRow):AccountActivityItem {
- return {kind:row.kind,id:row.id,requestId:row.request_id,operationalId:row.operational_id,paymentId:null,organizationId:row.organization_id,organizationName:row.organization_name,organizationSlug:row.organization_slug,title:row.title,status:row.status,startsAt:row.starts_at,endsAt:row.ends_at,timeZone:row.timezone,createdAt:row.created_at,imageUrl:null,locationTitle:row.location_title,partySize:row.party_size}
+ return {kind:row.kind,id:row.id,conversation_id:row.conversation_id,booking_id:row.booking_id,payment_id:null,organization_id:row.organization_id,organization_name:row.organization_name,organization_slug:row.organization_slug,title:row.title,status:row.status,starts_at:row.starts_at,ends_at:row.ends_at,timezone:row.timezone,created_at:row.created_at,image_url:null,location_title:row.location_title,party_size:row.party_size}
 }
 function paymentActivity(row:BuyerPaymentRow):AccountActivityItem {
  const snapshot:unknown=JSON.parse(row.price_snapshot_json)
@@ -39,10 +39,10 @@ function paymentActivity(row:BuyerPaymentRow):AccountActivityItem {
  // An ended/deleted session supplies no timezone. The retained hold is not an
  // operational booking; it never manufactures a calendar occurrence.
  const scheduled=kind==='payment'&&!!row.hold_timezone
- return {kind,id:row.id,requestId:kind==='payment'?row.hold_request_id:null,operationalId:null,paymentId:row.id,organizationId:row.organization_id,organizationName:row.organization_name,organizationSlug:row.organization_slug,title:snapshot.title,status:row.captured_amount===0?'pending':row.refunded_amount===row.captured_amount?'refunded':'captured',startsAt:scheduled?row.hold_starts_at:null,endsAt:scheduled?row.hold_ends_at:null,timeZone:scheduled?row.hold_timezone:null,createdAt:row.created_at,imageUrl:null,locationTitle:null,partySize:null}
+ return {kind,id:row.id,conversation_id:kind==='payment'?row.hold_conversation_id:null,booking_id:null,payment_id:row.id,organization_id:row.organization_id,organization_name:row.organization_name,organization_slug:row.organization_slug,title:snapshot.title,status:row.captured_amount===0?'pending':row.refunded_amount===row.captured_amount?'refunded':'captured',starts_at:scheduled?row.hold_starts_at:null,ends_at:scheduled?row.hold_ends_at:null,timezone:scheduled?row.hold_timezone:null,created_at:row.created_at,image_url:null,location_title:null,party_size:null}
 }
 function resolvePaymentActivity(rows:Awaited<ReturnType<typeof buyerActivityRows>>,payment:BuyerPaymentRow):AccountActivityItem {
- const visits=rows.visits.filter(row=>payment.subject_type==='booking'&&row.operational_id===payment.subject_id&&row.organization_id===payment.organization_id)
+ const visits=rows.visits.filter(row=>payment.subject_type==='booking'&&row.booking_id===payment.subject_id&&row.organization_id===payment.organization_id)
  if(visits.length>1)throw new Error('Owned payment has ambiguous visit associations')
  return visits[0]?visitActivity(visits[0]):paymentActivity(payment)
 }
@@ -57,11 +57,11 @@ export async function buyerActivities(db:DbClient,userId:string):Promise<Account
   const visit=rows.visits.find(row=>row.kind===item.kind&&row.id===item.id)
   if(visit){
    const ownerType=visit.product_id?'product':'business_location',ownerId=visit.product_id??visit.location_id
-   if(ownerId)item.imageUrl=(await loadOwnerPictures(db,item.organizationId,ownerType,[ownerId])).get(ownerId)?.imageUrl??null
+   if(ownerId)item.image_url=(await loadOwnerPictures(db,item.organization_id,ownerType,[ownerId])).get(ownerId)?.imageUrl??null
   }
   if(!isAccountActivityItem(item))throw new Error('Owned activity has invalid required state')
  }
- activities.sort((a,b)=>b.createdAt.localeCompare(a.createdAt)||a.id.localeCompare(b.id))
+ activities.sort((a,b)=>b.created_at.localeCompare(a.created_at)||a.id.localeCompare(b.id))
  return {activities}
 }
 /** The account’s payments and completed refunds, newest first. */
@@ -76,28 +76,28 @@ export async function buyerPayments(db:DbClient,userId:string):Promise<{entries:
   const to=accountActivityPath(item.kind,item.id)
   const visit=rows.visits.find(row=>row.kind===item.kind&&row.id===item.id)
   const ownerType=visit?.product_id?'product':'business_location',ownerId=visit?(visit.product_id??visit.location_id):(await queryFirst<{product_id:string|null}>(db,'SELECT l.product_id FROM payment_order_lines l JOIN payment_orders o ON o.id=l.order_id WHERE o.payment_id=? ORDER BY l.rowid LIMIT 1',[payment.id]))?.product_id??null
-  const imageUrl=ownerId?(await loadOwnerPictures(db,payment.organization_id,visit?ownerType:'product',[ownerId])).get(ownerId)?.imageUrl??null:null
-  const line={title:visit?visit.title:snapshot.title,organizationName:payment.organization_name,currency:payment.currency,to,imageUrl,visitStartsAt:visit?.starts_at??null,visitEndsAt:visit?.ends_at??null,timeZone:visit?.timezone??null}
-  entries.push({id:`paid:${payment.id}`,kind:'paid',occurredAt:payment.created_at,amount:payment.captured_amount,...line})
-  for(const refund of refunds.filter(row=>row.payment_id===payment.id))entries.push({id:`refund:${refund.id}`,kind:'refunded',occurredAt:refund.created_at,amount:-refund.amount,...line})
+  const image_url=ownerId?(await loadOwnerPictures(db,payment.organization_id,visit?ownerType:'product',[ownerId])).get(ownerId)?.imageUrl??null:null
+  const line={title:visit?visit.title:snapshot.title,organization_name:payment.organization_name,currency:payment.currency,to,image_url,starts_at:visit?.starts_at??null,ends_at:visit?.ends_at??null,timezone:visit?.timezone??null}
+  entries.push({id:`paid:${payment.id}`,kind:'paid',created_at:payment.created_at,amount:payment.captured_amount,...line})
+  for(const refund of refunds.filter(row=>row.payment_id===payment.id))entries.push({id:`refund:${refund.id}`,kind:'refunded',created_at:refund.created_at,amount:-refund.amount,...line})
  }
  for(const entry of entries)if(!isBuyerPaymentEntry(entry))throw new Error('Owned payment line has invalid required state')
- entries.sort((a,b)=>b.occurredAt.localeCompare(a.occurredAt)||a.id.localeCompare(b.id))
+ entries.sort((a,b)=>b.created_at.localeCompare(a.created_at)||a.id.localeCompare(b.id))
  return {entries}
 }
-export async function buyerPaymentActivityPath(db:DbClient,userId:string,paymentId:string):Promise<string> {
- const rows=await buyerActivityRows(db,userId),payment=rows.payments.find(row=>row.id===paymentId)
+export async function buyerPaymentActivityPath(db:DbClient,userId:string,payment_id:string):Promise<string> {
+ const rows=await buyerActivityRows(db,userId),payment=rows.payments.find(row=>row.id===payment_id)
  if(!payment)throw new HTTPError({statusCode:404,statusMessage:'Owned activity not found'})
  const item=resolvePaymentActivity(rows,payment)
  return accountActivityPath(item.kind,item.id)
 }
 /** Conversation links share the same actual visit/payment association resolver. */
-export async function buyerRequestActivityPath(db:DbClient,userId:string,requestId:string):Promise<string|null> {
+export async function buyerRequestActivityPath(db:DbClient,userId:string,conversation_id:string):Promise<string|null> {
  const rows=await buyerActivityRows(db,userId)
- const visits=rows.visits.filter(row=>row.request_id===requestId)
+ const visits=rows.visits.filter(row=>row.conversation_id===conversation_id)
  if(visits.length>1)throw new Error('Owned conversation has ambiguous visit associations')
  if(visits[0])return accountActivityPath(visits[0].kind,visits[0].id)
- const payments=rows.payments.filter(row=>row.hold_request_id===requestId)
+ const payments=rows.payments.filter(row=>row.hold_conversation_id===conversation_id)
  if(payments.length>1)return '/dashboard/account/activity'
  if(!payments[0])return null
  const item=resolvePaymentActivity(rows,payments[0])

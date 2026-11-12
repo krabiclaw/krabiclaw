@@ -70,7 +70,7 @@ const { organization } = useTenantOrganization()
 const isPlatform = organization.site.slug === 'platform'
 const organizationName = organization.name
 
-const { categories, localeRepresentations } = await usePublishedArticles(props.collection)
+const { categories, locale_representations } = await usePublishedArticles(props.collection)
 // A category with no published article, or none by this name, is not a page.
 const found = categories.value.find(candidate => candidate.slug === String(route.params.slug))
 if (!found) throw createError({ statusCode: 404, statusMessage: 'Category not found', fatal: true })
@@ -102,7 +102,7 @@ const nextCategories = computed(() => {
   })
 })
 // A category page is read in the index's languages, under the index's prefix.
-useState<PublicLocaleRepresentation[]>('public-locale-representations', () => []).value = localeRepresentations.value
+useState<PublicLocaleRepresentation[]>('public-locale-representations', () => []).value = locale_representations.value
   .filter(representation => found.locales.includes(representation.locale))
   .map(representation => ({ ...representation, route_path: `${representation.route_path}/category/${encodeURIComponent(found.slug)}` }))
 

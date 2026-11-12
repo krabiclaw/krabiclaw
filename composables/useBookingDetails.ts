@@ -45,7 +45,7 @@ export async function useBookingDetails(bookingType: DashboardRecordType, bookin
   // The account reads its own booking from the account API; the business reads the organization's.
   const dashboardApi = personalScope ? applicationFetch : useDashboardApi()
   const endpoint = `/api/${personalScope ? 'account' : 'dashboard'}/bookings/${bookingType}/${encodeURIComponent(bookingId)}`
-  const orgSlug = computed(() => personalScope ? 'account' : String(route.params.orgSlug || ''))
+  const orgSlug = computed(() => personalScope ? 'account' : String(route.params.org_slug || ''))
 
   const key = computed(() => `dashboard-booking:${orgSlug.value}:${bookingType}:${bookingId}`)
   const { data: resource, error, refresh: reread } = await useAsyncData<{ booking: DashboardBookingDetails }>(

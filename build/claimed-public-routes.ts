@@ -23,7 +23,7 @@ interface RouteTreeNode {
 }
 
 // The catch-all is what renders an unclaimed path, so it never claims one.
-const TENANT_CATCH_ALL_SEGMENT = ':tenantPath('
+const TENANT_CATCH_ALL_SEGMENT = ':tenant_path('
 
 // Reserve the API namespace, plus build output and Worker media served before
 // routes. File-based server routes are collected from Nitro's scanned handlers.

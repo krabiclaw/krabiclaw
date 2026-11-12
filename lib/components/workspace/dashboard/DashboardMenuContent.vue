@@ -134,7 +134,7 @@ const cardsError = computed(() => {
   return error ? getErrorMessage(error, 'The Menu could not be loaded.') : null
 })
 const placePhotos = computed(() => places.value?.organizationId === organization.value?.id ? places.value?.locations.map(row => row.picture_url).filter((url): url is string => !!url) ?? [] : [])
-const visitPhotos = computed(() => (activity.value?.activities ?? []).filter(item => item.imageUrl && (item.status === 'cancelled' || (item.endsAt && Date.parse(item.endsAt) < Date.now()) || item.kind === 'order' || item.kind === 'payment')).map(item => item.imageUrl as string))
+const visitPhotos = computed(() => (activity.value?.activities ?? []).filter(item => item.image_url && (item.status === 'cancelled' || (item.ends_at && Date.parse(item.ends_at) < Date.now()) || item.kind === 'order' || item.kind === 'payment')).map(item => item.image_url as string))
 const cards = computed(() => personal.value
   ? [
       { to: '/dashboard/account/activity', label: 'Past activity', subline: 'Visits and purchases', icon: 'i-lucide-history', figure: '', photos: visitPhotos.value, testId: 'dashboard-menu-past-activity' },

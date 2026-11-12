@@ -67,7 +67,7 @@ test.describe('Plan and billing', () => {
       const created = await owner.post('/api/auth/organization/create', { headers: authRequestHeaders(baseURL!), data: { name: 'Starter Legal Practice', slug, default_currency: 'USD', timezone: 'America/New_York' } })
       expect(created.status(), await created.text()).toBe(200)
       BASIC_ID = (await created.json() as { id: string }).id
-      const provisioned = await owner.post('/api/organizations', { headers: authRequestHeaders(baseURL!), data: { organizationId: BASIC_ID, name: 'Starter Legal Practice', subdomain: slug, vertical: 'service', sourceLocale: 'en' } })
+      const provisioned = await owner.post('/api/organizations', { headers: authRequestHeaders(baseURL!), data: { organization_id: BASIC_ID, name: 'Starter Legal Practice', subdomain: slug, vertical: 'service', source_locale: 'en' } })
       expect(provisioned.status(), await provisioned.text()).toBe(200)
       const BASIC = `/dashboard/${slug}`
       await asOwner(page, baseURL!, BASIC_OWNER_ID, BASIC_ID, async () => {
@@ -232,7 +232,7 @@ test.describe('Plan and billing', () => {
       const upgradeRequests: Array<Record<string, unknown>> = []
       await page.route('**/api/billing/analytics-intent**', async (route) => {
         intents.push(route.request().postDataJSON() as Record<string, unknown>)
-        await route.fulfill({ json: { success: true, intentId: 'e2e-boundary' } })
+        await route.fulfill({ json: { success: true, intent_id: 'e2e-boundary' } })
       })
       await page.route('**/api/auth/subscription/upgrade**', async (route) => {
         upgradeRequests.push(route.request().postDataJSON() as Record<string, unknown>)
