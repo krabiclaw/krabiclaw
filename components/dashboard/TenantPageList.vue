@@ -12,7 +12,7 @@
     <button
       v-if="tasks.length > 0"
       type="button"
-      class="w-full flex items-center justify-between p-4 sm:p-5 rounded-2xl bg-neutral-100 dark:bg-neutral-800 text-left transition hover:bg-neutral-200/70 dark:hover:bg-neutral-700/70 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+      class="w-full flex items-center justify-between p-4 sm:p-5 rounded-2xl bg-[#F7F7F7] dark:bg-neutral-800 text-left transition hover:bg-neutral-200/70 dark:hover:bg-neutral-700/70 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
       data-testid="pages-tasks-banner"
       @click="tasksModalOpen = true"
     >
@@ -54,7 +54,7 @@
         :data-testid="`page-card-${item.id}`"
       >
         <!-- Portrait Image Card -->
-        <div class="relative aspect-[3/4] w-full overflow-hidden rounded-2xl bg-neutral-100 dark:bg-neutral-800 border border-neutral-200/70 dark:border-neutral-800 flex items-center justify-center transition-shadow group-hover:shadow-md">
+        <div class="relative aspect-[3/4] w-full overflow-hidden rounded-2xl bg-[#F7F7F7] dark:bg-neutral-800 border border-neutral-200/70 dark:border-neutral-800 flex items-center justify-center transition-shadow group-hover:shadow-md">
           <!-- Real page photo -->
           <img
             v-if="item.imageUrl"

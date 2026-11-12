@@ -18,11 +18,11 @@
     </template>
     <UAlert v-if="loadError" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="loadError" />
     <template v-else>
-      <!-- Airbnb Parity: Status banner at the top of the Website editor (Airbnb authentic flat grey, no border, no shadow) -->
+      <!-- Status card (Airbnb parity: flat #F7F7F7 background, no hover, no border, no shadow) -->
       <div v-if="surface === 'settings'" class="mb-4">
         <button
           type="button"
-          class="w-full text-left rounded-2xl bg-neutral-100 dark:bg-neutral-800 p-4 sm:p-5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+          class="w-full text-left rounded-3xl bg-[#F7F7F7] dark:bg-neutral-800 p-5 sm:p-6 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
           data-testid="website-status-banner"
           @click="statusModalOpen = true"
         >
@@ -33,7 +33,7 @@
             </div>
             <UIcon name="i-lucide-chevron-right" class="size-5 text-muted shrink-0" />
           </div>
-          <p class="mt-1.5 text-sm text-muted leading-relaxed">{{ statusDescription }}</p>
+          <p class="mt-1 text-sm text-muted leading-relaxed">{{ statusDescription }}</p>
         </button>
       </div>
 
@@ -87,7 +87,7 @@
               </span>
             </div>
           </div>
-          <div v-else class="flex flex-col items-center justify-center h-40 my-3 rounded-2xl bg-neutral-100 dark:bg-neutral-800 text-muted">
+          <div v-else class="flex flex-col items-center justify-center h-40 my-3 rounded-2xl bg-[#F7F7F7] dark:bg-neutral-800 text-muted">
             <UIcon name="i-lucide-file-text" class="size-8 mb-1.5 opacity-60" />
             <span class="text-xs font-medium">{{ pagesCount }} {{ pagesCount === 1 ? 'page' : 'pages' }}</span>
           </div>
@@ -129,7 +129,7 @@
               :key="article.id"
               class="flex items-center gap-3.5"
             >
-              <span class="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-neutral-100 dark:bg-neutral-800">
+              <span class="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[#F7F7F7] dark:bg-neutral-800">
                 <img
                   v-if="article.cover?.thumbnail_url || article.cover?.public_url"
                   :src="article.cover.thumbnail_url || article.cover.public_url || undefined"
@@ -147,9 +147,14 @@
                 </p>
               </div>
             </div>
+
+            <!-- + X more text if more than 3 -->
+            <p v-if="blogRemainingCount > 0" class="pt-1 text-sm text-muted font-medium">
+              + {{ blogRemainingCount }} more
+            </p>
           </div>
           <div v-else class="mt-3 flex items-center gap-3 text-muted">
-            <span class="flex size-12 shrink-0 items-center justify-center rounded-xl bg-neutral-100 dark:bg-neutral-800">
+            <span class="flex size-12 shrink-0 items-center justify-center rounded-xl bg-[#F7F7F7] dark:bg-neutral-800">
               <UIcon name="i-lucide-newspaper" class="size-5 opacity-50" />
             </span>
             <p class="text-sm">No articles published yet</p>
@@ -179,7 +184,7 @@
               :key="post.id"
               class="flex items-center gap-3.5"
             >
-              <span class="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-neutral-100 dark:bg-neutral-800">
+              <span class="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[#F7F7F7] dark:bg-neutral-800">
                 <img
                   v-if="post.cover_image_url"
                   :src="post.cover_image_url"
@@ -197,9 +202,14 @@
                 </p>
               </div>
             </div>
+
+            <!-- + X more text if more than 3 -->
+            <p v-if="postRemainingCount > 0" class="pt-1 text-sm text-muted font-medium">
+              + {{ postRemainingCount }} more
+            </p>
           </div>
           <div v-else class="mt-3 flex items-center gap-3 text-muted">
-            <span class="flex size-12 shrink-0 items-center justify-center rounded-xl bg-neutral-100 dark:bg-neutral-800">
+            <span class="flex size-12 shrink-0 items-center justify-center rounded-xl bg-[#F7F7F7] dark:bg-neutral-800">
               <UIcon name="i-lucide-megaphone" class="size-5 opacity-50" />
             </span>
             <p class="text-sm">No social posts published yet</p>
@@ -207,7 +217,7 @@
         </div>
       </div>
 
-      <!-- Airbnb Parity: Booking Settings Card -->
+      <!-- Booking Settings Card (Airbnb Parity) -->
       <div v-if="surface === 'settings'" class="mb-6">
         <div
           class="block w-full text-left rounded-3xl p-6 bg-white dark:bg-neutral-900 shadow-[0_4px_24px_rgba(0,0,0,0.06)] dark:shadow-[0_4px_24px_rgba(0,0,0,0.3)] hover:shadow-[0_6px_28px_rgba(0,0,0,0.09)] transition cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
@@ -232,11 +242,12 @@
         </div>
       </div>
 
+
       <!-- Airbnb Parity: Brand Profile Header (media_1794368807915_664e9a97.jpg) -->
       <div v-if="surface === 'brand'" class="flex flex-col items-center pt-2 pb-6 text-center">
         <!-- Circular logo container with Edit button overlay -->
         <div class="relative size-36 sm:size-44 rounded-full p-1 bg-white dark:bg-neutral-900 shadow-[0_4px_24px_rgba(0,0,0,0.08)] dark:shadow-[0_4px_24px_rgba(0,0,0,0.3)] select-none">
-          <div class="relative size-full rounded-full overflow-hidden bg-neutral-100 dark:bg-neutral-800 flex items-center justify-center">
+          <div class="relative size-full rounded-full overflow-hidden bg-[#F7F7F7] dark:bg-neutral-800 flex items-center justify-center">
             <img
               v-if="brandLogoUrl"
               :src="brandLogoUrl"
@@ -280,7 +291,7 @@
           <div class="mt-6 flex items-center justify-between gap-6 sm:gap-10">
             <!-- Left Column: Avatar + Brand name + Vertical -->
             <div class="flex flex-col items-center flex-1 min-w-0">
-              <div class="relative size-24 sm:size-28 rounded-full overflow-hidden bg-neutral-100 dark:bg-neutral-800 flex items-center justify-center shadow-md shrink-0">
+              <div class="relative size-24 sm:size-28 rounded-full overflow-hidden bg-[#F7F7F7] dark:bg-neutral-800 flex items-center justify-center shadow-md shrink-0">
                 <img
                   v-if="brandLogoUrl"
                   :src="brandLogoUrl"
@@ -303,8 +314,15 @@
 
             <!-- Right Column: 3 metrics stacked with dividers -->
             <div class="flex flex-col justify-center flex-1 min-w-0 divide-y divide-neutral-200 dark:divide-neutral-800">
-              <!-- Reviews count -->
-              <div class="pb-3">
+              <!-- Reviews count (clickable) -->
+              <div
+                class="pb-3 rounded-xl -mx-2 px-2 transition hover:bg-[#F7F7F7] dark:hover:bg-neutral-800/60 cursor-pointer"
+                role="button"
+                tabindex="0"
+                aria-label="View reviews"
+                @click.stop="navigateTo(reviewsPath)"
+                @keydown.enter.stop="navigateTo(reviewsPath)"
+              >
                 <div class="text-xl sm:text-2xl font-bold text-highlighted">
                   {{ brandReviewsCount }}
                 </div>
@@ -313,8 +331,15 @@
                 </div>
               </div>
 
-              <!-- Rating -->
-              <div class="py-3">
+              <!-- Rating (clickable) -->
+              <div
+                class="py-3 rounded-xl -mx-2 px-2 transition hover:bg-[#F7F7F7] dark:hover:bg-neutral-800/60 cursor-pointer"
+                role="button"
+                tabindex="0"
+                aria-label="View rating and reviews"
+                @click.stop="navigateTo(reviewsPath)"
+                @keydown.enter.stop="navigateTo(reviewsPath)"
+              >
                 <div class="flex items-center text-xl sm:text-2xl font-bold text-highlighted">
                   {{ brandRatingText }}<span v-if="brandHasRating" class="text-base sm:text-lg ml-0.5">★</span>
                 </div>
@@ -324,7 +349,7 @@
               </div>
 
               <!-- Years active -->
-              <div class="pt-3">
+              <div class="pt-3 px-2">
                 <div class="text-xl sm:text-2xl font-bold text-highlighted">
                   {{ brandYearsActive }}
                 </div>
@@ -536,7 +561,6 @@ const editorError = ref<string | null>(null)
 const dashboard = useDashboardOrganization()
 const organizationDashboardPath = computed(() => `/dashboard/${String(route.params.orgSlug)}`)
 const brandPath = computed(() => `${organizationDashboardPath.value}/website/brand`)
-const settingsPath = computed(() => `${organizationDashboardPath.value}/website`)
 const preferencesPath = computed(() => `${organizationDashboardPath.value}/website/preferences`)
 const panelId = computed(() => {
   if (surface.value === 'brand') return 'organization-brand'
@@ -647,7 +671,9 @@ const brandItems = computed<EditorNavigationItem[]>(() => [
 // The site's content lists and its Brand lead, because they are what the site is made of;
 // Pages is featured above with its 3-image fan stack;
 // preferences (status, languages, domains, currency) live behind the header's settings cog.
+const settingsPath = computed(() => `${organizationDashboardPath.value}/website`)
 const pagesPath = computed(() => dashboard.organizationPaths.value?.pages ?? `${organizationDashboardPath.value}/website/pages`)
+const isBookingActive = computed(() => route.path.startsWith(`${settingsPath.value}/booking`) || route.path.startsWith(`${settingsPath.value}/inquiry-form`))
 
 const pageTasksModalOpen = ref(false)
 const dismissedPageTaskIds = ref<Set<string>>(new Set())
@@ -692,7 +718,6 @@ const postsPath = computed(() => dashboard.organizationPaths.value?.posts ?? `${
 const isPagesActive = computed(() => route.path.startsWith(pagesPath.value))
 const isBlogActive = computed(() => route.path.startsWith(blogPath.value))
 const isPostsActive = computed(() => route.path.startsWith(postsPath.value))
-const isBookingActive = computed(() => route.path.startsWith(`${settingsPath.value}/booking`) || route.path.startsWith(`${settingsPath.value}/inquiry-form`))
 
 const isBlogSummaryResponse = (value: unknown): value is { posts: BlogPost[] } =>
   isRecord(value) && Array.isArray(value.posts)
@@ -712,7 +737,7 @@ const isPostsSummaryResponse = (value: unknown): value is { posts: PostSummaryIt
 const { data: blogResource } = await useAsyncData(
   `tenant-blog-summary:${String(organizationId)}`,
   () => dashboardApi<{ posts: BlogPost[] }>(`/api/editor/organizations/${organizationId}/blog/posts`, {
-    query: { limit: 2 },
+    query: { limit: 50 },
     validate: isBlogSummaryResponse,
   }).catch(() => ({ posts: [] })),
 )
@@ -720,13 +745,18 @@ const { data: blogResource } = await useAsyncData(
 const { data: postsResource } = await useAsyncData(
   `tenant-posts-summary:${String(organizationId)}`,
   () => dashboardApi<{ posts: PostSummaryItem[] }>(`/api/editor/organizations/${organizationId}/posts`, {
-    query: { limit: 2 },
+    query: { limit: 50 },
     validate: isPostsSummaryResponse,
   }).catch(() => ({ posts: [] })),
 )
 
-const blogPreviewItems = computed(() => blogResource.value?.posts?.slice(0, 2) ?? [])
-const postPreviewItems = computed(() => postsResource.value?.posts?.slice(0, 2) ?? [])
+const blogPreviewItems = computed(() => blogResource.value?.posts?.slice(0, 3) ?? [])
+const blogRemainingCount = computed(() => Math.max(0, (blogResource.value?.posts?.length ?? 0) - 3))
+
+const postPreviewItems = computed(() => postsResource.value?.posts?.slice(0, 3) ?? [])
+const postRemainingCount = computed(() => Math.max(0, (postsResource.value?.posts?.length ?? 0) - 3))
+
+const reviewsPath = computed(() => dashboard.organizationPaths.value?.reviews ?? `${organizationDashboardPath.value}/website/reviews`)
 
 function articleSubtitle(article: BlogPost) {
   const parts: string[] = []
@@ -757,12 +787,7 @@ function postSubtitle(post: PostSummaryItem) {
   return parts.join(' · ')
 }
 
-const settingsItems = computed<EditorNavigationItem[]>(() => [
-  ...(dashboard.organizationPaths.value ? [
-    { id: 'reviews', label: 'Reviews', icon: 'i-lucide-star', to: dashboard.organizationPaths.value.reviews },
-    { id: 'qa', label: 'Q&A', icon: 'i-lucide-message-circle-question', to: dashboard.organizationPaths.value.qa },
-  ] : []),
-])
+const settingsItems = computed<EditorNavigationItem[]>(() => [])
 
 const bookingCardTitle = computed(() => {
   const v = loadedSettings.value?.vertical || dashboard.organization.value?.vertical
@@ -821,6 +846,14 @@ const brandYearsActive = computed(() => {
   return Math.max(1, diff)
 })
 
+const currencyIcon = computed(() => {
+  const code = loadedSettings.value?.default_currency?.toUpperCase()
+  if (code === 'EUR') return 'i-lucide-euro'
+  if (code === 'GBP') return 'i-lucide-pound-sterling'
+  if (code === 'JPY' || code === 'CNY') return 'i-lucide-japanese-yen'
+  return 'i-lucide-dollar-sign'
+})
+
 const preferencesItems = computed<EditorNavigationItem[]>(() => [
   {
     id: 'status',
@@ -831,7 +864,21 @@ const preferencesItems = computed<EditorNavigationItem[]>(() => [
   },
   { id: 'localization', label: 'Languages', summary: 'Languages the site is published in', icon: 'i-lucide-languages', to: `${preferencesPath.value}/localization` },
   { id: 'domains', label: 'Domains', summary: domainSummary.value, icon: 'i-lucide-globe-2', to: `${preferencesPath.value}/domains` },
-  { id: 'currency', label: 'Currency', summary: explicitSummary(loadedSettings.value?.default_currency), to: `${preferencesPath.value}/currency` },
+  { id: 'currency', label: 'Currency', summary: explicitSummary(loadedSettings.value?.default_currency), icon: currencyIcon.value, to: `${preferencesPath.value}/currency` },
+  {
+    id: 'booking',
+    label: bookingCardTitle.value,
+    summary: bookingCardSubtitle.value,
+    icon: 'i-lucide-calendar-check',
+    to: `${preferencesPath.value}/booking`,
+  },
+  {
+    id: 'reviews',
+    label: 'Review settings',
+    summary: 'Manual approval',
+    icon: 'i-lucide-star',
+    to: `${preferencesPath.value}/reviews`,
+  },
 ])
 
 const navigationGroups = computed(() => {

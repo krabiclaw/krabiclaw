@@ -2,7 +2,6 @@
   <DashboardLeafPanel
     id="organization-website-booking"
     :title="panelTitle"
-    :lead="panelLead"
     :saving="editor.saving.value"
     :disabled="editor.saveDisabled.value"
     :error="editor.editorError.value ?? ''"
@@ -10,21 +9,22 @@
     @save="editor.save"
   >
     <!-- Booking Mode Selection Cards (Airbnb Parity) -->
-    <div class="space-y-4">
+    <div class="space-y-4" role="radiogroup" :aria-label="panelTitle">
       <!-- Option 1: Instant / Online requests -->
-      <div
-        class="rounded-2xl p-5 border-2 transition cursor-pointer select-none"
-        :class="isInstantActive ? 'border-primary bg-primary/5 dark:bg-primary/10' : 'border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 hover:border-neutral-300 dark:hover:border-neutral-700'"
-        tabindex="0"
+      <button
+        type="button"
         role="radio"
         :aria-checked="isInstantActive"
         data-testid="booking-mode-instant"
+        class="w-full text-left rounded-2xl p-5 border-2 transition-all cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-highlighted"
+        :class="isInstantActive
+          ? 'border-highlighted bg-elevated shadow-sm ring-1 ring-highlighted/10'
+          : 'border-default bg-default hover:border-accented'"
         @click="setBookingMode(true)"
-        @keydown.space.prevent="setBookingMode(true)"
       >
         <div class="flex items-start justify-between gap-4">
           <div class="space-y-1">
-            <h3 class="font-bold text-highlighted text-base">
+            <h3 class="font-semibold text-highlighted text-base">
               {{ instantTitle }}
             </h3>
             <p class="text-sm text-muted">
@@ -33,32 +33,33 @@
           </div>
           <div
             class="size-5 rounded-full border-2 flex items-center justify-center shrink-0 mt-0.5"
-            :class="isInstantActive ? 'border-primary' : 'border-neutral-300 dark:border-neutral-700'"
+            :class="isInstantActive ? 'border-highlighted' : 'border-default'"
           >
-            <div v-if="isInstantActive" class="size-2.5 rounded-full bg-primary" />
+            <div v-if="isInstantActive" class="size-2.5 rounded-full bg-highlighted" />
           </div>
         </div>
 
-        <div v-if="instantHighlight" class="mt-4 flex items-center gap-2 rounded-xl bg-neutral-100 dark:bg-neutral-800/60 px-3.5 py-2.5 text-xs text-muted">
+        <div v-if="instantHighlight" class="mt-4 flex items-center gap-2 rounded-xl bg-accented px-3.5 py-2.5 text-xs text-muted">
           <UIcon name="i-lucide-trending-up" class="size-4 shrink-0 text-highlighted" />
           <span>{{ instantHighlight }}</span>
         </div>
-      </div>
+      </button>
 
       <!-- Option 2: Manual review / inquiries only -->
-      <div
-        class="rounded-2xl p-5 border-2 transition cursor-pointer select-none"
-        :class="!isInstantActive ? 'border-primary bg-primary/5 dark:bg-primary/10' : 'border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 hover:border-neutral-300 dark:hover:border-neutral-700'"
-        tabindex="0"
+      <button
+        type="button"
         role="radio"
         :aria-checked="!isInstantActive"
         data-testid="booking-mode-manual"
+        class="w-full text-left rounded-2xl p-5 border-2 transition-all cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-highlighted"
+        :class="!isInstantActive
+          ? 'border-highlighted bg-elevated shadow-sm ring-1 ring-highlighted/10'
+          : 'border-default bg-default hover:border-accented'"
         @click="setBookingMode(false)"
-        @keydown.space.prevent="setBookingMode(false)"
       >
         <div class="flex items-start justify-between gap-4">
           <div class="space-y-1">
-            <h3 class="font-bold text-highlighted text-base">
+            <h3 class="font-semibold text-highlighted text-base">
               {{ manualTitle }}
             </h3>
             <p class="text-sm text-muted">
@@ -67,23 +68,23 @@
           </div>
           <div
             class="size-5 rounded-full border-2 flex items-center justify-center shrink-0 mt-0.5"
-            :class="!isInstantActive ? 'border-primary' : 'border-neutral-300 dark:border-neutral-700'"
+            :class="!isInstantActive ? 'border-highlighted' : 'border-default'"
           >
-            <div v-if="!isInstantActive" class="size-2.5 rounded-full bg-primary" />
+            <div v-if="!isInstantActive" class="size-2.5 rounded-full bg-highlighted" />
           </div>
         </div>
-      </div>
+      </button>
     </div>
 
     <!-- Chevron Row: Intake Questions -->
-    <div class="mt-8 border-t border-neutral-200 dark:border-neutral-800 pt-6">
+    <div class="mt-8 border-t border-default pt-6">
       <NuxtLink
         :to="questionsPath"
-        class="flex items-center justify-between p-4 rounded-2xl bg-neutral-50 dark:bg-neutral-900/50 hover:bg-neutral-100 dark:hover:bg-neutral-900 transition group"
+        class="flex items-center justify-between p-4 rounded-2xl bg-default border border-default hover:bg-elevated transition group"
         data-testid="booking-intake-questions-link"
       >
         <div class="space-y-0.5">
-          <div class="font-bold text-sm sm:text-base text-highlighted group-hover:text-primary transition">
+          <div class="font-semibold text-sm sm:text-base text-highlighted transition">
             Intake questions
           </div>
           <div class="text-xs sm:text-sm text-muted">
@@ -112,13 +113,6 @@ const panelTitle = computed(() => {
   if (isService.value) return 'Consultation settings'
   if (vertical.value === 'restaurant') return 'Reservation settings'
   return 'Booking settings'
-})
-
-const panelLead = computed(() => {
-  if (isService.value) {
-    return 'Let clients choose a practice area and request a consultation directly from your website. Each consultation maintains its own schedule.'
-  }
-  return 'Configure how clients and guests book with your business and customize intake questions.'
 })
 
 const isInstantActive = computed(() => {

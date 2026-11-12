@@ -62,6 +62,7 @@ export const CUSTOMER_SITE: PublicSiteDefinition = {
       home: '/', about: '/about', contact: '/contact', reservations: '/reservations',
       services: '/services', pricing: '/pricing', donate: '/donate', schedule: '/schedule',
       privacy: '/policies/privacy', terms: '/policies/terms', 'third-party-notices': '/third-party-notices',
+      qa: '/qa', reviews: '/reviews',
     },
     optionalLocalizedPaths: ['/contact', '/reservations'],
     paths: [],

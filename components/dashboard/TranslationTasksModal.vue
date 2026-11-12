@@ -1,73 +1,55 @@
 <template>
-  <UModal v-model:open="modelValue" :ui="{ content: 'max-w-md p-6 sm:p-7 rounded-3xl' }">
+  <UModal v-model:open="modelValue" :ui="{ content: 'divide-none max-w-md p-6 sm:p-7 rounded-3xl shadow-2xl [&>*]:border-0' }">
     <template #content>
-      <div class="flex items-center justify-between mb-2">
-        <h3 class="text-lg sm:text-xl font-semibold text-highlighted">
-          Translation tasks
-        </h3>
-        <UButton
-          icon="i-lucide-x"
-          color="neutral"
-          variant="ghost"
-          square
-          size="sm"
-          aria-label="Close"
-          @click="modelValue = false"
-        />
-      </div>
-      <p class="text-xs sm:text-sm text-muted mb-5 leading-relaxed">
-        Complete these translations so visitors can read your website in their language.
-      </p>
-
-      <div v-if="tasks.length" class="space-y-3.5 max-h-[60vh] overflow-y-auto pr-1">
-        <div
-          v-for="task in tasks"
-          :key="task.id"
-          class="relative flex items-start gap-3.5 p-4 rounded-2xl bg-default border border-default shadow-xs"
-          data-testid="translation-task-item"
-        >
-          <!-- Icon -->
-          <div class="size-12 rounded-xl overflow-hidden bg-accented border border-default shrink-0 flex items-center justify-center">
-            <UIcon name="i-lucide-languages" class="size-6 text-muted" />
-          </div>
-
-          <!-- Middle details -->
-          <div class="min-w-0 flex-1 pr-6">
-            <h4 class="text-sm font-semibold text-highlighted leading-snug">
-              {{ task.headline }}
-            </h4>
-            <p class="mt-1 text-xs text-muted leading-relaxed">
-              {{ task.reason }}
-            </p>
-            <NuxtLink
-              :to="task.to"
-              class="mt-2.5 inline-block text-xs font-semibold text-highlighted underline underline-offset-2 hover:text-primary transition"
-              @click="modelValue = false"
-            >
-              {{ task.actionLabel }}
-            </NuxtLink>
-          </div>
-
-          <!-- Dismiss button -->
-          <button
-            type="button"
-            class="absolute top-3 right-3 size-7 rounded-full flex items-center justify-center text-muted hover:text-highlighted hover:bg-accented transition cursor-pointer"
-            aria-label="Dismiss task"
-            @click="emit('dismiss', task.id)"
-          >
-            <UIcon name="i-lucide-x" class="size-4" />
-          </button>
+      <div class="space-y-4">
+        <div class="flex items-center justify-between">
+          <h3 class="text-lg sm:text-xl font-semibold text-highlighted">
+            Translation tasks
+          </h3>
+          <UButton
+            icon="i-lucide-x"
+            color="neutral"
+            variant="ghost"
+            square
+            size="sm"
+            aria-label="Close"
+            @click="modelValue = false"
+          />
         </div>
-      </div>
 
-      <div v-else class="text-center py-8">
-        <UIcon name="i-lucide-check-circle" class="size-10 text-success mx-auto mb-2" />
-        <h4 class="text-base font-semibold text-highlighted">
-          All translations complete
-        </h4>
-        <p class="text-xs text-muted mt-1">
-          Every field with content has been translated.
-        </p>
+        <div v-if="tasks.length" class="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
+          <NuxtLink
+            v-for="task in tasks"
+            :key="task.id"
+            :to="task.to"
+            class="flex items-center justify-between p-4 sm:p-5 rounded-2xl bg-white dark:bg-neutral-900 shadow-[0_2px_12px_rgba(0,0,0,0.06)] dark:shadow-[0_2px_12px_rgba(0,0,0,0.3)] hover:shadow-[0_4px_16px_rgba(0,0,0,0.09)] transition cursor-pointer group"
+            data-testid="translation-task-item"
+            @click="modelValue = false"
+          >
+            <div class="min-w-0 flex-1">
+              <h4 class="text-sm sm:text-base font-semibold text-highlighted leading-snug">
+                {{ task.headline }}
+              </h4>
+              <p class="mt-0.5 text-xs sm:text-sm text-muted">
+                {{ task.reason }}
+              </p>
+            </div>
+            <UIcon
+              name="i-lucide-chevron-right"
+              class="size-5 text-muted group-hover:text-highlighted group-hover:translate-x-0.5 transition shrink-0 ml-3"
+            />
+          </NuxtLink>
+        </div>
+
+        <div v-else class="text-center py-8">
+          <UIcon name="i-lucide-check-circle" class="size-10 text-success mx-auto mb-2" />
+          <h4 class="text-base font-semibold text-highlighted">
+            All translations complete
+          </h4>
+          <p class="text-xs text-muted mt-1">
+            Every field with content has been translated.
+          </p>
+        </div>
       </div>
     </template>
   </UModal>
@@ -87,9 +69,5 @@ const modelValue = defineModel<boolean>({ default: false })
 
 defineProps<{
   tasks: TranslationTask[]
-}>()
-
-const emit = defineEmits<{
-  dismiss: [taskId: string]
 }>()
 </script>

@@ -318,12 +318,18 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
       expect(response.status()).toBe(200)
       return mcpData<{ guest: { needs_reply: boolean; operational_record: { status: string } | null; messages: Array<{ id: string; event: string | null }> } }>(await response.json()).guest
     }
-    // The booking carries no question from the guest: no reply is owed, and Today holds no task for it (Calendar has it).
+    // The booking carries no question from the guest: no reply is owed, and Today holds no reply task for it.
     expect((await conversationLedger()).needs_reply).toBe(false)
     const todayBefore = await request.get(`${baseURL}/api/dashboard/today`, { params: { org: wheel.slug } })
     expect(todayBefore.status(), await todayBefore.text()).toBe(200)
     const todayBeforePayload = await todayBefore.json() as { tasks: TaskSection[] }
-    expect(todayBeforePayload.tasks.flatMap(section => section.tasks).filter(task => task.conversation_id === body.conversation_id)).toEqual([])
+    const todayBeforeTasks = todayBeforePayload.tasks.flatMap(section => section.tasks).filter(task => task.conversation_id === body.conversation_id)
+    expect(todayBeforeTasks.filter(task => task.kind === 'guest_reply')).toEqual([])
+    // If booked for today, the teacher's visit job is to prepare for the booking; if booked ahead, Today holds no tasks for it yet.
+    for (const task of todayBeforeTasks) {
+      expect(task.kind).toBe('consultation_prep')
+      expect(task.status).toBe('open')
+    }
     const day = persistedBooking.booking_date
     // Calendar owns confirmed commitments; quests do not repeat its agenda.
     const scheduleParams = { org: wheel.slug, from: day, to: day }
@@ -356,6 +362,10 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     const scheduleAfter = await request.get(`${baseURL}/api/dashboard/agenda`, { params: scheduleParams })
     expect(scheduleAfter.status(), await scheduleAfter.text()).toBe(200)
     expect((await scheduleAfter.json() as { items: Array<{ id: string }> }).items.some(item => item.id === `booking:${body.conversation_id}`)).toBe(false)
+    const todayAfter = await request.get(`${baseURL}/api/dashboard/today`, { params: { org: wheel.slug } })
+    expect(todayAfter.status(), await todayAfter.text()).toBe(200)
+    const todayAfterPayload = await todayAfter.json() as { tasks: TaskSection[] }
+    expect(todayAfterPayload.tasks.flatMap(section => section.tasks).filter(task => task.conversation_id === body.conversation_id && task.status === 'open')).toEqual([])
     expect((await request.post(cancelURL, {
       headers: { ...headers, Authorization: 'Bearer invalid-cancellation-token' },
     })).status()).toBe(404)
