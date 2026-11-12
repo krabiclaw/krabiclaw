@@ -54,9 +54,9 @@ test('resuming onboarding updates the existing location without changing its his
     const payload = buildOnboardingDraftPayload({
       name: 'Renamed Restaurant', vertical: 'restaurant', place: null,
       details: {
-        name: 'Renamed Restaurant', streetAddress: '88 Beach Road', addressLine2: null, city: 'Ao Nang', region: null, postalCode: null,
-        country: 'TH', phone: null, websiteUrl: null, openingHours: null, specialHours: null,
-        timezone: 'Asia/Bangkok', currency: 'THB', sourceLocale: 'en',
+        name: 'Renamed Restaurant', street_address: '88 Beach Road', address_line_2: null, city: 'Ao Nang', region: null, postal_code: null,
+        country: 'TH', phone: null, website_url: null, opening_hours: null, special_hours: null,
+        timezone: 'Asia/Bangkok', currency: 'THB', source_locale: 'en',
       },
     })
     const draft = { id: 'onboarding-draft', user_id: userId, updated_at: NOW }

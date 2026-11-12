@@ -47,8 +47,8 @@ export default defineHandler(async (event) => {
 
     return jsonResponse({
       success: true, synced_at: new Date().toISOString(), reviews_upserted: reviewsUpserted, place: {
-        google_place_id: place.placeId, name: place.name, phone: place.phone, rating: place.rating, google_rating_count: place.ratingCount,
-        opening_hours: place.openingHours, timezone: place.timezone, address: place.address, google_maps_url: place.mapsUrl,
+        google_place_id: place.placeId, name: place.name, phone: place.phone, rating: place.rating, review_count: place.ratingCount,
+        opening_hours: place.openingHours, timezone: place.timezone, address: place.address, maps_url: place.mapsUrl,
       },
     })
   } catch (error) {
