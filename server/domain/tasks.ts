@@ -85,7 +85,9 @@ export function jobSubject(row: Pick<TaskRow, 'dedupe_key' | 'kind' | 'subject_t
 }
 
 /** The key of a job's post in its team conversation (messages.payload_json $.key): the one place it is built. */
-export const jobKey = (task: Pick<TaskRow, 'id' | 'product_id'>) => `job:${task.id}:${task.product_id}`
+export const jobKey = (task: Pick<TaskRow, 'id' | 'product_id'>, after?: string) => `job:${task.id}:${task.product_id}${after ? `:after:${after}` : ''}`
+const JOB_END_STATES = ['released', 'cancelled', 'closed'] as const
+export const jobEndKeys = (taskId: string) => JOB_END_STATES.map(state => `${state}:${taskId}`)
 
 /** Whether a job's member hears about it in a team conversation: a member who is not an owner or admin. */
 export async function jobHasConversation(db: DbClient, organizationId: string, memberId: string | null): Promise<boolean> {
@@ -1149,10 +1151,22 @@ export async function closeTask(db: DbClient, viewer: TaskViewer, taskId: string
   const organizationId = viewer.principal.organizationId
   // A job closes in its conversation too: the note and photos are the person's own message there, and nobody is alerted.
   // The conversation that carries this job is the one its automatic post went to, and the closer must still sit in it.
-  const thread = (isJobTask(current) || current.kind === 'consultation_prep') ? await queryFirst<{ id: string }>(db, `SELECT c.id FROM conversations c
-      JOIN messages m ON m.conversation_id = c.id AND m.author_kind = 'krabiclaw' AND json_extract(m.payload_json, '$.key') = ?
+  const privatePrep = current.subject_type === 'product_session'
+  const hasThread = view.booking_id && (isJobTask(current) || (privatePrep
+    && await jobHasConversation(db, organizationId, current.assigned_member_id)))
+  const thread = hasThread ? await queryFirst<{ id: string }>(db, `SELECT c.id FROM conversations c
+      JOIN messages m ON m.conversation_id = c.id AND m.author_kind = 'krabiclaw'
       JOIN conversation_participants seat ON seat.conversation_id = c.id AND seat.user_id = ?
-     WHERE c.organization_id = ? AND c.kind = 'team' ORDER BY m.sequence DESC, c.id LIMIT 1`, [jobKey(current), viewer.principal.userId, organizationId]) : null
+     WHERE c.organization_id = ? AND c.kind = 'team' AND c.booking_id = ?
+       AND (? = 0 OR EXISTS (SELECT 1 FROM conversation_participants assignee
+         JOIN member assigned ON assigned.organizationId = c.organization_id AND assigned.userId = assignee.user_id
+         WHERE assignee.conversation_id = c.id AND assigned.id = ?))
+       AND (json_extract(m.payload_json, '$.key') = ? OR instr(json_extract(m.payload_json, '$.key'), ?) = 1)
+       AND (? = 0 OR NOT EXISTS (SELECT 1 FROM messages later JOIN json_each(?) stop
+         ON json_extract(later.payload_json, '$.key') = stop.value OR instr(json_extract(later.payload_json, '$.key'), stop.value || ':') = 1
+         WHERE later.conversation_id = c.id AND later.author_kind = 'krabiclaw' AND later.sequence > m.sequence))
+     ORDER BY m.created_at DESC, m.id DESC LIMIT 1`, [viewer.principal.userId, organizationId, view.booking_id, privatePrep ? 1 : 0, current.assigned_member_id,
+    jobKey(current), `${jobKey(current)}:after:`, privatePrep ? 1 : 0, d1JsonStringSet(jobEndKeys(current.id))]) : null
   const assetIds = input.photos.length ? await uploadMessagePhotos(db, input.env, organizationId, input.photos, { source: 'uploaded', userId: viewer.principal.userId })
     .catch((error: unknown) => error instanceof MessagePhotoRejection ? fail(422, 'INVALID_PHOTO', error.message, 'photos') : Promise.reject(error)) : []
   // The person's own message in the job's conversation, written by the one message writer.

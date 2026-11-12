@@ -251,8 +251,40 @@ test('a consultation gives its attorney jobs that follow the booking and an aler
     await db.prepare("UPDATE bookings SET status = 'cancelled', cancelled_at = ? WHERE id = ?").bind(NOW, booking.bookingId).run()
     await recompute()
     assert.deepEqual((await jobs()).map(job => job.status), ['cancelled', 'cancelled'])
+    const runJobs = async () => assert.deepEqual((await runOrganizationJobs(env, db, ORG)).failures, [])
+    const oldThread = threads[0]!.id
+    const messages = (threadId: string) => listTeamMessages(db, attorney, threadId, { limit: 100 })
+    await runJobs()
+    assert.ok((await messages(oldThread)).messages.some(message => message.body.startsWith('Cancelled: prepare for consultation')))
     await db.prepare("UPDATE bookings SET status = 'confirmed', cancelled_at = NULL WHERE id = ?").bind(booking.bookingId).run()
     await recompute()
     assert.deepEqual((await jobs()).map(job => job.status), ['open', 'open'])
+    await runJobs()
+    await runJobs()
+    const assignmentPosts = await db.prepare("SELECT json_extract(payload_json, '$.key') AS key FROM messages WHERE conversation_id = ? AND json_extract(payload_json, '$.key') GLOB ?")
+      .bind(oldThread, `job:${prep!.id}:*`).all<{ key: string }>()
+    assert.equal(assignmentPosts.results.length, 2, 'A restored consultation is announced once')
+    assert.equal(assignmentPosts.results.filter(message => message.key.includes(':after:')).length, 1)
+
+    // A different client takes the same slot before the job runner sees the cancellation.
+    await db.prepare("UPDATE bookings SET status = 'cancelled', cancelled_at = ? WHERE id = ?").bind(NOW, booking.bookingId).run()
+    await recompute()
+    const replacement = { ...opening, id: 'replacement-request', payload: threadPayloadForGuest({ name: 'Replacement Client', email: 'replacement@example.test' }) }
+    const newBooking = await claimSessionCapacity(db, { policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1,
+      following: bookingId => requestInsertQueries({ ...replacement, booking_id: bookingId }, { query: 'SELECT 1 FROM bookings WHERE id = ?', params: [bookingId] }, { opening: 'Consultation for 1', note: null }) })
+    await db.prepare("UPDATE bookings SET status = 'confirmed' WHERE id = ?").bind(newBooking.bookingId).run()
+    await executeBatch(db, conversationTaskQueries(replacement.id, new Date().toISOString()), { operation: 'Recompute replacement consultation jobs' })
+    await runJobs()
+    const former = await messages(oldThread)
+    assert.ok(former.messages.some(message => message.body === 'No longer yours: prep for this session.'))
+    assert.ok(former.messages.every(message => !message.body.includes('Replacement')))
+    const newThread = await db.prepare("SELECT id FROM conversations WHERE kind = 'team' AND booking_id = ?").bind(newBooking.bookingId).first<string>('id')
+    assert.ok(newThread)
+    assert.equal((await getTeamThread(env, db, attorney, newThread)).job?.id, prep!.id)
+    const viewer = await taskViewer(db, memberAccessPrincipal({ userId: 'host', role: 'member', organizationId: ORG } as never, { env }))
+    const outcome = 'Private completion note for the current client'
+    assert.equal((await closeTask(db, viewer, prep!.id, { status: 'done', note: outcome, photos: [], env })).status, 'done')
+    assert.ok((await messages(newThread)).messages.some(message => message.body === outcome))
+    assert.ok((await messages(oldThread)).messages.every(message => message.body !== outcome))
   } finally { await runtime.dispose() }
 })

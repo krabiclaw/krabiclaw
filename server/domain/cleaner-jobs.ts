@@ -1,7 +1,7 @@
 import { d1JsonStringSet, queryAll, queryFirst, type DbClient } from '~/server/db'
 import { isOrganizationWideRole } from '~/server/utils/member-access'
 import { jobThreadParticipantsKey, postAutomaticTeamMessage, reseatAutomaticThread } from '~/server/domain/team-messages'
-import { JOB_TASK_SQL, isJobTask, jobBookingIdSql, jobKey, jobSubject, taskViewForUser, type JobSubject, type TaskRow, type TaskView } from '~/server/domain/tasks'
+import { JOB_TASK_SQL, isJobTask, jobBookingIdSql, jobEndKeys, jobKey, jobSubject, taskViewForUser, type JobSubject, type TaskRow, type TaskView } from '~/server/domain/tasks'
 import { notifyTaskStarting, taskStartingSent } from '~/server/utils/notifications'
 import { addLocalDays, localDateAt, localDateTimeToInstant } from '~/utils/timezone'
 import type { CloudflareEnv } from '~/server/utils/auth'
@@ -83,20 +83,32 @@ export async function runOrganizationJobs(env: CloudflareEnv, db: DbClient, orga
   const [members, tasks] = await Promise.all([
     queryAll<Member>(db, 'SELECT id, userId, role FROM member WHERE organizationId = ?', [organizationId]),
     // A job has something to say when its time is near (its reminders, from the evening before to its warning) or it changed lately (its post, release or cancellation); an open job long past says nothing more.
-    queryAll<TaskRow & { job_booking_id: string | null }>(db, `SELECT t.*, ${jobBookingIdSql('t')} AS job_booking_id FROM tasks t WHERE t.organization_id = ? AND (${JOB_TASK_SQL('t')} OR t.starts_at IS NOT NULL)
+    queryAll<TaskRow & { job_booking_id: string | null; private_prep: number }>(db, `SELECT t.*, ${jobBookingIdSql('t')} AS job_booking_id,
+      (t.subject_type = 'product_session' AND EXISTS (SELECT 1 FROM products p WHERE p.organization_id = t.organization_id AND p.id = t.product_id AND p.kind = 'service')) AS private_prep
+      FROM tasks t WHERE t.organization_id = ? AND (${JOB_TASK_SQL('t')} OR t.starts_at IS NOT NULL)
       AND ((t.status = 'open' AND (COALESCE(t.starts_at, t.due_at, t.created_at) BETWEEN ? AND ? OR t.due_at BETWEEN ? AND ?)) OR t.updated_at >= ?)
       AND (t.assigned_member_id IS NOT NULL OR ${JOB_TASK_SQL('t')}) ORDER BY COALESCE(t.starts_at, t.due_at, t.created_at), t.id`,
     [organizationId, new Date(now.getTime() - RECENT_MS).toISOString(), new Date(now.getTime() + AHEAD_MS).toISOString(), new Date(now.getTime() - RECENT_MS).toISOString(), new Date(now.getTime() + AHEAD_MS).toISOString(), new Date(now.getTime() - RECENT_MS).toISOString()]),
   ])
   const subjectIds = [...new Set(tasks.flatMap(task => task.job_booking_id && (isJobTask(task) || task.subject_type === 'product_session') ? [task.job_booking_id] : []))]
-  const posted = subjectIds.length ? await queryAll<{ thread_id: string; subject_id: string; participants_key: string; idempotency_key: string }>(db, `
-    SELECT m.conversation_id AS thread_id, t.booking_id AS subject_id, t.participants_key, json_extract(m.payload_json, '$.key') AS idempotency_key FROM messages m
-      JOIN conversations t ON t.organization_id = m.organization_id AND t.id = m.conversation_id
-     WHERE t.organization_id = ? AND t.kind = 'team' AND t.booking_id IN (SELECT value FROM json_each(?)) AND m.author_kind = 'krabiclaw'`, [organizationId, d1JsonStringSet(subjectIds)]) : []
-  const keysByThread = new Map<string, Set<string>>()
+  const prepKeys = tasks.filter(task => task.private_prep).map(task => jobKey(task))
+  const posted = subjectIds.length || prepKeys.length ? await queryAll<{ message_id: string; thread_id: string; subject_id: string; participants_key: string; idempotency_key: string }>(db, `
+    WITH relevant_threads AS (
+      SELECT id FROM conversations WHERE organization_id = ? AND kind = 'team' AND booking_id IN (SELECT value FROM json_each(?))
+      UNION
+      SELECT c.id FROM conversations c JOIN messages m ON m.conversation_id = c.id
+      WHERE c.organization_id = ? AND c.kind = 'team' AND c.booking_id IS NOT NULL AND m.author_kind = 'krabiclaw'
+        AND json_extract(m.payload_json, '$.key') IN (SELECT value FROM json_each(?))
+    )
+    SELECT m.id AS message_id, m.conversation_id AS thread_id, t.booking_id AS subject_id, t.participants_key,
+      json_extract(m.payload_json, '$.key') AS idempotency_key
+    FROM relevant_threads r JOIN conversations t ON t.id = r.id JOIN messages m ON m.conversation_id = t.id
+    WHERE m.author_kind = 'krabiclaw' AND json_type(m.payload_json, '$.key') = 'text' ORDER BY m.conversation_id, m.sequence`,
+    [organizationId, d1JsonStringSet(subjectIds), organizationId, d1JsonStringSet(prepKeys)]) : []
+  const postsByThread = new Map<string, Map<string, string>>()
   const threads = new Map<string, { subject_id: string; participants_key: string }>()
   for (const row of posted) {
-    keysByThread.set(row.thread_id, (keysByThread.get(row.thread_id) ?? new Set()).add(row.idempotency_key))
+    postsByThread.set(row.thread_id, (postsByThread.get(row.thread_id) ?? new Map()).set(row.idempotency_key, row.message_id))
     threads.set(row.thread_id, { subject_id: row.subject_id, participants_key: row.participants_key })
   }
   const seatUsers = new Map<string, string[]>()
@@ -108,7 +120,7 @@ export async function runOrganizationJobs(env: CloudflareEnv, db: DbClient, orga
   const hostUsers = members.filter(member => isOrganizationWideRole(member.role)).map(member => member.userId)
   const post = async (subject: JobSubject, seats: readonly string[], key: string, body: string, alertUserIds: readonly string[], threadId?: string) => {
     const result = await postAutomaticTeamMessage(env, db, { organizationId, subject, seatMemberIds: seats, body, idempotencyKey: key, alertUserIds, senderName: organization.name, threadId })
-    keysByThread.set(result.threadId, (keysByThread.get(result.threadId) ?? new Set()).add(key))
+    postsByThread.set(result.threadId, (postsByThread.get(result.threadId) ?? new Map()).set(key, result.messageId))
     return result
   }
   const pending: Date[] = []
@@ -125,25 +137,36 @@ export async function runOrganizationJobs(env: CloudflareEnv, db: DbClient, orga
   }
   for (const task of tasks) {
     try {
-      if (!task.job_booking_id || (!isJobTask(task) && task.subject_type !== 'product_session')) {
+      const prep = Boolean(task.private_prep)
+      const subject: JobSubject | null = isJobTask(task) ? jobSubject(task) : prep && task.job_booking_id ? { id: task.job_booking_id, unit: 'slot' } : null
+      const jobPrefix = `job:${task.id}:`
+      const endKeys = jobEndKeys(task.id)
+      const isJobPost = (key: string) => key.startsWith(jobPrefix)
+      // The last recorded assignment or release says whether the thread still
+      // carries this work. A session can have been discussed under another booking.
+      const lastPost = (threadId: string) => [...postsByThread.get(threadId) ?? []].findLast(([key]) =>
+        isJobPost(key) || endKeys.some(end => key === end || key.startsWith(`${end}:`)))
+      const elsewhere = [...threads].filter(([threadId, thread]) => (prep || thread.subject_id === subject?.id)
+        && [...(postsByThread.get(threadId)?.keys() ?? [])].some(isJobPost))
+      const roster = subject ? rosterFor(task, members) : null
+      if (!subject && !elsewhere.length) {
         if (task.status === 'open') await alertOnTheDay(task, members.filter(member => member.id === task.assigned_member_id).map(member => member.userId))
         continue
       }
-      const subject: JobSubject = isJobTask(task) ? jobSubject(task) : { id: task.job_booking_id, unit: 'slot' }
-      const about = subject.unit === 'nights' ? 'at' : 'with'
-      const roster = rosterFor(task, members)
       const view = roster || task.status === 'open' ? await taskViewForUser(db, organizationId, task.id, roster?.cleaners[0] ?? hostUsers[0] ?? null, now) : null
-      // Conversations of this stay that once carried this job: the one still held by the same people keeps it,
-      // with its seats brought up to today's owners and admins; the others are told it is no longer theirs.
-      const elsewhere = [...threads].filter(([threadId, thread]) => thread.subject_id === subject.id && [...keysByThread.get(threadId) ?? []].some(key => key.startsWith(`job:${task.id}:`)))
-      const targetKey = roster ? await jobThreadParticipantsKey(subject, roster.seats) : null
-      const sameCleaners = (threadId: string) => {
-        const cleaners = (seatUsers.get(threadId) ?? []).filter(userId => !hostUsers.includes(userId)).sort()
-        return roster !== null && cleaners.length === roster.cleaners.length && cleaners.every((userId, index) => userId === [...roster.cleaners].sort()[index])
-      }
-      let heldIn = elsewhere.find(([, thread]) => thread.participants_key === targetKey)?.[0] ?? null
-      if (task.status === 'open' && roster && heldIn === null) {
-        const kept = elsewhere.find(([threadId]) => sameCleaners(threadId))
+      // A booking may have changed while loading the card. Re-read on the
+      // next alarm instead of using a new client's card in an old thread.
+      if (prep && view && view.version !== task.version) { pending.push(now); continue }
+      if (prep && view && view.booking_id !== (subject?.id ?? null)) throw new Error(`Prep task ${task.id} does not match its booking conversation`)
+      const about = subject?.unit === 'nights' ? 'at' : 'with'
+      const targetKey = roster && subject ? await jobThreadParticipantsKey(subject, roster.seats) : null
+      let heldIn = elsewhere.find(([, thread]) => thread.subject_id === subject?.id && thread.participants_key === targetKey)?.[0] ?? null
+      if (task.status === 'open' && roster && subject && heldIn === null) {
+        const kept = elsewhere.find(([threadId, thread]) => {
+          const cleaners = (seatUsers.get(threadId) ?? []).filter(userId => !hostUsers.includes(userId)).sort()
+          return thread.subject_id === subject.id && cleaners.length === roster.cleaners.length
+            && cleaners.every((userId, index) => userId === [...roster.cleaners].sort()[index])
+        })
         if (kept) {
           const { threadId } = await reseatAutomaticThread(db, { organizationId, threadId: kept[0], seatMemberIds: roster.seats, participantsKey: targetKey! })
           threads.set(threadId, { subject_id: subject.id, participants_key: targetKey! })
@@ -151,34 +174,41 @@ export async function runOrganizationJobs(env: CloudflareEnv, db: DbClient, orga
           heldIn = threadId
         }
       }
-      for (const [threadId] of elsewhere) {
+      for (const [threadId, thread] of elsewhere) {
         if (threadId === heldIn && task.status === 'open') continue
-        const closedKey = task.status === 'open' ? `released:${task.id}` : `${task.status === 'cancelled' ? 'cancelled' : 'closed'}:${task.id}`
-        if (keysByThread.get(threadId)?.has(closedKey)) continue
+        const last = lastPost(threadId)
+        if (prep && (!last || !isJobPost(last[0]))) continue
         if (task.status !== 'open' && task.status !== 'cancelled' && task.closed_by_user_id !== null) continue
+        const end = `${task.status === 'open' ? 'released' : task.status === 'cancelled' ? 'cancelled' : 'closed'}:${task.id}`
+        const alreadyTold = postsByThread.get(threadId)?.has(end)
+        if (!prep && alreadyTold) continue
+        const endKey = alreadyTold && last ? `${end}:${last[1]}` : end
         const seated = seatUsers.get(threadId) ?? []
-        const body = task.status === 'open' ? `No longer yours: ${view!.sheet.heading.toLowerCase()} ${about} ${view!.sheet.title}${view!.sheet.date ? `, ${view!.sheet.date}` : ''}.`
-          : `Cancelled: ${view ? `${view.sheet.heading.toLowerCase()} ${about} ${view.sheet.title}${view.sheet.date ? `, ${view.sheet.date}` : ''}` : 'this job'}.`
-        await post(subject, [], closedKey, body, seated.filter(userId => !hostUsers.includes(userId)), threadId)
+        // A prior booking's team only needs to know its prep is no longer theirs.
+        const details = subject?.id === thread.subject_id && view ? `${view.sheet.heading.toLowerCase()} ${about} ${view.sheet.title}${view.sheet.date ? `, ${view.sheet.date}` : ''}` : prep ? 'prep for this session' : 'this job'
+        const label = { open: 'No longer yours', done: 'Completed', skipped: 'Skipped', cancelled: 'Cancelled' }[task.status]
+        const body = `${label}: ${details}.`
+        await post({ id: thread.subject_id, unit: subject?.unit ?? 'slot' }, [], endKey, body, seated.filter(userId => !hostUsers.includes(userId)), threadId)
       }
-      if (task.status !== 'open' || !view) continue
-      // A job nobody holds has been told to whoever held it; there is nobody to remind.
-      if (task.assigned_member_id === null) continue
-      if (!roster) {
-        // An owner's or admin's own job.
+      if (task.status !== 'open' || !view || !task.assigned_member_id) continue
+      if (!roster || !subject) {
         await alertOnTheDay(task, members.filter(member => member.id === task.assigned_member_id).map(member => member.userId))
         continue
       }
-      const key = jobKey(task)
-      // A post whose alert failed was withdrawn with it, so what is here was told; only what is missing is posted.
-      const keys = heldIn ? keysByThread.get(heldIn) ?? new Set<string>() : new Set<string>()
-      if (!keys.has(key)) {
-        const result = await post(subject, roster.seats, key, lines(view), roster.cleaners, heldIn ?? undefined)
+      const last = heldIn ? lastPost(heldIn) : undefined
+      const baseKey = jobKey(task)
+      // A newer release ends an assignment. A later reactivation is a new post
+      // keyed by that message, so retries still announce it once.
+      const postedForAssignment = heldIn && (prep
+        ? last && (last[0] === baseKey || last[0].startsWith(`${baseKey}:after:`))
+        : postsByThread.get(heldIn)?.has(baseKey))
+      if (!postedForAssignment) {
+        const result = await post(subject, roster.seats, jobKey(task, prep ? last?.[1] : undefined), lines(view), roster.cleaners, heldIn ?? undefined)
         threads.set(result.threadId, { subject_id: subject.id, participants_key: targetKey! })
         heldIn = result.threadId
       }
       for (const reminder of reminders(task)) {
-        if (keysByThread.get(heldIn!)?.has(reminder.key)) continue
+        if (postsByThread.get(heldIn!)?.has(reminder.key)) continue
         if (reminder.at > now) { pending.push(reminder.at); continue }
         if (now >= reminder.until) continue
         const when = view.when ? `, ${view.when}` : ''
