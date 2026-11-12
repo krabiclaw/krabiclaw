@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:dca9f0e7707b81328b5963cda311b9c03b2af7e25491485854c6ad4847f073ff",
-  "documentationFingerprint": "sha256:871f46ee6c0fe5bf3c3f1c8b93d73fc77700e638bedc92c2700b4345457da87c",
+  "fingerprint": "sha256:a90afaf642225d8b7088f17c8df80e82fc15b990ca4debe5cf1ee65ff4a2737d",
+  "documentationFingerprint": "sha256:8f76e1a31233335f2ea454536d0884448882a1e9e4944e06d4242e21853a52b2",
   "tools": [
     {
       "name": "accept_opportunity",
