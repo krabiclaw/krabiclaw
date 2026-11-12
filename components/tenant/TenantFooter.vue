@@ -75,12 +75,12 @@ const props = withDefaults(defineProps<{
   error?: unknown
   sections?: PublicShellPayload['sections'] | null
   compliance?: PublicCompliance | null
-  page_links?: PublicPageLink[]
+  pageLinks?: PublicPageLink[]
 }>(), {
   locations: () => [],
   sections: null,
   compliance: null,
-  page_links: () => [],
+  pageLinks: () => [],
 })
 
 const { locale, localePath, t } = useI18n()
@@ -99,7 +99,7 @@ const catalogLinks = computed(() => (props.organization?.vertical
   : []))
 
 function linksFor(paths: string[]) {
-  const byPath = new Map(props.page_links.map(item => [item.path, item]))
+  const byPath = new Map(props.pageLinks.map(item => [item.path, item]))
   return paths.flatMap(path => {
     const item = byPath.get(path)
     return item ? [{ path, title: item.title }] : []
@@ -115,7 +115,7 @@ const footerGroups = computed(() => [
     label: legalPractice.value ? t('site.footer.services') : t('site.footer.heading_experience'),
     items: [
       ...catalogLinks.value.map(item => ({ path: item.path, title: t(item.labelKey) })),
-      ...props.page_links.filter(item => item.path.startsWith('/services/')).map(item => ({ path: item.path, title: item.title })),
+      ...props.pageLinks.filter(item => item.path.startsWith('/services/')).map(item => ({ path: item.path, title: item.title })),
       ...sectionLinks([{ section: 'reservations', path: '/reservations', labelKey: 'site.header.reservations' }, { section: 'photos', path: '/photos', labelKey: 'site.footer.gallery' }]),
     ],
   },

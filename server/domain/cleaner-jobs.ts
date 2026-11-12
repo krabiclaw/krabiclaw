@@ -88,7 +88,7 @@ export async function runOrganizationJobs(env: CloudflareEnv, db: DbClient, orga
       AND (t.assigned_member_id IS NOT NULL OR ${JOB_TASK_SQL('t')}) ORDER BY COALESCE(t.starts_at, t.due_at, t.created_at), t.id`,
     [organizationId, new Date(now.getTime() - RECENT_MS).toISOString(), new Date(now.getTime() + AHEAD_MS).toISOString(), new Date(now.getTime() - RECENT_MS).toISOString(), new Date(now.getTime() + AHEAD_MS).toISOString(), new Date(now.getTime() - RECENT_MS).toISOString()]),
   ])
-  const subjectIds = [...new Set(tasks.flatMap(task => task.job_booking_id && (isJobTask(task) || task.kind === 'consultation_prep') ? [task.job_booking_id] : []))]
+  const subjectIds = [...new Set(tasks.flatMap(task => task.job_booking_id && (isJobTask(task) || task.subject_type === 'product_session') ? [task.job_booking_id] : []))]
   const posted = subjectIds.length ? await queryAll<{ thread_id: string; subject_id: string; participants_key: string; idempotency_key: string }>(db, `
     SELECT m.conversation_id AS thread_id, t.booking_id AS subject_id, t.participants_key, json_extract(m.payload_json, '$.key') AS idempotency_key FROM messages m
       JOIN conversations t ON t.organization_id = m.organization_id AND t.id = m.conversation_id
@@ -125,7 +125,7 @@ export async function runOrganizationJobs(env: CloudflareEnv, db: DbClient, orga
   }
   for (const task of tasks) {
     try {
-      if (!task.job_booking_id || (!isJobTask(task) && task.kind !== 'consultation_prep')) {
+      if (!task.job_booking_id || (!isJobTask(task) && task.subject_type !== 'product_session')) {
         if (task.status === 'open') await alertOnTheDay(task, members.filter(member => member.id === task.assigned_member_id).map(member => member.userId))
         continue
       }

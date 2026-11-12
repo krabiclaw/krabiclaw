@@ -433,8 +433,8 @@ async function loadContext(db: DbClient, viewer: TaskViewer, rows: TaskRow[]): P
       FROM scheduled_guest_messages m WHERE m.organization_id = ? AND m.id IN (SELECT value FROM json_each(?))`, [organizationId, d1JsonStringSet(messageIds)]) : []
   const sessions = ids(row => row.subject_type === 'product_session' ? row.subject_id : null)
   const privateConsultations = sessions.length ? await queryAll<{ id: string; booking_id: string | null }>(db,
-    `SELECT s.id, ${consultationBookingSql('s.id', 's.organization_id')} AS booking_id FROM product_sessions s
-      WHERE s.organization_id = ? AND s.id IN (SELECT value FROM json_each(?))`, [organizationId, d1JsonStringSet(sessions)]) : []
+    `SELECT candidate.id, ${consultationBookingSql('candidate.id', 'candidate.organization_id')} AS booking_id FROM product_sessions candidate
+      WHERE candidate.organization_id = ? AND candidate.id IN (SELECT value FROM json_each(?))`, [organizationId, d1JsonStringSet(sessions)]) : []
   const consultations = new Map(privateConsultations.flatMap(row => row.booking_id ? [[row.id, row.booking_id] as const] : []))
   const bookingIds = [...new Set([...ids(row => row.subject_type === 'booking' ? row.subject_id : null), ...messages.map(message => message.booking_id), ...consultations.values()])]
   const booked = bookingIds.length ? await queryAll<{ id: string; conversation_id: string | null; starts_at: string; product_kind: ProductKind; unit: 'slot' | 'nights' }>(db, `SELECT br.id, br.starts_at, br.product_kind, br.unit,
@@ -780,7 +780,7 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
     complete: row.status === 'open' && action?.type === 'complete' && reachable,
     skip: row.status === 'open' && reachable,
     reopen: personClosed && (viewer.manage || row.closed_by_user_id === viewer.principal.userId),
-    // A visit job is its holder's: it is reassigned by reassigning the booking.
+    // Prep follows the offering's host; follow-up follows its booking.
     assign: viewer.manage && row.status === 'open' && row.kind !== 'consultation_prep' && row.kind !== 'consultation_follow_up',
     edit: viewer.manage && row.status === 'open',
   }
