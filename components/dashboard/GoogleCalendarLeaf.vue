@@ -1,19 +1,14 @@
 <template>
-  <DashboardLeafPanel id="google-calendar" icon="i-logos-google-calendar" title="Google Calendar sync" :lead="integrationDefinition('google-calendar').purpose" :footer="false" :error="failure || connection.error.value || calendar?.last_error || data?.sync?.last_error || ''">
+  <DashboardLeafPanel id="google-calendar" icon="i-logos-google-calendar" title="Google Calendar sync" :lead="integrationDefinition('google-calendar').purpose" :footer="false" :error="failure || connection.error.value || calendar?.last_error || ''">
     <!-- The sync is Business. A calendar connected under a lapsed plan can still be disconnected. -->
     <OfferCard v-if="!entitled && !connected" :offer="offer('calendar_sync')" />
     <template v-else>
       <IntegrationLeaf integration="google-calendar" :connection="connected ? { name: calendar!.calendar_name, connectedAt: calendar!.created_at, through: integrations?.summary.value?.google_calendar?.connected_through ?? null, status: calendar!.status, lastError: calendar!.last_error } : null" :disconnecting="saving" @disconnect="disconnect">
         <UButton icon="i-simple-icons-google" size="xl" block :loading="saving || connection.linking.value" @click="connect">Connect Google Calendar</UButton>
-        <!-- How the sync works, before it is on: the three sections the connected leaf edits. -->
+        <!-- How the sync works, before it is on: the two sections the connected leaf shows. -->
         <EditorNavigationList :groups="[{ id: 'how', items: howItWorks }]" />
         <template #connected>
           <EditorNavigationList :groups="[{ id: 'conflicts', label: 'Check for conflicts', items: conflictRows }, { id: 'bookings', label: 'Add bookings to', items: bookingRows }]" />
-          <section class="space-y-0">
-            <h2 class="text-sm font-semibold text-muted">Sync changes from Google</h2>
-            <SettingRow v-model="reschedules" label="Reschedules" description="Drag a booking to a new time in Google Calendar and your client is asked to accept it, if that time is free. The booking stays where it is until they do. Anyone you give edit access to this calendar in Google can request booking changes as you." :disabled="saving || !entitled" />
-            <SettingRow :model-value="true" label="Deleted events" description="Deleting a booking's event never cancels it or refunds anyone. The event comes back, the booking shows on Today as needing your decision, and you're emailed, so you can cancel it properly here." disabled />
-          </section>
         </template>
       </IntegrationLeaf>
     </template>
@@ -24,11 +19,10 @@
 <script setup lang="ts">
 import IntegrationLeaf from './IntegrationLeaf.vue'
 import OfferCard from './OfferCard.vue'
-import SettingRow from './SettingRow.vue'
 import EditorNavigationList, { type EditorNavigationItem } from '~/components/dashboard/EditorNavigationList.vue'
 import { integrationDefinition } from '~/shared/integrations'
 import { offer } from '~/shared/offers'
-import { integrationsKey } from '~/pages/dashboard/[orgSlug]/integrations.vue'
+import { integrationsKey } from '~/pages/dashboard/[org_slug]/integrations.vue'
 import { INTEGRATION_SCOPES, type GoogleCalendarIntegration } from '~/shared/organization-settings'
 const route = useRoute()
 // The Integrations summary names the KrabiClaw user who linked the account; the leaf's own read does not.
@@ -39,14 +33,11 @@ const entitled = computed(() => dashboard.entitlements.value.calendar_sync === t
 const api = `/api/organizations/${organizationId}/integrations/google-calendar`
 const connection = useIntegrationConnection('google', INTEGRATION_SCOPES['google-calendar'])
 const failure = ref(''), saving = ref(false)
-interface CalendarSync { reschedules: boolean; watch_expires_at: string | null; last_pulled_at: string | null; last_error: string | null }
-const isCalendarResponse = (value: unknown): value is {calendar:GoogleCalendarIntegration|null;cleanup_pending:boolean;sync:CalendarSync|null} => {
+const isCalendarResponse = (value: unknown): value is {calendar:GoogleCalendarIntegration|null;cleanup_pending:boolean} => {
  if (!isRecord(value) || typeof value.cleanup_pending !== 'boolean') return false
  const calendar = value.calendar
- const sync = value.sync
  return (calendar === null || (isRecord(calendar) && ['revision','account_id','calendar_id','calendar_name','created_at','updated_at'].every(field => typeof calendar[field] === 'string')
   && ['active','disabled','error'].includes(String(calendar.status)) && (calendar.last_error === null || typeof calendar.last_error === 'string')))
-  && (sync === null || sync === undefined || (isRecord(sync) && typeof sync.reschedules === 'boolean'))
 }
 const { data, error, refresh } = await useAsyncData(`google-calendar:${organizationId}`, () => applicationFetch(api, {validate:isCalendarResponse}))
 const calendar = computed(() => data.value?.calendar ?? null)
@@ -72,15 +63,10 @@ const bookingRows = computed<EditorNavigationItem[]>(() => [{
 const howItWorks: EditorNavigationItem[] = [
   { id: 'conflicts', label: 'Check for conflicts', icon: 'i-lucide-users', summary: 'Times a team member is busy in Google Calendar can’t be booked with them.' },
   { id: 'bookings', label: 'Add bookings to your calendar', icon: 'i-lucide-calendar-check', summary: 'Every booking appears on a KrabiClaw calendar in your Google account, and follows the booking.' },
-  { id: 'changes', label: 'Sync changes from Google', icon: 'i-lucide-refresh-cw', summary: 'Move a booking there and your client is asked to accept the new time. Deleting one never cancels it.' },
 ]
-const reschedules = computed({
-  get: () => data.value?.sync?.reschedules ?? true,
-  set: value => { void run(async () => { await applicationFetch(`${api}/settings`, { method: 'POST', body: { reschedules: value }, validate: isCalendarMutation }) }) },
-})
 async function run(action:()=>Promise<void>) {
  saving.value=true; failure.value=''
- try { await action(); await refresh(); if(error.value)throw error.value; await refreshNuxtData(`dashboard-integrations:${String(route.params.orgSlug)}`) }
+ try { await action(); await refresh(); if(error.value)throw error.value; await refreshNuxtData(`dashboard-integrations:${String(route.params.org_slug)}`) }
  catch(cause){failure.value=getErrorMessage(cause,'Google Calendar could not be updated.')}
  finally {saving.value=false}
 }

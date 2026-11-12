@@ -12,7 +12,7 @@ import { deleteIntegration, storeIntegration } from './organization-integrations
  * is stored only for as long as it must keep being served.
  */
 
-export interface SearchConsoleSite {
+interface SearchConsoleSite {
   siteUrl: string
   permissionLevel: string
 }

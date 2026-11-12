@@ -2,15 +2,15 @@ import { HTTPError } from 'nitro'
 import { executeBatch, queryAll, queryAllPages, queryFirst, type DbClient } from '~/server/db'
 import { assertOrganizationWideAccess, assertRoleAllows, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import { creationDedupeKey, creationRequestHash, isUniqueDedupeConflict, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
-import { listBusinessOutcomes, readArticleDistribution, readBusinessProgressReference } from '~/server/utils/business-outcomes'
+import { listBusinessOutcomes, readArticleDistribution, readBookingWelcomes, readBusinessProgressReference } from '~/server/utils/business-outcomes'
 import type { BusinessProgressOperation, BusinessProgressReference } from '~/shared/business-outcomes'
 import { businessGoalStrategySchema, createBusinessGoalSchema, updateBusinessGoalSchema, type BusinessGoal, type BusinessGoalStrategy } from '~/shared/business-progress'
 import { publishBusinessInvalidation } from '~/server/cloudflare/guest-inbox-events'
 import { queryOrganizationAnalytics } from '~/server/utils/analytics-query'
 import { addLocalDays, formatCalendarRange, formatTimestamp, localDateAt } from '~/utils/timezone'
-import { articleSocialPostPath, blogCreatePath, blogEditorPath, postEditorPath, productEditorPath, productPaymentPath } from '~/server/utils/dashboard-links'
+import { articleSocialPostPath, blogCreatePath, blogEditorPath, guestConversationPath, postEditorPath, productEditorPath, productPaymentPath } from '~/server/utils/dashboard-links'
 import { listSessions } from '~/server/utils/availability'
-import { listReservationSlots } from '~/server/utils/reservations'
+import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import { readStayGapCandidates, stayAccessFor } from '~/server/domain/stays'
 import { readStripeCheckoutSetup } from '~/server/utils/stripe-connect'
 import { hasOrganizationEntitlement } from '~/server/utils/billing'
@@ -26,10 +26,8 @@ interface GoalRow {
   id: string; intent: string; constraints: string | null; target_at: string | null; status: BusinessGoal['status']; strategy_json: string | null
   created_by_user_id: string | null; updated_by_user_id: string | null; created_at: string; updated_at: string
 }
-const goalOf = (row: GoalRow): BusinessGoal => ({
-  id: row.id, intent: row.intent, constraints: row.constraints, targetAt: row.target_at, status: row.status,
-  strategy: row.strategy_json === null ? null : businessGoalStrategySchema.parse(JSON.parse(row.strategy_json)),
-  createdBy: row.created_by_user_id, updatedBy: row.updated_by_user_id, createdAt: row.created_at, revision: row.updated_at,
+const goalOf = ({ strategy_json, ...row }: GoalRow): BusinessGoal => ({
+  ...row, strategy: strategy_json === null ? null : businessGoalStrategySchema.parse(JSON.parse(strategy_json)),
 })
 const conflict = (message: string) => new HTTPError({ statusCode: 409, message, data: { code: 'PROGRESS_REVISION_CONFLICT' } })
 
@@ -39,7 +37,7 @@ async function authorize(db: DbClient, principal: MemberAccessPrincipal) {
 }
 
 async function readGoal(db: DbClient, organizationId: string, id: string): Promise<BusinessGoal> {
-  const row = await queryFirst<GoalRow>(db, 'SELECT * FROM organization_goals WHERE organization_id = ? AND id = ?', [organizationId, id])
+  const row = await queryFirst<GoalRow>(db, 'SELECT id, intent, constraints, target_at, status, strategy_json, created_by_user_id, updated_by_user_id, created_at, updated_at FROM organization_goals WHERE organization_id = ? AND id = ?', [organizationId, id])
   if (!row) throw new HTTPError({ statusCode: 404, message: 'Goal not found', data: { code: 'GOAL_NOT_FOUND' } })
   return goalOf(row)
 }
@@ -48,10 +46,10 @@ export async function createBusinessGoal(db: DbClient, principal: MemberAccessPr
   await authorize(db, principal)
   const parsed = createBusinessGoalSchema.safeParse(body)
   if (!parsed.success) throw new HTTPError({ statusCode: 400, message: 'Invalid goal', data: parsed.error.flatten() })
-  const { idempotencyKey, intent } = parsed.data
-  const constraints = parsed.data.constraints ?? null, targetAt = parsed.data.targetAt ?? null
+  const { idempotency_key, intent } = parsed.data
+  const constraints = parsed.data.constraints ?? null, targetAt = parsed.data.target_at ?? null
   const strategy = parsed.data.strategy ?? null
-  const key = creationDedupeKey('organization_goal', principal.organizationId, idempotencyKey)
+  const key = creationDedupeKey('organization_goal', principal.organizationId, idempotency_key)
   const requestHash = await creationRequestHash({ actorId: principal.userId, intent, constraints, targetAt, strategy: strategy ?? undefined })
   const replay = async () => {
     const record = await readCreationRecord(db, key)
@@ -88,19 +86,19 @@ export async function updateBusinessGoal(db: DbClient, principal: MemberAccessPr
   const parsed = updateBusinessGoalSchema.safeParse(body)
   if (!parsed.success) throw new HTTPError({ statusCode: 400, message: 'Invalid goal update', data: parsed.error.flatten() })
   const current = await readGoal(db, principal.organizationId, id)
-  const { revision, ...patch } = parsed.data
-  if (current.revision !== revision) throw conflict('The goal changed; read its current revision before editing')
-  const next = { intent: current.intent, constraints: current.constraints, targetAt: current.targetAt, strategy: current.strategy, status: current.status, ...patch }
-  if (next.intent === current.intent && next.constraints === current.constraints && next.targetAt === current.targetAt && next.status === current.status && JSON.stringify(next.strategy) === JSON.stringify(current.strategy)) {
+  const { updated_at, ...patch } = parsed.data
+  if (current.updated_at !== updated_at) throw conflict('The goal changed; read its current revision before editing')
+  const next = { intent: current.intent, constraints: current.constraints, target_at: current.target_at, strategy: current.strategy, status: current.status, ...patch }
+  if (next.intent === current.intent && next.constraints === current.constraints && next.target_at === current.target_at && next.status === current.status && JSON.stringify(next.strategy) === JSON.stringify(current.strategy)) {
     await publishBusinessInvalidation(principal.env, principal.organizationId)
     return current
   }
-  const now = new Date(Math.max(Date.now(), Date.parse(current.revision) + 1)).toISOString()
+  const now = new Date(Math.max(Date.now(), Date.parse(current.updated_at) + 1)).toISOString()
   const result = await executeBatch(db, [
     { query: `UPDATE organization_goals SET intent = ?, constraints = ?, target_at = ?, strategy_json = ?, status = ?, updated_by_user_id = ?, updated_at = ?
-      WHERE id = ? AND organization_id = ? AND updated_at = ?`, params: [next.intent, next.constraints, next.targetAt, next.strategy === null ? null : JSON.stringify(next.strategy), next.status, principal.userId, now, id, principal.organizationId, revision] },
+      WHERE id = ? AND organization_id = ? AND updated_at = ?`, params: [next.intent, next.constraints, next.target_at, next.strategy === null ? null : JSON.stringify(next.strategy), next.status, principal.userId, now, id, principal.organizationId, updated_at] },
     organizationEventQuery({ organizationId: principal.organizationId, actorId: principal.userId, eventType: 'goal.updated', entityType: 'organization_goal', entityId: id,
-      beforeState: current, afterState: { ...next, revision: now }, onlyIfPreviousChangedOneRow: true }),
+      beforeState: current, afterState: { ...next, updated_at: now }, onlyIfPreviousChangedOneRow: true }),
   ])
   if (result[0]?.meta.changes !== 1) throw conflict('The goal changed while this edit was being saved')
   await publishBusinessInvalidation(principal.env, principal.organizationId)
@@ -109,7 +107,7 @@ export async function updateBusinessGoal(db: DbClient, principal: MemberAccessPr
 
 export async function readRecommendationReference(db: DbClient, principal: MemberAccessPrincipal, subject: { operation: BusinessProgressOperation; subjectId: string }) {
   try {
-    return await readBusinessProgressReference(db, principal, subject)
+    return await readBusinessProgressReference(db, principal, { operation: subject.operation, subject_id: subject.subjectId })
   } catch (error) {
     if (!(error instanceof HTTPError) || error.statusCode !== 404) throw error
     return null
@@ -121,7 +119,7 @@ export async function readBusinessProgress(db: DbClient, principal: MemberAccess
   await authorize(db, principal)
   const [outcomes, goalRows] = await Promise.all([
     listBusinessOutcomes(db, principal, page),
-    queryAllPages<GoalRow>(db, 'SELECT * FROM organization_goals WHERE organization_id = ? ORDER BY updated_at DESC, id DESC', [principal.organizationId]),
+    queryAllPages<GoalRow>(db, 'SELECT id, intent, constraints, target_at, status, strategy_json, created_by_user_id, updated_by_user_id, created_at, updated_at FROM organization_goals WHERE organization_id = ? ORDER BY updated_at DESC, id DESC', [principal.organizationId]),
   ])
   return { goals: goalRows.map(goalOf), ...outcomes }
 }
@@ -135,6 +133,10 @@ export interface BusinessRecommendation {
   icon: string
   locationId: string | null
   productId: string | null
+  /** The conversation a message opportunity is sent in. */
+  requestId: string | null
+  /** The message it pre-writes for the owner to review and send. */
+  message: string | null
   goal: BusinessGoal | null
   reference: BusinessProgressReference
 }
@@ -217,7 +219,7 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
     'SELECT slug,name,vertical,timezone,default_currency,analytics_data_start_at FROM organization WHERE id=?', [organizationId])
   if (!organization) throw new HTTPError({ statusCode: 404, message: 'Organization not found' })
   if (input.locationId && !await queryFirst(db, 'SELECT id FROM business_locations WHERE id=? AND organization_id=?', [input.locationId, organizationId])) throw new HTTPError({ statusCode: 404, message: 'Location not found' })
-  const goals = (await queryAllPages<GoalRow>(db, "SELECT * FROM organization_goals WHERE organization_id = ? AND status = 'active' ORDER BY updated_at DESC, id DESC", [organizationId])).map(goalOf)
+  const goals = (await queryAllPages<GoalRow>(db, "SELECT id, intent, constraints, target_at, status, strategy_json, created_by_user_id, updated_by_user_id, created_at, updated_at FROM organization_goals WHERE organization_id = ? AND status = 'active' ORDER BY updated_at DESC, id DESC", [organizationId])).map(goalOf)
   const structured = goals.filter(goal => goal.strategy !== null)
   // Explicit strategies prioritize their channels. They do not turn a payments goal
   // into a marketing dead end or require a goal before a business can grow.
@@ -246,9 +248,9 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
   type Candidate = Omit<BusinessRecommendation, 'reference'> & { rank: number; recency: string }
   const candidates: Candidate[] = []
   const offer = (operation: BusinessProgressOperation, subjectId: string, headline: string, reason: string, to: string, rank: number,
-    options: Partial<Pick<Candidate, 'locationId' | 'productId' | 'goal' | 'icon' | 'recency'>> = {}) => {
+    options: Partial<Pick<Candidate, 'locationId' | 'productId' | 'requestId' | 'message' | 'goal' | 'icon' | 'recency'>> = {}) => {
     candidates.push({ operation, subjectId, headline, reason, to, rank, icon: 'i-lucide-sprout', locationId: input.locationId ?? null,
-      productId: null, goal: null, recency: '', ...options })
+      productId: null, requestId: null, message: null, goal: null, recency: '', ...options })
   }
   const pageEvidence = (slug: string | null) => slug ? marketing.pages.filter(page => page.path.split('/').filter(Boolean).at(-1) === slug) : []
   const sourceOrder = enabled('google_ads') ? ['Google Ads clicks', 'recorded website sessions', 'organic Google clicks'] : ['recorded website sessions', 'organic Google clicks', 'Google Ads clicks']
@@ -261,7 +263,8 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
     return 0
   }
   const published = articles.filter(document => document.status === 'published').sort((a, b) => compareInterest(a.slug, b.slug) || (b.published_at ?? '').localeCompare(a.published_at ?? ''))
-  const leading = [...products].filter(product => !published.some(article => article.title?.toLocaleLowerCase().includes(product.name.toLocaleLowerCase())))
+  // A restaurant's tables are how guests book, not a topic to write about.
+  const leading = [...products].filter(product => product.kind !== 'table' && !published.some(article => article.title?.toLocaleLowerCase().includes(product.name.toLocaleLowerCase())))
     .sort((a, b) => compareInterest(a.slug, b.slug))[0]
   const topic = leading ? `“${leading.name}”` : organization.vertical === 'service' ? 'a question prospective clients ask'
     : organization.vertical === 'lodging' ? 'a useful local stay or travel topic' : organization.vertical === 'experience' ? 'what guests can expect from a class' : 'your food, drinks or next event'
@@ -403,14 +406,26 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
       `${formatTimestamp(open.starts_at, 'en', open.timezone, { dateStyle: 'medium', timeStyle: 'short' })}: ${open.remaining} recorded ${organization.vertical === 'service' ? 'consultation openings remain' : 'places remain in this session'}. External bookings are not established by this count.`,
       postEditorPath(organization.slug, 'new', input.locationId), 85, { productId: product.id, goal: goalFor('social'), locationId: open.location_id, recency: open.starts_at, icon: 'i-lucide-ticket' })
   } else if (canOperate && organization.vertical === 'restaurant') {
-    const locations = await queryAll<{ id: string; timezone: string }>(db, `SELECT l.id,l.timezone FROM business_locations l JOIN location_reservation_configs c
-      ON c.organization_id=l.organization_id AND c.location_id=l.id WHERE l.organization_id=? AND l.status='active' ${input.locationId ? 'AND l.id=?' : ''}`, [organizationId, ...(input.locationId ? [input.locationId] : [])])
-    for (const location of locations) {
-      const available = await listReservationSlots(db, { organizationId, locationId: location.id, date: localDateAt(now, location.timezone) })
-      const slot = available.slots.find(slot => slot.starts_at > now.toISOString() && !slot.is_closed && !slot.is_full && slot.remaining !== null && slot.remaining > 0)
-      if (slot && canWrite && enabled('social') && canPreparePost) offer('post.create', JSON.stringify(['reservation', location.id, slot.starts_at]), 'Give customers a reason to book a table',
-        `A recorded reservation slot still has capacity at ${formatTimestamp(slot.starts_at, 'en', location.timezone, { hour: 'numeric', minute: '2-digit' })}. Feature a current dish, special or event with the reservation link. Walk-ins and physical table occupancy are not measured by this slot.`,
-        postEditorPath(organization.slug, 'new', location.id), 85, { goal: goalFor('social'), locationId: location.id, icon: 'i-lucide-camera' })
+    // Each location's tables, today in the location's own calendar: the first seating with room left.
+    const tables = products.filter(product => product.kind === 'table')
+    const sessions = tables.length ? await listSessions(db, { env: principal.env, organizationId, locationId: input.locationId, productIds: tables.map(product => product.id), fromInstant: now.toISOString(), toInstant: new Date(now.getTime() + 86_400_000).toISOString() }) : []
+    const offered = new Set<string>()
+    for (const session of sessions) {
+      if (!session.location_id || offered.has(session.location_id) || localDateAt(new Date(session.starts_at), session.timezone) !== localDateAt(now, session.timezone)) continue
+      if (session.is_full || session.remaining === null || session.remaining < 1) continue
+      offered.add(session.location_id)
+      if (canWrite && enabled('social') && canPreparePost) offer('post.create', JSON.stringify(['session', session.product_id, session.id]), 'Give customers a reason to book a table',
+        `A table seating still has room at ${formatTimestamp(session.starts_at, 'en', session.timezone, { hour: 'numeric', minute: '2-digit' })}. Feature a current dish, special or event with the reservation link. Walk-ins and physical table occupancy are not measured by this seating.`,
+        postEditorPath(organization.slug, 'new', session.location_id), 85, { productId: session.product_id, goal: goalFor('social'), locationId: session.location_id, recency: session.starts_at, icon: 'i-lucide-camera' })
+    }
+  }
+  // A booked client who has not heard from the business since booking is sent the host's own preparation.
+  if (await roleAllows({ ...principal, permissions: { operations: ['reply'] } })) {
+    for (const welcome of await readBookingWelcomes(db, organizationId, { now, locationId: input.locationId })) {
+      offer('booking.welcome', welcome.requestId, welcome.kind === 'stay' ? 'Share info about your place' : 'Share how to prepare',
+        `Help ${welcome.guestFirstName ?? `your ${welcome.kind === 'stay' ? 'guest' : resolveBookingPresentation(welcome.productKind, organization.vertical).counterpartyNoun}`} get ready`,
+        guestConversationPath(organization.slug, welcome.requestId), 90,
+        { productId: welcome.productId, locationId: welcome.locationId, requestId: welcome.requestId, message: welcome.message, recency: welcome.startsAt, icon: 'i-lucide-messages-square' })
     }
   }
   const unique = new Map<string, Candidate>()
@@ -426,7 +441,7 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
     if (!reference) return []
     return [{ operation: candidate.operation, subjectId: candidate.subjectId, headline: candidate.headline, to: candidate.to, icon: candidate.icon,
       reason: [candidate.reason, candidate.goal ? `Your strategy: ${candidate.goal.intent}` : null].filter(Boolean).join(' '), locationId: candidate.locationId, productId: candidate.productId,
-      goal: candidate.goal, reference }]
+      requestId: candidate.requestId, message: candidate.message, goal: candidate.goal, reference }]
   })
   return { recommendations, goals, issues, marketingEvidenceUnavailable, socialEvidenceUnavailable }
 }

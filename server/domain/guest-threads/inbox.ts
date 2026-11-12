@@ -1,15 +1,16 @@
 import { HTTPError } from 'nitro'
 import { d1JsonStringSet, queryAll, queryFirst, type DbClient } from '~/server/db'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
-import { listSendLaterMessages } from '~/server/domain/send-later'
+import { SCHEDULED_MESSAGE_CONVERSATION_SQL, visibleScheduledMessagesSql } from '~/server/domain/guest-messaging'
 import { stayAccessFor } from '~/server/domain/stays'
 import type { MemberAccessPrincipal } from '~/server/utils/member-access'
 import { getGuestThreadDetail } from './detail'
 import { guestReplyDestination } from './operations'
 import { getGuestRequest } from '~/server/domain/requests'
-import { OPENING_EVENT } from './opening'
+import { MEMBER_REPLY_EVENT, MIRRORED_EVENT, OPENING_EVENT, SCHEDULED_MESSAGE_EVENT, SUBMISSION_EVENT } from '~/server/domain/conversations'
 import { formatFormAnswer } from '~/shared/form-questions'
-import { threadRecordTitle } from '~/lib/components/workspace/messages/guest-thread-client'
+import { EXPERIENCE_PRESENTATION } from '~/utils/product-presentation'
+import { normalizeVertical } from '~/utils/vertical-copy'
 import { calendarDate, clockTime, dayLabel, firstName, initial, localDateKey, providerInstant, sendTime, stayWhen } from './presentation'
 import { formatCalendarRange } from '~/utils/timezone'
 import type {
@@ -40,7 +41,7 @@ function invalid(message: string, field: string, entryId: string): never {
 
 /** An Airbnb Support case: Airbnb's agents wrote, and no guest did. */
 export function isSupportThread(entries: Pick<GuestThreadEntryViewModel, 'kind' | 'actorKind' | 'eventName'>[]): boolean {
-  return entries.some(entry => entry.kind === 'message' && entry.actorKind === 'system' && entry.eventName === 'channel.message_mirrored')
+  return entries.some(entry => entry.kind === 'message' && entry.actorKind === 'krabiclaw' && entry.eventName === MIRRORED_EVENT)
     && !entries.some(entry => entry.kind === 'message' && entry.actorKind === 'guest')
 }
 
@@ -59,7 +60,7 @@ function text(value: unknown): string | null {
  * email that is not one.
  */
 function unshownFiles(entry: GuestThreadEntryViewModel): number {
-  const links = entry.eventName === 'channel.message_mirrored' && Array.isArray(entry.payload?.attachments) ? entry.payload.attachments.length : 0
+  const links = entry.eventName === MIRRORED_EVENT && Array.isArray(entry.payload?.attachments) ? entry.payload.attachments.length : 0
   const named = Array.isArray(entry.payload?.unshownFiles) ? entry.payload.unshownFiles.length : 0
   return Math.max(links - entry.attachments.length, 0) + named
 }
@@ -90,7 +91,7 @@ interface ThreadFacts {
  */
 export function inboxGuestNames(raw: GuestThreadDetailViewModel): { kind: InboxThreadKind; guestName: string; guestFullName: string } {
   const kind: InboxThreadKind = isSupportThread(raw.entries) ? 'support' : 'guest'
-  const airbnbName = raw.entries.findLast(entry => entry.actorKind === 'guest' && entry.eventName === 'channel.message_mirrored' && text(meta(entry)?.name))
+  const airbnbName = raw.entries.findLast(entry => entry.actorKind === 'guest' && entry.eventName === MIRRORED_EVENT && text(meta(entry)?.name))
   // Airbnb gives the guest's first name on their messages; the stay, once booked, has their full name.
   const airbnbFirstName = airbnbName ? text(meta(airbnbName)!.name)! : null
   const guestFullName = kind === 'support' ? 'Airbnb Support' : raw.guestName ?? airbnbFirstName ?? raw.participantLabel
@@ -101,26 +102,24 @@ export function inboxGuestNames(raw: GuestThreadDetailViewModel): { kind: InboxT
 
 async function threadFacts(db: DbClient, raw: GuestThreadDetailViewModel, organizationId: string, now: Date): Promise<ThreadFacts> {
   const { kind, guestName, guestFullName } = inboxGuestNames(raw)
-  const place = await queryFirst<{ location_timezone: string | null; organization_timezone: string }>(db, `
-    SELECT l.timezone AS location_timezone, o.timezone AS organization_timezone
-      FROM requests r JOIN organization o ON o.id = r.organization_id
-      LEFT JOIN business_locations l ON l.id = r.location_id AND l.organization_id = r.organization_id
-     WHERE r.id = ? AND r.organization_id = ?`, [raw.id, organizationId])
-  if (!place) throw new HTTPError({ statusCode: 404, message: 'Thread not found', data: { code: 'THREAD_NOT_FOUND', field: 'threadId' } })
-  const timeZone = place.location_timezone ?? place.organization_timezone
-  const automaticIds = raw.entries.filter(entry => entry.eventName === 'thread.scheduled_message').map(entry => entry.id)
-  const [owner, automatic] = await Promise.all([
+  const automaticIds = raw.entries.filter(entry => entry.eventName === SCHEDULED_MESSAGE_EVENT).map(entry => entry.id)
+  const [place, owner, automatic] = await Promise.all([
+    queryFirst<{ location_timezone: string | null; organization_timezone: string }>(db, `
+      SELECT l.timezone AS location_timezone, o.timezone AS organization_timezone
+        FROM conversations r JOIN organization o ON o.id = r.organization_id
+        LEFT JOIN business_locations l ON l.id = r.location_id AND l.organization_id = r.organization_id
+       WHERE r.id = ? AND r.organization_id = ?`, [raw.id, organizationId]),
     automaticIds.length ? queryFirst<{ name: string }>(db, `SELECT u.name FROM member m JOIN user u ON u.id = m.userId
       WHERE m.organizationId = ? AND m.role = 'owner' ORDER BY m.createdAt, m.id LIMIT 1`, [organizationId]) : null,
-    automaticIds.length ? queryAll<{ entry_id: string; template_title: string }>(db,
-      'SELECT entry_id, template_title FROM scheduled_guest_messages WHERE organization_id = ? AND entry_id IN (SELECT value FROM json_each(?))',
+    automaticIds.length ? queryAll<{ message_id: string; template_title: string }>(db,
+      'SELECT message_id, template_title FROM scheduled_guest_messages WHERE organization_id = ? AND message_id IN (SELECT value FROM json_each(?))',
       [organizationId, d1JsonStringSet(automaticIds)]) : [],
   ])
-  const inquiryEntry = raw.entries.findLast(entry => entry.eventName === 'channel.inquiry_received')
-  const inquiry = inquiryEntry && text(inquiryEntry.payload?.check_in_date) && text(inquiryEntry.payload?.check_out_date)
-    ? { checkIn: String(inquiryEntry.payload!.check_in_date), checkOut: String(inquiryEntry.payload!.check_out_date) } : null
+  if (!place) throw new HTTPError({ statusCode: 404, message: 'Thread not found', data: { code: 'THREAD_NOT_FOUND', field: 'conversation_id' } })
+  const timeZone = place.location_timezone ?? place.organization_timezone
+  const inquiry = raw.inquiry
   const record = raw.operationalRecord
-  // A stay is its nights; a booking or reservation is its start, in the home's clock; an inquiry is the dates asked about.
+  // A stay is its nights; a booking is its start, in the home's clock; an inquiry is the dates asked about.
   const when = record?.check_in_date && record.check_out_date ? stayWhen(record.check_in_date, record.check_out_date, now, timeZone)
     : record ? `${calendarDate(localDateKey(record.starts_at, timeZone))}, ${clockTime(record.starts_at, timeZone)}`
       : inquiry && kind === 'guest' ? formatCalendarRange(inquiry.checkIn, inquiry.checkOut, 'en-US') : null
@@ -128,7 +127,7 @@ async function threadFacts(db: DbClient, raw: GuestThreadDetailViewModel, organi
     raw, kind, guestName, guestFullName, channel: raw.conversationChannel,
     home: raw.locationLabel, when, timeZone,
     ownerFirstName: owner ? firstName(owner.name) : null,
-    automaticTitles: new Map(automatic.map(row => [row.entry_id, row.template_title])),
+    automaticTitles: new Map(automatic.map(row => [row.message_id, row.template_title])),
     inquiry,
   }
 }
@@ -153,8 +152,16 @@ function receipt(entry: GuestThreadEntryViewModel, guestName: string): string | 
 }
 
 function recordNoun(raw: GuestThreadDetailViewModel): string {
-  if (raw.submissionType === 'stay' || raw.submissionType === 'contact') return 'reservation'
-  return resolveBookingPresentation(raw.submissionType, raw.organizationVertical).noun
+  const record = raw.operationalRecord
+  if (!record || record.unit === 'nights') return 'reservation'
+  return resolveBookingPresentation(record.product_kind, raw.organizationVertical).noun
+}
+
+/** What Show reservation calls the record, in the business's own word: a stay or a table is a reservation, a class an experience. */
+function recordTitle(record: NonNullable<GuestThreadDetailViewModel['operationalRecord']>, vertical: string | null): string {
+  if (record.unit === 'nights') return 'Reservation'
+  if (record.product_kind === 'experience' && normalizeVertical(vertical ?? '') !== 'service') return EXPERIENCE_PRESENTATION.itemLabel
+  return resolveBookingPresentation(record.product_kind, vertical).label
 }
 
 /** Who did something, as the reader says it: "You", a teammate's first name, the guest. */
@@ -165,17 +172,12 @@ function actorName(entry: GuestThreadEntryViewModel, facts: ThreadFacts, viewer:
   return facts.raw.organizationName ?? 'KrabiClaw'
 }
 
-const SILENT_EVENTS = new Set(['channel.inquiry_received', 'booking.created', 'reservation.created', 'stay.created'])
-
-/** A sentence the server writes for something that happened to the conversation or its record; null for what the header already says. */
-function eventSentence(entry: GuestThreadEntryViewModel, facts: ThreadFacts, viewer: Viewer): string | null {
+/** A sentence the server writes for KrabiClaw's event in the conversation. */
+function eventSentence(entry: GuestThreadEntryViewModel, facts: ThreadFacts, viewer: Viewer): string {
   const name = entry.eventName ?? ''
-  if (SILENT_EVENTS.has(name)) return null
   const actor = actorName(entry, facts, viewer)
   const noun = recordNoun(facts.raw)
   const firstLine = text(entry.body)?.split('\n')[0]?.trim() ?? null
-  if (name === 'thread.archived') return `${actor} archived this conversation`
-  if (name === 'thread.unarchived') return `${actor} moved this conversation back to Messages`
   if (name.startsWith('booking_change.')) {
     const outcome = name.slice('booking_change.'.length)
     if (outcome === 'accepted' || outcome === 'declined' || outcome === 'withdrawn') {
@@ -188,7 +190,6 @@ function eventSentence(entry: GuestThreadEntryViewModel, facts: ThreadFacts, vie
   if (action === 'cancel' || action === 'cancelled') return `${actor} canceled the ${noun}`
   if (action === 'confirm' || action === 'confirmed') return `${actor} confirmed the ${noun}`
   if (action === 'reject') return `${actor} declined the ${noun}`
-  if (action === 'complete') return `The ${noun} was completed`
   if (action === 'no_show') return `${actor} marked the ${noun} as a no-show`
   if (name === 'review.requested') return 'Review invitation sent'
   if (firstLine) return firstLine
@@ -205,11 +206,11 @@ function stream(facts: ThreadFacts, viewer: Viewer, now: Date, canReply: boolean
     const key = localDateKey(sentAt, timeZone)
     if (key !== day) { items.push({ type: 'day', id: `day:${id}`, label: dayLabel(sentAt, timeZone, now) }); day = key; previous = null }
   }
-  const message = (entry: GuestThreadEntryViewModel, body: string | null, item: Omit<MessageItem, 'type' | 'id' | 'sentAt' | 'time' | 'body' | 'receipt' | 'retryable' | 'unshownFiles'>) => {
+  const message = (entry: GuestThreadEntryViewModel, body: string | null, item: Omit<MessageItem, 'type' | 'id' | 'sent_at' | 'time' | 'body' | 'receipt' | 'retryable' | 'unshown_files'>) => {
     const sentAt = entrySentAt(entry)
     place(sentAt, entry.id)
     const run = previous !== null && previous.side === item.side && previous.author === item.author
-    const next: MessageItem = { type: 'message', id: entry.id, sentAt, time: run ? null : clockTime(sentAt, timeZone), body, receipt: null, retryable: false, unshownFiles: unshownFiles(entry), ...item }
+    const next: MessageItem = { type: 'message', id: entry.id, sent_at: sentAt, time: run ? null : clockTime(sentAt, timeZone), body, receipt: null, retryable: false, unshown_files: unshownFiles(entry), ...item }
     items.push(next)
     previous = next
     return next
@@ -217,33 +218,30 @@ function stream(facts: ThreadFacts, viewer: Viewer, now: Date, canReply: boolean
 
   // In the buyer's own inbox the buyer is the guest side and the business answers.
   const businessAuthor = (entry: GuestThreadEntryViewModel): { author: string; label: string | null } => {
-    if (entry.eventName === 'thread.scheduled_message') {
+    if (entry.eventName === SCHEDULED_MESSAGE_EVENT) {
       const title = facts.automaticTitles.get(entry.id) ?? null
       return { author: viewer.audience === 'buyer' ? raw.organizationName ?? 'The business' : facts.ownerFirstName ? `${facts.ownerFirstName} · Automatic` : 'Automatic', label: title }
     }
     if (viewer.audience === 'buyer') return { author: raw.organizationName ?? 'The business', label: null }
     // A message Channex marks `property` is the host's side, whoever typed it on Airbnb.
-    if (entry.eventName === 'channel.message_mirrored' || entry.actorUserId === viewer.userId) return { author: 'You', label: null }
+    if (entry.eventName === MIRRORED_EVENT || entry.actorUserId === viewer.userId) return { author: 'You', label: null }
     if (!entry.actorLabel) invalid('The business message has no author', 'actor_user_id', entry.id)
     return { author: entry.actorLabel === 'Deleted account' ? entry.actorLabel : firstName(entry.actorLabel), label: null }
   }
 
   let newestBusiness: { item: MessageItem; entry: GuestThreadEntryViewModel } | null = null
   for (const entry of raw.entries) {
-    if (entry.kind === 'submission') {
-      // A contact form's words open its conversation: what the guest wrote, then
-      // their answers. A reservation, booking or stay opens with real messages
-      // written with it (opening.ts), so its submission draws nothing.
-      if (raw.submissionType !== 'contact') continue
+    if (entry.eventName === SUBMISSION_EVENT) {
+      // A contact form's words open its conversation: what the guest wrote, then their answers.
       const answers = raw.source.fields.answers.map(answer => `${answer.label} ${formatFormAnswer(answer, { yes: 'Yes', no: 'No' })}`)
-      const words = [text(raw.source.fields.message), ...answers].filter(Boolean).join('\n\n') || null
+      const words = [text(entry.body), ...answers].filter(Boolean).join('\n\n') || null
       if (words) message(entry, words, { side: 'guest', author: viewer.audience === 'buyer' ? 'You' : facts.guestName, label: null, photos: [], translated: null })
       continue
     }
     if (entry.kind === 'message') {
       // A message with no words, photo or file (an Airbnb host action Channex records that way) says nothing.
       if (!text(entry.body) && !entry.attachments.length && !unshownFiles(entry)) continue
-      const photos = entry.attachments.map(photo => ({ id: photo.id, url: photo.url, thumbnailUrl: photo.thumbnailUrl, width: photo.width, height: photo.height }))
+      const photos = entry.attachments.map(photo => ({ id: photo.id, url: photo.url, thumbnail_url: photo.thumbnailUrl, width: photo.width, height: photo.height }))
       if (entry.actorKind === 'guest') {
         const translation = text(meta(entry)?.translated_message)
         const translated = translation !== null && translation !== text(entry.body)
@@ -251,11 +249,11 @@ function stream(facts: ThreadFacts, viewer: Viewer, now: Date, canReply: boolean
         continue
       }
       // The booking's own message states what the guest asked for, on their side of the conversation.
-      if (entry.actorKind === 'system' && entry.eventName === OPENING_EVENT) {
+      if (entry.eventName === OPENING_EVENT) {
         message(entry, entry.body, { side: 'guest', author: viewer.audience === 'buyer' ? 'You' : facts.guestName, label: null, photos, translated: null })
         continue
       }
-      if (entry.actorKind === 'system' && entry.eventName === 'channel.message_mirrored') {
+      if (entry.actorKind === 'krabiclaw' && entry.eventName === MIRRORED_EVENT) {
         message(entry, entry.body, { side: 'guest', author: text(meta(entry)?.name) ?? 'Airbnb Support', label: null, photos, translated: null })
         continue
       }
@@ -266,14 +264,13 @@ function stream(facts: ThreadFacts, viewer: Viewer, now: Date, canReply: boolean
     if (entry.bookingChange) {
       const sentAt = entry.occurredAt
       place(sentAt, entry.id)
-      items.push({ type: 'change', id: entry.id, sentAt, change: entry.bookingChange })
+      items.push({ type: 'change', id: entry.id, sent_at: sentAt, change: entry.bookingChange })
       previous = null
       continue
     }
     const sentence = eventSentence(entry, facts, viewer)
-    if (sentence === null) continue
     place(entry.occurredAt, entry.id)
-    items.push({ type: 'event', id: entry.id, text: sentence, sentAt: entry.occurredAt })
+    items.push({ type: 'event', id: entry.id, text: sentence, sent_at: entry.occurredAt })
     previous = null
   }
   if (newestBusiness && viewer.audience === 'member') {
@@ -281,29 +278,25 @@ function stream(facts: ThreadFacts, viewer: Viewer, now: Date, canReply: boolean
     item.receipt = receipt(entry, facts.guestName)
     // A team member's text reply that did not arrive can be sent again under its own key, where the reply
     // operation can still send (`guestReplyDestination`); an automatic or photo reply cannot.
-    item.retryable = canReply && item.receipt === 'Not delivered' && entry.eventName === 'thread.member_reply' && !item.photos.length && Boolean(text(item.body))
+    item.retryable = canReply && item.receipt === 'Not delivered' && entry.eventName === MEMBER_REPLY_EVENT && !item.photos.length && Boolean(text(item.body))
   }
   return items
 }
 
-/** The thread's messages still to go out: its automatic messages, and the viewer's own send-later messages. */
-async function pendingMessages(db: DbClient, threadId: string, organizationId: string, principal: MemberAccessPrincipal, timeZone: string, now: string): Promise<InboxPendingMessage[]> {
-  const access = await stayAccessFor(principal)
-  const [automatic, later] = await Promise.all([
-    access.manage ? queryAll<{ id: string; template_title: string; body: string; due_at: string; timezone: string }>(db, `
-      SELECT id, template_title, body, due_at, timezone FROM scheduled_guest_messages
-       WHERE organization_id = ? AND request_id = ? AND status = 'pending' AND due_at IS NOT NULL ORDER BY due_at, id`, [organizationId, threadId]) : [],
-    listSendLaterMessages(db, principal, threadId, now),
-  ])
-  return [
-    ...automatic.map(row => ({ id: row.id, source: 'automatic' as const, label: row.template_title, sendAt: row.due_at, time: sendTime(row.due_at, row.timezone), body: row.body, cancellable: true })),
-    ...later.filter(row => row.status === 'pending' || row.status === 'sending')
-      .map(row => ({ id: row.id, source: 'later' as const, label: row.body, sendAt: row.sendAt, time: sendTime(row.sendAt, timeZone), body: row.body, cancellable: row.status === 'pending' })),
-  ].sort((a, b) => a.sendAt.localeCompare(b.sendAt))
+/** The thread's messages still to go out: its automatic messages for managers, and the viewer's own send-later replies. */
+async function pendingMessages(db: DbClient, threadId: string, organizationId: string, principal: MemberAccessPrincipal, timeZone: string): Promise<InboxPendingMessage[]> {
+  const visible = visibleScheduledMessagesSql('m', await stayAccessFor(principal))
+  const rows = await queryAll<{ id: string; author_user_id: string | null; template_title: string | null; body: string; due_at: string; timezone: string | null; status: string }>(db, `
+    SELECT m.id, m.author_user_id, m.template_title, m.body, m.due_at, m.timezone, m.status FROM scheduled_guest_messages m
+     WHERE m.organization_id = ? AND ${SCHEDULED_MESSAGE_CONVERSATION_SQL} = ? AND ${visible.query} AND m.due_at IS NOT NULL
+       AND (m.status = 'pending' OR (m.status = 'sending' AND m.author_user_id IS NOT NULL)) ORDER BY m.due_at, m.id`, [organizationId, threadId, ...visible.params])
+  return rows.map(row => row.author_user_id === null
+    ? { id: row.id, source: 'automatic' as const, label: row.template_title!, due_at: row.due_at, time: sendTime(row.due_at, row.timezone!), body: row.body, cancellable: true }
+    : { id: row.id, source: 'later' as const, label: row.body, due_at: row.due_at, time: sendTime(row.due_at, timeZone), body: row.body, cancellable: row.status === 'pending' })
 }
 
 async function rawThread(db: DbClient, threadId: string, organizationId: string, viewer: Viewer): Promise<GuestThreadDetailViewModel | null> {
-  return viewer.audience === 'buyer' ? getGuestThreadDetail(db, threadId, organizationId, { buyerUserId: viewer.userId }) : getGuestThreadDetail(db, threadId, organizationId)
+  return getGuestThreadDetail(db, threadId, organizationId, viewer.audience === 'buyer' ? { buyerUserId: viewer.userId } : { memberUserId: viewer.userId })
 }
 
 /** The conversation's view model, or null when the viewer has no such conversation. */
@@ -311,24 +304,27 @@ export async function getInboxThread(db: DbClient, threadId: string, organizatio
   const raw = await rawThread(db, threadId, organizationId, viewer)
   if (!raw) return null
   const facts = await threadFacts(db, raw, organizationId, now)
-  const replyComposer = await composer(db, raw.id, organizationId, viewer, facts.channel)
+  const [replyComposer, pending] = await Promise.all([
+    composer(db, raw.id, organizationId, viewer, facts.channel),
+    viewer.audience === 'member' ? pendingMessages(db, raw.id, organizationId, viewer.principal, facts.timeZone) : [],
+  ])
   const items = stream(facts, viewer, now, replyComposer.available)
   const record = raw.operationalRecord
   return {
     id: raw.id,
     kind: facts.kind,
-    guestName: viewer.audience === 'buyer' ? raw.organizationName ?? facts.guestName : facts.guestName,
-    avatarInitial: initial(viewer.audience === 'buyer' ? raw.organizationName ?? facts.guestName : facts.guestName),
+    title: viewer.audience === 'buyer' ? raw.organizationName ?? facts.guestName : facts.guestName,
+    avatar_initial: initial(viewer.audience === 'buyer' ? raw.organizationName ?? facts.guestName : facts.guestName),
     channel: facts.channel,
     home: facts.home,
     when: facts.when,
     translated: items.some(item => item.type === 'message' && item.translated !== null),
-    recordId: record ? record.kind === 'stay' ? record.id : raw.id : null,
-    recordKind: record?.kind ?? null,
-    recordTitle: record ? record.kind === 'stay' ? 'Reservation' : threadRecordTitle(record.kind, raw.organizationVertical) : null,
-    activityPath: raw.activityPath,
+    booking_id: record?.id ?? null,
+    record_kind: record ? record.unit === 'nights' ? 'stay' : 'booking' : null,
+    record_title: record ? recordTitle(record, raw.organizationVertical) : null,
+    activity_path: raw.activityPath,
     stream: items,
-    pending: viewer.audience === 'member' ? await pendingMessages(db, raw.id, organizationId, viewer.principal, facts.timeZone, now.toISOString()) : [],
+    pending,
     composer: replyComposer,
   }
 }
@@ -359,12 +355,13 @@ export async function getInboxThreadDetails(db: DbClient, threadId: string, orga
     SELECT m.userId AS user_id, u.name, m.role FROM member m JOIN user u ON u.id = m.userId
      WHERE m.organizationId = ? AND (m.role = 'owner'
        OR m.userId IN (SELECT value FROM json_each(?))
-       OR m.id = (SELECT c.assigned_member_id FROM stays s JOIN product_stay_configs c ON c.organization_id = s.organization_id AND c.product_id = s.product_id WHERE s.request_id = ?))
+       OR m.id = (SELECT c.assigned_member_id FROM conversations conversation JOIN bookings b ON b.id = conversation.booking_id AND b.organization_id = conversation.organization_id
+         JOIN product_booking_configs c ON c.organization_id = b.organization_id AND c.product_id = b.product_id WHERE conversation.id = ?))
      ORDER BY m.role = 'owner' DESC, m.createdAt, m.id`,
   [organizationId, d1JsonStringSet(raw.entries.flatMap(entry => entry.actorKind === 'member' && entry.actorUserId ? [entry.actorUserId] : [])), raw.id])
   const photos = raw.entries.filter(entry => entry.kind === 'message')
-    .flatMap(entry => entry.attachments.map(photo => ({ id: photo.id, url: photo.url, thumbnailUrl: photo.thumbnailUrl, width: photo.width, height: photo.height, sentAt: entrySentAt(entry) })))
-    .sort((a, b) => b.sentAt.localeCompare(a.sentAt))
+    .flatMap(entry => entry.attachments.map(photo => ({ id: photo.id, url: photo.url, thumbnail_url: photo.thumbnailUrl, width: photo.width, height: photo.height, sent_at: entrySentAt(entry) })))
+    .sort((a, b) => b.sent_at.localeCompare(a.sent_at))
   const support = facts.kind === 'support'
   return {
     participants: [
@@ -373,7 +370,7 @@ export async function getInboxThreadDetails(db: DbClient, threadId: string, orga
     ],
     photos,
     actions: {
-      showReservation: raw.operationalRecord !== null,
+      show_reservation: raw.operationalRecord !== null,
       archive: raw.canArchive,
       unarchive: raw.canUnarchive,
       report: !support,

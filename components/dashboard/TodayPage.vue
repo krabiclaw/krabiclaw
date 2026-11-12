@@ -32,7 +32,16 @@
 
       <!-- The business's stored tasks and opportunities. -->
       <template v-else-if="business">
-        <UAlert v-if="business.opportunityIssues.length" class="mb-6" color="warning" variant="soft" title="Some performance data could not be loaded" :description="business.opportunityIssues.join(' ')" />
+        <UAlert v-if="business.opportunity_issues.length" class="mb-6" color="warning" variant="soft" title="Some performance data could not be loaded" :description="business.opportunity_issues.join(' ')" />
+        <!-- Airbnb's reservations: one card per booking, its suggestion at the foot. -->
+        <template v-if="business.reservations.cards.length">
+          <h2 class="wtitle" data-testid="today-reservations-title">{{ business.reservations.title }}</h2>
+          <ul class="wgrid" role="list" data-testid="today-reservations">
+            <li v-for="card in business.reservations.cards" :key="card.id">
+              <TaskCard :booking="card" :busy="card.suggestion ? opportunityBusy[card.suggestion.id] !== undefined : false" @dismiss="card.suggestion && dismiss(card.suggestion)" />
+            </li>
+          </ul>
+        </template>
         <!-- Open work, then Opportunities full width, then Done (or Upcoming's days). -->
         <template v-for="part in parts" :key="part.key">
           <template v-if="part.section">
@@ -51,34 +60,7 @@
             </ul>
           </template>
         </template>
-        <p v-if="!business.tasks.length && !business.opportunities.length && !pending" class="text-sm text-muted" data-testid="today-empty">{{ range === 'today' ? 'Nothing to do today' : 'Nothing planned yet' }}</p>
-
-        <details v-if="canManage && range === 'today'" class="mt-8" role="group" aria-label="Your priority" data-testid="today-priorities">
-          <summary class="cursor-pointer text-sm font-medium">Business goals</summary>
-          <ul v-if="goals.length" class="mb-4 space-y-2">
-            <li v-for="goal in goals" :key="goal.id" class="flex items-start justify-between gap-3 rounded-lg bg-elevated/50 px-3 py-2" data-testid="today-priority">
-              <div class="min-w-0 text-sm">
-                <span class="text-highlighted">{{ goal.intent }}</span>
-                <p v-if="goal.strategy" class="mt-1 text-muted">{{ strategyDescription(goal.strategy) }}</p>
-              </div>
-              <UButton size="xs" color="neutral" variant="ghost" icon="i-lucide-x" :aria-label="`Remove priority: ${goal.intent}`" :loading="goalBusy === goal.id" :disabled="goalBusy !== null" @click="removeGoal(goal)" />
-            </li>
-          </ul>
-          <form class="space-y-3" @submit.prevent="addGoal">
-            <div class="flex gap-2">
-              <UInput v-model="goalDraft" class="flex-1" :maxlength="2000" required placeholder="What should the business focus on now?" aria-label="New priority" />
-              <UButton type="submit" color="neutral" variant="soft" label="Add" :loading="goalBusy === 'new'" :disabled="goalBusy !== null || !goalDraft.trim()" />
-            </div>
-            <details>
-              <summary class="cursor-pointer text-sm text-muted">Choose related work (optional)</summary>
-              <div class="mt-3 flex flex-wrap gap-x-5 gap-y-3">
-                <UCheckbox v-for="channel in strategyChannels" :key="channel.value" :model-value="goalChannels.includes(channel.value)" :label="channel.label" @update:model-value="toggleChannel(channel.value, $event === true)" />
-                <UCheckbox v-model="goalPayments" label="Accept payments" />
-                <UCheckbox v-model="goalAvailability" label="Booking availability" />
-              </div>
-            </details>
-          </form>
-        </details>
+        <p v-if="!business.tasks.length && !business.opportunities.length && !business.reservations.cards.length && !pending" class="text-sm text-muted" data-testid="today-empty">{{ range === 'today' ? 'Nothing to do today' : 'Nothing planned yet' }}</p>
       </template>
 
       <div v-if="pending && !loadError" class="flex min-h-24 items-center justify-center" aria-live="polite">
@@ -97,11 +79,10 @@ import TaskCard from './TaskCard.vue'
 import TodayTaskSheet from './TodayTaskSheet.vue'
 import TodayTaskCreate from './TodayTaskCreate.vue'
 import { getErrorMessage } from '~/utils/errors'
-import { agendaToTodayCard, todayFeedSchema, type TodayCard, type TodayFeedPayload } from '~/shared/dashboard-today'
+import { agendaToTodayCard, todayFeedSchema, type TodayCard, type TodayFeedPayload, type TodayReservation } from '~/shared/dashboard-today'
 import type { AgendaPayload } from '~/server/utils/dashboard-agenda'
 import type { TaskKind, TaskPerson, TaskSection, TaskView } from '~/server/domain/tasks'
 import type { OpportunityView } from '~/server/domain/opportunities'
-import type { BusinessGoal, BusinessGoalStrategy } from '~/shared/business-progress'
 import { authClient } from '~/lib/auth-client'
 import type { organizationRoles } from '~/utils/organization-access'
 import { addLocalDays, localDateAt } from '~/utils/timezone'
@@ -110,13 +91,13 @@ useSeoMeta({ title: 'Today | KrabiClaw', robots: 'noindex, nofollow' })
 
 const props = defineProps<{ personalScope?: boolean }>()
 type Range = 'today' | 'upcoming'
-interface BusinessToday { tasks: TaskSection[]; opportunities: OpportunityView[]; opportunityIssues: string[]; assignees: TaskPerson[]; resolvedAt: string }
+interface BusinessToday { reservations: { title: string | null; cards: TodayReservation[] }; tasks: TaskSection[]; opportunities: OpportunityView[]; opportunity_issues: string[]; assignees: TaskPerson[]; resolved_at: string }
 const ranges: Array<{ label: string; value: Range }> = [{ label: 'Today', value: 'today' }, { label: 'Upcoming', value: 'upcoming' }]
 
 const route = useRoute()
 const router = useRouter()
 const realtime = useDashboardInvalidations()
-const orgSlug = computed(() => props.personalScope ? 'account' : String(route.params.orgSlug ?? ''))
+const orgSlug = computed(() => props.personalScope ? 'account' : String(route.params.org_slug ?? ''))
 const organizationId = props.personalScope ? null : useDashboardOrganizationId()
 const dashboardApi = props.personalScope ? applicationFetch : useDashboardApi()
 const { organization, hasFeature } = useDashboardOrganization()
@@ -125,7 +106,6 @@ const roleAllows = (permissions: Parameters<typeof authClient.organization.check
   return Boolean(role && authClient.organization.checkRolePermission({ role, permissions }))
 }
 const canAddStay = computed(() => !props.personalScope && hasFeature('stays') && roleAllows({ operations: ['update'] }))
-const canManage = computed(() => !props.personalScope && roleAllows({ task: ['assign'] }))
 const canCreate = computed(() => !props.personalScope && roleAllows({ task: ['create'] }))
 const createOpen = ref(false)
 const addStayPath = computed(() => `/dashboard/${encodeURIComponent(orgSlug.value)}/bookings/stay/new`)
@@ -167,7 +147,7 @@ function onRangeKeydown(event: KeyboardEvent) {
   ;(event.currentTarget as HTMLElement).parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[index]?.focus()
 }
 
-const isBusinessToday = (value: unknown): value is BusinessToday => isRecord(value) && Array.isArray(value.tasks) && Array.isArray(value.opportunities) && Array.isArray(value.assignees) && typeof value.resolvedAt === 'string'
+const isBusinessToday = (value: unknown): value is BusinessToday => isRecord(value) && isRecord(value.reservations) && Array.isArray(value.reservations.cards) && Array.isArray(value.tasks) && Array.isArray(value.opportunities) && Array.isArray(value.assignees) && typeof value.resolved_at === 'string'
 const isFeed = (value: unknown): value is TodayFeedPayload => todayFeedSchema.safeParse(value).success
 const isAgenda = (value: unknown): value is AgendaPayload => isRecord(value) && Array.isArray(value.items)
 
@@ -180,8 +160,8 @@ const { data, pending, error: loadError, refresh } = await useAsyncData(
     const now = new Date()
     // From yesterday's UTC date, so every zone's tomorrow is inside; each visit is then compared in its own zone.
     const from = addLocalDays(now.toISOString().slice(0, 10), -1)
-    const agenda = await applicationFetch<AgendaPayload>('/api/account/agenda', { query: { from, to: addLocalDays(from, 364), kinds: 'reservation,booking,stay' }, validate: isAgenda })
-    return { business: null, visits: agenda.items.filter(item => item.dayKey > localDateAt(now, item.timeZone)).map(item => agendaToTodayCard(item, { resolvedAt: now.toISOString() })) }
+    const agenda = await applicationFetch<AgendaPayload>('/api/account/agenda', { query: { from, to: addLocalDays(from, 364), kinds: 'booking,stay' }, validate: isAgenda })
+    return { business: null, visits: agenda.items.filter(item => item.day_key > localDateAt(now, item.timezone)).map(item => agendaToTodayCard(item, { resolved_at: now.toISOString() })) }
   },
 )
 const business = computed(() => data.value?.business ?? null)
@@ -237,65 +217,9 @@ const skip = (task: TaskView) => act(taskBusy, task.id, 'skip', () => applicatio
 const isOpportunityResult = (value: unknown): value is { opportunity: { id: string } } => isRecord(value) && isRecord(value.opportunity) && typeof value.opportunity.id === 'string'
 const dismiss = (opportunity: OpportunityView) => act(opportunityBusy, opportunity.id, 'later', () => applicationFetch(`${tasksApi.value}/opportunities/${encodeURIComponent(opportunity.id)}/dismiss`, { method: 'POST', validate: isOpportunityResult, body: {} }))
 
-// Business goals steer which opportunities the selector finds.
-const isProgress = (value: unknown): value is { goals: BusinessGoal[] } => isRecord(value) && Array.isArray(value.goals)
-const { data: progress, refresh: refreshGoals } = await useAsyncData(() => `today-goals-${orgSlug.value}`,
-  async () => canManage.value ? (await applicationFetch<{ goals: BusinessGoal[] }>(`${tasksApi.value}/progress`, { query: { limit: 1 }, validate: isProgress })).goals : [],
-  { watch: [canManage] })
-const goals = computed(() => (progress.value ?? []).filter(goal => goal.status === 'active'))
-const goalDraft = ref('')
-const strategyChannels: Array<{ value: BusinessGoalStrategy['channels'][number]; label: string }> = [
-  { value: 'blog', label: 'Blog articles' }, { value: 'social', label: 'Social posts' }, { value: 'google_ads', label: 'Google Ads' },
-]
-const goalChannels = ref<BusinessGoalStrategy['channels']>([])
-const goalPayments = ref(false)
-const goalAvailability = ref(false)
-const goalBusy = ref<string | null>(null)
-const goalRequest = ref<{ signature: string; idempotencyKey: string } | null>(null)
-const isSavedGoal = (value: unknown): value is { goal: BusinessGoal } => isRecord(value) && isRecord(value.goal) && typeof value.goal.id === 'string'
-async function changeGoals(busy: string, request: () => Promise<unknown>): Promise<boolean> {
-  goalBusy.value = busy
-  actionError.value = null
-  try {
-    await request()
-  } catch (cause) {
-    actionError.value = cause
-    return false
-  } finally {
-    goalBusy.value = null
-  }
-  await Promise.all([refreshGoals(), refresh()])
-  return true
-}
-async function addGoal() {
-  const intent = goalDraft.value.trim()
-  if (!intent) return
-  const strategy: BusinessGoalStrategy | null = goalChannels.value.length || goalPayments.value || goalAvailability.value
-    ? { channels: [...goalChannels.value], payments: goalPayments.value, availability: goalAvailability.value } : null
-  const signature = JSON.stringify({ intent, strategy })
-  if (goalRequest.value?.signature !== signature) goalRequest.value = { signature, idempotencyKey: crypto.randomUUID() }
-  if (await changeGoals('new', () => applicationFetch(`${tasksApi.value}/goals`, { method: 'POST', validate: isSavedGoal, body: { idempotencyKey: goalRequest.value!.idempotencyKey, intent, strategy } }))) {
-    goalRequest.value = null
-    goalDraft.value = ''
-    goalChannels.value = []
-    goalPayments.value = false
-    goalAvailability.value = false
-  }
-}
-function toggleChannel(channel: BusinessGoalStrategy['channels'][number], selected: boolean) {
-  goalChannels.value = selected ? [...new Set([...goalChannels.value, channel])] : goalChannels.value.filter(value => value !== channel)
-}
-function strategyDescription(strategy: BusinessGoalStrategy): string {
-  return [...strategyChannels.filter(channel => strategy.channels.includes(channel.value)).map(channel => channel.label),
-    ...(strategy.payments ? ['Accept payments'] : []), ...(strategy.availability ? ['Booking availability'] : [])].join(' · ')
-}
-async function removeGoal(goal: BusinessGoal) {
-  await changeGoals(goal.id, () => applicationFetch(`${tasksApi.value}/goals/${encodeURIComponent(goal.id)}`, { method: 'PATCH', validate: isSavedGoal, body: { revision: goal.revision, status: 'archived' } }))
-}
-
 watch(realtime.event, (event) => {
   if (!event) return
-  if (['business.changed', 'stay.changed', 'access.changed', 'thread.created', 'thread.changed', 'entry.appended', 'delivery.changed'].includes(event.type)) void refresh()
+  if (['business.changed', 'stay.changed', 'access.changed', 'MESSAGE_CREATE', 'MESSAGE_UPDATE'].includes(event.type)) void refresh()
 })
 watch(realtime.connectionEpoch, epoch => { if (epoch > 0) void refresh() })
 function resume() { if (document.visibilityState === 'visible') void refresh() }
@@ -318,6 +242,7 @@ onBeforeUnmount(() => {
 .tog button { min-height: 46px; padding: 0 clamp(12px, 5vw, 24px); border-radius: 999px; background: var(--ui-bg-elevated); color: var(--ui-text-highlighted); font-size: 15px; font-weight: 600; }
 .tog button[aria-selected="true"] { background: var(--ui-bg-inverted); color: var(--ui-text-inverted); box-shadow: 0 3px 8px rgb(0 0 0 / 14%); }
 .tog button:focus-visible { outline: 2px solid var(--ui-text-highlighted); outline-offset: 2px; }
+.wtitle { margin: 8px 0 24px; text-align: center; font-size: 28px; line-height: 34px; font-weight: 700; letter-spacing: -.02em; color: var(--ui-text-highlighted); text-wrap: balance; }
 .wh2 { margin: 28px 2px 16px; font-size: 22px; line-height: 28px; font-weight: 700; letter-spacing: -.02em; color: var(--ui-text-highlighted); }
 .wh2 small { margin-left: 8px; font-size: 15px; line-height: 20px; font-weight: 400; letter-spacing: 0; color: var(--ui-text-muted); }
 .wgrid { display: grid; gap: 20px; }

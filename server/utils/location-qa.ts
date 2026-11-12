@@ -52,7 +52,7 @@ export interface QaDocument {
   updated_at: string
 }
 
-function normalizePagePath(pagePath: string | null | undefined) {
+export function normalizePagePath(pagePath: string | null | undefined) {
   if (!pagePath) return null
   const normalized = `/${pagePath.trim().replace(/^\/+|\/+$/g, '')}`
   return normalized === '/' ? '/' : normalized
@@ -168,7 +168,9 @@ export async function attachPageQa<T extends { type: string; data: Record<string
     [source, faqItems(await listFaqBlockQa(db, organizationId, pagePath, source, locale))] as const)))
   return blocks.map((block) => {
     const source = faqBlockSource(block)
-    return source ? { ...block, data: { ...block.data, items: itemsBySource.get(source) } } : block
+    if (!source) return block
+    if (source === 'page_qa' && Array.isArray(block.data.items) && block.data.items.length) return block
+    return { ...block, data: { ...block.data, items: itemsBySource.get(source) } }
   })
 }
 

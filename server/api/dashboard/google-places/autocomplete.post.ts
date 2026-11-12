@@ -16,11 +16,11 @@ export default defineHandler(async (event) => {
   const session = await getAuthSession(event, env)
   if (!session?.user?.id) return jsonResponse({ error: 'Authentication required' }, { status: 401 })
 
-  const body = await readBody(event) as { input?: unknown; sessionToken?: unknown } | undefined
+  const body = await readBody(event) as { input?: unknown; session_token?: unknown } | undefined
   const input = typeof body?.input === 'string' ? body.input : ''
   if (input.trim().length < 3) return jsonResponse({ error: 'input must be at least 3 characters' }, { status: 400 })
   if (input.length > 200) return jsonResponse({ error: 'input must be at most 200 characters' }, { status: 400 })
-  if (!isPlacesSessionToken(body?.sessionToken)) return jsonResponse({ error: 'sessionToken must be a UUID' }, { status: 400 })
+  if (!isPlacesSessionToken(body?.session_token)) return jsonResponse({ error: 'session_token must be a UUID' }, { status: 400 })
 
   const apiKey = env.GOOGLE_PLACES_API_KEY as string | undefined
   if (!apiKey) return jsonResponse({ error: 'Google Places API key not configured' }, { status: 503 })
@@ -31,7 +31,7 @@ export default defineHandler(async (event) => {
   }
 
   try {
-    return jsonResponse({ suggestions: await autocompletePlaces(apiKey, input.trim(), body.sessionToken) })
+    return jsonResponse({ suggestions: await autocompletePlaces(apiKey, input.trim(), body.session_token) })
   } catch (error) {
     return jsonResponse({ error: error instanceof Error ? error.message : 'Google Maps search failed' }, { status: 502 })
   }

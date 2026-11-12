@@ -139,8 +139,14 @@ on each deployed database.
 
 SQLite cannot alter a CHECK constraint in place. When a constraint on a table
 referenced by other tables must change, Drizzle generates a table rebuild whose
-`DROP TABLE` can cascade-delete D1 child rows. That case alone uses a replacement
-database. Name the constraint and affected references in the pull request. A
+`DROP TABLE` can cascade-delete D1 child rows. That case uses a replacement
+database, unless every table that references the parent is itself rebuilt and
+dropped first, so the parent is unreferenced when it is dropped and no
+foreign-key action can run; `yarn lint:migrations` replays the chain and refuses
+any other order. `0003_messages_by_booked_record.sql` is that case: it
+holds `scheduled_guest_messages` rows in a plain table, drops it, rebuilds
+`message_templates`, then recreates the child and restores its rows. Name the
+constraint and affected references in the pull request. A
 replacement gets a new generated baseline and a fresh D1 migration ledger; move
 the prior SQL and metadata intact to `migrations-history/<version>/`. Never edit
 an already deployed migration and ask D1 to replay it under the same filename.
@@ -926,3 +932,58 @@ node --experimental-strip-types scripts/pull-production-snapshot.ts --production
 
 Read back schema drift, the native baseline ledger, `PRAGMA foreign_key_check`
 and a representative booking journey before retiring either v25 database.
+
+## v27 booking and conversation replacement
+
+The v26 baseline and its four forward migrations are archived under
+`migrations-history/v26/`. The v27 baseline is generated from
+`server/db/schema.ts`. The snapshot command applies any remaining v26
+migrations to its private copy, then moves the records through
+`scripts/database-transfers/v26-to-v27.sql`. The new D1 applies the v27
+baseline through its native migration ledger.
+
+The transfer materializes table seatings through each location's opening and
+special hours. Check future seatings before loading the replacement. The staging
+Worker has no session-materialization cron, and the production cron runs hourly.
+A late reservation from v26 keeps the same seating ID in the final delta.
+
+The 2026-11-11 staging preflight preserved 116,742 rows across 98 tables.
+The transfer folded four groups of duplicate provider sessions after checking
+their scope, times, capacity and state. It kept the IDs of their bookings.
+The archived production rehearsal resolved one table change proposal using
+its original duration and the booked location's clock. Both rehearsals passed
+the transfer's ownership, foreign-key and payload replay checks.
+
+Cloudflare reported WNAM for the new staging database,
+`krabiclaw-staging-v27` (`8acf5e8f-e55f-46a3-87e3-f7967f25c4c2`). The
+snapshot source is the staging environment's own `krabiclaw-staging-v26`.
+The verified seated load held 119,475 rows across 98 tables. The remote
+readback found 12 tenants, 76 bookings, 111 conversations, 170 messages,
+2,669 future table seatings, one native baseline ledger entry and zero foreign-key violations. Private
+export, payload and verification manifests live under
+`~/krabiclaw-db-replacements/v27/`.
+
+After the staging deploy and the old writers finish, run the verified final
+delta against the initial target:
+
+```sh
+node --experimental-strip-types scripts/pull-production-snapshot.ts --staging --source krabiclaw-staging-v26 --out ~/krabiclaw-db-replacements/v27/staging-v27-seated-final.sqlite --delta-from ~/krabiclaw-db-replacements/v27/staging-v27-seated-loaded.sqlite
+```
+
+Review every changed or deleted row reported by the delta. Verify the active
+binding, baseline and foreign keys, then exercise table, class, consultation
+and stay booking through the guest site and read back the assigned member's
+tasks and conversations through staging MCP.
+
+Production uses its own replacement, `krabiclaw-production-v27`
+(`e2e1b8cf-9246-4cfa-bced-548f1ffca0c4`). Cloudflare reported WNAM before
+it was bound. The read-only November 12 rehearsal transferred 239,208 rows
+across 98 tables with zero foreign-key violations. Load the unbound replacement
+and take its final delta from `krabiclaw-production-v26`. Keep the old
+databases available through verification and rollback.
+
+On November 12 the owner approved deploying v27 before iOS App Review.
+The published iOS 1.5 build 35 uses the previous API. iOS 1.6 build 37
+points at production and Apple needs the new API to test the demo workspace.
+After the v27 deployment, verify the production demo sign-in, Today, Messages
+and a stay before submitting build 37. Use manual release after Apple approval.

@@ -66,11 +66,8 @@ export async function seedNewOrganization(
     ['home', { path: '/', title: pageTitle('home'), pageType: 'system', recipe: 'home' }],
     ['about', { path: '/about', title: pageTitle('about'), pageType: 'system', recipe: 'about' }],
     ['contact', { path: '/contact', title: pageTitle('contact'), pageType: 'system', recipe: 'contact' }],
-    // There is no '/locations/main' page. A location detail route renders the
-    // business_locations row and its datasets: usePublicPageRequest gives it the
-    // page key 'location', canonicalTenantPagePath() has no entry for that, and
-    // ROUTE_PAGE_PATHS has no 'locations' recipe. The page document this used to
-    // create was never read by anything.
+    ['qa', { path: '/qa', title: pageTitle('qa'), pageType: 'recipe', recipe: 'qa' }],
+    ['reviews', { path: '/reviews', title: pageTitle('reviews'), pageType: 'recipe', recipe: 'reviews' }],
   ]);
   if (vertical === 'service') {
     for (const [page, path, title, pageType] of [
@@ -86,7 +83,7 @@ export async function seedNewOrganization(
       locale: string
       path: string
       title: string
-      pageType: 'system' | 'recipe' | 'legal'
+      page_type: 'system' | 'recipe' | 'legal'
       recipe: string
       blocks: Array<{ id: string; type: string; position: number; data: Record<string, unknown> }>
     }
@@ -107,7 +104,21 @@ export async function seedNewOrganization(
         },
       },
     ];
-    if (vertical === 'service' && definition.path === '/contact') {
+    if (definition.path === '/qa') {
+      blocks.push({
+        id: uid('block'),
+        type: 'faq',
+        position: 1,
+        data: { title: 'Q&A', source: 'organization_qa' },
+      });
+    } else if (definition.path === '/reviews') {
+      blocks.push({
+        id: uid('block'),
+        type: 'testimonial_grid',
+        position: 1,
+        data: { title: 'Reviews' },
+      });
+    } else if (vertical === 'service' && definition.path === '/contact') {
       const copy = getVerticalCopy(vertical, source.locale)
       blocks.push({
         id: uid('block'), type: 'location_grid', position: 1,
@@ -115,10 +126,10 @@ export async function seedNewOrganization(
       }, { id: uid('block'), type: 'contact_form', position: 2, data: {} })
     }
     pagesToCreate.push({
-      trustedSystemPage: definition.pageType === 'system',
+      trustedSystemPage: definition.pageType === 'system' || definition.pageType === 'recipe',
       data: {
         locale: source.locale, path: definition.path, title: definition.title,
-        pageType: definition.pageType, recipe: definition.recipe, blocks,
+        page_type: definition.pageType, recipe: definition.recipe, blocks,
       },
     })
   }

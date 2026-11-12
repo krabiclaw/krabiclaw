@@ -13,6 +13,6 @@ export default defineHandler(async (event) => {
   const { env, db, organization } = await getDashboardMemberContext(event, {})
   const query = getQuery(event)
   const payload = await listAgenda(db, { organizationId: organization.id }, {
-    ...parseAgendaQuery(query), assignedMemberId:stringQuery(query.assigned_member_id), organizationId: stringQuery(query.organizationId), locationId: stringQuery(query.locationId), organizationSlug: organization.slug, principal: { env, membership: organization }, })
+    ...parseAgendaQuery(query), assignedMemberId:stringQuery(query.assigned_member_id), organizationId: stringQuery(query.organization_id), locationId: stringQuery(query.location_id), organizationSlug: organization.slug, principal: { env, membership: organization }, })
   return jsonResponse(finalizeRequestMetrics(event, 'dashboard-agenda', payload))
 })

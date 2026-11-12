@@ -46,12 +46,12 @@ import { getErrorMessage, isNotFoundError } from '~/utils/errors'
 // One post. Rendered by `blog.vue`, which owns the frame — this level draws its
 // own panel and navbar because it is the outermost level on screen.
 const route = useRoute()
-const orgSlug = route.params.orgSlug as string
+const orgSlug = route.params.org_slug as string
 const organizationId = useDashboardOrganizationId()
-const postId = String(route.params.postId || '')
+const postId = String(route.params.post_id || '')
 if (!postId) throw createError({ statusCode: 400, statusMessage: 'Post ID is required' })
 
-const organizationLocalizationSettingsPath = `/dashboard/${orgSlug}/website/localization`
+const organizationLocalizationSettingsPath = `/dashboard/${orgSlug}/website/preferences/localization`
 const level = useRouteLevel()
 const isNew = postId === 'new'
 const repository = tenantBlogRepository({ organizationId, orgSlug })
@@ -181,7 +181,7 @@ async function saveBlogLocalization(locale: string, submitted: Record<string, un
       body: {
         values,
         content_blocks: blocks,
-        ...(state.documentUpdatedAt ? { expected_updated_at: state.documentUpdatedAt } : {}),
+        ...(state.documentUpdatedAt ? { updated_at: state.documentUpdatedAt } : {}),
       },
       validate: isBlogTranslationResponse,
     },

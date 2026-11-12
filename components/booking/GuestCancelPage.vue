@@ -17,18 +17,19 @@
               <TenantIcon name="calendar-days" class="size-10" />
             </div>
           </div>
-          <h2 class="tenant-display tenant-italic text-3xl">{{ copy('cancel_visit') }}</h2>
+          <h2 v-if="!cancellationClosed" class="tenant-display tenant-italic text-3xl">{{ copy('cancel_visit') }}</h2>
           <div class="mt-6 space-y-2 border-y border-default py-6 text-sm">
-            <p><strong>{{ copy(kind === 'booking' ? 'booking_for' : 'reservation_for') }}</strong> {{ booking.name }}</p>
+            <p><strong>{{ copy(isTable ? 'reservation_for' : 'booking_for') }}</strong> {{ booking.name }}</p>
             <p v-if="booking.product_name"><strong>{{ booking.product_name }}</strong></p>
             <p><strong>{{ copy('date') }}</strong> {{ readableDate }}</p>
             <p><strong>{{ copy('time') }}</strong> {{ readableTime }}</p>
             <p><strong>{{ copy('guests') }}</strong> {{ booking.guests }}</p>
           </div>
-          <p v-if="booking.paid" class="mt-6 text-sm text-default">{{ t(booking.refund_on_cancel ? 'booking_policy.cancel_refund' : 'booking_policy.cancel_no_refund') }}</p>
+          <p v-if="cancellationClosed" class="mt-6 text-sm text-default">{{ t('booking_policy.cancel_closed', { window: noticeDuration(booking.advance_notice_minutes!, locale) }) }}</p>
+          <p v-else-if="booking.paid" class="mt-6 text-sm text-default">{{ t(booking.refund_on_cancel ? 'booking_policy.cancel_refund' : 'booking_policy.cancel_no_refund', { window: noticeDuration(freeCancellationNoticeMinutes(booking.advance_notice_minutes), locale) }) }}</p>
           <p v-if="cancelError" class="mt-4 text-sm text-error">{{ cancelError }}</p>
           <div class="mt-10 flex flex-col gap-3">
-            <TenantButton color="error" size="lg" block :loading="loading" @click="handleCancel">
+            <TenantButton v-if="!cancellationClosed" color="error" size="lg" block :loading="loading" @click="handleCancel">
               {{ copy('confirm') }}
             </TenantButton>
             <TenantButton :to="localePath('/')" variant="ghost" size="lg" block>{{ copy('keep') }}</TenantButton>
@@ -66,34 +67,21 @@ import { $fetch } from 'ofetch'
 import { formatTimestamp } from '~/utils/timezone'
 import { presentationForProduct } from '~/utils/product-presentation'
 import type { ProductKind } from '~/shared/product-details'
+import { freeCancellationNoticeMinutes, noticeDuration, outsideNotice } from '~/shared/availability-settings'
+import { ApiClientError } from '~/utils/api-clients'
 
 /**
- * The page a guest's cancellation link opens.
- *
- * A booking and a reservation are cancelled by the same act through the same
- * endpoint; only the words differ, so the wording is the one thing this takes
- * as a parameter.
+ * The page a guest's cancellation link opens. Every booking is cancelled by
+ * the same act through the same endpoint; a table's is worded as a reservation.
  */
-const props = defineProps<{ kind: 'reservation' | 'booking' }>()
-
 const { locale, localePath, t } = useI18n()
 const route = useRoute()
 
-const keyPrefix = computed(() => props.kind === 'booking' ? 'experience_cancel' : 'reservation_cancel')
-const copy = (key: string) => t(`site.${keyPrefix.value}.${key}`)
 const requestId = computed(() => typeof route.query.id === 'string' ? route.query.id : '')
 const token = computed(() => route.hash ? route.hash.slice(1) : '')
 
-useSocialMetadata(() => ({
-  path: route.path,
-  title: copy('title'),
-  description: copy('cancel_visit'),
-  socialImage: null,
-  discoverability: 'private',
-}))
-
 interface GuestBookingView {
-  kind: 'booking' | 'reservation'
+  kind: 'booking'
   name: string
   starts_at: string
   timezone: string
@@ -101,6 +89,7 @@ interface GuestBookingView {
   status: string
   can_retry_cancellation: boolean
   refund_on_cancel: boolean
+  advance_notice_minutes: number | null
   paid: { amount: number; currency: string } | null
   product_name: string | null
   product_kind: ProductKind | null
@@ -116,6 +105,17 @@ const { data, pending } = await useAsyncData<{ success: true; booking: GuestBook
 )
 
 const booking = computed(() => data.value?.booking ?? null)
+const isTable = computed(() => booking.value?.product_kind === 'table')
+const keyPrefix = computed(() => isTable.value ? 'reservation_cancel' : 'experience_cancel')
+const copy = (key: string) => t(`site.${keyPrefix.value}.${key}`)
+useSocialMetadata(() => ({
+  path: route.path,
+  title: copy('title'),
+  description: copy('cancel_visit'),
+  socialImage: null,
+  discoverability: 'private',
+}))
+
 const presentation = computed(() => booking.value?.product_kind ? presentationForProduct({ kind: booking.value.product_kind }) : null)
 // One instant plus its zone: the guest reads the local time of the place they
 // booked, not of the browser they happen to open the link in.
@@ -126,12 +126,14 @@ const readableTime = computed(() => booking.value
   ? formatTimestamp(booking.value.starts_at, locale.value, booking.value.timezone, { timeStyle: 'short' })
   : '')
 // Where a guest goes to start over: the catalogue they booked from, or the
-// reservations page. A site whose vertical presents no catalogue sends them
-// home rather than to a route that does not exist.
-const startOverHref = computed(() => localePath(props.kind === 'booking'
-  ? (presentation.value?.collectionPath ?? '/')
-  : '/reservations'))
+// reservations page for a table. A site whose vertical presents no catalogue
+// sends them home rather than to a route that does not exist.
+const startOverHref = computed(() => localePath(isTable.value ? '/reservations' : (presentation.value?.collectionPath ?? '/')))
 
+// The offering's advance notice closes the guest's own cancellation, as the cancel route refuses it.
+// A page left open past the cutoff learns it from the server's refusal.
+const closedByServer = ref(false)
+const cancellationClosed = computed(() => closedByServer.value || Boolean(booking.value && booking.value.advance_notice_minutes !== null && !outsideNotice(booking.value.starts_at, booking.value.advance_notice_minutes)))
 const cancellationSubmitted = ref(false)
 const cancelled = computed(() => cancellationSubmitted.value || booking.value?.status === 'cancelled')
 const loading = ref(false)
@@ -149,6 +151,7 @@ async function handleCancel() {
     })
     cancellationSubmitted.value = true
   } catch (err) {
+    if (err instanceof ApiClientError && err.code === 'cancellation_closed') { closedByServer.value = true; return }
     const message = (err as { data?: { error?: string } })?.data?.error
     cancelError.value = message || (booking.value?.can_retry_cancellation ? copy('toast_refund_failed') : copy('toast_cancel_failed'))
   } finally {

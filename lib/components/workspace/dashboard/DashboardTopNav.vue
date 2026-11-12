@@ -72,15 +72,13 @@
         :color="menuActive ? 'primary' : 'neutral'"
         variant="soft"
         square
-        class="relative rounded-full"
+        class="rounded-full"
         icon="i-lucide-menu"
         aria-label="Open menu"
         :aria-current="menuActive ? 'page' : undefined"
         data-testid="dashboard-top-nav-menu-button"
         @click="$emit('menu')"
-      >
-        <span v-if="menuUnread" class="absolute right-0.5 top-0.5 size-2.5 rounded-full bg-error" data-testid="dashboard-menu-unread" />
-      </UButton>
+      />
     </div>
   </header>
 </template>
@@ -111,8 +109,6 @@ defineProps<{
   homeTo: string
   /** The screen's declared tab is Menu. */
   menuActive?: boolean
-  /** The Menu's bell has unread notifications. */
-  menuUnread?: boolean
 }>()
 
 defineEmits<{ menu: [] }>()

@@ -24,7 +24,7 @@ import { memberAccessPrincipal, resolveMembership } from '../../server/utils/mem
 import { acceptOpportunity, listOpportunities } from '../../server/domain/opportunities.ts'
 import { writeMemberScheduling } from '../../server/domain/member-scheduling.ts'
 import { getTask, taskViewer } from '../../server/domain/tasks.ts'
-import bookingConfigRoute from '../../server/api/editor/organizations/[organizationId]/products/[productId]/booking.put.ts'
+import bookingConfigRoute from '../../server/api/editor/organizations/[organization_id]/products/[product_id]/booking.put.ts'
 import { readBusinessRecommendations } from '../../server/domain/business-progress.ts'
 
 async function withD1(run: (db: D1Database) => Promise<void>) {
@@ -60,7 +60,7 @@ test('connected account reservation is organization-scoped and claimed by one st
     // A failed creation is claimed again, as is one left unfinished for over a minute.
     await db.prepare("UPDATE stripe_connected_accounts SET status='creation_failed', last_error='Stripe refused' WHERE organization_id='org'").run()
     const retried = await reserveStripeConnectedAccount(db, { organizationId: 'org', livemode: false })
-    assert.deepEqual([retried.id, retried.status, retried.lastError], [first.id, 'creating', null])
+    assert.deepEqual([retried.id, retried.status, retried.last_error], [first.id, 'creating', null])
     await assert.rejects(reserveStripeConnectedAccount(db, { organizationId: 'org', livemode: false }), { statusCode: 409, data: { code: 'CONNECT_SETUP_IN_PROGRESS' } })
     await db.prepare("UPDATE stripe_connected_accounts SET updated_at='2026-01-01T00:00:00.000Z' WHERE organization_id='org'").run()
     assert.equal((await reserveStripeConnectedAccount(db, { organizationId: 'org', livemode: false })).id, first.id)
@@ -79,7 +79,7 @@ test('Stripe account projection preserves provider identity and derives onboardi
     const actionRequired = deriveStripeConnectStatus({
       cardPaymentsStatus: 'pending',
       cardPaymentsResolutions: [],
-      requirements: [{ awaitingActionFrom: 'user', deadlineStatus: 'currently_due' }],
+      requirements: [{ awaiting_action_from: 'user', deadline_status: 'currently_due' }],
     })
     assert.equal(actionRequired, 'action_required')
     // Restricted while Stripe verifies what was just submitted is under review, not an action for the business.
@@ -104,9 +104,9 @@ test('Stripe account projection preserves provider identity and derives onboardi
 
     const connected = await getStripeConnectedAccount(db, 'org')
     assert.ok(connected)
-    assert.equal(connected.stripeAccountId, 'acct_test')
+    assert.equal(connected.stripe_account_id, 'acct_test')
     assert.equal(connected.status, 'ready')
-    assert.equal(connected.cardPaymentsStatus, 'active')
+    assert.equal(connected.card_payments_status, 'active')
     assert.deepEqual(connected.requirements, [])
     // The country is the one Stripe reported for the account.
     assert.equal(await db.prepare("SELECT country FROM stripe_connected_accounts WHERE stripe_account_id='acct_test'").first('country'), 'US')
@@ -157,7 +157,7 @@ test('Stripe onboarding recommendations follow real account readiness and clear 
     const free = await createProduct(db, { organizationId: 'org', actor: { actorId: 'owner' }, env,
       product: { kind: 'experience', name: 'Free Studio Tour', variants: [{ name: 'Default', prices: [{ currency: 'USD', unit_amount: 0 }] }] } })
     for (const product of [paid, free]) await setProductBookingConfig(db, { organizationId: 'org', productId: product.id, actorId: 'owner', env,
-      patch: { duration_minutes: 120, default_capacity: 8, confirmation_mode: 'instant', online_payment_required: false } })
+      patch: { duration_minutes: 120, default_capacity: 8, confirmation_mode: 'instant', online_payment_required: false, assigned_member_id: 'm-owner' } })
     const membership = await resolveMembership(env, { organizationId: 'org', userId: 'owner' })
     assert.ok(membership)
     const principal = memberAccessPrincipal(membership, { env })
@@ -167,7 +167,7 @@ test('Stripe onboarding recommendations follow real account readiness and clear 
     const app = new H3()
     app.post('/api/dashboard/connect', connectStartRoute)
     app.post('/api/dashboard/connect/status', connectStatusRoute)
-    app.put('/api/editor/organizations/:organizationId/products/:productId/booking', bookingConfigRoute)
+    app.put('/api/editor/organizations/:organization_id/products/:product_id/booking', bookingConfigRoute)
     const login = await createAuth(env).api.signInEmail({ body: { email: 'owner@example.test', password: 'PayoutsProof123!' }, asResponse: true })
     const token = login.headers.get('set-auth-token')!
     const cookie = login.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
@@ -220,17 +220,17 @@ test('Stripe onboarding recommendations follow real account readiness and clear 
       assert.deepEqual(await call('/status', app_), { status: 409, body: { status: 409, statusText: 'Stripe onboarding has not started', message: 'Stripe onboarding has not started', data: { code: 'CONNECT_NOT_STARTED' } } })
       // A cookie session still needs a same-origin browser request; the app's bearer session does not.
       assert.equal((await call('', { cookie })).status, 403)
-      assert.equal((await call('', app_, { returnTo: 'web' })).status, 422)
+      assert.equal((await call('', app_, { return_to: 'web' })).status, 422)
       assert.equal(created, false)
-      const starting = call('', app_, { returnTo: 'app' })
+      const starting = call('', app_, { return_to: 'app' })
       await createStarted
       // A second Add payout method while Stripe is still creating the account is refused in words, not with Stripe's idempotency error.
-      assert.deepEqual(await call('', app_, { returnTo: 'app' }), { status: 409, body: { status: 409, statusText: 'Payout setup is already starting for this business. Finish it in the window where it opened, or try again in a minute.', message: 'Payout setup is already starting for this business. Finish it in the window where it opened, or try again in a minute.', data: { code: 'CONNECT_SETUP_IN_PROGRESS' } } })
+      assert.deepEqual(await call('', app_, { return_to: 'app' }), { status: 409, body: { status: 409, statusText: 'Payout setup is already starting for this business. Finish it in the window where it opened, or try again in a minute.', message: 'Payout setup is already starting for this business. Finish it in the window where it opened, or try again in a minute.', data: { code: 'CONNECT_SETUP_IN_PROGRESS' } } })
       releaseCreate()
       const started = await starting
       assert.equal(started.status, 200)
-      assert.equal(started.body.onboardingUrl, 'https://connect.stripe.com/d/setup/e/acct_payouts/abc')
-      assert.equal((started.body.account as { stripeAccountId: string }).stripeAccountId, 'acct_payouts')
+      assert.equal(started.body.onboarding_url, 'https://connect.stripe.com/d/setup/e/acct_payouts/abc')
+      assert.equal((started.body.account as { stripe_account_id: string }).stripe_account_id, 'acct_payouts')
       // Stripe takes only https returns, so the app's are a platform page that hands back to krabiclaw://payouts/<outcome>.
       assert.deepEqual((links[0]!.use_case as { account_onboarding: Record<string, unknown> }).account_onboarding, {
         collection_options: { fields: 'eventually_due', future_requirements: 'include' },
@@ -242,7 +242,7 @@ test('Stripe onboarding recommendations follow real account readiness and clear 
       assert.equal((links[1]!.use_case as { account_onboarding: { return_url: string } }).account_onboarding.return_url, 'https://krabiclaw.test/dashboard/cliff/payments?tab=payouts&stripe_connect=returned')
       const status = await call('/status', app_)
       assert.equal(status.status, 200)
-      assert.deepEqual((status.body.account as { requirements: unknown }).requirements, [{ awaitingActionFrom: 'user', deadlineStatus: 'currently_due', description: 'Provide a bank account for payouts', errors: [] }])
+      assert.deepEqual((status.body.account as { requirements: unknown }).requirements, [{ awaiting_action_from: 'user', deadline_status: 'currently_due', description: 'Provide a bank account for payouts', errors: [] }])
       account.requirements.entries = []
       const pending = await call('/status', app_)
       assert.equal(pending.status, 200)
@@ -275,11 +275,10 @@ test('Stripe onboarding recommendations follow real account readiness and clear 
       assert.equal((await recommendations()).some(item => item.operation === 'product.payment'), false, 'actual booking configuration clears payment work on the next read without a day boundary')
 
       const catalogCards = async () => (await listOpportunities(db, principal)).opportunities
-        .filter(item => item.productId === paid.id && item.statusLine === 'Catalog').map(item => item.path)
-      assert.deepEqual(await catalogCards(), [`${editor}/booking/assignment`])
-      await setProductBookingConfig(db, { organizationId: 'org', productId: paid.id, actorId: 'owner', env, patch: { assigned_member_id: 'm-owner' } })
+        .filter(item => item.product_id === paid.id && item.status_line === 'Catalog').map(item => item.path)
+      // Every offering has its host; the card asks for the host's public profile.
       assert.deepEqual(await catalogCards(), ['/dashboard/cliff/team/m-owner/profile'])
-      await writeMemberScheduling({ env, organizationId: 'org', userId: 'owner' }, 'm-owner', { expected_updated_at: null, public_name: 'Wheel class host', public_approved: true })
+      await writeMemberScheduling({ env, organizationId: 'org', userId: 'owner' }, 'm-owner', { updated_at: null, public_name: 'Wheel class host', public_approved: true })
       assert.deepEqual(await catalogCards(), [`${editor}/locations`])
       await updateProduct(db, { organizationId: 'org', productId: paid.id, actor: { actorId: 'owner' }, env,
         patch: { order_url: 'https://example.com/book/wheel-class' } })

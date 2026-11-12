@@ -12,9 +12,9 @@ import { storeIntegration } from './organization-integrations'
  */
 
 export interface Ga4Property {
-  accountName: string
-  propertyId: string
-  propertyName: string
+  account_name: string
+  property_id: string
+  property_name: string
 }
 
 const googleJson = async <T>(url: string, accessToken: string): Promise<T> => {
@@ -41,9 +41,9 @@ export async function listGa4Properties(accessToken: string): Promise<Ga4Propert
   for (const account of response.accountSummaries ?? []) {
     for (const property of account.propertySummaries ?? []) {
       properties.push({
-        accountName: account.displayName,
-        propertyId: property.property.replace(/^properties\//, ''),
-        propertyName: property.displayName,
+        account_name: account.displayName,
+        property_id: property.property.replace(/^properties\//, ''),
+        property_name: property.displayName,
       })
     }
   }
@@ -54,9 +54,9 @@ export async function listGa4Properties(accessToken: string): Promise<Ga4Propert
  * The property's web data stream measurement id — what the page actually
  * needs, so the tenant is never asked to go and find a `G-XXXXXXX` themselves.
  */
-export async function getGa4MeasurementId(accessToken: string, propertyId: string): Promise<string | null> {
+export async function getGa4MeasurementId(accessToken: string, property_id: string): Promise<string | null> {
   const response = await googleJson<{ dataStreams?: Array<{ webStreamData?: { measurementId?: string } }> }>(
-    `https://analyticsadmin.googleapis.com/v1beta/properties/${propertyId}/dataStreams?pageSize=200`, accessToken,
+    `https://analyticsadmin.googleapis.com/v1beta/properties/${property_id}/dataStreams?pageSize=200`, accessToken,
   )
   for (const stream of response.dataStreams ?? []) {
     if (stream.webStreamData?.measurementId) return stream.webStreamData.measurementId
@@ -69,17 +69,17 @@ export async function selectAnalyticsProperty(
   env: CloudflareEnv,
   organizationId: string,
   accountId: string,
-  propertyId: string,
-  propertyName: string,
+  property_id: string,
+  property_name: string,
   expected: { revision: string | null },
 ): Promise<string> {
   const { accessToken } = await linkedAccountAccessToken(env, accountId)
-  const measurementId = await getGa4MeasurementId(accessToken, propertyId)
+  const measurementId = await getGa4MeasurementId(accessToken, property_id)
   if (!measurementId) {
     throw new Error('That property has no web data stream, so there is no measurement ID to collect with.')
   }
   await storeIntegration(env.DB, organizationId, 'google_analytics', {
-    account_id: accountId, target_id: propertyId, target_name: propertyName, measurement_id: measurementId,
+    account_id: accountId, target_id: property_id, target_name: property_name, measurement_id: measurementId,
   }, expected)
   return measurementId
 }
@@ -108,9 +108,9 @@ export interface Ga4Report {
  * A GA4 report through the Data API's `properties.runReport`. More than one
  * date range adds GA4's own `dateRange` dimension, naming each row's range.
  */
-export async function runGa4Report(accessToken: string, propertyId: string, input: Ga4ReportInput): Promise<Ga4Report> {
-  if (!/^\d+$/u.test(propertyId)) throw new Error(`GA4 property id must be numeric: ${propertyId}`)
-  const response = await fetch(`https://analyticsdata.googleapis.com/v1beta/properties/${propertyId}:runReport`, {
+export async function runGa4Report(accessToken: string, property_id: string, input: Ga4ReportInput): Promise<Ga4Report> {
+  if (!/^\d+$/u.test(property_id)) throw new Error(`GA4 property id must be numeric: ${property_id}`)
+  const response = await fetch(`https://analyticsdata.googleapis.com/v1beta/properties/${property_id}:runReport`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json', 'content-type': 'application/json' },
     body: JSON.stringify({
@@ -133,7 +133,7 @@ export async function runGa4Report(accessToken: string, propertyId: string, inpu
     metadata?: { timeZone?: string; currencyCode?: string }
     propertyQuota?: Record<string, { consumed?: number; remaining?: number }>
   }
-  if (!data.metadata?.timeZone || !data.metadata.currencyCode) throw new Error(`Google Analytics did not report property ${propertyId}'s time zone and currency`)
+  if (!data.metadata?.timeZone || !data.metadata.currencyCode) throw new Error(`Google Analytics did not report property ${property_id}'s time zone and currency`)
   const dimensionNames = (data.dimensionHeaders ?? []).map(header => header.name)
   const metricNames = (data.metricHeaders ?? []).map(header => header.name)
   return {
@@ -141,7 +141,7 @@ export async function runGa4Report(accessToken: string, propertyId: string, inpu
       const dimensions = dimensionNames.map(name => [name, row.dimensionValues?.[dimensionNames.indexOf(name)]?.value] as const)
       const metrics = metricNames.map(name => [name, Number(row.metricValues?.[metricNames.indexOf(name)]?.value)] as const)
       if (dimensions.some(([, value]) => typeof value !== 'string') || metrics.some(([, value]) => !Number.isFinite(value))) {
-        throw new Error(`Google Analytics returned an incomplete row for property ${propertyId}`)
+        throw new Error(`Google Analytics returned an incomplete row for property ${property_id}`)
       }
       return { dimensions: Object.fromEntries(dimensions) as Record<string, string>, metrics: Object.fromEntries(metrics) }
     }),

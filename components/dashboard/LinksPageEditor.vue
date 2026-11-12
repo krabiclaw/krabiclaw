@@ -126,7 +126,7 @@ const organizationId = useDashboardOrganizationId()
 const saving = ref(false)
 const errorMessage = ref('')
 
-const linksPath = computed(() => `/dashboard/${String(route.params.orgSlug)}/website/pages/links`)
+const linksPath = computed(() => `/dashboard/${String(route.params.org_slug)}/website/pages/links`)
 const itemsPath = computed(() => `${linksPath.value}/items`)
 
 const form = reactive<LinksPage>({
@@ -138,7 +138,7 @@ const items = ref<LinkItem[]>([])
 const linksPageLocalizationFields = computed(() => [
   { key: 'title', label: 'Title', source: data.value?.page.title },
 ])
-const organizationLocalizationSettingsPath = computed(() => `/dashboard/${route.params.orgSlug}/website/localization`)
+const organizationLocalizationSettingsPath = computed(() => `/dashboard/${route.params.org_slug}/website/preferences/localization`)
 
 const { data, error, refresh } = await useAsyncData(
   `links-page-editor-${organizationId}`,
@@ -192,7 +192,7 @@ async function saveLinksLocalization(locale: string, submitted: Record<string, u
   const response = await dashboardApi<{ localization: LinksTranslation }>(
     `/api/editor/organizations/${organizationId}/localization/content_document/${form.id}/${encodeURIComponent(locale)}`, {
       method: 'PUT', body: { values, content_blocks: blocks,
-        ...(state.translation ? { expected_updated_at: state.translation.updated_at } : {}) }, validate: isLinksTranslation,
+        ...(state.translation ? { updated_at: state.translation.updated_at } : {}) }, validate: isLinksTranslation,
     })
   linkLocalizationStates.set(key, { locale, translation: response.localization })
 }

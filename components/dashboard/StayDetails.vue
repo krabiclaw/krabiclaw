@@ -6,7 +6,6 @@
       <UButton v-if="!embedded && recordLevel.to.value" :to="recordLevel.to.value" icon="i-lucide-x" color="neutral" variant="ghost" aria-label="Close stay details" />
     </template>
     <UAlert v-if="error" color="error" variant="soft" title="This stay could not be loaded" :description="getErrorMessage(error, 'Stay request failed')" />
-    <UAlert v-if="notificationReadError" color="error" variant="soft" :description="getErrorMessage(notificationReadError, 'Stay alerts could not be marked read')" />
     <div v-else-if="stay" class="min-w-0 [overflow-wrap:anywhere]">
       <UAlert v-if="actionError" class="mb-5" color="error" variant="soft" icon="i-lucide-circle-alert" :description="actionError" />
       <UAlert v-if="homeError" class="mb-5" color="error" variant="soft" title="The home could not be loaded" :description="getErrorMessage(homeError, 'Home request failed')" />
@@ -61,9 +60,9 @@
           <p v-if="recordHome?.check_out_time" class="mt-1 text-sm text-muted">By {{ formatTime(recordHome.check_out_time, 'en') }}</p>
         </div>
       </div>
-      <div v-if="stay.arrival_time" class="mt-6 border-t border-default pt-4">
+      <div v-if="arrivalTime" class="mt-6 border-t border-default pt-4">
         <p class="text-base font-medium text-highlighted">Arriving</p>
-        <p class="mt-1 text-base text-muted">{{ formatTime(stay.arrival_time, 'en') }}</p>
+        <p class="mt-1 text-base text-muted">{{ arrivalTime }}</p>
       </div>
       <!-- A member's turnover says the guest never arrived; managers read it with the stay's payments below. -->
       <p v-if="!personalScope && !detail && stay.no_show_at" class="mt-6 border-t border-default pt-4 text-base text-muted" data-testid="stay-no-show">No-show recorded {{ formatCalendarDate(stay.no_show_at.slice(0, 10), 'en') }}.</p>
@@ -101,9 +100,9 @@
       </UCard>
       <template v-if="detail">
       <FormAnswersCard :answers="detail.answers" :title="personalScope ? 'Your answers' : undefined" />
-      <UCard v-if="detail.notes" variant="record">
-        <h3 class="text-base font-semibold text-highlighted">{{ personalScope ? 'Your requests' : 'Guest requests' }}</h3>
-        <p class="mt-3 whitespace-pre-wrap text-base text-muted">{{ detail.notes }}</p>
+      <UCard v-if="!personalScope && detail.private_notes" variant="record">
+        <h3 class="text-base font-semibold text-highlighted">Private note</h3>
+        <p class="mt-3 whitespace-pre-wrap text-base text-muted">{{ detail.private_notes }}</p>
       </UCard>
 
       <!-- The policy the guest booked under, in Airbnb's words: what their own cancellation returns. -->
@@ -202,7 +201,7 @@
           <dd class="text-right text-base text-highlighted">{{ STAY_CHANNEL_LABELS[detail.channel] }}</dd>
         </div>
       </dl>
-      <UButton v-if="manage && detail.status !== 'cancelled'" class="mt-4" color="neutral" variant="outline" label="Move guest" :to="`/dashboard/${encodeURIComponent(String(route.params.orgSlug))}/bookings/stay/${encodeURIComponent(detail.id)}/move`" data-testid="stay-move" />
+      <UButton v-if="manage && detail.status !== 'cancelled'" class="mt-4" color="neutral" variant="outline" label="Move guest" :to="`/dashboard/${encodeURIComponent(String(route.params.org_slug))}/bookings/stay/${encodeURIComponent(detail.id)}/move`" data-testid="stay-move" />
       <p v-if="!personalScope && channelManaged" class="mt-4 text-base text-muted">
         Payments, changes and cancellations for this stay are managed on
         <ULink v-if="detail.channel_booking_url" :to="detail.channel_booking_url" target="_blank" rel="noopener noreferrer" class="text-highlighted underline">{{ channelName }}</ULink><template v-else>{{ channelName }}</template>.
@@ -245,10 +244,10 @@ import DashboardConfirmDialog from '~/components/dashboard/DashboardConfirmDialo
 import type { GuestStay, StayDetail, StayHome, StayTurnover } from '~/server/domain/stays'
 import { isChannelManagedStay, STAY_CHANNEL_LABELS, STAY_PAYMENT_METHOD_LABELS, type StayPaymentMethod } from '~/shared/bookings'
 import { bookedPolicyTerms } from '~/shared/stay-cancellation'
-import { GUEST_NOT_MESSAGED_WARNING, isMovedStayResponse } from '~/shared/stay-move'
+import { STAY_MOVE_MESSAGE_QUEUED, isMovedStayResponse } from '~/shared/stay-move'
 import { isCurrencyCode } from '~/shared/currencies'
 import { formatMinorAmount, majorAmountToMinor } from '~/shared/prices'
-import { formatCalendarDate, formatTime, localDateAt, localDateTimeToInstant } from '~/utils/timezone'
+import { formatCalendarDate, formatTime, localDateAt } from '~/utils/timezone'
 import { formatPostalAddress } from '~/utils/postal-address'
 import { getErrorMessage } from '~/utils/errors'
 import { ApiClientError } from '~/utils/api-clients'
@@ -273,16 +272,12 @@ const manageOpen = ref(false)
 const isStay = (value: unknown): value is { stay: StayDetail; manage?: boolean } => isRecord(value) && isRecord(value.stay) && typeof value.stay.id === 'string'
   && (value.stay.guest_image_url === null || typeof value.stay.guest_image_url === 'string')
 /** Managers read the whole stay; a member looking after the home reads its turnover. */
-type DashboardStay = ({ stay: StayDetail; manage: true } | { stay: StayTurnover; manage: false }) & { unreadNotificationIds: string[] }
+type DashboardStay = { stay: StayDetail; manage: true; can_message_guest: boolean } | { stay: StayTurnover; manage: false }
 const isDashboardStay = (value: unknown): value is DashboardStay => isRecord(value) && isRecord(value.stay) && typeof value.stay.id === 'string'
-  && Array.isArray(value.unreadNotificationIds) && value.unreadNotificationIds.every(id => typeof id === 'string')
-  && (value.manage === false || (value.manage === true && isStay(value)))
-const { data, error, refresh } = await useAsyncData(`${props.personalScope ? 'account' : String(route.params.orgSlug)}-stay:${props.stayId}`, (): Promise<DashboardStay | GuestStay> => props.personalScope
+  && (value.manage === false || (value.manage === true && typeof value.can_message_guest === 'boolean' && isStay(value)))
+const { data, error, refresh } = await useAsyncData(`${props.personalScope ? 'account' : String(route.params.org_slug)}-stay:${props.stayId}`, (): Promise<DashboardStay | GuestStay> => props.personalScope
   ? applicationFetch(`/api/account/stays/${encodeURIComponent(props.stayId)}`, { validate: isGuestStay })
   : dashboardApi(`/api/dashboard/stays/${encodeURIComponent(props.stayId)}`, { validate: isDashboardStay }))
-const notificationReadError = useAcknowledgeScheduleNotifications(() =>
-  !props.embedded && !props.personalScope && !error.value && data.value && 'unreadNotificationIds' in data.value
-    ? data.value.unreadNotificationIds : undefined)
 const stay = computed(() => data.value?.stay ?? null)
 /** The whole stay: the guest's own, or a manager's. Null for a member's turnover. */
 const detail = computed(() => !data.value ? null : 'home' in data.value ? data.value.stay : data.value.manage ? data.value.stay : null)
@@ -290,7 +285,7 @@ const channelManaged = computed(() => detail.value !== null && isChannelManagedS
 const manage = computed(() => !props.personalScope && data.value !== null && 'manage' in data.value! && data.value.manage === true)
 const home = computed(() => data.value && 'home' in data.value ? data.value.home : null)
 const { data: hostHomeData, error: homeError, refresh: refreshHostHome } = await useAsyncData(
-  computed(() => `${props.personalScope ? 'account' : String(route.params.orgSlug)}-stay-home:${stay.value?.product_id ?? props.stayId}`),
+  computed(() => `${props.personalScope ? 'account' : String(route.params.org_slug)}-stay-home:${stay.value?.product_id ?? props.stayId}`),
   async (): Promise<{ home: StayHome } | null> => {
     if (props.personalScope || !stay.value) return null
     const productId = stay.value.product_id
@@ -311,21 +306,31 @@ const homeImageUrl = computed(() => home.value ? home.value.image_url : hostHome
 const checkInTime = computed(() => recordHome.value?.check_in_time
   ? stayCheckInWindow(formatTime(recordHome.value.check_in_time, 'en'), hostHome.value?.check_in_end_time ? formatTime(hostHome.value.check_in_end_time, 'en') : null)
   : null)
-const messagePath = computed(() => detail.value?.request_id
-  ? props.personalScope ? `/dashboard/account/messages/${encodeURIComponent(detail.value.request_id)}`
-    : `/dashboard/${encodeURIComponent(String(route.params.orgSlug))}/messages/${encodeURIComponent(detail.value.request_id)}`
-  : null)
+/** When the guest said they arrive, where that is not the home's check-in time: the stay's stored start in the home's clock. */
+const arrivalTime = computed(() => {
+  const value = stay.value
+  if (!value || value.starts_at.length === 10) return null
+  const local = new Intl.DateTimeFormat('en-GB', { timeZone: value.timezone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(value.starts_at))
+  return local === recordHome.value?.check_in_time ? null : formatTime(local, 'en')
+})
+const messagePath = computed(() => {
+  if (!detail.value?.conversation_id) return null
+  const id = encodeURIComponent(detail.value.conversation_id)
+  if (props.personalScope) return `/dashboard/account/messages/${id}`
+  if (!data.value || !('manage' in data.value) || !data.value.manage || !data.value.can_message_guest) return null
+  return `/dashboard/${encodeURIComponent(String(route.params.org_slug))}/messages/${id}`
+})
 const callPhone = computed(() => !props.personalScope ? detail.value?.guest_phone ?? null : null)
 const guestAddress = computed(() => home.value?.location?.address ? formatPostalAddress(home.value.location.address) : '')
 const cancellation = computed(() => data.value && 'cancellation' in data.value ? data.value.cancellation : null)
 const canRequestChange = computed(() => props.personalScope && detail.value !== null && !isChannelManagedStay(detail.value) && Boolean(messagePath.value) && ['pending', 'confirmed'].includes(detail.value.status)
-  && Boolean(recordHome.value) && (recordHome.value!.check_out_time ? localDateTimeToInstant(detail.value.check_out_date, recordHome.value!.check_out_time, detail.value.timezone, 'compatible').getTime() > Date.now() : detail.value.check_out_date >= localDateAt(new Date(), detail.value.timezone)))
+  && (detail.value.ends_at.length === 10 ? detail.value.check_out_date >= localDateAt(new Date(), detail.value.timezone) : Date.parse(detail.value.ends_at) > Date.now()))
 const policy = computed(() => detail.value?.cancellation_policy ? bookedPolicyTerms(detail.value.cancellation_policy) : null)
-const paymentPath = computed(() => detail.value?.online_payment ? `/dashboard/${route.params.orgSlug}/bookings/payment/${encodeURIComponent(detail.value.online_payment.payment_id)}` : '')
+const paymentPath = computed(() => detail.value?.online_payment ? `/dashboard/${route.params.org_slug}/bookings/payment/${encodeURIComponent(detail.value.online_payment.payment_id)}` : '')
 watch(realtime.event, event => {
-  if (event?.type === 'stay.changed' && (event.stayId === props.stayId || (event.stayId === null && event.productId === stay.value?.product_id))) {
+  if (event?.type === 'stay.changed' && (event.booking_id === props.stayId || (event.booking_id === null && event.product_id === stay.value?.product_id))) {
     void refresh()
-    if (!props.personalScope && event.stayId === null) void refreshHostHome()
+    if (!props.personalScope && event.booking_id === null) void refreshHostHome()
   }
 })
 watch(realtime.connectionEpoch, epoch => {
@@ -348,8 +353,7 @@ const guest = computed<GuestIdentity>(() => {
   // A turnover carries the guest's first name and nothing about who booked it.
   if (!value) return !stay.value ? { state: 'loading' } : stay.value.guest_name ? { state: 'named', name: stay.value.guest_name } : { state: 'unnamed' }
   if (value.owner === 'app' && !value.guest_name) return { state: 'missing' }
-  const name = [value.guest_name, value.guest_surname].filter(Boolean).join(' ')
-  return name ? { state: 'named', name } : { state: 'not-provided' }
+  return value.guest_name ? { state: 'named', name: value.guest_name } : { state: 'not-provided' }
 })
 const title = computed(() => props.personalScope ? 'Your stay' : statusLabel.value)
 const nights = computed(() => stay.value ? Math.round((Date.parse(`${stay.value.check_out_date}T00:00:00Z`) - Date.parse(`${stay.value.check_in_date}T00:00:00Z`)) / 86_400_000) : 0)
@@ -432,21 +436,21 @@ async function deletePayment(paymentId: string) {
 // A stay booked here that has begun, before its guest reviewed it. The thread
 // operation is the writer; it refuses a stay that no longer qualifies.
 const canMarkNoShow = computed(() => !props.personalScope && manage.value && detail.value?.channel === 'direct' && detail.value.status === 'confirmed'
-  && !detail.value.no_show_at && Boolean(detail.value.request_id) && detail.value.check_in_date <= localDateAt(new Date(), detail.value.timezone))
+  && !detail.value.no_show_at && Boolean(detail.value.conversation_id) && detail.value.check_in_date <= localDateAt(new Date(), detail.value.timezone))
 
 async function undoMove() {
   const value = detail.value
   if (!value?.booked_product_id) return
-  if (!await confirmDialog.open({ title: 'Undo this move', description: `The guest goes back to ${value.booked_home_name} and is messaged its address and entry details.`, confirmLabel: 'Undo move', cancelLabel: 'Keep the move' })) return
+  if (!await confirmDialog.open({ title: 'Undo this move', description: `The guest goes back to ${value.booked_home_name} and a message with its address and entry details is queued.`, confirmLabel: 'Undo move', cancelLabel: 'Keep the move' })) return
   await run('undo_move', async () => {
-    const moved = await dashboardApi(`/api/dashboard/stays/${encodeURIComponent(value.id)}/move`, { method: 'POST', validate: isMovedStayResponse, body: { expected_version: value.version, product_id: value.booked_product_id } })
-    if (!moved.stay.guest_notified) toast.add(GUEST_NOT_MESSAGED_WARNING)
+    await dashboardApi(`/api/dashboard/stays/${encodeURIComponent(value.id)}/move`, { method: 'POST', validate: isMovedStayResponse, body: { version: value.version, product_id: value.booked_product_id } })
+    toast.add(STAY_MOVE_MESSAGE_QUEUED)
   }, 'The move could not be undone.')
 }
 
 async function markNoShow() {
   const value = detail.value
-  if (!value?.request_id) return
+  if (!value?.conversation_id) return
   if (!await confirmDialog.open({
     title: 'Mark as a no-show',
     description: `${guest.value.state === 'named' ? guest.value.name : 'The guest'} won’t be asked to review this stay, and a review link already sent stops working. The stay itself stays as it is. This cannot be undone.`,
@@ -455,9 +459,9 @@ async function markNoShow() {
   busy.value = 'no_show'
   actionError.value = null
   try {
-    await dashboardApi(`/api/dashboard/organizations/${encodeURIComponent(dashboardOrganization.organizationId.value ?? '')}/guest-threads/${encodeURIComponent(value.request_id)}/operations/no_show`, {
+    await dashboardApi(`/api/dashboard/organizations/${encodeURIComponent(dashboardOrganization.organizationId.value ?? '')}/guest-threads/${encodeURIComponent(value.conversation_id)}/operations/no_show`, {
       method: 'POST',
-      body: { idempotencyKey: `no-show:${value.id}` },
+      body: { idempotency_key: `no-show:${value.id}` },
       validate: (response: unknown): response is { thread: Record<string, unknown> } => isRecord(response) && isRecord(response.thread),
     })
     await refresh()
@@ -479,7 +483,7 @@ async function cancel() {
   busy.value = 'cancel'
   actionError.value = null
   try {
-    await dashboardApi(`/api/dashboard/stays/${encodeURIComponent(value.id)}/cancel`, { method: 'POST', validate: isStay, body: { expected_version: value.version } })
+    await dashboardApi(`/api/dashboard/stays/${encodeURIComponent(value.id)}/cancel`, { method: 'POST', validate: isStay, body: { version: value.version } })
     await refresh()
   } catch (cause) {
     const approval = isRecord(cause) && isRecord(cause.data) && isRecord(cause.data.data) && typeof cause.data.data.financial_approval_url === 'string' ? cause.data.data.financial_approval_url : null
@@ -504,13 +508,13 @@ async function cancel() {
 async function cancelAsGuest() {
   const value = detail.value
   const quote = cancellation.value
-  if (!value || isChannelManagedStay(value) || !quote || !value.request_id || !policy.value) return
+  if (!value || isChannelManagedStay(value) || !quote || !value.conversation_id || !policy.value) return
   const description = quote.refund_minor === quote.paid_minor ? `You get back the full ${money(quote.paid_minor)}.`
     : quote.refund_minor > 0 ? `Under the ${policy.value.label} policy you get back ${money(quote.refund_minor)} of the ${money(quote.paid_minor)} you paid.`
       : `Under the ${policy.value.label} policy none of the ${money(quote.paid_minor)} you paid comes back.`
   if (!await confirmDialog.open({ title: 'Cancel your stay?', description, confirmLabel: 'Cancel stay', cancelLabel: 'Keep stay' })) return
   await run('cancel', () => applicationFetch('/api/account/cancel', {
-    method: 'POST', body: { request_id: value.request_id },
+    method: 'POST', body: { conversation_id: value.conversation_id },
     validate: (response: unknown): response is { success: true } => isRecord(response) && response.success === true,
   }), 'Your stay could not be cancelled')
 }

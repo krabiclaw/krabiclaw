@@ -14,14 +14,13 @@ success, a quota or a customer-facing promise.
 
 ## Calendar and bookings
 
-New legal consultations book an available attorney from the explicitly selected
-attorney or legal team, using Better Auth organization membership and the
-attorney's published profile, working hours, timezone and time off. Experiences
-can use a business schedule without one named provider, or allocate an eligible
-member. Locations, offerings and homes share one responsibility model: an
-explicit Better Auth membership or Team, never both. It grants the same scoped
-work across the inbox, Today, calendar and notifications. A Team may include a
-host and supporting people. Owners and admins remain selectable; promotion
+New legal consultations book the explicitly selected attorney, using Better
+Auth organization membership and the attorney's published profile, working
+hours, timezone and time off. Experiences can use a business schedule without
+one named provider, or allocate an eligible member. Locations, offerings and
+homes share one responsibility model: one explicit Better Auth membership. It
+grants the same scoped work across the inbox, Today, calendar and
+notifications. Owners and admins remain selectable; promotion
 does not clear their responsibility. Missing choices remain unassigned.
 Existing bookings retain their recorded provider until an explicit
 reassignment; staffing and offering configuration edits do not rewrite that
@@ -30,10 +29,8 @@ retains its nightly calendar.
 
 Google Calendar sync is a Business feature. Connecting the business creates or
 reuses its KrabiClaw calendar and projects upcoming pending and confirmed
-bookings and reservations; an event moved there moves its booking through the
-same booking-move operation the dashboard and ChatGPT use, with its
-availability checks and guest email, while a deleted event is put back and the
-booking is raised for the owner's decision. Connecting a member's personal
+bookings and reservations, each event following its booking and carrying its
+Manage link. Editing an event in Google does not change the booking. Connecting a member's personal
 account excludes busy times from new availability. Personal event titles and
 descriptions are not imported.
 

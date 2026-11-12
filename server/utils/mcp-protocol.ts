@@ -51,7 +51,12 @@ export function mcpProtocolError(code: number, message: string, data?: unknown, 
 export function mcpErrorRecoveryIds(value: unknown): Record<string, string> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
   const details = value as Record<string, unknown>
-  return Object.fromEntries(['organization_id', 'draft_id', 'invitation_id', 'location_id', 'product_id', 'stay_id', 'request_id'].flatMap(key =>
+  return Object.fromEntries([
+    'organization_id', 'draft_id', 'invitation_id', 'location_id', 'product_id',
+    'booking_id', 'post_id', 'asset_id',
+    'task_id', 'lead_id', 'submission_id', 'user_id', 'campaign_id', 'publication_id',
+    'document_id', 'conversation_id', 'scheduled_message_id', 'message_id',
+  ].flatMap(key =>
     typeof details[key] === 'string' && /^[A-Za-z0-9_:-]{1,200}$/.test(details[key]) ? [[key, details[key]]] : [],
   ))
 }
@@ -61,6 +66,11 @@ export function mcpErrorRecoveryDetails(value: unknown): Record<string, unknown>
   const details = value as Record<string, unknown>
   const recovery: Record<string, unknown> = mcpErrorRecoveryIds(details)
   if (typeof details.code === 'string' && /^[A-Za-z_][A-Za-z0-9_.-]*$/.test(details.code)) recovery.code = details.code
+  if (typeof details.expected === 'string' && details.expected.length <= 200) recovery.expected = details.expected
+  if (typeof details.received === 'string' && details.received.length <= 200) recovery.received = details.received
+  if (typeof details.hint === 'string' && details.hint.length <= 500) recovery.hint = details.hint
+  if (typeof details.required_role === 'string' && details.required_role.length <= 50) recovery.required_role = details.required_role
+  if (typeof details.current_role === 'string' && details.current_role.length <= 50) recovery.current_role = details.current_role
   if (details.action_required === true) recovery.action_required = true
   if (details.operation_completed === false) recovery.operation_completed = false
   if (details.committed === true) {
@@ -75,6 +85,8 @@ export function mcpErrorRecoveryDetails(value: unknown): Record<string, unknown>
       && isValidCalendarDate(range.from) && isValidCalendarDate(range.to) && range.from < range.to)) recovery.ranges = details.ranges.map(({ from, to }) => ({ from, to }))
     if (Array.isArray(details.failures) && details.failures.every(failure => failure && typeof failure === 'object' && failure.committed === true
       && typeof failure.code === 'string' && /^[A-Za-z_][A-Za-z0-9_.-]*$/.test(failure.code))) recovery.failures = details.failures.map(mcpErrorRecoveryDetails)
+  } else if (details.committed === undefined) {
+    if (typeof details.field === 'string' && /^[A-Za-z_][A-Za-z0-9_.\[\]]*$/.test(details.field)) recovery.field = details.field
   }
   for (const key of ['missing', 'missing_fields', 'invalid_fields', 'fields', 'missing_product_ids', 'draft_ids', 'removed_block_ids', 'resource_ids']) {
     const values = details[key]

@@ -25,6 +25,18 @@ const requireLocationString = (value: unknown, field: string): string => {
   return value
 }
 
+/**
+ * A location takes reservations when it offers a published, on-sale table
+ * product with booking settings: the table product is the capability.
+ */
+export function locationTakesTablesSql(location: string): string {
+  return `EXISTS (SELECT 1 FROM product_locations pl
+    JOIN products p ON p.id = pl.product_id AND p.organization_id = pl.organization_id AND p.kind = 'table' AND p.active = 1
+    JOIN product_booking_configs c ON c.product_id = p.id AND c.organization_id = p.organization_id
+    JOIN product_publications pub ON pub.product_id = p.id AND pub.organization_id = p.organization_id AND pub.published = 1
+    WHERE pl.organization_id = ${location}.organization_id AND pl.location_id = ${location}.id AND pl.active = 1 AND pl.published = 1)`
+}
+
 export interface PublicShellQueryIndexes {
   locations: number
   config: number
@@ -125,8 +137,7 @@ export function appendPublicShellQueries(
                      bl.description, bl.short_description,
                      bl.last_synced_at, bl.seo_title, bl.seo_description,
                      bl.canonical_url,
-                     EXISTS (SELECT 1 FROM location_reservation_configs c
-                              WHERE c.organization_id = bl.organization_id AND c.location_id = bl.id) AS has_reservations
+                     ${locationTakesTablesSql('bl')} AS has_reservations
                 FROM business_locations bl
                WHERE bl.organization_id = ? AND ${publicLocationSql('bl')}
                ORDER BY bl.title ASC`, [organizationId]),
@@ -160,10 +171,10 @@ export async function buildPublicShellPayload(
   experiences?: Product[],
   extra?: {
     consultation?: PublicConsultationSettings | null
-    canSchedule?: boolean
+    can_schedule?: boolean
     compliance?: PublicCompliance | null
-    pageLinks?: PublicPageLink[]
-    searchConsoleVerification?: string | null
+    page_links?: PublicPageLink[]
+    search_console_verification?: string | null
     localizations?: readonly ExactPublicLocalization[]
   },
 ): Promise<PublicShellPayload> {
@@ -238,7 +249,7 @@ export async function buildPublicShellPayload(
   if (organization.search_console_verification) config.search_console_verification = organization.search_console_verification
 
   return {
-    platformMessages: null,
+    platform_messages: null,
     organization: {
       name: organization.name,
       brand_description: organization.brand_description,
@@ -249,17 +260,17 @@ export async function buildPublicShellPayload(
     },
     locations,
     config,
-    googleMaps: {
+    google_maps: {
       business: null,
       reviews: [],
       media: [],
-      syncedAt: null,
+      synced_at: null,
     },
     sections: sections.site,
     consultation: extra?.consultation ?? null,
-    canSchedule: extra?.canSchedule ?? false,
+    can_schedule: extra?.can_schedule ?? false,
     compliance: extra?.compliance ?? null,
-    pageLinks: extra?.pageLinks ?? [],
-    searchConsoleVerification: extra?.searchConsoleVerification ?? (organization.search_console_verification as string | null) ?? null,
+    page_links: extra?.page_links ?? [],
+    search_console_verification: extra?.search_console_verification ?? (organization.search_console_verification as string | null) ?? null,
   }
 }

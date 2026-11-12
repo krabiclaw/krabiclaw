@@ -63,8 +63,8 @@ export async function listSocialCardOwners(db: DbClient, input: { organizationId
 }
 
 export type SocialCardRefreshResult =
-  | { kind: 'generated'; owner: SocialCardOwner; assetId: string; publicUrl: string; generationKey: string }
-  | { kind: 'reused'; owner: SocialCardOwner; assetId: string; publicUrl: string; generationKey: string }
+  | { kind: 'generated'; owner: SocialCardOwner; asset_id: string; public_url: string; generation_key: string }
+  | { kind: 'reused'; owner: SocialCardOwner; asset_id: string; public_url: string; generation_key: string }
   | { kind: 'skipped'; owner: SocialCardOwner; reason: 'no_source' | 'owner_not_found' | 'missing_content' | 'images_unavailable' | 'private_location' }
   | { kind: 'failed'; owner: SocialCardOwner; error: string }
 
@@ -301,7 +301,7 @@ export async function refreshSocialCard(input: {
     : false
   if (currentServed && current?.public_url) {
     await executeBatch(db, [{ query: "UPDATE media_placements SET status = 'active' WHERE owner_type = ? AND owner_id = ? AND slot = 'social_card' AND asset_id = ?", params: [owner.owner_type, owner.owner_id, current.asset_id] }])
-    return { kind: 'reused', owner, assetId: current.asset_id, publicUrl: current.public_url, generationKey }
+    return { kind: 'reused', owner, asset_id: current.asset_id, public_url: current.public_url, generation_key: generationKey }
   }
   // Only production can store a card. Elsewhere the rows are production's copy,
   // so the card it already has stays exactly as it is and the result says why.
@@ -346,7 +346,7 @@ export async function refreshSocialCard(input: {
   // stores cards), so the image goes with it.
   if (current && current.asset_id !== uploaded.assetId) await deleteUnplacedCard(db, env, current.asset_id, organization.id, input.actorId ?? null)
 
-  return { kind: 'generated', owner, assetId: uploaded.assetId, publicUrl: uploaded.publicUrl, generationKey }
+  return { kind: 'generated', owner, asset_id: uploaded.assetId, public_url: uploaded.publicUrl, generation_key: generationKey }
 }
 
 export async function regenerateOrganizationSocialCards(input: {

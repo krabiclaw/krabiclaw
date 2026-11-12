@@ -115,10 +115,12 @@ The destinations are files under `O`, and their URLs are their files:
 
 | Destination | URL |
 | --- | --- |
-| Website | `O/website` — Pages, Blog, Posts, Reviews and Q&A, Brand, Status, Domains, Languages, Currency, Website booking |
+| Website | `O/website` — Pages, Blog, Posts, Reviews, Q&A, Brand, Preferences, Website booking |
+| Preferences | `O/website/preferences` and its leaves — Status, Languages, Domains, Currency |
 | Pages | `O/website/pages`, a page `O/website/pages/:pageId`, the Links page `O/website/pages/links` |
 | Blog | `O/website/blog` |
-| Reviews and Q&A | `O/website/qa` |
+| Reviews | `O/website/reviews` |
+| Q&A | `O/website/qa` |
 | Brand | `O/website/brand` and its leaves |
 | Posts | `O/website/posts` — short posts to the site and its connected social accounts |
 | Locations | `O/locations`, a location `O/locations/:locationSlug`, `O/locations/new` |
@@ -196,8 +198,7 @@ writes again. Upcoming groups by day
 stay in Calendar.
 
 The page re-reads on `business.changed`, `stay.changed` and conversation
-invalidations. Opening a task (`?task=`) reads its alerts. Business goals stay
-editable below the list in a collapsed disclosure; they steer the selector.
+invalidations. Opening a task (`?task=`) reads its alerts.
 Personal-account Today/Upcoming project the buyer's own agenda with
 `TodayAgendaCard`; this is separate from the business's tasks.
 
@@ -341,19 +342,21 @@ pane and Back, including on reload and deep links.
 | --- | --- |
 | Product, its variants and prices | what is sold: kind, pricing, booking, publication, locations, collections, its page |
 | A page, article or post | its own content |
-| Location | its place, hours, media and reservation policy |
+| Location | its place, hours and media; its tables are a `table` Product booked like any offering |
 | Organization member | that member's public profile and independently authored availability in the named organization |
 | Organization | the shared site: brand, domains, languages, connections |
 | User | account name, avatar, personal preferences and security |
-| Guest messaging | organization automatic messages and their home schedules at `O/messages/automatic`; immutable delivery snapshots at `O/messages/scheduled` or a conversation's `scheduled` child; each member's own send-later replies |
+| Guest messaging | organization automatic messages and their schedules for homes, experiences, consultations and table reservations at `O/messages/automatic`; the one outbox at `O/messages/scheduled`: immutable automatic delivery snapshots for managers and each member's own send-later replies |
 
 Automatic messages use the canonical message-template operations: Message edits
-its name and text, When it is sent edits its trigger, local time and named homes;
-every automatic message has a schedule. Managers create, change and delete them.
+its name and text, When it is sent edits its trigger, day or hours, local time
+and named offerings, in the business's own words (check-in for a home, the
+consultation, booking or reservation otherwise); every automatic message has a
+schedule. The one editor serves every vertical. Managers create, change and delete them.
 Every confirmed stay is also sent its home's check-in instructions by the server;
 that message has no template. In a conversation, "+" adds to the message
 (photos, or Send later), and the conversation's "⋯" holds Messaging settings:
-the person's own Suggested replies switch and their pending Send later replies.
+the person's own Suggested replies switch and the outbox (Sent and upcoming), where their Send later replies are.
 A suggested reply is the composer's placeholder until Use or Tab puts it in the
 field. Scheduled-message history reads the canonical snapshots and reasons;
 managers may cancel pending messages. Neither editor introduces a second sending or scheduling lifecycle.
@@ -618,8 +621,9 @@ Record contact actions use the shell's floating footer without a border.
 
 **One header row, decided by the shell.** As Airbnb's: a tab root opens on its
 large title with its actions on the same row and no bar above it; a pushed
-level puts a round Back first — on its own row above the title on a phone,
-inline before it from `lg` — with the actions at the right of that row; a
+level (such as all Menu sub-pages, Website, Preferences, Listing editor, Team)
+centers its compact title (16px font-semibold) on a single row in between the round
+Back button on the left and any action icons on the right; a
 leaf's sheet has ✕ and its title small and centred, and the leaf's pane its
 title large. Host booking and stay records use the compact status header
 specified below. Back, ✕ and every action are the same round button. Pages
@@ -857,7 +861,7 @@ each Menu destination — Website, Locations, Team, Connections, Earnings,
 Payments, Plan and billing, Insights, Notifications — as Airbnb's `/hosting/listings` grid does.
 A root that is a grid or a chart uses the frame; a root that is settings opens
 its first row beside it (Leaf width, above). Within a destination, levels pair
-with their parent: Pages, Blog, Reviews and Q&A, and Brand render as
+with their parent: Pages, Blog, Reviews, Q&A, and Brand render as
 `Website | Pages`, and a Catalog entry renders beside Catalog.
 
 **Auto-selection.** Auto-selection answers whether an index may choose one of
@@ -953,8 +957,8 @@ tree, so where the same levels must render under a second parent, the
 second set of records with their own names. `build/booking-routes.ts` mounts a
 booking under its calendar day and the account's own record under its calendar
 day and Today. `build/form-question-routes.ts` mounts a form's Questions,
-written once as Website › Inquiry form, beneath a product's Booking, a home and
-a location's reservation Availability, each as `questions`; the `formQuestions`
+written once as Website › Inquiry form, beneath a product's Booking (a table's
+included) and a home, each as `questions`; the `formQuestions`
 meta names the record a mount edits. Nothing else is mounted twice: a page a
 Product owns is edited in Pages, and the Product links to it. The generated router, not the
 filesystem, is the complete tree.
@@ -1096,7 +1100,7 @@ a token for other unpublished pages.
 the same saved-summary cards and focused editors. A practice area without a
 booking configuration does not imply an attorney assignment or available
 consultations. Configured consultations use the existing Product booking owner,
-attorneys or legal teams, clients and offices. Page content links to the bound
+attorneys, clients and offices. Page content links to the bound
 Page editor, and Preview uses that Page's saved path; a Product slug does not
 invent a second legal page. Assigned attorneys retain their authorized Product
 work without gaining organization-wide Page editing, preview or translations.

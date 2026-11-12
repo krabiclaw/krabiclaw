@@ -311,7 +311,7 @@ const {
   getHero: getContentHero,
   products,
   collections,
-  locationReviews,
+  location_reviews,
   tenantPage,
   pending,
   config: pageConfig,
@@ -364,7 +364,7 @@ const displayEmail = computed(() => {
 const otherLocations = computed(() => locations.value.filter((l: ApiRecord) => l.slug !== slug.value))
 
 // Reviews preview from bootstrap
-const reviewsPreview = computed(() => locationReviews.value.slice(0, 3))
+const reviewsPreview = computed(() => location_reviews.value.slice(0, 3))
 
 
 // Neutral default until the owner picks a brand color in onboarding.

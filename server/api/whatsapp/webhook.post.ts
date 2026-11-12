@@ -1,18 +1,14 @@
 import { cloudflareEnv, jsonResponse } from '~/server/utils/api-response'
 import { fetchWhatsAppMedia, sendWhatsAppText } from '~/server/utils/whatsapp'
-import { attachGuestPhotos, sortGuestFiles, type MessagePhoto } from '~/server/domain/guest-threads/attachments'
+import type { MessagePhoto } from '~/server/domain/guest-threads/attachments'
 import { advanceDeliveryStatus } from '~/server/domain/guest-threads/deliveries'
 import { parseMetaMsisdn } from '~/utils/phone'
 import { isLastWhatsAppInbound, recordWhatsAppInbound } from '~/server/utils/mcp-context'
 import { execute, queryFirst } from '~/server/db'
-import { updateThreadProjectionIfLatestEntry } from '~/server/domain/guest-threads/repository'
-import { getGuestRequest, requestSummary } from '~/server/domain/requests'
 import { REPLY_BY_QUOTING, replyToAlertEntry } from '~/server/domain/guest-threads/member-reply'
-import { appendEntry, findEntryByDedupeKey } from '~/server/domain/guest-threads/entries'
-import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
-import { notifyGuestThreadReply } from '~/server/utils/notifications'
-import { findSubmissionByPhone } from '~/server/utils/submission-messages'
-import { findVerifiedAuthUserByPhone } from '~/server/utils/auth'
+import { publishConversationEvent } from '~/server/cloudflare/guest-inbox-events'
+import { receiveGuestWhatsApp } from '~/server/domain/guest-threads/inbound-email'
+import { findVerifiedAuthUserByPhone, type CloudflareEnv } from '~/server/utils/auth'
 
 interface WhatsAppMessage {
   id: string
@@ -114,10 +110,9 @@ async function resolveUser(env: ApiRecord, from: string): Promise<UserRow | null
  */
 async function answerMember(db: D1Database, env: ApiRecord, message: WhatsAppMessage, toPhone: string, userId: string): Promise<void> {
   const quoted = message.context?.id
-    ? await queryFirst<{ entry_id: string }>(db, `
-        SELECT d.entry_id FROM guest_thread_deliveries d JOIN activity_entries e ON e.id = d.entry_id LEFT JOIN requests r ON r.id = e.request_id
-         WHERE d.provider = 'meta' AND d.channel = 'whatsapp' AND d.purpose = 'owner_alert' AND d.provider_message_id = ?
-           AND (e.kind = 'message' OR (e.kind = 'submission' AND r.kind = 'contact') OR e.dedupe_key LIKE 'team-message:%')
+    ? await queryFirst<{ message_id: string }>(db, `
+        SELECT d.message_id FROM guest_thread_deliveries d
+         WHERE d.provider = 'meta' AND d.channel = 'whatsapp' AND d.purpose = 'owner_alert' AND d.provider_message_id = ? AND d.message_id IS NOT NULL
          LIMIT 1`, [message.context.id])
     : null
   if (!quoted) {
@@ -126,7 +121,7 @@ async function answerMember(db: D1Database, env: ApiRecord, message: WhatsAppMes
     return
   }
   const outcome = await replyToAlertEntry(env as CloudflareEnv, {
-    entryId: quoted.entry_id, userId, body: messageText(message), files: await messageFiles(env, message), idempotencyKey: `whatsapp:${message.id}`,
+    entryId: quoted.message_id, userId, body: messageText(message), files: await messageFiles(env, message), idempotencyKey: `whatsapp:${message.id}`,
   })
   // The member reads the outcome first. A failed reply, or an outcome Meta would not carry, then fails
   // this message, so Meta delivers it again; the replay under the same key sends nothing twice.
@@ -146,55 +141,9 @@ async function handleMessage(db: D1Database, env: ApiRecord, message: WhatsAppMe
   const toPhone = parseMetaMsisdn(message.from)
   const user = await resolveUser(env, message.from)
   if (!user) {
-    // Not a verified owner/staff account — check whether this is a customer replying to an
-    // open reservation/experience-booking thread rather than trying to talk to ChowBot.
-    const existingEntry = await findEntryByDedupeKey(db, `whatsapp:${message.id}`)
-    const existingThread = existingEntry
-      ? await getGuestRequest(db, existingEntry.request_id)
-      : null
-    const match = existingThread
-      ? {
-          submissionType: existingThread.kind,
-          submissionId: existingThread.id,
-          organizationId: existingThread.organization_id,
-        }
-      : await findSubmissionByPhone(db, toPhone)
-    if (match) {
-      const text = messageText(message)
-      const { photos, unshown } = sortGuestFiles(await messageFiles(env, message))
-      if (text || photos.length || unshown.length) {
-        const thread = await getGuestRequest(db, match.submissionId, undefined, match.submissionType)
-        if (!thread) throw new Error(`WhatsApp guest reply matched conversation ${match.submissionId}, which no longer exists`)
-        const entry = await appendEntry(db, {
-          threadId: thread.id,
-          kind: 'message',
-          actorKind: 'guest',
-          body: text || null,
-          payloadJson: unshown.length ? { unshownFiles: unshown } : null,
-          dedupeKey: `whatsapp:${message.id}`,
-        })
-        await attachGuestPhotos(db, env, match.organizationId, entry.id, photos)
-        await updateThreadProjectionIfLatestEntry(db, thread.id, entry.id)
-        // The guest's message is in the thread before the owner is alerted, so an alert that fails cannot hide it.
-        await publishGuestInboxThreadEvent(env, db, { threadId: thread.id, type: 'entry.appended' })
-
-        const summary = await requestSummary(db, thread)
-        await notifyGuestThreadReply(env, db, {
-          organizationId: match.organizationId,
-          locationId: summary.locationId,
-          threadId: thread.id,
-          sourceEntryId: entry.id,
-          submissionType: match.submissionType,
-          submissionId: match.submissionId,
-          participantLabel: summary.participantLabel,
-          guestEmail: summary.guestEmail,
-          guestPhone: summary.guestPhone,
-          inboundChannel: 'whatsapp',
-        })
-      }
-      return
-    }
-    await reply(env, toPhone, `To continue, open KrabiClaw: ${platformLoginUrl(env)}`)
+    // Not a verified owner/staff account: a guest answering their booking conversation, or someone to point at the app.
+    const received = await receiveGuestWhatsApp(env as CloudflareEnv, { phone: toPhone, messageId: message.id, body: messageText(message), files: await messageFiles(env, message) })
+    if (!received) await reply(env, toPhone, `To continue, open KrabiClaw: ${platformLoginUrl(env)}`)
     return
   }
 
@@ -221,10 +170,10 @@ async function handleStatus(db: D1Database, env: ApiRecord, status: WhatsAppStat
   if (!providerMessageId || !incomingStatus) return
   if (incomingStatus !== 'sent' && incomingStatus !== 'delivered' && incomingStatus !== 'read' && incomingStatus !== 'failed') return
 
-  const delivery = await queryFirst<{ id: string; request_id: string; status: string }>(db, `
-    SELECT d.id, e.request_id, d.status
+  const delivery = await queryFirst<{ id: string; conversation_id: string | null; status: string }>(db, `
+    SELECT d.id, m.conversation_id, d.status
     FROM guest_thread_deliveries d
-    JOIN activity_entries e ON e.id = d.entry_id
+    LEFT JOIN messages m ON m.id = d.message_id
     WHERE d.provider = 'meta' AND d.provider_message_id = ?
     LIMIT 1
   `, [providerMessageId])
@@ -245,10 +194,7 @@ async function handleStatus(db: D1Database, env: ApiRecord, status: WhatsAppStat
     `, [errorText, new Date().toISOString(), delivery.id])
   }
 
-  await publishGuestInboxThreadEvent(env, db, {
-    threadId: delivery.request_id,
-    type: 'delivery.changed',
-  })
+  if (delivery.conversation_id) await publishConversationEvent(env, db, { conversationId: delivery.conversation_id, type: 'MESSAGE_UPDATE' })
 }
 
 export default defineHandler(async (event) => {

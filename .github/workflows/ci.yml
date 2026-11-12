@@ -57,6 +57,10 @@ jobs:
       github.event_name == 'pull_request'
       && !(github.base_ref == 'main' && github.head_ref == 'staging')
     runs-on: ubuntu-latest
+    container: &playwright_container
+      # Match @playwright/test in yarn.lock so the runner already has its browsers and libraries.
+      image: mcr.microsoft.com/playwright:v1.64.0-noble@sha256:06a9939e57531807f8d5fd76ce44b53165ffb7d7501d87ab10e285c20b1e971f
+      options: --user 1001
     timeout-minutes: 180
     permissions:
       contents: read
@@ -98,9 +102,6 @@ jobs:
           key: yarn-${{ runner.os }}-${{ hashFiles('yarn.lock') }}
           restore-keys: yarn-${{ runner.os }}-
       - run: corepack yarn install --immutable
-      - run: &install_browsers |
-          printf 'https://archive.ubuntu.com/ubuntu/\tpriority:1\nhttps://security.ubuntu.com/ubuntu/\tpriority:2\n' | sudo tee /etc/apt/apt-mirrors.txt > /dev/null
-          corepack yarn playwright install --with-deps chromium webkit
       # playwright.config.ts prepares an empty local D1 and the build, and its
       # global setup seeds the synthetic businesses through the app's own
       # boundaries (tests/e2e/seed). No production data reaches a pull request.
@@ -137,6 +138,7 @@ jobs:
     # Staging is the first deployed validation. Checks gates this exact SHA.
     needs: [typecheck]
     runs-on: ubuntu-latest
+    container: *playwright_container
     timeout-minutes: 90
     environment: staging
     concurrency:
@@ -173,7 +175,6 @@ jobs:
           key: yarn-${{ runner.os }}-${{ hashFiles('yarn.lock') }}
           restore-keys: yarn-${{ runner.os }}-
       - run: corepack yarn install --immutable
-      - run: *install_browsers
       - name: Build staging Worker
         run: yarn build
       - name: Capture Nuxt build ID
@@ -194,16 +195,27 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          branch_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/${GITHUB_REF#refs/}" --jq '.object.sha')"
-          if [[ "$branch_sha" != "$GITHUB_SHA" ]]; then
-            echo "::error::Refusing outdated deployment $GITHUB_SHA; $GITHUB_REF now points to $branch_sha."
-            exit 1
-          fi
+          node --input-type=module <<'JS'
+          const { GITHUB_API_URL, GITHUB_REPOSITORY, GITHUB_REF, GITHUB_SHA, GH_TOKEN } = process.env
+          const response = await fetch(`${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/git/ref/${GITHUB_REF.replace(/^refs\//, '')}`, {
+            headers: { authorization: `Bearer ${GH_TOKEN}`, accept: 'application/vnd.github+json' },
+          })
+          if (!response.ok) throw new Error(`Could not read deployment branch: HTTP ${response.status}`)
+          const { object } = await response.json()
+          if (object?.sha !== GITHUB_SHA) {
+            throw new Error(`Refusing outdated deployment ${GITHUB_SHA}; ${GITHUB_REF} now points to ${object?.sha}.`)
+          }
+          JS
+      # D1 keeps no planner statistics until `PRAGMA optimize` runs (D1 "Use
+      # indexes"). Without them SQLite read a conversation's messages through
+      # the (kind, created_at) index, scanning every message once per inbox row.
       - name: Apply staging migrations
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: corepack yarn wrangler d1 migrations apply DB --env staging --remote
+        run: |
+          corepack yarn wrangler d1 migrations apply DB --env staging --remote
+          corepack yarn wrangler d1 execute DB --env staging --remote --command 'PRAGMA optimize'
       # `d1 migrations apply` skips a tag already in `d1_migrations`, so a
       # regenerated baseline leaves the database on whatever it first carried
       # and the deploy says nothing. This is where that stops being silent.
@@ -300,7 +312,9 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: corepack yarn wrangler d1 migrations apply DB --remote
+        run: |
+          corepack yarn wrangler d1 migrations apply DB --remote
+          corepack yarn wrangler d1 execute DB --remote --command 'PRAGMA optimize'
       - name: Verify the production database carries this baseline
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -349,7 +363,9 @@ jobs:
           key: yarn-${{ runner.os }}-${{ hashFiles('yarn.lock') }}
           restore-keys: yarn-${{ runner.os }}-
       - run: corepack yarn install --immutable
-      - run: *install_browsers
+      - run: |
+          printf 'https://archive.ubuntu.com/ubuntu/\tpriority:1\nhttps://security.ubuntu.com/ubuntu/\tpriority:2\n' | sudo tee /etc/apt/apt-mirrors.txt > /dev/null
+          corepack yarn playwright install --with-deps chromium webkit
       - name: Wait for production assets to converge
         run: >-
           node scripts/wait-for-nuxt-deployment.mjs

@@ -45,12 +45,12 @@ async function loadReviewsSummary(db: DbClient, organizationIds: readonly string
       if (!row.author_name?.trim()) throw new HTTPError({ statusCode: 500, message: `Review ${row.id} has no author`, data: { code: 'INVALID_REVIEW', field: 'author_name', review_id: row.id } })
       return {
       id: row.id,
-      author: row.author_name,
+      author_name: row.author_name,
       rating: row.rating,
       title: row.title,
       content: row.content,
       source: row.source,
-      createdAt: row.created_at,
+      created_at: row.created_at,
       }
     }),
   }
@@ -88,7 +88,7 @@ export async function loadDashboardOrganizationAnalytics(
     loadReviewsSummary(db, [organization.id]),
   ])
 
-  return organizationAnalyticsSchema.parse({ organizationId: organization.id, report, reviews })
+  return organizationAnalyticsSchema.parse({ organization_id: organization.id, report, reviews })
 }
 
 /**

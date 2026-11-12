@@ -34,7 +34,7 @@ export interface PublicSiteDefinition {
    * documents a route still binds by path alone — only needed where a route
    * file claims the path, because a claimed path is one the catch-all cannot
    * reach. `prefixes` are subtrees served as documents. Unclaimed paths are
-   * rendered by pages/[...tenantPath].vue on every site.
+   * rendered by pages/[...tenant_path].vue on every site.
    */
   pageDocuments: {
     recipes: Record<string, string> & { home: string }
@@ -56,12 +56,13 @@ export const CUSTOMER_SITE: PublicSiteDefinition = {
     exactPaths: ['/', '/menu', '/products', '/experiences', '/stays', '/contact', '/blog', '/docs', '/locations', '/reservations', '/posts', '/photos', '/qa', '/reviews'],
     dynamicPrefixes: ['/blog/', '/docs/', '/services/', '/experiences/', '/stays/', '/locations/', '/posts/'],
   },
-  nonIndexableExactPaths: ['/contact/confirmed', '/bookings/cancel', '/bookings/confirmed', '/reservations/cancel', '/reservations/confirmed'],
+  nonIndexableExactPaths: ['/contact/confirmed', '/bookings/cancel', '/bookings/confirmed'],
   pageDocuments: {
     recipes: {
       home: '/', about: '/about', contact: '/contact', reservations: '/reservations',
       services: '/services', pricing: '/pricing', donate: '/donate', schedule: '/schedule',
       privacy: '/policies/privacy', terms: '/policies/terms', 'third-party-notices': '/third-party-notices',
+      qa: '/qa', reviews: '/reviews',
     },
     optionalLocalizedPaths: ['/contact', '/reservations'],
     paths: [],

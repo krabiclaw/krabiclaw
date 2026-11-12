@@ -10,9 +10,9 @@ export interface PageNode {
   children?: PageNode[]
 }
 
-const BOOKING_PATH = '/dashboard/:orgSlug()/bookings/:bookingType()/:bookingId()'
-const TODAY_PATH = '/dashboard/:orgSlug()'
-const CALENDAR_PATH = '/dashboard/:orgSlug()/calendar'
+const BOOKING_PATH = '/dashboard/:org_slug()/bookings/:booking_type()/:record_id()'
+const TODAY_PATH = '/dashboard/:org_slug()'
+const CALENDAR_PATH = '/dashboard/:org_slug()/calendar'
 const DAY_PATH = `${CALENDAR_PATH}/:day()`
 // The account's own record lives under Past activity. Today opens it at
 // `/dashboard/account/bookings` beneath Today, and its calendar day mounts
@@ -47,18 +47,18 @@ export function mountBookingRoutes(pages: PageNode[]): void {
   const calendar = nodeAt(pages, CALENDAR_PATH)
   const day = nodeAt(pages, DAY_PATH)
   if (!booking || !today || !calendar || !day) throw new Error('The booking, Today, calendar and calendar day pages were not all found; bookings cannot open in their context')
-  const clone = renamed(booking, 'dashboard-orgSlug-bookings', 'dashboard-orgSlug-calendar-day')
-  clone.path = ':bookingType()/:bookingId()'
+  const clone = renamed(booking, 'dashboard-org_slug-bookings', 'dashboard-org_slug-calendar-day')
+  clone.path = ':booking_type()/:record_id()'
   day.children = [...(day.children ?? []), clone]
   // A home's occupied night opens its stay directly: its parent is the nightly
   // Calendar, rather than an agenda day whose state belongs to a location.
-  const night = renamed(booking, 'dashboard-orgSlug-bookings', 'dashboard-orgSlug-calendar-night')
-  night.path = ':bookingType(stay)/:bookingId()'
+  const night = renamed(booking, 'dashboard-org_slug-bookings', 'dashboard-org_slug-calendar-night')
+  night.path = ':booking_type(stay)/:record_id()'
   calendar.children = [...(calendar.children ?? []), night]
   const bookingIndex = pages.indexOf(booking)
   if (bookingIndex === -1) throw new Error('The booking subtree must be a root before it is mounted beneath Today')
   pages.splice(bookingIndex, 1)
-  booking.path = 'bookings/:bookingType()/:bookingId()'
+  booking.path = 'bookings/:booking_type()/:record_id()'
   today.children = [...(today.children ?? []), booking]
 
   const record = nodeAt(pages, ACCOUNT_RECORD_PATH)

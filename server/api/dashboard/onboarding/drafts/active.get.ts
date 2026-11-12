@@ -24,7 +24,7 @@ export default defineHandler(async (event) => {
     if (!row.organization_id) throw new HTTPError({ statusCode: 409, statusMessage: 'Website draft cleanup has no recorded organization. Its native ownership must be verified.', data: { code: 'ONBOARDING_DRAFT_DISCARD_INCOMPLETE', draft_id: row.id } })
     const outcome = await deleteAbandonedDraftTenant(env, {
       draftId: row.id,
-      updatedAt: row.updated_at, organizationId: row.organization_id,
+      updated_at: row.updated_at, organizationId: row.organization_id,
       subdomain: row.subdomain_candidate, userId: session.user.id,
     })
     if ('refused' in outcome) throw new HTTPError({
@@ -55,24 +55,24 @@ export default defineHandler(async (event) => {
   return jsonResponse({
     success: true,
     draft: {
-      draftId: row.id,
-      updatedAt: row.updated_at,
-      draftName: payload.preview.brandName,
-      sourceType: row.source_type,
-      placeId: payload.source.placeId,
+      draft_id: row.id,
+      updated_at: row.updated_at,
+      name: payload.preview.brandName,
+      source_type: row.source_type,
+      google_place_id: payload.source.placeId,
       vertical: payload.preview.vertical,
       details: payload.source.details,
       config: payload.preview.config,
-      logoImage: getDraftMedia(payload, 'logo'),
-      heroImage: getDraftMedia(payload, 'hero'),
+      logo_image: getDraftMedia(payload, 'logo'),
+      hero_image: getDraftMedia(payload, 'hero'),
       products: payload.preview.products.map(product => ({
         name: product.name,
         category: product.collection,
-        amountMinor: product.price === null ? null : product.price.unit_amount,
+        unit_amount: product.price === null ? null : product.price.unit_amount,
       })),
-      organizationId: organization?.id ?? null,
-      subdomainCandidate: organization?.subdomain ?? row.subdomain_candidate,
-      previewToken,
+      organization_id: organization?.id ?? null,
+      subdomain_candidate: organization?.subdomain ?? row.subdomain_candidate,
+      preview_token: previewToken,
     },
   })
 })

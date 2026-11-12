@@ -55,28 +55,28 @@ export function onboardingDraftWriteGuard(draft: Pick<SavedOnboardingDraft, 'id'
 
 export interface DraftBrandInput {
   /** A starter palette id; the site wears the default colors until one is chosen. */
-  paletteStarter: string | null
-  fontPreset: string | null
+  palette_starter: string | null
+  font_preset: string | null
   /** How the uploaded logo is shown: original, square or circle. */
-  logoShape: string | null
-  logoNote: string | null
-  logoPreviewUrl: string | null
-  heroPhotoNote: string | null
-  heroPreviewUrl: string | null
-  heroHeadline: string | null
-  heroSubtitle: string | null
-  logoImage: DraftUploadedImage | null
-  heroImage: DraftUploadedImage | null
+  logo_shape: string | null
+  logo_note: string | null
+  logo_preview_url: string | null
+  hero_photo_note: string | null
+  hero_preview_url: string | null
+  hero_headline: string | null
+  hero_subtitle: string | null
+  logo_image: DraftUploadedImage | null
+  hero_image: DraftUploadedImage | null
 }
 
 export interface DraftUploadedImage {
-  draftAssetId: string
-  cloudflareImageId: string
-  publicUrl: string
-  thumbnailUrl: string | null
-  mimeType: string | null
-  fileName: string | null
-  fileSize: number | null
+  asset_id: string
+  cloudflare_image_id: string
+  public_url: string
+  thumbnail_url: string | null
+  mime_type: string | null
+  file_name: string | null
+  file_size: number | null
 }
 
 export interface DraftLocationRecord {
@@ -237,11 +237,11 @@ export interface DraftDetailsInput {
    * into the street field — so an owner returning to a saved draft found their
    * street address reading "United States".
    */
-  streetAddress: string | null
-  addressLine2: string | null
+  street_address: string | null
+  address_line_2: string | null
   city: string | null
   region: string | null
-  postalCode: string | null
+  postal_code: string | null
   /**
    * ISO 3166-1 alpha-2, as the owner answered it on the location step. Stored
    * in its own right rather than read back off the phone number: the location
@@ -251,12 +251,12 @@ export interface DraftDetailsInput {
    */
   country: string | null
   phone: string | null
-  websiteUrl: string | null
-  openingHours: OpeningHours
-  specialHours: SpecialHours
+  website_url: string | null
+  opening_hours: OpeningHours
+  special_hours: SpecialHours
   timezone: string | null
   currency: CurrencyCode | null
-  sourceLocale: string | null
+  source_locale: string | null
 }
 
 export interface PlaceDetailsSnapshot {
@@ -302,18 +302,18 @@ function asPlaceSnapshot(place: DraftPlaceSource): PlaceDetailsSnapshot {
 function buildDraftContent(
   _brandName: string,
   _vertical: OrganizationVertical,
-  heroHeadline: string | null,
-  heroSubtitle: string | null,
+  hero_headline: string | null,
+  hero_subtitle: string | null,
 ): DraftContentRecord[] {
-  if (!heroHeadline && !heroSubtitle) return []
+  if (!hero_headline && !hero_subtitle) return []
   return [{
     page: 'home',
     field: 'hero',
     content: null,
     value: null,
     type: 'text',
-    hero_title: heroHeadline,
-    hero_subtitle: heroSubtitle,
+    hero_title: hero_headline,
+    hero_subtitle: hero_subtitle,
     updated_at: nowIso(),
   }]
 }
@@ -323,7 +323,7 @@ export interface DraftProductInput {
   name: string
   category: string
   /** null when the owner left the price blank. `products` requires no price. */
-  amountMinor: number | null
+  unit_amount: number | null
 }
 
 export function buildOnboardingDraftPayload(input: {
@@ -335,15 +335,15 @@ export function buildOnboardingDraftPayload(input: {
   products?: DraftProductInput[] | null
 }): OnboardingDraftPayload {
   if (input.products?.length && input.vertical !== 'restaurant' && input.vertical !== 'experience') throw new HTTPError({ statusCode: 400, statusMessage: 'This business type adds its offerings after website setup' })
-  const sourceLocale = input.details.sourceLocale ? platformLocale(input.details.sourceLocale) : null
-  if (!sourceLocale) throw new HTTPError({ statusCode: 400, statusMessage: 'Choose a supported website language' })
+  const source_locale = input.details.source_locale ? platformLocale(input.details.source_locale) : null
+  if (!source_locale) throw new HTTPError({ statusCode: 400, statusMessage: 'Choose a supported website language' })
   const brandName = input.details.name || input.name
   const subdomainCandidate = slugify(brandName).slice(0, 40)
   const placeSnapshot = input.place ? asPlaceSnapshot(input.place) : null
   // No stock photo fallback here: a generic stock image isn't actually theirs, and the
   // Saya hero renders a brand-color + icon treatment when no real photo is available yet.
-  const uploadedHero = input.brandDraft?.heroImage ?? null
-  const uploadedLogo = input.brandDraft?.logoImage ?? null
+  const uploadedHero = input.brandDraft?.hero_image ?? null
+  const uploadedLogo = input.brandDraft?.logo_image ?? null
   // A tenant's first location is 'main' everywhere else — seedNewOrganization creates it
   // under that slug and seeds its page at /locations/main. Deriving a slug from
   // the brand name here renamed the location out from under that page, leaving
@@ -366,9 +366,9 @@ export function buildOnboardingDraftPayload(input: {
       // No currency of its own when the onboarding details carry none: the
       // price is normalized against the site's currency, and hardcoding USD
       // here overrode what the tenant actually sells in.
-      price: product.amountMinor === null
+      price: product.unit_amount === null
         ? null
-        : { unit_amount: product.amountMinor, ...(input.details.currency ? { currency: input.details.currency } : {}) },
+        : { unit_amount: product.unit_amount, ...(input.details.currency ? { currency: input.details.currency } : {}) },
       order_url: null,
       sort_order: index,
       source: 'import' as const,
@@ -384,15 +384,15 @@ export function buildOnboardingDraftPayload(input: {
 
   const qa: DraftQaRecord[] = []
 
-  const paletteStarter = input.brandDraft?.paletteStarter ?? null
-  if (paletteStarter !== null && !STARTER_PALETTES.some(starter => starter.id === paletteStarter)) throw new HTTPError({ statusCode: 400, statusMessage: 'Unknown starter palette' })
-  const fontPreset = input.brandDraft?.fontPreset ?? null
-  if (fontPreset !== null && !isOrganizationFontPreset(fontPreset)) throw new HTTPError({ statusCode: 400, statusMessage: 'Unsupported website font' })
-  const logoShape = input.brandDraft?.logoShape ?? null
-  if (logoShape !== null && !(LOGO_SHAPES as readonly string[]).includes(logoShape)) throw new HTTPError({ statusCode: 400, statusMessage: 'Unsupported logo shape' })
-  const heroHeadline = input.brandDraft?.heroHeadline?.trim() || null
-  const heroSubtitle = input.brandDraft?.heroSubtitle?.trim() || null
-  const content = buildDraftContent(brandName, input.vertical, heroHeadline, heroSubtitle)
+  const palette_starter = input.brandDraft?.palette_starter ?? null
+  if (palette_starter !== null && !STARTER_PALETTES.some(starter => starter.id === palette_starter)) throw new HTTPError({ statusCode: 400, statusMessage: 'Unknown starter palette' })
+  const font_preset = input.brandDraft?.font_preset ?? null
+  if (font_preset !== null && !isOrganizationFontPreset(font_preset)) throw new HTTPError({ statusCode: 400, statusMessage: 'Unsupported website font' })
+  const logo_shape = input.brandDraft?.logo_shape ?? null
+  if (logo_shape !== null && !(LOGO_SHAPES as readonly string[]).includes(logo_shape)) throw new HTTPError({ statusCode: 400, statusMessage: 'Unsupported logo shape' })
+  const hero_headline = input.brandDraft?.hero_headline?.trim() || null
+  const hero_subtitle = input.brandDraft?.hero_subtitle?.trim() || null
+  const content = buildDraftContent(brandName, input.vertical, hero_headline, hero_subtitle)
 
   return {
     version: 3,
@@ -407,13 +407,13 @@ export function buildOnboardingDraftPayload(input: {
       vertical: input.vertical,
       subdomainCandidate,
       config: {
-        palette_starter: paletteStarter,
-        font_preset: fontPreset,
-        logo_shape: logoShape,
-        draft_logo_note: input.brandDraft?.logoNote?.trim() || null,
-        draft_hero_photo_note: input.brandDraft?.heroPhotoNote?.trim() || null,
-        draft_hero_headline: heroHeadline,
-        draft_hero_subtitle: heroSubtitle,
+        palette_starter: palette_starter,
+        font_preset: font_preset,
+        logo_shape: logo_shape,
+        draft_logo_note: input.brandDraft?.logo_note?.trim() || null,
+        draft_hero_photo_note: input.brandDraft?.hero_photo_note?.trim() || null,
+        draft_hero_headline: hero_headline,
+        draft_hero_subtitle: hero_subtitle,
       },
       media: [
         ...(uploadedLogo ? [{ slot: 'logo' as const, asset: uploadedLogo }] : []),
@@ -423,12 +423,12 @@ export function buildOnboardingDraftPayload(input: {
         id: locationId,
         slug: locationSlug,
         title: brandName,
-        address: postalAddressFromAnswers(input.details),
+        address: postalAddressFromAnswers({ ...input.details, streetAddress: input.details.street_address, addressLine2: input.details.address_line_2, postalCode: input.details.postal_code }),
         description,
         phone: input.details.phone ?? placeSnapshot?.phone ?? null,
-        website_url: input.details.websiteUrl ?? placeSnapshot?.websiteUrl ?? null,
-        opening_hours: input.details.openingHours,
-        special_hours: input.details.specialHours,
+        website_url: input.details.website_url ?? placeSnapshot?.websiteUrl ?? null,
+        opening_hours: input.details.opening_hours,
+        special_hours: input.details.special_hours,
         rating: placeSnapshot?.rating ?? null,
         review_count: placeSnapshot?.ratingCount ?? null,
 
@@ -438,7 +438,7 @@ export function buildOnboardingDraftPayload(input: {
       reviews,
       qa,
       content,
-      locales: [{ code: sourceLocale.locale, label: sourceLocale.label, is_source: true }],
+      locales: [{ code: source_locale.locale, label: source_locale.label, is_source: true }],
     },
   }
 }
@@ -461,10 +461,10 @@ export function parseOnboardingDraftPayload(raw: string): OnboardingDraftPayload
   const payload: OnboardingDraftPayload = { ...parsed, version: 3, source: { ...parsed.source, placeId } }
   const source = payload.preview.locales.filter(locale => locale.is_source)
   if (source.length !== 1 || !platformLocale(source[0]!.code)) throw new Error('Onboarding primary language is unavailable')
-  payload.source.details.sourceLocale ??= source[0]!.code
-  if (payload.source.details.sourceLocale !== source[0]!.code) throw new Error('Onboarding primary language is inconsistent')
-  payload.source.details.openingHours = parseOpeningHours(payload.source.details.openingHours)
-  payload.source.details.specialHours = parseSpecialHours(payload.source.details.specialHours)
+  payload.source.details.source_locale ??= source[0]!.code
+  if (payload.source.details.source_locale !== source[0]!.code) throw new Error('Onboarding primary language is inconsistent')
+  payload.source.details.opening_hours = parseOpeningHours(payload.source.details.opening_hours)
+  payload.source.details.special_hours = parseSpecialHours(payload.source.details.special_hours)
   if (payload.source.place) payload.source.place.openingHours = parseOpeningHours(payload.source.place.openingHours)
   for (const location of payload.preview.locations) {
     location.opening_hours = parseOpeningHours(location.opening_hours)
@@ -474,16 +474,16 @@ export function parseOnboardingDraftPayload(raw: string): OnboardingDraftPayload
 }
 
 export interface OnboardingDraftInput {
-  draftId?: string
-  expectedUpdatedAt?: string | null
-  idempotencyKey?: string
-  sourceType?: unknown
-  placeId?: unknown
+  draft_id?: string
+  updated_at?: string | null
+  idempotency_key?: string
+  source_type?: unknown
+  google_place_id?: unknown
   vertical?: unknown
   name?: unknown
   subdomain?: unknown
   details?: Record<string, unknown> | null
-  brandDraft?: Record<string, unknown> | null
+  brand_draft?: Record<string, unknown> | null
   products?: unknown
 }
 
@@ -500,24 +500,24 @@ function draftImage(raw: unknown, existing: DraftUploadedImage | null): DraftUpl
   if (raw === null) return null
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new HTTPError({ statusCode: 400, statusMessage: 'Invalid draft image' })
   const image = raw as Record<string, unknown>
-  const draftAssetId = answer(image, 'draftAssetId')
-  const cloudflareImageId = answer(image, 'cloudflareImageId')
-  const publicUrl = answer(image, 'publicUrl')
-  if (!draftAssetId || !cloudflareImageId || !publicUrl) throw new HTTPError({ statusCode: 400, statusMessage: 'Draft image identity and URL are required' })
-  return { draftAssetId, cloudflareImageId, publicUrl, thumbnailUrl: answer(image, 'thumbnailUrl'), mimeType: answer(image, 'mimeType'), fileName: answer(image, 'fileName'), fileSize: typeof image.fileSize === 'number' ? image.fileSize : null }
+  const asset_id = answer(image, 'asset_id')
+  const cloudflare_image_id = answer(image, 'cloudflare_image_id')
+  const public_url = answer(image, 'public_url')
+  if (!asset_id || !cloudflare_image_id || !public_url) throw new HTTPError({ statusCode: 400, statusMessage: 'Draft image identity and URL are required' })
+  return { asset_id, cloudflare_image_id, public_url, thumbnail_url: answer(image, 'thumbnail_url'), mime_type: answer(image, 'mime_type'), file_name: answer(image, 'file_name'), file_size: typeof image.file_size === 'number' ? image.file_size : null }
 }
 
 export function normalizeOnboardingDraftInput(input: OnboardingDraftInput, existing: OnboardingDraftPayload | null, place: DraftPlaceSource | null) {
   if (input.details !== undefined && input.details !== null && (typeof input.details !== 'object' || Array.isArray(input.details))) throw new HTTPError({ statusCode: 400, statusMessage: 'Business details must be an object' })
-  if (input.brandDraft !== undefined && input.brandDraft !== null && (typeof input.brandDraft !== 'object' || Array.isArray(input.brandDraft))) throw new HTTPError({ statusCode: 400, statusMessage: 'Brand details must be an object' })
+  if (input.brand_draft !== undefined && input.brand_draft !== null && (typeof input.brand_draft !== 'object' || Array.isArray(input.brand_draft))) throw new HTTPError({ statusCode: 400, statusMessage: 'Brand details must be an object' })
   const raw = input.details
   const previous = existing?.source.details
   const name = answer(raw, 'name') ?? answer(input as unknown as Record<string, unknown>, 'name') ?? place?.name ?? previous?.name ?? ''
   const vertical = input.vertical ?? existing?.preview.vertical
   if (!name || typeof vertical !== 'string' || !ALL_VERTICALS.includes(vertical as OrganizationVertical)) throw new HTTPError({ statusCode: 400, statusMessage: 'Business name and type are required', data: { missing_fields: [...(!name ? ['name'] : []), ...(!vertical ? ['vertical'] : [])] } })
-  const sourceLocale = answer(raw, 'sourceLocale', previous?.sourceLocale)
-  if (!sourceLocale || !platformLocale(sourceLocale)) throw new HTTPError({ statusCode: 400, statusMessage: 'Choose a supported website language', data: { missing_fields: ['source_locale'] } })
-  if (previous && previous.sourceLocale !== sourceLocale) throw new HTTPError({ statusCode: 409, statusMessage: 'Existing draft content cannot be relabelled into another language' })
+  const source_locale = answer(raw, 'source_locale', previous?.source_locale)
+  if (!source_locale || !platformLocale(source_locale)) throw new HTTPError({ statusCode: 400, statusMessage: 'Choose a supported website language', data: { missing_fields: ['source_locale'] } })
+  if (previous && previous.source_locale !== source_locale) throw new HTTPError({ statusCode: 409, statusMessage: 'Existing draft content cannot be relabelled into another language' })
   const country = answer(raw, 'country', previous?.country)?.toUpperCase() ?? null
   if (country && !getPhoneCountry(country)) throw new HTTPError({ statusCode: 400, statusMessage: 'country must be an ISO 3166-1 alpha-2 code' })
   const currency = answer(raw, 'currency', previous?.currency)?.toUpperCase() ?? null
@@ -528,36 +528,36 @@ export function normalizeOnboardingDraftInput(input: OnboardingDraftInput, exist
   const phoneE164 = phone ? toE164(phone) : null
   if (phone && !phoneE164) throw new HTTPError({ statusCode: 400, statusMessage: 'Enter a valid phone number with its country calling code' })
   const details: DraftDetailsInput = {
-    name, sourceLocale, country, currency: currency as CurrencyCode | null, timezone, phone: phoneE164,
-    streetAddress: answer(raw, 'streetAddress', previous?.streetAddress), addressLine2: answer(raw, 'addressLine2', previous?.addressLine2),
-    city: answer(raw, 'city', previous?.city), region: answer(raw, 'region', previous?.region), postalCode: answer(raw, 'postalCode', previous?.postalCode),
-    websiteUrl: answer(raw, 'websiteUrl', previous?.websiteUrl ?? place?.websiteUrl ?? null),
-    openingHours: parseOpeningHours(raw?.openingHours === undefined ? previous?.openingHours ?? place?.openingHours ?? null : raw.openingHours),
-    specialHours: parseSpecialHours(raw?.specialHours === undefined ? previous?.specialHours ?? null : raw.specialHours),
+    name, source_locale, country, currency: currency as CurrencyCode | null, timezone, phone: phoneE164,
+    street_address: answer(raw, 'street_address', previous?.street_address), address_line_2: answer(raw, 'address_line_2', previous?.address_line_2),
+    city: answer(raw, 'city', previous?.city), region: answer(raw, 'region', previous?.region), postal_code: answer(raw, 'postal_code', previous?.postal_code),
+    website_url: answer(raw, 'website_url', previous?.website_url ?? place?.websiteUrl ?? null),
+    opening_hours: parseOpeningHours(raw?.opening_hours === undefined ? previous?.opening_hours ?? place?.openingHours ?? null : raw.opening_hours),
+    special_hours: parseSpecialHours(raw?.special_hours === undefined ? previous?.special_hours ?? null : raw.special_hours),
   }
   const products: DraftProductInput[] = input.products === undefined
-    ? (existing?.preview.products ?? []).map(product => ({ name: product.name, category: product.collection, amountMinor: product.price?.unit_amount ?? null }))
+    ? (existing?.preview.products ?? []).map(product => ({ name: product.name, category: product.collection, unit_amount: product.price?.unit_amount ?? null }))
     : (() => {
         if (!Array.isArray(input.products)) throw new HTTPError({ statusCode: 400, statusMessage: 'products must be an array' })
         return input.products.map((value, index) => {
           if (!value || typeof value !== 'object' || Array.isArray(value)) throw new HTTPError({ statusCode: 400, statusMessage: `Product ${index + 1} is invalid` })
           const product = value as Record<string, unknown>
           const productName = answer(product, 'name')
-          const amount = product.amountMinor
+          const amount = product.unit_amount
           if (!productName || (amount !== undefined && amount !== null && (typeof amount !== 'number' || !Number.isInteger(amount) || amount < 0))) throw new HTTPError({ statusCode: 400, statusMessage: `Product ${index + 1} requires a name and a valid price when supplied` })
-          return { name: productName, category: answer(product, 'category') ?? '', amountMinor: typeof amount === 'number' ? amount : null }
+          return { name: productName, category: answer(product, 'category') ?? '', unit_amount: typeof amount === 'number' ? amount : null }
         })
       })()
-  const brand = input.brandDraft
+  const brand = input.brand_draft
   const config = existing?.preview.config
   const previousHeadline = config?.draft_hero_headline ?? existing?.preview.content.find(content => content.page === 'home' && content.field === 'hero')?.hero_title
   const brandDraft: DraftBrandInput = {
-    paletteStarter: answer(brand, 'paletteStarter', config?.palette_starter), fontPreset: answer(brand, 'fontPreset', config?.font_preset),
-    logoShape: answer(brand, 'logoShape', config?.logo_shape), logoNote: answer(brand, 'logoNote', config?.draft_logo_note),
-    logoPreviewUrl: answer(brand, 'logoPreviewUrl'), heroPhotoNote: answer(brand, 'heroPhotoNote', config?.draft_hero_photo_note), heroPreviewUrl: answer(brand, 'heroPreviewUrl'),
-    heroHeadline: answer(brand, 'heroHeadline', previousHeadline && previousHeadline !== existing?.preview.brandName ? previousHeadline : name) ?? name, heroSubtitle: answer(brand, 'heroSubtitle', config?.draft_hero_subtitle),
-    logoImage: draftImage(brand?.logoImage, existing ? getDraftMedia(existing, 'logo') : null),
-    heroImage: draftImage(brand?.heroImage, existing ? getDraftMedia(existing, 'hero') : null),
+    palette_starter: answer(brand, 'palette_starter', config?.palette_starter), font_preset: answer(brand, 'font_preset', config?.font_preset),
+    logo_shape: answer(brand, 'logo_shape', config?.logo_shape), logo_note: answer(brand, 'logo_note', config?.draft_logo_note),
+    logo_preview_url: answer(brand, 'logo_preview_url'), hero_photo_note: answer(brand, 'hero_photo_note', config?.draft_hero_photo_note), hero_preview_url: answer(brand, 'hero_preview_url'),
+    hero_headline: answer(brand, 'hero_headline', previousHeadline && previousHeadline !== existing?.preview.brandName ? previousHeadline : name) ?? name, hero_subtitle: answer(brand, 'hero_subtitle', config?.draft_hero_subtitle),
+    logo_image: draftImage(brand?.logo_image, existing ? getDraftMedia(existing, 'logo') : null),
+    hero_image: draftImage(brand?.hero_image, existing ? getDraftMedia(existing, 'hero') : null),
   }
   const payload = buildOnboardingDraftPayload({ name, vertical: vertical as OrganizationVertical, place, details, brandDraft, products })
   const subdomain = answer(input as unknown as Record<string, unknown>, 'subdomain')?.toLowerCase() ?? existing?.preview.subdomainCandidate ?? payload.preview.subdomainCandidate
@@ -569,7 +569,7 @@ export function normalizeOnboardingDraftInput(input: OnboardingDraftInput, exist
 export function onboardingPublicationMissingFields(draft: Pick<SavedOnboardingDraft, 'subdomain_candidate'>, payload: OnboardingDraftPayload) {
   const details = payload.source.details
   return [
-    ...(!details.sourceLocale || !platformLocale(details.sourceLocale) ? ['source_locale'] : []),
+    ...(!details.source_locale || !platformLocale(details.source_locale) ? ['source_locale'] : []),
     ...(!details.currency ? ['currency'] : []),
     ...(!isValidTimezone(details.timezone) ? ['timezone'] : []),
     ...(!draft.subdomain_candidate ? ['subdomain'] : []),
@@ -592,7 +592,7 @@ export async function upsertActiveOnboardingDraft(db: D1Database, input: {
   vertical: OrganizationVertical
   sourceType: DraftSourceType
   payload: OnboardingDraftPayload
-  expectedUpdatedAt: string | null
+  updated_at: string | null
   draftId?: string
   idempotencyKey?: string
 }): Promise<OnboardingDraftUpsertResult> {
@@ -602,7 +602,7 @@ export async function upsertActiveOnboardingDraft(db: D1Database, input: {
   const id = input.draftId ?? (key ? `mcp-website-${await creationRequestHash({ userId: input.userId, key })}` : crypto.randomUUID())
   const keyed = key ? await queryFirst<SavedOnboardingDraft>(db, 'SELECT * FROM onboarding_drafts WHERE id = ? AND user_id = ?', [id, input.userId]) : null
   const fingerprint = await creationRequestHash({ ...input.payload, request: undefined, preview: { ...input.payload.preview, content: input.payload.preview.content.map(content => ({ ...content, updated_at: undefined })) } })
-  if (keyed && input.expectedUpdatedAt === null) {
+  if (keyed && input.updated_at === null) {
     const saved = parseOnboardingDraftPayload(keyed.payload_json)
     if (!saved.request || saved.request.key !== key || saved.request.fingerprint !== fingerprint) throw new HTTPError({ statusCode: 409, statusMessage: 'This idempotency key was already used for different website answers', data: { code: 'IDEMPOTENCY_KEY_CONFLICT', draft_id: keyed.id } })
     if (keyed.status === 'abandoned') throw new HTTPError({ statusCode: 409, statusMessage: 'This website draft was discarded', data: { code: 'ONBOARDING_DRAFT_ABANDONED', draft_id: keyed.id } })
@@ -610,7 +610,7 @@ export async function upsertActiveOnboardingDraft(db: D1Database, input: {
   }
   if (existing && input.draftId !== existing.id) throw new HTTPError({ statusCode: 409, statusMessage: 'Resume your saved website draft before creating another', data: { code: 'ONBOARDING_DRAFT_EXISTS', draft_id: existing.id } })
   if (input.draftId && !existing) throw new HTTPError({ statusCode: 404, statusMessage: 'Active website draft not found' })
-  if ((existing?.updated_at ?? null) !== input.expectedUpdatedAt) throw new HTTPError({ statusCode: 409, statusMessage: 'Website draft changed; reload before saving', data: { code: 'ONBOARDING_DRAFT_CHANGED', draft_id: existing?.id } })
+  if ((existing?.updated_at ?? null) !== input.updated_at) throw new HTTPError({ statusCode: 409, statusMessage: 'Website draft changed; reload before saving', data: { code: 'ONBOARDING_DRAFT_CHANGED', draft_id: existing?.id } })
   if (existing?.organization_id && input.payload.preview.subdomainCandidate !== existing.subdomain_candidate) {
     const organization = await queryFirst<{ subdomain: string | null; onboarding_status: string }>(db, 'SELECT subdomain, onboarding_status FROM organization WHERE id = ?', [existing.organization_id])
     if (!organization || organization.subdomain !== null || !['pending', 'failed'].includes(organization.onboarding_status)) throw new HTTPError({ statusCode: 409, statusMessage: 'A saved draft already owns its website address' })
@@ -634,7 +634,7 @@ export async function upsertActiveOnboardingDraft(db: D1Database, input: {
     VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
     ON CONFLICT DO NOTHING
     RETURNING id, subdomain_candidate, organization_id, updated_at
-  `, existing ? [input.name, input.vertical, payload.preview.subdomainCandidate, input.sourceType, payloadJson, now, existing.id, input.userId, input.expectedUpdatedAt, payload.preview.subdomainCandidate] : [id, input.userId, input.organizationId ?? null, input.name, input.vertical, payload.preview.subdomainCandidate, input.sourceType, payloadJson, now, now])
+  `, existing ? [input.name, input.vertical, payload.preview.subdomainCandidate, input.sourceType, payloadJson, now, existing.id, input.userId, input.updated_at, payload.preview.subdomainCandidate] : [id, input.userId, input.organizationId ?? null, input.name, input.vertical, payload.preview.subdomainCandidate, input.sourceType, payloadJson, now, now])
   if (!draft) throw new HTTPError({ statusCode: 409, statusMessage: 'Website draft changed; read it before retrying', data: { code: 'ONBOARDING_DRAFT_CHANGED' } })
   return { id: draft.id, subdomainCandidate: draft.subdomain_candidate, updatedAt: draft.updated_at, organizationId: draft.organization_id, payload }
 }

@@ -1,3 +1,4 @@
+import { RESOURCE_LOCALIZATIONS_SQL } from '~/shared/content-registries'
 import { HTTPError } from 'nitro'
 import { platformLocale } from '~/shared/platform-locales'
 import { parseSiteProductPath } from '~/utils/product-presentation'
@@ -165,7 +166,7 @@ export async function assertOrganizationLanguage(
       requires === 'published' ? 'This website language is not published.' : 'Add this website language before authoring its translations.', {
       organization_id: organizationId,
       locale,
-      dashboard_url: row.organization_slug ? `/dashboard/${encodeURIComponent(row.organization_slug)}/website/localization` : null,
+      dashboard_url: row.organization_slug ? `/dashboard/${encodeURIComponent(row.organization_slug)}/website/preferences/localization` : null,
     })
   }
   return { locale, source: false, status: row.locale_status, platform_messages: { ...catalog.messages } }
@@ -279,7 +280,7 @@ function canonicalResourceGuard(
 ): BatchQuery {
   const query = canonicalResourceQuery(resourceType, 'one')
   return {
-    query: `UPDATE resource_localizations SET resource_id = NULL
+    query: `UPDATE content_documents SET resource_id = NULL
       WHERE organization_id = ? AND resource_type = ? AND resource_id = ? AND NOT EXISTS (${query})`,
     params: [organizationId, resourceType, resourceId, organizationId, resourceId],
   }
@@ -299,7 +300,7 @@ export async function getResourceLocalization(
   const row = await queryFirst<ResourceLocalizationRow>(db, `
     SELECT id, organization_id, resource_type, resource_id, locale, values_json, route_path,
            created_at, created_by_user_id, updated_at, updated_by_user_id
-      FROM resource_localizations
+      FROM ${RESOURCE_LOCALIZATIONS_SQL}
      WHERE organization_id = ?  AND resource_type = ? AND resource_id = ? AND locale = ?
      LIMIT 1
   `, [organizationId, resourceType, resourceId, locale])
@@ -357,7 +358,7 @@ export async function resolveLocalizedPublicRoute(
       locale,
       route_path: routePath,
       platform_messages: language.platform_messages,
-      locale_representations: detail.localeRepresentations,
+      locale_representations: detail.locale_representations,
       representation: { kind: 'resource', resource_type: 'product', resource_id: detail.product.id, localization },
     }
   }
@@ -377,7 +378,7 @@ export async function resolveLocalizedPublicRoute(
     const localized = await queryFirst<ResourceLocalizationRow>(db, `
       SELECT id, organization_id, resource_type, resource_id, locale, values_json, route_path,
              created_at, created_by_user_id, updated_at, updated_by_user_id
-        FROM resource_localizations
+        FROM ${RESOURCE_LOCALIZATIONS_SQL}
        WHERE organization_id = ?  AND locale = ? AND resource_type = 'product' AND resource_id = ?
        LIMIT 1
     `, [organizationId, locale, product.id])
@@ -406,7 +407,7 @@ export async function resolveLocalizedPublicRoute(
     const resource = await queryFirst<ResourceLocalizationRow>(db, `
       SELECT rl.id, rl.organization_id, rl.resource_type, rl.resource_id, rl.locale, rl.values_json, rl.route_path,
              rl.created_at, rl.created_by_user_id, rl.updated_at, rl.updated_by_user_id
-        FROM resource_localizations rl
+        FROM ${RESOURCE_LOCALIZATIONS_SQL} rl
         JOIN business_locations l ON l.organization_id = rl.organization_id AND l.id = rl.resource_id
        WHERE rl.organization_id = ? AND rl.locale = ? AND rl.resource_type = 'business_location'
          AND rl.route_path = ? AND ${publicLocationSql('l')} LIMIT 1
@@ -441,7 +442,7 @@ export async function resolveLocalizedPublicRoute(
   const resource = await queryFirst<ResourceLocalizationRow>(db, `
     SELECT id, organization_id, resource_type, resource_id, locale, values_json, route_path,
            created_at, created_by_user_id, updated_at, updated_by_user_id
-      FROM resource_localizations
+      FROM ${RESOURCE_LOCALIZATIONS_SQL}
      WHERE organization_id = ?  AND locale = ? AND route_path = ?
      LIMIT 1
   `, [organizationId, locale, routePath])
@@ -508,13 +509,13 @@ function resourceLocalizationWriteQueries(input: {
 }): BatchQuery[] {
   const statements: BatchQuery[] = []
   statements.push({
-    query: `INSERT INTO resource_localizations
-      (id, organization_id, resource_type, resource_id, locale, values_json, route_path,
-       created_at, created_by_user_id, updated_at, updated_by_user_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    query: `INSERT INTO content_documents
+      (id, organization_id, kind, row_role, resource_type, resource_id, locale, metadata_json, path,
+       created_at, created_by, updated_at, updated_by)
+      VALUES (?, ?, 'resource', 'representation', ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(organization_id, resource_type, resource_id, locale) DO UPDATE SET
-        values_json = excluded.values_json, route_path = excluded.route_path,
-        updated_at = excluded.updated_at, updated_by_user_id = excluded.updated_by_user_id`,
+        metadata_json = excluded.metadata_json, path = excluded.path,
+        updated_at = excluded.updated_at, updated_by = excluded.updated_by`,
     params: [input.id, input.organizationId, input.resourceType, input.resourceId, input.locale,
       JSON.stringify(input.values), input.routePath,
       input.prior?.created_at ?? input.now, input.prior?.created_by_user_id ?? input.userId, input.now, input.userId],
@@ -523,7 +524,7 @@ function resourceLocalizationWriteQueries(input: {
   if (input.resourceType === 'product' && isRecord(input.values.details)) {
     const alarmDetails = STAY_ALARM_AMENITIES.filter(code => Object.hasOwn(input.values.details as object, STAY_ALARM_DETAIL_KEYS[code])).map(code => ({ code, key: STAY_ALARM_DETAIL_KEYS[code] }))
     if (alarmDetails.length) statements.push({
-      query: `UPDATE resource_localizations AS localized SET values_json = NULL
+      query: `UPDATE content_documents AS localized SET metadata_json = NULL
         WHERE organization_id = ? AND resource_type = 'product' AND resource_id = ? AND locale = ? AND EXISTS (
           SELECT 1 FROM json_each(?) alarm WHERE NOT EXISTS (
             SELECT 1 FROM products p JOIN product_stay_configs c ON c.organization_id = p.organization_id AND c.product_id = p.id, json_each(c.amenities) answer
@@ -566,7 +567,7 @@ export async function putResourceLocalization(
   }
   const existing = await queryFirst<{ id: string; route_path: string | null; created_at: string; created_by_user_id: string }>(db, `
     SELECT id, route_path, created_at, created_by_user_id
-      FROM resource_localizations
+      FROM ${RESOURCE_LOCALIZATIONS_SQL}
      WHERE organization_id = ?  AND resource_type = ? AND resource_id = ? AND locale = ?
      LIMIT 1
   `, [input.organizationId, resourceType, input.resourceId, locale])
@@ -581,8 +582,8 @@ export async function putResourceLocalization(
   try {
     await executeBatch(db, statements, { operation: 'replace resource localization' })
   } catch (error) {
-    if (error instanceof Error && /NOT NULL constraint failed: resource_localizations\.values_json/.test(error.message)) localizationError(409, 'LOCALIZATION_VALIDATION_FAILED', 'The source alarm details changed while translating; read the home again before saving', { field: 'details' })
-    if (error instanceof Error && /resource_localizations_organization_locale_route_unique|UNIQUE constraint failed: resource_localizations\.organization_id/.test(error.message)) {
+    if (error instanceof Error && /NOT NULL constraint failed: content_documents\.metadata_json/.test(error.message)) localizationError(409, 'LOCALIZATION_VALIDATION_FAILED', 'The source alarm details changed while translating; read the home again before saving', { field: 'details' })
+    if (error instanceof Error && /content_documents_route_unique|UNIQUE constraint failed: content_documents\.organization_id, content_documents\.locale, content_documents\.path/.test(error.message)) {
       localizationError(409, 'LOCALIZED_ROUTE_CONFLICT', 'Localized route path is already owned by another resource', { route_path: routePath })
     }
     throw error
@@ -683,8 +684,8 @@ export async function putLocalizationForAuthoring(env: CloudflareEnv, db: D1Data
         params: [...removeMetadata.map(key => '$.' + JSON.stringify(key)), documentId] }]
     : []
   if (existing) {
-    if (typeof input.expectedUpdatedAt !== 'string') localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', 'expected_updated_at is required')
-    await updateContentDocument(db, existing.id, { expected_updated_at: input.expectedUpdatedAt, changes,
+    if (typeof input.expectedUpdatedAt !== 'string') localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', 'updated_at is required')
+    await updateContentDocument(db, existing.id, { updated_at: input.expectedUpdatedAt, changes,
       blocks: prepared?.blocks, additionalQueriesAfter: [...removal(existing.id), ...after] })
   } else {
     await createContentDocumentWithBlocks(db, { organizationId: input.organizationId,
@@ -698,11 +699,11 @@ export async function putLocalizationForAuthoring(env: CloudflareEnv, db: D1Data
 }
 
 export function resourceLocalizationDeletionQueries(resourceType: LocalizedResourceType, resourceIds: BatchQuery, locale?: string): BatchQuery[] {
-  const owners = `SELECT id FROM resource_localizations WHERE resource_type = ? AND resource_id IN (${resourceIds.query})${locale === undefined ? '' : ' AND locale = ?'}`
+  const owners = `SELECT id FROM ${RESOURCE_LOCALIZATIONS_SQL} WHERE resource_type = ? AND resource_id IN (${resourceIds.query})${locale === undefined ? '' : ' AND locale = ?'}`
   const params = [resourceType, ...(resourceIds.params ?? []), ...(locale === undefined ? [] : [locale])]
   return [
     { query: `DELETE FROM organization_redirects WHERE owner_type = 'resource_localization' AND owner_id IN (${owners})`, params },
-    { query: `DELETE FROM resource_localizations WHERE id IN (${owners})`, params },
+    { query: `DELETE FROM content_documents WHERE id IN (${owners})`, params },
   ]
 }
 
@@ -727,7 +728,7 @@ export async function deleteLocalization(
   const { locale, source, status } = await assertOrganizationLanguage(db, input.organizationId, input.locale)
   if (source) localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', 'English source content cannot be deleted through localization')
   const row = await queryFirst<{ id: string }>(db, `
-    SELECT id FROM resource_localizations
+    SELECT id FROM ${RESOURCE_LOCALIZATIONS_SQL}
      WHERE organization_id = ?  AND resource_type = ? AND resource_id = ? AND locale = ? LIMIT 1
   `, [input.organizationId, resourceType, input.resourceId, locale])
   if (!row) localizationError(404, 'LOCALIZATION_NOT_FOUND', 'Localized representation was not found', { resource_type: resourceType, resource_id: input.resourceId, locale })
@@ -739,7 +740,7 @@ export async function deleteLocalization(
     }
   }
   const statements = resourceLocalizationDeletionQueries(resourceType, {
-    query: 'SELECT resource_id FROM resource_localizations WHERE id = ?', params: [row.id],
+    query: `SELECT resource_id FROM ${RESOURCE_LOCALIZATIONS_SQL} WHERE id = ?`, params: [row.id],
   }, locale)
   statements.push(publicResourceCacheInvalidationQuery(input.organizationId, 'resource-localization-delete'))
   await executeBatch(db, statements, { operation: 'delete resource localization' })
@@ -776,7 +777,7 @@ export async function getProductCatalogLocalization(
     SELECT p.id, p.kind, p.name, p.description, p.marketing_features, p.unit_label, p.details_json,
            rl.id AS localization_id, rl.values_json, rl.route_path
       FROM products p
-      LEFT JOIN resource_localizations rl
+      LEFT JOIN ${RESOURCE_LOCALIZATIONS_SQL} rl
         ON rl.organization_id = p.organization_id
        AND rl.resource_type = 'product' AND rl.resource_id = p.id AND rl.locale = ?
      WHERE p.organization_id = ?
@@ -791,7 +792,7 @@ export async function getProductCatalogLocalization(
   }>(db, `
     SELECT c.id, c.location_id, c.name, c.description, rl.id AS localization_id, rl.values_json
       FROM collections c
-      LEFT JOIN resource_localizations rl
+      LEFT JOIN ${RESOURCE_LOCALIZATIONS_SQL} rl
         ON rl.organization_id = c.organization_id AND rl.organization_id = c.organization_id
        AND rl.resource_type = 'collection' AND rl.resource_id = c.id AND rl.locale = ?
      WHERE c.organization_id = ? 
@@ -857,7 +858,7 @@ export async function replaceResourceLocalizations(
   if (missing.length) localizationError(404, 'LOCALIZATION_NOT_FOUND', 'One or more canonical resources were not found', { resource_type: resourceType, resource_ids: missing })
   const existing = await queryAll<PriorLocalization & { resource_id: string }>(db, `
     SELECT id, resource_id, route_path, created_at, created_by_user_id
-      FROM resource_localizations
+      FROM ${RESOURCE_LOCALIZATIONS_SQL}
      WHERE organization_id = ?  AND resource_type = ? AND locale = ?
   `, [input.organizationId, resourceType, locale])
   const byResource = new Map(existing.map(row => [row.resource_id, row]))
@@ -884,8 +885,8 @@ export async function replaceResourceLocalizations(
   try {
     await executeBatch(db, statements, { operation: 'replace resource localizations' })
   } catch (error) {
-    if (error instanceof Error && /NOT NULL constraint failed: resource_localizations\.values_json/.test(error.message)) localizationError(409, 'LOCALIZATION_VALIDATION_FAILED', 'The source alarm details changed while translating; read the home again before saving', { field: 'details' })
-    if (error instanceof Error && /resource_localizations_organization_locale_route_unique|UNIQUE constraint failed: resource_localizations\.organization_id/.test(error.message)) {
+    if (error instanceof Error && /NOT NULL constraint failed: content_documents\.metadata_json/.test(error.message)) localizationError(409, 'LOCALIZATION_VALIDATION_FAILED', 'The source alarm details changed while translating; read the home again before saving', { field: 'details' })
+    if (error instanceof Error && /content_documents_route_unique|UNIQUE constraint failed: content_documents\.organization_id, content_documents\.locale, content_documents\.path/.test(error.message)) {
       localizationError(409, 'LOCALIZED_ROUTE_CONFLICT', 'A localized route path is already owned by another resource')
     }
     throw error

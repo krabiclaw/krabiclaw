@@ -19,6 +19,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { register } from 'node:module'
 import { resolve } from 'node:path'
+import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
@@ -26,6 +27,7 @@ import { CONTENT_DOCUMENT_SCOPE_QUERY, MEDIA_PLACEMENT_OWNER_AUDIT_QUERY } from 
 import { isSupportedMediaPlacement } from '../shared/media-placement-contract.ts'
 import { organizationRoles } from '../utils/organization-access.ts'
 import { PRODUCT_KINDS, validateProductDetails, assertProductKind } from '../shared/product-details.ts'
+import { STAY_CHANNEL_LABELS } from '../shared/bookings.ts'
 import { DEFAULT_SITE_PALETTE, parseSitePalette } from '../shared/site-palette.ts'
 import { getDarkModeVariant } from '../utils/color-utils.ts'
 
@@ -35,6 +37,8 @@ register('../tests/unit/support/alias-hooks.mjs', import.meta.url)
 const DECLARED_ORGANIZATION_ROLES = new Set(Object.keys(organizationRoles))
 
 const MIGRATIONS_DIRECTORY = 'migrations'
+const V26_DIRECTORY = 'migrations-history/v26'
+const v26Baseline = () => readFileSync(resolve(V26_DIRECTORY, '0000_baseline.sql'), 'utf8')
 const hash = value => createHash('sha256').update(value).digest('hex')
 const qi = value => `"${value.replaceAll('"', '""')}"`
 const assert = (condition, message) => { if (!condition) throw new Error(message) }
@@ -271,7 +275,7 @@ export const TARGET_INVARIANT_QUERIES = {
     UNION ALL SELECT id FROM activity_entries WHERE json_type(payload_json, '$.visibility_scope') IS NOT NULL OR instr(payload_json ->> '$.deep_link', '/sites/') > 0`,
   media_owner_scope: MEDIA_PLACEMENT_OWNER_AUDIT_QUERY,
   document_owner_scope: `WITH scope AS (${CONTENT_DOCUMENT_SCOPE_QUERY}) SELECT d.id FROM content_documents d WHERE (SELECT count(*) FROM scope s WHERE s.id = d.id) <> 1`,
-  editorial_representation_scope: `SELECT d.id FROM content_documents d WHERE d.row_role = 'representation' AND NOT EXISTS (
+  editorial_representation_scope: `SELECT d.id FROM content_documents d WHERE d.row_role = 'representation' AND d.kind <> 'resource' AND NOT EXISTS (
     SELECT 1 FROM content_documents r WHERE r.id = d.root_id AND r.row_role = 'root'
       AND r.kind = d.kind AND r.organization_id = d.organization_id)`,
   organization_source_locale: `SELECT o.id FROM organization o WHERE
@@ -282,18 +286,22 @@ export const TARGET_INVARIANT_QUERIES = {
   // Every localized resource is scoped by its organization. This used to add a
   // site to that scope for all but Product, which was the same organization
   // said twice.
-  localized_resource_owner_scope: `SELECT r.id FROM resource_localizations r WHERE NOT (
+  localized_resource_owner_scope: `SELECT r.id FROM content_documents r WHERE r.kind = 'resource' AND NOT (
     ${Object.entries(LOCALIZED_OWNER_TABLES).map(([type, table]) => `(r.resource_type = '${type}' AND EXISTS (SELECT 1 FROM ${table} o WHERE o.id = r.resource_id AND ${type === 'organization' ? 'o.id' : 'o.organization_id'} = r.organization_id))`).join(' OR ')})`,
-  activity_request_scope: `SELECT e.id FROM activity_entries e WHERE e.scope_kind = 'request' AND NOT EXISTS (
-    SELECT 1 FROM requests r WHERE r.id = e.request_id AND r.kind IN ('contact','reservation','booking','stay'))`,
-  channel_thread_scope: `SELECT t.external_thread_id FROM channel_threads t JOIN requests r ON r.id = t.request_id
-    JOIN product_stay_configs c ON c.product_id = t.product_id AND c.organization_id = t.organization_id
-    WHERE r.kind <> 'stay' OR r.organization_id <> t.organization_id OR r.location_id IS NOT c.location_id`,
-  channel_participant_addressable: `SELECT r.id FROM requests r WHERE json_type(r.payload_json, '$.participant') IS NOT NULL
-    AND NOT EXISTS (SELECT 1 FROM channel_threads t WHERE t.request_id = r.id AND t.organization_id = r.organization_id)`,
-  channel_booking_thread_scope: `SELECT t.external_thread_id FROM channel_threads t JOIN stays s
+  channel_thread_scope: `SELECT t.external_thread_id FROM channel_threads t JOIN conversations r ON r.id = t.conversation_id
+    LEFT JOIN product_stay_configs c ON c.product_id = t.product_id AND c.organization_id = t.organization_id
+    LEFT JOIN bookings b ON b.id = r.booking_id AND b.organization_id = r.organization_id
+    WHERE r.kind <> 'booking' OR r.organization_id <> t.organization_id OR c.product_id IS NULL
+       OR (CASE WHEN b.id IS NULL THEN r.location_id IS NOT c.location_id
+          ELSE t.product_id IS NOT coalesce(b.booked_product_id, b.product_id) END)`,
+  // A conversation titled by its channel is a channel's thread, or a channel reservation's that named no guest.
+  channel_participant_addressable: `SELECT r.id FROM conversations r WHERE json_type(r.payload_json, '$.participant') IS NOT NULL
+    AND NOT EXISTS (SELECT 1 FROM channel_threads t WHERE t.conversation_id = r.id AND t.organization_id = r.organization_id)
+    AND NOT EXISTS (SELECT 1 FROM bookings b WHERE b.id = r.booking_id AND b.organization_id = r.organization_id AND b.owner = 'channel')`,
+  channel_booking_thread_scope: `SELECT t.external_thread_id FROM channel_threads t JOIN bookings s
     ON s.provider = t.provider AND s.external_booking_id = t.external_booking_id
-    WHERE s.organization_id <> t.organization_id OR s.product_id <> t.product_id OR s.request_id IS NOT t.request_id`,
+    WHERE s.organization_id <> t.organization_id OR s.product_id <> t.product_id
+      OR (SELECT c.id FROM conversations c WHERE c.booking_id = s.id AND c.kind = 'booking') IS NOT t.conversation_id`,
   // The retired model must leave no trace.
   no_hero_description: "SELECT id FROM content_blocks WHERE type = 'hero' AND json_type(data_json, '$.description') IS NOT NULL",
   no_slug_cased_page_titles: "SELECT id FROM content_documents WHERE kind = 'page' AND title IN ('home','about','contact','location','services','pricing','donate','schedule','privacy','terms','third-party-notices')",
@@ -313,7 +321,7 @@ export const TARGET_INVARIANT_QUERIES = {
       SELECT 1 FROM content_documents d JOIN content_documents owner ON owner.id = b.document_id
        WHERE d.id = j.value AND d.kind = 'page' AND d.row_role = 'root' AND d.organization_id = owner.organization_id)`,
   // A booking holds a seat at a real occurrence of the product it names.
-  booking_session_scope: `SELECT b.id FROM bookings b WHERE NOT EXISTS (
+  booking_session_scope: `SELECT b.id FROM bookings b WHERE b.product_session_id IS NOT NULL AND NOT EXISTS (
     SELECT 1 FROM product_sessions s WHERE s.id = b.product_session_id AND s.product_id = b.product_id)`,
   // `visibility` says whether a document is listed in its index, and those are
   // the only two answers. The CHECK covers root articles and social posts; this
@@ -364,17 +372,30 @@ export async function auditTargetInvariants(target) {
   // object is gone on purpose.
   const media = target.prepare("SELECT id, public_url FROM media_assets WHERE status = 'active' AND provider = 'cloudflare_r2' AND public_url IS NOT NULL").all()
   const unserved = []
-  for (const row of media) {
-    try {
-      const response = await fetch(String(row.public_url), { method: 'HEAD', signal: AbortSignal.timeout(20_000) })
-      if (response.status !== 200) unserved.push(`${row.id} ${row.public_url}: HTTP ${response.status}`)
-    } catch (error) {
-      // undici's "fetch failed" says nothing; the reason is its cause.
-      const cause = error instanceof Error && error.cause instanceof Error ? error.cause : null
-      unserved.push(`${row.id} ${row.public_url}: ${error instanceof Error ? error.message : String(error)}${cause ? ` (${[Reflect.get(cause, 'code'), Reflect.get(cause, 'syscall'), Reflect.get(cause, 'hostname'), cause.message].filter(Boolean).join(' ')})` : ''}`)
-    }
+  let dnsRetries = 0
+  for (let offset = 0; offset < media.length; offset += 12) {
+    const batch = await Promise.all(media.slice(offset, offset + 12).map(async (row) => {
+      for (let attempt = 1; ; attempt++) {
+        try {
+          const response = await fetch(String(row.public_url), { method: 'HEAD', signal: AbortSignal.timeout(20_000) })
+          return response.status === 200 ? null : `${row.id} ${row.public_url}: HTTP ${response.status}`
+        } catch (error) {
+          // "fetch failed" says nothing; the reason is its cause.
+          const cause = error instanceof Error && error.cause instanceof Error ? error.cause : null
+          const code = cause && Reflect.get(cause, 'code')
+          if (attempt < 3 && (code === 'ENOTFOUND' || code === 'EAI_AGAIN')) {
+            dnsRetries++
+            await delay(250 * attempt)
+            continue
+          }
+          const detail = cause ? [code, Reflect.get(cause, 'syscall'), Reflect.get(cause, 'hostname'), cause.message].filter(Boolean).join(' ') : null
+          return `${row.id} ${row.public_url}: ${error instanceof Error ? error.message : String(error)}${detail ? ` (${detail})` : ''} after ${attempt} attempt(s)`
+        }
+      }
+    }))
+    unserved.push(...batch.filter(Boolean))
   }
-  results.push({ name: 'media_objects_are_served', violations: unserved.length, unserved })
+  results.push({ name: 'media_objects_are_served', violations: unserved.length, unserved, dns_retries: dnsRetries })
   return results
 }
 
@@ -520,8 +541,189 @@ export const SCHEMA_OBJECTS_QUERY = "SELECT type, name, sql FROM sqlite_schema W
  * @typedef {{ table: string, source_rows: number, target_rows: number }} TableTransfer
  * @typedef {{ baseline_sha256: string, source_migrations: string[], target_migrations: string[], tables: TableTransfer[], transforms: Array<{ name: string, changes: number, sql_sha256: string }>,
  *   invariants: Array<{ name: string, violations: number, sql_sha256: string }>, payload?: { tables: number, statements: number, delta?: Record<string, number>, left_behind?: Record<string, { changed: string[], deleted: string[] }> },
- *   provider_hours_session_ids: string[], provider_hours_session_source_hashes: Record<string, string>, schema?: Array<{ type: string, name: string, sql: string }> }} TransferManifest
+ *   hours_session_ids: string[], hours_session_source_hashes: Record<string, string>, schema?: Array<{ type: string, name: string, sql: string }> }} TransferManifest
  */
+
+/** Collapse the v26 records on the private copy. The replacement's ledger still applies the native baseline. */
+async function consolidateV26(stage, baseline, manifest) {
+  const { localDateTimeToInstant } = await import('../utils/timezone.ts')
+  const source = readFileSync(new URL('./database-transfers/v26-to-v27.sql', import.meta.url), 'utf8')
+  const sections = source.split(/^-- stage: /mu).slice(1).map(section => {
+    const line = section.indexOf('\n')
+    return [section.slice(0, line), section.slice(line + 1)]
+  })
+  const parts = new Map(sections)
+  const ddl = baseline.split('--> statement-breakpoint')
+  const create = (...tables) => {
+    for (const table of tables) {
+      const statements = ddl.filter(sql => sql.match(/(?:CREATE TABLE|ON) \x60(\w+)\x60/u)?.[1] === table)
+      assert(statements.some(sql => sql.includes('CREATE TABLE')), 'v27 baseline has no table ' + table)
+      for (const statement of statements) stage.exec(statement)
+    }
+  }
+  const rename = (...tables) => {
+    for (const table of tables) {
+      const indexes = stage.prepare("SELECT name FROM sqlite_schema WHERE type = 'index' AND tbl_name = ? AND sql IS NOT NULL").all(table)
+      for (const { name } of indexes) stage.exec('DROP INDEX ' + qi(name))
+      stage.exec('ALTER TABLE ' + qi(table) + ' RENAME TO ' + qi('old_' + table))
+    }
+  }
+  const copy = (table, overrides = {}) => {
+    const previous = 'old_' + table
+    const sourceColumns = new Set(columns(stage, previous))
+    const kept = columns(stage, table).filter(column => sourceColumns.has(column) || Object.hasOwn(overrides, column))
+    stage.exec('INSERT INTO ' + qi(table) + ' (' + kept.map(qi).join(',') + ') SELECT '
+      + kept.map(column => overrides[column] ?? qi(column)).join(',') + ' FROM ' + qi(previous))
+  }
+  const drop = (...tables) => {
+    for (const table of tables) stage.exec('DROP TABLE ' + qi(table))
+  }
+  const run = (name) => {
+    const script = parts.get(name)
+    assert(script, 'Missing v26 data move section ' + name)
+    const statements = script.replace(/^--.*$/gmu, '').split(/;\s*(?=\n|$)/u).map(sql => sql.trim()).filter(Boolean)
+    for (const sql of statements) {
+      if (!/^SELECT\b/iu.test(sql)) {
+        try { stage.exec(sql) }
+        catch (cause) { throw new Error('v26 ' + name + ': ' + cause.message + ' (' + sql.slice(0, 115) + ')', { cause }) }
+        continue
+      }
+      const rows = stage.prepare(sql).all()
+      if (/\bAS personal_sends_dropped\b/iu.test(sql)) {
+        if (rows[0].personal_sends_dropped) manifest.transforms.push({ name: 'personal_sends_without_anchor', changes: rows[0].personal_sends_dropped })
+        continue
+      }
+      assert(rows.length === 0 || (rows.length === 1 && Object.values(rows[0]).length === 1 && Object.values(rows[0])[0] === 0),
+        'v26 ' + name + ' verification failed: ' + sql.slice(0, 180))
+    }
+  }
+  const count = table => stage.prepare('SELECT count(*) n FROM ' + qi(table)).get().n
+  stage.pragma('foreign_keys = OFF')
+  stage.pragma('legacy_alter_table = ON')
+  stage.transaction(() => {
+    assert(count('team') === 0 && count('teamMember') === 0, 'v26 still has Better Auth Teams or team memberships')
+    rename('products')
+    create('products')
+    copy('products')
+    drop('old_products')
+    for (const [column, definition] of Object.entries({
+      unit: "TEXT NOT NULL DEFAULT 'slot'", seating_interval_minutes: 'INTEGER', party_size_min: 'INTEGER', party_size_max: 'INTEGER',
+      minimum_guest_age: 'INTEGER', accessibility_contact_required: 'INTEGER NOT NULL DEFAULT 0',
+      payment_basis: "TEXT NOT NULL DEFAULT 'per_guest'", payment_min_party_size: 'INTEGER',
+    })) stage.exec('ALTER TABLE product_booking_configs ADD COLUMN ' + qi(column) + ' ' + definition)
+    stage.exec('ALTER TABLE bookings ADD COLUMN policy_json TEXT')
+    // Early proposals recorded a local date and time. Resolve it using the
+    // named location and the originally booked duration before moving sessions.
+    const localProposals = stage.prepare(`SELECT e.id, l.timezone,
+      json_extract(e.payload_json, '$.after.bookingDate') date,
+      json_extract(e.payload_json, '$.after.bookingTime') time,
+      json_extract(e.payload_json, '$.before.startsAt') starts_at,
+      json_extract(e.payload_json, '$.before.endsAt') ends_at
+      FROM activity_entries e JOIN requests r ON r.id = e.request_id
+      JOIN business_locations l ON l.organization_id = r.organization_id
+        AND l.id = COALESCE(json_extract(e.payload_json, '$.afterLocationId'), json_extract(e.payload_json, '$.after.locationId'))
+      WHERE e.event_name IN ('booking_change.requested', 'booking_change.moved')
+        AND json_extract(e.payload_json, '$.after.kind') = 'reservation'
+        AND json_extract(e.payload_json, '$.afterStartsAt') IS NULL`).all()
+    const dateProposal = stage.prepare("UPDATE activity_entries SET payload_json = json_set(payload_json, '$.afterStartsAt', ?, '$.afterEndsAt', ?, '$.afterTimezone', ?) WHERE id = ?")
+    for (const proposal of localProposals) {
+      const duration = Date.parse(proposal.ends_at) - Date.parse(proposal.starts_at)
+      assert(Number.isFinite(duration) && duration > 0, 'A legacy table proposal has no recorded original duration')
+      const starts = localDateTimeToInstant(proposal.date, proposal.time, proposal.timezone, 'reject')
+      dateProposal.run(starts.toISOString(), new Date(starts.valueOf() + duration).toISOString(), proposal.timezone, proposal.id)
+    }
+    if (localProposals.length) manifest.transforms.push({ name: 'local_reservation_proposals_resolved', changes: localProposals.length })
+    const reservations = count('reservations')
+    run('reservations')
+    run('open-time')
+    if (reservations) manifest.transforms.push({ name: 'table_reservations_to_bookings', changes: reservations })
+
+    rename('product_booking_configs')
+    create('product_booking_configs')
+    copy('product_booking_configs')
+    stage.exec("INSERT INTO product_booking_configs (organization_id, product_id, unit, default_capacity, scheduling_mode, assigned_member_id, questions,"
+      + " check_in_time, check_in_end_time, check_out_time, min_nights, calendar_rules, cancellation_policy, long_term_cancellation_policy, created_at, updated_at, created_by, updated_by)"
+      + " SELECT organization_id, product_id, 'nights', max_guests, 'business', assigned_member_id, questions,"
+      + " check_in_time, check_in_end_time, check_out_time, min_nights, NULLIF(json_remove(calendar_rules, '$.weekend_price_minor'), '{}'),"
+      + " cancellation_policy, long_term_cancellation_policy, created_at, updated_at, created_by, updated_by FROM product_stay_configs")
+    drop('old_product_booking_configs')
+
+    const windows = stage.prepare('SELECT s.id, s.check_in_date, s.check_out_date, s.arrival_time, b.check_in_time, b.check_out_time, l.timezone'
+      + ' FROM stays s JOIN product_stay_configs c ON c.organization_id = s.organization_id AND c.product_id = s.product_id'
+      + ' JOIN product_booking_configs b ON b.organization_id = s.organization_id AND b.product_id = s.product_id'
+      + ' JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id').all()
+    stage.exec('CREATE TEMP TABLE stay_channels (channel TEXT PRIMARY KEY, title TEXT NOT NULL)')
+    const saveChannel = stage.prepare('INSERT INTO stay_channels VALUES (?, ?)')
+    for (const [channel, title] of Object.entries(STAY_CHANNEL_LABELS)) saveChannel.run(channel, title)
+    stage.exec('CREATE TEMP TABLE stay_windows (stay_id TEXT PRIMARY KEY, starts_at TEXT NOT NULL, ends_at TEXT NOT NULL)')
+    const saveWindow = stage.prepare('INSERT INTO stay_windows VALUES (?, ?, ?)')
+    const boundary = (date, time, timezone) => time === null ? date : localDateTimeToInstant(date, time, timezone, 'earlier').toISOString()
+    for (const row of windows) saveWindow.run(row.id,
+      boundary(row.check_in_date, row.arrival_time ?? row.check_in_time, row.timezone),
+      boundary(row.check_out_date, row.check_out_time, row.timezone))
+
+    rename('bookings', 'stays', 'stay_nights', 'stay_payments', 'requests', 'tasks', 'scheduled_guest_messages', 'team_threads',
+      'review_requests', 'reviews', 'google_calendar_event_links', 'payment_checkout_holds')
+    run('booked-record-schema')
+    run('stays')
+    drop('stay_windows', 'stay_channels')
+    if (windows.length) manifest.transforms.push({ name: 'stays_to_bookings', changes: windows.length })
+
+    const legacyAttachments = stage.prepare(`SELECT count(*) AS n FROM media_placements mp
+      WHERE (mp.owner_type = 'activity_entry' AND NOT EXISTS (
+        SELECT 1 FROM activity_entries e JOIN requests r ON r.id = e.request_id
+          WHERE e.id = mp.owner_id AND e.kind IN ('submission', 'message', 'operation') AND r.organization_id = mp.organization_id))
+      OR (mp.owner_type = 'team_message' AND NOT EXISTS (
+        SELECT 1 FROM team_messages m WHERE m.id = mp.owner_id AND m.organization_id = mp.organization_id))`).get().n
+    assert(legacyAttachments === 0, 'Invariant violations: media_owner_scope (' + legacyAttachments + ' legacy message attachments)')
+    rename('activity_entries', 'bookings', 'channel_threads', 'content_reports', 'guest_thread_deliveries', 'media_placements', 'payment_checkout_holds',
+      'scheduled_guest_messages', 'send_later_messages', 'tasks', 'requests', 'team_threads', 'team_messages', 'team_thread_members')
+    create('activity_entries', 'bookings', 'channel_threads', 'content_reports', 'guest_thread_deliveries', 'media_placements', 'payment_checkout_holds',
+      'scheduled_guest_messages', 'tasks', 'conversations', 'conversation_participants', 'messages')
+    run('conversations')
+    const conversations = count('conversations')
+    if (conversations) manifest.transforms.push({ name: 'unified_conversations', changes: conversations })
+
+    rename('product_stay_configs', 'product_nights', 'prices')
+    create('product_stay_configs', 'product_nights', 'prices')
+    copy('product_stay_configs')
+    copy('prices')
+    run('prices')
+    drop('old_product_stay_configs', 'old_product_nights', 'old_prices')
+
+    rename('organization_integrations', 'usage_events', 'google_calendar_setup', 'payment_usage_events')
+    create('organization_integrations', 'usage_events')
+    copy('organization_integrations')
+    run('usage-and-calendar')
+    drop('old_organization_integrations', 'old_usage_events', 'old_google_calendar_setup', 'old_payment_usage_events')
+
+    rename('reviews', 'review_requests', 'content_documents', 'resource_localizations', 'product_stay_photo_room_memberships',
+      'product_stay_room_accessibility_photos', 'product_stay_accessibility_photos')
+    create('reviews', 'review_requests', 'content_documents')
+    copy('reviews')
+    copy('review_requests')
+    copy('content_documents')
+    run('media-reviews-localizations')
+    drop('old_reviews', 'old_review_requests', 'old_content_documents', 'old_resource_localizations', 'old_product_stay_photo_room_memberships',
+      'old_product_stay_room_accessibility_photos', 'old_product_stay_accessibility_photos')
+
+    rename('message_templates')
+    create('message_templates')
+    run('payloads')
+    drop('old_message_templates')
+
+    const shared = ['business_locations', 'invitation', 'session', 'product_availability_rules', 'product_sessions']
+    rename(...shared)
+    const sessions = count('old_product_sessions')
+    run('sessions')
+    const folded = sessions - count('old_product_sessions')
+    if (folded) manifest.transforms.push({ name: 'duplicate_provider_sessions_folded', changes: folded })
+    create(...shared)
+    for (const table of shared) copy(table)
+    drop(...shared.map(table => 'old_' + table))
+    drop('team', 'teamMember', 'reservations', 'location_reservation_configs', 'google_calendar_sync')
+  })()
+}
 
 /**
  * Copy a recognized v7 or current export through the canonical migration chain.
@@ -550,7 +752,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
   const target = new Database(targetPath)
   /** @type {TransferManifest} */
   const manifest = {
-    baseline_sha256: hash(baseSql), source_migrations: [], target_migrations: files, tables: [], transforms: [], invariants: [], provider_hours_session_ids: [], provider_hours_session_source_hashes: {},
+    baseline_sha256: hash(baseSql), source_migrations: [], target_migrations: files, tables: [], transforms: [], invariants: [], hours_session_ids: [], hours_session_source_hashes: {},
   }
   try {
     const hasLedger = source.prepare("SELECT count(*) AS n FROM sqlite_schema WHERE type = 'table' AND name = 'd1_migrations'").get().n === 1
@@ -563,7 +765,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     assert(applied.size === ledger.length, 'Source migration ledger contains duplicate filenames')
     assert(ledger[0] === '0000_baseline.sql', 'Source migration ledger must start with 0000_baseline.sql')
     let recognized = false
-    for (const directory of [MIGRATIONS_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13', 'migrations-history/v12', 'migrations-history/v11', 'migrations-history/v10', 'migrations-history/v9', 'migrations-history/v8', 'migrations-history/v7']) {
+    for (const directory of [MIGRATIONS_DIRECTORY, V26_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13', 'migrations-history/v12', 'migrations-history/v11', 'migrations-history/v10', 'migrations-history/v9', 'migrations-history/v8', 'migrations-history/v7']) {
       const candidates = readdirSync(resolve(directory)).filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort()
       if (!ledger.every(name => candidates.includes(name))) continue
       const expected = new Database(':memory:')
@@ -669,13 +871,13 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
       stage.exec(normalizedTable)
     }
     // An older archived chain reaches v11 through v11's forward migrations, which the v12 baseline absorbed.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13', 'migrations-history/v12', 'migrations-history/v11'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, V26_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13', 'migrations-history/v12', 'migrations-history/v11'].includes(sourceDirectory)) {
       for (const name of readdirSync('migrations-history/v11').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
         stage.exec(readFileSync(resolve('migrations-history/v11', name), 'utf8'))
       }
     }
     // An older archived chain reaches v12 through v12's forward migrations, which the v13 baseline absorbed.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13', 'migrations-history/v12'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, V26_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13', 'migrations-history/v12'].includes(sourceDirectory)) {
       for (const name of readdirSync('migrations-history/v12').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
         stage.exec(readFileSync(resolve('migrations-history/v12', name), 'utf8'))
       }
@@ -694,36 +896,38 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     // start empty; existing booking commitments and source languages keep every
     // recorded fact. The new nullable fields stay unknown until an owner sets
     // them or a native financial event supplies its actual billing basis.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, V26_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13'].includes(sourceDirectory)) {
       for (const name of readdirSync('migrations-history/v13').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
         stage.exec(readFileSync(resolve('migrations-history/v13', name), 'utf8'))
       }
     }
-    for (const [table, column, type] of [
-      ['invitation', 'teamId', 'TEXT'],
-      ['product_booking_configs', 'assigned_team_id', 'TEXT'],
-      ['reservations', 'policy_json', 'TEXT'],
-      ['location_reservation_configs', 'duration_minutes', 'INTEGER'],
-      ['location_reservation_configs', 'deposit_amount', 'INTEGER'],
-      ['location_reservation_configs', 'deposit_currency', 'TEXT'],
-      ['location_reservation_configs', 'deposit_tax_behavior', 'TEXT'],
-      ['payment_checkout_holds', 'location_id', 'TEXT'],
-      ['payment_checkout_holds', 'timezone', 'TEXT'],
-      ['payment_checkout_holds', 'converted_reservation_id', 'TEXT'],
-      ['payment_usage_events', 'billing_basis_json', 'TEXT'],
-      ['payment_cost_snapshots', 'billing_basis_json', 'TEXT'],
-    ]) {
-      if (!columns(stage, table).includes(column)) stage.exec(`ALTER TABLE ${qi(table)} ADD COLUMN ${qi(column)} ${type}`)
-    }
-    for (const table of ['team', 'teamMember']) {
-      if (tableNames(stage).includes(table)) continue
-      const definition = baseSql.split('--> statement-breakpoint').find(statement => statement.includes(`CREATE TABLE \`${table}\``))
-      assert(definition, `Native Better Auth ${table} schema is missing`)
-      stage.exec(definition)
+    if (sourceDirectory !== MIGRATIONS_DIRECTORY) {
+      for (const [table, column, type] of [
+        ['invitation', 'teamId', 'TEXT'],
+        ['product_booking_configs', 'assigned_team_id', 'TEXT'],
+        ['reservations', 'policy_json', 'TEXT'],
+        ['location_reservation_configs', 'duration_minutes', 'INTEGER'],
+        ['location_reservation_configs', 'deposit_amount', 'INTEGER'],
+        ['location_reservation_configs', 'deposit_currency', 'TEXT'],
+        ['location_reservation_configs', 'deposit_tax_behavior', 'TEXT'],
+        ['payment_checkout_holds', 'location_id', 'TEXT'],
+        ['payment_checkout_holds', 'timezone', 'TEXT'],
+        ['payment_checkout_holds', 'converted_reservation_id', 'TEXT'],
+        ['payment_usage_events', 'billing_basis_json', 'TEXT'],
+        ['payment_cost_snapshots', 'billing_basis_json', 'TEXT'],
+      ]) {
+        if (!columns(stage, table).includes(column)) stage.exec(`ALTER TABLE ${qi(table)} ADD COLUMN ${qi(column)} ${type}`)
+      }
+      for (const table of ['team', 'teamMember']) {
+        if (tableNames(stage).includes(table)) continue
+        const definition = v26Baseline().split('--> statement-breakpoint').find(statement => statement.includes(`CREATE TABLE \`${table}\``))
+        assert(definition, `Native Better Auth ${table} schema is missing`)
+        stage.exec(definition)
+      }
     }
     // v15 relaxes the calendar group CHECK only. Older chains still pass
     // through v14's canonical content data migration before the exact copy.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, V26_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14'].includes(sourceDirectory)) {
       for (const name of readdirSync('migrations-history/v14').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
         stage.exec(readFileSync(resolve('migrations-history/v14', name), 'utf8'))
       }
@@ -767,7 +971,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     // retired public OAuth flag, team member times, the Google Ads provider,
     // invite links, full-remaining refunds and payment intents). Older chains pass through it before the exact copy; a v16
     // source already ran its pending ones above.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, V26_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16'].includes(sourceDirectory)) {
       for (const name of readdirSync('migrations-history/v16').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
         stage.exec(readFileSync(resolve('migrations-history/v16', name), 'utf8'))
       }
@@ -801,22 +1005,24 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     // v18 absorbs v17's deployed forward chain (Channex connections, channel
     // mappings, the sync log, night pushes and stay threads). Older chains pass
     // through it before the exact copy; a v17 source already ran its pending ones above.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, V26_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17'].includes(sourceDirectory)) {
       withBaselineTables(readFileSync('migrations-history/v17/0000_baseline.sql', 'utf8'))
       for (const name of readdirSync('migrations-history/v17').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
         stage.exec(readFileSync(resolve('migrations-history/v17', name), 'utf8'))
       }
     }
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19'].includes(sourceDirectory)) withBaselineTables(readFileSync('migrations-history/v19/0000_baseline.sql', 'utf8'))
+    if (![MIGRATIONS_DIRECTORY, V26_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19'].includes(sourceDirectory)) withBaselineTables(readFileSync('migrations-history/v19/0000_baseline.sql', 'utf8'))
     // v19 adds facts no older row has: no copied stay was received as a new
     // reservation and no home has private instructions yet. A saved category
     // preference predates push, so its push switch is that category's
     // product default, exactly as for a person who never saved one.
-    for (const [table, column, type] of [
-      ['stays', 'booking_received_at', 'TEXT'],
-      ['product_stay_configs', 'check_in_instructions', 'TEXT'],
-    ]) {
-      if (!columns(stage, table).includes(column)) stage.exec(`ALTER TABLE ${qi(table)} ADD COLUMN ${qi(column)} ${type}`)
+    if (sourceDirectory !== MIGRATIONS_DIRECTORY) {
+      for (const [table, column, type] of [
+        ['stays', 'booking_received_at', 'TEXT'],
+        ['product_stay_configs', 'check_in_instructions', 'TEXT'],
+      ]) {
+        if (!columns(stage, table).includes(column)) stage.exec(`ALTER TABLE ${qi(table)} ADD COLUMN ${qi(column)} ${type}`)
+      }
     }
     if (tableNames(stage).includes('user_notification_preferences') && !columns(stage, 'user_notification_preferences').includes('push_enabled')) {
       // This v18 → v19 transformation uses v19's policy, independently of later product categories.
@@ -830,7 +1036,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     }
     // Older epochs reach v19 through its full archived forward chain before
     // receiving tables and forward migrations from the current baseline.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, V26_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19'].includes(sourceDirectory)) {
       for (const name of readdirSync('migrations-history/v19').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
         stage.exec(readFileSync(resolve('migrations-history/v19', name), 'utf8'))
       }
@@ -838,7 +1044,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     // Older epochs reach v20 the same way: its baseline's tables, then its
     // forward chain. Rehoming an archived forward migration does not make it a
     // second operation: the complete v19 chain already ran on this stage.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, V26_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20'].includes(sourceDirectory)) {
       withBaselineTables(readFileSync('migrations-history/v20/0000_baseline.sql', 'utf8'))
       const absorbed = new Set(readdirSync('migrations-history/v19').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)
         .map(name => hash(readFileSync(resolve('migrations-history/v19', name), 'utf8'))))
@@ -850,7 +1056,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     // v21 widens stays_channel_check to admit Booking.com; every v20 row fits it
     // unchanged. Complete its archived forward chain, including the manual-group
     // backfill, before copying into the replacement's relaxed responsibility CHECK.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, V26_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21'].includes(sourceDirectory)) {
       withBaselineTables(readFileSync('migrations-history/v21/0000_baseline.sql', 'utf8'))
       for (const name of readdirSync('migrations-history/v21').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
         stage.exec(readFileSync(resolve('migrations-history/v21', name), 'utf8'))
@@ -858,13 +1064,13 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     }
     // v22's pending leaf migrations must run before its tables are copied into
     // the baseline that retires the duplicated nightly rule. No referenced table is dropped remotely.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, V26_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22'].includes(sourceDirectory)) {
       withBaselineTables(readFileSync('migrations-history/v22/0000_baseline.sql', 'utf8'))
       for (const name of readdirSync('migrations-history/v22').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
         stage.exec(readFileSync(resolve('migrations-history/v22', name), 'utf8'))
       }
     }
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24', 'migrations-history/v23'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, V26_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24', 'migrations-history/v23'].includes(sourceDirectory)) {
       // Legacy homes have no recorded weekday/weekend rules. Keep that absence
       // as NULL while advancing the private stage to the v23 schema.
       stage.exec('ALTER TABLE product_stay_configs ADD COLUMN calendar_rules TEXT NULL')
@@ -879,7 +1085,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     // conversation_state and resolved_at are not copied (RETIRED_COLUMNS):
     // an open guest_reply task, derived from the ledger by `yarn db:tasks`,
     // says whether the business owes a reply.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, V26_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24'].includes(sourceDirectory)) {
       withBaselineTables(readFileSync('migrations-history/v24/0000_baseline.sql', 'utf8'))
       const references = stage.prepare("SELECT count(*) AS n FROM (SELECT DISTINCT organization_id, operation, subject_id, evidence_revision, coalesce(goal_id, '') FROM recommendation_feedback)").get().n
       const accepted = stage.prepare("SELECT count(*) AS n FROM (SELECT DISTINCT organization_id, operation, subject_id, evidence_revision, coalesce(goal_id, '') FROM recommendation_feedback f WHERE decision = 'accept' AND updated_at = (SELECT max(updated_at) FROM recommendation_feedback g WHERE g.organization_id = f.organization_id AND g.operation = f.operation AND g.subject_id = f.subject_id AND g.evidence_revision = f.evidence_revision AND g.goal_id IS f.goal_id))").get().n
@@ -892,7 +1098,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
       for (const name of readdirSync('migrations-history/v24').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) stage.exec(readFileSync(resolve('migrations-history/v24', name), 'utf8'))
     }
     // Older epochs reach v25 through its baseline's tables and forward chain.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v25'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, V26_DIRECTORY, 'migrations-history/v25'].includes(sourceDirectory)) {
       withBaselineTables(readFileSync('migrations-history/v25/0000_baseline.sql', 'utf8'))
       for (const name of readdirSync('migrations-history/v25').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) stage.exec(readFileSync(resolve('migrations-history/v25', name), 'utf8'))
     }
@@ -900,8 +1106,8 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     // 'business'. The value was 'legacy', the column's old default. Stock
     // tables and Hosted Checkout fields that nothing reads or writes are
     // dropped; a row or value in them fails rather than being discarded.
-    if (sourceDirectory !== MIGRATIONS_DIRECTORY) {
-      withBaselineTables(baseSql)
+    if (sourceDirectory !== MIGRATIONS_DIRECTORY && sourceDirectory !== V26_DIRECTORY) {
+      withBaselineTables(v26Baseline())
       for (const table of ['inventory_levels', 'inventory_items']) {
         if (!tableNames(stage).includes(table)) continue
         assert(stage.prepare(`SELECT count(*) AS n FROM ${qi(table)}`).get().n === 0, `${table} holds rows nothing maps; no rows were copied`)
@@ -957,7 +1163,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
       if (!columns(stage, 'team_threads').includes('booking_id')) stage.exec('ALTER TABLE team_threads ADD COLUMN booking_id TEXT')
       // Every message so far was written by a person.
       if (!columns(stage, 'team_messages').includes('automatic')) stage.exec('ALTER TABLE team_messages ADD COLUMN automatic INTEGER NOT NULL DEFAULT 0')
-      for (const name of files.slice(1)) stage.exec(readFileSync(resolve(MIGRATIONS_DIRECTORY, name), 'utf8'))
+      for (const name of readdirSync(V26_DIRECTORY).filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) stage.exec(readFileSync(resolve(V26_DIRECTORY, name), 'utf8'))
     }
     // Airbnb's single minimum was duplicated by the old importer. The owner also
     // approved retiring these exact Saltleaf demo rules; every other host rule
@@ -979,6 +1185,10 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
       const approved = stage.prepare("SELECT count(*) AS n FROM product_nights WHERE min_stay_through IS NOT NULL AND source = 'host'").get().n
       if (approved) manifest.transforms.push({ name: 'owner_approved_saltleaf_through_minimum_removed', changes: approved })
     }
+    if (sourceDirectory !== MIGRATIONS_DIRECTORY) {
+      await consolidateV26(stage, baseSql, manifest)
+      for (const name of files.slice(1)) stage.exec(readFileSync(resolve(MIGRATIONS_DIRECTORY, name), 'utf8'))
+    }
     const names = tableNames(stage)
     const count = (db, table) => db.prepare(`SELECT count(*) AS n FROM ${qi(table)}`).get().n
     target.exec(schemaSql)
@@ -996,11 +1206,12 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
       }
     })
     copy()
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24', 'migrations-history/v23'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, V26_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24', 'migrations-history/v23'].includes(sourceDirectory)) {
       // Seed the existing content-import edit guard only for a default still
       // equal to the original first imported night. The protected source read
       // can then correct that derivation; this transfer never guesses its value.
-      const provenDefaultsSql = `SELECT m.product_id, c.min_nights FROM product_stay_configs c
+      const provenDefaultsSql = `SELECT m.product_id, settings.min_nights FROM product_stay_configs c
+        JOIN product_booking_configs settings ON settings.organization_id = c.organization_id AND settings.product_id = c.product_id
         JOIN product_channel_mappings m ON m.organization_id = c.organization_id AND m.product_id = c.product_id AND m.provider = 'channex'
         JOIN activity_entries created ON created.organization_id = c.organization_id
           AND created.event_name = 'product.created' AND created.occurred_at = c.created_at
@@ -1013,7 +1224,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
               AND json_extract(first_import.payload_json, '$.entityId') = c.product_id)
         JOIN product_nights n ON n.organization_id = c.organization_id AND n.product_id = c.product_id
           AND n.date = json_extract(imported.payload_json, '$.metadata.from') AND n.source = 'import'
-          AND n.updated_at = imported.occurred_at AND n.min_stay_arrival = c.min_nights
+          AND n.updated_at = imported.occurred_at AND n.min_stay_arrival = settings.min_nights
         WHERE json_type(m.import_written, '$.min_nights') IS NULL`
       const seed = target.prepare(`UPDATE product_channel_mappings SET import_written = json_set(COALESCE(import_written, '{}'), '$.min_nights', ?)
         WHERE product_id = ? AND provider = 'channex' AND json_type(import_written, '$.min_nights') IS NULL`)
@@ -1069,15 +1280,24 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
       assert(count(target, 'organization_integrations') === integrations.length, 'organization_integrations differs from the connections it maps')
       manifest.transforms.push({ name: 'integrations_json_to_organization_integrations', changes: integrations.length })
     }
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19'].includes(sourceDirectory)) {
-      const configs = target.prepare('SELECT * FROM product_booking_configs WHERE held_online = 1 ORDER BY product_id').all()
+    if (sourceDirectory !== MIGRATIONS_DIRECTORY) {
+      const rebuildProviderHours = ![V26_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19'].includes(sourceDirectory)
+      const configs = rebuildProviderHours ? target.prepare('SELECT * FROM product_booking_configs WHERE held_online = 1 ORDER BY product_id').all() : []
+      const tables = target.prepare(`SELECT c.*, l.id AS location_id, l.timezone, l.status, l.opening_hours, l.special_hours
+        FROM product_booking_configs c
+        JOIN product_locations pl ON pl.organization_id = c.organization_id AND pl.product_id = c.product_id
+        JOIN business_locations l ON l.organization_id = pl.organization_id AND l.id = pl.location_id
+        WHERE c.seating_interval_minutes IS NOT NULL ORDER BY c.product_id`).all()
+      // The legacy reservation transfer names a booked table session from its
+      // location and start. An old writer may book one before the final delta.
+      const tableSessionId = (locationId, start) => 'table-session-' + locationId + '-' + start
+      const hoursProducts = new Map([
+        ...configs.map(config => [config.product_id, null]),
+        ...tables.map(table => [table.product_id, table.location_id]),
+      ])
       const previousSourceRows = new Map()
-      if (deltaFrom) {
-        const { sessionMemberSql } = await import('../server/utils/provider-allocation.ts')
-        const currentProvider = target.prepare(`WITH candidate AS (SELECT ? AS id, ? AS organization_id, ? AS product_id, ? AS assigned_member_id)
-          SELECT 1 FROM candidate JOIN member_scheduling ms ON ms.member_id=candidate.assigned_member_id AND ms.organization_id=candidate.organization_id
-            JOIN member m ON m.id=ms.member_id AND m.organizationId=ms.organization_id
-          WHERE ${sessionMemberSql('candidate')} IS candidate.assigned_member_id`)
+      const retainedHoursIds = new Set()
+      if (deltaFrom && hoursProducts.size) {
         // These rows were derived on the replacement, never held by the old
         // source. Seed their canonical occurrences before regeneration so the
         // native unique index retains their identities across a final delta.
@@ -1085,48 +1305,56 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
         // visible in the payload audit rather than being restored here.
         const previous = JSON.parse(readFileSync(`${deltaFrom}.manifest.json`, 'utf8'))
         assert(previous.baseline_sha256 === manifest.baseline_sha256, 'The initial transfer was built from another baseline')
-        assert(Array.isArray(previous.provider_hours_session_ids) && previous.provider_hours_session_ids.every(id => typeof id === 'string')
-          && new Set(previous.provider_hours_session_ids).size === previous.provider_hours_session_ids.length,
-        'The initial transfer has no valid provider-hours session inventory; repeat the initial preflight before deriving a delta')
-        assert(previous.provider_hours_session_source_hashes && typeof previous.provider_hours_session_source_hashes === 'object'
-          && !Array.isArray(previous.provider_hours_session_source_hashes) && Object.values(previous.provider_hours_session_source_hashes).every(value => typeof value === 'string' && /^[a-f0-9]{64}$/u.test(value)),
-        'The initial transfer has no valid provider-hours source signatures; repeat the initial preflight before deriving a delta')
+        assert(Array.isArray(previous.hours_session_ids) && previous.hours_session_ids.every(id => typeof id === 'string')
+          && new Set(previous.hours_session_ids).size === previous.hours_session_ids.length,
+        'The initial transfer has no valid hours session inventory; repeat the initial preflight before deriving a delta')
+        assert(previous.hours_session_source_hashes && typeof previous.hours_session_source_hashes === 'object'
+          && !Array.isArray(previous.hours_session_source_hashes) && Object.values(previous.hours_session_source_hashes).every(value => typeof value === 'string' && /^[a-f0-9]{64}$/u.test(value)),
+        'The initial transfer has no valid hours session source signatures; repeat the initial preflight before deriving a delta')
         const earlier = comparisonDatabase(deltaFrom)
         try {
           assert(sameSchema(earlier, target), 'The initial transfer schema differs from the current target')
-          for (const [id, signature] of Object.entries(previous.provider_hours_session_source_hashes)) {
+          for (const [id, signature] of Object.entries(previous.hours_session_source_hashes)) {
             const row = earlier.prepare('SELECT * FROM product_sessions WHERE id = ?').get(id)
-            assert(row, `Initial provider-hours source session is missing: ${id}`)
+            assert(row, `Initial hours source session is missing: ${id}`)
             previousSourceRows.set(id, { row, signature })
           }
           const sessionColumns = columns(target, 'product_sessions')
           const insert = target.prepare(`INSERT INTO product_sessions (${sessionColumns.map(qi).join(',')}) VALUES (${sessionColumns.map(() => '?').join(',')})`)
-          const sourceOccurrence = target.prepare('SELECT id FROM product_sessions WHERE product_id = ? AND starts_at = ? AND assigned_member_id = ? AND location_id IS NULL LIMIT 1')
-          const held = new Set(configs.map(config => config.product_id))
-          let retained = 0
+          const sourceOccurrence = target.prepare('SELECT id FROM product_sessions WHERE product_id = ? AND starts_at = ? AND location_id IS ? LIMIT 1')
           target.transaction(() => {
-            for (const id of previous.provider_hours_session_ids) {
+            for (const id of previous.hours_session_ids) {
               const row = earlier.prepare('SELECT * FROM product_sessions WHERE id = ?').get(id)
-              assert(row && row.location_id === null && row.assigned_member_id !== null
-                && row.source_occurrence_key === `hours:${row.assigned_member_id}:${row.starts_at}`, `Invalid initial provider-hours session: ${id}`)
-              if (!held.has(row.product_id) || !currentProvider.get(row.id, row.organization_id, row.product_id, row.assigned_member_id)) continue
-              const occupied = sourceOccurrence.get(row.product_id, row.starts_at, row.assigned_member_id)
+              assert(row && row.source_occurrence_key?.startsWith('hours:')
+                && row.source_occurrence_key.endsWith(':' + row.starts_at), `Invalid initial hours session: ${id}`)
+              if (hoursProducts.get(row.product_id) !== row.location_id) continue
+              const occupied = sourceOccurrence.get(row.product_id, row.starts_at, row.location_id)
+              if (row.location_id !== null && occupied?.id === row.id && row.id === tableSessionId(row.location_id, row.starts_at)) continue
               assert(!occupied, `Source session ${occupied?.id} occupies initial derived session ${id}; explicitly reconcile this occurrence before a creations-only delta. No replacement rows were overwritten.`)
-              insert.run(...sessionColumns.map(name => row[name]))
-              retained++
+              try { insert.run(...sessionColumns.map(name => row[name])) }
+              catch (cause) { throw new Error(`Retaining hours session ${id}: ${cause.message}`, { cause }) }
+              retainedHoursIds.add(id)
             }
           })()
-          manifest.transforms.push({ name: 'provider_hours_session_identities_retained', changes: retained })
+          manifest.transforms.push({ name: 'hours_session_identities_retained', changes: retainedHoursIds.size })
         } finally { earlier.close() }
       }
-      if (configs.length) {
-        const { prepareProviderHoursSessions } = await import('../server/utils/availability.ts')
+      if (hoursProducts.size) {
+        const { prepareProviderHoursSessions, tableSeatingQueries } = await import('../server/utils/availability.ts')
         const db = drizzle(target)
         const before = new Map(target.prepare('SELECT * FROM product_sessions').all().map(row => [row.id, row]))
         const now = new Date().toISOString()
         const queries = []
         for (const config of configs) queries.push(...await prepareProviderHoursSessions(db, config, { actorId: 'system', now }))
-        const changes = target.transaction(() => queries.reduce((total, { query, params }) => total + target.prepare(query).run(...params).changes, 0))()
+        for (const table of tables) {
+          const { location_id: id, timezone, status, opening_hours, special_hours } = table
+          queries.push(...tableSeatingQueries(table, { id, timezone, status, opening_hours, special_hours },
+            { actorId: 'system', now, sessionIdForStart: start => tableSessionId(id, start) }))
+        }
+        const changes = target.transaction(() => queries.reduce((total, { query, params }) => {
+          try { return total + target.prepare(query).run(...params).changes }
+          catch (cause) { throw new Error(`Generating booking sessions from hours: ${cause.message}`, { cause }) }
+        }, 0))()
         const sourceSessions = new Map(source.prepare('SELECT * FROM product_sessions').all().map(row => [row.id, hash(JSON.stringify(row))]))
         const sessions = target.prepare('SELECT * FROM product_sessions ORDER BY id').all()
         const retainTimestamp = target.prepare('UPDATE product_sessions SET updated_at = ?, updated_by = ? WHERE id = ?')
@@ -1145,12 +1373,12 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
               row.updated_at = previous.row.updated_at
               row.updated_by = previous.row.updated_by
             }
-            if (JSON.stringify(row) !== JSON.stringify(original)) manifest.provider_hours_session_source_hashes[row.id] = signature
+            if (JSON.stringify(row) !== JSON.stringify(original)) manifest.hours_session_source_hashes[row.id] = signature
           }
         })()
-        manifest.provider_hours_session_ids = sessions.filter(row => !sourceSessions.has(row.id)).map(row => row.id)
+        manifest.hours_session_ids = sessions.filter(row => !before.has(row.id) || retainedHoursIds.has(row.id)).map(row => row.id)
         const created = sessions.filter(row => !before.has(row.id)).length
-        manifest.transforms.push({ name: 'online_provider_hours_sessions_created', changes: created }, { name: 'online_provider_hours_sessions_updated', changes: changes - created })
+        manifest.transforms.push({ name: 'hours_sessions_created', changes: created }, { name: 'hours_sessions_updated', changes: changes - created })
       }
     }
     manifest.tables = names.map(table => ({ table, source_rows: sourceTables.includes(table) ? count(source, table) : 0, target_rows: count(target, table) }))
@@ -1183,6 +1411,8 @@ export function printTransferReport(manifest) {
     console.log(`${entry.table.padEnd(width)}  ${String(entry.source_rows).padStart(6)}  ${String(entry.target_rows).padStart(6)}${entry.source_rows === entry.target_rows ? '' : '  (changed by a forward migration or transform)'}`)
   }
   console.log(`Transforms: ${manifest.transforms.filter(transform => transform.changes > 0).map(transform => `${transform.name}=${transform.changes}`).join(', ') || 'no changes'}`)
+  const media = manifest.invariants.find(result => result.name === 'media_objects_are_served')
+  if (media?.dns_retries) console.log(`Media audit repeated ${media.dns_retries} failed DNS lookup(s); all active R2 media returned HTTP 200.`)
   for (const [table, rows] of Object.entries(manifest.payload?.left_behind ?? {})) {
     if (rows.changed.length) console.log(`Not carried, changed since the initial export: ${table} ${rows.changed.length}: ${rows.changed.join(' ')}`)
     if (rows.deleted.length) console.log(`Not carried, deleted since the initial export: ${table} ${rows.deleted.length}: ${rows.deleted.join(' ')}`)

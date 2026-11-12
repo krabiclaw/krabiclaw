@@ -13,8 +13,7 @@ import { resourceLocalizationDeletionQueries } from '~/server/utils/localization
 import { prepareContentDocumentDeletion } from '~/server/utils/content/documents'
 import { publicResourceCacheInvalidationQuery, purgePublicResourceCacheNow } from '~/server/utils/public-resource-cache'
 import { capacityRefusalOf, executeWithinCapacity, reportBillingUsage } from '~/server/utils/billing'
-import { publishAccessInvalidation, publishStayInvalidation } from '~/server/cloudflare/guest-inbox-events'
-import { assertResponsibilityTarget } from '~/server/utils/member-access'
+import { publishStayInvalidation } from '~/server/cloudflare/guest-inbox-events'
 
 type SetupEnv = CloudflareEnv;
 
@@ -41,18 +40,15 @@ export interface CreateLocationInput {
   opening_hours?: OpeningHours;
   special_hours?: SpecialHours;
   /** The updated_at the caller read; the write is refused if the row moved since. */
-  expected_updated_at?: string;
+  updated_at?: string;
   price_level?: string | null;
   rating?: number | null;
   review_count?: number | null;
   /** The location's IANA timezone. Required — a missing one is refused, never defaulted: every session here is offered in it. */
   timezone: string | null;
-  max_capacity?: number | null;
   seo_title?: string | null;
   seo_description?: string | null;
   canonical_url?: string | null;
-  assigned_member_id?: string | null;
-  assigned_team_id?: string | null;
 }
 
 export interface UpdateLocationInput extends Partial<CreateLocationInput> {
@@ -88,12 +84,9 @@ export interface LocationRecord {
   special_hours?: string | null;
   price_level?: string | null;
   timezone: string;
-  max_capacity?: number | null;
   seo_title?: string | null;
   seo_description?: string | null;
   canonical_url?: string | null;
-  assigned_member_id?: string | null;
-  assigned_team_id?: string | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -201,8 +194,7 @@ async function loadLocation(
   const columns = `id, slug, title, phone, email, website_url, maps_url, latitude, longitude, google_review_url, google_place_id,
            rating, review_count, description, short_description, status,
            address, stay_map_sharing, opening_hours, special_hours, categories, price_level,
-           timezone, max_capacity, seo_title, seo_description, canonical_url,
-           assigned_member_id, assigned_team_id,
+           timezone, seo_title, seo_description, canonical_url,
            created_at, updated_at`;
   // Check id first so a slug that happens to collide with another row's id can
   // never shadow the row actually addressed by that id.
@@ -289,20 +281,6 @@ export async function createLocation(
       },
     };
   }
-  if (
-    input.max_capacity !== undefined &&
-    input.max_capacity !== null &&
-    (!Number.isInteger(input.max_capacity) || input.max_capacity < 0)
-  ) {
-    return {
-      status: 400,
-      data: {
-        error:
-          "max_capacity must be a whole number greater than or equal to 0.",
-        code: 'INVALID_LOCATION_FIELD', field: 'max_capacity',
-      },
-    };
-  }
 
   const normalizedTimezone = normalizeTimezone(input.timezone);
   if (!isValidTimezone(normalizedTimezone)) {
@@ -325,8 +303,6 @@ export async function createLocation(
     return locationValidationFailure(error, 'special_hours');
   }
 
-  await assertResponsibilityTarget(db, organizationId, input);
-
   const baseSlug = toSlug((input.slug ?? title).trim());
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
@@ -343,12 +319,11 @@ export async function createLocation(
             id, organization_id, title, slug, phone, email, website_url, maps_url,
             google_review_url, google_place_id, description, short_description, address, opening_hours, special_hours, rating, review_count,
             price_level,
-            timezone, max_capacity, status,
+            timezone, status,
             seo_title, seo_description, canonical_url,
-            assigned_member_id, assigned_team_id,
             created_at, updated_at
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         params: [
           id,
@@ -370,13 +345,10 @@ export async function createLocation(
           input.review_count ?? null,
           input.price_level ?? null,
           normalizedTimezone,
-          input.max_capacity ?? null,
           'active',
           input.seo_title ?? null,
           input.seo_description ?? null,
           input.canonical_url ?? null,
-          input.assigned_member_id ?? null,
-          input.assigned_team_id ?? null,
           now,
           now,
         ],
@@ -452,7 +424,7 @@ export async function updateLocation(
     if (!homes.length) return;
     if (typeof updatedAt !== 'string' || !updatedAt) throw new HTTPError({ statusCode: 500, message: 'The saved home location has no update timestamp', data: { code: 'LOCATION_NOT_READABLE', field: 'location.updated_at', committed: true, location_id: locationId } });
     for (const home of homes) {
-      const input = { organizationId, productId: home.product_id, locationId, stayId: null };
+      const input = { organization_id: organizationId, product_id: home.product_id, location_id: locationId, booking_id: null };
       await publishStayInvalidation(env, { ...input, type: 'stay.changed' }, { updated_at: updatedAt });
       await publishStayInvalidation(env, { ...input, type: 'nights.changed' }, { updated_at: updatedAt });
     }
@@ -501,20 +473,6 @@ export async function updateLocation(
       },
     };
   }
-  if (
-    input.max_capacity !== undefined &&
-    input.max_capacity !== null &&
-    (!Number.isInteger(input.max_capacity) || input.max_capacity < 0)
-  ) {
-    return {
-      status: 400,
-      data: {
-        error:
-          "max_capacity must be a whole number greater than or equal to 0.",
-        code: 'INVALID_LOCATION_FIELD', field: 'max_capacity',
-      },
-    };
-  }
   const coordinates = coordinatesFailure(input);
   if (coordinates) return { status: 400, data: { ...coordinates, code: 'INVALID_LOCATION_FIELD' } };
   const normalizedTimezone = input.timezone === undefined
@@ -527,8 +485,6 @@ export async function updateLocation(
       data: { error: "timezone must be a valid IANA time zone identifier; a location cannot be without one.", code: 'INVALID_LOCATION_FIELD', field: 'timezone' },
     };
   }
-
-  const responsibility = await assertResponsibilityTarget(db, organizationId, input, { assigned_member_id: existing.assigned_member_id ?? null, assigned_team_id: existing.assigned_team_id ?? null });
 
   const now = new Date(Math.max(Date.now(), Date.parse(existing.updated_at!) + 1)).toISOString();
   const sets: string[] = ["updated_at = ?"];
@@ -550,7 +506,6 @@ export async function updateLocation(
     "google_review_url",
     "google_place_id",
     "timezone",
-    "max_capacity",
     "latitude",
     "longitude",
     "status",
@@ -573,12 +528,6 @@ export async function updateLocation(
             ? submittedPhone.phone
             : input[field] ?? null,
       );
-    }
-  }
-  if (input.assigned_member_id !== undefined || input.assigned_team_id !== undefined) {
-    for (const field of ['assigned_member_id', 'assigned_team_id'] as const) {
-      sets.push(`${field} = ?`);
-      params.push(responsibility[field]);
     }
   }
 
@@ -613,9 +562,9 @@ export async function updateLocation(
 
   const stale = {
     status: 409,
-    data: { error: "The location changed since it was read. Reload it and try again.", code: 'LOCATION_VERSION_CONFLICT', field: 'expected_updated_at' },
+    data: { error: "The location changed since it was read. Reload it and try again.", code: 'LOCATION_VERSION_CONFLICT', field: 'updated_at' },
   };
-  if (input.expected_updated_at !== undefined && input.expected_updated_at !== existing.updated_at) return stale;
+  if (input.updated_at !== undefined && input.updated_at !== existing.updated_at) return stale;
   const changedFields: string[] = [];
   for (let index = 1; index < sets.length; index++) {
     const field = sets[index]!.split(' = ')[0] as keyof LocationRecord;
@@ -640,16 +589,31 @@ export async function updateLocation(
   // the row it read. With the caller's updated_at in the WHERE, a row that
   // moved since matches nothing and the write is refused rather than applied
   // over someone else's.
-  const expectedUpdatedAt = input.expected_updated_at ?? existing.updated_at;
+  const expectedUpdatedAt = input.updated_at ?? existing.updated_at;
+  // A table here is seated through these hours: its seatings follow them in
+  // the same batch, written only if this update lands.
+  const saved = (field: 'timezone' | 'opening_hours' | 'special_hours') => {
+    const index = sets.findIndex(set => set === `${field} = ?`);
+    return (index >= 0 ? params[index] : existing[field] ?? null) as string | null;
+  };
+  const version = { query: 'EXISTS (SELECT 1 FROM business_locations WHERE id = ? AND organization_id = ? AND updated_at = ?)', params: [locationId, organizationId, expectedUpdatedAt] };
+  const seatings = changedFields.some(field => ['timezone', 'opening_hours', 'special_hours'].includes(field))
+    ? await (await import('~/server/utils/availability')).prepareLocationTableSeatings(db, {
+      organizationId, actorId: userId ?? 'system', now,
+      location: { id: locationId, status: existing.status, timezone: saved('timezone')!, opening_hours: saved('opening_hours'), special_hours: saved('special_hours') },
+      guard: version,
+    })
+    : { guard: version, queries: [] };
   const runUpdate = async (boundParams: Array<string | number | null>): Promise<boolean> => {
-    const statements: BatchQuery[] = [];
+    // The cache and session writes see the same snapshot as the location update.
+    const statements: BatchQuery[] = [...seatings.queries, publicResourceCacheInvalidationQuery(organizationId, 'location_updated', seatings.guard)];
     statements.push({
       query: `
         UPDATE business_locations
         SET ${sets.join(", ")}
-        WHERE id = ? AND organization_id = ? AND updated_at = ?
+        WHERE id = ? AND organization_id = ? AND (${seatings.guard.query})
       `,
-      params: [...boundParams, expectedUpdatedAt],
+      params: [...boundParams, ...seatings.guard.params!],
     });
     statements.push(organizationEventQuery({
       organizationId,
@@ -667,16 +631,10 @@ export async function updateLocation(
       },
       onlyIfPreviousChangedOneRow: true,
     }));
-    // The site changed: recorded with the change, so its caches and search index follow it.
-    statements.push(publicResourceCacheInvalidationQuery(organizationId, 'location_updated'));
-
     // An inactive location takes its homes off the live count. Making it
     // active again is guarded by the same home-activation boundary.
     const results = await executeWithinCapacity(env, db, organizationId, [...(writeGuard ? [writeGuard] : []), ...statements], { action: 'make it active', allowHomeActivation: options.allowHomeActivation });
-    const changed = (results[writeGuard ? 1 : 0]?.meta?.changes ?? 0) === 1;
-    if (changed && (input.assigned_member_id !== undefined || input.assigned_team_id !== undefined)) {
-      await publishAccessInvalidation(env, { organizationId });
-    }
+    const changed = (results[seatings.queries.length + (writeGuard ? 2 : 1)]?.meta?.changes ?? 0) === 1;
     // The saved privacy mode must be visible even if readback or card work fails.
     if (changed) await purgePublicResourceCacheNow(env, organizationId);
     return changed;
@@ -684,13 +642,7 @@ export async function updateLocation(
 
   params.push(locationId, organizationId);
   try {
-    if (!(await runUpdate(params))) {
-      if (input.expected_updated_at === undefined && (input.assigned_member_id !== undefined || input.assigned_team_id !== undefined)) {
-        const current = await loadLocation(db, organizationId, locationId);
-        if (current) await assertResponsibilityTarget(db, organizationId, input, { assigned_member_id: current.assigned_member_id ?? null, assigned_team_id: current.assigned_team_id ?? null });
-      }
-      return stale;
-    }
+    if (!(await runUpdate(params))) return stale;
   } catch (error) {
     const refusal = capacityRefusalOf(error);
     if (refusal) return refusal;
@@ -753,7 +705,7 @@ export async function deleteLocation(
     },
     {
       query: `
-      DELETE FROM requests WHERE organization_id = ? AND location_id = ? AND kind IN ('reservation', 'booking')
+      DELETE FROM conversations WHERE organization_id = ? AND location_id = ? AND kind = 'booking'
     `,
       params: [organizationId, locationId],
     },

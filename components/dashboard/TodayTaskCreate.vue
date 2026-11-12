@@ -42,27 +42,26 @@ const busy = ref(false)
 const failure = ref<string | null>(null)
 // One key per request, kept across retries of the same draft.
 const idempotencyKey = ref(crypto.randomUUID())
-const assigneeItems = computed(() => [{ label: 'Unassigned', value: 'none' }, ...props.assignees.map(person => ({ label: person.name, value: `${person.type}:${person.id}` }))])
+const assigneeItems = computed(() => [{ label: 'Unassigned', value: 'none' }, ...props.assignees.map(person => ({ label: person.name, value: person.id }))])
 const isTaskResult = (value: unknown): value is { task: TaskView } => isRecord(value) && isRecord(value.task) && typeof value.task.id === 'string'
 
 watch(open, (isOpen) => {
   if (!isOpen) return
   title.value = ''; notes.value = ''; due.value = ''; failure.value = null
-  assigneeKey.value = props.assignees.find(person => person.you) ? `member:${props.assignees.find(person => person.you)!.id}` : 'none'
+  assigneeKey.value = props.assignees.find(person => person.you)?.id ?? 'none'
   idempotencyKey.value = crypto.randomUUID()
 })
 
 async function save() {
   busy.value = true
   failure.value = null
-  const [type, id] = assigneeKey.value === 'none' ? [null, null] : assigneeKey.value.split(':') as [string, string]
   try {
     const result = await applicationFetch(`/api/organizations/${encodeURIComponent(props.organizationId)}/tasks`, { method: 'POST', validate: isTaskResult, body: {
       title: title.value.trim(), notes: notes.value.trim() || null,
       // The end of the chosen day on this device's clock.
-      dueAt: due.value ? new Date(`${due.value}T23:59:00`).toISOString() : null,
-      assignedMemberId: type === 'member' ? id : null, assignedTeamId: type === 'team' ? id : null,
-      idempotencyKey: idempotencyKey.value,
+      due_at: due.value ? new Date(`${due.value}T23:59:00`).toISOString() : null,
+      assigned_member_id: assigneeKey.value === 'none' ? null : assigneeKey.value,
+      idempotency_key: idempotencyKey.value,
     } })
     emit('created', result.task)
     open.value = false

@@ -1,3 +1,4 @@
+import type { EarningsPerformance, PayoutDetail, PayoutItem } from '~/shared/earnings-display'
 import type Stripe from 'stripe'
 import { HTTPError } from 'nitro'
 import { queryAll, queryFirst, type DbClient } from '~/server/db'
@@ -14,20 +15,19 @@ import { channelReservationAmounts } from '~/server/domain/stays'
  * from Stripe; nothing is stored.
  */
 
-export interface PaymentPicture { title: string; imageUrl: string | null; subjectTitle: string | null; startsAt: string | null; endsAt: string | null; timeZone: string | null }
+export interface PaymentPicture { title: string; image_url: string | null; name: string | null; starts_at: string | null; ends_at: string | null; timezone: string | null }
 
 /** What each payment was for — its immutable title, the thing's picture, and the visit's dates when it paid for one. */
 export async function paymentPictures(db: DbClient, organizationId: string, payments: readonly Pick<Payment, 'id' | 'subject_type' | 'subject_id' | 'location_id' | 'price_snapshot_json'>[]): Promise<Map<string, PaymentPicture>> {
   const ids = payments.map(payment => payment.id)
   if (!ids.length) return new Map()
   const json = JSON.stringify(ids)
-  const [bookings, reservations, lines] = await Promise.all([
-    queryAll<{ payment_id: string; product_id: string; title: string; starts_at: string; ends_at: string; timezone: string }>(db, `SELECT p.id AS payment_id, b.product_id, pr.name AS title, s.starts_at, s.ends_at, s.timezone FROM payments p JOIN bookings b ON b.id = p.subject_id AND b.organization_id = p.organization_id JOIN product_sessions s ON s.id = b.product_session_id JOIN products pr ON pr.id = b.product_id WHERE p.subject_type = 'booking' AND p.id IN (SELECT value FROM json_each(?))`, [json]),
-    queryAll<{ payment_id: string; location_id: string; title: string; starts_at: string; ends_at: string; timezone: string }>(db, `SELECT p.id AS payment_id, v.location_id, l.title, v.starts_at, v.ends_at, v.timezone FROM payments p JOIN reservations v ON v.id = p.subject_id AND v.organization_id = p.organization_id JOIN business_locations l ON l.id = v.location_id WHERE p.subject_type = 'reservation' AND p.id IN (SELECT value FROM json_each(?))`, [json]),
+  const [bookings, lines] = await Promise.all([
+    queryAll<{ payment_id: string; product_id: string; name: string; starts_at: string; ends_at: string; timezone: string }>(db, `SELECT p.id AS payment_id, b.product_id, pr.name, b.starts_at, b.ends_at, b.timezone FROM payments p JOIN bookings b ON b.id = p.subject_id AND b.organization_id = p.organization_id JOIN products pr ON pr.id = b.product_id WHERE p.subject_type = 'booking' AND p.id IN (SELECT value FROM json_each(?))`, [json]),
     queryAll<{ payment_id: string; product_id: string | null }>(db, `SELECT o.payment_id, (SELECT l.product_id FROM payment_order_lines l WHERE l.order_id = o.id ORDER BY l.rowid LIMIT 1) AS product_id FROM payment_orders o WHERE o.payment_id IN (SELECT value FROM json_each(?))`, [json]),
   ])
   const productIds = [...bookings.map(row => row.product_id), ...lines.map(row => row.product_id).filter((id): id is string => !!id)]
-  const locationIds = [...reservations.map(row => row.location_id), ...payments.map(payment => payment.location_id).filter((id): id is string => !!id)]
+  const locationIds = payments.map(payment => payment.location_id).filter((id): id is string => !!id)
   const [products, locations] = await Promise.all([
     loadOwnerPictures(db, organizationId, 'product', productIds),
     loadOwnerPictures(db, organizationId, 'business_location', locationIds),
@@ -37,31 +37,18 @@ export async function paymentPictures(db: DbClient, organizationId: string, paym
     const snapshot: unknown = JSON.parse(payment.price_snapshot_json)
     if (!snapshot || typeof snapshot !== 'object' || !('title' in snapshot) || typeof snapshot.title !== 'string' || !snapshot.title.trim()) throw new Error(`Payment ${payment.id} has no immutable title`)
     const booking = bookings.find(row => row.payment_id === payment.id)
-    const reservation = reservations.find(row => row.payment_id === payment.id)
     const line = lines.find(row => row.payment_id === payment.id)
     // Use only the image of the payment's actual subject; an absent image is optional.
-    const imageUrl = booking ? products.get(booking.product_id)?.imageUrl
-      : reservation ? locations.get(reservation.location_id)?.imageUrl
+    const image_url = booking ? products.get(booking.product_id)?.imageUrl
       : line?.product_id ? products.get(line.product_id)?.imageUrl
-      : payment.subject_type === 'stay' && payment.location_id ? locations.get(payment.location_id)?.imageUrl
+      // A stay not yet booked shows its home's place.
+      : 'stay' in snapshot && payment.location_id ? locations.get(payment.location_id)?.imageUrl
       : null
 
-    const visit = booking ?? reservation ?? null
-    result.set(payment.id, { title: snapshot.title, imageUrl: imageUrl ?? null, subjectTitle: visit?.title ?? null, startsAt: visit?.starts_at ?? null, endsAt: visit?.ends_at ?? null, timeZone: visit?.timezone ?? null })
+    const visit = booking ?? null
+    result.set(payment.id, { title: snapshot.title, image_url: image_url ?? null, name: visit?.name ?? null, starts_at: visit?.starts_at ?? null, ends_at: visit?.ends_at ?? null, timezone: visit?.timezone ?? null })
   }
   return result
-}
-
-export interface MonthEarnings { month: string; paid: number; refunded: number }
-export interface EarningsPerformance {
-  /** Confirmed channel reservations arriving in the selected month, never added to captured payments. */
-  channelReservations: Array<{ channel: string; currency: string; amount: number; count: number }>
-  /** What was earned in; with nothing earned yet, the currency the business sells in. */
-  currency: string
-  /** Twelve months of the year, every month present. */
-  months: MonthEarnings[]
-  /** The selected month by what was sold, largest first. */
-  items: Array<{ title: string; imageUrl: string | null; paid: number; count: number }>
 }
 
 /** Airbnb's Performance: the year by month, and one month by what was sold. */
@@ -81,35 +68,24 @@ export async function paymentPerformance(db: DbClient, principal: FinancialPrinc
   const next = new Date(Date.UTC(monthYear!, monthNumber!, 1)).toISOString()
   const payments = await queryAll<Payment>(db, `SELECT * FROM payments WHERE organization_id = ? AND created_at >= ? AND created_at < ? AND captured_amount > 0`, [principal.organizationId, `${month}-01T00:00:00.000Z`, next])
   const pictures = await paymentPictures(db, principal.organizationId, payments)
-  const byTitle = new Map<string, { title: string; imageUrl: string | null; paid: number; count: number }>()
+  const byTitle = new Map<string, { title: string; image_url: string | null; paid: number; count: number }>()
   for (const payment of payments) {
     const picture = pictures.get(payment.id)!
-    const entry = byTitle.get(picture.title) ?? { title: picture.title, imageUrl: picture.imageUrl, paid: 0, count: 0 }
+    const entry = byTitle.get(picture.title) ?? { title: picture.title, image_url: picture.image_url, paid: 0, count: 0 }
     entry.paid += payment.captured_amount - payment.refunded_amount
     entry.count += 1
     byTitle.set(picture.title, entry)
   }
   const currency = currencies[0] ?? (await queryFirst<{ default_currency: string }>(db, 'SELECT default_currency FROM organization WHERE id = ?', [principal.organizationId]))?.default_currency
   if (!currency) throw new HTTPError({ statusCode: 404, statusMessage: 'Organization not found' })
-  const channelReservations = await channelReservationAmounts(db, principal.organizationId, `${month}-01`, next.slice(0, 10))
-  return { currency, months, items: [...byTitle.values()].sort((a, b) => b.paid - a.paid), channelReservations }
-}
-
-export interface PayoutItem { paymentId: string; title: string; imageUrl: string | null; amount: number; currency: string; startsAt: string | null; endsAt: string | null; timeZone: string | null; subjectTitle: string | null }
-export interface PayoutDetail {
-  id: string
-  amount: number
-  currency: string
-  status: string
-  arrivalDate: number
-  bank: { bankName: string | null; last4: string } | null
-  items: PayoutItem[]
+  const channel_reservations = await channelReservationAmounts(db, principal.organizationId, `${month}-01`, next.slice(0, 10))
+  return { currency, months, items: [...byTitle.values()].sort((a, b) => b.paid - a.paid), channel_reservations }
 }
 
 export async function connectedStripe(db: DbClient, env: CloudflareEnv, organizationId: string) {
   const account = await getStripeConnectedAccount(db, organizationId)
-  if (!account?.stripeAccountId) throw new HTTPError({ statusCode: 404, statusMessage: 'Stripe account not connected' })
-  return { stripe: paymentsStripe(env, account.livemode), options: { stripeAccount: account.stripeAccountId } }
+  if (!account?.stripe_account_id) throw new HTTPError({ statusCode: 404, statusMessage: 'Stripe account not connected' })
+  return { stripe: paymentsStripe(env, account.livemode), options: { stripeAccount: account.stripe_account_id } }
 }
 
 /**
@@ -133,7 +109,7 @@ export async function payoutItems(db: DbClient, stripe: Stripe, options: { strip
     const picture = pictures.get(payment.id)!
     const transaction = transactions.find(row => (typeof row.source === 'string' ? row.source : row.source?.id) === payment.stripe_charge_id)
     if (!transaction) throw new HTTPError({ statusCode: 502, statusMessage: 'Payout payment has no Stripe balance transaction', data: { code: 'PAYOUT_TRANSACTION_MISSING', field: `items.${payment.id}.amount` } })
-    return { paymentId: payment.id, title: picture.title, imageUrl: picture.imageUrl, amount: transaction.net, currency: transaction.currency.toUpperCase(), startsAt: picture.startsAt, endsAt: picture.endsAt, timeZone: picture.timeZone, subjectTitle: picture.subjectTitle }
+    return { payment_id: payment.id, title: picture.title, image_url: picture.image_url, amount: transaction.net, currency: transaction.currency.toUpperCase(), starts_at: picture.starts_at, ends_at: picture.ends_at, timezone: picture.timezone, name: picture.name }
   })
 }
 
@@ -144,7 +120,7 @@ export async function paymentPayoutDetail(db: DbClient, env: CloudflareEnv, prin
   const payout = await stripe.payouts.retrieve(payoutId, {}, options)
   const destination = typeof payout.destination === 'string' ? payout.destination : payout.destination?.id
   const external = destination ? await stripe.accounts.retrieveExternalAccount(options.stripeAccount, destination) : null
-  const bank = external && external.object === 'bank_account' ? { bankName: external.bank_name ?? null, last4: external.last4 } : null
+  const bank = external && external.object === 'bank_account' ? { bank_name: external.bank_name ?? null, last4: external.last4 } : null
   if (!destination) throw new HTTPError({ statusCode: 502, statusMessage: 'Stripe payout has no destination', data: { code: 'PAYOUT_DESTINATION_MISSING', field: 'payout.destination' } })
 
   return {
@@ -152,7 +128,7 @@ export async function paymentPayoutDetail(db: DbClient, env: CloudflareEnv, prin
     amount: payout.amount,
     currency: payout.currency.toUpperCase(),
     status: payout.status,
-    arrivalDate: payout.arrival_date,
+    arrival_date: payout.arrival_date,
     bank,
     items: await payoutItems(db, stripe, options, principal.organizationId, payout.id),
   }
@@ -170,8 +146,8 @@ export async function paymentTransactions(db: DbClient, principal: FinancialPrin
   const [pictures, buyers, bookings, orders] = ids.length
     ? await Promise.all([
         paymentPictures(db, principal.organizationId, page.payments),
-        queryAll<{ id: string; name: string | null }>(db, `SELECT p.id, COALESCE(json_extract(r.payload_json, '$.guest.name'), u.name) AS name FROM payments p LEFT JOIN user u ON u.id = p.buyer_user_id LEFT JOIN payment_checkout_holds h ON h.payment_id = p.id LEFT JOIN requests r ON r.id = h.request_id WHERE p.id IN (SELECT value FROM json_each(?))`, [json]),
-        queryAll<{ payment_id: string; request_id: string | null }>(db, `SELECT p.id AS payment_id, b.request_id FROM payments p JOIN bookings b ON b.id = p.subject_id AND b.organization_id = p.organization_id WHERE p.subject_type = 'booking' AND p.id IN (SELECT value FROM json_each(?)) UNION ALL SELECT p.id, r.request_id FROM payments p JOIN reservations r ON r.id = p.subject_id AND r.organization_id = p.organization_id WHERE p.subject_type = 'reservation' AND p.id IN (SELECT value FROM json_each(?))`, [json,json]),
+        queryAll<{ id: string; name: string | null }>(db, `SELECT p.id, COALESCE(json_extract(r.payload_json, '$.guest.name'), u.name) AS name FROM payments p LEFT JOIN user u ON u.id = p.buyer_user_id LEFT JOIN payment_checkout_holds h ON h.payment_id = p.id LEFT JOIN conversations r ON r.id = h.conversation_id WHERE p.id IN (SELECT value FROM json_each(?))`, [json]),
+        queryAll<{ payment_id: string; booking_id: string; conversation_id: string | null; nights: number }>(db, `SELECT p.id AS payment_id, b.id AS booking_id, (SELECT c.id FROM conversations c WHERE c.booking_id = b.id AND c.kind = 'booking') AS conversation_id, b.product_session_id IS NULL AS nights FROM payments p JOIN bookings b ON b.id = p.subject_id AND b.organization_id = p.organization_id WHERE p.subject_type = 'booking' AND p.id IN (SELECT value FROM json_each(?))`, [json]),
         queryAll<{ payment_id: string }>(db, `SELECT payment_id FROM payment_orders WHERE payment_id IN (SELECT value FROM json_each(?))`, [json]),
       ])
     : [new Map<string, PaymentPicture>(), [], [], []]
@@ -180,12 +156,15 @@ export async function paymentTransactions(db: DbClient, principal: FinancialPrin
     next_cursor: page.next_cursor,
     payments: page.payments.map((payment) => {
       const picture = pictures.get(payment.id)!
-      const request = bookings.find(row => row.payment_id === payment.id)?.request_id
-      const to = request ? `${base}/${payment.subject_type}/${encodeURIComponent(request)}` : `${base}/${orders.some(row => row.payment_id === payment.id) ? 'order' : 'payment'}/${encodeURIComponent(payment.id)}`
+      const booking = bookings.find(row => row.payment_id === payment.id)
+      // A stay opens by its id, any other booking by its conversation, as the bookings pages address them.
+      const to = booking?.nights === 1 ? `${base}/stay/${encodeURIComponent(booking.booking_id)}`
+        : booking?.conversation_id ? `${base}/booking/${encodeURIComponent(booking.conversation_id)}`
+        : `${base}/${orders.some(row => row.payment_id === payment.id) ? 'order' : 'payment'}/${encodeURIComponent(payment.id)}`
       return {
         id: payment.id, created_at: payment.created_at, currency: payment.currency, amount: payment.amount, captured_amount: payment.captured_amount, refunded_amount: payment.refunded_amount,
-        title: picture.title, image_url: picture.imageUrl, buyer_name: buyers.find(row => row.id === payment.id)?.name ?? null,
-        starts_at: picture.startsAt, ends_at: picture.endsAt, timezone: picture.timeZone, to,
+        title: picture.title, image_url: picture.image_url, buyer_name: buyers.find(row => row.id === payment.id)?.name ?? null,
+        starts_at: picture.starts_at, ends_at: picture.ends_at, timezone: picture.timezone, to,
       }
     }),
   }

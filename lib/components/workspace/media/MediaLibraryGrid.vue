@@ -247,8 +247,8 @@ const { data: media, error: mediaError, status: mediaStatus, refresh } = await u
     const params = new URLSearchParams({ limit: '100' })
     if (kindFilter.value !== ALL_MEDIA_KIND) params.set('kind', kindFilter.value)
     if (props.locationId) {
-      params.set('ownerType', 'business_location')
-      params.set('ownerId', props.locationId)
+      params.set('owner_type', 'business_location')
+      params.set('owner_id', props.locationId)
       params.set('slot', 'gallery')
     }
     return await dashboardApi<{ media: MediaAsset[] }>(

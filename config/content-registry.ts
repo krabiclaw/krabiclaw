@@ -12,7 +12,7 @@ export interface EditablePage {
   label: string
   path: string
   scope: 'organization' | 'location'
-  scopeLabelKey: 'organization' | 'location' | 'office'
+  scope_label_key: 'organization' | 'location' | 'office'
   editor: CmsPageCapability['editor']
 }
 
@@ -48,7 +48,7 @@ export function getEditablePages(
     label: page.label,
     path: page.route,
     scope: page.scope,
-    scopeLabelKey: page.scope === 'organization'
+    scope_label_key: page.scope === 'organization'
       ? 'organization'
       : capability.locationVocabulary === 'office/service area' ? 'office' : 'location',
     editor: page.editor,

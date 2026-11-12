@@ -9,12 +9,12 @@ export default defineHandler(async event=>{
  const {env,db,organization,userId}=await getDashboardContext(event,{})
  await authorizePayments({organizationId:organization.id,userId,role:organization.role},'integration')
  const account=await getStripeConnectedAccount(db,organization.id)
- if(!account?.stripeAccountId)throw new HTTPError({statusCode:409,statusMessage:'Scoped Stripe account is unavailable',data:{code:'CONNECT_NOT_STARTED',field:'account.stripeAccountId'}})
+ if(!account?.stripe_account_id)throw new HTTPError({statusCode:409,statusMessage:'Scoped Stripe account is unavailable',data:{code:'CONNECT_NOT_STARTED',field:'account.stripe_account_id'}})
  const stripe=paymentsStripe(env,account.livemode)
  try {
-  const native=await stripe.v2.core.accounts.retrieve(account.stripeAccountId)
+  const native=await stripe.v2.core.accounts.retrieve(account.stripe_account_id)
   if(native.dashboard!=='express'||native.livemode!==account.livemode)throw new HTTPError({statusCode:409,statusMessage:'Express Dashboard financial scope mismatch',data:{code:'CONNECT_DASHBOARD_SCOPE_INVALID',field:'account.dashboard'}})
-  const link=await stripe.accounts.createLoginLink(account.stripeAccountId)
+  const link=await stripe.accounts.createLoginLink(account.stripe_account_id)
   if (!link.url || new URL(link.url).protocol !== 'https:') throw new HTTPError({statusCode:502,statusMessage:'Stripe returned an invalid dashboard URL',data:{code:'CONNECT_DASHBOARD_INVALID',field:'url'}})
   return jsonResponse({url:link.url})
  } catch(error) {

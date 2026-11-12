@@ -1,23 +1,24 @@
 import { buyerRequestActivityPath } from '~/server/domain/payments/buyer'
 import { OPEN_REPLY_TASK_SQL } from './repository'
 import { d1JsonStringSet, queryAll, queryFirst, type DbClient } from '~/server/db'
-import { getGuestRequest, getThreadOperationalRecord, requestSummary, requestActions, stayPreview } from '~/server/domain/requests'
+import { bookingDay, getGuestRequest, getThreadOperationalRecord, requestSummary, requestActions, stayPreview } from '~/server/domain/requests'
 import { formatOperationalStatusLabel } from './status-labels'
-import { readMailboxActivity, resolveGuestThreadMailbox } from './mailbox'
-import { listThreadEntries, parseEntryPayload, isBuyerVisibleThreadEntry } from './entries'
+import { resolveGuestThreadMailbox } from './mailbox'
+import { GUEST_NOTE_EVENT, MIRRORED_EVENT, OPENING_EVENT, SCHEDULED_MESSAGE_EVENT, SUBMISSION_EVENT, isEventMessage, listConversationMessages, messageRole, parseMessagePayload, type MessageRow } from '~/server/domain/conversations'
 import { isDeliverySent, isVisibleDeliveryFailure, listThreadDeliveries } from './deliveries'
 import { listMessagePhotos } from './attachments'
-import type { GuestThreadDetailViewModel, GuestThreadEntryDeliveryViewModel, GuestThreadEntryRow, GuestThreadEntryViewModel } from './types'
+import type { GuestThreadDetailViewModel, GuestThreadEntryDeliveryViewModel, GuestThreadEntryViewModel } from './types'
 import { HTTPError } from 'nitro'
 import { providerTimestamp } from '~/server/integrations/channex/messages'
 import { bookingChangeViews } from './booking-changes'
 import { formAnswerSnapshotsSchema, type FormAnswerSnapshot } from '~/shared/form-questions'
 
-/** What the guest answered when they wrote in or booked: on the thread, or on the stay the thread is about. */
+/** What the guest answered when they wrote in or booked: on a contact's thread, or on the booking the thread is about (none before a checkout's payment makes it). */
 async function threadAnswers(db: DbClient, thread: NonNullable<Awaited<ReturnType<typeof getGuestRequest>>>): Promise<FormAnswerSnapshot[]> {
-  if (thread.kind !== 'stay') return thread.payload.answers
-  const stay = await queryFirst<{ answers: string }>(db, 'SELECT answers FROM stays WHERE organization_id = ? AND request_id = ?', [thread.organization_id, thread.id])
-  return stay ? formAnswerSnapshotsSchema.parse(JSON.parse(stay.answers)) : []
+  if (thread.kind === 'contact') return thread.payload.answers
+  if (!thread.booking_id) return []
+  const booking = await queryFirst<{ answers: string }>(db, 'SELECT answers FROM bookings WHERE organization_id = ? AND id = ?', [thread.organization_id, thread.booking_id])
+  return booking ? formAnswerSnapshotsSchema.parse(JSON.parse(booking.answers)) : []
 }
 
 function deliveryRecipient(emailJson: string | null): string | null {
@@ -26,88 +27,93 @@ function deliveryRecipient(emailJson: string | null): string | null {
   return typeof parsed.message?.to === 'string' && parsed.message.to.trim() ? parsed.message.to.trim() : null
 }
 
-/** Builds the full canonical thread detail view model — the sole source for the detail API. */
+/**
+ * Builds the full canonical conversation detail view model — the sole source
+ * for the detail API. A guest reads it as `buyerUserId`; a member as
+ * `memberUserId`, whose own archive it shows; a server read (an alert, MCP)
+ * as neither. It never writes.
+ */
 export async function getGuestThreadDetail(
   db: DbClient,
   threadId: string,
   organizationId: string,
-  audience?: { buyerUserId: string },
+  viewer?: { buyerUserId: string } | { memberUserId: string },
 ): Promise<GuestThreadDetailViewModel | null> {
+  const audience = viewer && 'buyerUserId' in viewer ? viewer : undefined
+  const memberUserId = viewer && 'memberUserId' in viewer ? viewer.memberUserId : null
   const now = new Date().toISOString()
-  const thread = await getGuestRequest(db, threadId, organizationId, undefined, audience?.buyerUserId)
-  if (!thread || (audience && thread.user_id !== audience.buyerUserId)) return null
-  const record = await getThreadOperationalRecord(db, thread.id)
-  if (audience && record && (record.user_id !== audience.buyerUserId || record.organization_id !== organizationId || record.kind !== thread.kind)) return null
-  const organization = await queryFirst<{name:string;vertical:string}>(db,'SELECT name,vertical FROM organization WHERE id=?',[organizationId])
-  if (!organization) throw new Error('Conversation has no organization')
-
-
-  const [entryRows, deliveryRows, channelThread, answers] = await Promise.all([
-    listThreadEntries(db, threadId),
-    listThreadDeliveries(db, threadId),
-    queryFirst<{ request_id: string; product_id: string | null }>(db, `SELECT request_id, product_id FROM channel_threads WHERE organization_id = ? AND request_id = ?
-      UNION ALL SELECT request_id, product_id FROM stays WHERE organization_id = ? AND request_id = ? AND owner = 'channel' LIMIT 1`, [organizationId, threadId, organizationId, threadId]),
-    threadAnswers(db, thread),
+  // Everything read by the conversation's id goes in one wave: a D1 read is a
+  // round trip, and this view made a dozen of them one after another.
+  const [thread, record, organization, entryRows, deliveryRows, channelThread, needsReply, archive] = await Promise.all([
+    getGuestRequest(db, threadId, organizationId, undefined, audience?.buyerUserId),
+    getThreadOperationalRecord(db, threadId),
+    queryFirst<{ name: string; vertical: string }>(db, 'SELECT name, vertical FROM organization WHERE id = ?', [organizationId]),
+    listConversationMessages(db, threadId, Boolean(audience)),
+    audience ? [] : listThreadDeliveries(db, threadId),
+    queryFirst<{ product_id: string | null }>(db, `SELECT product_id FROM channel_threads WHERE organization_id = ? AND conversation_id = ?
+      UNION ALL SELECT b.product_id FROM conversations c JOIN bookings b ON b.id = c.booking_id AND b.organization_id = c.organization_id
+        WHERE c.organization_id = ? AND c.id = ? AND b.owner = 'channel' LIMIT 1`, [organizationId, threadId, organizationId, threadId]),
+    audience ? false : queryFirst(db, `SELECT 1 AS open FROM conversations gt WHERE gt.id = ? AND ${OPEN_REPLY_TASK_SQL}`, [threadId]).then(Boolean),
+    memberUserId ? queryFirst<{ archived_at: string | null }>(db, 'SELECT archived_at FROM conversation_participants WHERE conversation_id = ? AND user_id = ?', [threadId, memberUserId]) : null,
   ])
+  if (!thread || (audience && thread.user_id !== audience.buyerUserId)) return null
+  if (audience && record && (record.user_id !== audience.buyerUserId || record.organization_id !== organizationId)) return null
+  if (!organization) throw new Error('Conversation has no organization')
 
   // One read of the deliveries answers both questions the thread asks of them:
   // where each entry went, and which sends failed.
   const deliveriesByEntry = new Map<string, GuestThreadEntryDeliveryViewModel[]>()
   for (const delivery of deliveryRows) {
-    const forEntry = deliveriesByEntry.get(delivery.entry_id) ?? []
+    if (!delivery.message_id) throw new Error(`Delivery ${delivery.id} of conversation ${threadId} names no message`)
+    const forEntry = deliveriesByEntry.get(delivery.message_id) ?? []
     forEntry.push({ id: delivery.id, channel: delivery.channel, provider: delivery.provider, purpose: delivery.purpose, status: delivery.status })
-    deliveriesByEntry.set(delivery.entry_id, forEntry)
+    deliveriesByEntry.set(delivery.message_id, forEntry)
   }
   const deliveryFailureRows = deliveryRows.filter(isVisibleDeliveryFailure)
   if (deliveryRows.some(delivery => delivery.provider === 'channex' && isDeliverySent(delivery) && !delivery.provider_message_id?.trim())) {
     throw new HTTPError({ statusCode: 500, message: 'A successful channel reply has no provider message ID', data: { code: 'CHANNEL_RECEIPT_INVALID', field: 'delivery.provider_message_id' } })
   }
 
-  const photos = await listMessagePhotos(db, 'activity_entry', entryRows.filter(entry => entry.kind === 'message').map(entry => entry.id))
+  // The second wave: what the conversation's own rows point at. Who on the team
+  // said or did each thing is read by the name their account carries.
+  const actorUserIds = entryRows.flatMap(entry => entry.author_user_id ? [entry.author_user_id] : [])
+  const [photos, actorRows, changes, answers, summary, home, activityPath] = await Promise.all([
+    listMessagePhotos(db, 'message', entryRows.filter(entry => !isEventMessage(entry)).map(entry => entry.id)),
+    actorUserIds.length ? queryAll<{ id: string; name: string }>(db, 'SELECT id, name FROM user WHERE id IN (SELECT value FROM json_each(?))', [d1JsonStringSet(actorUserIds)]) : [],
+    bookingChangeViews(db, thread, entryRows, now),
+    threadAnswers(db, thread),
+    requestSummary(db, thread, record),
+    audience || record?.unit === 'nights' || !channelThread?.product_id ? null
+      : queryFirst<{ internal_name: string }>(db, 'SELECT internal_name FROM product_stay_configs WHERE organization_id = ? AND product_id = ?', [organizationId, channelThread.product_id]),
+    audience && thread.kind !== 'contact' ? buyerRequestActivityPath(db, audience.buyerUserId, thread.id) : null,
+  ])
+  const actorNames = new Map(actorRows.map(row => [row.id, row.name]))
 
-  // Who on the team said or did each thing, by the name their account carries.
-  const actorUserIds = entryRows.flatMap(entry => entry.actor_user_id ? [entry.actor_user_id] : [])
-  const actorNames = new Map(actorUserIds.length
-    ? (await queryAll<{ id: string; name: string }>(db, 'SELECT id, name FROM user WHERE id IN (SELECT value FROM json_each(?))', [d1JsonStringSet(actorUserIds)]))
-        .map(row => [row.id, row.name])
-    : [])
-
-  // The local attempt and its provider resource remain separate immutable facts.
-  // Only an actual successful receipt ID proves the mirrored property message is
-  // the same reply. No content, timestamp or in-flight state identifies an echo.
-  const acceptedChannelIds = new Set(deliveryRows.flatMap(delivery => delivery.provider === 'channex' && isDeliverySent(delivery) && delivery.provider_message_id !== null ? [delivery.provider_message_id] : []))
-  const presentationEntries = entryRows.filter(entry => {
-    if (entry.event_name !== 'channel.message_mirrored' || entry.actor_kind !== 'member') return true
-    const payload = parseEntryPayload(entry)
-    if (typeof payload?.provider_message_id !== 'string' || !payload.provider_message_id) throw new HTTPError({ statusCode: 500, message: 'The mirrored message has no provider message ID', data: { code: 'CHANNEL_MESSAGE_PAYLOAD_INVALID', field: 'provider_message_id', entry_id: entry.id } })
-    return !acceptedChannelIds.has(payload.provider_message_id)
-  })
-  const visibleEntries = audience ? presentationEntries.filter(isBuyerVisibleThreadEntry) : presentationEntries
-  const changes = await bookingChangeViews(db, thread, entryRows, now)
-  const entries: GuestThreadEntryViewModel[] = visibleEntries.map(entry => {
-    const payload = parseEntryPayload(entry)
-    if (payload) delete payload.email
-    const mirrored = entry.event_name === 'channel.message_mirrored'
-    if (mirrored && (!payload || !Array.isArray(payload.attachments) || !payload.attachments.every(link => typeof link === 'string' && URL.canParse(link) && new URL(link).protocol === 'https:'))) {
+  const entries: GuestThreadEntryViewModel[] = entryRows.map(entry => {
+    const payload = parseMessagePayload(entry)
+    delete payload.email
+    const mirrored = entry.event_name === MIRRORED_EVENT
+    const event = isEventMessage(entry)
+    const role = messageRole(entry, thread.user_id)
+    if (mirrored && (!Array.isArray(payload.attachments) || !payload.attachments.every(link => typeof link === 'string' && URL.canParse(link) && new URL(link).protocol === 'https:'))) {
       throw new HTTPError({ statusCode: 500, message: 'The mirrored message has invalid attachment links', data: { code: 'CHANNEL_MESSAGE_PAYLOAD_INVALID', entry_id: entry.id, field: 'attachments' } })
     }
-    const providerRecordedAt = mirrored ? providerTimestamp(payload!.provider_inserted_at, `activity_entry:${entry.id}`, 'provider_inserted_at') : null
+    const providerRecordedAt = mirrored ? providerTimestamp(payload.provider_inserted_at, `message:${entry.id}`, 'provider_inserted_at') : null
     // Airbnb's photos are our own media once the mirror has stored them, like every message's.
     const attachments = photos.get(entry.id) ?? []
     return {
       id: entry.id,
-      kind: entry.kind,
-      actorKind: entry.actor_kind,
+      kind: event ? 'event' : 'message',
+      actorKind: role,
       actorUserId: audience
-        ? entry.actor_kind === 'guest' && entry.channel === 'web' && entry.actor_user_id === audience.buyerUserId ? entry.actor_user_id : null
-        : entry.actor_user_id,
-      actorLabel: actorLabel(entry, mirrored, actorNames, organization.name),
+        ? role === 'guest' && entry.author_user_id === audience.buyerUserId ? entry.author_user_id : null
+        : entry.author_user_id,
+      actorLabel: actorLabel(entry, role, mirrored, actorNames, organization.name),
       channel: entry.channel,
       body: entry.body,
       eventName: entry.event_name,
       payload: audience
-        ? entry.kind === 'message' ? { unshownFiles: payload?.unshownFiles ?? [] }
-          : entry.kind === 'operation' ? { action: payload?.action ?? null } : null
+        ? event ? { action: payload.action ?? null } : { unshownFiles: payload.unshownFiles ?? [] }
         : payload,
       sequence: entry.sequence,
       occurredAt: entry.occurred_at,
@@ -118,40 +124,43 @@ export async function getGuestThreadDetail(
     }
   })
 
-  const summary = await requestSummary(db, thread, record)
   if (!audience) {
-    const home = record?.kind === 'stay' ? { internal_name: record.product_internal_name } : channelThread?.product_id
-      ? await queryFirst<{ internal_name: string }>(db, 'SELECT internal_name FROM product_stay_configs WHERE organization_id = ? AND product_id = ?', [organizationId, channelThread.product_id]) : null
-    if (home) { summary.productTitle = home.internal_name; summary.locationTitle = home.internal_name }
+    const named = record?.unit === 'nights' ? { internal_name: record.product_internal_name } : home
+    if (named) { summary.productTitle = named.internal_name; summary.locationTitle = named.internal_name }
   }
-  const mailbox = resolveGuestThreadMailbox(thread, record, now, await readMailboxActivity(db, thread.id), audience?'buyer':'member')
+  const mailbox = resolveGuestThreadMailbox({ blocked_at: thread.blocked_at, archived_at: archive?.archived_at ?? null }, record, now, { lastMessageAt: thread.last_message_at }, audience ? 'buyer' : 'member')
+  // The guest's own words: a contact's first message, a booking guest's note.
+  const words = (event: string) => entryRows.find(entry => entry.event_name === event && entry.author_kind === 'guest')?.body ?? null
+  // A stay's conversation is presented as a stay: the booking is its nights, or a channel's guest has not booked yet.
+  const submissionType = thread.kind === 'booking' && (record ? record.unit === 'nights' : channelThread !== null) ? 'stay' : thread.kind
 
   return {
     id: thread.id,
     organizationName: organization.name,
     organizationVertical: organization.vertical,
-    activityPath: audience && thread.kind!=='contact' ? await buyerRequestActivityPath(db,audience.buyerUserId,thread.id) : null,
+    activityPath,
     guestName: summary.guestName,
     participantLabel: summary.participantLabel,
     conversationChannel: channelThread ? 'airbnb' : 'direct',
     guestEmail: summary.guestEmail,
     guestPhone: summary.guestPhone,
-    submissionType: thread.kind,
+    submissionType,
     submissionId: thread.id,
     locationLabel: summary.locationTitle,
-    needsReply: !audience && Boolean(await queryFirst(db, `SELECT 1 AS open FROM requests gt WHERE gt.id = ? AND ${OPEN_REPLY_TASK_SQL}`, [thread.id])),
-    operationalRecord: record ? { id: record.id, kind: record.kind, status: record.status, starts_at: record.starts_at, ends_at: record.ends_at, timezone: record.timezone, party_size: record.party_size, check_in_date: record.check_in_date, check_out_date: record.check_out_date } : null,
+    needsReply,
+    operationalRecord: record ? { id: record.id, unit: record.unit, product_kind: record.product_kind, status: record.status, starts_at: record.starts_at, ends_at: record.ends_at, timezone: record.timezone, party_size: record.party_size,
+      check_in_date: record.unit === 'nights' ? bookingDay(record.starts_at, record.timezone) : null, check_out_date: record.unit === 'nights' ? bookingDay(record.ends_at, record.timezone) : null } : null,
     source: {
-      submissionType: thread.kind,
+      submissionType,
       submissionId: thread.id,
       operationalStatus: record?.status ?? null,
-      operationalStatusLabel: record ? formatOperationalStatusLabel(thread.kind, record.status) : null,
+      operationalStatusLabel: record ? formatOperationalStatusLabel(submissionType, record.status) : null,
       fields: thread.kind === 'contact'
-        ? { subject: thread.payload.subject, message: thread.payload.message, locationTitle: summary.locationTitle, productTitle: summary.productTitle, answers }
-        : thread.kind === 'stay'
+        ? { subject: thread.payload.subject, message: words(SUBMISSION_EVENT), locationTitle: summary.locationTitle, productTitle: summary.productTitle, answers }
+        : submissionType === 'stay'
           ? {
-              // A stay is its nights in its own dates; it has no start time to localize.
-              whenLabel: record?.check_in_date && record.check_out_date ? stayPreview({ check_in_date: record.check_in_date, check_out_date: record.check_out_date, party_size: record.party_size }) : null,
+              // A stay is its nights in its own days.
+              whenLabel: record ? stayPreview(record) : null,
               startsAt: null, endsAt: null, timezone: record?.timezone ?? null,
               guests: record ? String(record.party_size) : null, partySize: record?.party_size ?? null,
               notes: null, locationTitle: summary.locationTitle, productTitle: summary.productTitle, answers,
@@ -161,20 +170,20 @@ export async function getGuestThreadDetail(
             startsAt: record?.starts_at ?? null,
             endsAt: record?.ends_at ?? null,
             timezone: record?.timezone ?? null,
-            guests: record ? `${record.party_size}${thread.payload.party_size_is_minimum ? '+' : ''}` : null,
+            guests: record ? `${record.party_size}${record.party_size_is_minimum ? '+' : ''}` : null,
             partySize: record?.party_size ?? null,
-            notes: thread.payload.notes,
+            notes: words(GUEST_NOTE_EVENT),
             locationTitle: summary.locationTitle,
             productTitle: summary.productTitle,
             answers,
           },
     },
     entries,
+    inquiry: thread.kind === 'booking' && thread.payload.inquiry ? { checkIn: thread.payload.inquiry.check_in_date, checkOut: thread.payload.inquiry.check_out_date } : null,
     availableActions: audience ? [] : requestActions(record, now),
     mailbox: mailbox.mailbox,
     manuallyArchived: mailbox.manuallyArchived,
-    archivedAt: audience ? null : thread.archived_at,
-    archivedByUserId: audience ? null : thread.archived_by_user_id,
+    archivedAt: audience ? null : archive?.archived_at ?? null,
     blockedAt: audience ? null : thread.blocked_at,
     canArchive: audience ? false : mailbox.canArchive,
     canUnarchive: audience ? false : mailbox.canUnarchive,
@@ -189,28 +198,29 @@ export async function getGuestThreadDetail(
       createdAt: d.created_at,
     })),
     createdAt: thread.created_at,
-    updatedAt: thread.updated_at,
+    lastMessageAt: thread.last_message_at,
   }
 }
 
 /**
- * Who wrote a team-side message, from the entry's own facts. A member reply
- * always records its member; the user FK sets that to null only when the
- * account is deleted, which is a recorded fact rather than a missing one. A
- * system message is either a provider message or a scheduled message.
+ * Who wrote a message or caused an event, from its own facts. A member's
+ * message always records its member; the user FK sets that to null only when
+ * the account is deleted, which is a recorded fact rather than a missing one.
+ * KrabiClaw alone writes a relayed provider message, an automatic message or
+ * an event nobody caused.
  */
-function actorLabel(entry: GuestThreadEntryRow, mirrored: boolean, actorNames: Map<string, string>, business: string): string | null {
+function actorLabel(entry: MessageRow, role: GuestThreadEntryViewModel['actorKind'], mirrored: boolean, actorNames: Map<string, string>, business: string): string | null {
   // The host's Airbnb messages are the business's side, whoever typed them on Airbnb.
-  if (mirrored) return entry.actor_kind === 'system' ? 'Airbnb' : entry.actor_kind === 'member' ? business : null
-  if (entry.event_name === 'thread.scheduled_message') return 'Scheduled message'
+  if (mirrored) return entry.author_kind === 'krabiclaw' ? 'Airbnb' : entry.author_kind === 'member' ? business : null
+  if (entry.event_name === SCHEDULED_MESSAGE_EVENT) return 'Scheduled message'
   // The booking's own message, written with the record: no one on the team said it.
-  if (entry.event_name === 'thread.opening') return null
-  if (entry.actor_user_id) {
-    const name = actorNames.get(entry.actor_user_id)
-    if (!name?.trim()) throw new HTTPError({ statusCode: 500, message: 'The entry actor has no account name', data: { code: 'INVALID_GUEST_THREAD_ENTRY', field: 'actor_user_id', entry_id: entry.id } })
+  if (entry.event_name === OPENING_EVENT) return null
+  if (role === 'guest') return null
+  if (entry.author_user_id) {
+    const name = actorNames.get(entry.author_user_id)
+    if (!name?.trim()) throw new HTTPError({ statusCode: 500, message: 'The message author has no account name', data: { code: 'INVALID_GUEST_THREAD_ENTRY', field: 'author_user_id', entry_id: entry.id } })
     return name
   }
-  if (entry.kind !== 'message' || entry.actor_kind === 'guest') return null
-  if (entry.actor_kind === 'member') return 'Deleted account'
-  throw new HTTPError({ statusCode: 500, message: 'The system message has no recorded source', data: { code: 'INVALID_GUEST_THREAD_ENTRY', field: 'actor_kind', entry_id: entry.id } })
+  if (role === 'krabiclaw') return null
+  return 'Deleted account'
 }

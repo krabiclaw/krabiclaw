@@ -18,7 +18,7 @@
         </NuxtLink>
       </div>
     </header>
-    <LazyTenantQA :qa="qaList" :show-title="false" />
+    <LazyTenantQA :qa="qa_list" :show-title="false" />
   </div>
 </template>
 
@@ -28,7 +28,7 @@ definePageMeta({ layout: 'tenant' })
 const { organization } = useTenantOrganization()
 const { localePath, t } = useI18n()
 
-const { qaList, locations, sections } = await usePublicPageData()
+const { qa_list, locations, sections } = await usePublicPageData()
 // A section with nothing on it is not a page; the navigation hides it by the same flag.
 if (sections.value?.qa === false) throw createError({ statusCode: 404 })
 const organizationName = organization.name
@@ -42,8 +42,8 @@ useSocialMetadata(() => ({
   breadcrumbs: [
     { name: t('site.qa.title'), url: '/qa' },
   ],
-  faqItems: Array.isArray(qaList.value)
-    ? qaList.value
+  faqItems: Array.isArray(qa_list.value)
+    ? qa_list.value
         .filter((item): item is { question: unknown; answer: unknown } => Boolean(item && typeof item === 'object' && 'question' in item && 'answer' in item && item.question && item.answer))
         .map(item => ({
           question: String(item.question),

@@ -54,7 +54,7 @@
             <p v-if="loc.short_description" class="mt-3 max-w-md text-sm leading-relaxed text-muted">{{ loc.short_description }}</p>
 
             <div class="mt-6 flex flex-wrap items-center gap-3">
-              <TenantButton control-id="reservation-booking-toggle" @click="openBookingModal(loc)">{{ resCopy.reservationRequestButton }}</TenantButton>
+              <TenantButton v-if="tableAt(loc)" control-id="reservation-booking-toggle" @click="openBookingModal(loc)">{{ resCopy.reservationRequestButton }}</TenantButton>
               <TenantButton v-if="loc.phone" :href="`tel:${loc.phone}`" variant="outline">
                 {{ formatPhone(loc.phone) }}
               </TenantButton>
@@ -78,86 +78,33 @@
         </div>
       </section>
 
-    <!-- Booking Modal Flow -->
+    <!-- The table's booking: the same steps, times and form as every bookable offering. -->
     <BookingModal
-      v-model="isBookingModalOpen"
+      v-model="bookingOpen"
       target-id="reservation-booking"
-      :title="modalTitle"
-      :can-go-back="bookingStep > startStep && !submitting"
-      @back="prevStep"
+      :title="selectedLocation?.title ?? resCopy.selectTimeLabel"
+      :can-go-back="bookingStep > 1 && !submitting"
+      @back="bookingStep = 1"
     >
-      <!-- STEP: LOCATION (only if multiple locations and not pre-selected from a card) -->
-      <div v-if="bookingStep === 1" class="flex-1 overflow-y-auto">
-        <BookingLocationStep
-          v-model="reservationForm.location_id"
-          :locations="bookingLocations"
-          @next="nextStep"
-        />
-
-        <div v-if="submitError" role="alert" class="mt-4 rounded-lg border border-red-500/30 bg-red-500/5 px-4 py-3 text-sm text-red-500">
-          {{ submitError }}
-        </div>
-      </div>
-
-      <!-- STEP: TIME (party size + day-grouped availability, single scrollable surface) -->
-      <div v-if="bookingStep === 2" class="flex flex-1 flex-col min-h-0">
-        <BookingTimeStep
-          v-model="timeSelection"
-          :dates="availabilityDates"
-          :loading="availabilityLoading || !isHydrated"
-          :guests="guests"
-          :guests-label="resCopy.guestsLabel"
-          :guest-singular="resCopy.guestLabel"
-          :guest-plural="resCopy.guestsLabelPlural"
-          @update:guests="guests = $event"
-          @next="nextStep"
-        />
-        <div v-if="submitError" role="alert" class="mt-4 rounded-lg border border-red-500/30 bg-red-500/5 px-4 py-3 text-sm text-red-500">
-          {{ submitError }}
-        </div>
-      </div>
-
-      <!-- STEP: CONTACT -->
-      <div v-if="bookingStep === 3" class="flex-1 overflow-y-auto">
-        <BookingRecap
-          v-if="timeSelection"
-          :main-line="`${timeSelection.label.split(',')[0]} · ${formatTime(timeSelection.time, locale)}`"
-          :meta-line="`${guests >= 8 ? '8+' : guests} ${guests === 1 ? resCopy.guestLabel : resCopy.guestsLabelPlural}`"
-          @edit="bookingStep = 2"
-        />
-        <BookingContactForm
-          v-model="contactForm"
-          :questions="formQuestions.questions.value"
-          :answer-errors="formQuestions.answerErrors.value"
-          :questions-notice="formQuestions.notice.value"
-          :default-country="defaultPhoneCountry"
-          :loading="submitting"
-          :submit-text="resCopy.reservationRequestButton"
-          phone-required
-          @submit="handleReservation"
-        />
-        <div v-if="submitError" role="alert" class="mt-4 rounded-lg border border-red-500/30 bg-red-500/5 px-4 py-3 text-sm text-red-500">
-          {{ submitError }}
-        </div>
-      </div>
+      <ProductBookingSteps
+        :controller="bookingController"
+        :confirmation-mode="activeTable.booking!.confirmation_mode"
+        :payment-required="paymentRequired"
+        phone-required
+      />
     </BookingModal>
   </div>
 </template>
 
 <script setup lang="ts">
-import type { SubmissionMeasurement } from '~/composables/useOrganizationConversionTracking'
-import { isRecord, publicApiMutation, publicApiRequest, normalizeApiError } from '~/utils/api-clients'
-import BookingContactForm, { type ContactFormState } from '@/components/booking/BookingContactForm.vue'
-import BookingLocationStep from '@/components/booking/BookingLocationStep.vue'
+import type { PublicProduct } from '~/server/types/products'
 import BookingModal from '@/components/booking/BookingModal.vue'
-import BookingRecap from '@/components/booking/BookingRecap.vue'
-import BookingTimeStep, { type RawDateAvailability, type TimeSlotSelection } from '@/components/booking/BookingTimeStep.vue'
+import ProductBookingSteps from '~/components/booking/ProductBookingSteps.vue'
 import { getTodayHoursLabel, isOpenNow, schemaOpeningHours } from '~/shared/reservation-hours'
-import { formatTime, localDateAt, isValidInstant, isValidTimezone } from '~/utils/timezone'
-import { setBookingConfirmation } from '~/composables/useBookingHandoff'
-import { addressPlaceName, formatPostalAddress, schemaPostalAddress, type PostalAddress } from '~/utils/postal-address'
+import { isCurrencyCode } from '~/shared/currencies'
+import { addressPlaceName, parsePostalAddress, schemaPostalAddress, type PostalAddress } from '~/utils/postal-address'
 import { mediaStillUrl, type MediaPresentation } from '~/shared/media-placement-contract'
-import { getPhoneCountry, formatPhone } from '~/utils/phone'
+import { formatPhone } from '~/utils/phone'
 import MediaPreview, { provideMediaPreviews } from '~/components/MediaPreview.vue'
 
 function formatTitleItalics(text: string | null | undefined): string {
@@ -167,16 +114,23 @@ function formatTitleItalics(text: string | null | undefined): string {
 
 definePageMeta({ layout: 'tenant' })
 
-// The tenant is the organization; `site` is only the shape this composable
-// still returns it under.
 const { organization } = useTenantOrganization()
 const { id: organizationId } = organization
-const { locale, localePath, t } = useI18n()
+const { locale } = useI18n()
 const resCopy = computed(() => getVerticalCopy((organization as ApiValue)?.vertical, locale.value))
-const { locations, config, getField, reservationPolicyByLocation, reservationQuestionsByLocation } = await usePublicPageData()
+const { locations, config, getField, products, table_policy_summaries } = await usePublicPageData()
+
+/**
+ * A location takes reservations through its table product: published, on
+ * sale and offered there. The reservations page books it like any offering.
+ */
+const tables = computed(() => (products.value as PublicProduct[]).filter(product => product.kind === 'table' && product.booking))
+function tableAt(location: ApiRecord): PublicProduct | null {
+  return tables.value.find(product => product.locations.some(entry => entry.location_id === location.id && entry.published && entry.active)) ?? null
+}
 // A site whose locations take no reservations has no reservations page, the
 // same fact the header uses to offer one.
-if (!Object.values(reservationPolicyByLocation.value).some(policy => policy !== null)) {
+if (!locations.value.some(location => tableAt(location))) {
   throw createError({ statusCode: 404, statusMessage: 'This site does not take reservations' })
 }
 
@@ -186,51 +140,49 @@ useHeroLcpPreload(computed(() => {
   return first ? getLocationPoster(first) : null
 }))
 
+const selectedLocationId = ref<string | null>(null)
+const selectedLocation = computed(() => locations.value.find(location => location.id === selectedLocationId.value) ?? null)
+const selectedTable = computed(() => selectedLocation.value ? tableAt(selectedLocation.value) : null)
+/** The table the booking form is for: the chosen location's, before any is chosen the first. */
+const activeTable = computed(() => selectedTable.value ?? tables.value[0]!)
+
+/** The terms of the table being booked, or of the only one there is, as the booking will freeze them. */
 const activeReservationPolicySummary = computed(() => {
-  const locationId = selectedLocation.value?.id ? String(selectedLocation.value.id) : null
-  if (!locationId) return null
-  if (!Object.prototype.hasOwnProperty.call(reservationPolicyByLocation.value, locationId)) {
-    throw createError({ statusCode: 500, statusMessage: 'Reservation policy contract is missing the selected location' })
+  const table = selectedTable.value ?? (tables.value.length === 1 ? tables.value[0]! : null)
+  if (!table) return null
+  const summary = table_policy_summaries.value[table.id]
+  if (!summary) throw createError({ statusCode: 500, statusMessage: 'Reservation terms are missing for this location' })
+  return summary
+})
+
+const currency = config.value.default_currency
+if (!isCurrencyCode(currency)) throw createError({ statusCode: 500, statusMessage: 'This business has no currency set' })
+const brandName = computed(() => String((organization as ApiValue)?.name ?? '').trim())
+
+// One booking controller follows the chosen location's table.
+const bookingController = useSessionBooking(() => {
+  const location = selectedLocation.value
+  return {
+    organizationId, organizationName: brandName.value, product: activeTable.value, currency,
+    location: location ? { id: String(location.id), slug: String(location.slug), title: String(location.title), address: parsePostalAddress(location.address) } : null,
+    sessions: [], contactPhone: typeof location?.phone === 'string' ? location.phone : null,
   }
-  return reservationPolicyByLocation.value[locationId]
+})
+const { bookingOpen, bookingStep, submitting, partySize, selectedPrice, openBooking } = bookingController
+provideMediaPreviews(bookingOpen)
+
+/** A table's deposit is asked of the parties its terms name; a smaller party books without paying. */
+const paymentRequired = computed(() => {
+  const booking = activeTable.value.booking
+  return Boolean(booking?.online_payment_required && (selectedPrice.value?.unit_amount ?? 0) > 0
+    && (booking.payment_min_party_size === null || partySize.value >= booking.payment_min_party_size))
 })
 
-// ── Form state ────────────────────────────────────────────────────────────
-const reservationForm = ref({ location_id: '', date: '', time: '', guests: '' })
-const contactForm = ref<ContactFormState>({ name: '', email: '', phone: '', notes: '', answers: {} })
-// The chosen location's own reservation questions, asked beside the guest's details.
-const formQuestions = useFormQuestionState(() => reservationQuestionsByLocation.value[reservationForm.value.location_id] ?? null, computed({ get: () => contactForm.value.answers, set: (answers) => { contactForm.value.answers = answers } }))
-
-// ── Contact & Locations ───────────────────────────────────────────────────
-const hasMultipleLocations = computed(() => locations.value.length > 1)
-const selectedLocation = computed(() =>
-  locations.value.find(location => typeof location.id === 'string' && location.id === reservationForm.value.location_id),
-)
-const defaultPhoneCountry = computed(() => {
-  const address = selectedLocation.value?.address
-  return getPhoneCountry(isRecord(address) && typeof address.regionCode === 'string' ? address.regionCode : undefined)?.code
-})
-
-/**
- * The zone the chosen slot is stated in.
- *
- * A reservation is a wall-clock time at a place, so the place's zone is the
- * only one that can turn it into an instant. A location without one cannot
- * take reservations, and saying so loudly beats booking the wrong hour.
- */
-const reservationTimezone = computed(() => {
-  const timezone = selectedLocation.value?.timezone
-  if (typeof timezone !== 'string' || !timezone) {
-    throw createError({ statusCode: 500, statusMessage: 'This location has no timezone set, so a reservation time cannot be read.' })
-  }
-  return timezone
-})
-
-const bookingLocations = computed(() => locations.value.map(location => ({
-  ...location,
-  todayHours: getTodayHoursLabel(location.opening_hours, resCopy.value.closedLabel, location.timezone, new Date(), location.special_hours, locale.value),
-})))
-
+async function openBookingModal(location: ApiRecord) {
+  selectedLocationId.value = String(location.id)
+  await nextTick()
+  await openBooking()
+}
 
 function getLocationLabel(location: ApiRecord): string | null {
   return addressPlaceName(location.address as PostalAddress | null) || null
@@ -260,198 +212,9 @@ function getLocationMedia(location: ApiRecord): ApiRecord | null {
 const heroTitle = computed(() => String(getField('hero.title') ?? '').trim())
 const heroSubtitle = computed(() => String(getField('hero.subtitle') ?? '').trim())
 
-const contactPhone = computed(() =>
-  String(
-    selectedLocation.value?.phone
-    ?? getField('contact.phone', config.value.contact_phone || '')
-    ?? '',
-  ),
-)
-const contactEmail = computed(() =>
-  String(
-    selectedLocation.value?.email
-    ?? getField('contact.email', config.value.contact_email || '')
-    ?? '',
-  ),
-)
-
-// ── Modal State ───────────────────────────────────────────────────────────
-const isBookingModalOpen = ref(false)
-provideMediaPreviews(isBookingModalOpen)
-const isHydrated = ref(false)
-onMounted(() => { isHydrated.value = true })
-// Skipped when opened from a location card (location is already pre-selected)
-// or when the site only has one location to begin with.
-const skipLocationStep = ref(false)
-const startStep = computed(() => (hasMultipleLocations.value && !skipLocationStep.value) ? 1 : 2)
-const bookingStep = ref(startStep.value)
-const modalTitle = computed(() => {
-  if (bookingStep.value === 1) return resCopy.value.selectLocationLabel
-  if (bookingStep.value === 2) return resCopy.value.selectTimeLabel
-  return t('site.experience_detail.your_details')
-})
-
-function openBookingModal(loc?: ApiRecord) {
-  skipLocationStep.value = Boolean(loc)
-  if (loc) reservationForm.value.location_id = String(loc.id ?? '')
-  bookingStep.value = startStep.value
-}
-
-function nextStep() {
-  submitError.value = null
-  bookingStep.value++
-}
-
-function prevStep() {
-  submitError.value = null
-  if (bookingStep.value > startStep.value) {
-    bookingStep.value--
-  } else {
-    isBookingModalOpen.value = false
-  }
-}
-
-// ── Guests & time slot ────────────────────────────────────────────────────
-const guests = ref(2)
-const timeSelection = ref<TimeSlotSelection | null>(null)
-
-// ── Availability (day-grouped, capacity-aware — server/utils/reservations.ts) ──
-const availabilityDates = ref<RawDateAvailability[]>([])
-const availabilityLoading = ref(false)
-const submitError = ref<string | null>(null)
-
-let availabilityRequestId = 0
-
-async function loadAvailability() {
-  if (!organizationId || !reservationForm.value.location_id) {
-    availabilityDates.value = []
-    return
-  }
-  const requestId = ++availabilityRequestId
-  const locationId = reservationForm.value.location_id
-  availabilityLoading.value = true
-  try {
-    const dateStr = localDateAt(new Date(), reservationTimezone.value)
-    const res = await publicApiRequest(`/api/public/reservations/availability`, {
-      query: { location_id: locationId, date: dateStr, days: 14 },
-      validate: (value): value is { dates: RawDateAvailability[] } => isRecord(value) && Array.isArray(value.dates)
-        && value.dates.every(day => isRecord(day) && typeof day.date === 'string' && Array.isArray(day.slots)
-          && day.slots.every(slot => isRecord(slot) && typeof slot.time_slot === 'string' && (slot.capacity === null || Number.isSafeInteger(slot.capacity))
-            && (slot.remaining === null || Number.isSafeInteger(slot.remaining)) && typeof slot.is_closed === 'boolean' && typeof slot.is_full === 'boolean')),
-    })
-    // Ignore stale responses from a location that was changed away from before this resolved
-    if (requestId !== availabilityRequestId || locationId !== reservationForm.value.location_id) return
-    availabilityDates.value = res.dates
-  } catch (error) {
-    if (requestId !== availabilityRequestId || locationId !== reservationForm.value.location_id) return
-    availabilityDates.value = []
-    submitError.value = error instanceof Error ? error.message : 'Failed to load availability'
-  } finally {
-    if (requestId === availabilityRequestId) availabilityLoading.value = false
-  }
-}
-
-watch(() => reservationForm.value.location_id, (id, previous) => {
-  // Each location asks its own questions; an answer given to another location's is not one to this.
-  if (previous !== undefined && id !== previous) contactForm.value.answers = {}
-  if (id && import.meta.client) {
-    timeSelection.value = null
-    loadAvailability()
-  }
-}, { immediate: true })
-
-// ── Submission ────────────────────────────────────────────────────────────
-const submitting = ref(false)
-let reservationRequestKey: string | null = null
-let reservationFingerprint: string | null = null
-const { mirrorSubmission, pageEventId, trackCheckoutStart } = useOrganizationConversionTracking()
-let checkoutStarted = false
-watch([isBookingModalOpen, () => reservationForm.value.location_id], ([open, locationId]) => {
-  if (!open) { checkoutStarted = false; return }
-  if (locationId && !checkoutStarted) {
-    checkoutStarted = true
-    trackCheckoutStart(null, locationId, null)
-  }
-}, { immediate: true })
-
-async function handleReservation(contact: ContactFormState) {
-  if (submitting.value || !organizationId || !timeSelection.value) return
-  reservationForm.value.date = timeSelection.value.day
-  reservationForm.value.time = timeSelection.value.time
-  reservationForm.value.guests = guests.value >= 8 ? '8+' : String(guests.value)
-
-  submitting.value = true
-  submitError.value = null
-  formQuestions.clear()
-  try {
-    const details = { ...reservationForm.value, name: contact.name.trim(), email: contact.email.trim(), phone: contact.phone.trim(), requests: contact.notes.trim() }
-    const fingerprint = JSON.stringify({ details, questions: formQuestions.submission() })
-    if (fingerprint !== reservationFingerprint) {
-      reservationRequestKey = crypto.randomUUID()
-      reservationFingerprint = fingerprint
-    }
-    reservationRequestKey ??= crypto.randomUUID()
-    type ReservationReceipt = { success: true; status: 'confirmed'; id: string; request_id: string; operational_reservation_id: string; starts_at: string; ends_at: string; timezone: string; cancellationToken: string; policy_summary?: ApiRecord | null; measurement?: SubmissionMeasurement }
-      | { success: true; status: 'checkout'; payment_id: string; pay_path: string; purchase_claim: string; expires_at: string }
-    const res = await publicApiMutation(`/api/public/reservations`, {
-      method: 'POST',
-      body: { ...details, ...formQuestions.submission(), idempotency_key: reservationRequestKey, locale: locale.value, page_event_id: await pageEventId() },
-      validate: (value): value is ReservationReceipt => isRecord(value) && value.success === true && (
-        value.status === 'checkout' ? typeof value.payment_id === 'string' && typeof value.pay_path === 'string' && value.pay_path.startsWith('/pay/') && typeof value.purchase_claim === 'string' && isValidInstant(value.expires_at)
-        : value.status === 'confirmed' && typeof value.id === 'string' && typeof value.request_id === 'string' && typeof value.operational_reservation_id === 'string' && typeof value.cancellationToken === 'string'
-          && isValidInstant(value.starts_at) && isValidInstant(value.ends_at) && typeof value.timezone === 'string' && isValidTimezone(value.timezone)),
-    })
-    if (res.status === 'checkout') {
-      await navigateTo({ path: res.pay_path, hash: `#${res.purchase_claim}` })
-      return
-    }
-    setBookingConfirmation({
-      type: 'reservation',
-      locale: locale.value,
-      organizationId,
-      organizationName: brandName.value,
-      guestName: contact.name,
-      guestEmail: contact.email,
-      operationalBookingId: res.operational_reservation_id,
-      requestId: res.request_id,
-      startsAt: res.starts_at,
-      timezone: res.timezone,
-      guests: reservationForm.value.guests,
-      requests: contact.notes || null,
-      cancelUrl: res?.id && res?.cancellationToken ? `${localePath('/reservations/cancel')}?id=${encodeURIComponent(res.id)}#${res.cancellationToken}` : null,
-      contactPhone: contactPhone.value || null,
-      contactEmail: contactEmail.value || null,
-      policySummary: res.policy_summary,
-      locationId: selectedLocation.value?.id ? String(selectedLocation.value.id) : null,
-      locationName: selectedLocation.value?.title ?? null,
-      locationAddress: formatPostalAddress((selectedLocation.value?.address ?? null) as PostalAddress | null) || null,
-      locationSlug: typeof selectedLocation.value?.slug === 'string' ? selectedLocation.value.slug : null,
-    })
-    mirrorSubmission('reservation_submit', res.measurement, selectedLocation.value?.id ? String(selectedLocation.value.id) : null)
-    await navigateTo({ path: localePath('/reservations/confirmed'), query: { id: res.request_id }, hash: `#${res.cancellationToken}` })
-    reservationRequestKey = null
-    reservationFingerprint = null
-  } catch (err) {
-    const error = normalizeApiError(err)
-    if (error.statusCode === 409 && error.code === 'capacity_unavailable') {
-      // Conflict (slot filled or capacity exceeded) — revert to time selection and reload availability
-      bookingStep.value = 2
-      timeSelection.value = null
-      submitError.value = error.message
-      await loadAvailability()
-    } else {
-      // Changed questions are a review of what was entered, not a failure to retype.
-      submitError.value = formQuestions.handleRefusal(error) && formQuestions.notice.value ? null : error.message
-    }
-  } finally {
-    submitting.value = false
-  }
-}
-
 // ── SEO ───────────────────────────────────────────────────────────────────
 const requestUrl = useRequestURL()
 
-const brandName = computed(() => String((organization as ApiValue)?.name ?? '').trim())
 // A page about the business: its image is the organization's.
 useSocialMetadata(() => ({
   path: '/reservations',
@@ -497,7 +260,7 @@ useSchemaOrg(computed(() => [
     address: schemaPostalAddress((location.address ?? null) as PostalAddress | null),
     telephone: location.phone,
     hasMap: location.maps_url,
-    acceptsReservations: true,
+    acceptsReservations: Boolean(tableAt(location)),
     reservationUrl: `${requestUrl.origin}/reservations`,
     openingHoursSpecification: schemaOpeningHours(location.opening_hours ?? null),
     ...(location.latitude && location.longitude

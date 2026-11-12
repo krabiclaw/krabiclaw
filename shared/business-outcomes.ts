@@ -17,7 +17,7 @@ export const BUSINESS_ACTIVITY_EVENTS = [
   'google_ads.campaign_created', 'google_ads.campaign_updated', 'google_ads.campaign_change_unconfirmed', 'google_ads.campaign_change_failed',
   'thread.member_reply', 'thread.scheduled_message', 'thread.archived', 'thread.unarchived',
   'booking.confirm', 'booking.reject', 'booking.cancel', 'booking.no_show',
-  'reservation.confirm', 'reservation.reject', 'reservation.cancel', 'reservation.no_show', 'stay.no_show',
+  'stay.no_show',
   'booking_change.requested', 'booking_change.accepted', 'booking_change.declined', 'booking_change.withdrawn', 'booking_change.moved',
   'review.requested',
   // Work the business recorded doing: a turnover or task done or skipped, an opportunity taken on.
@@ -33,7 +33,7 @@ export const BUSINESS_OUTCOME_EVENTS = [
 export type BusinessOutcomeEvent = typeof BUSINESS_OUTCOME_EVENTS[number]
 export const BUSINESS_PROGRESS_OPERATIONS = [
   'article.create', 'article.update', 'article.publish', 'article.distribute',
-  'post.create', 'post.publish', 'social.connect', 'google_ads.connect', 'payments.connect', 'product.payment', 'product.readiness', 'stay.gap', 'guest_thread.reply',
+  'post.create', 'post.publish', 'social.connect', 'google_ads.connect', 'payments.connect', 'product.payment', 'product.readiness', 'stay.gap', 'guest_thread.reply', 'booking.welcome',
 ] as const
 export type BusinessProgressOperation = typeof BUSINESS_PROGRESS_OPERATIONS[number]
 
@@ -42,36 +42,36 @@ export interface BusinessOutcomeReceipt {
   channel: string
   provider: string
   status: string
-  providerMessageId: string | null
-  nonDeliveryConfirmed?: boolean | null
+  provider_message_id: string | null
+  non_delivery_confirmed?: boolean | null
 }
 
 export interface BusinessOutcome {
   /** Activity keeps its stored ID. Other sources are namespaced; source.id is always the stored identity. */
   id: string
-  source: { table: 'activity_entries' | 'post_publications' | 'reviews' | 'analytics_events'; id: string }
+  source: { table: 'activity_entries' | 'messages' | 'post_publications' | 'reviews' | 'analytics_events'; id: string }
   event: BusinessOutcomeEvent
   subject: { kind: string; id: string }
-  actor: { kind: 'guest' | 'member' | 'system' | 'cloudflare' | 'user' | 'agent' | 'unknown'; userId: string | null }
-  occurredAt: string
+  actor: { kind: 'guest' | 'member' | 'system' | 'cloudflare' | 'user' | 'agent' | 'unknown'; user_id: string | null }
+  occurred_at: string
   /** The recorded domain state, not an invented universal completion state. */
   state: string | null
-  changedFields: string[]
-  requestedFields?: string[]
+  changed_fields: string[]
+  requested_fields?: string[]
   revision: string | null
   references: Array<{ kind: string; id: string }>
   /** Existing metadata and recorded beforeState/afterState, including booleans and source revisions; no inferred completion. */
   details?: Record<string, unknown>
   value?: ConversionValue
-  moneyOwner?: 'customer_business' | 'platform'
+  money_owner?: 'customer_business' | 'platform'
   measurement?: {
     stage: string
     surface: string
-    conversionType: string | null
-    attribution: AttributionTouch | null
-    attributedAt: string | null
-    originEventId: string | null
-    assignedMemberId: string | null
+    conversion_type: string | null
+    attribution: (Omit<AttributionTouch, 'referrerHost'> & { referrer_host: string | null }) | null
+    attributed_at: string | null
+    origin_event_id: string | null
+    assigned_member_id: string | null
   }
   verification: {
     status: 'verified' | 'unconfirmed' | 'failed'
@@ -82,24 +82,63 @@ export interface BusinessOutcome {
 
 export interface BusinessOutcomePage {
   outcomes: BusinessOutcome[]
-  pagination: { limit: number; offset: number; hasMore: boolean; nextOffset: number | null }
+  pagination: { limit: number; offset: number; has_more: boolean; next_offset: number | null }
   coverage: {
-    supportedEvents: readonly BusinessOutcomeEvent[]
+    supported_events: readonly BusinessOutcomeEvent[]
     sources: readonly BusinessOutcome['source']['table'][]
     attribution: 'recorded_actor_only'
     article: 'persisted_change_only'
-    webReply: 'stored_message_only'
-    externalReply: 'provider_acceptance_requires_receipt'
+    web_reply: 'stored_message_only'
+    external_reply: 'provider_acceptance_requires_receipt'
     verification: 'only_the_named_evidence_basis'
     unverified: readonly ['public_visibility', 'operation_completion', 'recipient_notification', 'conversation_resolution', 'business_goal_achievement', 'attendance_or_fulfilment', 'causal_revenue_attribution']
   }
 }
 
+export const PROGRESS_WIRE_KEYS = {
+  activityEntryId: 'activity_entry_id',
+  assetId: 'asset_id',
+  assetUpdatedAt: 'asset_updated_at',
+  blockedAt: 'blocked_at',
+  cardPaymentsStatus: 'card_payments_status',
+  configurationUpdatedAt: 'configuration_updated_at',
+  endsAt: 'ends_at',
+  latestGuestEntryId: 'latest_guest_entry_id',
+  latestMemberEntryId: 'latest_member_entry_id',
+  latestReplyEntryId: 'latest_reply_entry_id',
+  placementId: 'placement_id',
+  providerPostId: 'provider_post_id',
+  publishedAt: 'published_at',
+  startsAt: 'starts_at',
+  targetId: 'target_id',
+  updatedAt: 'updated_at',
+  postId: 'post_id',
+  paymentRequired: 'online_payment_required',
+} as const
+type ProgressWire<T> = T extends readonly (infer Item)[] ? ProgressWire<Item>[]
+  : T extends object ? { [K in keyof T as K extends keyof typeof PROGRESS_WIRE_KEYS ? typeof PROGRESS_WIRE_KEYS[K] : K]: ProgressWire<T[K]> }
+  : T
+
+export function progressWire<T extends BusinessProgressEvidence>(value: T): ProgressWire<T> {
+  function project(data: unknown): unknown {
+    if (Array.isArray(data)) return data.map(project)
+    if (!data || typeof data !== 'object') return data
+    return Object.fromEntries(Object.entries(data).map(([key, item]) => [
+      Object.hasOwn(PROGRESS_WIRE_KEYS, key) ? PROGRESS_WIRE_KEYS[key as keyof typeof PROGRESS_WIRE_KEYS] : key,
+      project(item),
+    ]))
+  }
+  return project(value) as ProgressWire<T>
+}
+
 export interface BusinessProgressReference {
   operation: BusinessProgressOperation
-  subjectId: string
-  evidenceRevision: string
-  evidence: {
+  subject_id: string
+  evidence_revision: string
+  evidence: ProgressWire<BusinessProgressEvidence>
+}
+
+export type BusinessProgressEvidence = {
     kind: 'article'
     status: string | null
     updatedAt: string
@@ -142,15 +181,17 @@ export interface BusinessProgressReference {
     updatedAt: string
     configurationUpdatedAt: string
   } | {
+    kind: 'booking_welcome'
+    record: { kind: 'booking' | 'stay'; id: string; status: string; startsAt: string }
+    message: string
+  } | {
     kind: 'guest_thread'
-    archivedAt: string | null
     blockedAt: string | null
     latestGuestEntryId: string | null
     latestReplyEntryId: string | null
     latestMemberEntryId: string | null
-    commitment: { kind: 'booking' | 'reservation' | 'stay'; id: string; status: string; startsAt: string; endsAt: string } | null
+    commitment: { kind: 'booking' | 'stay'; id: string; status: string; startsAt: string; endsAt: string } | null
   }
-}
 
 export interface RecommendationPublication {
   id: string

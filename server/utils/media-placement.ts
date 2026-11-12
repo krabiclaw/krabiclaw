@@ -12,6 +12,7 @@ import {
   isSingleMediaPlacement,
   readMediaPlacements,
   pruneStayPhotoRoomMembershipsQuery,
+  addStayPhotoRoomPlacementsQuery,
   stayAccessibilityEvidenceGuardQueries,
   stayAccessibilityEvidenceWriteError,
   type MediaAssetRefInput,
@@ -466,13 +467,13 @@ export async function readStayHomeAccessibility(db: DbClient, organizationId: st
   const [saved, evidence] = await executeBatch(db, [{
     query: 'SELECT product_id, feature_code, available FROM product_stay_accessibility WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?))', params: [organizationId, ids],
   }, {
-    query: `SELECT e.product_id, e.feature_code, e.asset_id,
+    query: `SELECT e.owner_id AS product_id, e.slot AS feature_code, e.asset_id,
       EXISTS (SELECT 1 FROM media_assets ma WHERE ma.organization_id = e.organization_id AND ma.id = e.asset_id
         AND ma.status = 'active' AND ma.kind = 'image' AND ma.generation_key IS NULL AND length(trim(ma.public_url)) > 0 AND mp.id IS NOT NULL) AS valid
-      FROM product_stay_accessibility_photos e LEFT JOIN media_placements mp
-        ON mp.organization_id = e.organization_id AND mp.owner_type = 'product' AND mp.owner_id = e.product_id
+      FROM media_placements e LEFT JOIN media_placements mp
+        ON mp.organization_id = e.organization_id AND mp.owner_type = 'product' AND mp.owner_id = e.owner_id
         AND mp.asset_id = e.asset_id AND mp.slot IN ('image', 'gallery') AND mp.status = 'active'
-      WHERE e.organization_id = ? AND e.product_id IN (SELECT value FROM json_each(?))
+      WHERE e.organization_id = ? AND e.owner_type = 'stay_home_accessibility' AND e.owner_id IN (SELECT value FROM json_each(?))
       ORDER BY CASE mp.slot WHEN 'image' THEN 0 ELSE 1 END, mp.sort_order, e.asset_id`, params: [organizationId, ids],
   }], { operation: 'Read listing accessibility' })
   for (const row of saved!.results as Array<{ product_id: string; feature_code: unknown; available: number }>) {
@@ -499,11 +500,13 @@ export async function readStayPhotoRooms(db: DbClient, organizationId: string, p
   const [savedRooms, memberships, amenities, accessibility, evidence] = await executeBatch(db, [
     { query: `SELECT id, product_id, type, details_version, sleeping_arrangements, private_attached_bathroom FROM product_stay_photo_rooms
         WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?)) ORDER BY type, sort_order, id`, params: [organizationId, ids] },
-    { query: `SELECT m.product_id, m.room_id, m.asset_id FROM product_stay_photo_room_memberships m
-        JOIN media_placements mp ON mp.organization_id = m.organization_id AND mp.owner_type = 'product'
-          AND mp.owner_id = m.product_id AND mp.asset_id = m.asset_id AND mp.slot IN ('image', 'gallery') AND mp.status = 'active'
+    { query: `SELECT r.product_id, r.id AS room_id, room_photo.asset_id
+        FROM product_stay_photo_rooms r JOIN media_placements room_photo
+          ON room_photo.organization_id = r.organization_id AND room_photo.owner_type = 'stay_photo_room' AND room_photo.owner_id = r.id
+        JOIN media_placements mp ON mp.organization_id = r.organization_id AND mp.owner_type = 'product'
+          AND mp.owner_id = r.product_id AND mp.asset_id = room_photo.asset_id AND mp.slot IN ('image', 'gallery') AND mp.status = 'active'
         JOIN media_assets ma ON ma.organization_id = mp.organization_id AND ma.id = mp.asset_id AND ma.status = 'active'
-        WHERE m.organization_id = ? AND m.product_id IN (SELECT value FROM json_each(?))
+        WHERE r.organization_id = ? AND r.product_id IN (SELECT value FROM json_each(?)) AND room_photo.status = 'active'
         ORDER BY CASE mp.slot WHEN 'image' THEN 0 ELSE 1 END, mp.sort_order, mp.asset_id`, params: [organizationId, ids] },
     { query: `SELECT a.room_id, a.amenity_code,
         EXISTS (SELECT 1 FROM json_each(c.amenities) WHERE value ->> '$.code' = a.amenity_code AND value ->> '$.available' = 1) AS on_listing
@@ -511,13 +514,15 @@ export async function readStayPhotoRooms(db: DbClient, organizationId: string, p
         WHERE a.organization_id = ? AND a.product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
     { query: `SELECT room_id, feature_code, available FROM product_stay_room_accessibility
         WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
-    { query: `SELECT e.room_id, e.feature_code, e.asset_id,
+    { query: `SELECT r.id AS room_id, e.slot AS feature_code, e.asset_id,
         EXISTS (SELECT 1 FROM media_assets ma WHERE ma.organization_id = e.organization_id AND ma.id = e.asset_id
           AND ma.status = 'active' AND ma.kind = 'image' AND ma.generation_key IS NULL AND length(trim(ma.public_url)) > 0 AND mp.id IS NOT NULL) AS valid
-        FROM product_stay_room_accessibility_photos e LEFT JOIN media_placements mp
-          ON mp.organization_id = e.organization_id AND mp.owner_type = 'product' AND mp.owner_id = e.product_id
+        FROM product_stay_photo_rooms r JOIN media_placements e
+          ON e.organization_id = r.organization_id AND e.owner_type = 'stay_room_accessibility' AND e.owner_id = r.id
+        LEFT JOIN media_placements mp
+          ON mp.organization_id = r.organization_id AND mp.owner_type = 'product' AND mp.owner_id = r.product_id
           AND mp.asset_id = e.asset_id AND mp.slot IN ('image', 'gallery') AND mp.status = 'active'
-        WHERE e.organization_id = ? AND e.product_id IN (SELECT value FROM json_each(?))
+        WHERE r.organization_id = ? AND r.product_id IN (SELECT value FROM json_each(?))
         ORDER BY CASE mp.slot WHEN 'image' THEN 0 ELSE 1 END, mp.sort_order, e.asset_id`, params: [organizationId, ids] },
   ], { operation: 'Read stay photo rooms' })
   const byId = new Map<string, StayPhotoRoom>()
@@ -649,10 +654,7 @@ export async function prepareArrangeProductPhotos(db: DbClient, input: {
           eventType: 'media.placement_changed', entityType: 'product', entityId: input.productId,
           metadata: { operation: 'arrange', slots: ['image', 'gallery'], changed_fields: ['media.image', 'media.gallery'] }, afterState: { asset_ids: [...input.to] } }),
       ] : []),
-      ...(input.roomAssignment ? [{
-        query: 'INSERT INTO product_stay_photo_room_memberships (organization_id, product_id, asset_id, room_id) VALUES (?, ?, ?, ?)',
-        params: [input.organizationId, input.productId, input.roomAssignment.assetId, input.roomAssignment.roomId],
-      }] : []),
+      ...(input.roomAssignment ? [addStayPhotoRoomPlacementsQuery(input.organizationId, input.productId, input.roomAssignment.roomId, [input.roomAssignment.assetId])] : []),
       pruneStayPhotoRoomMembershipsQuery(input.organizationId, input.productId),
       ...stayAccessibilityEvidenceGuardQueries(input.organizationId, { productId: input.productId }),
       publicResourceCacheInvalidationQuery(input.organizationId, 'product-photos-arrange'),

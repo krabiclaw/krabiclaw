@@ -51,7 +51,7 @@
                 <span class="block text-sm sm:text-base" :class="night(day)?.available === false ? 'line-through' : ''">{{ day.day }}</span>
                 <UIcon v-if="channelState(day)" :name="CHANNEL_MARKS[channelState(day)!]" class="size-3.5 shrink-0" :class="channelState(day) === 'pending' ? 'text-muted' : 'text-warning'" :data-testid="`stay-night-channel-${channelState(day)}`" aria-hidden="true" />
               </span>
-              <span v-if="night(day)?.stay_id || night(day)?.held_until || night(day)?.calendar" class="hidden truncate text-xs sm:block">{{ stayLabel(day) }}</span>
+              <span v-if="night(day)?.booking_id || night(day)?.held_until || night(day)?.calendar" class="hidden truncate text-xs sm:block">{{ stayLabel(day) }}</span>
               <span class="block break-all text-[10px] leading-tight tabular-nums sm:hidden">{{ night(day) ? night(day)!.price_minor === null ? 'No price' : compactMoney(night(day)!.price_minor!) : '…' }}</span>
               <span class="hidden truncate text-sm sm:block">{{ night(day) ? night(day)!.price_minor === null ? 'No price' : money(night(day)!.price_minor!) : '…' }}</span>
             </span>
@@ -88,9 +88,9 @@
           </div>
           <div v-else-if="data" class="divide-y divide-default border-y border-default">
             <p v-if="!listedStays.length" class="py-10 text-center text-sm text-muted">No stays in {{ placeholder?.year }}.</p>
-            <NuxtLink v-for="stay in listedStays" :key="stay.id" :to="{ path: `/dashboard/${route.params.orgSlug}/calendar/stay/${encodeURIComponent(stay.id)}`, query: route.query }" class="flex items-center justify-between gap-4 py-5">
+            <NuxtLink v-for="stay in listedStays" :key="stay.id" :to="{ path: `/dashboard/${route.params.org_slug}/calendar/stay/${encodeURIComponent(stay.id)}`, query: route.query }" class="flex items-center justify-between gap-4 py-5">
               <div>
-                <p class="font-medium text-highlighted">{{ [stay.guest_name, stay.guest_surname].filter(Boolean).join(' ') || 'Guest name not provided' }}</p>
+                <p class="font-medium text-highlighted">{{ stay.guest_name || 'Guest name not provided' }}</p>
                 <p class="mt-1 text-sm text-muted">{{ formatCalendarDate(stay.check_in_date, 'en', { month: 'short', day: 'numeric' }) }} – {{ formatCalendarDate(stay.check_out_date, 'en', { month: 'short', day: 'numeric', year: 'numeric' }) }}</p>
               </div>
               <span v-if="stay.channel" class="text-sm text-muted">{{ channels[stay.channel] }}</span>
@@ -154,14 +154,14 @@ import { CHANNEL_MARKS, channelNote, isStayNight, stayNightSource, useStayNightE
 import { getErrorMessage } from '~/utils/errors'
 
 type Home = Pick<StayHome, 'product_id' | 'name' | 'internal_name' | 'timezone' | 'currency' | 'base_price_minor' | 'min_nights' | 'calendar_rules' | 'cancellation_policy' | 'long_term_cancellation_policy'>
-// A manager reads each stay's surname and channel; a member's turnover has neither.
-type CalendarStay = Pick<StayTurnover, 'id' | 'product_id' | 'check_in_date' | 'check_out_date' | 'guest_name' | 'status'> & Partial<Pick<Stay, 'guest_surname' | 'channel'>>
+// A manager reads each stay's channel; a member's turnover has none.
+type CalendarStay = Pick<StayTurnover, 'id' | 'product_id' | 'check_in_date' | 'check_out_date' | 'guest_name' | 'status'> & Partial<Pick<Stay, 'channel'>>
 interface CalendarPayload { home: Home; nights: StayNight[]; stays: CalendarStay[]; channel_push?: SuccessfulChannelPush | null }
 const props = defineProps<{ productId: string; homes: Pick<StayHome, 'product_id' | 'name' | 'internal_name' | 'timezone'>[]; manage: boolean; homeError: string; offeringItems: { label: string; value: string }[]; offeringsError?: string }>()
 const route = useRoute()
 const level = useRouteLevel()
 const router = useRouter()
-const orgSlug = String(route.params.orgSlug)
+const orgSlug = String(route.params.org_slug)
 const api = useDashboardApi(computed(() => ({ orgSlug })))
 const pane = useDashboardPane()
 const homeOption = computed(() => props.homes.find(home => home.product_id === props.productId))
@@ -194,7 +194,7 @@ const selectedRanges = computed(() => {
 })
 const selectedCount = computed(() => selectedDates.value.length)
 const selectedRange = computed(() => selectedRanges.value.length === 1 ? selectedRanges.value[0]! : null)
-const addStayTo = computed(() => ({ path: `/dashboard/${route.params.orgSlug}/bookings/stay/new`, query: { product_id: props.productId, ...(selectedRange.value ? { check_in_date: selectedRange.value.from, check_out_date: selectedRange.value.to } : {}) } }))
+const addStayTo = computed(() => ({ path: `/dashboard/${route.params.org_slug}/bookings/stay/new`, query: { product_id: props.productId, ...(selectedRange.value ? { check_in_date: selectedRange.value.from, check_out_date: selectedRange.value.to } : {}) } }))
 const yearMonths = computed(() => placeholder.value ? Array.from({ length: 12 }, (_, month) => placeholder.value!.set({ month: month + 1, day: 1 })) : [])
 const monthRange = computed(() => {
   const first = placeholder.value?.set({ day: 1 })
@@ -225,11 +225,11 @@ function isCalendar(value: unknown): value is CalendarPayload {
   parseStayCalendarRules(home.calendar_rules)
   if (!value.stays.every(stay => isRecord(stay) && typeof stay.id === 'string' && stay.product_id === props.productId
     && isValidCalendarDate(stay.check_in_date) && isValidCalendarDate(stay.check_out_date) && stay.check_out_date > stay.check_in_date
-    && nullableText(stay.guest_name) && (props.manage ? nullableText(stay.guest_surname) && Object.hasOwn(channels, String(stay.channel)) : !('guest_surname' in stay) && !('channel' in stay)) && typeof stay.status === 'string')) return false
+    && nullableText(stay.guest_name) && (props.manage ? Object.hasOwn(channels, String(stay.channel)) : !('channel' in stay)) && typeof stay.status === 'string')) return false
   return (value.channel_push === undefined || isSuccessfulChannelPush(value.channel_push)) && value.nights.every(isStayNight)
 }
 const { data, error, status, refresh } = await useAsyncData(
-  () => `stay-night-calendar:${String(route.params.orgSlug)}:${props.productId}:${readRanges.value.map(range => `${range.from}:${range.to}`).join('|')}`,
+  () => `stay-night-calendar:${String(route.params.org_slug)}:${props.productId}:${readRanges.value.map(range => `${range.from}:${range.to}`).join('|')}`,
   async (_nuxtApp, { signal }) => {
     const ranges = readRanges.value
     if (initialError.value || !ranges.length) return null
@@ -256,7 +256,7 @@ const { data, error, status, refresh } = await useAsyncData(
 
 if (import.meta.client) {
   onMounted(() => {
-    const key = `stay-night-calendar:${String(route.params.orgSlug)}:${props.productId}:${readRanges.value.map(range => `${range.from}:${range.to}`).join('|')}`
+    const key = `stay-night-calendar:${String(route.params.org_slug)}:${props.productId}:${readRanges.value.map(range => `${range.from}:${range.to}`).join('|')}`
     if (useNuxtApp().payload.data[key]) {
       void refresh()
     }
@@ -267,9 +267,9 @@ const staysById = computed(() => new Map((data.value?.stays ?? []).map(stay => [
 const night = (day: DateValue) => nightsByDate.value.get(day.toString())
 function stayLabel(day: DateValue) {
   const value = night(day)
-  if (value?.stay_id) {
-    const stay = staysById.value.get(value.stay_id)
-    return stay ? [[stay.guest_name, stay.guest_surname].filter(Boolean).join(' ') || 'Guest name not provided', ...(stay.channel ? [channels[stay.channel]] : [])].join(' · ') : 'Reserved'
+  if (value?.booking_id) {
+    const stay = staysById.value.get(value.booking_id)
+    return stay ? [stay.guest_name || 'Guest name not provided', ...(stay.channel ? [channels[stay.channel]] : [])].join(' · ') : 'Reserved'
   }
   return value?.calendar ? `Unavailable from ${channels[value.calendar]}` : 'Checkout hold'
 }
@@ -286,7 +286,7 @@ const channelState = (day: DateValue) => {
 function nightTitle(day: DateValue) {
   const value = night(day)
   const note = value ? channelNote(value) : null
-  return value ? `${day.toString()} · ${value.stay_id ? stayLabel(day) : value.held_until ? 'Checkout hold' : value.calendar ? `Unavailable from ${channels[value.calendar]}` : value.closed ? 'Blocked' : 'Available'} · ${value.price_minor === null ? 'No price' : money(value.price_minor)}${note ? ` · ${note}` : ''}` : day.toString()
+  return value ? `${day.toString()} · ${value.booking_id ? stayLabel(day) : value.held_until ? 'Checkout hold' : value.calendar ? `Unavailable from ${channels[value.calendar]}` : value.closed ? 'Blocked' : 'Available'} · ${value.price_minor === null ? 'No price' : money(value.price_minor)}${note ? ` · ${note}` : ''}` : day.toString()
 }
 const dateLabel = computed(() => {
   const range = selectedRange.value
@@ -316,9 +316,9 @@ const editor = useStayNightEditor({
 const { busy, error: writeError } = editor
 const inspectorProps = computed(() => ({ ...editor.inspector.value, dateLabel: dateLabel.value, scope: data.value ? `${data.value.home.timezone} · ${data.value.home.currency}` : '', selectDates: true }))
 const overviewGroups = computed(() => [{ id: 'home', items: [
-  { id: 'price', label: 'Pricing', summary: data.value?.home.base_price_minor == null ? 'No base nightly price set' : `${money(data.value.home.base_price_minor)} per night`, to: `/dashboard/${String(route.params.orgSlug)}/products/${props.productId}/price` },
-  { id: 'availability', label: 'Availability', summary: data.value ? `${data.value.home.min_nights} night minimum` : 'Loading availability…', to: `/dashboard/${String(route.params.orgSlug)}/products/${props.productId}/availability` },
-  { id: 'cancellation', label: 'Cancellations', summary: [data.value?.home.cancellation_policy ? STAY_CANCELLATION_POLICIES[data.value.home.cancellation_policy].label : 'Short-term policy not set', data.value?.home.long_term_cancellation_policy ? STAY_LONG_TERM_CANCELLATION_POLICIES[data.value.home.long_term_cancellation_policy].label : 'Long-term policy not set'].join(' · '), to: `/dashboard/${String(route.params.orgSlug)}/products/${props.productId}/cancellation` },
+  { id: 'price', label: 'Pricing', summary: data.value?.home.base_price_minor == null ? 'No base nightly price set' : `${money(data.value.home.base_price_minor)} per night`, to: `/dashboard/${String(route.params.org_slug)}/products/${props.productId}/price` },
+  { id: 'availability', label: 'Availability', summary: data.value ? `${data.value.home.min_nights} night minimum` : 'Loading availability…', to: `/dashboard/${String(route.params.org_slug)}/products/${props.productId}/availability` },
+  { id: 'cancellation', label: 'Cancellations', summary: [data.value?.home.cancellation_policy ? STAY_CANCELLATION_POLICIES[data.value.home.cancellation_policy].label : 'Short-term policy not set', data.value?.home.long_term_cancellation_policy ? STAY_LONG_TERM_CANCELLATION_POLICIES[data.value.home.long_term_cancellation_policy].label : 'Long-term policy not set'].join(' · '), to: `/dashboard/${String(route.params.org_slug)}/products/${props.productId}/cancellation` },
 ] }])
 function clearSelection() {
   if (busy.value) return
@@ -386,7 +386,7 @@ watch(() => route.query.month, value => {
 })
 const realtime = useDashboardInvalidations()
 watch(realtime.event, event => {
-  if ((event?.type === 'stay.changed' || event?.type === 'nights.changed') && event.productId === props.productId && !busy.value) void refresh()
+  if ((event?.type === 'stay.changed' || event?.type === 'nights.changed') && event.product_id === props.productId && !busy.value) void refresh()
 })
 watch(realtime.connectionEpoch, epoch => { if (epoch > 0 && !busy.value) void refresh() })
 const calendarUi = {

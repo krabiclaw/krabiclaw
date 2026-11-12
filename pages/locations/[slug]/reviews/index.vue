@@ -132,12 +132,12 @@ const { organization } = useTenantOrganization()
 const slug = computed(() => String(route.params.slug))
 const organizationName = computed(() => String((organization as ApiValue)?.name ?? '').trim())
 
-const { location, reviewsAggregate, reviewsList, pending } = await usePublicPageData()
+const { location, reviews_aggregate, reviews_list, pending } = await usePublicPageData()
 if (!location.value) throw createError({ statusCode: 404, statusMessage: 'Location not found' })
 // A section with nothing on it is not a page; the navigation hides it by the same flag.
 if (!location.value.sections.reviews) throw createError({ statusCode: 404 })
-const aggregate = reviewsAggregate
-const reviews = reviewsList
+const aggregate = reviews_aggregate
+const reviews = reviews_list
 
 const filters = computed(() => [
   { key: 'recent', label: t('site.reviews_page.most_recent') },

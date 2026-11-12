@@ -18,5 +18,5 @@ import { paymentMoney } from '~/shared/payment-display'
 import { payoutDate, payoutStatusLabel, type PayoutItem, type PayoutRow } from '~/shared/earnings-display'
 
 const props = defineProps<{ payout: PayoutRow; items?: PayoutItem[]; to: string }>()
-const photos = computed(() => [...new Set((props.items ?? []).map(item => item.imageUrl).filter((url): url is string => !!url))])
+const photos = computed(() => [...new Set((props.items ?? []).map(item => item.image_url).filter((url): url is string => !!url))])
 </script>

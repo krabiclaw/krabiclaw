@@ -16,6 +16,7 @@ const NAMES: Record<IntegrationProvider, string> = {
   discord: 'Discord connection',
   google_analytics: 'Google Analytics connection',
   google_ads: 'Google Ads connection',
+  meta_ads: 'Meta Ads connection',
   google_search_console: 'Search Console connection',
 }
 
@@ -26,6 +27,7 @@ const TARGETS: Record<IntegrationProvider, string> = {
   discord: 'That Discord channel',
   google_analytics: 'That Google Analytics property',
   google_ads: 'That Google Ads account',
+  meta_ads: 'That Meta Ad Account',
   google_search_console: 'That Search Console site',
 }
 
@@ -35,12 +37,12 @@ type Row = Omit<OrganizationIntegration, 'verified'> & { verified: number | null
 const project = (row: Row): OrganizationIntegration => ({ ...row, verified: row.verified === null ? null : row.verified === 1 })
 
 export async function readIntegration(db: DbClient, organizationId: string, provider: IntegrationProvider): Promise<OrganizationIntegration | null> {
-  const row = await queryFirst<Row>(db, `SELECT ${COLUMNS} FROM organization_integrations WHERE organization_id = ? AND provider = ?`, [organizationId, provider])
+  const row = await queryFirst<Row>(db, `SELECT ${COLUMNS} FROM organization_integrations WHERE organization_id = ? AND provider = ? AND status IS NOT 'setting_up'`, [organizationId, provider])
   return row ? project(row) : null
 }
 
 export async function listIntegrations(db: DbClient, organizationId: string): Promise<OrganizationIntegration[]> {
-  return (await queryAll<Row>(db, `SELECT ${COLUMNS} FROM organization_integrations WHERE organization_id = ? ORDER BY provider`, [organizationId])).map(project)
+  return (await queryAll<Row>(db, `SELECT ${COLUMNS} FROM organization_integrations WHERE organization_id = ? AND status IS NOT 'setting_up' ORDER BY provider`, [organizationId])).map(project)
 }
 
 /** The organizations connected through one linked account. */

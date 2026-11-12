@@ -66,10 +66,10 @@ const bootstrapError = computed(() => shell.error.value)
 const shellOrganization = computed(() => shell.organization.value)
 const shellSections = computed(() => shell.sections.value)
 const shellConsultation = computed(() => shell.consultation.value)
-const shellCanSchedule = computed(() => shell.canSchedule.value)
+const shellCanSchedule = computed(() => shell.can_schedule.value)
 const shellCompliance = computed(() => shell.compliance.value)
-const shellPageLinks = computed(() => shell.pageLinks.value)
-const shellSearchConsoleVerification = computed(() => shell.searchConsoleVerification.value)
+const shellPageLinks = computed(() => shell.page_links.value)
+const shellSearchConsoleVerification = computed(() => shell.search_console_verification.value)
 
 const tenantChromeOrganization = computed(() => {
   if (shellOrganization.value) {

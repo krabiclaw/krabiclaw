@@ -67,7 +67,7 @@ export default defineHandler(async (event) => {
     } catch (cause) {
       return jsonResponse({
         image: uploaded.publicUrl,
-        previousImageCleanupError: `The previous avatar image ${previousImageId} was not deleted: ${cause instanceof Error ? cause.message : String(cause)}`,
+        previous_image_cleanup_error: `The previous avatar image ${previousImageId} was not deleted: ${cause instanceof Error ? cause.message : String(cause)}`,
       })
     }
   }

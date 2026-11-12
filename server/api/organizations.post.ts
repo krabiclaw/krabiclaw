@@ -11,13 +11,13 @@ import type { OrganizationVertical } from '~/utils/vertical-copy'
 // Provisions an organization the caller already belongs to: gives it its
 // address, its template and its seeded structure. The organization is explicit:
 // the dashboard sends the route's `org` query param (dashboardFetch), API
-// callers send `organizationId` in the body. Nothing is inferred from memberships.
+// callers send `organization_id` in the body. Nothing is inferred from memberships.
 export default defineHandler(async (event) => {
-  const body = await readBody<{ name?: string; subdomain?: string; vertical?: string; organizationId?: string; sourceLocale?: string }>(event)
+  const body = await readBody<{ name?: string; subdomain?: string; vertical?: string; organization_id?: string; source_locale?: string }>(event)
   const name = body?.name?.trim()
   const subdomain = body?.subdomain?.trim()
   const vertical = body?.vertical
-  const explicitOrganizationId = body?.organizationId?.trim() || null
+  const explicitOrganizationId = body?.organization_id?.trim() || null
 
   if (!name || !subdomain) {
     return jsonResponse({ error: 'name and subdomain are required' }, { status: 400 })
@@ -27,8 +27,8 @@ export default defineHandler(async (event) => {
       error: `vertical is required and must be one of: ${VALID_VERTICALS.join(', ')}`
     }, { status: 400 })
   }
-  const sourceLocale = typeof body?.sourceLocale === 'string' ? body.sourceLocale : ''
-  if (!platformLocale(sourceLocale)) return jsonResponse({ error: 'sourceLocale is required and must name a supported website language' }, { status: 400 })
+  const sourceLocale = typeof body?.source_locale === 'string' ? body.source_locale : ''
+  if (!platformLocale(sourceLocale)) return jsonResponse({ error: 'source_locale is required and must name a supported website language' }, { status: 400 })
 
   const env = cloudflareEnv(event)
   const db = env.DB
@@ -40,7 +40,7 @@ export default defineHandler(async (event) => {
   const organization = await resolveRequestedOrganization(event, db, session.user.id, { explicitOrganizationId })
   if (!organization) {
     return jsonResponse({
-      error: 'organizationId (or the dashboard `org` query param) is required and must name an organization you belong to',
+      error: 'organization_id (or the dashboard `org` query param) is required and must name an organization you belong to',
     }, { status: 400 })
   }
 

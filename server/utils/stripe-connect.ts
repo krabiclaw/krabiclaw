@@ -19,28 +19,28 @@ export type StripeCapabilityStatus = 'active' | 'pending' | 'restricted' | 'unsu
 export type StripeCapabilityResolution = 'contact_stripe' | 'no_resolution' | 'provide_info'
 
 export interface StripeConnectRequirement {
-  awaitingActionFrom: 'stripe' | 'user'
-  deadlineStatus: 'currently_due' | 'eventually_due' | 'past_due'
+  awaiting_action_from: 'stripe' | 'user'
+  deadline_status: 'currently_due' | 'eventually_due' | 'past_due'
   description: string
   errors: string[]
 }
 
 export interface StripeConnectedAccount {
   id: string
-  organizationId: string
-  stripeAccountId: string | null
+  organization_id: string
+  stripe_account_id: string | null
   /** The account's country as Stripe reports it; null before account creation. */
   country: string | null
   livemode: boolean
   status: StripeConnectStatus
-  cardPaymentsStatus: StripeCapabilityStatus | null
+  card_payments_status: StripeCapabilityStatus | null
   /** Pass on credit card fees: the surcharge rate in basis points, bounded by Stripe's maximum per card; null is off. */
-  surchargeBasisPoints: number | null
+  surcharge_basis_points: number | null
   requirements: StripeConnectRequirement[]
-  stripeRefreshedAt: string | null
-  lastError: string | null
-  createdAt: string
-  updatedAt: string
+  stripe_refreshed_at: string | null
+  last_error: string | null
+  created_at: string
+  updated_at: string
 }
 
 interface StripeConnectedAccountRow {
@@ -80,8 +80,8 @@ function parseRequirements(value: string): StripeConnectRequirement[] {
     if (!item || typeof item !== 'object' || Array.isArray(item)) throw new Error('Stored Stripe Connect requirement is invalid')
     const requirement = item as Record<string, unknown>
     if (
-      (requirement.awaitingActionFrom !== 'stripe' && requirement.awaitingActionFrom !== 'user')
-      || (requirement.deadlineStatus !== 'currently_due' && requirement.deadlineStatus !== 'eventually_due' && requirement.deadlineStatus !== 'past_due')
+      (requirement.awaiting_action_from !== 'stripe' && requirement.awaiting_action_from !== 'user')
+      || (requirement.deadline_status !== 'currently_due' && requirement.deadline_status !== 'eventually_due' && requirement.deadline_status !== 'past_due')
       || typeof requirement.description !== 'string'
       || !Array.isArray(requirement.errors)
       || !requirement.errors.every(error => typeof error === 'string')
@@ -91,21 +91,8 @@ function parseRequirements(value: string): StripeConnectRequirement[] {
 }
 
 function mapConnectedAccount(row: StripeConnectedAccountRow): StripeConnectedAccount {
-  return {
-    id: row.id,
-    organizationId: row.organization_id,
-    stripeAccountId: row.stripe_account_id,
-    country: row.country,
-    livemode: Boolean(row.livemode),
-    status: row.status,
-    cardPaymentsStatus: row.card_payments_status,
-    surchargeBasisPoints: row.surcharge_basis_points,
-    requirements: parseRequirements(row.requirements_json),
-    stripeRefreshedAt: row.stripe_refreshed_at,
-    lastError: row.last_error,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  }
+  const { livemode, requirements_json, ...account } = row
+  return { ...account, livemode: Boolean(livemode), requirements: parseRequirements(requirements_json) }
 }
 
 export function stripeLivemodeFromKey(secretKey: string): boolean {
@@ -199,8 +186,8 @@ export function deriveStripeConnectStatus(input: {
   requirements: StripeConnectRequirement[]
 }): Exclude<StripeConnectStatus, 'creating' | 'creation_failed'> {
   const userActionDue = input.requirements.some(requirement =>
-    requirement.awaitingActionFrom === 'user'
-    && (requirement.deadlineStatus === 'currently_due' || requirement.deadlineStatus === 'past_due'))
+    requirement.awaiting_action_from === 'user'
+    && (requirement.deadline_status === 'currently_due' || requirement.deadline_status === 'past_due'))
   if (userActionDue || input.cardPaymentsResolutions.includes('provide_info')) return 'action_required'
   if (input.cardPaymentsStatus === 'active') return 'ready'
   if (input.cardPaymentsStatus === 'unsupported' || input.cardPaymentsResolutions.includes('contact_stripe')) return 'restricted'
@@ -240,8 +227,8 @@ export async function readStripeCheckoutSetup(db: DbClient, organizationId: stri
   const keys = livemode === null ? null : paymentsStripeKeys(env, livemode)
   if (!keys?.methodConfiguration || !keys.publishableKey || !env.NUXT_PUBLIC_PLATFORM_DOMAIN) missing.push('payments.configuration')
   if (organization.servicing) missing.push('payments.servicing')
-  if (!connected?.stripeAccountId) missing.push('payments.account')
-  else if (connected.status !== 'ready' || connected.cardPaymentsStatus !== 'active' || !connected.stripeRefreshedAt) missing.push('payments.account_ready')
+  if (!connected?.stripe_account_id) missing.push('payments.account')
+  else if (connected.status !== 'ready' || connected.card_payments_status !== 'active' || !connected.stripe_refreshed_at) missing.push('payments.account_ready')
   if (connected && livemode !== null && connected.livemode !== livemode) missing.push('payments.account_mode')
   return { connected, slug: organization.slug, missing, livemode }
 }
@@ -287,7 +274,7 @@ export async function reserveStripeConnectedAccount(
   if (row.livemode !== input.livemode) {
     throw new HTTPError({ statusCode: 409, statusMessage: 'Stripe Connect account belongs to a different Stripe mode' })
   }
-  if (!row.stripeAccountId && Number(claim.meta.changes) !== 1) {
+  if (!row.stripe_account_id && Number(claim.meta.changes) !== 1) {
     throw new HTTPError({ statusCode: 409, statusMessage: 'Payout setup is already starting for this business. Finish it in the window where it opened, or try again in a minute.', data: { code: 'CONNECT_SETUP_IN_PROGRESS' } })
   }
   return row
@@ -315,10 +302,10 @@ async function recordStripeConnectedAccountId(
     SET stripe_account_id = ?, status = 'pending_review', last_error = NULL, updated_at = ?
     WHERE id = ? AND organization_id = ?
       AND (stripe_account_id IS NULL OR stripe_account_id = ?)
-  `, [stripeAccountId, new Date().toISOString(), reservation.id, reservation.organizationId, stripeAccountId])
+  `, [stripeAccountId, new Date().toISOString(), reservation.id, reservation.organization_id, stripeAccountId])
   if (Number(updated.meta.changes) !== 1) throw new Error('Stripe Connect account ID did not match its reservation')
-  const connected = await getStripeConnectedAccount(db, reservation.organizationId)
-  if (!connected || connected.stripeAccountId !== stripeAccountId) {
+  const connected = await getStripeConnectedAccount(db, reservation.organization_id)
+  if (!connected || connected.stripe_account_id !== stripeAccountId) {
     throw new Error('Stripe Connect account ID was not persisted')
   }
   return connected
@@ -359,8 +346,8 @@ function normalizeAccountRequirements(account: Stripe.V2.Core.Account): StripeCo
   const entries = account.requirements?.entries
   if (!entries) return []
   return entries.map(requirement => ({
-    awaitingActionFrom: requirement.awaiting_action_from,
-    deadlineStatus: requirement.minimum_deadline.status,
+    awaiting_action_from: requirement.awaiting_action_from,
+    deadline_status: requirement.minimum_deadline.status,
     description: requirement.description,
     errors: requirement.errors.map(error => error.description),
   }))
@@ -376,7 +363,7 @@ function accountProjection(
   const cardPaymentsStatus = cardPayments?.status
   return {
     reservationId: reservation.id,
-    organizationId: reservation.organizationId,
+    organizationId: reservation.organization_id,
     stripeAccountId: account.id,
     // Persist only the country Stripe reports for the created account.
     country: country ? country.toUpperCase() : null,
@@ -433,7 +420,7 @@ async function checkoutReadiness(db: DbClient, env: CloudflareEnv, organizationI
   const saved = setup.connected!
   const keys = paymentsStripeKeys(env, setup.livemode!)!
   const stripe = createStripeClient(keys.secretKey, 'payments')
-  const account = await stripe.v2.core.accounts.retrieve(saved.stripeAccountId!, { include: STRIPE_CONNECT_ACCOUNT_INCLUDE })
+  const account = await stripe.v2.core.accounts.retrieve(saved.stripe_account_id!, { include: STRIPE_CONNECT_ACCOUNT_INCLUDE })
   const connected = await projectStripeConnectedAccount(db, accountProjection(saved, account))
   if (connected.status !== 'ready' || account.livemode !== saved.livemode) return { ready: false as const, statusCode: 409, statusMessage: 'Complete the business’s Stripe account setup before requiring online collection', handoff }
   // Stripe Tax answers a seller outside its business locations with a 400 that
@@ -477,7 +464,7 @@ export async function requireStripeCheckoutAcceptance(db: DbClient, env: Cloudfl
   // Which methods the business offers is its Stripe payment method configuration's to decide.
   const methods = await connectedMethodConfiguration(stripe, account.id, readiness.parent)
   if ('problem' in methods) throw new HTTPError({ statusCode: 409, statusMessage: methods.problem, data: handoff })
-  return { connected: { ...connected, stripeAccountId: account.id }, methodConfigurationId: methods.configuration.id, automaticTax: readiness.automaticTax }
+  return { connected: { ...connected, stripe_account_id: account.id }, methodConfigurationId: methods.configuration.id, automaticTax: readiness.automaticTax }
 }
 
 export async function refreshStripeConnectedAccount(
@@ -486,8 +473,8 @@ export async function refreshStripeConnectedAccount(
   connected: StripeConnectedAccount,
   stripeContext?: Stripe.V2.Core.EventNotification['context'],
 ): Promise<StripeConnectedAccount> {
-  if (!connected.stripeAccountId) throw new Error('Stripe Connect account has not been created')
-  const account = await stripe.v2.core.accounts.retrieve(connected.stripeAccountId, {
+  if (!connected.stripe_account_id) throw new Error('Stripe Connect account has not been created')
+  const account = await stripe.v2.core.accounts.retrieve(connected.stripe_account_id, {
     include: STRIPE_CONNECT_ACCOUNT_INCLUDE,
   }, stripeContext === undefined ? {} : { stripeContext })
   return await projectStripeConnectedAccount(db, accountProjection(connected, account))
@@ -505,7 +492,7 @@ export async function ensureStripeConnectedAccount(
   },
 ): Promise<StripeConnectedAccount> {
   const reservation = await reserveStripeConnectedAccount(db, input)
-  if (reservation.stripeAccountId) return await refreshStripeConnectedAccount(db, stripe, reservation)
+  if (reservation.stripe_account_id) return await refreshStripeConnectedAccount(db, stripe, reservation)
 
   let account: Stripe.V2.Core.Account
   try {
@@ -551,8 +538,8 @@ export async function startStripeConnectOnboarding(
       livemode,
       country: input.country,
     })
-    if (!account.stripeAccountId) throw new Error('Stripe connected account ID is missing after creation')
-    const url = await createStripeConnectOnboardingLink(stripe, { stripeAccountId: account.stripeAccountId, ...input.urls })
+    if (!account.stripe_account_id) throw new Error('Stripe connected account ID is missing after creation')
+    const url = await createStripeConnectOnboardingLink(stripe, { stripeAccountId: account.stripe_account_id, ...input.urls })
     return { account, url }
   } catch (error) {
     if (error instanceof HTTPError) throw error

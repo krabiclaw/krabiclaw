@@ -49,11 +49,11 @@ const isPlatform = computed(() => organization.site.slug === 'platform')
 const accordionName = useId()
 const decorationUrl = computed(() => blockMedia(props.block, 'decoration')[0]?.public_url ?? null)
 const eyebrow = computed(() => blockTextOrNull(props.block.data.label))
-const items = computed(() => blockRecords(props.block.data.items).map(item => ({
-  id: blockText(item.id),
-  question: blockText(item.title),
-  answer: blockTextOrNull(item.description),
-})).filter(item => item.id && item.question))
+const items = computed(() => blockRecords(props.block.data.items).map((item, index) => ({
+  id: blockText(item.id) || `faq-${index}`,
+  question: blockText(item.title) || blockText(item.question),
+  answer: blockTextOrNull(item.description) ?? blockTextOrNull(item.answer),
+})).filter(item => item.question))
 const heading = computed(() => blockText(props.block.data.title) || 'Frequently asked questions')
 </script>
 

@@ -19,10 +19,10 @@ export default defineHandler(async (event) => {
   try {
     const items = await listAllItems(env)
     return jsonResponse({
-      ok: true, itemCount: items.length, elapsedMs: Date.now() - startedAt, })
+      ok: true, item_count: items.length, elapsed_ms: Date.now() - startedAt, })
   } catch (error) {
     const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error)
-    return jsonResponse({ error: 'Failed to list AI Search items', detail, elapsedMs: Date.now() - startedAt }, { status: 500 })
+    return jsonResponse({ error: 'Failed to list AI Search items', detail, elapsed_ms: Date.now() - startedAt }, { status: 500 })
   }
 })
 import { defineHandler } from 'nitro';

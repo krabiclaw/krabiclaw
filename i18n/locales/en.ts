@@ -17,7 +17,6 @@ export default {
     }
   },
   "reservations": {
-    "deposit_label": "Reservation deposit",
     "confirmed": "Reservation confirmed"
   },
   "forms": {
@@ -94,16 +93,18 @@ export default {
     "schedule": "Schedule",
     "privacy": "Privacy Policy",
     "terms": "Terms of Service",
-    "third_party_notices": "Third-Party Notices"
+    "third_party_notices": "Third-Party Notices",
+    "qa": "Q&A",
+    "reviews": "Reviews"
   },
   "booking_policy": {
-    "cancellation": "Cancel free up to 24 hours before the start time. After that, payments aren't refunded automatically.",
+    "cancellation": "Cancel free up to {window} before the start time. After that, payments aren't refunded automatically.",
     "cancel_refund": "You'll get a full refund.",
-    "cancel_no_refund": "It's less than 24 hours before the start time, so your payment won't be refunded.",
+    "cancel_no_refund": "It's less than {window} before the start time, so your payment won't be refunded.",
+    "cancel_closed": "Online cancellation closed {window} before the start time. Contact the business to cancel.",
     "reservation_heading": "Reservation policies",
     "experience_heading": "Experience policies",
     "consultation_heading": "Consultation policies",
-    "reschedule": "You can reschedule up to 24 hours before the start time.",
     "deposit_party": "Parties of {count}+ guests require a deposit.",
     "deposit": "A deposit is required before confirmation.",
     "deposit_amount": "Deposit: {amount} per reservation.",

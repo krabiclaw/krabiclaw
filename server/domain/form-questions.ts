@@ -1,3 +1,4 @@
+import { RESOURCE_LOCALIZATIONS_SQL } from '~/shared/content-registries'
 import { HTTPError } from 'nitro'
 import { queryFirst, type DbClient } from '~/server/db'
 import { getSourceLocale } from '~/server/utils/organization-locales'
@@ -16,27 +17,19 @@ import {
 
 /**
  * Which configuration owns a question collection. Each is an existing
- * configuration record: the organization's inquiry settings, a location's
- * reservation policy, a product's booking setup and a home's stay settings.
+ * configuration record: the organization's inquiry settings and a product's
+ * booking setup (a table's and a home's included).
  */
 export type FormQuestionOwner =
   | { kind: 'inquiry'; organizationId: string }
-  | { kind: 'reservation'; organizationId: string; locationId: string }
   | { kind: 'booking'; organizationId: string; productId: string }
-  | { kind: 'stay'; organizationId: string; productId: string }
 
 /** Where an owner's translated wording lives in its resource localization. */
-export function formQuestionLocalizationField(owner: FormQuestionOwner): { resourceType: 'organization' | 'business_location' | 'product'; resourceId: string; field: string } {
+export function formQuestionLocalizationField(owner: FormQuestionOwner): { resourceType: 'organization' | 'product'; resourceId: string; field: string } {
   if (owner.kind === 'inquiry') return { resourceType: 'organization', resourceId: owner.organizationId, field: 'inquiry_questions' }
-  if (owner.kind === 'reservation') return { resourceType: 'business_location', resourceId: owner.locationId, field: 'reservation_questions' }
   return { resourceType: 'product', resourceId: owner.productId, field: 'questions' }
 }
 
-const OWNER_QUERIES: Record<Exclude<FormQuestionOwner['kind'], 'inquiry'>, string> = {
-  reservation: 'SELECT questions FROM location_reservation_configs WHERE organization_id = ? AND location_id = ?',
-  booking: 'SELECT questions FROM product_booking_configs WHERE organization_id = ? AND product_id = ?',
-  stay: 'SELECT questions FROM product_stay_configs WHERE organization_id = ? AND product_id = ?',
-}
 
 /** The saved collection of one explicitly named owner. An owner that does not exist is not an empty form. */
 export async function readFormQuestions(db: DbClient, owner: FormQuestionOwner): Promise<FormQuestion[]> {
@@ -46,8 +39,8 @@ export async function readFormQuestions(db: DbClient, owner: FormQuestionOwner):
     // An organization that never saved inquiry questions asks none.
     return row.questions === null ? [] : parseStoredFormQuestions(row.questions)
   }
-  const row = await queryFirst<{ questions: string }>(db, OWNER_QUERIES[owner.kind], [owner.organizationId, owner.kind === 'reservation' ? owner.locationId : owner.productId])
-  if (!row) throw new HTTPError({ statusCode: 404, statusMessage: owner.kind === 'reservation' ? 'Reservation policy not found' : owner.kind === 'booking' ? 'This product does not take bookings' : 'Place to stay not found', data: { code: 'FORM_QUESTIONS_OWNER_NOT_FOUND', field: owner.kind } })
+  const row = await queryFirst<{ questions: string }>(db, 'SELECT questions FROM product_booking_configs WHERE organization_id = ? AND product_id = ?', [owner.organizationId, owner.productId])
+  if (!row) throw new HTTPError({ statusCode: 404, statusMessage: 'This product does not take bookings', data: { code: 'FORM_QUESTIONS_OWNER_NOT_FOUND', field: owner.kind } })
   return parseStoredFormQuestions(row.questions)
 }
 
@@ -61,7 +54,7 @@ export async function readLocalizedFormQuestions(db: DbClient, owner: FormQuesti
   const questions_revision = formQuestionsRevision(questions)
   if (!questions.length || locale === null || locale === await getSourceLocale(db, owner.organizationId)) return { questions, questions_revision }
   const { resourceType, resourceId, field } = formQuestionLocalizationField(owner)
-  const row = await queryFirst<{ wording: string | null }>(db, `SELECT json_extract(values_json, '$.' || ?) AS wording FROM resource_localizations
+  const row = await queryFirst<{ wording: string | null }>(db, `SELECT json_extract(values_json, '$.' || ?) AS wording FROM ${RESOURCE_LOCALIZATIONS_SQL}
     WHERE organization_id = ? AND resource_type = ? AND resource_id = ? AND locale = ?`, [field, owner.organizationId, resourceType, resourceId, locale])
   const localization = row?.wording ? formQuestionLocalizationSchema.parse(JSON.parse(row.wording)) : null
   return { questions: localizeFormQuestions(questions, localization), questions_revision }

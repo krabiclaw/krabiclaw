@@ -21,19 +21,22 @@ test('a host moves unpaid occupancy in batches, reviews manual-only homes and re
   const created = await page.request.post('/api/auth/organization/create', { headers, data: { name: `Migration ${slug}`, slug, default_currency: 'USD', timezone: 'Etc/UTC' } })
   await status(created, 200)
   const organizationId = (await created.json() as { id: string }).id
-  const provisioned = await page.request.post('/api/organizations', { headers, data: { organizationId, name: `Migration ${slug}`, subdomain: slug, vertical: 'lodging', sourceLocale: 'en' } })
+  const provisioned = await page.request.post('/api/organizations', { headers, data: { organization_id: organizationId, name: `Migration ${slug}`, subdomain: slug, vertical: 'lodging', source_locale: 'en' } })
   await status(provisioned, 200)
   const active = await page.request.post('/api/auth/organization/set-active', { headers, data: { organizationId } })
   await status(active, 200)
+  const listedMembers = await page.request.get('/api/auth/organization/list-members', { params: { organizationId } })
+  await status(listedMembers, 200)
+  const ownerMemberId = (await listedMembers.json() as { members: Array<{ id: string; role: string }> }).members.find(member => member.role === 'owner')!.id
   const home = await page.request.post(`/api/dashboard/stay-homes?org=${slug}`, { headers, data: {
     idempotency_key: `migration-home-${slug}`, name: 'Migration 0C', timezone: 'Etc/UTC', address: '12 Example Street', city: 'Denver', state: 'Colorado', country: 'US', zip_code: '80201',
-    check_in_time: '16:00', check_out_time: '11:00', max_guests: 4, min_nights: 1, base_price_minor: 10000,
+    check_in_time: '16:00', check_out_time: '11:00', max_guests: 4, min_nights: 1, base_price_minor: 10000, assigned_member_id: ownerMemberId,
   } })
   await status(home, 201)
   const productId = (await home.json() as { home: { product_id: string } }).home.product_id
   const manualHome = await page.request.post(`/api/dashboard/stay-homes?org=${slug}`, { headers, data: {
     idempotency_key: `migration-manual-home-${slug}`, name: 'Manual closures only', timezone: 'Etc/UTC', address: '14 Example Street', city: 'Denver', state: 'Colorado', country: 'US', zip_code: '80201',
-    check_in_time: '16:00', check_out_time: '11:00', max_guests: 4, min_nights: 1, base_price_minor: 10000,
+    check_in_time: '16:00', check_out_time: '11:00', max_guests: 4, min_nights: 1, base_price_minor: 10000, assigned_member_id: ownerMemberId,
   } })
   await status(manualHome, 201)
   const manualProductId = (await manualHome.json() as { home: { product_id: string } }).home.product_id
@@ -102,7 +105,7 @@ test('a host moves unpaid occupancy in batches, reviews manual-only homes and re
   expect(receipts[0]).toMatchObject({ imported: 5, failed: 0, remaining: 1, has_more: true })
   const receipt = receipts[1]!
   expect(receipt).toMatchObject({ imported: 1, failed: 0, remaining: 0, has_more: false })
-  const stayId = receipt.outcomes.find(outcome => outcome.source_id === '700001')!.stay_id!
+  const stayId = receipt.outcomes.find(outcome => outcome.source_id === '700001')!.booking_id!
   expect(stayId).toBeTruthy()
   await expect(page.getByText('The handover needs attention', { exact: true })).toBeVisible()
   await expect(page.getByText('Checks complete for these homes and records', { exact: true })).toHaveCount(0)
@@ -119,13 +122,13 @@ test('a host moves unpaid occupancy in batches, reviews manual-only homes and re
   expect(await stay.json()).toMatchObject({ stay: { product_id: productId, status: 'confirmed', guest_name: 'Morgan from 1A', check_in_date: checkIn, check_out_date: checkOut, payment_status: 'unpaid', paid_minor: 0 } })
   const calendar = await page.request.get(`/api/dashboard/stay-homes/${productId}/calendar?org=${slug}&from=${day(0)}&to=${day(3)}`)
   await status(calendar, 200)
-  const nights = (await calendar.json() as { nights: Array<{ available: boolean; stay_id: string | null }> }).nights
+  const nights = (await calendar.json() as { nights: Array<{ available: boolean; booking_id: string | null }> }).nights
   expect(nights).toHaveLength(3)
-  expect(nights.map(night => ({ available: night.available, stay_id: night.stay_id }))).toEqual(Array.from({ length: 3 }, () => ({ available: false, stay_id: stayId })))
+  expect(nights.map(night => ({ available: night.available, booking_id: night.booking_id }))).toEqual(Array.from({ length: 3 }, () => ({ available: false, booking_id: stayId })))
   const manualCalendar = await page.request.get(`/api/dashboard/stay-homes/${manualProductId}/calendar?org=${slug}&from=${day(2)}&to=${day(4)}`)
   await status(manualCalendar, 200)
   expect((await manualCalendar.json() as { nights: Array<{ available: boolean; closed: boolean }> }).nights.map(night => ({ available: night.available, closed: night.closed }))).toEqual([{ available: false, closed: true }, { available: false, closed: true }])
-  const otaStayId = receipt.outcomes.find(outcome => outcome.source_id === '700006')!.stay_id!
+  const otaStayId = receipt.outcomes.find(outcome => outcome.source_id === '700006')!.booking_id!
   await page.goto(`/dashboard/${slug}/bookings/stay/${otaStayId}`)
   await expect(page.getByText('Payments, changes and cancellations for this stay are managed on', { exact: false })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Record payment', exact: true })).toHaveCount(0)
@@ -140,7 +143,7 @@ test('a host moves unpaid occupancy in batches, reviews manual-only homes and re
   await status(replay, 200)
   const repeated = await replay.json() as MigrationReceipt
   expect(repeated).toMatchObject({ imported: 0, existing: 6, failed: 0, remaining: 0 })
-  expect(repeated.outcomes.find(outcome => outcome.source_id === '700001')!.stay_id).toBe(stayId)
+  expect(repeated.outcomes.find(outcome => outcome.source_id === '700001')!.booking_id).toBe(stayId)
   await page.goto(path)
   await expect(page).toHaveURL(`${path}/upload`)
   await expect(page.getByText('Previous import', { exact: true })).toBeVisible()

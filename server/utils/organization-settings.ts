@@ -60,6 +60,8 @@ interface FullOrganizationRow extends OrganizationSettingsRow {
   seo_description: string | null
   canonical_url: string | null
   consultation_mode: 'native' | 'external_url' | 'native_disabled' | null
+  reviews_count: number | null
+  average_rating: number | null
   created_at: string
   updated_at: string
 }
@@ -99,6 +101,8 @@ export async function loadSettingsPayload(
            CASE WHEN json_type(organization.consultation_settings_json) = 'object' THEN json_extract(organization.consultation_settings_json, '$.mode') END AS consultation_mode,
            strftime('%Y-%m-%dT%H:%M:%fZ', organization."createdAt", 'unixepoch') AS created_at, organization.updated_at,
            vertical, theme_id,
+           COALESCE(NULLIF((SELECT COUNT(*) FROM reviews WHERE organization_id = organization.id AND status = 'approved'), 0), (SELECT SUM(review_count) FROM business_locations WHERE organization_id = organization.id AND status = 'active'), 0) AS reviews_count,
+           COALESCE((SELECT ROUND(AVG(rating), 2) FROM reviews WHERE organization_id = organization.id AND status = 'approved'), (SELECT ROUND(AVG(rating), 2) FROM business_locations WHERE organization_id = organization.id AND status = 'active' AND rating > 0), 0) AS average_rating,
            (SELECT json_group_array(json_object('id', id, 'slug', slug, 'title', title, 'address', address,
                      'phone', phone, 'website_url', website_url, 'image', image,
                      'google_place_id', google_place_id, 'rating', rating, 'review_count', review_count,
@@ -204,6 +208,9 @@ export async function loadSettingsPayload(
     // The inquiry form's own questions, and the revision a write or a form names.
     ...await (async () => { const questions = await readFormQuestions(db, { kind: 'inquiry', organizationId }); return { inquiry_questions: questions, inquiry_questions_revision: formQuestionsRevision(questions) } })(),
     integrations: await integrationsSummary(db, env, organizationId, await listIntegrations(db, organizationId), JSON.parse(updatedOrganization.locations_json) as IntegrationLocation[]),
+    vertical: updatedOrganization.vertical,
+    reviews_count: Number(updatedOrganization.reviews_count || 0),
+    average_rating: Number(updatedOrganization.average_rating || 0),
     created_at: updatedOrganization.created_at,
     updated_at: updatedOrganization.updated_at,
   }
@@ -246,6 +253,7 @@ async function integrationsSummary(db: DbClient, env: CloudflareEnv, organizatio
     google_calendar: (() => { const row = integrations.find(row => row.provider === 'google_calendar'); return row ? { account_id: row.account_id, calendar_name: row.target_name, status: row.status, last_error: row.last_error, connected_at: row.created_at, connected_through: owners.get(row.account_id) ?? null } : null })(),
     google_analytics: connected('google_analytics'),
     google_ads: connected('google_ads'),
+    meta_ads: connected('meta_ads'),
     google_search_console: connected('google_search_console'),
     facebook: connected('facebook'),
     instagram: connected('instagram'),

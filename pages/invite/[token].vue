@@ -59,8 +59,8 @@ definePageMeta({ layout: 'access', auth: false })
 useResponseHeader('cache-control').value = 'private, no-store'
 useSeoMeta({ title: 'Join a workspace | KrabiClaw', robots: 'noindex, nofollow' })
 
-type Invite = { organization: { name: string }; role: string; expiresAt: string }
-type Joined = { organization: { id: string; name: string }; role: string; memberId: string }
+type Invite = { organization: { name: string }; role: string; expires_at: string }
+type Joined = { organization: { id: string; name: string }; role: string; member_id: string }
 type Failure = { title: string; message: string }
 
 const route = useRoute()
@@ -86,7 +86,7 @@ const invite = ref<Invite | null>(null)
 try {
   invite.value = await applicationFetch<Invite>(`/api/invite-links/${encodeURIComponent(token)}`, {
     validate: (value): value is Invite => isRecord(value) && isRecord(value.organization) && typeof value.organization.name === 'string'
-      && typeof value.role === 'string' && typeof value.expiresAt === 'string',
+      && typeof value.role === 'string' && typeof value.expires_at === 'string',
   })
 } catch (error) {
   failure.value = failureFor(error)
@@ -94,7 +94,7 @@ try {
 
 const roleLabel = computed(() => invite.value?.role === 'admin' ? 'an admin' : 'a team member')
 const expiresOn = computed(() => invite.value
-  ? new Date(invite.value.expiresAt).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
+  ? new Date(invite.value.expires_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
   : '')
 
 const session = authClient.useSession()
@@ -114,7 +114,7 @@ async function accept() {
     joined.value = await applicationFetch<Joined>(`/api/invite-links/${encodeURIComponent(token)}/accept`, {
       method: 'POST',
       validate: (value): value is Joined => isRecord(value) && isRecord(value.organization) && typeof value.organization.id === 'string'
-        && typeof value.organization.name === 'string' && typeof value.role === 'string' && typeof value.memberId === 'string',
+        && typeof value.organization.name === 'string' && typeof value.role === 'string' && typeof value.member_id === 'string',
     })
   } catch (error) {
     failure.value = failureFor(error)

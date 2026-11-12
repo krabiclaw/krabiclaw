@@ -22,7 +22,7 @@ export interface PublicLinksPayload {
     title: string
   }
   items: PublicLinksItem[]
-  localeRepresentations: PublicLocaleRepresentation[]
+  locale_representations: PublicLocaleRepresentation[]
 }
 
 export type PublicLinksResponse = { success: true } & PublicLinksPayload
@@ -52,8 +52,8 @@ export function isPublicLinksPayload(value: unknown): value is PublicLinksPayloa
       && typeof item.destination === 'string'
       && item.status === 'active',
     )
-    && Array.isArray(value.localeRepresentations)
-    && value.localeRepresentations.every(item => isRecord(item)
+    && Array.isArray(value.locale_representations)
+    && value.locale_representations.every(item => isRecord(item)
       && typeof item.locale === 'string'
       && typeof item.label === 'string'
       && typeof item.route_path === 'string'

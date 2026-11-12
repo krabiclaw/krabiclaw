@@ -183,6 +183,7 @@ export function tenantPageRecordSections(
   collection: TenantPageBlockCollection,
 ): readonly TenantPageRecordSection[] {
   if (collection !== 'items') return []
+  if (blockType === 'faq') return []
   if (blockType === 'team_grid') return PERSON_SECTIONS
   if (blockType === 'feature_grid') return FEATURE_ITEM_SECTIONS
   if (blockType === 'showcase') return SHOWCASE_ITEM_SECTIONS
@@ -206,6 +207,7 @@ export function tenantPageRecordTitle(
   if (collection === 'buttons') return text(record.label) || fallback
   if (collection === 'steps') return text(record.name) || fallback
   if (collection === 'tiers') return text(record.title) || text(record.amount) || fallback
+  if (blockType === 'faq') return text(record.title) || text(record.question) || `Question ${index + 1}`
   if (blockType === 'team_grid') {
     return [text(record.first_name), text(record.last_name)].filter(Boolean).join(' ') || fallback
   }

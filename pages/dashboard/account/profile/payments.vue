@@ -12,12 +12,12 @@
         <div class="mt-4 space-y-6">
           <NuxtLink v-for="entry in year.entries" :key="entry.id" :to="entry.to" class="flex items-center gap-4" :data-testid="`account-payment-${entry.id}`">
             <span class="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-elevated">
-              <img v-if="entry.imageUrl" :src="entry.imageUrl" alt="" class="size-full object-cover" loading="lazy">
+              <img v-if="entry.image_url" :src="entry.image_url" alt="" class="size-full object-cover" loading="lazy">
               <UIcon v-else name="i-lucide-receipt" class="size-6 text-dimmed" />
             </span>
             <span class="min-w-0 flex-1">
-              <span class="block text-base font-medium text-highlighted">{{ entry.kind === 'paid' ? 'Paid' : 'Refunded' }} {{ formatTimestamp(entry.occurredAt, 'en', 'UTC', { month: 'short', day: 'numeric' }) }}</span>
-              <span class="block truncate text-sm text-muted">{{ entry.organizationName }}</span>
+              <span class="block text-base font-medium text-highlighted">{{ entry.kind === 'paid' ? 'Paid' : 'Refunded' }} {{ formatTimestamp(entry.created_at, 'en', 'UTC', { month: 'short', day: 'numeric' }) }}</span>
+              <span class="block truncate text-sm text-muted">{{ entry.organization_name }}</span>
               <span class="block truncate text-sm text-muted">{{ whenLabel(entry) }}</span>
             </span>
             <span class="shrink-0 text-right">
@@ -56,16 +56,16 @@ const years = computed(() => {
   const current = String(new Date().getUTCFullYear())
   const groups = new Map<string, BuyerPaymentEntry[]>()
   for (const entry of entries.value.slice(0, shown.value)) {
-    const year = entry.occurredAt.slice(0, 4)
+    const year = entry.created_at.slice(0, 4)
     groups.set(year, [...(groups.get(year) ?? []), entry])
   }
   return [...groups].map(([year, list]) => ({ label: year === current ? 'Completed' : year, entries: list }))
 })
 // "Thủ Đức · Aug 11–Oct 11": what, and the dates of the visit it paid for.
 function whenLabel(entry: BuyerPaymentEntry): string {
-  if (!entry.visitStartsAt || !entry.visitEndsAt || !entry.timeZone) return entry.title
-  const start = formatTimestamp(entry.visitStartsAt, 'en', entry.timeZone, { month: 'short', day: 'numeric' })
-  const end = formatTimestamp(entry.visitEndsAt, 'en', entry.timeZone, { month: 'short', day: 'numeric' })
+  if (!entry.starts_at || !entry.ends_at || !entry.timezone) return entry.title
+  const start = formatTimestamp(entry.starts_at, 'en', entry.timezone, { month: 'short', day: 'numeric' })
+  const end = formatTimestamp(entry.ends_at, 'en', entry.timezone, { month: 'short', day: 'numeric' })
   return `${entry.title} · ${start === end ? start : `${start}–${end}`}`
 }
 </script>

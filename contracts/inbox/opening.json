@@ -1,58 +1,58 @@
 {
   "thread": {
-    "activityPath": null,
-    "avatarInitial": "A",
+    "activity_path": null,
+    "avatar_initial": "A",
+    "booking_id": "site-stay",
     "channel": "direct",
     "composer": {
       "available": true,
       "channel": "email",
       "reason": null
     },
-    "guestName": "Ana Ruiz",
     "home": "74 D · Sky",
-    "id": "00000000-0000-4000-8000-000000000088",
+    "id": "00000000-0000-4000-8000-000000000002",
     "kind": "guest",
     "pending": [],
-    "recordId": "site-stay",
-    "recordKind": "stay",
-    "recordTitle": "Reservation",
+    "record_kind": "stay",
+    "record_title": "Reservation",
     "stream": [
       {
-        "id": "day:00000000-0000-4000-8000-000000000091",
+        "id": "day:00000000-0000-4000-8000-000000000013",
         "label": "Today",
         "type": "day"
       },
       {
         "author": "Ana Ruiz",
         "body": "74 D · Sky from Fri, Nov 20 to Mon, Nov 23 for 2 guests. Ana Ruiz, +1 303 555 0123.",
-        "id": "00000000-0000-4000-8000-000000000091",
+        "id": "00000000-0000-4000-8000-000000000013",
         "label": null,
         "photos": [],
         "receipt": null,
         "retryable": false,
-        "sentAt": "2026-11-05T19:00:00.000Z",
+        "sent_at": "2026-11-05T19:00:00.000Z",
         "side": "guest",
         "time": "12:00 PM",
         "translated": null,
         "type": "message",
-        "unshownFiles": 0
+        "unshown_files": 0
       },
       {
         "author": "Ana Ruiz",
         "body": "We arrive late, around 9 PM.",
-        "id": "00000000-0000-4000-8000-000000000092",
+        "id": "00000000-0000-4000-8000-000000000014",
         "label": null,
         "photos": [],
         "receipt": null,
         "retryable": false,
-        "sentAt": "2026-11-05T19:00:00.000Z",
+        "sent_at": "2026-11-05T19:00:00.000Z",
         "side": "guest",
         "time": null,
         "translated": null,
         "type": "message",
-        "unshownFiles": 0
+        "unshown_files": 0
       }
     ],
+    "title": "Ana Ruiz",
     "translated": false,
     "when": "Nov 20 – 23"
   }

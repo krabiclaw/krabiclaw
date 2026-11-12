@@ -145,8 +145,8 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   // The draft holds the typed name as a manual business, with no Google place.
   const saved = await page.request.get('/api/dashboard/onboarding/drafts/active')
   expect(saved.status(), await saved.text()).toBe(200)
-  const initialDraft = (await saved.json() as { draft: { draftId: string; organizationId: string; updatedAt: string } }).draft
-  expect(initialDraft).toMatchObject({ sourceType: 'manual', placeId: null, details: { name, currency: 'THB', timezone: 'Asia/Bangkok' } })
+  const initialDraft = (await saved.json() as { draft: { draft_id: string; organization_id: string; updated_at: string } }).draft
+  expect(initialDraft).toMatchObject({ source_type: 'manual', google_place_id: null, details: { name, currency: 'THB', timezone: 'Asia/Bangkok' } })
   await expect(page.getByText('Your answers have not been saved yet.', { exact: true })).toHaveCount(0)
 
   const previewFrame = page.locator('iframe[title="Site preview"]')
@@ -197,10 +197,10 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   // Another editor saves the same draft. Exit must report the stale revision,
   // keep the owner's edit on screen and leave the newer persisted answer intact.
   const competingSave = await page.request.post('/api/dashboard/onboarding/drafts/active', {
-    data: { draftId: initialDraft.draftId, expectedUpdatedAt: initialDraft.updatedAt, details: { phone: '+66821234567' } },
+    data: { draft_id: initialDraft.draft_id, updated_at: initialDraft.updated_at, details: { phone: '+66821234567' } },
   })
   expect(competingSave.status(), await competingSave.text()).toBe(200)
-  const competingRevision = (await competingSave.json() as { updatedAt: string }).updatedAt
+  const competingRevision = (await competingSave.json() as { updated_at: string }).updated_at
   const failedExitResponse = page.waitForResponse(response => response.request().method() === 'POST'
     && new URL(response.url()).pathname === '/api/dashboard/onboarding/drafts/active')
   await page.getByRole('button', { name: 'Save & exit', exact: true }).click()
@@ -212,7 +212,7 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   const newerDraft = await page.request.get('/api/dashboard/onboarding/drafts/active')
   expect(newerDraft.status(), await newerDraft.text()).toBe(200)
   expect((await newerDraft.json() as { draft: unknown }).draft).toMatchObject({
-    draftId: initialDraft.draftId, organizationId: initialDraft.organizationId, updatedAt: competingRevision,
+    draft_id: initialDraft.draft_id, organization_id: initialDraft.organization_id, updated_at: competingRevision,
     details: { name, phone: '+66821234567', currency: 'THB', timezone: 'Asia/Bangkok' },
   })
 
@@ -223,13 +223,13 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   // Exit goes through post-login, which lands on the draft's organization.
   // Wait for that landing so the next navigation doesn't race the redirect.
   const draftOrganization = (await (await page.request.get('/api/auth/organization/list')).json() as Array<{ id: string; slug: string }>)
-    .find(organization => organization.id === initialDraft.organizationId)
+    .find(organization => organization.id === initialDraft.organization_id)
   await page.getByRole('button', { name: 'Save & exit', exact: true }).click()
   await expect(page).toHaveURL(new RegExp(`/dashboard/${draftOrganization!.slug}$`))
   const exitedDraft = await page.request.get('/api/dashboard/onboarding/drafts/active')
   expect(exitedDraft.status(), await exitedDraft.text()).toBe(200)
   expect((await exitedDraft.json() as { draft: unknown }).draft).toMatchObject({
-    draftId: initialDraft.draftId, organizationId: initialDraft.organizationId,
+    draft_id: initialDraft.draft_id, organization_id: initialDraft.organization_id,
     details: { name, phone: '+66812345678', currency: 'THB', timezone: 'Asia/Bangkok' },
   })
 
@@ -271,7 +271,7 @@ test('a new owner builds a draft and creates a site through the routed flow', as
 
   // Hold the actual upload in flight so navigation cannot race its revision.
   // Releasing it reaches the local endpoint and its real Images refusal.
-  const uploadPath = `/api/dashboard/onboarding/drafts/${initialDraft.draftId}/media/upload`
+  const uploadPath = `/api/dashboard/onboarding/drafts/${initialDraft.draft_id}/media/upload`
   const uploadRoute = `**${uploadPath}`
   const uploadStarted = Promise.withResolvers<undefined>()
   const uploadRelease = Promise.withResolvers<undefined>()
@@ -377,10 +377,10 @@ test('a new experience site saves its first experience privately until booking s
   expect(await empty.json()).toEqual({ success: true, draft: null })
   try {
     const created = await page.request.post('/api/dashboard/onboarding/drafts/active', {
-      data: { sourceType: 'manual', vertical: 'experience', name: `E2E experience ${Date.now().toString(36)}`, details: { sourceLocale: 'en', currency: 'THB', timezone: 'Asia/Bangkok', country: 'TH', city: 'Ao Nang', streetAddress: '88 Moo 2', phone: '+66812345678' } },
+      data: { source_type: 'manual', vertical: 'experience', name: `E2E experience ${Date.now().toString(36)}`, details: { source_locale: 'en', currency: 'THB', timezone: 'Asia/Bangkok', country: 'TH', city: 'Ao Nang', street_address: '88 Moo 2', phone: '+66812345678' } },
     })
     expect(created.status(), await created.text()).toBe(200)
-    const { organizationId } = await created.json() as { organizationId: string }
+    const { organization_id: organizationId } = await created.json() as { organization_id: string }
     await page.goto('/dashboard/onboarding/products')
     await expect(page.locator('[data-onboarding-hydrated="true"]')).toBeVisible()
     const products = page.locator('[data-onboarding-step="products"]')
@@ -423,10 +423,10 @@ test('an owner changes their restaurant draft to lodging, restores it and opens 
   await loginAs(page.request, baseURL!, 'user-e2e-onboarding-wizard')
   const previous = await page.request.get('/api/dashboard/onboarding/drafts/active')
   expect(previous.status(), await previous.text()).toBe(200)
-  const previousDraft = (await previous.json() as { draft: { organizationId: string | null } | null }).draft
+  const previousDraft = (await previous.json() as { draft: { organization_id: string | null } | null }).draft
   const discarded = await page.request.delete('/api/dashboard/onboarding/drafts/active')
   expect(discarded.status(), await discarded.text()).toBe(200)
-  expect(await discarded.json()).toEqual({ success: true, deleted: previousDraft?.organizationId != null })
+  expect(await discarded.json()).toEqual({ success: true, deleted: previousDraft?.organization_id != null })
   const cleared = await page.request.get('/api/dashboard/onboarding/drafts/active')
   expect(cleared.status(), await cleared.text()).toBe(200)
   expect(await cleared.json()).toEqual({ success: true, draft: null })
@@ -462,7 +462,7 @@ test('an owner changes their restaurant draft to lodging, restores it and opens 
   const restaurant = await page.request.get('/api/dashboard/onboarding/drafts/active')
   expect(restaurant.status(), await restaurant.text()).toBe(200)
   expect((await restaurant.json() as { draft: unknown }).draft).toMatchObject({
-    vertical: 'restaurant', products: [{ name: 'Grilled squid', category: 'Menu', amountMinor: null }],
+    vertical: 'restaurant', products: [{ name: 'Grilled squid', category: 'Menu', unit_amount: null }],
   })
 
   // The saved restaurant offering is restored before the owner changes type.
@@ -488,17 +488,17 @@ test('an owner changes their restaurant draft to lodging, restores it and opens 
 
   const saved = await page.request.get('/api/dashboard/onboarding/drafts/active')
   expect(saved.status(), await saved.text()).toBe(200)
-  const draft = (await saved.json() as { draft: { draftId: string; updatedAt: string; vertical: string; products: unknown[]; details: { name: string } } }).draft
+  const draft = (await saved.json() as { draft: { draft_id: string; updated_at: string; vertical: string; products: unknown[]; details: { name: string } } }).draft
   expect(draft).toMatchObject({ vertical: 'lodging', products: [], details: { name } })
   // The server refuses a generic onboarding item for a home, before changing
   // the draft. Homes are created with their own required stay settings later.
   const invalidProduct = await page.request.post('/api/dashboard/onboarding/drafts/active', {
-    data: { draftId: draft.draftId, expectedUpdatedAt: draft.updatedAt, products: [{ name: 'A home is not an experience', category: 'Homes', amountMinor: null }] },
+    data: { draft_id: draft.draft_id, updated_at: draft.updated_at, products: [{ name: 'A home is not an experience', category: 'Homes', unit_amount: null }] },
   })
   expect(invalidProduct.status(), await invalidProduct.text()).toBe(400)
   const unchanged = await page.request.get('/api/dashboard/onboarding/drafts/active')
   expect(unchanged.status(), await unchanged.text()).toBe(200)
-  expect((await unchanged.json() as { draft: unknown }).draft).toMatchObject({ draftId: draft.draftId, updatedAt: draft.updatedAt, vertical: 'lodging', products: [] })
+  expect((await unchanged.json() as { draft: unknown }).draft).toMatchObject({ draft_id: draft.draft_id, updated_at: draft.updated_at, vertical: 'lodging', products: [] })
 
   // A cold load reads the selected vertical from the persisted draft.
   await page.goto('/dashboard/onboarding/type')
@@ -564,7 +564,7 @@ test('a new owner picks their Google listing and it seeds location, contact and 
   // Predictions appear as the owner types; each names the place and its area.
   const autocomplete = page.waitForRequest(sent => sent.url().includes('/api/dashboard/google-places/autocomplete'))
   await page.getByPlaceholder('Search for your business on Google Maps').pressSequentially('Kikuzuki Krabi')
-  const sessionToken = ((await autocomplete).postDataJSON() as { sessionToken: string }).sessionToken
+  const sessionToken = ((await autocomplete).postDataJSON() as { session_token: string }).session_token
   const suggestion = page.getByRole('option', { name: new RegExp(KIKUZUKI.name.replace(/[&]/g, '\\$&')) })
   await expect(suggestion).toContainText('Ao Nang')
   await expect(page.locator('[data-google-maps-attribution]')).toHaveText('Google Maps')
@@ -572,7 +572,7 @@ test('a new owner picks their Google listing and it seeds location, contact and 
   // Selecting it closes the Google session with the same token.
   const details = page.waitForRequest(sent => sent.url().includes('/api/dashboard/google-places/details'))
   await suggestion.click()
-  expect((await details).postDataJSON()).toEqual({ placeId: KIKUZUKI.placeId, sessionToken })
+  expect((await details).postDataJSON()).toEqual({ google_place_id: KIKUZUKI.placeId, session_token: sessionToken })
 
   // Location is seeded from the place and stays editable.
   await expect(step('location')).toBeVisible()
@@ -598,9 +598,9 @@ test('a new owner picks their Google listing and it seeds location, contact and 
   // The saved draft names the Google place, which the server fetched itself.
   const saved = await page.request.get('/api/dashboard/onboarding/drafts/active')
   expect(saved.status(), await saved.text()).toBe(200)
-  const draft = (await saved.json() as { draft: { sourceType: string; placeId: string; details: { name: string; phone: string; timezone: string; currency: string; openingHours: { periods: unknown[] } } } }).draft
-  expect(draft).toMatchObject({ sourceType: 'google_places', placeId: KIKUZUKI.placeId, details: { name: KIKUZUKI.name, phone: '+66952932112', timezone: 'Asia/Bangkok', currency: 'THB' } })
-  expect(draft.details.openingHours.periods.length).toBeGreaterThan(0)
+  const draft = (await saved.json() as { draft: { source_type: string; google_place_id: string; details: { name: string; phone: string; timezone: string; currency: string; opening_hours: { periods: unknown[] } } } }).draft
+  expect(draft).toMatchObject({ source_type: 'google_places', google_place_id: KIKUZUKI.placeId, details: { name: KIKUZUKI.name, phone: '+66952932112', timezone: 'Asia/Bangkok', currency: 'THB' } })
+  expect(draft.details.opening_hours.periods.length).toBeGreaterThan(0)
 
   const cleared = await page.request.delete('/api/dashboard/onboarding/drafts/active')
   expect(cleared.status(), await cleared.text()).toBe(200)
@@ -616,10 +616,10 @@ test('deleting a site through Better Auth also deletes the draft that created it
 
   const name = `E2E Deleted ${Date.now().toString(36)}`
   const firstSave = await page.request.post('/api/dashboard/onboarding/drafts/active', {
-    data: { sourceType: 'manual', vertical: 'restaurant', name, details: { sourceLocale: 'en', currency: 'THB', timezone: 'Asia/Bangkok', country: 'TH', city: 'Ao Nang', streetAddress: '88 Moo 2' } },
+    data: { source_type: 'manual', vertical: 'restaurant', name, details: { source_locale: 'en', currency: 'THB', timezone: 'Asia/Bangkok', country: 'TH', city: 'Ao Nang', street_address: '88 Moo 2' } },
   })
   expect(firstSave.status(), await firstSave.text()).toBe(200)
-  const { organizationId } = await firstSave.json() as { organizationId: string }
+  const { organization_id: organizationId } = await firstSave.json() as { organization_id: string }
 
   const deleted = await page.request.post('/api/auth/organization/delete', { headers: authRequestHeaders(baseURL!), data: { organizationId } })
   expect(deleted.status(), await deleted.text()).toBe(200)
@@ -633,15 +633,15 @@ test('deleting a site through Better Auth also deletes the draft that created it
 
 test('the business search API refuses what the picker would never send', async ({ request, baseURL }) => {
   const sessionToken = crypto.randomUUID()
-  const anonymous = await request.post('/api/dashboard/google-places/autocomplete', { data: { input: 'Kikuzuki', sessionToken } })
+  const anonymous = await request.post('/api/dashboard/google-places/autocomplete', { data: { input: 'Kikuzuki', session_token: sessionToken } })
   expect(anonymous.status()).toBe(401)
 
   await loginAs(request, baseURL!, 'user-e2e-demo-owner')
-  const short = await request.post('/api/dashboard/google-places/autocomplete', { data: { input: 'ki ', sessionToken } })
+  const short = await request.post('/api/dashboard/google-places/autocomplete', { data: { input: 'ki ', session_token: sessionToken } })
   expect(short.status(), await short.text()).toBe(400)
-  const malformed = await request.post('/api/dashboard/google-places/autocomplete', { data: { input: 'Kikuzuki', sessionToken: 'not-a-uuid' } })
+  const malformed = await request.post('/api/dashboard/google-places/autocomplete', { data: { input: 'Kikuzuki', session_token: 'not-a-uuid' } })
   expect(malformed.status(), await malformed.text()).toBe(400)
-  const detailsMalformed = await request.post('/api/dashboard/google-places/details', { data: { placeId: KIKUZUKI.placeId, sessionToken: 'not-a-uuid' } })
+  const detailsMalformed = await request.post('/api/dashboard/google-places/details', { data: { google_place_id: KIKUZUKI.placeId, session_token: 'not-a-uuid' } })
   expect(detailsMalformed.status(), await detailsMalformed.text()).toBe(400)
 })
 
@@ -655,7 +655,7 @@ test('a paid plan adds a third location without counting it', async ({ page, bas
   const failures: unknown[] = []
   let createdLocationId: string | undefined
   const status = async () => {
-    const response = await page.request.get('/api/billing/status', { params: { organizationId: restaurant.organizationId } })
+    const response = await page.request.get('/api/billing/status', { params: { organization_id: restaurant.organizationId } })
     expect(response.status(), await response.text()).toBe(200)
     return (await response.json() as { billing: { plan: string; usage: Record<string, number> } }).billing
   }
@@ -784,7 +784,7 @@ test('Settings connects a new location to Google Maps through the business picke
   const picked = page.waitForRequest(sent => sent.url().includes('/api/dashboard/google-places/details'))
   await page.getByPlaceholder('Search for your business on Google Maps').pressSequentially(' Carmine Street')
   await page.getByRole('option', { name: /Carmine St/ }).first().click()
-  const placeId = ((await picked).postDataJSON() as { placeId: string }).placeId
+  const placeId = ((await picked).postDataJSON() as { google_place_id: string }).google_place_id
   await expect(page.getByText('Connected to Google Maps')).toBeVisible()
 
   const added = (await connected()).find(candidate => candidate.google_place_id === placeId)
@@ -798,7 +798,7 @@ test('Settings connects a new location to Google Maps through the business picke
   const repicked = page.waitForRequest(sent => sent.url().includes('/api/dashboard/google-places/details'))
   const synced = page.waitForResponse(response => response.url().includes('/api/integrations/google-places/sync'))
   await page.getByRole('option', { name: /Joe's Pizza Broadway/ }).first().click()
-  const otherPlaceId = ((await repicked).postDataJSON() as { placeId: string }).placeId
+  const otherPlaceId = ((await repicked).postDataJSON() as { google_place_id: string }).google_place_id
   expect(otherPlaceId).not.toBe(placeId)
   expect((await synced).status()).toBe(200)
   await expect(page.getByText('Connected to Google Maps')).toBeVisible()

@@ -73,7 +73,7 @@ export type AbandonedDraftTenantOutcome =
  */
 export async function deleteAbandonedDraftTenant(
   env: CloudflareEnv,
-  claim: { draftId: string; updatedAt: string; organizationId: string; subdomain: string; userId: string },
+  claim: { draftId: string; updated_at: string; organizationId: string; subdomain: string; userId: string },
 ): Promise<AbandonedDraftTenantOutcome> {
   const db = env.DB
   const { organizationId, subdomain, userId } = claim
@@ -85,11 +85,11 @@ export async function deleteAbandonedDraftTenant(
   if (!['pending', 'failed'].includes(draft.onboarding_status)) return { refused: 'draft_changed' }
   const membership = await resolveOrganizationMembership(env, { organizationId, userId })
   if (membership?.role !== 'owner') return { refused: 'not_owner' }
-  const abandoned = await queryFirst<{ id: string }>(db, "SELECT id FROM onboarding_drafts WHERE id = ? AND user_id = ? AND organization_id = ? AND subdomain_candidate = ? AND status = 'abandoned' AND updated_at = ?", [claim.draftId, userId, organizationId, subdomain, claim.updatedAt])
+  const abandoned = await queryFirst<{ id: string }>(db, "SELECT id FROM onboarding_drafts WHERE id = ? AND user_id = ? AND organization_id = ? AND subdomain_candidate = ? AND status = 'abandoned' AND updated_at = ?", [claim.draftId, userId, organizationId, subdomain, claim.updated_at])
   if (!abandoned) return { refused: 'draft_changed' }
 
   await cleanupOrganizationBeforeDelete(env, organizationId, userId)
-  const current = await queryFirst<{ id: string }>(db, "SELECT d.id FROM onboarding_drafts d JOIN organization o ON o.id = d.organization_id WHERE d.id = ? AND d.user_id = ? AND d.organization_id = ? AND d.status = 'abandoned' AND d.updated_at = ? AND o.onboarding_status IN ('pending', 'failed')", [claim.draftId, userId, organizationId, claim.updatedAt])
+  const current = await queryFirst<{ id: string }>(db, "SELECT d.id FROM onboarding_drafts d JOIN organization o ON o.id = d.organization_id WHERE d.id = ? AND d.user_id = ? AND d.organization_id = ? AND d.status = 'abandoned' AND d.updated_at = ? AND o.onboarding_status IN ('pending', 'failed')", [claim.draftId, userId, organizationId, claim.updated_at])
   if (!current) return { refused: 'draft_changed' }
   const adapter = await organizationAdapter(env)
   await adapter.deleteOrganization(organizationId)

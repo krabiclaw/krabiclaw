@@ -9,7 +9,7 @@ import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/
 import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
 import { createProduct, deleteProduct, getProduct, removeProductLocation, setProductLocation, setProductPublication, updateProduct } from '../../server/utils/product-management.ts'
-import { addStayHomePhoto, applyChannelBooking, cancelStay, cancelStayAsGuest, createStay, createStayPhotoRoom, deleteStayPayment, getStay, listStays, moveStayPhotos, readStayCalendar, readStayCalendars, readStayGapCandidates, readStayHome, recordStayPayment, removeStayHomePhoto, removeStayPhotoRoom, reorderStayHomePhotos, importStayNights, quoteStay, resumeImportedStay, setStayNights, updateStay, updateStayHome, updateStayHomeAccessibility, updateStayPhotoRoom, type GuestStay, type StayAccess } from '../../server/domain/stays.ts'
+import { addStayHomePhoto, applyChannelBooking, cancelStay, cancelStayAsGuest, createStay, createStayPhotoRoom, deleteStayPayment, getStay, listStays, moveStayPhotos, readStayCalendar, readStayCalendars, readStayGapCandidates, readStayHome, recordStayPayment, removeStayHomePhoto, removeStayPhotoRoom, reorderStayHomePhotos, importStayNights, quoteStay, resumeImportedStay, setStayNights, stayCheckoutPolicy, updateStay, updateStayHome, updateStayHomeAccessibility, updateStayPhotoRoom, type GuestStay, type StayAccess } from '../../server/domain/stays.ts'
 import { readBusinessProgressReference } from '../../server/utils/business-outcomes.ts'
 import { dismissOpportunity, listOpportunities } from '../../server/domain/opportunities.ts'
 import { listTasks, parseTaskListQuery, taskViewer } from '../../server/domain/tasks.ts'
@@ -17,9 +17,9 @@ import { writeMemberScheduling } from '../../server/domain/member-scheduling.ts'
 import { isDashboardInvalidation, type DashboardInvalidation } from '../../shared/dashboard-invalidations.ts'
 import { getQuery, H3 } from 'nitro/h3'
 import { createAuth } from '../../server/utils/auth.ts'
-import guestStayRoute from '../../server/api/public/guest-stays/[activityId].get.ts'
-import accountStayRoute from '../../server/api/account/stays/[activityId].get.ts'
-import paymentReturnRoute from '../../server/api/public/payments/[paymentId]/return.post.ts'
+import guestStayRoute from '../../server/api/public/guest-stays/[activity_id].get.ts'
+import accountStayRoute from '../../server/api/account/stays/[activity_id].get.ts'
+import paymentReturnRoute from '../../server/api/public/payments/[payment_id]/return.post.ts'
 import { tokenHash } from '../../server/domain/payments/buyer.ts'
 import { createLocation, updateLocation } from '../../server/utils/location-management.ts'
 import publicLocationsRoute from '../../server/api/public/locations.get.ts'
@@ -36,15 +36,17 @@ import { listOrganizationReviews } from '../../server/utils/organization-reviews
 import { loadPublicSocialMedia } from '../../server/utils/public-social-image.ts'
 import { arrangeProductPhotos, attachMediaPlacement, removeMediaPlacement, setSingleMediaPlacement } from '../../server/utils/media-placement.ts'
 import { deleteMediaAsset, getMediaAsset } from '../../server/utils/media-asset-manager.ts'
-import { assertAssignedBookingAccess, listOrganizationNotificationMembers, memberAccessPrincipal, resolveMembership, resolveOrganizationMembership } from '../../server/utils/member-access.ts'
+import { listOrganizationNotificationMembers, memberAccessPrincipal, resolveMembership, resolveOrganizationMembership } from '../../server/utils/member-access.ts'
+import { assertConversationAccess } from '../../server/domain/conversations.ts'
 import { listScheduledGuestMessages, saveMessageTemplate } from '../../server/domain/guest-messaging.ts'
 import { handleStaysTools, STAYS_TOOLS } from '../../server/utils/mcp-tools/stays.ts'
+import { BOOKINGS_TOOLS, handleBookingsTools } from '../../server/utils/mcp-tools/bookings.ts'
 import type { McpOrganizationContext } from '../../server/utils/mcp-auth.ts'
 import Ajv from 'ajv'
 import { stayPhotoRoomName, type StayPhotoRoom } from '../../shared/stay-photos.ts'
 import { STAY_HOME_ACCESSIBILITY_FEATURES } from '../../shared/stay-accessibility.ts'
 import { hashPassword } from 'better-auth/crypto'
-import editNightsRoute from '../../server/api/dashboard/stay-homes/[productId]/nights.put.ts'
+import editNightsRoute from '../../server/api/dashboard/stay-homes/[product_id]/nights.put.ts'
 import { buyStay } from './support/stay-checkout.ts'
 
 const ORG = 'org'
@@ -74,8 +76,6 @@ async function boot() {
       await db.prepare("INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, ?, ?, 1, 0, 0)").bind(id, id, `${id}@example.test`).run()
       await db.prepare('INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES (?, ?, ?, ?, 0)').bind(`m-${id}`, ORG, id, role).run()
     }
-    await db.prepare("INSERT INTO team (id, name, organizationId, createdAt) VALUES ('cleaning', 'Cleaning', ?, 0)").bind(ORG).run()
-    await db.prepare("INSERT INTO teamMember (id, teamId, userId, createdAt) VALUES ('tm-cleaner', 'cleaning', ?, 0)").bind(CLEANER).run()
     for (const loc of ['cabin-site', 'lake-site']) {
       await db.prepare(`INSERT INTO business_locations (id, organization_id, slug, title, status, timezone, created_at, updated_at)
         VALUES (?, ?, ?, ?, 'active', 'America/Denver', ?, ?)`).bind(loc, ORG, loc, loc, NOW, NOW).run()
@@ -87,11 +87,11 @@ async function boot() {
   }
 }
 
-async function home(db: D1Database, env: CloudflareEnv, input: { name: string; location: string; team?: string }) {
+async function home(db: D1Database, env: CloudflareEnv, input: { name: string; location: string; member?: string }) {
   return createProduct(db, { env, organizationId: ORG, actor: { actorId: OWNER }, product: {
     kind: 'stay', name: input.name,
     variants: [{ name: input.name, prices: [{ unit_amount: 15_000, currency: 'USD' }] }],
-    stay: { location_id: input.location, check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 2, assigned_member_id: null, assigned_team_id: input.team ?? null },
+    stay: { location_id: input.location, check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 2, assigned_member_id: input.member ?? `m-${OWNER}` },
   } })
 }
 
@@ -112,23 +112,24 @@ test('committed stays report publication failures and idempotent retries publish
       return value as DashboardInvalidation[]
     }
     const homeEvents = await events()
-    assert.deepEqual(homeEvents.map(event => ({ type: event.type, ...('stayId' in event ? { productId: event.productId, stayId: event.stayId, locationId: event.locationId } : {}) })), [
-      { type: 'stay.changed', productId: cabin.id, stayId: null, locationId: 'cabin-site' },
-      { type: 'nights.changed', productId: cabin.id, stayId: null, locationId: 'cabin-site' },
+    assert.deepEqual(homeEvents.map(event => ({ type: event.type, ...('booking_id' in event ? { product_id: event.product_id, booking_id: event.booking_id, location_id: event.location_id } : {}) })), [
+      { type: 'stay.changed', product_id: cabin.id, booking_id: null, location_id: 'cabin-site' },
+      { type: 'nights.changed', product_id: cabin.id, booking_id: null, location_id: 'cabin-site' },
     ])
     await hub.fetch('https://inbox.test/failure', { method: 'PUT' })
     const input = { product_id: cabin.id, idempotency_key: 'publish-stay', check_in_date: '2027-05-01', check_out_date: '2027-05-03', ...guest }
     await assert.rejects(createStay(db, env, manager, input), (error: { status?: number; data?: Record<string, unknown> }) =>
-      error.status === 503 && error.data?.code === 'DASHBOARD_PUBLICATION_FAILED' && error.data.committed === true && error.data.version === 1 && typeof error.data.stay_id === 'string')
-    const persisted = await db.prepare('SELECT id, version FROM stays WHERE idempotency_key = ?').bind(input.idempotency_key).first<{ id: string; version: number }>()
+      error.status === 503 && error.data?.code === 'DASHBOARD_PUBLICATION_FAILED' && error.data.committed === true && error.data.version === 1 && typeof error.data.booking_id === 'string')
+    const persisted = await db.prepare('SELECT id, version FROM bookings WHERE idempotency_key = ?').bind(input.idempotency_key).first<{ id: string; version: number }>()
     assert(persisted)
-    assert.equal(await db.prepare('SELECT count(*) FROM stay_nights WHERE stay_id = ?').bind(persisted.id).first('count(*)'), 2)
+    assert.equal(await db.prepare('SELECT count(*) FROM stay_nights WHERE booking_id = ?').bind(persisted.id).first('count(*)'), 2)
     await hub.fetch('https://inbox.test/failure', { method: 'DELETE' })
     const replay = await createStay(db, env, manager, input)
     assert.deepEqual({ id: replay.id, version: replay.version }, persisted)
-    assert.equal(await db.prepare('SELECT count(*) FROM stays WHERE idempotency_key = ?').bind(input.idempotency_key).first('count(*)'), 1)
-    assert.deepEqual((await events()).slice(-2).map(event => ({ type: event.type, ...('stayId' in event ? { stayId: event.stayId, productId: event.productId } : {}) })), [
-      { type: 'stay.changed', stayId: replay.id, productId: cabin.id }, { type: 'nights.changed', stayId: replay.id, productId: cabin.id },
+    assert.equal(await db.prepare('SELECT count(*) FROM bookings WHERE idempotency_key = ?').bind(input.idempotency_key).first('count(*)'), 1)
+    // Every stay has its conversation, which hears the change after the stay's own screens.
+    assert.deepEqual((await events()).slice(-3).map(event => ({ type: event.type, ...('booking_id' in event ? { booking_id: event.booking_id, product_id: event.product_id } : {}) })), [
+      { type: 'stay.changed', booking_id: replay.id, product_id: cabin.id }, { type: 'nights.changed', booking_id: replay.id, product_id: cabin.id }, { type: 'MESSAGE_UPDATE' },
     ])
 
     await hub.fetch('https://inbox.test/failure', { method: 'PUT' })
@@ -137,14 +138,14 @@ test('committed stays report publication failures and idempotent retries publish
     assert.equal((await getStay(db, manager, replay.id)).paid_minor, 10_000)
     await hub.fetch('https://inbox.test/failure', { method: 'DELETE' })
     assert.equal((await recordStayPayment(db, env, manager, replay.id, payment)).stay.paid_minor, 10_000)
-    assert.equal(await db.prepare('SELECT count(*) FROM stay_payments WHERE stay_id = ?').bind(replay.id).first('count(*)'), 1)
+    assert.equal(await db.prepare('SELECT count(*) FROM offline_payments WHERE booking_id = ?').bind(replay.id).first('count(*)'), 1)
 
     // A saved versioned edit reports its real version; its stale retry never writes again.
     await hub.fetch('https://inbox.test/failure', { method: 'PUT' })
-    await assert.rejects(updateStay(db, env, manager, replay.id, { expected_version: 1, guest_name: 'Ana Recorded' }),
+    await assert.rejects(updateStay(db, env, manager, replay.id, { version: 1, guest_name: 'Ana Recorded' }),
       (error: { data?: Record<string, unknown> }) => error.data?.code === 'DASHBOARD_PUBLICATION_FAILED' && error.data.committed === true && error.data.version === 2)
     await hub.fetch('https://inbox.test/failure', { method: 'DELETE' })
-    await assert.rejects(updateStay(db, env, manager, replay.id, { expected_version: 1, guest_name: 'Ana Recorded' }), code('STAY_VERSION_CONFLICT'))
+    await assert.rejects(updateStay(db, env, manager, replay.id, { version: 1, guest_name: 'Ana Recorded' }), code('STAY_VERSION_CONFLICT'))
     assert.deepEqual({ name: (await getStay(db, manager, replay.id)).guest_name, version: (await getStay(db, manager, replay.id)).version }, { name: 'Ana Recorded', version: 2 })
 
     const booking = { provider: 'channex' as const, external_booking_id: 'live-channel-booking', channel_booking_id: null, channel: 'airbnb' as const,
@@ -156,13 +157,14 @@ test('committed stays report publication failures and idempotent retries publish
     const channel = await applyChannelBooking(db, env, ORG, cabin.id, booking)
     assert.equal(channel.applied, false)
     assert.equal(channel.version, 1)
-    assert.equal(await db.prepare('SELECT count(*) FROM stays WHERE external_booking_id = ?').bind(booking.external_booking_id).first('count(*)'), 1)
+    assert.equal(await db.prepare('SELECT count(*) FROM bookings WHERE external_booking_id = ?').bind(booking.external_booking_id).first('count(*)'), 1)
     const published = await events()
-    assert.deepEqual(published.slice(-2).map(event => ({ type: event.type, ...('stayId' in event ? { stayId: event.stayId, productId: event.productId, locationId: event.locationId } : {}) })), [
-      { type: 'stay.changed', stayId: channel.id, productId: cabin.id, locationId: 'cabin-site' },
-      { type: 'nights.changed', stayId: channel.id, productId: cabin.id, locationId: 'cabin-site' },
+    assert.deepEqual(published.slice(-3).map(event => ({ type: event.type, ...('booking_id' in event ? { booking_id: event.booking_id, product_id: event.product_id, location_id: event.location_id } : {}) })), [
+      { type: 'stay.changed', booking_id: channel.id, product_id: cabin.id, location_id: 'cabin-site' },
+      { type: 'nights.changed', booking_id: channel.id, product_id: cabin.id, location_id: 'cabin-site' },
+      { type: 'MESSAGE_UPDATE' },
     ])
-    assert.equal(new Set(published.map(event => event.eventId)).size, published.length)
+    assert.equal(new Set(published.map(event => event.event_id)).size, published.length)
   } finally {
     await runtime.dispose()
   }
@@ -206,11 +208,13 @@ test('a moved channel revision repairs its audited home scopes without rewriting
     const replay = await applyChannelBooking(db, env, ORG, lake.id, moved)
     assert.equal(replay.applied, false)
     assert.deepEqual([replay.version, replay.updated_at], [committed.version, committed.updated_at])
-    assert.deepEqual((await events()).slice(beforeRepair).map(event => ({ type: event.type, ...('productId' in event ? { productId: event.productId, locationId: event.locationId, stayId: event.stayId } : {}) })), [
-      { type: 'stay.changed', productId: cabin.id, locationId: 'cabin-site', stayId: first.id },
-      { type: 'nights.changed', productId: cabin.id, locationId: 'cabin-site', stayId: first.id },
-      { type: 'stay.changed', productId: lake.id, locationId: 'lake-site', stayId: first.id },
-      { type: 'nights.changed', productId: lake.id, locationId: 'lake-site', stayId: first.id },
+    assert.deepEqual((await events()).slice(beforeRepair).map(event => ({ type: event.type, ...('product_id' in event ? { product_id: event.product_id, location_id: event.location_id, booking_id: event.booking_id } : {}) })), [
+      { type: 'stay.changed', product_id: cabin.id, location_id: 'cabin-site', booking_id: first.id },
+      { type: 'nights.changed', product_id: cabin.id, location_id: 'cabin-site', booking_id: first.id },
+      { type: 'stay.changed', product_id: lake.id, location_id: 'lake-site', booking_id: first.id },
+      { type: 'nights.changed', product_id: lake.id, location_id: 'lake-site', booking_id: first.id },
+      // The reservation's conversation, which every channel stay has from its first revision.
+      { type: 'MESSAGE_UPDATE' },
     ])
     assert.deepEqual((await audit()).results, appliedAudits.results)
 
@@ -222,7 +226,7 @@ test('a moved channel revision repairs its audited home scopes without rewriting
     const beforeStale = (await events()).length
     const stale = await applyChannelBooking(db, env, ORG, cabin.id, { ...booking, revision_id: 'never-applied', provider_updated_at: '2026-10-16T00:00:00Z' })
     assert.equal(stale.applied, false)
-    assert.deepEqual((await events()).slice(beforeStale).filter(event => 'productId' in event).map(event => event.productId), [lake.id, lake.id])
+    assert.deepEqual((await events()).slice(beforeStale).filter(event => 'product_id' in event).map(event => event.product_id), [lake.id, lake.id])
     assert.deepEqual((await audit()).results, appliedAudits.results)
     assert.equal((await getStay(db, manager, first.id)).updated_at, committed.updated_at)
 
@@ -238,9 +242,9 @@ test('a moved channel revision repairs its audited home scopes without rewriting
     await db.prepare("DELETE FROM activity_entries WHERE organization_id = ? AND json_extract(payload_json, '$.metadata.revision_id') = ?").bind(ORG, moved.revision_id).run()
     await assert.rejects(applyChannelBooking(db, env, ORG, lake.id, moved), code('CHANNEL_REVISION_AUDIT_REQUIRED'))
     assert.equal((await getStay(db, manager, first.id)).version, 2)
-    await db.prepare('UPDATE stays SET revision_id = NULL WHERE id = ?').bind(first.id).run()
+    await db.prepare('UPDATE bookings SET revision_id = NULL WHERE id = ?').bind(first.id).run()
     await assert.rejects(applyChannelBooking(db, env, ORG, lake.id, moved), code('CHANNEL_REVISION_ID_REQUIRED'))
-    await db.prepare('UPDATE stays SET revision_id = ? WHERE id = ?').bind(moved.revision_id, first.id).run()
+    await db.prepare('UPDATE bookings SET revision_id = ? WHERE id = ?').bind(moved.revision_id, first.id).run()
 
     const duplicate = { ...booking, external_booking_id: 'concurrent-channel-booking', revision_id: 'concurrent-revision', check_in_date: '2027-07-01', check_out_date: '2027-07-03' }
     const concurrent = await Promise.all(Array.from({ length: 4 }, () => applyChannelBooking(db, env, ORG, cabin.id, duplicate)))
@@ -266,7 +270,7 @@ test('a moved channel revision repairs its audited home scopes without rewriting
     assert.equal(moveAudits.results.find(row => row.revision === newer.revision_id)!.previous_product, olderApplied ? lake.id : cabin.id)
     assert.equal(winner.version, olderApplied ? 3 : 2)
     assert.equal(winner.product_id, cabin.id)
-    const held = await db.prepare('SELECT product_id, date FROM stay_nights WHERE stay_id = ? ORDER BY date').bind(winner.id).all<{ product_id: string; date: string }>()
+    const held = await db.prepare('SELECT product_id, date FROM stay_nights WHERE booking_id = ? ORDER BY date').bind(winner.id).all<{ product_id: string; date: string }>()
     assert.deepEqual(held.results, [{ product_id: cabin.id, date: '2027-08-01' }, { product_id: cabin.id, date: '2027-08-02' }])
 
     // A move into occupied nights rolls back its first attempt, then lands
@@ -275,8 +279,8 @@ test('a moved channel revision repairs its audited home scopes without rewriting
     const overlapStay = await applyChannelBooking(db, env, ORG, cabin.id, overlapBase)
     const overbooked = await applyChannelBooking(db, env, ORG, lake.id, { ...overlapBase, revision_id: 'overlap-move', provider_updated_at: '2026-10-16T05:00:00Z' })
     assert.deepEqual([overbooked.id, overbooked.product_id, overbooked.overbooked, overbooked.version], [overlapStay.id, lake.id, true, 2])
-    assert.equal(await db.prepare('SELECT count(*) FROM stay_nights WHERE stay_id = ?').bind(overlapStay.id).first('count(*)'), 0)
-    assert.equal(await db.prepare('SELECT count(*) FROM stay_nights WHERE stay_id = ?').bind(first.id).first('count(*)'), 2)
+    assert.equal(await db.prepare('SELECT count(*) FROM stay_nights WHERE booking_id = ?').bind(overlapStay.id).first('count(*)'), 0)
+    assert.equal(await db.prepare('SELECT count(*) FROM stay_nights WHERE booking_id = ?').bind(first.id).first('count(*)'), 2)
   } finally {
     await runtime.dispose()
   }
@@ -286,13 +290,13 @@ test('a place to stay is a Product at exactly one location, priced per night', {
   const { runtime, db, env } = await boot()
   try {
     await assert.rejects(createProduct(db, { env, organizationId: ORG, actor: { actorId: OWNER }, product: { kind: 'stay', name: 'No rules' } }), /needs its location/)
-    await assert.rejects(createProduct(db, { env, organizationId: ORG, actor: { actorId: OWNER }, product: { kind: 'dish', name: 'Soup', stay: { location_id: 'cabin-site', check_in_time: '16:00', check_out_time: '10:00', max_guests: 2, min_nights: 1, assigned_member_id: null, assigned_team_id: null } } }), /Only a place to stay/)
-    const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site', team: 'cleaning' })
+    await assert.rejects(createProduct(db, { env, organizationId: ORG, actor: { actorId: OWNER }, product: { kind: 'dish', name: 'Soup', stay: { location_id: 'cabin-site', check_in_time: '16:00', check_out_time: '10:00', max_guests: 2, min_nights: 1, assigned_member_id: null } } }), /Only a place to stay/)
+    const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site', member: `m-${CLEANER}` })
     assert.equal(cabin.kind, 'stay')
     assert.equal(cabin.unit_label, 'night')
     assert.deepEqual(cabin.stay, { internal_name: 'Cabin', location_id: 'cabin-site', check_in_time: '16:00', check_in_end_time: null, check_out_time: '10:00', max_guests: 4, min_nights: 2, calendar_rules: null,
       property_type_group: null, property_type: null, listing_type: null, total_floors: null, listing_floor: null, year_built: null, property_size: null, property_size_unit: null,
-      bedrooms: null, beds: null, bathrooms: null, amenities: [], amenity_answers: [], cancellation_policy: 'flexible', long_term_cancellation_policy: 'firm', assigned_member_id: null, assigned_team_id: 'cleaning', live: false, photo_rooms: [],
+      bedrooms: null, beds: null, bathrooms: null, amenities: [], amenity_answers: [], cancellation_policy: 'flexible', long_term_cancellation_policy: 'firm', assigned_member_id: `m-${CLEANER}`, live: false, photo_rooms: [],
       accessibility: Object.keys(STAY_HOME_ACCESSIBILITY_FEATURES).map(feature => ({ feature, available: null, photo_ids: [] })),
       questions: [], questions_revision: formQuestionsRevision([]) })
     // Property classification is either one authored pair or fully unknown.
@@ -319,7 +323,7 @@ test('a place to stay is a Product at exactly one location, priced per night', {
     await assert.rejects(updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { order_url: 'https://www.airbnb.com/rooms/1' } }), /takes no external booking link/)
     const edited = await updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { stay: { max_guests: 6 } } })
     // A save that does not name stay settings leaves them as stored, even if they changed meanwhile.
-    await db.prepare('UPDATE product_stay_configs SET min_nights = 5 WHERE product_id = ?').bind(cabin.id).run()
+    await db.prepare('UPDATE product_booking_configs SET min_nights = 5 WHERE product_id = ?').bind(cabin.id).run()
     await updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { name: 'Cliff Cabin' } })
     assert.equal((await getProduct(db, ORG, cabin.id)).stay?.min_nights, 5)
     assert.equal(edited.stay?.max_guests, 6)
@@ -364,7 +368,7 @@ test('a place to stay is a Product at exactly one location, priced per night', {
     assert.equal(afterConcurrentEdits.stay?.check_in_time, '17:00')
     assert.equal(afterConcurrentEdits.stay?.check_out_time, '11:00')
     assert.deepEqual(JSON.parse((await db.prepare('SELECT details_json FROM products WHERE id = ?').bind(cabin.id).first<string>('details_json'))!), combinedRules)
-    assert.deepEqual(await db.prepare('SELECT check_in_time, check_out_time FROM product_stay_configs WHERE product_id = ?').bind(cabin.id).first(), {
+    assert.deepEqual(await db.prepare('SELECT check_in_time, check_out_time FROM product_booking_configs WHERE product_id = ?').bind(cabin.id).first(), {
       check_in_time: '17:00', check_out_time: '11:00',
     })
 
@@ -511,7 +515,7 @@ test('a place to stay is a Product at exactly one location, priced per night', {
     assert.deepEqual(noSmoke.stay!.amenity_answers, [{ code: 'carbon_monoxide_detector', available: false }, { code: 'smoke_detector', available: false }])
     assert.equal(noSmoke.details.smoke_detector_details, undefined)
     assert.deepEqual({ amenities: noSmoke.stay!.photo_rooms[0]!.amenities, version: noSmoke.stay!.photo_rooms[0]!.details_version }, { amenities: [], version: assigned.room.details_version + 1 })
-    assert.deepEqual(JSON.parse((await db.prepare("SELECT values_json FROM resource_localizations WHERE organization_id = ? AND resource_id = ? AND locale = 'th'").bind(ORG, cabin.id).first<string>('values_json'))!), { name: 'บ้าน', details: { house_rules: 'ถอดรองเท้า' } })
+    assert.deepEqual(JSON.parse((await db.prepare("SELECT metadata_json AS values_json FROM content_documents WHERE kind = 'resource' AND organization_id = ? AND resource_id = ? AND locale = 'th'").bind(ORG, cabin.id).first<string>('values_json'))!), { name: 'บ้าน', details: { house_rules: 'ถอดรองเท้า' } })
     await assert.rejects(putResourceLocalization(env, db, { organizationId: ORG, resourceType: 'product', resourceId: cabin.id, locale: 'th', userId: OWNER,
       values: { details: { smoke_detector_details: 'old translation' } } }), (error: unknown) => (error as { status: number }).status === 422)
     // Promotion through a room reuses the same positive fact and cannot revive
@@ -536,10 +540,10 @@ test('a place to stay is a Product at exactly one location, priced per night', {
       assert.equal(error.data.code, 'LOCALIZATION_VALIDATION_FAILED')
     }
     assert.equal((await getProduct(db, ORG, cabin.id)).details.smoke_detector_details, undefined)
-    assert.equal(await db.prepare("SELECT json_extract(values_json, '$.details.smoke_detector_details') AS alarm FROM resource_localizations WHERE organization_id = ? AND resource_id = ? AND locale = 'th'").bind(ORG, cabin.id).first('alarm'), null)
-    const beforeBulkRefusal = await db.prepare("SELECT values_json FROM resource_localizations WHERE organization_id = ? AND resource_id = ? AND locale = 'th'").bind(ORG, cabin.id).first<string>('values_json')
+    assert.equal(await db.prepare("SELECT json_extract(metadata_json, '$.details.smoke_detector_details') AS alarm FROM content_documents WHERE kind = 'resource' AND organization_id = ? AND resource_id = ? AND locale = 'th'").bind(ORG, cabin.id).first('alarm'), null)
+    const beforeBulkRefusal = await db.prepare("SELECT metadata_json AS values_json FROM content_documents WHERE kind = 'resource' AND organization_id = ? AND resource_id = ? AND locale = 'th'").bind(ORG, cabin.id).first<string>('values_json')
     await assert.rejects(replaceResourceLocalizations(env, db, { organizationId: ORG, resourceType: 'product', locale: 'th', userId: OWNER, items: [{ resource_id: cabin.id, values: { name: 'Must not be saved', details: { smoke_detector_details: 'cleared source cannot be translated' } } }] }), { status: 409, data: { code: 'LOCALIZATION_VALIDATION_FAILED', field: 'details' } })
-    assert.equal(await db.prepare("SELECT values_json FROM resource_localizations WHERE organization_id = ? AND resource_id = ? AND locale = 'th'").bind(ORG, cabin.id).first<string>('values_json'), beforeBulkRefusal)
+    assert.equal(await db.prepare("SELECT metadata_json AS values_json FROM content_documents WHERE kind = 'resource' AND organization_id = ? AND resource_id = ? AND locale = 'th'").bind(ORG, cabin.id).first<string>('values_json'), beforeBulkRefusal)
     await updateStayHome(env, db, manager, cabin.id, { amenity_answers: [{ code: 'smoke_detector', available: null }], carbon_monoxide_detector_details: null })
     assert.deepEqual((await readStayHome(db, manager, cabin.id)).amenity_answers, [{ code: 'carbon_monoxide_detector', available: false }])
     assert.deepEqual(JSON.parse((await db.prepare('SELECT amenities FROM product_stay_configs WHERE product_id = ?').bind(cabin.id).first<string>('amenities'))!), [{ code: 'carbon_monoxide_detector', available: false }])
@@ -552,7 +556,7 @@ test('authored photo rooms move photos atomically and follow the listing placeme
   const { runtime, db, env } = await boot()
   try {
     await db.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('room-en', ?, 'en', 1, 'published')").bind(ORG).run()
-    const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site', team: 'cleaning' })
+    const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site', member: `m-${CLEANER}` })
     const lake = await home(db, env, { name: 'Lake house', location: 'lake-site' })
     // A draft home owns its photos before it has a publication row. Withdrawing
     // an already unlisted home preserves that state instead of inventing one.
@@ -796,7 +800,7 @@ test('authored photo rooms move photos atomically and follow the listing placeme
     const libraryEvidence = await updateStayPhotoRoom(db, env, manager, cabin.id, roomA.id, { expected_details_version: existingEvidence.room.details_version, accessibility: { feature: 'wide_doorway', available: true, photo_ids: ['room-evidence'] } })
     assert.deepEqual(libraryEvidence.room.accessibility, [{ feature: 'step_free_access', available: true, photo_ids: ['room-a'] }, { feature: 'wide_doorway', available: true, photo_ids: ['room-evidence'] }])
     assert.deepEqual((await db.prepare('SELECT feature_code, available FROM product_stay_room_accessibility WHERE organization_id = ? AND product_id = ? AND room_id = ? ORDER BY feature_code').bind(ORG, cabin.id, roomA.id).all()).results, [{ feature_code: 'step_free_access', available: 1 }, { feature_code: 'wide_doorway', available: 1 }])
-    assert.deepEqual((await db.prepare('SELECT feature_code, asset_id FROM product_stay_room_accessibility_photos WHERE organization_id = ? AND product_id = ? AND room_id = ? ORDER BY feature_code, asset_id').bind(ORG, cabin.id, roomA.id).all()).results, [{ feature_code: 'step_free_access', asset_id: 'room-a' }, { feature_code: 'wide_doorway', asset_id: 'room-evidence' }])
+    assert.deepEqual((await db.prepare("SELECT slot AS feature_code, asset_id FROM media_placements WHERE organization_id = ? AND owner_type = 'stay_room_accessibility' AND owner_id = ? ORDER BY slot, asset_id").bind(ORG, roomA.id).all()).results, [{ feature_code: 'step_free_access', asset_id: 'room-a' }, { feature_code: 'wide_doorway', asset_id: 'room-evidence' }])
     const accessibleHome = await readStayHome(db, manager, cabin.id)
     assert.deepEqual(accessibleHome.photos.map(photo => photo.id), ['room-a', 'room-b', 'room-c', 'room-evidence'])
     assert.deepEqual(accessibleHome.photo_rooms, [libraryEvidence.room, roomB])
@@ -818,7 +822,7 @@ test('authored photo rooms move photos atomically and follow the listing placeme
         sleeping_arrangements: [{ type: 'queen', count: 1 }], private_attached_bathroom: true, amenities: ['hot_water'],
       }), (error: unknown) => (error as { status: number }).status === 400 && (error as Error).message === message)
       await assert.rejects(updateStayHomeAccessibility(db, env, manager, cabin.id, {
-        expected_updated_at: beforeInvalidEvidence.updated_at, accessibility: { feature: 'home_wide_doorway', available: true, photo_ids: ['room-library', assetId] },
+        updated_at: beforeInvalidEvidence.updated_at, accessibility: { feature: 'home_wide_doorway', available: true, photo_ids: ['room-library', assetId] },
       }), (error: unknown) => (error as { status: number }).status === 400 && (error as Error).message === message)
       assert.deepEqual((await getProduct(db, ORG, cabin.id)).stay, beforeInvalidEvidence.stay)
       assert.deepEqual((await readStayHome(db, manager, cabin.id)).photos.map(photo => photo.id), ['room-a', 'room-b', 'room-c', 'room-evidence'])
@@ -854,7 +858,7 @@ test('authored photo rooms move photos atomically and follow the listing placeme
     assert.deepEqual(clearedStep.room.accessibility, [unansweredAccessibility[0], { feature: 'wide_doorway', available: true, photo_ids: ['room-evidence'] }])
     // The same media boundaries protect listing evidence after the room has
     // released that photo, including the guard before provider storage deletion.
-    const listingEvidence = await updateStayHomeAccessibility(db, env, manager, cabin.id, { expected_updated_at: (await getProduct(db, ORG, cabin.id)).updated_at, accessibility: { feature: 'home_step_free_access', available: true, photo_ids: ['room-a'] } })
+    const listingEvidence = await updateStayHomeAccessibility(db, env, manager, cabin.id, { updated_at: (await getProduct(db, ORG, cabin.id)).updated_at, accessibility: { feature: 'home_step_free_access', available: true, photo_ids: ['room-a'] } })
     const listingPublic = await loadPublicProductApiDetail(env, db, ORG, true, 'cabin-site', cabin.slug)
     assert(listingPublic)
     assert.deepEqual(listingPublic.product.stay!.accessibility, listingEvidence.home.accessibility)
@@ -866,11 +870,11 @@ test('authored photo rooms move photos atomically and follow the listing placeme
       assert.equal((await getMediaAsset(db, 'room-a', ORG))?.status, 'active')
     }
     const listingRace = await Promise.allSettled([true, false].map(available => updateStayHomeAccessibility(db, env, manager, cabin.id, {
-      expected_updated_at: listingEvidence.home.product_updated_at, accessibility: { feature: 'ceiling_hoist', available, photo_ids: available ? ['room-a'] : [] },
+      updated_at: listingEvidence.home.updated_at, accessibility: { feature: 'ceiling_hoist', available, photo_ids: available ? ['room-a'] : [] },
     })))
     assert.equal(listingRace.filter(result => result.status === 'fulfilled').length, 1)
     for (const result of listingRace) if (result.status === 'rejected') { assert.equal(result.reason.status, 409); assert.equal(result.reason.data.code, 'STAY_ACCESSIBILITY_CHANGED') }
-    for (const feature of ['home_step_free_access', 'ceiling_hoist']) await updateStayHomeAccessibility(db, env, manager, cabin.id, { expected_updated_at: (await getProduct(db, ORG, cabin.id)).updated_at, accessibility: { feature, available: null, photo_ids: [] } })
+    for (const feature of ['home_step_free_access', 'ceiling_hoist']) await updateStayHomeAccessibility(db, env, manager, cabin.id, { updated_at: (await getProduct(db, ORG, cabin.id)).updated_at, accessibility: { feature, available: null, photo_ids: [] } })
     await removeStayHomePhoto(db, env, manager, principal, cabin.id, 'room-a')
     await addStayHomePhoto(db, env, manager, principal, cabin.id, { asset_id: 'room-a' })
     await reorderStayHomePhotos(db, env, manager, principal, cabin.id, { photo_ids: ['room-a', 'room-b', 'room-c', 'room-evidence'] })
@@ -883,7 +887,7 @@ test('authored photo rooms move photos atomically and follow the listing placeme
     roomA.details_version = clearedAccessibility.room.details_version
     assert.deepEqual(clearedAccessibility.room, roomA)
     assert.equal(await db.prepare('SELECT count(*) AS n FROM product_stay_room_accessibility WHERE organization_id = ? AND product_id = ? AND room_id = ?').bind(ORG, cabin.id, roomA.id).first('n'), 0)
-    assert.equal(await db.prepare('SELECT count(*) AS n FROM product_stay_room_accessibility_photos WHERE organization_id = ? AND product_id = ? AND room_id = ?').bind(ORG, cabin.id, roomA.id).first('n'), 0)
+    assert.equal(await db.prepare("SELECT count(*) AS n FROM media_placements WHERE organization_id = ? AND owner_type = 'stay_room_accessibility' AND owner_id = ?").bind(ORG, roomA.id).first('n'), 0)
 
     const evidenceRoom = await createStayPhotoRoom(db, env, manager, cabin.id, { type: 'bedroom' })
     await updateStayPhotoRoom(db, env, manager, cabin.id, evidenceRoom.room.id, { expected_details_version: 1, accessibility: { feature: 'step_free_access', available: true, photo_ids: ['room-library'] } })
@@ -929,7 +933,7 @@ test('authored photo rooms move photos atomically and follow the listing placeme
     assert.equal(completed.value.destination_room_id, winner)
     assert.equal(completed.value.created_room_id, null)
     assert.deepEqual(completed.value.moved_photo_ids, ['room-a'])
-    assert.equal(await db.prepare('SELECT room_id FROM product_stay_photo_room_memberships WHERE organization_id = ? AND product_id = ? AND asset_id = ?').bind(ORG, cabin.id, 'room-a').first('room_id'), winner)
+    assert.equal(await db.prepare("SELECT p.owner_id AS room_id FROM media_placements p JOIN product_stay_photo_rooms r ON r.id = p.owner_id AND r.organization_id = p.organization_id WHERE p.organization_id = ? AND p.owner_type = 'stay_photo_room' AND r.product_id = ? AND p.asset_id = ?").bind(ORG, cabin.id, 'room-a').first('room_id'), winner)
     const afterRace = (await getProduct(db, ORG, cabin.id)).stay!.photo_rooms
     assert.deepEqual(afterRace, [roomA, { ...roomB, photo_ids: winner ? ['room-a'] : [] }, { ...roomC, photo_ids: ['room-b', 'room-c'] }])
     await moveStayPhotos(db, env, manager, cabin.id, { room_id: roomC.id, photos: [{ photo_id: 'room-a', expected_room_id: winner }] })
@@ -996,7 +1000,7 @@ test('a stay holds its nights, and a held night refuses another stay even when t
     // The same key replays the same stay; a different stay under it is refused.
     assert.equal((await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'k1', check_in_date: '2026-11-01', check_out_date: '2026-11-04', ...guest })).id, first.id)
     const persistedBeforeRetries = await getStay(db, manager, first.id)
-    for (const patch of [{ adults: 1 }, { children: 1 }, { infants: 1 }, { arrival_time: '18:30' }, { guest_surname: 'Changed' }, { guest_email: 'changed@example.test' }, { guest_phone: '+61491570154' }, { notes: 'Different arrival note' }]) {
+    for (const patch of [{ adults: 1 }, { children: 1 }, { infants: 1 }, { arrival_time: '18:30' }, { guest_name: 'Ana Changed' }, { guest_email: 'changed@example.test' }, { guest_phone: '+61491570154' }, { private_notes: 'Different arrival note' }]) {
       await assert.rejects(createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'k1', check_in_date: '2026-11-01', check_out_date: '2026-11-04', ...guest, ...patch }), code('IDEMPOTENCY_CONFLICT'))
       assert.deepEqual(await getStay(db, manager, first.id), persistedBeforeRetries)
     }
@@ -1025,14 +1029,14 @@ test('editing and cancelling a stay move and free exactly its nights, under its 
     await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'b', check_in_date: '2026-11-10', check_out_date: '2026-11-12', ...guest })
     const beforeEmptyEdit = await getStay(db, manager, stay.id)
     for (const patch of [{}, { guest_name: stay.guest_name }]) {
-      await assert.rejects(updateStay(db, env, manager, stay.id, { expected_version: 1, ...patch }), code('INVALID_STAY_FIELD'))
+      await assert.rejects(updateStay(db, env, manager, stay.id, { version: 1, ...patch }), code('INVALID_STAY_FIELD'))
       assert.deepEqual(await getStay(db, manager, stay.id), beforeEmptyEdit)
     }
-    await assert.rejects(updateStay(db, env, manager, stay.id, { expected_version: 99, check_out_date: '2026-11-04' }), code('STAY_VERSION_CONFLICT'))
-    await assert.rejects(updateStay(db, env, manager, stay.id, { expected_version: 1, check_in_date: '2026-11-09', check_out_date: '2026-11-11' }), code('STAY_OVERLAP'))
+    await assert.rejects(updateStay(db, env, manager, stay.id, { version: 99, check_out_date: '2026-11-04' }), code('STAY_VERSION_CONFLICT'))
+    await assert.rejects(updateStay(db, env, manager, stay.id, { version: 1, check_in_date: '2026-11-09', check_out_date: '2026-11-11' }), code('STAY_OVERLAP'))
     // A refused move leaves the stay and its nights where they were.
-    assert.deepEqual((await readStayCalendar(db, manager, { productId: cabin.id, from: '2026-11-01', to: '2026-11-03' })).nights.map(night => night.stay_id), [stay.id, stay.id])
-    const moved = await updateStay(db, env, manager, stay.id, { expected_version: 1, check_in_date: '2026-11-05', check_out_date: '2026-11-08', guest_phone: '+61491570154' })
+    assert.deepEqual((await readStayCalendar(db, manager, { productId: cabin.id, from: '2026-11-01', to: '2026-11-03' })).nights.map(night => night.booking_id), [stay.id, stay.id])
+    const moved = await updateStay(db, env, manager, stay.id, { version: 1, check_in_date: '2026-11-05', check_out_date: '2026-11-08', guest_phone: '+61491570154' })
     assert.equal(moved.version, 2)
     assert.equal(moved.guest_phone, '+61491570154')
     const calendar = await readStayCalendar(db, manager, { productId: cabin.id, from: '2026-11-01', to: '2026-11-09' })
@@ -1044,20 +1048,22 @@ test('editing and cancelling a stay move and free exactly its nights, under its 
     assert.equal(calendar.nights[0]!.price_minor, 15_000)
     // Two edits from the same version race; whichever wins, the nights held are the winner's.
     const racers = await Promise.allSettled([
-      updateStay(db, env, manager, stay.id, { expected_version: 2, check_in_date: '2026-11-20', check_out_date: '2026-11-22' }),
-      updateStay(db, env, manager, stay.id, { expected_version: 2, check_in_date: '2026-11-25', check_out_date: '2026-11-28' }),
+      updateStay(db, env, manager, stay.id, { version: 2, check_in_date: '2026-11-20', check_out_date: '2026-11-22' }),
+      updateStay(db, env, manager, stay.id, { version: 2, check_in_date: '2026-11-25', check_out_date: '2026-11-28' }),
     ])
     assert.equal(racers.filter(result => result.status === 'fulfilled').length, 1)
     const winner = await getStay(db, manager, stay.id)
-    const held = await db.prepare('SELECT date FROM stay_nights WHERE stay_id = ? ORDER BY date').bind(stay.id).all<{ date: string }>()
+    const held = await db.prepare('SELECT date FROM stay_nights WHERE booking_id = ? ORDER BY date').bind(stay.id).all<{ date: string }>()
     const expected: string[] = []
     for (let day = Date.parse(`${winner.check_in_date}T00:00:00Z`); day < Date.parse(`${winner.check_out_date}T00:00:00Z`); day += 86_400_000) expected.push(new Date(day).toISOString().slice(0, 10))
     assert.deepEqual(held.results.map(row => row.date), expected)
-    const cancelled = await cancelStay(db, env, manager, stay.id, { expected_version: 3, reason: 'Guest changed plans' })
+    const cancelled = await cancelStay(db, env, manager, stay.id, { version: 3, reason: 'Guest changed plans' })
     assert.equal(cancelled.status, 'cancelled')
     assert.ok(cancelled.cancelled_at)
-    assert(((await readStayCalendar(db, manager, { productId: cabin.id, from: '2026-11-05', to: '2026-11-30' })).nights).every(night => night.stay_id !== stay.id))
-    await assert.rejects(updateStay(db, env, manager, stay.id, { expected_version: 4, adults: 1 }), code('STAY_NOT_EDITABLE'))
+    const afterCancellation = await readStayCalendar(db, manager, { productId: cabin.id, from: '2026-11-05', to: '2026-11-30' })
+    assert.equal(afterCancellation.nights.length, 25)
+    assert(afterCancellation.nights.every(night => night.booking_id !== stay.id))
+    await assert.rejects(updateStay(db, env, manager, stay.id, { version: 4, adults: 1 }), code('STAY_NOT_EDITABLE'))
     assert.deepEqual((await listStays(db, manager, { from: '2026-11-01', to: '2026-12-01' })).map(row => row.id).includes(stay.id), false)
     assert.equal((await listStays(db, manager, { from: '2026-11-01', to: '2026-12-01', includeCancelled: true })).some(row => row.id === stay.id), true)
     const audit = await db.prepare("SELECT event_name FROM activity_entries WHERE organization_id = ? AND event_name LIKE 'stay.%' ORDER BY occurred_at, event_name").bind(ORG).all<{ event_name: string }>()
@@ -1071,24 +1077,26 @@ test('a channel stay is read-only here and is paid through its channel; an app s
   const { runtime, db, env } = await boot()
   try {
     const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site' })
-    await db.prepare(`INSERT INTO stays (id, organization_id, product_id, channel, owner, status, check_in_date, check_out_date, adults, guest_name, total_minor, currency, provider, external_booking_id, channel_booking_id, created_at, updated_at)
-      VALUES ('airbnb-1', ?, ?, 'airbnb', 'channel', 'confirmed', '2026-11-20', '2026-11-22', 2, 'Bo', 30000, 'USD', 'channex', 'chx-1', 'HMBO1234', ?, ?)`).bind(ORG, cabin.id, NOW, NOW).run()
+    // The channel's reservation lands through its revision feed, as every channel stay does.
+    const { id: channelStayId } = await applyChannelBooking(db, env, ORG, cabin.id, { provider: 'channex', external_booking_id: 'chx-1', channel_booking_id: 'HMBO1234', channel: 'airbnb',
+      revision_id: 'chx-1-revision', provider_updated_at: NOW, cancelled: false, check_in_date: '2026-11-20', check_out_date: '2026-11-22', adults: 2, children: 0, infants: 0,
+      guest_name: 'Bo', guest_surname: null, guest_email: null, guest_phone: null, total_minor: 30_000, currency: 'USD', imported: false })
     // The refusal links to the reservation on Airbnb, read from the confirmation code Channex sent.
     const airbnb = 'https://www.airbnb.com/hosting/reservations/details/HMBO1234'
     const onAirbnb = (message: string) => (error: unknown) => code('STAY_NOT_EDITABLE')(error)
       && (error as { data: { channel_booking_url: unknown } }).data.channel_booking_url === airbnb && (error as Error).message === message
-    await assert.rejects(updateStay(db, env, manager, 'airbnb-1', { expected_version: 1, adults: 1 }), onAirbnb(`This stay belongs to Airbnb; change it there: ${airbnb}`))
-    await assert.rejects(cancelStay(db, env, manager, 'airbnb-1', { expected_version: 1 }), onAirbnb(`This stay belongs to Airbnb; change it there: ${airbnb}`))
-    await assert.rejects(recordStayPayment(db, env, manager, 'airbnb-1', { amount_minor: 100, method: 'cash', paid_on: '2026-11-20', idempotency_key: 'pay-1' }), onAirbnb(`This stay is paid through Airbnb; change it there: ${airbnb}`))
-    assert.equal((await getStay(db, manager, 'airbnb-1')).payment_status, null)
-    assert.equal((await getStay(db, manager, 'airbnb-1')).channel_booking_url, airbnb)
+    await assert.rejects(updateStay(db, env, manager, channelStayId, { version: 1, adults: 1 }), onAirbnb(`This stay belongs to Airbnb; change it there: ${airbnb}`))
+    await assert.rejects(cancelStay(db, env, manager, channelStayId, { version: 1 }), onAirbnb(`This stay belongs to Airbnb; change it there: ${airbnb}`))
+    await assert.rejects(recordStayPayment(db, env, manager, channelStayId, { amount_minor: 100, method: 'cash', paid_on: '2026-11-20', idempotency_key: 'pay-1' }), onAirbnb(`This stay is paid through Airbnb; change it there: ${airbnb}`))
+    assert.equal((await getStay(db, manager, channelStayId)).payment_status, null)
+    assert.equal((await getStay(db, manager, channelStayId)).channel_booking_url, airbnb)
 
     const stay = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'p', check_in_date: '2026-11-01', check_out_date: '2026-11-04', ...guest })
     await assert.rejects(recordStayPayment(db, env, manager, stay.id, { amount_minor: 0, method: 'cash', paid_on: '2026-11-01', idempotency_key: 'pay-2' }), code('INVALID_AMOUNT'))
     await assert.rejects(recordStayPayment(db, env, manager, stay.id, { amount_minor: 100, method: 'crypto', paid_on: '2026-11-01', idempotency_key: 'pay-3' }), code('INVALID_STAY_FIELD'))
     const partial = await recordStayPayment(db, env, manager, stay.id, { amount_minor: 20_000, method: 'cash', paid_on: '2026-11-01', reference: 'deposit', idempotency_key: 'pay-4' })
     assert.deepEqual([partial.stay.paid_minor, partial.stay.payment_status, partial.stay.payments.length], [20_000, 'partial', 1])
-    const storedPayment = await db.prepare('SELECT id, amount_minor, reference, note FROM stay_payments WHERE organization_id = ? AND stay_id = ? AND idempotency_key = ?').bind(ORG, stay.id, 'pay-4').first<{ id: string; amount_minor: number; reference: string | null; note: string | null }>()
+    const storedPayment = await db.prepare('SELECT id, amount_minor, reference, note FROM offline_payments WHERE organization_id = ? AND booking_id = ? AND idempotency_key = ?').bind(ORG, stay.id, 'pay-4').first<{ id: string; amount_minor: number; reference: string | null; note: string | null }>()
     assert.deepEqual(storedPayment, { id: partial.payment.id, amount_minor: 20_000, reference: 'deposit', note: null })
     // A retried record is the same payment; the same key for another payment is refused.
     const retried = await recordStayPayment(db, env, manager, stay.id, { amount_minor: 20_000, method: 'cash', paid_on: '2026-11-01', reference: 'deposit', idempotency_key: 'pay-4' })
@@ -1116,11 +1124,11 @@ test('a channel stay is read-only here and is paid through its channel; an app s
       await assert.rejects(createStay(db, env, manager, { ...withPayment, payment }), code('IDEMPOTENCY_CONFLICT'))
       assert.deepEqual((await getStay(db, manager, prepaid.id)).payments, prepaid.payments)
     }
-    assert.equal(await db.prepare('SELECT count(*) FROM stay_payments WHERE stay_id = ?').bind(prepaid.id).first('count(*)'), 1)
+    assert.equal(await db.prepare('SELECT count(*) FROM offline_payments WHERE booking_id = ?').bind(prepaid.id).first('count(*)'), 1)
     // A bad payment stops the whole create: no stay, no nights.
     await assert.rejects(createStay(db, env, manager, { ...withPayment, idempotency_key: 'bad-payment', check_in_date: '2026-12-20', check_out_date: '2026-12-22', payment: { amount_minor: -100, method: 'cash', paid_on: '2026-12-01' } }), { status: 422, data: { code: 'INVALID_AMOUNT', field: 'payment.amount_minor' } })
     await assert.rejects(createStay(db, env, manager, { ...withPayment, idempotency_key: 'bad-method', check_in_date: '2026-12-20', check_out_date: '2026-12-22', payment: { amount_minor: 100, method: 'crypto', paid_on: '2026-12-01' } }), { status: 422, data: { code: 'INVALID_STAY_FIELD', field: 'payment.method' } })
-    assert.equal(await db.prepare("SELECT count(*) FROM stays WHERE idempotency_key IN ('bad-payment', 'bad-method')").first('count(*)'), 0)
+    assert.equal(await db.prepare("SELECT count(*) FROM bookings WHERE idempotency_key IN ('bad-payment', 'bad-method')").first('count(*)'), 0)
   } finally {
     await runtime.dispose()
   }
@@ -1172,6 +1180,10 @@ test('the host sets nights apart from the defaults and resets them', { timeout: 
       weekend_price_minor: 22_000,
     }
     await updateStayHome(env, db, manager, cabin.id, { min_nights: 5, base_price_minor: 17_000, calendar_rules: rules })
+    const weekend = await db.prepare(`SELECT pr.unit_amount, json_type(b.calendar_rules, '$.weekend_price_minor') AS stored_in_rules
+      FROM product_booking_configs b JOIN product_variants v ON v.organization_id = b.organization_id AND v.product_id = b.product_id
+      JOIN prices pr ON pr.organization_id = v.organization_id AND pr.product_variant_id = v.id AND pr.weekend = 1 WHERE b.product_id = ?`).bind(cabin.id).first()
+    assert.deepEqual(weekend, { unit_amount: 22000, stored_in_rules: null })
     await importStayNights(db, env, manager, cabin.id, Array.from({ length: 6 }, (_, offset) => ({
       date: `2026-12-0${offset + 1}`, available: true, price_minor: offset === 2 ? 19_000 : null,
       min_stay_arrival: offset === 2 ? 2 : null, max_stay: null, closed_to_arrival: false, closed_to_departure: false,
@@ -1187,7 +1199,7 @@ test('the host sets nights apart from the defaults and resets them', { timeout: 
     assert.deepEqual((await readStayCalendar(db, manager, policyWindow)).nights.map(night => [night.min_stay_arrival, night.price_minor]), [
       [9, 18_000], [5, 18_000], [2, 19_000], [9, 22_000], [9, 22_000], [9, 18_000],
     ])
-    assert.deepEqual((await db.prepare("SELECT date, min_stay_arrival, price_minor FROM product_nights WHERE product_id = ? AND date >= '2026-12-01' ORDER BY date").bind(cabin.id).all()).results,
+    assert.deepEqual((await db.prepare("SELECT n.date, n.min_stay_arrival, pr.unit_amount AS price_minor FROM product_nights n JOIN product_variants v ON v.organization_id = n.organization_id AND v.product_id = n.product_id LEFT JOIN prices pr ON pr.organization_id = v.organization_id AND pr.product_variant_id = v.id AND pr.stay_date = n.date WHERE n.product_id = ? AND n.date >= '2026-12-01' ORDER BY date").bind(cabin.id).all()).results,
       Array.from({ length: 6 }, (_, offset) => ({ date: `2026-12-0${offset + 1}`, min_stay_arrival: offset === 2 ? 2 : null, price_minor: offset === 2 ? 19_000 : null })))
     const policyHome = await readStayHome(db, manager, cabin.id)
     await assert.rejects(quoteStay(db, ORG, policyHome, { check_in_date: '2026-12-01', check_out_date: '2026-12-06', adults: 1 }), code('STAY_MIN_NIGHTS'))
@@ -1236,7 +1248,7 @@ test('the host changes only the chosen weekdays and moves each night’s own pri
     assert.deepEqual(priced.nights.map(night => [night.date, night.price_minor]), [
       ['2026-11-01', 15_750], ['2026-11-02', 15_000], ['2026-11-03', 15_000], ['2026-11-04', 18_000], ['2026-11-05', 10_499], ['2026-11-06', 15_000], ['2026-11-07', 15_000],
     ])
-    assert.deepEqual((await db.prepare('SELECT date, closed, price_minor, min_stay_arrival FROM product_nights WHERE product_id = ? ORDER BY date').bind(cabin.id).all()).results, [
+    assert.deepEqual((await db.prepare('SELECT n.date, n.closed, pr.unit_amount AS price_minor, n.min_stay_arrival FROM product_nights n JOIN product_variants v ON v.organization_id = n.organization_id AND v.product_id = n.product_id LEFT JOIN prices pr ON pr.organization_id = v.organization_id AND pr.product_variant_id = v.id AND pr.stay_date = n.date WHERE n.product_id = ? ORDER BY n.date').bind(cabin.id).all()).results, [
       { date: '2026-11-01', closed: 0, price_minor: 15_750, min_stay_arrival: null },
       { date: '2026-11-04', closed: 0, price_minor: 18_000, min_stay_arrival: null },
       { date: '2026-11-05', closed: 0, price_minor: 10_499, min_stay_arrival: null },
@@ -1259,7 +1271,7 @@ test('the host changes only the chosen weekdays and moves each night’s own pri
 test('the multi-calendar reads every home the caller looks after, each night as its own home calendar reads it', { timeout: 120_000 }, async () => {
   const { runtime, db, env } = await boot()
   try {
-    const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site', team: 'cleaning' })
+    const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site', member: `m-${CLEANER}` })
     const lake = await home(db, env, { name: 'Lake house', location: 'lake-site' })
     await setStayNights(db, env, manager, { product_id: lake.id, from: '2026-11-02', to: '2026-11-04', price_minor: 22_000, min_stay_arrival: 3 })
     await setStayNights(db, env, manager, { product_id: cabin.id, from: '2026-11-05', to: '2026-11-06', closed: true })
@@ -1273,11 +1285,11 @@ test('the multi-calendar reads every home the caller looks after, each night as 
       assert.deepEqual(entry, { home: own.home, nights: own.nights })
     }
     const cabinNights = all.homes[0]!.nights
-    assert.deepEqual(cabinNights.map(night => [night.date, night.stay_id, night.closed, night.available]), [
+    assert.deepEqual(cabinNights.map(night => [night.date, night.booking_id, night.closed, night.available]), [
       ['2026-11-01', cabinStay.id, false, false], ['2026-11-02', cabinStay.id, false, false], ['2026-11-03', null, false, true], ['2026-11-04', null, false, true],
       ['2026-11-05', null, true, false], ['2026-11-06', null, false, true], ['2026-11-07', null, false, true],
     ])
-    assert.deepEqual(all.homes[1]!.nights.slice(1, 4).map(night => [night.date, night.price_minor, night.min_stay_arrival, night.stay_id]), [
+    assert.deepEqual(all.homes[1]!.nights.slice(1, 4).map(night => [night.date, night.price_minor, night.min_stay_arrival, night.booking_id]), [
       ['2026-11-02', 22_000, 3, null], ['2026-11-03', 22_000, 3, null], ['2026-11-04', 15_000, 2, lakeStay.id],
     ])
     assert.deepEqual(all.stays.map(stay => [stay.id, stay.guest_name, stay.channel, stay.check_in_date, stay.check_out_date]), [
@@ -1306,7 +1318,7 @@ test('gap recommendations follow live listing state, effective night rules and a
     const read = () => readStayGapCandidates(db, manager, window)
     assert.deepEqual(await read(), [], 'a configured draft home is not promoted')
 
-    await writeMemberScheduling({ env, userId: OWNER, organizationId: ORG }, `m-${OWNER}`, { expected_updated_at: null, public_name: 'Cabin host', public_approved: true })
+    await writeMemberScheduling({ env, userId: OWNER, organizationId: ORG }, `m-${OWNER}`, { updated_at: null, public_name: 'Cabin host', public_approved: true })
     await setProductPublication(db, { env, organizationId: ORG, productId: cabin.id, published: true, actor: { actorId: OWNER } })
     const gap = { productId: cabin.id, name: 'Gap cabin', locationId: 'cabin-site', from: '2027-05-03', to: '2027-05-04', nights: 1, bookable: true, restriction: null }
     assert.deepEqual(await read(), [gap], 'the saved one-night override applies despite the 21-night home default')
@@ -1319,7 +1331,7 @@ test('gap recommendations follow live listing state, effective night rules and a
     await setStayNights(db, env, manager, { product_id: cabin.id, from: gap.from, to: gap.to, min_stay_arrival: 1 })
     const filled = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'gap-filled', check_in_date: gap.from, check_out_date: gap.to, ...guest })
     assert.deepEqual(await read(), [], 'a real stay clears the gap on the next read')
-    await cancelStay(db, env, manager, filled.id, { expected_version: filled.version, reason: 'Guest cancelled' })
+    await cancelStay(db, env, manager, filled.id, { version: filled.version, reason: 'Guest cancelled' })
     assert.deepEqual(await read(), [gap], 'cancellation frees the same bounded gap')
 
     // Base-price eligibility is the quote's own rule, even with priced overrides.
@@ -1335,7 +1347,7 @@ test('gap recommendations follow live listing state, effective night rules and a
     assert.ok(membership)
     const principal = memberAccessPrincipal(membership, { env })
     for (const [from, to] of [['invalid', gap.to], ['2027-02-30', gap.to], [gap.from, gap.from], [gap.to, gap.from], ['2027-05-03', '2027-08-03'], ['0000-01-01', '0000-01-02'], ['9999-12-30', '9999-12-31']]) {
-      await assert.rejects(readBusinessProgressReference(db, principal, { operation: 'stay.gap', subjectId: JSON.stringify([cabin.id, from, to]) }), { status: 404, data: { code: 'PROGRESS_SUBJECT_NOT_FOUND', field: 'subjectId' } })
+      await assert.rejects(readBusinessProgressReference(db, principal, { operation: 'stay.gap', subject_id: JSON.stringify([cabin.id, from, to]) }), { status: 404, data: { code: 'PROGRESS_SUBJECT_NOT_FOUND', field: 'subject_id' } })
     }
     // The gap opportunities Today offers the owner, by the subject each one records.
     const gapOpportunities = async () => {
@@ -1376,7 +1388,7 @@ test('unknown home clocks preserve turnover dates without inventing task instant
   const { runtime, db, env } = await boot()
   try {
     t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-10-31T12:00:00.000Z') })
-    const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site', team: 'cleaning' })
+    const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site', member: `m-${CLEANER}` })
     await updateStayHome(env, db, manager, cabin.id, { check_in_time: null, check_out_time: null })
     const first = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'unknown-first', check_in_date: '2026-11-01', check_out_date: '2026-11-03', ...guest })
     const next = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'unknown-next', check_in_date: '2026-11-03', check_out_date: '2026-11-05', ...guest })
@@ -1385,14 +1397,14 @@ test('unknown home clocks preserve turnover dates without inventing task instant
     const before = new Date('2026-11-02T18:00:00.000Z')
     assert.deepEqual((await listTasks(db, viewer, parseTaskListQuery({}), before)).sections, [])
     const upcoming = await listTasks(db, viewer, parseTaskListQuery({ range: 'upcoming' }), before)
-    assert.deepEqual(upcoming.sections.map(section => [section.id, section.tasks.map(task => task.stayId)]), [['2026-11-03', [first.id]], ['2026-11-05', [next.id]]])
+    assert.deepEqual(upcoming.sections.map(section => [section.id, section.tasks.map(task => task.booking_id)]), [['2026-11-03', [first.id]], ['2026-11-05', [next.id]]])
     assert.equal(upcoming.sections[0]!.title, 'Tomorrow')
     const stored = await db.prepare("SELECT starts_at, due_at FROM tasks WHERE dedupe_key = ?").bind(`turnover:${first.id}`).first()
     assert.deepEqual(stored, { starts_at: null, due_at: null })
     const today = await listTasks(db, viewer, parseTaskListQuery({}), new Date('2026-11-03T18:00:00.000Z'))
     const tasks = today.sections.flatMap(section => section.tasks)
     assert.equal(tasks.length, 1)
-    assert.equal(tasks[0]!.stayId, first.id)
+    assert.equal(tasks[0]!.booking_id, first.id)
     assert.equal(tasks[0]!.when, 'Time not set')
     assert.deepEqual(tasks[0]!.sheet, { heading: 'Turnover', title: 'Cabin', date: 'Tue, Nov 3', checkout: { label: 'Checkout', time: 'Time not set', guest: 'Ana' }, checkin: { label: 'Check-in', time: 'Time not set', guest: 'Ana · 2 guests' } })
   } finally {
@@ -1406,7 +1418,7 @@ test('members see only the homes they look after and change nothing; a home with
   try {
     // The stays are booked ahead of their dates, so their turnovers are work rather than history.
     t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-10-31T12:00:00.000Z') })
-    const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site', team: 'cleaning' })
+    const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site', member: `m-${CLEANER}` })
     const lake = await home(db, env, { name: 'Lake house', location: 'lake-site' })
     const cabinStay = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'c', check_in_date: '2026-11-01', check_out_date: '2026-11-03', ...guest })
     const lakeStay = await createStay(db, env, manager, { product_id: lake.id, idempotency_key: 'l', check_in_date: '2026-11-01', check_out_date: '2026-11-03', ...guest })
@@ -1416,23 +1428,23 @@ test('members see only the homes they look after and change nothing; a home with
     const ownerToday = (now: string) => listTodayAgenda(db, { organizationId: ORG }, { principal: { env, membership: ownerMembership }, organizationSlug: 'org' }, new Date(now))
     const cleanerToday = (now: string) => listTodayAgenda(db, { organizationId: ORG }, { principal: { env, membership: cleanerMembership }, organizationSlug: 'org' }, new Date(now))
     const hosting = await ownerToday('2026-11-02T18:00:00.000Z')
-    assert.deepEqual(hosting.items.map(item => [item.stayId, item.stayMoment]).sort(), [[cabinStay.id, 'current'], [lakeStay.id, 'current']].sort())
+    assert.deepEqual(hosting.items.map(item => [item.booking_id, item.stay_moment]).sort(), [[cabinStay.id, 'current'], [lakeStay.id, 'current']].sort())
     assert.equal((await cleanerToday('2026-11-02T18:00:00.000Z')).items.length, 0)
     for (const [now, moment] of [['2026-11-01T18:00:00.000Z', 'arrival'], ['2026-11-03T18:00:00.000Z', 'departure']] as const) {
-      assert.deepEqual((await ownerToday(now)).items.map(item => item.stayMoment), [moment, moment])
-      assert.deepEqual((await cleanerToday(now)).items.map(item => [item.stayId, item.stayMoment]), [[cabinStay.id, moment]])
+      assert.deepEqual((await ownerToday(now)).items.map(item => item.stay_moment), [moment, moment])
+      assert.deepEqual((await cleanerToday(now)).items.map(item => [item.booking_id, item.stay_moment]), [[cabinStay.id, moment]])
     }
     // The cleaner's Today is the turnover tasks at the homes they look after.
     const cleanerTasks = async (now: string) => (await listTasks(db, await taskViewer(db, memberAccessPrincipal(cleanerMembership!, { env })), parseTaskListQuery({}), new Date(now)))
-      .sections.flatMap(section => section.tasks).map(task => [task.kind, task.stayId, task.detail])
+      .sections.flatMap(section => section.tasks).map(task => [task.kind, task.booking_id, task.detail])
     assert.deepEqual(await cleanerTasks('2026-11-03T18:00:00.000Z'), [['turnover', cabinStay.id, 'Ana out']])
     const next = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'next', check_in_date: '2026-11-03', check_out_date: '2026-11-05', ...guest })
     const turnover = await cleanerToday('2026-11-03T18:00:00.000Z')
-    const departure = turnover.items.find(item => item.stayId === cabinStay.id)!
-    assert.equal(departure.stayMoment, 'turnover')
+    const departure = turnover.items.find(item => item.booking_id === cabinStay.id)!
+    assert.equal(departure.stay_moment, 'turnover')
     assert.deepEqual(await cleanerTasks('2026-11-03T18:00:00.000Z'), [['turnover', cabinStay.id, 'Ana out · Ana in']])
-    await cancelStay(db, env, manager, next.id, { expected_version: next.version })
-    assert.equal((await cleanerToday('2026-11-03T18:00:00.000Z')).items.find(item => item.stayId === cabinStay.id)!.stayMoment, 'departure')
+    await cancelStay(db, env, manager, next.id, { version: next.version })
+    assert.equal((await cleanerToday('2026-11-03T18:00:00.000Z')).items.find(item => item.booking_id === cabinStay.id)!.stay_moment, 'departure')
     assert.deepEqual(await cleanerTasks('2026-11-03T18:00:00.000Z'), [['turnover', cabinStay.id, 'Ana out']])
     assert.deepEqual((await listStays(db, cleaner, { from: '2026-11-01', to: '2026-11-30' })).map(stay => stay.id), [cabinStay.id])
     assert.deepEqual(await listStays(db, outsider, { from: '2026-11-01', to: '2026-11-30' }), [])
@@ -1440,7 +1452,7 @@ test('members see only the homes they look after and change nothing; a home with
     await assert.rejects(getStay(db, cleaner, lakeStay.id), code('STAY_NOT_FOUND'))
     await assert.rejects(readStayCalendar(db, cleaner, { productId: lake.id, from: '2026-11-01', to: '2026-11-03' }), code('HOME_NOT_FOUND'))
     await assert.rejects(createStay(db, env, cleaner, { product_id: cabin.id, idempotency_key: 'x', check_in_date: '2026-11-10', check_out_date: '2026-11-12', ...guest }), code('STAY_ROLE_REQUIRED'))
-    await assert.rejects(cancelStay(db, env, cleaner, cabinStay.id, { expected_version: 1 }), code('STAY_ROLE_REQUIRED'))
+    await assert.rejects(cancelStay(db, env, cleaner, cabinStay.id, { version: 1 }), code('STAY_ROLE_REQUIRED'))
     await assert.rejects(deleteProduct(db, { env, organizationId: ORG, productId: cabin.id }), /has bookings or stays/)
     assert.equal((await getProduct(db, ORG, cabin.id)).id, cabin.id)
   } finally {
@@ -1452,13 +1464,14 @@ test('members see only the homes they look after and change nothing; a home with
 test('a member reads a stay at a home they look after as its turnover on every read path, and nothing of its guest, money or conversation', { timeout: 120_000 }, async () => {
   const { runtime, db, env } = await boot()
   try {
-    const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site', team: 'cleaning' })
+    const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site', member: `m-${CLEANER}` })
     const stay = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'turnover', check_in_date: '2026-11-01', check_out_date: '2026-11-03', arrival_time: '15:30',
-      adults: 2, children: 1, infants: 1, guest_name: 'Ana', guest_surname: 'Silva', guest_email: 'ana@example.test', notes: 'Door code 4411', total_minor: 45_000 })
+      adults: 2, children: 1, infants: 1, guest_name: 'Ana Silva', guest_email: 'ana@example.test', private_notes: 'Door code 4411', total_minor: 45_000 })
     await recordStayPayment(db, env, manager, stay.id, { amount_minor: 20_000, method: 'cash', paid_on: '2026-11-01', idempotency_key: 'turnover-pay' })
-    assert(stay.request_id)
-    const turnover = { id: stay.id, product_id: cabin.id, location_id: 'cabin-site', timezone: 'America/Denver', status: 'confirmed', check_in_date: '2026-11-01', check_out_date: '2026-11-03',
-      arrival_time: '15:30', adults: 2, children: 1, infants: 1, guest_name: 'Ana', no_show_at: null }
+    assert(stay.conversation_id)
+    // The recorded arrival is the stay's start; it leaves at the home's 10:00 checkout.
+    const turnover = { id: stay.id, product_id: cabin.id, location_id: 'cabin-site', timezone: 'America/Denver', status: 'confirmed', starts_at: '2026-11-01T22:30:00.000Z', ends_at: '2026-11-03T17:00:00.000Z',
+      check_in_date: '2026-11-01', check_out_date: '2026-11-03', adults: 2, children: 1, infants: 1, guest_name: 'Ana', no_show_at: null }
     const window = { from: '2026-11-01', to: '2026-11-04' }
 
     assert.deepEqual(await getStay(db, cleaner, stay.id), turnover)
@@ -1467,8 +1480,8 @@ test('a member reads a stay at a home they look after as its turnover on every r
     assert.deepEqual((await readStayCalendars(db, cleaner, window)).stays, [turnover])
     // Owners and admins read the whole stay, unchanged.
     const whole = await getStay(db, manager, stay.id)
-    assert.deepEqual([whole.guest_surname, whole.guest_email, whole.notes, whole.total_minor, whole.paid_minor, whole.payments.length, whole.request_id], ['Silva', 'ana@example.test', 'Door code 4411', 45_000, 20_000, 1, stay.request_id])
-    assert.equal((await listStays(db, manager, window))[0]!.guest_surname, 'Silva')
+    assert.deepEqual([whole.guest_name, whole.guest_email, whole.private_notes, whole.total_minor, whole.paid_minor, whole.payments.length, whole.conversation_id], ['Ana Silva', 'ana@example.test', 'Door code 4411', 45_000, 20_000, 1, stay.conversation_id])
+    assert.equal((await listStays(db, manager, window))[0]!.guest_name, 'Ana Silva')
     // A site checkout saves the guest's whole name in guest_name; the member still reads the first name.
     const wholeName = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'whole-name', check_in_date: '2026-11-05', check_out_date: '2026-11-07', adults: 1, guest_name: '  Bo   Lee ', total_minor: 30_000 })
     assert.equal((await getStay(db, cleaner, wholeName.id)).guest_name, 'Bo')
@@ -1478,42 +1491,50 @@ test('a member reads a stay at a home they look after as its turnover on every r
     await assert.rejects(getStay(db, outsider, stay.id), code('STAY_NOT_FOUND'))
 
     for (const change of [
-      () => updateStay(db, env, cleaner, stay.id, { expected_version: stay.version, adults: 1 }),
-      () => cancelStay(db, env, cleaner, stay.id, { expected_version: stay.version }),
+      () => updateStay(db, env, cleaner, stay.id, { version: stay.version, adults: 1 }),
+      () => cancelStay(db, env, cleaner, stay.id, { version: stay.version }),
       () => recordStayPayment(db, env, cleaner, stay.id, { amount_minor: 100, method: 'cash', paid_on: '2026-11-01', idempotency_key: 'member-pay' }),
       () => deleteStayPayment(db, env, cleaner, stay.id, whole.payments[0]!.id),
       () => setStayNights(db, env, cleaner, { product_id: cabin.id, from: '2026-11-10', to: '2026-11-11', closed: true }),
     ]) await assert.rejects(change(), { status: 403, data: { code: 'STAY_ROLE_REQUIRED' } })
     assert.deepEqual(await getStay(db, manager, stay.id), whole)
-    await assert.rejects(listScheduledGuestMessages(db, cleaner, { limit: 20, offset: 0 }, null), { status: 403, data: { code: 'MESSAGING_ROLE_REQUIRED', field: 'permissions.operations.update' } })
+    // The outbox shows a member only their own replies: none of the business's automatic messages the manager reads.
+    await saveMessageTemplate(db, env, manager, null, { title: 'After your stay', body: 'Thanks for staying.', schedule: { trigger: 'check_out', offset_days: 1, local_time: '10:00', product_ids: [cabin.id] } })
+    const managerOutbox = await listScheduledGuestMessages(db, manager, { limit: 20, offset: 0 }, null)
+    assert.ok(managerOutbox.messages.some(message => message.booking_id === stay.id && message.author_user_id === null))
+    assert.deepEqual((await listScheduledGuestMessages(db, cleaner, { limit: 20, offset: 0 }, null)).messages, [])
 
     // The stay's guest conversation is not the member's, and its alerts do not reach them.
     const [ownerMembership, cleanerMembership] = await Promise.all([OWNER, CLEANER].map(userId => resolveOrganizationMembership(env, { organizationId: ORG, userId })))
     assert(ownerMembership && cleanerMembership)
-    await assert.rejects(assertAssignedBookingAccess(db, { ...memberAccessPrincipal(cleanerMembership, { env }), requestId: stay.request_id }), { status: 404, data: { code: 'THREAD_NOT_FOUND', field: 'threadId' } })
-    await assertAssignedBookingAccess(db, { ...memberAccessPrincipal(ownerMembership, { env }), requestId: stay.request_id })
-    assert.deepEqual((await listOrganizationNotificationMembers(env, ORG, { requestId: stay.request_id })).map(member => member.userId), [OWNER])
+    await assert.rejects(assertConversationAccess(db, memberAccessPrincipal(cleanerMembership, { env }), stay.conversation_id), { status: 404, data: { code: 'THREAD_NOT_FOUND', field: 'conversation_id' } })
+    await assertConversationAccess(db, memberAccessPrincipal(ownerMembership, { env }), stay.conversation_id)
+    assert.deepEqual((await listOrganizationNotificationMembers(env, ORG, { requestId: stay.conversation_id })).map(member => member.userId), [OWNER])
 
     // Today names the guest by first name for the member and in full for the owner.
     const today = (membership: typeof ownerMembership) => listTodayAgenda(db, { organizationId: ORG }, { principal: { env, membership }, organizationSlug: 'org' }, new Date('2026-11-01T18:00:00.000Z'))
-    assert.deepEqual((await today(cleanerMembership)).items.map(item => [item.stayId, item.title]), [[stay.id, 'Ana']])
-    assert.deepEqual((await today(ownerMembership)).items.map(item => [item.stayId, item.title]), [[stay.id, 'Ana Silva']])
+    assert.deepEqual((await today(cleanerMembership)).items.map(item => [item.booking_id, item.title]), [[stay.id, 'Ana']])
+    assert.deepEqual((await today(ownerMembership)).items.map(item => [item.booking_id, item.title]), [[stay.id, 'Ana Silva']])
 
     // MCP returns the same projection, and each tool's output schema admits both views.
     const ajv = new Ajv({ strict: false })
     const mcp = async (membership: typeof ownerMembership, role: McpOrganizationContext['role'], toolName: string, args: Record<string, unknown>) => {
       const organization: McpOrganizationContext = { env, db, userId: membership.userId, isPlatformAdmin: false, scopes: ['organization:read'], organizationId: ORG, organizationSlug: 'org', role, membership }
-      const result = await handleStaysTools({ organization, toolName, args })
-      const schema = STAYS_TOOLS.find(tool => tool.name === toolName)!.outputSchema
+      // A stay is read through the booking tools; only its nights are the stays tools'.
+      const booking = BOOKINGS_TOOLS.some(tool => tool.name === toolName)
+      const result = await (booking ? handleBookingsTools : handleStaysTools)({ organization, toolName, args })
+      const schema = [...BOOKINGS_TOOLS, ...STAYS_TOOLS].find(tool => tool.name === toolName)!.outputSchema
       assert(ajv.validate(schema, result), `${toolName} output: ${ajv.errorsText()}`)
       return result as Record<string, unknown>
     }
-    assert.deepEqual(await mcp(cleanerMembership, 'member', 'get_stay', { stay_id: stay.id }), { stay: turnover })
-    assert.deepEqual(await mcp(cleanerMembership, 'member', 'list_stays', window), { stays: [turnover] })
+    assert.deepEqual(await mcp(cleanerMembership, 'member', 'get_product_booking', { booking_id: stay.id }), { booking_id: stay.id, unit: 'nights', stay: turnover })
+    const listed = (owner: boolean) => mcp(owner ? ownerMembership : cleanerMembership, owner ? 'owner' : 'member', 'list_product_bookings', { from: '2026-11-01T00:00:00.000Z', to: '2026-11-04T00:00:00.000Z' })
+      .then(result => (result.bookings as Array<Record<string, unknown>>).map(row => [row.booking_id, row.unit, row.guest, row.starts_at]))
+    assert.deepEqual(await listed(false), [[stay.id, 'nights', { name: 'Ana' }, turnover.starts_at]])
     assert.deepEqual((await mcp(cleanerMembership, 'member', 'get_stay_calendar', { product_id: cabin.id, ...window })).stays, [turnover])
-    assert.equal(((await mcp(ownerMembership, 'owner', 'get_stay', { stay_id: stay.id })).stay as Record<string, unknown>).guest_email, 'ana@example.test')
-    assert.equal(((await mcp(ownerMembership, 'owner', 'list_stays', window)).stays as Array<Record<string, unknown>>)[0]!.guest_surname, 'Silva')
-    assert.equal(((await mcp(ownerMembership, 'owner', 'get_stay_calendar', { product_id: cabin.id, ...window })).stays as Array<Record<string, unknown>>)[0]!.guest_surname, 'Silva')
+    assert.equal(((await mcp(ownerMembership, 'owner', 'get_product_booking', { booking_id: stay.id })).stay as Record<string, unknown>).guest_email, 'ana@example.test')
+    assert.deepEqual(await listed(true), [[stay.id, 'nights', { name: 'Ana Silva' }, turnover.starts_at]])
+    assert.equal(((await mcp(ownerMembership, 'owner', 'get_stay_calendar', { product_id: cabin.id, ...window })).stays as Array<Record<string, unknown>>)[0]!.guest_name, 'Ana Silva')
   } finally {
     await runtime.dispose()
   }
@@ -1544,19 +1565,19 @@ test('a business’s site shows a guest the stay its signed link names, from any
     const stay = await buyStay(db, { id: 'site-stay', organizationId: ORG, productId: cabin.id, locationId: 'cabin-site', timezone: 'America/Denver', checkIn: '2026-11-01', checkOut: '2026-11-04', adults: 2,
       nightlyMinor: 15_000, currency: 'USD', buyerUserId: booker.id, guest: { name: 'Ana', email: 'ana@example.com', phone: null, notes: null } })
     // The guest's stay is read by its activity ID: its conversation's, as the account reads it.
-    const activityId = stay.request_id ?? stay.id
+    const activityId = stay.conversation_id ?? stay.id
     // The link the confirmation email and the paid return carry, signed with the site's secret.
     const link = (await createReplayableReservationCancelToken(env.EMAIL_REPLY_SECRET, activityId)).token
     const otherLink = (await createReplayableReservationCancelToken(env.EMAIL_REPLY_SECRET, 'another-stay')).token
     const read = (organizationId: string, token?: string) => {
       const app = new H3()
       app.use((event) => { event.context.organizationId = organizationId })
-      app.get('/api/public/guest-stays/:activityId', guestStayRoute)
+      app.get('/api/public/guest-stays/:activity_id', guestStayRoute)
       return app.request(Object.assign(new Request(`https://org.proof.example/api/public/guest-stays/${activityId}`, { headers: token ? { authorization: `Bearer ${token}` } : {} }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
     }
     const accountRead = (cookie?: string) => {
       const app = new H3()
-      app.get('/api/account/stays/:activityId', accountStayRoute)
+      app.get('/api/account/stays/:activity_id', accountStayRoute)
       return app.request(Object.assign(new Request(`https://proof.example/api/account/stays/${activityId}`, { headers: cookie ? { cookie } : {} }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
     }
 
@@ -1571,7 +1592,7 @@ test('a business’s site shows a guest the stay its signed link names, from any
         cancellation: { policy: 'moderate', paid_minor: 45_000, refund_minor: 7_500, currency: 'USD' } })
     assert.deepEqual(arrivalGuide, { product_id: cabin.id, ...guide })
     const midStay = await listAgenda(db, { buyerUserId: booker.id }, { from: '2026-11-02', to: '2026-11-02', kinds: ['stay'] })
-    assert.deepEqual(midStay.items.map(item => ({ kind: item.kind, title: item.title, requestId: item.requestId, to: item.to, startsAt: item.startsAt, endsAt: item.endsAt })), [
+    assert.deepEqual(midStay.items.map(item => ({ kind: item.kind, title: item.title, requestId: item.conversation_id, to: item.to, startsAt: item.starts_at, endsAt: item.ends_at })), [
       { kind: 'stay', title: 'Cabin', requestId: activityId, to: `/dashboard/account/activity/stay/${activityId}`, startsAt: '2026-11-01T23:00:00.000Z', endsAt: '2026-11-04T17:00:00.000Z' },
     ])
     assert.deepEqual((await listTodayAgenda(db, { buyerUserId: booker.id }, {}, new Date('2026-11-02T19:00:00.000Z'))).items.map(item => item.to), [`/dashboard/account/activity/stay/${activityId}`])
@@ -1660,7 +1681,7 @@ test('a business’s site shows a guest the stay its signed link names, from any
 
     // Pending app records are not currently made by checkout, but stored
     // unconfirmed state must never disclose an exact location through either read.
-    await db.prepare("UPDATE stays SET status = 'pending' WHERE id = ?").bind(stay.id).run()
+    await db.prepare("UPDATE bookings SET status = 'pending' WHERE id = ?").bind(stay.id).run()
     for (const response of [await read(ORG, link), await accountRead(booker.cookie)]) {
       assert.equal(response.status, 200)
       const pending = await response.json() as GuestStay
@@ -1671,7 +1692,7 @@ test('a business’s site shows a guest the stay its signed link names, from any
       assert(!JSON.stringify(pending).includes(guide.wifi_password))
       for (const exact of [address.addressLines[0]!, String(location.latitude), String(location.longitude), location.maps_url]) assert(!JSON.stringify(pending).includes(exact))
     }
-    await db.prepare("UPDATE stays SET status = 'confirmed' WHERE id = ?").bind(stay.id).run()
+    await db.prepare("UPDATE bookings SET status = 'confirmed' WHERE id = ?").bind(stay.id).run()
     // The guest cancels: the moderate policy refunds what it allows through Stripe,
     // and the cancelled stay stops disclosing where it is on either read.
     const realFetch = globalThis.fetch
@@ -1694,7 +1715,7 @@ test('a business’s site shows a guest the stay its signed link names, from any
       for (const exact of [address.addressLines[0]!, String(location.latitude), String(location.longitude), location.maps_url]) assert(!JSON.stringify(cancelled).includes(exact))
     }
     // The link lasts as a booking's does: thirty days from when the stay was booked.
-    await db.prepare("UPDATE stays SET created_at = ? WHERE id = ?").bind(new Date(Date.now() - 31 * 86_400_000).toISOString(), stay.id).run()
+    await db.prepare("UPDATE bookings SET created_at = ? WHERE id = ?").bind(new Date(Date.now() - 31 * 86_400_000).toISOString(), stay.id).run()
     assert.equal((await read(ORG, link)).status, 410)
   } finally {
     await runtime.dispose()
@@ -1721,10 +1742,12 @@ test('a stay paid on a business’s site returns to that site’s stay confirmat
     // The checkout as Stripe's capture finds it: the payment captured, its hold not yet converted. The return
     // reconciles the payment, which runs the real conversion that makes the checkout guest's stay.
     const nightly = ['2026-11-01', '2026-11-02', '2026-11-03'].map(date => ({ date, price_minor: 15_000 }))
-    const purchase = { product_id: cabin.id, location_id: 'cabin-site', timezone: 'America/Denver', check_in_date: '2026-11-01', check_out_date: '2026-11-04', adults: 2, children: 0, infants: 0, total_minor: 45_000, currency: 'USD', cancellation_policy: 'moderate', nightly, guest: { name: 'Ana', email: 'ana@example.com', phone: null, notes: null } }
+    const purchase = { product_id: cabin.id, location_id: 'cabin-site', timezone: 'America/Denver', check_in_date: '2026-11-01', check_out_date: '2026-11-04', adults: 2, children: 0, infants: 0, total_minor: 45_000, currency: 'USD', cancellation_policy: 'moderate', nightly, guest: { name: 'Ana', email: 'ana@example.com', phone: null, notes: null } } as const
+    // The terms the checkout froze with its purchase.
+    const policy = JSON.parse(await stayCheckoutPolicy(db, ORG, { ...purchase, tax_behavior: 'unspecified' }))
     await db.prepare(`INSERT INTO payments (id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,subject_id,location_id,currency,amount,captured_amount,stripe_payment_intent_id,price_snapshot_json,created_at,updated_at)
-      VALUES ('stay-pay', ?, ?, 'acct_seller', 0, 'stay', NULL, 'cabin-site', 'USD', 45000, 45000, 'pi_stay-pay', ?, ?, ?)`).bind(ORG, checkoutGuest, JSON.stringify({ title: 'Cabin', quantity: 1, price: { unit_amount: 45_000, currency: 'USD' }, method_configuration_id: 'pmc_test', stay: purchase }), NOW, NOW).run()
-    await db.prepare(`INSERT INTO payment_checkout_holds (id, organization_id, product_id, location_id, timezone, buyer_user_id, payment_id, quantity, amount, currency, starts_at, ends_at, status, converted_stay_id, expires_at, created_at)
+      VALUES ('stay-pay', ?, ?, 'acct_seller', 0, 'booking', NULL, 'cabin-site', 'USD', 45000, 45000, 'pi_stay-pay', ?, ?, ?)`).bind(ORG, checkoutGuest, JSON.stringify({ title: 'Cabin', quantity: 1, price: { unit_amount: 45_000, currency: 'USD' }, method_configuration_id: 'pmc_test', stay: purchase, policy }), NOW, NOW).run()
+    await db.prepare(`INSERT INTO payment_checkout_holds (id, organization_id, product_id, location_id, timezone, buyer_user_id, payment_id, quantity, amount, currency, starts_at, ends_at, status, converted_booking_id, expires_at, created_at)
       VALUES ('stay-hold', ?, ?, 'cabin-site', 'America/Denver', ?, 'stay-pay', 2, 45000, 'USD', '2026-11-01', '2026-11-04', 'active', NULL, '2099-01-01T00:00:00.000Z', ?)`).bind(ORG, cabin.id, checkoutGuest, NOW).run()
     const claim = crypto.randomUUID() + crypto.randomUUID()
     await db.prepare("UPDATE payments SET idempotency_key = 'checkout:stay', stripe_payment_intent_id = 'pi_stay-pay', return_token = ?, checkout_expires_at = '2099-01-01T00:00:00.000Z', return_token_hash = ?, return_expires_at = '2099-01-01T00:00:00.000Z' WHERE id = 'stay-pay'").bind(claim, await tokenHash(claim)).run()
@@ -1747,16 +1770,16 @@ test('a stay paid on a business’s site returns to that site’s stay confirmat
     })
     const app = new H3()
     app.use((event) => { event.context.organizationId = ORG })
-    app.post('/api/public/payments/:paymentId/return', paymentReturnRoute)
-    app.get('/api/public/guest-stays/:activityId', guestStayRoute)
-    app.get('/api/account/stays/:activityId', accountStayRoute)
+    app.post('/api/public/payments/:payment_id/return', paymentReturnRoute)
+    app.get('/api/public/guest-stays/:activity_id', guestStayRoute)
+    app.get('/api/account/stays/:activity_id', accountStayRoute)
     const call = (path: string, init: RequestInit = {}, headers: Record<string, string> = { cookie }) => app.request(Object.assign(new Request(`https://org.proof.example${path}`, { ...init, headers: { ...headers, 'content-type': 'application/json' } }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
 
     const back = await call('/api/public/payments/stay-pay/return', { method: 'POST', body: JSON.stringify({ claim }) })
     assert.equal(back.status, 200)
-    const stay = (await db.prepare("SELECT s.id, s.request_id FROM stays s JOIN payment_checkout_holds h ON h.converted_stay_id = s.id WHERE h.id = 'stay-hold'").first<{ id: string; request_id: string }>())!
+    const stay = (await db.prepare("SELECT s.id, c.id AS conversation_id FROM bookings s JOIN payment_checkout_holds h ON h.converted_booking_id = s.id JOIN conversations c ON c.booking_id = s.id AND c.kind = 'booking' WHERE h.id = 'stay-hold'").first<{ id: string; conversation_id: string }>())!
     assert.ok(stay, 'The return converted the checkout into its stay')
-    const activityId = stay.request_id
+    const activityId = stay.conversation_id
     // The stay is read by its signed link, not by a browser's session: none, or a forged one, opens nothing.
     assert.equal((await call(`/api/public/guest-stays/${activityId}`)).status, 401)
     assert.equal((await call(`/api/public/guest-stays/${activityId}`, {}, { authorization: 'Bearer forged' })).status, 404)
@@ -1765,7 +1788,7 @@ test('a stay paid on a business’s site returns to that site’s stay confirmat
     assert.equal(typeof returned.receipt_token, 'string')
     assert.deepEqual(await db.prepare("SELECT claimed_user_id FROM payments WHERE id = 'stay-pay'").first(), { claimed_user_id: buyer })
     // The claim moved the stay, its payment and its hold to the browser that paid.
-    assert.deepEqual(await db.prepare("SELECT (SELECT user_id FROM stays WHERE id = ?) AS stay, (SELECT buyer_user_id FROM payments WHERE id = 'stay-pay') AS payment, (SELECT buyer_user_id FROM payment_checkout_holds WHERE id = 'stay-hold') AS hold").bind(stay.id).first(), { stay: buyer, payment: buyer, hold: buyer })
+    assert.deepEqual(await db.prepare("SELECT (SELECT user_id FROM bookings WHERE id = ?) AS stay, (SELECT buyer_user_id FROM payments WHERE id = 'stay-pay') AS payment, (SELECT buyer_user_id FROM payment_checkout_holds WHERE id = 'stay-hold') AS hold").bind(stay.id).first(), { stay: buyer, payment: buyer, hold: buyer })
     // The confirmation page reads the stay its link names, here from a browser with no session at all, as
     // the emailed link is opened. What was paid and the policy come from the conversion the return ran.
     const read = await call(`/api/public/guest-stays/${activityId}`, {}, { authorization: `Bearer ${returned.receipt_token}` })
@@ -1870,11 +1893,11 @@ test('home location sharing protects every public projection after localization 
 
     for (const mode of ['general', 'specific'] as const) {
       if (mode === 'specific') {
-        assert.equal((await updateLocation(db, ORG, 'cabin-site', { stay_map_sharing: mode, expected_updated_at: originalVersion }, OWNER, env)).status, 200)
+        assert.equal((await updateLocation(db, ORG, 'cabin-site', { stay_map_sharing: mode, updated_at: originalVersion }, OWNER, env)).status, 200)
         assert.equal(await db.prepare("SELECT count(*) FROM media_placements WHERE owner_id = 'cabin-site' AND slot = 'social_card'").first('count(*)'), 0)
         assert.equal(await db.prepare("SELECT status FROM media_assets WHERE id = 'old-private-card'").first('status'), 'active')
-        const stale = await updateLocation(db, ORG, 'cabin-site', { stay_map_sharing: 'general', expected_updated_at: originalVersion }, OWNER, env)
-        assert.deepEqual(stale, { status: 409, data: { error: 'The location changed since it was read. Reload it and try again.', code: 'LOCATION_VERSION_CONFLICT', field: 'expected_updated_at' } })
+        const stale = await updateLocation(db, ORG, 'cabin-site', { stay_map_sharing: 'general', updated_at: originalVersion }, OWNER, env)
+        assert.deepEqual(stale, { status: 409, data: { error: 'The location changed since it was read. Reload it and try again.', code: 'LOCATION_VERSION_CONFLICT', field: 'updated_at' } })
       }
       const collection = await loadPublicProductCollection(db, ORG, 'menu', false, 'cabin-site', env)
       assert.equal(collection?.products[0]?.id, dish.id)
@@ -1923,11 +1946,11 @@ test('home location sharing protects every public projection after localization 
       assert.equal(reviews.length, 1)
       assert.equal(reviews[0]!.original_reference, null)
       assert.equal(reviews[0]!.google_review_metadata?.flag_content_uri, null)
-      const locationReviews = await listOrganizationReviews(db, ORG, { locationId: 'cabin-site', publishedOnly: true })
-      assert.equal(locationReviews.length, 1)
-      assert.equal(locationReviews[0]!.original_reference, null)
+      const location_reviews = await listOrganizationReviews(db, ORG, { locationId: 'cabin-site', publishedOnly: true })
+      assert.equal(location_reviews.length, 1)
+      assert.equal(location_reviews[0]!.original_reference, null)
       // The site's review list includes location reviews, still projected for the private home.
-      const siteReview = (await listOrganizationReviews(db, ORG, { publishedOnly: true })).find(review => review.id === locationReviews[0]!.id)
+      const siteReview = (await listOrganizationReviews(db, ORG, { publishedOnly: true })).find(review => review.id === location_reviews[0]!.id)
       assert.equal(siteReview?.original_reference, null)
     }
 
@@ -1958,7 +1981,7 @@ test('home location sharing protects every public projection after localization 
     assert.equal((await read('/api/public/localized-route?path=/th/locations/cabin-site')).status, 404)
     const translatedAddress = await putResourceLocalization(env, db, { organizationId: ORG, resourceType: 'business_location', resourceId: 'cabin-site', locale: 'th', userId: OWNER,
       values: { address: { addressLines: [translatedStreet], locality: 'เมืองกระบี่' } } })
-    assert.deepEqual(await db.prepare('SELECT route_path, values_json FROM resource_localizations WHERE id = ?').bind(translatedAddress.id).first(), {
+    assert.deepEqual(await db.prepare("SELECT path AS route_path, metadata_json AS values_json FROM content_documents WHERE kind = 'resource' AND id = ?").bind(translatedAddress.id).first(), {
       route_path: null, values_json: JSON.stringify({ address: { addressLines: [translatedStreet], locality: 'เมืองกระบี่' } }),
     })
     const nowProtected = await loadPublicSocialMedia(db, ORG, 'business_location', ['lake-site'])
@@ -1992,7 +2015,7 @@ test('native calendar writes retain real session and impersonator evidence with 
       return cookie(response)
     }
     const app = new H3()
-    app.put('/api/dashboard/stay-homes/:productId/nights', editNightsRoute)
+    app.put('/api/dashboard/stay-homes/:product_id/nights', editNightsRoute)
     const put = (sessionCookie: string, minimum: number) => app.request(Object.assign(new Request(`https://proof.example/api/dashboard/stay-homes/${cabin.id}/nights?org=org`, {
       method: 'PUT', headers: { cookie: sessionCookie, origin: 'https://proof.example', 'content-type': 'application/json', 'user-agent': 'Krabiclaw/25 CalendarAuditProof', 'x-request-id': 'calendar-audit-proof', 'cf-ray': 'calendar-proof-ray' },
       body: JSON.stringify({ from: '2026-11-04', to: '2026-11-05', min_stay_arrival: minimum }),
@@ -2036,22 +2059,26 @@ test('migrated unpaid stays occupy nights without a fresh reservation message an
   const { runtime, db, env } = await boot()
   try {
     const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site' })
-    const template = await saveMessageTemplate(db, env, manager, null, { title: 'Booking received', body: 'Thanks for your reservation.', schedule: { trigger: 'booking_received', delayMinutes: 5, productIds: [cabin.id] } })
+    const template = await saveMessageTemplate(db, env, manager, null, { title: 'Booking received', body: 'Thanks for your reservation.', schedule: { trigger: 'booking_received', delay_minutes: 5, product_ids: [cabin.id] } })
     const offline = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'hostaway:offline', check_in_date: '2027-05-01', check_out_date: '2027-05-04', ...guest }, { imported: { source: 'hostaway', source_id: 'offline', row: { status: 'New', payment: 'Unpaid' }, fingerprint: 'offline-fingerprint', channel: 'direct' } })
     assert.equal(offline.payment_status, 'unpaid')
     assert.equal(offline.status, 'confirmed')
-    assert((await readStayCalendar(db, manager, { productId: cabin.id, from: '2027-05-01', to: '2027-05-04' })).nights.every(night => night.stay_id === offline.id && !night.available))
+    const afterImport = await readStayCalendar(db, manager, { productId: cabin.id, from: '2027-05-01', to: '2027-05-04' })
+    assert.equal(afterImport.nights.length, 3)
+    assert(afterImport.nights.every(night => night.booking_id === offline.id && !night.available))
     const input = { product_id: cabin.id, idempotency_key: 'hostaway:source-1', check_in_date: '2027-06-01', check_out_date: '2027-06-03', ...guest, guest_email: 'ana@example.test' }
     const source = { source: 'hostaway' as const, source_id: 'source-1', row: { id: 'source-1', payment: 'Unpaid' }, fingerprint: 'source-fingerprint', channel: 'airbnb' as const, channel_booking_id: 'ABB-EXACT-SOURCE' }
     const imported = await createStay(db, env, manager, input, { imported: source })
-    assert.equal(imported.request_id, null)
+    // An imported stay has its conversation like every booking, naming the guest it was imported with.
+    assert.deepEqual(await db.prepare("SELECT kind, json_extract(payload_json, '$.guest.name') AS name, json_extract(payload_json, '$.guest.email') AS email FROM conversations WHERE id = ?").bind(imported.conversation_id).first(),
+      { kind: 'booking', name: 'Ana', email: 'ana@example.test' })
     assert.deepEqual({ channel: imported.channel, owner: imported.owner, status: imported.status, payment: imported.payment_status, paid: imported.paid_minor }, { channel: 'airbnb', owner: 'app', status: 'confirmed', payment: null, paid: 0 })
-    await assert.rejects(updateStay(db, env, manager, imported.id, { expected_version: imported.version, check_out_date: '2027-06-04' }), code('STAY_NOT_EDITABLE'))
-    await assert.rejects(cancelStay(db, env, manager, imported.id, { expected_version: imported.version }), code('STAY_NOT_EDITABLE'))
+    await assert.rejects(updateStay(db, env, manager, imported.id, { version: imported.version, check_out_date: '2027-06-04' }), code('STAY_NOT_EDITABLE'))
+    await assert.rejects(cancelStay(db, env, manager, imported.id, { version: imported.version }), code('STAY_NOT_EDITABLE'))
     await assert.rejects(recordStayPayment(db, env, manager, imported.id, { amount_minor: 1000, method: 'cash', paid_on: '2027-06-01', idempotency_key: 'should-not-collect' }), code('STAY_NOT_EDITABLE'))
-    assert.equal(await db.prepare('SELECT booking_received_at FROM stays WHERE id = ?').bind(imported.id).first('booking_received_at'), null)
-    assert.deepEqual((await readStayCalendar(db, manager, { productId: cabin.id, from: '2027-06-01', to: '2027-06-03' })).nights.map(night => [night.available, night.stay_id]), [[false, imported.id], [false, imported.id]])
-    assert.deepEqual(await db.prepare('SELECT status, due_at FROM scheduled_guest_messages WHERE stay_id = ? AND template_id = ?').bind(imported.id, template.id).first(), { status: 'skipped', due_at: null })
+    assert.equal(await db.prepare('SELECT received_at FROM bookings WHERE id = ?').bind(imported.id).first('received_at'), null)
+    assert.deepEqual((await readStayCalendar(db, manager, { productId: cabin.id, from: '2027-06-01', to: '2027-06-03' })).nights.map(night => [night.available, night.booking_id]), [[false, imported.id], [false, imported.id]])
+    assert.deepEqual(await db.prepare("SELECT status, due_at FROM scheduled_guest_messages WHERE booking_id = ? AND template_id = ?").bind(imported.id, template.id).first(), { status: 'skipped', due_at: null })
     assert.equal((await createStay(db, env, manager, input, { imported: source })).id, imported.id)
     const audit = await db.prepare("SELECT payload_json FROM activity_entries WHERE event_name = 'stay.created' AND json_extract(payload_json, '$.entityId') = ?").bind(imported.id).first<string>('payload_json')
     assert.deepEqual(JSON.parse(audit!).metadata.imported, source)
@@ -2062,8 +2089,8 @@ test('migrated unpaid stays occupy nights without a fresh reservation message an
     const adopted = await applyChannelBooking(db, env, ORG, cabin.id, booking)
     assert.equal(adopted.applied, true)
     assert.deepEqual({ id: adopted.id, owner: adopted.owner, provider: adopted.provider, overbooked: adopted.overbooked }, { id: imported.id, owner: 'channel', provider: 'channex', overbooked: false })
-    assert.equal(await db.prepare('SELECT count(*) FROM stays WHERE channel_booking_id = ?').bind(source.channel_booking_id).first('count(*)'), 1)
-    assert.deepEqual((await readStayCalendar(db, manager, { productId: cabin.id, from: input.check_in_date, to: input.check_out_date })).nights.map(night => night.stay_id), [imported.id, imported.id])
+    assert.equal(await db.prepare('SELECT count(*) FROM bookings WHERE channel_booking_id = ?').bind(source.channel_booking_id).first('count(*)'), 1)
+    assert.deepEqual((await readStayCalendar(db, manager, { productId: cabin.id, from: input.check_in_date, to: input.check_out_date })).nights.map(night => night.booking_id), [imported.id, imported.id])
     assert.equal((await applyChannelBooking(db, env, ORG, cabin.id, booking)).applied, false)
     const lake = await home(db, env, { name: 'Lake house', location: 'lake-site' })
     const moveInput = { ...input, idempotency_key: 'hostaway:source-2', check_in_date: '2027-07-01', check_out_date: '2027-07-04' }
@@ -2072,19 +2099,19 @@ test('migrated unpaid stays occupy nights without a fresh reservation message an
     // A prior manual relocation is an assignment conflict, not permission to free the physically occupied unit.
     await assert.rejects(applyChannelBooking(db, env, ORG, lake.id, { ...booking, external_booking_id: 'actual-moved-booking', channel_booking_id: moveSource.channel_booking_id, revision_id: 'actual-moved-revision', check_in_date: moveInput.check_in_date, check_out_date: moveInput.check_out_date }), code('CHANNEL_MIGRATION_HOME_CONFLICT'))
     assert.equal((await getStay(db, manager, beforeMove.id)).owner, 'app')
-    assert.deepEqual((await db.prepare('SELECT product_id, date FROM stay_nights WHERE stay_id = ? ORDER BY date').bind(beforeMove.id).all()).results, ['2027-07-01', '2027-07-02', '2027-07-03'].map(date => ({ product_id: cabin.id, date })))
+    assert.deepEqual((await db.prepare('SELECT product_id, date FROM stay_nights WHERE booking_id = ? ORDER BY date').bind(beforeMove.id).all()).results, ['2027-07-01', '2027-07-02', '2027-07-03'].map(date => ({ product_id: cabin.id, date })))
     const hub = env.GUEST_INBOX_HUBS!.get(env.GUEST_INBOX_HUBS!.idFromName(ORG))
     await hub.fetch('https://inbox.test/failure', { method: 'PUT' })
     const retryInput = { ...input, idempotency_key: 'hostaway:needs-publication', check_in_date: '2027-08-01', check_out_date: '2027-08-03' }
     await assert.rejects(createStay(db, env, manager, retryInput, { imported: { ...source, source_id: 'needs-publication', channel: 'direct', channel_booking_id: null } }), code('DASHBOARD_PUBLICATION_FAILED'))
-    const committed = await db.prepare('SELECT id FROM stays WHERE organization_id = ? AND idempotency_key = ?').bind(ORG, retryInput.idempotency_key).first<{ id: string }>()
+    const committed = await db.prepare('SELECT id FROM bookings WHERE organization_id = ? AND idempotency_key = ?').bind(ORG, retryInput.idempotency_key).first<{ id: string }>()
     assert(committed)
     await hub.fetch('https://inbox.test/failure', { method: 'DELETE' })
-    await updateStay(db, env, manager, committed.id, { expected_version: 1, guest_name: 'Host corrected name' })
+    await updateStay(db, env, manager, committed.id, { version: 1, guest_name: 'Host corrected name' })
     const resumed = await resumeImportedStay(db, env, manager, committed.id)
     assert.equal(resumed.guest_name, 'Host corrected name')
     assert.equal(resumed.version, 2)
-    assert.equal(await db.prepare('SELECT count(*) FROM stays WHERE idempotency_key = ?').bind(retryInput.idempotency_key).first('count(*)'), 1)
+    assert.equal(await db.prepare('SELECT count(*) FROM bookings WHERE idempotency_key = ?').bind(retryInput.idempotency_key).first('count(*)'), 1)
 
   } finally {
     await runtime.dispose()

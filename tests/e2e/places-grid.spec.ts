@@ -71,7 +71,7 @@ test('a restaurant blocks the same weekdays at two locations from the places gri
     // The booked day is a bar counting its reservations; it opens that day, narrowed to the location.
     const bar = grid.locator(`div[role="rowheader"]:has([data-place="location:${brooklyn.id}"]) + div [data-booked="${booked!.date}"]`)
     await expect(bar).toHaveText(`${booked!.booked} booked`)
-    expect(new URL((await bar.getAttribute('href'))!, baseURL).searchParams.get('locationId')).toBe(brooklyn.id)
+    expect(new URL((await bar.getAttribute('href'))!, baseURL).searchParams.get('location_id')).toBe(brooklyn.id)
     // The grid scrolls inside itself; the page does not scroll sideways.
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
 
@@ -132,7 +132,7 @@ test('a restaurant blocks the same weekdays at two locations from the places gri
     for (const [index, id] of [brooklyn.id, williamsburg.id].entries()) expect((await location(id)).special_hours).toEqual(before[index]!.special_hours)
 
     // The day leaf blocks and opens one day through the same write, and the month reads the closure.
-    await page.goto(`/dashboard/${restaurant.slug}/calendar/${first}?locationId=${brooklyn.id}`)
+    await page.goto(`/dashboard/${restaurant.slug}/calendar/${first}?location_id=${brooklyn.id}`)
     await page.getByRole('button', { name: 'Block date', exact: true }).click()
     await expect(page.getByText('You blocked this date.')).toBeVisible()
     expect((await location(brooklyn.id)).special_hours).toEqual([...(Array.isArray(before[0]!.special_hours) ? before[0]!.special_hours as unknown[] : []), { kind: 'closure', starts_on: first, ends_on: first, note: null }])

@@ -165,7 +165,7 @@ test('an article composes its first draft and preserves pending edits through co
     // Continue the author's real workflow: choose the blog's real category,
     // write its body, and publish explicitly.
     const update = await page.request.patch(`${editor}/blog/${articleId}`, { data: {
-      excerpt, category_id: kitchen[0]!.id, expected_updated_at: savedArticle.updated_at,
+      excerpt, category_id: kitchen[0]!.id, updated_at: savedArticle.updated_at,
       content_blocks: [{ type: 'markdown', data: { markdown: body, editor_mode: 'rich' } }],
     } })
     expect(update.status(), await update.text()).toBe(200)
@@ -179,7 +179,7 @@ test('an article composes its first draft and preserves pending edits through co
     await excerptPanel.getByRole('button', { name: 'Save', exact: true }).click()
     const refusedSave = await staleSaveResponse
     expect(refusedSave.status(), await refusedSave.text()).toBe(409)
-    expect(refusedSave.request().postDataJSON().expected_updated_at).toBe(savedArticle.updated_at)
+    expect(refusedSave.request().postDataJSON().updated_at).toBe(savedArticle.updated_at)
     await expect(page).toHaveURL(`/dashboard/${orgSlug}/website/blog/${articleId}/excerpt`)
     await expect(excerptPanel).toContainText('Content document was updated by another writer')
     await expect(excerptPanel.getByRole('textbox', { name: 'Excerpt', exact: true })).toHaveValue(staleExcerpt)
@@ -267,7 +267,7 @@ test('a prepared article photo post preserves concurrent media and publishes onl
     expect(sourceCreated.status(), await sourceCreated.text()).toBe(200)
     const source = await sourceCreated.json() as { id: string; post: { updated_at: string; public_path: string } }
     articleId = source.id
-    const sourcePublished = await page.request.post(`${editor}/blog/${articleId}/publish`, { data: { expected_updated_at: source.post.updated_at } })
+    const sourcePublished = await page.request.post(`${editor}/blog/${articleId}/publish`, { data: { updated_at: source.post.updated_at } })
     expect(sourcePublished.status(), await sourcePublished.text()).toBe(200)
     const contextRead = await page.request.get('/api/dashboard/context', { params: { org: orgSlug } })
     expect(contextRead.status()).toBe(200)
@@ -380,7 +380,7 @@ test('a prepared article photo post preserves concurrent media and publishes onl
     await expect(galleryPicker).not.toBeVisible()
     const postPath = `${editor}/posts/${postId}`
     const interceptPost = (url: URL) => url.pathname === postPath
-    const captionPatches: Array<{ expected_updated_at: string; body: string; call_to_action: { label: string; url: string } }> = []
+    const captionPatches: Array<{ updated_at: string; body: string; call_to_action: { label: string; url: string } }> = []
     page.on('request', request => {
       if (request.method() === 'PATCH' && new URL(request.url()).pathname === postPath) captionPatches.push(request.postDataJSON())
     })
@@ -414,7 +414,7 @@ test('a prepared article photo post preserves concurrent media and publishes onl
       }).toMatchObject({ body: revisedCaption, call_to_action: { label: 'Read article', url: articleUrl }, media: [{ asset_id: assetId, slot: 'gallery' }] })
       await expect(caption.getByRole('button', { name: 'Save draft', exact: true })).toBeDisabled()
       await expect(caption.getByText('Post could not be completed', { exact: true })).toHaveCount(0)
-      expect(captionPatches.at(-1)).toMatchObject({ expected_updated_at: appliedPost.updated_at, body: revisedCaption, call_to_action: { label: 'Read article', url: articleUrl } })
+      expect(captionPatches.at(-1)).toMatchObject({ updated_at: appliedPost.updated_at, body: revisedCaption, call_to_action: { label: 'Read article', url: articleUrl } })
     } finally { await page.unroute(interceptPost) }
     // Only the explicitly checked website is published. No external social
     // account is contacted by this local authoring journey.
@@ -577,31 +577,35 @@ test('a new article publishes its composed body directly and retries publication
 test('Insights reads a linked report period and preserves preset changes in its URL', async ({ page }) => {
   // A period the business's own analytics cover (they begin when the seed takes it live), unlike any preset.
   const today = localDateAt(new Date(), seededTenant('restaurant').timezone)
-  const range = { startDate: addLocalDays(today, -2), endDate: today }
+  const range = { start_date: addLocalDays(today, -2), end_date: today }
   const linkedPath = insightsPath(orgSlug, range)
   const isReport = (response: import('@playwright/test').Response) => new URL(response.url()).pathname === '/api/dashboard/analytics'
   expect((await page.goto(linkedPath))?.status()).toBe(200)
   await waitForNuxtHydration(page)
   const reportPeriod = page.getByTestId('insights-period').locator('time')
-  await expect(reportPeriod.nth(0)).toHaveAttribute('datetime', range.startDate)
-  await expect(reportPeriod.nth(1)).toHaveAttribute('datetime', range.endDate)
+  await expect(reportPeriod.nth(0)).toHaveAttribute('datetime', range.start_date)
+  await expect(reportPeriod.nth(1)).toHaveAttribute('datetime', range.end_date)
   const linkedUrl = new URL(page.url())
-  const first = await page.request.get('/api/dashboard/analytics', { params: { org: orgSlug, startDate: linkedUrl.searchParams.get('startDate')!, endDate: linkedUrl.searchParams.get('endDate')! } })
+  const first = await page.request.get('/api/dashboard/analytics', { params: { org: orgSlug, start_date: linkedUrl.searchParams.get('start_date')!, end_date: linkedUrl.searchParams.get('end_date')! } })
   expect(first.status(), await first.text()).toBe(200)
-  expect((await first.json() as { report: { period: typeof range } }).report.period).toMatchObject(range)
+  expect((await first.json()).report.period).toMatchObject({ start_date: range.start_date, end_date: range.end_date })
   await expect(page.getByText('Traffic trend', { exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: '7d', exact: true })).toHaveAttribute('aria-pressed', 'false')
+  const datePill = page.getByTestId('insights-date-range-pill')
+  await expect(datePill).toBeVisible()
 
   await page.reload()
   await waitForNuxtHydration(page)
-  await expect(reportPeriod.nth(0)).toHaveAttribute('datetime', range.startDate)
-  await expect(reportPeriod.nth(1)).toHaveAttribute('datetime', range.endDate)
-  const presetReport = page.waitForResponse(isReport)
-  await page.getByRole('button', { name: '7d', exact: true }).click()
-  const preset = await presetReport
+  await expect(reportPeriod.nth(0)).toHaveAttribute('datetime', range.start_date)
+  await expect(reportPeriod.nth(1)).toHaveAttribute('datetime', range.end_date)
+  const updatedRange = { start_date: addLocalDays(today, -6), end_date: today }
+  const rangeReport = page.waitForResponse(isReport)
+  await datePill.click()
+  await page.locator('#start-date-input').fill(updatedRange.start_date)
+  await page.locator('#end-date-input').fill(updatedRange.end_date)
+  await page.getByRole('button', { name: 'Apply', exact: true }).click()
+  const preset = await rangeReport
   expect(preset.status(), await preset.text()).toBe(200)
-  const period = (await preset.json() as { report: { period: typeof range } }).report.period
-  expect(period.startDate).toBe(addLocalDays(period.endDate, -6))
-  await expect(page).toHaveURL(insightsPath(orgSlug, { startDate: period.startDate, endDate: period.endDate }))
-  await expect(page.getByRole('button', { name: '7d', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  const period = (await preset.json() as { report: { period: { start_date: string; end_date: string } } }).report.period
+  expect(period.start_date).toBe(updatedRange.start_date)
+  await expect(page).toHaveURL(insightsPath(orgSlug, { start_date: period.start_date, end_date: period.end_date }))
 })

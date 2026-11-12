@@ -9,12 +9,32 @@ const DAY = 24 * HOUR
 /**
  * The one cancellation rule for every reservation, class and consultation,
  * Airbnb's 1-day policy (airbnb.com/help/article/1565): a full refund until 24
- * hours before the start. Changes close at the same moment. Not a setting.
+ * hours before the start.
  */
 export const FREE_CANCELLATION_MINUTES = DAY
 
-export function freeCancellationUntil(startsAt: string): string {
-  return new Date(Date.parse(startsAt) - FREE_CANCELLATION_MINUTES * 60_000).toISOString()
+/**
+ * How long before the start a class's or consultation's free cancellation
+ * closes: its advance notice, never less than the 1-day rule. A table
+ * reservation passes null: its notice governs booking only.
+ */
+export function freeCancellationNoticeMinutes(advanceNoticeMinutes: number | null): number {
+  return Math.max(FREE_CANCELLATION_MINUTES, advanceNoticeMinutes ?? 0)
+}
+
+export function freeCancellationUntil(startsAt: string, advanceNoticeMinutes: number | null): string {
+  return new Date(Date.parse(startsAt) - freeCancellationNoticeMinutes(advanceNoticeMinutes) * 60_000).toISOString()
+}
+
+/** A start inside the advance notice is not offered, and a guest's own cancellation closes there too. */
+export function outsideNotice(startsAt: string, advanceNoticeMinutes: number | null, now = Date.now()): boolean {
+  return Date.parse(startsAt) > now + (advanceNoticeMinutes ?? 0) * 60_000
+}
+
+/** "24 hours", "2 days": a notice in the guest's language. One day reads as the 24 hours guests already know. */
+export function noticeDuration(minutes: number, locale: string): string {
+  const [value, unit] = minutes > DAY && minutes % DAY === 0 ? [minutes / DAY, 'day'] : minutes % HOUR === 0 ? [minutes / HOUR, 'hour'] : [minutes, 'minute']
+  return new Intl.NumberFormat(locale, { style: 'unit', unit, unitDisplay: 'long' }).format(value)
 }
 
 /** How far ahead a guest must book: Airbnb's choices, with hours where a table needs them. */

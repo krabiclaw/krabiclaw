@@ -6,8 +6,8 @@ import { assertRoleAllows } from '~/server/utils/member-access'
 import { jsonResponse } from '~/server/utils/api-response'
 import { buildAppPayoutsOnboardingUrls, buildStripeConnectOnboardingUrls, startStripeConnectOnboarding } from '~/server/utils/stripe-connect'
 
-// Stripe-hosted onboarding: { country?, returnTo?: "app" }. The dashboard returns to Payments; the iPhone app
-// (returnTo "app") to /app/return/payouts, which hands back to krabiclaw://payouts/<outcome>.
+// Stripe-hosted onboarding: { country?, return_to?: "app" }. The dashboard returns to Payments; the iPhone app
+// (return_to "app") to /app/return/payouts, which hands back to krabiclaw://payouts/<outcome>.
 export default defineHandler(async (event) => {
   requireFinancialBrowserOrAppRequest(event)
   const { env, db, session, organization } = await getDashboardContext(event, {})
@@ -22,17 +22,17 @@ export default defineHandler(async (event) => {
     throw new HTTPError({ statusCode: 409, statusMessage: 'Your account needs an email address before Stripe onboarding', data: { code: 'ACCOUNT_EMAIL_REQUIRED' } })
   }
 
-  const body = await readBody(event) as { country?: unknown; returnTo?: unknown } | undefined
-  if (body?.returnTo !== undefined && body.returnTo !== 'app') {
-    throw new HTTPError({ statusCode: 422, statusMessage: 'returnTo must be "app" when given', data: { code: 'VALIDATION_ERROR', field: 'returnTo' } })
+  const body = await readBody(event) as { country?: unknown; return_to?: unknown } | undefined
+  if (body?.return_to !== undefined && body.return_to !== 'app') {
+    throw new HTTPError({ statusCode: 422, statusMessage: 'return_to must be "app" when given', data: { code: 'VALIDATION_ERROR', field: 'return_to' } })
   }
   const { account, url } = await startStripeConnectOnboarding(db, env, {
     organization,
     contactEmail: userEmail,
     country: typeof body?.country === 'string' ? body.country : null,
-    urls: body?.returnTo === 'app'
+    urls: body?.return_to === 'app'
       ? buildAppPayoutsOnboardingUrls(env.NUXT_PUBLIC_PLATFORM_DOMAIN)
       : buildStripeConnectOnboardingUrls(env.NUXT_PUBLIC_PLATFORM_DOMAIN, organization.slug),
   })
-  return jsonResponse({ success: true, account, onboardingUrl: url })
+  return jsonResponse({ success: true, account, onboarding_url: url })
 })

@@ -565,7 +565,7 @@ function receipt(publication: PublicationRecord): PublishOutcome {
  *
  * Existing results are read first, so a repeat returns the same receipts
  * without needing a fresh revision. A new target, or a first website
- * publication, needs the caller's current `expected_updated_at` and the
+ * publication, needs the caller's current `updated_at` and the
  * connection revision it read. Every target is evaluated; `ok` is true only
  * when all of them are published.
  */
@@ -581,7 +581,7 @@ export async function publishPost(
   if (!post) throw new HTTPError({ statusCode: 404, statusMessage: 'Post not found' })
   const stale = post.updated_at !== input.expectedUpdatedAt
   const staleOutcome = (channel: PublishOutcome['channel'], targetId: string): PublishOutcome => ({ channel, target_id: targetId, status: 'failed', code: 'stale_revision',
-    message: `The post changed since it was read (now ${post.updated_at}); read it again and publish with the current expected_updated_at` })
+    message: `The post changed since it was read (now ${post.updated_at}); read it again and publish with the current updated_at` })
   const assets = await assetFacts(db, env, organizationId, post.media)
   const caption = providerCaption(post.body, post.call_to_action)
   const entitled = await hasOrganizationEntitlement(env, organizationId, 'managed_service')

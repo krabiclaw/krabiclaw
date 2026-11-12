@@ -41,6 +41,7 @@ pr_body.txt
 /.agents/skills/krabiclaw-marketing/*
 !/.agents/skills/krabiclaw-marketing/SKILL.md
 !/.agents/skills/krabiclaw-marketing/recording/
+!/.agents/skills/krabiclaw-marketing/film/
 !/.agents/skills/write-help-docs/
 !/.agents/skills/krabiclaw-publishing/
 /.agents/skills/krabiclaw-publishing/*
@@ -97,3 +98,4 @@ tsconfig.spot.json
 
 # The local E2E seed manifest, written by Playwright global setup
 tests/e2e/.seed/
+airbnb_insights/

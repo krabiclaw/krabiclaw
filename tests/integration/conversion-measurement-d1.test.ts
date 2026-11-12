@@ -12,7 +12,12 @@ import { getAnalyticsReport } from '../../server/utils/analytics-report.ts'
 import { recordTenantPageview, type TenantPageviewInput } from '../../server/utils/pageview-tracking.ts'
 import { completeOnboarding } from '../../server/utils/organization-provisioning.ts'
 import { hashEmail } from '../../server/utils/email-delivery.ts'
-import { requestInsertQueries, threadPayloadForGuest } from '../../server/domain/requests.ts'
+import { H3Event } from 'h3'
+import { createProductBooking } from '../../server/domain/product-bookings.ts'
+import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
+import { listSessions } from '../../server/utils/availability.ts'
+import { addLocalDays, localDateAt, localDateTimeToInstant } from '../../utils/timezone.ts'
+import { createTables } from './support/table-product.ts'
 import { listBusinessOutcomes } from '../../server/utils/business-outcomes.ts'
 import { memberAccessPrincipal, resolveMembership } from '../../server/utils/member-access.ts'
 import { createQa } from '../../server/utils/location-qa.ts'
@@ -28,8 +33,9 @@ const browser = { headers: new Headers({ cookie: `kc_session_id=${SESSION}; kc_v
 async function openDb() {
   const runtime = new Miniflare({ workers: [{ config: {
     name: 'conversion-proof', compatibilityDate: '2024-11-01',
-    manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export default { fetch() { return new Response("ok") } }' } } },
-    env: { DB: { type: 'd1' } },
+    manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export class Hub { fetch() { return new Response(null, { status: 204 }) } } export default { fetch() { return new Response("ok") } }' } } },
+    exports: { Hub: { type: 'durable-object', storage: 'sqlite' } },
+    env: { DB: { type: 'd1' }, ORGANIZATION_CACHE: { type: 'kv' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'conversion-proof', exportName: 'Hub' } },
   } }] })
   const db = await runtime.getD1Database('DB')
   const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
@@ -106,30 +112,30 @@ test('conversion measurement: contract, values, idempotency, report and cohort o
     const period = { startDate: '2026-09-10', endDate: '2026-09-12', now: new Date('2026-09-13T00:00:00Z') }
     const platform = await getAnalyticsReport(db, { organizationId: 'org-platform', ...period })
     // One session, one signup: the session converted once; the purchase and onboarding have no session.
-    const signupRow = platform.conversions.find(row => row.eventName === 'sign_up')
-    assert.deepEqual([signupRow?.events, signupRow?.distinctEntities, signupRow?.convertingSessions, signupRow?.sessionConversionRate], [1, 1, 1, 100])
-    assert.equal(platform.conversions.find(row => row.eventName === 'onboarding_complete')?.nonbrowserEvents, 1)
+    const signupRow = platform.conversions.find(row => row.event_name === 'sign_up')
+    assert.deepEqual([signupRow?.events, signupRow?.distinct_entities, signupRow?.converting_sessions, signupRow?.session_conversion_rate], [1, 1, 1, 100])
+    assert.equal(platform.conversions.find(row => row.event_name === 'onboarding_complete')?.nonbrowser_events, 1)
     // Revenue is attributed to the campaign and creative the checkout observed, without a browser session.
-    assert.deepEqual(platform.attributedValue.map(row => [row.campaign, row.content, row.currency, row.purchases, row.collectedMinor, row.refundedMinor, row.netMinor]), [['launch', 'video-a', 'USD', 1, 5243, 1500, 3743]])
+    assert.deepEqual(platform.attributed_value.map(row => [row.campaign, row.content, row.currency, row.purchases, row.collected_minor, row.refunded_minor, row.net_minor]), [['launch', 'video-a', 'USD', 1, 5243, 1500, 3743]])
     assert.equal(await db.prepare("SELECT count(*) FROM analytics_events WHERE json_extract(payload_json, '$.event_name') = 'purchase' AND session_id IS NULL").first('count(*)'), 1)
-    assert.equal(platform.conversions.find(row => row.eventName === 'purchase')?.sessionConversionRate, 0)
-    assert.deepEqual(platform.attribution.map(row => [row.campaign, row.content, row.sessions, row.outcomeEvents, row.convertingSessions, row.sessionConversionRate]), [['launch', 'video-a', 1, 1, 1, 100]])
-    assert.deepEqual(platform.values.find(row => row.eventName === 'purchase'), { eventName: 'purchase', basis: 'purchase', currency: 'USD', events: 1, valueMinor: 4900, collectedMinor: 5243 })
-    assert.deepEqual(platform.net, [{ currency: 'USD', collectedMinor: 5243, refundedMinor: 1500, netMinor: 3743 }])
-    assert.deepEqual(platform.signupCohort.bySignupAttribution[0]?.revenue, [{ currency: 'USD', collectedMinor: 5243, refundedMinor: 1500, netMinor: 3743 }])
+    assert.equal(platform.conversions.find(row => row.event_name === 'purchase')?.session_conversion_rate, 0)
+    assert.deepEqual(platform.attribution.map(row => [row.campaign, row.content, row.sessions, row.outcome_events, row.converting_sessions, row.session_conversion_rate]), [['launch', 'video-a', 1, 1, 1, 100]])
+    assert.deepEqual(platform.values.find(row => row.event_name === 'purchase'), { event_name: 'purchase', basis: 'purchase', currency: 'USD', events: 1, value_minor: 4900, collected_minor: 5243 })
+    assert.deepEqual(platform.net, [{ currency: 'USD', collected_minor: 5243, refunded_minor: 1500, net_minor: 3743 }])
+    assert.deepEqual(platform.signup_cohort.by_signup_attribution[0]?.revenue, [{ currency: 'USD', collected_minor: 5243, refunded_minor: 1500, net_minor: 3743 }])
     // The signup cohort links signup -> owned organization -> onboarding and first payment, counted per signup.
-    assert.deepEqual([platform.signupCohort.signups, platform.signupCohort.onboardedSignups, platform.signupCohort.firstPaidSignups], [1, 1, 1])
-    assert.equal(platform.signupCohort.bySignupAttribution[0]?.campaign, 'launch')
-    assert.deepEqual([platform.signupCohort.onboardedBusinesses, platform.signupCohort.firstPaidBusinesses], [1, 1])
+    assert.deepEqual([platform.signup_cohort.signups, platform.signup_cohort.onboarded_signups, platform.signup_cohort.first_paid_signups], [1, 1, 1])
+    assert.equal(platform.signup_cohort.by_signup_attribution[0]?.campaign, 'launch')
+    assert.deepEqual([platform.signup_cohort.onboarded_businesses, platform.signup_cohort.first_paid_businesses], [1, 1])
     // Only the nonbrowser onboarding carried no observed attribution.
-    assert.equal(platform.coverage.outcomeEventsWithoutAttribution, 1)
-    assert.equal(platform.coverage.measurementContractStartedAt, '2026-09-10T04:00:00.000Z')
-    assert.deepEqual(platform.coverage.ga4Delivery.map(row => [row.eventName, row.status]).sort(), [['onboarding_complete', 'unrecorded'], ['purchase', 'unrecorded'], ['refund', 'unrecorded'], ['sign_up', 'unrecorded']])
+    assert.equal(platform.coverage.outcome_events_without_attribution, 1)
+    assert.equal(platform.coverage.measurement_contract_started_at, '2026-09-10T04:00:00.000Z')
+    assert.deepEqual(platform.coverage.ga4_delivery.map(row => [row.event_name, row.status]).sort(), [['onboarding_complete', 'unrecorded'], ['purchase', 'unrecorded'], ['refund', 'unrecorded'], ['sign_up', 'unrecorded']])
 
     const customer = await getAnalyticsReport(db, { organizationId: 'org-customer', ...period })
-    assert.deepEqual(customer.bookingValue.map(row => [row.productName, row.currency, row.bookings, row.valuedBookings, row.quotedValueMinor]).sort(), [['Pottery', 'THB', 1, 1, 240000], [null, null, 1, 0, 0]].sort())
+    assert.deepEqual(customer.booking_value.map(row => [row.product_name, row.currency, row.bookings, row.valued_bookings, row.quoted_value_minor]).sort(), [['Pottery', 'THB', 1, 1, 240000], [null, null, 1, 0, 0]].sort())
     assert.deepEqual(customer.net, [])
-    assert.equal(customer.signupCohort.signups, 0)
+    assert.equal(customer.signup_cohort.signups, 0)
     // KrabiClaw's subscription revenue never appears as the subscribing customer's revenue.
     assert.equal(customer.values.some(row => row.basis !== 'quoted'), false)
 
@@ -142,9 +148,9 @@ test('conversion measurement: contract, values, idempotency, report and cohort o
         value: { ...purchase.value, transaction_id: `cohort-invoice-${index}`, amount_minor: (index + 1) * 100, collected_minor: (index + 1) * 100 },
         metadata: { purchase_type: 'initial_subscription', originating_user_id: userId } })
     }
-    const cohorts = (await getAnalyticsReport(db, { organizationId: 'org-platform', ...period })).signupCohort.bySignupAttribution
+    const cohorts = (await getAnalyticsReport(db, { organizationId: 'org-platform', ...period })).signup_cohort.by_signup_attribution
       .filter(row => row.source === 'cohort-proof')
-    assert.deepEqual(cohorts.map(row => row.revenue.map(value => value.netMinor)).sort(), [[100], [200]])
+    assert.deepEqual(cohorts.map(row => row.revenue.map(value => value.net_minor)).sort(), [[100], [200]])
 
     // Progress reads these same canonical results, rather than copying an
     // analytics report or treating the assigned member as the acting user.
@@ -167,21 +173,21 @@ test('conversion measurement: contract, values, idempotency, report and cohort o
     const progress = await listBusinessOutcomes(db, principal, { limit: 100 })
     const qaFact = progress.outcomes.find(item => item.subject.kind === 'qa' && item.subject.id === qaId)
     assert(qaFact)
-    assert.deepEqual(qaFact.actor, { kind: 'member', userId: 'user-a' })
-    assert.deepEqual(qaFact.changedFields, ['question', 'answer', 'status'])
+    assert.deepEqual(qaFact.actor, { kind: 'member', user_id: 'user-a' })
+    assert.deepEqual(qaFact.changed_fields, ['question', 'answer', 'status'])
     const paidFacts = progress.outcomes.filter(item => item.source.table === 'analytics_events' && item.source.id === paidResult.id)
     assert.equal(paidFacts.length, 1)
-    assert.deepEqual(paidFacts[0]!.actor, { kind: 'unknown', userId: null })
-    assert.equal(paidFacts[0]!.measurement?.assignedMemberId, 'assigned-member')
+    assert.deepEqual(paidFacts[0]!.actor, { kind: 'unknown', user_id: null })
+    assert.equal(paidFacts[0]!.measurement?.assigned_member_id, 'assigned-member')
     assert.equal(paidFacts[0]!.measurement?.attribution, null)
-    assert.equal(paidFacts[0]!.moneyOwner, 'customer_business')
+    assert.equal(paidFacts[0]!.money_owner, 'customer_business')
     assert.deepEqual(paidFacts[0]!.value, customerPayment.value)
     const refundFact = progress.outcomes.find(item => item.source.id === refundedResult.id)
     assert(refundFact)
-    assert.deepEqual(refundFact.actor, { kind: 'member', userId: 'user-a' })
+    assert.deepEqual(refundFact.actor, { kind: 'member', user_id: 'user-a' })
     assert.equal(refundFact.value?.basis, 'refund')
     assert.equal(refundFact.value?.amount_minor, 1000)
-    assert.equal(progress.outcomes.some(item => item.moneyOwner === 'platform'), false, 'platform invoices do not become this customer business’s revenue')
+    assert.equal(progress.outcomes.some(item => item.money_owner === 'platform'), false, 'platform invoices do not become this customer business’s revenue')
     assert.deepEqual(progress.outcomes.filter(item => item.value?.basis === 'quoted').map(item => item.subject.id), ['req-1'])
     const paged = []
     let next: number | null = 0
@@ -189,7 +195,7 @@ test('conversion measurement: contract, values, idempotency, report and cohort o
       const page = await listBusinessOutcomes(db, principal, { limit: 1, offset: next })
       assert.equal(page.outcomes.length, 1)
       paged.push(...page.outcomes)
-      next = page.pagination.nextOffset
+      next = page.pagination.next_offset
     } while (next !== null)
     assert.deepEqual(paged, progress.outcomes, 'mixed canonical sources share one stable database ordering and pagination')
     assert.equal(new Set(paged.map(item => item.id)).size, paged.length)
@@ -200,9 +206,28 @@ test('conversion measurement: contract, values, idempotency, report and cohort o
 test('the funnel joins a business site from visit to payment, by source and by location', { timeout: 60_000 }, async () => {
   const { runtime, db } = await openDb()
   try {
-    await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, default_currency, timezone, analytics_data_start_at) VALUES ('org-funnel', 'Funnel', 'funnel', 'funnel', '{}', 'THB', 'Asia/Bangkok', '2000-01-01T00:00:00.000Z')`).run()
-    for (const id of ['loc-beach', 'loc-town']) {
-      await db.prepare(`INSERT INTO business_locations (id, organization_id, slug, title, timezone) VALUES (?, 'org-funnel', ?, ?, 'Asia/Bangkok')`).bind(id, id, id).run()
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://funnel.example', STRIPE_SECRET_KEY: 'sk_test_no_provider_requests', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://funnel.example',
+      EMAIL_REPLY_SECRET: 'local-reply-proof', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' } as CloudflareEnv
+    const occurredAt = new Date().toISOString()
+    const open = JSON.stringify({ periods: [{ open: { day: 0, hour: 0, minute: 0 } }] })
+    await db.batch([
+      db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, timezone, analytics_data_start_at)
+        VALUES ('org-funnel', 'Funnel', 'funnel', 'funnel', '{}', 'tenant-theme-v1', 'THB', 'active', 'active', 'flat', 'restaurant', 'Asia/Bangkok', '2000-01-01T00:00:00.000Z')`),
+      db.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('funnel-en', 'org-funnel', 'en', 1, 'published')"),
+      db.prepare("INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES ('funnel-owner', 'Owner', 'owner@funnel.example', 1, 0, 0)"),
+      db.prepare(`INSERT INTO member (id, "organizationId", "userId", role, "createdAt") VALUES ('m-funnel-owner', 'org-funnel', 'funnel-owner', 'owner', 0)`),
+      ...['loc-beach', 'loc-town'].map(id => db.prepare(`INSERT INTO business_locations (id, organization_id, slug, title, status, timezone, opening_hours, created_at, updated_at) VALUES (?, 'org-funnel', ?, ?, 'active', 'Asia/Bangkok', ?, ?, ?)`)
+        .bind(id, id, id, open, occurredAt, occurredAt)),
+    ])
+    // Each location's tables, set up the way the dashboard sets them up.
+    const tables = Object.fromEntries(await Promise.all(['loc-beach', 'loc-town'].map(async locationId => [locationId, await createTables(db, env, {
+      organizationId: 'org-funnel', locationId, actorId: 'funnel-owner', memberId: 'm-funnel-owner', name: `Tables ${locationId}`, durationMinutes: 120, seats: 10, open: '18:00', lastSeating: '21:00', currency: 'THB' })])))
+    const dinnerDate = localDateAt(new Date(Date.now() + 2 * 86_400_000), 'Asia/Bangkok')
+    const seating = async (locationId: string) => {
+      const at = localDateTimeToInstant(dinnerDate, '19:00', 'Asia/Bangkok', 'reject').toISOString()
+      const [found] = await listSessions(db, { env, organizationId: 'org-funnel', productId: tables[locationId]!.id, fromInstant: at, toInstant: new Date(Date.parse(at) + 60_000).toISOString() })
+      assert.equal(found?.starts_at, at)
+      return found!.id
     }
     // Two visitors: one from a Google ad at the beach, one typing the address in town.
     const visitor = (n: number) => ({ session: `3333333${n}-3333-4333-8333-333333333333`, visitor: `4444444${n}-4444-4444-8444-444444444444` })
@@ -211,46 +236,48 @@ test('the funnel joins a business site from visit to payment, by source and by l
       await recordTenantPageview(db, {
         eventId: `pv-funnel-${index}`, organizationId: 'org-funnel', pagePath: '/', locale: 'en', referrerHost: null, attribution: arrival.attribution,
         internalHosts: ['funnel.example'], userAgent: 'Desktop', ipHash: 'h', sessionId: arrival.session, visitorId: arrival.visitor,
-        country: 'th', region: null, city: null, locationId: arrival.locationId, pageId: null, pageType: 'home', recipe: null, now: '2026-09-10T03:00:00.000Z',
+        country: 'th', region: null, city: null, locationId: arrival.locationId, pageId: null, pageType: 'home', recipe: null, now: occurredAt,
       })
     }
     const [ad, direct] = arrivals.map(arrival => ({ headers: new Headers({ cookie: `kc_session_id=${arrival.session}; kc_visitor_id=${arrival.visitor}`, 'user-agent': 'Desktop' }) }))
-    const view = { organizationId: 'org-funnel', eventName: 'product_view', stage: 'viewed', surface: 'website', entityType: 'product', entityId: 'dinner' } as const
-    await recordOrganizationConversionEvent(db, ad, { ...view, locationId: 'loc-beach' })
-    await recordOrganizationConversionEvent(db, direct, { ...view, locationId: 'loc-town' })
-    await recordOrganizationConversionEvent(db, ad, { organizationId: 'org-funnel', eventName: 'checkout_start', stage: 'started', surface: 'website', entityType: null, entityId: null, locationId: 'loc-beach' })
-    // Both visitors reserve; the town reservation is later cancelled, so only the beach one is confirmed.
-    for (const [requestId, origin, locationId, status] of [['req-beach', ad, 'loc-beach', 'confirmed'], ['req-town', direct, 'loc-town', 'cancelled']] as const) {
-      const now = '2026-09-10T05:00:00.000Z'
-      const thread = requestInsertQueries({ id: requestId, kind: 'reservation', organization_id: 'org-funnel', location_id: locationId, user_id: null, review_id: null,
-        payload: threadPayloadForGuest({ name: 'Guest', email: 'guest@funnel.example', phone: '+66812345678' }), created_at: now, updated_at: now })
-      await db.batch(thread.map(write => db.prepare(write.query).bind(...write.params)))
-      await db.prepare(`INSERT INTO reservations (id, organization_id, location_id, request_id, timezone, starts_at, ends_at, party_size, status, cancelled_at)
-        VALUES (?, 'org-funnel', ?, ?, 'Asia/Bangkok', '2026-09-20T12:00:00.000Z', '2026-09-20T14:00:00.000Z', 2, ?, ?)`)
-        .bind(`reservation-${requestId}`, locationId, requestId, status, status === 'cancelled' ? now : null).run()
-      await recordOrganizationConversionEvent(db, origin, { organizationId: 'org-funnel', eventName: 'reservation_submit', stage: 'submitted', surface: 'website', entityType: 'request', entityId: requestId, locationId })
+    const view = { organizationId: 'org-funnel', eventName: 'product_view', stage: 'viewed', surface: 'website', entityType: 'product', entityId: 'dinner', occurredAt } as const
+    await recordAt(db, ad, { ...view, locationId: 'loc-beach' })
+    await recordAt(db, direct, { ...view, locationId: 'loc-town' })
+    await recordAt(db, ad, { organizationId: 'org-funnel', eventName: 'checkout_start', stage: 'started', surface: 'website', entityType: 'product', entityId: tables['loc-beach']!.id, locationId: 'loc-beach', occurredAt })
+    // Each visitor books a table on the site, which records its own submission.
+    const guestEvent = (origin: { headers: Headers }) => new H3Event(Object.assign(new Request('https://funnel.example/api/products', { headers: origin.headers }), { runtime: { cloudflare: { env } } }))
+    const book = async (origin: { headers: Headers } | null, locationId: string, email: string, key: string) => {
+      const result = await createProductBooking(origin ? guestEvent(origin) : new H3Event(Object.assign(new Request('https://funnel.example/api/mcp'), { runtime: { cloudflare: { env } } })), {
+        organizationId: 'org-funnel', slug: tables[locationId]!.slug, financialWritesAllowed: false,
+        ...(origin ? {} : { operator: { userId: 'funnel-owner', idempotencyKey: key, source: 'operator', externalReference: null, guestAcknowledgement: false } }),
+        body: { guest_name: 'Guest', guest_email: email, guest_phone: '+66812345678', product_session_id: await seating(locationId), party_size: 2, ...(origin ? { idempotency_key: key } : {}) } })
+      assert.equal(result.status, 201, JSON.stringify(result.body))
+      return { requestId: String(result.body.conversation_id), bookingId: String(result.body.booking_id) }
     }
-    // A request made through checkout records no submit event: its payment is how it was made.
-    const now = '2026-09-10T06:00:00.000Z'
-    const checkout = requestInsertQueries({ id: 'req-checkout', kind: 'reservation', organization_id: 'org-funnel', location_id: 'loc-beach', user_id: null, review_id: null,
-      payload: threadPayloadForGuest({ name: 'Guest', email: 'paid@funnel.example', phone: '+66812345678' }), created_at: now, updated_at: now })
-    await db.batch(checkout.map(write => db.prepare(write.query).bind(...write.params)))
-    await db.prepare(`INSERT INTO reservations (id, organization_id, location_id, request_id, timezone, starts_at, ends_at, party_size, status)
-      VALUES ('reservation-req-checkout', 'org-funnel', 'loc-beach', 'req-checkout', 'Asia/Bangkok', '2026-09-21T12:00:00.000Z', '2026-09-21T14:00:00.000Z', 2, 'confirmed')`).run()
-    // One payment made the checkout request; the other pays for a request already submitted, which is not submitted twice.
-    for (const [paymentId, reservationId, collected] of [['pay-checkout', 'reservation-req-checkout', 160500], ['pay-beach', 'reservation-req-beach', 53500]] as const) {
+    const beach = await book(ad, 'loc-beach', 'beach@funnel.example', 'beach')
+    const town = await book(direct, 'loc-town', 'town@funnel.example', 'town')
+    assert.deepEqual(await db.prepare(`SELECT payload_json ->> '$.entity_id' AS request_id, location_id FROM analytics_events WHERE kind = 'conversion' AND (payload_json ->> '$.event_name') = 'reservation_submit' ORDER BY location_id`).all().then(r => r.results),
+      [{ request_id: beach.requestId, location_id: 'loc-beach' }, { request_id: town.requestId, location_id: 'loc-town' }])
+    // The town booking is later cancelled, so only the beach one stands confirmed.
+    const cancelled = await executeGuestThreadOperation(db, { threadId: town.requestId, organizationId: 'org-funnel', action: 'cancel', actorUserId: 'funnel-owner', idempotencyKey: 'cancel-town', env, financialWritesAllowed: false })
+    assert.equal(cancelled.ok, true, JSON.stringify(cancelled))
+    // A booking nobody submitted on the site (the owner entered it) is made by its payment: that payment is its submission.
+    const entered = await book(null, 'loc-beach', 'paid@funnel.example', 'entered')
+    // One payment pays for that booking; the other pays for the beach booking already submitted, which is not submitted twice.
+    for (const [paymentId, bookingId, collected] of [['pay-checkout', entered.bookingId, 160500], ['pay-beach', beach.bookingId, 53500]] as const) {
       await db.prepare(`INSERT INTO payments (id, organization_id, stripe_account_id, livemode, subject_type, subject_id, location_id, currency, amount, price_snapshot_json, created_at, updated_at)
-        VALUES (?, 'org-funnel', 'acct_funnel', 0, 'reservation', ?, 'loc-beach', 'THB', ?, '{}', ?, ?)`).bind(paymentId, reservationId, collected, now, now).run()
-      await recordOrganizationConversionEvent(db, ad, { organizationId: 'org-funnel', eventName: 'payment_paid', stage: 'completed', surface: 'stripe', entityType: 'payment', entityId: paymentId, locationId: 'loc-beach',
+        VALUES (?, 'org-funnel', 'acct_funnel', 0, 'booking', ?, 'loc-beach', 'THB', ?, '{}', ?, ?)`).bind(paymentId, bookingId, collected, occurredAt, occurredAt).run()
+      await recordAt(db, ad, { organizationId: 'org-funnel', eventName: 'payment_paid', stage: 'completed', surface: 'stripe', entityType: 'payment', entityId: paymentId, locationId: 'loc-beach', occurredAt,
         value: { basis: 'purchase', amount_minor: collected - 100, collected_minor: collected, currency: 'THB', transaction_id: `pi_${paymentId}` } })
     }
 
-    const { funnel } = await getAnalyticsReport(db, { organizationId: 'org-funnel', startDate: '2026-09-10', endDate: '2026-09-12', now: new Date('2026-09-13T00:00:00Z') })
-    const steps = (counts: Omit<typeof funnel, 'bySource' | 'byLocation'>) => [counts.visits, counts.viewed, counts.intent, counts.submitted, counts.confirmed, counts.paid]
+    const today = localDateAt(new Date(), 'Asia/Bangkok')
+    const { funnel } = await getAnalyticsReport(db, { organizationId: 'org-funnel', startDate: addLocalDays(today, -1), endDate: addLocalDays(today, 1), now: new Date(Date.now() + 3 * 86_400_000) })
+    const steps = (counts: Omit<typeof funnel, 'by_source' | 'by_location'>) => [counts.visits, counts.viewed, counts.intent, counts.submitted, counts.confirmed, counts.paid]
     assert.deepEqual(steps(funnel), [2, 2, 1, 3, 2, 2])
-    assert.deepEqual(funnel.paidCollected, [{ currency: 'THB', collectedMinor: 214000 }])
-    assert.deepEqual(funnel.bySource.map(row => [row.channel, ...steps(row)]), [['Google Ads', 1, 1, 1, 2, 2, 2], ['Direct', 1, 1, 0, 1, 0, 0]])
-    assert.deepEqual(funnel.byLocation.map(row => [row.locationId, ...steps(row)]).sort(), [['loc-beach', 1, 1, 1, 2, 2, 2], ['loc-town', 1, 1, 0, 1, 0, 0]])
+    assert.deepEqual(funnel.paid_collected, [{ currency: 'THB', collected_minor: 214000 }])
+    assert.deepEqual(funnel.by_source.map(row => [row.channel, ...steps(row)]), [['Google Ads', 1, 1, 1, 2, 2, 2], ['Direct', 1, 1, 0, 1, 0, 0]])
+    assert.deepEqual(funnel.by_location.map(row => [row.location_id, ...steps(row)]).sort(), [['loc-beach', 1, 1, 1, 2, 2, 2], ['loc-town', 1, 1, 0, 1, 0, 0]])
   } finally { await runtime.dispose() }
 })
 
@@ -277,10 +304,10 @@ test('attribution rates share one population; cohorts follow the acquiring owner
     }
     const period = { organizationId: 'org-platform', startDate: '2026-09-10', endDate: '2026-09-10', now: new Date('2026-09-11T00:00:00Z') }
     const report = await getAnalyticsReport(db, period)
-    for (const row of report.attribution) assert.ok((row.sessionConversionRate ?? 0) <= 100, `${row.campaign} rate ${row.sessionConversionRate}`)
-    assert.deepEqual(report.attribution.map(row => [row.campaign, row.sessions, row.convertingSessions]).sort(), [['A', 1, 0], ['B', 2, 2]])
+    for (const row of report.attribution) assert.ok((row.session_conversion_rate ?? 0) <= 100, `${row.campaign} rate ${row.session_conversion_rate}`)
+    assert.deepEqual(report.attribution.map(row => [row.campaign, row.sessions, row.converting_sessions]).sort(), [['A', 1, 0], ['B', 2, 2]])
     // The events keep the touch they had when they happened, in their own grouping.
-    assert.deepEqual(report.outcomeAttribution.map(row => [row.campaign, row.events]), [['A', 2]])
+    assert.deepEqual(report.outcome_attribution.map(row => [row.campaign, row.events]), [['A', 2]])
 
     // A paying business already owned by someone else; a newcomer is added as a later owner and is not its acquirer.
     const founderSignup = await recordAt(db, null, { organizationId: 'org-platform', eventName: 'sign_up', stage: 'completed', surface: 'auth', entityType: 'user', entityId: 'founder', occurredAt: '2026-09-10T05:00:00.000Z' })
@@ -297,10 +324,10 @@ test('attribution rates share one population; cohorts follow the acquiring owner
     await recordAt(db, null, { organizationId: 'org-platform', eventName: 'purchase', stage: 'completed', surface: 'stripe', entityType: 'invoice', entityId: 'in_new', occurredAt: '2026-09-10T08:00:00.000Z',
       value: { basis: 'purchase', amount_minor: 4900, collected_minor: 4900, currency: 'USD', transaction_id: 'in_new' },
       metadata: { purchase_type: 'initial_subscription', subscribing_organization_id: 'org-new', originating_user_id: 'founder' } })
-    const cohort = (await getAnalyticsReport(db, period)).signupCohort
+    const cohort = (await getAnalyticsReport(db, period)).signup_cohort
     // Four signups; only the founder's led to a business that onboarded and paid after them. The paying business predates the newcomer.
-    assert.deepEqual([cohort.signups, cohort.onboardedSignups, cohort.firstPaidSignups], [4, 1, 1])
-    assert.deepEqual([cohort.onboardedBusinesses, cohort.firstPaidBusinesses], [1, 2])
+    assert.deepEqual([cohort.signups, cohort.onboarded_signups, cohort.first_paid_signups], [4, 1, 1])
+    assert.deepEqual([cohort.onboarded_businesses, cohort.first_paid_businesses], [1, 2])
   } finally { await runtime.dispose() }
 })
 
@@ -606,29 +633,43 @@ test('a completed onboarding emails each operator once, with a link to that cust
 
     const completion = await completeOnboarding(env, db, 'org-customer', null)
     assert.deepEqual(completion.operator_email, { status: 'sent' })
-    assert.equal(sent.length, 1, 'a repeated operator address, however cased, is one email')
-    const [email] = sent
-    assert.deepEqual(email!.body.to, ['ops@krabiclaw.com'])
-    assert.equal(email!.body.subject, 'Clay Corner is live on KrabiClaw')
-    assert.equal(email!.idempotencyKey, `onboarding-complete:org-customer:${hashEmail('ops@krabiclaw.com')}`)
+    assert.deepEqual(completion.owner_welcome_email, { status: 'sent' })
+    assert.equal(sent.length, 2, 'a completed onboarding sends one operator notification and one owner welcome email')
+    const operatorMail = sent.find(mail => mail.body.to.includes('ops@krabiclaw.com'))
+    const ownerMail = sent.find(mail => mail.body.to.includes('mina@clay-corner.com'))
+    assert.ok(operatorMail)
+    assert.ok(ownerMail)
+    assert.deepEqual(operatorMail!.body.to, ['ops@krabiclaw.com'])
+    assert.equal(operatorMail!.body.subject, 'Clay Corner is live on KrabiClaw')
+    assert.equal(operatorMail!.idempotencyKey, `onboarding-complete:org-customer:${hashEmail('ops@krabiclaw.com')}`)
     for (const expected of ['Mina Park (mina@clay-corner.com)', 'https://clay-corner.krabiclaw.com/',
       'https://krabiclaw.com/dashboard/krabiclaw/platform-accounts?user=user-owner&amp;organization=org-customer']) {
-      assert.ok(email!.body.html.includes(expected), `email carries ${expected}`)
+      assert.ok(operatorMail!.body.html.includes(expected), `operator email carries ${expected}`)
+    }
+
+    assert.deepEqual(ownerMail!.body.to, ['mina@clay-corner.com'])
+    assert.equal(ownerMail!.body.subject, 'Welcome to KrabiClaw — congrats on launching Clay Corner!')
+    assert.equal(ownerMail!.idempotencyKey, `onboarding-welcome:org-customer:${hashEmail('mina@clay-corner.com')}`)
+    for (const expected of ['Hi Mina,', 'Clay Corner', 'https://clay-corner.krabiclaw.com/', 'https://krabiclaw.com/dashboard/clay-corner', 'dining experience or cuisine', 'Paul', 'Founder, KrabiClaw']) {
+      assert.ok(ownerMail!.body.html.includes(expected), `owner welcome email carries ${expected}`)
     }
     // The conversion is recorded on its own path, once per organization.
     assert.equal(await db.prepare("SELECT count(*) FROM analytics_events WHERE json_extract(payload_json, '$.event_name') = 'onboarding_complete' AND json_extract(payload_json, '$.entity_id') = 'org-customer'").first('count(*)'), 1)
 
     // KrabiClaw activating itself is not a customer: no email.
     assert.deepEqual((await completeOnboarding(env, db, 'org-platform', null)).operator_email, { status: 'sent' })
-    assert.equal(sent.length, 1)
+    assert.deepEqual((await completeOnboarding(env, db, 'org-platform', null)).owner_welcome_email, { status: 'sent' })
+    assert.equal(sent.length, 2)
 
-    // An unconfigured operator address fails visibly and does not stop the measurement.
+    // An unconfigured operator address fails visibly and does not stop the owner welcome email or measurement.
     await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, status, default_currency, timezone) VALUES ('org-second', 'Second', 'second', 'second', 'active', 'USD', 'Asia/Bangkok')`).run()
+    await db.prepare(`INSERT INTO organization_domains (id, organization_id, domain, type, role, status) VALUES ('dom-2', 'org-second', 'second.krabiclaw.com', 'system', 'canonical', 'active')`).run()
     await db.prepare(`INSERT INTO member (id, "organizationId", "userId", role) VALUES ('m-second', 'org-second', 'user-owner', 'owner')`).run()
     const unconfigured = await completeOnboarding({ ...env, PLATFORM_OWNER_EMAILS: '' }, db, 'org-second', null)
     assert.deepEqual(unconfigured.operator_email, { status: 'failed', reason: 'PLATFORM_OWNER_EMAILS is not configured' })
+    assert.deepEqual(unconfigured.owner_welcome_email, { status: 'sent' })
     assert.equal(await db.prepare("SELECT count(*) FROM analytics_events WHERE json_extract(payload_json, '$.event_name') = 'onboarding_complete' AND json_extract(payload_json, '$.entity_id') = 'org-second'").first('count(*)'), 1)
-    assert.equal(sent.length, 1)
+    assert.equal(sent.length, 3, 'owner welcome email was sent despite operator email failure')
   } finally {
     await runtime.dispose()
   }

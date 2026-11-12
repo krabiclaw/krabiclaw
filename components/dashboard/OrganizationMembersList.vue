@@ -111,7 +111,7 @@ const dashboardApi = useDashboardApi()
 
 const dashboard = useDashboardOrganization()
 const { data, error: loadError, refresh } = await useAsyncData(
-  () => organizationMembersKey(String(route.params.orgSlug)),
+  () => organizationMembersKey(String(route.params.org_slug)),
   () => dashboardApi('/api/dashboard/members', { validate: isOrganizationMembersData }),
 )
 

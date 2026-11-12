@@ -49,7 +49,7 @@ export interface PublicOrganizationLinksPayload {
   }
   page: OrganizationLinksPage
   items: OrganizationLinkItem[]
-  localeRepresentations: PublicLocaleRepresentation[]
+  locale_representations: PublicLocaleRepresentation[]
 }
 
 export interface LinksPageUpdateInput {
@@ -235,7 +235,7 @@ export async function getPublicLinksPage(env: CloudflareEnv, db: DbClient, organ
     },
     page,
     items: publicItems,
-    localeRepresentations: await listPublicLocaleRepresentations(env, db, {
+    locale_representations: await listPublicLocaleRepresentations(env, db, {
       organizationId,
       sourcePath: '/links',
       documentId: sourcePage.id,
@@ -290,7 +290,7 @@ export async function upsertLinksPage(db: DbClient, input: {
   }))
   const copy = { title, updated_by: input.updatedBy ?? null }
   if (current.page) {
-    await updateContentDocument(db, current.page.id, { expected_updated_at: input.expectedUpdatedAt ?? current.page.updated_at,
+    await updateContentDocument(db, current.page.id, { updated_at: input.expectedUpdatedAt ?? current.page.updated_at,
       changes: copy, blocks })
   } else {
     await createContentDocumentWithBlocks(db, { id: pageId, organizationId: input.organizationId,

@@ -22,10 +22,10 @@ export async function requireDeviceSession(event: H3Event) {
   return { db: env.DB, userId: session.user.id, sessionId: session.session.id }
 }
 
-export function deviceToken(value: unknown): string {
+function parseDeviceToken(value: unknown): string {
   // Apple device tokens have variable byte lengths; validate hexadecimal bytes rather than one fixed size.
   if (typeof value !== 'string' || !/^(?:[0-9a-f]{2})+$/i.test(value)) {
-    throw new HTTPError({ statusCode: 422, message: 'deviceToken must contain hexadecimal bytes', data: { code: 'INVALID_DEVICE_TOKEN', field: 'deviceToken' } })
+    throw new HTTPError({ statusCode: 422, message: 'token must contain hexadecimal bytes', data: { code: 'INVALID_DEVICE_TOKEN', field: 'token' } })
   }
   return value.toLowerCase()
 }
@@ -60,7 +60,7 @@ function subscriptionKey(value: unknown, field: 'p256dh' | 'auth'): string {
 }
 
 export type DeviceRegistration =
-  | { kind: 'apns'; deviceToken: unknown; environment: unknown }
+  | { kind: 'apns'; token: unknown; environment: unknown }
   | { kind: 'web'; endpoint: unknown; p256dh: unknown; auth: unknown }
 
 export async function registerDevice(
@@ -68,7 +68,7 @@ export async function registerDevice(
   input: DeviceRegistration & { userId: string; sessionId: string },
 ): Promise<void> {
   const row = input.kind === 'apns'
-    ? { token: deviceToken(input.deviceToken), environment: deviceEnvironment(input.environment), p256dh: null, auth: null }
+    ? { token: parseDeviceToken(input.token), environment: deviceEnvironment(input.environment), p256dh: null, auth: null }
     : { token: subscriptionEndpoint(input.endpoint), environment: null, p256dh: subscriptionKey(input.p256dh, 'p256dh'), auth: subscriptionKey(input.auth, 'auth') }
   // The Better Auth read authorizes the request. This same-statement guard
   // prevents a revoked or expired session from winning a later device write.
@@ -92,10 +92,10 @@ export async function registerDevice(
 
 export async function unregisterDevice(
   db: DbClient,
-  input: { kind: 'apns'; deviceToken: unknown } | { kind: 'web'; endpoint: unknown },
+  input: { kind: 'apns'; token: unknown } | { kind: 'web'; endpoint: unknown },
   owner: { userId: string; sessionId: string },
 ): Promise<void> {
-  const token = input.kind === 'apns' ? deviceToken(input.deviceToken) : subscriptionEndpoint(input.endpoint)
+  const token = input.kind === 'apns' ? parseDeviceToken(input.token) : subscriptionEndpoint(input.endpoint)
   // An older signed-in session cannot unregister a token since reassigned to a new session.
   await execute(db, 'DELETE FROM device_tokens WHERE token = ? AND kind = ? AND user_id = ? AND session_id = ?', [token, input.kind, owner.userId, owner.sessionId])
 }

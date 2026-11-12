@@ -161,7 +161,7 @@ const billingPeriodLabel = computed(() => props.photo && props.plan.id === 'free
 
 // Stripe's own phrasing: what Basic includes, or the charge per home (a place to stay).
 // A paid plan's beta spots left; the struck next price and the chip show only while some are.
-const betaSpotsLeft = computed(() => props.plan.prices.length ? props.plan.betaSpotsLeft ?? 0 : 0)
+const betaSpotsLeft = computed(() => props.plan.prices.length ? props.plan.beta_spots_left ?? 0 : 0)
 // Badges take the feature checks' tint: a pale primary chip on a light card, a deeper one on a dark card.
 const chipClass = computed(() => props.photo || !isHighlighted.value ? 'bg-primary/10 text-primary-600' : 'bg-primary/20 text-primary-300')
 

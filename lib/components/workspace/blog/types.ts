@@ -9,6 +9,9 @@ export interface BlogPost {
   collection?: ArticleCollection | null
   category?: { id: string; name: string; slug: string } | null
   /** Its place in its collection, from 1; 0 until the collection is ordered with it in it. */
+  author_id?: string | null
+  author_name?: string | null
+  author?: { id: string; name?: string | null } | null
   sort_order: number
   seo_keywords?: string | null
   published_at?: string | null
@@ -65,7 +68,7 @@ export interface BlogPostUpdateInput {
   seo_keywords?: string | null
   visibility?: 'listed' | 'unlisted'
   content_blocks?: BlogEditorBlock[]
-  expected_updated_at?: string
+  updated_at?: string
 }
 
 export interface BlogLifecycleState {
@@ -82,5 +85,5 @@ export interface BlogPostRepository {
   create(_input: BlogPostCreateInput): Promise<BlogPost & { id: string }>
   update(_postId: string, _input: BlogPostUpdateInput): Promise<BlogPost>
   delete(_postId: string): Promise<void>
-  publish(_postId: string, _input: { expected_updated_at: string }): Promise<BlogPost>
+  publish(_postId: string, _input: { updated_at: string }): Promise<BlogPost>
 }

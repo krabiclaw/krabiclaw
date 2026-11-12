@@ -17,16 +17,16 @@ export default defineHandler(async (event) => {
   const validation = await validateInternalRequest(event, env, SEARCH_INTERNAL_CALLER)
   if (!validation.ok) return jsonResponse({ error: validation.error }, { status: validation.status })
 
-  const staticCounts = {
-    faqEntries: PLATFORM_KNOWLEDGE_FAQ_ENTRIES.length, routeEntries: PLATFORM_KNOWLEDGE_ROUTE_ENTRIES.length, pageEntries: PLATFORM_KNOWLEDGE_PAGE_ENTRIES.length, }
+  const static_counts = {
+    faq_entries: PLATFORM_KNOWLEDGE_FAQ_ENTRIES.length, route_entries: PLATFORM_KNOWLEDGE_ROUTE_ENTRIES.length, page_entries: PLATFORM_KNOWLEDGE_PAGE_ENTRIES.length, }
 
   try {
     const baseRecords = await buildPlatformKnowledgeDocuments(env.db)
-    const byType: Record<string, number> = {}
+    const by_type: Record<string, number> = {}
     for (const record of baseRecords) {
-      byType[record.type] = (byType[record.type] ?? 0) + 1
+      by_type[record.type] = (by_type[record.type] ?? 0) + 1
     }
-    return jsonResponse({ ok: true, totalBaseRecords: baseRecords.length, byType, staticCounts })
+    return jsonResponse({ ok: true, total_base_records: baseRecords.length, by_type, static_counts })
   } catch (error) {
     console.error('Failed to build corpus stats:', error)
     return jsonResponse({ error: 'Failed to build corpus' }, { status: 500 })

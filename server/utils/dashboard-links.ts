@@ -122,12 +122,12 @@ export function articleSocialPostPath(orgSlug: string, articleId: string, channe
   return `${organizationBase(orgSlug)}/website/posts/new?${query}`
 }
 
-export function insightsPath(orgSlug: string, query?: { startDate: string; endDate: string; tab?: 'ads' } | { tab: 'reviews'; review: string }): string {
+export function insightsPath(orgSlug: string, query?: { start_date: string; end_date: string; tab?: 'ads' } | { tab: 'reviews'; review: string }): string {
   const path = `${organizationBase(orgSlug)}/insights`
   return query ? `${path}?${new URLSearchParams(query)}` : path
 }
 
-export function bookingEditorPath(orgSlug: string, kind: 'reservation' | 'booking' | 'stay', requestId: string): string {
+export function bookingEditorPath(orgSlug: string, kind: 'booking' | 'stay', requestId: string): string {
   return `${organizationBase(orgSlug)}/bookings/${kind}/${encodeURIComponent(requestId)}`
 }
 
@@ -155,9 +155,9 @@ export function qaEditorPath(orgSlug: string, qaId: string, locationId?: string 
   return scopedTo(`${organizationBase(orgSlug)}/website/qa/${encodeURIComponent(qaId)}`, locationId)
 }
 
-/** A review is a row of the Reviews tab beside Q&A, listed per scope, so its location rides along. */
+/** A review is a row of the Reviews destination, listed per scope, so its location rides along. */
 export function reviewEditorPath(orgSlug: string, reviewId: string, locationId?: string | null): string {
-  return scopedTo(`${organizationBase(orgSlug)}/website/qa/reviews/${encodeURIComponent(reviewId)}`, locationId)
+  return scopedTo(`${organizationBase(orgSlug)}/website/reviews/${encodeURIComponent(reviewId)}`, locationId)
 }
 
 export function locationEditorPath(orgSlug: string, locationSlug: string): string {

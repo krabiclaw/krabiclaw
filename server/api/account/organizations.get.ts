@@ -8,6 +8,6 @@ export default defineHandler(async event=>{
  const env=cloudflareEnv(event),session=await getAuthSession(event,env)
  if(!session)throw new HTTPError({statusCode:401,statusMessage:'Sign in to view your organizations'})
  const rows=await queryAll<{id:string;slug:string;name:string;vertical:string;default_currency:string;role:string}>(env.DB,'SELECT o.id,o.slug,o.name,o.vertical,o.default_currency,m.role FROM member m JOIN organization o ON o.id=m.organizationId WHERE m.userId=? ORDER BY o.name',[session.user.id])
- const organizations=await Promise.all(rows.map(async row=>({...row,imageUrl:await organizationLogo(env.DB,row.id)})))
+ const organizations=await Promise.all(rows.map(async row=>({...row,image_url:await organizationLogo(env.DB,row.id)})))
  return jsonResponse({organizations},{headers:{'cache-control':'private, no-store'}})
 })

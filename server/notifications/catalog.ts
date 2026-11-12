@@ -2,11 +2,10 @@ import type { WhatsAppTemplate } from '~/server/utils/whatsapp'
 import { reviewEditorPath } from '~/server/utils/dashboard-links'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import type { NotificationMessage } from './messages'
-import { guestPaymentMessage, ownerPaymentMessage, stripeAccountAttentionMessage } from './payment-events'
+import { guestPaymentMessage, ownerPaymentMessage, subscriptionPlanMessage } from './payment-events'
 import type { GuestPaymentNotificationEvent, PaymentNotificationEvent } from './payment-events'
 import {
   bookingCancelledMessage,
-  calendarSyncMessage,
   bookingChangeMessage,
   bookingCreatedMessage,
   occurrenceChangeDifferences,
@@ -17,12 +16,11 @@ import {
   stayTurnoverAlert,
   domainUpdateMessage,
   onboardingCompletedMessage,
+  ownerWelcomeMessage,
   contentReportedMessage,
   inquiryReceivedMessage,
   messageReceived,
   taskAlertMessage,
-  reservationCancelledMessage,
-  reservationCreatedMessage,
   reviewReceivedMessage,
 } from './events'
 import {
@@ -31,8 +29,6 @@ import {
   guestBookingCancelledMessage,
   guestBookingReceivedMessage,
   guestContactReceivedMessage,
-  guestReservationCancelledMessage,
-  guestReservationReceivedMessage,
   guestStayConfirmedMessage,
   guestThreadReplyMessage,
   guestThreadStatusMessage,
@@ -66,6 +62,7 @@ const restaurant = 'Ember & Slice'
 const studio = 'Pottery House Krabi'
 const inbox = 'https://demo.krabiclaw.com/dashboard/ember-slice/messages/preview-1'
 
+// A restaurant's table booking: the booking messages in the reservation's words.
 const reservation = {
   guestName: 'Alex Carter',
   guestEmail: 'alex@example.com',
@@ -80,6 +77,8 @@ const reservation = {
   heroImageUrl: null,
   replyUrl: inbox,
   paid: '$20.00',
+  productTitle: 'Main Dining Room table',
+  presentation: resolveBookingPresentation('table', 'restaurant'),
 }
 
 // A real tenant asset, so the preview shows what a hero actually looks like
@@ -116,7 +115,7 @@ const booking = {
   guestPhone: '+66 76 000 0002',
   organizationName: studio,
   productTitle: 'Pottery Wheel Class',
-  presentation: resolveBookingPresentation('booking', 'experience'),
+  presentation: resolveBookingPresentation('experience', 'experience'),
   // The studio's own question, answered as the guest read it.
   answers: [{ question_id: 'experience_level', label: 'Have you thrown on a wheel before?', type: 'yes_no' as const, help_text: null, value: false, selected_choices: [] }],
   date: 'Mon, Jul 20, 2026',
@@ -137,7 +136,7 @@ const guestVisit = {
   notes: 'Window seat.',
   contactPhone: '+1 555 000 0000',
   contactEmail: 'hello@emberslice.example',
-  receiptUrl: 'https://demo.krabiclaw.com/reservations/confirmed?id=preview',
+  receiptUrl: 'https://demo.krabiclaw.com/bookings/confirmed?id=preview',
   heroImageUrl: sampleCover,
 }
 
@@ -179,12 +178,10 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
   { id: 'task-assigned', audience: 'owner', title: 'Tasks — assigned to you', whatsappTemplate: 'guest_thread_reply_whatsapp', message: ownerAlert(taskAlertMessage({ kind: 'assigned', actorName: 'Alex Carter', task: { eyebrow: 'Turnover · 11:00 AM – 3:00 PM', title: '70 2B', detail: 'Next guests arrive 3:00 PM · 2 guests' }, organizationName: studio, taskUrl: inbox })) },
   { id: 'task-starting', audience: 'owner', title: 'Tasks — turnover starts today', whatsappTemplate: 'guest_thread_reply_whatsapp', message: ownerAlert(taskAlertMessage({ kind: 'starting', actorName: null, task: { eyebrow: '11:00 AM – 3:00 PM', title: '70 2B', detail: 'Next guests arrive 3:00 PM · 2 guests' }, organizationName: studio, taskUrl: inbox })) },
   // Owner alerts — both channels.
-  { id: 'reservation-created', audience: 'owner', title: 'Owner — new reservation', whatsappTemplate: 'new_reservation', message: ownerAlert(reservationCreatedMessage(reservation)) },
-  { id: 'reservation-cancelled', audience: 'owner', title: 'Owner — reservation cancelled', whatsappTemplate: 'reservation_cancelled', message: ownerAlert(reservationCancelledMessage({ ...reservation, wasConfirmed: true })) },
-  { id: 'booking-created', audience: 'owner', title: 'Owner — new experience booking', whatsappTemplate: 'new_reservation', message: ownerAlert(bookingCreatedMessage(booking)) },
+  { id: 'reservation-created', audience: 'owner', title: 'Owner — new table reservation', whatsappTemplate: 'new_reservation', message: ownerAlert(bookingCreatedMessage({ ...reservation, status: 'confirmed' })) },
+  { id: 'reservation-cancelled', audience: 'owner', title: 'Owner — table reservation cancelled', whatsappTemplate: 'reservation_cancelled', message: ownerAlert(bookingCancelledMessage({ ...reservation, wasConfirmed: true })) },
+  { id: 'booking-created', audience: 'owner', title: 'Owner — new experience booking request', whatsappTemplate: 'new_reservation', message: ownerAlert(bookingCreatedMessage({ ...booking, status: 'pending' })) },
   { id: 'booking-cancelled', audience: 'owner', title: 'Owner — booking cancelled', whatsappTemplate: 'reservation_cancelled', message: ownerAlert(bookingCancelledMessage({ ...booking, wasConfirmed: false })) },
-  { id: 'calendar-event-deleted', audience: 'owner', title: 'Owner — booking event deleted in Google Calendar', message: ownerAlert(calendarSyncMessage({ kind: 'event_deleted', recordKind: 'consultation', guestName: 'Mina Park', whenLabel: 'Mon, Jul 20, 2026, 10:00 AM', day: 'Jul 20', reason: null, replyUrl: 'https://demo.krabiclaw.com/dashboard/demo/bookings/booking/preview-1', organizationName: studio })) },
-  { id: 'calendar-move-refused', audience: 'owner', title: 'Owner — booking could not follow its Google Calendar event', message: ownerAlert(calendarSyncMessage({ kind: 'move_refused', recordKind: 'consultation', guestName: 'Mina Park', whenLabel: 'Mon, Jul 20, 2026, 10:00 AM', day: 'Jul 20', reason: 'That time is outside Elena’s working hours', replyUrl: 'https://demo.krabiclaw.com/dashboard/demo/bookings/booking/preview-1', organizationName: studio })) },
   {
     id: 'stay-booked',
     audience: 'owner',
@@ -354,17 +351,6 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
     ))),
   },
   {
-    id: 'stripe-account-attention',
-    audience: 'owner',
-    title: 'Owner — Stripe needs something from the business',
-    whatsappTemplate: 'guest_thread_reply_whatsapp',
-    message: ownerAlert(stripeAccountAttentionMessage({
-      organizationName: 'Ember & Slice', status: 'action_required',
-      reasons: ['Information on the account doesn\'t match information on the document. Verify the account and upload the document again.'],
-      action: { url: 'https://demo.krabiclaw.com/dashboard/ember-slice/payments/payout-method', label: 'Review payout setup' },
-    })),
-  },
-  {
     id: 'domain-update',
     audience: 'owner',
     title: 'Owner — custom domain updated',
@@ -413,11 +399,63 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
   },
 
   {
+    id: 'owner-welcome-experience',
+    audience: 'owner',
+    title: 'Owner — founder welcome (Experience)',
+    message: ownerWelcomeMessage({
+      organizationName: studio,
+      ownerName: 'Priya Shah',
+      siteUrl: 'https://pottery-house.krabiclaw.com/',
+      dashboardUrl: 'https://krabiclaw.com/dashboard/pottery-house',
+      vertical: 'experience',
+    }),
+  },
+
+  {
+    id: 'owner-welcome-restaurant',
+    audience: 'owner',
+    title: 'Owner — founder welcome (Restaurant)',
+    message: ownerWelcomeMessage({
+      organizationName: 'The Olive Branch',
+      ownerName: 'Marco Rossi',
+      siteUrl: 'https://olive-branch.krabiclaw.com/',
+      dashboardUrl: 'https://krabiclaw.com/dashboard/olive-branch',
+      vertical: 'restaurant',
+    }),
+  },
+
+  {
+    id: 'owner-welcome-lodging',
+    audience: 'owner',
+    title: 'Owner — founder welcome (Lodging)',
+    message: ownerWelcomeMessage({
+      organizationName: 'Pinecone Stays',
+      ownerName: 'Sarah Jenkins',
+      siteUrl: 'https://pinecone-stays.krabiclaw.com/',
+      dashboardUrl: 'https://krabiclaw.com/dashboard/pinecone-stays',
+      vertical: 'lodging',
+    }),
+  },
+
+  {
+    id: 'owner-welcome-service',
+    audience: 'owner',
+    title: 'Owner — founder welcome (Legal Services)',
+    message: ownerWelcomeMessage({
+      organizationName: 'North Carolina Legal Services',
+      ownerName: 'Robert Vance',
+      siteUrl: 'https://nclegal.krabiclaw.com/',
+      dashboardUrl: 'https://krabiclaw.com/dashboard/nclegal',
+      vertical: 'service',
+    }),
+  },
+
+  {
     id: 'content-reported',
     audience: 'owner',
     title: 'Operator — a member reported or blocked someone',
     message: contentReportedMessage({
-      organizationName: 'Pinecone Stays', reporter: 'Priya Shah (priya@example.com)', subject: 'guest_thread', blocked: true,
+      organizationName: 'Pinecone Stays', reporter: 'Priya Shah (priya@example.com)', subject: 'conversation', blocked: true,
       reason: 'Harassing messages', excerpt: 'You will regret this. I know where you live.',
       reviewUrl: 'https://krabiclaw.com/dashboard/krabiclaw/platform-reports',
     }),
@@ -428,11 +466,11 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
   { id: 'auth-sign-in-code', audience: 'guest', title: 'Sign-in — email code', message: signInCodeMessage({ code: '482913' }) },
   { id: 'auth-reset', audience: 'guest', title: 'Sign-in — reset your password', message: resetPasswordMessage({ resetUrl: 'https://krabiclaw.com/reset-password?token=preview' }) },
   { id: 'organization-invite', audience: 'guest', title: 'Invitee — organization invitation', message: organizationInviteMessage({ organizationName: studio, inviterName: 'Priya Shah', role: 'Admin', inviteUrl: 'https://demo.krabiclaw.com/accept-invitation/preview', expires: 'Nov 8, 2026, 2:00 PM UTC' }) },
-  { id: 'guest-reservation-received', audience: 'guest', title: 'Guest — reservation confirmed', message: guestReservationReceivedMessage(guestVisit) },
-  { id: 'guest-reservation-cancelled', audience: 'guest', title: 'Guest — reservation cancelled', message: guestReservationCancelledMessage({ ...guestVisit, wasConfirmed: true }) },
-  { id: 'guest-booking-received', audience: 'guest', title: 'Guest — booking request sent', message: guestBookingReceivedMessage({ ...guestVisit, guestName: 'Mina Park', organizationName: studio, productTitle: 'Pottery Wheel Class', date: 'Mon, Jul 20, 2026', time: '10:00 AM' }) },
+  { id: 'guest-reservation-received', audience: 'guest', title: 'Guest — table reservation confirmed', message: guestBookingReceivedMessage({ ...guestVisit, productTitle: 'Main Dining Room table', status: 'confirmed', wording: 'reservation' }) },
+  { id: 'guest-reservation-cancelled', audience: 'guest', title: 'Guest — table reservation cancelled', message: guestBookingCancelledMessage({ ...guestVisit, productTitle: 'Main Dining Room table', wasConfirmed: true, wording: 'reservation' }) },
+  { id: 'guest-booking-received', audience: 'guest', title: 'Guest — booking request sent', message: guestBookingReceivedMessage({ ...guestVisit, guestName: 'Mina Park', organizationName: studio, productTitle: 'Pottery Wheel Class', date: 'Mon, Jul 20, 2026', time: '10:00 AM', status: 'pending', wording: 'booking' }) },
   { id: 'guest-stay-confirmed', audience: 'guest', title: 'Guest — stay confirmed', message: guestStayConfirmedMessage({ guestName: 'Mina Park', organizationName: 'Pinecone Stays', organizationLogoUrl: sampleLogo, homeName: 'Cedar Loft', heroImageUrl: sampleCover, checkIn: 'Fri, Nov 6, 2026 · from 15:00', checkOut: 'Mon, Nov 9, 2026 · by 11:00', nights: '3', guests: '2 adults', total: '$645.00', receiptUrl: 'https://demo.krabiclaw.com/bookings/stay?id=preview', checkInInstructions: 'The lockbox is to the left of the front door. Your code arrives the morning of check-in.', contactPhone: '+1 415 555 0100', contactEmail: 'hello@example.com' }) },
-  { id: 'guest-booking-cancelled', audience: 'guest', title: 'Guest — booking cancelled', message: guestBookingCancelledMessage({ ...guestVisit, guestName: 'Mina Park', organizationName: studio, productTitle: 'Pottery Wheel Class', date: 'Mon, Jul 20, 2026', time: '10:00 AM', wasConfirmed: false }) },
+  { id: 'guest-booking-cancelled', audience: 'guest', title: 'Guest — booking cancelled', message: guestBookingCancelledMessage({ ...guestVisit, guestName: 'Mina Park', organizationName: studio, productTitle: 'Pottery Wheel Class', date: 'Mon, Jul 20, 2026', time: '10:00 AM', wasConfirmed: false, wording: 'booking' }) },
   { id: 'guest-contact-received', audience: 'guest', title: 'Guest — message sent', message: guestContactReceivedMessage({ guestName: 'Jordan Lee', organizationName: restaurant, organizationLogoUrl: sampleLogo, subject: 'General', productTitle: 'Pottery Wheel Class', message: 'Hi, do you have vegan options and parking nearby?', consentAcknowledged: true }) },
   { id: 'guest-thread-reply', audience: 'guest', title: 'Guest — a reply from the business', message: guestThreadReplyMessage({ organizationName: restaurant, organizationLogoUrl: sampleLogo, body: 'Hi Jordan,\n\nYes — we have a full vegan menu, and there is street parking on Soi 3 right outside. See you Tuesday!' }) },
   { id: 'guest-thread-status', audience: 'guest', title: 'Guest — reservation status changed', message: guestThreadStatusMessage({ organizationName: restaurant, organizationLogoUrl: sampleLogo, heading: `Your reservation at ${restaurant} is confirmed`, body: 'Your reservation is confirmed: Tue, Jul 14, 2026 at 7:00 PM for 2 guests.', actionUrl: guestVisit.receiptUrl, actionLabel: 'Manage your reservation' }) },
@@ -444,4 +482,12 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
     return { id: `owner-${event.kind}`, audience: 'owner' as const, title: `Owner — ${message.title}`, message }
   }),
   ...guestPayments.map(event => ({ id: `guest-${event.kind}`, audience: 'guest' as const, title: `Guest — ${guestPaymentMessage(event).title}`, message: guestPaymentMessage(event) })),
+  ...([
+    { kind: 'started', plan: 'Business', date: 'Nov 24, 2026' },
+    { kind: 'changed', plan: 'Business', previousPlan: 'Growth' },
+    { kind: 'ending', plan: 'Business', date: 'Dec 10, 2026' },
+  ] as const).map((input) => {
+    const message = ownerAlert(subscriptionPlanMessage({ ...input, organizationName: studio, action: { url: 'https://demo.krabiclaw.com/dashboard/pottery-house/billing', label: 'Open Plan and billing' } }))
+    return { id: `owner-plan-${input.kind}`, audience: 'owner' as const, title: `Owner — ${message.title}`, message }
+  }),
 ]

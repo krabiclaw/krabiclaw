@@ -7,10 +7,10 @@ import { getStripeConnectedAccount, paymentsStripe } from '~/server/utils/stripe
 
 /** The payout method as Airbnb shows it: the bank on file and when Stripe sends, read live from the connected account. */
 export interface ConnectPayoutMethod {
-  bankName: string | null
+  bank_name: string | null
   last4: string
   currency: string
-  schedule: { interval: string; delayDays: number }
+  schedule: { interval: string; delay_days: number }
 }
 
 export default defineHandler(async (event) => {
@@ -20,11 +20,11 @@ export default defineHandler(async (event) => {
   await assertRoleAllows({ organizationId: organization.id, role: organization.role, permissions: { payments: ['integration'] } })
   const account = await getStripeConnectedAccount(db, organization.id)
   let payout: ConnectPayoutMethod | null = null
-  if (account?.stripeAccountId && account.status === 'ready') {
+  if (account?.stripe_account_id && account.status === 'ready') {
     const stripe = paymentsStripe(env, account.livemode)
     const [banks, settings] = await Promise.all([
-      stripe.accounts.listExternalAccounts(account.stripeAccountId, { object: 'bank_account', limit: 100 }).autoPagingToArray({ limit: 10000 }),
-      stripe.accounts.retrieve(account.stripeAccountId),
+      stripe.accounts.listExternalAccounts(account.stripe_account_id, { object: 'bank_account', limit: 100 }).autoPagingToArray({ limit: 10000 }),
+      stripe.accounts.retrieve(account.stripe_account_id),
     ])
     if (!settings.default_currency) throw new HTTPError({ statusCode: 502, statusMessage: 'Stripe account has no default currency', data: { code: 'PAYOUT_CURRENCY_MISSING', field: 'account.default_currency' } })
     const defaultCurrency = settings.default_currency
@@ -33,8 +33,8 @@ export default defineHandler(async (event) => {
     const bank = defaultBanks[0]
     const schedule = settings.settings?.payouts?.schedule
     if (bank && (bank.object !== 'bank_account' || !bank.last4 || !schedule || !['daily', 'weekly', 'monthly', 'manual'].includes(schedule.interval) || (!Number.isSafeInteger(schedule.delay_days) || schedule.delay_days < 0))) throw new HTTPError({ statusCode: 502, statusMessage: 'Stripe returned invalid payout bank or schedule data', data: { code: 'PAYOUT_METHOD_INVALID', field: 'payout.schedule' } })
-    if (bank?.object === 'bank_account' && schedule) payout = { bankName: bank.bank_name ?? null, last4: bank.last4, currency: bank.currency.toUpperCase(), schedule: { interval: schedule.interval, delayDays: schedule.delay_days } }
+    if (bank?.object === 'bank_account' && schedule) payout = { bank_name: bank.bank_name ?? null, last4: bank.last4, currency: bank.currency.toUpperCase(), schedule: { interval: schedule.interval, delay_days: schedule.delay_days } }
 
   }
-  return jsonResponse({ success: true, account, payout, surchargePolicy: SURCHARGE_POLICY })
+  return jsonResponse({ success: true, account, payout, surcharge_policy: SURCHARGE_POLICY })
 })

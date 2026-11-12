@@ -111,9 +111,9 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Changes the selected booking to cancelled and releases its places; for a legal practice it also cancels the attorney’s preparation and follow-up jobs, posted to the team as an automatic team message.",
+        "read_only_justification": "Changes the selected booking to cancelled and releases its places, or a stay's nights under its version; for a legal practice it also cancels the attorney’s preparation and follow-up jobs, posted to the team as an automatic team message.",
         "destructive_justification": "Cancels the booking and emails the guest; a required refund is handed off to the dashboard first.",
-        "open_world_justification": "Sends the selected booking’s guest an email; for a legal practice the cancelled jobs are posted to the team."
+        "open_world_justification": "Sends the selected booking’s guest an email and, for a stay at a home connected to Airbnb, updates its availability through Channex; for a legal practice the cancelled jobs are posted to the team."
       }
     },
     "cancel_scheduled_guest_message": {
@@ -123,45 +123,9 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Changes one pending automatic message to cancelled.",
+        "read_only_justification": "Changes one pending outbox message, the caller’s own reply or, for a manager, an automatic message, to cancelled.",
         "destructive_justification": "Cancels a queued guest delivery.",
         "open_world_justification": "Changes private queue state without sending a message to a guest."
-      }
-    },
-    "cancel_scheduled_reply": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Changes the caller’s pending scheduled reply to cancelled.",
-        "destructive_justification": "Cancels a queued reply before it starts sending.",
-        "open_world_justification": "Changes only the caller’s private queued reply and does not send an external message."
-      }
-    },
-    "cancel_stay": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": true,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Checks the stay’s version, then cancels it, frees its nights, cancels its turnover job and pending guest messages and updates Airbnb availability; a required website refund returns a dashboard handoff before cancellation.",
-        "destructive_justification": "Cancels a saved stay, its turnover job and its pending outgoing messages.",
-        "open_world_justification": "Changes connected Airbnb availability, and the cancelled turnover job is posted to the team as an automatic team message."
-      }
-    },
-    "cancel_table_reservation": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": true,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Cancels the reservation and releases its table capacity.",
-        "destructive_justification": "Overwrites reservation state and emails the cancellation; required refunds are handed off first.",
-        "open_world_justification": "Emails the reservation’s guest."
       }
     },
     "complete_task": {
@@ -284,6 +248,18 @@
         "open_world_justification": "Plans messages for guests through their email, Airbnb or guest-inbox channel."
       }
     },
+    "create_meta_ads_campaign": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Creates a new paused campaign in the connected Meta Ad Account and records its result.",
+        "destructive_justification": "Adds new paused advertising resources without replacing existing campaigns or serving ads.",
+        "open_world_justification": "Submits campaign details to Meta's ad platform in PAUSED status."
+      }
+    },
     "create_post": {
       "annotations": {
         "readOnlyHint": false,
@@ -315,7 +291,7 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Saves a booking, for a legal practice a client consultation, with its inbox conversation; emails the guest when acknowledgement is chosen and notifies business staff. A confirmed consultation opens the attorney’s preparation and follow-up jobs, posted to the team as an automatic team message.",
+        "read_only_justification": "Saves a booking — a class, a restaurant table, or for a legal practice a client consultation — with its inbox conversation; emails the guest when acknowledgement is chosen and notifies business staff. A confirmed consultation opens the attorney’s preparation and follow-up jobs, posted to the team as an automatic team message.",
         "destructive_justification": "Sends notifications that cannot be recalled and uses up bookable places; a booking that requires online payment is refused before it is created.",
         "open_world_justification": "Can email the supplied guest address, notify business staff and post the attorney’s jobs to the team."
       }
@@ -368,18 +344,6 @@
         "open_world_justification": "Queued guest messages can reach guests, connected Airbnb availability is updated and the turnover job is posted to the team."
       }
     },
-    "create_table_reservation": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": true,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Persists the table reservation and initiates configured guest/staff notifications.",
-        "destructive_justification": "Sends notifications and reserves capacity; required financial action is handed off before confirmation.",
-        "open_world_justification": "Can email the supplied guest address and notify business staff."
-      }
-    },
     "create_task": {
       "annotations": {
         "readOnlyHint": false,
@@ -390,18 +354,6 @@
         "read_only_justification": "Persists a new task and can notify its assignee.",
         "destructive_justification": "Assignment can send email, WhatsApp or push notifications that cannot be recalled.",
         "open_world_justification": "Sends configured email, WhatsApp or push notifications to workspace assignees through external delivery services."
-      }
-    },
-    "create_team": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Creates a named Better Auth team in the selected business.",
-        "destructive_justification": "Only adds a private team record; it removes no member and sends no invitation.",
-        "open_world_justification": "Confined to the selected private business’s Better Auth teams."
       }
     },
     "defer_opportunity": {
@@ -608,18 +560,6 @@
         "open_world_justification": "Acts only on private payment records and moves no money."
       }
     },
-    "delete_team": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Deletes the selected Better Auth team.",
-        "destructive_justification": "Removes the team and its membership associations and clears open tasks assigned to that team.",
-        "open_world_justification": "Only deletes a team within the selected private business."
-      }
-    },
     "disable_organization_language": {
       "annotations": {
         "readOnlyHint": false,
@@ -680,6 +620,18 @@
         "open_world_justification": "Reads one post from the exact saved Page, Instagram account or Discord channel and validates that target."
       }
     },
+    "get_conversation": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Reads one conversation the caller may see — a guest conversation’s guest, answers, booking, messages and delivery receipts, or a team conversation’s people and messages — without marking it read.",
+        "destructive_justification": "Does not send a message, change participants, advance the caller read position or modify a booking.",
+        "open_world_justification": "Reads one conversation and its private records within the caller authorized business scope."
+      }
+    },
     "get_google_ads_campaign": {
       "annotations": {
         "readOnlyHint": true,
@@ -690,18 +642,6 @@
         "read_only_justification": "Reads one campaign’s status, budget, ad groups, keywords and copy in the connected account.",
         "destructive_justification": "Does not change campaign status, budget, keywords or ad copy.",
         "open_world_justification": "Reads one campaign only from the business connected Google Ads customer account."
-      }
-    },
-    "get_guest_conversation": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Reads saved guest messages, answers, operational records, attachments and delivery receipts without changing the conversation.",
-        "destructive_justification": "Does not change conversation state, send guest replies or modify the operational booking.",
-        "open_world_justification": "Reads one guest conversation and its private records within the caller authorized business scope."
       }
     },
     "get_guest_messaging_context": {
@@ -867,7 +807,7 @@
         "destructiveHint": false
       },
       "justifications": {
-        "read_only_justification": "Reads the booking’s saved guest details, answers, provenance and operational record.",
+        "read_only_justification": "Reads the booking’s saved guest details, answers, provenance and operational record, or a stay with its offline and online paid totals; member access to a stay returns turnover fields only.",
         "destructive_justification": "Does not confirm, cancel, reassign or change the booking or send guest notifications.",
         "open_world_justification": "Reads one operational booking and its private guest snapshot in the authorized business scope."
       }
@@ -882,18 +822,6 @@
         "read_only_justification": "Reads the selected business’s saved product and collection text and its exact secondary-language translations.",
         "destructive_justification": "Does not translate products, replace text or change language publication.",
         "open_world_justification": "Reads only the selected business product and collection text and its saved translations."
-      }
-    },
-    "get_reservation_policy": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Reads an existing location reservation configuration and computes its localized policy summary.",
-        "destructive_justification": "Does not change reservation rules, collect deposits or reserve capacity.",
-        "open_world_justification": "Reads an existing policy at the selected business location and computes its summary."
       }
     },
     "get_resource_localization": {
@@ -932,18 +860,6 @@
         "open_world_justification": "Checks only the business saved Meta and Discord connections and their current access."
       }
     },
-    "get_stay": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Reads one authorized stay and computes offline/online paid totals; member access returns turnover fields only.",
-        "destructive_justification": "Does not edit the stay, record payments, refund money or send guest messages.",
-        "open_world_justification": "Reads one authorized stay and its private payment records in the selected business."
-      }
-    },
     "get_stay_calendar": {
       "annotations": {
         "readOnlyHint": true,
@@ -954,18 +870,6 @@
         "read_only_justification": "Reads one authorized home and stored nights, stay claims and restrictions for a date range; no provider sync is started.",
         "destructive_justification": "Does not close nights, set prices, create stays or push channel updates.",
         "open_world_justification": "Reads the saved calendar and stay claims for one authorized home in the selected business."
-      }
-    },
-    "get_team_conversation": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Reads messages, photos and notification receipts without marking the conversation read.",
-        "destructive_justification": "Does not send a message, remove participants or advance the caller read position.",
-        "open_world_justification": "Reads only an internal conversation the signed-in workspace member participates in."
       }
     },
     "get_website_draft": {
@@ -1052,6 +956,30 @@
         "open_world_justification": "Reads only collections owned by the selected business and optional named location."
       }
     },
+    "list_conversation_recipients": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Reads actual members available in the selected private workspace.",
+        "destructive_justification": "Does not create conversations, invite people or change team membership.",
+        "open_world_justification": "Reads existing members eligible for conversations in the selected private workspace."
+      }
+    },
+    "list_conversations": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Reads the authorized Messages list — guest, Airbnb Support and the caller’s team conversations — with each row’s last-message preview and the caller’s unread counts.",
+        "destructive_justification": "Does not archive conversations, mark messages read, reply or change bookings.",
+        "open_world_justification": "Reads the business private inbox subject to the caller conversation access."
+      }
+    },
     "list_google_ads_campaigns": {
       "annotations": {
         "readOnlyHint": true,
@@ -1062,18 +990,6 @@
         "read_only_justification": "Reads campaigns and metrics in the organization’s connected Google Ads account.",
         "destructive_justification": "Does not create campaigns, enable delivery or change advertising budgets.",
         "open_world_justification": "Reads campaigns and metrics only in the business configured Google Ads customer account."
-      }
-    },
-    "list_guest_conversations": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Reads the authorized inbox’s conversation labels and reply status without returning message text or intake answers in bulk.",
-        "destructive_justification": "Does not archive conversations, mark messages read, reply or change bookings.",
-        "open_world_justification": "Reads the business private inbox subject to the caller conversation access."
       }
     },
     "list_location_products": {
@@ -1146,6 +1062,18 @@
         "read_only_justification": "Reads the saved automatic-message templates and schedules without planning or sending them.",
         "destructive_justification": "Does not modify templates, plan new deliveries or send automatic messages.",
         "open_world_justification": "Reads saved automatic-message text and schedules in the selected business."
+      }
+    },
+    "list_meta_ads_campaigns": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Reads campaigns and status in the organization’s connected Meta Ad Account.",
+        "destructive_justification": "Does not create campaigns, enable delivery or change advertising budgets.",
+        "open_world_justification": "Reads campaigns and status only in the business configured Meta Ad Account."
       }
     },
     "list_opportunities": {
@@ -1263,7 +1191,7 @@
         "destructiveHint": false
       },
       "justifications": {
-        "read_only_justification": "Reads saved product bookings and consultations under the caller’s access scope.",
+        "read_only_justification": "Reads saved bookings, table reservations, consultations and stays under the caller’s access scope.",
         "destructive_justification": "Does not allocate capacity, confirm, cancel or change saved bookings.",
         "open_world_justification": "Reads bookings and consultations only within the caller authorized business scope."
       }
@@ -1287,21 +1215,9 @@
         "destructiveHint": false
       },
       "justifications": {
-        "read_only_justification": "Reads planned automatic-message snapshots and saved failure states without sending them.",
+        "read_only_justification": "Reads the caller’s own scheduled replies and, for managers, planned automatic-message snapshots and saved failure states without sending them.",
         "destructive_justification": "Does not edit delivery snapshots, cancel queued messages or dispatch sends.",
-        "open_world_justification": "Reads automatic-message plans only for the selected business and accessible homes."
-      }
-    },
-    "list_scheduled_replies": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Reads only the caller’s pending and failed scheduled replies without changing their schedule.",
-        "destructive_justification": "Does not reschedule replies, cancel them or initiate delivery.",
-        "open_world_justification": "Reads only the signed-in user own scheduled replies and recorded failures."
+        "open_world_justification": "Reads outbox messages only for the selected business, the caller’s own replies and the automatic messages a manager may see."
       }
     },
     "list_site_pages": {
@@ -1316,30 +1232,6 @@
         "open_world_justification": "Reads authored pages and the fixed template routes belonging to the selected business."
       }
     },
-    "list_stays": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Reads visible stays overlapping the date range, optionally one product or cancelled stays; members receive only assigned turnover fields.",
-        "destructive_justification": "Does not create or cancel stays, claim nights or send guest messages.",
-        "open_world_justification": "Reads only stays at homes the caller may access in the selected business."
-      }
-    },
-    "list_table_reservations": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Reads saved restaurant reservations and their status summary.",
-        "destructive_justification": "Does not reserve tables, change party sizes, cancel reservations or email guests.",
-        "open_world_justification": "Reads restaurant reservations and summaries only within the authorized business."
-      }
-    },
     "list_tasks": {
       "annotations": {
         "readOnlyHint": true,
@@ -1352,43 +1244,7 @@
         "open_world_justification": "Reads only the selected private workspace."
       }
     },
-    "list_team_conversation_recipients": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Reads actual members available in the selected private workspace.",
-        "destructive_justification": "Does not create conversations, invite people or change team membership.",
-        "open_world_justification": "Reads existing members eligible for conversations in the selected private workspace."
-      }
-    },
-    "list_team_conversations": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Reads only the caller’s internal conversations and their saved unread state.",
-        "destructive_justification": "Does not send messages, alter participants or advance read positions.",
-        "open_world_justification": "Reads only internal conversations the signed-in member already participates in."
-      }
-    },
-    "list_teams": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Reads Better Auth teams and memberships in the selected business.",
-        "destructive_justification": "Does not create teams, remove them or change their membership.",
-        "open_world_justification": "Reads Better Auth teams and memberships only in the selected private business."
-      }
-    },
-    "mark_team_conversation_read": {
+    "mark_conversation_read": {
       "annotations": {
         "readOnlyHint": false,
         "openWorldHint": false,
@@ -1396,7 +1252,19 @@
       },
       "justifications": {
         "read_only_justification": "Persists the caller’s read position for the selected conversation.",
-        "destructive_justification": "Overwrites the caller’s existing last-read timestamp.",
+        "destructive_justification": "Moves the caller’s own read position forward; it does not message anyone or change anyone else’s.",
+        "open_world_justification": "Changes only the caller’s private read position within the workspace."
+      }
+    },
+    "mark_conversation_unread": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Persists the caller’s read position for the selected conversation, just before its newest message from someone else.",
+        "destructive_justification": "Moves the caller’s own read position back; it does not message anyone or change anyone else’s.",
         "open_world_justification": "Changes only the caller’s private read position within the workspace."
       }
     },
@@ -1508,6 +1376,18 @@
         "open_world_justification": "Queries only the Google Analytics property already selected by the business."
       }
     },
+    "query_meta_ads_report": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Reads an advertising performance summary report in the connected Meta Ad Account.",
+        "destructive_justification": "Does not edit campaigns, enable advertising or change budgets.",
+        "open_world_justification": "Queries performance only within the business configured Meta Ad Account."
+      }
+    },
     "query_organization_analytics": {
       "annotations": {
         "readOnlyHint": true,
@@ -1530,18 +1410,6 @@
         "read_only_justification": "Reads search-performance rows for the organization’s already-selected Search Console property.",
         "destructive_justification": "Does not change Search Console settings or submit website changes.",
         "open_world_justification": "Queries search performance only for the Search Console property already selected by the business."
-      }
-    },
-    "reassign_product_booking": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": true,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Persists an attorney-replacement proposal for the selected consultation.",
-        "destructive_justification": "Sends the client a proposal that cannot be recalled after delivery.",
-        "open_world_justification": "Sends to the selected booking’s client through their conversation channel."
       }
     },
     "reconcile_post_publication": {
@@ -1724,18 +1592,6 @@
         "open_world_justification": "Can immediately change translations in a published website language."
       }
     },
-    "reply_to_guest": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": true,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Saves a reply and dispatches its text or photo through the guest conversation’s channel.",
-        "destructive_justification": "Sends text or a photo to the guest that cannot be recalled.",
-        "open_world_justification": "Can download the supplied ChatGPT attachment and send through email, Airbnb or guest inbox."
-      }
-    },
     "request_product_booking_change": {
       "annotations": {
         "readOnlyHint": false,
@@ -1743,21 +1599,9 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Persists a guest-change proposal or immediately applies an allowed non-consultation move.",
+        "read_only_justification": "Persists a guest-change proposal or immediately applies an allowed non-consultation move, including a table booking moved to another location's tables.",
         "destructive_justification": "Sends the guest a proposal or change email and can overwrite the booking’s session and party size.",
         "open_world_justification": "Emails the booking’s guest; consultations still require client acceptance."
-      }
-    },
-    "request_table_reservation_change": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": true,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Persists a reservation-change proposal or directly applies an allowed change.",
-        "destructive_justification": "Emails the guest and can overwrite saved location, date, time and party size.",
-        "open_world_justification": "Sends a proposal or changed-time email to the reservation’s guest."
       }
     },
     "save_media_attachment": {
@@ -1796,16 +1640,16 @@
         "open_world_justification": "Schedules communication to a guest through their conversation channel."
       }
     },
-    "send_team_message": {
+    "send_message": {
       "annotations": {
         "readOnlyHint": false,
         "openWorldHint": true,
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Persists the message or photo and sends configured participant notifications.",
-        "destructive_justification": "Sends a message and email, WhatsApp or push notifications that cannot be recalled.",
-        "open_world_justification": "Can download an optional photo from the host-supplied HTTPS attachment URL and its redirects; conversation members and notification recipients remain within the selected private workspace."
+        "read_only_justification": "Saves the caller’s message and sends its text or photo through the conversation: the guest’s channel, or the team participants’ notifications.",
+        "destructive_justification": "Sends text or a photo that cannot be recalled.",
+        "open_world_justification": "Can download the supplied ChatGPT attachment and send through email, Airbnb, the guest inbox, WhatsApp or push within the selected private workspace."
       }
     },
     "set_collection_products": {
@@ -1832,15 +1676,15 @@
         "open_world_justification": "Changes the public Schedule page and can direct clients to an external scheduler."
       }
     },
-    "set_guest_conversation_archived": {
+    "set_conversation_archived": {
       "annotations": {
         "readOnlyHint": false,
         "openWorldHint": false,
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Persists the selected conversation’s archived or restored state.",
-        "destructive_justification": "Overwrites its inbox archive state; it does not cancel the booking or send a guest message.",
+        "read_only_justification": "Persists the caller’s own archived or restored state for the selected conversation, and for a guest conversation dismisses its open reply task.",
+        "destructive_justification": "Overwrites the caller’s own archive state; it does not cancel a booking, send a message or change anyone else’s Messages.",
         "open_world_justification": "Operates only in the selected private business inbox."
       }
     },
@@ -1928,18 +1772,6 @@
         "open_world_justification": "Updates website bookable nights and a connected Airbnb listing."
       }
     },
-    "set_team_member": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Adds or removes an existing business teammate’s Better Auth team membership.",
-        "destructive_justification": "The removal branch revokes that team membership.",
-        "open_world_justification": "Only accepts members and teams of the selected private business."
-      }
-    },
     "set_workspace_context": {
       "annotations": {
         "readOnlyHint": false,
@@ -1964,14 +1796,14 @@
         "open_world_justification": "Writes only to the selected private workspace."
       }
     },
-    "start_team_conversation": {
+    "start_conversation": {
       "annotations": {
         "readOnlyHint": false,
         "openWorldHint": false,
         "destructiveHint": false
       },
       "justifications": {
-        "read_only_justification": "Creates an internal conversation with the chosen members, or reuses the existing conversation with the same members and subject.",
+        "read_only_justification": "Creates a team conversation with the chosen members, or reuses the existing conversation with the same members and subject.",
         "destructive_justification": "Only adds a conversation and its members; it sends no message and removes no existing member.",
         "open_world_justification": "Only targets actual members of the selected private workspace."
       }
@@ -2010,6 +1842,18 @@
         "read_only_justification": "Edits only supplied name/description/order fields on one collection.",
         "destructive_justification": "Overwrites existing collection metadata and display order.",
         "open_world_justification": "Can immediately change collection metadata in the public catalog."
+      }
+    },
+    "update_conversation_group": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Persists a manual team group’s name or participant changes.",
+        "destructive_justification": "Can overwrite its name or revoke a participant’s access and expose history to added members.",
+        "open_world_justification": "Only acts on the selected private workspace group and its real workspace members."
       }
     },
     "update_google_ads_campaign": {
@@ -2108,6 +1952,18 @@
         "open_world_justification": "Changes scheduled communications to guests."
       }
     },
+    "update_meta_ads_campaign": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Saves campaign status or daily budget changes in Meta Ads and records the provider result.",
+        "destructive_justification": "Overwrites existing advertising settings and can enable advertising spend.",
+        "open_world_justification": "Can enable ad delivery on Facebook and Instagram; changes to daily budget affect campaign spend."
+      }
+    },
     "update_organization_member_role": {
       "annotations": {
         "readOnlyHint": false,
@@ -2180,18 +2036,6 @@
         "open_world_justification": "Can immediately change public website Q&A."
       }
     },
-    "update_reservation_policy": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": true,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Upserts supplied reservation duration, capacity, notice, deposits and guest questions with revision checks.",
-        "destructive_justification": "Overwrites editable capacity, notice, deposit, guest-question and other reservation rules. The cancellation cutoff is fixed.",
-        "open_world_justification": "Changes rules and questions on the public reservation flow."
-      }
-    },
     "update_site_page": {
       "annotations": {
         "readOnlyHint": false,
@@ -2239,30 +2083,6 @@
         "destructive_justification": "Overwrites the task's saved assignment or schedule and notifies a new assignee.",
         "open_world_justification": "Reassignment can send configured email, WhatsApp or push notifications to the new assignee through external delivery services."
       }
-    },
-    "update_team": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Renames the selected Better Auth team.",
-        "destructive_justification": "Overwrites the saved team name.",
-        "open_world_justification": "Only changes a team in the selected private business."
-      }
-    },
-    "update_team_group": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Persists a manual group’s name or participant changes.",
-        "destructive_justification": "Can overwrite its name or revoke a participant’s access and expose history to added members.",
-        "open_world_justification": "Only acts on the selected private workspace group and its real workspace members."
-      }
     }
   },
   "test_cases": [
@@ -2293,11 +2113,11 @@
       "expected_output_url": null
     },
     {
-      "description": "Create a regular Brooklyn table reservation, then propose a one-hour change for guest acceptance.",
+      "description": "Book a regular Brooklyn table, then propose a one-hour change for guest acceptance.",
       "user_prompt": "Find a Friday more than 24 hours away with 7 PM and 8 PM both available at Ember & Slice in Brooklyn. Book a regular table for two at 7 PM for Taylor Review, using the reviewer contact details in the review instructions. Then email the guest a proposal to move it to 8 PM. Keep 7 PM until they accept.",
       "file_attachment_urls": null,
-      "tools_triggered": "list_organizations, list_locations, get_reservation_policy, get_calendar, create_table_reservation, list_table_reservations, request_table_reservation_change",
-      "expected_output": "Uses the Brooklyn calendar and reservation availability to choose a Friday more than 24 hours away. Creates one regular table reservation using the location policy and controlled reviewer contact details. Emails one proposal for 8 PM while the reservation remains at 7 PM. Guest acceptance updates the same reservation once; reopening the accepted link preserves the accepted state. Experience bookings remain separate. Cancel the review reservation after verification.",
+      "tools_triggered": "list_organizations, list_location_products, get_product, list_product_booking_sessions, create_product_booking, get_product_booking, request_product_booking_change",
+      "expected_output": "Uses the Brooklyn table product's sessions to choose a Friday more than 24 hours away with both seatings available. Creates one regular table booking under the table product's terms with the controlled reviewer contact details. Emails one proposal for the 8 PM session while the booking remains at 7 PM. Guest acceptance moves the same booking once; reopening the accepted link preserves the accepted state. Cancel the review booking after verification.",
       "expected_output_url": null
     },
     {

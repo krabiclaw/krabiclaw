@@ -1,106 +1,105 @@
 {
   "thread": {
-    "activityPath": null,
-    "avatarInitial": "M",
+    "activity_path": null,
+    "avatar_initial": "M",
+    "booking_id": "00000000-0000-4000-8000-000000000003",
     "channel": "airbnb",
     "composer": {
       "available": true,
       "channel": "airbnb",
       "reason": null
     },
-    "guestName": "Mililani",
     "home": "74 D · Sky",
-    "id": "00000000-0000-4000-8000-000000000018",
+    "id": "00000000-0000-4000-8000-000000000001",
     "kind": "guest",
     "pending": [
       {
         "body": "Enjoy your stay!",
         "cancellable": true,
-        "id": "00000000-0000-4000-8000-000000000085",
+        "due_at": "2026-11-08T23:00:00.000Z",
+        "id": "00000000-0000-4000-8000-000000000004",
         "label": "Enjoy your stay!",
-        "sendAt": "2026-11-08T23:00:00.000Z",
         "source": "later",
         "time": "Sun, Nov 8, 4:00 PM"
       }
     ],
-    "recordId": "00000000-0000-4000-8000-000000000007",
-    "recordKind": "stay",
-    "recordTitle": "Reservation",
+    "record_kind": "stay",
+    "record_title": "Reservation",
     "stream": [
       {
-        "id": "day:00000000-0000-4000-8000-000000000022",
+        "id": "day:00000000-0000-4000-8000-000000000005",
         "label": "Yesterday",
         "type": "day"
       },
       {
         "author": "Mililani",
         "body": "In winter, can we park on the street?",
-        "id": "00000000-0000-4000-8000-000000000022",
+        "id": "00000000-0000-4000-8000-000000000005",
         "label": null,
         "photos": [],
         "receipt": null,
         "retryable": false,
-        "sentAt": "2026-11-04T18:16:00.000Z",
+        "sent_at": "2026-11-04T18:16:00.000Z",
         "side": "guest",
         "time": "11:16 AM",
         "translated": {
           "original": "¿En invierno dejan aparcar en la calle?"
         },
         "type": "message",
-        "unshownFiles": 0
+        "unshown_files": 0
       },
       {
         "author": "Mililani",
         "body": null,
-        "id": "00000000-0000-4000-8000-000000000027",
+        "id": "00000000-0000-4000-8000-000000000006",
         "label": null,
         "photos": [
           {
             "height": 3,
-            "id": "00000000-0000-4000-8000-000000000028",
-            "thumbnailUrl": "https://media.example.test/organizations/org-contract/media/00000000-0000-4000-8000-000000000028.avif",
-            "url": "https://media.example.test/organizations/org-contract/media/00000000-0000-4000-8000-000000000028.avif",
+            "id": "00000000-0000-4000-8000-000000000007",
+            "thumbnail_url": "https://media.example.test/organizations/org-contract/media/00000000-0000-4000-8000-000000000007.avif",
+            "url": "https://media.example.test/organizations/org-contract/media/00000000-0000-4000-8000-000000000007.avif",
             "width": 4
           }
         ],
         "receipt": null,
         "retryable": false,
-        "sentAt": "2026-11-04T18:17:00.000Z",
+        "sent_at": "2026-11-04T18:17:00.000Z",
         "side": "guest",
         "time": null,
         "translated": null,
         "type": "message",
-        "unshownFiles": 0
+        "unshown_files": 0
       },
       {
         "author": "You",
         "body": "Yes, the street facing downhill is easiest.",
-        "id": "00000000-0000-4000-8000-000000000036",
+        "id": "00000000-0000-4000-8000-000000000008",
         "label": null,
         "photos": [],
         "receipt": null,
         "retryable": false,
-        "sentAt": "2026-11-04T18:23:00.000Z",
+        "sent_at": "2026-11-04T18:23:00.000Z",
         "side": "business",
         "time": "11:23 AM",
         "translated": null,
         "type": "message",
-        "unshownFiles": 0
+        "unshown_files": 0
       },
       {
         "author": "Mililani",
         "body": "Thank you! What time is check-in?",
-        "id": "00000000-0000-4000-8000-000000000041",
+        "id": "00000000-0000-4000-8000-000000000009",
         "label": null,
         "photos": [],
         "receipt": null,
         "retryable": false,
-        "sentAt": "2026-11-04T18:31:00.000Z",
+        "sent_at": "2026-11-04T18:31:00.000Z",
         "side": "guest",
         "time": "11:31 AM",
         "translated": null,
         "type": "message",
-        "unshownFiles": 0
+        "unshown_files": 0
       },
       {
         "id": "day:automatic-contract",
@@ -115,72 +114,67 @@
         "photos": [],
         "receipt": null,
         "retryable": false,
-        "sentAt": "2026-11-05T19:00:00.000Z",
+        "sent_at": "2026-11-05T19:00:00.000Z",
         "side": "business",
         "time": "12:00 PM",
         "translated": null,
         "type": "message",
-        "unshownFiles": 0
+        "unshown_files": 0
       },
       {
         "change": {
           "after": {
-            "assignedMemberId": null,
-            "assignedMemberName": null,
-            "partySize": 2,
-            "totalLabel": "$900.00",
-            "whenLabel": "Nov 8, 2026 – Nov 14, 2026"
+            "assigned_member_id": null,
+            "assigned_member_name": null,
+            "party_size": 2,
+            "total_label": "$900.00",
+            "when_label": "Nov 8, 2026 – Nov 14, 2026"
           },
           "before": {
-            "assignedMemberId": null,
-            "assignedMemberName": null,
-            "partySize": 2,
-            "totalLabel": "$600.00",
-            "whenLabel": "Nov 8, 2026 – Nov 12, 2026"
+            "assigned_member_id": null,
+            "assigned_member_name": null,
+            "party_size": 2,
+            "total_label": "$600.00",
+            "when_label": "Nov 8, 2026 – Nov 12, 2026"
           },
           "channel": "airbnb",
-          "guestName": "Mililani Garcia",
+          "guest_name": "Mililani Garcia",
           "locale": "en",
-          "locationTitle": "74 D · Sky",
+          "location_title": "74 D · Sky",
           "noun": "stay",
-          "originalLocationTitle": "74 D · Sky",
-          "requestedBy": "guest",
+          "original_location_title": "74 D · Sky",
+          "requested_by": "guest",
           "status": "pending",
           "type": "stay",
           "vertical": "lodging"
         },
-        "id": "00000000-0000-4000-8000-000000000057",
-        "sentAt": "2026-11-05T19:00:00.000Z",
+        "id": "00000000-0000-4000-8000-000000000010",
+        "sent_at": "2026-11-05T19:00:00.000Z",
         "type": "change"
       },
       {
-        "id": "00000000-0000-4000-8000-000000000070",
-        "sentAt": "2026-11-05T19:00:00.000Z",
-        "text": "You archived this conversation",
-        "type": "event"
-      },
-      {
-        "id": "00000000-0000-4000-8000-000000000075",
-        "sentAt": "2026-11-05T19:00:00.000Z",
-        "text": "You moved this conversation back to Messages",
+        "id": "00000000-0000-4000-8000-000000000011",
+        "sent_at": "2026-11-05T19:00:00.000Z",
+        "text": "Payment received",
         "type": "event"
       },
       {
         "author": "You",
         "body": "Check-in is from 4 PM.",
-        "id": "00000000-0000-4000-8000-000000000080",
+        "id": "00000000-0000-4000-8000-000000000012",
         "label": null,
         "photos": [],
         "receipt": "Not delivered",
         "retryable": true,
-        "sentAt": "2026-11-05T19:00:00.000Z",
+        "sent_at": "2026-11-05T19:00:00.000Z",
         "side": "business",
         "time": "12:00 PM",
         "translated": null,
         "type": "message",
-        "unshownFiles": 0
+        "unshown_files": 0
       }
     ],
+    "title": "Mililani",
     "translated": true,
     "when": "In 3 days"
   }

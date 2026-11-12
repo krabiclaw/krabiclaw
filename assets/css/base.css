@@ -282,10 +282,10 @@
   --ui-warning:           var(--kc-warning);
   --ui-error:             var(--kc-danger);
 
-  --ui-bg:                var(--kc-cream);
-  --ui-bg-elevated:       var(--kc-cream-elev);
-  --ui-bg-muted:          #F2EFEA;
-  --ui-bg-accented:       #F5F0EB;
+  --ui-bg:                #FFF;
+  --ui-bg-elevated:       #FFF;
+  --ui-bg-muted:          #F7F7F7;
+  --ui-bg-accented:       #F0F0F0;
   --ui-bg-inverted:       var(--kc-navy);
 
   --ui-text:              #454864;
@@ -295,15 +295,15 @@
   --ui-text-highlighted:  var(--kc-navy);
   --ui-text-inverted:     #FFF;
 
-  --ui-border:            var(--kc-border);
-  --ui-border-muted:      var(--kc-border-muted);
-  --ui-border-accented:   #D8D3CB;
+  --ui-border:            #EBEBEB;
+  --ui-border-muted:      #F2F2F2;
+  --ui-border-accented:   #DCDCDC;
   --ui-border-inverted:   var(--kc-navy-300);
 
   /* The public footer is a distinct surface: lighter than the cream page in
      light, darker than the navy page in dark. No --ui-* token inverts that
      way, so the shared shell owns one. */
-  --kc-footer-bg:         var(--kc-cream-elev);
+  --kc-footer-bg:         #FFF;
 }
 
 /* ── Platform theme dark mode ─────────────────────────────── */

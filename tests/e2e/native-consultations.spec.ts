@@ -39,7 +39,7 @@ test.afterEach(async ({ page }) => {
     const currentResponse = await cleanupRequest.get(`${editor}/pages/${restore.serviceId}`)
     expect(currentResponse.status(), await currentResponse.text()).toBe(200)
     const current = (await currentResponse.json()).page
-    const binding = await cleanupRequest.patch(`${editor}/pages/${restore.serviceId}`, { data: { path: current.path, title: current.title, summary: current.summary, pageType: current.page_type, recipe: current.recipe, sortOrder: current.sort_order, blocks: current.blocks, expectedUpdatedAt: current.document.updated_at, productId: restore.originalProductId } })
+    const binding = await cleanupRequest.patch(`${editor}/pages/${restore.serviceId}`, { data: { path: current.path, title: current.title, summary: current.summary, page_type: current.page_type, recipe: current.recipe, sort_order: current.sort_order, blocks: current.blocks, updated_at: current.document.updated_at, product_id: restore.originalProductId } })
     expect(binding.status(), await binding.text()).toBe(200)
     expect((await binding.json()).page.product_id).toBe(restore.originalProductId)
     const restoredPage = await cleanupRequest.get(`${editor}/pages/${restore.serviceId}`)
@@ -167,7 +167,7 @@ test('native online review uses canonical Products, holds capacity, and releases
   }
   // The attorney hosts the consultations, and guests meet them through their published profile.
   const host = { name: 'Consultation attorney', photo_url: null, bio: 'Reviews family law questions before your appointment.' }
-  const hours = await page.request.put(`/api/organizations/${org}/members/${self.id}/scheduling`, { data: { timezone: 'UTC', weekly: [{ weekday: tomorrow.getUTCDay(), start: '14:00', end: '14:45' }], time_off: [], expected_updated_at: null, public_name: host.name, public_bio: host.bio, public_approved: true } })
+  const hours = await page.request.put(`/api/organizations/${org}/members/${self.id}/scheduling`, { data: { timezone: 'UTC', weekly: [{ weekday: tomorrow.getUTCDay(), start: '14:00', end: '14:45' }], time_off: [], updated_at: null, public_name: host.name, public_bio: host.bio, public_approved: true } })
   expect(hours.status(), await hours.text()).toBe(200)
   expect((await hours.json()).scheduling).toMatchObject({ public_name: host.name, public_bio: host.bio, public_approved: 1 })
   for (let index = 0; index < 2; index++) {
@@ -180,24 +180,24 @@ test('native online review uses canonical Products, holds capacity, and releases
     expect(product.page).toBeTruthy()
     const automaticPage = await page.request.get(`${editor}/pages/${product.page.id}`)
     expect(automaticPage.status(), await automaticPage.text()).toBe(200)
-    const removedPage = await page.request.delete(`${editor}/pages/${product.page.id}`, { data: { expectedUpdatedAt: (await automaticPage.json()).page.document.updated_at } })
+    const removedPage = await page.request.delete(`${editor}/pages/${product.page.id}`, { data: { updated_at: (await automaticPage.json()).page.document.updated_at } })
     expect(removedPage.status(), await removedPage.text()).toBe(200)
     if (index === 0) {
       await page.goto(`${dashboard}/products/${product.id}/booking/enabled`)
       const setup = page.locator('#dashboard-panel-booking-enabled')
       await expect(setup.getByRole('switch', { name: 'Use a consultation calendar', exact: true })).not.toBeChecked()
       await setup.getByRole('switch', { name: 'Use a consultation calendar', exact: true }).check()
-      await expect(setup.getByRole('radio', { name: 'Unassigned No person or team is assigned.', exact: true })).toBeChecked()
+      await expect(setup.getByRole('radio', { name: 'Unassigned No person is assigned.', exact: true })).toBeChecked()
       await expect(setup.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
       await setup.getByRole('radio', { name: `${host.name} Profile published`, exact: true }).check()
       const enabled = page.waitForResponse(response => new URL(response.url()).pathname === `${editor}/products/${product.id}/booking` && response.request().method() === 'PUT')
       await setup.getByRole('button', { name: 'Save', exact: true }).click()
       const saved = await enabled
       expect(saved.status(), await saved.text()).toBe(200)
-      expect(saved.request().postDataJSON()).toEqual({ scheduling_mode: 'provider', assigned_member_id: self.id, assigned_team_id: null })
+      expect(saved.request().postDataJSON()).toEqual({ scheduling_mode: 'provider', assigned_member_id: self.id })
       const read = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_product', args: { organization_id: org, product_id: product.id } })
       expect(read.status(), await read.text()).toBe(200)
-      expect(mcpData<{ product: Product }>(await read.json()).product.booking).toMatchObject({ scheduling_mode: 'provider', assigned_member_id: self.id, assigned_team_id: null })
+      expect(mcpData<{ product: Product }>(await read.json()).product.booking).toMatchObject({ scheduling_mode: 'provider', assigned_member_id: self.id })
     }
     // Both offerings are the owner's, so the one 14:00 hour can be booked once between them.
     const config = await page.request.put(`${editor}/products/${product.id}/booking`, { data: { duration_minutes: 45, default_capacity: 1, confirmation_mode: 'review', online_payment_required: false, scheduling_mode: 'provider', assigned_member_id: self.id, held_online: true } })
@@ -216,26 +216,26 @@ test('native online review uses canonical Products, holds capacity, and releases
     await expect(onlineCalendar.getByRole('button', { name: 'Add availability', exact: true })).toHaveCount(0)
     await onlineCalendar.getByRole('combobox', { name: 'Location', exact: true }).click()
     await page.getByRole('option', { name: 'Online', exact: true }).click()
-    await expect(page).toHaveURL(url => url.searchParams.get('locationId') === 'online')
+    await expect(page).toHaveURL(url => url.searchParams.get('location_id') === 'online')
     await onlineCalendar.getByRole('combobox', { name: 'Calendar', exact: true }).click()
     await page.getByRole('option', { name: `Availability: ${products[1]!.name}`, exact: true }).click()
-    await expect(page).toHaveURL(url => url.pathname === `${dashboard}/calendar` && url.searchParams.get('product_id') === products[1]!.id && !url.searchParams.has('locationId'))
+    await expect(page).toHaveURL(url => url.pathname === `${dashboard}/calendar` && url.searchParams.get('product_id') === products[1]!.id && !url.searchParams.has('location_id'))
     await expect(onlineCalendar.getByRole('combobox', { name: 'Calendar', exact: true })).toContainText(`Availability: ${products[1]!.name}`)
     await expect(onlineCalendar.getByRole('link', { name: 'Bookable times', exact: true })).toHaveAttribute('href', `${dashboard}/team/${self.id}/hours`)
     await expect(onlineCalendar.getByRole('button', { name: 'Add availability', exact: true })).toHaveCount(0)
     await onlineCalendar.getByRole('combobox', { name: 'Location', exact: true }).click()
     await page.getByRole('option', { name: 'Online', exact: true }).click()
-    await expect(page).toHaveURL(url => url.searchParams.get('product_id') === products[1]!.id && url.searchParams.get('locationId') === 'online')
+    await expect(page).toHaveURL(url => url.searchParams.get('product_id') === products[1]!.id && url.searchParams.get('location_id') === 'online')
     await onlineCalendar.getByRole('combobox', { name: 'Calendar', exact: true }).click()
     await page.getByRole('option', { name: 'All activity', exact: true }).click()
-    await expect(page).toHaveURL(url => url.pathname === `${dashboard}/calendar` && !url.searchParams.has('locationId') && !url.searchParams.has('product_id'))
+    await expect(page).toHaveURL(url => url.pathname === `${dashboard}/calendar` && !url.searchParams.has('location_id') && !url.searchParams.has('product_id'))
     await expect(onlineCalendar.getByRole('combobox', { name: 'Calendar', exact: true })).toContainText('All activity')
     await expect(page.getByRole('button', { name: 'Filter activity', exact: true })).toBeVisible()
     await page.goto(`${dashboard}/products/${products[0]!.id}/booking`)
     const bookingPath = `${dashboard}/products/${products[0]!.id}/booking`
     const bookingPanel = page.locator('#dashboard-panel-product-booking')
     await expect(bookingPanel.getByRole('link', { name: 'Client limit One client per consultation', exact: true })).toBeVisible()
-    await expect(bookingPanel.getByRole('link', { name: `Attorney or legal team ${host.name}`, exact: true })).toBeVisible()
+    await expect(bookingPanel.getByRole('link', { name: `Attorney ${host.name}`, exact: true })).toBeVisible()
     await expect(bookingPanel.getByRole('link', { name: 'Meeting format Online consultations available', exact: true })).toBeVisible()
     // Online, the times are the provider's own hours; the offering has no weekly list of its own.
     await expect(bookingPanel.getByRole('link', { name: "Bookable times The attorney's working hours", exact: true })).toHaveAttribute('href', `${dashboard}/team/${self.id}/hours`)
@@ -328,9 +328,9 @@ test('native online review uses canonical Products, holds capacity, and releases
     const bindViaMcp = async (productId?: string | null) => {
       const current = (await (await page.request.get(`${editor}/pages/${service.id}`)).json()).page
       const response = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'update_site_page', args: {
-        organization_id: org, variant_id: service.id, expected_updated_at: current.document.updated_at,
-        path: current.path, title: current.title, summary: current.summary, pageType: current.page_type,
-        recipe: current.recipe, sortOrder: current.sort_order,
+        organization_id: org, variant_id: service.id, updated_at: current.document.updated_at,
+        path: current.path, title: current.title, summary: current.summary, page_type: current.page_type,
+        recipe: current.recipe, sort_order: current.sort_order,
         blocks: current.blocks.map((block: { id: string; type: string; level: number | null; parent_block_id: string | null; source_block_id: string | null; data: Record<string, unknown> }) => ({
           id: block.id, type: block.type, level: block.level, parent_block_id: block.parent_block_id, source_block_id: block.source_block_id, data: block.data,
         })),
@@ -392,7 +392,7 @@ test('native online review uses canonical Products, holds capacity, and releases
     expect(publishedService.title).toBe(service.title)
     expect(publishedService.blocks.map((block: { id: string }) => block.id)).toEqual(service.blocks.map((block: { id: string }) => block.id))
     const storedGallery = (await Promise.all(['cover', 'gallery'].map(async slot => {
-      const response = await page.request.get(`${editor}/media?ownerType=content_document&ownerId=${publishedService.id}&slot=${slot}`)
+      const response = await page.request.get(`${editor}/media?owner_type=content_document&owner_id=${publishedService.id}&slot=${slot}`)
       expect(response.status(), await response.text()).toBe(200)
       return (await response.json()).media as Array<{ id: string; public_url: string; kind: string; thumbnail_url: string | null }>
     }))).flat()
@@ -622,32 +622,32 @@ test('native online review uses canonical Products, holds capacity, and releases
       return (await response.json()).sessions.find((session: { starts_at: string }) => session.starts_at.startsWith(day))
     }))
     for(const [sessionId,status]of [[sessions[1].id,404],['missing-session',404],['',400]]) {
-      const invalidProvider=await request.get(`/api/public/products/${products[0]!.slug}/provider`,{headers,params:{session_id:String(sessionId)}})
+      const invalidProvider=await request.get(`/api/public/products/${products[0]!.slug}/provider`,{headers,params:{product_session_id:String(sessionId)}})
       expect(invalidProvider.status(),await invalidProvider.text()).toBe(status)
       expect((await invalidProvider.json()).hosts).toBeUndefined()
     }
     const ambiguousProvider=await request.get(`/api/public/products/${products[0]!.slug}/provider?session_id=${sessions[0].id}&session_id=${sessions[1].id}`,{headers})
     expect(ambiguousProvider.status(),await ambiguousProvider.text()).toBe(400)
-    const book = (index: number) => request.post(`/api/public/products/${products[index]!.slug}/book`, { headers, data: { session_id: sessions[index].id, variant_id: products[index]!.variants[0]!.id, party_size: 1, guest_name: `Local review ${index}`, guest_email: `consultation-${stamp}-${index}@playwright.example`, idempotency_key: crypto.randomUUID() } })
+    const book = (index: number) => request.post(`/api/public/products/${products[index]!.slug}/book`, { headers, data: { product_session_id: sessions[index].id, product_variant_id: products[index]!.variants[0]!.id, party_size: 1, guest_name: `Local review ${index}`, guest_email: `consultation-${stamp}-${index}@playwright.example`, idempotency_key: crypto.randomUUID() } })
     const results = await Promise.all([book(0), book(1)])
     expect(results.map(result => result.status()).sort()).toEqual([201, 409])
     const pending = await results.find(result => result.status() === 201)!.json()
-    expect(pending).toMatchObject({ status: 'pending', request_id: expect.any(String) })
+    expect(pending).toMatchObject({ status: 'pending', conversation_id: expect.any(String) })
     expect(pending).not.toHaveProperty('booking_id')
-    expect(pending.operational_booking_id).not.toBe(pending.request_id)
+    expect(pending.booking_id).not.toBe(pending.conversation_id)
     const cancellationTerms = 'Cancel free up to 24 hours before the start time. After that, payments aren\'t refunded automatically.'
     expect(pending.policy_summary.items[0]).toEqual({ id: 'cancellation', text: cancellationTerms })
-    const details = await page.request.get(`/api/dashboard/bookings/booking/${pending.request_id}?org=${legal.slug}`)
+    const details = await page.request.get(`/api/dashboard/bookings/booking/${pending.conversation_id}?org=${legal.slug}`)
     expect(details.status(), await details.text()).toBe(200)
-    expect((await details.json()).booking).toMatchObject({ locationId: null, locationTitle: 'Online', status: 'pending', operationalBookingId: pending.operational_booking_id, assignedMemberId: self.id, assignedMemberName: host.name, policy: pending.policy_summary })
-    const invalidReassignment = await page.request.post(`/api/dashboard/bookings/booking/${pending.operational_booking_id}/provider?org=${legal.slug}`, { data: { member_id: 42, expected_updated_at: new Date().toISOString(), idempotency_key: `invalid-${stamp}` } })
+    expect((await details.json()).booking).toMatchObject({ location_id: null, location_title: 'Online', status: 'pending', booking_id: pending.booking_id, assigned_member_id: self.id, assigned_member_name: host.name, policy: pending.policy_summary })
+    const invalidReassignment = await page.request.post(`/api/dashboard/bookings/booking/${pending.booking_id}/provider?org=${legal.slug}`, { data: { member_id: 42, updated_at: new Date().toISOString(), idempotency_key: `invalid-${stamp}` } })
     expect(invalidReassignment.status(), await invalidReassignment.text()).toBe(400)
-    const unchangedBooking = await page.request.get(`/api/dashboard/bookings/booking/${pending.request_id}?org=${legal.slug}`)
+    const unchangedBooking = await page.request.get(`/api/dashboard/bookings/booking/${pending.conversation_id}?org=${legal.slug}`)
     expect(unchangedBooking.status(), await unchangedBooking.text()).toBe(200)
-    expect((await unchangedBooking.json()).booking).toMatchObject({ status: 'pending', operationalBookingId: pending.operational_booking_id, assignedMemberId: self.id, assignedMemberName: host.name })
+    expect((await unchangedBooking.json()).booking).toMatchObject({ status: 'pending', booking_id: pending.booking_id, assigned_member_id: self.id, assigned_member_name: host.name })
     const key = `reject-${stamp}`
     for (let replay = 0; replay < 2; replay++) {
-      const reject = await page.request.post(`/api/dashboard/organizations/${org}/guest-threads/${pending.request_id}/operations/reject`, { data: { idempotencyKey: key } })
+      const reject = await page.request.post(`/api/dashboard/organizations/${org}/guest-threads/${pending.conversation_id}/operations/reject`, { data: { idempotency_key: key } })
       expect(reject.status(), await reject.text()).toBe(200)
     }
     const remaining = await request.get(`/api/public/products/${products[0]!.slug}/sessions?location_id=online&from=${day}&to=${day}`, { headers })
@@ -670,18 +670,27 @@ test('native online review uses canonical Products, holds capacity, and releases
     await expect(page.getByText('Your request is waiting for confirmation from the business.', { exact: true })).toBeVisible()
     expect(analyticsFailures).toEqual([])
     for (let replay = 0; replay < 2; replay++) {
-      const confirm = await page.request.post(`/api/dashboard/organizations/${org}/guest-threads/${browserBooking.request_id}/operations/confirm`, { data: { idempotencyKey: `confirm-${stamp}` } })
+      const confirm = await page.request.post(`/api/dashboard/organizations/${org}/guest-threads/${browserBooking.conversation_id}/operations/confirm`, { data: { idempotency_key: `confirm-${stamp}` } })
       expect(confirm.status(), await confirm.text()).toBe(200)
     }
-    const confirmedDetails = await page.request.get(`/api/dashboard/bookings/booking/${browserBooking.request_id}?org=${legal.slug}`)
-    expect((await confirmedDetails.json()).booking).toMatchObject({ status: 'confirmed', operationalBookingId: browserBooking.operational_booking_id })
-    await page.goto(`${dashboard}/bookings/booking/${browserBooking.request_id}`)
+    const confirmedDetails = await page.request.get(`/api/dashboard/bookings/booking/${browserBooking.conversation_id}?org=${legal.slug}`)
+    expect((await confirmedDetails.json()).booking).toMatchObject({ status: 'confirmed', booking_id: browserBooking.booking_id })
+    // The day counts the party in the practice's own noun, and the change sheet
+    // shows that day's open times as buttons, the booked one chosen.
+    await page.goto(`${dashboard}/calendar/${day}`)
+    const dayRow = page.locator('#dashboard-panel-calendar-day').getByRole('link').filter({ hasText: 'Browser review guest' })
+    await expect(dayRow.getByText('1 client', { exact: true })).toBeVisible()
+    await page.goto(`${dashboard}/bookings/booking/${browserBooking.conversation_id}/change`)
+    const changeSheet = page.locator('#dashboard-panel-booking-change')
+    await expect(changeSheet.getByRole('button', { name: '2:00 PM', exact: true })).toHaveAttribute('aria-pressed', 'true')
+    await expect(changeSheet.getByRole('button', { name: 'Send request', exact: true })).toBeDisabled()
+    await page.goto(`${dashboard}/bookings/booking/${browserBooking.conversation_id}`)
     await page.getByRole('button', { name: `Cancellation policy ${cancellationTerms}`, exact: true }).click()
     const policyDialog = page.getByRole('dialog', { name: browserBooking.policy_summary.heading, exact: true })
     await expect(policyDialog.getByText(cancellationTerms, { exact: true })).toBeVisible()
     await policyDialog.getByRole('button', { name: `Close ${browserBooking.policy_summary.heading}`, exact: true }).click()
-    await page.getByRole('link', { name: `Attorney or legal team ${host.name}`, exact: true }).click()
-    await expect(page.getByRole('heading', { name: 'Attorney or legal team', exact: true })).toBeVisible()
+    await page.getByRole('link', { name: `Attorney ${host.name}`, exact: true }).click()
+    await expect(page.getByRole('heading', { name: 'Attorney', exact: true })).toBeVisible()
     await expect(page.getByRole('radio', { name: `${host.name} Current`, exact: true })).toBeChecked()
     await expect(page.getByText('Current', { exact: true })).toBeVisible()
     await expect(page.getByText('Add working hours before moving this consultation to another attorney.', { exact: true })).toHaveCount(0)
@@ -736,8 +745,8 @@ test('native online review uses canonical Products, holds capacity, and releases
       const binding = (await (await page.request.get(`${editor}/pages/${service.id}`)).json()).page
       expect(binding.product_id).toBe(products[0]!.id)
       expect(content(binding.blocks)).toEqual(content(service.blocks))
-      const retained = await page.request.get(`/api/dashboard/bookings/booking/${browserBooking.request_id}?org=${legal.slug}`)
-      expect((await retained.json()).booking).toMatchObject({ status: 'confirmed', operationalBookingId: browserBooking.operational_booking_id })
+      const retained = await page.request.get(`/api/dashboard/bookings/booking/${browserBooking.conversation_id}?org=${legal.slug}`)
+      expect((await retained.json()).booking).toMatchObject({ status: 'confirmed', booking_id: browserBooking.booking_id })
     }
     const pause = await page.request.patch(`${editor}/products/${products[0]!.id}`, { data: { active: false } })
     expect(pause.status(), await pause.text()).toBe(200)
@@ -753,18 +762,18 @@ test('native online review uses canonical Products, holds capacity, and releases
     await bindViaMcp(products[0]!.id)
     await page.goto(service.path)
     await expect(page.locator('[data-media-gallery]')).toHaveCount(1)
-    const browserCancel = await request.post(`/api/public/booking-requests/${browserBooking.request_id}/cancel`, { headers: { ...headers, authorization: `Bearer ${browserBooking.cancellation_token}` } })
+    const browserCancel = await request.post(`/api/public/booking-requests/${browserBooking.conversation_id}/cancel`, { headers: { ...headers, authorization: `Bearer ${browserBooking.cancellation_token}` } })
     expect(browserCancel.status(), await browserCancel.text()).toBe(200)
-    const cancelledBrowserDetails = await page.request.get(`/api/dashboard/bookings/booking/${browserBooking.request_id}?org=${legal.slug}`)
+    const cancelledBrowserDetails = await page.request.get(`/api/dashboard/bookings/booking/${browserBooking.conversation_id}?org=${legal.slug}`)
     expect((await cancelledBrowserDetails.json()).booking.status).toBe('cancelled')
-    await page.goto(`${dashboard}/bookings/booking/${browserBooking.request_id}`)
-    await expect(page.getByRole('link', { name: `Attorney or legal team ${host.name}`, exact: true })).toHaveCount(0)
+    await page.goto(`${dashboard}/bookings/booking/${browserBooking.conversation_id}`)
+    await expect(page.getByRole('link', { name: `Attorney ${host.name}`, exact: true })).toHaveCount(0)
     await page.getByRole('button', { name: 'Manage consultation', exact: true }).click()
     const cancelledActions = page.getByRole('dialog', { name: 'Manage consultation', exact: true })
     await expect(cancelledActions.getByRole('link', { name: 'Change consultation', exact: true })).toHaveCount(0)
     await cancelledActions.getByRole('button', { name: 'Close Manage consultation', exact: true }).click()
     await page.getByRole('link', { name: 'Message client', exact: true }).click()
-    await expect(page).toHaveURL(`${dashboard}/messages/${browserBooking.request_id}`)
+    await expect(page).toHaveURL(`${dashboard}/messages/${browserBooking.conversation_id}`)
     await expect(page.getByRole('heading', { name: 'Browser review guest', exact: true })).toBeVisible()
     const currentProductResponse = await page.request.get(`${editor}/products/${products[0]!.id}`)
     expect(currentProductResponse.status(), await currentProductResponse.text()).toBe(200)
@@ -787,14 +796,14 @@ test('native online review uses canonical Products, holds capacity, and releases
     const instant = await instantResponse.json()
     expect(instant.status).toBe('confirmed')
     for (let replay = 0; replay < 2; replay++) {
-      const cancel = await request.post(`/api/public/booking-requests/${instant.request_id}/cancel`, { headers: { ...headers, authorization: `Bearer ${instant.cancellation_token}` } })
+      const cancel = await request.post(`/api/public/booking-requests/${instant.conversation_id}/cancel`, { headers: { ...headers, authorization: `Bearer ${instant.cancellation_token}` } })
       expect(cancel.status(), await cancel.text()).toBe(200)
       expect(await cancel.json()).toEqual({ success: true, kind: 'booking' })
-      const cancelledDetails = await page.request.get(`/api/dashboard/bookings/booking/${instant.request_id}?org=${legal.slug}`)
+      const cancelledDetails = await page.request.get(`/api/dashboard/bookings/booking/${instant.conversation_id}?org=${legal.slug}`)
       expect((await cancelledDetails.json()).booking.status).toBe('cancelled')
       const released = await request.get(`/api/public/products/${products[0]!.slug}/sessions?location_id=online`, { headers })
       expect((await released.json()).sessions.find((session: { id: string }) => session.id === sessions[0].id).remaining).toBe(1)
     }
-    const invalidCancel = await request.post(`/api/public/booking-requests/${instant.request_id}/cancel`, { headers: { ...headers, authorization: 'Bearer invalid-cancellation-token' } })
+    const invalidCancel = await request.post(`/api/public/booking-requests/${instant.conversation_id}/cancel`, { headers: { ...headers, authorization: 'Bearer invalid-cancellation-token' } })
     expect(invalidCancel.status(), await invalidCancel.text()).toBe(404)
 })

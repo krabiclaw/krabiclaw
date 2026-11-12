@@ -4,6 +4,7 @@ import { executeBatch, queryAll, queryFirst, type DbClient } from '~/server/db'
 import { createStay, getStay, listStayHomes, resumeImportedStay, setStayNights, type StayAccess, type StayHome } from '~/server/domain/stays'
 import { verifyStayCalendarOccupancy } from '~/server/domain/stays'
 import { toE164 } from '~/utils/phone'
+import { bookingDay } from '~/server/domain/requests'
 import { organizationEventQuery } from '~/server/utils/organization-events'
 import { currencyFractionDigits, isCurrencyCode } from '~/shared/currencies'
 import { MAX_STAY_NIGHTS, STAY_CALENDAR_DAYS, STAY_PAYMENT_METHODS, type StayChannel } from '~/shared/bookings'
@@ -124,6 +125,11 @@ function channelValue(value: string): StayChannel {
 }
 
 interface ExistingStay { id: string; product_id: string; channel: StayChannel; channel_booking_id: string | null; idempotency_key: string | null; check_in_date: string; check_out_date: string; status: string }
+/** A stay booking as stored: its days are read in its home's clock. */
+type StoredStay = Omit<ExistingStay, 'check_in_date' | 'check_out_date'> & { starts_at: string; ends_at: string; timezone: string }
+function storedStay({ starts_at, ends_at, timezone, ...stay }: StoredStay): ExistingStay {
+  return { ...stay, check_in_date: bookingDay(starts_at, timezone), check_out_date: bookingDay(ends_at, timezone) }
+}
 function readCell(source: Record<string, string>, field: MigrationField): string {
   const value = source[field]?.trim() ?? ''
   if (!value) throw new Error(`${MIGRATION_FIELD_LABELS[field]} is missing; choose its column or enter a correction`)
@@ -198,14 +204,14 @@ export async function previewStayMigration(db: DbClient, access: StayAccess, val
     Object.assign(source, input.overrides?.[source.source_id!.trim()])
     return source
   })
-  const existing = await queryAll<ExistingStay>(db, `SELECT id, product_id, channel, channel_booking_id, idempotency_key, check_in_date, check_out_date, status FROM stays WHERE organization_id = ? AND (idempotency_key IN (SELECT value FROM json_each(?)) OR channel_booking_id IN (SELECT value FROM json_each(?)))`, [access.organizationId, JSON.stringify(sources.map(source => keyFor(source.source_id!.trim()))), JSON.stringify(sources.map(source => source.channel_booking_id).filter(Boolean))])
+  const existing = (await queryAll<StoredStay>(db, `SELECT id, product_id, channel, channel_booking_id, idempotency_key, starts_at, ends_at, timezone, status FROM bookings WHERE organization_id = ? AND product_session_id IS NULL AND (idempotency_key IN (SELECT value FROM json_each(?)) OR channel_booking_id IN (SELECT value FROM json_each(?)))`, [access.organizationId, JSON.stringify(sources.map(source => keyFor(source.source_id!.trim()))), JSON.stringify(sources.map(source => source.channel_booking_id).filter(Boolean))])).map(storedStay)
   const rows: MigrationRow[] = []
   for (const [index, raw] of parsed.records.entries()) {
     const source = sources[index]!
     const sourceId = source.source_id!.trim()
     const sourceListing = source.source_listing!.trim()
     const productId = input.homes[sourceListing] || null
-    const row: MigrationRow = { row_number: index + 2, source_id: sourceId, source_listing: sourceListing, product_id: productId, source, raw, stay: null, state: 'needs_attention', issues: [], existing_stay_id: null, imported_source: false, skip_reason: null }
+    const row: MigrationRow = { row_number: index + 2, source_id: sourceId, source_listing: sourceListing, product_id: productId, source, raw, stay: null, state: 'needs_attention', issues: [], existing_booking_id: null, imported_source: false, skip_reason: null }
     rows.push(row)
     try {
       if (!sourceId || keyFor(sourceId).length > 200) throw new Error('A Hostaway reservation ID of at most 191 characters is required')
@@ -214,7 +220,7 @@ export async function previewStayMigration(db: DbClient, access: StayAccess, val
       if (own) {
         if (!home) throw new Error('Match this Hostaway property to a KrabiClaw home')
         if (own.product_id !== productId) throw new Error('This reservation was already imported at another home; review the existing stay and property match')
-        row.state = 'existing'; row.existing_stay_id = own.id; row.imported_source = true; row.skip_reason = 'Already imported. Current host edits are preserved.'
+        row.state = 'existing'; row.existing_booking_id = own.id; row.imported_source = true; row.skip_reason = 'Already imported. Current host edits are preserved.'
         continue
       }
       const status = normalized(readCell(source, 'status'))
@@ -235,7 +241,7 @@ export async function previewStayMigration(db: DbClient, access: StayAccess, val
       if (channelMatches[0]) {
         const match = channelMatches[0]
         if (match.product_id !== productId || match.check_in_date !== checkIn || match.check_out_date !== checkOut || match.status !== 'confirmed') throw new Error('The existing channel booking has a different home, dates or status; resolve that difference before migration')
-        row.state = 'existing'; row.existing_stay_id = match.id; row.skip_reason = 'The existing channel booking is preserved.'
+        row.state = 'existing'; row.existing_booking_id = match.id; row.skip_reason = 'The existing channel booking is preserved.'
         continue
       }
       row.stay = normalizeStay(source, home, sourceId, sourceListing, input)
@@ -262,14 +268,14 @@ export async function previewStayMigration(db: DbClient, access: StayAccess, val
   }
   // The canonical night claims hold stays, linked calendars and only live checkout holds.
   const ready = rows.filter(row => row.stay !== null)
-  const claims = ready.length ? await queryAll<{ product_id: string; date: string; stay_id: string | null }>(db, `SELECT n.product_id, n.date, n.stay_id FROM stay_nights n
+  const claims = ready.length ? await queryAll<{ product_id: string; date: string; booking_id: string | null }>(db, `SELECT n.product_id, n.date, n.booking_id FROM stay_nights n
     LEFT JOIN payment_checkout_holds h ON h.id = n.hold_id
-    WHERE n.organization_id = ? AND n.product_id IN (SELECT value FROM json_each(?)) AND n.date >= ? AND n.date < ? AND (n.stay_id IS NOT NULL OR n.calendar_link_id IS NOT NULL OR (h.status = 'active' AND h.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now')))`, [access.organizationId, JSON.stringify([...new Set(ready.map(row => row.product_id))]), ready.map(row => row.stay!.check_in_date).sort()[0], ready.map(row => row.stay!.check_out_date).sort().at(-1)]) : []
+    WHERE n.organization_id = ? AND n.product_id IN (SELECT value FROM json_each(?)) AND n.date >= ? AND n.date < ? AND (n.booking_id IS NOT NULL OR n.calendar_link_id IS NOT NULL OR (h.status = 'active' AND h.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now')))`, [access.organizationId, JSON.stringify([...new Set(ready.map(row => row.product_id))]), ready.map(row => row.stay!.check_in_date).sort()[0], ready.map(row => row.stay!.check_out_date).sort().at(-1)]) : []
   for (const claim of claims) {
     const row = sourceClaims.get(`${claim.product_id}:${claim.date}`)
     if (row && row.state !== 'existing') {
       row.state = 'needs_attention'
-      const message = claim.stay_id ? `Overlaps existing stay ${claim.stay_id}` : 'Overlaps a linked calendar or live checkout hold'
+      const message = claim.booking_id ? `Overlaps existing stay ${claim.booking_id}` : 'Overlaps a linked calendar or live checkout hold'
       if (!row.issues.includes(message)) row.issues.push(message)
     }
   }
@@ -343,36 +349,36 @@ export async function importStayMigration(db: DbClient, env: MigrationEnv, acces
   const completion = await migrationCompletion(db, access, preview)
   let processed = 0
   for (const row of preview.rows) {
-    if (row.state === 'skipped') { receipt.skipped++; receipt.outcomes.push({ source_id: row.source_id, stay_id: null, state: 'skipped', detail: row.skip_reason, committed: false }); continue }
+    if (row.state === 'skipped') { receipt.skipped++; receipt.outcomes.push({ source_id: row.source_id, booking_id: null, state: 'skipped', detail: row.skip_reason, committed: false }); continue }
     if (row.state === 'existing') {
       if (row.imported_source && completion.get(row.source_id) !== false) {
-        if (processed >= 5) { receipt.remaining++; receipt.outcomes.push({ source_id: row.source_id, stay_id: row.existing_stay_id, state: 'pending', detail: 'Waiting to finish this imported stay', committed: true, completion_pending: true }); continue }
+        if (processed >= 5) { receipt.remaining++; receipt.outcomes.push({ source_id: row.source_id, booking_id: row.existing_booking_id, state: 'pending', detail: 'Waiting to finish this imported stay', committed: true, completion_pending: true }); continue }
         processed++
         try {
-          const resumed = await resumeImportedStay(db, env, access, row.existing_stay_id!)
+          const resumed = await resumeImportedStay(db, env, access, row.existing_booking_id!)
           receipt.existing++
-          receipt.outcomes.push({ source_id: row.source_id, stay_id: row.existing_stay_id, state: 'existing', detail: resumed.channel_push?.state === 'pending' ? resumed.channel_push.detail : row.skip_reason, committed: true, completion_pending: resumed.channel_push?.state === 'pending' })
-        } catch (error) { receipt.failed++; receipt.outcomes.push({ source_id: row.source_id, stay_id: row.existing_stay_id, state: 'failed', detail: message(error), committed: true, completion_pending: true }) }
-      } else { receipt.existing++; receipt.outcomes.push({ source_id: row.source_id, stay_id: row.existing_stay_id, state: 'existing', detail: row.skip_reason, committed: false }) }
+          receipt.outcomes.push({ source_id: row.source_id, booking_id: row.existing_booking_id, state: 'existing', detail: resumed.channel_push?.state === 'pending' ? resumed.channel_push.detail : row.skip_reason, committed: true, completion_pending: resumed.channel_push?.state === 'pending' })
+        } catch (error) { receipt.failed++; receipt.outcomes.push({ source_id: row.source_id, booking_id: row.existing_booking_id, state: 'failed', detail: message(error), committed: true, completion_pending: true }) }
+      } else { receipt.existing++; receipt.outcomes.push({ source_id: row.source_id, booking_id: row.existing_booking_id, state: 'existing', detail: row.skip_reason, committed: false }) }
       continue
     }
-    if (processed >= 5) { receipt.remaining++; receipt.outcomes.push({ source_id: row.source_id, stay_id: null, state: 'pending', detail: 'Waiting for the next migration batch', committed: false }); continue }
+    if (processed >= 5) { receipt.remaining++; receipt.outcomes.push({ source_id: row.source_id, booking_id: null, state: 'pending', detail: 'Waiting for the next migration batch', committed: false }); continue }
     processed++
     const stay = row.stay!
     try {
       const saved = await createStay(db, env, access, {
         product_id: stay.product_id, idempotency_key: keyFor(stay.source_id), guest_name: stay.guest_name, guest_email: stay.guest_email, guest_phone: stay.guest_phone,
         check_in_date: stay.check_in_date, check_out_date: stay.check_out_date, adults: stay.adults, children: stay.children, infants: stay.infants,
-        total_minor: stay.total_minor, notes: stay.notes, ...(stay.payment ? { payment: { ...stay.payment, reference: stay.source_id } } : {}),
+        total_minor: stay.total_minor, private_notes: stay.notes, ...(stay.payment ? { payment: { ...stay.payment, reference: stay.source_id } } : {}),
       }, { imported: { source: 'hostaway', source_id: stay.source_id, row: row.raw, fingerprint: expected, channel: stay.channel, channel_booking_id: stay.channel_booking_id } })
       const readBack = await getStay(db, access, saved.id)
       if (!('owner' in readBack) || readBack.product_id !== stay.product_id || readBack.check_in_date !== stay.check_in_date || readBack.check_out_date !== stay.check_out_date || readBack.status !== 'confirmed') throw new HTTPError({ statusCode: 503, message: 'The saved stay did not read back with the imported property and dates', data: { committed: true } })
       receipt.imported++
-      receipt.outcomes.push({ source_id: row.source_id, stay_id: saved.id, state: 'imported', detail: saved.channel_push?.state === 'pending' ? saved.channel_push.detail : null, committed: true, completion_pending: saved.channel_push?.state === 'pending' })
+      receipt.outcomes.push({ source_id: row.source_id, booking_id: saved.id, state: 'imported', detail: saved.channel_push?.state === 'pending' ? saved.channel_push.detail : null, committed: true, completion_pending: saved.channel_push?.state === 'pending' })
     } catch (error) {
       receipt.failed++
-      const persisted = await queryFirst<{ id: string }>(db, 'SELECT id FROM stays WHERE organization_id = ? AND idempotency_key = ?', [access.organizationId, keyFor(row.source_id)])
-      receipt.outcomes.push({ source_id: row.source_id, stay_id: persisted?.id ?? null, state: 'failed', detail: message(error), committed: committed(error) || Boolean(persisted) })
+      const persisted = await queryFirst<{ id: string }>(db, 'SELECT id FROM bookings WHERE organization_id = ? AND idempotency_key = ?', [access.organizationId, keyFor(row.source_id)])
+      receipt.outcomes.push({ source_id: row.source_id, booking_id: persisted?.id ?? null, state: 'failed', detail: message(error), committed: committed(error) || Boolean(persisted) })
     }
   }
   const [blocked, completedBlocks] = await Promise.all([blockState(db, access, input), migrationBlockCompletion(db, access, input, expected)])
@@ -415,20 +421,20 @@ export async function verifyStayMigration(db: DbClient, env: MigrationEnv, acces
   for (const row of preview.rows) if (row.imported_source && completion.get(row.source_id) !== false) result.issues.push(`Reservation ${row.source_id} still needs its import completion retried before handover`)
   const datesByHome = new Map<string, Set<string>>()
   const add = (productId: string, dates: string[]) => { const set = datesByHome.get(productId) ?? new Set<string>(); for (const date of dates) set.add(date); datesByHome.set(productId, set) }
-  for (const row of preview.rows) if (row.state !== 'skipped' && (row.state !== 'existing' || !row.existing_stay_id)) result.issues.push(`Reservation ${row.source_id || `row ${row.row_number}`} is not imported: ${row.issues.join('; ') || 'Import this reservation first'}`)
-  const selectedRows = preview.rows.filter(row => row.state === 'existing' && row.existing_stay_id && productIds.includes(row.product_id!))
-  const ids = JSON.stringify(selectedRows.map(row => row.existing_stay_id))
+  for (const row of preview.rows) if (row.state !== 'skipped' && (row.state !== 'existing' || !row.existing_booking_id)) result.issues.push(`Reservation ${row.source_id || `row ${row.row_number}`} is not imported: ${row.issues.join('; ') || 'Import this reservation first'}`)
+  const selectedRows = preview.rows.filter(row => row.state === 'existing' && row.existing_booking_id && productIds.includes(row.product_id!))
+  const ids = JSON.stringify(selectedRows.map(row => row.existing_booking_id))
   const [savedStays, claims, blocked, completedBlocks] = await Promise.all([
-    queryAll<Pick<ExistingStay, 'id' | 'product_id' | 'check_in_date' | 'check_out_date' | 'status'>>(db, 'SELECT id, product_id, check_in_date, check_out_date, status FROM stays WHERE organization_id = ? AND id IN (SELECT value FROM json_each(?))', [access.organizationId, ids]),
-    queryAll<{ stay_id: string; date: string }>(db, 'SELECT stay_id, date FROM stay_nights WHERE organization_id = ? AND stay_id IN (SELECT value FROM json_each(?)) ORDER BY date', [access.organizationId, ids]),
+    queryAll<StoredStay>(db, 'SELECT id, product_id, channel, channel_booking_id, idempotency_key, starts_at, ends_at, timezone, status FROM bookings WHERE organization_id = ? AND id IN (SELECT value FROM json_each(?))', [access.organizationId, ids]).then(rows => rows.map(storedStay)),
+    queryAll<{ booking_id: string; date: string }>(db, 'SELECT booking_id, date FROM stay_nights WHERE organization_id = ? AND booking_id IN (SELECT value FROM json_each(?)) ORDER BY date', [access.organizationId, ids]),
     blockState(db, access, input),
     migrationBlockCompletion(db, access, input, expected),
   ])
   for (const row of selectedRows) {
-    const saved = savedStays.find(stay => stay.id === row.existing_stay_id)
+    const saved = savedStays.find(stay => stay.id === row.existing_booking_id)
     if (!saved) { result.issues.push(`Reservation ${row.source_id} could not be read back`); continue }
     if (saved.status === 'cancelled') continue
-    const occupied = claims.filter(claim => claim.stay_id === saved.id)
+    const occupied = claims.filter(claim => claim.booking_id === saved.id)
     const expectedDates = days(saved.check_in_date, saved.check_out_date)
     if (occupied.length !== expectedDates.length || occupied.some((claim, index) => claim.date !== expectedDates[index])) result.issues.push(`Reservation ${row.source_id} does not hold all of its occupied nights`)
     add(saved.product_id, expectedDates)

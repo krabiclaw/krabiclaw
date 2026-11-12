@@ -6,15 +6,15 @@ import type { GuestThreadEntryAttachmentViewModel } from './types'
 
 /*
   The photos a message carries. Each is an ordinary media asset, placed on the
-  message it was sent with (`activity_entry` or `team_message` / `attachments`), so it has the
+  message it was sent with (`message` / `attachments`), so it has the
   same storage, deletion and tenant scope as every other picture — and the media
   library leaves it out, because it is the conversation's, not the website's.
 */
 
 export const MAX_MESSAGE_PHOTOS = 10
 
-/** A guest-thread message (an activity entry), a team-conversation message, or a task someone closed with photos. */
-export type MessageOwnerType = 'activity_entry' | 'team_message' | 'task'
+/** A message in any conversation, or a task someone closed with photos. */
+export type MessageOwnerType = 'message' | 'task'
 
 /** The rules every message photo meets, however it arrived: count, size and real image type. */
 export function assertMessagePhotos(photos: MessagePhoto[]): Array<MessagePhoto & { contentType: string }> {
@@ -83,14 +83,14 @@ export async function attachGuestPhotos(
   uploader: Uploader = { source: 'external', userId: null },
 ): Promise<void> {
   if (!photos.length) return
-  if ((await listMessagePhotos(db, 'activity_entry', [entryId])).has(entryId)) return
+  if ((await listMessagePhotos(db, 'message', [entryId])).has(entryId)) return
   const assetIds = await uploadMessagePhotos(db, env, organizationId, photos, uploader)
   try {
-    await executeBatch(db, messagePhotoPlacements(organizationId, 'activity_entry', entryId, assetIds, new Date().toISOString()), { operation: 'guest message photos' })
+    await executeBatch(db, messagePhotoPlacements(organizationId, 'message', entryId, assetIds, new Date().toISOString()), { operation: 'guest message photos' })
   } catch (error) {
     let saved: {asset_id:string}[]
     try {
-      saved = await queryAll<{asset_id:string}>(db, "SELECT asset_id FROM media_placements WHERE organization_id=? AND owner_type='activity_entry' AND owner_id=? AND slot='attachments'", [organizationId, entryId])
+      saved = await queryAll<{asset_id:string}>(db, "SELECT asset_id FROM media_placements WHERE organization_id=? AND owner_type='message' AND owner_id=? AND slot='attachments'", [organizationId, entryId])
     } catch (readError) {
       throw new AggregateError([error, readError], 'The attachment commit could not be read; its photos have been retained', { cause: readError })
     }

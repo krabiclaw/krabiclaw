@@ -181,8 +181,8 @@ async function goNext() {
   if (step.action === 'commit') {
     if (!await draft.activate()) return
     const created = state.value.created
-    const home = created?.orgSlug
-      ? `/dashboard/${created.orgSlug}${migrateHostaway.value && state.value.vertical === 'lodging' ? '/integrations/hostaway-migration' : ''}`
+    const home = created?.organization_slug
+      ? `/dashboard/${created.organization_slug}${migrateHostaway.value && state.value.vertical === 'lodging' ? '/integrations/hostaway-migration' : ''}`
       : '/dashboard'
     // The site takes requests from here on, so this is when to offer push — once, where the browser can still be asked.
     // The site exists either way: a browser whose push state cannot be read is reported and not asked.
@@ -230,7 +230,7 @@ const previewLocations = computed(() => state.value.preview
   : [])
 
 const organizationDomain = computed(() => {
-  const slug = state.value.created?.organizationSlug ?? state.value.preview?.subdomainCandidate
+  const slug = state.value.created?.subdomain ?? state.value.preview?.subdomainCandidate
   return slug ? organizationOriginFor(slug).replace(/^https?:\/\//, '') : ''
 })
 
@@ -239,7 +239,7 @@ const organizationDomain = computed(() => {
 // is pending, so the first load carries its preview token — the tenant host
 // turns that into a preview cookie for the rest of the visit.
 const iframeSrc = computed(() => {
-  const slug = state.value.created?.organizationSlug ?? state.value.preview?.subdomainCandidate
+  const slug = state.value.created?.subdomain ?? state.value.preview?.subdomainCandidate
   const origin = slug ? organizationOriginFor(slug) : ''
   if (!origin) return ''
   const url = new URL(`${origin}/`)

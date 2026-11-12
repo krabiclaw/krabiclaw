@@ -6,6 +6,14 @@ import {
   MCP_ERROR,
   mcpProtocolError,
 } from '../../server/utils/mcp-protocol.ts'
+import { mcpToolErrorResult } from '../../server/utils/mcp-route-helpers.ts'
+import {
+  objectArray,
+  objectRecord,
+  requiredBoolean,
+  requiredString,
+  requiredStringArray,
+} from '../../server/utils/mcp-tools/execution.ts'
 
 // JSON-RPC envelope parsing, protocol-version negotiation, and JSON-RPC
 // argument-shape validation moved to @modelcontextprotocol/server (see
@@ -44,16 +52,16 @@ test('asMcpError falls back to internal for a plain Error', () => {
 
 test('domain failures preserve actions and recovery receipts without private details', () => {
   const error = Object.assign(new Error('This website language is not published.'), { statusCode: 409, data: {
-    code: 'LANGUAGE_NOT_PUBLISHED', dashboard_url: '/dashboard/kanpai/website/localization',
+    code: 'LANGUAGE_NOT_PUBLISHED', dashboard_url: '/dashboard/kanpai/website/preferences/localization',
     credential: 'private-value', customer_email: 'private@example.com',
   } })
   const mapped = asMcpError(error)
   assert.equal(mapped.kind, 'tool_execution')
-  assert.deepEqual(mapped.data, { status: 409, code: 'LANGUAGE_NOT_PUBLISHED', dashboard_url: '/dashboard/kanpai/website/localization' })
+  assert.deepEqual(mapped.data, { status: 409, code: 'LANGUAGE_NOT_PUBLISHED', dashboard_url: '/dashboard/kanpai/website/preferences/localization' })
 
   const reason = 'Channex rejected part of the update.'
   const details: Record<string, unknown> = {
-    code: 'CHANNEL_PUSH_FAILED', field: 'channel_push', committed: true, product_id: 'home-1', stay_id: 'stay-1', version: 3,
+    code: 'CHANNEL_PUSH_FAILED', field: 'channel_push', committed: true, product_id: 'home-1', booking_id: 'stay-1', version: 3,
     updated_at: '2030-01-01T00:00:00.000Z', reason,
     ranges: [{ from: '2030-01-01', to: '2030-01-03', provider_payload: 'private-value' }],
     channel_push: { state: 'needs_review', detail: reason, provider_payload: { credential: 'private-value' } },
@@ -62,7 +70,7 @@ test('domain failures preserve actions and recovery receipts without private det
   const channelError = Object.assign(new Error(reason), { statusCode: 503, data: details })
   assert.equal(asMcpError(channelError).kind, 'transport')
   const recovery = {
-    status: 503, code: 'CHANNEL_PUSH_FAILED', field: 'channel_push', committed: true, product_id: 'home-1', stay_id: 'stay-1', version: 3,
+    status: 503, code: 'CHANNEL_PUSH_FAILED', field: 'channel_push', committed: true, product_id: 'home-1', booking_id: 'stay-1', version: 3,
     updated_at: '2030-01-01T00:00:00.000Z', reason, ranges: [{ from: '2030-01-01', to: '2030-01-03' }],
     channel_push: { state: 'needs_review', detail: reason },
   }
@@ -74,7 +82,7 @@ test('domain failures preserve actions and recovery receipts without private det
   details.code = 'CHANNEL_PUSH_FAILED'
   details.ranges = [{ from: 'private@example.com', to: '2030-01-03' }]
   details.channel_push = { state: 'needs_review', detail: '' }
-  details.stay_id = 'private@example.com'
+  details.booking_id = 'private@example.com'
   details.version = -1
   details.updated_at = 'private@example.com'
   details.channel_outcome = 'unknown'
@@ -102,4 +110,94 @@ test('asMcpError maps statusCode 403 to forbidden rather than auth', () => {
   const mapped = asMcpError(forbidden)
   assert.equal(mapped.kind, 'forbidden')
   assert.equal(mapped.code, MCP_ERROR.internal)
+})
+
+test('asMcpError and mcpToolErrorResult preserve structured field, hint, and entity recovery IDs', () => {
+  const error = Object.assign(new Error("Operational booking 'book_123' not found"), {
+    statusCode: 404,
+    data: {
+      code: 'BOOKING_NOT_FOUND',
+      booking_id: 'book_123',
+      field: 'booking_id',
+      hint: 'Call list_product_bookings to view valid records.',
+      private_token: 'secret-leaked',
+    },
+  })
+  const mapped = asMcpError(error)
+  assert.equal(mapped.kind, 'tool_execution')
+  assert.deepEqual(mapped.data, {
+    status: 404,
+    code: 'BOOKING_NOT_FOUND',
+    booking_id: 'book_123',
+    field: 'booking_id',
+    hint: 'Call list_product_bookings to view valid records.',
+  })
+
+  const toolError = mcpToolErrorResult("Operational booking 'book_123' not found", mapped.data)
+  assert.equal(toolError.isError, true)
+  assert.deepEqual(JSON.parse(toolError.content[0].text), {
+    status: 404,
+    code: 'BOOKING_NOT_FOUND',
+    message: "Operational booking 'book_123' not found",
+    booking_id: 'book_123',
+    field: 'booking_id',
+    hint: 'Call list_product_bookings to view valid records.',
+  })
+})
+
+test('execution validation helpers throw structured mcpProtocolError with field and expected', () => {
+  assert.throws(
+    () => requiredString({}, 'organization_id'),
+    (err: unknown) => {
+      const mcp = (err as { mcp: { code: number; message: string; data: unknown } }).mcp
+      assert.equal(mcp.code, MCP_ERROR.invalidParams)
+      assert.match(mcp.message, /Invalid organization_id: a non-empty string is required/)
+      assert.deepEqual(mcp.data, { field: 'organization_id', expected: 'non-empty string' })
+      return true
+    },
+  )
+
+  assert.throws(
+    () => requiredBoolean({ active: 'yes' }, 'active'),
+    (err: unknown) => {
+      const mcp = (err as { mcp: { code: number; message: string; data: unknown } }).mcp
+      assert.equal(mcp.code, MCP_ERROR.invalidParams)
+      assert.match(mcp.message, /Invalid active: a boolean \(true or false\) is required/)
+      assert.deepEqual(mcp.data, { field: 'active', expected: 'boolean' })
+      return true
+    },
+  )
+
+  assert.throws(
+    () => requiredStringArray(['valid', ''], 'tags'),
+    (err: unknown) => {
+      const mcp = (err as { mcp: { code: number; message: string; data: unknown } }).mcp
+      assert.equal(mcp.code, MCP_ERROR.invalidParams)
+      assert.match(mcp.message, /Invalid tags: an array of non-empty strings is required/)
+      assert.deepEqual(mcp.data, { field: 'tags', expected: 'string[]' })
+      return true
+    },
+  )
+
+  assert.throws(
+    () => objectRecord('not-an-object', 'payload'),
+    (err: unknown) => {
+      const mcp = (err as { mcp: { code: number; message: string; data: unknown } }).mcp
+      assert.equal(mcp.code, MCP_ERROR.invalidParams)
+      assert.match(mcp.message, /Invalid payload: an object is required/)
+      assert.deepEqual(mcp.data, { field: 'payload', expected: 'object' })
+      return true
+    },
+  )
+
+  assert.throws(
+    () => objectArray([{ ok: true }, 'invalid'], 'items'),
+    (err: unknown) => {
+      const mcp = (err as { mcp: { code: number; message: string; data: unknown } }).mcp
+      assert.equal(mcp.code, MCP_ERROR.invalidParams)
+      assert.match(mcp.message, /Invalid items: each element must be an object/)
+      assert.deepEqual(mcp.data, { field: 'items', expected: 'object[]' })
+      return true
+    },
+  )
 })

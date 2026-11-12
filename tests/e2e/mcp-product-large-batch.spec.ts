@@ -8,6 +8,8 @@ import type { Product } from '../../server/types/products'
 interface CreatedProduct { id: string; name: string; description: string; active: boolean }
 
 test('Product batches validate and commit atomically for a 100-item catalog', async ({ request, baseURL }, testInfo) => {
+  // Cleanup makes 102 serial calls through the MCP delete tools.
+  test.setTimeout(90_000)
   const organizationId = mcpOrganizationId()
   // Compare the existing catalog before and after this test's batch, so
   // nothing else may write the demo's products meanwhile.

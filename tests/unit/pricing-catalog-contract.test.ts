@@ -157,7 +157,7 @@ test('renderPlansMarkdown generates accurate, machine-readable markdown specific
       highlighted: false,
       prices: [],
       features: ['Basic templates', 'AI site generation'],
-      limits: { customDomain: false, googlePlaces: false, support: 'Community' },
+      limits: { custom_domains: false, google_places: false, support: 'Community' },
       cta: { label: 'Start Free', href: '/signup' },
     },
     {
@@ -167,7 +167,7 @@ test('renderPlansMarkdown generates accurate, machine-readable markdown specific
       highlighted: true,
       prices: [{ id: 'p_month', amount: 4900, currency: 'usd', interval: 'month' }],
       features: ['Custom domains', 'Google Places', 'Direct booking'],
-      limits: { customDomain: true, googlePlaces: true, support: 'Priority' },
+      limits: { custom_domains: true, google_places: true, support: 'Priority' },
       cta: { label: 'Upgrade', href: '/signup' },
     },
   ]
@@ -201,9 +201,9 @@ test('the beta spots and the price after them are stated while spots are left', 
   assert.equal(pricingNotice(0), 'Beta pricing. Prices will rise for new subscribers as KrabiClaw grows; you keep the price you subscribe at for 12 months.')
   assert.equal(pricingNotice(7), 'Beta pricing: 7 of 10 spots left. After that, new subscribers pay $12 per home per month. You keep the price you subscribe at for 12 months.')
   const growth: Plan = {
-    id: 'growth', name: 'Growth', tagline: '', highlighted: false, features: [], betaSpotsLeft: 7,
+    id: 'growth', name: 'Growth', tagline: '', highlighted: false, features: [], beta_spots_left: 7,
     prices: [{ id: 'p_growth', amount: 4900, currency: 'usd', interval: 'month' }],
-    limits: { customDomain: true, googlePlaces: true, support: 'Priority' }, cta: { label: 'Get Growth', href: '/signup' },
+    limits: { custom_domains: true, google_places: true, support: 'Priority' }, cta: { label: 'Get Growth', href: '/signup' },
   }
   const md = renderPlansMarkdown([growth])
   assert.ok(md.includes('\nBeta pricing: 7 of 10 spots left. After that, new subscribers pay $12 per home per month. You keep the price you subscribe at for 12 months.\n'))

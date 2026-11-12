@@ -61,6 +61,19 @@ export interface TenantPageListRow {
   product_id: string | null
   /** False when the site's template renders a document at this path; see deleteTenantPage. */
   removable: boolean
+  section_count?: number
+  image_url?: string | null
+}
+
+export interface PageTask {
+  id: string
+  page_id: string
+  title: string
+  headline: string
+  reason: string
+  action_label: string
+  to: string
+  image_url?: string | null
 }
 
 function isOptionalString(value: unknown): value is string | null {
@@ -87,6 +100,8 @@ export interface TenantPageRow {
   removable: boolean
   /** The delete endpoint takes the timestamp the row was last seen at. */
   updatedAt: string
+  sectionCount?: number
+  imageUrl?: string | null
 }
 
 /**
@@ -99,7 +114,16 @@ export interface TenantPageRow {
 export function tenantPageRows(pages: readonly TenantPageListRow[]): TenantPageRow[] {
   const links = pages.find(page => page.recipe === 'links')
   return [
-    { id: links?.id ?? 'links', recipe: 'links', title: 'Links page', summary: '/links', removable: false, updatedAt: links?.updated_at ?? '' },
+    {
+      id: links?.id ?? 'links',
+      recipe: 'links',
+      title: 'Links page',
+      summary: '/links',
+      removable: false,
+      updatedAt: links?.updated_at ?? '',
+      sectionCount: links?.section_count ?? 0,
+      imageUrl: links?.image_url ?? null,
+    },
     ...pages
       .filter(page => page.recipe !== 'links')
       .sort((left, right) => Number(right.path === '/') - Number(left.path === '/'))
@@ -110,11 +134,13 @@ export function tenantPageRows(pages: readonly TenantPageListRow[]): TenantPageR
         summary: page.path === '/' ? 'Homepage' : page.path,
         removable: page.removable,
         updatedAt: page.updated_at,
+        sectionCount: page.section_count ?? 0,
+        imageUrl: page.image_url ?? null,
       })),
   ]
 }
 
-export function isTenantPageListResponse(value: unknown): value is { pages: TenantPageListRow[] } {
+export function isTenantPageListResponse(value: unknown): value is { pages: TenantPageListRow[]; tasks?: PageTask[] } {
   return isRecord(value) && Array.isArray(value.pages)
     && value.pages.every(page => isRecord(page) && typeof page.id === 'string'
       && typeof page.page_id === 'string' && typeof page.title === 'string' && typeof page.path === 'string'
@@ -122,8 +148,8 @@ export function isTenantPageListResponse(value: unknown): value is { pages: Tena
       && typeof page.removable === 'boolean')
 }
 
-function isEditorContextResponse(value: unknown): value is { context: { previewToken: string; sourceLocale: string; organization: { subdomain: string | null } } } {
-  return isRecord(value) && isRecord(value.context) && typeof value.context.previewToken === 'string' && typeof value.context.sourceLocale === 'string'
+function isEditorContextResponse(value: unknown): value is { context: { preview_token: string; source_locale: string; organization: { subdomain: string | null } } } {
+  return isRecord(value) && isRecord(value.context) && typeof value.context.preview_token === 'string' && typeof value.context.source_locale === 'string'
     && isRecord(value.context.organization)
 }
 
@@ -171,7 +197,7 @@ export function useTenantPageDraft(organizationId: string, pageId: string) {
     key,
     async () => {
       const [context, page] = await Promise.all([
-        dashboardApi<{ context: { previewToken: string; sourceLocale: string; organization: { subdomain: string | null } } }>(
+        dashboardApi<{ context: { preview_token: string; source_locale: string; organization: { subdomain: string | null } } }>(
           `/api/editor/organizations/${organizationId}/context`,
           { validate: isEditorContextResponse },
         ),
@@ -188,7 +214,7 @@ export function useTenantPageDraft(organizationId: string, pageId: string) {
       getCachedData(cacheKey, nuxtApp, ctx) {
         if (ctx?.cause === 'refresh:manual' || ctx?.cause === 'refresh:hook') return undefined
         return nuxtApp.payload.data[cacheKey] as {
-          context: { previewToken: string; sourceLocale: string; organization: { subdomain: string | null } }
+          context: { preview_token: string; source_locale: string; organization: { subdomain: string | null } }
           page: TenantPageResponse | null
           public_url: string | null
         } | undefined
@@ -216,7 +242,7 @@ export function useTenantPageDraft(organizationId: string, pageId: string) {
 
   function seed(page: TenantPageResponse | null) {
     accepted.value = page
-    draft.value = page ? toDraft(page) : emptyDraft(data.value?.context.sourceLocale)
+    draft.value = page ? toDraft(page) : emptyDraft(data.value?.context.source_locale)
     baseline.value = JSON.stringify(draft.value)
     seededFrom.value = page?.document.updated_at ?? 'new'
   }
@@ -270,10 +296,10 @@ export function useTenantPageDraft(organizationId: string, pageId: string) {
    */
   const previewUrl = computed(() => {
     const page = data.value?.page
-    const token = data.value?.context.previewToken
+    const token = data.value?.context.preview_token
     const subdomain = data.value?.context.organization.subdomain
     if (!page || !token || !subdomain) return ''
-    const localizedPath = formatTenantLocalePath(page.path, page.locale, data.value!.context.sourceLocale)
+    const localizedPath = formatTenantLocalePath(page.path, page.locale, data.value!.context.source_locale)
     const origin = tenantOrganizationOrigin({
       platformDomain: String(runtimeConfig.public.platformDomain),
       freeOrganizationDomain: String(runtimeConfig.public.freeOrganizationDomain),
@@ -301,22 +327,22 @@ export function useTenantPageDraft(organizationId: string, pageId: string) {
     if (!draft.value.id && path === '/') throw new Error('Choose a more specific page title.')
     const body = {
       id: draft.value.id || undefined,
-      pageId: draft.value.page_id || undefined,
-      productId: draft.value.id && draft.value.id === draft.value.page_id ? draft.value.product_id : undefined,
+      page_id: draft.value.page_id || undefined,
+      product_id: draft.value.id && draft.value.id === draft.value.page_id ? draft.value.product_id : undefined,
       locale: draft.value.locale,
       path,
       title,
       summary: draft.value.summary,
-      pageType: draft.value.page_type,
+      page_type: draft.value.page_type,
       recipe: draft.value.recipe || null,
-      sortOrder: draft.value.sort_order,
+      sort_order: draft.value.sort_order,
       blocks,
       // Optimistic concurrency: a page another writer changed under us comes
       // back 409, which stays on screen as an error the tenant can retry.
       // The stamp the draft was seeded from, not whatever the last read left
       // in `data`: those are the same page except when a straggler read is
       // ignored above, and then only this one describes what is being edited.
-      expectedUpdatedAt: draft.value.id ? seededFrom.value : undefined,
+      updated_at: draft.value.id ? seededFrom.value : undefined,
     }
     const response = draft.value.id
       ? await dashboardApi<{ page: TenantPageResponse }>(`/api/editor/organizations/${organizationId}/pages/${draft.value.id}`, { method: 'PATCH', body, validate: isTenantPageResponse })

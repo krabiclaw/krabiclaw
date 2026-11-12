@@ -119,8 +119,8 @@ export function provideDashboardInvalidations(organizationSlug: Readonly<Ref<str
         nextSocket.close(4002, 'Invalid dashboard invalidation')
         return
       }
-      if (seenEventIds.has(parsed.eventId)) return
-      seenEventIds.add(parsed.eventId)
+      if (seenEventIds.has(parsed.event_id)) return
+      seenEventIds.add(parsed.event_id)
       if (seenEventIds.size > 1000) {
         const first = seenEventIds.values().next().value
         if (first) seenEventIds.delete(first)

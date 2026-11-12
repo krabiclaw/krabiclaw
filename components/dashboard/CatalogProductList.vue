@@ -56,7 +56,7 @@ defineProps<{
 
 const route = useRoute()
 const router = useRouter()
-const catalogPath = computed(() => `/dashboard/${String(route.params.orgSlug)}/products`)
+const catalogPath = computed(() => `/dashboard/${String(route.params.org_slug)}/products`)
 /** A path in this catalog's scope: the explicit location rides along, nothing else does. */
 function scoped(path: string) {
   return router.resolve({ path, query: { location_id: route.query.location_id } }).fullPath

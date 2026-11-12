@@ -151,8 +151,8 @@ test.describe('stateless MCP server', () => {
       expect(await galleryOrder()).toEqual([second, first])
       const reordered = await newChanges()
       expect(reordered).toHaveLength(1)
-      expect(reordered[0]).toMatchObject({ actor: { kind: 'member', userId: E2E_ADMIN_ID }, verification: { status: 'verified', basis: 'persisted_change' } })
-      expect(reordered[0]!.changedFields).toEqual(['media.gallery'])
+      expect(reordered[0]).toMatchObject({ actor: { kind: 'member', user_id: E2E_ADMIN_ID }, verification: { status: 'verified', basis: 'persisted_change' } })
+      expect(reordered[0]!.changed_fields).toEqual(['media.gallery'])
       await call('reorder_media', { placement, moves: [{ asset_id: second, before_asset_id: first }] })
       expect(await galleryOrder()).toEqual([second, first])
       expect(await newChanges()).toEqual(reordered)
@@ -186,7 +186,7 @@ test.describe('stateless MCP server', () => {
       expect(replaced).toHaveLength(5)
       await call('set_media', { placement: hero, asset_id: replacementHero })
       expect(await newChanges()).toEqual(replaced)
-      expect(replaced.every(outcome => outcome.actor.userId === E2E_ADMIN_ID)).toBe(true)
+      expect(replaced.every(outcome => outcome.actor.user_id === E2E_ADMIN_ID)).toBe(true)
     } finally {
       // Put the fixture back in its stored order whatever failed above.
       try {

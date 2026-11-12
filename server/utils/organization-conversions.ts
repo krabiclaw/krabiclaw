@@ -3,6 +3,7 @@ import type { DbClient } from '~/server/db'
 import { execute, queryFirst } from '~/server/db'
 import { getClientIp } from '~/server/utils/hourly-rate-limit'
 import { deliverForVisitor, type MeasurementProtocolEnv } from '~/server/utils/ga4-delivery'
+import { deliverMetaCapiForEvent } from '~/server/utils/meta-capi-delivery'
 import { projectConversionToGa4 } from '~/utils/ga4-projection'
 import { SESSION_COOKIE, VISITOR_COOKIE, hashIp, isCanonicalEventId } from '~/server/utils/pageview-tracking'
 import type { AttributionTouch, ObservedAttribution } from '~/utils/analytics-attribution'
@@ -149,9 +150,8 @@ export async function recordOrganizationConversionEvent(db: DbClient, origin: { 
   if (!(rule.stages as readonly ConversionStage[]).includes(input.stage)) throw new Error(`Invalid stage for ${input.eventName}`)
   if (rule.entityType !== null && input.entityType !== rule.entityType) throw new Error(`Invalid entity type for ${input.eventName}`)
   if ((input.entityType && !input.entityId) || (!input.entityType && input.entityId)) throw new Error('entityType and entityId must be supplied together')
-  if (input.eventName === 'checkout_start' && (input.entityType ? input.entityType !== 'product' : !input.locationId)) {
-    throw new Error('Checkout requires a product or a reservation location')
-  }
+  // Every checkout is a product's, a table's included.
+  if (input.eventName === 'checkout_start' && input.entityType !== 'product') throw new Error('Checkout requires a product')
   if (input.eventName === 'consultation_cta_click') {
     const validScheduleEntity = input.entityType === undefined || input.entityType === null || input.entityType === 'content_document'
     if (input.stage === 'schedule_navigation' && !validScheduleEntity) throw new Error('Invalid entity type for consultation_cta_click')
@@ -259,6 +259,9 @@ export async function recordAndDeliverConversion(env: MeasurementProtocolEnv, db
     await deliverForVisitor(env, db, {
       eventId: recorded.id, organizationId: input.organizationId, origin,
       projection: projectConversionToGa4({ eventName: input.eventName, value: input.value }),
+    })
+    await deliverMetaCapiForEvent(env as never, db, {
+      eventId: recorded.id, organizationId: input.organizationId, origin, input,
     })
   }
   return recorded

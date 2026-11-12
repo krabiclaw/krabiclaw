@@ -100,7 +100,7 @@ export async function requestAirbnbSync(env: CloudflareEnv, db: DbClient, organi
   // A listing's details may only hold the fields its listing details report missing, as the review asked for them.
   for (const item of items) {
     if (!item.details) continue
-    const missing = (await connection.details(item.listing_id)).missingFields as string[]
+    const missing = (await connection.details(item.listing_id)).missing_fields as string[]
     const extra = Object.keys(item.details).find(key => !missing.includes(key))
     if (extra) fail(422, 'ONLY_MISSING_DETAILS', 'Only the listing details Airbnb left out may be supplied', { listing_id: item.listing_id, field: `details.${extra}` })
   }

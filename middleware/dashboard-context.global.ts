@@ -6,6 +6,12 @@
  * still completes the navigation; the layout shows its error.
  */
 export default defineNuxtRouteMiddleware(async (to, from) => {
+  if (to.path.startsWith('/dashboard/')) {
+    const preferenceMatch = to.path.match(/^\/dashboard\/([^/]+)\/website\/(status|domains|localization|currency)(\/.*)?$/)
+    if (preferenceMatch) {
+      return navigateTo({ path: `/dashboard/${preferenceMatch[1]}/website/preferences/${preferenceMatch[2]}${preferenceMatch[3] ?? ''}`, query: to.query, hash: to.hash })
+    }
+  }
   if (import.meta.server || !to.path.startsWith('/dashboard/')) return
   const scope = useDashboardRouteScope(to).value
   if (!scope) return

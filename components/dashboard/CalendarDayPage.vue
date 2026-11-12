@@ -6,7 +6,7 @@
   <DashboardIndexPanel :id="personalScope ? 'account-calendar-day' : 'calendar-day'" :title="title" column="leaf">
     <template v-if="sessionProduct" #right>
       <UButton v-if="!calendarSessions?.providerHours.value && calendarSessions?.canCreate.value" label="Add availability" icon="i-lucide-plus" :to="calendarSessions.addTo(day)" />
-      <UButton v-else-if="calendarSessions?.providerHours.value && sessionProduct.booking" label="Bookable times" icon="i-lucide-clock" :to="sessionProduct.booking.assigned_member_id ? `/dashboard/${route.params.orgSlug}/team/${sessionProduct.booking.assigned_member_id}/hours` : `/dashboard/${route.params.orgSlug}/team`" />
+      <UButton v-else-if="calendarSessions?.providerHours.value && sessionProduct.booking" label="Bookable times" icon="i-lucide-clock" :to="sessionProduct.booking.assigned_member_id ? `/dashboard/${route.params.org_slug}/team/${sessionProduct.booking.assigned_member_id}/hours` : `/dashboard/${route.params.org_slug}/team`" />
     </template>
     <div class="space-y-6">
       <UAlert v-if="errorMessage" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="errorMessage" />
@@ -32,7 +32,7 @@
           variant="soft"
           size="lg"
           label="Edit hours"
-          :to="{ path: `/dashboard/${route.params.orgSlug}/calendar/settings/availability/hours`, query: route.query }"
+          :to="{ path: `/dashboard/${route.params.org_slug}/calendar/settings/availability/hours`, query: route.query }"
         />
         <UButton
           v-else-if="availability.action"
@@ -71,6 +71,7 @@
 import { closureOnDate, datedHours, getDateIntervals, parseOpeningHours, parseSpecialHours, type SpecialHours } from '~/shared/reservation-hours'
 import { addLocalDays, formatCalendarDate } from '~/utils/timezone'
 import { getErrorMessage } from '~/utils/errors'
+import { getVerticalCopy } from '~/utils/vertical-copy'
 import type { AgendaItem, AgendaPayload } from '~/server/utils/dashboard-agenda'
 import { calendarLocationKey, calendarRecordPath, calendarSessionsKey, type CalendarItem } from './CalendarPage.vue'
 
@@ -83,15 +84,16 @@ const dashboardApi = props.personalScope ? applicationFetch : useDashboardApi()
 const apiBase = props.personalScope ? '/api/account' : '/api/dashboard'
 const organizationId = props.personalScope ? null : useDashboardOrganizationId()
 const calendarSessions = inject(calendarSessionsKey, null)
+const { organization } = useDashboardOrganization()
 const sessionProduct = computed(() => calendarSessions?.product.value)
 const day = computed(() => String(route.params.day ?? ''))
-const locationId = computed(() => typeof route.query.locationId === 'string' ? route.query.locationId : null)
+const locationId = computed(() => typeof route.query.location_id === 'string' ? route.query.location_id : null)
 const title = computed(() => formatCalendarDate(day.value, 'en', { weekday: 'long', month: 'long', day: 'numeric' }))
 
 const isAgendaItem = (value: unknown): value is AgendaItem =>
   isRecord(value) && typeof value.id === 'string' && typeof value.kind === 'string'
-  && typeof value.startsAt === 'string' && typeof value.dayKey === 'string'
-  && typeof value.timeZone === 'string' && typeof value.title === 'string'
+  && typeof value.starts_at === 'string' && typeof value.day_key === 'string'
+  && typeof value.timezone === 'string' && typeof value.title === 'string'
   && typeof value.status === 'string' && typeof value.to === 'string'
 const isAgendaPayload = (value: unknown): value is AgendaPayload =>
   isRecord(value) && Array.isArray(value.items) && value.items.every(isAgendaItem)
@@ -107,7 +109,7 @@ const { data, error, status: agendaStatus, refresh } = await useAsyncData(
   async () => {
     if (sessionProduct.value) return null
     const agenda = await dashboardApi<AgendaPayload>(`${apiBase}/agenda`, {
-      query: { from: day.value, to: day.value, locationId: locationId.value ?? undefined, kinds: typeof route.query.kinds === 'string' ? route.query.kinds : undefined },
+      query: { from: day.value, to: day.value, location_id: locationId.value ?? undefined, kinds: typeof route.query.kinds === 'string' ? route.query.kinds : undefined },
       validate: isAgendaPayload,
     })
     return { items: agenda.items }
@@ -152,7 +154,8 @@ const availability = computed<{ open: boolean; reason: string; action: 'open' | 
   if (intervals !== null && intervals.length === 0) {
     return { open: false, reason: `Closed on ${formatCalendarDate(day.value, 'en', { weekday: 'long' })}s in your hours.`, action: 'hours' }
   }
-  return { open: true, reason: 'Guests can book this date.', action: 'block' }
+  const party = getVerticalCopy(organization.value?.vertical).guestsLabelPlural
+  return { open: true, reason: `${party.charAt(0).toUpperCase()}${party.slice(1)} can book this date.`, action: 'block' }
 })
 
 const saving = ref(false)
@@ -166,7 +169,7 @@ async function toggleClosure(): Promise<void> {
     // The one dates write every calendar uses: the place's closures, read back.
     await dashboardApi(`/api/dashboard/places/location/${record.id}/dates`, {
       method: 'PUT',
-      body: { from: day.value, to: addLocalDays(day.value, 1), closed: availability.value.action === 'block', expected_updated_at: record.updated_at },
+      body: { from: day.value, to: addLocalDays(day.value, 1), closed: availability.value.action === 'block', updated_at: record.updated_at },
       validate: isPlaceDates,
     })
     await refreshLocation()

@@ -1,4 +1,5 @@
-import { formQuestionLocalizationSchema, localizeFormQuestions } from '~/shared/form-questions'
+import { bookingPolicy, formatBookingPolicySummary, type FormattedBookingPolicySummary } from '~/server/utils/booking-policy-summary'
+import { selectPrice } from '~/shared/prices'
 import { publicCacheRevision } from '~/server/utils/edge-cache'
 import { oncePerRequest } from '~/server/utils/request-scope'
 import { publicLocationIsProtected } from '~/shared/location-sharing'
@@ -225,7 +226,7 @@ async function loadPublicPageSource(
   // to prevent unbounded cache entries from arbitrary variants.
   const VALID_DATASETS = new Set([
     'content', 'location', 'products', 'reviews', 'photos', 'qa',
-    'blogPost', 'reservationPolicies',
+    'blog_post',
   ]);
   // Mirrors composables/usePublicPageRequest.ts's getPublicPageRequest() — the only
   // page values the frontend ever requests. A regex alone (e.g. /^[a-z0-9_-]+$/)
@@ -348,8 +349,7 @@ async function loadPublicPageSource(
   const needsLocations =
     requestedDatasets.has("reviews") ||
     requestedDatasets.has("location") ||
-    requestedDatasets.has('products') ||
-    requestedDatasets.has("reservationPolicies");
+    requestedDatasets.has('products');
 
   // Build batch — one subrequest to D1 for all inline queries
   const batchStmts: BatchQuery[] = [];
@@ -442,7 +442,7 @@ async function loadPublicPageSource(
       locationId ? [organizationId, locationId] : [organizationId],
     );
 
-  if (requestedDatasets.has("blogPost") && blogSlug)
+  if (requestedDatasets.has("blog_post") && blogSlug)
     idxBlogPost = push(
       `SELECT p.id, root.id AS root_id, root.slug AS source_slug, p.title, p.slug, p.summary AS excerpt, ${ARTICLE_CATEGORY_SELECT}, (p.metadata_json ->> '$.nav_title') AS nav_title, p.seo_keywords,
               root.published_at, p.created_at, p.updated_at,
@@ -563,7 +563,7 @@ async function loadPublicPageSource(
     tenantPagePromise,
     buildPublicShellPayload(db, organization, batchResults, shellIndexes, env, undefined, { localizations: localizedLocale ? publicLocalizations : undefined }),
     includeProducts
-      ? listOrganizationProducts(db, { organizationId: orgId, kind: page === 'experiences' ? 'experience' : page === 'menu' ? 'dish' : page === 'stays' ? 'stay' : undefined, publishedOnly: true, env }).then(products => products.map(publicProduct))
+      ? listOrganizationProducts(db, { organizationId: orgId, kind: page === 'experiences' ? 'experience' : page === 'menu' ? 'dish' : page === 'stays' ? 'stay' : page === 'reservations' ? 'table' : undefined, publishedOnly: true, env }).then(products => products.map(publicProduct))
       : [],
     includeProducts
       ? locationId
@@ -585,10 +585,10 @@ async function loadPublicPageSource(
     throw new HTTPError({ statusCode: 404, statusMessage: 'Localized page was not found' })
   }
   const contentRows: OrganizationContent[] = tenantPage ? tenantPageToContentRows(tenantPage) : []
-  const localeRepresentations = ownRepresentations
-    ?? (!representationResource && tenantPage?.localeRepresentations ? tenantPage.localeRepresentations : await readLocaleRepresentations())
+  const locale_representations = ownRepresentations
+    ?? (!representationResource && tenantPage?.locale_representations ? tenantPage.locale_representations : await readLocaleRepresentations())
   options.signal?.throwIfAborted()
-  sourceShell.platformMessages = language.platform_messages
+  sourceShell.platform_messages = language.platform_messages
   const shell = (() => {
     if (!localizedLocale) return sourceShell
     const organizationLocalization = publicLocalizations.find(item => item.resourceType === 'organization' && item.resourceId === organizationId)
@@ -618,8 +618,8 @@ async function loadPublicPageSource(
         brand_description: localizedOrganization.brand_description,
       },
       config,
-      googleMaps: {
-        ...sourceShell.googleMaps,
+      google_maps: {
+        ...sourceShell.google_maps,
         business: null,
       },
     }
@@ -659,7 +659,13 @@ async function loadPublicPageSource(
     // Product offered at both would otherwise drag onto the page.
     if (localizedLocale) {
       collections = projectExactLocalizedCollection('collection', collections, publicLocalizations)
-      products = projectExactLocalizedCollection('product', products, publicLocalizations).map(product => ({
+      // Reservations are labelled by their dining location. Its exact locale
+      // is already part of the public shell, alongside the table's booking facts.
+      const localizedProducts = page === 'reservations' ? products.flatMap(product => {
+        const location = shell.locations.find(place => product.locations.some(scope => scope.location_id === place.id && scope.published && scope.active))
+        return location ? [{ ...product, name: location.title }] : []
+      }) : projectExactLocalizedCollection('product', products, publicLocalizations)
+      products = localizedProducts.map(product => ({
         ...product,
         image: product.image ? projectLocalizedMediaAlt([product.image], publicLocalizations)[0] ?? null : null,
         gallery: projectLocalizedMediaAlt(product.gallery, publicLocalizations),
@@ -667,45 +673,17 @@ async function loadPublicPageSource(
     }
   }
 
-
-
-  const locations = shell.locations
-
-  const needsReservationPolicies = requestedDatasets.has('reservationPolicies');
-  if (needsReservationPolicies && !locale && !sourceLocale) {
-    throw new HTTPError({
-      statusCode: 500,
-      statusMessage: 'Organization source locale is not configured',
-    });
-  }
-  options.signal?.throwIfAborted();
-  // Reservation policy is a location's own typed row. A product's booking
-  // terms are its details and are read with the product, so there is no
-  // second policy index to resolve here.
-  const reservationPolicies = needsReservationPolicies
-    ? new Map(await Promise.all(locations.map(async location => [
-        String(location.id),
-        await getLocationReservationConfig(db, { organizationId: orgId, locationId: String(location.id) }),
-      ] as const)))
-    : null
-  options.signal?.throwIfAborted();
-  const policyLocale = locale ?? sourceLocale!;
-  const reservationPolicyByLocation = Object.fromEntries(
-    Array.from(reservationPolicies ?? [], ([locationId, config]) => [
-      locationId,
-      config ? renderBookingPolicySummary(reservationPolicySummarySource(config), policyLocale) : null,
-    ]),
-  );
-
-  // Each location's reservation questions, worded in this page's language; their revision is the source's.
-  const reservationQuestionsByLocation = Object.fromEntries(
-    Array.from(reservationPolicies ?? [], ([locationId, config]) => {
-      if (!config) return [locationId, null]
-      const values = localizedLocale ? publicLocalizations.find(item => item.resourceType === 'business_location' && item.resourceId === locationId)?.values : undefined
-      const wording = values?.reservation_questions === undefined ? null : formQuestionLocalizationSchema.parse(values.reservation_questions)
-      return [locationId, { questions: localizeFormQuestions(config.questions, wording), questions_revision: config.questions_revision }]
-    }),
-  );
+  // A table's terms, as the reservations page states them before the guest
+  // chooses a time: the same summary a booking freezes, at today's price.
+  const policyLocale = locale ?? sourceLocale
+  const currency = organization.default_currency
+  const table_policy_summaries: Record<string, FormattedBookingPolicySummary> = Object.fromEntries(products.flatMap((product) => {
+    if (product.kind !== 'table' || !product.booking) return []
+    if (!currency) throw new HTTPError({ statusCode: 500, statusMessage: 'Organization currency is not configured' })
+    const variant = product.variants.find(candidate => candidate.active)
+    const price = variant ? selectPrice(variant.prices, { currency, location_id: product.locations.find(location => location.published)?.location_id ?? null }) : null
+    return [[product.id, formatBookingPolicySummary(bookingPolicy(product.booking, price), policyLocale, product.kind)]]
+  }))
 
   // Shape full reviews (type A)
   const locationForAggregate = locationId
@@ -723,7 +701,7 @@ async function loadPublicPageSource(
     review_count: null,
     last_synced_at: null,
   };
-  const reviewsAggregate = buildPublicReviewAggregate(
+  const reviews_aggregate = buildPublicReviewAggregate(
     normalizePublicReviewAggregateRows(reviewAggregateRows.results),
     aggregateLocation,
   );
@@ -751,14 +729,14 @@ async function loadPublicPageSource(
     ? projectLocalizedMediaAlt(sourceMedia, publicLocalizations)
     : sourceMedia
 
-  let blogPost: ApiRecord | null = null;
+  let blog_post: ApiRecord | null = null;
   if (postRow) {
     options.signal?.throwIfAborted();
     const loadedBlocks = await getContentBlocksForDocument(db, String(postRow.id));
     const contentBlocks = loadedBlocks
       ? await attachPageQa(db, organizationId, tenantBlogPostPath(String(postRow.source_slug)), loadedBlocks, localizedLocale ?? 'en')
       : loadedBlocks
-    blogPost = (await localizeArticleCategories(env, db, orgId, localizedLocale ?? 'en',
+    blog_post = (await localizeArticleCategories(env, db, orgId, localizedLocale ?? 'en',
       [attachArticleCategory(attachCoverMedia({ ...postRow, content_blocks: contentBlocks }))], publicLocalizations))[0]!;
   }
 
@@ -766,7 +744,7 @@ async function loadPublicPageSource(
     if (typeof row.id !== 'string') throw new HTTPError({ statusCode: 500, statusMessage: 'Stored public Q&A is invalid' })
     return { ...row, id: row.id }
   })
-  const qaList = sourceQaList
+  const qa_list = sourceQaList
 
   const pagePayload = {
     kind: page ?? 'home',
@@ -777,26 +755,25 @@ async function loadPublicPageSource(
     tenant_page: tenantPage,
     products,
     collections,
-    locationReviews: (locationReviewRows?.results ?? []).map(({ is_stay_location, ...review }) => projectPublicLocationReview(review, publicLocationIsProtected(is_stay_location))),
-    globalReviews: needsGlobalReviews ? (reviewRows.results ?? []).map(({ is_stay_location, ...review }) => projectPublicLocationReview(review, publicLocationIsProtected(is_stay_location))) : [],
-    reviewsAggregate: requestedDatasets.has("reviews") ? reviewsAggregate : null,
-    reviewsList: requestedDatasets.has("reviews") ? fullReviews : [],
+    location_reviews: (locationReviewRows?.results ?? []).map(({ is_stay_location, ...review }) => projectPublicLocationReview(review, publicLocationIsProtected(is_stay_location))),
+    global_reviews: needsGlobalReviews ? (reviewRows.results ?? []).map(({ is_stay_location, ...review }) => projectPublicLocationReview(review, publicLocationIsProtected(is_stay_location))) : [],
+    reviews_aggregate: requestedDatasets.has("reviews") ? reviews_aggregate : null,
+    reviews_list: requestedDatasets.has("reviews") ? fullReviews : [],
     media: requestedDatasets.has("photos") ? media : [],
-    qaList,
-    blogPost: requestedDatasets.has("blogPost") ? blogPost : null,
-    reservationPolicyByLocation,
-    reservationQuestionsByLocation,
-    localeRepresentations,
+    qa_list,
+    blog_post: requestedDatasets.has("blog_post") ? blog_post : null,
+    table_policy_summaries,
+    locale_representations,
   };
   const payload = pagePayload;
 
   // Slug-shaped inputs are only worth caching once they've resolved to a real
   // row — otherwise a stream of made-up slugs (still regex-valid) would each
-  // mint their own permanent KV entry. locationRow/blogPost are the actual
+  // mint their own permanent KV entry. locationRow/blog_post are the actual
   // D1-resolved lookups for locationSlug/blogSlug.
   const resolvedSlugsValid =
     (!locationSlug || !!locationRow) &&
-    (!blogSlug || !!blogPost);
+    (!blogSlug || !!blog_post);
 
   if (usePageCache && resolvedSlugsValid) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -137,13 +137,13 @@ import { STARTER_PALETTES } from '~/shared/site-palette'
 import { ORGANIZATION_FONT_OPTIONS, type OrganizationFontPreset } from '~/shared/organization-fonts'
 import type { LogoShape } from '~/shared/media-placement-contract'
 type DraftUploadedImage = {
-  draftAssetId: string
-  cloudflareImageId: string
-  publicUrl: string
-  thumbnailUrl: string | null
-  mimeType: string | null
-  fileName: string | null
-  fileSize: number | null
+  asset_id: string
+  cloudflare_image_id: string
+  public_url: string
+  thumbnail_url: string | null
+  mime_type: string | null
+  file_name: string | null
+  file_size: number | null
 }
 
 export type DraftBrandForm = {
@@ -209,36 +209,36 @@ async function uploadDraftImage(event: Event, target: 'logo' | 'hero') {
   try {
     if (!revision.value) throw new Error('Reload your saved website draft before uploading.')
     const body = new FormData()
-    body.set('revision', revision.value)
+    body.set('updated_at', revision.value)
     body.set('target', target)
     body.set('file', file)
-    const res = await applicationFetch<{ success: boolean; image?: DraftUploadedImage; updatedAt?: string; error?: string; message?: string }>(
+    const res = await applicationFetch<{ success: boolean; image?: DraftUploadedImage; updated_at?: string; error?: string; message?: string }>(
       `/api/dashboard/onboarding/drafts/${props.draftId}/media/upload`,
       {
         method: 'POST',
         body,
-        validate: (value): value is { success: boolean; image?: DraftUploadedImage; updatedAt?: string; error?: string; message?: string } =>
+        validate: (value): value is { success: boolean; image?: DraftUploadedImage; updated_at?: string; error?: string; message?: string } =>
           isRecord(value)
           && typeof value.success === 'boolean'
           && (value.image === undefined || (
             isRecord(value.image)
-            && typeof value.image.draftAssetId === 'string'
-            && typeof value.image.cloudflareImageId === 'string'
-            && typeof value.image.publicUrl === 'string'
+            && typeof value.image.asset_id === 'string'
+            && typeof value.image.cloudflare_image_id === 'string'
+            && typeof value.image.public_url === 'string'
           )),
       },
     )
-    if (!res.success || !res.image || typeof res.updatedAt !== 'string') throw new Error(res.error || res.message || 'Upload failed.')
-    revision.value = res.updatedAt
+    if (!res.success || !res.image || typeof res.updated_at !== 'string') throw new Error(res.error || res.message || 'Upload failed.')
+    revision.value = res.updated_at
 
     if (target === 'logo') {
       form.value.logoImage = res.image
-      form.value.logoNote = res.image.fileName ?? file.name
-      form.value.logoPreviewUrl = res.image.publicUrl
+      form.value.logoNote = res.image.file_name ?? file.name
+      form.value.logoPreviewUrl = res.image.public_url
     } else {
       form.value.heroImage = res.image
-      form.value.heroPhotoNote = res.image.fileName ?? file.name
-      form.value.heroPreviewUrl = res.image.publicUrl
+      form.value.heroPhotoNote = res.image.file_name ?? file.name
+      form.value.heroPreviewUrl = res.image.public_url
     }
   } catch (error) {
     const fetchError = error as { data?: { error?: string; message?: string }; status?: number; statusCode?: number }

@@ -12,9 +12,9 @@
   >
     <template #right>
       <div class="flex items-center gap-1">
-        <UButton v-if="!personalScope && !sessionProduct && canCreateStay" label="Add stay" icon="i-lucide-plus" :to="`/dashboard/${route.params.orgSlug}/bookings/stay/new`" :disabled="Boolean(level.child.value)" />
+        <UButton v-if="!personalScope && !sessionProduct && canCreateStay" label="Add stay" icon="i-lucide-plus" :to="`/dashboard/${route.params.org_slug}/bookings/stay/new`" :disabled="Boolean(level.child.value)" />
         <UButton v-if="sessionProduct && !providerHours && canCreate" label="Add availability" icon="i-lucide-plus" :to="addAvailabilityTo" :disabled="Boolean(level.child.value)" />
-        <UButton v-else-if="providerHours && sessionProduct?.booking" label="Bookable times" icon="i-lucide-clock" :to="sessionProduct.booking.assigned_member_id ? `/dashboard/${route.params.orgSlug}/team/${sessionProduct.booking.assigned_member_id}/hours` : `/dashboard/${route.params.orgSlug}/team`" />
+        <UButton v-else-if="providerHours && sessionProduct?.booking" label="Bookable times" icon="i-lucide-clock" :to="sessionProduct.booking.assigned_member_id ? `/dashboard/${route.params.org_slug}/team/${sessionProduct.booking.assigned_member_id}/hours` : `/dashboard/${route.params.org_slug}/team`" />
         <UButton
           v-if="!personalScope && !sessionProduct && chosenLocation && !selecting && view === 'month'"
           label="Select dates"
@@ -28,7 +28,7 @@
         <UDropdownMenu :items="viewItems" :content="{ align: 'end' }" :ui="{ content: 'w-44' }">
           <UButton :icon="VIEWS[view].icon" color="neutral" variant="soft" square :aria-label="`View: ${VIEWS[view].label}`" />
         </UDropdownMenu>
-        <!-- The gear opens this location's reservation settings, as Airbnb's opens the listing's. -->
+        <!-- The gear opens this location's availability settings, as Airbnb's opens the listing's. -->
         <UButton
           v-if="!personalScope && !sessionProduct && chosenLocation"
           icon="i-lucide-settings"
@@ -52,7 +52,7 @@
         <!-- One search for every calendar: homes by name or address, places by name and where, bookings by who, what and where. -->
         <UInput :model-value="search" icon="i-lucide-search" :placeholder="searchLabel" :aria-label="searchLabel" :class="gridView ? 'min-w-0 flex-1 sm:w-72 sm:flex-none' : 'w-full sm:w-72'" :ui="{ base: 'rounded-full' }" @update:model-value="setSearch" />
         <UTooltip v-if="sessionProduct && physicalLocation" text="Repeating times">
-          <UButton icon="i-lucide-settings" color="neutral" variant="soft" square class="size-10 justify-center rounded-full" aria-label="Schedule settings" :to="{ path: `/dashboard/${route.params.orgSlug}/products/${sessionProduct.id}/booking/schedule`, query: { location_id: physicalLocation.id } }" />
+          <UButton icon="i-lucide-settings" color="neutral" variant="soft" square class="size-10 justify-center rounded-full" aria-label="Schedule settings" :to="{ path: `/dashboard/${route.params.org_slug}/products/${sessionProduct.id}/booking/schedule`, query: { location_id: physicalLocation.id } }" />
         </UTooltip>
       </div>
       <UAlert
@@ -122,7 +122,7 @@
                   <li v-for="item in itemsOn(day.key).slice(0, 2)" :key="item.id">
                     <NuxtLink :to="rowTo(item, day.key) ?? item.to" :data-session-id="item.kind === 'session' ? item.session.id : undefined" class="group/item flex" :class="item.status === 'cancelled' ? 'text-muted line-through' : ''">
                       <p class="flex-auto truncate font-medium" :class="item.status === 'cancelled' ? '' : 'text-highlighted group-hover/item:text-primary'">{{ item.kind === 'session' ? timeOf(item) : item.title }}</p>
-                      <time v-if="item.kind !== 'session'" :datetime="item.startsAt" class="ml-3 hidden flex-none text-muted xl:block">{{ timeOf(item) }}</time>
+                      <time v-if="item.kind !== 'session'" :datetime="item.starts_at" class="ml-3 hidden flex-none text-muted xl:block">{{ timeOf(item) }}</time>
                     </NuxtLink>
                   </li>
                   <li v-if="itemsOn(day.key).length > 2" class="text-muted">
@@ -240,13 +240,13 @@ import type { SessionAvailability } from '~/server/utils/availability'
 import type { CalendarRowItem } from '~/lib/components/workspace/dashboard/AgendaRow.vue'
 import type { AgendaItem, AgendaKind, AgendaLocation, AgendaPayload } from '~/server/utils/dashboard-agenda'
 
-export type CalendarSessionItem = CalendarRowItem & { kind: 'session'; dayKey: string; session: SessionAvailability }
+export type CalendarSessionItem = CalendarRowItem & { kind: 'session'; day_key: string; session: SessionAvailability }
 export type CalendarItem = AgendaItem | CalendarSessionItem
 
 /** A booking opens beneath its calendar day, so the calendar stays beside it. */
 export function calendarRecordPath(dayPath: string, item: CalendarItem): string | undefined {
   if (item.kind === 'session' || item.kind === 'post') return undefined
-  return `${dayPath}/${item.kind}/${encodeURIComponent(item.stayId ?? item.id.slice(item.kind.length + 1))}`
+  return `${dayPath}/${item.kind}/${encodeURIComponent((item.kind === 'stay' ? item.booking_id : item.kind === 'booking' ? item.conversation_id : null) ?? item.id.slice(item.kind.length + 1))}`
 }
 
 /** The location the calendar is showing, owned by this level and read by the day leaf below it. */
@@ -313,7 +313,7 @@ const props = defineProps<{
 }>()
 
 // Named here rather than imported: the agenda module is the server's, and a value import would bundle it.
-const AGENDA_KINDS = ['reservation', 'booking', 'post', 'stay'] as const satisfies readonly AgendaKind[]
+const AGENDA_KINDS = ['booking', 'post', 'stay'] as const satisfies readonly AgendaKind[]
 // Weeks start on Sunday, as Airbnb's do.
 const WEEKDAYS = [
   { short: 'S', rest: 'un', long: 'Sunday' }, { short: 'M', rest: 'on', long: 'Monday' }, { short: 'T', rest: 'ue', long: 'Tuesday' },
@@ -412,11 +412,11 @@ const creationUnavailable = computed(() => {
   return {
     message: physicalLocation.value ? `${physicalLocation.value.title} is inactive.` : `No active ${office ? 'office' : 'location'} is assigned to this ${office ? 'consultation' : 'experience'}.`,
     label: office ? 'Edit offices' : 'Edit locations',
-    to: `/dashboard/${route.params.orgSlug}/products/${product.id}/locations`,
+    to: `/dashboard/${route.params.org_slug}/products/${product.id}/locations`,
   }
 })
 function addTo(date?: string) {
-  return { path: `/dashboard/${route.params.orgSlug}/calendar/sessions/new`, query: { product_id: sessionProduct.value?.id, locationId: physicalLocation.value?.id, date, month: monthKey.value, view: view.value === 'month' ? undefined : view.value } }
+  return { path: `/dashboard/${route.params.org_slug}/calendar/sessions/new`, query: { product_id: sessionProduct.value?.id, location_id: physicalLocation.value?.id, date, month: monthKey.value, view: view.value === 'month' ? undefined : view.value } }
 }
 const addAvailabilityTo = computed(() => addTo(openDay.value ?? undefined))
 
@@ -476,14 +476,16 @@ const yearMonths = computed(() => yearKeys.value.map((key) => {
 
 const isAgendaItem = (value: unknown): value is AgendaItem =>
   isRecord(value) && typeof value.id === 'string' && typeof value.kind === 'string'
-  && typeof value.startsAt === 'string' && typeof value.dayKey === 'string'
-  && typeof value.timeZone === 'string' && typeof value.title === 'string'
+  && typeof value.starts_at === 'string' && typeof value.day_key === 'string'
+  && typeof value.timezone === 'string' && typeof value.title === 'string'
   && typeof value.status === 'string' && typeof value.to === 'string'
 const isLocation = (value: unknown): value is AgendaLocation => isRecord(value) && typeof value.id === 'string' && typeof value.title === 'string'
 const isAgendaPayload = (value: unknown): value is AgendaPayload =>
   isRecord(value) && Array.isArray(value.items) && value.items.every(isAgendaItem)
-  && Array.isArray(value.availableKinds) && value.availableKinds.every(kind => AGENDA_KINDS.includes(kind as AgendaKind))
+  && Array.isArray(value.available_kinds) && value.available_kinds.every(kind => AGENDA_KINDS.includes(kind as AgendaKind))
   && Array.isArray(value.locations) && value.locations.every(isLocation)
+
+const places = (count: number) => `${count} ${count === 1 ? 'place' : 'places'}`
 
 async function loadMonth(key: string, signal?: AbortSignal): Promise<void> {
   const first = firstOf(key)
@@ -508,13 +510,13 @@ async function loadMonth(key: string, signal?: AbortSignal): Promise<void> {
         const location = session.location_id ? props.sessionLocations?.find(entry => entry.id === session.location_id) : null
         if (session.location_id && !location) throw new Error('A scheduled time’s saved location could not be loaded')
         return [{
-          id: session.id, kind: 'session', dayKey, session,
-          startsAt: session.starts_at, timeZone: session.timezone, showTimeZone: true,
+          id: session.id, kind: 'session', day_key: dayKey, session,
+          starts_at: session.starts_at, timezone: session.timezone, show_time_zone: true,
           title: product.name,
-          subtitle: `${session.claimed} places reserved${session.capacity === null ? '' : ` · ${session.capacity} places`}`,
-          status: session.status, locationTitle: location?.title ?? 'Online', guestImageUrl: null,
-          resourceImageUrl: mediaStillUrl(product.image),
-          to: router.resolve({ path: `${level.path.value}/sessions/${session.id}`, query: { product_id: product.id, locationId: session.location_id ? productLocations.value.some(entry => entry.id === session.location_id) ? session.location_id : undefined : product.booking?.held_online ? 'online' : undefined, date: dayKey, month: key } }).fullPath,
+          subtitle: `${places(session.claimed)} reserved${session.capacity === null ? '' : ` · ${places(session.capacity)}`}`,
+          status: session.status, location_title: location?.title ?? 'Online', guest_image_url: null,
+          resource_image_url: mediaStillUrl(product.image),
+          to: router.resolve({ path: `${level.path.value}/sessions/${session.id}`, query: { product_id: product.id, location_id: session.location_id ? productLocations.value.some(entry => entry.id === session.location_id) ? session.location_id : undefined : product.booking?.held_online ? 'online' : undefined, date: dayKey, month: key } }).fullPath,
         }]
       })
       putMonth({ key, status: 'ready', items })
@@ -526,7 +528,7 @@ async function loadMonth(key: string, signal?: AbortSignal): Promise<void> {
     })
     if (requested !== generation.value) return
     locations.value = payload.locations
-    availableKinds.value = payload.availableKinds
+    availableKinds.value = payload.available_kinds
     putMonth({ key, status: 'ready', items: payload.items })
   } catch (cause) {
     if (requested !== generation.value) return
@@ -551,10 +553,10 @@ const itemsByDay = computed(() => {
   const groups = new Map<string, CalendarItem[]>()
   for (const block of monthData.value.values()) {
     for (const item of block.items) {
-      const days = [item.dayKey]
-      if (item.kind === 'stay' && item.endsAt) {
-        const last = localNow(item.timeZone, new Date(item.endsAt)).date
-        for (let day = parseDate(item.dayKey).add({ days: 1 }); day.toString() <= last; day = day.add({ days: 1 })) days.push(day.toString())
+      const days = [item.day_key]
+      if (item.kind === 'stay' && item.ends_at) {
+        const last = localNow(item.timezone, new Date(item.ends_at)).date
+        for (let day = parseDate(item.day_key).add({ days: 1 }); day.toString() <= last; day = day.add({ days: 1 })) days.push(day.toString())
       }
       for (const day of days) {
         const rows = groups.get(day) ?? []
@@ -571,7 +573,7 @@ function setSearch(value: string | number) {
 function itemsOn(dayKey: string): CalendarItem[] {
   const items = itemsByDay.value.get(dayKey) ?? []
   const query = search.value.toLowerCase()
-  return query ? items.filter(item => [item.title, item.subtitle, item.locationTitle].some(text => text?.toLowerCase().includes(query))) : items
+  return query ? items.filter(item => [item.title, item.subtitle, item.location_title].some(text => text?.toLowerCase().includes(query))) : items
 }
 // A tile counts what is still happening; a cancelled booking is listed on its
 // day, marked, and not counted.
@@ -579,7 +581,7 @@ function countFor(dayKey: string): number {
   return itemsOn(dayKey).filter(item => item.status !== 'cancelled').length
 }
 function timeOf(item: CalendarItem): string {
-  return item.startsAt.includes('T') ? formatTimestamp(item.startsAt, 'en', item.timeZone, { hour: 'numeric', minute: '2-digit' }) : 'Time not set'
+  return item.starts_at.includes('T') ? formatTimestamp(item.starts_at, 'en', item.timezone, { hour: 'numeric', minute: '2-digit' }) : 'Time not set'
 }
 
 // The open day is the route below this level, so a reload and a deep link ring
@@ -683,7 +685,7 @@ async function writeSelection(action: 'block' | 'open'): Promise<void> {
     // The one dates write every calendar uses: the place's closures, read back.
     await dashboardApi(`/api/dashboard/places/location/${record.id}/dates`, {
       method: 'PUT',
-      body: { from: range.from, to: addLocalDays(range.to, 1), closed: action === 'block', expected_updated_at: record.updated_at },
+      body: { from: range.from, to: addLocalDays(range.to, 1), closed: action === 'block', updated_at: record.updated_at },
       validate: isPlaceDates,
     })
     await refreshLocation()
@@ -702,7 +704,7 @@ const locationOptions = computed(() => [
   { label: 'All locations', value: AGENDA_FILTER_ALL, imageUrl: null as string | null },
   ...(sessionProduct.value
     ? productLocations.value.map(location => ({ label: location.status === 'active' ? location.title : `${location.title} · Inactive`, value: location.id, imageUrl: location.picture_url }))
-    : locations.value.map(location => ({ label: location.title, value: location.id, imageUrl: location.imageUrl }))),
+    : locations.value.map(location => ({ label: location.title, value: location.id, imageUrl: location.image_url }))),
   ...(sessionProduct.value?.booking?.held_online ? [{ label: 'Online', value: 'online', imageUrl: null }] : []),
 ])
 

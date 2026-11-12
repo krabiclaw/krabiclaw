@@ -25,8 +25,6 @@ import type { LocationHoursForm } from '~/lib/components/workspace/location/hour
 import { parseOpeningHours, parseSpecialHours, type OpeningHours, type SpecialHours } from '~/shared/reservation-hours'
 
 import type { Ref } from 'vue'
-import type { LocationReservationConfig, LocationReservationConfigPatch } from '~/server/utils/reservations'
-import type { FormQuestionWrite } from '~/utils/form-question-editing'
 import { getErrorMessage } from '~/utils/errors'
 import { coordinatesFailure } from '~/utils/location-map'
 import { parsePostalAddress, postalAddressFromAnswers, type PostalAddress } from '~/utils/postal-address'
@@ -58,17 +56,16 @@ export interface BusinessLocation {
   status: string
   last_synced_at: string | null
   timezone: string
-  assigned_member_id: string | null
-  assigned_team_id: string | null
 }
 
 /**
  * The editors a guest sees the result of — name, description, hours, address,
- * contact, the reservation policy — open from the location index's cards. The
- * rest are the gear's.
+ * contact — open from the location index's cards. The rest are the gear's. A
+ * location's tables are its table product, edited in the product's booking
+ * settings like every bookable offering.
  */
-export const HUB_KEYS = ['name', 'description', 'hours', 'address', 'contact', 'reservations'] as const
-export const SETTINGS_KEYS = ['assignment', 'status'] as const
+export const HUB_KEYS = ['name', 'description', 'hours', 'address', 'contact'] as const
+export const SETTINGS_KEYS = ['status'] as const
 export type LocationEditorKey = typeof HUB_KEYS[number] | typeof SETTINGS_KEYS[number] | 'stay-map-sharing'
 
 /** `/locations/new`: the location record before it exists. */
@@ -93,8 +90,8 @@ export function useNewLocation(organizationId: string, openKey: NewLocationSecti
   const draft = useState(`location-draft-${organizationId}-${NEW_LOCATION_SLUG}`, blankLocationDraft)
   const creating = ref(false)
   const createError = ref<string | null>(null)
-  const isNew = computed(() => route.params.locationSlug === NEW_LOCATION_SLUG)
-  const recordPath = computed(() => `/dashboard/${String(route.params.orgSlug)}/locations/${NEW_LOCATION_SLUG}`)
+  const isNew = computed(() => route.params.location_slug === NEW_LOCATION_SLUG)
+  const recordPath = computed(() => `/dashboard/${String(route.params.org_slug)}/locations/${NEW_LOCATION_SLUG}`)
 
   async function commit() {
     creating.value = true
@@ -117,7 +114,7 @@ export function useNewLocation(organizationId: string, openKey: NewLocationSecti
       if (!response) return
       draft.value = blankLocationDraft()
       await dashboard.refresh()
-      await navigateTo(`/dashboard/${String(route.params.orgSlug)}/locations/${response.location.slug}`, { replace: true })
+      await navigateTo(`/dashboard/${String(route.params.org_slug)}/locations/${response.location.slug}`, { replace: true })
     } finally {
       creating.value = false
     }
@@ -182,30 +179,10 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
       && (value.address === null || isRecord(value.address))
       && isNullableString(value.phone)
       && isNullableString(value.google_place_id)
-      && isNullableString(value.assigned_member_id)
-      && isNullableString(value.assigned_team_id)
   }
   const isLocationResponse = (value: unknown): value is { success: true; location: BusinessLocation } =>
     isRecord(value) && value.success === true && isBusinessLocation(value.location)
   const detailsSaving = ref(false)
-
-  // The reservation policy is its own row (location_reservation_configs), not a
-  // column on the location, so it loads and saves through its own endpoint. A
-  // null row means this location does not take reservations — the absence of the
-  // capability, not an empty policy.
-  const reservationForm = ref<LocationReservationConfigPatch>({})
-  const reservationSaving = ref(false)
-  const closingReservations = ref(false)
-  const reservationConfigExists = computed(() => reservationConfig.value !== null)
-  const isReservationConfigResponse = (value: unknown): value is { success: true; config: LocationReservationConfig | null } =>
-    isRecord(value) && value.success === true && (value.config === null || isRecord(value.config))
-
-  function reservationPatchFrom(config: LocationReservationConfig | null): LocationReservationConfigPatch {
-    if (!config) return {}
-    // Questions are written by their own editor, against their own revision.
-    const { location_id: _locationId, organization_id: _organizationId, created_at: _createdAt, updated_at: _updatedAt, questions: _questions, questions_revision: _questionsRevision, ...patch } = config
-    return patch
-  }
 
   /**
    * The address the form's fields make. The same mapping onboarding uses, so a
@@ -247,11 +224,9 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
     short_description: '',
     description: '',
     status: 'active',
-    assigned_member_id: null as string | null,
-    assigned_team_id: null as string | null,
   })
   const addressDraftKeys = ['addressLines', 'regionCode', 'locality', 'sublocality', 'administrativeArea', 'postalCode'] as const
-  const organizationLocalizationSettingsPath = computed(() => `/dashboard/${route.params.orgSlug}/website/localization`)
+  const organizationLocalizationSettingsPath = computed(() => `/dashboard/${route.params.org_slug}/website/preferences/localization`)
   const locationLocalizationFields = computed(() => [
     { key: 'title', label: 'Name', source: location.value?.title },
     { key: 'short_description', label: 'Short description', source: location.value?.short_description },
@@ -283,34 +258,19 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
     detailsForm.description = loc.description ?? ''
     hoursForm.value = { timezone: loc.timezone, hours: parseOpeningHours(loc.opening_hours), specialHours: parseSpecialHours(loc.special_hours) }
     detailsForm.status = loc.status
-    detailsForm.assigned_member_id = loc.assigned_member_id
-    detailsForm.assigned_team_id = loc.assigned_team_id
   }
-
-  const schedulingMembersResource = useMemberSchedulingList(() => organizationId)
-  const { data: schedulingMembers, error: schedulingMembersError } = schedulingMembersResource
-  const assignmentSummary = computed(() => {
-    if (!detailsForm.assigned_team_id && !detailsForm.assigned_member_id) return 'Unassigned'
-    if (schedulingMembersError.value) return 'Team members could not be loaded'
-    if (!schedulingMembers.value) return 'Loading team members…'
-    if (detailsForm.assigned_team_id) return schedulingMembers.value.teams.find(t => t.id === detailsForm.assigned_team_id)?.name ?? 'Assigned team not found in this business'
-    return schedulingMembers.value.members.find(m => m.id === detailsForm.assigned_member_id)?.name ?? 'Assigned member not found in this business'
-  })
 
   const statusSummary = computed(() => location.value?.status === 'active' ? 'Published' : 'Draft')
   const navigationGroups = computed(() => [{
     id: 'settings',
     items: [
-      { id: 'assignment', label: 'Team assignment', summary: assignmentSummary.value, to: `${settingsBase.value}/assignment` },
       { id: 'status', label: 'Status', summary: statusSummary.value, to: `${settingsBase.value}/status` },
       { id: 'languages', icon: 'i-lucide-languages', label: 'Languages', summary: 'Translate the name, description and address', to: `${settingsBase.value}?editMode=translations` },
     ],
   }])
 
-  // Every write this screen can be in the middle of, including the one that
-  // stops reservations: Save stayed live during that delete, and a save landing
-  // on top of it recreated the policy it had just removed.
-  const saving = computed(() => detailsSaving.value || reservationSaving.value || closingReservations.value || newLocation.creating.value)
+  // Every write this screen can be in the middle of.
+  const saving = computed(() => detailsSaving.value || newLocation.creating.value)
 
   function editorSignature(key: string | null): string {
     switch (key) {
@@ -318,11 +278,9 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
       case 'stay-map-sharing': return JSON.stringify(detailsForm.stay_map_sharing)
       case 'address': return JSON.stringify([detailsForm.addressLines, detailsForm.regionCode, detailsForm.locality, detailsForm.sublocality, detailsForm.administrativeArea, detailsForm.postalCode])
       case 'contact': return JSON.stringify([detailsForm.phone, detailsForm.email])
-      case 'assignment': return JSON.stringify([detailsForm.assigned_member_id, detailsForm.assigned_team_id])
       case 'status': return JSON.stringify(detailsForm.status)
       case 'hours': return JSON.stringify(hoursForm.value)
       case 'description': return JSON.stringify([detailsForm.short_description, detailsForm.description, detailsForm.price_level])
-      case 'reservations': return JSON.stringify(reservationForm.value)
       default: return ''
     }
   }
@@ -358,7 +316,6 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
     editorError.value = null
     if (!location.value) return
     fillDetailsForm(location.value)
-    reservationForm.value = reservationPatchFrom(reservationConfig.value)
     originalSignature.value = editorSignature(key)
   }
 
@@ -401,7 +358,7 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
   }
 
   async function refreshLocationReads(requestedLocationId: string | null) {
-    const orgSlug = String(route.params.orgSlug)
+    const orgSlug = String(route.params.org_slug)
     const keys = [`dashboard-location-overview:${organizationId}:${requestedLocationId}`, `dashboard-org-locations:${orgSlug}`, `dashboard-org-locations:${orgSlug}:all`]
     const reads = await Promise.allSettled([refreshLocationWorkspace(), refreshNuxtData(keys)])
     const failures = reads.flatMap(result => result.status === 'rejected' ? [getErrorMessage(result.reason, 'Failed to reload location')] : [])
@@ -413,85 +370,22 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
     if (failures.length) throw new Error([...new Set(failures)].join(' '))
   }
 
-  async function saveReservationPolicy() {
-    const requestedLocationId = locationId.value
-    reservationSaving.value = true
-    editorError.value = null
-    try {
-      await dashboardApi<{ success: true; config: LocationReservationConfig | null }>(
-        `/api/editor/organizations/${organizationId}/locations/${requestedLocationId}/reservation-config`,
-        { method: 'PUT', body: { ...reservationForm.value, expected_updated_at: reservationConfig.value?.updated_at ?? null }, validate: isReservationConfigResponse },
-      )
-      if (locationId.value !== requestedLocationId) return
-      await refreshLocationWorkspace()
-      await refreshNuxtData(`dashboard-location-overview:${organizationId}:${requestedLocationId}`)
-    } catch (error) {
-      editorError.value = getErrorMessage(error, 'Failed to save the reservation policy')
-    } finally {
-      reservationSaving.value = false
-    }
-  }
-
-  /** Replaces the reservation form's questions over the revision last read, then re-reads the location. Throws what the writer refused. */
-  async function saveReservationQuestions(questions: readonly FormQuestionWrite[]) {
-    const requestedLocationId = locationId.value
-    const config = reservationConfig.value
-    if (!config) throw new Error('This location does not take reservations.')
-    await dashboardApi<{ success: true; config: LocationReservationConfig | null }>(
-      `/api/editor/organizations/${organizationId}/locations/${requestedLocationId}/reservation-config`,
-      { method: 'PUT', body: { questions, expected_questions_revision: config.questions_revision, expected_updated_at: config.updated_at }, validate: isReservationConfigResponse },
-    )
-    if (locationId.value !== requestedLocationId) return
-    await refreshLocationWorkspace()
-    await refreshNuxtData(`dashboard-location-overview:${organizationId}:${requestedLocationId}`)
-  }
-
-  async function closeReservations() {
-    const requestedLocationId = locationId.value
-    closingReservations.value = true
-    editorError.value = null
-    try {
-      await dashboardApi<{ success: true }>(
-        `/api/editor/organizations/${organizationId}/locations/${requestedLocationId}/reservation-config`,
-        { method: 'DELETE', validate: (value: unknown): value is { success: true } => isRecord(value) && value.success === true },
-      )
-      if (locationId.value !== requestedLocationId) return
-      await refreshLocationWorkspace()
-      await refreshNuxtData(`dashboard-location-overview:${organizationId}:${requestedLocationId}`)
-    } catch (error) {
-      editorError.value = getErrorMessage(error, 'Failed to close reservations')
-    } finally {
-      closingReservations.value = false
-    }
-  }
-
   async function saveCurrentEditor() {
     if (saveDisabled.value) return
-    if (key === 'reservations') {
-      await saveReservationPolicy()
-      return
-    }
     if (key === 'name') {
       await patchLocation({ title: detailsForm.title.trim() })
       return
     }
     if (key === 'stay-map-sharing') {
-      return patchLocation({ stay_map_sharing: parseStayMapSharing(detailsForm.stay_map_sharing), expected_updated_at: location.value!.updated_at })
+      return patchLocation({ stay_map_sharing: parseStayMapSharing(detailsForm.stay_map_sharing), updated_at: location.value!.updated_at })
     }
     if (key === 'address') {
-      return patchLocation({ address: addressFromForm(), expected_updated_at: location.value!.updated_at })
+      return patchLocation({ address: addressFromForm(), updated_at: location.value!.updated_at })
     }
     if (key === 'contact') {
       await patchLocation({
         phone: detailsForm.phone.trim() || null,
         email: detailsForm.email.trim() || null,
-      })
-      return
-    }
-    if (key === 'assignment') {
-      await patchLocation({
-        assigned_member_id: detailsForm.assigned_member_id,
-        assigned_team_id: detailsForm.assigned_team_id,
       })
       return
     }
@@ -516,7 +410,6 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
 
   interface LocationSettingsResource {
     location: { success: true; location: BusinessLocation }
-    reservationConfig: { success: true; config: LocationReservationConfig | null }
   }
 
   const locationSettingsKey = computed(() => `dashboard-location-settings-${organizationId}-${isNew.value ? NEW_LOCATION_SLUG : locationId.value}`)
@@ -524,17 +417,11 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
     if (isNew.value) return null
     const requestedLocationId = locationId.value
     if (!requestedLocationId) throw createError({ statusCode: 400, statusMessage: 'Location is required' })
-    const [locationResponse, reservationResponse] = await Promise.all([
-      dashboardApi<{ success: true; location: BusinessLocation }>(
-        `/api/dashboard/locations/${requestedLocationId}`,
-        { validate: isLocationResponse },
-      ),
-      dashboardApi<{ success: true; config: LocationReservationConfig | null }>(
-        `/api/editor/organizations/${organizationId}/locations/${requestedLocationId}/reservation-config`,
-        { validate: isReservationConfigResponse },
-      ),
-    ])
-    return { location: locationResponse, reservationConfig: reservationResponse }
+    const locationResponse = await dashboardApi<{ success: true; location: BusinessLocation }>(
+      `/api/dashboard/locations/${requestedLocationId}`,
+      { validate: isLocationResponse },
+    )
+    return { location: locationResponse }
   }, {
     watch: [locationId],
   })
@@ -547,21 +434,16 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
   // resource succeeded in a previous leaf. Defer joins an initial read already
   // in flight; both composables were created before awaiting so Nuxt disposes
   // their subscriptions with this editor.
-  await Promise.all([
-    schedulingMembersResource,
-    import.meta.client && !nuxtApp.isHydrating && key !== null && !isNew.value
-      ? locationSettings.refresh({ dedupe: 'defer' })
-      : locationSettings,
-  ])
+  await (import.meta.client && !nuxtApp.isHydrating && key !== null && !isNew.value
+    ? locationSettings.refresh({ dedupe: 'defer' })
+    : locationSettings)
 
-  // The location and its policy are what the request answered; only the drafts
-  // are this editor's own, seeded from each answer.
+  // The location is what the request answered; only the drafts are this
+  // editor's own, seeded from each answer.
   const location = computed(() => locationSettingsResource.value?.location.location ?? null)
-  const reservationConfig = computed(() => locationSettingsResource.value?.reservationConfig.config ?? null)
   const error = computed(() => locationSettingsError.value ? getErrorMessage(locationSettingsError.value, 'Failed to load location') : null)
   const seedDrafts = () => watch(locationSettingsResource, (resource) => {
     if (!resource) return
-    reservationForm.value = reservationPatchFrom(resource.reservationConfig.config)
     fillDetailsForm(resource.location.location)
     originalSignature.value = editorSignature(key)
   }, { immediate: true })
@@ -580,10 +462,9 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
     organizationId, error, location, saving, saveDisabled, validationMessage, dirty,
     editorError: computed(() => isNew.value ? newLocation.createError.value : editorError.value),
     saveLabel: newLocation.saveLabel,
-    detailsForm, hoursForm, reservationForm, reservationConfigExists, closingReservations,
+    detailsForm, hoursForm,
     navigationGroups, locationLocalizationFields, organizationLocalizationSettingsPath,
-    revert: resetDraft, save: () => isNew.value ? newLocation.save() : saveCurrentEditor(), closeReservations,
-    reservationQuestions: computed(() => reservationConfig.value?.questions ?? null), saveReservationQuestions,
+    revert: resetDraft, save: () => isNew.value ? newLocation.save() : saveCurrentEditor(),
   }
 }
 </script>

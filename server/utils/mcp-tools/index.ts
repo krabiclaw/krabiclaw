@@ -17,10 +17,11 @@ import { ORGANIZATIONS_TOOLS, handleOrganizationsTools } from './organizations'
 import { BOOKINGS_TOOLS, handleBookingsTools } from './bookings'
 import { STAYS_TOOLS, handleStaysTools } from './stays'
 import { GUEST_MESSAGING_TOOLS, handleGuestMessagingTools } from './guest-messaging'
-import { TEAM_MESSAGING_TOOLS, handleTeamMessagingTools } from './team-messaging'
+import { CONVERSATION_TOOLS, handleConversationTools } from './conversations'
 import { TASK_TOOLS, handleTaskTools } from './tasks'
 import { SUBMISSIONS_TOOLS, handleSubmissionsTools } from './submissions'
 import { GOOGLE_ADS_TOOLS, handleGoogleAdsTools } from './google-ads'
+import { META_ADS_TOOLS, handleMetaAdsTools } from './meta-ads'
 import { HTTPError } from 'nitro';
 import type { H3Event } from 'nitro'
 import { queryFirst } from '~/server/db'
@@ -67,9 +68,10 @@ export const MCP_PUBLIC_TOOLS: McpToolDefinition[] = [
   ...BOOKINGS_TOOLS,
   ...STAYS_TOOLS,
   ...GUEST_MESSAGING_TOOLS,
-  ...TEAM_MESSAGING_TOOLS,
+  ...CONVERSATION_TOOLS,
   ...TASK_TOOLS,
   ...GOOGLE_ADS_TOOLS,
+  ...META_ADS_TOOLS,
 ].sort((a, b) => a.name.localeCompare(b.name))
 
 export const MCP_INTERNAL_TOOLS: McpToolDefinition[] = []
@@ -138,9 +140,10 @@ export const DOMAIN_HANDLERS: Record<string, (_ctx: McpExecutorContext) => Promi
   bookings: handleBookingsTools,
   stays: handleStaysTools,
   guest_messaging: handleGuestMessagingTools,
-  team_messaging: handleTeamMessagingTools,
+  conversations: handleConversationTools,
   tasks: handleTaskTools,
   google_ads: handleGoogleAdsTools,
+  meta_ads: handleMetaAdsTools,
 }
 
 export async function executeMcpToolCall(
@@ -168,27 +171,27 @@ export async function executeMcpToolCall(
     const { row, payload } = toolName === 'get_website_draft'
       ? await readOnboardingDraft(user.db, user.userId, optionalString(normalizedArguments, 'draft_id') ?? undefined)
       : await saveOnboardingDraft(user.env, user.db, user.userId, {
-          draftId: optionalString(normalizedArguments, 'draft_id') ?? undefined,
-          expectedUpdatedAt: optionalString(normalizedArguments, 'revision'), idempotencyKey: requiredString(normalizedArguments, 'idempotency_key'),
+          draft_id: optionalString(normalizedArguments, 'draft_id') ?? undefined,
+          updated_at: optionalString(normalizedArguments, 'updated_at'), idempotency_key: requiredString(normalizedArguments, 'idempotency_key'),
           name: normalizedArguments.name, vertical: normalizedArguments.vertical, subdomain: normalizedArguments.subdomain,
-          details: { sourceLocale: normalizedArguments.source_locale, currency: normalizedArguments.currency, timezone: normalizedArguments.timezone,
-            streetAddress: location?.street_address, addressLine2: location?.address_line_2, city: location?.city, region: location?.region,
-            postalCode: location?.postal_code, country: location?.country, phone: location?.phone, websiteUrl: location?.website_url },
-          brandDraft: { heroHeadline: normalizedArguments.hero_headline, heroSubtitle: normalizedArguments.hero_subtitle },
+          details: { source_locale: normalizedArguments.source_locale, currency: normalizedArguments.currency, timezone: normalizedArguments.timezone,
+            street_address: location?.street_address, address_line_2: location?.address_line_2, city: location?.city, region: location?.region,
+            postal_code: location?.postal_code, country: location?.country, phone: location?.phone, website_url: location?.website_url },
+          brand_draft: { hero_headline: normalizedArguments.hero_headline, hero_subtitle: normalizedArguments.hero_subtitle },
           products: Array.isArray(normalizedArguments.products) ? normalizedArguments.products.map(product => {
             const item = product as Record<string, unknown>
-            return { name: item.name, category: item.category, amountMinor: item.amount_minor }
+            return { name: item.name, category: item.category, unit_amount: item.amount_minor }
           }) : normalizedArguments.products,
         })
     if (row.organization_id) event.context.mcpExecutionContext = { organizationId: row.organization_id }
     const details = payload.source.details
     return {
-      draft_id: row.id, revision: row.updated_at, ...(row.organization_id ? { organization_id: row.organization_id } : {}), status: row.status,
+      draft_id: row.id, updated_at: row.updated_at, ...(row.organization_id ? { organization_id: row.organization_id } : {}), status: row.status,
       ...(payload.request ? { idempotency_key: payload.request.key } : {}),
-      subdomain: row.subdomain_candidate, name: payload.preview.brandName, vertical: payload.preview.vertical, source_locale: details.sourceLocale,
+      subdomain: row.subdomain_candidate, name: payload.preview.brandName, vertical: payload.preview.vertical, source_locale: details.source_locale,
       ...(details.currency ? { currency: details.currency } : {}), ...(details.timezone ? { timezone: details.timezone } : {}),
-      location: Object.fromEntries(Object.entries({ street_address: details.streetAddress, address_line_2: details.addressLine2, city: details.city,
-        region: details.region, postal_code: details.postalCode, country: details.country, phone: details.phone, website_url: details.websiteUrl }).filter(([, value]) => value !== null)),
+      location: Object.fromEntries(Object.entries({ street_address: details.street_address, address_line_2: details.address_line_2, city: details.city,
+        region: details.region, postal_code: details.postal_code, country: details.country, phone: details.phone, website_url: details.website_url }).filter(([, value]) => value !== null)),
       ...(payload.preview.config.draft_hero_headline ? { hero_headline: payload.preview.config.draft_hero_headline } : {}),
       ...(payload.preview.config.draft_hero_subtitle ? { hero_subtitle: payload.preview.config.draft_hero_subtitle } : {}),
       products: payload.preview.products.map(product => ({ name: product.name, category: product.collection, ...(product.price ? { amount_minor: product.price.unit_amount } : {}) })),
@@ -199,14 +202,14 @@ export async function executeMcpToolCall(
   if (toolName === 'publish_website') {
     const user = authenticatedUser ?? await requireMcpUser(event)
     const draftId = requiredString(normalizedArguments, 'draft_id')
-    const created = await activateOnboardingDraft(user.env, user.db, { userId: user.userId, draftId, expectedUpdatedAt: requiredString(normalizedArguments, 'revision'), origin: event.req })
-    event.context.mcpExecutionContext = { organizationId: created.organizationId, locationId: created.locationId }
+    const created = await activateOnboardingDraft(user.env, user.db, { userId: user.userId, draftId, updated_at: requiredString(normalizedArguments, 'updated_at'), origin: event.req })
+    event.context.mcpExecutionContext = { organizationId: created.organization_id, locationId: created.location_id }
     try {
-      await upsertMcpWorkspacePreference(user.db, { userId: user.userId, organizationId: created.organizationId, locationId: created.locationId })
-      const workspace = await resolveMcpWorkspace(user.db, user.env, user.userId, { organizationId: created.organizationId, locationId: created.locationId, requireOrganization: true, requireLocation: true })
-      return { organization_id: created.organizationId, location_id: created.locationId, draft_id: draftId, public_url: created.publicUrl, ready: true, context: workspaceContextPayload(workspace.organization, workspace.location) }
+      await upsertMcpWorkspacePreference(user.db, { userId: user.userId, organizationId: created.organization_id, locationId: created.location_id })
+      const workspace = await resolveMcpWorkspace(user.db, user.env, user.userId, { organizationId: created.organization_id, locationId: created.location_id, requireOrganization: true, requireLocation: true })
+      return { organization_id: created.organization_id, location_id: created.location_id, draft_id: draftId, public_url: created.public_url, ready: true, context: workspaceContextPayload(workspace.organization, workspace.location) }
     } catch (error) {
-      throw new HTTPError({ statusCode: 500, statusMessage: 'Website is live, but workspace selection failed', data: { code: 'WEBSITE_WORKSPACE_SELECTION_FAILED', organization_id: created.organizationId, draft_id: draftId }, cause: error })
+      throw new HTTPError({ statusCode: 500, statusMessage: 'Website is live, but workspace selection failed', data: { code: 'WEBSITE_WORKSPACE_SELECTION_FAILED', organization_id: created.organization_id, draft_id: draftId }, cause: error })
     }
   }
 
@@ -221,18 +224,18 @@ export async function executeMcpToolCall(
       id: entry.id,
       name: entry.name ?? entry.slug,
       subdomain: entry.subdomain,
-      orgSlug: entry.slug,
-      publicUrl: resolveOrganizationPublicOrigin({ public_url: entry.public_url }),
+      slug: entry.slug,
+      public_url: resolveOrganizationPublicOrigin({ public_url: entry.public_url }),
       status: entry.status,
       active: entry.id === workspace.organization?.id,
     }));
     const currentUser = {
       id: user.userId,
-      isPlatformAdmin: user.isPlatformAdmin,
+      is_platform_admin: user.isPlatformAdmin,
     };
     const page = paginateMcpCollection(organizations, rawArguments, { resource: `organizations:${user.userId}` });
     return renderStructuredResponse(
-      { organizations: page.items, currentUser, page_info: page.page_info },
+      { organizations: page.items, current_user: currentUser, page_info: page.page_info },
       organizations.length === 0
         ? "You have no websites yet. Use save_website_draft to start your business website."
         : `You have ${organizations.length} organization${organizations.length > 1 ? "s" : ""}: ${organizations.map((entry) => entry.name).join(", ")}.`,
@@ -255,7 +258,11 @@ export async function executeMcpToolCall(
 
   if (toolName === "set_workspace_context") {
     if (!Object.hasOwn(normalizedArguments, 'organization_id') && !Object.hasOwn(normalizedArguments, 'location_id')) {
-      throw new HTTPError({ statusCode: 400, statusMessage: 'Select an organization or location' })
+      throw new HTTPError({
+        statusCode: 400,
+        statusMessage: 'Select an organization or location. Call list_organizations to view accessible organizations.',
+        data: { code: 'INVALID_WORKSPACE_ARGUMENTS', missing_fields: ['organization_id', 'location_id'], hint: 'Call list_organizations to view accessible organizations.' },
+      })
     }
     const user = authenticatedUser ?? await requireMcpUser(event);
     const organizationId = optionalString(normalizedArguments, "organization_id");
@@ -320,7 +327,11 @@ export async function executeMcpToolCall(
       LIMIT 1
     `, [explicitLocationId, organization.organizationId]);
     if (!location) {
-      throw new HTTPError({ statusCode: 404, statusMessage: 'Location not found for this organization' });
+      throw new HTTPError({
+        statusCode: 404,
+        statusMessage: `Location '${explicitLocationId}' not found for this organization. Call list_locations to inspect valid locations.`,
+        data: { code: 'LOCATION_NOT_FOUND', location_id: explicitLocationId, hint: 'Call list_locations to inspect valid locations.' },
+      });
     }
   }
 

@@ -39,11 +39,11 @@
               <p v-else class="whitespace-pre-wrap">{{ messageText(message) }}</p>
 
               <template v-if="message.role === 'assistant'">
-                <div v-if="message.metadata.suggestedLinks.length" class="space-y-2 pt-1">
+                <div v-if="message.metadata.suggested_links.length" class="space-y-2 pt-1">
                   <p class="text-xs font-medium uppercase tracking-[0.18em] text-muted">Related resources</p>
                   <div class="flex flex-wrap gap-2">
                     <NuxtLink
-                      v-for="link in message.metadata.suggestedLinks"
+                      v-for="link in message.metadata.suggested_links"
                       :key="`${link.path}-${link.title}`"
                       :to="link.path"
                       class="inline-flex items-center gap-2 rounded-full border border-default px-3 py-1.5 text-xs font-medium text-default no-underline transition hover:border-muted hover:bg-elevated"
@@ -54,11 +54,11 @@
                   </div>
                 </div>
 
-                <div v-if="message.metadata.followUpPrompts.length" class="space-y-2 pt-1">
+                <div v-if="message.metadata.follow_up_prompts.length" class="space-y-2 pt-1">
                   <p class="text-xs font-medium uppercase tracking-[0.18em] text-muted">Ask next</p>
                   <div class="flex flex-wrap gap-2">
                     <UButton
-                      v-for="prompt in message.metadata.followUpPrompts"
+                      v-for="prompt in message.metadata.follow_up_prompts"
                       :key="prompt"
                       color="neutral"
                       variant="outline"
@@ -173,8 +173,8 @@ type HelpMessage = {
   id: string
   role: 'user' | 'assistant'
   content: string
-  suggestedLinks?: HelpCitation[]
-  followUpPrompts?: string[]
+  suggested_links?: HelpCitation[]
+  follow_up_prompts?: string[]
   escalation?: HelpEscalation | null
   escalationSubmitted?: boolean
 }
@@ -183,8 +183,8 @@ type HelpMessage = {
 // as a part. Help-specific facts ride along in `metadata` so the content slot can
 // reach them without a second lookup into `messages`.
 type HelpChatMetadata = {
-  suggestedLinks: HelpCitation[]
-  followUpPrompts: string[]
+  suggested_links: HelpCitation[]
+  follow_up_prompts: string[]
   escalation: HelpEscalation | null
   escalationSubmitted: boolean
 }
@@ -213,8 +213,8 @@ const chatMessages = computed<HelpChatMessage[]>(() => messages.value.map(messag
   role: message.role,
   parts: [{ type: 'text', text: message.content }],
   metadata: {
-    suggestedLinks: message.suggestedLinks ?? [],
-    followUpPrompts: message.followUpPrompts ?? [],
+    suggested_links: message.suggested_links ?? [],
+    follow_up_prompts: message.follow_up_prompts ?? [],
     escalation: message.escalation ?? null,
     escalationSubmitted: message.escalationSubmitted ?? false,
   },
@@ -273,8 +273,8 @@ async function submitMessage(message: string) {
   try {
     const response = await $fetch<{
       reply: string
-      suggestedLinks?: HelpCitation[]
-      followUpPrompts?: string[]
+      suggested_links?: HelpCitation[]
+      follow_up_prompts?: string[]
       escalation?: HelpEscalation | null
     }>('/api/public/help/agent', {
       method: 'POST',
@@ -285,8 +285,8 @@ async function submitMessage(message: string) {
     messages.value = [
       ...messages.value,
       createMessage('assistant', response.reply, {
-        suggestedLinks: response.suggestedLinks ?? [],
-        followUpPrompts: response.followUpPrompts ?? [],
+        suggested_links: response.suggested_links ?? [],
+        follow_up_prompts: response.follow_up_prompts ?? [],
         escalation: response.escalation ?? null,
         escalationSubmitted: false,
       }),

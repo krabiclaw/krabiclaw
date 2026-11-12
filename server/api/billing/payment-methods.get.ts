@@ -6,9 +6,9 @@ import { listCustomerCards, resolveBillingCustomer, type PaymentMethodRow } from
 /** Airbnb's "Payment methods": the cards on this business's Stripe customer. */
 export default defineHandler(async (event) => {
   const query = getQuery(event)
-  if (typeof query.organizationId !== 'string' || !query.organizationId) throw new HTTPError({ statusCode: 400, statusMessage: 'Organization is required', data: { code: 'ORGANIZATION_REQUIRED', field: 'organizationId' } })
+  if (typeof query.organization_id !== 'string' || !query.organization_id) throw new HTTPError({ statusCode: 400, statusMessage: 'Organization is required', data: { code: 'ORGANIZATION_REQUIRED', field: 'organization_id' } })
   try {
-  const { stripe, customerId } = await resolveBillingCustomer(event, query.organizationId)
+  const { stripe, customerId } = await resolveBillingCustomer(event, query.organization_id)
   const payment_methods: PaymentMethodRow[] = customerId ? await listCustomerCards(stripe, customerId) : []
   return jsonResponse({ payment_methods }, { headers: { 'cache-control': 'private, no-store' } })
   } catch (cause) {

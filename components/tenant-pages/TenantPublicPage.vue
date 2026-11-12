@@ -1,7 +1,7 @@
 <template>
   <!-- Every site's authored pages use the shared page renderer. -->
   <template v-if="page">
-    <ProductDetailPage v-if="linkedOffer" :key="`${linkedOffer.product.id}:${linkedOffer.location?.id ?? 'online'}:${Boolean(linkedOffer.scopeRequired)}`" :organization-id="organizationId" :organization-name="linkedOffer.brandName" :vertical="linkedOffer.product.kind === 'service' ? 'service' : linkedOffer.vertical" :product="linkedOffer.product" :booking="linkedOffer.booking" :location="linkedOffer.location" :locations="linkedOffer.locations" :online-available="linkedOffer.onlineAvailable" :scope-required="linkedOffer.scopeRequired" :currency="linkedOffer.currency" :page-document="page" :collection-name="linkedOffer.collectionName" :presentation="presentationForProduct(linkedOffer.product, organization.theme_id)" :reviews="linkedOffer.reviews" :sessions="linkedOffer.sessions" :collection-siblings="linkedOffer.collectionSiblings" :stay-checkout-available="linkedOffer.stayCheckoutAvailable">
+    <ProductDetailPage v-if="linkedOffer" :key="`${linkedOffer.product.id}:${linkedOffer.location?.id ?? 'online'}:${Boolean(linkedOffer.scope_required)}`" :organization-id="organizationId" :organization-name="linkedOffer.organization_name" :vertical="linkedOffer.product.kind === 'service' ? 'service' : linkedOffer.vertical" :product="linkedOffer.product" :booking="linkedOffer.booking" :location="linkedOffer.location" :locations="linkedOffer.locations" :online-available="linkedOffer.online_available" :scope-required="linkedOffer.scope_required" :currency="linkedOffer.currency" :page-document="page" :collection-name="linkedOffer.collection_name" :presentation="presentationForProduct(linkedOffer.product, organization.theme_id)" :reviews="linkedOffer.reviews" :sessions="linkedOffer.sessions" :collection-siblings="linkedOffer.collection_siblings" :stay-checkout-available="linkedOffer.stay_checkout_available">
       <template #actions>
         <TenantButton v-if="secondaryAction" class="mt-5" variant="outline" :to="secondaryAction.url">{{ secondaryAction.label }}</TenantButton>
       </template>
@@ -145,10 +145,10 @@ function serviceContent(canBook: boolean): PublicTenantPage {
 // Guarded by the same abandoned-instance condition as the check above: a page
 // nobody is looking at any more has nothing to announce.
 if (data.value?.page) {
-  if (!data.value.page.localeRepresentations) {
+  if (!data.value.page.locale_representations) {
     throw createError({ statusCode: 500, statusMessage: 'Tenant page locale representations were not returned' })
   }
-  useState<PublicLocaleRepresentation[]>('public-locale-representations', () => []).value = data.value.page.localeRepresentations
+  useState<PublicLocaleRepresentation[]>('public-locale-representations', () => []).value = data.value.page.locale_representations
 }
 
 useSocialMetadata(() => page.value && ({

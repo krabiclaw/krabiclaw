@@ -1,5 +1,5 @@
 <template>
-  <DashboardLeafPanel v-if="isNew" id="new-automatic-message" :title="createLabels.title" lead="A message sent on its own to every guest at the homes you choose, at the time you choose." :saving="saving" :disabled="disabled" :save-label="saveLabel" :error="error" @cancel="revert" @save="commit">
+  <DashboardLeafPanel v-if="isNew" id="new-automatic-message" :title="createLabels.title" :lead="`A message sent on its own to every ${counterparty} you choose it for, at the time you choose.`" :saving="saving" :disabled="disabled" :save-label="saveLabel" :error="error" @cancel="revert" @save="commit">
     <UButton v-if="recoveryLabel" :label="recoveryLabel" color="neutral" variant="outline" class="mb-6" :disabled="saving" @click="recover" />
     <UForm :state="draft" :disabled="saving" @submit="commit"><AutomaticMessageFields /></UForm>
   </DashboardLeafPanel>
@@ -15,11 +15,12 @@
 </template>
 <script lang="ts">
 import type { InjectionKey, Ref, ComputedRef } from 'vue'
-import type { MessageTemplate, GuestMessageSchedule } from '~/lib/components/workspace/messages/guest-messaging-client'
+import type { MessageTemplate, GuestMessageSchedule, MessageOffering } from '~/lib/components/workspace/messages/guest-messaging-client'
 export interface AutomaticMessageEditor {
   draft: Ref<{ title: string; body: string; schedule: GuestMessageSchedule }>
-  homes: ComputedRef<{ product_id: string; name: string; internal_name: string; timezone: string }[]>
-  homesError: ComputedRef<string>
+  offerings: ComputedRef<MessageOffering[]>
+  offeringsError: ComputedRef<string>
+  vertical: ComputedRef<string>
   manage: ComputedRef<boolean>
   saving: Ref<boolean>
   error: ComputedRef<string>
@@ -38,15 +39,16 @@ import AutomaticMessageFields from '~/components/dashboard/AutomaticMessageField
 import { isNavigationFailure } from 'vue-router'
 import { authClient } from '~/lib/auth-client'
 import type { organizationRoles } from '~/utils/organization-access'
-import { isMessageTemplateResponse, isMessageTemplatePage, messageScheduleLabel } from '~/lib/components/workspace/messages/guest-messaging-client'
+import { isMessageOfferings, isMessageTemplateResponse, isMessageTemplatePage, messageScheduleLabel } from '~/lib/components/workspace/messages/guest-messaging-client'
 import { isRecord } from '~/utils/api-clients'
+import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import { getErrorMessage, isNotFoundError } from '~/utils/errors'
 
 const route = useRoute()
 const level = useRouteLevel()
 const dashboard = useDashboardOrganization()
 const api = useDashboardApi()
-const templateId = computed(() => String(route.params.templateId))
+const templateId = computed(() => String(route.params.template_id))
 const isNew = computed(() => templateId.value === 'new')
 const createLabels = newRecordLabels('automatic message')
 const role = computed(() => dashboard.organization.value?.role as keyof typeof organizationRoles | undefined)
@@ -55,7 +57,7 @@ const key = `automatic-message:${dashboard.organizationId.value}:${templateId.va
 const { data, error: readError, refresh } = await useAsyncData(key, () => isNew.value ? Promise.resolve(null) : api(`/api/dashboard/message-templates/${encodeURIComponent(templateId.value)}`, { validate: isMessageTemplateResponse }))
 watchEffect(() => { if (isNotFoundError(readError.value)) showError(createError({ statusCode: 404, statusMessage: 'Automatic message not found' })) })
 const saved = computed(() => data.value?.template ?? null)
-const empty = () => ({ title: '', body: '', schedule: { trigger: 'check_in', offsetDays: -1, localTime: '10:00', productIds: [] } as GuestMessageSchedule })
+const empty = () => ({ title: '', body: '', schedule: { trigger: 'check_in', offset_days: -1, local_time: '10:00', product_ids: [] } as GuestMessageSchedule })
 const draft = useState(`${key}:draft`, empty)
 const creation = useState(`${key}:creation`, () => ({ id: null as string | null, uncertain: false }))
 const clone = (reply: MessageTemplate) => ({ title: reply.title, body: reply.body, schedule: JSON.parse(JSON.stringify(reply.schedule)) as GuestMessageSchedule })
@@ -65,17 +67,18 @@ const actionError = ref('')
 const deleteOpen = ref(false)
 const loadError = computed(() => readError.value ? getErrorMessage(readError.value, 'The automatic message could not be loaded') : '')
 const error = computed(() => loadError.value || actionError.value)
-const { data: homesData, error: homesReadError } = await useAsyncData(`automatic-message-homes:${dashboard.organizationId.value}`, () => api('/api/dashboard/stay-homes', {
-  validate: (value): value is { homes: { product_id: string; name: string; internal_name: string; timezone: string }[] } => isRecord(value) && Array.isArray(value.homes) && value.homes.every(home => isRecord(home) && typeof home.product_id === 'string' && typeof home.name === 'string' && typeof home.internal_name === 'string' && typeof home.timezone === 'string'),
-}))
-const homes = computed(() => homesData.value?.homes ?? [])
-const homesError = computed(() => homesReadError.value ? getErrorMessage(homesReadError.value, 'Homes could not be loaded') : '')
+const { data: offeringsData, error: offeringsReadError } = await useAsyncData(`automatic-message-offerings:${dashboard.organizationId.value}`, () => api('/api/dashboard/message-templates/offerings', { validate: isMessageOfferings }))
+const offerings = computed(() => offeringsData.value?.offerings ?? [])
+const offeringsError = computed(() => offeringsReadError.value ? getErrorMessage(offeringsReadError.value, 'Offerings could not be loaded') : '')
+const vertical = computed(() => dashboard.organization.value?.vertical ?? '')
+const counterparty = computed(() => vertical.value === 'service' ? resolveBookingPresentation('service', 'service').counterpartyNoun : 'guest')
 watchEffect(() => { if (level.child.value && (isNew.value || !['content', 'schedule'].includes(level.child.value))) showError(createError({ statusCode: 404, statusMessage: 'Automatic message concern not found' })) })
 const valid = computed(() => {
   if (!draft.value.title.trim() || !draft.value.body.trim()) return false
   const schedule = draft.value.schedule
-  return (!homesError.value && schedule.productIds.length > 0 && schedule.productIds.length <= 100 && schedule.productIds.every(id => homes.value.some(home => home.product_id === id))
-    && (schedule.trigger === 'booking_received' || (Number.isInteger(schedule.offsetDays) && schedule.offsetDays >= -7 && schedule.offsetDays <= 7 && /^([01]\d|2[0-3]):[0-5]\d$/.test(schedule.localTime))))
+  return (!offeringsError.value && schedule.product_ids.length > 0 && schedule.product_ids.length <= 100 && schedule.product_ids.every(id => offerings.value.some(offering => offering.id === id))
+    && (schedule.trigger === 'booking_received' || ('offset_hours' in schedule ? Number.isInteger(schedule.offset_hours) && Math.abs(schedule.offset_hours) <= 72
+      : Number.isInteger(schedule.offset_days) && schedule.offset_days >= -7 && schedule.offset_days <= 7 && /^([01]\d|2[0-3]):[0-5]\d$/.test(schedule.local_time))))
 })
 const dirty = computed(() => !saved.value || JSON.stringify(draft.value) !== JSON.stringify(clone(saved.value)))
 const saveLabel = computed(() => isNew.value ? createLabels.action : undefined)
@@ -83,7 +86,7 @@ const disabled = computed(() => saving.value || !manage.value || Boolean(loadErr
 const recoveryLabel = computed(() => !isNew.value ? null : creation.value.id ? 'Open created automatic message' : creation.value.uncertain ? 'Review automatic messages before creating another' : null)
 const groups = computed<EditorNavigationGroup[]>(() => [{ id: 'automatic-message', items: [
   { id: 'content', label: 'Message', summary: draft.value.body || 'Write the message', to: `${level.path.value}/content` },
-  { id: 'schedule', label: 'When it is sent', summary: messageScheduleLabel(draft.value.schedule), to: `${level.path.value}/schedule` },
+  { id: 'schedule', label: 'When it is sent', summary: messageScheduleLabel(draft.value.schedule, vertical.value), to: `${level.path.value}/schedule` },
 ] }])
 
 function revert() { draft.value = saved.value ? clone(saved.value) : empty(); actionError.value = '' }
@@ -94,7 +97,7 @@ async function commit() {
   try {
     if (isNew.value) creation.value.uncertain = true
     const result = await api(isNew.value ? '/api/dashboard/message-templates' : `/api/dashboard/message-templates/${encodeURIComponent(templateId.value)}`, {
-      method: isNew.value ? 'POST' : 'PUT', body: { ...draft.value, ...(saved.value ? { expectedVersion: saved.value.version } : {}) }, validate: isMessageTemplateResponse,
+      method: isNew.value ? 'POST' : 'PUT', body: { ...draft.value, ...(saved.value ? { version: saved.value.version } : {}) }, validate: isMessageTemplateResponse,
     })
     if (isNew.value) creation.value = { id: result.template.id, uncertain: false }
     await refreshNuxtData([`automatic-messages:${dashboard.organizationId.value}`, `reply-picker:${dashboard.organizationId.value}`])
@@ -130,12 +133,12 @@ async function remove() {
   saving.value = true
   actionError.value = ''
   try {
-    await api(`/api/dashboard/message-templates/${encodeURIComponent(saved.value.id)}`, { method: 'DELETE', body: { expectedVersion: saved.value.version }, validate: (value): value is { status: 'deleted' } => isRecord(value) && value.status === 'deleted' })
+    await api(`/api/dashboard/message-templates/${encodeURIComponent(saved.value.id)}`, { method: 'DELETE', body: { version: saved.value.version }, validate: (value): value is { status: 'deleted' } => isRecord(value) && value.status === 'deleted' })
     await refreshNuxtData([`automatic-messages:${dashboard.organizationId.value}`, `reply-picker:${dashboard.organizationId.value}`])
     clearNuxtState(`${key}:draft`, { reset: true })
     await navigateTo(level.to.value!)
   } catch (cause) { actionError.value = getErrorMessage(cause, 'The automatic message could not be deleted') }
   finally { saving.value = false }
 }
-provide(automaticMessageEditorKey, { draft, homes, homesError, manage, saving, error, disabled, saveLabel, save: commit, revert, recoveryLabel, recover })
+provide(automaticMessageEditorKey, { draft, offerings, offeringsError, vertical, manage, saving, error, disabled, saveLabel, save: commit, revert, recoveryLabel, recover })
 </script>

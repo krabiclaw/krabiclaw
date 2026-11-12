@@ -19,13 +19,13 @@
           </div>
           <div class="grid grid-cols-3 gap-2">
             <button v-for="(photo, at) in shownPhotos" :key="photo.id" type="button" class="aspect-square overflow-hidden rounded-xl bg-elevated focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inverted" :aria-label="`Open photo ${at + 1} of ${details.photos.length}`" @click="viewer = { photos: details.photos.map(item => ({ url: item.url })), at }">
-              <img :src="photo.thumbnailUrl" alt="" loading="lazy" class="size-full object-cover">
+              <img :src="photo.thumbnail_url" alt="" loading="lazy" class="size-full object-cover">
             </button>
           </div>
         </template>
 
         <div class="mt-6 flex flex-col border-t border-default">
-          <NuxtLink v-if="details.actions.showReservation && reservationTo" :to="reservationTo" class="border-b border-default py-4 text-base font-medium text-highlighted" @click="open = false">Show reservation</NuxtLink>
+          <NuxtLink v-if="details.actions.show_reservation && reservationTo" :to="reservationTo" class="border-b border-default py-4 text-base font-medium text-highlighted" @click="open = false">Show reservation</NuxtLink>
           <button v-if="details.actions.archive" type="button" class="border-b border-default py-4 text-left text-base font-medium text-highlighted" :disabled="saving !== null" @click="move('archive')">Archive</button>
           <button v-if="details.actions.unarchive" type="button" class="border-b border-default py-4 text-left text-base font-medium text-highlighted" :disabled="saving !== null" @click="move('unarchive')">Move to Messages</button>
           <button v-if="details.actions.report" type="button" class="border-b border-default py-4 text-left text-base font-medium text-highlighted" :disabled="saving !== null" @click="reporting = { block: false }">Report</button>
@@ -51,6 +51,7 @@
 
 <script setup lang="ts">
 import { getErrorMessage } from '~/utils/errors'
+import { isRecord } from '~/utils/api-clients'
 import { isThreadDetailResponse, isThreadDetails, type ThreadDetails } from './guest-thread-client'
 import MessagePhotoViewer, { type MessagePhotoViewerState } from './MessagePhotoViewer.vue'
 import ReportDialog from './ReportDialog.vue'
@@ -95,7 +96,16 @@ async function move(transition: 'archive' | 'unarchive' | 'report' | 'block' | '
   saving.value = transition
   moveError.value = null
   try {
-    await api(`${path.value}/operations/${transition}`, { method: 'POST', body: reason === undefined ? { idempotencyKey } : { idempotencyKey, reason }, validate: isThreadDetailResponse })
+    if (transition === 'archive' || transition === 'unarchive') {
+      // Archive is this member's own filing (D2): the conversation's read and archive state, not an operation on it.
+      const archived = transition === 'archive'
+      await api(`/api/dashboard/organizations/${dashboard.organizationId.value}/conversations/${encodeURIComponent(props.threadId)}/archive`, {
+        method: 'POST', body: { archived },
+        validate: (value: unknown): value is { archived: boolean } => isRecord(value) && value.archived === archived,
+      })
+    } else {
+      await api(`${path.value}/operations/${transition}`, { method: 'POST', body: reason === undefined ? { idempotency_key: idempotencyKey } : { idempotency_key: idempotencyKey, reason }, validate: isThreadDetailResponse })
+    }
     attemptKeys.delete(attempt)
     reporting.value = null
     open.value = false

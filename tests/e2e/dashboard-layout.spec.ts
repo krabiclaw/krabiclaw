@@ -17,6 +17,7 @@ import type { Collection, Product } from '../../server/types/products'
 import type { DashboardLocation } from '../../composables/useDashboardOrganization'
 import { countCatalog, type CatalogCounts } from '../../utils/product-presentation'
 import { seededTenant } from './seed/manifest'
+import { seededTables } from './helpers/tables'
 
 // The dashboard's pane topology is the nested route tree (DESIGN.md, Route
 // hierarchy). On a wide screen a level renders beside the parent its Back goes
@@ -57,7 +58,7 @@ test.describe('dashboard pane hierarchy', () => {
   test('each Menu destination is a root at its own URL, and Website content nests under Website', async ({ page }) => {
     await page.setViewportSize(WIDE)
     await open(page, `${ORG}/menu`)
-    const segments = ['website/pages', 'website/blog', 'website/qa', 'website/brand', 'website/pages/links', 'website/posts', 'locations', 'team', 'products', 'products/menu']
+    const segments = ['website/pages', 'website/blog', 'website/reviews', 'website/qa', 'website/brand', 'website/pages/links', 'website/posts', 'locations', 'team', 'products', 'products/menu']
     const resolved = await page.evaluate(({ org, segments }) => {
       const router = (document.querySelector('#__nuxt') as Element & {
         __vue_app__: { config: { globalProperties: { $router: { resolve: (path: string) => { path: string; matched: Array<{ path: string; meta: { tab?: unknown; back?: unknown } }> } } } } }
@@ -72,11 +73,12 @@ test.describe('dashboard pane hierarchy', () => {
 
     // Menu is a launcher: no destination nests under it. Each declares Menu as
     // its tab and exits to Menu; Catalog is a primary destination with no exit.
-    const o = '/dashboard/:orgSlug()'
+    const o = '/dashboard/:org_slug()'
     const website = { tab: 'menu', back: 'menu' }
     expect(resolved).toEqual({
       'website/pages': { path: `${ORG}/website/pages`, levels: [`${o}/website`, `${o}/website/pages`], ...website },
       'website/blog': { path: `${ORG}/website/blog`, levels: [`${o}/website`, `${o}/website/blog`], ...website },
+      'website/reviews': { path: `${ORG}/website/reviews`, levels: [`${o}/website`, `${o}/website/reviews`], ...website },
       'website/qa': { path: `${ORG}/website/qa`, levels: [`${o}/website`, `${o}/website/qa`], ...website },
       'website/brand': { path: `${ORG}/website/brand`, levels: [`${o}/website`, `${o}/website/brand`], ...website },
       'website/pages/links': { path: `${ORG}/website/pages/links`, levels: [`${o}/website`, `${o}/website/pages`, `${o}/website/pages/links`], ...website },
@@ -192,114 +194,24 @@ test.describe('dashboard pane hierarchy', () => {
     }
   })
 
-  test('Booking team forms create, rename and change native Better Auth membership', async ({ page, baseURL, playwright }, testInfo) => {
-    test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Team writes require isolated local D1.')
-    const organizationId = seededTenant('restaurant').organizationId
-    const release = await acquireTenantMutationLock(testInfo, organizationId)
-    try {
-    const membersResponse = await page.request.get('/api/auth/organization/list-members', { params: { organizationId } })
-    expect(membersResponse.status(), await membersResponse.text()).toBe(200)
-    const member = (await membersResponse.json() as { members: Array<{ userId: string; user: { name: string } }> }).members.find(row => row.userId === 'user-e2e-demo-role-owner')
-    expect(member).toBeDefined()
-    const readTeams = async () => {
-      const response = await page.request.get('/api/dashboard/members', { params: { org: 'ember-slice-demo' } })
-      expect(response.status(), await response.text()).toBe(200)
-      return (await response.json() as OrganizationMembersData).teams
-    }
-    const name = `E2E Booking Team ${Date.now().toString(36)}`
-    let teamId: string | null = null
-    try {
-      await page.setViewportSize(PHONE)
-      await open(page, `${ORG}/team/groups/new/name`)
-      const leaf = page.locator('#dashboard-panel-booking-team-setting')
-      await expect(page.getByRole('dialog', { name: 'Team name', exact: true })).toBeVisible()
-      await expect(page.locator('#dashboard-panel-booking-team')).toBeVisible()
-      await expect(leaf.getByRole('button', { name: 'Create booking team', exact: true })).toBeDisabled()
-      await leaf.getByRole('textbox', { name: 'Team name', exact: true }).fill(name)
-      const created = page.waitForResponse(response => new URL(response.url()).pathname === '/api/auth/organization/create-team' && response.request().method() === 'POST')
-      await leaf.getByRole('button', { name: 'Create booking team', exact: true }).click()
-      const createdResponse = await created
-      expect(createdResponse.status(), await createdResponse.text()).toBe(200)
-      teamId = (await createdResponse.json() as { id: string }).id
-      await expect(page).toHaveURL(`${ORG}/team/groups/${teamId}`)
-      await expect(page.getByRole('dialog')).toHaveCount(0)
-      await expect(page.locator('#dashboard-panel-booking-team')).toContainText(name)
-      const original = (await readTeams()).find(row => row.id === teamId)
-      expect(original).toMatchObject({ id: teamId, name, organizationId })
-      expect(original!.members.map(row => row.userId)).not.toContain(member!.userId)
-
-      await open(page, `${ORG}/team/groups/${teamId}/name`)
-      await expect(page.getByRole('dialog', { name: 'Team name', exact: true })).toBeVisible()
-      await expect(page.locator('#dashboard-panel-booking-team')).toContainText(name)
-      const save = leaf.getByRole('button', { name: 'Save', exact: true })
-      await expect(save).toBeDisabled()
-      const renamed = `${name} renamed`
-      await leaf.getByRole('textbox', { name: 'Team name', exact: true }).fill(renamed)
-      await expect(save).toBeEnabled()
-      for (const viewport of [WIDE, PHONE]) {
-        await page.setViewportSize(viewport)
-        await expect(leaf.getByRole('textbox', { name: 'Team name', exact: true })).toHaveValue(renamed)
-        await expect(save).toBeEnabled()
-      }
-      await save.click()
-      await expect(page).toHaveURL(`${ORG}/team/groups/${teamId}`)
-      await expect(page.getByRole('dialog')).toHaveCount(0)
-      await expect(page.locator('#dashboard-panel-booking-team')).toContainText(renamed)
-      expect((await readTeams()).find(row => row.id === teamId)?.name).toBe(renamed)
-
-      await open(page, `${ORG}/team/groups/${teamId}/members`)
-      const included = leaf.getByRole('switch', { name: member!.user.name, exact: true })
-      await expect(included).not.toBeChecked()
-      await expect(save).toBeDisabled()
-      await included.click()
-      await expect(save).toBeEnabled()
-      await save.click()
-      await expect(page).toHaveURL(`${ORG}/team/groups/${teamId}`)
-      expect((await readTeams()).find(row => row.id === teamId)?.members.map(row => row.userId).sort()).toEqual([...original!.members.map(row => row.userId), member!.userId].sort())
-      const memberReader = await playwright.request.newContext({ baseURL })
-      try {
-        await loginAs(memberReader, baseURL!, member!.userId)
-        const nativeMembers = await memberReader.get('/api/auth/organization/list-team-members', { params: { teamId } })
-        expect(nativeMembers.status(), await nativeMembers.text()).toBe(200)
-        expect((await nativeMembers.json() as OrganizationMembersData['teams'][number]['members']).map(row => row.userId).sort()).toEqual([...original!.members.map(row => row.userId), member!.userId].sort())
-      } finally {
-        await memberReader.dispose()
-      }
-
-      await open(page, `${ORG}/team/groups/${teamId}/members`)
-      await expect(included).toBeChecked()
-      await expect(save).toBeDisabled()
-      await included.click()
-      await save.click()
-      await expect(page).toHaveURL(`${ORG}/team/groups/${teamId}`)
-      expect((await readTeams()).find(row => row.id === teamId)?.members.map(row => row.userId).sort()).toEqual(original!.members.map(row => row.userId).sort())
-    } finally {
-      if (teamId) {
-        const removed = await page.request.post('/api/auth/organization/remove-team', { headers: authRequestHeaders(baseURL!), data: { organizationId, teamId } })
-        expect(removed.status(), await removed.text()).toBe(200)
-        expect((await readTeams()).map(row => row.id)).not.toContain(teamId)
-      }
-    }
-    } finally {
-      await release()
-    }
-  })
-
-  test('location assignments survive reload and let assigned staff discover and edit their branch', async ({ page, baseURL, browser }, testInfo) => {
+  test('product assignments survive reload and let assigned staff discover and edit their branch', async ({ page, baseURL, browser }, testInfo) => {
     test.setTimeout(120_000)
-    test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Location assignments and role changes use disposable local data only.')
+    test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Product assignments and role changes use disposable local data only.')
     const organizationId = seededTenant('restaurant').organizationId
     const org = 'ember-slice-demo'
     const locationId = seededTenant('restaurant').locations.brooklyn.id
+    const productId = seededTables().id
+    const productEndpoint = `/api/editor/organizations/${organizationId}/products/${productId}`
+    const assignmentEndpoint = `${productEndpoint}/booking`
     const endpoint = `/api/dashboard/locations/${locationId}`
     const independentEndpoint = `/api/organizations/${organizationId}/locations/${locationId}`
     const release = await acquireTenantMutationLock(testInfo, organizationId)
     let memberContext: BrowserContext | null = null
-    type Location = { id: string; slug: string; title: string; email: string | null; assigned_member_id: string | null; assigned_team_id: string | null }
+    type Location = { id: string; slug: string; title: string; email: string | null }
     type Member = { id: string; userId: string; role: string; user: { name: string } }
     let original: Location | null = null
+    let originalAssignee: string | null = null
     let actor: Member | undefined
-    let teamId: string | null = null
     let roleChanged = false
     let originalProfile: MemberSchedule = null
     let photoAttempted = false
@@ -309,10 +221,18 @@ test.describe('dashboard pane hierarchy', () => {
       expect(response.status(), await response.text()).toBe(200)
       return (await response.json() as { location: Location }).location
     }
+    const readAssignment = async () => {
+      const response = await page.request.get(productEndpoint)
+      expect(response.status(), await response.text()).toBe(200)
+      const { product } = await response.json() as { product: Product }
+      expect(product.booking).toBeTruthy()
+      return product.booking!.assigned_member_id
+    }
     try {
       memberContext = await browser.newContext({ baseURL, viewport: PHONE })
       original = await readLocation()
-      expect(original).toMatchObject({ id: locationId, assigned_team_id: null })
+      originalAssignee = await readAssignment()
+      expect(original).toMatchObject({ id: locationId })
       const otherTenant = await page.request.get(`/api/dashboard/locations/${seededTenant('experience').locations['ao-nang'].id}`, { params: { org: 'clayhouse-studio' } })
       expect(otherTenant.status(), await otherTenant.text()).toBe(200)
       expect(await otherTenant.json()).toMatchObject({ location: { id: seededTenant('experience').locations['ao-nang'].id, organization_id: seededTenant('experience').organizationId } })
@@ -322,10 +242,10 @@ test.describe('dashboard pane hierarchy', () => {
       actor = members.find(member => member.userId === 'user-e2e-demo-role-owner')
       expect(actor, 'The canonical role actor already belongs to the demo tenant').toBeDefined()
       if (!actor) throw new Error('The canonical demo role actor is missing')
-      // The branch keeps the tenant's own responsibility; the actor holds none of it.
-      expect(original.assigned_member_id).not.toBe(actor.id)
-      const responsible = original.assigned_member_id ? members.find(member => member.id === original!.assigned_member_id) : null
-      if (original.assigned_member_id) expect(responsible, 'The branch is assigned to a current member').toBeDefined()
+      // The tables name a current member, and the actor handles no offering at this branch.
+      const responsible = members.find(member => member.id === originalAssignee)
+      expect(responsible, 'The tables are assigned to a current member').toBeDefined()
+      expect(originalAssignee).not.toBe(actor.id)
       expect(actor.role).toBe('owner')
       const changed = await page.request.post('/api/auth/organization/update-member-role', {
         headers: authRequestHeaders(baseURL!), data: { organizationId, memberId: actor.id, role: 'member' },
@@ -339,22 +259,27 @@ test.describe('dashboard pane hierarchy', () => {
       const unassigned = await memberContext.request.get(endpoint, { params: { org } })
       expect(unassigned.status(), await unassigned.text()).toBe(404)
 
-      const assignmentPath = `${ORG}/locations/${original.slug}/settings/assignment`
+      const schedulingList = await page.request.get(`/api/organizations/${organizationId}/members/scheduling`)
+      expect(schedulingList.status(), await schedulingList.text()).toBe(200)
+      const { members: people } = await schedulingList.json() as { members: Array<{ id: string; name: string }> }
+      const priorPerson = people.find(member => member.id === originalAssignee)
+      const nextPerson = people.find(member => member.id === actor!.id)
+      expect(priorPerson).toBeDefined()
+      expect(nextPerson).toBeDefined()
+      const assignmentPath = `${ORG}/products/${productId}/booking/assignment`
       await page.setViewportSize(WIDE)
       await open(page, assignmentPath)
-      const leaf = page.locator('#dashboard-panel-location-assignment')
-      await expect(leaf.getByRole('radio', { name: responsible ? responsible.user.name : 'Unassigned No person or team is assigned.', exact: true })).toBeChecked()
-      const memberChoice = leaf.getByRole('radio', { name: actor.user.name, exact: true })
+      const leaf = page.locator('#dashboard-panel-booking-assignment')
+      await expect(leaf.getByRole('radio', { name: priorPerson!.name })).toBeChecked()
+      const memberChoice = leaf.getByRole('radio', { name: nextPerson!.name })
       await memberChoice.click()
-      const saved = page.waitForResponse(response => new URL(response.url()).pathname === endpoint && response.request().method() === 'PATCH')
+      const saved = page.waitForResponse(response => new URL(response.url()).pathname === assignmentEndpoint && response.request().method() === 'PUT')
       await leaf.getByRole('button', { name: 'Save', exact: true }).click()
       expect((await saved).status()).toBe(200)
-      await expect(leaf.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
-      await page.reload()
-      await waitForNuxtHydration(page)
+      await open(page, assignmentPath)
       await expect(memberChoice).toBeChecked()
-      await expect(page.locator('#dashboard-panel-location-settings').getByRole('link', { name: /Team assignment/ })).toContainText(actor.user.name)
-      expect(await readLocation()).toMatchObject({ assigned_member_id: actor.id, assigned_team_id: null })
+      await expect(leaf.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
+      expect(await readAssignment()).toBe(actor.id)
 
       const memberPage = await memberContext.newPage()
       await dismissPreviewToolbar(memberPage)
@@ -375,41 +300,13 @@ test.describe('dashboard pane hierarchy', () => {
       await memberPage.reload()
       await waitForNuxtHydration(memberPage)
       await expect(contact.getByRole('textbox', { name: 'Email', exact: true })).toHaveValue(email)
-      expect(await readLocation()).toMatchObject({ email, assigned_member_id: actor.id, assigned_team_id: null })
-      const forbidden = await memberContext.request.patch(endpoint, { params: { org }, data: { assigned_member_id: null, assigned_team_id: null } })
+      expect(await readLocation()).toMatchObject({ email })
+      const forbidden = await memberContext.request.put(assignmentEndpoint, { data: { assigned_member_id: originalAssignee } })
       expect(forbidden.status(), await forbidden.text()).toBe(403)
-      expect(await readLocation()).toMatchObject({ email, assigned_member_id: actor.id, assigned_team_id: null })
+      expect(await readAssignment()).toBe(actor.id)
       const wrongTenant = await memberContext.request.get(`/api/organizations/${organizationId}/locations/${seededTenant('experience').locations['ao-nang'].id}`)
       expect(wrongTenant.status(), await wrongTenant.text()).toBe(404)
 
-      const name = `E2E Location Team ${Date.now().toString(36)}`
-      const created = await page.request.post('/api/auth/organization/create-team', { headers: authRequestHeaders(baseURL!), data: { organizationId, name } })
-      expect(created.status(), await created.text()).toBe(200)
-      teamId = (await created.json() as { id: string }).id
-      const included = await page.request.post('/api/auth/organization/add-team-member', { headers: authRequestHeaders(baseURL!), data: { organizationId, teamId, userId: actor.userId } })
-      expect(included.status(), await included.text()).toBe(200)
-      const nativeMembers = await memberContext.request.get('/api/auth/organization/list-team-members', { params: { teamId } })
-      expect(nativeMembers.status(), await nativeMembers.text()).toBe(200)
-      expect((await nativeMembers.json() as Array<{ userId: string }>).map(member => member.userId)).toContain(actor.userId)
-      await page.reload()
-      await waitForNuxtHydration(page)
-      const teamChoice = leaf.getByRole('radio', { name: `Team: ${name} 1 member`, exact: true })
-      await teamChoice.click()
-      const teamSaved = page.waitForResponse(response => new URL(response.url()).pathname === endpoint && response.request().method() === 'PATCH')
-      await leaf.getByRole('button', { name: 'Save', exact: true }).click()
-      expect((await teamSaved).status()).toBe(200)
-      await expect(leaf.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
-      await page.reload()
-      await waitForNuxtHydration(page)
-      await expect(teamChoice).toBeChecked()
-      expect(await readLocation()).toMatchObject({ assigned_member_id: null, assigned_team_id: teamId })
-      await open(memberPage, `${ORG}/locations`)
-      await expect(branch).toBeVisible()
-      await branch.click()
-      await expect(memberPage.locator('#dashboard-panel-location-index').getByRole('heading', { name: original.title, exact: true })).toBeVisible()
-      const teamForbidden = await memberContext.request.patch(endpoint, { params: { org }, data: { assigned_member_id: actor.id, assigned_team_id: null } })
-      expect(teamForbidden.status(), await teamForbidden.text()).toBe(403)
-      expect(await readLocation()).toMatchObject({ assigned_member_id: null, assigned_team_id: teamId })
 
       // An administrator edits this existing member's portrait through the same
       // media library, without initializing Hours or altering calendar facts.
@@ -451,7 +348,7 @@ test.describe('dashboard pane hierarchy', () => {
       await portrait.getByRole('button', { name: 'Save', exact: true }).click()
       const photoResponse = await photoWrite
       expect(photoResponse.status(), await photoResponse.text()).toBe(200)
-      expect(photoResponse.request().postDataJSON()).toEqual({ public_photo_url: photo.public_url, expected_updated_at: originalProfile?.updated_at ?? null })
+      expect(photoResponse.request().postDataJSON()).toEqual({ public_photo_url: photo.public_url, updated_at: originalProfile?.updated_at ?? null })
       const photoProfileRead = await mcpRequest(memberContext.request, baseURL!, { method: 'tools/call', toolName: 'get_member_public_profile', args: { organization_id: organizationId, member_id: actor.id } })
       expect(photoProfileRead.status(), await photoProfileRead.text()).toBe(200)
       type PublicProfile = Pick<NonNullable<MemberSchedule>, 'member_id' | 'updated_at' | 'public_name' | 'public_photo_url' | 'public_bio' | 'public_approved'>
@@ -470,7 +367,7 @@ test.describe('dashboard pane hierarchy', () => {
       await picker.getByRole('button', { name: attemptedPhoto.alt_text || attemptedPhoto.file_name || attemptedPhoto.kind, exact: true }).click()
       await picker.getByRole('button', { name: 'Done', exact: true }).click()
       const concurrentWrite = await mcpRequest(memberContext.request, baseURL!, { method: 'tools/call', toolName: 'update_member_public_profile', args: {
-        organization_id: organizationId, member_id: actor.id, public_photo_url: originalProfile?.public_photo_url ?? null, expected_updated_at: savedProfile.updated_at,
+        organization_id: organizationId, member_id: actor.id, public_photo_url: originalProfile?.public_photo_url ?? null, updated_at: savedProfile.updated_at,
       } })
       expect(concurrentWrite.status(), await concurrentWrite.text()).toBe(200)
       const concurrent = mcpData<{ profile: PublicProfile }>(await concurrentWrite.json()).profile
@@ -480,7 +377,7 @@ test.describe('dashboard pane hierarchy', () => {
       await portrait.getByRole('button', { name: 'Save', exact: true }).click()
       const conflictResponse = await conflictWrite
       expect(conflictResponse.status(), await conflictResponse.text()).toBe(409)
-      expect(conflictResponse.request().postDataJSON()).toEqual({ public_photo_url: attemptedPhoto.public_url, expected_updated_at: savedProfile.updated_at })
+      expect(conflictResponse.request().postDataJSON()).toEqual({ public_photo_url: attemptedPhoto.public_url, updated_at: savedProfile.updated_at })
       await expect(portrait.locator('img')).toHaveAttribute('src', attemptedPhoto.public_url!)
       await expect(portrait.getByRole('button', { name: 'Retry', exact: true })).toBeDisabled()
       const savedValuesRead = page.waitForResponse(response => new URL(response.url()).pathname === schedulingEndpoint && response.request().method() === 'GET')
@@ -510,7 +407,7 @@ test.describe('dashboard pane hierarchy', () => {
           if (current) {
             const restored = await page.request.put(schedulingEndpoint, { data: {
               public_name: originalProfile?.public_name ?? null, public_photo_url: originalProfile?.public_photo_url ?? null,
-              public_bio: originalProfile?.public_bio ?? null, public_approved: Boolean(originalProfile?.public_approved), expected_updated_at: current.updated_at,
+              public_bio: originalProfile?.public_bio ?? null, public_approved: Boolean(originalProfile?.public_approved), updated_at: current.updated_at,
             } })
             expect(restored.status(), await restored.text()).toBe(200)
             const readback = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_member_public_profile', args: { organization_id: organizationId, member_id: actor.id } })
@@ -524,24 +421,18 @@ test.describe('dashboard pane hierarchy', () => {
       } catch (error) { failures.push(error) }
       try {
         if (original) {
-          const restored = await page.request.patch(endpoint, { params: { org }, data: {
-            email: original.email, assigned_member_id: original.assigned_member_id, assigned_team_id: original.assigned_team_id,
-          } })
+          const restored = await page.request.patch(endpoint, { params: { org }, data: { email: original.email } })
           expect(restored.status(), await restored.text()).toBe(200)
-          expect(await readLocation()).toMatchObject({ email: original.email, assigned_member_id: original.assigned_member_id, assigned_team_id: original.assigned_team_id })
+          expect(await readLocation()).toMatchObject({ email: original.email })
+          if (originalAssignee) {
+            const reassigned = await page.request.put(assignmentEndpoint, { data: { assigned_member_id: originalAssignee } })
+            expect(reassigned.status(), await reassigned.text()).toBe(200)
+            expect(await readAssignment()).toBe(originalAssignee)
+          }
           if (roleChanged && memberContext) {
             const restoredAccess = await memberContext.request.get(endpoint, { params: { org } })
             expect(restoredAccess.status(), await restoredAccess.text()).toBe(404)
           }
-        }
-      } catch (error) { failures.push(error) }
-      try {
-        if (teamId) {
-          const removed = await page.request.post('/api/auth/organization/remove-team', { headers: authRequestHeaders(baseURL!), data: { organizationId, teamId } })
-          expect(removed.status(), await removed.text()).toBe(200)
-          const teams = await page.request.get('/api/auth/organization/list-teams', { params: { organizationId } })
-          expect(teams.status(), await teams.text()).toBe(200)
-          expect((await teams.json() as Array<{ id: string }>).map(team => team.id)).not.toContain(teamId)
         }
       } catch (error) { failures.push(error) }
       try {
@@ -560,7 +451,7 @@ test.describe('dashboard pane hierarchy', () => {
         await release()
       } catch (error) { failures.push(error) }
     }
-    if (failures.length) throw new AggregateError(failures, 'Location assignment workflow or restoration failed')
+    if (failures.length) throw new AggregateError(failures, 'Product assignment workflow or restoration failed')
   })
   })
 
@@ -755,7 +646,7 @@ test.describe('dashboard pane hierarchy', () => {
         const current = (await currentResponse.json() as { session: SessionAvailability }).session
         expect(current).toMatchObject({ id: original.id, organization_id: restore.organizationId, product_id: restore.productId })
         const restored = await mcpRequest(restore.owner, restore.baseURL, { method: 'tools/call', toolName: 'update_product_session', args: {
-          organization_id: restore.organizationId, product_id: restore.productId, session_id: original.id, expected_updated_at: current.updated_at,
+          organization_id: restore.organizationId, product_id: restore.productId, product_session_id: original.id, updated_at: current.updated_at,
           starts_at: original.starts_at, ends_at: original.ends_at, capacity: original.capacity, status: original.status,
         } })
         expect(restored.status(), await restored.text()).toBe(200)
@@ -769,7 +660,7 @@ test.describe('dashboard pane hierarchy', () => {
         if (!page.isClosed()) {
           const starts = localNow(original.timezone, new Date(original.starts_at))
           const ends = localNow(original.timezone, new Date(original.ends_at))
-          await open(page, `/dashboard/${restore.slug}/calendar/sessions/${original.id}?product_id=${restore.productId}&locationId=${original.location_id}&month=${starts.date.slice(0, 7)}&date=${starts.date}`)
+          await open(page, `/dashboard/${restore.slug}/calendar/sessions/${original.id}?product_id=${restore.productId}&location_id=${original.location_id}&month=${starts.date.slice(0, 7)}&date=${starts.date}`)
           const leaf = page.locator('#dashboard-panel-product-session')
           await expect(leaf.getByLabel('Starts', { exact: true })).toHaveValue(`${starts.date}T${starts.time}`)
           await expect(leaf.getByLabel('Ends', { exact: true })).toHaveValue(`${ends.date}T${ends.time}`)
@@ -879,22 +770,22 @@ test.describe('dashboard pane hierarchy', () => {
       await expect(leaf.getByLabel('Starts', { exact: true })).toBeDisabled()
       await leaf.getByRole('combobox', { name: 'Location*', exact: true }).click()
       await page.getByRole('option', { name: location!.title, exact: true }).click()
-      await expect(page).toHaveURL(url => url.pathname === `${calendarPath}/sessions/new` && url.searchParams.get('locationId') === location!.id)
-      expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ product_id: productId, month: sessionMonth, locationId: location!.id })
+      await expect(page).toHaveURL(url => url.pathname === `${calendarPath}/sessions/new` && url.searchParams.get('location_id') === location!.id)
+      expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ product_id: productId, month: sessionMonth, location_id: location!.id })
       await expect(leaf.getByLabel('Date', { exact: true })).toHaveValue(sessionDay)
       await expect(leaf.getByLabel('Starts', { exact: true })).toBeEnabled()
       await expect(leaf.getByLabel('Starts', { exact: true })).toHaveValue('')
       await expect(leaf.getByLabel('Ends', { exact: true })).toHaveValue('')
       await leaf.getByRole('button', { name: 'Cancel', exact: true }).click()
       await expect(page).toHaveURL(url => url.pathname === calendarPath && url.searchParams.get('product_id') === productId)
-      expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ product_id: productId, month: sessionMonth, locationId: location!.id })
+      expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ product_id: productId, month: sessionMonth, location_id: location!.id })
 
       await open(page, `${calendarPath}?product_id=${productId}&month=${sessionMonth}`)
       await locationFilter.click()
       await page.getByRole('option', { name: location!.title, exact: true }).click()
       await expect(locationFilter).toContainText(location!.title)
-      await expect(page).toHaveURL(url => url.pathname === calendarPath && url.searchParams.get('locationId') === location!.id)
-      expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ product_id: productId, month: sessionMonth, locationId: location!.id })
+      await expect(page).toHaveURL(url => url.pathname === calendarPath && url.searchParams.get('location_id') === location!.id)
+      expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ product_id: productId, month: sessionMonth, location_id: location!.id })
       await expect(calendar.locator(`button[data-day="${sessionDay}"]`)).toContainText(`${originalSessions.filter(session => session.location_id === location!.id && session.status !== 'cancelled' && localNow(session.timezone, new Date(session.starts_at)).date === sessionDay).length} scheduled times`)
       const scheduleSettings = calendar.getByRole('link', { name: 'Schedule settings', exact: true })
       await expect(scheduleSettings).toHaveAttribute('href', `${schedulePath}?location_id=${location!.id}`)
@@ -908,8 +799,8 @@ test.describe('dashboard pane hierarchy', () => {
       await expect(page).toHaveURL(`${schedulePath}?location_id=${location!.id}`)
       await expect(schedule.getByTestId('editor-row-monday')).toHaveAttribute('href', `${schedulePath}/monday?location_id=${location!.id}`)
       await page.goBack()
-      await expect(page).toHaveURL(url => url.pathname === calendarPath && url.searchParams.get('locationId') === location!.id)
-      expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ product_id: productId, month: sessionMonth, locationId: location!.id })
+      await expect(page).toHaveURL(url => url.pathname === calendarPath && url.searchParams.get('location_id') === location!.id)
+      expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ product_id: productId, month: sessionMonth, location_id: location!.id })
       await expect(locationFilter).toContainText(location!.title)
 
       const nextMonthDate = new Date(`${sessionDay}T12:00:00Z`)
@@ -927,14 +818,14 @@ test.describe('dashboard pane hierarchy', () => {
       const nextMonthResponse = await nextMonthRead
       expect(nextMonthResponse.status(), await nextMonthResponse.text()).toBe(200)
       const nextMonthSessions = (await nextMonthResponse.json() as { sessions: SessionAvailability[] }).sessions.filter(session => session.location_id === location!.id && localNow(session.timezone, new Date(session.starts_at)).date.startsWith(nextMonth))
-      await expect(page).toHaveURL(url => url.pathname === calendarPath && url.searchParams.get('month') === nextMonth && url.searchParams.get('locationId') === location!.id)
-      expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ product_id: productId, month: nextMonth, locationId: location!.id })
+      await expect(page).toHaveURL(url => url.pathname === calendarPath && url.searchParams.get('month') === nextMonth && url.searchParams.get('location_id') === location!.id)
+      expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ product_id: productId, month: nextMonth, location_id: location!.id })
       await expect(calendar.locator(`time[datetime="${nextMonth}"]`)).toHaveText(nextMonthLabel)
       const firstDayCount = nextMonthSessions.filter(session => session.status !== 'cancelled' && localNow(session.timezone, new Date(session.starts_at)).date === `${nextMonth}-01`).length
       await expect(calendar.locator(`button[data-day="${nextMonth}-01"]`)).toContainText(`${firstDayCount} scheduled times`)
       await page.reload()
       await waitForNuxtHydration(page)
-      expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ product_id: productId, month: nextMonth, locationId: location!.id })
+      expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ product_id: productId, month: nextMonth, location_id: location!.id })
       await expect(calendar.locator(`time[datetime="${nextMonth}"]`)).toHaveText(nextMonthLabel)
       await expect(calendar.getByRole('combobox', { name: 'Calendar', exact: true })).toContainText(`Availability: ${product.name}`)
       await expect(locationFilter).toContainText(location!.title)
@@ -943,24 +834,24 @@ test.describe('dashboard pane hierarchy', () => {
       const returnedMonthQuery = sessionMonth === currentCalendarMonth ? {} : { month: sessionMonth }
       await calendar.getByRole('button', { name: 'Previous month', exact: true }).click()
       await expect(page).toHaveURL(url => url.pathname === calendarPath && url.searchParams.get('month') === (sessionMonth === currentCalendarMonth ? null : sessionMonth))
-      expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ product_id: productId, locationId: location!.id, ...returnedMonthQuery })
+      expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ product_id: productId, location_id: location!.id, ...returnedMonthQuery })
       const selectedDayLabel = new Intl.DateTimeFormat('en', { weekday: 'long', month: 'long', day: 'numeric', timeZone: 'UTC' }).format(new Date(`${sessionDay}T12:00:00Z`))
       const selectedDay = calendar.getByRole('button', { name: selectedDayLabel, exact: true })
       await selectedDay.click()
       await expect(page).toHaveURL(url => url.pathname === `${calendarPath}/${sessionDay}`)
-      expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ product_id: productId, locationId: location!.id, ...returnedMonthQuery })
+      expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ product_id: productId, location_id: location!.id, ...returnedMonthQuery })
       const day = page.locator('#dashboard-panel-calendar-day')
       const daySessions = originalSessions.filter(session => session.location_id === location!.id && localNow(session.timezone, new Date(session.starts_at)).date === sessionDay)
       await expect(day.locator('[data-session-id]')).toHaveCount(daySessions.length)
       expect(await day.locator('[data-session-id]').evaluateAll(elements => elements.map(element => element.getAttribute('data-session-id')).sort())).toEqual(daySessions.map(session => session.id).sort())
       const occurrenceHref = new URL((await day.locator(`[data-session-id="${original!.id}"]`).getAttribute('href'))!, baseURL)
       expect(occurrenceHref.pathname).toBe(`${calendarPath}/sessions/${original!.id}`)
-      expect(Object.fromEntries(occurrenceHref.searchParams)).toEqual({ product_id: productId, locationId: location!.id, month: sessionMonth, date: sessionDay })
+      expect(Object.fromEntries(occurrenceHref.searchParams)).toEqual({ product_id: productId, location_id: location!.id, month: sessionMonth, date: sessionDay })
       await page.screenshot({ path: testInfo.outputPath('experience-calendar-day-phone.png') })
       const add = day.getByRole('link', { name: 'Add availability', exact: true })
       const addHref = new URL((await add.getAttribute('href'))!, baseURL)
       expect(addHref.pathname).toBe(`${calendarPath}/sessions/new`)
-      expect(Object.fromEntries(addHref.searchParams)).toEqual({ product_id: productId, locationId: location!.id, month: sessionMonth, date: sessionDay })
+      expect(Object.fromEntries(addHref.searchParams)).toEqual({ product_id: productId, location_id: location!.id, month: sessionMonth, date: sessionDay })
       await add.click()
       await expect(leaf.getByRole('heading', { name: 'Add availability', exact: true })).toBeVisible()
       await expect(leaf).toContainText(`Times are in ${location!.timezone}.`)
@@ -978,8 +869,8 @@ test.describe('dashboard pane hierarchy', () => {
       await expect(leaf.getByLabel('Ends', { exact: true })).toHaveValue(`${customEnd.date}T${customEnd.time}`)
       await expect(leaf.getByRole('button', { name: 'Add to calendar', exact: true })).toBeEnabled()
       await leaf.getByRole('button', { name: 'Cancel', exact: true }).click()
-      await expect(page).toHaveURL(url => url.pathname === calendarPath && url.searchParams.get('date') === sessionDay && url.searchParams.get('locationId') === location!.id)
-      expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ product_id: productId, date: sessionDay, month: sessionMonth, locationId: location!.id })
+      await expect(page).toHaveURL(url => url.pathname === calendarPath && url.searchParams.get('date') === sessionDay && url.searchParams.get('location_id') === location!.id)
+      expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ product_id: productId, date: sessionDay, month: sessionMonth, location_id: location!.id })
       const readback = await page.request.get(endpoint, { params: { from, to } })
       expect(readback.status(), await readback.text()).toBe(200)
       const afterCancelledCreation = (await readback.json() as { sessions: SessionAvailability[] }).sessions
@@ -989,9 +880,9 @@ test.describe('dashboard pane hierarchy', () => {
       await calendar.getByRole('button', { name: 'View: Month', exact: true }).click()
       await page.getByRole('menuitemcheckbox', { name: 'List', exact: true }).click()
       await expect(calendar.getByRole('button', { name: 'View: List', exact: true })).toBeVisible()
-      await expect(page).toHaveURL(url => url.searchParams.get('view') === 'list' && url.searchParams.get('locationId') === location!.id)
+      await expect(page).toHaveURL(url => url.searchParams.get('view') === 'list' && url.searchParams.get('location_id') === location!.id)
       const beforeOfferingChange = new URL(page.url()).searchParams
-      expect(Object.fromEntries(beforeOfferingChange)).toEqual({ product_id: productId, locationId: location!.id, date: sessionDay, ...returnedMonthQuery, view: 'list' })
+      expect(Object.fromEntries(beforeOfferingChange)).toEqual({ product_id: productId, location_id: location!.id, date: sessionDay, ...returnedMonthQuery, view: 'list' })
       const otherSessionsRead = page.waitForResponse(response => new URL(response.url()).pathname === `/api/editor/organizations/${organizationId}/products/${otherOffering!.id}/sessions` && response.request().method() === 'GET')
       await calendar.getByRole('combobox', { name: 'Calendar', exact: true }).click()
       await page.getByRole('option', { name: `Availability: ${otherOffering!.name}${otherOffering!.active ? '' : ' · Paused'}`, exact: true }).click()
@@ -1045,7 +936,7 @@ test.describe('dashboard pane hierarchy', () => {
     const endsAt = new Date(Date.parse(original!.ends_at) + 15 * 60_000).toISOString()
     const calendarPath = `/dashboard/${seededTenant('experience').slug}/calendar`
     const sessionDay = localNow(original!.timezone, new Date(original!.starts_at)).date
-    const path = `${calendarPath}/sessions/${original!.id}?product_id=${productId}&locationId=${original!.location_id}&month=${sessionDay.slice(0, 7)}&date=${sessionDay}`
+    const path = `${calendarPath}/sessions/${original!.id}?product_id=${productId}&location_id=${original!.location_id}&month=${sessionDay.slice(0, 7)}&date=${sessionDay}`
     const leaf = page.locator('#dashboard-panel-product-session')
     const save = leaf.getByRole('button', { name: 'Save', exact: true })
     const commit = async () => {
@@ -1054,8 +945,8 @@ test.describe('dashboard pane hierarchy', () => {
       await save.click()
       const response = await saved
       expect(response.status(), await response.text()).toBe(200)
-      await expect(page).toHaveURL(url => url.pathname === calendarPath && url.searchParams.get('date') === sessionDay && url.searchParams.get('locationId') === original!.location_id)
-      expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ product_id: productId, locationId: original!.location_id, month: sessionDay.slice(0, 7), date: sessionDay })
+      await expect(page).toHaveURL(url => url.pathname === calendarPath && url.searchParams.get('date') === sessionDay && url.searchParams.get('location_id') === original!.location_id)
+      expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ product_id: productId, location_id: original!.location_id, month: sessionDay.slice(0, 7), date: sessionDay })
       await expect(page.locator('#dashboard-panel-org-calendar').getByRole('button', { name: 'View: Month', exact: true })).toBeVisible()
     }
     await page.setViewportSize(NARROW)
@@ -1117,7 +1008,7 @@ test.describe('dashboard pane hierarchy', () => {
     await leaf.getByRole('spinbutton', { name: 'Guest limit', exact: true }).fill('10')
     await leaf.getByRole('spinbutton', { name: 'Guest limit', exact: true }).press('Tab')
     const current = (await list()).find(row => row.id === original!.id)!
-    const concurrent = await page.request.patch(`${endpoint}/${original!.id}`, { data: { capacity: 9, expected_updated_at: current.updated_at } })
+    const concurrent = await page.request.patch(`${endpoint}/${original!.id}`, { data: { capacity: 9, updated_at: current.updated_at } })
     expect(concurrent.status(), await concurrent.text()).toBe(200)
     const concurrentReadback = (await list()).find(row => row.id === original!.id)
     expect(concurrentReadback, 'the concurrent write preserves the existing session').toBeDefined()
@@ -1190,13 +1081,13 @@ test.describe('dashboard pane hierarchy', () => {
       if (!actor) throw new Error('The canonical Clayhouse role actor is missing')
       bookingAttempted = true
       const assigned = await page.request.put(bookingEndpoint, { data: {
-        scheduling_mode: original.booking.scheduling_mode, assigned_member_id: actor.id, assigned_team_id: null,
+        scheduling_mode: original.booking.scheduling_mode, assigned_member_id: actor.id,
       } })
       expect(assigned.status(), await assigned.text()).toBe(200)
       const assignmentRead = await page.request.get(endpoint)
       expect(assignmentRead.status(), await assignmentRead.text()).toBe(200)
       expect((await assignmentRead.json() as { product: Product }).product.booking).toMatchObject({
-        scheduling_mode: original.booking.scheduling_mode, assigned_member_id: actor.id, assigned_team_id: null,
+        scheduling_mode: original.booking.scheduling_mode, assigned_member_id: actor.id,
       })
       roleAttempted = true
       const demoted = await page.request.post('/api/auth/organization/update-member-role', {
@@ -1215,7 +1106,7 @@ test.describe('dashboard pane hierarchy', () => {
       const forbiddenPreview = await memberContext.request.get(`/api/editor/organizations/${organizationId}/context`)
       expect(forbiddenPreview.status(), await forbiddenPreview.text()).toBe(404)
       const deniedPreview = await forbiddenPreview.json()
-      expect(deniedPreview).not.toHaveProperty('context.previewToken')
+      expect(deniedPreview).not.toHaveProperty('context.preview_token')
       expect(deniedPreview).not.toHaveProperty('previewToken')
       const memberPage = await memberContext.newPage()
       await dismissPreviewToolbar(memberPage)
@@ -1275,7 +1166,7 @@ test.describe('dashboard pane hierarchy', () => {
       try {
         if (bookingAttempted && original?.booking) {
           const restored = await cleanupRequest!.put(bookingEndpoint, { data: {
-            scheduling_mode: original.booking.scheduling_mode, assigned_member_id: original.booking.assigned_member_id, assigned_team_id: original.booking.assigned_team_id,
+            scheduling_mode: original.booking.scheduling_mode, assigned_member_id: original.booking.assigned_member_id,
           } })
           expect(restored.status(), await restored.text()).toBe(200)
           const restoredBooking = await cleanupRequest!.get(endpoint)
@@ -1740,8 +1631,8 @@ test.describe('dashboard pane hierarchy', () => {
       expect(isAccountActivityResponse(activity), 'the account API returns actual owned activity').toBe(true)
       if (!isAccountActivityResponse(activity)) throw new Error('Invalid account activity response')
       await expect(page.getByRole('heading', { name: 'Past activity', exact: true })).toBeVisible()
-      const past = activity.activities.filter(item => item.kind === 'order' || item.kind === 'payment' || (item.status !== 'cancelled' && item.endsAt !== null && Date.parse(item.endsAt) < Date.now()))
-      const cancelled = activity.activities.filter(item => (item.kind === 'booking' || item.kind === 'reservation') && item.status === 'cancelled')
+      const past = activity.activities.filter(item => item.kind === 'order' || item.kind === 'payment' || (item.status !== 'cancelled' && item.ends_at !== null && Date.parse(item.ends_at) < Date.now()))
+      const cancelled = activity.activities.filter(item => item.kind === 'booking' && item.status === 'cancelled')
       await expect(page.getByTestId('account-activity-cancelled')).toHaveCount(cancelled.length ? 1 : 0)
       await expect(page.locator('[data-testid^="account-activity-"]:not([data-testid="account-activity-cancelled"])')).toHaveCount(past.length)
       for (const item of past) {
@@ -1794,11 +1685,11 @@ test.describe('dashboard pane hierarchy', () => {
       for (const entry of entries.slice(0, 10)) {
         const row = payments.getByTestId(`account-payment-${entry.id}`)
         await expect(row).toHaveAttribute('href', entry.to)
-        await expect(row).toContainText(`${entry.kind === 'paid' ? 'Paid' : 'Refunded'} ${formatTimestamp(entry.occurredAt, 'en', 'UTC', { month: 'short', day: 'numeric' })}`)
+        await expect(row).toContainText(`${entry.kind === 'paid' ? 'Paid' : 'Refunded'} ${formatTimestamp(entry.created_at, 'en', 'UTC', { month: 'short', day: 'numeric' })}`)
         await expect(row).toContainText(entry.title)
         await expect(row).toContainText(paymentMoney(entry.amount, entry.currency))
         await expect(row).toContainText(entry.currency)
-        if (entry.organizationName) await expect(row).toContainText(entry.organizationName)
+        if (entry.organization_name) await expect(row).toContainText(entry.organization_name)
       }
       if (!expectedPaymentIds.size) await expect(payments.getByText('No payments yet', { exact: true })).toBeVisible()
       await payments.getByTestId('dashboard-navbar-close').click()
@@ -1812,39 +1703,16 @@ test.describe('dashboard pane hierarchy', () => {
       await expect(page.getByRole('heading', { name: 'Calendar', exact: true })).toBeVisible()
       await mobileNav.getByRole('link', { name: 'Messages', exact: true }).click()
       await expect(page).toHaveURL('/dashboard/account/messages')
-      // A guest's own Messages lists their conversations and nothing else: no kind
-      // menu at all, so no Updates in it; updates are the bell's.
-      await expect(page.locator('[data-guest-thread-list-hydrated="true"]')).toBeVisible()
+      // A guest's own Messages lists their conversations and nothing else: no kind menu at all.
+      await expect(page.locator('[data-conversation-list-hydrated="true"]')).toBeVisible()
       await expect(page.getByRole('button', { name: /filter by (conversation|message) type$/ })).toHaveCount(0)
       await expect(page.getByRole('menuitemcheckbox', { name: 'Updates', exact: true })).toHaveCount(0)
-      const personalUnread = page.waitForResponse(response => new URL(response.url()).pathname === '/api/dashboard/notifications/unread-count'
-        && new URL(response.url()).searchParams.get('scope') === 'personal')
-      const personalNotifications = page.waitForResponse(response => new URL(response.url()).pathname === '/api/dashboard/notifications'
-        && new URL(response.url()).searchParams.get('scope') === 'personal')
+      // Alerts are gone: the Menu is the account's launcher and carries no bell; unread is Messages' alone.
       await mobileNav.getByRole('link', { name: 'Menu', exact: true }).click()
-      const notificationBell = page.locator('#dashboard-panel-account-menu').getByTestId('dashboard-notification-bell')
-      await expect(notificationBell).toHaveAttribute('href', '/dashboard/account/notifications')
-      await notificationBell.click()
-      const updatesResponse = await personalNotifications
-      expect(updatesResponse.status(), await updatesResponse.text()).toBe(200)
-      const updates = await updatesResponse.json() as { notifications: Array<{ id: string; scope: string; title: string | null; target_user_id: string | null }>; unread_count: number }
-      const unreadResponse = await personalUnread
-      expect(unreadResponse.status(), await unreadResponse.text()).toBe(200)
-      expect((await unreadResponse.json()).unread_count, 'the Personal bell reads the same owned unread total through its count endpoint').toBe(updates.unread_count)
-      const viewer = await (await page.request.get('/api/auth/get-session')).json() as { user: { id: string } }
-      // Personal Notifications are platform notifications addressed to this account, or to everyone; never a business's.
-      expect(updates.notifications.every(item => item.scope === 'global' && (item.target_user_id === viewer.user.id || item.target_user_id === null)), 'personal Notifications carry only this account\'s notifications').toBe(true)
-      await expect(page).toHaveURL('/dashboard/account/notifications')
-      await expect(page.getByRole('heading', { name: 'Notifications', exact: true })).toBeVisible()
-      if (updates.notifications.length) {
-        for (const item of updates.notifications) {
-          const row = page.getByTestId(`notification-${item.id}`)
-          await expect(row).toBeVisible()
-          if (item.title) await expect(row).toContainText(item.title)
-        }
-      } else {
-        await expect(page.getByText('No notifications yet.', { exact: true })).toBeVisible()
-      }
+      await expect(page).toHaveURL('/dashboard/account/menu')
+      await expect(page.locator('#dashboard-panel-account-menu')).toBeVisible()
+      await expect(page.getByTestId('dashboard-notification-bell')).toHaveCount(0)
+      await expect(page.getByTestId('dashboard-menu-unread')).toHaveCount(0)
       await expect(mobileNav.getByTestId('dashboard-nav-label')).toHaveText(['Today', 'Calendar', 'Messages', 'Menu'])
       await page.setViewportSize(WIDE)
       await expect(page.getByTestId('dashboard-top-nav').getByRole('navigation', { name: 'Dashboard' }).getByTestId('dashboard-nav-label')).toHaveText(['Today', 'Calendar', 'Messages'])
@@ -1857,34 +1725,35 @@ test.describe('dashboard pane hierarchy', () => {
     }
   })
 
-  test('booking Change opens its first field on desktop and not below lg', async ({ page }) => {
+  test('booking Change is one sheet beside its record on desktop and over it below lg', async ({ page }) => {
     const agenda = await page.request.get('/api/dashboard/agenda', { params: { org: 'ember-slice-demo', from: '2000-01-01', to: '2100-01-01' } })
     expect(agenda.status()).toBe(200)
-    const { items } = await agenda.json() as { items: Array<{ kind: string; to: string }> }
-    const reservation = items.find(item => item.kind === 'reservation' && item.to.includes('/bookings/'))
-    expect(reservation, 'the demo fixture carries a reservation').toBeTruthy()
+    const { items } = await agenda.json() as { items: Array<{ kind: string; product_id: string | null; to: string }> }
+    const reservation = items.find(item => item.kind === 'booking' && item.product_id === seededTables().id && item.to.includes('/bookings/'))
+    expect(reservation, 'the demo fixture carries a table booking').toBeTruthy()
     const change = `${reservation!.to}/change`
 
     await page.setViewportSize(WIDE)
     await open(page, change)
-    // A reservation's Location row is the first row on the screen.
-    await expect(page).toHaveURL(`${change}/location`)
-    await expectPanes(page, ['booking-change', 'booking-change-field'])
+    // The details are edited in place: the sheet opens nothing further.
+    await expect(page).toHaveURL(change)
+    await expectPanes(page, ['booking-details', 'booking-change'])
+    await expect(page.locator('#dashboard-panel-booking-change').getByRole('heading', { name: 'Reservation details', exact: true })).toBeVisible()
 
     await page.setViewportSize(NARROW)
     await open(page, change)
-    await expectPanes(page, ['booking-change'])
+    await expect(page.locator('#dashboard-panel-booking-change').getByRole('button', { name: 'Send request', exact: true })).toBeVisible()
     await expect(page).toHaveURL(change)
   })
 
   test('a booking opened from the calendar closes to its day, and from Today to Today', async ({ page }) => {
     const agenda = await page.request.get('/api/dashboard/agenda', { params: { org: 'ember-slice-demo', from: '2000-01-01', to: '2100-01-01' } })
     expect(agenda.status()).toBe(200)
-    const { items } = await agenda.json() as { items: Array<{ kind: string; dayKey: string; to: string }> }
-    const reservation = items.find(item => item.kind === 'reservation' && item.to.includes('/bookings/'))
-    expect(reservation, 'the demo fixture carries a reservation').toBeTruthy()
-    const day = `${ORG}/calendar/${reservation!.dayKey}`
-    const fromCalendar = `${day}/reservation/${reservation!.to.split('/').at(-1)}`
+    const { items } = await agenda.json() as { items: Array<{ kind: string; product_id: string | null; day_key: string; to: string }> }
+    const reservation = items.find(item => item.kind === 'booking' && item.product_id === seededTables().id && item.to.includes('/bookings/'))
+    expect(reservation, 'the demo fixture carries a table booking').toBeTruthy()
+    const day = `${ORG}/calendar/${reservation!.day_key}`
+    const fromCalendar = `${day}/booking/${reservation!.to.split('/').at(-1)}`
 
     // The same record, mounted under the day: Close is the day and Calendar is the lit tab.
     await page.setViewportSize(NARROW)
@@ -1904,7 +1773,7 @@ test.describe('dashboard pane hierarchy', () => {
 
     // A direct link and reload retain Today as the actual parent, so the same
     // range and filters remain beside the record and survive mobile Close.
-    const context = '?range=upcoming&kinds=reservation'
+    const context = '?range=upcoming&kinds=booking'
     await page.setViewportSize(WIDE)
     await open(page, `${reservation!.to}${context}`)
     await expectPanes(page, ['org-today', 'booking-details'])
@@ -1920,7 +1789,7 @@ test.describe('dashboard pane hierarchy', () => {
     await expect(page).toHaveURL(`${ORG}${context}`)
     await expectPanes(page, ['org-today'])
     await open(page, `${reservation!.to}/change${context}`)
-    await expect(page).toHaveURL(`${reservation!.to}/change/location${context}`)
+    await expect(page).toHaveURL(`${reservation!.to}/change${context}`)
     await page.locator('#dashboard-panel-booking-change').getByRole('button', { name: 'Cancel', exact: true }).click()
     await expect(page).toHaveURL(`${reservation!.to}${context}`)
     await page.setViewportSize(PHONE)
@@ -2524,7 +2393,7 @@ test.describe('dashboard pane hierarchy', () => {
           const read = await cleanupRequest.get(`${editor}/pages/${pageId}`)
           expect(read.status(), await read.text()).toBe(200)
           const current = (await read.json() as { page: { document: { updated_at: string } } }).page
-          const removedPage = await cleanupRequest.delete(`${editor}/pages/${pageId}`, { data: { expectedUpdatedAt: current.document.updated_at } })
+          const removedPage = await cleanupRequest.delete(`${editor}/pages/${pageId}`, { data: { updated_at: current.document.updated_at } })
           expect(removedPage.status(), await removedPage.text()).toBe(200)
           const removedRead = await cleanupRequest.get(`${editor}/pages/${pageId}`)
           expect(removedRead.status(), await removedRead.text()).toBe(404)
@@ -2670,7 +2539,7 @@ test.describe('dashboard pane hierarchy', () => {
     const publicNameResponse = await publicNameWrite
     expect(publicNameResponse.status(), await publicNameResponse.text()).toBe(200)
     profileSaved = true
-    expect(publicNameResponse.request().postDataJSON()).toEqual({ public_name: publicName, expected_updated_at: previous?.updated_at ?? null })
+    expect(publicNameResponse.request().postDataJSON()).toEqual({ public_name: publicName, updated_at: previous?.updated_at ?? null })
     const namedRead = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_member_public_profile', args: { organization_id: organizationId, member_id: memberId } })
     expect(namedRead.status(), await namedRead.text()).toBe(200)
     const namedProfile = mcpData<{ profile: PublicProfile }>(await namedRead.json()).profile
@@ -2690,7 +2559,7 @@ test.describe('dashboard pane hierarchy', () => {
     await bioLeaf.getByRole('button', { name: 'Save', exact: true }).click()
     const bioResponse = await bioWrite
     expect(bioResponse.status(), await bioResponse.text()).toBe(200)
-    expect(bioResponse.request().postDataJSON()).toEqual({ public_bio: bio, expected_updated_at: namedProfile.updated_at })
+    expect(bioResponse.request().postDataJSON()).toEqual({ public_bio: bio, updated_at: namedProfile.updated_at })
     const independentProfile = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_member_public_profile', args: { organization_id: organizationId, member_id: memberId } })
     expect(independentProfile.status(), await independentProfile.text()).toBe(200)
     const saved = mcpData<{ profile: PublicProfile }>(await independentProfile.json()).profile
@@ -2715,7 +2584,7 @@ test.describe('dashboard pane hierarchy', () => {
     const attemptedBio = `${bio} unsaved edit`
     await bioLeaf.getByRole('textbox', { name: 'About you', exact: true }).fill(attemptedBio)
     const concurrentBio = `${bio} concurrent edit`
-    const concurrentWrite = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'update_member_public_profile', args: { organization_id: organizationId, member_id: memberId, public_bio: concurrentBio, expected_updated_at: saved.updated_at } })
+    const concurrentWrite = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'update_member_public_profile', args: { organization_id: organizationId, member_id: memberId, public_bio: concurrentBio, updated_at: saved.updated_at } })
     expect(concurrentWrite.status(), await concurrentWrite.text()).toBe(200)
     const concurrent = mcpData<{ profile: PublicProfile }>(await concurrentWrite.json()).profile
     expect(concurrent).toEqual({ ...saved, updated_at: concurrent.updated_at, public_bio: concurrentBio, public_approved: 0 })
@@ -2723,7 +2592,7 @@ test.describe('dashboard pane hierarchy', () => {
     await bioLeaf.getByRole('button', { name: 'Save', exact: true }).click()
     const conflictResponse = await conflictWrite
     expect(conflictResponse.status(), await conflictResponse.text()).toBe(409)
-    expect(conflictResponse.request().postDataJSON()).toEqual({ public_bio: attemptedBio, expected_updated_at: saved.updated_at })
+    expect(conflictResponse.request().postDataJSON()).toEqual({ public_bio: attemptedBio, updated_at: saved.updated_at })
     await expect(bioLeaf.getByRole('textbox', { name: 'About you', exact: true })).toHaveValue(attemptedBio)
     await expect(bioLeaf.getByText(/These settings changed after your edit\. Use the saved values before editing again\./)).toBeVisible()
     await expect(bioLeaf.getByRole('button', { name: 'Retry', exact: true })).toBeDisabled()
@@ -2766,7 +2635,7 @@ test.describe('dashboard pane hierarchy', () => {
     await approvalLeaf.getByRole('button', { name: 'Save', exact: true }).click()
     const approvalResponse = await approvalWrite
     expect(approvalResponse.status(), await approvalResponse.text()).toBe(200)
-    expect(approvalResponse.request().postDataJSON()).toEqual({ public_approved: true, expected_updated_at: concurrent.updated_at })
+    expect(approvalResponse.request().postDataJSON()).toEqual({ public_approved: true, updated_at: concurrent.updated_at })
     const approvalRead = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_member_public_profile', args: { organization_id: organizationId, member_id: memberId } })
     expect(approvalRead.status(), await approvalRead.text()).toBe(200)
     const approved = mcpData<{ profile: PublicProfile }>(await approvalRead.json()).profile
@@ -2845,7 +2714,7 @@ test.describe('dashboard pane hierarchy', () => {
           const record = (await current.json() as { scheduling: NonNullable<MemberSchedule> }).scheduling
           const restored = await cleanupRequest!.put(`/api/organizations/${organizationId}/members/${memberId}/scheduling`, { data: {
             public_name: originalSettings.public_name, public_photo_url: originalSettings.public_photo_url,
-            public_bio: originalSettings.public_bio, public_approved: Boolean(originalSettings.public_approved), expected_updated_at: record.updated_at,
+            public_bio: originalSettings.public_bio, public_approved: Boolean(originalSettings.public_approved), updated_at: record.updated_at,
           } })
           expect(restored.status(), await restored.text()).toBe(200)
           const independent = await mcpRequest(cleanupRequest!, baseURL!, { method: 'tools/call', toolName: 'get_member_public_profile', args: { organization_id: organizationId, member_id: memberId } })
@@ -2876,10 +2745,10 @@ test.describe('dashboard pane hierarchy', () => {
     expect(discarded.status(), await discarded.text()).toBe(200)
     const name = `E2E Organization ${Date.now().toString(36)}`
     const draft = await page.request.post('/api/dashboard/onboarding/drafts/active', {
-      data: { sourceType: 'manual', vertical: 'restaurant', name, details: { sourceLocale: 'en', country: 'TH', city: 'Ao Nang', streetAddress: '88 Moo 2', currency: 'THB', timezone: 'Asia/Bangkok' } },
+      data: { source_type: 'manual', vertical: 'restaurant', name, details: { source_locale: 'en', country: 'TH', city: 'Ao Nang', street_address: '88 Moo 2', currency: 'THB', timezone: 'Asia/Bangkok' } },
     })
     expect(draft.status(), await draft.text()).toBe(200)
-    const { organizationId } = await draft.json() as { organizationId: string }
+    const { organization_id: organizationId } = await draft.json() as { organization_id: string }
     const listed = async () => (await (await page.request.get('/api/auth/organization/list')).json() as Array<{ id: string }>).map(organization => organization.id)
     try {
       // Deleting is the list's edit state, on the rows Better Auth lets this account delete.

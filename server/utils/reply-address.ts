@@ -20,10 +20,10 @@ const TOKEN_BYTES = 12
  */
 export type ReplyAs = { kind: 'guest' } | { kind: 'member'; userId: string }
 
-/** What a reply address carries: who replies, and the conversation entry the email was about. */
+/** What a reply address carries: who replies, and the message (messages.id) the email was about. */
 export interface ReplyAddress {
   kind: ReplyAs['kind']
-  entryId: string
+  messageId: string
   token: string
 }
 
@@ -59,25 +59,27 @@ function replySecret(env: ReplyAddressEnv): string {
   return env.EMAIL_REPLY_SECRET
 }
 
-function signedFact(entryId: string, as: ReplyAs): string {
-  return as.kind === 'guest' ? `guest:${entryId.toLowerCase()}` : `member:${entryId.toLowerCase()}:${as.userId}`
+// The signed text keeps the shape mail already sent was signed with.
+function signedFact(messageId: string, as: ReplyAs): string {
+  return as.kind === 'guest' ? `guest:${messageId.toLowerCase()}` : `member:${messageId.toLowerCase()}:${as.userId}`
 }
 
-export async function buildReplyToken(secret: string, entryId: string, as: ReplyAs): Promise<string> {
-  return hmacHex(secret, signedFact(entryId, as), TOKEN_BYTES)
+export async function buildReplyToken(secret: string, messageId: string, as: ReplyAs): Promise<string> {
+  return hmacHex(secret, signedFact(messageId, as), TOKEN_BYTES)
 }
 
 /**
- * The reply-to of an email about a conversation entry:
- * r<g|m><entry uuid without hyphens><24-hex-hmac>@reply.<domain>, 58 characters
- * before the @. The entry, not the conversation, is addressed because a
- * booking's or reservation's conversation id is a 64-character hash, which does
- * not fit SMTP's 64-character local part. Entries are UUIDs.
+ * The reply-to of an email about a message:
+ * r<g|m><message uuid without hyphens><24-hex-hmac>@reply.<domain>, 58
+ * characters before the @. The message, not the conversation, is addressed
+ * because a booking's conversation id is a 64-character hash, which does not
+ * fit SMTP's 64-character local part. Message ids are UUIDs, and a message
+ * keeps its id when it moves, so mail already sent still threads.
  */
-export async function buildReplyToAddress(env: ReplyAddressEnv, entryId: string, as: ReplyAs): Promise<string> {
-  const compact = entryId.toLowerCase().replace(/-/g, '')
-  if (!/^[0-9a-f]{32}$/.test(compact)) throw new Error(`Conversation entry ${entryId} is not a UUID a reply address can carry`)
-  return `r${KIND_CODE[as.kind]}${compact}${await buildReplyToken(replySecret(env), entryId, as)}@${getReplyDomain(env)}`
+export async function buildReplyToAddress(env: ReplyAddressEnv, messageId: string, as: ReplyAs): Promise<string> {
+  const compact = messageId.toLowerCase().replace(/-/g, '')
+  if (!/^[0-9a-f]{32}$/.test(compact)) throw new Error(`Message ${messageId} is not a UUID a reply address can carry`)
+  return `r${KIND_CODE[as.kind]}${compact}${await buildReplyToken(replySecret(env), messageId, as)}@${getReplyDomain(env)}`
 }
 
 /** The identity of a reply address; an address on another domain, or one KrabiClaw never issued, is refused. */
@@ -89,12 +91,12 @@ export function parseReplyToAddress(env: ReplyAddressEnv, address: string): Repl
   const id = match[2]!.toLowerCase()
   return {
     kind: match[1]!.toLowerCase() === 'g' ? 'guest' : 'member',
-    entryId: `${id.slice(0, 8)}-${id.slice(8, 12)}-${id.slice(12, 16)}-${id.slice(16, 20)}-${id.slice(20)}`,
+    messageId: `${id.slice(0, 8)}-${id.slice(8, 12)}-${id.slice(12, 16)}-${id.slice(16, 20)}-${id.slice(20)}`,
     token: match[3]!.toLowerCase(),
   }
 }
 
-/** Whether `token` signs this entry for this guest or member. */
-export async function verifyReplyToken(env: ReplyAddressEnv, entryId: string, as: ReplyAs, token: string): Promise<boolean> {
-  return timingSafeEqual(await buildReplyToken(replySecret(env), entryId, as), token)
+/** Whether `token` signs this message for this guest or member. */
+export async function verifyReplyToken(env: ReplyAddressEnv, messageId: string, as: ReplyAs, token: string): Promise<boolean> {
+  return timingSafeEqual(await buildReplyToken(replySecret(env), messageId, as), token)
 }

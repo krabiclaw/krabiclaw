@@ -27,7 +27,8 @@ test('an owner adds an inquiry question in Website, a visitor answers it, and th
   try {
     const cms = await dashboard.newPage()
     await openTenantPage(cms, `${baseURL}/dashboard/${restaurant.slug}/website`, {})
-    await cms.getByRole('link', { name: /Inquiry form/ }).click({ timeout: 30_000 })
+    await cms.getByTestId('website-booking-card').click({ timeout: 30_000 })
+    await cms.getByTestId('booking-intake-questions-link').click({ timeout: 30_000 })
     await expect(cms).toHaveURL(new RegExp(`/dashboard/${restaurant.slug}/website/inquiry-form$`))
     await cms.getByTestId('list-editor-add').click({ timeout: 30_000 })
     await expect(cms).toHaveURL(/\/website\/inquiry-form\/new$/)
@@ -52,9 +53,9 @@ test('an owner adds an inquiry question in Website, a visitor answers it, and th
     const mcpRead = await mcpRequest(owner, baseURL, { method: 'tools/call', toolName: 'get_organization_settings', args: { organization_id: restaurant.organizationId } })
     expect(mcpData<{ settings: Settings }>(await mcpRead.json()).settings.inquiry_questions_revision).toBe(saved.inquiry_questions_revision)
 
-    // The website index previews the saved form.
+    // The website index previews the saved form on the Booking card.
     await openTenantPage(cms, `${baseURL}/dashboard/${restaurant.slug}/website`, {})
-    await expect(cms.getByRole('link', { name: /Inquiry form/ })).toContainText(`${saved.inquiry_questions.length} question`)
+    await expect(cms.getByTestId('website-booking-card')).toContainText(`${saved.inquiry_questions.length} intake question`)
 
     const guest = await browser.newPage()
     await openTenantPage(guest, `${seededSiteURL('restaurant')}/contact`, seededSiteHeaders('restaurant'))
@@ -66,14 +67,14 @@ test('an owner adds an inquiry question in Website, a visitor answers it, and th
     await guest.getByRole('button', { name: 'Send message', exact: true }).click()
     const submitted = await submission
     expect(submitted.status(), await submitted.text()).toBe(201)
-    const requestId = (await submitted.json() as { request_id: string }).request_id
+    const requestId = (await submitted.json() as { conversation_id: string }).conversation_id
     await expect(guest).toHaveURL(/\/contact\/confirmed/)
 
     // The answers are the submission's, kept with the conversation; MCP reads them out (the inbox view does not carry them).
     const savedAnswers = async () => {
-      const response = await mcpRequest(owner, baseURL, { method: 'tools/call', toolName: 'get_guest_conversation', args: { organization_id: restaurant.organizationId, request_id: requestId } })
+      const response = await mcpRequest(owner, baseURL, { method: 'tools/call', toolName: 'get_conversation', args: { organization_id: restaurant.organizationId, conversation_id: requestId } })
       expect(response.status(), await response.text()).toBe(200)
-      return mcpData<{ conversation: { answers: FormAnswerSnapshot[] } }>(await response.json()).conversation.answers
+      return mcpData<{ guest: { answers: FormAnswerSnapshot[] } }>(await response.json()).guest.answers
     }
     const answers = await savedAnswers()
     expect(answers).toEqual([{ question_id: question.id, label: 'How did you hear about us?', type: 'single_choice', help_text: null, value: 'instagram', selected_choices: [{ id: 'instagram', label: 'Instagram' }] }])

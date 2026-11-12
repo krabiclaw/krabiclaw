@@ -6,7 +6,7 @@
  * actually asks for.
  */
 
-export const DETAIL_FIELDS = ['timezone', 'email', 'phone', 'country', 'state', 'city', 'address', 'zipCode'] as const
+export const DETAIL_FIELDS = ['timezone', 'email', 'phone', 'country', 'state', 'city', 'address', 'zipCode', 'assigned_member_id'] as const
 export type DetailField = typeof DETAIL_FIELDS[number]
 
 export const DETAIL_FIELD_TITLES: Readonly<Record<DetailField, string>> = {
@@ -18,6 +18,8 @@ export const DETAIL_FIELD_TITLES: Readonly<Record<DetailField, string>> = {
   city: 'City',
   address: 'Street address',
   zipCode: 'Postal code',
+  // Airbnb never knows who on the team looks after a home: the host always names the member.
+  assigned_member_id: 'Who looks after this home',
 }
 
 /**

@@ -13,7 +13,7 @@ test('a guest reply address round-trips to its entry and verifies only as the gu
   const address = await buildReplyToAddress(env, entry, { kind: 'guest' })
   const token = sign(`guest:${entry}`)
   assert.equal(address, `rg${entry.replaceAll('-', '')}${token}@reply.example.com`)
-  assert.deepEqual(parseReplyToAddress(env, address), { kind: 'guest', entryId: entry, token })
+  assert.deepEqual(parseReplyToAddress(env, address), { kind: 'guest', messageId: entry, token })
   assert.equal(await verifyReplyToken(env, entry, { kind: 'guest' }, token), true)
   assert.equal(await verifyReplyToken(env, entry, { kind: 'member', userId: 'owner' }, token), false)
   assert.throws(() => parseReplyToAddress(env, address.replace('@reply.example.com', '@other.example.com')), InboundEmailRejection)
@@ -27,7 +27,7 @@ test('a member reply address verifies only for its member', async () => {
   const address = await buildReplyToAddress(env, entry, { kind: 'member', userId: 'user-owner' })
   const token = sign(`member:${entry}:user-owner`)
   assert.ok(address.split('@')[0]!.length <= 64)
-  assert.deepEqual(parseReplyToAddress(env, address), { kind: 'member', entryId: entry, token })
+  assert.deepEqual(parseReplyToAddress(env, address), { kind: 'member', messageId: entry, token })
   assert.equal(await verifyReplyToken(env, entry, { kind: 'member', userId: 'user-owner' }, token), true)
   assert.equal(await verifyReplyToken(env, entry, { kind: 'member', userId: 'user-other' }, token), false)
   // A conversation id that is a 64-character hash is never put in an address.

@@ -5,13 +5,13 @@ import { devLoginHeaders, seededSiteHeaders, seededSiteURL, testBaseUrl } from '
 import { loginAs } from './helpers/auth'
 import { mcpData, mcpRequest } from './helpers/mcp'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
+import { seededTables } from './helpers/tables'
 import type { Product, PublicProduct } from '../../server/types/products'
 import type { InboxThread } from '../../server/domain/guest-threads/types'
 import type { TaskSection } from '../../server/domain/tasks'
 
-type NotificationRow = { template: string }
-type DeliveryRow = { channel: 'email' | 'whatsapp'; purpose: string; status: string }
-type NotificationState = { notifications: NotificationRow[]; deliveries: DeliveryRow[] }
+type DeliveryRow = { conversation_id: string; channel: 'email' | 'whatsapp'; purpose: string; status: string }
+type NotificationState = { deliveries: DeliveryRow[] }
 const executionHost = new URL(testBaseUrl()).hostname
 const writableEnvironment = ['localhost', '127.0.0.1'].includes(executionHost)
 
@@ -34,19 +34,21 @@ async function waitForNotifications(
   baseURL: string,
   organizationId: string,
   since: string,
+  conversationId: string,
   complete: (_state: NotificationState) => boolean,
 ) {
-  let state: NotificationState = { notifications: [], deliveries: [] }
+  let state: NotificationState = { deliveries: [] }
   await expect.poll(async () => {
     const response = await request.get(notificationUrl(baseURL, organizationId, since), { headers: devLoginHeaders() })
-    state = response.ok() ? await response.json() as NotificationState : { notifications: [], deliveries: [] }
+    expect(response.status(), await response.text()).toBe(200)
+    const { deliveries } = await response.json() as NotificationState
+    state = { deliveries: deliveries.filter(delivery => delivery.conversation_id === conversationId) }
     return complete(state)
   }, { timeout: 8_000 }).toBe(true)
   return state
 }
 
 function expectOwnerDispatch(state: NotificationState) {
-  expect(state.notifications.length).toBeGreaterThan(0)
   expect(state.deliveries.some(row => row.purpose === 'owner_alert' && row.status === 'sent')).toBe(true)
   expect(state.deliveries.some(row => row.purpose === 'guest_acknowledgement' && row.channel === 'email' && row.status === 'sent')).toBe(true)
   // Whatever channels this tenant does dispatch on, none of them may have failed.
@@ -157,41 +159,32 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     const response = await submission
     expect(response.status()).toBe(201)
     expect(response.request().postDataJSON()).toMatchObject({ guest_phone: '+66812345678' })
-    const booked = await response.json() as { request_id: string }
-    expect(booked.request_id).toEqual(expect.any(String))
-    const persisted = await request.get(`${testBaseUrl()}/api/dashboard/bookings/booking/${booked.request_id}`, {
+    const booked = await response.json() as { conversation_id: string }
+    expect(booked.conversation_id).toEqual(expect.any(String))
+    const persisted = await request.get(`${testBaseUrl()}/api/dashboard/bookings/booking/${booked.conversation_id}`, {
       params: { org: wheel.slug },
     })
     expect(persisted.status(), await persisted.text()).toBe(200)
     expect((await persisted.json()).booking).toMatchObject({
-      guestName: 'Pottery Journey Test', guestEmail: email, guestPhone: '+66812345678', requests: 'Please keep the two seats together.',
+      guest_name: 'Pottery Journey Test', guest_email: email, guest_phone: '+66812345678', notes: 'Please keep the two seats together.',
     })
     await expect(page).toHaveURL(/\/bookings\/confirmed/)
     await expect(page.locator('main')).toContainText(/booking|received|confirmed/i)
-    const state = await waitForNotifications(request, seededSiteURL('experience'), wheel.organizationId, since, state =>
-      state.notifications.some(row => row.template === 'new_booking')
-      && ownerAlertSent(state)
+    const state = await waitForNotifications(request, seededSiteURL('experience'), wheel.organizationId, since, booked.conversation_id, state =>
+      ownerAlertSent(state)
       && state.deliveries.some(row => row.purpose === 'guest_acknowledgement' && row.channel === 'email' && row.status === 'sent'),
     )
     expectOwnerDispatch(state)
   })
 
-  test('Ember & Slice restaurant reservation persists and creates log-only owner dispatch', async ({ page, request }, testInfo) => {
+  test('Ember & Slice table booking persists and creates log-only owner dispatch', async ({ page, request }, testInfo) => {
     const restaurant = seededTenant('restaurant')
     const brooklyn = restaurant.locations.brooklyn!
     const baseURL = seededSiteURL('restaurant')
     const since = new Date().toISOString()
     const email = `restaurant-reservation-${Date.now()}@playwright.example`
     const unlock = await acquireTenantMutationLock(testInfo, restaurant.organizationId)
-    const policyUrl = `${testBaseUrl()}/api/editor/organizations/${restaurant.organizationId}/locations/${brooklyn.id}/reservation-config`
-    let original: { duration_minutes: number | null; updated_at: string | null } | null | undefined
     try {
-      await loginAs(request, testBaseUrl(), 'user-e2e-kikuzuki-owner')
-      const read = await request.get(policyUrl)
-      expect(read.status(), await read.text()).toBe(200)
-      original = (await read.json()).config
-      const configured = await request.put(policyUrl, { data: { duration_minutes: 60, expected_updated_at: original?.updated_at ?? null } })
-      expect(configured.status(), await configured.text()).toBe(200)
       await openTenantPage(page, `${baseURL}/reservations`, seededSiteHeaders('restaurant'))
       await waitForNuxtHydration(page)
       await page.locator('article').filter({ has: page.getByRole('heading', { name: brooklyn.title, exact: true }) }).getByRole('button', { name: 'Request Reservation', exact: true }).click()
@@ -199,50 +192,43 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
       await page.getByLabel('Full name').fill('Restaurant Journey Test')
       await page.getByLabel('Email address').fill(email)
       await page.getByLabel(/Phone number/i).fill('+12025550123')
-      const submission = page.waitForResponse(response => response.request().method() === 'POST' && response.url().endsWith('/api/public/reservations'))
-      await page.getByLabel('Your details').getByRole('button', { name: /request reservation|ขอจองโต๊ะ/i }).click()
+      // The dining room's tables are booked as their product: the same booking every offering takes.
+      const submission = page.waitForResponse(response => response.request().method() === 'POST' && response.url().endsWith(`/api/public/products/${seededTables('brooklyn').slug}/book`))
+      await page.getByRole('button', { name: 'Confirm booking', exact: true }).click()
       const response = await submission
-      expect(response.status()).toBe(201)
-      const reservation: { id?: unknown; cancellationToken?: unknown; message?: unknown } = await response.json()
-      expect(reservation.message).toBe('Your reservation is confirmed.')
-      expect(reservation.id).toEqual(expect.any(String))
-      expect(reservation.cancellationToken).toEqual(expect.any(String))
-      if (typeof reservation.id !== 'string' || typeof reservation.cancellationToken !== 'string') {
-        throw new Error('Reservation response omitted its lookup credentials')
+      expect(response.status(), await response.text()).toBe(201)
+      const reservation: { conversation_id?: unknown; cancellation_token?: unknown; message?: unknown } = await response.json()
+      expect(reservation.message).toEqual(expect.stringMatching(/^Your reservation for .+ is confirmed\.$/u))
+      expect(reservation.conversation_id).toEqual(expect.any(String))
+      expect(reservation.cancellation_token).toEqual(expect.any(String))
+      if (typeof reservation.conversation_id !== 'string' || typeof reservation.cancellation_token !== 'string') {
+        throw new Error('The table booking response omitted its lookup credentials')
       }
-      // A booking and a reservation are read back through one route: what holds
-      // the seats differs, what the guest is shown does not.
-      const persisted = await request.get(`${baseURL}/api/public/booking-requests/${reservation.id}`, {
-        headers: { ...seededSiteHeaders('restaurant'), Authorization: `Bearer ${reservation.cancellationToken}` },
+      // Read back through the guest's receipt: a table, booked and confirmed.
+      const persisted = await request.get(`${baseURL}/api/public/booking-requests/${reservation.conversation_id}`, {
+        headers: { ...seededSiteHeaders('restaurant'), Authorization: `Bearer ${reservation.cancellation_token}` },
       })
       expect(persisted.status(), await persisted.text()).toBe(200)
-      const persistedBody: { booking?: { kind?: unknown; status?: unknown } } = await persisted.json()
-      expect(persistedBody.booking?.kind).toBe('reservation')
-      expect(persistedBody.booking?.status).toBe('confirmed')
-      await expect(page).toHaveURL(/\/reservations\/confirmed/)
+      const persistedBody: { booking?: { kind?: unknown; product_kind?: unknown; status?: unknown; location_id?: unknown } } = await persisted.json()
+      expect(persistedBody.booking).toMatchObject({ kind: 'booking', product_kind: 'table', status: 'confirmed', location_id: brooklyn.id })
+      await expect(page).toHaveURL(/\/bookings\/confirmed/)
       await expect(page.locator('main')).toContainText('Reservation confirmed')
       await expect(page.locator('main')).not.toContainText(/confirm your .* shortly/i)
-      const state = await waitForNotifications(request, baseURL, restaurant.organizationId, since, state =>
-        state.notifications.some(row => row.template === 'new_reservation')
-        && state.deliveries.some(row => row.purpose === 'owner_alert' && row.channel === 'whatsapp' && row.status === 'sent')
+      const state = await waitForNotifications(request, baseURL, restaurant.organizationId, since, reservation.conversation_id, state =>
+        ownerAlertSent(state)
         && state.deliveries.some(row => row.purpose === 'guest_acknowledgement' && row.channel === 'email' && row.status === 'sent'),
       )
       expectOwnerDispatch(state)
+
+      const cancellation = new URL('/bookings/cancel', baseURL)
+      cancellation.searchParams.set('id', reservation.conversation_id)
+      cancellation.hash = reservation.cancellation_token
+      await openTenantPage(page, cancellation.href, seededSiteHeaders('restaurant'))
+      await expect(page.getByRole('heading', { name: 'Cancel reservation', exact: true })).toBeVisible()
+      await expect(page.locator('main')).toContainText('Reservation for:')
+      await expect(page.locator('main')).toContainText('Restaurant Journey Test')
     } finally {
-      try {
-        if (original !== undefined) {
-          const current = await request.get(policyUrl)
-          expect(current.status(), await current.text()).toBe(200)
-          // A location that had no usable reservation policy is returned to
-          // disabled reservations, rather than writing an incomplete policy.
-          const restored = !original || original.duration_minutes === null
-            ? await request.delete(policyUrl)
-            : await request.put(policyUrl, { data: { duration_minutes: original.duration_minutes, expected_updated_at: (await current.json()).config.updated_at } })
-          expect(restored.status(), await restored.text()).toBe(200)
-        }
-      } finally {
-        await unlock()
-      }
+      await unlock()
     }
   })
 
@@ -256,11 +242,12 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     await page.getByLabel(/your message/i).fill('Please tell me more about private pottery classes.')
     const submission = page.waitForResponse(response => response.request().method() === 'POST' && response.url().endsWith('/api/public/contact'))
     await page.getByRole('button', { name: 'Send message', exact: true }).click()
-    expect((await submission).status()).toBe(201)
+    const response = await submission
+    expect(response.status()).toBe(201)
+    const { conversation_id } = await response.json() as { conversation_id: string }
     await expect(page).toHaveURL(/\/contact\/confirmed/)
-    const state = await waitForNotifications(request, seededSiteURL('experience'), seededTenant('experience').organizationId, since, state =>
-      state.notifications.some(row => row.template === 'new_contact_msg')
-      && ownerAlertSent(state)
+    const state = await waitForNotifications(request, seededSiteURL('experience'), seededTenant('experience').organizationId, since, conversation_id, state =>
+      ownerAlertSent(state)
       && state.deliveries.some(row => row.purpose === 'guest_acknowledgement' && row.channel === 'email' && row.status === 'sent'),
     )
     expectOwnerDispatch(state)
@@ -273,12 +260,11 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     // A guest names a SESSION, not a date and a time: the occurrence is a real
     // row, so there is nothing to re-derive and no slot to invent.
     const book = (name: string, email: string, sessionId: string) => request.post(`${baseURL}/api/public/products/${wheel.product.slug}/book`, {
-      headers, data: { guest_name: name, guest_email: email, party_size: 1, session_id: sessionId, idempotency_key: crypto.randomUUID() },
+      headers, data: { guest_name: name, guest_email: email, party_size: 1, product_session_id: sessionId, idempotency_key: crypto.randomUUID() },
     })
     expect((await book('Missing Session', 'past@playwright.example', '')).status()).toBe(400)
     expect((await book('Unknown Session', 'slot@playwright.example', 'session-that-does-not-exist')).status()).toBe(404)
     expect((await request.post(`${baseURL}/api/public/contact`, { headers, data: {} })).status()).toBe(400)
-    expect((await request.post(`${baseURL}/api/public/reservations`, { headers, data: {} })).status()).toBe(400)
     await openTenantPage(page, `${seededSiteURL('experience')}${wheel.pagePath}`, seededSiteHeaders('experience'))
     await waitForNuxtHydration(page)
     await page.getByRole('button', { name: 'Book now' }).first().click()
@@ -313,38 +299,39 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     const created = await submission
     expect(created.status()).toBe(201)
     expect(created.request().postDataJSON()).toMatchObject({ guest_phone: null })
-    const body = await created.json() as { request_id: string; cancellation_token: string }
+    const body = await created.json() as { conversation_id: string; cancellation_token: string }
     expect(JSON.stringify(body)).not.toContain('cancel-once@playwright.example')
     await loginAs(request, baseURL, 'user-e2e-pottery-owner')
-    const persisted = await request.get(`${baseURL}/api/dashboard/bookings/booking/${body.request_id}`, {
+    const persisted = await request.get(`${baseURL}/api/dashboard/bookings/booking/${body.conversation_id}`, {
       params: { org: wheel.slug },
     })
     expect(persisted.status(), await persisted.text()).toBe(200)
-    const persistedBooking = (await persisted.json()).booking as { guestName: string; guestPhone: string | null; bookingDate: string }
-    expect(persistedBooking).toMatchObject({ guestName: 'Cancel Once', guestPhone: null })
-    const threadURL = `${baseURL}/api/dashboard/organizations/${wheel.organizationId}/guest-threads/${body.request_id}`
+    const persistedBooking = (await persisted.json()).booking as { guest_name: string; guest_phone: string | null; booking_date: string }
+    expect(persistedBooking).toMatchObject({ guest_name: 'Cancel Once', guest_phone: null })
+    const threadURL = `${baseURL}/api/dashboard/organizations/${wheel.organizationId}/guest-threads/${body.conversation_id}`
     const pendingThread = await request.get(threadURL)
     expect(pendingThread.status(), await pendingThread.text()).toBe(200)
-    expect((await pendingThread.json() as { thread: InboxThread }).thread).toMatchObject({ id: body.request_id, guestName: 'Cancel Once', recordKind: 'booking' })
+    expect((await pendingThread.json() as { thread: InboxThread }).thread).toMatchObject({ id: body.conversation_id, title: 'Cancel Once', record_kind: 'booking' })
     // Whether a reply is owed is the ledger's, which MCP reads out; the inbox view keeps it on the server.
     const conversationLedger = async () => {
-      const response = await mcpRequest(request, baseURL, { method: 'tools/call', toolName: 'get_guest_conversation', args: { organization_id: wheel.organizationId, request_id: body.request_id } })
+      const response = await mcpRequest(request, baseURL, { method: 'tools/call', toolName: 'get_conversation', args: { organization_id: wheel.organizationId, conversation_id: body.conversation_id } })
       expect(response.status()).toBe(200)
-      return mcpData<{ conversation: { needs_reply: boolean; operational_record: { status: string } | null; entries: Array<{ id: string; event: string | null }> } }>(await response.json()).conversation
+      return mcpData<{ guest: { needs_reply: boolean; operational_record: { status: string } | null; messages: Array<{ id: string; event: string | null }> } }>(await response.json()).guest
     }
-    // The booking carries no question from the guest: no reply is owed, and Today holds no task for it (Calendar has it).
+    // The booking carries no question from the guest: no reply is owed, and Today holds no reply task for it.
     expect((await conversationLedger()).needs_reply).toBe(false)
     const todayBefore = await request.get(`${baseURL}/api/dashboard/today`, { params: { org: wheel.slug } })
     expect(todayBefore.status(), await todayBefore.text()).toBe(200)
     const todayBeforePayload = await todayBefore.json() as { tasks: TaskSection[] }
-    expect(todayBeforePayload.tasks.flatMap(section => section.tasks).filter(task => task.requestId === body.request_id)).toEqual([])
-    const day = persistedBooking.bookingDate
+    const todayBeforeTasks = todayBeforePayload.tasks.flatMap(section => section.tasks).filter(task => task.conversation_id === body.conversation_id)
+    expect(todayBeforeTasks.filter(task => task.kind === 'guest_reply')).toEqual([])
+    const day = persistedBooking.booking_date
     // Calendar owns confirmed commitments; quests do not repeat its agenda.
     const scheduleParams = { org: wheel.slug, from: day, to: day }
     const scheduleBefore = await request.get(`${baseURL}/api/dashboard/agenda`, { params: scheduleParams })
     expect(scheduleBefore.status(), await scheduleBefore.text()).toBe(200)
-    expect((await scheduleBefore.json() as { items: Array<{ id: string }> }).items.map(item => item.id)).toContain(`booking:${body.request_id}`)
-    const cancelURL = `${baseURL}/api/public/booking-requests/${body.request_id}/cancel`
+    expect((await scheduleBefore.json() as { items: Array<{ id: string }> }).items.map(item => item.id)).toContain(`booking:${body.conversation_id}`)
+    const cancelURL = `${baseURL}/api/public/booking-requests/${body.conversation_id}/cancel`
     const authHeaders = { ...headers, Authorization: `Bearer ${body.cancellation_token}` }
     const receiptURL = cancelURL.replace(/\/cancel$/, '')
     const before = await request.get(receiptURL, { headers: authHeaders })
@@ -364,12 +351,16 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     // A cancel and its replay are one cancellation: one ledger entry, said once in the conversation.
     const cancelledLedger = await conversationLedger()
     expect(cancelledLedger).toMatchObject({ needs_reply: false, operational_record: { status: 'cancelled' } })
-    const cancelEntries = cancelledLedger.entries.filter(entry => entry.event === 'booking.cancel')
+    const cancelEntries = cancelledLedger.messages.filter(entry => entry.event === 'booking.cancel')
     expect(cancelEntries).toHaveLength(1)
     expect(thread.stream.filter(item => item.type === 'event' && item.id === cancelEntries[0]!.id)).toMatchObject([{ text: expect.stringMatching(/ canceled the booking$/) }])
+    const todayAfter = await request.get(`${baseURL}/api/dashboard/today`, { params: { org: wheel.slug } })
+    expect(todayAfter.status(), await todayAfter.text()).toBe(200)
+    const todayAfterPayload = await todayAfter.json() as { tasks: TaskSection[] }
+    expect(todayAfterPayload.tasks.flatMap(section => section.tasks).filter(task => task.conversation_id === body.conversation_id && task.status === 'open')).toEqual([])
     const scheduleAfter = await request.get(`${baseURL}/api/dashboard/agenda`, { params: scheduleParams })
     expect(scheduleAfter.status(), await scheduleAfter.text()).toBe(200)
-    expect((await scheduleAfter.json() as { items: Array<{ id: string }> }).items.some(item => item.id === `booking:${body.request_id}`)).toBe(false)
+    expect((await scheduleAfter.json() as { items: Array<{ id: string }> }).items.some(item => item.id === `booking:${body.conversation_id}`)).toBe(false)
     expect((await request.post(cancelURL, {
       headers: { ...headers, Authorization: 'Bearer invalid-cancellation-token' },
     })).status()).toBe(404)
@@ -386,6 +377,65 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
       expect(await denied.json()).toEqual({ error: 'Booking not found' })
     }
   })
+
+  test('two class bookings share one prep task and keep one follow-up each', async ({ request }) => {
+    const baseURL = testBaseUrl()
+    const wheel = wheelClass()
+    const locationId = seededTenant('experience').locations['ao-nang']!.id
+    await loginAs(request, baseURL, 'user-e2e-pottery-owner')
+    const call = async <T>(toolName: string, args: Record<string, unknown>): Promise<T> => {
+      const response = await mcpRequest(request, baseURL, { method: 'tools/call', toolName, args: { organization_id: wheel.organizationId, ...args } })
+      expect(response.status()).toBe(200)
+      return mcpData<T>(await response.json())
+    }
+    // A dedicated afternoon occurrence keeps other journeys' morning bookings out of this session.
+    const startsAt = new Date(Date.now() + 2 * 86_400_000)
+    startsAt.setUTCHours(8, 0, 0, 0)
+    const { sessions: [session] } = await call<{ sessions: Array<{ id: string }> }>('create_product_session', {
+      product_id: wheel.product.id, location_id: locationId, starts_at: startsAt.toISOString(),
+      ends_at: new Date(startsAt.getTime() + 7_200_000).toISOString(), capacity: 8, idempotency_key: crypto.randomUUID(),
+    })
+    const sessionId = session!.id
+    const headers = { ...devLoginHeaders(), ...seededSiteHeaders('experience') }
+    const book = async (index: number, partySize: number) => {
+      const response = await request.post(`${baseURL}/api/public/products/${wheel.product.slug}/book`, {
+        headers, data: { product_session_id: sessionId, party_size: partySize, guest_name: `Class Prep Guest ${index}`,
+          guest_email: `class-prep-${index}@playwright.example`, idempotency_key: crypto.randomUUID() },
+      })
+      expect(response.status(), await response.text()).toBe(201)
+      return await response.json() as { booking_id: string; conversation_id: string; cancellation_token: string }
+    }
+    const tasks = async (kind: string, status: 'open' | 'cancelled' = 'open') => {
+      const { sections } = await call<{ sections: TaskSection[] }>('list_tasks', {
+        range: status === 'open' ? 'upcoming' : 'today', status, kind, assignee: 'all',
+      })
+      return sections.flatMap(section => section.tasks)
+    }
+    const prepTasks = async (status?: 'cancelled') => (await tasks('consultation_prep', status)).filter(task => task.product_session_id === sessionId)
+    const first = await book(1, 3)
+    const prep = await prepTasks()
+    expect(prep).toMatchObject([{ kind: 'consultation_prep', status: 'open', booking_id: null, path: expect.stringContaining(`/calendar/sessions/${sessionId}?`) }])
+    const second = await book(2, 1)
+    expect(await prepTasks()).toMatchObject([{ id: prep[0]!.id, version: prep[0]!.version }])
+    const bookingIds = [first.booking_id, second.booking_id].sort()
+    const followUps = async () => (await tasks('consultation_follow_up')).filter(task => bookingIds.includes(task.booking_id ?? '')).map(task => task.booking_id).sort()
+    expect(await followUps()).toEqual(bookingIds)
+    const cancel = async (booking: typeof first) => {
+      const cancelled = await request.post(`${baseURL}/api/public/booking-requests/${booking.conversation_id}/cancel`, {
+        headers: { ...headers, Authorization: `Bearer ${booking.cancellation_token}` },
+      })
+      expect(cancelled.status(), await cancelled.text()).toBe(200)
+      expect((await call<{ record: { status: string } }>('get_product_booking', { booking_id: booking.booking_id })).record.status).toBe('cancelled')
+    }
+    await cancel(first)
+    expect(await prepTasks()).toMatchObject([{ id: prep[0]!.id }])
+    expect(await followUps()).toEqual([second.booking_id])
+    await cancel(second)
+    expect(await prepTasks()).toEqual([])
+    expect(await prepTasks('cancelled')).toMatchObject([{ id: prep[0]!.id }])
+    expect(await followUps()).toEqual([])
+  })
+
 })
 
 for (const seeded of [
@@ -427,15 +477,15 @@ for (const seeded of [
         const loaded = await page.request.get(`${editor}/${product.id}`)
         expect(loaded.status(), await loaded.text()).toBe(200)
         const savedProduct = (await loaded.json() as { product: Product }).product
-        const concurrent = await page.request.patch(`${editor}/${product.id}`, { data: { description, expected_updated_at: savedProduct.updated_at } })
+        const concurrent = await page.request.patch(`${editor}/${product.id}`, { data: { description, updated_at: savedProduct.updated_at } })
         expect(concurrent.status(), await concurrent.text()).toBe(200)
         const concurrentProduct = (await concurrent.json() as { product: Product }).product
         const refusedSave = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === `${editor}/${product.id}`)
         await page.getByRole('button', { name: 'Save', exact: true }).click()
         const refusedResponse = await refusedSave
         expect(refusedResponse.status(), await refusedResponse.text()).toBe(409)
-        expect(await refusedResponse.json()).toMatchObject({ data: { code: 'PRODUCT_UPDATE_CONFLICT', field: 'expected_updated_at', product_id: product.id } })
-        expect(refusedResponse.request().postDataJSON()).toEqual({ details_mode: 'merge', details: { dietary_notes: [detail] }, expected_updated_at: savedProduct.updated_at })
+        expect(await refusedResponse.json()).toMatchObject({ data: { code: 'PRODUCT_UPDATE_CONFLICT', field: 'updated_at', product_id: product.id } })
+        expect(refusedResponse.request().postDataJSON()).toEqual({ details_mode: 'merge', details: { dietary_notes: [detail] }, updated_at: savedProduct.updated_at })
         const retained = page.locator('#dashboard-panel-product-attribute')
         await expect(retained.getByText(detail, { exact: true })).toBeVisible()
         const unchanged = await page.request.get(`${editor}/${product.id}`)

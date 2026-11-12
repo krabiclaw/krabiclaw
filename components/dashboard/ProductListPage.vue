@@ -58,6 +58,7 @@ const KINDS: Array<{ value: Exclude<CatalogKind, 'all'>; label: string }> = [
   { value: 'experience', label: 'Experiences' },
   { value: 'service', label: 'Services' },
   { value: 'stay', label: 'Places to stay' },
+  { value: 'table', label: 'Tables' },
 ]
 const grouped = computed(() => new Map(groupProductsByCollection(catalog.products.value, catalog.collections.value).map(group => [group.id, group])))
 // A section is the menu's when it holds dishes or nothing yet.

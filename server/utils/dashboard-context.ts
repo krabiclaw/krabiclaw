@@ -6,7 +6,7 @@ import type { H3Event } from 'nitro'
 import { cloudflareEnv } from '~/server/utils/api-response'
 import { getAuthSession, type CloudflareEnv } from '~/server/utils/auth'
 import { queryAll, queryFirst, type DbClient } from '~/server/db'
-import { assertOrganizationWideAccess, assignedResponsibilitySql, ASSIGNED_SERVICE_SQL, memberAccessPrincipal, resolveUserOrganization, type ResolvedMembership } from '~/server/utils/member-access'
+import { assertOrganizationWideAccess, ASSIGNED_SERVICE_SQL, memberAccessPrincipal, resolveUserOrganization, type ResolvedMembership } from '~/server/utils/member-access'
 import { getOrganizationPlan } from '~/server/utils/billing-access'
 
 import { parsePostalAddress } from '~/utils/postal-address'
@@ -112,8 +112,6 @@ export interface DashboardLocationContextRow {
   google_place_id: string | null
   google_review_url: string | null
   timezone: string | null
-  assigned_member_id: string | null
-  assigned_team_id: string | null
 }
 
 export interface DashboardContextOptions {
@@ -327,8 +325,8 @@ export async function getDashboardLocationContext(event: H3Event, locationId: st
     SELECT bl.id, bl.organization_id, bl.slug, bl.title, bl.address, bl.stay_map_sharing, bl.phone, bl.website_url, bl.maps_url,
            bl.latitude, bl.longitude, bl.opening_hours, bl.categories, bl.rating, bl.review_count, bl.status,
            bl.last_synced_at, bl.description, bl.short_description, bl.special_hours, bl.price_level, bl.email,
-           bl.google_place_id, bl.google_review_url, bl.created_at, bl.updated_at, bl.timezone, bl.max_capacity,
-           bl.seo_title, bl.seo_description, bl.canonical_url, bl.assigned_member_id, bl.assigned_team_id
+           bl.google_place_id, bl.google_review_url, bl.created_at, bl.updated_at, bl.timezone,
+           bl.seo_title, bl.seo_description, bl.canonical_url
     FROM business_locations bl
     WHERE bl.id = ?
     LIMIT 1
@@ -371,9 +369,9 @@ export async function listDashboardLocations(
     WHERE l.organization_id = ? ${includeInactive ? '' : "AND l.status = 'active'"}
       ${assignedUserId ? `AND (EXISTS (SELECT 1 FROM products p WHERE p.organization_id = l.organization_id AND (${ASSIGNED_SERVICE_SQL})
         AND (EXISTS (SELECT 1 FROM product_locations pl WHERE pl.organization_id = p.organization_id AND pl.product_id = p.id AND pl.location_id = l.id)
-          OR EXISTS (SELECT 1 FROM product_sessions ps WHERE ps.organization_id = p.organization_id AND ps.product_id = p.id AND ps.location_id = l.id))) OR ${assignedResponsibilitySql('l')})` : ''}
+          OR EXISTS (SELECT 1 FROM product_sessions ps WHERE ps.organization_id = p.organization_id AND ps.product_id = p.id AND ps.location_id = l.id))))` : ''}
     ORDER BY l.title ASC
-  `, assignedUserId ? [organizationId, assignedUserId, assignedUserId, assignedUserId, assignedUserId] : [organizationId])
+  `, assignedUserId ? [organizationId, assignedUserId] : [organizationId])
   const [media, organizationPlacements] = await Promise.all([
     loadPublicSocialMedia(db, organizationId, 'business_location', locations.map(location => location.id)),
     readMediaPlacements(db, { organizationId, ownerType: 'organization', ownerIds: [organizationId], slot: 'social_share' }),

@@ -17,7 +17,7 @@ import { setProductBookingConfig } from '../../server/utils/availability.ts'
 const ORG = 'org-services'
 const ACTOR = { actorId: 'owner' }
 const NOW = '2026-10-06T00:00:00.000Z'
-const SERVICE_PAGE = { title: 'Family Law', pageType: 'custom' as const, recipe: null, blocks: [] }
+const SERVICE_PAGE = { title: 'Family Law', page_type: 'custom' as const, recipe: null, blocks: [] }
 
 async function boot(plan: 'growth' | null) {
   const runtime = new Miniflare({ workers: [{ config: {
@@ -169,7 +169,7 @@ test('a refused page creates no product, and one page per product holds at the w
     // Two pages prepared for one product, each passing its own checks before
     // either is written: the database keeps the second from binding.
     const prepare = (path: string) => prepareTenantPageCreate(db, { organizationId: ORG, userId: ACTOR.actorId, env,
-      data: { ...SERVICE_PAGE, title: 'Probate', path, productId: product.id } })
+      data: { ...SERVICE_PAGE, title: 'Probate', path, product_id: product.id } })
     const first = await prepare('/services/probate')
     const second = await prepare('/services/probate-and-estate')
     await executeBatch(db, first.queries, { operation: 'Create tenant page' })
@@ -225,11 +225,11 @@ test('page edits retain actor and meaningful revisions while unchanged saves ret
   const { runtime, db, env } = await boot('growth')
   try {
     const { page } = await createTenantPage(db, { organizationId: ORG, userId: ACTOR.actorId, env, data: {
-      path: '/services/foundation', title: 'Foundation', summary: 'Keep this summary', pageType: 'custom', recipe: null, sortOrder: 0,
+      path: '/services/foundation', title: 'Foundation', summary: 'Keep this summary', page_type: 'custom', recipe: null, sort_order: 0,
       blocks: [{ type: 'markdown', data: { markdown: 'Original practice information.', editor_mode: 'rich' } }],
     } })
-    const data = { path: page.path, title: 'Foundation updated', pageType: page.page_type, recipe: page.recipe,
-      sortOrder: page.sort_order, blocks: page.blocks, expectedUpdatedAt: page.document.updated_at }
+    const data = { path: page.path, title: 'Foundation updated', page_type: page.page_type, recipe: page.recipe,
+      sort_order: page.sort_order, blocks: page.blocks, updated_at: page.document.updated_at }
     await updateTenantPage(db, page.id, { userId: ACTOR.actorId, scope: { organizationId: ORG }, env, data })
     const read = await getPublishedTenantPage(db, ORG, page.path)
     assert.equal(read?.title, 'Foundation updated')
@@ -244,7 +244,7 @@ test('page edits retain actor and meaningful revisions while unchanged saves ret
     assert.equal(savedReceipts[0].afterState.updated_at, page.document.updated_at)
     assert.equal(savedReceipts[1].afterState.updated_at, read!.document.updated_at)
     const current = await getTenantPageForEditor(db, page.id, { organizationId: ORG })
-    await updateTenantPage(db, page.id, { userId: ACTOR.actorId, scope: { organizationId: ORG }, env, data: { ...data, expectedUpdatedAt: current.document.updated_at } })
+    await updateTenantPage(db, page.id, { userId: ACTOR.actorId, scope: { organizationId: ORG }, env, data: { ...data, updated_at: current.document.updated_at } })
     assert.equal((await getTenantPageForEditor(db, page.id)).document.updated_at, current.document.updated_at)
     assert.deepEqual(await receipts(), savedReceipts)
   } finally { await runtime.dispose() }

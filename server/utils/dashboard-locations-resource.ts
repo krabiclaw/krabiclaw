@@ -37,7 +37,7 @@ export async function listDashboardLocationsResource(
     locations: locations.map(location => ({
       ...location,
       address: parsePostalAddress(location.address),
-      imageUrl: pictures.get(location.id)?.imageUrl ?? null,
+      image_url: pictures.get(location.id)?.imageUrl ?? null,
     })),
   }
 }

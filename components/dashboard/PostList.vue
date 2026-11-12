@@ -2,6 +2,7 @@
   <div>
     <DashboardListEditor
       v-model:editing="editing"
+      :editable="false"
       title="Posts"
       :items="listItems"
       :loading="status === 'pending'"
@@ -19,24 +20,45 @@
       </template>
 
       <template #item="{ item }">
-        <span class="flex w-full items-center gap-4 text-left" :data-testid="`post-${item.id}`">
-          <!--
-            The picture leads, and a post without one keeps the same footprint
-            so the list does not reflow between rows that have one and rows
-            that do not.
-          -->
-          <span class="size-12 shrink-0 overflow-hidden rounded-lg bg-muted">
-            <img v-if="coverUrl(item.row)" :src="coverUrl(item.row)!" :alt="item.title" class="h-full w-full object-cover">
-            <span v-else class="flex h-full w-full items-center justify-center">
-              <UIcon name="i-lucide-file-text" class="size-4 text-muted" />
+        <span class="flex w-full items-start gap-4 text-left py-1" :data-testid="`post-${item.id}`">
+          <!-- The picture leads -->
+          <span class="size-16 sm:size-20 shrink-0 overflow-hidden rounded-xl bg-neutral-100 dark:bg-neutral-800 border border-neutral-200/70 dark:border-neutral-800">
+            <img v-if="coverUrl(item.row)" :src="coverUrl(item.row)!" :alt="item.title" class="size-full object-cover">
+            <span v-else class="flex size-full items-center justify-center">
+              <UIcon name="i-lucide-file-text" class="size-6 text-neutral-400 dark:text-neutral-500" />
             </span>
           </span>
-          <span class="min-w-0 flex-1">
-            <span class="block truncate text-sm font-semibold text-highlighted">{{ item.title }}</span>
-            <span class="mt-1 flex items-center gap-2 truncate text-sm text-muted">
-              <span class="truncate">{{ item.summary }}</span>
-              <UIcon v-for="channel in item.channels" :key="channel" :name="channel === 'facebook' ? 'i-logos-facebook' : 'i-skill-icons-instagram'" class="size-3.5 shrink-0" :aria-label="`Published on ${channel}`" />
-            </span>
+          <span class="min-w-0 flex-1 space-y-1">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="truncate text-base font-semibold text-highlighted">{{ item.title }}</span>
+              <span
+                class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
+                :class="item.row.visibility === 'unlisted' ? 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400' : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-400'"
+              >
+                {{ item.row.visibility === 'unlisted' ? 'Unlisted' : 'Listed' }}
+              </span>
+              <span
+                v-if="item.row.status === 'draft'"
+                class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-400"
+              >
+                Draft
+              </span>
+            </div>
+            <!-- Author & Channels -->
+            <div class="flex items-center gap-2 text-xs sm:text-sm text-muted flex-wrap">
+              <span v-if="authorLabel(item.row)">By {{ authorLabel(item.row) }}</span>
+              <span v-if="authorLabel(item.row) && item.channels.length">·</span>
+              <span v-if="item.channels.length" class="flex items-center gap-1.5">
+                <UIcon v-for="channel in item.channels" :key="channel" :name="channel === 'facebook' ? 'i-logos-facebook' : 'i-skill-icons-instagram'" class="size-3.5 shrink-0" :aria-label="`Published on ${channel}`" />
+              </span>
+            </div>
+            <!-- Updated & Published -->
+            <div class="flex items-center gap-2 text-xs text-muted flex-wrap">
+              <span>Updated {{ formatDate(item.row.updated_at) }}</span>
+              <span>·</span>
+              <span v-if="item.row.published_at">Published {{ formatDate(item.row.published_at) }}</span>
+              <span v-else class="italic">Not published</span>
+            </div>
           </span>
         </span>
       </template>
@@ -171,7 +193,14 @@ function coverUrl(post: ApiRecord): string | null {
   return cover?.thumbnail_url ?? null
 }
 
-function formatDate(iso: string) {
+function authorLabel(post: ApiRecord): string | null {
+  if (typeof post.author_name === 'string' && post.author_name.trim()) return post.author_name.trim()
+  if (post.author && typeof post.author === 'object' && 'name' in post.author && typeof post.author.name === 'string') return post.author.name
+  if (typeof post.author === 'string') return post.author
+  return null
+}
+
+function formatDate(iso?: string | null) {
   if (!iso) return ''
   return formatTimestamp(iso, 'en', 'UTC', { dateStyle: 'medium' })
 }

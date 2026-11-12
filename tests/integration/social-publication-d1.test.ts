@@ -490,7 +490,7 @@ test('publication: one result and one external post per target; a failure is the
       assert.equal(fact.event, 'post.publication')
       assert.equal(fact.subject.kind, 'post_publication')
       assert.equal(fact.subject.id, fact.source.id)
-      assert.deepEqual(fact.actor, { kind: 'member', userId: 'publisher' })
+      assert.deepEqual(fact.actor, { kind: 'member', user_id: 'publisher' })
       assert.equal(fact.state, 'published')
       assert.equal(fact.verification.status, 'verified')
     }
@@ -557,7 +557,7 @@ test('publication: one result and one external post per target; a failure is the
       WHERE p.post_id = ? AND p.channel = 'facebook'`).bind(third.post.id).first<{ actor_user_id: string }>()
     assert.equal(retryInitiator?.actor_user_id, 'publisher')
     const retriedFact = (await progress()).outcomes.find(fact => fact.source.table === 'post_publications' && fact.source.id === retried.outcomes[0]!.publication_id)
-    assert.deepEqual(retriedFact?.actor, { kind: 'member', userId: 'publisher' })
+    assert.deepEqual(retriedFact?.actor, { kind: 'member', user_id: 'publisher' })
     assert.equal(retriedFact?.verification.status, 'verified')
     const attempts = await db.prepare(`SELECT actor_user_id, payload_json FROM activity_entries WHERE event_name = 'post.publication_started'
       AND json_extract(payload_json, '$.metadata.post_id') = ?`).bind(third.post.id).all<{ actor_user_id: string; payload_json: string }>()
@@ -667,7 +667,7 @@ test('publication: one result and one external post per target; a failure is the
 
     // After publication, local edits are allowed and nothing is re-sent; the management view says the website copy changed.
     const edited = await mcp('update_post', {
-      post_id: racing.post.id, body: 'Edited later', expected_updated_at: (await getPost(db, env, 'org-a', racing.post.id))!.updated_at,
+      post_id: racing.post.id, body: 'Edited later', updated_at: (await getPost(db, env, 'org-a', racing.post.id))!.updated_at,
     })
     const editedPost = (await getPost(db, env, 'org-a', racing.post.id))!
     assert.equal(editedPost.body, 'Edited later')
@@ -885,7 +885,7 @@ test('opportunity MCP tools preserve saved decisions during incomplete social re
     assert(partial.issues.every(issue => /Social connection status for (facebook|instagram) could not be read:.*Network connection lost/.test(issue)))
     assert(!partial.opportunities.some(item => ids.includes(item.id) || /^(Reconnect your social account|Capture a new business photo)/.test(item.title)))
     await assert.rejects(tool('accept_opportunity', { opportunity_id: open }), (error: unknown) => {
-      assert.deepEqual(asMcpError(error).data, { status: 503, code: 'OPPORTUNITY_EVIDENCE_UNAVAILABLE', operation_completed: false })
+      assert.deepEqual(asMcpError(error).data, { status: 503, code: 'OPPORTUNITY_EVIDENCE_UNAVAILABLE', operation_completed: false, field: 'opportunity_id' })
       return true
     })
     assert.deepEqual(await status(open), { status: 'open', available_at: null })
@@ -901,7 +901,7 @@ test('opportunity MCP tools preserve saved decisions during incomplete social re
     meta.fault('dropped', request => request.path.endsWith('/assigned_pages'))
     meta.fault('dropped', request => request.host === 'graph.instagram.com' && request.path.endsWith('/me'))
     await assert.rejects(tool('accept_opportunity', { opportunity_id: articleWork.id }), (error: unknown) => {
-      assert.deepEqual(asMcpError(error).data, { status: 409, code: 'OPPORTUNITY_CHANGED' })
+      assert.deepEqual(asMcpError(error).data, { status: 409, code: 'OPPORTUNITY_CHANGED', field: 'opportunity_id' })
       return true
     })
 

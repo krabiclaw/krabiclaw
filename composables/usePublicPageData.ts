@@ -5,7 +5,7 @@
 // and route loaders keep persistent chrome and route content on one contract.
 //
 // Usage (in a page):
-//   const { getField, getHero, media, qaList, ... } = await usePublicPageData()
+//   const { getField, getHero, media, qa_list, ... } = await usePublicPageData()
 import { onMounted, watch } from "vue";
 import {
   usePublicPageRequest,
@@ -104,11 +104,11 @@ export const usePublicPageData = async (options: {
     onMounted(() => void asyncData.execute());
   }
   const { data, error, pending, refresh } = asyncData
-  const localeRepresentations = useState<PublicLocaleRepresentation[]>('public-locale-representations', () => [])
+  const locale_representations = useState<PublicLocaleRepresentation[]>('public-locale-representations', () => [])
   if (options.routeOwned !== false) {
     watch(
-      () => data.value?.localeRepresentations,
-      representations => { localeRepresentations.value = representations ?? [] },
+      () => data.value?.locale_representations,
+      representations => { locale_representations.value = representations ?? [] },
       { immediate: true },
     )
   }
@@ -116,9 +116,9 @@ export const usePublicPageData = async (options: {
   // Persistent chrome comes from the stable shell. Route-owned collections
   // come from the keyed page response and change with navigation.
   const { locations, config, organization, sections } = shell;
-  const googleMaps = computed(() => ({
-    ...(shell.googleMaps.value ?? {}),
-    reviews: data.value?.globalReviews ?? [],
+  const google_maps = computed(() => ({
+    ...(shell.google_maps.value ?? {}),
+    reviews: data.value?.global_reviews ?? [],
   }))
   const products = computed(() => data.value?.products ?? []);
   const collections = computed(() => data.value?.collections ?? []);
@@ -154,18 +154,17 @@ export const usePublicPageData = async (options: {
   });
 
   // ── Location reviews preview (3 items) ───────────────────
-  const locationReviews = computed(() => (data.value?.locationReviews ?? []) as ApiRecord[]);
+  const location_reviews = computed(() => (data.value?.location_reviews ?? []) as ApiRecord[]);
 
   // ── Full page datasets (types A / E / F) ─────────────────
-  const reviewsAggregate = computed(() => (data.value?.reviewsAggregate ?? null) as ApiRecord | null);
-  const reviewsList = computed(() => (data.value?.reviewsList ?? []) as ApiRecord[]);
+  const reviews_aggregate = computed(() => (data.value?.reviews_aggregate ?? null) as ApiRecord | null);
+  const reviews_list = computed(() => (data.value?.reviews_list ?? []) as ApiRecord[]);
   const media = computed(() => (data.value?.media ?? []) as ApiRecord[]);
-  const qaList = computed(() => (data.value?.qaList ?? []) as ApiRecord[]);
-  const blogPost = computed(() => (data.value?.blogPost ?? null) as ApiRecord | null);
+  const qa_list = computed(() => (data.value?.qa_list ?? []) as ApiRecord[]);
+  const blog_post = computed(() => (data.value?.blog_post ?? null) as ApiRecord | null);
   const tenantPage = computed(() => data.value?.tenant_page ?? null);
 
-  const reservationPolicyByLocation = computed(() => data.value?.reservationPolicyByLocation ?? {});
-  const reservationQuestionsByLocation = computed(() => data.value?.reservationQuestionsByLocation ?? {});
+  const table_policy_summaries = computed(() => data.value?.table_policy_summaries ?? {});
 
   // ── Content ───────────────────────────────────────────────
   const contentMap = computed(() => {
@@ -235,7 +234,7 @@ export const usePublicPageData = async (options: {
     if (asyncData.error.value) throwPublicPageError(asyncData.error.value)
   }
   if (options.routeOwned !== false) {
-    localeRepresentations.value = data.value?.localeRepresentations ?? []
+    locale_representations.value = data.value?.locale_representations ?? []
   }
   await shell.ready
   if (options.routeOwned !== false && shell.error.value) throwPublicPageError(shell.error.value)
@@ -249,16 +248,15 @@ export const usePublicPageData = async (options: {
     location,
     sections,
     config,
-    googleMaps,
-    locationReviews,
-    reviewsAggregate,
-    reviewsList,
+    google_maps,
+    location_reviews,
+    reviews_aggregate,
+    reviews_list,
     media,
-    qaList,
-    blogPost,
+    qa_list,
+    blog_post,
     tenantPage,
-    reservationPolicyByLocation,
-    reservationQuestionsByLocation,
+    table_policy_summaries,
     getField,
     getHero,
     contentMap,
@@ -266,6 +264,6 @@ export const usePublicPageData = async (options: {
     productsByCollection,
     collections,
     error,
-    localeRepresentations,
+    locale_representations,
   };
 };

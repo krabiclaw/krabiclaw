@@ -24,6 +24,7 @@ export type IntegrationProduct =
   | 'google-analytics'
   | 'google-search-console'
   | 'google-ads'
+  | 'meta-ads'
   | 'facebook'
   | 'instagram'
   | 'discord'
@@ -38,6 +39,7 @@ const PROVIDER: Record<IntegrationProduct, IntegrationProvider> = {
   'google-analytics': 'google_analytics',
   'google-search-console': 'google_search_console',
   'google-ads': 'google_ads',
+  'meta-ads': 'meta_ads',
   'facebook': 'facebook',
   'instagram': 'instagram',
   'discord': 'discord',
@@ -48,7 +50,7 @@ export async function releaseIntegration(
   organizationId: string,
   product: IntegrationProduct,
 ): Promise<ReleaseIntegrationResult> {
-  if (product === 'google-ads') await requireRecordedManagedSpend(env.DB, env, organizationId)
+  if (product === 'google-ads' || product === 'meta-ads') await requireRecordedManagedSpend(env.DB, env, organizationId, product)
   const released = await deleteIntegration(env.DB, organizationId, PROVIDER[product])
 
   // Zaraz serves the measurement id of connected sites, so losing Analytics

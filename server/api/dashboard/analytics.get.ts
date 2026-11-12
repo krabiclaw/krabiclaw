@@ -8,8 +8,8 @@ export default defineHandler(async (event) => {
   const query = getQuery(event)
   try {
     return jsonResponse(await loadDashboardOrganizationAnalytics(event, {
-      startDate: typeof query.startDate === 'string' ? query.startDate : undefined,
-      endDate: typeof query.endDate === 'string' ? query.endDate : undefined,
+      startDate: typeof query.start_date === 'string' ? query.start_date : undefined,
+      endDate: typeof query.end_date === 'string' ? query.end_date : undefined,
     }))
   } catch (error) {
     if (error instanceof z.ZodError) {

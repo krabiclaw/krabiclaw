@@ -99,7 +99,7 @@ async function main() {
   const postUpdate = await mcp(headers, 'update_post', {
     organization_id: organizationId,
     post_id: postId,
-    expected_updated_at: toolData(post.body)?.post?.updated_at,
+    updated_at: toolData(post.body)?.post?.updated_at,
     title: 'MCP Ops Post Updated',
     body: 'Post updated by MCP ops checker',
   })
@@ -115,7 +115,7 @@ async function main() {
   const postPublish = await mcp(headers, 'publish_post', {
     organization_id: organizationId,
     post_id: postId,
-    expected_updated_at: updatedAt,
+    updated_at: updatedAt,
     targets: [{ channel: 'organization' }],
   })
   expectSuccess('publish_post succeeds', postPublish)
@@ -127,7 +127,7 @@ async function main() {
     const facebookPublish = await mcp(headers, 'publish_post', {
       organization_id: organizationId,
       post_id: postId,
-      expected_updated_at: toolData(postPublish.body)?.updated_at,
+      updated_at: toolData(postPublish.body)?.updated_at,
       targets: [{ channel: 'organization' }, { channel: 'facebook', target_id: 'no-page-connected', connection_revision: 'none' }],
     })
     expectValue('publish_post reports incomplete publication when facebook is not connected', facebookPublish.status === 200 && facebookPublish.body?.result?.isError === true, facebookPublish.body)

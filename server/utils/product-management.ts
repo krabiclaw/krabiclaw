@@ -1,15 +1,16 @@
 import { isStayAmenityCodes, NEW_HOME_CANCELLATION_POLICIES, parseStayAmenityAnswers, planStayAmenityAnswers, STAY_ALARM_AMENITIES, STAY_ALARM_DETAIL_KEYS, stayAmenityAvailability, stayCodes, STAY_CANCELLATION_POLICIES, STAY_LONG_TERM_CANCELLATION_POLICIES, STAY_LISTING_TYPES, STAY_PROPERTY_SIZE_UNITS, isStayPropertyType, type StayCancellationPolicy, type StayLongTermCancellationPolicy, type StayPropertyType, type StayPropertyTypeGroup, type StayListingType, type StayPropertySizeUnit } from '~/shared/stay-listing'
+import { outsideNotice } from '~/shared/availability-settings'
 import { getSourceLocale } from '~/server/utils/organization-locales'
-import { assertResponsibilityTarget, ASSIGNED_SERVICE_SQL, memberAccessPrincipal, resolveMembership, type ResponsibilityTarget } from '~/server/utils/member-access'
+import { assertResponsibleMember, ASSIGNED_SERVICE_SQL, memberAccessPrincipal, resolveMembership } from '~/server/utils/member-access'
 import { assertPublishedHost, hasPublishedHost } from '~/server/utils/public-provider'
-import type { ProductBookingSetupInput, SessionAvailability } from '~/server/utils/availability'
+import type { PaymentBasis, ProductBookingSetupInput, SessionAvailability } from '~/server/utils/availability'
 import { HTTPError } from 'nitro'
 import { MAX_STAY_NIGHTS, parseStayCalendarRules } from '~/shared/bookings'
 import { d1JsonArray, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { MAX_D1_BATCH_STATEMENTS } from '~/server/db/d1-limits'
 import { resourceLocalizationDeletionQueries } from '~/server/utils/localization'
 import { loadPublicSocialMedia } from '~/server/utils/public-social-image'
-import { buildDeleteOwnerPlacementsQuery, hydrateMediaAssetRefs, readMediaPlacements, stayAccessibilityEvidenceGuardQueries, stayAccessibilityEvidenceWriteError } from '~/server/utils/media-asset-manager'
+import { buildDeleteOwnerPlacementsQuery, buildMediaPlacementReplacementQueries, deleteProductMediaPlacementsQuery, hydrateMediaAssetRefs, readMediaPlacements, stayAccessibilityEvidenceGuardQueries, stayAccessibilityEvidenceWriteError } from '~/server/utils/media-asset-manager'
 import { isStayBedAllocationConflict, prepareArrangeProductPhotos, readProductPhotos, readStayHomeAccessibility, readStayPhotoRooms, stayBedAllocationGuardQuery } from '~/server/utils/media-placement'
 import { parseStaySleepingArrangements, type StayPhotoRoom } from '~/shared/stay-photos'
 import { isStayHomeAccessibility, type StayHomeAccessibility, type StayRoomAccessibility } from '~/shared/stay-accessibility'
@@ -40,7 +41,17 @@ import { assertProductKind, patchProductDetails, validateProductDetails, validat
 import { presentationForProduct, type CatalogCounts } from '~/utils/product-presentation'
 import { resolvePublicTenantOrigin } from '~/server/utils/public-base'
 import { FormQuestionDefinitionError, formQuestionsRevision, normalizeFormQuestionsInput, parseStoredFormQuestions } from '~/shared/form-questions'
-import { prepareFormQuestionsWrite } from '~/server/domain/form-questions'
+
+/** The home's weekend rate, read alongside the rest of its calendar policy. */
+export function stayWeekendPriceSql(home: string) {
+  return `(SELECT pr.unit_amount FROM product_variants v JOIN prices pr ON pr.organization_id = v.organization_id AND pr.product_variant_id = v.id
+    WHERE v.organization_id = ${home}.organization_id AND v.product_id = ${home}.product_id AND pr.weekend = 1)`
+}
+
+export function readStayCalendarRules(value: unknown, weekendPrice: unknown) {
+  const rules = parseStayCalendarRules(value === null ? null : JSON.parse(String(value)))
+  return weekendPrice === null ? rules : parseStayCalendarRules({ ...rules, weekend_price_minor: weekendPrice })
+}
 
 /** A stored question collection and the revision a form built from it carries. */
 function storedQuestions(value: unknown) {
@@ -88,6 +99,12 @@ import {
 
 const MAX_SLUG_SUFFIX_ATTEMPTS = 100
 
+/** A stored payment basis; anything else is a corrupt row, never a default. */
+function paymentBasis(value: unknown, productId: string): PaymentBasis {
+  if (value !== 'per_guest' && value !== 'per_booking') throw new Error(`Product ${productId} has an unknown payment basis`)
+  return value
+}
+
 /** Coarse publication gate; public catalogue readers also require booking readiness. */
 export const PUBLIC_PRODUCT_SQL = `pub.published = 1 AND (p.kind <> 'experience' OR NULLIF(trim(p.order_url), '') IS NOT NULL
   OR EXISTS (SELECT 1 FROM product_booking_configs cfg WHERE cfg.product_id = p.id AND cfg.organization_id = p.organization_id AND cfg.duration_minutes > 0))`
@@ -133,7 +150,7 @@ type Row = Record<string, unknown>
 export function publicProduct<T extends Product>(product: T): PublicProduct<T> {
   const { booking, stay, ...rest } = product
   const strip = <C extends Record<StaffAssignment, string | null>>(config: C): Omit<C, StaffAssignment> => {
-    const { assigned_member_id: _member, assigned_team_id: _team, ...shown } = config
+    const { assigned_member_id: _member, ...shown } = config
     return shown
   }
   const publicStay = (config: ProductStayConfig): Omit<ProductStayConfig, StaffAssignment | 'live' | 'internal_name'> => {
@@ -256,7 +273,7 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
     // for each: 184,000 rows for one 365-dish menu.
     { query: `SELECT pr.* FROM product_variants v
       CROSS JOIN prices pr ON pr.organization_id = v.organization_id AND pr.product_variant_id = v.id
-      WHERE v.organization_id = ? AND v.product_id IN (SELECT value FROM json_each(?))
+      WHERE v.organization_id = ? AND v.product_id IN (SELECT value FROM json_each(?)) AND pr.stay_date IS NULL AND pr.weekend = 0
       ORDER BY pr.product_variant_id, pr.valid_from_at, pr.id`, params: [organizationId, ids] },
     { query: `SELECT product_id, organization_id, published FROM product_publications
       WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?)) ORDER BY organization_id`, params: [organizationId, ids] },
@@ -264,15 +281,19 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
       WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?)) ORDER BY location_id`, params: [organizationId, ids] },
     { query: `SELECT product_id, collection_id, sort_order FROM collection_products
       WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?)) ORDER BY collection_id`, params: [organizationId, ids] },
-    { query: `SELECT product_id, duration_minutes, default_capacity, confirmation_mode, online_payment_required, held_online, scheduling_mode, assigned_member_id, assigned_team_id, questions FROM product_booking_configs
-      WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
+    // A session offering's booking; a home's is presented with its stay settings below.
+    { query: `SELECT product_id, duration_minutes, seating_interval_minutes, default_capacity, confirmation_mode, online_payment_required, held_online, scheduling_mode, assigned_member_id, advance_notice_minutes, questions,
+        party_size_min, party_size_max, minimum_guest_age, accessibility_contact_required, payment_basis, payment_min_party_size FROM product_booking_configs
+      WHERE organization_id = ? AND unit = 'slot' AND product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
     // The page each product owns: the source row that carries its product_id.
     { query: `SELECT product_id, id, path, title FROM content_documents
       WHERE organization_id = ? AND row_role = 'root' AND kind = 'page' AND product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
-    { query: `SELECT c.product_id, c.internal_name, c.location_id, c.check_in_time, c.check_in_end_time, c.check_out_time, c.max_guests, c.min_nights, c.calendar_rules, c.property_type_group, c.property_type,
+    // How a home is booked is its booking configuration, presented here with what the home is.
+    { query: `SELECT c.product_id, c.internal_name, c.location_id, b.check_in_time, b.check_in_end_time, b.check_out_time, b.default_capacity AS max_guests, b.min_nights, b.calendar_rules, ${stayWeekendPriceSql('c')} AS weekend_price_minor, c.property_type_group, c.property_type,
         c.listing_type, c.total_floors, c.listing_floor, c.year_built, c.property_size, c.property_size_unit, c.bedrooms, c.beds, c.bathrooms, c.amenities,
-        c.cancellation_policy, c.long_term_cancellation_policy, c.assigned_member_id, c.assigned_team_id, c.questions, ${liveHomeSql('p')} AS live
+        b.cancellation_policy, b.long_term_cancellation_policy, b.assigned_member_id, b.questions, ${liveHomeSql('p')} AS live
       FROM product_stay_configs c JOIN products p ON p.organization_id = c.organization_id AND p.id = c.product_id
+      JOIN product_booking_configs b ON b.organization_id = c.organization_id AND b.product_id = c.product_id AND b.unit = 'nights'
       WHERE c.organization_id = ? AND c.product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
   ], { operation: 'Hydrate products' }), readStayPhotoRooms(db, organizationId, products.filter(product => product.kind === 'stay').map(product => product.id)), readStayHomeAccessibility(db, organizationId, products.filter(product => product.kind === 'stay').map(product => product.id))])
   const rowsAt = (index: number): Row[] => (batched[index] as { results?: Row[] })?.results ?? []
@@ -291,10 +312,9 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
       internal_name: requireTrimmedProductString(row.internal_name, 'stay.internal_name', PRODUCT_LIMITS.name),
       location_id: String(row.location_id), check_in_time: row.check_in_time === null ? null : String(row.check_in_time),
       check_in_end_time: row.check_in_end_time === null ? null : String(row.check_in_end_time), check_out_time: row.check_out_time === null ? null : String(row.check_out_time),
-      max_guests: Number(row.max_guests), min_nights: Number(row.min_nights), calendar_rules: parseStayCalendarRules(row.calendar_rules === null ? null : JSON.parse(String(row.calendar_rules))),
+      max_guests: Number(row.max_guests), min_nights: Number(row.min_nights), calendar_rules: readStayCalendarRules(row.calendar_rules, row.weekend_price_minor),
       ...storedStayListing(row),
       assigned_member_id: row.assigned_member_id === null ? null : String(row.assigned_member_id),
-      assigned_team_id: row.assigned_team_id === null ? null : String(row.assigned_team_id),
       live: Number(row.live) === 1,
       ...storedQuestions(row.questions),
     }
@@ -312,11 +332,18 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
     if (!product) continue
     product.booking = {
       duration_minutes: row.duration_minutes === null ? null : Number(row.duration_minutes),
+      seating_interval_minutes: row.seating_interval_minutes === null ? null : Number(row.seating_interval_minutes),
       default_capacity: row.default_capacity === null ? null : Number(row.default_capacity),
       confirmation_mode: row.confirmation_mode as 'instant' | 'review', online_payment_required: Number(row.online_payment_required) === 1,
       held_online: Number(row.held_online) === 1,
       scheduling_mode: row.scheduling_mode as 'business' | 'provider', assigned_member_id: row.assigned_member_id === null ? null : String(row.assigned_member_id),
-      assigned_team_id: row.assigned_team_id === null ? null : String(row.assigned_team_id),
+      advance_notice_minutes: row.advance_notice_minutes === null ? null : Number(row.advance_notice_minutes),
+      party_size_min: row.party_size_min === null ? null : Number(row.party_size_min),
+      party_size_max: row.party_size_max === null ? null : Number(row.party_size_max),
+      minimum_guest_age: row.minimum_guest_age === null ? null : Number(row.minimum_guest_age),
+      accessibility_contact_required: Number(row.accessibility_contact_required) === 1,
+      payment_basis: paymentBasis(row.payment_basis, String(row.product_id)),
+      payment_min_party_size: row.payment_min_party_size === null ? null : Number(row.payment_min_party_size),
       ...storedQuestions(row.questions),
     }
   }
@@ -487,7 +514,7 @@ export async function listOrganizationProducts(db: DbClient, input: ProductListI
   const params = [input.organizationId, input.publishedOnly ? 1 : 0,
     ...(input.kind ? [input.kind] : []),
     ...(input.featured === undefined ? [] : [Number(input.featured)]),
-    ...(input.assignedUserId ? [input.assignedUserId, input.assignedUserId] : [])]
+    ...(input.assignedUserId ? [input.assignedUserId] : [])]
   const [rows, counts] = await Promise.all([
     queryAll<Row>(db, `SELECT ${PRODUCT_COLUMNS} ${selection} ORDER BY p.name, p.id ${window ? 'LIMIT ? OFFSET ?' : ''}`, [...params, ...(window ? [window.limit + 1, window.offset] : [])]),
     input.withCounts && window ? queryAll<{ kind: ProductKind; count: number }>(db, `SELECT p.kind, count(*) AS count ${selection} GROUP BY p.kind`, params) : undefined,
@@ -520,7 +547,7 @@ export async function listLocationProducts(db: DbClient, input: ProductListInput
   const params = [input.organizationId, input.locationId,
     ...(input.kind ? [input.kind] : []),
     ...(input.featured === undefined ? [] : [Number(input.featured)]),
-    ...(input.assignedUserId ? [input.assignedUserId, input.assignedUserId] : [])]
+    ...(input.assignedUserId ? [input.assignedUserId] : [])]
   const [rows, counts] = await Promise.all([
     queryAll<Row>(db, `SELECT ${PRODUCT_COLUMNS} ${selection} ORDER BY p.name, p.id ${window ? 'LIMIT ? OFFSET ?' : ''}`, [...params, ...(window ? [window.limit + 1, window.offset] : [])]),
     input.withCounts && window ? queryAll<{ kind: ProductKind; count: number }>(db, `SELECT p.kind, count(*) AS count ${selection} GROUP BY p.kind`, params) : undefined,
@@ -758,7 +785,7 @@ function stayUnitLabel(kind: ProductKind, unitLabel: string | null): string | nu
 }
 
 /** A place to stay is at one location of this organization, with stay settings the calendar and channels enforce. */
-async function planStayConfig(db: DbClient, organizationId: string, kind: ProductKind, value: unknown, stored?: ResponsibilityTarget): Promise<Omit<ProductStayConfig, 'photo_rooms' | 'accessibility' | 'live'> | null> {
+async function planStayConfig(db: DbClient, organizationId: string, kind: ProductKind, value: unknown, stored?: { assigned_member_id: string | null }): Promise<Omit<ProductStayConfig, 'photo_rooms' | 'accessibility' | 'live'> | null> {
   if (kind !== 'stay') {
     if (value !== undefined && value !== null) invalid('Only a place to stay takes stay settings')
     return null
@@ -786,10 +813,8 @@ async function planStayConfig(db: DbClient, organizationId: string, kind: Produc
   const location = await queryFirst<{ id: string }>(db, 'SELECT id FROM business_locations WHERE organization_id = ? AND id = ?', [organizationId, locationId])
   if (!location) notFound('That location is not in this organization')
   // An edit names the responsibility it changes; the stored target it keeps is carried, not re-checked.
-  const named = stored
-    ? Object.fromEntries((['assigned_member_id', 'assigned_team_id'] as const).filter(field => (stay[field] ?? null) !== stored[field]).map(field => [field, stay[field]]))
-    : stay
-  const target = await assertResponsibilityTarget(db, organizationId, named, stored)
+  const named = stored && (stay.assigned_member_id ?? null) === stored.assigned_member_id ? {} : stay
+  const assignedMember = await assertResponsibleMember(db, organizationId, named, stored?.assigned_member_id ?? null)
   let questions: ProductStayConfig['questions']
   try { questions = normalizeFormQuestionsInput(stay.questions ?? []) }
   catch (error) {
@@ -797,7 +822,7 @@ async function planStayConfig(db: DbClient, organizationId: string, kind: Produc
     invalidStayField('questions', error.message)
   }
   return { internal_name: requireTrimmedProductString(stay.internal_name, 'stay.internal_name', PRODUCT_LIMITS.name), location_id: locationId, check_in_time: stay.check_in_time as string | null, check_in_end_time: checkInEnd as string | null, check_out_time: stay.check_out_time as string | null, max_guests: maxGuests, min_nights: minNights, calendar_rules: calendarRules,
-    ...planStayListing(stay), ...target, questions, questions_revision: formQuestionsRevision(questions) }
+    ...planStayListing(stay), assigned_member_id: assignedMember, questions, questions_revision: formQuestionsRevision(questions) }
 }
 
 function invalidStayField(field: string, message: string): never {
@@ -898,7 +923,16 @@ function plannedAmenityAnswers(current: ProductStayConfig['amenity_answers'], pa
 }
 
 async function assertBookableOffering(db: DbClient, organizationId: string, product: PlannedProduct, locationId: string | null): Promise<void> {
-  if (!['experience', 'service'].includes(product.kind)) invalid('Only experiences and services take scheduled bookings')
+  if (!['experience', 'service', 'table'].includes(product.kind)) invalid('Only experiences, services and tables take scheduled bookings')
+  if (product.kind === 'table') {
+    // A location's tables are one product: guests book them, and a booking moves between locations' tables, by location.
+    if (locationId === null) invalid('Tables are booked at a location')
+    if (product.variants.filter(variant => variant.active).length !== 1) invalid('A location\'s tables are booked as one option, priced zero or at the deposit charged per booking')
+    if (await queryFirst(db, `SELECT 1 FROM product_locations pl JOIN products p ON p.id = pl.product_id AND p.organization_id = pl.organization_id
+      WHERE pl.organization_id = ? AND pl.location_id = ? AND p.kind = 'table' AND p.id <> ?`, [organizationId, locationId, product.id])) {
+      throw new HTTPError({ statusCode: 409, statusMessage: 'This location already takes table bookings; change that table product instead', data: { code: 'TABLE_PRODUCT_EXISTS', field: 'booking.location_id' } })
+    }
+  }
   if (!product.active) invalid('Enable this offering before publishing its bookings')
   const currency = await organizationDefaultCurrency(db, organizationId)
   const variants = product.variants.filter(variant => variant.active)
@@ -982,7 +1016,7 @@ async function planProduct(
     idOwners?: SuppliedIdOwners
     knownSlugs?: ReadonlyMap<string, string>
     /** An edited place to stay's saved responsibility, which the edit keeps unless it names another. */
-    stayResponsibility?: ResponsibilityTarget
+    stayResponsibility?: { assigned_member_id: string | null }
   },
 ): Promise<PlannedProduct> {
   if (!context.existingId && input.stay && Object.hasOwn(input.stay, 'accessibility')) invalid('Use the home accessibility operation to author accessibility information')
@@ -1041,6 +1075,55 @@ async function planProduct(
   }
 }
 
+/** A home's stay settings that are how it is booked: its booking configuration's, unit nights. */
+const STAY_BOOKING_FIELDS = ['check_in_time', 'check_in_end_time', 'check_out_time', 'max_guests', 'min_nights', 'calendar_rules', 'cancellation_policy', 'long_term_cancellation_policy', 'assigned_member_id', 'questions'] as const
+
+/**
+ * A home's booking settings, through the one booking-configuration writer, in
+ * its product's own batch: all of them when the home is created, the ones an
+ * edit names otherwise.
+ */
+async function stayBookingWrites(db: DbClient, input: {
+  organizationId: string; planned: PlannedProduct; actorId: string; env?: CloudflareEnv
+  /** Absent on creation; an edit's named stay fields, with the questions as sent and the revision they replace. */
+  edit?: { fields: readonly string[]; questions?: unknown; expectedQuestionsRevision?: unknown }
+}): Promise<BatchQuery[]> {
+  const stay = input.planned.stay
+  if (!stay) return []
+  const named = (field: typeof STAY_BOOKING_FIELDS[number]) => !input.edit || input.edit.fields.includes(field)
+  if (input.edit && !STAY_BOOKING_FIELDS.some(named)) return []
+  const { NIGHTS_BOOKING_FIELDS, prepareProductBookingConfig } = await import('~/server/utils/availability')
+  const patch: Parameters<typeof prepareProductBookingConfig>[1]['patch'] = {}
+  for (const field of NIGHTS_BOOKING_FIELDS) if (named(field)) Object.assign(patch, { [field]: stay[field] })
+  if (named('calendar_rules')) {
+    const minimums = stay.calendar_rules?.day_of_week_min_nights
+    patch.calendar_rules = minimums ? { day_of_week_min_nights: minimums } : null
+  }
+  if (named('max_guests')) patch.default_capacity = stay.max_guests
+  if (named('assigned_member_id')) patch.assigned_member_id = stay.assigned_member_id
+  if (input.edit?.fields.includes('questions')) Object.assign(patch, { questions: input.edit.questions, expected_questions_revision: input.edit.expectedQuestionsRevision })
+  else if (!input.edit && stay.questions.length) Object.assign(patch, { questions: stay.questions, expected_questions_revision: formQuestionsRevision([]) })
+  const { queries } = await prepareProductBookingConfig(db, { organizationId: input.organizationId, productId: input.planned.id, actorId: input.actorId, env: input.env, productInSameBatch: !input.edit, productKind: 'stay', patch })
+  if (!named('calendar_rules')) return queries
+  const [variant] = input.planned.variants
+  if (!variant || input.planned.variants.length !== 1) throw new Error('A home must have exactly one variant before setting its weekend price')
+  const amount = stay.calendar_rules?.weekend_price_minor
+  if (amount === undefined) {
+    if (input.edit) queries.push({ query: 'DELETE FROM prices WHERE organization_id = ? AND product_variant_id = ? AND weekend = 1', params: [input.organizationId, variant.id] })
+    return queries
+  }
+  const currency = await organizationDefaultCurrency(db, input.organizationId)
+  if (!currency) invalid('Set the organization currency before setting its weekend price')
+  queries.push({
+    query: `INSERT INTO prices (id, organization_id, product_variant_id, weekend, currency, unit_amount, created_by, updated_by)
+      VALUES (?, ?, ?, 1, ?, ?, ?, ?)
+      ON CONFLICT (product_variant_id) WHERE weekend = 1 DO UPDATE SET currency = excluded.currency, unit_amount = excluded.unit_amount,
+        updated_at = excluded.updated_at, updated_by = excluded.updated_by`,
+    params: [crypto.randomUUID(), input.organizationId, variant.id, currency, amount, input.actorId, input.actorId],
+  })
+  return queries
+}
+
 /**
  * Build the writes for one product's rows.
  *
@@ -1081,11 +1164,11 @@ function productWrites(
 
   // Stay settings are written when created or when an edit names them, so an
   // unrelated save never restates settings someone else changed.
-  if (planned.stay && (options.stayFields === undefined || options.stayFields.length)) {
+  if (planned.stay && (options.stayFields === undefined || options.stayFields.some(field => !(STAY_BOOKING_FIELDS as readonly string[]).includes(field)))) {
     const columns = [
-      'internal_name', 'check_in_time', 'check_in_end_time', 'check_out_time', 'max_guests', 'min_nights', 'calendar_rules', 'property_type_group', 'property_type',
+      'internal_name', 'property_type_group', 'property_type',
       'listing_type', 'total_floors', 'listing_floor', 'year_built', 'property_size', 'property_size_unit',
-      'bedrooms', 'beds', 'bathrooms', 'amenities', 'cancellation_policy', 'long_term_cancellation_policy', 'assigned_member_id', 'assigned_team_id', 'questions',
+      'bedrooms', 'beds', 'bathrooms', 'amenities',
     ] as const satisfies readonly (keyof ProductStayConfig)[]
     const assignments = columns.filter(column => options.stayFields === undefined || options.stayFields.includes(column) || (column === 'amenities' && options.stayFields.includes('amenity_answers')))
       .map(column => `${column} = excluded.${column}`)
@@ -1098,30 +1181,17 @@ function productWrites(
                VALUES (?, ?, ?, 1, 1, ?, ?, ?, ?) ON CONFLICT (product_id, location_id) DO NOTHING`,
       params: [organizationId, planned.id, planned.stay.location_id, now, now, actor.actorId, actor.actorId],
     }, {
-      query: `INSERT INTO product_stay_configs (product_id, organization_id, internal_name, location_id, check_in_time, check_in_end_time, check_out_time, max_guests, min_nights, calendar_rules,
+      query: `INSERT INTO product_stay_configs (product_id, organization_id, internal_name, location_id,
                  property_type_group, property_type, listing_type, total_floors, listing_floor, year_built, property_size, property_size_unit,
-                 bedrooms, beds, bathrooms, amenities, cancellation_policy, long_term_cancellation_policy, assigned_member_id, assigned_team_id, questions, created_at, updated_at, created_by, updated_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 bedrooms, beds, bathrooms, amenities, created_at, updated_at, created_by, updated_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT (product_id) DO UPDATE SET ${[...assignments, 'updated_at = excluded.updated_at', 'updated_by = excluded.updated_by'].join(', ')}
                WHERE product_stay_configs.organization_id = excluded.organization_id AND product_stay_configs.location_id = excluded.location_id`,
-      params: [planned.id, organizationId, planned.stay.internal_name, planned.stay.location_id, planned.stay.check_in_time, planned.stay.check_in_end_time, planned.stay.check_out_time,
-        planned.stay.max_guests, planned.stay.min_nights, planned.stay.calendar_rules === null ? null : JSON.stringify(planned.stay.calendar_rules), planned.stay.property_type_group, planned.stay.property_type,
+      params: [planned.id, organizationId, planned.stay.internal_name, planned.stay.location_id, planned.stay.property_type_group, planned.stay.property_type,
         planned.stay.listing_type, planned.stay.total_floors, planned.stay.listing_floor, planned.stay.year_built, planned.stay.property_size, planned.stay.property_size_unit,
         planned.stay.bedrooms, planned.stay.beds, planned.stay.bathrooms,
-        JSON.stringify(planned.stay.amenity_answers), planned.stay.cancellation_policy, planned.stay.long_term_cancellation_policy,
-        planned.stay.assigned_member_id, planned.stay.assigned_team_id, JSON.stringify(planned.stay.questions), now, now, actor.actorId, actor.actorId],
+        JSON.stringify(planned.stay.amenity_answers), now, now, actor.actorId, actor.actorId],
     })
-    if (upsert && (options.stayFields === undefined || options.stayFields.includes('assigned_member_id') || options.stayFields.includes('assigned_team_id'))) {
-      // The home's open cleaning jobs are its assignee's: a new assignee takes them over. A save that
-      // restates the same assignee leaves a job's own assignment alone, so this runs before the home is written.
-      writes.splice(writes.length - 1, 0, {
-        query: `UPDATE tasks SET assigned_member_id = ?, assigned_team_id = ?, version = version + 1, updated_at = ?
-          WHERE organization_id = ? AND product_id = ? AND status = 'open' AND kind IN ('turnover', 'stay_ready') AND (assigned_member_id IS NOT ? OR assigned_team_id IS NOT ?)
-            AND EXISTS (SELECT 1 FROM product_stay_configs c WHERE c.organization_id = ? AND c.product_id = ? AND (c.assigned_member_id IS NOT ? OR c.assigned_team_id IS NOT ?))`,
-        params: [planned.stay.assigned_member_id, planned.stay.assigned_team_id, now, organizationId, planned.id, planned.stay.assigned_member_id, planned.stay.assigned_team_id,
-          organizationId, planned.id, planned.stay.assigned_member_id, planned.stay.assigned_team_id],
-      })
-    }
     if (upsert && (options.stayFields === undefined || options.stayFields.includes('amenities') || options.stayFields.includes('amenity_answers'))) {
       // A removed listing fact cannot retain room references. Invalidate every
       // affected room draft before deleting the references in this same batch.
@@ -1146,8 +1216,8 @@ function productWrites(
     const clearedAlarmPaths = STAY_ALARM_AMENITIES.filter(code => stayAmenityAvailability(planned.stay!.amenity_answers, code) !== true || planned.details[STAY_ALARM_DETAIL_KEYS[code]] === undefined)
       .map(code => `$.details.${STAY_ALARM_DETAIL_KEYS[code]}`)
     if (clearedAlarmPaths.length) writes.push({
-      query: `UPDATE resource_localizations SET values_json = json_remove(values_json, ${clearedAlarmPaths.map(() => '?').join(', ')}), updated_at = ?, updated_by_user_id = ?
-        WHERE organization_id = ? AND resource_type = 'product' AND resource_id = ? AND (${clearedAlarmPaths.map(() => 'json_type(values_json, ?) IS NOT NULL').join(' OR ')})`,
+      query: `UPDATE content_documents SET metadata_json = json_remove(metadata_json, ${clearedAlarmPaths.map(() => '?').join(', ')}), updated_at = ?, updated_by = ?
+        WHERE organization_id = ? AND resource_type = 'product' AND resource_id = ? AND (${clearedAlarmPaths.map(() => 'json_type(metadata_json, ?) IS NOT NULL').join(' OR ')})`,
       params: [...clearedAlarmPaths, now, actor.actorId, organizationId, planned.id, ...clearedAlarmPaths],
     })
   }
@@ -1217,11 +1287,11 @@ function assertVariantPricesConsistent(planned: PlannedProduct): void {
   }
 }
 
-type ProductPageInput = { data: Omit<TenantPageEditorInput, 'productId' | 'pageId' | 'locale' | 'path'> & { path?: string }; env: CloudflareEnv }
+type ProductPageInput = { data: Omit<TenantPageEditorInput, 'product_id' | 'page_id' | 'locale' | 'path'> & { path?: string }; env: CloudflareEnv }
 
 function productPageInput(product: Pick<CreateProductInput, 'kind' | 'name' | 'description'>, env?: CloudflareEnv, page?: ProductPageInput): ProductPageInput | undefined {
   return page ?? (product.kind === 'service'
-    ? { data: { title: product.name, summary: product.description ?? null, pageType: 'recipe', recipe: 'services', blocks: [] }, env: env ?? invalid('The service page requires the organization environment') }
+    ? { data: { title: product.name, summary: product.description ?? null, page_type: 'recipe', recipe: 'services', blocks: [] }, env: env ?? invalid('The service page requires the organization environment') }
     : undefined)
 }
 
@@ -1229,7 +1299,7 @@ export async function publishStayProducts(env: CloudflareEnv, products: readonly
   for (const product of products) {
     if (product.kind !== 'stay') continue
     if (!product.stay) throw new HTTPError({ statusCode: 500, message: 'The place to stay has no home configuration', data: { code: 'STAY_HOME_CONFIGURATION_REQUIRED', field: 'stay' } })
-    const input = { organizationId: product.organization_id, productId: product.id, locationId: product.stay.location_id, stayId: null }
+    const input = { organization_id: product.organization_id, product_id: product.id, location_id: product.stay.location_id, booking_id: null }
     await publishStayInvalidation(env, { ...input, type: 'stay.changed' }, { updated_at: product.updated_at })
     await publishStayInvalidation(env, { ...input, type: 'nights.changed' }, { updated_at: product.updated_at })
   }
@@ -1302,7 +1372,7 @@ export async function createProduct(db: DbClient, input: {
     const planned = await planProduct(db, input.organizationId, product, { organizationId: input.organizationId })
     assertVariantPricesConsistent(planned)
     const now = new Date().toISOString()
-    const writes = productWrites(input.organizationId, planned, input.actor, now, 'insert')
+    const writes = [...productWrites(input.organizationId, planned, input.actor, now, 'insert'), ...await stayBookingWrites(db, { organizationId: input.organizationId, planned, actorId: input.actor.actorId, env })]
     if (input.booking) {
       await assertBookableOffering(db, input.organizationId, planned, input.booking.data.location_id)
       const { prepareProductBookingSetup } = await import('~/server/utils/availability')
@@ -1392,7 +1462,7 @@ async function prepareProductPageCreate(db: DbClient, input: {
     : invalid('page.path is required for this kind of product'))
   const page = await prepareTenantPageCreate(db, {
     organizationId: input.organizationId, userId: input.actor.actorId,
-    data: { ...pageInput.data, path, productId: input.product.id }, env: pageInput.env,
+    data: { ...pageInput.data, path, product_id: input.product.id }, env: pageInput.env,
     productInSameBatch: true, pathOwnerDeletedInSameBatch: input.replacedPages?.get(path),
   })
   input.takenPaths?.add(page.path)
@@ -1449,7 +1519,7 @@ export async function planProductCreateWrites(db: DbClient, input: {
     const planned = await planProduct(db, input.organizationId, product, { organizationId: input.organizationId, defaultCurrency, takenSlugs: taken, knownSlugs, idOwners })
     assertVariantPricesConsistent(planned)
     if (input.publication?.published && planned.kind === 'experience' && !planned.order_url) invalid('Create experiences with booking details before publishing them')
-    queries.push(...productWrites(input.organizationId, planned, input.actor, input.now, 'insert'))
+    queries.push(...productWrites(input.organizationId, planned, input.actor, input.now, 'insert'), ...await stayBookingWrites(db, { organizationId: input.organizationId, planned, actorId: input.actor.actorId, env: input.env }))
     const page = await prepareProductPageCreate(db, { ...input, product: planned, takenPaths })
     if (page) {
       queries.push(...page.queries)
@@ -1558,20 +1628,15 @@ async function planProductUpdate(db: DbClient, input: {
   cacheInvalidations: BatchQuery[]
 }): Promise<{ writes: BatchQuery[]; keptVariants: string; product: PlannedProduct; airbnbSettings: AirbnbSettingSections | null; changedFields: string[]; updatedAt: string }> {
   const { current, organizationId } = input
-  let { patch } = input
+  const { patch } = input
   if ('slug' in patch && patch.slug !== undefined && patch.slug !== current.slug) invalid('A product keeps its saved slug')
-  if (patch.expected_updated_at !== undefined) {
-    if (typeof patch.expected_updated_at !== 'string' || !Number.isFinite(Date.parse(patch.expected_updated_at))) invalid('expected_updated_at must be the Product updated_at value from the latest read')
-    if (patch.expected_updated_at !== current.updated_at) throw new HTTPError({ statusCode: 409, statusMessage: 'The product changed while you were editing. Nothing was changed; read it again before saving.', data: { code: 'PRODUCT_UPDATE_CONFLICT', field: 'expected_updated_at', product_id: current.id } })
+  if (patch.updated_at !== undefined) {
+    if (typeof patch.updated_at !== 'string' || !Number.isFinite(Date.parse(patch.updated_at))) invalid('updated_at must be the Product updated_at value from the latest read')
+    if (patch.updated_at !== current.updated_at) throw new HTTPError({ statusCode: 409, statusMessage: 'The product changed while you were editing. Nothing was changed; read it again before saving.', data: { code: 'PRODUCT_UPDATE_CONFLICT', field: 'updated_at', product_id: current.id } })
   }
   if (patch.stay && Object.hasOwn(patch.stay, 'accessibility')) invalid('Use the home accessibility operation to author accessibility information')
   if (patch.stay?.expected_questions_revision !== undefined && patch.stay.questions === undefined) invalidStayField('expected_questions_revision', 'stay.expected_questions_revision is only sent with stay.questions')
-  // A home's questions are replaced whole, against the revision the caller read.
-  if (patch.stay?.questions !== undefined) {
-    if (!current.stay) invalid('Only a place to stay takes stay settings')
-    const { expected_questions_revision: expectedRevision, ...stayPatch } = patch.stay
-    patch = { ...patch, stay: { ...stayPatch, questions: prepareFormQuestionsWrite(current.stay.questions, { questions: patch.stay.questions, expectedRevision }) } }
-  }
+  if (patch.stay?.questions !== undefined && !current.stay) invalid('Only a place to stay takes stay settings')
   const previousUpdate = Date.parse(current.updated_at)
   const requestedUpdate = Date.parse(input.now)
   if (!Number.isFinite(previousUpdate) || !Number.isFinite(requestedUpdate)) throw new Error('The Product update timestamp is invalid')
@@ -1623,7 +1688,7 @@ async function planProductUpdate(db: DbClient, input: {
   const planned = await planProduct(db, organizationId, merged, {
     organizationId: input.organizationId, existingId: productId, existingSlug: current.slug, defaultCurrency: input.defaultCurrency,
     takenSlugs: input.takenSlugs, idOwners: input.idOwners, knownSlugs: input.knownSlugs,
-    stayResponsibility: current.stay ? { assigned_member_id: current.stay.assigned_member_id, assigned_team_id: current.stay.assigned_team_id } : undefined,
+    stayResponsibility: current.stay ? { assigned_member_id: current.stay.assigned_member_id } : undefined,
   })
   planned.source = current.source
   assertVariantPricesConsistent(planned)
@@ -1667,7 +1732,7 @@ async function planProductUpdate(db: DbClient, input: {
   const writes: BatchQuery[] = changedFields.length ? [
     // Only explicit replacement removes prices; merged omissions remain in the plan.
     ...(writesPrices
-      ? [{ query: 'DELETE FROM prices WHERE organization_id = ? AND product_variant_id IN (SELECT id FROM product_variants WHERE organization_id = ? AND product_id = ?) AND id NOT IN (SELECT value FROM json_each(?))', params: [organizationId, organizationId, productId, keptPrices] }]
+      ? [{ query: 'DELETE FROM prices WHERE organization_id = ? AND product_variant_id IN (SELECT id FROM product_variants WHERE organization_id = ? AND product_id = ?) AND stay_date IS NULL AND weekend = 0 AND id NOT IN (SELECT value FROM json_each(?))', params: [organizationId, organizationId, productId, keptPrices] }]
       : []),
     // Variants are UPSERTED, never dropped and recreated:
     // bookings reference variant identity, and recreating a variant under a
@@ -1684,6 +1749,9 @@ async function planProductUpdate(db: DbClient, input: {
       // A narrow edit still restates the Product it read, including its details.
       expectedUpdatedAt: current.updated_at,
     }),
+    // A home's questions are replaced whole by the booking writer, against the revision the caller read.
+    ...await stayBookingWrites(db, { organizationId, planned, actorId: input.actor.actorId, env: input.env,
+      edit: { fields: Object.keys(patch.stay ?? {}), questions: patch.stay?.questions, expectedQuestionsRevision: patch.stay?.expected_questions_revision } }),
   ] : [{
     // An unchanged save still names the Product it read, but must not
     // replace its revision, editor or child rows merely to check that fact.
@@ -1817,8 +1885,8 @@ export async function updateProduct(db: DbClient, input: {
   let reprice = false
   let settings: AirbnbSettingSections | null = null
   const complete = async (product: Product): Promise<ProductMutation> => {
-    if ((product.kind === 'stay' && (input.patch.stay?.assigned_member_id !== undefined || input.patch.stay?.assigned_team_id !== undefined))
-      || input.booking?.data.assigned_member_id !== undefined || input.booking?.data.assigned_team_id !== undefined) {
+    if ((product.kind === 'stay' && input.patch.stay?.assigned_member_id !== undefined)
+      || input.booking?.data.assigned_member_id !== undefined) {
       await publishAccessInvalidation(env, { organizationId: input.organizationId })
     }
     let channelPush: ChannelPushCompletion = null
@@ -1857,7 +1925,7 @@ export async function updateProduct(db: DbClient, input: {
     throw new HTTPError({ statusCode: 409, statusMessage: 'The room or listing changed while you were editing. Nothing was changed; reload the room and try again.', data: { code: 'ROOM_DETAILS_CHANGED', field: 'expected_details_version', product_id: input.productId } })
   }
   const homeChanged = (): never => {
-    throw new HTTPError({ statusCode: 409, statusMessage: 'The listing changed while you were editing. Nothing was changed; reload the accessibility information and try again.', data: { code: 'STAY_ACCESSIBILITY_CHANGED', field: 'expected_updated_at', product_id: input.productId } })
+    throw new HTTPError({ statusCode: 409, statusMessage: 'The listing changed while you were editing. Nothing was changed; reload the accessibility information and try again.', data: { code: 'STAY_ACCESSIBILITY_CHANGED', field: 'updated_at', product_id: input.productId } })
   }
   if (homeUpdate && (!current.stay || current.updated_at !== homeUpdate.expectedUpdatedAt)) homeChanged()
   if (roomUpdate && !current.stay?.photo_rooms.some(room => room.id === roomUpdate.roomId && room.details_version === roomUpdate.expectedDetailsVersion)) roomChanged()
@@ -1903,10 +1971,11 @@ export async function updateProduct(db: DbClient, input: {
     writes.push({ query: 'DELETE FROM product_stay_accessibility WHERE organization_id = ? AND product_id = ? AND feature_code = ?', params: [input.organizationId, input.productId, answer.feature] })
     if (answer.available !== null) writes.push({
       query: 'INSERT INTO product_stay_accessibility (organization_id, product_id, feature_code, available) VALUES (?, ?, ?, ?)', params: [input.organizationId, input.productId, answer.feature, answer.available ? 1 : 0],
-    }, {
-      query: `INSERT INTO product_stay_accessibility_photos (organization_id, product_id, feature_code, asset_id)
-        SELECT ?, ?, ?, value FROM json_each(?)`, params: [input.organizationId, input.productId, answer.feature, d1JsonArray(answer.photo_ids)],
     })
+    writes.push(...buildMediaPlacementReplacementQueries({ organizationId: input.organizationId,
+      placement: { owner_type: 'stay_home_accessibility', owner_id: input.productId, slot: answer.feature },
+      media: answer.photo_ids.map(asset_id => ({ asset_id })), now,
+    }))
   }
   if (roomUpdate) {
     writes.unshift({ query: `UPDATE products SET updated_at = NULL WHERE organization_id = ? AND id = ? AND NOT EXISTS (
@@ -1935,10 +2004,11 @@ export async function updateProduct(db: DbClient, input: {
       writes.push({ query: 'DELETE FROM product_stay_room_accessibility WHERE organization_id = ? AND product_id = ? AND room_id = ? AND feature_code = ?', params: [input.organizationId, input.productId, roomUpdate.roomId, answer.feature] })
       if (answer.available !== null) writes.push({
         query: 'INSERT INTO product_stay_room_accessibility (organization_id, product_id, room_id, feature_code, available) VALUES (?, ?, ?, ?, ?)', params: [input.organizationId, input.productId, roomUpdate.roomId, answer.feature, answer.available ? 1 : 0],
-      }, {
-        query: `INSERT INTO product_stay_room_accessibility_photos (organization_id, product_id, room_id, feature_code, asset_id)
-          SELECT ?, ?, ?, ?, value FROM json_each(?)`, params: [input.organizationId, input.productId, roomUpdate.roomId, answer.feature, d1JsonArray(answer.photo_ids)],
       })
+      writes.push(...buildMediaPlacementReplacementQueries({ organizationId: input.organizationId,
+        placement: { owner_type: 'stay_room_accessibility', owner_id: roomUpdate.roomId, slot: answer.feature },
+        media: answer.photo_ids.map(asset_id => ({ asset_id })), now,
+      }))
     }
     writes.push(stayBedAllocationGuardQuery(input.organizationId, input.productId), {
       // All room references must still have their canonical listing fact.
@@ -2005,7 +2075,7 @@ export async function updateProduct(db: DbClient, input: {
       if (await replay()) return
       if (roomUpdate) roomChanged()
       if (homeUpdate) homeChanged()
-      throw new HTTPError({ statusCode: 409, statusMessage: 'The offering or its availability changed while you were editing. Nothing was changed; read its current state and retry.', data: { code: 'PRODUCT_UPDATE_CONFLICT', ...(input.patch.expected_updated_at !== undefined ? { field: 'expected_updated_at' } : {}), product_id: input.productId }, cause: error })
+      throw new HTTPError({ statusCode: 409, statusMessage: 'The offering or its availability changed while you were editing. Nothing was changed; read its current state and retry.', data: { code: 'PRODUCT_UPDATE_CONFLICT', ...(input.patch.updated_at !== undefined ? { field: 'updated_at' } : {}), product_id: input.productId }, cause: error })
     }
     if (input.booking) {
       const { bookingConfigurationWriteError } = await import('~/server/utils/availability')
@@ -2032,8 +2102,8 @@ export async function deleteProduct(db: DbClient, input: {
   // off both would go with them — silently for a booking with no thread, and
   // as a raw foreign-key error for one that has a thread holding it.
   const booked = await queryFirst<{ n: number }>(db, `
-    SELECT (SELECT count(*) FROM bookings WHERE organization_id = ? AND product_id = ?) + (SELECT count(*) FROM stays WHERE organization_id = ? AND product_id = ?) AS n
-  `, [input.organizationId, input.productId, input.organizationId, input.productId])
+    SELECT count(*) AS n FROM bookings WHERE organization_id = ? AND (product_id = ? OR booked_product_id = ?)
+  `, [input.organizationId, input.productId, input.productId])
   if ((booked?.n ?? 0) > 0) {
     conflict('This product has bookings or stays. Cancel them, or turn the product off instead of deleting it.')
   }
@@ -2053,16 +2123,15 @@ export async function deleteProduct(db: DbClient, input: {
   // A home deleted is one fewer home, and its location, if still active, is a
   // location again: guarded as one, since Basic may already have the locations it includes.
   await executeProductWrites(db, input.env, input.organizationId, [
-    { query: `UPDATE products SET updated_at=NULL WHERE organization_id=? AND id=? AND (EXISTS(SELECT 1 FROM bookings WHERE organization_id=? AND product_id=?)
-      OR EXISTS(SELECT 1 FROM stays WHERE organization_id=? AND product_id=?)
+    { query: `UPDATE products SET updated_at=NULL WHERE organization_id=? AND id=? AND (EXISTS(SELECT 1 FROM bookings WHERE organization_id=? AND (product_id=? OR booked_product_id=?))
       OR EXISTS(SELECT 1 FROM channel_threads WHERE organization_id=? AND product_id=?)
       OR EXISTS(SELECT 1 FROM message_templates t, json_each(t.schedule_json, '$.productIds') home WHERE t.organization_id=? AND t.schedule_json IS NOT NULL AND home.value=?)
-      OR EXISTS(SELECT 1 FROM payment_checkout_holds WHERE organization_id=? AND product_id=? AND status='active' AND expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now')))`, params: [input.organizationId, input.productId, input.organizationId, input.productId, input.organizationId, input.productId, input.organizationId, input.productId, input.organizationId, input.productId, input.organizationId, input.productId] },
+      OR EXISTS(SELECT 1 FROM payment_checkout_holds WHERE organization_id=? AND product_id=? AND status='active' AND expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now')))`, params: [input.organizationId, input.productId, input.organizationId, input.productId, input.productId, input.organizationId, input.productId, input.organizationId, input.productId, input.organizationId, input.productId] },
     ...pages.flatMap(page => page.queries),
     ...resourceLocalizationDeletionQueries('product', { query: 'SELECT ?', params: [input.productId] }),
     ...invalidations,
     // Its pictures go with it; the assets stay in the library.
-    buildDeleteOwnerPlacementsQuery({ ownerType: 'product', ownerId: input.productId, organizationId: input.organizationId }),
+    deleteProductMediaPlacementsQuery(input.organizationId, [input.productId]),
     { query: 'DELETE FROM products WHERE organization_id = ? AND id = ?', params: [input.organizationId, input.productId] },
   ], { operation: 'Delete product', action: 'delete it', stay: product.kind === 'stay' }).catch((error: unknown) => {
     if (/NOT NULL constraint failed: products\.updated_at/.test(error instanceof Error ? error.message : String(error))) conflict('This product received a booking, stay, guest conversation, schedule or checkout while you were deleting it. Turn it off instead of deleting it.')
@@ -2117,8 +2186,10 @@ export async function productBookingReadiness(db: DbClient, organizationId: stri
       : locations.some(location => location.location_id === session.location_id && location.published && (!requireActive || location.active)))
   // Scheduled seats prove the booking capability even while full or closed.
   // Publication additionally guards a real allocation in its atomic write.
-  const candidate = sessions.find(session => !session.is_full)
-    ?? sessions.find(session => session.capacity === null || session.capacity > 0)
+  // A start inside the advance notice cannot be booked, so it proves nothing.
+  const bookable = sessions.filter(session => outsideNotice(session.starts_at, product.booking?.advance_notice_minutes ?? null))
+  const candidate = bookable.find(session => !session.is_full)
+    ?? bookable.find(session => session.capacity === null || session.capacity > 0)
   const scopes = [...new Set([
     ...locations.filter(location => location.published && (!requireActive || location.active)).map(location => location.location_id),
     ...(options.locationId === undefined && product.booking?.held_online ? [null] : []),
@@ -2208,6 +2279,8 @@ export async function setProductLocation(db: DbClient, input: {
   if (!organization) notFound('Location not found')
   const product = await requireOrganizationProduct(db, input)
   if (product.stay && product.stay.location_id !== input.locationId) conflict('A place to stay is at exactly one location')
+  // A table is seated through one location's hours; a second placement would be a second schedule.
+  if (product.kind === 'table' && product.locations.some(location => location.location_id !== input.locationId)) conflict('A location\'s tables are at exactly one location')
   const currentLocation = product.locations.find(location => location.location_id === input.locationId)
   const expectedProductUpdatedAt = product.updated_at
   const location = { location_id: input.locationId, active: input.active ?? currentLocation?.active ?? true, published: input.published ?? currentLocation?.published ?? true }
@@ -2249,6 +2322,9 @@ export async function removeProductLocation(db: DbClient, input: {
   if (!organization) notFound('Location not found')
   const home = await queryFirst<{ product_id: string }>(db, 'SELECT product_id FROM product_stay_configs WHERE organization_id = ? AND product_id = ? AND location_id = ?', [input.organizationId, input.productId, input.locationId])
   if (home) conflict('A place to stay cannot leave the location it is at; delete the place to stay instead')
+  // A table is seated through this location's hours; without the location it has no open time.
+  const table = await queryFirst<{ id: string }>(db, "SELECT id FROM products WHERE organization_id = ? AND id = ? AND kind = 'table'", [input.organizationId, input.productId])
+  if (table) conflict('A location\'s tables cannot leave the location they are at; delete the tables instead')
   await executeBatch(db, [
     { query: 'DELETE FROM product_locations WHERE organization_id = ? AND product_id = ? AND location_id = ?', params: [input.organizationId, input.productId, input.locationId] },
     publicResourceCacheInvalidationQuery(input.organizationId, 'product_location_changed'),
@@ -2284,7 +2360,7 @@ export async function listCollections(db: DbClient, input: {
       ${input.assignedUserId ? `AND EXISTS (SELECT 1 FROM collection_products cp JOIN products p ON p.id = cp.product_id AND p.organization_id = cp.organization_id
         WHERE cp.collection_id = collections.id AND cp.organization_id = collections.organization_id AND (${ASSIGNED_SERVICE_SQL}))` : ''}
     ORDER BY sort_order, name, id
-  `, [input.organizationId, input.locationId === undefined ? 0 : 1, input.locationId ?? null, ...(input.assignedUserId ? [input.assignedUserId, input.assignedUserId] : [])])
+  `, [input.organizationId, input.locationId === undefined ? 0 : 1, input.locationId ?? null, ...(input.assignedUserId ? [input.assignedUserId] : [])])
   return mapCollectionRows(db, input.organizationId, rows)
 }
 
@@ -2561,7 +2637,7 @@ async function planProductReconciliation(db: DbClient, input: {
     })
     assertVariantPricesConsistent(planned)
     plannedProducts.push(planned)
-    const creates = productWrites(input.organizationId, planned, input.actor, now, 'insert')
+    const creates = [...productWrites(input.organizationId, planned, input.actor, now, 'insert'), ...await stayBookingWrites(db, { organizationId: input.organizationId, planned, actorId: input.actor.actorId, env: input.env })]
     // The site that reconciles its catalog carries what the reconcile creates,
     // withheld until someone publishes it — the same rule batch creation
     // follows, and what makes "missing from this site's import" answerable.
@@ -2607,7 +2683,7 @@ export async function reconcileProducts(db: DbClient, input: {
   })
   const { pushStayHomeChannel } = await import('~/server/domain/stays')
   const complete = async (products: Product[], completion: unknown, replay = false): Promise<ProductMutation[]> => {
-    if (input.products.some(product => product.stay?.assigned_member_id !== undefined || product.stay?.assigned_team_id !== undefined)) {
+    if (input.products.some(product => product.stay?.assigned_member_id !== undefined)) {
       await publishAccessInvalidation(input.env, { organizationId: input.organizationId })
     }
     const plans = typeof completion === 'object' && completion !== null && !Array.isArray(completion) ? completion as Record<string, unknown> : null

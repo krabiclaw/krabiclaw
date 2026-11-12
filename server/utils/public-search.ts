@@ -554,10 +554,10 @@ export async function buildWorkspaceDocuments(db: DbClient, organizationId?: str
     `, organizationParams),
     queryAll<{ id: string; organization_id: string; kind: string; payload_json: string; location_title: string | null; product_name: string | null }>(db, `
       SELECT r.id, r.organization_id, r.kind, r.payload_json, bl.title AS location_title,
-        (SELECT p.name FROM bookings b JOIN products p ON p.id = b.product_id WHERE b.request_id = r.id LIMIT 1) AS product_name
-      FROM requests r ${WORKSPACE_ORGANIZATION_SQL} AND s.id = r.organization_id
+        (SELECT p.name FROM bookings b JOIN products p ON p.id = b.product_id WHERE b.id = r.booking_id LIMIT 1) AS product_name
+      FROM conversations r ${WORKSPACE_ORGANIZATION_SQL} AND s.id = r.organization_id
       LEFT JOIN business_locations bl ON bl.id = r.location_id
-      WHERE 1 = 1${organizationWhere}
+      WHERE r.kind IN ('contact', 'booking')${organizationWhere}
     `, organizationParams),
     queryAll<{ id: string; organization_id: string; role: string; name: string | null; email: string }>(db, `
       SELECT m.id, m."organizationId" AS organization_id, m.role, u.name, u.email
@@ -630,7 +630,7 @@ export async function buildWorkspaceDocuments(db: DbClient, organizationId?: str
     if (!organization) continue
     const payload = JSON.parse(row.payload_json) as { participant?: { kind: 'channel'; title: string }; guest: { name: string | null; email: string | null }; message?: string; notes?: string | null }
     const guest = payload.guest
-    // requests_guest_payload_check: a contact-backed conversation has its guest's
+    // conversations_guest_payload_check: a contact-backed conversation has its guest's
     // name; a channel conversation is labelled by its provider title.
     const label = payload.participant ? payload.participant.title : guest.name
     if (!label?.trim()) throw new HTTPError({ statusCode: 500, message: `Conversation ${row.id} has no participant label`, data: { code: 'REQUEST_PARTICIPANT_INVALID', field: 'guest.name', request_id: row.id } })

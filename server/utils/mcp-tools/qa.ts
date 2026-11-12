@@ -3,7 +3,8 @@ import { findAuthUsersByIds } from '~/server/utils/auth'
 import type { McpToolDefinition } from './shared'
 import { pageInfoObject, paginationInputSchema, qaItemObject, organizationTool } from './shared'
 import type { McpExecutorContext } from './execution'
-import { listLocationQa, listQa, createQa, updateQa, deleteQa, reorderQa } from '~/server/utils/location-qa'
+import { queryAll } from '~/server/db'
+import { listLocationQa, listQa, createQa, updateQa, deleteQa, reorderQa, normalizePagePath } from '~/server/utils/location-qa'
 import { paginateMcpCollection } from '~/server/utils/mcp-pagination'
 import { NOT_HANDLED, requiredString, assertDomainSuccess } from './execution'
 
@@ -77,8 +78,55 @@ export async function handleQaTools(ctx: McpExecutorContext): Promise<unknown> {
       return await reorderQa(organization.db, scope, args.updates as Array<{ id: string; sort_order: number }>, actor)
     case "list_organization_qa":
       {
-        const items = await listQa(organization.db, organization.organizationId, null, false, typeof args.page_path === "string" ? args.page_path : null);
-        const page = paginateMcpCollection(items, args, { resource: `organization-qa:${organization.organizationId}:${typeof args.page_path === 'string' ? args.page_path : ''}` });
+        const pagePath = typeof args.page_path === "string" ? args.page_path : null;
+        const items = await listQa(organization.db, organization.organizationId, null, false, pagePath);
+        if (pagePath) {
+          const normalized = normalizePagePath(pagePath)
+          const faqBlocks = await queryAll<{ id: string; data_json: string }>(organization.db, `
+            SELECT cb.id, cb.data_json
+            FROM content_blocks cb
+            JOIN content_documents cd ON cd.id = cb.document_id
+            WHERE cd.organization_id = ? AND cd.kind = 'page' AND cd.path = ? AND cb.type = 'faq'
+          `, [organization.organizationId, normalized])
+          for (const block of faqBlocks) {
+            try {
+              const data = JSON.parse(block.data_json) as Record<string, unknown>
+              if (Array.isArray(data.items)) {
+                for (const [index, item] of (data.items as Array<Record<string, unknown>>).entries()) {
+                  if (item && typeof item === 'object') {
+                    const q = typeof item.title === 'string' ? item.title : typeof item.question === 'string' ? item.question : ''
+                    const a = typeof item.description === 'string' ? item.description : typeof item.answer === 'string' ? item.answer : null
+                    const id = typeof item.id === 'string' && item.id ? item.id : `${block.id}-q${index}`
+                    if (q && !items.some(existing => existing.id === id || existing.question === q)) {
+                      items.push({
+                        id,
+                        organization_id: organization.organizationId,
+                        location_id: null,
+                        page_path: pagePath,
+                        question: q,
+                        question_author: null,
+                        question_date: null,
+                        answer: a,
+                        answer_author: null,
+                        answer_date: null,
+                        is_owner_answer: 1,
+                        upvote_count: 0,
+                        source: 'manual',
+                        status: 'published',
+                        sort_order: items.length,
+                        created_at: new Date().toISOString(),
+                        updated_at: new Date().toISOString(),
+                      })
+                    }
+                  }
+                }
+              }
+            } catch {
+              // Ignore invalid JSON in block data
+            }
+          }
+        }
+        const page = paginateMcpCollection(items, args, { resource: `organization-qa:${organization.organizationId}:${pagePath ?? ''}` });
         return { items: page.items, page_info: page.page_info };
       }
     case "list_location_qa":

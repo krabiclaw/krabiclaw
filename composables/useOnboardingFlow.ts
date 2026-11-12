@@ -22,13 +22,13 @@ export interface OnboardingProductDraft {
 
 /** The place the business picker hands back: Place Details for the chosen prediction. */
 export interface OnboardingPlacePreview {
-  placeId: string
+  google_place_id: string
   name: string
   address: PostalAddress | null
   phone?: string | null
-  mapsUrl?: string | null
+  maps_url?: string | null
   timezone?: string | null
-  openingHours?: OpeningHours
+  opening_hours?: OpeningHours
 }
 
 export interface OnboardingDraftPreview {
@@ -63,7 +63,7 @@ export interface OnboardingFlowState {
   draftId: string | null
   draftRevision: string | null
   preview: OnboardingDraftPreview | null
-  created: { orgSlug: string | null; organizationSlug: string | null; locationSlug: string | null } | null
+  created: { organization_slug: string; subdomain: string } | null
 }
 
 /**

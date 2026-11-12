@@ -16,14 +16,13 @@ export type PublicPageDataset =
   | 'reviews'
   | 'photos'
   | 'qa'
-  | 'blogPost'
-  | 'reservationPolicies'
+  | 'blog_post'
 
 export interface PublicPageRequest {
   page: string | null;
   location: string | null;
   datasets: readonly PublicPageDataset[];
-  blogSlug: string | null; // set when the blogPost dataset is requested
+  blogSlug: string | null; // set when the blog_post dataset is requested
   locale: string | null;
 }
 
@@ -62,7 +61,7 @@ export function getPublicPageRequest(path: string): Omit<PublicPageRequest, "loc
     return {
       page: "blog",
       location: null,
-      datasets: ['blogPost'],
+      datasets: ['blog_post'],
       blogSlug: blogMatch[1] ?? null,
     };
   }
@@ -72,7 +71,7 @@ export function getPublicPageRequest(path: string): Omit<PublicPageRequest, "loc
     return {
       page: "blog",
       location: null,
-      datasets: ['blogPost'],
+      datasets: ['blog_post'],
       blogSlug: articleMatch[1] ?? null,
     };
   }
@@ -110,7 +109,7 @@ export function getPublicPageRequest(path: string): Omit<PublicPageRequest, "loc
     return {
       page: "reservations",
       location: null,
-      datasets: ['content', 'reservationPolicies'],
+      datasets: ['content', 'products'],
       blogSlug: null,
     };
   if (path.startsWith("/qa"))

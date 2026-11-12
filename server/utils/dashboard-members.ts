@@ -7,19 +7,10 @@ type InvitationDelivery = Pick<GuestThreadDeliveryRow, 'status' | 'provider' | '
 
 export async function getInvitationDeliveries(db: DbClient, organizationId: string, invitations: Pick<Awaited<ReturnType<OrganizationAdapter['listInvitations']>>[number], 'id' | 'expiresAt'>[]) {
   const rows = invitations.length ? await queryAll<InvitationDelivery & {id:string}>(db, `SELECT d.id,d.status,d.provider,d.provider_message_id,d.error FROM guest_thread_deliveries d
-    JOIN activity_entries a ON a.id=d.entry_id WHERE a.organization_id=? AND a.scope_kind='organization' AND a.event_name='member.invited'
+    JOIN activity_entries a ON a.id=d.activity_entry_id WHERE a.organization_id=? AND a.event_name='member.invited'
       AND d.id IN (SELECT value FROM json_each(?))`, [organizationId, JSON.stringify(invitations.map(invitation => `organization-invitation-email:${invitation.id}:${invitation.expiresAt.toISOString()}`))]) : []
   const byId = new Map(rows.map(({id,...delivery}) => [id, delivery]))
   return new Map(invitations.map(invitation => [invitation.id, byId.get(`organization-invitation-email:${invitation.id}:${invitation.expiresAt.toISOString()}`) ?? null]))
-}
-
-export async function getOrganizationTeamsData(env: CloudflareEnv, organizationId: string) {
-  const adapter = await organizationAdapter(env)
-  const teams = await adapter.listTeams(organizationId)
-  return Promise.all(teams.map(async team => ({
-    ...team,
-    members: await adapter.listTeamMembers({ teamId: team.id }),
-  })))
 }
 
 export async function getOrganizationMembersData(env: CloudflareEnv, organizationId: string) {

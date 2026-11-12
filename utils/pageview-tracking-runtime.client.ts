@@ -125,7 +125,7 @@ export function registerPageviewTracking() {
           if (!win.zaraz?.track) throw new Error('Zaraz is unavailable for the recorded pageview')
           await win.zaraz.track(NATIVE_PAGEVIEW_ZARAZ_EVENT, { event_id: page.eventId, page_location: new URL(page.fullPath, window.location.origin).href })
         } catch (error) { deliveryStatus = 'failed'; report(error) }
-        await send({ eventId: page.eventId, eventType: 'ga4_delivery', pagePath: page.path, deliveryStatus }).catch(report)
+        await send({ event_id: page.eventId, event_type: 'ga4_delivery', page_path: page.path, delivery_status: deliveryStatus }).catch(report)
       })()
     }
     return true
@@ -143,11 +143,11 @@ export function registerPageviewTracking() {
     const attribution = readAttributionParams(new URL(target.fullPath, window.location.origin).searchParams)
     const referrerHost = initial ? normalizeReferrerHost(document.referrer) : null
     page.pageview = {
-      eventId,
-      eventType: 'pageview',
-      pagePath: target.path,
-      occurredAt: new Date(page.enteredAt).toISOString(),
-      ...(referrerHost ? { referrerHost } : {}),
+      event_id: eventId,
+      event_type: 'pageview',
+      page_path: target.path,
+      occurred_at: new Date(page.enteredAt).toISOString(),
+      ...(referrerHost ? { referrer_host: referrerHost } : {}),
       ...(Object.keys(attribution).length > 0 ? { attribution } : {}),
     }
     return page
@@ -158,7 +158,7 @@ export function registerPageviewTracking() {
     const durationSeconds = Math.round((Date.now() - page.enteredAt) / 1000)
     if (durationSeconds <= 0) return
     page.durationSent = true
-    const payload = JSON.stringify({ eventId: page.eventId, eventType: 'duration', pagePath: page.path, durationSeconds })
+    const payload = JSON.stringify({ event_id: page.eventId, event_type: 'duration', page_path: page.path, duration_seconds: durationSeconds })
     void page.pageviewReady.then((recorded) => {
       if (!recorded) return
       // Exact-event duration: a beacon survives the page going away; without one the same request is sent.

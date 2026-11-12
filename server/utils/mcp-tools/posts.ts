@@ -155,17 +155,17 @@ export const POSTS_TOOLS: McpToolDefinition[] = [
   }),
   organizationTool({
     name: 'update_post',
-    description: 'Change at least one supplied website post field. First call get_post for its updated_at and use that as expected_updated_at. Omitted fields retain their values; null clears a nullable field. Published social posts are unchanged.',
+    description: 'Change at least one supplied website post field. Use the current updated_at from get_post. Omitted fields retain their values; null clears a nullable field. Published social posts are unchanged.',
     domain: 'posts',
     minimumRole: 'admin',
     inputSchema: {
       post_id: { type: 'string' },
-      expected_updated_at: { type: 'string', description: 'Current post.updated_at from get_post. A stale revision refuses the change.' },
+      updated_at: { type: 'string', description: 'Current post.updated_at from get_post. A stale revision refuses the change.' },
       ...postUpdateProperties,
       location_id: { ...postUpdateProperties.location_id, description: 'Omit to retain the current scope. A location ID scopes the post there; null makes it organization-wide.' },
       anyOf: Object.keys(postUpdateProperties).map(field => ({ required: [field] })),
     },
-    required: ['post_id', 'expected_updated_at'],
+    required: ['post_id', 'updated_at'],
     outputSchema: postMutationResultObject,
   }),
   organizationTool({
@@ -175,10 +175,10 @@ export const POSTS_TOOLS: McpToolDefinition[] = [
     minimumRole: 'admin',
     inputSchema: {
       post_id: { type: 'string' },
-      expected_updated_at: { type: 'string', description: 'The post\'s updated_at as you last read it.' },
+      updated_at: { type: 'string', description: 'The post\'s updated_at as you last read it.' },
       targets: { type: 'array', minItems: 1, maxItems: 1 + SOCIAL_CHANNELS.length, items: publishTargetSchema, description: 'One entry per destination, each channel at most once.' },
     },
-    required: ['post_id', 'expected_updated_at', 'targets'],
+    required: ['post_id', 'updated_at', 'targets'],
     outputSchema: postPublishResultObject,
   }),
   organizationTool({
@@ -258,8 +258,15 @@ export async function handlePostsTools(ctx: McpExecutorContext): Promise<unknown
       return { posts: page.posts.map(post => forMcp(post, organization)), page_info: page.page_info }
     }
     case 'get_post': {
-      const post = await getPost(organization.db, env, organization.organizationId, requiredString(args, 'post_id'))
-      if (!post) throw new HTTPError({ statusCode: 404, statusMessage: 'Post not found' })
+      const postId = requiredString(args, 'post_id')
+      const post = await getPost(organization.db, env, organization.organizationId, postId)
+      if (!post) {
+        throw new HTTPError({
+          statusCode: 404,
+          statusMessage: `Post '${postId}' not found in this organization. Call list_posts to inspect valid posts.`,
+          data: { code: 'POST_NOT_FOUND', post_id: postId, hint: 'Call list_posts to inspect valid posts.' },
+        })
+      }
       return { post: forMcp(post, organization) }
     }
     case 'create_post': {
@@ -271,9 +278,16 @@ export async function handlePostsTools(ctx: McpExecutorContext): Promise<unknown
       )
     }
     case 'update_post': {
-      const post = await asMcpValidationError(() => updatePost(organization.db, env, organization.organizationId, requiredString(args, 'post_id'),
-        { changes: omit(args, ['post_id', 'organization_id', 'expected_updated_at']), expectedUpdatedAt: requiredString(args, 'expected_updated_at') }, organization.userId))
-      if (!post) throw new HTTPError({ statusCode: 404, statusMessage: 'Post not found' })
+      const postId = requiredString(args, 'post_id')
+      const post = await asMcpValidationError(() => updatePost(organization.db, env, organization.organizationId, postId,
+        { changes: omit(args, ['post_id', 'organization_id', 'updated_at']), expectedUpdatedAt: requiredString(args, 'updated_at') }, organization.userId))
+      if (!post) {
+        throw new HTTPError({
+          statusCode: 404,
+          statusMessage: `Post '${postId}' not found in this organization. Call list_posts to inspect valid posts.`,
+          data: { code: 'POST_NOT_FOUND', post_id: postId, hint: 'Call list_posts to inspect valid posts.' },
+        })
+      }
       return renderStructuredResponse(
         { ok: true, post: forMcp(post, organization), context: await mutationContextPayload(organization, { locationId: post.location_id }) },
         `Updated post ${post.id}.`,
@@ -286,7 +300,7 @@ export async function handlePostsTools(ctx: McpExecutorContext): Promise<unknown
         throw error
       }
       const result = await publishPost(env, organization.organizationId, requiredString(args, 'post_id'),
-        { expectedUpdatedAt: requiredString(args, 'expected_updated_at'), targets }, organization.userId)
+        { expectedUpdatedAt: requiredString(args, 'updated_at'), targets }, organization.userId)
       const summary = result.outcomes.map(outcome => `${outcome.channel}: ${outcome.status}${outcome.code ? ` (${outcome.code})` : ''}`).join('; ')
       return renderStructuredResponse(result as unknown as Record<string, unknown>, `${result.ok ? 'Published' : 'Not every target is published'} — ${summary}.`, undefined, !result.ok)
     }
@@ -326,7 +340,13 @@ export async function handlePostsTools(ctx: McpExecutorContext): Promise<unknown
     case 'delete_post': {
       const postId = requiredString(args, 'post_id')
       const deleted = await deletePost(organization.db, organization.organizationId, postId, organization.userId)
-      if (!deleted) throw new HTTPError({ statusCode: 404, statusMessage: 'Post not found' })
+      if (!deleted) {
+        throw new HTTPError({
+          statusCode: 404,
+          statusMessage: `Post '${postId}' not found in this organization. Call list_posts to inspect valid posts.`,
+          data: { code: 'POST_NOT_FOUND', post_id: postId, hint: 'Call list_posts to inspect valid posts.' },
+        })
+      }
       return { post_id: postId, deleted: true }
     }
     default:

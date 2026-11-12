@@ -82,6 +82,8 @@ export interface Post {
   media: PostMedia[]
   social_image: SocialImageSource | null
   publications: PostPublicationSummary[]
+  author_id?: string | null
+  author_name?: string | null
   created_by: string | null
   created_at: string
   updated_at: string
@@ -98,13 +100,15 @@ interface PostRow {
   status: Post['status']
   visibility: Post['visibility']
   published_at: string | null
+  author_id?: string | null
+  author_name?: string | null
   created_by: string | null
   created_at: string
   updated_at: string
 }
 
 const POST_COLUMNS = `p.id, p.organization_id, p.location_id, p.slug, p.title, p.summary AS body, p.metadata_json, p.status, p.visibility,
-  p.published_at, p.created_by, p.created_at, p.updated_at`
+  p.published_at, p.author_id, p.created_by, u.name AS author_name, p.created_at, p.updated_at`
 
 function callToActionOf(metadataJson: string): PostCallToAction | null {
   const metadata = JSON.parse(metadataJson) as { call_to_action?: PostCallToAction | null }
@@ -247,6 +251,7 @@ async function attachPostFields(db: DbClient, env: CloudflareEnv, rows: PostRow[
 
 async function readPostRow(db: DbClient, organizationId: string, postId: string) {
   return await queryFirst<PostRow>(db, `SELECT ${POST_COLUMNS} FROM content_documents p
+    LEFT JOIN user u ON u.id = COALESCE(p.author_id, p.created_by)
     WHERE p.kind = 'social_post' AND p.row_role = 'root' AND p.id = ? AND p.organization_id = ? LIMIT 1`, [postId, organizationId])
 }
 
@@ -270,6 +275,7 @@ export async function listPosts(
 ): Promise<{ posts: Post[]; page_info: McpPageInfo }> {
   if (filter.status && filter.status !== 'draft' && filter.status !== 'published') throw new PostValidationError('status must be draft or published')
   const rows = await queryAll<PostRow>(db, `SELECT ${POST_COLUMNS} FROM content_documents p
+    LEFT JOIN user u ON u.id = COALESCE(p.author_id, p.created_by)
     WHERE p.kind = 'social_post' AND p.row_role = 'root' AND p.organization_id = ?
       ${filter.status ? 'AND p.status = ?' : ''} ${filter.locationId ? 'AND p.location_id = ?' : ''}
     ORDER BY p.updated_at DESC, p.id DESC LIMIT ? OFFSET ?`,
@@ -392,7 +398,7 @@ export async function createPost(
 }
 
 /**
- * Changes what the caller names. `expected_updated_at` is the caller's own
+ * Changes what the caller names. `updated_at` is the caller's own
  * token; nothing reads a fresh one on its behalf. Editing the words, the call
  * to action or the media marks the post as authored (`manual`).
  */
@@ -428,7 +434,7 @@ export async function updatePost(
   if (data.location_id !== undefined) changes.location_id = data.location_id
   if (data.call_to_action) changes.metadata = { call_to_action: data.call_to_action }
   await updateContentDocument(db, postId, {
-    expected_updated_at: input.expectedUpdatedAt, changes,
+    updated_at: input.expectedUpdatedAt, changes,
     additionalQueriesAfter: [
       // Removing the call to action removes the key; json_set would store a JSON null.
       ...(data.call_to_action === null ? [{ query: "UPDATE content_documents SET metadata_json = json_remove(metadata_json, '$.call_to_action') WHERE id = ? AND organization_id = ?", params: [postId, organizationId] }] : []),
@@ -596,8 +602,8 @@ export async function getPublicSocialPost(
   if (!row) return null
   const [post] = await projectPublicPosts(env, db, organizationId, [row], locale)
   const source = await queryFirst<{ slug: string }>(db, 'SELECT slug FROM content_documents WHERE id = ?', [row.id])
-  const localeRepresentations = await listPublicLocaleRepresentations(env, db, {
+  const locale_representations = await listPublicLocaleRepresentations(env, db, {
     organizationId, sourcePath: postPublicPath(source!.slug), documentId: row.id,
   })
-  return { ...post!, localeRepresentations }
+  return { ...post!, locale_representations }
 }

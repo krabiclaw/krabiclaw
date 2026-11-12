@@ -50,7 +50,7 @@ export interface PublicTenantPage {
   blocks: TenantPageBlock[]
   media: MediaPlacementItem[]
   social_image: SocialImageSource | null
-  localeRepresentations?: PublicLocaleRepresentation[]
+  locale_representations?: PublicLocaleRepresentation[]
   updated_at: string
 }
 
@@ -390,7 +390,7 @@ async function hydrateBlocks(
   const reviewRows = sourceReviewRows
   const postRows = sourcePostRows
   // A page's translation is its representation row, loaded by locale in the
-  // reference query above — not a resource_localizations entry. Only the media
+  // reference query above. Only the media
   // alt text needs projecting here.
   const pages = localizations
     ? sourcePages.map(page => ({ ...page, media: projectLocalizedMediaAlt(page.media, localizations) }))
@@ -517,7 +517,13 @@ async function hydrateBlocks(
       })
     }
     const faqSource = faqBlockSource(block)
-    if (faqSource) data.items = qaItemsBySource.get(faqSource)
+    if (faqSource === 'organization_qa') {
+      data.items = qaItemsBySource.get(faqSource)
+    } else if (faqSource === 'page_qa') {
+      data.items = (Array.isArray(block.data.items) && block.data.items.length)
+        ? block.data.items
+        : qaItemsBySource.get(faqSource)
+    }
     if (block.type === 'testimonial_grid') data.items = reviewItems
     if (block.type === 'social_posts') {
       const feed = socialFeeds.get(block.id)!
@@ -537,7 +543,7 @@ function mapPage(
   page: TenantPageDto,
   blocks: TenantPageBlock[],
   socialMedia: { media: MediaPlacementItem[]; social_image: SocialImageSource | null },
-  localeRepresentations: PublicLocaleRepresentation[],
+  locale_representations: PublicLocaleRepresentation[],
 ): PublicTenantPage {
   return {
     id: page.id,
@@ -552,7 +558,7 @@ function mapPage(
     locale: page.locale,
     blocks,
     ...socialMedia,
-    localeRepresentations,
+    locale_representations,
     updated_at: page.updated_at,
   }
 }
@@ -578,7 +584,7 @@ export async function getPublicTenantPageForPath(
     : options.localizations ?? await loadExactPublicLocalizations(env, db, page.organization_id, page.locale)
   // The home page has no card of its own: it is the organization's page, and
   // its image is the organization's.
-  const [blocks, media, localeRepresentations] = await Promise.all([
+  const [blocks, media, locale_representations] = await Promise.all([
     hydrateBlocks(env, db, organizationId, page.path, page.locale, page.blocks, options.hydrationResources, localizations),
     page.path === '/'
       ? loadPublicSocialMedia(db, organizationId, 'organization', [organizationId]).then(organization => new Map([[page.id, {
@@ -606,7 +612,7 @@ export async function getPublicTenantPageForPath(
       )
     }
   }
-  return mapPage(page, blocks, localizedMedia, localeRepresentations)
+  return mapPage(page, blocks, localizedMedia, locale_representations)
 }
 
 async function resolveVariantId(db: DbClient, organizationId: string, path: string, locale?: string | null): Promise<string> {

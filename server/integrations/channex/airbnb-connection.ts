@@ -488,15 +488,15 @@ export class AirbnbConnection {
    * update is committed with the import's mapping. A detail set in Brand ›
    * Contact while the import ran is kept: each is written only while still empty.
    */
-  private organizationContactUpdate(details: ListingDetails, values: Record<DetailField, string>): BatchQuery | null {
+  private organizationContactUpdate(details: ListingDetails, values: Record<Exclude<DetailField, 'assigned_member_id'>, string>): BatchQuery | null {
     const sets: string[] = []
     const params: unknown[] = []
-    if (details.missingFields.includes('email')) {
+    if (details.missing_fields.includes('email')) {
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.email)) fail(422, 'INVALID_DETAIL', 'Enter a valid contact email')
       sets.push("contact_email = COALESCE(NULLIF(TRIM(contact_email), ''), ?)")
       params.push(values.email.toLowerCase())
     }
-    if (details.missingFields.includes('phone')) {
+    if (details.missing_fields.includes('phone')) {
       if (values.phone.length > 32) fail(422, 'INVALID_DETAIL', 'Contact phone must be 32 characters or fewer')
       sets.push("contact_phone = COALESCE(NULLIF(TRIM(contact_phone), ''), ?)")
       params.push(values.phone)
@@ -528,14 +528,14 @@ export class AirbnbConnection {
 
       const details = await listingDetails(this.env, channelId, listingId, await this.organizationContact())
       const supplied = Object.keys(input.missingDetails ?? {})
-      if (supplied.some(key => !(details.missingFields as string[]).includes(key))) fail(422, 'ONLY_MISSING_DETAILS', 'Only the listing details Airbnb left out may be supplied')
+      if (supplied.some(key => !(details.missing_fields as string[]).includes(key))) fail(422, 'ONLY_MISSING_DETAILS', 'Only the listing details Airbnb left out may be supplied')
       const field = (key: DetailField): string => {
         const value = details.fields[key] ?? input.missingDetails?.[key]
-        if (typeof value !== 'string' || !value.trim()) fail(422, 'MISSING_DETAIL', `${key} is required`)
+        if (typeof value !== 'string' || !value.trim()) fail(422, 'MISSING_DETAIL', `${key} is required`, { field: `details.${key}` })
         return value.trim()
       }
-      const values = Object.fromEntries(DETAIL_FIELDS.map(key => [key, field(key)])) as Record<DetailField, string>
-      if (details.defaultOccupancy > details.maxGuests) fail(422, 'INVALID_DETAIL', "The included guest count exceeds the listing's capacity")
+      const values = Object.fromEntries(DETAIL_FIELDS.filter(key => key !== 'assigned_member_id').map(key => [key, field(key)])) as Record<Exclude<DetailField, 'assigned_member_id'>, string>
+      if (details.default_occupancy > details.max_guests) fail(422, 'INVALID_DETAIL', "The included guest count exceeds the listing's capacity")
       const organization = await queryFirst<{ default_currency: string }>(this.db, 'SELECT default_currency FROM organization WHERE id = ?', [this.organizationId])
       if (!organization || !isCurrencyCode(organization.default_currency)) throw new Error(`Organization ${this.organizationId} has no supported default currency`)
       if (details.currency !== organization.default_currency) {
@@ -547,8 +547,8 @@ export class AirbnbConnection {
       const contact = this.organizationContactUpdate(details, values)
       const property: ImportProperty = {
         title: details.title, currency: details.currency, timezone: values.timezone, ...(details.fields.propertyType ? { property_type: details.fields.propertyType } : {}), email: values.email, phone: values.phone,
-        country: values.country, state: values.state, city: values.city, address: values.address, zip_code: values.zipCode, max_guests: details.maxGuests,
-        default_occupancy: details.defaultOccupancy, nightly_rate: details.nightlyRate,
+        country: values.country, state: values.state, city: values.city, address: values.address, zip_code: values.zipCode, max_guests: details.max_guests,
+        default_occupancy: details.default_occupancy, nightly_rate: details.nightly_rate,
       }
       this.checkSlice()
       if (existing) {
@@ -567,11 +567,14 @@ export class AirbnbConnection {
       // Resume that home even if Airbnb's details have changed since the first attempt.
       const creationKey = `airbnb-listing:${listingId}`
       const created = await readCreationRecord(this.db, creationDedupeKey('product', this.organizationId, creationKey))
+      // The host names the member who looks after the home; Airbnb never says.
+      const memberId = created ? null : field('assigned_member_id')
+      if (memberId !== null && !await queryFirst(this.db, 'SELECT id FROM member WHERE organizationId = ? AND id = ?', [this.organizationId, memberId])) fail(422, 'INVALID_DETAIL', 'assigned_member_id must be a member of this organization', { field: 'details.assigned_member_id' })
       const home = created ? await readStayHome(this.db, this.manager(), created.entityId) : await createStayHome(this.env, this.db, this.manager(), stayHomeInput({
         name: details.title, timezone: values.timezone, address: values.address, city: values.city, state: values.state, country: values.country,
-        zip_code: values.zipCode, phone: values.phone, email: values.email, check_in_time: details.checkInTime, check_in_end_time: details.checkInEndTime, check_out_time: details.checkOutTime,
-        max_guests: details.maxGuests, min_nights: details.minimumNights, calendar_rules: details.calendarRules, base_price_minor: provided(() => minorUnits(details.nightlyRate, organization.default_currency)),
-        cancellation_policy: details.cancellationPolicy, long_term_cancellation_policy: details.longTermCancellationPolicy,
+        zip_code: values.zipCode, phone: values.phone, email: values.email, check_in_time: details.check_in_time, check_in_end_time: details.check_in_end_time, check_out_time: details.check_out_time,
+        max_guests: details.max_guests, min_nights: details.minimum_nights, calendar_rules: details.calendar_rules, base_price_minor: provided(() => minorUnits(details.nightly_rate, organization.default_currency)),
+        cancellation_policy: details.cancellation_policy, long_term_cancellation_policy: details.long_term_cancellation_policy, assigned_member_id: memberId!,
       }), creationKey)
       // The nights land before the mapping: until the mapping exists a retry
       // runs this whole step again (the location and product replay by their
@@ -848,7 +851,7 @@ export class AirbnbConnection {
         if (!result.meta.changes) fail(409, 'IMPORT_CHANGED', 'The import changed. Refresh and try again.')
         const home = await readStayHome(this.db, this.manager(), productId)
         await publishBusinessInvalidation(this.env, this.organizationId)
-        await publishStayInvalidation(this.env, { type: 'nights.changed', organizationId: this.organizationId, productId, locationId: home.location_id, stayId: null }, { updated_at: now() })
+        await publishStayInvalidation(this.env, { type: 'nights.changed', organization_id: this.organizationId, product_id: productId, location_id: home.location_id, booking_id: null }, { updated_at: now() })
         return { product_id: productId, stage: 'complete' as const, content: report }
       })
     })
@@ -943,9 +946,9 @@ export class AirbnbConnection {
     }
     const written: Record<string, string> = mapping.import_written ? JSON.parse(mapping.import_written) as Record<string, string> : {}
     const body: Record<string, unknown> = {}
-    if (written.min_nights !== undefined) body.min_nights = content.minimumNights
+    if (written.min_nights !== undefined) body.min_nights = content.minimum_nights
     else report.kept_host_edits.push('min_nights')
-    if (written.calendar_rules !== undefined || home.calendar_rules === null) body.calendar_rules = content.calendarRules
+    if (written.calendar_rules !== undefined || home.calendar_rules === null) body.calendar_rules = content.calendar_rules
     else report.kept_host_edits.push('calendar_rules')
     const texts = content.descriptions
     // Airbnb's Listing description is the home's description; Airbnb's other texts are the home's sections of the same names.
@@ -964,7 +967,7 @@ export class AirbnbConnection {
         : { quiet_hours: true, quiet_hours_start: content.quietHours.start, quiet_hours_end: content.quietHours.end })
     }
     // The import guard below preserves host edits; unknown provider values stay null.
-    Object.assign(body, { check_in_time: content.checkInTime, check_in_end_time: content.checkInEndTime, check_out_time: content.checkOutTime })
+    Object.assign(body, { check_in_time: content.check_in_time, check_in_end_time: content.check_in_end_time, check_out_time: content.check_out_time })
     const arrival: Record<keyof typeof STAY_ARRIVAL_TEXT_LIMITS, string | null> = {
       check_in_instructions: paragraphs(content.checkInOption?.instruction),
       house_manual: paragraphs(content.houseManual), directions: paragraphs(content.directions),
@@ -1007,10 +1010,23 @@ export class AirbnbConnection {
     }
     // NULL inherits the canonical home, even after a global host edit leaves this row source='import'.
     // Airbnb's calendar echoes our resolved ARI values; importing those would freeze inheritance.
+    const received = JSON.stringify(inherited)
+    const imported = `FROM json_each(?) d JOIN product_nights n ON n.organization_id = ? AND n.product_id = ? AND n.date = json_extract(d.value, '$.date')
+      WHERE n.source = 'import'`
+    const dates = [received, this.organizationId, mapping.product_id]
     await executeBatch(this.db, [{
-      query: `UPDATE product_nights SET min_stay_arrival = CASE WHEN product_nights.min_stay_arrival IS NULL THEN NULL ELSE json_extract(value, '$.min_stay_arrival') END, price_minor = CASE WHEN product_nights.price_minor IS NULL THEN NULL ELSE json_extract(value, '$.price_minor') END
-        FROM json_each(?) WHERE organization_id = ? AND product_id = ? AND source = 'import' AND date = json_extract(value, '$.date')`,
-      params: [JSON.stringify(inherited), this.organizationId, mapping.product_id],
+      query: `UPDATE product_nights SET min_stay_arrival = json_extract(value, '$.min_stay_arrival')
+        FROM json_each(?) WHERE organization_id = ? AND product_id = ? AND source = 'import' AND date = json_extract(value, '$.date') AND min_stay_arrival IS NOT NULL`,
+      params: dates,
+    }, {
+      query: `DELETE FROM prices WHERE organization_id = ? AND product_variant_id = ? AND stay_date IN
+        (SELECT n.date ${imported} AND json_extract(d.value, '$.price_minor') IS NULL)`,
+      params: [this.organizationId, home.variant_id, ...dates],
+    }, {
+      query: `UPDATE prices SET unit_amount = imported.amount, updated_at = ?, updated_by = ? FROM
+        (SELECT n.date, json_extract(d.value, '$.price_minor') AS amount ${imported}) imported
+        WHERE prices.organization_id = ? AND prices.product_variant_id = ? AND prices.stay_date = imported.date AND imported.amount IS NOT NULL`,
+      params: [new Date().toISOString(), this.userId, ...dates, this.organizationId, home.variant_id],
     }, publicResourceCacheInvalidationQuery(this.organizationId, 'airbnb-calendar-content')], { operation: 'Refresh imported Airbnb calendar' })
     const homeWrite = await unedited(body)
     const detailsWrite = await unedited(details)
@@ -1300,8 +1316,8 @@ function contentReport(mapping: MappingRow): ImportContentReport | null {
 
 
 /** Source equality identifies inheritance; the canonical home governs inherited values after import. */
-function importedNight(night: ListingNight, currency: string, source: Pick<ListingDetails, 'minimumNights' | 'nightlyRate' | 'calendarRules'>) {
-  const defaults = resolveStayNightPolicy({ min_nights: source.minimumNights, base_price_minor: minorUnits(source.nightlyRate, currency), calendar_rules: source.calendarRules }, night.date)
+function importedNight(night: ListingNight, currency: string, source: Pick<ListingDetails, 'minimum_nights' | 'nightly_rate' | 'calendar_rules'>) {
+  const defaults = resolveStayNightPolicy({ min_nights: source.minimum_nights, base_price_minor: minorUnits(source.nightly_rate, currency), calendar_rules: source.calendar_rules }, night.date)
   const price = minorUnits(night.rate, currency)
   return {
     date: night.date, available: night.availability === 1, price_minor: price === defaults.price_minor ? null : price,

@@ -18,7 +18,7 @@ const organizationShell = isPlatform ? null : useOrganizationShellState()
 if (import.meta.server) await organizationShell?.ready
 if (organizationShell?.error.value) throw createError(organizationShell.error.value)
 useHead(() => {
-  const verification = organizationShell?.searchConsoleVerification.value ?? organizationShell?.config.value.search_console_verification
+  const verification = organizationShell?.search_console_verification.value ?? organizationShell?.config.value.search_console_verification
   return {
     link: buildTenantHeadLinks({
       isPlatform,

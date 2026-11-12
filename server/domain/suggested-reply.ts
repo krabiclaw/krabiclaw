@@ -16,22 +16,22 @@ Output only a JSON array of the reply strings, without commentary, markdown, or 
 /**
  * One to three draft replies for the web composer's Suggested replies, the way
  * the iPhone drafts them on the device: from the whole conversation and
- * everything the business saved about the home or stay behind it. Nothing is
+ * everything the business saved about the home, stay or booking behind it. Nothing is
  * sent; nothing is stored.
  */
-export async function suggestGuestReplies(db: DbClient, env: Record<string, unknown>, principal: MemberAccessPrincipal, threadId: string): Promise<{ generationId: string; suggestions: string[] }> {
+export async function suggestGuestReplies(db: DbClient, env: Record<string, unknown>, principal: MemberAccessPrincipal, threadId: string): Promise<{ generation_id: string; suggestions: string[] }> {
   const context = await guestThreadMessagingContext(db, principal, threadId)
   // The conversation as it is shown: a contact form's words are the guest's opening message too.
   const thread = await getInboxThread(db, threadId, principal.organizationId, { audience: 'member', userId: principal.userId, principal })
-  if (!thread) messagingError(404, 'THREAD_NOT_FOUND', 'This conversation is not in the workspace', 'threadId')
-  if (thread.kind !== 'guest') messagingError(409, 'SUGGESTION_NEEDS_GUEST_MESSAGE', 'Airbnb Support cases have no suggested replies', 'threadId')
+  if (!thread) messagingError(404, 'THREAD_NOT_FOUND', 'This conversation is not in the workspace', 'conversation_id')
+  if (thread.kind !== 'guest') messagingError(409, 'SUGGESTION_NEEDS_GUEST_MESSAGE', 'Airbnb Support cases have no suggested replies', 'conversation_id')
   const messages = thread.stream
-    .flatMap(item => item.type === 'message' && item.body?.trim() ? [{ from: item.side, at: item.sentAt, text: item.body }] : [])
+    .flatMap(item => item.type === 'message' && item.body?.trim() ? [{ from: item.side, at: item.sent_at, text: item.body }] : [])
     .slice(-40)
-  if (messages.at(-1)?.from !== 'guest') messagingError(409, 'SUGGESTION_NEEDS_GUEST_MESSAGE', 'A reply is suggested only when the guest wrote last', 'threadId')
+  if (messages.at(-1)?.from !== 'guest') messagingError(409, 'SUGGESTION_NEEDS_GUEST_MESSAGE', 'A reply is suggested only when the guest wrote last', 'conversation_id')
   // Operator identity must not enter a draft addressed to the guest.
   const home = context.home ? (({ internal_name: _internalName, ...listing }) => listing)(context.home) : null
-  const facts = JSON.stringify({ guest: thread.guestName, home, stay: context.stay, messages })
+  const facts = JSON.stringify({ now: new Date().toISOString(), guest: thread.title, home, stay: context.stay, booked: context.record, messages })
   const draft = await runWorkersAiText(env, [
     { role: 'system', content: INSTRUCTIONS },
     { role: 'user', content: `Write the reply using this quoted context:\n${facts}` },
@@ -57,7 +57,7 @@ export async function suggestGuestReplies(db: DbClient, env: Record<string, unkn
     metadata: { threadId, organizationId: principal.organizationId, userId: principal.userId, count: suggestions.length, model: draft.model,
       promptTokens: draft.promptTokens, outputTokens: draft.outputTokens, draftDigests: await Promise.all(suggestions.map(digest)) },
   })
-  return { generationId, suggestions }
+  return { generation_id: generationId, suggestions }
 }
 
 async function digest(text: string): Promise<string> {
@@ -65,16 +65,16 @@ async function digest(text: string): Promise<string> {
 }
 
 /** A reply's claim to have started from a suggested draft: which generation and which of its drafts. */
-export interface SuggestionUse { generationId: string; index: number }
+export interface SuggestionUse { generation_id: string; index: number }
 
 /** Reads `suggestion` from a reply request: an object, or (in a form with photos) its JSON. Absent is null; anything else is refused. */
 export function parseSuggestionUse(value: unknown): SuggestionUse | null {
   if (value === undefined || value === null || value === '') return null
-  const parsed: unknown = typeof value === 'string' ? (() => { try { return JSON.parse(value) } catch { messagingError(400, 'INVALID_SUGGESTION', 'suggestion must be { generationId, index }', 'suggestion') } })() : value
-  if (!parsed || typeof parsed !== 'object' || typeof (parsed as SuggestionUse).generationId !== 'string' || !Number.isSafeInteger((parsed as SuggestionUse).index) || (parsed as SuggestionUse).index < 0) {
-    messagingError(400, 'INVALID_SUGGESTION', 'suggestion must be { generationId, index }', 'suggestion')
+  const parsed: unknown = typeof value === 'string' ? (() => { try { return JSON.parse(value) } catch { messagingError(400, 'INVALID_SUGGESTION', 'suggestion must be { generation_id, index }', 'suggestion') } })() : value
+  if (!parsed || typeof parsed !== 'object' || typeof (parsed as SuggestionUse).generation_id !== 'string' || !Number.isSafeInteger((parsed as SuggestionUse).index) || (parsed as SuggestionUse).index < 0) {
+    messagingError(400, 'INVALID_SUGGESTION', 'suggestion must be { generation_id, index }', 'suggestion')
   }
-  return { generationId: (parsed as SuggestionUse).generationId, index: (parsed as SuggestionUse).index }
+  return { generation_id: (parsed as SuggestionUse).generation_id, index: (parsed as SuggestionUse).index }
 }
 
 /**
@@ -83,9 +83,9 @@ export function parseSuggestionUse(value: unknown): SuggestionUse | null {
  */
 export async function suggestedDraft(db: DbClient, input: { organizationId: string; threadId: string; suggestion: SuggestionUse }): Promise<SuggestionUse & { draftDigest: string }> {
   const generation = await queryFirst<{ metadata_json: string | null }>(db, `SELECT metadata_json FROM usage_events
-    WHERE organization_id = ? AND resource = 'suggested_replies' AND unit = 'generation' AND idempotency_key = ?`, [input.organizationId, input.suggestion.generationId])
+    WHERE organization_id = ? AND resource = 'suggested_replies' AND unit = 'generation' AND idempotency_key = ?`, [input.organizationId, input.suggestion.generation_id])
   const facts = generation?.metadata_json ? JSON.parse(generation.metadata_json) as { threadId?: unknown; draftDigests?: unknown } : null
-  if (!facts || facts.threadId !== input.threadId || !Array.isArray(facts.draftDigests)) messagingError(400, 'INVALID_SUGGESTION', 'That suggestion was not generated for this conversation', 'suggestion.generationId')
+  if (!facts || facts.threadId !== input.threadId || !Array.isArray(facts.draftDigests)) messagingError(400, 'INVALID_SUGGESTION', 'That suggestion was not generated for this conversation', 'suggestion.generation_id')
   const draftDigest = facts.draftDigests[input.suggestion.index]
   if (typeof draftDigest !== 'string') messagingError(400, 'INVALID_SUGGESTION', 'That suggestion index is not one of the generated drafts', 'suggestion.index')
   return { ...input.suggestion, draftDigest }
@@ -95,8 +95,8 @@ export async function suggestedDraft(db: DbClient, input: { organizationId: stri
 export async function recordSuggestionAccepted(db: DbClient, input: { organizationId: string; threadId: string; userId: string; body: string; draft: SuggestionUse & { draftDigest: string } }): Promise<void> {
   await recordUsageEvent(db, {
     organizationId: input.organizationId, resource: 'suggested_replies', source: 'guest_thread', provider: 'workers_ai',
-    quantity: 1, unit: 'accepted', idempotencyKey: `${input.draft.generationId}:accepted`,
-    metadata: { generationId: input.draft.generationId, index: input.draft.index, threadId: input.threadId, userId: input.userId,
+    quantity: 1, unit: 'accepted', idempotencyKey: `${input.draft.generation_id}:accepted`,
+    metadata: { generationId: input.draft.generation_id, index: input.draft.index, threadId: input.threadId, userId: input.userId,
       edited: await digest(input.body) !== input.draft.draftDigest },
   })
 }

@@ -262,10 +262,10 @@ export function unwrapInstrumentedD1(database: D1Database): D1Database {
   return databaseTargets.get(database) ?? database
 }
 
-export function finalizeRequestMetrics(
+export function finalizeRequestMetrics<T>(
   event: H3Event,
   resource: string,
-  payload: unknown,
+  payload: T,
   cacheStatus?: string,
 ) {
   const metrics = getRequestDataMetrics(event)

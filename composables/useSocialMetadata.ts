@@ -88,7 +88,7 @@ export function useSocialMetadata(input: MaybeRefOrGetter<PageSocialMetadataInpu
   const { organization, previewAuthorized } = useTenantOrganization()
   const shell = organization.site.slug === 'platform' ? null : useOrganizationShellState()
   const publicLocale = useState<string>('public-locale', () => 'en')
-  const localeRepresentations = useState<PublicLocaleRepresentation[]>('public-locale-representations', () => [])
+  const locale_representations = useState<PublicLocaleRepresentation[]>('public-locale-representations', () => [])
 
   const normalized = computed(() => {
     const value = toValue(input)
@@ -98,7 +98,7 @@ export function useSocialMetadata(input: MaybeRefOrGetter<PageSocialMetadataInpu
       ? config.public.siteUrl
       : requestURL.origin
     const privatePage = value.discoverability === 'private'
-    const exactRepresentation = privatePage ? undefined : localeRepresentations.value.find(item => item.locale === publicLocale.value)
+    const exactRepresentation = privatePage ? undefined : locale_representations.value.find(item => item.locale === publicLocale.value)
     if (!privatePage && publicLocale.value !== 'en' && !exactRepresentation) {
       throw createError({ statusCode: 404, statusMessage: 'Localized route representation was not found' })
     }
@@ -129,7 +129,7 @@ export function useSocialMetadata(input: MaybeRefOrGetter<PageSocialMetadataInpu
   useHead(() => {
     const resolved = normalized.value
     if (!resolved) return {}
-    const alternateLinks: Array<{ rel: 'alternate'; hreflang: string; href: string }> = (resolved.value.discoverability === 'private' ? [] : localeRepresentations.value).map(representation => ({
+    const alternateLinks: Array<{ rel: 'alternate'; hreflang: string; href: string }> = (resolved.value.discoverability === 'private' ? [] : locale_representations.value).map(representation => ({
       rel: 'alternate',
       hreflang: representation.locale,
       href: resolveSeoUrl(representation.route_path, resolved.origin),
@@ -196,6 +196,10 @@ export function useSocialMetadata(input: MaybeRefOrGetter<PageSocialMetadataInpu
     const url = tags.canonicalUrl
     const webpageId = `${url}#webpage`
     const logo = organization.logos.find(item => item.slot === 'logo')?.url
+    const sameAsList = Array.from(new Set([
+      ...(organization.social_profiles ?? []).map(item => item.url),
+      ...(shell?.compliance.value?.same_as ?? []),
+    ])).filter(Boolean)
     const organizationNode: ApiRecord = {
       '@type': 'Organization',
       '@id': organizationId,
@@ -203,6 +207,7 @@ export function useSocialMetadata(input: MaybeRefOrGetter<PageSocialMetadataInpu
       url: organizationRoot,
       logo: logo ? resolveSeoUrl(logo, origin) : undefined,
       description: organization.brand_description,
+      ...(sameAsList.length > 0 ? { sameAs: sameAsList } : {}),
     }
     const recipe = value.professionalService?.recipe
     const webpageNode: ApiRecord = {
@@ -246,7 +251,7 @@ export function useSocialMetadata(input: MaybeRefOrGetter<PageSocialMetadataInpu
             ? { '@type': compliance.service_area_type, name: compliance.service_area }
             : compliance.service_area,
           nonprofitStatus: compliance.nonprofit_status,
-          sameAs: compliance.same_as,
+          sameAs: sameAsList.length > 0 ? sameAsList : undefined,
           founder: compliance.founder_name ? { '@type': 'Person', name: compliance.founder_name } : undefined,
           foundingDate: compliance.founding_date,
           contactPoint: compliance.contact_points.filter(point => point.telephone || point.email || point.url).map(point => ({
@@ -301,7 +306,7 @@ export function useSocialMetadata(input: MaybeRefOrGetter<PageSocialMetadataInpu
         }))
         if (actions.length) webpageNode.potentialAction = actions
       }
-      if (recipe === 'schedule' && shell?.canSchedule.value && shell.consultation.value) {
+      if (recipe === 'schedule' && shell?.can_schedule.value && shell.consultation.value) {
         const consultation = shell.consultation.value
         webpageNode.potentialAction = {
           '@type': 'ScheduleAction',
@@ -311,7 +316,11 @@ export function useSocialMetadata(input: MaybeRefOrGetter<PageSocialMetadataInpu
     }
 
     if (value.schemaPageType === 'SoftwareApplication' && value.softwareApplication) {
-      Object.assign(webpageNode, value.softwareApplication)
+      Object.assign(webpageNode, {
+        name: organization.name,
+        headline: value.title,
+        ...value.softwareApplication,
+      })
     }
     if (value.article) {
       const articleId = `${url}#article`

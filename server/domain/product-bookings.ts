@@ -1,5 +1,6 @@
-import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
-import { CapacityUnavailableError, claimSessionCapacity, requireBookingConfig } from '~/server/utils/availability'
+import { publishConversationEvent } from '~/server/cloudflare/guest-inbox-events'
+import { planSourceMessages } from '~/server/domain/scheduled-guest-messages'
+import { CapacityUnavailableError, claimSessionCapacity, partyPaysOnline, partySizeRefusal, requireBookingConfig } from '~/server/utils/availability'
 import { cloudflareEnv, cleanString } from '~/server/utils/api-response'
 import { isReservedTestDomain, shouldSendRealEmail } from '~/server/utils/email-delivery'
 import { notifyBookingCreated, raiseSettledFailures } from '~/server/utils/notifications'
@@ -7,7 +8,7 @@ import { measurementOutcome, readPageEventId, recordOrganizationConversionEvent 
 import { resolveLocationContact } from '~/server/utils/contact-resolution'
 import { toE164 } from '~/utils/phone'
 import { queryAll, queryFirst, type DbClient } from '~/server/db'
-import { renderBookingPolicySummary, visitPolicySummarySource } from '~/server/utils/reservations'
+import { bookingPolicy, formatBookingPolicySummary } from '~/server/utils/booking-policy-summary'
 import { getProduct, resolveVariantPrice } from '~/server/utils/product-management'
 import { isCurrencyCode } from '~/shared/currencies'
 import { getSourceLocale } from '~/server/utils/organization-locales'
@@ -18,7 +19,7 @@ import { createReplayableReservationCancelToken, hashReservationCancelToken } fr
 import { ensureInteractionUser, type CloudflareEnv } from '~/server/utils/auth'
 import { getGuestRequest, getThreadOperationalRecord, requestInsertQueries, threadPayloadForGuest, type BookingOperator } from '~/server/domain/requests'
 import { conversationTaskQueries } from '~/server/domain/guest-threads/repository'
-import { openingSentence } from '~/server/domain/guest-threads/opening'
+import { GUEST_NOTE_EVENT, openingSentence } from '~/server/domain/guest-threads/opening'
 import { DEFAULT_EMAIL_DAILY_LIMIT as EMAIL_DAILY_LIMIT, DEFAULT_IP_HOURLY_LIMIT as IP_HOURLY_LIMIT, getClientIp, hashClientIp, hashIdentifier, incrementHourlyRateLimit } from '~/server/utils/hourly-rate-limit'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import { HTTPError, type H3Event } from 'nitro'
@@ -29,7 +30,8 @@ import { isRecord } from '~/server/utils/type-guards'
 import { pushStayHoldNights, quoteStay, readPublicStayHome, type StayQuote } from '~/server/domain/stays'
 import { requireChannelPush } from '~/server/integrations/channex/ari'
 import { acceptFormAnswers } from '~/server/domain/form-questions'
-import { formAnswersFingerprint } from '~/shared/form-questions'
+import { formAnswerSnapshotsSchema, formAnswersFingerprint } from '~/shared/form-questions'
+import type { ProductKind } from '~/shared/product-details'
 
 export interface BookingCreationContext {
   organizationId: string
@@ -48,35 +50,44 @@ export async function notifyProductBookingCreated(env: CloudflareEnv, db: DbClie
     getThreadOperationalRecord(db, requestId),
     queryFirst<{ name: string | null; vertical: string | null; public_url: string | null }>(db, `SELECT name, vertical, (SELECT 'https://' || domain FROM organization_domains WHERE organization_id = organization.id AND role = 'canonical' AND status = 'active') AS public_url FROM organization WHERE id = ?`, [organizationId]),
   ])
-  if (!request || request.kind !== 'booking' || !record || record.kind !== 'booking' || record.organization_id !== organizationId || !record.product_id || !record.product_name || !organization) throw new Error('Booking creation delivery requires its canonical tenant, request and offering')
-  const creation = await queryFirst<{ status: string }>(db, `SELECT json_extract(payload_json, '$.afterStatus') AS status FROM activity_entries WHERE request_id = ? AND event_name = 'booking.created' AND dedupe_key = ?`, [requestId, `booking:${record.id}:created`])
-  if (creation?.status !== 'pending' && creation?.status !== 'confirmed') throw new Error('Booking creation status is missing or invalid')
+  if (!request || request.kind !== 'booking' || !record || record.unit !== 'slot' || record.organization_id !== organizationId || !organization) throw new Error('Booking creation delivery requires its canonical tenant, request and offering')
+  const { name: guestName, email: guestEmail } = request.payload.guest
+  if (guestName === null || guestEmail === null) throw new Error('A booking made on the site or by its operator has its guest\'s name and email')
+  // The status the booking was created in, recorded on its conversation in the batch that claimed it.
+  const creation = { status: request.payload.provenance?.creation_status }
+  if (creation.status !== 'pending' && creation.status !== 'confirmed') throw new Error('Booking creation status is missing or invalid')
   const sourceLocale = await getSourceLocale(db, organizationId)
   const locale = request.payload.guest.locale ?? sourceLocale
+  // The guest's note is their message in the conversation.
+  const note = await queryFirst<{ body: string | null }>(db, 'SELECT body FROM messages WHERE conversation_id = ? AND event_name = ?', [requestId, GUEST_NOTE_EVENT])
   const token = cancellationToken ?? (await createReplayableReservationCancelToken(env.EMAIL_REPLY_SECRET ?? '', requestId)).token
   const tokenMatches = await hashReservationCancelToken(token) === request.payload.cancellation.token_hash
   if (cancellationToken && !tokenMatches) throw new Error('Booking cancellation capability does not match its request')
   const receiptUrl = tokenMatches && organization.public_url
     ? `${organization.public_url.replace(/\/$/, '')}${formatTenantLocalePath('/bookings/confirmed', locale, sourceLocale)}?id=${requestId}#${token}`
     : null
-  const [{ contactPhone, contactEmail }, ownerInboxUrl, paid] = await Promise.all([
+  const [{ contactPhone, contactEmail }, ownerInboxUrl, paid, booking] = await Promise.all([
     resolveLocationContact(db, organizationId, record.location_id),
     buildOwnerThreadInboxUrl(env, db, { organizationId, locationId: record.location_id ?? undefined, threadId: requestId }),
-    paidOnline(db, organizationId, 'booking', record.id),
+    paidOnline(db, organizationId, record.id),
+    queryFirst<{ answers: string }>(db, 'SELECT answers FROM bookings WHERE organization_id = ? AND id = ?', [organizationId, record.id]),
   ])
+  if (!booking) throw new Error(`Booking ${record.id} could not be read for its creation delivery`)
+  // Its automatic messages are planned before the new conversation is announced, so it opens with them.
+  await planSourceMessages(db, organizationId, record.id)
   const results = await Promise.allSettled([
-    publishGuestInboxThreadEvent(env, db, { threadId: requestId, type: 'thread.created' }),
+    publishConversationEvent(env, db, { conversationId: requestId, type: 'MESSAGE_CREATE' }),
     notifyBookingCreated(env, db, {
       organizationId, organizationName: organization.name, vertical: organization.vertical, locationId: record.location_id,
       guestAcknowledgement: request.payload.provenance?.guest_acknowledgement ?? true,
-      bookingId: requestId, status: creation.status, guestName: request.payload.guest.name,
-      email: request.payload.guest.email, guestPhone: request.payload.guest.phone,
-      productId: record.product_id, productTitle: record.product_name, startsAt: record.starts_at,
-      timezone: record.timezone, partySize: record.party_size, notes: request.payload.notes,
-      receiptUrl, paid, contactPhone, contactEmail, ownerInboxUrl, locale,
+      bookingId: requestId, status: creation.status, guestName,
+      email: guestEmail, guestPhone: request.payload.guest.phone,
+      productId: record.product_id, productKind: record.product_kind, productTitle: record.product_name, startsAt: record.starts_at,
+      timezone: record.timezone, partySize: record.party_size, partySizeIsMinimum: record.party_size_is_minimum, notes: note?.body ?? null,
+      receiptUrl, paid, contactPhone, contactEmail, ownerInboxUrl, locale, answers: formAnswerSnapshotsSchema.parse(JSON.parse(booking.answers)),
     }),
   ])
-  raiseSettledFailures('booking creation delivery', `bookingId ${requestId}`, results)
+  raiseSettledFailures('booking creation delivery', `bookingId ${requestId}`, results, ['publishConversationEvent', 'notifyBookingCreated'])
   return creation.status
 }
 
@@ -105,8 +116,8 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
   const guestPhone = cleanString(body.guest_phone, 30)
   const normalizedGuestPhone = guestPhone ? toE164(guestPhone) : null
   if (guestPhone && !normalizedGuestPhone) return creationResult({ error: 'A valid phone number is required.' }, { status: 400 })
-  const sessionId = cleanString(body.session_id, 64)
-  const requestedVariantId = cleanString(body.variant_id, 64)
+  const sessionId = cleanString(body.product_session_id, 64)
+  const requestedVariantId = cleanString(body.product_variant_id, 64)
   const notes = cleanString(body.notes, 1000)
   const pageEventId = readPageEventId(body.page_event_id)
   const partySizeValue = typeof body.party_size === 'number' || typeof body.party_size === 'string' ? Number(body.party_size) : Number.NaN
@@ -127,29 +138,29 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
   const threadId = await hashIdentifier(JSON.stringify(operator ? [organizationId, idempotencyKey] : ['website-booking', organizationId, idempotencyKey]))
   const fingerprint = await hashIdentifier(JSON.stringify({ slug, sessionId, requestedVariantId, partySize, guestName, guestEmail, phone: normalizedGuestPhone, notes, answers: formAnswersFingerprint(body.answers), source: operator?.source ?? 'website', externalReference: operator?.externalReference ?? null, guestAcknowledgement: operator?.guestAcknowledgement ?? true }))
   const replay = async () => {
-    const existing = await queryFirst<{ id: string; status: string; fingerprint: string | null; completed: number | null; creation_status: string | null; product_session_id: string; product_variant_id: string; party_size: number }>(db, `SELECT b.id, b.status, b.product_session_id, b.product_variant_id, b.party_size, json_extract(r.payload_json, '$.provenance.fingerprint') AS fingerprint, json_extract(r.payload_json, '$.provenance.followups_completed') AS completed, json_extract(r.payload_json, '$.provenance.creation_status') AS creation_status FROM bookings b JOIN requests r ON r.id = b.request_id WHERE b.organization_id = ? AND r.id = ?`, [organizationId, threadId])
+    const existing = await queryFirst<{ id: string; status: string; fingerprint: string | null; completed: number | null; creation_status: string | null; product_session_id: string; product_variant_id: string; party_size: number }>(db, `SELECT b.id, b.status, b.product_session_id, b.product_variant_id, b.party_size, json_extract(r.payload_json, '$.provenance.fingerprint') AS fingerprint, json_extract(r.payload_json, '$.provenance.followups_completed') AS completed, json_extract(r.payload_json, '$.provenance.creation_status') AS creation_status FROM conversations r JOIN bookings b ON b.id = r.booking_id AND b.organization_id = r.organization_id WHERE b.organization_id = ? AND r.id = ?`, [organizationId, threadId])
     if (!existing) return null
     if (existing.fingerprint !== fingerprint) return creationResult({ error: 'Idempotency key was reused with different booking details', code: 'idempotency_conflict' }, { status: 409 })
     if (!existing.completed) {
       if (existing.status !== existing.creation_status || existing.product_session_id !== sessionId || (requestedVariantId && existing.product_variant_id !== requestedVariantId) || existing.party_size !== partySize) {
-        return creationResult({ error: 'Booking changed before creation notifications completed. Read the current booking before continuing.', code: 'booking_changed', operational_booking_id: existing.id, request_id: threadId, status: existing.status }, { status: 409 })
+        return creationResult({ error: 'Booking changed before creation notifications completed. Read the current booking before continuing.', code: 'booking_changed', booking_id: existing.id, conversation_id: threadId, status: existing.status }, { status: 409 })
       }
       await notifyProductBookingCreated(env, db, organizationId, threadId)
-      await db.prepare(`UPDATE requests SET payload_json=json_set(payload_json,'$.provenance.followups_completed',json('true')) WHERE id=? AND organization_id=?`).bind(threadId, organizationId).run()
+      await db.prepare(`UPDATE conversations SET payload_json=json_set(payload_json,'$.provenance.followups_completed',json('true')) WHERE id=? AND organization_id=?`).bind(threadId, organizationId).run()
     }
     const record = await getThreadOperationalRecord(db, threadId)
-    if (!record || record.kind !== 'booking' || record.organization_id !== organizationId || record.id !== existing.id) throw new Error('Committed booking is missing its operational receipt')
+    if (!record || record.organization_id !== organizationId || record.id !== existing.id) throw new Error('Committed booking is missing its operational receipt')
     if (!operator) {
-      if (record.status !== 'pending' && record.status !== 'confirmed') return creationResult({ error: 'This booking has already been cancelled', code: 'booking_cancelled', operational_booking_id: record.id, request_id: threadId }, { status: 409 })
+      if (record.status !== 'pending' && record.status !== 'confirmed') return creationResult({ error: 'This booking has already been cancelled', code: 'booking_cancelled', booking_id: record.id, conversation_id: threadId }, { status: 409 })
       const cancellation = await createReplayableReservationCancelToken(env.EMAIL_REPLY_SECRET ?? '', threadId)
       const request = await getGuestRequest(db, threadId, organizationId, 'booking')
       if (!request || request.kind !== 'booking' || await hashReservationCancelToken(cancellation.token) !== request.payload.cancellation.token_hash) throw new Error('Booking receipt is missing its cancellation capability')
-      return creationResult({ success: true, request_id: threadId, operational_booking_id: record.id, status: record.status, replayed: true,
+      return creationResult({ success: true, conversation_id: threadId, booking_id: record.id, status: record.status, replayed: true,
         starts_at: record.starts_at, ends_at: record.ends_at, timezone: record.timezone, cancellation_token: cancellation.token,
         message: record.status === 'pending' ? 'Your booking request is awaiting review.' : 'Your booking is confirmed.',
       }, { status: 200 })
     }
-    return creationResult({ success: true, request_id: threadId, operational_booking_id: record.id, status: record.status, replayed: true,
+    return creationResult({ success: true, conversation_id: threadId, booking_id: record.id, status: record.status, replayed: true,
       starts_at: record.starts_at, ends_at: record.ends_at, timezone: record.timezone,
     }, { status: 200 })
   }
@@ -157,7 +168,7 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
   if (existing) return existing
 
   const checkoutAttempt = await queryFirst<{ price_snapshot_json: string; fingerprint: string | null }>(db, `SELECT p.price_snapshot_json, json_extract(r.payload_json,'$.provenance.fingerprint') AS fingerprint
-    FROM payments p JOIN requests r ON r.id=? AND r.organization_id=p.organization_id
+    FROM payments p JOIN conversations r ON r.id=? AND r.organization_id=p.organization_id
     WHERE p.idempotency_key=? AND p.organization_id=?`, [threadId, `checkout:${organizationId}:${idempotencyKey}`, organizationId])
   if (checkoutAttempt) {
     if (checkoutAttempt.fingerprint !== fingerprint) return creationResult({ error: 'This key already identifies a different checkout request. Read its purchase before continuing.', code: 'idempotency_conflict' }, { status: 409 })
@@ -168,22 +179,25 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
     }
     if (context.financialWritesAllowed === false) throw new HTTPError({ statusCode: 409, statusMessage: 'Continue this purchase through the business’s payment workflow', data: { code: 'financial_action_required', dashboard_url: `/dashboard/${encodeURIComponent(organization.slug)}/products/${encodeURIComponent(snapshot.product_id)}/booking` } })
     const checkout = await createPaymentCheckout(db, env, {
-      subjectType: 'booking', organizationId, buyerUserId: operator ? null : await ensureInteractionUser(event, env), productId: snapshot.product_id, variantId: snapshot.variant_id,
-      sessionId, requestId: threadId, requestFingerprint: await hashIdentifier(JSON.stringify({ guestName, guestEmail, phone: normalizedGuestPhone, notes })), quantity: partySize,
+      // A retry is held to the answers its purchase froze; it does not read them again.
+      unit: 'slot', organizationId, buyerUserId: operator ? null : await ensureInteractionUser(event, env), productId: snapshot.product_id, variantId: snapshot.variant_id,
+      sessionId, answers: null, requestId: threadId, requestFingerprint: await hashIdentifier(JSON.stringify({ guestName, guestEmail, phone: normalizedGuestPhone, notes })), quantity: partySize,
       idempotencyKey, following: () => [], origin: operator ? null : { request: event.req, pageEventId },
     })
     return creationResult({ success: true, status: 'checkout', replayed: true, ...checkout }, { status: 200 })
   }
 
   await assertPublicOrganizationLanguage(db, organizationId, locale)
-  const product = await queryFirst<{ id: string; name: string; order_url: string | null }>(db, `
-    SELECT p.id, p.name, p.order_url FROM products p
+  const product = await queryFirst<{ id: string; name: string; kind: ProductKind; order_url: string | null }>(db, `
+    SELECT p.id, p.name, p.kind, p.order_url FROM products p
       JOIN product_publications pub ON pub.product_id = p.id AND pub.organization_id = p.organization_id
-      JOIN product_booking_configs cfg ON cfg.product_id = p.id
+      JOIN product_booking_configs cfg ON cfg.product_id = p.id AND cfg.unit = 'slot'
      WHERE pub.organization_id = ? AND pub.published = 1 AND p.slug = ? AND p.active = 1 LIMIT 1
   `, [organizationId, slug])
   if (!product) return creationResult({ error: 'Product not found' }, { status: 404 })
   if (!operator && product.order_url) return creationResult({ error: 'Book this product on its configured external website.', external_url: product.order_url }, { status: 409 })
+  // A restaurant calls a table's guest when plans change, so a table booking needs a phone number.
+  if (product.kind === 'table' && !normalizedGuestPhone) return creationResult({ error: 'Please enter your phone number.' }, { status: 400 })
   // The answers are checked and frozen here, before any seat or payment: a
   // checkout's thread carries them, and capture uses what was accepted now.
   const answers = await acceptFormAnswers(db, { kind: 'booking', organizationId, productId: product.id }, { locale, answers: body.answers, questionsRevision: body.questions_revision, revisionRequired: false })
@@ -223,14 +237,17 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
   const productVariantId = requestedVariantId || variants[0]!.id
 
   const full = await getProduct(db, organization.id, product.id)
-  const presentation = resolveBookingPresentation('booking', organization.vertical)
+  const presentation = resolveBookingPresentation(product.kind, organization.vertical)
   const config = await requireBookingConfig(db, organization.id, product.id)
+  const partyRefusal = partySizeRefusal(config, partySize)
+  if (partyRefusal) return creationResult({ error: partyRefusal, code: 'party_size_unavailable' }, { status: 400 })
   if (!isCurrencyCode(organization.default_currency)) throw new Error(`Unsupported organization currency: ${organization.default_currency}`)
   const variant = full.variants.find(candidate => candidate.id === productVariantId)
   if (!variant) throw new Error('The selected variant is missing')
   const price = resolveVariantPrice(variant, { currency: organization.default_currency, location_id: session.location_id, at: new Date().toISOString() })
   if (!price || price.type !== 'one_time') return creationResult({ error: 'A current one-time price is required for this offering', code: 'price_unavailable' }, { status: 409 })
-  const requiresPayment = config.online_payment_required && price.unit_amount > 0
+  const requiresPayment = partyPaysOnline(config, partySize) && price.unit_amount > 0
+  const policy = bookingPolicy(config, price)
   if (requiresPayment && context.financialWritesAllowed === false) {
     throw new HTTPError({ statusCode: 409, statusMessage: 'This booking requires online payment. Review the offering in the dashboard and complete its payment workflow before a booking can be created.', data: {
       code: 'financial_action_required', dashboard_url: `/dashboard/${encodeURIComponent(organization.slug)}/products/${encodeURIComponent(product.id)}/booking`,
@@ -260,14 +277,14 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
   const userId = operator ? null : await ensureInteractionUser(event, env)
 
   const now = new Date().toISOString()
-  const payload = threadPayloadForGuest({ name: guestName, email: guestEmail, phone: normalizedGuestPhone, locale, notes, ipHash, answers })
+  const payload = threadPayloadForGuest({ name: guestName, email: guestEmail, phone: normalizedGuestPhone, locale, ipHash })
   // The booking's own message opens its conversation, stated where and when it is.
   const place = session.location_id === null ? null
     : await queryFirst<{ title: string }>(db, 'SELECT title FROM business_locations WHERE id = ? AND organization_id = ?', [session.location_id, organizationId])
   if (session.location_id !== null && !place) throw new HTTPError({ statusCode: 404, message: 'The session location does not exist' })
   if (!organization.vertical) throw new Error('The organization has no vertical')
-  const opening = { body: openingSentence({ kind: 'booking', vertical: organization.vertical, productTitle: product.name, guestName: payload.guest.name ?? guestName, guestPhone: payload.guest.phone,
-    answers: payload.answers, partySize, startsAt: session.starts_at, timezone: session.timezone, placeTitle: place?.title ?? null }) }
+  const opening = { note: notes, opening: openingSentence({ kind: 'booking', vertical: organization.vertical, productKind: product.kind, productTitle: product.name, partySizeIsMinimum: false, guestName, guestPhone: payload.guest.phone,
+    answers, partySize, startsAt: session.starts_at, timezone: session.timezone, placeTitle: place?.title ?? null }) }
   payload.provenance = { source: operator?.source ?? 'website', external_reference: operator?.externalReference ?? null, actor_user_id: operator?.userId ?? null,
     idempotency_key: idempotencyKey, fingerprint, guest_acknowledgement: operator?.guestAcknowledgement ?? true,
     creation_kind: requiresPayment ? 'checkout' : 'ordinary', creation_status: config.confirmation_mode === 'review' ? 'pending' : 'confirmed', followups_completed: false }
@@ -278,12 +295,12 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
     // Contact stays on the guest thread. A checkout thread waits on the guest;
     // authenticated capture alone creates its operational Booking and activity.
     const checkout = await createPaymentCheckout(db, env, {
-      subjectType: 'booking', organizationId, buyerUserId: userId, productId: product.id, variantId: productVariantId,
-      sessionId: session.id, requestId: threadId, requestFingerprint: await hashIdentifier(JSON.stringify({ guestName, guestEmail, phone: normalizedGuestPhone, notes })), quantity: partySize, idempotencyKey: checkoutKey,
+      unit: 'slot', organizationId, buyerUserId: userId, productId: product.id, variantId: productVariantId,
+      sessionId: session.id, answers, requestId: threadId, requestFingerprint: await hashIdentifier(JSON.stringify({ guestName, guestEmail, phone: normalizedGuestPhone, notes })), quantity: partySize, idempotencyKey: checkoutKey,
       origin: operator ? null : { request: event.req, pageEventId },
       following: paymentId => requestInsertQueries({
         kind: 'booking', id: threadId, organization_id: organizationId, location_id: session.location_id,
-        user_id: userId, review_id: null, payload, created_at: now, updated_at: now,
+        user_id: userId, booking_id: null, payload, created_at: now,
       }, { query: "SELECT 1 FROM payment_checkout_holds WHERE payment_id = ? AND status = 'active'", params: [paymentId] }, opening),
     })
     return creationResult({ success: true, status: 'checkout', ...checkout }, { status: 201 })
@@ -291,39 +308,25 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
 
   let operationalBookingId: string
   try {
-    // The seat is claimed first, and the thread is written only where that
-    // claim landed: a claim that finds the session full inserts nothing and
-    // raises nothing, so a thread written ahead of it would commit on its own.
-    // The booking takes its request id once the thread exists.
+    // The seat is claimed first, and the conversation is written only where
+    // that claim landed: a claim that finds the session full inserts nothing
+    // and raises nothing, so a conversation written ahead of it would commit
+    // on its own. The conversation names the booking it is about.
     const claim = await claimSessionCapacity(db, {
       env,
       organizationId: organization.id, productId: product.id, sessionId: session.id,
-      productVariantId, partySize, userId, requestId: null,
+      productVariantId, partySize, userId, policyJson: JSON.stringify(policy), answers,
       following: bookingId => [
         ...requestInsertQueries({
           kind: 'booking', id: threadId, organization_id: organization.id,
-          location_id: session.location_id, user_id: userId, review_id: null,
-          payload,
-          created_at: now, updated_at: now,
+          location_id: session.location_id, user_id: userId, booking_id: bookingId,
+          payload, created_at: now,
         }, { query: 'SELECT 1 FROM bookings WHERE id = ?', params: [bookingId] }, opening),
         {
-          query: `UPDATE bookings SET request_id = ?, updated_at = ?
-                   WHERE id = ? AND EXISTS (SELECT 1 FROM requests WHERE id = ?)`,
-          params: [threadId, now, bookingId, threadId],
-        },
-        {
-          query: `UPDATE requests SET payload_json = json_set(payload_json, '$.provenance.creation_status',
+          query: `UPDATE conversations SET payload_json = json_set(payload_json, '$.provenance.creation_status',
                     (SELECT status FROM bookings WHERE id = ?))
-                  WHERE id = ? AND EXISTS (SELECT 1 FROM bookings WHERE id = ? AND request_id = requests.id)`,
+                  WHERE id = ? AND booking_id = ?`,
           params: [bookingId, threadId, bookingId],
-        },
-        {
-          query: `INSERT INTO activity_entries (id, request_id, kind, scope_kind, actor_kind, actor_user_id, event_name, payload_json, dedupe_key, sequence, occurred_at, created_at)
-                  SELECT ?, request_id, 'operation', 'request', ?, ?, 'booking.created',
-                    json_object('operational_booking_id', id, 'request_id', request_id, 'afterStatus', status), ?,
-                    COALESCE((SELECT MAX(sequence) FROM activity_entries WHERE request_id = bookings.request_id), 0) + 1, ?, ?
-                  FROM bookings WHERE id = ? AND request_id IS NOT NULL`,
-          params: [crypto.randomUUID(), operator ? 'member' : 'system', operator?.userId ?? null, `booking:${bookingId}:created`, now, now, bookingId],
         },
         // A booking that waits for the business's approval is its review task.
         ...conversationTaskQueries(threadId, now),
@@ -349,8 +352,17 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
   // event, and a quote that cannot be resolved is a measurement failure reported beside the
   // committed booking, never a reason the booking was not made. Seats are priced per person, as the
   // product page states, so the quoted amount is unit price x seats. A variant with no offer has an
-  // unknown value, not a zero one.
+  // unknown value, not a zero one. A table booking is the provider-side 'reservation_submit'
+  // conversion restaurants' Google Ads and GA4 already count, which carries no value.
   const recordBookingMeasurement = async () => {
+    if (product.kind === 'table') {
+      const recorded = await recordOrganizationConversionEvent(db, event.req, {
+        organizationId: organization.id, eventName: 'reservation_submit', stage: 'submitted', surface: 'website',
+        locationId: session.location_id, entityType: 'request', entityId: threadId, productId: product.id, variantId: productVariantId,
+        pageType: 'reservations', routePath: '/reservations', originEventId: pageEventId,
+      })
+      return { ...recorded, quotedValue: null }
+    }
     const quotedValue = {
       basis: 'quoted' as const,
       amount_minor: price.unit_amount * partySize,
@@ -377,18 +389,18 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
   // committed result: a guest told a confirmed submission failed would submit again.
   raiseSettledFailures('booking follow-up', `bookingId ${threadId}`, followUps.slice(0, 1),
     ['notifyProductBookingCreated'])
-  await db.prepare(`UPDATE requests SET payload_json = json_set(payload_json, '$.provenance.followups_completed', json('true')) WHERE id = ? AND organization_id = ?`).bind(threadId, organizationId).run()
+  await db.prepare(`UPDATE conversations SET payload_json = json_set(payload_json, '$.provenance.followups_completed', json('true')) WHERE id = ? AND organization_id = ?`).bind(threadId, organizationId).run()
   const record = await getThreadOperationalRecord(db, threadId)
-  if (!record || record.kind !== 'booking' || record.organization_id !== organizationId || record.id !== operationalBookingId) throw new Error('Created booking is missing its operational receipt')
-  if (!operator && record.status === 'cancelled') return creationResult({ error: 'This booking has already been cancelled', code: 'booking_cancelled', operational_booking_id: record.id, request_id: threadId }, { status: 409 })
+  if (!record || record.organization_id !== organizationId || record.id !== operationalBookingId) throw new Error('Created booking is missing its operational receipt')
+  if (!operator && record.status === 'cancelled') return creationResult({ error: 'This booking has already been cancelled', code: 'booking_cancelled', booking_id: record.id, conversation_id: threadId }, { status: 409 })
   const whenLabel = new Intl.DateTimeFormat(locale, { timeZone: record.timezone, dateStyle: 'medium', timeStyle: 'short' }).format(new Date(record.starts_at)) + (record.location_id === null ? ` (${record.timezone})` : '')
   const measurement = measurementOutcome(followUps[1]!)
   const quotedValueOf = (result: PromiseSettledResult<unknown>) => result.status === 'fulfilled' ? (result.value as { quotedValue: unknown }).quotedValue : null
 
   return creationResult({
-    success: true, request_id: threadId, operational_booking_id: operationalBookingId, status: record.status, replayed: false, starts_at: record.starts_at, ends_at: record.ends_at, timezone: record.timezone, presentation, ...(operator ? {} : { cancellation_token: cancellation.token, quoted_value: quotedValueOf(followUps[1]!), measurement }),
+    success: true, conversation_id: threadId, booking_id: operationalBookingId, status: record.status, replayed: false, starts_at: record.starts_at, ends_at: record.ends_at, timezone: record.timezone, presentation, ...(operator ? {} : { cancellation_token: cancellation.token, quoted_value: quotedValueOf(followUps[1]!), measurement }),
     message: record.status === 'cancelled' ? 'This booking was cancelled.' : record.status === 'pending' ? `Your request for ${record.product_name} on ${whenLabel} is awaiting review.` : `Your ${presentation.noun} for ${record.product_name} on ${whenLabel} is confirmed.`,
-    policy_summary: renderBookingPolicySummary(visitPolicySummarySource('experience'), locale, full.kind),
+    policy_summary: formatBookingPolicySummary(policy, locale, full.kind),
   }, { status: 201 })
 }
 
@@ -432,7 +444,7 @@ export async function createStayBooking(event: H3Event, context: { organizationI
   // A new checkout checks and freezes the answers with the purchase; a retry is
   // held to the purchase it froze, answers included, and does not read the
   // questions again (createPaymentCheckout reads `guest` only for a new checkout).
-  const answers = retrying ? [] : await acceptFormAnswers(db, { kind: 'stay', organizationId, productId: home.product_id }, { locale: typeof body.locale === 'string' ? body.locale : null, answers: body.answers, questionsRevision: body.questions_revision, revisionRequired: false })
+  const answers = retrying ? [] : await acceptFormAnswers(db, { kind: 'booking', organizationId, productId: home.product_id }, { locale: typeof body.locale === 'string' ? body.locale : null, answers: body.answers, questionsRevision: body.questions_revision, revisionRequired: false })
   const guest = { name: guestName, email: guestEmail, phone, notes, answers }
   // The quote's refusals name the rule a guest's choice breaks; they come before rate limits and payment setup.
   const quoted: StayQuote | null = retrying ? null : await quoteStay(db, organizationId, home, request)
@@ -451,7 +463,7 @@ export async function createStayBooking(event: H3Event, context: { organizationI
     ? { product_id: quoted.product_id, check_in_date: quoted.check_in_date, check_out_date: quoted.check_out_date, adults: quoted.adults, children: quoted.children, infants: quoted.infants }
     : { product_id: home.product_id, check_in_date: String(request.check_in_date), check_out_date: String(request.check_out_date), adults: Number(request.adults), children: Number(request.children), infants: Number(request.infants) }
   const checkout = await createPaymentCheckout(db, env, {
-    subjectType: 'stay', organizationId, buyerUserId: await ensureInteractionUser(event, env), requestId: null, requestFingerprint: fingerprint,
+    unit: 'nights', organizationId, buyerUserId: await ensureInteractionUser(event, env), requestId: null, requestFingerprint: fingerprint,
     quantity: stay.adults + stay.children, idempotencyKey, following: () => [],
     origin: { request: event.req, pageEventId: readPageEventId(body.page_event_id) },
     stay, guest, quote,

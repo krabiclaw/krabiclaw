@@ -6,27 +6,70 @@
     </template>
     <template v-if="!concern || concern === 'schedule'">
       <UFormField label="When to send"><USelect :model-value="trigger" :items="triggers" class="w-full" :disabled="!editor.manage.value || editor.saving.value" @update:model-value="setTrigger" /></UFormField>
-        <UAlert v-if="editor.homesError.value" color="error" title="Homes could not be loaded" :description="editor.homesError.value" />
-        <UFormField label="Homes"><USelectMenu v-model="editor.draft.value.schedule.productIds" :items="editor.homes.value.map(home => ({ label: home.internal_name, value: home.product_id, description: home.timezone }))" value-key="value" multiple placeholder="Select homes" class="w-full" :disabled="!editor.manage.value || editor.saving.value || !!editor.homesError.value" /></UFormField>
+        <UAlert v-if="editor.offeringsError.value" color="error" title="Offerings could not be loaded" :description="editor.offeringsError.value" />
+        <UFormField :label="homesOnly ? 'Homes' : 'Offerings'"><USelectMenu v-model="selected" :items="offeringItems" value-key="value" multiple :placeholder="homesOnly ? 'Select homes' : 'Select offerings'" class="w-full" :disabled="!editor.manage.value || editor.saving.value || !!editor.offeringsError.value" /></UFormField>
         <template v-if="editor.draft.value.schedule.trigger !== 'booking_received'">
-          <UFormField label="Day"><USelect v-model="editor.draft.value.schedule.offsetDays" :items="days" class="w-full" :disabled="!editor.manage.value || editor.saving.value" /></UFormField>
-          <UFormField label="Local time"><UInput v-model="editor.draft.value.schedule.localTime" type="time" class="w-full" :disabled="!editor.manage.value || editor.saving.value" /></UFormField>
+          <UFormField label="Day"><USelect :model-value="offset ?? undefined" :items="offsets" class="w-full" :disabled="!editor.manage.value || editor.saving.value" @update:model-value="setOffset" /></UFormField>
+          <UFormField v-if="'local_time' in editor.draft.value.schedule" label="Local time"><UInput v-model="editor.draft.value.schedule.local_time" type="time" class="w-full" :disabled="!editor.manage.value || editor.saving.value" /></UFormField>
         </template>
-        <p class="text-sm text-muted">New-reservation messages apply to new reservations, including Airbnb bookings received as they happen. Imported reservations do not trigger new-reservation messages. Every confirmed stay is also sent its home’s check-in instructions the day before arrival. Failed messages remain visible for review.</p>
+        <p class="text-sm text-muted"><template v-if="homesOnly">New-reservation messages apply to new reservations, including Airbnb bookings received as they happen. Imported reservations do not trigger new-reservation messages. Every confirmed stay is also sent its home’s check-in instructions the day before arrival. </template>Failed messages remain visible for review.</p>
     </template>
   </div>
 </template>
 <script setup lang="ts">
 import { automaticMessageEditorKey } from './AutomaticMessageEditorPage.vue'
+import { scheduleVocabulary, type GuestMessageSchedule } from '~/lib/components/workspace/messages/guest-messaging-client'
+import { resolveBookingPresentation } from '~/utils/booking-presentation'
+import { EXPERIENCE_PRESENTATION } from '~/utils/product-presentation'
 defineProps<{ concern?: 'content' | 'schedule' }>()
 const editor = inject(automaticMessageEditorKey)!
-const trigger = computed(() => editor.draft.value.schedule.trigger)
-const triggers = [{ label: '5 minutes after a new reservation', value: 'booking_received' }, { label: 'Around check-in', value: 'check_in' }, { label: 'Around checkout', value: 'check_out' }]
-const days = Array.from({ length: 15 }, (_, index) => { const value = index - 7; return { value, label: value === 0 ? 'On the day' : `${Math.abs(value)} ${Math.abs(value) === 1 ? 'day' : 'days'} ${value < 0 ? 'before' : 'after'}` } })
+const schedule = computed(() => editor.draft.value.schedule)
+const trigger = computed(() => schedule.value.trigger)
+const vocabulary = computed(() => scheduleVocabulary(editor.vertical.value))
+// Every offering the workspace takes bookings for; a list of homes alone keeps the homes' words.
+const homesOnly = computed(() => editor.offerings.value.length > 0 && editor.offerings.value.every(offering => offering.kind === 'stay'))
+const kindLabel = (kind: 'stay' | 'experience' | 'service' | 'table') => kind === 'experience' ? EXPERIENCE_PRESENTATION.itemLabel
+  : kind === 'service' ? resolveBookingPresentation('service', 'service').label : kind === 'table' ? resolveBookingPresentation('table', editor.vertical.value).labelPlural : 'Home'
+const offeringItems = computed(() => editor.offerings.value.map(offering => ({
+  label: offering.name, value: offering.id,
+  description: [homesOnly.value ? null : kindLabel(offering.kind), offering.timezone].filter(Boolean).join(' · '),
+})))
+// product_ids names each offering, a location's tables included.
+const selected = computed({
+  get: () => schedule.value.product_ids,
+  set: (values: string[]) => {
+    if (!editor.manage.value || editor.saving.value) return
+    editor.draft.value.schedule = { ...schedule.value, product_ids: values }
+  },
+})
+const triggers = computed(() => [
+  { label: `5 minutes after ${vocabulary.value.received}`, value: 'booking_received' },
+  { label: vocabulary.value.aroundCheckIn, value: 'check_in' },
+  { label: vocabulary.value.aroundCheckOut, value: 'check_out' },
+])
+// Days anchor to a local time on that day; hours count from the start or end itself.
+const HOURS = [1, 2, 3, 4, 6, 12, 24, 48, 72]
+const offset = computed(() => schedule.value.trigger === 'booking_received' ? null : 'offset_hours' in schedule.value ? `h:${schedule.value.offset_hours}` : `d:${schedule.value.offset_days}`)
+const offsets = computed(() => {
+  const hours = [...new Set([...HOURS.map(value => -value), ...HOURS, ...(offset.value?.startsWith('h:') ? [Number(offset.value.slice(2))] : [])])].sort((a, b) => a - b)
+  const hourItems = hours.map(value => ({ value: `h:${value}`, label: value === 0 ? 'At that time' : `${Math.abs(value)} ${Math.abs(value) === 1 ? 'hour' : 'hours'} ${value < 0 ? 'before' : 'after'}` }))
+  const dayItems = Array.from({ length: 15 }, (_, index) => { const value = index - 7; return { value: `d:${value}`, label: value === 0 ? 'On the day' : `${Math.abs(value)} ${Math.abs(value) === 1 ? 'day' : 'days'} ${value < 0 ? 'before' : 'after'}` } })
+  return [...dayItems.filter(item => item.value.startsWith('d:-')), ...hourItems.filter(item => item.value.startsWith('h:-')), ...hourItems.filter(item => !item.value.startsWith('h:-')), ...dayItems.filter(item => !item.value.startsWith('d:-'))]
+})
+function setOffset(value: string) {
+  if (!editor.manage.value || editor.saving.value || schedule.value.trigger === 'booking_received') return
+  const { product_ids, trigger: event } = schedule.value
+  const amount = Number(value.slice(2))
+  editor.draft.value.schedule = value.startsWith('h:') ? { trigger: event, offset_hours: amount, product_ids }
+    : { trigger: event, offset_days: amount, local_time: 'local_time' in schedule.value ? schedule.value.local_time : '09:00', product_ids }
+}
 function setTrigger(value: string) {
   if (!editor.manage.value || editor.saving.value) return
-  const current = editor.draft.value.schedule
-  editor.draft.value.schedule = value === 'booking_received' ? { trigger: value, delayMinutes: 5, productIds: current.productIds }
-    : { trigger: value as 'check_in' | 'check_out', offsetDays: current.trigger !== 'booking_received' ? current.offsetDays : 0, localTime: current.trigger !== 'booking_received' ? current.localTime : '09:00', productIds: current.productIds }
+  const current = schedule.value
+  const { product_ids } = current
+  const next: GuestMessageSchedule = value === 'booking_received' ? { trigger: 'booking_received', delay_minutes: 5, product_ids }
+    : current.trigger === 'booking_received' ? { trigger: value as 'check_in' | 'check_out', offset_days: 0, local_time: '09:00', product_ids }
+      : { ...current, trigger: value as 'check_in' | 'check_out' }
+  editor.draft.value.schedule = next
 }
 </script>
