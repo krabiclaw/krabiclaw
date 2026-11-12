@@ -915,17 +915,18 @@ test('buyer conversation approves and declines canonical changes without moving 
       return (await response.json() as { booking: { version: number; updated_at: string; booking_date: string; booking_time: string; party_size: number; location_id: string; product_session_id: string } }).booking
     }
     const original = await read()
+    const movePath = `/api/dashboard/bookings/${booked.bookingId}/move`
+    const moveParams = { org: demoSlug() }
     const requestChange = async (partySize: number) => {
       const current = await read()
-      const response = await owner.post(`/api/dashboard/bookings/${booked.bookingId}/move`, {
-        params: { org: demoSlug() },
-        data: { apply: false, product_session_id: current.product_session_id, party_size: partySize, version: current.version, idempotency_key: crypto.randomUUID() },
-      })
+      const data = { apply: false, product_session_id: current.product_session_id, party_size: partySize, version: current.version, idempotency_key: crypto.randomUUID() }
+      const response = await owner.post(movePath, { params: moveParams, data })
       await expectStatus(response, 200)
+      expect(await response.json()).toMatchObject({ change_status: 'awaiting_guest_acceptance', booking: { booking_id: booked.bookingId } })
       const detail = await loadThreadDetail(owner, threadId!, demoOrganizationId())
       const proposal = streamChanges(detail).at(-1)
       expect(proposal?.change.status).toBe('pending')
-      return proposal!
+      return { id: proposal!.id, data }
     }
     const first = await requestChange(2)
     expect(await read()).toMatchObject({ party_size: 1, booking_date: original.booking_date, booking_time: original.booking_time })
@@ -952,6 +953,9 @@ test('buyer conversation approves and declines canonical changes without moving 
     const afterDecline = await loadThreadDetail(owner, threadId, demoOrganizationId())
     expect(streamChanges(afterDecline).find(item => item.id === first.id)?.change.status).toBe('declined')
     expect(streamEvents(afterDecline, 'E2E Buyer’s change was declined')).toHaveLength(1)
+    const declinedReplay = await owner.post(movePath, { params: moveParams, data: first.data })
+    await expectStatus(declinedReplay, 200)
+    expect(await declinedReplay.json()).toMatchObject({ change_status: 'declined', booking: { booking_id: booked.bookingId, party_size: 1 } })
 
     const second = await requestChange(2)
     await page.reload()
@@ -965,6 +969,9 @@ test('buyer conversation approves and declines canonical changes without moving 
     const final = await loadThreadDetail(owner, threadId, demoOrganizationId())
     expect(streamChanges(final).find(item => item.id === second.id)?.change.status).toBe('accepted')
     expect(streamEvents(final, 'E2E Buyer’s change was accepted')).toHaveLength(1)
+    const acceptedReplay = await owner.post(movePath, { params: moveParams, data: second.data })
+    await expectStatus(acceptedReplay, 200)
+    expect(await acceptedReplay.json()).toMatchObject({ change_status: 'accepted', booking: { booking_id: booked.bookingId, party_size: 2 } })
     const finalRecord = (await loadLedger(owner, threadId, demoOrganizationId())).operational_record
     const replay = await page.request.post(`/api/public/booking-changes/${threadId}/${second.id}`, {
       headers: authRequestHeaders(baseURL), data: { decision: 'accept' },

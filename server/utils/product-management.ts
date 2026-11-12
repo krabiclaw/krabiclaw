@@ -2200,14 +2200,15 @@ export async function productBookingReadiness(db: DbClient, organizationId: stri
     const start = Date.parse(now)
     const end = start + BOOKING_HORIZON_DAYS * 86_400_000
     const partySize = product.booking.party_size_min ?? 1
+    const scope = options.prepareAllocation ? 'publication' : 'bookable'
     for (let from = start; from < end; from += AVAILABILITY_PAGE_DAYS * 86_400_000) {
       const sessions = await listBookableSessions(db, {
         env, organizationId, productId: product.id, locationId: options.locationId, now,
         fromInstant: new Date(from).toISOString(), toInstant: new Date(Math.min(end, from + AVAILABILITY_PAGE_DAYS * 86_400_000)).toISOString(),
-      })
+      }, scope)
       const candidate = sessions.find(session => scopes.includes(session.location_id) && (session.remaining === null || session.remaining >= partySize))
       if (!candidate) continue
-      const resolved = await resolveBookingSession(db, { env, organizationId, productId: product.id, sessionId: candidate.id, actorId: 'system', now })
+      const resolved = await resolveBookingSession(db, { env, organizationId, productId: product.id, sessionId: candidate.id, locationId: candidate.location_id, actorId: 'system', now }, scope)
       allocation = await sessionAllocationPredicate(db, {
         env, organizationId, productId: product.id, sessionId: candidate.id, partySize, now,
         requireActive: Boolean(requireActive), resolved, preview: true,

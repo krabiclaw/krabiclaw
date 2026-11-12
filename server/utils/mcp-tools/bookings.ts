@@ -119,7 +119,7 @@ export async function handleBookingsTools(ctx: McpExecutorContext): Promise<unkn
     if (toolName === 'update_product_session') {
       const sessionId = requiredString(args, 'product_session_id')
       const current = await queryFirst<{ id: string; location_id: string | null }>(db, 'SELECT id, location_id FROM product_sessions WHERE organization_id=? AND product_id=? AND id=?', [organizationId, productId, sessionId])
-        ?? await findBookableSession(db, { organizationId, productId, sessionId })
+        ?? await findBookableSession(db, { organizationId, productId, sessionId }, 'editor')
       if (!current) throw new HTTPError({ statusCode: 404, statusMessage: 'Session not found for this offering' })
       if (managesBookings) await assertResourceAccess(db, { ...principal, resourceLocationId: current.location_id })
       return { session: await updateSession(db, { env, organizationId, productId, sessionId, actorId: organization.userId, expectedUpdatedAt: args.updated_at === null ? null : requiredString(args, 'updated_at'), startsAt: optionalString(args, 'starts_at') ?? undefined, endsAt: optionalString(args, 'ends_at') ?? undefined, capacity: args.capacity as number | null | undefined, status: args.status as 'scheduled' | 'cancelled' | undefined }) }

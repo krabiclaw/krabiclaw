@@ -13,6 +13,7 @@ import {
   claimSessionCapacity,
   bookingWindow,
   listBookableSessions,
+  listScheduleSessions,
   listSessions,
   resolveBookingSession,
   sessionMoveQuery,
@@ -26,7 +27,7 @@ import { listDashboardLocations } from '../../server/utils/dashboard-context.ts'
 import { updateLocation } from '../../server/utils/location-management.ts'
 import { syncPlaceToLocation } from '../../server/utils/google-places.ts'
 import { readPublicProductAvailability } from '../../server/utils/public-session-booking.ts'
-import { createProduct, getProduct, removeProductLocation, updateProduct } from '../../server/utils/product-management.ts'
+import { createProduct, getProduct, removeProductLocation, setProductLocation, updateProduct } from '../../server/utils/product-management.ts'
 import { occurrenceKey } from '../../shared/bookings.ts'
 import { addLocalDays, formatTimestamp, localDateTimeToInstant, localNow } from '../../utils/timezone.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
@@ -183,6 +184,26 @@ test('a table is seated through its location\'s current hours and closing preser
 
     const booked = (await publicDay(tuesday)).find(session => local(session.starts_at).slice(11) === '19:30')
     assert(booked)
+    const range = { env, organizationId: ORG, productId: tables.id,
+      fromInstant: booked.starts_at, toInstant: new Date(Date.parse(booked.starts_at) + 1).toISOString() }
+    const selector = { env, organizationId: ORG, productId: tables.id, sessionId: booked.id, actorId: ACTOR }
+    const resolved = await resolveBookingSession(db, selector)
+    for (const [active, published] of [[0, 1], [1, 0]]) {
+      await db.prepare('UPDATE product_locations SET active=?,published=? WHERE organization_id=? AND product_id=? AND location_id=?')
+        .bind(active, published, ORG, tables.id, LOCATION).run()
+      assert.deepEqual(await listBookableSessions(db, range), [])
+      assert.deepEqual(await listBookableSessions(db, { ...range, locationId: LOCATION }), [])
+      assert.deepEqual((await listScheduleSessions(db, { ...range, locationId: LOCATION })).map(session => session.id), [booked.id])
+      await assert.rejects(resolveBookingSession(db, selector), { statusCode: 409 })
+    }
+    await assert.rejects(claimSessionCapacity(db, { ...selector, resolved, productVariantId: tables.variants[0]!.id, partySize: 4, policyJson: OPEN_TERMS_JSON }), CapacityUnavailableError)
+    assert.equal(await db.prepare('SELECT COUNT(*) AS n FROM product_sessions WHERE product_id=?').bind(tables.id).first('n'), 0)
+    const publishLocation = () => setProductLocation(db, { env, organizationId: ORG, productId: tables.id, locationId: LOCATION, active: true, published: true, actor: { actorId: ACTOR } })
+    await publishLocation()
+    await db.prepare('DELETE FROM product_locations WHERE organization_id=? AND product_id=? AND location_id=?').bind(ORG, tables.id, LOCATION).run()
+    assert.deepEqual(await listBookableSessions(db, { ...range, locationId: LOCATION }), [])
+    await publishLocation()
+    assert.deepEqual((await listBookableSessions(db, { ...range, locationId: LOCATION })).map(session => session.id), [booked.id])
     const party = await claimSessionCapacity(db, {
       env, organizationId: ORG, productId: tables.id, sessionId: booked.id,
       productVariantId: tables.variants[0]!.id, partySize: 4, policyJson: OPEN_TERMS_JSON,

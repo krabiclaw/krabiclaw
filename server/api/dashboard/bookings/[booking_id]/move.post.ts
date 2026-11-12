@@ -11,5 +11,5 @@ export default defineHandler(async event => {
     idempotencyKey: typeof body.idempotency_key === 'string' ? body.idempotency_key : undefined,
   })
   if (result.kind === 'stay') return jsonResponse({ booking: nightBooking(result.stay) })
-  return jsonResponse(await dashboardBookingDetails(event))
+  return jsonResponse({ ...await dashboardBookingDetails(event), change_status: result.changeStatus })
 })

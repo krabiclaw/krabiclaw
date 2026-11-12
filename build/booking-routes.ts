@@ -60,8 +60,10 @@ export function mountBookingRoutes(pages: PageNode[]): void {
   const bookingIndex = pages.indexOf(booking)
   if (bookingIndex === -1) throw new Error('The booking subtree must be a root before it is mounted beneath Today')
   pages.splice(bookingIndex, 1)
+  // These three detail URLs were delivered in notifications. They redirect to the booking ID route.
+  const issued: PageNode = { name: 'dashboard-issued-booking', file: booking.file, path: 'bookings/:booking_type(stay|booking|reservation)/:record_id()' }
   booking.path = 'bookings/:booking_type(order|payment)/:record_id()'
-  today.children = [...(today.children ?? []), canonical, booking]
+  today.children = [...(today.children ?? []), canonical, booking, issued]
 
   const record = nodeAt(pages, ACCOUNT_RECORD_PATH)
   const accountDay = nodeAt(pages, ACCOUNT_DAY_PATH)
