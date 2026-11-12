@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:5d39d5308877959f43413e9baf88c974a331f9a0173e8419bc5434a2114fc10f",
-  "documentationFingerprint": "sha256:70bace66bde759c2892ad0916d9152719b9a5e45ed1659421fb87ffbb2d06b6b",
+  "fingerprint": "sha256:dca9f0e7707b81328b5963cda311b9c03b2af7e25491485854c6ad4847f073ff",
+  "documentationFingerprint": "sha256:871f46ee6c0fe5bf3c3f1c8b93d73fc77700e638bedc92c2700b4345457da87c",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -42874,7 +42874,7 @@
             "type": "string"
           },
           "payment_id": {
-            "description": "ID from get_product_booking → stay.payments[].id, or record_stay_payment → payment.id. Removes an offline record, not a Stripe payment or actual money.",
+            "description": "ID from get_product_booking → record.payments[].id, or record_stay_payment → payment.id. Removes an offline record, not a Stripe payment or actual money.",
             "minLength": 1,
             "type": "string"
           }

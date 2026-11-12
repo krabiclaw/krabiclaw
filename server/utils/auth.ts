@@ -31,7 +31,7 @@ import { ingestStripeFeeReportEvent } from '~/server/domain/payments/costs'
 import { createStripeClient } from '~/server/utils/stripe-client'
 import { deleteBuyerCustomers } from '~/server/utils/billing-customer'
 import { anonymousLinkQueries, linkGuestIdentitiesByVerifiedEmail } from '~/server/utils/guest-accounts'
-import { unwrapInstrumentedD1 } from '~/server/utils/request-metrics'
+import { recordRequestExternalCall, unwrapInstrumentedD1 } from '~/server/utils/request-metrics'
 import { timingSafeEqualText } from '~/server/utils/dev-route-auth'
 import { notifyOrganizationInvited } from '~/server/utils/notifications'
 import { assertNoPendingInvitation } from '~/server/utils/email-invitations'
@@ -988,7 +988,7 @@ export async function findAuthUsersByIds(env: CloudflareEnv, userIds: Array<stri
  * organization names by `account_id`, the user it belongs to, and the scopes
  * Better Auth recorded across every link of it.
  */
-type LinkedAccount = Pick<Account, 'id' | 'userId' | 'providerId' | 'accountId' | 'scope'>
+type LinkedAccount = Pick<Account, 'id' | 'userId' | 'providerId' | 'accountId' | 'scope' | 'accessTokenExpiresAt'>
 
 /** Reads a linked account through Better Auth's adapter. Null when it has been unlinked. */
 /** Whose linked account a connection acts through: the provider identity's owner, by name and email. */
@@ -1005,7 +1005,7 @@ export async function readLinkedAccount(env: CloudflareEnv, accountId: string): 
   return context.adapter.findOne<LinkedAccount>({
     model: 'account',
     where: [{ field: 'id', value: accountId }],
-    select: ['id', 'userId', 'providerId', 'accountId', 'scope'],
+    select: ['id', 'userId', 'providerId', 'accountId', 'scope', 'accessTokenExpiresAt'],
   })
 }
 
@@ -1038,6 +1038,10 @@ export async function linkedAccountAccessToken(
     })
   }
   if (!token.accessToken) throw new Error(`Better Auth returned no access token for the linked ${account.providerId} account.`)
+  if (account.providerId === 'google' && account.accessTokenExpiresAt && token.accessTokenExpiresAt
+    && new Date(token.accessTokenExpiresAt).getTime() > new Date(account.accessTokenExpiresAt).getTime()) {
+    recordRequestExternalCall(env.DB, 'better_auth_google_refresh')
+  }
   return { accessToken: token.accessToken, accessTokenExpiresAt: token.accessTokenExpiresAt }
 }
 

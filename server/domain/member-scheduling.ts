@@ -7,6 +7,7 @@ import { MEMBER_BUSY_SCOPES, MEMBER_NAME_SQL, type WorkingHours, type Scheduling
 import { hasOrganizationEntitlement } from '~/server/utils/billing'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
 import { getR2KeyFromPublicUrl } from '~/server/utils/cloudflare-r2'
+import { recordRequestExternalCall } from '~/server/utils/request-metrics'
 
 export interface SchedulingActor { env: CloudflareEnv; userId: string; organizationId: string }
 export interface MemberScheduling {
@@ -172,6 +173,7 @@ async function memberBusy(env: CloudflareEnv, row: MemberScheduling, span: { fro
  for (let from = Date.parse(span.from); from < Date.parse(span.until); from += 30 * 86400000) starts.push(from)
  const chunks = await Promise.all(starts.map(async from => {
   const timeMax = new Date(Math.min(from + 30 * 86400000, Date.parse(span.until))).toISOString()
+  recordRequestExternalCall(env.DB, 'google_calendar_free_busy')
   const response = await fetch('https://www.googleapis.com/calendar/v3/freeBusy', { method: 'POST', headers: { Authorization: `Bearer ${token.accessToken}`, 'content-type': 'application/json' }, body: JSON.stringify({ timeMin: new Date(from).toISOString(), timeMax, items: ids.map(id => ({ id })) }) })
   if (!response.ok) throw new HTTPError({ statusCode: 502, message: `Google busy-calendar check failed (${response.status})` })
   const data = await response.json() as { calendars: Record<string, { errors?: { reason: string }[]; busy: SchedulingInterval[] }> }

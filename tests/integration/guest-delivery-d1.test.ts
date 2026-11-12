@@ -31,7 +31,7 @@ import { getResendClient, resendData } from '../../server/utils/resend.ts'
 import { getReviewBookingContext } from '../../server/utils/review-requests.ts'
 import { renderNotificationEmail } from '../../server/emails/render.ts'
 import { reviewRequestMessage } from '../../server/notifications/guest-events.ts'
-import { addLocalDays, formatTimestamp, localDateAt, localDateTimeToInstant } from '../../utils/timezone.ts'
+import { addLocalDays, formatCalendarDate, formatTimestamp, localDateAt, localDateTimeToInstant } from '../../utils/timezone.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 
 /** The open reply tasks of a conversation, by dedupe key: the guest entry each one is about. */
@@ -507,15 +507,18 @@ test('a failed stay cancellation email retries its recorded content after displa
       kind: 'stay', name: 'Original Cabin', variants: [{ name: 'Original Cabin', prices: [{ unit_amount: 15000, currency: 'USD' }] }],
       stay: { location_id: 'location-stay-cancel', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 2, assigned_member_id: 'member-stay-cancel' },
     } })
-    const walkIn = await createStay(db, env, access, { product_id: home.id, idempotency_key: 'stay-walk-in', check_in_date: '2098-11-01', check_out_date: '2098-11-03',
+    const today = localDateAt(new Date(), 'Asia/Bangkok')
+    const walkIn = await createStay(db, env, access, { product_id: home.id, idempotency_key: 'stay-walk-in', check_in_date: addLocalDays(today, 45), check_out_date: addLocalDays(today, 47),
       adults: 2, guest_name: 'Bo', guest_email: 'walkin@provider-proof.com', total_minor: 30000 })
     assert(walkIn.conversation_id)
     // The guest of a host-entered stay is an anonymous Better Auth user; their verified sign-in with this email joins it, so the stay has its management link.
     assert.equal(await buildBuyerRequestActivityUrl(env,db,{organizationId:access.organizationId,threadId:walkIn.conversation_id}),`https://proof.example/dashboard/account/activity/stay/${walkIn.conversation_id}`)
     // The guest bought this one on the site; the real checkout conversion makes it theirs.
     const signed=await createAuth(env).api.signInAnonymous({headers:new Headers(),returnHeaders:true})
+    const checkIn = addLocalDays(today, 14)
+    const checkOut = addLocalDays(today, 16)
     const stay = await buyStay(db, { id: 'stay-cancellation-email', organizationId: access.organizationId, productId: home.id, locationId: 'location-stay-cancel', timezone: 'Asia/Bangkok',
-      checkIn: '2098-10-01', checkOut: '2098-10-03', adults: 2, nightlyMinor: 15000, currency: 'USD', buyerUserId: signed.response!.user.id,
+      checkIn, checkOut, adults: 2, nightlyMinor: 15000, currency: 'USD', buyerUserId: signed.response!.user.id,
       guest: { name: 'Ana', email: 'guest@provider-proof.com', phone: null, notes: null } })
     // The host cancels it, with the full refund they approved.
     const principal = { organizationId: access.organizationId, userId: access.actorId, role: 'owner' }
@@ -538,7 +541,9 @@ test('a failed stay cancellation email retries its recorded content after displa
     for (const body of [original.body.text, original.body.html]) {
       assert.match(body, /Original Retreat/u)
       assert.match(body, /Original Cabin/u)
-      assert.match(body, /2098/u)
+      for (const date of [checkIn, checkOut]) {
+        assert(body.includes(formatCalendarDate(date, 'en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })))
+      }
     }
     const entry = await db.prepare('SELECT * FROM messages WHERE dedupe_key = ?').bind(`stay-cancellation:${stay.id}`).first<{ id: string; body: string; payload_json: string; event_name: string }>()
     assert(entry)
@@ -635,7 +640,9 @@ test('a guest-cancelled stay alerts owners with the whole stay and the member lo
       stay: { location_id: 'location-turnover', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 2, assigned_member_id: 'member-cleaner-turnover' },
     } })
     // A site checkout saves the guest's whole name in guest_name.
-    const stay = await createStay(db, env, access, { product_id: home.id, idempotency_key: 'turnover-alert', check_in_date: '2098-10-01', check_out_date: '2098-10-03', arrival_time: '15:30',
+    const checkIn = addLocalDays(localDateAt(new Date(), 'Asia/Bangkok'), 14)
+    const checkOut = addLocalDays(checkIn, 2)
+    const stay = await createStay(db, env, access, { product_id: home.id, idempotency_key: 'turnover-alert', check_in_date: checkIn, check_out_date: checkOut, arrival_time: '15:30',
       adults: 2, children: 1, guest_name: 'Ana Silva', guest_email: 'guest@provider-proof.com', notes: 'Door code 4411', total_minor: 30000 })
     await notifyStayCancelled(env, db, access.organizationId, stay.id, 'guest', 12345)
 
@@ -645,10 +652,15 @@ test('a guest-cancelled stay alerts owners with the whole stay and the member lo
     assert.equal(to('unassigned@provider-proof.com').length, 0)
     const [ownerEmail] = to('owner@provider-proof.com')
     const [memberEmail] = to('cleaner@provider-proof.com')
-    assert.equal(ownerEmail!.subject, 'Reservation canceled - Ana Silva, Oct 1')
+    const subjectDay = formatCalendarDate(checkIn, 'en-US', { month: 'short', day: 'numeric' })
+    const dateLabel = (date: string) => formatCalendarDate(date, 'en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
+    const checkInLabel = `${dateLabel(checkIn)} · 4:00 PM`
+    const checkOutLabel = `${dateLabel(checkOut)} · 10:00 AM`
+    const memberSubject = `Reservation canceled - Ana, ${subjectDay}`
+    assert.equal(ownerEmail!.subject, `Reservation canceled - Ana Silva, ${subjectDay}`)
     for (const fact of ['guest@provider-proof.com', '$123.45', '3:30 PM']) assert(ownerEmail!.text.includes(fact), `the owner's alert states ${fact}`)
-    assert.equal(memberEmail!.subject, 'Reservation canceled - Ana, Oct 1')
-    for (const fact of ['Place to stay\nTurnover Cabin', 'Guest\nAna\n', 'Check-in\nWed, Oct 1, 2098 · 4:00 PM', 'Check-out\nFri, Oct 3, 2098 · 10:00 AM', 'Arriving\n3:30 PM', 'Guests\n3\n', `https://proof.example/dashboard/turnover/bookings/${stay.id}`]) assert(memberEmail!.text.includes(fact), `the member's alert states ${fact}`)
+    assert.equal(memberEmail!.subject, memberSubject)
+    for (const fact of ['Place to stay\nTurnover Cabin', 'Guest\nAna\n', `Check-in\n${checkInLabel}`, `Check-out\n${checkOutLabel}`, 'Arriving\n3:30 PM', 'Guests\n3\n', `https://proof.example/dashboard/turnover/bookings/${stay.id}`]) assert(memberEmail!.text.includes(fact), `the member's alert states ${fact}`)
     for (const secret of ['Silva', 'guest@provider-proof.com', '$123.45', 'Door code', stay.conversation_id!]) {
       assert(!memberEmail!.text.includes(secret) && !memberEmail!.html.includes(secret), `the member's alert leaves out ${secret}`)
     }
@@ -657,7 +669,7 @@ test('a guest-cancelled stay alerts owners with the whole stay and the member lo
     assert.equal(pushes[0]!.url, `https://api.sandbox.push.apple.com/3/device/${deviceToken}`)
     // The icon is the member's unread conversations, the count Messages shows: a stay's guest conversation is not theirs.
     assert.deepEqual(pushes[0]!.body, {
-      aps: { alert: { title: 'Reservation canceled - Ana, Oct 1', body: 'Turnover Cabin · Wed, Oct 1, 2098 · 4:00 PM – Fri, Oct 3, 2098 · 10:00 AM' }, sound: 'default', badge: 0 },
+      aps: { alert: { title: memberSubject, body: `Turnover Cabin · ${checkInLabel} – ${checkOutLabel}` }, sound: 'default', badge: 0 },
       organization_id: access.organizationId, user_id: 'cleaner-turnover', kind: 'stay', booking_id: stay.id,
     })
   } finally {

@@ -1529,12 +1529,12 @@ test('a member reads a stay at a home they look after as its turnover on every r
       assert(ajv.validate(schema, result), `${toolName} output: ${ajv.errorsText()}`)
       return result as Record<string, unknown>
     }
-    assert.deepEqual(await mcp(cleanerMembership, 'member', 'get_product_booking', { booking_id: stay.id }), { booking_id: stay.id, unit: 'nights', stay: turnover })
+    assert.deepEqual(await mcp(cleanerMembership, 'member', 'get_product_booking', { booking_id: stay.id }), { booking_id: stay.id, unit: 'nights', record: turnover })
     const listed = (owner: boolean) => mcp(owner ? ownerMembership : cleanerMembership, owner ? 'owner' : 'member', 'list_product_bookings', { from: '2026-11-01T00:00:00.000Z', to: '2026-11-04T00:00:00.000Z' })
       .then(result => (result.bookings as Array<Record<string, unknown>>).map(row => [row.booking_id, row.unit, row.guest, row.starts_at]))
     assert.deepEqual(await listed(false), [[stay.id, 'nights', { name: 'Ana' }, turnover.starts_at]])
     assert.deepEqual((await mcp(cleanerMembership, 'member', 'get_stay_calendar', { product_id: cabin.id, ...window })).stays, [turnover])
-    assert.equal(((await mcp(ownerMembership, 'owner', 'get_product_booking', { booking_id: stay.id })).stay as Record<string, unknown>).guest_email, 'ana@example.test')
+    assert.equal(((await mcp(ownerMembership, 'owner', 'get_product_booking', { booking_id: stay.id })).record as Record<string, unknown>).guest_email, 'ana@example.test')
     assert.deepEqual(await listed(true), [[stay.id, 'nights', { name: 'Ana Silva' }, turnover.starts_at]])
     assert.equal(((await mcp(ownerMembership, 'owner', 'get_stay_calendar', { product_id: cabin.id, ...window })).stays as Array<Record<string, unknown>>)[0]!.guest_name, 'Ana Silva')
   } finally {

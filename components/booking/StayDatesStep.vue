@@ -48,7 +48,7 @@
         >
           <div v-if="vertical" class="grid shrink-0 grid-cols-7 border-b border-default pb-3 text-center text-xs text-muted"><span v-for="(day, index) in weekDays" :key="index">{{ day }}</span></div>
           <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain" :class="vertical ? 'space-y-8 py-5' : 'grid gap-8 grid-cols-[repeat(var(--stay-months),minmax(0,1fr))]'" :style="{ '--stay-months': monthCount }">
-          <CalendarPrev v-if="vertical" as-child><button type="button" class="mb-6 w-full rounded-xl bg-muted py-3 text-sm font-semibold disabled:hidden" @click="hoveredDate = null">{{ t('stay.load_dates') }}</button></CalendarPrev>
+          <CalendarPrev v-if="vertical" as-child><button type="button" class="mb-6 w-full rounded-xl bg-muted py-3 text-sm font-semibold disabled:hidden" :aria-label="t('stay.previous_month')" @click="hoveredDate = null">{{ t('stay.load_dates') }}</button></CalendarPrev>
           <div v-for="(month, index) in grid" :key="month.value.toString()">
             <div class="mb-4 flex items-center" :class="vertical ? 'justify-start' : 'justify-between'">
               <CalendarPrev v-if="!vertical" as-child :class="index > 0 ? 'invisible' : undefined">
@@ -103,7 +103,7 @@
               </CalendarGridBody>
             </CalendarGrid>
           </div>
-          <CalendarNext v-if="vertical" as-child><button type="button" class="mt-6 w-full rounded-xl bg-muted py-3 text-sm font-semibold disabled:hidden" @click="hoveredDate = null">{{ t('stay.load_dates') }}</button></CalendarNext>
+          <CalendarNext v-if="vertical" as-child><button type="button" class="mt-6 w-full rounded-xl bg-muted py-3 text-sm font-semibold disabled:hidden" :aria-label="t('stay.next_month')" @click="hoveredDate = null">{{ t('stay.load_dates') }}</button></CalendarNext>
           </div>
         </CalendarRoot>
         </TooltipProvider>

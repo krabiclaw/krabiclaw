@@ -2848,8 +2848,8 @@ function publicNight(night: StayNight, today: string, lastDeparture: string): Pu
 
 /** The bookable nights of [from, to), plus `to` so the guest can select that departure. No claims are shown. */
 export async function readPublicStayCalendar(db: DbClient, organizationId: string, slug: string, input: { from: unknown; to: unknown }): Promise<PublicStayCalendar> {
-  const { from, to } = range(input, AVAILABILITY_PAGE_DAYS)
   const home = await readPublicStayHome(db, organizationId, slug)
+  const { from, to } = range(input, AVAILABILITY_PAGE_DAYS)
   const today = homeToday(home.timezone)
   const lastDeparture = addDays(today, STAY_CALENDAR_DAYS)
   const start = from < today ? today : from

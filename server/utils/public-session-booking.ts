@@ -17,9 +17,10 @@ function publicOffering(product: PublicProduct | null, organizationId: string): 
 }
 
 export async function readPublicProductAvailability(db: DbClient, organizationId: string, slug: string, env: CloudflareEnv, input: AvailabilityInput) {
-  const product = await getProductBySlug(db, organizationId, slug)
-  if (!publicOffering(product, organizationId)) throw new HTTPError({ statusCode: 404, statusMessage: 'Product not found' })
+  const product = await getProductBySlug(db, organizationId, slug, 'kind-only')
+  if (!product) throw new HTTPError({ statusCode: 404, statusMessage: 'Product not found' })
   if (product.kind === 'stay') return { unit: 'nights' as const, ...await readPublicStayCalendar(db, organizationId, slug, { from: input.from, to: input.to }) }
+  if (!publicOffering(product, organizationId)) throw new HTTPError({ statusCode: 404, statusMessage: 'Product not found' })
   if (!product.order_url && !(await productBookingReadiness(db, organizationId, product, { env })).ready) {
     throw new HTTPError({ statusCode: 404, statusMessage: 'Product not found' })
   }

@@ -823,6 +823,7 @@ test('new legal consultations require an eligible named attorney while experienc
     await assert.rejects(listSessions(db, { env, organizationId: ORG, productId: consultation, fromInstant: startsAt, toInstant: `${day}T23:59:59.999Z` }), attorneyRequired)
     await assert.rejects(claimSessionCapacity(db, { ...scope, sessionId: 'consultation-morgan', productVariantId: 'consultation-variant', partySize: 1 }), attorneyRequired)
     assert.equal(await db.prepare('SELECT COUNT(*) n FROM bookings WHERE product_id=? AND id<>?').bind(consultation, 'historical-consultation').first('n'), 0)
+    assert.deepEqual(await publicProductHosts(db, ORG, consultation, 'consultation-historical'), [], 'a saved consultation with no current attorney has no public host')
 
     await setProductBookingConfig(db, { ...scope, patch: { scheduling_mode: 'provider', assigned_member_id: 'morgan' } })
     const available = await listSessions(db, { env, organizationId: ORG, productId: consultation, fromInstant: startsAt, toInstant: `${day}T23:59:59.999Z` })
@@ -830,6 +831,7 @@ test('new legal consultations require an eligible named attorney while experienc
     const booked = await claimSessionCapacity(db, { ...scope, sessionId: 'consultation-morgan', productVariantId: 'consultation-variant', partySize: 1 })
     assert.equal(await db.prepare('SELECT c.assigned_member_id FROM bookings b JOIN product_booking_configs c ON c.product_id=b.product_id AND c.organization_id=b.organization_id WHERE b.id=?').bind(booked.bookingId).first('assigned_member_id'), 'morgan')
     assert.deepEqual(await publicProductHosts(db, ORG, consultation, 'consultation-morgan'), [{ name: 'Attorney Morgan', photo_url: null, bio: null }])
+    assert.deepEqual(await publicProductHosts(db, ORG, consultation, 'consultation-historical'), [{ name: 'Attorney Morgan', photo_url: null, bio: null }])
     assert.equal(await db.prepare('SELECT c.assigned_member_id FROM bookings b JOIN product_booking_configs c ON c.product_id=b.product_id AND c.organization_id=b.organization_id WHERE b.id=?').bind('historical-consultation').first('assigned_member_id'), 'morgan', 'every consultation of the practice area is its attorney\'s')
 
     await setProductBookingConfig(db, { ...scope, patch: { assigned_member_id: 'morgan', held_online: true } })
@@ -841,6 +843,9 @@ test('new legal consultations require an eligible named attorney while experienc
       booking: { env, data: { location_id: null, duration_minutes: 60, default_capacity: 1, scheduling_mode: 'provider', assigned_member_id: 'morgan' } } })
     const freshSessions = await listBookableSessions(db, { env, organizationId: ORG, productId: fresh.id, fromInstant: new Date().toISOString(), toInstant: new Date(Date.now() + 14 * 86_400_000).toISOString() })
     assert(freshSessions.some(session => !session.is_full), 'the configured attorney holds bookable sessions from the first write')
+    const projected = freshSessions.find(session => !session.is_full && session.created_at === null)
+    assert(projected)
+    assert.deepEqual(await publicProductHosts(db, ORG, fresh.id, projected.id), [{ name: 'Attorney Morgan', photo_url: null, bio: null }])
     // A dated session beyond the public window is nothing a guest can book now, so it does not make the offering bookable.
     const distantStart = new Date(Date.now() + 501 * 86_400_000); distantStart.setUTCHours(10, 0, 0, 0)
     await assert.rejects(createProduct(db, { env, organizationId: ORG, actor: { actorId: ACTOR }, product: { kind: 'service', name: 'Distant consultation', variants: [{ name: 'Standard', prices: [{ unit_amount: 100_000, currency: 'THB', type: 'one_time' }] }] },

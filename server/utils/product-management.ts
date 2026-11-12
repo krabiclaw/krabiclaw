@@ -588,9 +588,12 @@ export async function requireOrganizationProduct(db: DbClient, input: {
   return getProduct(db, input.organizationId, input.productId)
 }
 
-export async function getProductBySlug(db: DbClient, organizationId: string, slug: string): Promise<Product | null> {
+export function getProductBySlug(db: DbClient, organizationId: string, slug: string): Promise<Product | null>
+export function getProductBySlug(db: DbClient, organizationId: string, slug: string, stay: 'kind-only'): Promise<Product | { kind: 'stay' } | null>
+export async function getProductBySlug(db: DbClient, organizationId: string, slug: string, stay?: 'kind-only'): Promise<Product | { kind: 'stay' } | null> {
   const row = await queryFirst<Row>(db, `SELECT ${PRODUCT_COLUMNS} FROM products p WHERE p.organization_id = ? AND p.slug = ?`, [organizationId, slug])
   if (!row) return null
+  if (stay === 'kind-only' && row.kind === 'stay') return { kind: 'stay' }
   const [product] = await hydrate(db, organizationId, [mapProductRow(row)])
   return product!
 }

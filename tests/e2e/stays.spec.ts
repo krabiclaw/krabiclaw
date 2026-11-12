@@ -3478,7 +3478,7 @@ test('a host lists, pauses and unlists a priced place to stay', async ({ page, b
         await expect(guestDialog.getByRole('alert')).toHaveText('This booking link has invalid dates or guests. Choose your dates and guests again.')
         await expect(guestDialog.getByRole('heading', { name: 'Select check-in date', exact: true })).toBeVisible()
         await expect(guestDialog.getByRole('application')).toHaveCount(2)
-        await expect(guestDialog.getByRole('button', { name: 'Load more dates', exact: true })).toBeVisible()
+        await expect(guestDialog.getByRole('button', { name: 'Next month', exact: true })).toBeVisible()
       }
       await guest.setViewportSize({ width: 1440, height: 900 })
       await guest.goto(previewURL.href)
@@ -3689,13 +3689,13 @@ test('a host lists, pauses and unlists a priced place to stay', async ({ page, b
             const url = new URL(response.url())
             return url.pathname.endsWith('/availability') && url.searchParams.has('from') && url.searchParams.has('to')
           })
-          await guestDialog.getByRole('button', { name: 'Load more dates', exact: true }).last().click()
+          await guestDialog.getByRole('button', { name: 'Next month', exact: true }).click()
           const availability = await nextPage
           await expectStatus(availability, 200)
           const url = new URL(availability.url())
           expect((Date.parse(url.searchParams.get('to')!) - Date.parse(url.searchParams.get('from')!)) / 86_400_000).toBeLessThanOrEqual(31)
           await expect(calendar.getByRole('application').first()).not.toHaveAttribute('aria-label', firstMonth!)
-          await guestDialog.getByRole('button', { name: 'Load more dates', exact: true }).first().click()
+          await guestDialog.getByRole('button', { name: 'Previous month', exact: true }).click()
           await expect(calendar.getByRole('application').first()).toHaveAttribute('aria-label', firstMonth!)
           await expect(guestDialog.locator('input[type="date"]')).toHaveCount(0)
         } else {
