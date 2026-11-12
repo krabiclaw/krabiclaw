@@ -52,7 +52,7 @@ export const useOrganizationSubscription = () => {
 
   // The organization owns one recurring subscription; its entitlements follow
   // once Better Auth confirms the subscription through Stripe.
-  async function startOrganizationCheckout(organizationId: string, plan: string) {
+  async function startOrganizationCheckout(organizationId: string, plan: string, service?: 'managed-ads' | 'strategy') {
     const subscription = await organizationSubscriptionId(dashboardApi, organizationId)
     if (!subscription.canUpdate || !subscription.actions.changes.some(change => change.plan === plan)) throw new Error('This plan change is no longer available. Review Plan and billing before approving another change.')
     const currentPlan = subscription.plan
@@ -63,8 +63,8 @@ export const useOrganizationSubscription = () => {
       plan,
       currentPlan,
       subscriptionId: subscription.id,
-      // The leaf that started the change may no longer apply once it is made, so the owner returns to the plan.
-      returnPath: `/dashboard/${encodeURIComponent(organizationSlug())}/billing`,
+      // Resume the service after checkout, or return to the current plan.
+      returnPath: `/dashboard/${encodeURIComponent(organizationSlug())}/billing${service ? `/${service}` : ''}`,
       onAction: action => {
         if (action === 'upgrade') trackSubscriptionUpgrade(plan, organizationId)
         if (action === 'downgrade' && plan !== 'free') trackSubscriptionDowngrade(plan, organizationId)

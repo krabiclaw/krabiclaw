@@ -134,43 +134,39 @@ test.describe('Plan and billing', () => {
           await expect(card).toContainText('Basic')
           await expect(card).toContainText('Free')
           await expect(card.getByRole('link', { name: 'Choose a plan', exact: true })).toBeVisible()
-          await expect(index.locator('[data-testid^="editor-row-"]')).toHaveCount(2)
-          await expect(index.getByTestId('editor-row-locations')).toHaveCount(0)
-          await expect(index.getByTestId('editor-row-homes')).toHaveCount(0)
-          await expect(index.getByTestId('editor-row-portal')).toHaveCount(0)
-          await expect(index.getByTestId('editor-row-managed-ads')).toContainText('Off10% of monthly ad spend')
-          await expect(index.getByTestId('editor-row-strategy')).toContainText('Off$2,000/mo')
+          await expect(index.locator('[data-testid^="editor-card-"]')).toHaveCount(2)
+          await expect(index.getByTestId('editor-card-locations')).toHaveCount(0)
+          await expect(index.getByTestId('editor-card-homes')).toHaveCount(0)
+          await expect(index.getByTestId('editor-card-portal')).toHaveCount(0)
+          await expect(index.getByTestId('editor-card-managed-ads')).toContainText('10% of monthly ad spend')
+          await expect(index.getByTestId('editor-card-strategy')).toContainText('$2,000/mo')
           // Beside a pane the index opens the plan's one change; on a narrower screen it is the screen.
           await expect(page).toHaveURL(wide ? `${BASIC}/billing/upgrade` : `${BASIC}/billing`)
 
           // Choose a plan: Growth and Business as two cards, Continue only once one is chosen.
-          await open(page, `${BASIC}/billing/upgrade`)
+          await open(page, `${BASIC}/billing/upgrade?plan=business`)
           const upgrade = page.locator('#dashboard-panel-organization-upgrade')
           await expect(upgrade.getByRole('heading', { name: 'Choose a plan', exact: true })).toBeVisible()
           await expect(upgrade.getByRole('radio')).toHaveCount(2)
-          // The recommended plan starts chosen, so Continue is live.
-          await expect(upgrade.getByRole('radio', { checked: true })).toHaveCount(1)
-          await expect(upgrade.getByRole('button', { name: 'Continue to Stripe', exact: true })).toBeEnabled()
-          // The card is what a person presses. Its radio is named by the card's label beside the pane,
-          // and by its value inside the drawer, where Nuxt UI's label is not yet associated.
-          await upgrade.getByText('Business', { exact: true }).click()
           await expect(upgrade.getByRole('radio', { name: /^business/i })).toBeChecked()
+          await expect(upgrade.getByRole('button', { name: 'Continue to Stripe', exact: true })).toBeEnabled()
+          await upgrade.getByText('Growth', { exact: true }).click()
+          await expect(upgrade.getByRole('radio', { name: /^growth/i })).toBeChecked()
+          await expect(page).toHaveURL(`${BASIC}/billing/upgrade?plan=business`)
+          if (!wide) {
+            await upgrade.getByRole('link', { name: 'Close', exact: true }).click()
+            await expect(page).toHaveURL(`${BASIC}/billing?plan=business`)
+            await expect(index.getByRole('heading', { name: 'Plan and billing', exact: true })).toBeVisible()
+          }
 
           // Managed ads off: three unmet requirements, and no consent until they hold.
           await open(page, `${BASIC}/billing/managed-ads`)
           const ads = page.locator('#dashboard-panel-organization-managed-ads')
           await expect(ads.getByText('10% of monthly ad spend, added to your plan\'s invoice.', { exact: true })).toBeVisible()
-          // Each open requirement says where it stands; the two with somewhere to go are links there.
-          await expect(ads.getByTestId('editor-row-google-ads')).toContainText('Not connected in USD')
-          await expect(ads.getByTestId('editor-row-google-ads')).toHaveAttribute('href', `${BASIC}/integrations/google-ads`)
-          await expect(ads.getByTestId('editor-row-business-plan')).toContainText('On Basic')
-          await expect(ads.getByTestId('editor-row-business-plan')).toHaveAttribute('href', `${BASIC}/billing/upgrade`)
-          await expect(ads.getByTestId('editor-row-payment-method')).toContainText('None saved')
-          // Without a plan there is no Stripe customer, so the payment-method row opens nothing.
-          await expect(ads.getByTestId('editor-row-payment-method')).not.toHaveAttribute('type', 'button')
-          // No consent until every requirement holds: the line under the rows says what is left.
+          // Managed ads presents the first action. The plan and payment follow the account.
+          await expect(ads.getByRole('link', { name: 'Connect Google Ads', exact: true })).toHaveAttribute('href', `${BASIC}/integrations/google-ads?service=managed-ads`)
+          await expect(ads.getByRole('link', { name: 'Review Business plan', exact: true })).toHaveCount(0)
           await expect(ads.getByRole('button', { name: 'Agree and turn on', exact: true })).toHaveCount(0)
-          await expect(ads.getByText('Connect Google Ads in USD, upgrade to Business and add a payment method to turn this on.', { exact: true })).toBeVisible()
         }
       })
     } finally {
@@ -203,9 +199,9 @@ test.describe('Plan and billing', () => {
         await expect(card).toContainText('$49/mo')
         await expect(card).toContainText(/Renews \w{3} \d{1,2}, \d{4}/)
         await expect(card.getByRole('link', { name: 'Upgrade to Business', exact: true })).toBeVisible()
-        await expect(index.getByTestId('editor-row-locations')).toHaveCount(0)
-        await expect(index.getByTestId('editor-row-portal')).toContainText('Card, invoices and receipts, cancel')
-        await expect(index.getByTestId('editor-row-cancel')).toHaveCount(0)
+        await expect(index.getByTestId('editor-card-locations')).toHaveCount(0)
+        await expect(index.getByTestId('editor-card-portal')).toContainText('Card, invoices and receipts, cancel')
+        await expect(index.getByTestId('editor-card-cancel')).toHaveCount(0)
 
         await open(page, `${GROWTH}/billing/upgrade`)
         const upgrade = page.locator('#dashboard-panel-organization-upgrade')
@@ -285,7 +281,7 @@ test.describe('Plan and billing', () => {
           await expect(index.getByTestId('billing-plan-card')).toContainText('Business')
           await expect(index.getByTestId('billing-plan-card').getByRole('button')).toHaveCount(0)
           await expect(index.getByTestId('billing-plan-card').getByRole('link')).toHaveCount(0)
-          await expect(index.getByTestId('editor-row-portal')).toHaveCount(0)
+          await expect(index.getByTestId('editor-card-portal')).toHaveCount(0)
           // A service leaf reads the same, with no consent to give.
           await open(admin, '/dashboard/ember-slice-demo/billing/strategy')
           const strategy = admin.locator('#dashboard-panel-organization-strategy')
