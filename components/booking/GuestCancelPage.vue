@@ -77,19 +77,8 @@ import { ApiClientError } from '~/utils/api-clients'
 const { locale, localePath, t } = useI18n()
 const route = useRoute()
 
-const isTable = computed(() => booking.value?.product_kind === 'table')
-const keyPrefix = computed(() => isTable.value ? 'reservation_cancel' : 'experience_cancel')
-const copy = (key: string) => t(`site.${keyPrefix.value}.${key}`)
 const requestId = computed(() => typeof route.query.id === 'string' ? route.query.id : '')
 const token = computed(() => route.hash ? route.hash.slice(1) : '')
-
-useSocialMetadata(() => ({
-  path: route.path,
-  title: copy('title'),
-  description: copy('cancel_visit'),
-  socialImage: null,
-  discoverability: 'private',
-}))
 
 interface GuestBookingView {
   kind: 'booking'
@@ -116,6 +105,17 @@ const { data, pending } = await useAsyncData<{ success: true; booking: GuestBook
 )
 
 const booking = computed(() => data.value?.booking ?? null)
+const isTable = computed(() => booking.value?.product_kind === 'table')
+const keyPrefix = computed(() => isTable.value ? 'reservation_cancel' : 'experience_cancel')
+const copy = (key: string) => t(`site.${keyPrefix.value}.${key}`)
+useSocialMetadata(() => ({
+  path: route.path,
+  title: copy('title'),
+  description: copy('cancel_visit'),
+  socialImage: null,
+  discoverability: 'private',
+}))
+
 const presentation = computed(() => booking.value?.product_kind ? presentationForProduct({ kind: booking.value.product_kind }) : null)
 // One instant plus its zone: the guest reads the local time of the place they
 // booked, not of the browser they happen to open the link in.

@@ -11,7 +11,7 @@ import { PRICE_TAX_BEHAVIORS, type Price } from '~/shared/prices'
 import { reconcilePaymentIntent, confirmationHoldUntil } from './events'
 import { notifyPaymentFinancialEvent } from './notifications'
 import { loadOwnerPictures } from '~/server/notifications/hero'
-import { getGuestRequest } from '~/server/domain/requests'
+import { getGuestRequest, type GuestThreadPayload } from '~/server/domain/requests'
 import { createReplayableReservationCancelToken, hashReservationCancelToken } from '~/server/utils/reservation-cancel-token'
 
 /**
@@ -49,18 +49,19 @@ function parseReview(value: string | null): PaymentReview | null {
   return review
 }
 
+/** Read the frozen purchase terms shared by the buyer handoff and tax review. */
 function snapshotOf(payment: Payment) {
   const snapshot = JSON.parse(payment.price_snapshot_json) as { title?: unknown; quantity?: unknown; method_configuration_id?: unknown; stay?: unknown; price?: { unit_amount?: unknown; tax_behavior?: unknown }; product_id?: unknown; automatic_tax?: unknown; tax_code?: unknown }
   if (typeof snapshot.title !== 'string' || !Number.isSafeInteger(snapshot.quantity) || typeof snapshot.method_configuration_id !== 'string' || !Number.isSafeInteger(snapshot.price?.unit_amount)
     || typeof snapshot.automatic_tax !== 'boolean' || (snapshot.tax_code !== null && typeof snapshot.tax_code !== 'string')
     || !PRICE_TAX_BEHAVIORS.includes(snapshot.price!.tax_behavior as Price['tax_behavior'])) throw new Error('Payment purchase snapshot is invalid')
   // A booking's purchase of nights carries its stay; one of a session's seats names its session.
-  if (snapshot.stay !== undefined && !isStayPurchase(snapshot.stay)) throw new Error('Stay payment has no valid stay purchase')
-  const stay = isStayPurchase(snapshot.stay)
-    ? { check_in_date: snapshot.stay.check_in_date, check_out_date: snapshot.stay.check_out_date, nights: snapshot.stay.nightly.length, nightly: snapshot.stay.nightly.map(night => night.price_minor), adults: snapshot.stay.adults, children: snapshot.stay.children, infants: snapshot.stay.infants, cancellation_policy: snapshot.stay.cancellation_policy, product_id: snapshot.stay.product_id }
-    : null
+  const stay = isStayPurchase(snapshot.stay) ? snapshot.stay : null
+  if (snapshot.stay !== undefined && !stay) throw new Error('Stay payment has no valid stay purchase')
   return {
-    title: snapshot.title, quantity: snapshot.quantity as number, unit_amount: snapshot.price!.unit_amount as number, product_id: typeof snapshot.product_id === 'string' ? snapshot.product_id : null, stay,
+    title: snapshot.title, quantity: snapshot.quantity as number, unit_amount: snapshot.price!.unit_amount as number, product_id: typeof snapshot.product_id === 'string' ? snapshot.product_id : null,
+    stay: stay ? { check_in_date: stay.check_in_date, check_out_date: stay.check_out_date, nights: stay.nightly.length, nightly: stay.nightly.map(night => night.price_minor), adults: stay.adults, children: stay.children, infants: stay.infants, cancellation_policy: stay.cancellation_policy, product_id: stay.product_id } : null,
+    stayGuest: stay?.guest ?? null,
     automatic_tax: snapshot.automatic_tax, tax_code: snapshot.tax_code as string | null, tax_behavior: snapshot.price!.tax_behavior as Price['tax_behavior'],
   }
 }
@@ -70,13 +71,20 @@ function snapshotOf(payment: Payment) {
  * picture, the time it holds and what kind of booking it is. The time is the
  * checkout hold's — the one the purchase reserved.
  */
-async function handoffSubject(db: DbClient, organizationId: string, payment: Payment, snapshot: ReturnType<typeof snapshotOf>) {
+async function handoffSubject(db: DbClient, organizationId: string, payment: Payment, snapshot: ReturnType<typeof snapshotOf>, state: PaymentHandoffState) {
   // A session's time is its hold's; a stay's nights are its purchase's.
   const slot = payment.subject_type === 'booking' && snapshot.stay === null
   const hold = slot
-    ? await queryFirst<{ starts_at: string; ends_at: string; timezone: string; location_id: string | null; quantity: number }>(db, 'SELECT starts_at,ends_at,timezone,location_id,quantity FROM payment_checkout_holds WHERE payment_id=? AND organization_id=? ORDER BY created_at DESC LIMIT 1', [payment.id, organizationId])
+    ? await queryFirst<{ starts_at: string; ends_at: string; timezone: string; location_id: string | null; quantity: number; conversation_id: string | null }>(db, 'SELECT starts_at,ends_at,timezone,location_id,quantity,conversation_id FROM payment_checkout_holds WHERE payment_id=? AND organization_id=?', [payment.id, organizationId])
     : null
   if (slot && !hold) throw new Error('Payment has no checkout hold for its time')
+  let guest: GuestThreadPayload['guest'] | null = state === 'open' ? snapshot.stayGuest : null
+  if (state === 'open' && hold) {
+    const request = hold.conversation_id ? await getGuestRequest(db, hold.conversation_id, organizationId, 'booking') : null
+    const contact = request?.kind === 'booking' ? request.payload.guest : null
+    if (!contact?.name || !contact.email) throw new Error('Open checkout has no guest contact in its booking conversation')
+    guest = { name: contact.name, email: contact.email, phone: contact.phone }
+  }
   const productId = snapshot.stay?.product_id ?? snapshot.product_id
   // A payment outlives its product: a deleted product leaves its kind unknown, and the summary omits what depends on it.
   const product = productId ? await queryFirst<{ kind: string; slug: string; advance_notice_minutes: number | null }>(db, 'SELECT p.kind,p.slug,c.advance_notice_minutes FROM products p LEFT JOIN product_booking_configs c ON c.product_id=p.id AND c.organization_id=p.organization_id WHERE p.id=? AND p.organization_id=?', [productId, organizationId]) : null
@@ -90,6 +98,7 @@ async function handoffSubject(db: DbClient, organizationId: string, payment: Pay
     kind: product?.kind ?? (productId ? null : payment.subject_type), image_url: picture?.imageUrl ?? null, starts_at: hold?.starts_at ?? null, ends_at: hold?.ends_at ?? null, timezone: hold?.timezone ?? null,
     // The party the booking is for: a table's deposit is one per booking, whatever the party.
     party_size: hold?.quantity ?? null,
+    billing_details: guest ? { name: guest.name, email: guest.email, ...(guest.phone ? { phone: guest.phone } : {}) } : null,
     // Where the offering's page is, so the buyer can read its full terms or change what they picked.
     product_slug: product?.slug ?? null, location_slug: location?.slug ?? null,
     free_cancellation_until: freeUntil && new Date().toISOString() <= freeUntil ? freeUntil : null,
@@ -114,7 +123,7 @@ export async function paymentHandoff(db: DbClient, stripe: Stripe, publishableKe
   }
   return {
     payment_id: payment.id, state, title: snapshot.title, quantity: snapshot.quantity, unit_amount: snapshot.unit_amount, stay: snapshot.stay,
-    ...await handoffSubject(db, organizationId, payment, snapshot), subtotal: payment.amount, currency: payment.currency, expires_at: payment.checkout_expires_at,
+    ...await handoffSubject(db, organizationId, payment, snapshot, state), subtotal: payment.amount, currency: payment.currency, expires_at: payment.checkout_expires_at,
     stripe_account_id: payment.stripe_account_id, publishable_key: publishableKey, payment_method_types: intent.payment_method_types,
     customer_session_client_secret: customerSession,
     bank_verification_url: state === 'verifying' ? bankVerificationUrl(intent) : null,
