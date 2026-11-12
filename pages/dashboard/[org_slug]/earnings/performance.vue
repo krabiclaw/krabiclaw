@@ -41,7 +41,7 @@
         <div v-if="data.items.length" class="mt-4 space-y-5">
           <div v-for="item in data.items" :key="item.title" class="flex items-center gap-4">
             <span class="flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-elevated">
-              <img v-if="item.imageUrl" :src="item.imageUrl" alt="" class="size-full object-cover">
+              <img v-if="item.image_url" :src="item.image_url" alt="" class="size-full object-cover">
               <UIcon v-else name="i-lucide-package" class="size-5 text-dimmed" />
             </span>
             <span class="min-w-0 flex-1">
@@ -57,7 +57,7 @@
         <p class="mt-4 text-xs text-muted">Stripe payments captured in the selected period, less refunds; channel reservation amounts are separate.</p>
       </section>
 
-      <ChannelReservationSummary v-if="data && dashboard.hasFeature('stays')" class="mt-10" :rows="data.channelReservations" :month="monthTitle" />
+      <ChannelReservationSummary v-if="data && dashboard.hasFeature('stays')" class="mt-10" :rows="data.channel_reservations" :month="monthTitle" />
     </template>
   </DashboardLeafPanel>
 </template>

@@ -16,6 +16,6 @@
 <script setup lang="ts">
 import type { EarningsPerformance } from '~/shared/earnings-display'
 import { paymentMoney } from '~/shared/payment-display'
-defineProps<{ rows: EarningsPerformance['channelReservations']; month: string }>()
+defineProps<{ rows: EarningsPerformance['channel_reservations']; month: string }>()
 const labels: Record<string, string> = { airbnb: 'Airbnb', booking_com: 'Booking.com', vrbo: 'Vrbo' }
 </script>

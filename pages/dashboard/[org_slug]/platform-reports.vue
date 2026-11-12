@@ -20,10 +20,10 @@
         <li v-for="report in reports" :key="report.id" class="space-y-3 border-b border-default py-6 last:border-b-0" :data-report="report.id">
           <div class="flex flex-wrap items-baseline justify-between gap-2">
             <p class="text-base text-highlighted">
-              {{ report.subject === 'guest_thread' ? (report.blocked ? 'Guest blocked' : 'Guest conversation') : 'Team message' }}
-              <span class="text-muted">· {{ report.organizationName }}</span>
+              {{ report.subject === 'conversation' ? (report.blocked ? 'Guest blocked' : 'Guest conversation') : 'Team message' }}
+              <span class="text-muted">· {{ report.organization_name }}</span>
             </p>
-            <p class="text-sm text-muted">{{ formatTimestamp(report.createdAt, 'en-US', 'UTC') }} UTC</p>
+            <p class="text-sm text-muted">{{ formatTimestamp(report.created_at, 'en-US', 'UTC') }} UTC</p>
           </div>
           <p class="text-sm text-muted">
             Reported by {{ report.reporter ? `${report.reporter.name} (${report.reporter.email})` : 'a deleted account' }}<span v-if="report.author">
@@ -43,6 +43,7 @@
 </template>
 
 <script setup lang="ts">
+import type { ContentReport } from '~/server/domain/content-reports'
 import { authClient } from '~/lib/auth-client'
 import { canOpenPlatformReports } from '~/utils/platform-admin-access'
 import { isRecord } from '~/utils/api-clients'
@@ -63,38 +64,25 @@ if (!dashboard.organization.value || !canOpenPlatformReports(dashboard.organizat
 
 useSeoMeta({ title: 'Platform reports | KrabiClaw Dashboard', robots: 'noindex, nofollow' })
 
-interface Report {
-  id: string
-  organizationName: string
-  subject: 'guest_thread' | 'team_message'
-  reporter: { name: string; email: string } | null
-  author: { name: string; email: string; banned: boolean } | null
-  reason: string
-  excerpt: string
-  blocked: boolean
-  status: 'open' | 'removed' | 'dismissed'
-  createdAt: string
-}
-
 const statuses = [
   { value: 'open', label: 'Open' },
   { value: 'removed', label: 'Removed' },
   { value: 'dismissed', label: 'Dismissed' },
 ] as const
-const status = ref<Report['status']>('open')
+const status = ref<ContentReport['status']>('open')
 const api = useDashboardApi()
 
-function isReport(value: unknown): value is Report {
-  return isRecord(value) && typeof value.id === 'string' && typeof value.organizationName === 'string'
-    && (value.subject === 'guest_thread' || value.subject === 'team_message')
+function isReport(value: unknown): value is ContentReport {
+  return isRecord(value) && typeof value.id === 'string' && typeof value.organization_name === 'string'
+    && (value.subject === 'conversation' || value.subject === 'message')
     && typeof value.reason === 'string' && typeof value.excerpt === 'string' && typeof value.blocked === 'boolean'
-    && (value.status === 'open' || value.status === 'removed' || value.status === 'dismissed') && typeof value.createdAt === 'string'
+    && (value.status === 'open' || value.status === 'removed' || value.status === 'dismissed') && typeof value.created_at === 'string'
 }
 
 const { data, error: loadError, refresh } = await useAsyncData(() => `platform-reports:${status.value}`, () =>
   api('/api/dashboard/platform-reports', {
     query: { status: status.value },
-    validate: (value: unknown): value is { reports: Report[] } => isRecord(value) && Array.isArray(value.reports) && value.reports.every(isReport),
+    validate: (value: unknown): value is { reports: ContentReport[] } => isRecord(value) && Array.isArray(value.reports) && value.reports.every(isReport),
   }))
 const reports = computed(() => data.value?.reports ?? [])
 
@@ -105,7 +93,7 @@ async function decide(reportId: string, decision: 'remove' | 'dismiss') {
   actionError.value = null
   try {
     await api(`/api/dashboard/platform-reports/${encodeURIComponent(reportId)}/resolve`, {
-      method: 'POST', body: { decision }, validate: (value: unknown): value is { report: Report } => isRecord(value) && isReport(value.report),
+      method: 'POST', body: { decision }, validate: (value: unknown): value is { report: ContentReport } => isRecord(value) && isReport(value.report),
     })
     await refresh()
   } catch (error) {

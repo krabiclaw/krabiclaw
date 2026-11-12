@@ -128,7 +128,7 @@ test('authored goals and evidence-bound opportunity decisions follow persisted w
     const editedOutcomes = articleOutcomes(progress)
     expect(editedOutcomes.map(outcome => outcome.event).sort()).toEqual(['article.created', 'article.updated'])
     expect(new Set(editedOutcomes.map(outcome => outcome.id)).size).toBe(2)
-    expect(editedOutcomes.every(outcome => outcome.actor.userId === actorId)).toBe(true)
+    expect(editedOutcomes.every(outcome => outcome.actor.user_id === actorId)).toBe(true)
     expect(progress.coverage.unverified).toContain('business_goal_achievement')
     expect(progress.coverage.unverified).toContain('public_visibility')
 
@@ -337,13 +337,13 @@ test('business progress read-only contract holds on an established business', as
       id: outcome.id, event: outcome.event, subject: outcome.subject, actor: { kind: outcome.actor.kind }, occurred_at: outcome.occurred_at,
     })
     // Account deletion can redact attribution through its SET NULL foreign key.
-    if (repeated.actor.userId !== null) expect(repeated.actor.userId).toBe(outcome.actor.userId)
+    if (repeated.actor.user_id !== null) expect(repeated.actor.user_id).toBe(outcome.actor.user_id)
   }
   for (const outcome of [...first.outcomes, ...second.outcomes]) {
     expect(['guest', 'member', 'system', 'cloudflare', 'user', 'agent', 'unknown']).toContain(outcome.actor.kind)
-    if (outcome.actor.userId !== null) {
-      expect(outcome.actor.userId).toEqual(expect.any(String))
-      expect(outcome.actor.userId.length).toBeGreaterThan(0)
+    if (outcome.actor.user_id !== null) {
+      expect(outcome.actor.user_id).toEqual(expect.any(String))
+      expect(outcome.actor.user_id.length).toBeGreaterThan(0)
     }
   }
   // Audit history can describe a deleted article. Its immutable occurrence

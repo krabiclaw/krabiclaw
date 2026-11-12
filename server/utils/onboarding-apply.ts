@@ -169,7 +169,10 @@ export async function activateOnboardingDraft(env: CloudflareEnv, db: D1Database
         completion.owner_welcome_email?.status === 'failed' ? completion.owner_welcome_email.reason : null,
       ].filter(Boolean).join('; '))
     }
-    return { organizationId, orgSlug: organization.slug, subdomain: draft.subdomain_candidate, locationId: locations[0]!.id, locationSlug: locations[0]!.slug, publicUrl, ...completion }
+    return {
+      organization_id: organizationId, organization_slug: organization.slug, subdomain: draft.subdomain_candidate,
+      location_id: locations[0]!.id, location_slug: locations[0]!.slug, public_url: publicUrl, ...completion,
+    }
   } catch (error) {
     const recorded = await queryFirst<{ organization_id: string | null; onboarding_status: string | null }>(db,
       'SELECT d.organization_id, o.onboarding_status FROM onboarding_drafts d LEFT JOIN organization o ON o.id = d.organization_id WHERE d.id = ?', [draft.id])

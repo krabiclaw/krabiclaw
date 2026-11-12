@@ -63,7 +63,7 @@ export interface OnboardingFlowState {
   draftId: string | null
   draftRevision: string | null
   preview: OnboardingDraftPreview | null
-  created: { orgSlug: string | null; organizationSlug: string | null; locationSlug: string | null } | null
+  created: { organization_slug: string; subdomain: string } | null
 }
 
 /**

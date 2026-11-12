@@ -161,15 +161,12 @@ export function useOnboardingDraft() {
         `/api/dashboard/onboarding/drafts/${draftId}/activate`,
         { method: 'POST', body: { updated_at: state.value.draftRevision }, validate: (value): value is Record<string, unknown> => isRecord(value) },
       )
-      if (res.success !== true) {
-        throw new Error(typeof res.error === 'string' ? res.error : 'Failed to create your organization. Please try again.')
+      if (res.success !== true || typeof res.organization_slug !== 'string' || !res.organization_slug
+        || typeof res.subdomain !== 'string' || !res.subdomain || typeof res.organization_id !== 'string' || !res.organization_id) {
+        throw new Error(typeof res.error === 'string' ? res.error : 'The published website could not be read.')
       }
-      state.value.created = {
-        orgSlug: typeof res.orgSlug === 'string' ? res.orgSlug : null,
-        organizationSlug: typeof res.organizationSlug === 'string' ? res.organizationSlug : null,
-        locationSlug: typeof res.locationSlug === 'string' ? res.locationSlug : null,
-      }
-      if (typeof res.organizationId === 'string') trackOrganizationCreated(res.organizationId)
+      state.value.created = { organization_slug: res.organization_slug, subdomain: res.subdomain }
+      trackOrganizationCreated(res.organization_id)
       return true
     } catch (cause) {
       error.value = cause instanceof Error ? cause.message : 'Something went wrong. Please try again.'

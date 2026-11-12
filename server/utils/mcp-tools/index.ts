@@ -203,13 +203,13 @@ export async function executeMcpToolCall(
     const user = authenticatedUser ?? await requireMcpUser(event)
     const draftId = requiredString(normalizedArguments, 'draft_id')
     const created = await activateOnboardingDraft(user.env, user.db, { userId: user.userId, draftId, updated_at: requiredString(normalizedArguments, 'updated_at'), origin: event.req })
-    event.context.mcpExecutionContext = { organizationId: created.organizationId, locationId: created.locationId }
+    event.context.mcpExecutionContext = { organizationId: created.organization_id, locationId: created.location_id }
     try {
-      await upsertMcpWorkspacePreference(user.db, { userId: user.userId, organizationId: created.organizationId, locationId: created.locationId })
-      const workspace = await resolveMcpWorkspace(user.db, user.env, user.userId, { organizationId: created.organizationId, locationId: created.locationId, requireOrganization: true, requireLocation: true })
-      return { organization_id: created.organizationId, location_id: created.locationId, draft_id: draftId, public_url: created.publicUrl, ready: true, context: workspaceContextPayload(workspace.organization, workspace.location) }
+      await upsertMcpWorkspacePreference(user.db, { userId: user.userId, organizationId: created.organization_id, locationId: created.location_id })
+      const workspace = await resolveMcpWorkspace(user.db, user.env, user.userId, { organizationId: created.organization_id, locationId: created.location_id, requireOrganization: true, requireLocation: true })
+      return { organization_id: created.organization_id, location_id: created.location_id, draft_id: draftId, public_url: created.public_url, ready: true, context: workspaceContextPayload(workspace.organization, workspace.location) }
     } catch (error) {
-      throw new HTTPError({ statusCode: 500, statusMessage: 'Website is live, but workspace selection failed', data: { code: 'WEBSITE_WORKSPACE_SELECTION_FAILED', organization_id: created.organizationId, draft_id: draftId }, cause: error })
+      throw new HTTPError({ statusCode: 500, statusMessage: 'Website is live, but workspace selection failed', data: { code: 'WEBSITE_WORKSPACE_SELECTION_FAILED', organization_id: created.organization_id, draft_id: draftId }, cause: error })
     }
   }
 

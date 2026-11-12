@@ -4,7 +4,7 @@
     Payout ID, then a card per booking the payout carried — pictures, what,
     when, and its total — with Details opening the record.
   -->
-  <DashboardLeafPanel id="earnings-payout" :title="detail ? paymentMoney(detail.amount, detail.currency) : 'Payout'" :lead="detail ? `${payoutStatusLabel(detail.status)} · ${payoutDate(detail.arrivalDate, { month: 'long', day: 'numeric', year: 'numeric' })}` : ''" :footer="false" :error="error ? getErrorMessage(error, 'Payout request failed') : ''">
+  <DashboardLeafPanel id="earnings-payout" :title="detail ? paymentMoney(detail.amount, detail.currency) : 'Payout'" :lead="detail ? `${payoutStatusLabel(detail.status)} · ${payoutDate(detail.arrival_date, { month: 'long', day: 'numeric', year: 'numeric' })}` : ''" :footer="false" :error="error ? getErrorMessage(error, 'Payout request failed') : ''">
     <template v-if="detail">
       <div class="flex flex-col items-center py-4">
         <span class="relative flex size-20 items-center justify-center rounded-full bg-elevated ring ring-default">
@@ -16,21 +16,21 @@
 
       <UCard as="section" variant="subtle">
         <dl class="divide-y divide-default">
-          <div class="py-4 first:pt-0"><dt class="text-base font-semibold text-highlighted">{{ payoutStatusLabel(detail.status) }}</dt><dd class="mt-1 text-base text-muted">{{ payoutDate(detail.arrivalDate, { month: 'long', day: 'numeric', year: 'numeric' }) }}</dd></div>
-          <div v-if="detail.bank" class="py-4"><dt class="text-base font-semibold text-highlighted">Bank account</dt><dd class="mt-1 text-base text-muted">{{ detail.bank.bankName ?? 'Bank account' }}, ••••{{ detail.bank.last4 }} ({{ detail.currency }})</dd></div>
+          <div class="py-4 first:pt-0"><dt class="text-base font-semibold text-highlighted">{{ payoutStatusLabel(detail.status) }}</dt><dd class="mt-1 text-base text-muted">{{ payoutDate(detail.arrival_date, { month: 'long', day: 'numeric', year: 'numeric' }) }}</dd></div>
+          <div v-if="detail.bank" class="py-4"><dt class="text-base font-semibold text-highlighted">Bank account</dt><dd class="mt-1 text-base text-muted">{{ detail.bank.bank_name ?? 'Bank account' }}, ••••{{ detail.bank.last4 }} ({{ detail.currency }})</dd></div>
           <div class="py-4 last:pb-0"><dt class="text-base font-semibold text-highlighted">Payout ID</dt><dd class="mt-1 break-all text-base text-muted">{{ detail.id }}</dd></div>
         </dl>
       </UCard>
 
-      <UCard v-for="item in detail.items" :key="item.paymentId" as="section" variant="subtle" class="mt-6" :ui="{ body: 'text-center' }">
+      <UCard v-for="item in detail.items" :key="item.payment_id" as="section" variant="subtle" class="mt-6" :ui="{ body: 'text-center' }">
         <span class="mx-auto flex size-20 items-center justify-center overflow-hidden rounded-full bg-elevated">
-          <img v-if="item.imageUrl" :src="item.imageUrl" alt="" class="size-full object-cover">
+          <img v-if="item.image_url" :src="item.image_url" alt="" class="size-full object-cover">
           <UIcon v-else name="i-lucide-package" class="size-8 text-dimmed" />
         </span>
         <h2 class="mt-5 text-2xl font-semibold text-highlighted">{{ item.title }}</h2>
-        <p v-if="item.startsAt && item.timeZone" class="mt-1 text-base text-muted">{{ whenLabel(item) }}</p>
+        <p v-if="item.starts_at && item.timezone" class="mt-1 text-base text-muted">{{ whenLabel(item) }}</p>
         <dl class="mt-6 divide-y divide-default text-left">
-          <div class="flex items-center justify-between gap-4 py-4"><div><dt class="text-base font-semibold text-highlighted">Payment</dt><dd class="mt-1 break-all text-sm text-muted">{{ item.paymentId }}</dd></div><UButton label="Details" color="neutral" variant="soft" :to="`/dashboard/${route.params.org_slug}/earnings/transactions/${encodeURIComponent(item.paymentId)}`" /></div>
+          <div class="flex items-center justify-between gap-4 py-4"><div><dt class="text-base font-semibold text-highlighted">Payment</dt><dd class="mt-1 break-all text-sm text-muted">{{ item.payment_id }}</dd></div><UButton label="Details" color="neutral" variant="soft" :to="`/dashboard/${route.params.org_slug}/earnings/transactions/${encodeURIComponent(item.payment_id)}`" /></div>
           <div class="flex items-center justify-between gap-4 py-4"><dt class="text-base font-semibold text-highlighted">Total ({{ item.currency }})</dt><dd class="text-base font-semibold text-highlighted">{{ paymentMoney(item.amount, item.currency) }}</dd></div>
         </dl>
       </UCard>
@@ -57,8 +57,8 @@ const { data: detail, error } = await useAsyncData(
   () => api<PayoutDetail>('/api/dashboard/payments', { query: { view: 'payout', payout_id: payoutId }, validate: isPayoutDetail }),
 )
 function whenLabel(item: PayoutItem): string {
-  const start = formatTimestamp(item.startsAt!, 'en', item.timeZone!, { month: 'short', day: 'numeric', year: 'numeric' })
-  const end = item.endsAt ? formatTimestamp(item.endsAt, 'en', item.timeZone!, { month: 'short', day: 'numeric', year: 'numeric' }) : start
-  return [item.subjectTitle, start === end ? start : `${start} – ${end}`].filter(Boolean).join(' · ')
+  const start = formatTimestamp(item.starts_at!, 'en', item.timezone!, { month: 'short', day: 'numeric', year: 'numeric' })
+  const end = item.ends_at ? formatTimestamp(item.ends_at, 'en', item.timezone!, { month: 'short', day: 'numeric', year: 'numeric' }) : start
+  return [item.name, start === end ? start : `${start} – ${end}`].filter(Boolean).join(' · ')
 }
 </script>
