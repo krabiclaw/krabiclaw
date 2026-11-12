@@ -98,6 +98,10 @@ export function firstMenuSectionSetupPath(orgSlug: string, locationId: string): 
   return scopedTo(`${organizationBase(orgSlug)}/products/first-menu`, locationId)
 }
 
+export function firstPracticeAreaPath(orgSlug: string): string {
+  return `${organizationBase(orgSlug)}/first-practice-area`
+}
+
 export function productEditorPath(orgSlug: string, productId: string, locationId?: string | null): string {
   return scopedTo(`${organizationBase(orgSlug)}/products/${encodeURIComponent(productId)}`, locationId)
 }

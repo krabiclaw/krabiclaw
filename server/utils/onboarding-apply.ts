@@ -172,7 +172,7 @@ export async function activateOnboardingDraft(env: CloudflareEnv, db: D1Database
     }
     return {
       organization_id: organizationId, organization_slug: organization.slug, subdomain: draft.subdomain_candidate,
-      vertical: payload.preview.vertical,
+      vertical: payload.preview.vertical, source_type: draft.source_type,
       first_menu_setup: firstMenuSetupApplies(payload),
       location_id: locations[0]!.id, location_slug: locations[0]!.slug, public_url: publicUrl, ...completion,
     }

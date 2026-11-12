@@ -8,7 +8,7 @@ import { businessGoalStrategySchema, createBusinessGoalSchema, updateBusinessGoa
 import { publishBusinessInvalidation } from '~/server/cloudflare/guest-inbox-events'
 import { queryOrganizationAnalytics } from '~/server/utils/analytics-query'
 import { addLocalDays, formatCalendarRange, formatTimestamp, localDateAt } from '~/utils/timezone'
-import { articleSocialPostPath, blogCreatePath, blogEditorPath, firstHomeSetupPath, firstMenuSectionSetupPath, guestConversationPath, postEditorPath, productEditorPath, productPaymentPath } from '~/server/utils/dashboard-links'
+import { articleSocialPostPath, blogCreatePath, blogEditorPath, firstHomeSetupPath, firstMenuSectionSetupPath, firstPracticeAreaPath, guestConversationPath, postEditorPath, productEditorPath, productPaymentPath } from '~/server/utils/dashboard-links'
 import { firstMenuSetupApplies, parseOnboardingDraftPayload } from '~/server/utils/onboarding-drafts'
 import { listBookableSessions } from '~/server/utils/availability'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
@@ -19,8 +19,9 @@ import { readIntegration } from '~/server/utils/organization-integrations'
 import { linkedAccountAccessToken } from '~/server/utils/auth'
 import { getGoogleAdsReport } from '~/server/utils/google-ads'
 import { querySearchAnalytics } from '~/server/utils/google-search-console'
+import { getPublicConsultationSettings } from '~/server/utils/professional-services'
 import { getSocialConnections } from '~/server/utils/social-publication'
-import { experiencePublicationBlocker, getProduct, resolveVariantPrice } from '~/server/utils/product-management'
+import { experiencePublicationBlocker, getProduct, listOrganizationProducts, resolveVariantPrice } from '~/server/utils/product-management'
 import type { CurrencyCode } from '~/shared/currencies'
 import { errorChainForTelemetry } from '~/shared/error-telemetry'
 
@@ -368,23 +369,33 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
       lodging: ['stay', 'Add your first home', 'Start your listing.'],
       experience: ['experience', 'Add your first experience', 'Give guests something to book.'],
       restaurant: ['dish', 'Add your first dish', 'Start your menu.'],
-      service: ['service', 'Add a consultation', 'Give clients a way to request a consultation.'],
+      service: ['service', 'Add your first practice area', 'Start with the name clients will see.'],
     } as const
     const nextProduct = firstProduct[organization.vertical as keyof typeof firstProduct]
     if (canAddProduct && nextProduct) {
       const [kind, title, detail] = nextProduct
-      const existing = products.filter(product => product.kind === kind).length
+      const areas = kind === 'service' ? await listOrganizationProducts(db, { organizationId, kind, window: { limit: 2, offset: 0 } }) : []
+      const existing = kind === 'service' ? areas.length : products.filter(product => product.kind === kind).length
       const menuLocations = kind === 'dish' && existing <= 1 && firstMenuSetupApplies(parseOnboardingDraftPayload(firstRun.payload_json))
         ? await queryAll<{ id: string }>(db, "SELECT id FROM business_locations WHERE organization_id=? AND status='active' LIMIT 2", [organizationId])
         : []
       const menuLocation = menuLocations.length === 1 ? menuLocations[0] : undefined
       if (menuLocation) {
-        offer('product.create', organizationId, existing ? 'Preview your first menu' : 'Set up your menu',
-          existing ? 'See how your dish looks on your private website.' : detail,
+        offer('product.create', organizationId, existing ? 'Continue your menu setup' : 'Set up your menu',
+          existing ? 'Pick up where you left off.' : detail,
           firstMenuSectionSetupPath(organization.slug, menuLocation.id), 110, { icon: 'i-lucide-list-checks' })
+      } else if (areas.length === 1) {
+        const area = areas[0]!
+        if (area.page?.path && !area.order_url && (!area.active || !area.publications.some(publication => publication.published)
+          || (await getPublicConsultationSettings(db, organizationId)).mode !== 'native')) {
+          offer('product.create', organizationId, 'Continue consultation setup', area.name,
+            `${firstPracticeAreaPath(organization.slug)}/${encodeURIComponent(area.id)}`, 110, { icon: 'i-lucide-list-checks' })
+        }
       } else if (!existing) {
-        offer('product.create', organizationId, title, detail, kind === 'stay'
-          ? firstHomeSetupPath(organization.slug) : `${productEditorPath(organization.slug, 'new')}?kind=${kind}`, 110, { icon: 'i-lucide-list-checks' })
+        const to = kind === 'stay' ? firstHomeSetupPath(organization.slug)
+          : kind === 'service' ? firstPracticeAreaPath(organization.slug)
+          : `${productEditorPath(organization.slug, 'new')}?kind=${kind}`
+        offer('product.create', organizationId, title, detail, to, 110, { icon: 'i-lucide-list-checks' })
       }
     }
   }

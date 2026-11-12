@@ -1,5 +1,16 @@
 <template>
-  <DashboardIndexPanel v-if="isNew" id="product" :title="pageTitle" column="reading">
+  <PracticeAreaSetupPanel v-if="practiceAreaSetup" :title="practiceAreaSetup.title" :detail="practiceAreaSetup.detail"
+    :back-to="creationSubmitted ? undefined : practiceAreaSetup.today_url" :back-label="practiceAreaSetup.back_label"
+    :next-label="practiceAreaSetup.next_label" :exit-label="practiceAreaSetup.exit_label"
+    :saving="saving" :next-disabled="saveDisabled" :exit-disabled="saveDisabled" :error="saveError"
+    @next="save()" @exit="save(practiceAreaSetup.today_url)">
+    <UFormField :label="practiceAreaSetup.name_label" :ui="{ label: 'sr-only' }">
+      <UTextarea v-model="form.name" :aria-label="practiceAreaSetup.name_label" :maxlength="practiceAreaSetup.max_length"
+        :rows="4" size="xl" class="w-full" :ui="{ base: 'min-h-32 resize-none rounded-xl text-base lg:min-h-44' }" :disabled="creationSubmitted" />
+      <p class="mt-2 text-sm text-muted" aria-hidden="true">{{ form.name.length }}/{{ practiceAreaSetup.max_length }}</p>
+    </UFormField>
+  </PracticeAreaSetupPanel>
+  <DashboardIndexPanel v-else-if="isNew" id="product" :title="pageTitle" column="reading">
     <UAlert v-if="saveError || photoError" class="mb-6" color="error" variant="soft" :description="saveError || photoError || ''" />
     <p v-if="createdProductId && saveError" class="mb-6 text-base text-muted">Your draft is saved. Finish creating it to apply the selected photo and catalog placement.</p>
     <fieldset :disabled="saving || creationSubmitted" class="w-full space-y-8" data-testid="product-create-form">
@@ -448,6 +459,8 @@ import { ApiClientError } from '~/utils/api-clients'
 import StayArrivalGuideView from '~/components/booking/StayArrivalGuide.vue'
 import { isStayArrivalGuide, stayCheckInWindow } from '~/shared/stay-arrival'
 import type { ProductMutation } from '~/server/utils/product-management'
+import PracticeAreaSetupPanel from './PracticeAreaSetupPanel.vue'
+import type { FirstPracticeAreaSetup } from '~/server/api/dashboard/onboarding/first-practice-area.get'
 import { presentationForProduct } from '~/utils/product-presentation'
 import { tenantOrganizationOrigin } from '~/utils/tenant-organization-origin'
 import { mediaStillUrl, uniqueMediaAssets } from '~/shared/media-placement-contract'
@@ -472,12 +485,16 @@ import {
   isStayPropertyType,
 } from '~/shared/stay-listing'
 
+const props = defineProps<{ practiceAreaSetup?: NonNullable<FirstPracticeAreaSetup['step']> }>()
 const route = useRoute()
+if (props.practiceAreaSetup && ['kind', 'location_id', 'collection_id'].some(key => route.query[key] !== undefined)) {
+  throw createError({ statusCode: 400, statusMessage: 'Practice area setup requires organization scope' })
+}
 const { locale } = useI18n()
 const { formatExactDateTime } = useHumanTime()
 const router = useRouter()
 const dashboardApi = useDashboardApi()
-const productId = computed(() => String(route.params.product_id ?? ''))
+const productId = computed(() => props.practiceAreaSetup ? 'new' : String(route.params.product_id ?? ''))
 // Catalog's explicit scope. No location is the whole organization: its own
 // prices and settings, not whichever location was visited last.
 const locationScope = useLocationScope()
@@ -861,7 +878,7 @@ async function reloadSchedule() {
 // ── The form ────────────────────────────────────────────
 
 if (route.query.kind !== undefined && !PRODUCT_KINDS.includes(route.query.kind as ProductKind)) throw createError({ statusCode: 400, statusMessage: 'Unsupported product type' })
-const suppliedKind = route.query.kind as ProductKind | undefined
+const suppliedKind = props.practiceAreaSetup ? 'service' : route.query.kind as ProductKind | undefined
 // New entries retain only their caller's exact type, location and menu section.
 const creationScope = [suppliedKind ?? '', locationScope.value ?? '', createCollectionId.value ?? ''].map(encodeURIComponent).join(':')
 const draftKey = `product-draft:${organizationId}:${productId.value}${isNew.value ? `:${creationScope}` : ''}`
@@ -1840,7 +1857,10 @@ async function commit(concern?: ProductConcern) {
       const destinationLocationId = form.kind === 'stay' ? form.stay_location_id : id
       commitNavigation = true
       try {
-        const navigation = await navigateTo(router.resolve({ path: `${catalogPath.value}/${createdId}`, query: { location_id: destinationLocationId ?? undefined, ...(route.query.kind === 'dish' ? { kind: 'dish' } : {}) } }).fullPath, { replace: true })
+        const destination = props.practiceAreaSetup
+          ? closeTo.value ?? `${props.practiceAreaSetup.continue_url}/${encodeURIComponent(createdId)}`
+          : router.resolve({ path: `${catalogPath.value}/${createdId}`, query: { location_id: destinationLocationId ?? undefined, ...(route.query.kind === 'dish' ? { kind: 'dish' } : {}) } }).fullPath
+        const navigation = await navigateTo(destination, { replace: true })
         if (isNavigationFailure(navigation)) throw navigation
       } finally { commitNavigation = false }
       clearNuxtState([draftKey, createKeyName, `${draftKey}:created`, `${draftKey}:submitted`, `${draftKey}:photo`, `${draftKey}:price`])
