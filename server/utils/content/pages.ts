@@ -390,13 +390,13 @@ function pageDto(row: PageRepresentationRow, document: TenantPageDocument, block
 
 export interface PageTask {
   id: string
-  pageId: string
-  pageTitle: string
+  page_id: string
+  title: string
   headline: string
   reason: string
-  actionLabel: string
+  action_label: string
   to: string
-  imageUrl?: string | null
+  image_url?: string | null
 }
 
 export async function listTenantPages(db: DbClient, organizationId: string, opts: { locale?: string | null } = {}) {
@@ -455,13 +455,13 @@ export async function listPageTasks(db: DbClient, organizationId: string, opts: 
     if (matched) {
       tasks.push({
         id: st.id,
-        pageId: matched.id,
-        pageTitle: matched.title,
+        page_id: matched.id,
+        title: matched.title,
         headline: st.title || `Update: ${matched.title}`,
         reason: st.notes || `Review and update ${matched.title} on your website storefront.`,
-        actionLabel: 'Edit page',
+        action_label: 'Edit page',
         to: matched.recipe === 'links' ? `/dashboard/[orgSlug]/website/pages/links` : `/dashboard/[orgSlug]/website/pages/${matched.id}`,
-        imageUrl: matched.image_url,
+        image_url: matched.image_url,
       })
     }
   }
@@ -472,24 +472,24 @@ export async function listPageTasks(db: DbClient, organizationId: string, opts: 
     if (page.section_count === 0) {
       tasks.push({
         id: `task-empty-${page.id}`,
-        pageId: page.id,
-        pageTitle: page.title,
+        page_id: page.id,
+        title: page.title,
         headline: `Add content: ${page.title}`,
         reason: `This page is empty. Add sections so visitors learn about your practice and offerings.`,
-        actionLabel: 'Add sections',
+        action_label: 'Add sections',
         to: `/dashboard/[orgSlug]/website/pages/${page.id}`,
-        imageUrl: page.image_url,
+        image_url: page.image_url,
       })
     } else if (!page.image_url && ['/', '/about', '/services', '/contact'].includes(page.path)) {
       tasks.push({
         id: `task-photo-${page.id}`,
-        pageId: page.id,
-        pageTitle: page.title,
+        page_id: page.id,
+        title: page.title,
         headline: `Add photo: ${page.title}`,
         reason: `Pages with photos build client trust and appear in search result previews.`,
-        actionLabel: 'Add photo',
+        action_label: 'Add photo',
         to: `/dashboard/[orgSlug]/website/pages/${page.id}`,
-        imageUrl: null,
+        image_url: null,
       })
     }
   }

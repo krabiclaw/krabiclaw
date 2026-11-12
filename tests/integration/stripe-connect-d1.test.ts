@@ -79,7 +79,7 @@ test('Stripe account projection preserves provider identity and derives onboardi
     const actionRequired = deriveStripeConnectStatus({
       cardPaymentsStatus: 'pending',
       cardPaymentsResolutions: [],
-      requirements: [{ awaitingActionFrom: 'user', deadlineStatus: 'currently_due' }],
+      requirements: [{ awaiting_action_from: 'user', deadline_status: 'currently_due' }],
     })
     assert.equal(actionRequired, 'action_required')
     // Restricted while Stripe verifies what was just submitted is under review, not an action for the business.
@@ -242,7 +242,7 @@ test('Stripe onboarding recommendations follow real account readiness and clear 
       assert.equal((links[1]!.use_case as { account_onboarding: { return_url: string } }).account_onboarding.return_url, 'https://krabiclaw.test/dashboard/cliff/payments?tab=payouts&stripe_connect=returned')
       const status = await call('/status', app_)
       assert.equal(status.status, 200)
-      assert.deepEqual((status.body.account as { requirements: unknown }).requirements, [{ awaitingActionFrom: 'user', deadlineStatus: 'currently_due', description: 'Provide a bank account for payouts', errors: [] }])
+      assert.deepEqual((status.body.account as { requirements: unknown }).requirements, [{ awaiting_action_from: 'user', deadline_status: 'currently_due', description: 'Provide a bank account for payouts', errors: [] }])
       account.requirements.entries = []
       const pending = await call('/status', app_)
       assert.equal(pending.status, 200)

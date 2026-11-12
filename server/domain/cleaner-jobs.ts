@@ -1,7 +1,7 @@
 import { d1JsonStringSet, queryAll, queryFirst, type DbClient } from '~/server/db'
 import { isOrganizationWideRole } from '~/server/utils/member-access'
 import { jobThreadParticipantsKey, postAutomaticTeamMessage, reseatAutomaticThread } from '~/server/domain/team-messages'
-import { JOB_TASK_SQL, isJobTask, jobKey, jobSubject, taskViewForUser, type JobSubject, type TaskRow, type TaskView } from '~/server/domain/tasks'
+import { JOB_TASK_SQL, isJobTask, jobBookingIdSql, jobKey, jobSubject, taskViewForUser, type JobSubject, type TaskRow, type TaskView } from '~/server/domain/tasks'
 import { notifyTaskStarting, taskStartingSent } from '~/server/utils/notifications'
 import { addLocalDays, localDateAt, localDateTimeToInstant } from '~/utils/timezone'
 import type { CloudflareEnv } from '~/server/utils/auth'
@@ -83,12 +83,12 @@ export async function runOrganizationJobs(env: CloudflareEnv, db: DbClient, orga
   const [members, tasks] = await Promise.all([
     queryAll<Member>(db, 'SELECT id, userId, role FROM member WHERE organizationId = ?', [organizationId]),
     // A job has something to say when its time is near (its reminders, from the evening before to its warning) or it changed lately (its post, release or cancellation); an open job long past says nothing more.
-    queryAll<TaskRow>(db, `SELECT t.* FROM tasks t WHERE t.organization_id = ? AND (${JOB_TASK_SQL('t')} OR t.starts_at IS NOT NULL)
+    queryAll<TaskRow & { job_booking_id: string | null }>(db, `SELECT t.*, ${jobBookingIdSql('t')} AS job_booking_id FROM tasks t WHERE t.organization_id = ? AND (${JOB_TASK_SQL('t')} OR t.starts_at IS NOT NULL)
       AND ((t.status = 'open' AND (COALESCE(t.starts_at, t.due_at, t.created_at) BETWEEN ? AND ? OR t.due_at BETWEEN ? AND ?)) OR t.updated_at >= ?)
       AND (t.assigned_member_id IS NOT NULL OR ${JOB_TASK_SQL('t')}) ORDER BY COALESCE(t.starts_at, t.due_at, t.created_at), t.id`,
     [organizationId, new Date(now.getTime() - RECENT_MS).toISOString(), new Date(now.getTime() + AHEAD_MS).toISOString(), new Date(now.getTime() - RECENT_MS).toISOString(), new Date(now.getTime() + AHEAD_MS).toISOString(), new Date(now.getTime() - RECENT_MS).toISOString()]),
   ])
-  const subjectIds = [...new Set(tasks.filter(isJobTask).map(task => jobSubject(task).id))]
+  const subjectIds = [...new Set(tasks.flatMap(task => task.job_booking_id && (isJobTask(task) || task.kind === 'consultation_prep') ? [task.job_booking_id] : []))]
   const posted = subjectIds.length ? await queryAll<{ thread_id: string; subject_id: string; participants_key: string; idempotency_key: string }>(db, `
     SELECT m.conversation_id AS thread_id, t.booking_id AS subject_id, t.participants_key, json_extract(m.payload_json, '$.key') AS idempotency_key FROM messages m
       JOIN conversations t ON t.organization_id = m.organization_id AND t.id = m.conversation_id
@@ -125,11 +125,11 @@ export async function runOrganizationJobs(env: CloudflareEnv, db: DbClient, orga
   }
   for (const task of tasks) {
     try {
-      if (!isJobTask(task)) {
+      if (!task.job_booking_id || (!isJobTask(task) && task.kind !== 'consultation_prep')) {
         if (task.status === 'open') await alertOnTheDay(task, members.filter(member => member.id === task.assigned_member_id).map(member => member.userId))
         continue
       }
-      const subject = jobSubject(task)
+      const subject: JobSubject = isJobTask(task) ? jobSubject(task) : { id: task.job_booking_id, unit: 'slot' }
       const about = subject.unit === 'nights' ? 'at' : 'with'
       const roster = rosterFor(task, members)
       const view = roster || task.status === 'open' ? await taskViewForUser(db, organizationId, task.id, roster?.cleaners[0] ?? hostUsers[0] ?? null, now) : null

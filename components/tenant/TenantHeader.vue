@@ -82,14 +82,14 @@ const props = withDefaults(defineProps<{
   locations?: ApiRecord[]
   sections?: PublicShellPayload['sections'] | null
   consultation?: PublicConsultationSettings | null
-  canSchedule?: boolean
-  pageLinks?: PublicPageLink[]
+  can_schedule?: boolean
+  page_links?: PublicPageLink[]
 }>(), {
   locations: () => [],
   sections: null,
   consultation: null,
-  canSchedule: false,
-  pageLinks: () => [],
+  can_schedule: false,
+  page_links: () => [],
 })
 
 const route = useRoute()
@@ -146,7 +146,7 @@ const catalogLinks = computed(() => (props.organization?.vertical
 const showLocations = computed(() => hasPublicLocationPages(props.organization?.vertical as string | undefined) && !isLegalPractice(props.organization?.vertical as string | undefined) && props.locations.length > 1)
 const navItems = computed(() => {
   // A published page names its own link; a catalog surface with no page of its own uses the catalog's word.
-  const byPath = new Map(props.pageLinks.map(item => [item.path, item]))
+  const byPath = new Map(props.page_links.map(item => [item.path, item]))
   const items: Array<{ path: string; title: string }> = catalogLinks.value.map(item => ({ path: item.path, title: byPath.get(item.path)?.title ?? t(item.labelKey) }))
   for (const path of headerOrder) {
     const page = byPath.get(path)
@@ -155,14 +155,14 @@ const navItems = computed(() => {
   if (props.sections?.blog) items.push({ path: '/blog', title: t('site.footer.blog') })
   if (props.sections?.reservations) items.push({ path: '/reservations', title: t('site.header.reservations') })
   if (showLocations.value) items.push({ path: '/locations', title: t('site.header.locations') })
-  items.push({ path: '/contact', title: props.pageLinks.find(page => page.path === '/contact')?.title || t('site.header.contact') })
+  items.push({ path: '/contact', title: props.page_links.find(page => page.path === '/contact')?.title || t('site.header.contact') })
   return items
 })
 
 // One action: a legal practice's consultation, or the venue's own next step.
 const primaryAction = computed(() => {
   if (props.consultation) {
-    return props.canSchedule && props.consultation.schedule_path && props.consultation.cta_label
+    return props.can_schedule && props.consultation.schedule_path && props.consultation.cta_label
       ? { path: props.consultation.schedule_path, label: props.consultation.cta_label, consultation: true }
       : null
   }

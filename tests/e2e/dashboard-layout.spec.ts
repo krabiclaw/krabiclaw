@@ -1106,7 +1106,7 @@ test.describe('dashboard pane hierarchy', () => {
       const forbiddenPreview = await memberContext.request.get(`/api/editor/organizations/${organizationId}/context`)
       expect(forbiddenPreview.status(), await forbiddenPreview.text()).toBe(404)
       const deniedPreview = await forbiddenPreview.json()
-      expect(deniedPreview).not.toHaveProperty('context.previewToken')
+      expect(deniedPreview).not.toHaveProperty('context.preview_token')
       expect(deniedPreview).not.toHaveProperty('previewToken')
       const memberPage = await memberContext.newPage()
       await dismissPreviewToolbar(memberPage)

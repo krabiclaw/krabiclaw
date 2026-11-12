@@ -26,7 +26,7 @@
         >
           <!-- Thumbnail / Icon -->
           <div class="size-12 rounded-xl overflow-hidden bg-accented border border-default shrink-0 flex items-center justify-center">
-            <img v-if="task.imageUrl" :src="task.imageUrl" alt="" class="size-full object-cover" />
+            <img v-if="task.image_url" :src="task.image_url" alt="" class="size-full object-cover" />
             <UIcon v-else-if="task.headline.startsWith('Add photo')" name="i-lucide-image" class="size-6 text-muted" />
             <UIcon v-else name="i-lucide-file-text" class="size-6 text-muted" />
           </div>
@@ -40,7 +40,7 @@
               class="mt-2.5 inline-block text-xs font-semibold text-highlighted underline underline-offset-2 hover:text-primary transition"
               @click="modelValue = false"
             >
-              {{ task.actionLabel }}
+              {{ task.action_label }}
             </NuxtLink>
           </div>
 

@@ -233,7 +233,7 @@ test('authored goals and evidence-bound opportunity decisions follow persisted w
     expect(assignedCover.status(), await assignedCover.text()).toBe(200)
     mcpData(await assignedCover.json())
     const afterMedia = await responseBody<{ reference: BusinessProgressReference }>(await request.get(`${api}/progress/reference`, { params: { operation: 'article.update', subject_id: postId } }))
-    expect(afterMedia.reference.evidence).toMatchObject({ kind: 'article', updatedAt: publishedRead.post.updated_at, media: [expect.objectContaining({ assetId: asset.asset_id })] })
+    expect(afterMedia.reference.evidence).toMatchObject({ kind: 'article', updated_at: publishedRead.post.updated_at, media: [expect.objectContaining({ asset_id: asset.asset_id })] })
     expect(afterMedia.reference.evidence_revision).not.toBe(beforeMedia.reference.evidence_revision)
 
     // The client's enquiry is the owner's open reply task on Today, read through the dashboard and through MCP alike.
@@ -257,7 +257,7 @@ test('authored goals and evidence-bound opportunity decisions follow persisted w
       verification: { status: 'unconfirmed', basis: 'provider_acceptance', receipts: [expect.objectContaining({ provider: 'log_only', channel: 'email', status: 'sent' })] },
     })])
     const { reference: repliedReference } = await responseBody<{ reference: BusinessProgressReference }>(await request.get(`${api}/progress/reference`, { params: { operation: 'guest_thread.reply', subject_id: threadId } }))
-    expect(repliedReference.evidence).toMatchObject({ kind: 'guest_thread', latestGuestEntryId: expect.any(String), latestReplyEntryId: replies[0]!.id })
+    expect(repliedReference.evidence).toMatchObject({ kind: 'guest_thread', latest_guest_entry_id: expect.any(String), latest_reply_entry_id: replies[0]!.id })
     // A reply is an answer once a provider accepted it. Here its only receipt is log-only (unconfirmed, above),
     // so the record shows no delivered answer and the question is still owed.
     expect(await replyTasks()).toEqual(unanswered)
@@ -266,7 +266,7 @@ test('authored goals and evidence-bound opportunity decisions follow persisted w
     const { reference: inboundReference } = await responseBody<{ reference: BusinessProgressReference }>(await request.get(`${api}/progress/reference`, { params: { operation: 'guest_thread.reply', subject_id: threadId } }))
     expect(inboundReference.evidence_revision).not.toBe(repliedReference.evidence_revision)
     if (inboundReference.evidence.kind !== 'guest_thread' || repliedReference.evidence.kind !== 'guest_thread') throw new Error('The explicit thread reference must describe thread evidence')
-    expect(inboundReference.evidence.latestGuestEntryId).not.toBe(repliedReference.evidence.latestGuestEntryId)
+    expect(inboundReference.evidence.latest_guest_entry_id).not.toBe(repliedReference.evidence.latest_guest_entry_id)
     progress = await responseBody<Progress>(await request.get(`${api}/progress`))
     // The client writing again does not add a second task: the one task stays on the first question still owed.
     const reasked = await replyTasks()
@@ -368,8 +368,8 @@ test('business progress read-only contract holds on an established business', as
     expect(reference).toMatchObject({ operation: 'article.update', subject_id: post.id, evidence: { kind: 'article' } })
     expect(reference.evidence_revision).toMatch(/^[a-f0-9]{64}$/)
     if (reference.evidence.kind !== 'article') throw new Error('An article reference must describe article evidence')
-    expect(new Date(reference.evidence.updatedAt).toISOString()).toBe(reference.evidence.updatedAt)
-    if (reference.evidence.updatedAt === post.updated_at) expect(reference.evidence.status).toBe(post.status)
+    expect(new Date(reference.evidence.updated_at).toISOString()).toBe(reference.evidence.updated_at)
+    if (reference.evidence.updated_at === post.updated_at) expect(reference.evidence.status).toBe(post.status)
     break
   }
 })

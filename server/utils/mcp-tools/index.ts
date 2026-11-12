@@ -174,13 +174,13 @@ export async function executeMcpToolCall(
           draft_id: optionalString(normalizedArguments, 'draft_id') ?? undefined,
           updated_at: optionalString(normalizedArguments, 'updated_at'), idempotency_key: requiredString(normalizedArguments, 'idempotency_key'),
           name: normalizedArguments.name, vertical: normalizedArguments.vertical, subdomain: normalizedArguments.subdomain,
-          details: { sourceLocale: normalizedArguments.source_locale, currency: normalizedArguments.currency, timezone: normalizedArguments.timezone,
-            streetAddress: location?.street_address, addressLine2: location?.address_line_2, city: location?.city, region: location?.region,
-            postalCode: location?.postal_code, country: location?.country, phone: location?.phone, websiteUrl: location?.website_url },
-          brand_draft: { heroHeadline: normalizedArguments.hero_headline, heroSubtitle: normalizedArguments.hero_subtitle },
+          details: { source_locale: normalizedArguments.source_locale, currency: normalizedArguments.currency, timezone: normalizedArguments.timezone,
+            street_address: location?.street_address, address_line_2: location?.address_line_2, city: location?.city, region: location?.region,
+            postal_code: location?.postal_code, country: location?.country, phone: location?.phone, website_url: location?.website_url },
+          brand_draft: { hero_headline: normalizedArguments.hero_headline, hero_subtitle: normalizedArguments.hero_subtitle },
           products: Array.isArray(normalizedArguments.products) ? normalizedArguments.products.map(product => {
             const item = product as Record<string, unknown>
-            return { name: item.name, category: item.category, amountMinor: item.amount_minor }
+            return { name: item.name, category: item.category, unit_amount: item.amount_minor }
           }) : normalizedArguments.products,
         })
     if (row.organization_id) event.context.mcpExecutionContext = { organizationId: row.organization_id }
@@ -188,10 +188,10 @@ export async function executeMcpToolCall(
     return {
       draft_id: row.id, updated_at: row.updated_at, ...(row.organization_id ? { organization_id: row.organization_id } : {}), status: row.status,
       ...(payload.request ? { idempotency_key: payload.request.key } : {}),
-      subdomain: row.subdomain_candidate, name: payload.preview.brandName, vertical: payload.preview.vertical, source_locale: details.sourceLocale,
+      subdomain: row.subdomain_candidate, name: payload.preview.brandName, vertical: payload.preview.vertical, source_locale: details.source_locale,
       ...(details.currency ? { currency: details.currency } : {}), ...(details.timezone ? { timezone: details.timezone } : {}),
-      location: Object.fromEntries(Object.entries({ street_address: details.streetAddress, address_line_2: details.addressLine2, city: details.city,
-        region: details.region, postal_code: details.postalCode, country: details.country, phone: details.phone, website_url: details.websiteUrl }).filter(([, value]) => value !== null)),
+      location: Object.fromEntries(Object.entries({ street_address: details.street_address, address_line_2: details.address_line_2, city: details.city,
+        region: details.region, postal_code: details.postal_code, country: details.country, phone: details.phone, website_url: details.website_url }).filter(([, value]) => value !== null)),
       ...(payload.preview.config.draft_hero_headline ? { hero_headline: payload.preview.config.draft_hero_headline } : {}),
       ...(payload.preview.config.draft_hero_subtitle ? { hero_subtitle: payload.preview.config.draft_hero_subtitle } : {}),
       products: payload.preview.products.map(product => ({ name: product.name, category: product.collection, ...(product.price ? { amount_minor: product.price.unit_amount } : {}) })),

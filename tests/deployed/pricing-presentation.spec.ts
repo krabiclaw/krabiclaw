@@ -85,8 +85,8 @@ test('pricing desktop exposes provider details after one reveal and does not rep
   const billing = await page.request.get(`${testBaseUrl()}/api/billing/plans`)
   expect(billing.status()).toBe(200)
   const plans = await billing.json() as Array<{ id: string; name: string; features: string[]; prices: Array<{ amount: number; currency: string; interval: string }>; betaSpotsLeft?: number }>
-  const spotsLeft = plans.find(plan => plan.id === 'business')!.betaSpotsLeft!
-  expect(plans.find(plan => plan.id === 'growth')!.betaSpotsLeft).toBe(spotsLeft)
+  const spotsLeft = plans.find(plan => plan.id === 'business')!.beta_spots_left!
+  expect(plans.find(plan => plan.id === 'growth')!.beta_spots_left).toBe(spotsLeft)
   expect(spotsLeft).toBeGreaterThanOrEqual(0)
   const beta = betaPricing(spotsLeft)
   expect(plans.map(plan => plan.id)).toEqual(['free', 'growth', 'business'])
@@ -209,7 +209,7 @@ test('pricing remains readable with JavaScript disabled', async ({ browser }) =>
   const page = await context.newPage()
   const billing = await page.request.get(`${testBaseUrl()}/api/billing/plans`)
   expect(billing.status()).toBe(200)
-  const beta = betaPricing((await billing.json() as Array<{ id: string; betaSpotsLeft?: number }>).find(plan => plan.id === 'business')!.betaSpotsLeft!)
+  const beta = betaPricing((await billing.json() as Array<{ id: string; betaSpotsLeft?: number }>).find(plan => plan.id === 'business')!.beta_spots_left!)
   try {
     const response = await page.goto(`${testBaseUrl()}/pricing`)
     expect(response?.status()).toBe(200)

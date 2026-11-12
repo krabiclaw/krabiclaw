@@ -123,21 +123,21 @@ export async function loadPublicShellSource(
   ])
   options.signal?.throwIfAborted()
 
-  let canSchedule = false
+  let can_schedule = false
   if (sourceConsultation?.mode === 'native') {
     const services = await listOrganizationProducts(db, { organizationId: organization.id, kind: 'service', publishedOnly: true, bookableOnly: true, env })
-    canSchedule = services.length > 0
+    can_schedule = services.length > 0
   } else if (sourceConsultation?.mode === 'external_url') {
-    canSchedule = Boolean(sourceConsultation.external_url)
+    can_schedule = Boolean(sourceConsultation.external_url)
   }
 
-  const pageLinks = publishedPages
-    .filter(page => page.path !== '/blog' && (page.path !== '/schedule' || canSchedule))
+  const page_links = publishedPages
+    .filter(page => page.path !== '/blog' && (page.path !== '/schedule' || can_schedule))
     .map(page => ({ id: page.id, path: page.path, title: page.title }))
 
-  if (experiences.length && !pageLinks.some(page => page.path === '/experiences')) {
+  if (experiences.length && !page_links.some(page => page.path === '/experiences')) {
     const title = platformLocale(locale ?? sourceLocale)?.messages['site.footer.experiences'] || 'Experiences'
-    pageLinks.push({ id: 'experiences', path: '/experiences', title })
+    page_links.push({ id: 'experiences', path: '/experiences', title })
   }
 
   const localizations = locale && locale !== sourceLocale ? indexStoredPublicLocalizations(localizedRows) : undefined
@@ -145,20 +145,20 @@ export async function loadPublicShellSource(
     success: true,
     ...(await buildPublicShellPayload(db, organization, shellResults, shellIndexes, env, experiences, {
       consultation: sourceConsultation,
-      canSchedule,
+      can_schedule,
       compliance: sourceCompliance,
-      pageLinks,
-      searchConsoleVerification: verification?.token ?? organization.search_console_verification ?? null,
+      page_links,
+      search_console_verification: verification?.token ?? organization.search_console_verification ?? null,
       localizations,
     })),
     count: shellResults[shellIndexes.locations]?.results?.length ?? 0,
-    platformMessages: language.platform_messages,
+    platform_messages: language.platform_messages,
   }
   if (locale && locale !== sourceLocale) {
     if (!language.platform_messages) {
       throw new HTTPError({ statusCode: 500, statusMessage: 'Published platform locale messages are unavailable' })
     }
-    payload.platformMessages = language.platform_messages
+    payload.platform_messages = language.platform_messages
     // The shell reads the site and its locations; neither carries details,
     // so no definition is in scope here.
     const organizationLocalization = localizations?.find(item => item.resourceType === 'organization' && item.resourceId === organizationId)

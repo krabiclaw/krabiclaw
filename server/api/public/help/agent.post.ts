@@ -117,16 +117,16 @@ export default defineHandler(async (event) => {
     }
 
     const shouldEscalate = !lowIntentOpening && (parsed.escalate || shouldForceEscalation(message))
-    const suggestedLinks = results
+    const suggested_links = results
       .filter(result => result.path !== '/help')
       .slice(0, 3)
       .map(result => ({ title: result.title, path: result.path, type: result.type }))
-    const followUpPrompts = lowIntentOpening
+    const follow_up_prompts = lowIntentOpening
       ? DEFAULT_DISCOVERY_PROMPTS
       : []
 
     const response = {
-      reply: parsed.answer, citations: results.slice(0, 3), suggestedLinks, followUpPrompts, escalation: shouldEscalate
+      reply: parsed.answer, citations: results.slice(0, 3), suggested_links, follow_up_prompts, escalation: shouldEscalate
         ? {
             topic: parsed.topic || topic || 'Support request', message: parsed.summary && parsed.summary.toLowerCase() !== 'none'
               ? `${parsed.summary}\n\n${message}`
@@ -139,7 +139,7 @@ export default defineHandler(async (event) => {
     logPublicHelpEventDetached(event, env.DB, {
       method: 'help/chat', toolName: 'public_help_chowbot', toolDomain: 'support', arguments: {
         topic: topic || null, message_length: message.length, history_length: history.length, }, result: {
-        escalation: shouldEscalate, suggested_links: suggestedLinks.length, citations: response.citations.length, }, status: 'success', durationMs: Date.now() - startedAt, })
+        escalation: shouldEscalate, suggested_links: suggested_links.length, citations: response.citations.length, }, status: 'success', durationMs: Date.now() - startedAt, })
 
     return jsonResponse(response)
   } catch (error) {

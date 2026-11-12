@@ -83,7 +83,7 @@ export default defineHandler(async (event) => {
     const filename = sanitizeFilename(filePart.filename)
     const uploaded = await uploadImageBuffer(env, toArrayBuffer(filePart.data), filename, contentType)
     const image: DraftUploadedImage = {
-      draftAssetId: crypto.randomUUID(), cloudflareImageId: uploaded.imageId, publicUrl: uploaded.publicUrl, thumbnailUrl: uploaded.thumbnailUrl, mimeType: contentType, fileName: filename, fileSize, }
+      asset_id: crypto.randomUUID(), cloudflare_image_id: uploaded.imageId, public_url: uploaded.publicUrl, thumbnail_url: uploaded.thumbnailUrl, mime_type: contentType, file_name: filename, file_size: fileSize, }
 
     const payload = parseOnboardingDraftPayload(draft.payload_json)
     payload.preview.media = payload.preview.media.filter(item => item.slot !== target)

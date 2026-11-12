@@ -132,7 +132,7 @@ for (const directory of ['pages', 'server/api']) {
 }
 
 // Literal request schemas, inline response envelopes and direct query reads
-// expose wire keys without including local variables or nested provider data.
+// expose app-owned wire keys without inspecting provider payload variables.
 for (const path of sources(join(root, 'server/api'))) {
   const route = path.slice(root.length + 1)
   const file = ts.createSourceFile(route, readFileSync(path, 'utf8'), ts.ScriptTarget.Latest)
@@ -147,11 +147,21 @@ for (const path of sources(join(root, 'server/api'))) {
       if (name && (ts.isIdentifier(name) || ts.isStringLiteral(name))) checkKey(name.text)
     }
   }
+  function checkInlineValue(node) {
+    if (ts.isObjectLiteralExpression(node)) {
+      checkProperties(node.properties)
+      for (const property of node.properties) {
+        if (ts.isPropertyAssignment(property)) checkInlineValue(property.initializer)
+      }
+    } else if (ts.isArrayLiteralExpression(node)) {
+      for (const element of node.elements) checkInlineValue(element)
+    }
+  }
   function visit(node) {
     if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
       const name = node.expression.text
       const literal = name === 'readStrictBody' ? node.arguments[1] : appRoute && name === 'jsonResponse' ? node.arguments[0] : undefined
-      if (literal && ts.isObjectLiteralExpression(literal)) checkProperties(literal.properties)
+      if (literal) checkInlineValue(literal)
       const bodyType = node.typeArguments?.[0]
       if (appRoute && (name === 'readBody' || name === 'readRequiredBody') && bodyType && ts.isTypeLiteralNode(bodyType)) checkProperties(bodyType.members)
     }

@@ -27,7 +27,7 @@ export const TASK_VIEW_SCHEMA = { type: 'object', properties: {
   person: { anyOf: [person, { type: 'null' }] }, assignee: { anyOf: [person, { type: 'null' }] }, sheet: { type: 'object' },
   starts_at: nullableText, due_at: nullableText, timezone: text, notes: nullableText,
   outcome: { type: ['object', 'null'] }, action: { type: ['object', 'null'] }, path: nullableText,
-  product_id: nullableText, location_id: nullableText, booking_id: nullableText, conversation_id: nullableText,
+  product_id: nullableText, location_id: nullableText, booking_id: nullableText, product_session_id: text, conversation_id: nullableText,
   can: { type: 'object', properties: { complete: { type: 'boolean' }, skip: { type: 'boolean' }, reopen: { type: 'boolean' }, assign: { type: 'boolean' }, edit: { type: 'boolean' } }, required: ['complete', 'skip', 'reopen', 'assign', 'edit'] },
 }, required: ['id', 'kind', 'status', 'version', 'face', 'tag', 'image_url', 'avatar', 'status_line', 'title', 'when', 'detail', 'error', 'note', 'person', 'assignee', 'sheet', 'starts_at', 'due_at', 'timezone', 'notes', 'outcome', 'action', 'path', 'product_id', 'location_id', 'booking_id', 'conversation_id', 'can'] }
 const task = TASK_VIEW_SCHEMA

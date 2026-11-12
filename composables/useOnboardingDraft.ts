@@ -41,33 +41,33 @@ export function useOnboardingDraft() {
       name: details.name.trim(),
       country: details.country.trim().toUpperCase() || null,
       city: details.city.trim() || null,
-      streetAddress: details.streetAddress.trim() || null,
-      addressLine2: details.addressLine2.trim() || null,
+      street_address: details.streetAddress.trim() || null,
+      address_line_2: details.addressLine2.trim() || null,
       region: details.region.trim() || null,
-      postalCode: details.postalCode.trim() || null,
+      postal_code: details.postalCode.trim() || null,
       phone: details.phone.trim() || null,
-      openingHours: parseOpeningHours(state.value.hours.hours),
-      specialHours: parseSpecialHours(state.value.hours.specialHours),
+      opening_hours: parseOpeningHours(state.value.hours.hours),
+      special_hours: parseSpecialHours(state.value.hours.specialHours),
       timezone: state.value.hours.timezone.trim() || null,
       currency: details.currency ?? null,
-      sourceLocale: details.sourceLocale,
+      source_locale: details.sourceLocale,
     }
   }
 
   function serializeBrandDraft() {
     const brand = state.value.brand
     return {
-      paletteStarter: brand.paletteStarter,
-      fontPreset: brand.fontPreset,
-      logoShape: brand.logoShape,
-      logoNote: brand.logoNote.trim() || null,
-      logoPreviewUrl: brand.logoPreviewUrl.trim() || null,
-      heroPhotoNote: brand.heroPhotoNote.trim() || null,
-      heroPreviewUrl: brand.heroPreviewUrl.trim() || null,
-      logoImage: brand.logoImage,
-      heroImage: brand.heroImage,
-      heroHeadline: brand.heroHeadline.trim() || null,
-      heroSubtitle: brand.heroSubtitle.trim() || null,
+      palette_starter: brand.paletteStarter,
+      font_preset: brand.fontPreset,
+      logo_shape: brand.logoShape,
+      logo_note: brand.logoNote.trim() || null,
+      logo_preview_url: brand.logoPreviewUrl.trim() || null,
+      hero_photo_note: brand.heroPhotoNote.trim() || null,
+      hero_preview_url: brand.heroPreviewUrl.trim() || null,
+      logo_image: brand.logoImage,
+      hero_image: brand.heroImage,
+      hero_headline: brand.heroHeadline.trim() || null,
+      hero_subtitle: brand.heroSubtitle.trim() || null,
     }
   }
 
@@ -77,7 +77,7 @@ export function useOnboardingDraft() {
       .map(product => ({
         name: product.name.trim(),
         category: product.category.trim(),
-        amountMinor: product.amountMinor,
+        unit_amount: product.amountMinor,
       }))
   }
 
@@ -237,7 +237,7 @@ export function useOnboardingDraft() {
 
   function restoredImage(value: unknown): typeof state.value.brand.logoImage {
     if (value === null) return null
-    if (!isRecord(value) || typeof value.draftAssetId !== 'string' || typeof value.cloudflareImageId !== 'string' || typeof value.publicUrl !== 'string') throw new Error('Saved website image is unavailable')
+    if (!isRecord(value) || typeof value.asset_id !== 'string' || typeof value.cloudflare_image_id !== 'string' || typeof value.public_url !== 'string') throw new Error('Saved website image is unavailable')
     return value as NonNullable<typeof state.value.brand.logoImage>
   }
 
@@ -256,8 +256,8 @@ export function useOnboardingDraft() {
     // parse, and assigning as we went left the flow half-restored — name and
     // address in place, hours silently empty — which the next save would have
     // written back over the hours the owner had already given.
-    const openingHours = parseOpeningHours(details.openingHours as OpeningHours)
-    const specialHours = parseSpecialHours(details.specialHours)
+    const openingHours = parseOpeningHours(details.opening_hours as OpeningHours)
+    const specialHours = parseSpecialHours(details.special_hours)
 
     const logoImage = restoredImage(draft.logo_image)
     const heroImage = restoredImage(draft.hero_image)
@@ -268,13 +268,13 @@ export function useOnboardingDraft() {
     state.value.vertical = draft.vertical as OrganizationVertical
     state.value.source = draft.source_type === 'google_places' ? 'google_places' : 'manual'
     state.value.placeId = typeof draft.google_place_id === 'string' && draft.google_place_id ? draft.google_place_id : null
-    state.value.details.sourceLocale = typeof details.sourceLocale === 'string' ? details.sourceLocale : null
+    state.value.details.sourceLocale = typeof details.source_locale === 'string' ? details.source_locale : null
     state.value.details.name = text(details.name)
     state.value.details.city = text(details.city)
-    state.value.details.streetAddress = text(details.streetAddress)
-    state.value.details.addressLine2 = text(details.addressLine2)
+    state.value.details.streetAddress = text(details.street_address)
+    state.value.details.addressLine2 = text(details.address_line_2)
     state.value.details.region = text(details.region)
-    state.value.details.postalCode = text(details.postalCode)
+    state.value.details.postalCode = text(details.postal_code)
     state.value.details.phone = text(details.phone)
     if (typeof details.country === 'string' && details.country) state.value.details.country = details.country
     if (typeof details.currency === 'string' && details.currency) {
@@ -288,8 +288,8 @@ export function useOnboardingDraft() {
     state.value.brand.logoShape = (LOGO_SHAPES as readonly unknown[]).includes(config.logo_shape) ? config.logo_shape as LogoShape : null
     state.value.brand.logoImage = logoImage
     state.value.brand.heroImage = heroImage
-    state.value.brand.logoPreviewUrl = logoImage?.publicUrl ?? ''
-    state.value.brand.heroPreviewUrl = heroImage?.publicUrl ?? ''
+    state.value.brand.logoPreviewUrl = logoImage?.public_url ?? ''
+    state.value.brand.heroPreviewUrl = heroImage?.public_url ?? ''
     state.value.brand.logoNote = text(config.draft_logo_note)
     state.value.brand.heroPhotoNote = text(config.draft_hero_photo_note)
     state.value.brand.heroHeadline = text(config.draft_hero_headline)

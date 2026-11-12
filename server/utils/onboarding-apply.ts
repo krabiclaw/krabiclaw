@@ -95,7 +95,7 @@ export async function saveOnboardingDraft(env: CloudflareEnv, db: D1Database, us
   const target = await ensureOnboardingTarget(env, db, userId, {
     id: draft.id, updated_at: draft.updatedAt, organization_id: draft.organizationId,
     name: draft.payload.preview.brandName, vertical: draft.payload.preview.vertical,
-    subdomain_candidate: draft.subdomainCandidate, source_locale: draft.payload.source.details.sourceLocale,
+    subdomain_candidate: draft.subdomainCandidate, source_locale: draft.payload.source.details.source_locale,
     default_currency: draft.payload.source.details.currency, timezone: draft.payload.source.details.timezone,
   })
   if ('error' in target) throw new HTTPError({ statusCode: target.status, statusMessage: target.error, data: { ...target.data, draft_id: draft.id } })
@@ -119,7 +119,7 @@ export async function activateOnboardingDraft(env: CloudflareEnv, db: D1Database
   if (!draft) throw new HTTPError({ statusCode: 404, statusMessage: 'Draft not found' })
   if (!['active', 'committed'].includes(draft.status)) throw new HTTPError({ statusCode: 409, statusMessage: 'Website draft is no longer available', data: { code: 'ONBOARDING_DRAFT_UNAVAILABLE', draft_id: input.draftId } })
   const payload = parseOnboardingDraftPayload(draft.payload_json)
-  const { currency, timezone, sourceLocale } = payload.source.details
+  const { currency, timezone, source_locale: sourceLocale } = payload.source.details
   const missingFields = onboardingPublicationMissingFields(draft, payload)
   if (missingFields.length) throw new HTTPError({ statusCode: 400, statusMessage: `Missing website fields: ${missingFields.join(', ')}`, data: { code: 'ONBOARDING_INCOMPLETE', draft_id: draft.id, missing_fields: missingFields } })
   if (!currency || !sourceLocale || !timezone) throw new Error('Validated website setup has missing values')
@@ -342,21 +342,21 @@ export async function applyOnboardingDraft(
 
   const logoDraftImage = getDraftMedia(payload, 'logo')
   const heroDraftImage = getDraftMedia(payload, 'hero')
-  const heroAssetId = heroDraftImage?.draftAssetId ?? null
+  const heroAssetId = heroDraftImage?.asset_id ?? null
 
   if (logoDraftImage) {
     await ensureMediaAsset(db, {
-      id: logoDraftImage.draftAssetId, organization_id: organizationId, kind: 'image', provider: 'cloudflare_images', source: 'uploaded', cloudflare_image_id: logoDraftImage.cloudflareImageId, public_url: logoDraftImage.publicUrl, thumbnail_url: logoDraftImage.thumbnailUrl, mime_type: logoDraftImage.mimeType, file_name: logoDraftImage.fileName, file_size: logoDraftImage.fileSize, status: 'active', created_by_user_id: userId, }, writeGuard)
-    await executeBatch(db, [writeGuard, ...insertInitialMediaPlacements({ organizationId, placement: { owner_type: 'organization', owner_id: organizationId, slot: 'logo' }, media: [{ asset_id: logoDraftImage.draftAssetId, presentation: logoPresentation }] })])
+      id: logoDraftImage.asset_id, organization_id: organizationId, kind: 'image', provider: 'cloudflare_images', source: 'uploaded', cloudflare_image_id: logoDraftImage.cloudflare_image_id, public_url: logoDraftImage.public_url, thumbnail_url: logoDraftImage.thumbnail_url, mime_type: logoDraftImage.mime_type, file_name: logoDraftImage.file_name, file_size: logoDraftImage.file_size, status: 'active', created_by_user_id: userId, }, writeGuard)
+    await executeBatch(db, [writeGuard, ...insertInitialMediaPlacements({ organizationId, placement: { owner_type: 'organization', owner_id: organizationId, slot: 'logo' }, media: [{ asset_id: logoDraftImage.asset_id, presentation: logoPresentation }] })])
   }
 
   if (heroDraftImage) {
     await ensureMediaAsset(db, {
-      id: heroDraftImage.draftAssetId, organization_id: organizationId, kind: 'image', provider: 'cloudflare_images', source: 'uploaded', cloudflare_image_id: heroDraftImage.cloudflareImageId, public_url: heroDraftImage.publicUrl, thumbnail_url: heroDraftImage.thumbnailUrl, mime_type: heroDraftImage.mimeType, file_name: heroDraftImage.fileName, file_size: heroDraftImage.fileSize, category: 'other', status: 'active', created_by_user_id: userId, }, writeGuard)
+      id: heroDraftImage.asset_id, organization_id: organizationId, kind: 'image', provider: 'cloudflare_images', source: 'uploaded', cloudflare_image_id: heroDraftImage.cloudflare_image_id, public_url: heroDraftImage.public_url, thumbnail_url: heroDraftImage.thumbnail_url, mime_type: heroDraftImage.mime_type, file_name: heroDraftImage.file_name, file_size: heroDraftImage.file_size, category: 'other', status: 'active', created_by_user_id: userId, }, writeGuard)
     // The photo is the home page's hero and the business's sharing image. It
     // is not also the location's hero: the location, its card and its email
     // resolve to the sharing image until the owner gives the location its own.
-    await executeBatch(db, [writeGuard, ...insertInitialMediaPlacements({ organizationId, placement: { owner_type: 'organization', owner_id: organizationId, slot: 'social_share' }, media: [{ asset_id: heroDraftImage.draftAssetId }] })])
+    await executeBatch(db, [writeGuard, ...insertInitialMediaPlacements({ organizationId, placement: { owner_type: 'organization', owner_id: organizationId, slot: 'social_share' }, media: [{ asset_id: heroDraftImage.asset_id }] })])
   }
 
   const draftLocation = payload.preview.locations.find(location => location.id === 'draft-location-main')

@@ -103,7 +103,7 @@ const { organization } = useTenantOrganization()
 const slug = computed(() => String(route.params.slug))
 const organizationName = computed(() => String((organization as ApiValue)?.name ?? '').trim())
 
-const { location, qaList } = await usePublicPageData()
+const { location, qa_list } = await usePublicPageData()
 // A slug naming no location is a URL that does not exist. Rendering the page
 // around a null location answered 200 with an empty shell — a soft 404 a
 // crawler indexes. The sibling menu and product indexes already refuse it.
@@ -113,7 +113,7 @@ if (!location.value.sections.qa) throw createError({ statusCode: 404 })
 
 const { formatDate } = useLocaleDate()
 
-const qa = qaList
+const qa = qa_list
 
 const sorted = computed(() =>
   [...qa.value].sort((a, b) => {

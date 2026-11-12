@@ -30,7 +30,7 @@ export type TaskStatus = 'open' | 'done' | 'skipped' | 'cancelled'
 
 export interface TaskRow {
   id: string; organization_id: string; kind: TaskKind
-  subject_type: 'conversation' | 'scheduled_guest_message' | 'booking' | 'article' | 'post' | 'product' | null; subject_id: string | null
+  subject_type: 'conversation' | 'scheduled_guest_message' | 'booking' | 'product_session' | 'article' | 'post' | 'product' | null; subject_id: string | null
   product_id: string | null; location_id: string | null; opportunity_id: string | null
   title: string | null; notes: string | null
   assigned_member_id: string | null
@@ -52,13 +52,30 @@ function fail(statusCode: number, code: string, message: string, field?: string)
 // keeps the task alert instead.
 // ---------------------------------------------------------------------------
 
-export const JOB_TASK_SQL = (alias: string) => `${alias}.kind IN ('turnover', 'stay_ready', 'consultation_prep', 'consultation_follow_up')`
+export const JOB_TASK_SQL = (alias: string) => `${alias}.kind IN ('turnover', 'stay_ready', 'consultation_follow_up')`
 
 export function isJobTask(row: Pick<TaskRow, 'kind'>): boolean {
-  return row.kind === 'turnover' || row.kind === 'stay_ready' || row.kind === 'consultation_prep' || row.kind === 'consultation_follow_up'
+  return row.kind === 'turnover' || row.kind === 'stay_ready' || row.kind === 'consultation_follow_up'
 }
 
-/** The booking a job is about, and what it holds: a home's nights (a turnover or a make-ready job) or a session's seats (a consultation's jobs). */
+// A private legal appointment's prep can be discussed in the one client's
+// booking conversation. A group session has no booking that represents it.
+const consultationBookingSql = (sessionId: string, organizationId: string) => `(
+  SELECT COALESCE(
+    CASE WHEN count(*) FILTER (WHERE b.status = 'confirmed') = 1 THEN max(b.id) FILTER (WHERE b.status = 'confirmed') END,
+    CASE WHEN count(*) = 1 THEN min(b.id) END
+  ) FROM product_sessions s JOIN products p ON p.organization_id = s.organization_id AND p.id = s.product_id
+    JOIN bookings b ON b.organization_id = s.organization_id AND b.product_session_id = s.id
+  WHERE s.id = ${sessionId} AND s.organization_id = ${organizationId} AND s.capacity = 1 AND p.kind = 'service'
+)`
+
+export const jobBookingIdSql = (alias: string) => `CASE
+  WHEN ${alias}.subject_type = 'booking' THEN ${alias}.subject_id
+  WHEN ${alias}.subject_type = 'product_session' AND ${alias}.kind = 'consultation_prep'
+    THEN ${consultationBookingSql(`${alias}.subject_id`, `${alias}.organization_id`)}
+END`
+
+/** The booking a job is about, and what it holds: a home's nights (a turnover or a make-ready job) or a session's seats (a visit follow-up). */
 export type JobSubject = { id: string; unit: 'slot' | 'nights' }
 
 /** The booking a job is about, which its conversation is tied to. */
@@ -229,6 +246,35 @@ export function opportunityDoneQuery(organizationId: string, operations: readonl
 // Who may see and act on a task.
 // ---------------------------------------------------------------------------
 
+/**
+ * One prep task for the session's assigned member while any confirmed booking
+ * still holds it. The caller supplies the affected session IDs in its write batch.
+ */
+export function sessionPrepTaskQueries(sessions: BatchQuery, now: string): BatchQuery[] {
+  const confirmed = `EXISTS (SELECT 1 FROM bookings b WHERE b.organization_id = s.organization_id
+    AND b.product_session_id = s.id AND b.status = 'confirmed' AND b.no_show_at IS NULL)`
+  return [{
+    query: `UPDATE tasks SET status = 'cancelled', closed_at = ?, closed_by_user_id = NULL, version = tasks.version + 1, updated_at = ?
+      FROM product_sessions s JOIN product_booking_configs cfg ON cfg.organization_id = s.organization_id AND cfg.product_id = s.product_id
+      WHERE tasks.kind = 'consultation_prep' AND tasks.subject_type = 'product_session' AND tasks.subject_id = s.id
+        AND tasks.organization_id = s.organization_id AND tasks.status = 'open' AND s.id IN (${sessions.query})
+        AND (s.status <> 'scheduled' OR cfg.assigned_member_id IS NULL OR NOT ${confirmed})`,
+    params: [now, now, ...(sessions.params ?? [])],
+  }, {
+    query: `INSERT INTO tasks (id, organization_id, kind, subject_type, subject_id, product_id, location_id, assigned_member_id, starts_at, due_at, timezone, status, dedupe_key, version, created_at, updated_at)
+      SELECT 'session-prep:' || s.id, s.organization_id, 'consultation_prep', 'product_session', s.id, s.product_id, s.location_id,
+        cfg.assigned_member_id, s.starts_at, s.starts_at, s.timezone, 'open', 'consultation_prep:session:' || s.id, 1, ?, ?
+      FROM product_sessions s JOIN product_booking_configs cfg ON cfg.organization_id = s.organization_id AND cfg.product_id = s.product_id
+      WHERE s.id IN (${sessions.query}) AND s.status = 'scheduled' AND s.starts_at > ? AND cfg.assigned_member_id IS NOT NULL AND ${confirmed}
+      ON CONFLICT (dedupe_key) DO UPDATE SET status = 'open', closed_at = NULL, closed_by_user_id = NULL,
+        assigned_member_id = excluded.assigned_member_id, starts_at = excluded.starts_at, due_at = excluded.due_at, timezone = excluded.timezone,
+        version = tasks.version + 1, updated_at = excluded.updated_at
+      WHERE tasks.status = 'cancelled' OR (tasks.status = 'open' AND (tasks.assigned_member_id IS NOT excluded.assigned_member_id
+        OR tasks.starts_at IS NOT excluded.starts_at OR tasks.timezone IS NOT excluded.timezone))`,
+    params: [now, now, ...(sessions.params ?? []), now],
+  }]
+}
+
 export interface TaskViewer { principal: MemberAccessPrincipal; manage: boolean; memberId: string }
 
 export async function taskViewer(db: DbClient, principal: MemberAccessPrincipal): Promise<TaskViewer> {
@@ -323,6 +369,7 @@ export interface TaskView {
   product_id: string | null
   location_id: string | null
   booking_id: string | null
+  product_session_id?: string
   conversation_id: string | null
   can: { complete: boolean; skip: boolean; reopen: boolean; assign: boolean; edit: boolean }
   /** How an open task is set aside, and whether its card offers it as well as its sheet. Null when it cannot be. */
@@ -359,6 +406,7 @@ async function nextArrival(db: DbClient, organizationId: string, stay: Pick<Stay
 interface Context {
   slug: string
   vertical: string
+  consultations: Map<string, string>
   paymentOpportunities: Set<string>
   people: Map<string, { name: string; userId: string }>
   users: Map<string, string>
@@ -383,7 +431,12 @@ async function loadContext(db: DbClient, viewer: TaskViewer, rows: TaskRow[]): P
   const messages = messageIds.length ? await queryAll<{ id: string; template_title: string; status: string; conversation_id: string | null; booking_id: string }>(db,
     `SELECT m.id, m.template_title, m.status, (SELECT c.id FROM conversations c WHERE c.organization_id = m.organization_id AND c.booking_id = m.booking_id AND c.kind = 'booking') AS conversation_id, m.booking_id
       FROM scheduled_guest_messages m WHERE m.organization_id = ? AND m.id IN (SELECT value FROM json_each(?))`, [organizationId, d1JsonStringSet(messageIds)]) : []
-  const bookingIds = [...new Set([...ids(row => row.subject_type === 'booking' ? row.subject_id : null), ...messages.map(message => message.booking_id)])]
+  const sessions = ids(row => row.subject_type === 'product_session' ? row.subject_id : null)
+  const privateConsultations = sessions.length ? await queryAll<{ id: string; booking_id: string | null }>(db,
+    `SELECT s.id, ${consultationBookingSql('s.id', 's.organization_id')} AS booking_id FROM product_sessions s
+      WHERE s.organization_id = ? AND s.id IN (SELECT value FROM json_each(?))`, [organizationId, d1JsonStringSet(sessions)]) : []
+  const consultations = new Map(privateConsultations.flatMap(row => row.booking_id ? [[row.id, row.booking_id] as const] : []))
+  const bookingIds = [...new Set([...ids(row => row.subject_type === 'booking' ? row.subject_id : null), ...messages.map(message => message.booking_id), ...consultations.values()])]
   const booked = bookingIds.length ? await queryAll<{ id: string; conversation_id: string | null; starts_at: string; product_kind: ProductKind; unit: 'slot' | 'nights' }>(db, `SELECT br.id, br.starts_at, br.product_kind, br.unit,
        (SELECT c.id FROM conversations c WHERE c.organization_id = br.organization_id AND c.booking_id = br.id AND c.kind = 'booking') AS conversation_id FROM ${BOOKING_RECORDS_SQL} br
      WHERE br.organization_id = ? AND br.id IN (SELECT value FROM json_each(?))`, [organizationId, d1JsonStringSet(bookingIds)]) : []
@@ -443,6 +496,7 @@ async function loadContext(db: DbClient, viewer: TaskViewer, rows: TaskRow[]): P
   return {
     slug: organization.slug,
     vertical: organization.vertical,
+    consultations,
     paymentOpportunities: new Set(paymentOpportunities.map(row => row.id)),
     people: new Map(members.map(member => [member.id, { name: member.name, userId: member.userId }])),
     users: new Map(members.map(member => [member.userId, member.name])),
@@ -498,6 +552,7 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
   let face: TaskView['face'] = product ? 'photo' : 'compact', tag: string | null = null, avatar: TaskView['avatar'] = null
   let status_line: string | null = null, title = '', when: string | null = null, detail: string | null = null, error: string | null = null, path: string | null = null
   let booking_id = row.subject_type === 'booking' ? row.subject_id : null
+  const product_session_id = row.subject_type === 'product_session' ? row.subject_id : null
   let conversation_id: string | null = null
   let reservation: TaskView['reservation']
   let action: TaskView['action'] = { type: 'complete', label: 'Done' }
@@ -617,14 +672,43 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
       sheet = { heading: 'Booking request', title, date: day(record.starts_at), checkout: null, checkin: null }
       break
     }
-    case 'consultation_prep':
+    case 'consultation_prep': {
+      const consultation = product_session_id ? context.consultations.get(product_session_id) : booking_id
+      const record = consultation ? context.records.get(consultation) : undefined
+      const request = record?.conversation_id ? context.requests.get(record.conversation_id) : undefined
+      if (record?.product_kind === 'service' && record.conversation_id && request) {
+        const heading = 'Prepare for consultation'
+        conversation_id = record.conversation_id
+        booking_id = consultation ?? null
+        face = 'compact'
+        title = request.guest_name ? firstName(request.guest_name) : request.participant ?? 'Client'
+        avatar = { initial: initialOf(title), tone: 'warm' }
+        status_line = [heading, place].filter(Boolean).join(' · ')
+        detail = `${day(record.starts_at)}, ${time(record.starts_at)}`
+        path = bookingEditorPath(context.slug, 'booking', record.conversation_id)
+        sheet = { heading, title, date: null, checkout: null, checkin: null }
+        break
+      }
+      if (!product || !row.starts_at) throw new Error(`Prep task ${row.id} has no offering or start time`)
+      const heading = `Prepare for ${getVerticalCopy(context.vertical, 'en').reservationWord}`
+      title = product.name
+      status_line = [heading, row.location_id ? context.locations.get(row.location_id) : null].filter(Boolean).join(' · ')
+      detail = `${day(row.starts_at)}, ${time(row.starts_at)}`
+      if (product_session_id) {
+        const query = new URLSearchParams({ product_id: row.product_id!, date: localDateAt(new Date(row.starts_at), zone) })
+        if (row.location_id) query.set('location_id', row.location_id)
+        path = `/dashboard/${encodeURIComponent(context.slug)}/calendar/sessions/${encodeURIComponent(product_session_id)}?${query}`
+      }
+      sheet = { heading, title, date: day(row.starts_at), checkout: null, checkin: null }
+      break
+    }
     case 'consultation_follow_up': {
       const record = context.records.get(row.subject_id!)
       const request = record?.conversation_id ? context.requests.get(record.conversation_id) : undefined
       if (!record?.conversation_id || !request) throw new Error(`Visit job ${row.id} has no booking conversation`)
       // In the business's own words: "Prepare for consultation", a client; "Prepare for reservation", a guest.
       const presentation = resolveBookingPresentation(record.product_kind, context.vertical)
-      const heading = row.kind === 'consultation_prep' ? `Prepare for ${getVerticalCopy(context.vertical, 'en').reservationWord}` : 'Follow up'
+      const heading = 'Follow up'
       conversation_id = record.conversation_id
       face = 'compact'
       title = request.guest_name ? firstName(request.guest_name) : request.participant ?? `${presentation.counterpartyNoun.charAt(0).toUpperCase()}${presentation.counterpartyNoun.slice(1)}`
@@ -710,7 +794,7 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
     person: row.status === 'open' ? assignee : closer, assignee, action, sheet,
     starts_at: row.starts_at, due_at: row.due_at, timezone: zone, notes: row.notes,
     outcome: row.status === 'open' ? null : { note: row.outcome_note, photos, closed_at: row.closed_at!, closed_by: closerName },
-    path, product_id: row.product_id, location_id: row.location_id, booking_id, conversation_id, can,
+    path, product_id: row.product_id, location_id: row.location_id, booking_id, ...(product_session_id ? { product_session_id } : {}), conversation_id, can,
     dismiss: can.skip ? { label: PERSON_WORK.has(row.kind) ? 'Skip' : 'Dismiss', card: row.kind === 'guest_reply' } : null,
   }
 }
@@ -842,13 +926,14 @@ export async function getTask(db: DbClient, viewer: TaskViewer, taskId: string, 
 export async function subjectJobViews(db: DbClient, viewer: TaskViewer, subjectIds: readonly string[], now = new Date()): Promise<Map<string, TaskView>> {
   if (!subjectIds.length) return new Map()
   const scope = scopeSql(viewer)
-  const rows = await queryAll<TaskRow>(db, `SELECT t.* FROM tasks t WHERE t.organization_id = ? AND ${JOB_TASK_SQL('t')} AND ${scope.sql}
-      AND t.subject_id IN (SELECT value FROM json_each(?))
+  const rows = await queryAll<TaskRow & { job_booking_id: string }>(db, `SELECT t.*, ${jobBookingIdSql('t')} AS job_booking_id FROM tasks t
+    WHERE t.organization_id = ? AND (${JOB_TASK_SQL('t')} OR t.kind = 'consultation_prep') AND ${scope.sql}
+      AND job_booking_id IN (SELECT value FROM json_each(?))
     ORDER BY CASE t.status WHEN 'open' THEN 0 ELSE 1 END, CASE WHEN t.status = 'open' THEN COALESCE(t.due_at, t.starts_at, t.created_at) END, t.closed_at DESC, t.updated_at DESC`,
   [viewer.principal.organizationId, ...scope.params, d1JsonStringSet(subjectIds)])
   const chosen = new Map<string, TaskRow>()
   for (const row of rows) {
-    if (!chosen.has(row.subject_id!)) chosen.set(row.subject_id!, row)
+    if (!chosen.has(row.job_booking_id)) chosen.set(row.job_booking_id, row)
   }
   const context = await loadContext(db, viewer, [...chosen.values()])
   return new Map([...chosen].map(([subjectId, row]) => [subjectId, present(row, viewer, context, now)]))
@@ -1059,7 +1144,7 @@ export async function closeTask(db: DbClient, viewer: TaskViewer, taskId: string
   const organizationId = viewer.principal.organizationId
   // A job closes in its conversation too: the note and photos are the person's own message there, and nobody is alerted.
   // The conversation that carries this job is the one its automatic post went to, and the closer must still sit in it.
-  const thread = isJobTask(current) ? await queryFirst<{ id: string }>(db, `SELECT c.id FROM conversations c
+  const thread = (isJobTask(current) || current.kind === 'consultation_prep') ? await queryFirst<{ id: string }>(db, `SELECT c.id FROM conversations c
       JOIN messages m ON m.conversation_id = c.id AND m.author_kind = 'krabiclaw' AND json_extract(m.payload_json, '$.key') = ?
       JOIN conversation_participants seat ON seat.conversation_id = c.id AND seat.user_id = ?
      WHERE c.organization_id = ? AND c.kind = 'team' ORDER BY m.sequence DESC, c.id LIMIT 1`, [jobKey(current), viewer.principal.userId, organizationId]) : null

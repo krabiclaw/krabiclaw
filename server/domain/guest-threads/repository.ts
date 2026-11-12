@@ -1,4 +1,5 @@
 import { HTTPError } from 'nitro'
+import { sessionPrepTaskQueries } from '~/server/domain/tasks'
 import { BOOKING_ENDS_SQL, BOOKING_RECORDS_SQL, bookingDay, parseGuestRequest, participantLabel } from '~/server/domain/requests'
 import {
   CURRENT_GUEST_SQL, MEMBER_REPLY_EVENT, MIRRORED_EVENT, OPENING_EVENT, SUPPORT_CONVERSATION_SQL,
@@ -404,30 +405,19 @@ export async function expireReplyTasks(db: DbClient, now: string): Promise<{ con
 const REPLY_TASK_EXPIRY_DAYS = 30
 const replyTaskCutoff = (now: string) => new Date(Date.parse(now) - REPLY_TASK_EXPIRY_DAYS * 86_400_000).toISOString()
 
-/**
- * A person's work around a visit they hold: preparing for its start and
- * following up the day after it ends, for any booked record with an assigned
- * member (an attorney's consultation, a guide's class). A visit nobody holds is
- * a Calendar commitment, not a task; a stay's work is its turnover. Both jobs
- * follow the record: they move with it, follow its member, and close if it is
- * cancelled or loses its member. The kind names are the shipped API's.
- */
-const VISIT_JOBS = [
-  { kind: 'consultation_prep', at: 'br.starts_at' },
-  { kind: 'consultation_follow_up', at: "strftime('%Y-%m-%dT%H:%M:%fZ', br.ends_at, '+1 day')" },
-] as const
-
-function visitJobQueries(conversationId: string, now: string): BatchQuery[] {
+// The follow-up belongs to the guest's booking and moves with it.
+function bookingFollowUpQueries(conversationId: string, now: string): BatchQuery[] {
+  const dueAt = "strftime('%Y-%m-%dT%H:%M:%fZ', br.ends_at, '+1 day')"
   return [{
     query: `UPDATE tasks SET status = 'cancelled', closed_at = ?, closed_by_user_id = NULL, version = tasks.version + 1, updated_at = ?
       FROM ${BOOKING_RECORDS_SQL} br WHERE br.conversation_id = ? AND br.unit = 'slot' AND (br.status <> 'confirmed' OR br.assigned_member_id IS NULL) AND tasks.status = 'open'
-        AND tasks.subject_type = 'booking' AND tasks.subject_id = br.id AND tasks.kind IN ('consultation_prep', 'consultation_follow_up')`,
+        AND tasks.subject_type = 'booking' AND tasks.subject_id = br.id AND tasks.kind = 'consultation_follow_up'`,
     params: [now, now, conversationId],
-  }, ...VISIT_JOBS.map(job => ({
+  }, {
     query: `INSERT INTO tasks (id, organization_id, kind, subject_type, subject_id, product_id, location_id, assigned_member_id, starts_at, due_at, timezone, status, dedupe_key, version, created_at, updated_at)
-      SELECT ?, br.organization_id, '${job.kind}', 'booking', br.id, br.product_id, br.location_id, br.assigned_member_id, ${job.at}, ${job.at}, br.timezone, 'open', '${job.kind}:' || br.id, 1, ?, ?
+      SELECT ?, br.organization_id, 'consultation_follow_up', 'booking', br.id, br.product_id, br.location_id, br.assigned_member_id, ${dueAt}, ${dueAt}, br.timezone, 'open', 'consultation_follow_up:' || br.id, 1, ?, ?
         FROM ${BOOKING_RECORDS_SQL} br
-       WHERE br.conversation_id = ? AND br.unit = 'slot' AND br.status = 'confirmed' AND br.assigned_member_id IS NOT NULL AND ${job.at} > ?
+       WHERE br.conversation_id = ? AND br.unit = 'slot' AND br.status = 'confirmed' AND br.assigned_member_id IS NOT NULL AND ${dueAt} > ?
       ON CONFLICT (dedupe_key) DO UPDATE SET status = CASE WHEN tasks.status = 'cancelled' THEN 'open' ELSE tasks.status END, closed_at = CASE WHEN tasks.status = 'cancelled' THEN NULL ELSE tasks.closed_at END,
         product_id = excluded.product_id, location_id = excluded.location_id, timezone = excluded.timezone,
         starts_at = excluded.starts_at, due_at = excluded.due_at, assigned_member_id = excluded.assigned_member_id, version = tasks.version + 1, updated_at = excluded.updated_at
@@ -435,7 +425,7 @@ function visitJobQueries(conversationId: string, now: string): BatchQuery[] {
           OR tasks.assigned_member_id IS NOT excluded.assigned_member_id OR tasks.product_id IS NOT excluded.product_id
           OR tasks.location_id IS NOT excluded.location_id OR tasks.timezone IS NOT excluded.timezone))`,
     params: [crypto.randomUUID(), now, now, conversationId, now],
-  }))]
+  }]
 }
 
 /**
@@ -448,9 +438,9 @@ function visitJobQueries(conversationId: string, now: string): BatchQuery[] {
  * which dismisses) covers everything the guest had said by then; the guest's
  * next message opens a new task. A failed scheduled message the business has
  * since answered in person is done too. Bookings awaiting approval, changes
- * that need the business and a visit's prep and follow-up follow the booking.
+ * that need the business and follow-ups follow the booking. Prep follows the session while it has confirmed bookings.
  */
-export function conversationTaskQueries(conversationId: string, now: string): BatchQuery[] {
+export function conversationTaskQueries(conversationId: string, now: string, previousSessionId: string | null = null): BatchQuery[] {
   const entryOf = `substr(tasks.dedupe_key, length('guest_reply:' || tasks.subject_id || ':') + 1)`
   const unanswered = `guest_entry.id = ${entryOf} AND NOT ${businessReplyAfterSql('guest_entry')} AND NOT ${CANCELLED_AFTER_SQL}`
   return [{
@@ -506,7 +496,12 @@ export function conversationTaskQueries(conversationId: string, now: string): Ba
        WHERE c.id = ? AND c.kind = 'booking' AND b.status = 'pending'
       ON CONFLICT (dedupe_key) DO NOTHING`,
     params: [crypto.randomUUID(), now, now, conversationId],
-  }, ...visitJobQueries(conversationId, now), {
+  }, ...bookingFollowUpQueries(conversationId, now), ...sessionPrepTaskQueries({
+    query: `SELECT b.product_session_id FROM conversations c
+      JOIN bookings b ON b.id = c.booking_id AND b.organization_id = c.organization_id WHERE c.id = ? AND c.kind = 'booking'
+      UNION SELECT s.id FROM product_sessions s JOIN conversations c ON c.organization_id = s.organization_id WHERE c.id = ? AND s.id = ?`,
+    params: [conversationId, conversationId, previousSessionId],
+  }, now), {
     // A change is answered, or replaced by a newer proposal or a move: its task is done, by whoever answered or replaced it.
     query: `UPDATE tasks SET status = 'done', closed_at = ?, version = tasks.version + 1, updated_at = ?,
         closed_by_user_id = (SELECT answer.author_user_id FROM messages answer WHERE answer.conversation_id = p.conversation_id

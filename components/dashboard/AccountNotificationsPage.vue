@@ -7,7 +7,7 @@
   <DashboardIndexPanel id="account-notifications" title="Notifications" :auto-open="`${level.path.value}/${NOTIFICATION_CATEGORIES[0]}`">
     <UAlert v-if="error" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="error" class="mb-6" />
     <!-- An alert email that bounced is said here, where the address it went to is, not inside a conversation. -->
-    <UAlert v-if="bouncedEmail" color="error" variant="soft" icon="i-lucide-mail-warning" :title="`Alerts to ${bouncedEmail.address} are bouncing`" :description="`The last one bounced ${new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(bouncedEmail.failedAt))}${bouncedEmail.error ? `: ${bouncedEmail.error}` : '.'}`" class="mb-6" />
+    <UAlert v-if="bounced_email" color="error" variant="soft" icon="i-lucide-mail-warning" :title="`Alerts to ${bounced_email.address} are bouncing`" :description="`The last one bounced ${new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(bounced_email.failed_at))}${bounced_email.error ? `: ${bounced_email.error}` : '.'}`" class="mb-6" />
     <EditorNavigationList :groups="groups" :active-item="level.child.value" />
   </DashboardIndexPanel>
 </template>
@@ -21,7 +21,7 @@ const level = useRouteLevel()
 
 const session = authClient.useSession()
 const sessionData = computed(() => session.value.data)
-const { preferences, labels, bouncedEmail, error, load } = useNotificationPreferences(() => sessionData.value?.user?.id)
+const { preferences, labels, bounced_email, error, load } = useNotificationPreferences(() => sessionData.value?.user?.id)
 const { locale } = useI18n()
 // Read on every visit: the labels follow the person's businesses, which change outside this screen.
 watch(() => sessionData.value?.user?.id, (userId) => {

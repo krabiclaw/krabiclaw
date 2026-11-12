@@ -236,16 +236,16 @@ async function pickPhoto(event: Event) {
   const body = new FormData()
   body.append('file', file)
   try {
-    const result = await applicationFetch<{ image: string; previousImageCleanupError?: string }>('/api/user/avatar', {
+    const result = await applicationFetch<{ image: string; previous_image_cleanup_error?: string }>('/api/user/avatar', {
       method: 'POST',
       body,
-      validate: (value): value is { image: string; previousImageCleanupError?: string } => isRecord(value)
+      validate: (value): value is { image: string; previous_image_cleanup_error?: string } => isRecord(value)
         && typeof value.image === 'string' && Boolean(value.image.trim())
-        && (!Object.hasOwn(value, 'previousImageCleanupError') || typeof value.previousImageCleanupError === 'string'),
+        && (!Object.hasOwn(value, 'previous_image_cleanup_error') || typeof value.previous_image_cleanup_error === 'string'),
     })
     photoPreview.value = result.image
     imageSaved = true
-    photoError.value = result.previousImageCleanupError ?? ''
+    photoError.value = result.previous_image_cleanup_error ?? ''
     await refreshSession()
     editing.value = null
   } catch (cause) {

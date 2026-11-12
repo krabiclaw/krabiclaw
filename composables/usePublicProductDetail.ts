@@ -19,12 +19,12 @@ export function isPublicProductDetailPayload(value: unknown): value is PublicPro
     && (value.location.latitude === null || typeof value.location.latitude === 'number')
     && (value.location.longitude === null || typeof value.location.longitude === 'number')))
     && (value.locations === undefined || (Array.isArray(value.locations) && value.locations.every(location => isRecord(location) && typeof location.id === 'string' && typeof location.slug === 'string' && typeof location.title === 'string')))
-    && (value.scopeRequired === undefined || typeof value.scopeRequired === 'boolean')
-    && (value.onlineAvailable === undefined || typeof value.onlineAvailable === 'boolean')
+    && (value.scope_required === undefined || typeof value.scope_required === 'boolean')
+    && (value.online_available === undefined || typeof value.online_available === 'boolean')
     && isCurrencyCode(value.currency)
     && typeof value.vertical === 'string'
-    && typeof value.brandName === 'string'
-    && value.brandName.trim().length > 0
+    && typeof value.organization_name === 'string'
+    && value.organization_name.trim().length > 0
     && (value.booking === null || (isRecord(value.booking)
       && (value.booking.duration_minutes === null || typeof value.booking.duration_minutes === 'number')
       && (value.booking.default_capacity === null || typeof value.booking.default_capacity === 'number')))
@@ -49,13 +49,13 @@ export function isPublicProductDetailPayload(value: unknown): value is PublicPro
       && typeof review.source === 'string'
       && (typeof review.original_reference === 'string' || review.original_reference === null)
       && (isRecord(review.google_review_metadata) || review.google_review_metadata === null))
-    && typeof value.collectionName === 'string'
-    && Array.isArray(value.collectionSiblings)
-    && value.collectionSiblings.every(sibling => isRecord(sibling)
+    && typeof value.collection_name === 'string'
+    && Array.isArray(value.collection_siblings)
+    && value.collection_siblings.every(sibling => isRecord(sibling)
       && typeof sibling.id === 'string'
       && typeof sibling.name === 'string'
       && typeof sibling.slug === 'string')
-    && typeof value.stayCheckoutAvailable === 'boolean'
+    && typeof value.stay_checkout_available === 'boolean'
     && Array.isArray(value.locale_representations)
     && value.locale_representations.every(item => isRecord(item)
       && typeof item.locale === 'string'

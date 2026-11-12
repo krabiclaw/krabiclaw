@@ -177,7 +177,7 @@ useSchemaOrg([
       return {
         '@type': 'ImageObject',
         contentUrl,
-        thumbnailUrl,
+        thumbnail_url: thumbnailUrl,
         description: p.alt_text,
         about: p.category
       }

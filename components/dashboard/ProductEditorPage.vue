@@ -608,8 +608,8 @@ const { data: loaded, error: loadFailure, refresh } = await useAsyncData<Product
     let previewToken: string | null = kept
     if (kept === null && canPreview.value && ['stay', 'dish', 'experience', 'service'].includes(productResponse.product.kind)) {
       const response = await dashboardApi(`/api/editor/organizations/${organizationId}/context`, { validate: isRecord })
-      if (!isRecord(response.context) || typeof response.context.previewToken !== 'string' || !response.context.previewToken) throw new Error('The product preview could not be loaded.')
-      previewToken = response.context.previewToken
+      if (!isRecord(response.context) || typeof response.context.preview_token !== 'string' || !response.context.preview_token) throw new Error('The product preview could not be loaded.')
+      previewToken = response.context.preview_token
     }
     return { collections: collectionResponse.collections, product: productResponse.product, previewToken, publicUrl: productResponse.public_url, publicUrls: productResponse.public_urls }
   },

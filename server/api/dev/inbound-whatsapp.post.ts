@@ -9,12 +9,12 @@ import { receiveGuestWhatsApp } from '~/server/domain/guest-threads/inbound-emai
 export default defineHandler(async (event) => {
   assertDevRouteAllowed(event)
   const env = cloudflareEnv(event)
-  const body = await readBody(event) as { from?: string; body?: string; messageId?: string; organizationId?: string }
+  const body = await readBody(event) as { from?: string; body?: string; message_id?: string; organization_id?: string }
   const from = body.from?.trim()
   const text = body.body?.trim()
   if (!from || !text) return jsonResponse({ error: 'from and body are required' }, { status: 400 })
-  const messageId = body.messageId?.trim() || crypto.randomUUID()
-  const received = await receiveGuestWhatsApp(env, { phone: parsePhoneOrThrow(from), messageId, body: text, files: [], organizationId: body.organizationId?.trim() || undefined })
+  const messageId = body.message_id?.trim() || crypto.randomUUID()
+  const received = await receiveGuestWhatsApp(env, { phone: parsePhoneOrThrow(from), messageId, body: text, files: [], organizationId: body.organization_id?.trim() || undefined })
   if (!received) return jsonResponse({ error: 'Submission not found for phone' }, { status: 404 })
-  return jsonResponse({ received: true, conversationId: received.conversationId, messageId })
+  return jsonResponse({ received: true, conversation_id: received.conversationId, message_id: messageId })
 })

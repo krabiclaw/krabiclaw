@@ -8,7 +8,7 @@ import { assertOrganizationWideAccess, type MemberAccessPrincipal } from '~/serv
 import { readMediaPlacements } from '~/server/utils/media-asset-manager'
 import { creationRequestHash } from '~/server/utils/organization-events'
 import { isRecord } from '~/server/utils/type-guards'
-import { BUSINESS_ACTIVITY_EVENTS, BUSINESS_MEASUREMENT_EVENTS, BUSINESS_OUTCOME_EVENTS, BUSINESS_PROGRESS_OPERATIONS, type ArticleDistribution, type BusinessOutcome, type BusinessOutcomeEvent, type BusinessOutcomePage, type BusinessProgressOperation, type BusinessProgressReference, type RecommendationPublication } from '~/shared/business-outcomes'
+import { BUSINESS_ACTIVITY_EVENTS, BUSINESS_MEASUREMENT_EVENTS, BUSINESS_OUTCOME_EVENTS, BUSINESS_PROGRESS_OPERATIONS, progressWire, type BusinessProgressEvidence, type ArticleDistribution, type BusinessOutcome, type BusinessOutcomeEvent, type BusinessOutcomePage, type BusinessProgressOperation, type BusinessProgressReference, type RecommendationPublication } from '~/shared/business-outcomes'
 import { CONVERSION_EVENT_CATALOG, type ConversionValue, type OrganizationConversionEventName } from '~/utils/organization-conversion-events'
 import type { AttributionTouch } from '~/utils/analytics-attribution'
 import { resolvePublicTenantOrigin } from '~/server/utils/public-base'
@@ -229,7 +229,7 @@ export async function listBusinessOutcomes(
       outcome.state = payload.stage
       outcome.measurement = {
         stage: payload.stage, surface: payload.surface, conversion_type: text(payload.conversion_type),
-        attribution: isRecord(payload.attribution) ? payload.attribution as unknown as AttributionTouch : null,
+        attribution: wireAttribution(payload.attribution),
         attributed_at: text(payload.attributed_at), origin_event_id: text(payload.origin_event_id), assigned_member_id: text(properties.member_id),
       }
     }
@@ -245,6 +245,12 @@ export async function listBusinessOutcomes(
       unverified: ['public_visibility', 'operation_completion', 'recipient_notification', 'conversation_resolution', 'business_goal_achievement', 'attendance_or_fulfilment', 'causal_revenue_attribution'],
     },
   }
+}
+
+function wireAttribution(value: unknown): NonNullable<BusinessOutcome['measurement']>['attribution'] {
+  if (!isRecord(value)) return null
+  const { referrerHost, ...attribution } = value as unknown as AttributionTouch
+  return { ...attribution, referrer_host: referrerHost }
 }
 
 async function recommendationPublications(db: DbClient, organizationId: string, postIds: string[]): Promise<Array<RecommendationPublication & { postId: string }>> {
@@ -398,8 +404,8 @@ export async function readBusinessProgressReference(
     if (!Array.isArray(value) || value.length !== 3 || value.some(part => typeof part !== 'string' || !part)) throw missing()
     return value as [string, string, string]
   }
-  const result = async (evidence: BusinessProgressReference['evidence'], sources: unknown = evidence): Promise<BusinessProgressReference> => ({
-    ...input, evidence, evidence_revision: await creationRequestHash({ operation: input.operation, subjectId: input.subject_id, sources }),
+  const result = async (evidence: BusinessProgressEvidence, sources: unknown = evidence): Promise<BusinessProgressReference> => ({
+    ...input, evidence: progressWire(evidence), evidence_revision: await creationRequestHash({ operation: input.operation, subjectId: input.subject_id, sources }),
   })
   if (['article.create', 'post.create', 'social.connect', 'google_ads.connect', 'payments.connect'].includes(input.operation)) {
     if (input.subject_id !== principal.organizationId && input.operation !== 'post.create') throw missing()
@@ -420,7 +426,7 @@ export async function readBusinessProgressReference(
       return result({ kind: 'payment_setup', missing: setup.missing,
         account: setup.connected ? { status: setup.connected.status, cardPaymentsStatus: setup.connected.card_payments_status, updatedAt: setup.connected.updated_at } : null },
       { missing: setup.missing, account: setup.connected ? { id: setup.connected.id, status: setup.connected.status,
-        cardPaymentsStatus: setup.connected.card_payments_status, requirements: setup.connected.requirements, livemode: setup.connected.livemode } : null })
+        cardPaymentsStatus: setup.connected.card_payments_status, requirements: setup.connected.requirements.map(({ awaiting_action_from, deadline_status, ...requirement }) => ({ ...requirement, awaitingActionFrom: awaiting_action_from, deadlineStatus: deadline_status })), livemode: setup.connected.livemode } : null })
     }
     let availability: unknown = null
     if (input.operation === 'post.create' && input.subject_id !== principal.organizationId) {
@@ -517,7 +523,7 @@ export async function readBusinessProgressReference(
       media: media.map(item => ({ placementId: item.placement_id, assetId: item.asset_id, assetUpdatedAt: item.updated_at })),
       ...(input.operation === 'article.distribute' ? { distribution: await readArticleDistribution(db, principal, document.id) } : {}),
     }
-    return { ...input, evidence_revision: await creationRequestHash({ operation: input.operation, document, blocks, categories, media, activityEntryId: evidence.activityEntryId, ...(evidence.distribution ? { distribution: evidence.distribution } : {}) }), evidence }
+    return { ...input, evidence_revision: await creationRequestHash({ operation: input.operation, document, blocks, categories, media, activityEntryId: evidence.activityEntryId, ...(evidence.distribution ? { distribution: evidence.distribution } : {}) }), evidence: progressWire(evidence) }
   }
   if (input.operation === 'booking.welcome') {
     const [welcome] = await readBookingWelcomes(db, principal.organizationId, { now: new Date(), requestId: input.subject_id })
@@ -539,5 +545,5 @@ export async function readBusinessProgressReference(
     latestMemberEntryId: latestMember?.id ?? null,
     commitment: commitment ? { kind: commitment.unit === 'nights' ? 'stay' as const : 'booking' as const, id: commitment.id, status: commitment.status, startsAt: commitment.starts_at, endsAt: commitment.ends_at } : null,
   }
-  return { ...input, evidence_revision: await creationRequestHash({ operation: input.operation, evidence, commitment, deliveries }), evidence }
+  return { ...input, evidence_revision: await creationRequestHash({ operation: input.operation, evidence, commitment, deliveries }), evidence: progressWire(evidence) }
 }

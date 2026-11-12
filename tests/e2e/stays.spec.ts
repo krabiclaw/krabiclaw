@@ -233,7 +233,7 @@ test('a home keeps its operator name independent from its public title across CM
   expect(stay.conversation_id).toBeTruthy()
   const questionText = 'Can you send the check-in instructions?'
   const question = await request.post('/api/dev/inbound-whatsapp', { headers: devLoginHeaders(), data: {
-    organizationId, from: '+66812345001', body: questionText, messageId: crypto.randomUUID(),
+    organization_id: organizationId, from: '+66812345001', body: questionText, message_id: crypto.randomUUID(),
   } })
   await expectStatus(question, 200)
   const today = await request.get(api('today'))
@@ -353,7 +353,7 @@ test('a home keeps its operator name independent from its public title across CM
   await expectStatus(past, 201)
   const pastStay = (await past.json() as { stay: StayDetail }).stay
   const pastQuestion = await request.post('/api/dev/inbound-whatsapp', { headers: devLoginHeaders(), data: {
-    organizationId, from: '+66812345002', body: 'Can you send the receipt for my stay?', messageId: crypto.randomUUID(),
+    organization_id: organizationId, from: '+66812345002', body: 'Can you send the receipt for my stay?', message_id: crypto.randomUUID(),
   } })
   await expectStatus(pastQuestion, 200)
   const pastWork = await request.get(api('today'))

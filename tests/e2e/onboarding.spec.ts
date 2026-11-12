@@ -377,7 +377,7 @@ test('a new experience site saves its first experience privately until booking s
   expect(await empty.json()).toEqual({ success: true, draft: null })
   try {
     const created = await page.request.post('/api/dashboard/onboarding/drafts/active', {
-      data: { source_type: 'manual', vertical: 'experience', name: `E2E experience ${Date.now().toString(36)}`, details: { sourceLocale: 'en', currency: 'THB', timezone: 'Asia/Bangkok', country: 'TH', city: 'Ao Nang', streetAddress: '88 Moo 2', phone: '+66812345678' } },
+      data: { source_type: 'manual', vertical: 'experience', name: `E2E experience ${Date.now().toString(36)}`, details: { source_locale: 'en', currency: 'THB', timezone: 'Asia/Bangkok', country: 'TH', city: 'Ao Nang', street_address: '88 Moo 2', phone: '+66812345678' } },
     })
     expect(created.status(), await created.text()).toBe(200)
     const { organization_id: organizationId } = await created.json() as { organization_id: string }
@@ -598,9 +598,9 @@ test('a new owner picks their Google listing and it seeds location, contact and 
   // The saved draft names the Google place, which the server fetched itself.
   const saved = await page.request.get('/api/dashboard/onboarding/drafts/active')
   expect(saved.status(), await saved.text()).toBe(200)
-  const draft = (await saved.json() as { draft: { source_type: string; google_place_id: string; details: { name: string; phone: string; timezone: string; currency: string; openingHours: { periods: unknown[] } } } }).draft
+  const draft = (await saved.json() as { draft: { source_type: string; google_place_id: string; details: { name: string; phone: string; timezone: string; currency: string; opening_hours: { periods: unknown[] } } } }).draft
   expect(draft).toMatchObject({ source_type: 'google_places', google_place_id: KIKUZUKI.placeId, details: { name: KIKUZUKI.name, phone: '+66952932112', timezone: 'Asia/Bangkok', currency: 'THB' } })
-  expect(draft.details.openingHours.periods.length).toBeGreaterThan(0)
+  expect(draft.details.opening_hours.periods.length).toBeGreaterThan(0)
 
   const cleared = await page.request.delete('/api/dashboard/onboarding/drafts/active')
   expect(cleared.status(), await cleared.text()).toBe(200)
@@ -616,7 +616,7 @@ test('deleting a site through Better Auth also deletes the draft that created it
 
   const name = `E2E Deleted ${Date.now().toString(36)}`
   const firstSave = await page.request.post('/api/dashboard/onboarding/drafts/active', {
-    data: { source_type: 'manual', vertical: 'restaurant', name, details: { sourceLocale: 'en', currency: 'THB', timezone: 'Asia/Bangkok', country: 'TH', city: 'Ao Nang', streetAddress: '88 Moo 2' } },
+    data: { source_type: 'manual', vertical: 'restaurant', name, details: { source_locale: 'en', currency: 'THB', timezone: 'Asia/Bangkok', country: 'TH', city: 'Ao Nang', street_address: '88 Moo 2' } },
   })
   expect(firstSave.status(), await firstSave.text()).toBe(200)
   const { organization_id: organizationId } = await firstSave.json() as { organization_id: string }

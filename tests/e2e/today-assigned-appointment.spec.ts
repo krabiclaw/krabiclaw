@@ -124,7 +124,7 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
     await expect(legalCards.getByTestId('editor-card-description')).toContainText(description)
     const forbiddenPreview = await memberContext.request.get(new URL(`${EDITOR}/context`, baseURL!).toString())
     expect(forbiddenPreview.status(), await forbiddenPreview.text()).toBe(404)
-    expect(await forbiddenPreview.json()).not.toHaveProperty('context.previewToken')
+    expect(await forbiddenPreview.json()).not.toHaveProperty('context.preview_token')
     expect(product.page, 'the assigned Product has a real bound Page').toBeTruthy()
     const ownerPage = await body<{ page: { product_id: string } }>(await page.request.get(`${EDITOR}/pages/${product.page!.id}`), 200)
     expect(ownerPage.page.product_id).toBe(product.id)

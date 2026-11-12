@@ -36,30 +36,30 @@ export interface ListingDetails {
   id: string
   title: string
   currency: string
-  maxGuests: number
-  defaultOccupancy: number
+  max_guests: number
+  default_occupancy: number
   /** The base nightly rate as Airbnb states it, a decimal string. */
-  nightlyRate: string
+  nightly_rate: string
   /** Airbnb's actual listing default, independent of dated calendar exceptions. */
-  minimumNights: number
-  calendarRules: StayCalendarRules | null
+  minimum_nights: number
+  calendar_rules: StayCalendarRules | null
   fields: Partial<Record<DetailField | 'propertyType', string>>
-  missingFields: DetailField[]
+  missing_fields: DetailField[]
   /**
    * Airbnb's check-in window and checkout (`booking_settings.check_in_time_start`,
    * `check_in_time_end`, `check_out_time`) as local HH:MM. A start or checkout
    * Airbnb has not set is null and remains unset; a flexible or unset
    * end is null.
    */
-  checkInTime: string | null
-  checkInEndTime: string | null
-  checkOutTime: string | null
+  check_in_time: string | null
+  check_in_end_time: string | null
+  check_out_time: string | null
   /**
    * Airbnb's policies (`booking_settings.cancellation_policy_settings`) as ours,
    * for stays under 28 nights and for longer ones; null where Airbnb sent none.
    */
-  cancellationPolicy: StayCancellationPolicy | null
-  longTermCancellationPolicy: StayLongTermCancellationPolicy | null
+  cancellation_policy: StayCancellationPolicy | null
+  long_term_cancellation_policy: StayLongTermCancellationPolicy | null
 }
 
 /** The organization's guest contact details, which every imported home carries. */
@@ -158,7 +158,7 @@ export async function keptBookingSettings(env: ChannexEnv, channelId: string, li
   }
 }
 
-function minimumNights(listing: JsonRecord): number {
+function minimum_nights(listing: JsonRecord): number {
   const availability = object(listing.availability_rules, 'Listing availability rules')
   const value = integer(availability.default_min_nights, 'availability_rules.default_min_nights', 1)
   if (value > MAX_STAY_NIGHTS) throw new ChannexDataError(`availability_rules.default_min_nights must be at most ${MAX_STAY_NIGHTS}`)
@@ -173,7 +173,7 @@ export function minorUnits(decimal: string, currency: string): number {
   return minor
 }
 
-function calendarRules(listing: JsonRecord, currency: string): StayCalendarRules | null {
+function calendar_rules(listing: JsonRecord, currency: string): StayCalendarRules | null {
   const availability = object(listing.availability_rules, 'Listing availability rules')
   const pricing = object(listing.pricing_settings, 'Listing pricing settings')
   const rules: Record<string, unknown> = {}
@@ -187,7 +187,7 @@ function calendarRules(listing: JsonRecord, currency: string): StayCalendarRules
 /** Read Airbnb itself, rather than Channex's cached mapping settings, after a default update. */
 export async function listingMinimumNights(env: ChannexEnv, channelId: string, listingId: string): Promise<number> {
   const listing = await listingRecord(env, channelId, listingId)
-  return provided(() => minimumNights(listing))
+  return provided(() => minimum_nights(listing))
 }
 
 export async function listingDetails(env: ChannexEnv, channelId: string, listingId: string, contact: OrganizationContact): Promise<ListingDetails> {
@@ -216,14 +216,14 @@ export async function listingDetails(env: ChannexEnv, channelId: string, listing
     const cancellation = booking.cancellation_policy_settings === undefined || booking.cancellation_policy_settings === null ? {} : object(booking.cancellation_policy_settings, 'Cancellation policy settings')
     return {
       id: listingId, title: string(listing.name, 'Listing name'), currency: string(pricing.listing_currency, 'Currency'),
-      maxGuests: integer(listing.person_capacity, 'Guest capacity', 1), defaultOccupancy: integer(pricing.guests_included, 'Included guests', 1),
-      nightlyRate: amount(pricing.default_daily_price, 'Base price'), minimumNights: minimumNights(listing), calendarRules: calendarRules(listing, string(pricing.listing_currency, 'Currency')), fields,
-      missingFields: DETAIL_FIELDS.filter(key => fields[key] === undefined),
-      checkInTime: hourTime(booking.check_in_time_start, 'booking_settings.check_in_time_start'),
-      checkInEndTime: hourTime(booking.check_in_time_end, 'booking_settings.check_in_time_end'),
-      checkOutTime: hourTime(booking.check_out_time, 'booking_settings.check_out_time'),
-      cancellationPolicy: airbnbPolicy<StayCancellationPolicy>(AIRBNB_CANCELLATION_CATEGORIES, cancellation.cancellation_policy_category),
-      longTermCancellationPolicy: airbnbPolicy<StayLongTermCancellationPolicy>(AIRBNB_LONG_TERM_CANCELLATION_IDS, cancellation.lts_cancellation_policy_id),
+      max_guests: integer(listing.person_capacity, 'Guest capacity', 1), default_occupancy: integer(pricing.guests_included, 'Included guests', 1),
+      nightly_rate: amount(pricing.default_daily_price, 'Base price'), minimum_nights: minimum_nights(listing), calendar_rules: calendar_rules(listing, string(pricing.listing_currency, 'Currency')), fields,
+      missing_fields: DETAIL_FIELDS.filter(key => fields[key] === undefined),
+      check_in_time: hourTime(booking.check_in_time_start, 'booking_settings.check_in_time_start'),
+      check_in_end_time: hourTime(booking.check_in_time_end, 'booking_settings.check_in_time_end'),
+      check_out_time: hourTime(booking.check_out_time, 'booking_settings.check_out_time'),
+      cancellation_policy: airbnbPolicy<StayCancellationPolicy>(AIRBNB_CANCELLATION_CATEGORIES, cancellation.cancellation_policy_category),
+      long_term_cancellation_policy: airbnbPolicy<StayLongTermCancellationPolicy>(AIRBNB_LONG_TERM_CANCELLATION_IDS, cancellation.lts_cancellation_policy_id),
     }
   })
 }
@@ -257,9 +257,9 @@ export interface ListingRoom {
 /** A listing's content as Airbnb reports it: nothing is filled in; a text Airbnb has no value for is null. */
 export interface ListingContent {
   currency: string
-  nightlyRate: string
-  minimumNights: number
-  calendarRules: StayCalendarRules | null
+  nightly_rate: string
+  minimum_nights: number
+  calendar_rules: StayCalendarRules | null
   images: ListingImage[]
   descriptions: Record<DescriptionField, string | null>
   /** `booking_settings.guest_controls`: whether the host allows pets, events and smoking; null where Airbnb has no answer. */
@@ -267,9 +267,9 @@ export interface ListingContent {
   /** Top-level `quiet_hours` as local HH:MM: null when Airbnb leaves it out, false when the list is empty. */
   quietHours: { start: string; end: string } | false | null
   /** The check-in window and checkout, as `listingDetails` reads them. */
-  checkInTime: string | null
-  checkInEndTime: string | null
-  checkOutTime: string | null
+  check_in_time: string | null
+  check_in_end_time: string | null
+  check_out_time: string | null
   /** Airbnb's amenity constants reported present (`is_present`), plus its `listing_views`, in Airbnb's spelling. */
   amenities: string[]
   bedrooms: number | null
@@ -375,17 +375,17 @@ export async function listingContent(env: ChannexEnv, channelId: string, listing
       checkInOption = { category: string(option.category, 'check_in_option.category'), instruction: text(option, 'instruction', 'check_in_option.instruction') }
     }
     return {
-      images, descriptions, amenities: [...new Set(amenities)], rooms, checkInOption, quietHours, minimumNights: minimumNights(listing),
+      images, descriptions, amenities: [...new Set(amenities)], rooms, checkInOption, quietHours, minimum_nights: minimum_nights(listing),
       currency: string(object(listing.pricing_settings, 'Listing pricing settings').listing_currency, 'Currency'),
-      nightlyRate: amount(object(listing.pricing_settings, 'Listing pricing settings').default_daily_price, 'Base price'),
-      calendarRules: calendarRules(listing, string(object(listing.pricing_settings, 'Listing pricing settings').listing_currency, 'Currency')),
+      nightly_rate: amount(object(listing.pricing_settings, 'Listing pricing settings').default_daily_price, 'Base price'),
+      calendar_rules: calendar_rules(listing, string(object(listing.pricing_settings, 'Listing pricing settings').listing_currency, 'Currency')),
       guestControls: {
         pets: flag(controls, 'allows_pets_as_host', 'guest_controls.allows_pets_as_host'), events: flag(controls, 'allows_events_as_host', 'guest_controls.allows_events_as_host'),
         smoking: flag(controls, 'allows_smoking_as_host', 'guest_controls.allows_smoking_as_host'),
       },
-      checkInTime: hourTime(booking.check_in_time_start, 'booking_settings.check_in_time_start'),
-      checkInEndTime: hourTime(booking.check_in_time_end, 'booking_settings.check_in_time_end'),
-      checkOutTime: hourTime(booking.check_out_time, 'booking_settings.check_out_time'),
+      check_in_time: hourTime(booking.check_in_time_start, 'booking_settings.check_in_time_start'),
+      check_in_end_time: hourTime(booking.check_in_time_end, 'booking_settings.check_in_time_end'),
+      check_out_time: hourTime(booking.check_out_time, 'booking_settings.check_out_time'),
       bedrooms: count(listing, 'bedrooms', 'bedrooms', 1), beds: count(listing, 'beds', 'beds', 1), bathrooms: count(listing, 'bathrooms', 'bathrooms', 0.5),
       houseManual: text(listing, 'house_manual', 'house_manual'), directions: text(listing, 'directions', 'directions'),
       wifiNetwork: text(listing, 'wifi_network', 'wifi_network'), wifiPassword: text(listing, 'wifi_password', 'wifi_password'),

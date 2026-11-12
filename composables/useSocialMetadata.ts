@@ -301,7 +301,7 @@ export function useSocialMetadata(input: MaybeRefOrGetter<PageSocialMetadataInpu
         }))
         if (actions.length) webpageNode.potentialAction = actions
       }
-      if (recipe === 'schedule' && shell?.canSchedule.value && shell.consultation.value) {
+      if (recipe === 'schedule' && shell?.can_schedule.value && shell.consultation.value) {
         const consultation = shell.consultation.value
         webpageNode.potentialAction = {
           '@type': 'ScheduleAction',

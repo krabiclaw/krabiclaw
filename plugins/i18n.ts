@@ -20,7 +20,7 @@ function expandMessages(messages: Record<string, string>): Record<string, unknow
 
 export default defineNuxtPlugin((nuxtApp) => {
   const publicLocale = useState<string>('public-locale', () => 'en')
-  const platformMessages = useState<Record<string, string> | null>('platform-locale-messages', () => null)
+  const platform_messages = useState<Record<string, string> | null>('platform-locale-messages', () => null)
   const i18n = createI18n({
     legacy: false,
     globalInjection: true,
@@ -36,7 +36,7 @@ export default defineNuxtPlugin((nuxtApp) => {
     i18n.global.locale.value = locale as 'en'
   }
 
-  watch([publicLocale, platformMessages], ([locale, messages]) => {
+  watch([publicLocale, platform_messages], ([locale, messages]) => {
     setAppLocale(locale, messages)
   }, { immediate: true })
 

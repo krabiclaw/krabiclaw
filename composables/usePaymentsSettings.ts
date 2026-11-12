@@ -80,8 +80,8 @@ export type PayoutMethod = ConnectPayoutMethod
 const CONNECT_STATUSES = new Set<StripeConnectStatus>(['creating', 'creation_failed', 'action_required', 'pending_review', 'restricted', 'ready'])
 const CAPABILITY_STATUSES = new Set<StripeCapabilityStatus>(['active', 'pending', 'restricted', 'unsupported'])
 const isRequirement = (value: unknown): value is StripeConnectRequirement => isRecord(value)
-  && (value.awaitingActionFrom === 'stripe' || value.awaitingActionFrom === 'user')
-  && (value.deadlineStatus === 'currently_due' || value.deadlineStatus === 'eventually_due' || value.deadlineStatus === 'past_due')
+  && (value.awaiting_action_from === 'stripe' || value.awaiting_action_from === 'user')
+  && (value.deadline_status === 'currently_due' || value.deadline_status === 'eventually_due' || value.deadline_status === 'past_due')
   && typeof value.description === 'string' && Array.isArray(value.errors) && value.errors.every(error => typeof error === 'string')
 export const isConnectedAccount = (value: unknown): value is ConnectedAccount => isRecord(value)
   && typeof value.id === 'string' && typeof value.organization_id === 'string'

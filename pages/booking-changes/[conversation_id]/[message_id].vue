@@ -39,12 +39,12 @@ const route = useRoute()
 const { locale, t } = useI18n()
 const app = useNuxtApp()
 const publicLocale = useState<string>('public-locale')
-const platformMessages = useState<Record<string, string> | null>('platform-locale-messages')
+const platform_messages = useState<Record<string, string> | null>('platform-locale-messages')
 function setGuestLocale(value: string) {
   const catalog = platformLocale(value)
   if (!catalog) throw createError({ statusCode: 500, statusMessage: 'Guest language is unavailable' })
   publicLocale.value = catalog.locale
-  platformMessages.value = { ...catalog.messages }
+  platform_messages.value = { ...catalog.messages }
   app.$setAppLocale(catalog.locale, { ...catalog.messages })
 }
 // This private link also runs on the platform domain, without a tenant locale.

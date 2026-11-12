@@ -25,8 +25,8 @@ export interface PlanPrice {
 }
 
 export interface PlanLimits {
-  customDomain: boolean
-  googlePlaces: boolean
+  custom_domains: boolean
+  google_places: boolean
   support: string
 }
 
@@ -42,7 +42,7 @@ export interface Plan {
   limits: PlanLimits
   cta: { label: string; href: string }
   /** Paid plans: how many of the beta spots are left (shared/billing-model.ts). */
-  betaSpotsLeft?: number
+  beta_spots_left?: number
 }
 
 export type EnvWithOrganizationCache = Record<string, string | undefined> & {
@@ -99,8 +99,8 @@ const PLAN_CTA: Record<string, { label: string; href: string }> = {
 function publicPlanLimits(planId: string): PlanLimits {
   const entitlements = getPlanEntitlements(planId)
   return {
-    customDomain: entitlements.custom_domains === true,
-    googlePlaces: entitlements.google_places === true,
+    custom_domains: entitlements.custom_domains === true,
+    google_places: entitlements.google_places === true,
     support: 'Documentation and help form',
   }
 }
@@ -140,11 +140,11 @@ function isPlanLimits(value: unknown, planId: string): value is PlanLimits {
   if (!isRecord(value)) return false
   const expected = publicPlanLimits(planId)
   return (
-    typeof value.customDomain === 'boolean'
-    && typeof value.googlePlaces === 'boolean'
+    typeof value.custom_domains === 'boolean'
+    && typeof value.google_places === 'boolean'
     && typeof value.support === 'string'
-    && value.customDomain === expected.customDomain
-    && value.googlePlaces === expected.googlePlaces
+    && value.custom_domains === expected.custom_domains
+    && value.google_places === expected.google_places
     && value.support === expected.support
   )
 }
@@ -168,7 +168,7 @@ function isPlan(value: unknown): value is Plan {
     && Array.isArray(value.features)
     && value.features.every((feature) => typeof feature === 'string')
     && isPlanLimits(value.limits, id as string)
-    && (!('betaSpotsLeft' in value) || (Number.isInteger(value.betaSpotsLeft) && (value.betaSpotsLeft as number) >= 0 && (value.betaSpotsLeft as number) <= BETA_SPOTS))
+    && (!('beta_spots_left' in value) || (Number.isInteger(value.beta_spots_left) && (value.beta_spots_left as number) >= 0 && (value.beta_spots_left as number) <= BETA_SPOTS))
     && isRecord(value.cta)
     && typeof value.cta.label === 'string'
     && typeof value.cta.href === 'string'
@@ -211,7 +211,7 @@ function parseCachedPlans(value: unknown): Plan[] {
     const amounts = PAID_PLAN_PRICES[planId]
     const monthly = plan?.prices[0]
     if (!plan || plan.prices.length !== 1 || monthly?.interval !== 'month'
-      || monthly.amount !== amounts.monthly || monthly.currency.toLowerCase() !== 'usd' || plan.betaSpotsLeft === undefined) {
+      || monthly.amount !== amounts.monthly || monthly.currency.toLowerCase() !== 'usd' || plan.beta_spots_left === undefined) {
       throw new BillingPlansError('BILLING_PLANS_CACHE_INVALID', `Billing plans cache contains an invalid ${planId} price set`)
     }
     return plan
@@ -258,7 +258,7 @@ export async function fetchStripeProducts(
   env: Record<string, string | undefined>,
 ): Promise<Plan[]> {
   const stripe = createStripeClient(env.STRIPE_SECRET_KEY!)
-  const [catalog, betaSpotsLeft] = await Promise.all([readStripeCatalog(stripe), readBetaSpotsLeft(stripe)])
+  const [catalog, beta_spots_left] = await Promise.all([readStripeCatalog(stripe), readBetaSpotsLeft(stripe)])
   const products = catalog.products.filter(product => product.active)
 
   // Each plan is sold with its metered prices; a catalog without them cannot sell the plans as published.
@@ -324,7 +324,7 @@ export async function fetchStripeProducts(
       features,
       limits: publicPlanLimits(planId),
       cta: PLAN_CTA[planId] ?? { label: 'Get started', href: '/signup' },
-      betaSpotsLeft,
+      beta_spots_left,
     })
   }
 

@@ -99,7 +99,7 @@
                 <template v-if="publish">Your review is with {{ requestData.organization.name }}. It appears on their website once they’ve checked it.</template>
                 <template v-else>Your feedback went to {{ requestData.organization.name }} only. Nothing was published.</template>
               </p>
-              <UButton v-if="publish && requestData.location.googleReviewUrl" :label="copyButtonLabel" @click="copyAndOpenGoogle" />
+              <UButton v-if="publish && requestData.location.google_review_url" :label="copyButtonLabel" @click="copyAndOpenGoogle" />
               <GuestAccountPrompt />
             </div>
           </template>
@@ -163,11 +163,11 @@ const imageCount = computed(() => media.value.filter(item => item.kind === 'imag
 const videoCount = computed(() => media.value.filter(item => item.kind === 'video').length)
 
 const { data: requestData, status: validationStatus, error: validationError } = await useAsyncData<{
-  request: { id: string; bookingType: string; expiresAt: string }
+  request: { id: string; booking_type: string; expires_at: string }
   organization: { id: string; name: string }
-  visit: { subject: string; title: string | null; at: string; locationTitle: string | null }
+  visit: { subject: string; title: string | null; at: string; location_title: string | null }
   questions: Array<{ key: string; label: string }>
-  location: { googleReviewUrl: string | null }
+  location: { google_review_url: string | null }
   display_names: string[]
 }>(() => `review-request-validation-${token.value}`, () =>
   $fetch('/api/public/review-requests/validate', { query: { token: token.value } }),
@@ -394,7 +394,7 @@ async function submitReview() {
 }
 
 async function copyAndOpenGoogle() {
-  const googleUrl = requestData.value?.location?.googleReviewUrl
+  const googleUrl = requestData.value?.location?.google_review_url
   if (!googleUrl) return
 
   // The new tab must open inside the click; a popup blocker refuses one that

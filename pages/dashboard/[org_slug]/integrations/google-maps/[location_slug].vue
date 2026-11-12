@@ -105,7 +105,7 @@ async function importPlace(placeId?: string) {
   try {
     await dashboardApi('/api/integrations/google-places/sync', {
       method: 'POST',
-      body: { organizationId: integrations.organizationId, locationId: location.value.id, ...(placeId ? { placeId } : {}) },
+      body: { organization_id: integrations.organizationId, location_id: location.value.id, ...(placeId ? { google_place_id: placeId } : {}) },
       validate: isSuccess,
     })
     searching.value = false

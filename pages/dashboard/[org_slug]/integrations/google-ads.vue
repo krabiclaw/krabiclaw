@@ -39,7 +39,7 @@ definePageMeta({ layout: 'dashboard' })
 interface AdsLeaf {
   account_id: string | null
   ads: ConnectedIntegration | null
-  accounts: Array<{ customerId: string; formattedCustomerId: string; descriptiveName: string | null; isManager?: boolean; notEnabled?: true; error?: string }>
+  accounts: Array<{ customerId: string; formatted_customer_id: string; descriptiveName: string | null; is_manager?: boolean; not_enabled?: true; error?: string }>
   error: string | null
 }
 
@@ -61,16 +61,16 @@ const { data, refresh, error: loadError } = await useAsyncData(
 )
 const selected = ref<string | undefined>()
 
-const options = computed(() => (data.value?.accounts ?? []).filter(account => !account.notEnabled).map(account => ({
-  label: `${account.descriptiveName ? `${account.descriptiveName} (${account.formattedCustomerId})` : account.formattedCustomerId}${account.isManager ? ' · manager account' : ''}`,
+const options = computed(() => (data.value?.accounts ?? []).filter(account => !account.not_enabled).map(account => ({
+  label: `${account.descriptiveName ? `${account.descriptiveName} (${account.formatted_customer_id})` : account.formatted_customer_id}${account.is_manager ? ' · manager account' : ''}`,
   value: account.customerId,
   // A manager account holds other accounts and has no campaigns or results of its own.
-  disabled: Boolean(account.error) || account.isManager === true,
+  disabled: Boolean(account.error) || account.is_manager === true,
 })))
 // Google's reason for each account it would not describe, shown under the picker.
-const accountErrors = computed(() => (data.value?.accounts ?? []).filter(account => account.error).map(account => `${account.formattedCustomerId}: ${account.error}`))
+const accountErrors = computed(() => (data.value?.accounts ?? []).filter(account => account.error).map(account => `${account.formatted_customer_id}: ${account.error}`))
 // Cancelled or never-enabled accounts cannot be connected; they are counted, not offered.
-const notEnabledCount = computed(() => (data.value?.accounts ?? []).filter(account => account.notEnabled).length)
+const notEnabledCount = computed(() => (data.value?.accounts ?? []).filter(account => account.not_enabled).length)
 
 const loadFailure = computed(() => loadError.value ? getErrorMessage(loadError.value, 'Could not load Google Ads.') : '')
 const saving = ref(false)

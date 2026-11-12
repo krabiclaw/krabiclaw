@@ -27,7 +27,7 @@ export async function unrecordedDaysForIntegration(
   const { accessToken } = await linkedAccountAccessToken(env, ads.account_id)
   const isMeta = ads.provider === 'meta_ads'
   const timeZone = isMeta
-    ? (await getMetaAdAccount(accessToken, ads.target_id)).timezoneName
+    ? (await getMetaAdAccount(accessToken, ads.target_id)).timezone_name
     : (await getGoogleAdsCustomer(accessToken, env.GOOGLE_ADS_DEVELOPER_TOKEN, ads.target_id)).timeZone
   if (!timeZone) throw new Error(`Ads account ${ads.target_id} has no reporting timezone`)
   const throughDate = addLocalDays(localDateAt(now, timeZone), -reportingDelayDays)
@@ -151,7 +151,7 @@ export async function recordMetaAdSpend(db: DbClient, env: CloudflareEnv, organi
   if (!ads?.account_id || !ads.target_id) throw new HTTPError({ statusCode: 409, statusMessage: 'Meta Ads is not connected' })
   const { accessToken } = await linkedAccountAccessToken(env, ads.account_id)
   const account = await getMetaAdAccount(accessToken, ads.target_id)
-  const timezone = account.timezoneName
+  const timezone = account.timezone_name
   if (!timezone) throw new Error(`Meta Ads account ${ads.target_id} has no reporting timezone`)
   const occurredAt = new Date(Date.parse(localDateBounds(date, timezone).end) - 1).toISOString()
   const summary = await getMetaAdsPerformanceSummary(accessToken, ads.target_id, date, date)

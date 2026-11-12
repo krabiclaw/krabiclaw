@@ -171,10 +171,10 @@ export async function buildPublicShellPayload(
   experiences?: Product[],
   extra?: {
     consultation?: PublicConsultationSettings | null
-    canSchedule?: boolean
+    can_schedule?: boolean
     compliance?: PublicCompliance | null
-    pageLinks?: PublicPageLink[]
-    searchConsoleVerification?: string | null
+    page_links?: PublicPageLink[]
+    search_console_verification?: string | null
     localizations?: readonly ExactPublicLocalization[]
   },
 ): Promise<PublicShellPayload> {
@@ -249,7 +249,7 @@ export async function buildPublicShellPayload(
   if (organization.search_console_verification) config.search_console_verification = organization.search_console_verification
 
   return {
-    platformMessages: null,
+    platform_messages: null,
     organization: {
       name: organization.name,
       brand_description: organization.brand_description,
@@ -260,17 +260,17 @@ export async function buildPublicShellPayload(
     },
     locations,
     config,
-    googleMaps: {
+    google_maps: {
       business: null,
       reviews: [],
       media: [],
-      syncedAt: null,
+      synced_at: null,
     },
     sections: sections.site,
     consultation: extra?.consultation ?? null,
-    canSchedule: extra?.canSchedule ?? false,
+    can_schedule: extra?.can_schedule ?? false,
     compliance: extra?.compliance ?? null,
-    pageLinks: extra?.pageLinks ?? [],
-    searchConsoleVerification: extra?.searchConsoleVerification ?? (organization.search_console_verification as string | null) ?? null,
+    page_links: extra?.page_links ?? [],
+    search_console_verification: extra?.search_console_verification ?? (organization.search_console_verification as string | null) ?? null,
   }
 }

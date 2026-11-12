@@ -125,7 +125,7 @@ import MediaPreview from '~/components/MediaPreview.vue'
 const props = defineProps<{ block: TenantPageBlock; page: PublicTenantPage }>()
 const route = useRoute()
 const { localePath, t } = useI18n()
-const { consultation, canSchedule } = useOrganizationShellState()
+const { consultation, can_schedule } = useOrganizationShellState()
 
 const isHome = computed(() => props.page.path === '/' || route.path === '/')
 const isSchedule = computed(() => props.page.recipe === 'schedule')
@@ -180,11 +180,11 @@ const overviewActions = computed(() => (props.page.product_id ? actions.value.sl
 
 // The schedule page lists the consultations natively, sends visitors to the
 // practice's external scheduler, or — with nothing bookable — to contact.
-const nativeSchedule = computed(() => Boolean(canSchedule.value && consultation.value?.mode === 'native'))
+const nativeSchedule = computed(() => Boolean(can_schedule.value && consultation.value?.mode === 'native'))
 const pageAction = computed(() => {
   if (!isSchedule.value || !consultation.value) return actions.value[0] ?? null
   if (nativeSchedule.value) return null
-  if (canSchedule.value && consultation.value.mode === 'external_url' && consultation.value.external_url) {
+  if (can_schedule.value && consultation.value.mode === 'external_url' && consultation.value.external_url) {
     return { label: primary.value.label || consultation.value.cta_label || t('site_pages.schedule'), url: consultation.value.external_url }
   }
   return { label: t('site_pages.contact'), url: localePath('/contact') }

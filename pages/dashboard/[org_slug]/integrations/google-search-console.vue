@@ -38,7 +38,7 @@ interface SearchConsoleLeaf {
   account_id: string | null
   search_console: ConnectedIntegration | null
   site_url: string | null
-  properties: Array<{ siteUrl: string; permissionLevel: string }>
+  properties: Array<{ site_url: string; permission_level: string }>
   error: string | null
 }
 
@@ -63,7 +63,7 @@ const selected = ref<string | undefined>()
 
 // This website's own URL is offered even before the account owns it: KrabiClaw verifies it by serving the tag.
 const options = computed(() => {
-  const owned = (data.value?.properties ?? []).map(property => ({ label: property.siteUrl, value: property.siteUrl }))
+  const owned = (data.value?.properties ?? []).map(property => ({ label: property.site_url, value: property.site_url }))
   const own = data.value?.site_url
   return own && !owned.some(option => option.value === own) ? [{ label: `${own} (verify for me)`, value: own }, ...owned] : owned
 })

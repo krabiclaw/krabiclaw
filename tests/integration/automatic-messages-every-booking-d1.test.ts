@@ -144,7 +144,7 @@ test('consultations, classes and table bookings are sent their automatic message
     assert.equal(await db.prepare('SELECT count(*) AS n FROM scheduled_guest_messages WHERE booking_id = ? AND template_id = ?').bind(ana.bookingId, reminder.id).first('n'), 0)
 
     // Every visit is held by its offering's one member: theirs to prepare and follow up, whatever was booked.
-    const jobs = (kind: 'booking', id: string) => db.prepare("SELECT kind, starts_at, status, assigned_member_id FROM tasks WHERE subject_type = ? AND subject_id = ? AND kind IN ('consultation_prep', 'consultation_follow_up') ORDER BY kind").bind(kind, id).all().then(result => result.results)
+    const jobs = (id: string) => db.prepare("SELECT t.kind, t.starts_at, t.status, t.assigned_member_id FROM bookings b JOIN tasks t ON t.organization_id = b.organization_id AND ((t.subject_type = 'booking' AND t.subject_id = b.id AND t.kind = 'consultation_follow_up') OR (t.subject_type = 'product_session' AND t.subject_id = b.product_session_id AND t.kind = 'consultation_prep')) WHERE b.id = ? ORDER BY t.kind").bind(id).all().then(result => result.results)
     const heldJobs = async (bookingId: string, member: string) => {
       const held = await db.prepare('SELECT ps.starts_at, ps.ends_at FROM bookings b JOIN product_sessions ps ON ps.id = b.product_session_id WHERE b.id = ?').bind(bookingId).first<{ starts_at: string; ends_at: string }>()
       return [
@@ -152,9 +152,9 @@ test('consultations, classes and table bookings are sent their automatic message
         { kind: 'consultation_prep', starts_at: held!.starts_at, status: 'open', assigned_member_id: member },
       ]
     }
-    assert.deepEqual(await jobs('booking', ana.bookingId), await heldJobs(ana.bookingId, `${law.organizationId}-owner`))
-    assert.deepEqual(await jobs('booking', cy.bookingId), await heldJobs(cy.bookingId, `${studio.organizationId}-owner`))
-    assert.deepEqual(await jobs('booking', dee.reservationId), await heldJobs(dee.reservationId, `${bistro.organizationId}-owner`))
+    assert.deepEqual(await jobs(ana.bookingId), await heldJobs(ana.bookingId, `${law.organizationId}-owner`))
+    assert.deepEqual(await jobs(cy.bookingId), await heldJobs(cy.bookingId, `${studio.organizationId}-owner`))
+    assert.deepEqual(await jobs(dee.reservationId), await heldJobs(dee.reservationId, `${bistro.organizationId}-owner`))
 
     // The firm cancels Ben's consultation: nothing of it is sent.
     const thread = async (organizationId: string, requestId: string) => (await getGuestRequest(db, requestId, organizationId)) as unknown as GuestThreadRow
@@ -163,7 +163,7 @@ test('consultations, classes and table bookings are sent their automatic message
     for (const template of [received, prepare]) {
       assert.deepEqual([(await planned(ben.bookingId, template.id))?.status, (await planned(ben.bookingId, template.id))?.reason], ['cancelled', 'The booking was cancelled.'])
     }
-    assert.deepEqual((await jobs('booking', ben.bookingId)).map(job => job.status), ['cancelled', 'cancelled'])
+    assert.deepEqual((await jobs(ben.bookingId)).map(job => job.status), ['cancelled', 'cancelled'])
 
     // The studio moves Cy to the next day's class and the table to 20:30: their messages move with them.
     await moveBooking(db, env, await thread(studio.organizationId, cy.requestId), { userId: OWNER }, { kind: 'booking', product_session_id: 'clay-2', party_size: 1 }, 'move-cy')

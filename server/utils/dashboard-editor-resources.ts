@@ -37,7 +37,7 @@ export async function loadDashboardEditorContext(event: H3Event, organizationId:
   // requireOrganizationAccess(event, organizationId) has already
   // authorized this caller (location-access.ts), so asserting again here only
   // bought a second read of the same member row.
-  const [locationRows, entitlements, sourceLocale] = await Promise.all([
+  const [locationRows, entitlements, source_locale] = await Promise.all([
     queryAll<EditorLocationRow>(db, `
       SELECT id, slug, title, status
         FROM business_locations
@@ -51,12 +51,12 @@ export async function loadDashboardEditorContext(event: H3Event, organizationId:
   if (typeof env.PREVIEW_SECRET !== 'string' || !env.PREVIEW_SECRET) {
     throw new HTTPError({ statusCode: 500, statusMessage: 'PREVIEW_SECRET is required for editor previews' })
   }
-  const previewToken = await createPreviewToken(env.PREVIEW_SECRET, organizationId, Date.now() + PREVIEW_TOKEN_TTL_MS)
+  const preview_token = await createPreviewToken(env.PREVIEW_SECRET, organizationId, Date.now() + PREVIEW_TOKEN_TTL_MS)
   const { vertical, site } = resolveOrganizationCmsCapabilities(organization.vertical, organization.theme_id, null)
   return {
     success: true as const,
     context: {
-      sourceLocale,
+      source_locale,
       organization: {
         id: organization.id,
         name: organization.name,
@@ -72,8 +72,8 @@ export async function loadDashboardEditorContext(event: H3Event, organizationId:
         { id: null, label: 'Brand-wide', type: 'brand' as const },
         ...locations.map(location => ({ id: location.id, label: location.title, type: 'location' as const })),
       ],
-      previewToken,
-      editablePages: getEditablePages(vertical, site),
+      preview_token,
+      editable_pages: getEditablePages(vertical, site),
     },
   }
 }
@@ -141,7 +141,7 @@ export interface LocationContentCounts {
   qa: number
   reviews: number
   /** The site's own questions, which this location's page also answers from. */
-  organizationQa: number
+  organization_qa: number
 }
 
 /**
@@ -180,7 +180,7 @@ async function loadLocationContentCounts(
     posts: row?.posts ?? 0,
     qa: row?.qa ?? 0,
     reviews: row?.reviews ?? 0,
-    organizationQa: row?.organization_qa ?? 0,
+    organization_qa: row?.organization_qa ?? 0,
   }
 }
 

@@ -37,7 +37,7 @@ extend that model. Never add a second one beside it.
 | Guest message template | `message_templates` | server/domain/scheduled-guest-messages.ts | KrabiClaw |
 | Future guest message, one outbox (a booking's automatic messages and a member's own send-later replies, one status machine) | `scheduled_guest_messages` | server/domain/scheduled-guest-messages.ts | KrabiClaw |
 | Reported content | `content_reports` | server/domain/content-reports.ts | KrabiClaw |
-| Work and suggestions | `tasks` `opportunities` `organization_goals` | server/domain/tasks.ts | KrabiClaw |
+| Work and suggestions (one prep per assigned slot session, one follow-up per booking) | `tasks` `opportunities` `organization_goals` | server/domain/tasks.ts | KrabiClaw |
 | Provider working hours | `member_scheduling` | server/domain/member-scheduling.ts | KrabiClaw |
 | Media and its placements, including a home’s photo rooms and accessibility evidence | `media_assets` `media_placements` | server/utils/media-placement.ts | Cloudflare Images |
 | Website content and localized representations | `content_documents` `content_blocks` `article_categories` `article_category_articles` `organization_redirects` | server/utils/content | KrabiClaw |

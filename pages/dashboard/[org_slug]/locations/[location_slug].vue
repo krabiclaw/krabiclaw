@@ -73,7 +73,7 @@ interface LocationContentCounts {
   posts: number
   qa: number
   reviews: number
-  organizationQa: number
+  organization_qa: number
 }
 interface LocationOverviewResource {
   location: { success: boolean; location: LocationOverview }
@@ -144,11 +144,11 @@ function countSummary(total: number, noun: string, empty: string): string {
 }
 
 /** "5 questions · 18 reviews · 110 site-wide", or what to do when there are none. */
-function trustSummary(qa: number, reviews: number, organizationQa: number): string {
+function trustSummary(qa: number, reviews: number, organization_qa: number): string {
   const parts = [
     qa ? countSummary(qa, 'question', '') : '',
     reviews ? countSummary(reviews, 'review', '') : '',
-    organizationQa ? `${organizationQa} organization-wide` : '',
+    organization_qa ? `${organization_qa} organization-wide` : '',
   ].filter(Boolean)
   return parts.length ? parts.join(' · ') : 'Answer your first question'
 }
@@ -191,7 +191,7 @@ const cards = computed<HubCard[]>(() => {
       ? [{ id: 'products', icon: 'i-lucide-store', title: catalogLabelText(resource.catalog), description: catalogSummaryText(resource.catalog), to: scopedToLocation(organizationLinks.value?.catalog), visible: true }]
       : []),
     { id: 'posts', icon: 'i-lucide-megaphone', title: 'Posts', description: countSummary(counts.posts, 'published post', 'Write your first post'), to: scopedToLocation(organizationLinks.value?.posts), visible: hasFeature('posts') },
-    { id: 'qa', icon: 'i-lucide-message-circle-question', title: 'Reviews and Q&A', description: trustSummary(counts.qa, counts.reviews, counts.organizationQa), to: scopedToLocation(organizationLinks.value?.qa), visible: hasFeature('qa') },
+    { id: 'qa', icon: 'i-lucide-message-circle-question', title: 'Reviews and Q&A', description: trustSummary(counts.qa, counts.reviews, counts.organization_qa), to: scopedToLocation(organizationLinks.value?.qa), visible: hasFeature('qa') },
   ].filter(card => card.visible).map(({ visible: _visible, ...card }) => card)
 })
 

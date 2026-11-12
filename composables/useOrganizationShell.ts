@@ -56,31 +56,31 @@ export const useOrganizationShellState = () => {
   const locations = computed(() => data.value?.locations ?? []);
   const config = computed(() => (data.value?.config ?? {}) as Record<string, string>);
   const shellOrganization = computed(() => data.value?.organization ?? null);
-  const googleMaps = computed(() => data.value?.googleMaps ?? null);
+  const google_maps = computed(() => data.value?.google_maps ?? null);
   // Before the shell loads no section is known to have anything on it.
   const sections = computed(() => data.value?.sections ?? null);
   const consultation = computed(() => data.value?.consultation ?? null);
-  const canSchedule = computed(() => data.value?.canSchedule ?? false);
+  const can_schedule = computed(() => data.value?.can_schedule ?? false);
   const compliance = computed(() => data.value?.compliance ?? null);
-  const pageLinks = computed(() => data.value?.pageLinks ?? []);
-  const searchConsoleVerification = computed(() => data.value?.searchConsoleVerification ?? null);
-  const platformMessages = useState<Record<string, string> | null>('platform-locale-messages', () => null)
+  const page_links = computed(() => data.value?.page_links ?? []);
+  const search_console_verification = computed(() => data.value?.search_console_verification ?? null);
+  const platform_messages = useState<Record<string, string> | null>('platform-locale-messages', () => null)
   watch(
-    () => data.value?.platformMessages,
-    messages => { platformMessages.value = messages ?? null },
+    () => data.value?.platform_messages,
+    messages => { platform_messages.value = messages ?? null },
     { immediate: true },
   )
   return {
     locations,
     config,
     organization: shellOrganization,
-    googleMaps,
+    google_maps,
     sections,
     consultation,
-    canSchedule,
+    can_schedule,
     compliance,
-    pageLinks,
-    searchConsoleVerification,
+    page_links,
+    search_console_verification,
     data,
     pending,
     error,

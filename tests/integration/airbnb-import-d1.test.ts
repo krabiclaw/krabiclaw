@@ -326,8 +326,8 @@ test('a listing imports through every stage into a home Channex and KrabiClaw ag
     const details = await connection.details(LISTING)
     // The organization has no contact details yet, so the import asks for them once, and always for the member who looks after the home.
     // Children and infants are not asked: Airbnb counts neither.
-    assert.deepEqual(details.missingFields, ['email', 'phone', 'assigned_member_id'])
-    assert.deepEqual({ timezone: details.fields.timezone, checkIn: details.checkInTime, checkInEnd: details.checkInEndTime, checkOut: details.checkOutTime }, { timezone: TZ, checkIn: '16:00', checkInEnd: '21:00', checkOut: '10:00' })
+    assert.deepEqual(details.missing_fields, ['email', 'phone', 'assigned_member_id'])
+    assert.deepEqual({ timezone: details.fields.timezone, checkIn: details.check_in_time, checkInEnd: details.check_in_end_time, checkOut: details.check_out_time }, { timezone: TZ, checkIn: '16:00', checkInEnd: '21:00', checkOut: '10:00' })
     // Translate provider aliases without rejecting categories Channex can validate itself.
     assert.equal(details.fields.propertyType, 'holiday_home')
     channex.category = 'house'
@@ -342,7 +342,7 @@ test('a listing imports through every stage into a home Channex and KrabiClaw ag
     assert.deepEqual(await connection.prepare(LISTING, form), started)
     // What the host typed is now the organization's contact, so the next listing asks only who looks after it.
     assert.deepEqual(await db.prepare('SELECT contact_email, contact_phone FROM organization WHERE id = ?').bind(ORG).first(), { contact_email: 'stay@example.test', contact_phone: '+1 435 555 0100' })
-    assert.deepEqual((await connection.details(LISTING)).missingFields, ['assigned_member_id'])
+    assert.deepEqual((await connection.details(LISTING)).missing_fields, ['assigned_member_id'])
     const productId = started.product_id
 
     const home = await db.prepare(`SELECT p.kind, p.name, b.check_in_time, b.check_in_end_time, b.check_out_time, b.default_capacity AS max_guests, b.min_nights, l.title AS location, l.timezone, l.email, pr.unit_amount, pr.currency
@@ -1590,7 +1590,7 @@ for (const target of ['rolling default', 'listing minimum'] as const) {
           assert.deepEqual(state, { status: 'connected', pending_step: null, operation_id: null })
           assert.equal(currentMinimum, canonicalMinimum, 'the unconfirmed mutation actually applied')
           assert.ok((await connection.listings()).some(listing => listing.id === LISTING))
-          assert.equal((await connection.details(LISTING)).minimumNights, channex.availabilityRules.default_min_nights)
+          assert.equal((await connection.details(LISTING)).minimum_nights, channex.availabilityRules.default_min_nights)
           failWrite = false
           assert.equal((await connection.refreshContent(productId)).stage, 'complete')
           assert.equal(attempts, 1, 'readback recognizes the applied update without repeating it')
@@ -1802,14 +1802,14 @@ test('the import asks only for required contact details and preserves provider b
     // Untranslated provider terms do not block the home or acquire a different local policy.
     channex.booking = { ...channex.booking, cancellation_policy_settings: { cancellation_policy_category: 'super_strict_30', lts_cancellation_policy_id: 'CANCEL_LONG_TERM_FAIR' } }
     const untranslated = await connection.details(LISTING)
-    assert.equal(untranslated.cancellationPolicy, null)
-    assert.equal(untranslated.longTermCancellationPolicy, 'firm')
+    assert.equal(untranslated.cancellation_policy, null)
+    assert.equal(untranslated.long_term_cancellation_policy, 'firm')
     channex.booking = { ...channex.booking, cancellation_policy_settings: policies }
     // A flexible end is a home whose check-in window has no end; an hour after midnight is that hour.
     channex.booking = { ...channex.booking, check_in_time_start: '16', check_in_time_end: 'FLEXIBLE', check_out_time: 10 }
-    assert.equal((await connection.details(LISTING)).checkInEndTime, null)
+    assert.equal((await connection.details(LISTING)).check_in_end_time, null)
     channex.booking = { ...channex.booking, check_in_time_end: '25' }
-    assert.equal((await connection.details(LISTING)).checkInEndTime, '01:00')
+    assert.equal((await connection.details(LISTING)).check_in_end_time, '01:00')
     // The home has Airbnb's window; Channex's child-only beds and infant cots are 0, as Airbnb counts neither.
     await db.prepare(`CREATE TRIGGER refuse_initial_mapping BEFORE INSERT ON product_channel_mappings BEGIN SELECT RAISE(ABORT, 'Import mapping refused'); END`).run()
     await assert.rejects(connection.prepare(LISTING, form), /Import mapping refused/)

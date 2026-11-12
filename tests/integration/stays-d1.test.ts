@@ -1946,11 +1946,11 @@ test('home location sharing protects every public projection after localization 
       assert.equal(reviews.length, 1)
       assert.equal(reviews[0]!.original_reference, null)
       assert.equal(reviews[0]!.google_review_metadata?.flag_content_uri, null)
-      const locationReviews = await listOrganizationReviews(db, ORG, { locationId: 'cabin-site', publishedOnly: true })
-      assert.equal(locationReviews.length, 1)
-      assert.equal(locationReviews[0]!.original_reference, null)
+      const location_reviews = await listOrganizationReviews(db, ORG, { locationId: 'cabin-site', publishedOnly: true })
+      assert.equal(location_reviews.length, 1)
+      assert.equal(location_reviews[0]!.original_reference, null)
       // The site's review list includes location reviews, still projected for the private home.
-      const siteReview = (await listOrganizationReviews(db, ORG, { publishedOnly: true })).find(review => review.id === locationReviews[0]!.id)
+      const siteReview = (await listOrganizationReviews(db, ORG, { publishedOnly: true })).find(review => review.id === location_reviews[0]!.id)
       assert.equal(siteReview?.original_reference, null)
     }
 

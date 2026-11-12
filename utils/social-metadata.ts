@@ -26,7 +26,7 @@ export type SocialImageMimeType = 'image/jpeg' | 'image/png' | 'image/gif'
 export interface SocialImageSource {
   url: string
   kind?: 'image' | 'video'
-  thumbnailUrl?: string | null
+  thumbnail_url?: string | null
   width?: number
   height?: number
   type?: SocialImageMimeType
@@ -45,7 +45,7 @@ export function parseSocialImageSource(value: unknown): SocialImageSource | null
   if (value.kind !== undefined && value.kind !== 'image' && value.kind !== 'video') {
     throw new Error('Social image source kind must be image or video')
   }
-  if (value.thumbnailUrl !== undefined && value.thumbnailUrl !== null && typeof value.thumbnailUrl !== 'string') {
+  if (value.thumbnail_url !== undefined && value.thumbnail_url !== null && typeof value.thumbnail_url !== 'string') {
     throw new Error('Social image thumbnail URL must be a string or null')
   }
   if (value.width !== undefined && (typeof value.width !== 'number' || !Number.isFinite(value.width))) {
@@ -63,7 +63,7 @@ export function parseSocialImageSource(value: unknown): SocialImageSource | null
   return {
     url: value.url,
     ...(value.kind === undefined ? {} : { kind: value.kind }),
-    ...(value.thumbnailUrl === undefined ? {} : { thumbnailUrl: value.thumbnailUrl }),
+    ...(value.thumbnail_url === undefined ? {} : { thumbnail_url: value.thumbnail_url }),
     ...(value.width === undefined ? {} : { width: value.width }),
     ...(value.height === undefined ? {} : { height: value.height }),
     ...(value.type === undefined ? {} : { type: value.type }),

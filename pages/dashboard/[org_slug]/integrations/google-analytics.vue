@@ -37,7 +37,7 @@ definePageMeta({ layout: 'dashboard' })
 interface AnalyticsLeaf {
   account_id: string | null
   analytics: ConnectedIntegration | null
-  properties: Array<{ accountName: string; propertyId: string; propertyName: string }>
+  properties: Array<{ account_name: string; property_id: string; property_name: string }>
   error: string | null
 }
 
@@ -59,19 +59,19 @@ const { data, refresh, error: loadError } = await useAsyncData(
 )
 const selected = ref<string | undefined>()
 
-const options = computed(() => (data.value?.properties ?? []).map(property => ({ label: `${property.propertyName} (${property.accountName})`, value: property.propertyId })))
+const options = computed(() => (data.value?.properties ?? []).map(property => ({ label: `${property.property_name} (${property.account_name})`, value: property.property_id })))
 
 const loadFailure = computed(() => loadError.value ? getErrorMessage(loadError.value, 'Could not load Google Analytics.') : '')
 const saving = ref(false)
 const disconnecting = ref(false)
 
 async function select() {
-  const property = data.value?.properties.find(candidate => candidate.propertyId === selected.value)
+  const property = data.value?.properties.find(candidate => candidate.property_id === selected.value)
   if (!property || !accountId.value) return
   saving.value = true
   error.value = ''
   try {
-    await dashboardApi(`${api}/select`, { method: 'POST', body: { account_id: accountId.value, property_id: property.propertyId, property_name: property.propertyName }, validate: isSuccess })
+    await dashboardApi(`${api}/select`, { method: 'POST', body: { account_id: accountId.value, property_id: property.property_id, property_name: property.property_name }, validate: isSuccess })
     await clear()
     selected.value = undefined
     await Promise.all([refresh(), integrations.refresh()])

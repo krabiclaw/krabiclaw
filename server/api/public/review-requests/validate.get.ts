@@ -22,16 +22,16 @@ export default defineHandler(async (event) => {
   const firstName = guestName.split(/\s+/)[0]!
 
   return jsonResponse({
-    request: { id: result.request.id, bookingType: context.unit === 'nights' ? 'stay' : 'booking', expiresAt: result.request.expires_at },
+    request: { id: result.request.id, booking_type: context.unit === 'nights' ? 'stay' : 'booking', expires_at: result.request.expires_at },
     organization: { id: context.organization_id, name: context.organization_name },
     visit: {
       subject: context.subject,
       title: context.product_title ?? context.location_title,
       at: formatTimestamp(context.visit_starts_at, 'en', context.visit_timezone, { dateStyle: 'medium' }),
-      locationTitle: context.location_title,
+      location_title: context.location_title,
     },
     questions: REVIEW_CATEGORIES[context.subject],
-    location: { googleReviewUrl: context.location_id ? resolveGoogleReviewUrl(context) : null },
+    location: { google_review_url: context.location_id ? resolveGoogleReviewUrl(context) : null },
     // The two ways the guest may be named on a public review; they choose one.
     display_names: firstName === guestName ? [guestName] : [firstName, guestName],
   })

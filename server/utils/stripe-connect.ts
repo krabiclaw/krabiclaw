@@ -19,8 +19,8 @@ export type StripeCapabilityStatus = 'active' | 'pending' | 'restricted' | 'unsu
 export type StripeCapabilityResolution = 'contact_stripe' | 'no_resolution' | 'provide_info'
 
 export interface StripeConnectRequirement {
-  awaitingActionFrom: 'stripe' | 'user'
-  deadlineStatus: 'currently_due' | 'eventually_due' | 'past_due'
+  awaiting_action_from: 'stripe' | 'user'
+  deadline_status: 'currently_due' | 'eventually_due' | 'past_due'
   description: string
   errors: string[]
 }
@@ -80,8 +80,8 @@ function parseRequirements(value: string): StripeConnectRequirement[] {
     if (!item || typeof item !== 'object' || Array.isArray(item)) throw new Error('Stored Stripe Connect requirement is invalid')
     const requirement = item as Record<string, unknown>
     if (
-      (requirement.awaitingActionFrom !== 'stripe' && requirement.awaitingActionFrom !== 'user')
-      || (requirement.deadlineStatus !== 'currently_due' && requirement.deadlineStatus !== 'eventually_due' && requirement.deadlineStatus !== 'past_due')
+      (requirement.awaiting_action_from !== 'stripe' && requirement.awaiting_action_from !== 'user')
+      || (requirement.deadline_status !== 'currently_due' && requirement.deadline_status !== 'eventually_due' && requirement.deadline_status !== 'past_due')
       || typeof requirement.description !== 'string'
       || !Array.isArray(requirement.errors)
       || !requirement.errors.every(error => typeof error === 'string')
@@ -186,8 +186,8 @@ export function deriveStripeConnectStatus(input: {
   requirements: StripeConnectRequirement[]
 }): Exclude<StripeConnectStatus, 'creating' | 'creation_failed'> {
   const userActionDue = input.requirements.some(requirement =>
-    requirement.awaitingActionFrom === 'user'
-    && (requirement.deadlineStatus === 'currently_due' || requirement.deadlineStatus === 'past_due'))
+    requirement.awaiting_action_from === 'user'
+    && (requirement.deadline_status === 'currently_due' || requirement.deadline_status === 'past_due'))
   if (userActionDue || input.cardPaymentsResolutions.includes('provide_info')) return 'action_required'
   if (input.cardPaymentsStatus === 'active') return 'ready'
   if (input.cardPaymentsStatus === 'unsupported' || input.cardPaymentsResolutions.includes('contact_stripe')) return 'restricted'
@@ -346,8 +346,8 @@ function normalizeAccountRequirements(account: Stripe.V2.Core.Account): StripeCo
   const entries = account.requirements?.entries
   if (!entries) return []
   return entries.map(requirement => ({
-    awaitingActionFrom: requirement.awaiting_action_from,
-    deadlineStatus: requirement.minimum_deadline.status,
+    awaiting_action_from: requirement.awaiting_action_from,
+    deadline_status: requirement.minimum_deadline.status,
     description: requirement.description,
     errors: requirement.errors.map(error => error.description),
   }))

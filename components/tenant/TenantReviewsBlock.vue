@@ -56,7 +56,7 @@ import { getVerticalCopy } from '~/utils/vertical-copy'
 const props = defineProps<{ block: TenantPageBlock; page: PublicTenantPage }>()
 const { localePath, t, locale } = useI18n()
 const { organization } = useTenantOrganization()
-const { locations, googleMaps } = useOrganizationShellState()
+const { locations, google_maps } = useOrganizationShellState()
 
 const heading = computed(() => blockText(props.block.data.title))
 const kicker = computed(() => blockText(props.block.data.kicker))
@@ -98,7 +98,7 @@ interface ShellReview {
   media?: Array<{ slot: string; public_url?: string | null }>
 }
 const profile = computed(() => {
-  const record = googleMaps.value as { reviews?: unknown; business?: { reviewSummary?: { averageRating?: unknown; totalReviewCount?: number } | null } } | null
+  const record = google_maps.value as { reviews?: unknown; business?: { reviewSummary?: { averageRating?: unknown; totalReviewCount?: number } | null } } | null
   return {
     reviews: Array.isArray(record?.reviews) ? record.reviews as ShellReview[] : [],
     ratingSummary: record?.business?.reviewSummary ? {

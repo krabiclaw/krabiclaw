@@ -21,7 +21,7 @@ async function bootstrapAdministrator(baseURL: string) {
     body: JSON.stringify({ admin: { id: admin.id, email: admin.email, name: admin.name, password: E2E_PASSWORD } }),
   })
   if (response.status !== 201) throw new Error(`Bootstrapping the administrator and platform site failed: ${response.status} ${await response.text()}`)
-  const { platformOrganizationId } = await response.json() as { platformOrganizationId: string }
+  const { organization_id: platformOrganizationId } = await response.json() as { organization_id: string }
   return { admin: await SeedClient.signedIn(baseURL, admin.email, E2E_PASSWORD), platformOrganizationId }
 }
 

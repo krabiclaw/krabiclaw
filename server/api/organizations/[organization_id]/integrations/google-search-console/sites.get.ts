@@ -36,7 +36,8 @@ export default defineHandler(async (event) => {
       providerId: 'google',
       scopes: INTEGRATION_SCOPES['google-search-console'],
     })
-    const properties = await listSearchConsoleSites((await linkedAccountAccessToken(env, accountId)).accessToken)
+    const sites = await listSearchConsoleSites((await linkedAccountAccessToken(env, accountId)).accessToken)
+    const properties = sites.map(site => ({ site_url: site.siteUrl, permission_level: site.permissionLevel }))
     return jsonResponse({ success: true, account_id: accountId, search_console, site_url, properties, error: null })
   } catch (error) {
     rethrowHttpError(error)

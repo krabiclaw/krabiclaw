@@ -137,13 +137,13 @@ import { STARTER_PALETTES } from '~/shared/site-palette'
 import { ORGANIZATION_FONT_OPTIONS, type OrganizationFontPreset } from '~/shared/organization-fonts'
 import type { LogoShape } from '~/shared/media-placement-contract'
 type DraftUploadedImage = {
-  draftAssetId: string
-  cloudflareImageId: string
-  publicUrl: string
-  thumbnailUrl: string | null
-  mimeType: string | null
-  fileName: string | null
-  fileSize: number | null
+  asset_id: string
+  cloudflare_image_id: string
+  public_url: string
+  thumbnail_url: string | null
+  mime_type: string | null
+  file_name: string | null
+  file_size: number | null
 }
 
 export type DraftBrandForm = {
@@ -222,9 +222,9 @@ async function uploadDraftImage(event: Event, target: 'logo' | 'hero') {
           && typeof value.success === 'boolean'
           && (value.image === undefined || (
             isRecord(value.image)
-            && typeof value.image.draftAssetId === 'string'
-            && typeof value.image.cloudflareImageId === 'string'
-            && typeof value.image.publicUrl === 'string'
+            && typeof value.image.asset_id === 'string'
+            && typeof value.image.cloudflare_image_id === 'string'
+            && typeof value.image.public_url === 'string'
           )),
       },
     )
@@ -233,12 +233,12 @@ async function uploadDraftImage(event: Event, target: 'logo' | 'hero') {
 
     if (target === 'logo') {
       form.value.logoImage = res.image
-      form.value.logoNote = res.image.fileName ?? file.name
-      form.value.logoPreviewUrl = res.image.publicUrl
+      form.value.logoNote = res.image.file_name ?? file.name
+      form.value.logoPreviewUrl = res.image.public_url
     } else {
       form.value.heroImage = res.image
-      form.value.heroPhotoNote = res.image.fileName ?? file.name
-      form.value.heroPreviewUrl = res.image.publicUrl
+      form.value.heroPhotoNote = res.image.file_name ?? file.name
+      form.value.heroPreviewUrl = res.image.public_url
     }
   } catch (error) {
     const fetchError = error as { data?: { error?: string; message?: string }; status?: number; statusCode?: number }

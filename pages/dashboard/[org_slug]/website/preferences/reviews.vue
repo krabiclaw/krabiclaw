@@ -106,7 +106,7 @@ import { getErrorMessage } from '~/utils/errors'
 definePageMeta({ layout: 'dashboard' })
 
 const route = useRoute()
-const orgSlug = computed(() => String(route.params.orgSlug))
+const orgSlug = computed(() => String(route.params.org_slug))
 const organizationId = useDashboardOrganizationId()
 const dashboardApi = useDashboardApi()
 

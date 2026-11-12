@@ -157,7 +157,7 @@ const manualDescription = computed(() => {
   return 'Requests require staff review and manual confirmation before scheduling.'
 })
 
-const questionsPath = computed(() => `/dashboard/${route.params.orgSlug}/website/inquiry-form`)
+const questionsPath = computed(() => `/dashboard/${route.params.org_slug}/website/inquiry-form`)
 
 const questionsSummary = computed(() => {
   const list = editor.inquiryQuestions.value

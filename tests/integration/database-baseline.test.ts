@@ -66,6 +66,43 @@ test('the migration chain applies from zero and builds every table the schema de
   }
 })
 
+test('session prep migration keeps the completed task and delivery history for both bookings', () => {
+  const database = new Database(':memory:')
+  database.pragma('foreign_keys = ON')
+  try {
+    database.exec(readFileSync('migrations/0000_baseline.sql', 'utf8'))
+    database.exec(`
+      INSERT INTO organization (id, name, slug, default_currency, timezone) VALUES ('studio', 'Clayhouse', 'clayhouse', 'THB', 'Asia/Bangkok');
+      INSERT INTO user (id, name, email) VALUES ('host', 'Class host', 'host@example.test');
+      INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES ('staff', 'studio', 'host', 'member', 1);
+      INSERT INTO products (id, organization_id, kind, slug, name, created_by, updated_by)
+        VALUES ('class', 'studio', 'experience', 'class', 'Wheel class', 'host', 'host');
+      INSERT INTO product_booking_configs (product_id, organization_id, unit, duration_minutes, scheduling_mode, assigned_member_id, created_by, updated_by)
+        VALUES ('class', 'studio', 'slot', 60, 'business', 'staff', 'host', 'host');
+      INSERT INTO product_sessions (id, organization_id, product_id, timezone, starts_at, ends_at, capacity, created_by, updated_by)
+        VALUES ('session', 'studio', 'class', 'Asia/Bangkok', '2099-10-01T13:00:00.000Z', '2099-10-01T14:00:00.000Z', 8, 'host', 'host');
+      INSERT INTO bookings (id, organization_id, product_id, product_session_id, starts_at, ends_at, timezone, party_size, policy_json)
+        SELECT guest.id, s.organization_id, s.product_id, s.id, s.starts_at, s.ends_at, s.timezone, guest.size, '{}'
+        FROM product_sessions s CROSS JOIN (SELECT 'one' AS id, 3 AS size UNION ALL SELECT 'two', 1) guest;
+      INSERT INTO tasks (id, organization_id, kind, subject_type, subject_id, product_id, assigned_member_id, starts_at, due_at, timezone, status, closed_at, dedupe_key, created_at, updated_at)
+        SELECT 'prep-' || id, organization_id, 'consultation_prep', 'booking', id, product_id, 'staff', starts_at, starts_at, timezone,
+          CASE WHEN id = 'two' THEN 'done' ELSE 'open' END, CASE WHEN id = 'two' THEN '2026-11-01T00:00:00.000Z' END,
+          'consultation_prep:' || id, '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z' FROM bookings;
+      INSERT INTO guest_thread_deliveries (id, task_id, channel, provider, purpose, status)
+        SELECT 'delivery-' || id, id, 'email', 'log_only', 'task_starting', 'sent' FROM tasks;
+    `)
+    database.exec(readFileSync('migrations/0001_session_prep_tasks.sql', 'utf8'))
+    assert.deepEqual(database.prepare('SELECT id, subject_type, subject_id, status FROM tasks ORDER BY id').all(), [
+      { id: 'prep-one', subject_type: 'booking', subject_id: 'one', status: 'cancelled' },
+      { id: 'prep-two', subject_type: 'product_session', subject_id: 'session', status: 'done' },
+    ])
+    assert.deepEqual(database.prepare('SELECT task_id FROM guest_thread_deliveries ORDER BY task_id').pluck().all(), ['prep-one', 'prep-two'])
+    assert.deepEqual(database.pragma('foreign_key_check'), [])
+  } finally {
+    database.close()
+  }
+})
+
 test('the v25 forward migration initializes the internal name of an existing home', () => {
   const database = new Database(':memory:')
   database.pragma('foreign_keys = ON')

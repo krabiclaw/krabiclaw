@@ -1,3 +1,4 @@
+import { sessionPrepTaskQueries } from '~/server/domain/tasks'
 import { assertResponsibleMember } from '~/server/utils/member-access'
 import { opportunityDoneQuery } from '~/server/domain/tasks'
 import { publishAccessInvalidation, publishBusinessInvalidation } from '~/server/cloudflare/guest-inbox-events'
@@ -349,7 +350,10 @@ export async function prepareProductBookingConfig(db: DbClient, input: {
     params: [input.productId, input.organizationId, unit, ...fields.map(field => stored(config, field)), JSON.stringify(questions), now,
       ...unchanged.params!, config.duration_minutes, input.productId, input.organizationId, config.scheduling_mode, config.assigned_member_id, input.organizationId,
       now, input.actorId, input.actorId],
-  }, ...(unit === 'slot' && patch.online_payment_required === true ? [opportunityDoneQuery(input.organizationId, ['product.payment'], input.productId, now)] : [])] }
+  }, ...(unit === 'slot' && reassigned ? sessionPrepTaskQueries({
+    query: 'SELECT id FROM product_sessions WHERE organization_id = ? AND product_id = ?',
+    params: [input.organizationId, input.productId],
+  }, now) : []), ...(unit === 'slot' && patch.online_payment_required === true ? [opportunityDoneQuery(input.organizationId, ['product.payment'], input.productId, now)] : [])] }
 }
 
 export function bookingConfigurationWriteError(error: unknown): unknown {

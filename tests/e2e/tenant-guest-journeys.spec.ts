@@ -325,11 +325,24 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     const todayBeforePayload = await todayBefore.json() as { tasks: TaskSection[] }
     const todayBeforeTasks = todayBeforePayload.tasks.flatMap(section => section.tasks).filter(task => task.conversation_id === body.conversation_id)
     expect(todayBeforeTasks.filter(task => task.kind === 'guest_reply')).toEqual([])
-    // If booked for today, the teacher's visit job is to prepare for the booking; if booked ahead, Today holds no tasks for it yet.
-    for (const task of todayBeforeTasks) {
-      expect(task.kind).toBe('consultation_prep')
-      expect(task.status).toBe('open')
+    const sessionId = created.request().postDataJSON().product_session_id as string
+    const second = await book('Second Booker', 'second-booker@playwright.example', sessionId)
+    expect(second.status(), await second.text()).toBe(201)
+    const other = await second.json() as { booking_id: string; conversation_id: string; cancellation_token: string }
+    const bookingId = (await created.json()).booking_id as string
+    const tasks = async (kind: string, status: 'open' | 'cancelled' = 'open') => {
+      const results = await Promise.all(['today', 'upcoming'].map(async range => {
+        const response = await mcpRequest(request, baseURL, { method: 'tools/call', toolName: 'list_tasks',
+          args: { organization_id: wheel.organizationId, range, status, kind, assignee: 'all' } })
+        expect(response.status()).toBe(200)
+        return mcpData<{ sections: TaskSection[] }>(await response.json()).sections.flatMap(section => section.tasks)
+      }))
+      return results.flat()
     }
+    const prep = (await tasks('consultation_prep')).filter(task => task.product_session_id === sessionId)
+    expect(prep).toMatchObject([{ kind: 'consultation_prep', status: 'open', booking_id: null, path: expect.stringContaining(`/calendar/sessions/${sessionId}?`) }])
+    expect((await tasks('consultation_follow_up')).filter(task => [bookingId, other.booking_id].includes(task.booking_id ?? '')).map(task => task.booking_id).sort())
+      .toEqual([bookingId, other.booking_id].sort())
     const day = persistedBooking.booking_date
     // Calendar owns confirmed commitments; quests do not repeat its agenda.
     const scheduleParams = { org: wheel.slug, from: day, to: day }
@@ -366,10 +379,14 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     const scheduleAfter = await request.get(`${baseURL}/api/dashboard/agenda`, { params: scheduleParams })
     expect(scheduleAfter.status(), await scheduleAfter.text()).toBe(200)
     expect((await scheduleAfter.json() as { items: Array<{ id: string }> }).items.some(item => item.id === `booking:${body.conversation_id}`)).toBe(false)
-    const todayAfter = await request.get(`${baseURL}/api/dashboard/today`, { params: { org: wheel.slug } })
-    expect(todayAfter.status(), await todayAfter.text()).toBe(200)
-    const todayAfterPayload = await todayAfter.json() as { tasks: TaskSection[] }
-    expect(todayAfterPayload.tasks.flatMap(section => section.tasks).filter(task => task.conversation_id === body.conversation_id && task.status === 'open')).toEqual([])
+    expect((await tasks('consultation_prep')).filter(task => task.product_session_id === sessionId)).toMatchObject([{ id: prep[0]!.id }])
+    expect((await tasks('consultation_follow_up')).filter(task => [bookingId, other.booking_id].includes(task.booking_id ?? ''))).toMatchObject([{ booking_id: other.booking_id }])
+    const secondCancellation = await request.post(`${baseURL}/api/public/booking-requests/${other.conversation_id}/cancel`, {
+      headers: { ...headers, Authorization: `Bearer ${other.cancellation_token}` },
+    })
+    expect(secondCancellation.status(), await secondCancellation.text()).toBe(200)
+    expect((await tasks('consultation_prep')).filter(task => task.product_session_id === sessionId)).toEqual([])
+    expect((await tasks('consultation_prep', 'cancelled')).filter(task => task.product_session_id === sessionId)).toMatchObject([{ id: prep[0]!.id }])
     expect((await request.post(cancelURL, {
       headers: { ...headers, Authorization: 'Bearer invalid-cancellation-token' },
     })).status()).toBe(404)

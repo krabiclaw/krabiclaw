@@ -76,24 +76,24 @@ test('listGoogleAdsAccounts queries accessible customers and retrieves descripti
   const accounts = await listGoogleAdsAccounts('test-token', 'dev-tok-123')
   assert.equal(accounts.length, 4)
   // An account Google will not describe carries Google's reason, not a made-up name.
-  assert.deepEqual(accounts[2], { customerId: '5555555555', formattedCustomerId: '555-555-5555', descriptiveName: null, error: 'DEVELOPER_TOKEN_NOT_APPROVED: The developer token is only approved for use with test accounts.' })
+  assert.deepEqual(accounts[2], { customerId: '5555555555', formatted_customer_id: '555-555-5555', descriptiveName: null, error: 'DEVELOPER_TOKEN_NOT_APPROVED: The developer token is only approved for use with test accounts.' })
   // A cancelled or never-enabled account is marked, not reported as a failure.
-  assert.deepEqual(accounts[3], { customerId: '8699514202', formattedCustomerId: '869-951-4202', descriptiveName: null, notEnabled: true })
+  assert.deepEqual(accounts[3], { customerId: '8699514202', formatted_customer_id: '869-951-4202', descriptiveName: null, not_enabled: true })
   assert.deepEqual(accounts[0], {
     customerId: '3317427925',
-    formattedCustomerId: '331-742-7925',
+    formatted_customer_id: '331-742-7925',
     descriptiveName: 'KrabiClaw',
     currencyCode: 'USD',
     timeZone: 'America/New_York',
-    isManager: false,
+    is_manager: false,
   })
   assert.deepEqual(accounts[1], {
     customerId: '1234567890',
-    formattedCustomerId: '123-456-7890',
+    formatted_customer_id: '123-456-7890',
     descriptiveName: 'Client Account',
     currencyCode: 'THB',
     timeZone: 'Asia/Bangkok',
-    isManager: true,
+    is_manager: true,
   })
   assert.equal(requests.length, 5)
 })
