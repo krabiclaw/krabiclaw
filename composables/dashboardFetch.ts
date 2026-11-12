@@ -112,7 +112,7 @@ export async function dashboardFetch<T>(
 export function useDashboardRouteScope(route: MaybeRefOrGetter<ReturnType<typeof useRoute>> = useRoute()) {
   return computed<DashboardRequestScope | null>(() => {
     const params = toValue(route).params
-    const orgSlug = typeof params.orgSlug === 'string' ? params.orgSlug : null
+    const orgSlug = typeof params.org_slug === 'string' ? params.org_slug : null
     if (!orgSlug) return null
     return { orgSlug }
   })

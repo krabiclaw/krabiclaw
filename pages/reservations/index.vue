@@ -118,7 +118,7 @@ const { organization } = useTenantOrganization()
 const { id: organizationId } = organization
 const { locale } = useI18n()
 const resCopy = computed(() => getVerticalCopy((organization as ApiValue)?.vertical, locale.value))
-const { locations, config, getField, products, tablePolicySummaries } = await usePublicPageData()
+const { locations, config, getField, products, table_policy_summaries } = await usePublicPageData()
 
 /**
  * A location takes reservations through its table product: published, on
@@ -150,7 +150,7 @@ const activeTable = computed(() => selectedTable.value ?? tables.value[0]!)
 const activeReservationPolicySummary = computed(() => {
   const table = selectedTable.value ?? (tables.value.length === 1 ? tables.value[0]! : null)
   if (!table) return null
-  const summary = tablePolicySummaries.value[table.id]
+  const summary = table_policy_summaries.value[table.id]
   if (!summary) throw createError({ statusCode: 500, statusMessage: 'Reservation terms are missing for this location' })
   return summary
 })

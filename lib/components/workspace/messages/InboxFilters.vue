@@ -50,7 +50,7 @@ const route = useRoute()
 const router = useRouter()
 const dashboard = useDashboardOrganization()
 const counts = useInboxUnread(computed(() => dashboard.organizationId.value))
-const listPath = computed(() => `/dashboard/${encodeURIComponent(String(route.params.orgSlug))}/messages`)
+const listPath = computed(() => `/dashboard/${encodeURIComponent(String(route.params.org_slug))}/messages`)
 const vertical = computed(() => dashboard.organization.value?.vertical ?? null)
 
 const selected = computed(() => route.query.kind === 'guests' || route.query.kind === 'support' || route.query.kind === 'team' ? route.query.kind : 'all')

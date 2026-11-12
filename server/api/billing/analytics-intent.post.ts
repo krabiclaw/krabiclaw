@@ -143,6 +143,6 @@ export default defineHandler(async (event) => {
   await updateStripeAttribution(env, organization.id, session.user.id, gaBody, action)
   const intent = await recordStripeGa4Intent(env.DB, {
     organizationId: organization.id, userId: session.user.id, stripeSubscriptionId: subscriptionId, action, clientId, sessionId, sessionCapturedAt, attribution, previousPriceId: optionalString(body.previousPriceId), newPriceId: optionalString(body.newPriceId), effectiveTiming: body.effectiveTiming, source: body.source ?? 'browser', })
-  return jsonResponse({ success: true, intentId: intent.id })
+  return jsonResponse({ success: true, intent_id: intent.id })
 })
 import { readBody } from 'nitro/h3';

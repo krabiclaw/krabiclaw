@@ -16,7 +16,7 @@ export default onResponse(async (response, event) => {
   if (response.status < 200 || response.status >= 300) return response
 
   const params = event.context.params
-  const organizationId = params && typeof params.organizationId === 'string' ? params.organizationId : undefined
+  const organizationId = params && typeof params.organization_id === 'string' ? params.organization_id : undefined
   if (!organizationId) throw new Error('Organization ID is required to invalidate a successful dashboard write')
 
   const runtimeEnv = request.runtime?.cloudflare?.env as GuestInboxPublicationEnv & {

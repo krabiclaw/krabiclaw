@@ -495,7 +495,7 @@ export async function moveBooking(db: DbClient, env: CloudflareEnv, thread: Gues
       // A moved booking is the party it moved with, no longer "this many or more".
       query: 'UPDATE bookings SET party_size_is_minimum = 0 WHERE id = ? AND organization_id = ? AND EXISTS (SELECT 1 FROM messages WHERE id = ?)',
       params: [before.recordId, thread.organization_id, id],
-    }]
+    }, ...conversationTaskQueries(thread.id, now, before.sessionId)]
     await executeBatch(db, queries, { operation: 'move booking' })
     entry = await findMessageByDedupeKey(db, dedupeKey)
     if (!entry) throw new HTTPError({ statusCode: 409, message: 'That session filled up or the booking changed; it has not moved' })
@@ -610,7 +610,7 @@ export async function respondToBookingChange(db: DbClient, env: ChangeEnv, input
         params: [current.recordId, thread.organization_id, id],
       })
     }
-    queries.push(...conversationTaskQueries(thread.id, now))
+    queries.push(...conversationTaskQueries(thread.id, now, current.sessionId))
 
     await executeBatch(db, queries, { operation: 'respond to booking change' })
     result = await findMessageByDedupeKey(db, resultId)

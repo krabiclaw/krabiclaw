@@ -89,7 +89,7 @@ const dashboardApi = useDashboardApi()
 const route = useRoute()
 const router = useRouter()
 const organizationId = useDashboardOrganizationId()
-const orgSlug = route.params.orgSlug as string
+const orgSlug = route.params.org_slug as string
 const level = useRouteLevel()
 
 const repository = tenantBlogRepository({ organizationId, orgSlug })

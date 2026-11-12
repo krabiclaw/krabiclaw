@@ -12,14 +12,14 @@ import { isValidTimezone } from '~/utils/timezone'
 
 export interface GoogleAdsCustomer {
   customerId: string
-  formattedCustomerId: string
-  /** Null when Google would not describe the account; `error` or `notEnabled` says why. */
+  formatted_customer_id: string
+  /** Null when Google would not describe the account; `error` or `not_enabled` says why. */
   descriptiveName: string | null
   currencyCode?: string
   timeZone?: string
-  isManager?: boolean
+  is_manager?: boolean
   /** Google reports the account cancelled or not yet set up (`CUSTOMER_NOT_ENABLED`); it cannot be connected. */
-  notEnabled?: true
+  not_enabled?: true
   error?: string
 }
 
@@ -96,7 +96,7 @@ export async function listGoogleAdsAccounts(accessToken: string, developerToken?
   const customers: GoogleAdsCustomer[] = []
   for (const resourceName of resourceNames) {
     const customerId = resourceName.replace(/^customers\//, '')
-    const formattedCustomerId = formatGoogleAdsCustomerId(customerId)
+    const formatted_customer_id = formatGoogleAdsCustomerId(customerId)
     const searchResponse = await fetch(`https://googleads.googleapis.com/v25/customers/${customerId}/googleAds:search`, {
       method: 'POST',
       headers: { ...headers, 'Content-Type': 'application/json' },
@@ -107,16 +107,16 @@ export async function listGoogleAdsAccounts(accessToken: string, developerToken?
     if (!searchResponse.ok) {
       const failure = googleAdsError(searchResponse.status, await searchResponse.text())
       customers.push(failure.code === 'CUSTOMER_NOT_ENABLED'
-        ? { customerId, formattedCustomerId, descriptiveName: null, notEnabled: true }
-        : { customerId, formattedCustomerId, descriptiveName: null, error: failure.message })
+        ? { customerId, formatted_customer_id, descriptiveName: null, not_enabled: true }
+        : { customerId, formatted_customer_id, descriptiveName: null, error: failure.message })
       continue
     }
     const searchData = (await searchResponse.json()) as {
       results?: Array<{ customer?: { id?: string; descriptiveName?: string; currencyCode?: string; timeZone?: string; manager?: boolean } }>
     }
     const c = searchData.results?.[0]?.customer
-    if (!c) throw new Error(`Google Ads returned no customer row for ${formattedCustomerId}`)
-    customers.push({ customerId, formattedCustomerId, descriptiveName: c.descriptiveName ?? null, currencyCode: c.currencyCode, timeZone: c.timeZone, isManager: c.manager ?? false })
+    if (!c) throw new Error(`Google Ads returned no customer row for ${formatted_customer_id}`)
+    customers.push({ customerId, formatted_customer_id, descriptiveName: c.descriptiveName ?? null, currencyCode: c.currencyCode, timeZone: c.timeZone, is_manager: c.manager ?? false })
   }
 
   return customers
@@ -134,7 +134,7 @@ export async function selectGoogleAdsCustomer(
   if (await readIntegration(env.DB, organizationId, 'google_ads')) throw new HTTPError({ statusCode: 409, message: 'Disconnect Google Ads before connecting again.' })
   // A manager account holds other accounts; it has no campaigns or results of its own.
   const { accessToken } = await linkedAccountAccessToken(env, accountId)
-  if ((await getGoogleAdsCustomer(accessToken, env.GOOGLE_ADS_DEVELOPER_TOKEN, customerId)).isManager) {
+  if ((await getGoogleAdsCustomer(accessToken, env.GOOGLE_ADS_DEVELOPER_TOKEN, customerId)).is_manager) {
     throw new HTTPError({ statusCode: 422, message: 'That is a Google Ads manager account. Choose one of the accounts it manages.' })
   }
   return await storeIntegration(env.DB, organizationId, 'google_ads', {
@@ -618,7 +618,7 @@ async function googleAdsFailure(label: string, response: Response, mutation = fa
     : new Error(message)
 }
 
-export async function getGoogleAdsCustomer(accessToken: string, developerToken: string | undefined, customerId: string): Promise<{ descriptiveName: string; currencyCode: string; timeZone: string; isManager: boolean }> {
+export async function getGoogleAdsCustomer(accessToken: string, developerToken: string | undefined, customerId: string): Promise<{ descriptiveName: string; currencyCode: string; timeZone: string; is_manager: boolean }> {
   const cid = cleanCustomerId(customerId)
   const response = await fetch(`https://googleads.googleapis.com/v25/customers/${cid}/googleAds:search`, {
     method: 'POST',
@@ -630,7 +630,7 @@ export async function getGoogleAdsCustomer(accessToken: string, developerToken: 
   const customer = data.results?.[0]?.customer
   if (!customer?.currencyCode) throw new Error(`Google Ads did not describe customer ${cid}`)
   if (!isValidTimezone(customer.timeZone)) throw new Error(`Google Ads did not provide a valid reporting timezone for customer ${cid}`)
-  return { descriptiveName: customer.descriptiveName ?? '', currencyCode: customer.currencyCode, timeZone: customer.timeZone, isManager: customer.manager === true }
+  return { descriptiveName: customer.descriptiveName ?? '', currencyCode: customer.currencyCode, timeZone: customer.timeZone, is_manager: customer.manager === true }
 }
 
 /** Query aggregated Google Ads performance for date range */

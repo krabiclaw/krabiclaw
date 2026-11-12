@@ -9,7 +9,7 @@ import { dashboardFetch } from '~/composables/dashboardFetch'
  */
 export async function useOrganizationLocations(options: { includeInactive?: boolean } = {}) {
   const route = useRoute()
-  const orgSlug = computed(() => String(route.params.orgSlug || ''))
+  const orgSlug = computed(() => String(route.params.org_slug || ''))
   const { data, error, pending } = await useAsyncData(
     () => `dashboard-org-locations:${orgSlug.value}${options.includeInactive ? ':all' : ''}`,
     () => dashboardFetch<{ success: true; locations: DashboardLocation[] }>('/api/dashboard/locations', { orgSlug: orgSlug.value }, {

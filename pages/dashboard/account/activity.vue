@@ -44,7 +44,7 @@ const cancelled = computed(() => (data.value?.activities ?? []).filter(item => i
 const sections = computed(() => {
   const items = data.value?.activities ?? []
   return [
-    { label: 'Past', items: items.filter(item => isVisit(item) && item.status !== 'cancelled' && item.endsAt && Date.parse(item.endsAt) < now) },
+    { label: 'Past', items: items.filter(item => isVisit(item) && item.status !== 'cancelled' && item.ends_at && Date.parse(item.ends_at) < now) },
     { label: 'Purchases', items: items.filter(item => !isVisit(item)) },
   ].filter(section => section.items.length)
 })

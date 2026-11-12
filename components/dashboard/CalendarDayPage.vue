@@ -6,7 +6,7 @@
   <DashboardIndexPanel :id="personalScope ? 'account-calendar-day' : 'calendar-day'" :title="title" column="leaf">
     <template v-if="sessionProduct" #right>
       <UButton v-if="!calendarSessions?.providerHours.value && calendarSessions?.canCreate.value" label="Add availability" icon="i-lucide-plus" :to="calendarSessions.addTo(day)" />
-      <UButton v-else-if="calendarSessions?.providerHours.value && sessionProduct.booking" label="Bookable times" icon="i-lucide-clock" :to="sessionProduct.booking.assigned_member_id ? `/dashboard/${route.params.orgSlug}/team/${sessionProduct.booking.assigned_member_id}/hours` : `/dashboard/${route.params.orgSlug}/team`" />
+      <UButton v-else-if="calendarSessions?.providerHours.value && sessionProduct.booking" label="Bookable times" icon="i-lucide-clock" :to="sessionProduct.booking.assigned_member_id ? `/dashboard/${route.params.org_slug}/team/${sessionProduct.booking.assigned_member_id}/hours` : `/dashboard/${route.params.org_slug}/team`" />
     </template>
     <div class="space-y-6">
       <UAlert v-if="errorMessage" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="errorMessage" />
@@ -32,7 +32,7 @@
           variant="soft"
           size="lg"
           label="Edit hours"
-          :to="{ path: `/dashboard/${route.params.orgSlug}/calendar/settings/availability/hours`, query: route.query }"
+          :to="{ path: `/dashboard/${route.params.org_slug}/calendar/settings/availability/hours`, query: route.query }"
         />
         <UButton
           v-else-if="availability.action"

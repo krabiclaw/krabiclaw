@@ -80,8 +80,8 @@ export interface ThreadDetailSourceModel {
 export interface GuestThreadPagination {
   limit: number
   offset: number
-  hasMore: boolean
-  nextOffset: number | null
+  has_more: boolean
+  next_offset: number | null
 }
 
 /**
@@ -194,8 +194,8 @@ export type InboxChannel = 'airbnb' | 'direct'
 export interface InboxRow {
   id: string
   kind: InboxThreadKind
-  guestName: string
-  avatarInitial: string
+  title: string
+  avatar_initial: string
   channel: InboxChannel
   /** The home or location the conversation is about; null for one with the business itself. */
   home: string | null
@@ -204,7 +204,7 @@ export interface InboxRow {
   /** The last message's words, or "Sent a photo"; empty when nobody has written words yet (a booking with no note). */
   preview: string
   /** "You", or the sender's first name; null when there is no preview. */
-  previewFrom: string | null
+  preview_from: string | null
   /** The last message's time in the home's timezone: "2:33 PM", "Yesterday", "Mon", "Nov 2". */
   time: string
   unread: boolean
@@ -221,7 +221,7 @@ export interface InboxListPage {
 export interface InboxPhoto {
   id: string
   url: string
-  thumbnailUrl: string
+  thumbnail_url: string
   width: number | null
   height: number | null
 }
@@ -237,7 +237,7 @@ export type InboxStreamItem =
     /** An automatic message's template, "Check-in instructions"; null otherwise. */
     label: string | null
     /** One instant: the provider's time when it has one, else when KrabiClaw sent it. */
-    sentAt: string
+    sent_at: string
     /** "2:33 PM" on the first message of a run from one side; null on the rest of the run. */
     time: string | null
     /** The words shown, which are the translation when Airbnb translated the message. */
@@ -246,14 +246,14 @@ export type InboxStreamItem =
     /** The guest's own words when `body` is Airbnb's translation of them. */
     translated: { original: string } | null
     /** Files the message carried that are not photos the conversation can show, such as a PDF. */
-    unshownFiles: number
+    unshown_files: number
     /** On the newest business message only: Sending, Sent, Delivered, Read by <name>, Not delivered, Recorded locally. */
     receipt: string | null
     /** The reply was not delivered and can be sent again as it was (a team member's text reply). */
     retryable: boolean
   }
-  | { type: 'event'; id: string; text: string; sentAt: string }
-  | { type: 'change'; id: string; sentAt: string; change: BookingChangeView }
+  | { type: 'event'; id: string; text: string; sent_at: string }
+  | { type: 'change'; id: string; sent_at: string; change: BookingChangeView }
 
 /** A message waiting to go out: an automatic message, or one a member set to send later. */
 export interface InboxPendingMessage {
@@ -271,20 +271,20 @@ export interface InboxPendingMessage {
 export interface InboxThread {
   id: string
   kind: InboxThreadKind
-  guestName: string
-  avatarInitial: string
+  title: string
+  avatar_initial: string
   channel: InboxChannel
   home: string | null
   when: string | null
   /** A message in the conversation was translated: the header says "Translation on". */
   translated: boolean
-  /** What Show reservation opens: a stay's id, or the conversation's own id for a booking (the id the booking route takes). */
-  recordId: string | null
-  recordKind: 'stay' | 'booking' | null
+  /** The stored booking attached to this conversation, whether it uses nights or a session. */
+  booking_id: string | null
+  record_kind: 'stay' | 'booking' | null
   /** The record in the business's own word: "Reservation", "Consultation", "Experience". */
-  recordTitle: string | null
+  record_title: string | null
   /** In a guest's own inbox, where their booking is shown; null for the business. */
-  activityPath: string | null
+  activity_path: string | null
   stream: InboxStreamItem[]
   pending: InboxPendingMessage[]
   /** Where a reply goes, and whether one can be sent. */
@@ -295,8 +295,8 @@ export interface InboxThread {
 /** "In this conversation": who is in it, its photos and what can be done to it. */
 export interface InboxThreadDetails {
   participants: Array<{ name: string; initial: string; role: 'Guest' | 'Host' | 'Co-host' | 'Airbnb Support' }>
-  photos: Array<InboxPhoto & { sentAt: string }>
-  actions: { showReservation: boolean; archive: boolean; unarchive: boolean; report: boolean; block: boolean; unblock: boolean }
+  photos: Array<InboxPhoto & { sent_at: string }>
+  actions: { show_reservation: boolean; archive: boolean; unarchive: boolean; report: boolean; block: boolean; unblock: boolean }
 }
 
 export interface ListGuestThreadsOptions {

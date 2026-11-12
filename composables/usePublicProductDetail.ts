@@ -19,12 +19,12 @@ export function isPublicProductDetailPayload(value: unknown): value is PublicPro
     && (value.location.latitude === null || typeof value.location.latitude === 'number')
     && (value.location.longitude === null || typeof value.location.longitude === 'number')))
     && (value.locations === undefined || (Array.isArray(value.locations) && value.locations.every(location => isRecord(location) && typeof location.id === 'string' && typeof location.slug === 'string' && typeof location.title === 'string')))
-    && (value.scopeRequired === undefined || typeof value.scopeRequired === 'boolean')
-    && (value.onlineAvailable === undefined || typeof value.onlineAvailable === 'boolean')
+    && (value.scope_required === undefined || typeof value.scope_required === 'boolean')
+    && (value.online_available === undefined || typeof value.online_available === 'boolean')
     && isCurrencyCode(value.currency)
     && typeof value.vertical === 'string'
-    && typeof value.brandName === 'string'
-    && value.brandName.trim().length > 0
+    && typeof value.organization_name === 'string'
+    && value.organization_name.trim().length > 0
     && (value.booking === null || (isRecord(value.booking)
       && (value.booking.duration_minutes === null || typeof value.booking.duration_minutes === 'number')
       && (value.booking.default_capacity === null || typeof value.booking.default_capacity === 'number')))
@@ -49,15 +49,15 @@ export function isPublicProductDetailPayload(value: unknown): value is PublicPro
       && typeof review.source === 'string'
       && (typeof review.original_reference === 'string' || review.original_reference === null)
       && (isRecord(review.google_review_metadata) || review.google_review_metadata === null))
-    && typeof value.collectionName === 'string'
-    && Array.isArray(value.collectionSiblings)
-    && value.collectionSiblings.every(sibling => isRecord(sibling)
+    && typeof value.collection_name === 'string'
+    && Array.isArray(value.collection_siblings)
+    && value.collection_siblings.every(sibling => isRecord(sibling)
       && typeof sibling.id === 'string'
       && typeof sibling.name === 'string'
       && typeof sibling.slug === 'string')
-    && typeof value.stayCheckoutAvailable === 'boolean'
-    && Array.isArray(value.localeRepresentations)
-    && value.localeRepresentations.every(item => isRecord(item)
+    && typeof value.stay_checkout_available === 'boolean'
+    && Array.isArray(value.locale_representations)
+    && value.locale_representations.every(item => isRecord(item)
       && typeof item.locale === 'string'
       && typeof item.label === 'string'
       && typeof item.route_path === 'string'
@@ -74,13 +74,13 @@ export async function usePublicProductDetail(routeKind: ProductSurface) {
   // a vertical's product page names the branch first. Same payload either way,
   // so one composable serves both.
   const routeSlug = String(route.params.slug ?? '')
-  const productSlugParam = String(route.params.productSlug ?? '')
+  const productSlugParam = String(route.params.product_slug ?? '')
   const siteWideSurface = (routeKind === 'experiences' || routeKind === 'stays') && productSlugParam === '' ? routeKind : null
   const locationSlug = siteWideSurface ? '' : routeSlug
   const productSlug = siteWideSurface ? routeSlug : productSlugParam
   const scope = computed(() => typeof route.query.location_id === 'string' ? route.query.location_id : null)
   const locale = typeof route.params.locale === 'string' ? route.params.locale : useState<string>('public-locale').value
-  const localeRepresentations = useState<PublicLocaleRepresentation[]>('public-locale-representations', () => [])
+  const locale_representations = useState<PublicLocaleRepresentation[]>('public-locale-representations', () => [])
   if (!organizationId || !productSlug || (!siteWideSurface && !locationSlug)) throw createError({ statusCode: 404, statusMessage: 'Product not found', fatal: true })
 
   const { data, error } = await useAsyncData<PublicProductDetailPayload | null>(
@@ -122,7 +122,7 @@ export async function usePublicProductDetail(routeKind: ProductSurface) {
     if (failure) nuxtApp.runWithContext(() => showError(failure))
   }, { flush: 'sync' })
   if (!data.value) throw createError({ statusCode: 404, statusMessage: 'Product not found', fatal: true })
-  localeRepresentations.value = data.value.localeRepresentations
+  locale_representations.value = data.value.locale_representations
   return { organizationId, detail: data as Ref<PublicProductDetailPayload> }
 }
 

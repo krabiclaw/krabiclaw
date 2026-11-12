@@ -369,9 +369,9 @@ async function performSeeding(
   return {
     status: 200,
     data: {
-      organizationId,
+      organization_id: organizationId,
       subdomain,
-      locationId,
+      location_id: locationId,
       message: 'Organization provisioned successfully',
       ...completion,
     }

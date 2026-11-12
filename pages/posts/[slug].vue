@@ -9,10 +9,10 @@ import { publicApiRequest, isRecord } from '~/utils/api-clients'
 
 definePageMeta({ middleware: 'site-layout' })
 
-type DetailPost = PublicSocialPost & { localeRepresentations: Array<{ locale: string; label: string; route_path: string; source: 'source' | 'localized' }> }
+type DetailPost = PublicSocialPost & { locale_representations: Array<{ locale: string; label: string; route_path: string; source: 'source' | 'localized' }> }
 
 const isPublicPostResponse = (value: unknown): value is { post: DetailPost } =>
-  isRecord(value) && isPublicSocialPost(value.post) && Array.isArray((value.post as unknown as Record<string, unknown>).localeRepresentations)
+  isRecord(value) && isPublicSocialPost(value.post) && Array.isArray((value.post as unknown as Record<string, unknown>).locale_representations)
 
 const route = useRoute()
 const requestEvent = useRequestEvent()
@@ -50,7 +50,7 @@ const { data, error } = await useAsyncData(
   },
 )
 if (error.value) throw error.value
-useState<DetailPost['localeRepresentations']>('public-locale-representations', () => []).value = data.value?.post.localeRepresentations ?? []
+useState<DetailPost['locale_representations']>('public-locale-representations', () => []).value = data.value?.post.locale_representations ?? []
 
 const post = computed(() => data.value?.post ?? null)
 // A post without a title is described by its own words, and titled by the

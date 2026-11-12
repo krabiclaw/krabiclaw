@@ -25,20 +25,20 @@ export type ContentReportStatus = 'open' | 'removed' | 'dismissed'
 
 export interface ContentReport {
   id: string
-  organizationId: string
-  organizationName: string
-  organizationSlug: string
+  organization_id: string
+  organization_name: string
+  organization_slug: string
   subject: ContentReportSubject
-  conversationId: string | null
-  messageId: string | null
+  conversation_id: string | null
+  message_id: string | null
   reporter: { id: string; name: string; email: string } | null
   author: { id: string; name: string; email: string; banned: boolean } | null
   reason: string
   excerpt: string
   blocked: boolean
   status: ContentReportStatus
-  resolvedAt: string | null
-  createdAt: string
+  resolved_at: string | null
+  created_at: string
 }
 
 function fail(statusCode: number, code: string, message: string, field: string): never {
@@ -121,26 +121,26 @@ interface ReportRow {
 function toReport(row: ReportRow): ContentReport {
   return {
     id: row.id,
-    organizationId: row.organization_id,
-    organizationName: row.organization_name,
-    organizationSlug: row.organization_slug,
+    organization_id: row.organization_id,
+    organization_name: row.organization_name,
+    organization_slug: row.organization_slug,
     subject: row.subject,
-    conversationId: row.conversation_id,
-    messageId: row.message_id,
+    conversation_id: row.conversation_id,
+    message_id: row.message_id,
     reporter: row.reporter_user_id ? { id: row.reporter_user_id, name: row.reporter_name ?? '', email: row.reporter_email ?? '' } : null,
     author: row.author_user_id ? { id: row.author_user_id, name: row.author_name ?? '', email: row.author_email ?? '', banned: row.author_banned === 1 } : null,
     reason: row.reason,
     excerpt: row.excerpt,
     blocked: row.blocked === 1,
     status: row.status,
-    resolvedAt: row.resolved_at,
-    createdAt: row.created_at,
+    resolved_at: row.resolved_at,
+    created_at: row.created_at,
   }
 }
 
 async function readReport(db: DbClient, id: string): Promise<ContentReport> {
   const row = await queryFirst<ReportRow>(db, `${REPORT_SELECT} WHERE r.id = ?`, [id])
-  if (!row) fail(404, 'CONTENT_REPORT_NOT_FOUND', 'That report does not exist', 'reportId')
+  if (!row) fail(404, 'CONTENT_REPORT_NOT_FOUND', 'That report does not exist', 'report_id')
   return toReport(row)
 }
 
@@ -157,7 +157,7 @@ export async function announceContentReport(env: ContentReportEnv, db: DbClient,
   if (!platform) throw new Error('The platform organization has no slug')
   const platformDomain = getPlatformDomain(env)
   const message = contentReportedMessage({
-    organizationName: report.organizationName,
+    organizationName: report.organization_name,
     reporter: report.reporter ? `${report.reporter.name} (${report.reporter.email})` : 'A deleted account',
     subject: report.subject,
     blocked: report.blocked,
@@ -198,7 +198,7 @@ export async function resolveContentReport(env: CloudflareEnv & GuestInboxPublic
 }): Promise<ContentReport> {
   if (input.decision !== 'remove' && input.decision !== 'dismiss') fail(422, 'INVALID_REPORT_DECISION', 'decision must be remove or dismiss', 'decision')
   const report = await readReport(db, input.reportId)
-  if (report.status !== 'open') fail(409, 'CONTENT_REPORT_RESOLVED', 'This report has already been decided', 'reportId')
+  if (report.status !== 'open') fail(409, 'CONTENT_REPORT_RESOLVED', 'This report has already been decided', 'report_id')
   const now = new Date().toISOString()
   // The decision is claimed first, so a concurrent decision by other staff wins
   // or loses here, before anything is removed or anyone banned.
@@ -206,18 +206,18 @@ export async function resolveContentReport(env: CloudflareEnv & GuestInboxPublic
     query: `UPDATE content_reports SET status = ?, resolved_by_user_id = ?, resolved_at = ? WHERE id = ? AND status = 'open'`,
     params: [input.decision === 'remove' ? 'removed' : 'dismissed', input.staffUserId, now, report.id],
   }], { operation: 'Decide a content report' })
-  if ((claimed?.meta?.changes ?? 0) !== 1) fail(409, 'CONTENT_REPORT_RESOLVED', 'This report has already been decided', 'reportId')
+  if ((claimed?.meta?.changes ?? 0) !== 1) fail(409, 'CONTENT_REPORT_RESOLVED', 'This report has already been decided', 'report_id')
   if (input.decision === 'dismiss') return await readReport(db, report.id)
 
   // The conversation the removal changes: the message's, or the blocked guest's.
-  const changed = report.messageId
-    ? (await queryFirst<{ conversation_id: string }>(db, 'SELECT conversation_id FROM messages WHERE organization_id = ? AND id = ?', [report.organizationId, report.messageId]))?.conversation_id ?? null
-    : report.conversationId
+  const changed = report.message_id
+    ? (await queryFirst<{ conversation_id: string }>(db, 'SELECT conversation_id FROM messages WHERE organization_id = ? AND id = ?', [report.organization_id, report.message_id]))?.conversation_id ?? null
+    : report.conversation_id
   const removal: BatchQuery[] = report.subject === 'message'
-    ? report.messageId
-      ? teamMessageRemovalQueries(report.organizationId, report.messageId)
+    ? report.message_id
+      ? teamMessageRemovalQueries(report.organization_id, report.message_id)
       : []
-    : [{ query: 'UPDATE conversations SET blocked_at = COALESCE(blocked_at, ?) WHERE organization_id = ? AND id = ?', params: [now, report.organizationId, report.conversationId] }]
+    : [{ query: 'UPDATE conversations SET blocked_at = COALESCE(blocked_at, ?) WHERE organization_id = ? AND id = ?', params: [now, report.organization_id, report.conversation_id] }]
   try {
     // Removal is idempotent and the ban is skipped once it holds, so reopening
     // the report lets staff retry the whole decision.

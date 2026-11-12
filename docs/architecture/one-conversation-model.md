@@ -279,7 +279,7 @@ Writers today: `appendEntry` (`entries.ts:61`) plus about 12 hand-written `INSER
 - Web:
   - `NotificationList.vue`, `DashboardNotificationBell.vue`
   - the bell in `DashboardMenuSlideover.vue` and both `menu.vue` pages
-  - `pages/dashboard/{[orgSlug],account}/notifications.vue`
+  - `pages/dashboard/{[org_slug],account}/notifications.vue`
   - `menuUnread` in `DashboardShell/TopNav`
 - iOS: `DashboardActivity.swift` and the notification push target
 - `docs/notification-testing.md`

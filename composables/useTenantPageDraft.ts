@@ -67,13 +67,13 @@ export interface TenantPageListRow {
 
 export interface PageTask {
   id: string
-  pageId: string
-  pageTitle: string
+  page_id: string
+  title: string
   headline: string
   reason: string
-  actionLabel: string
+  action_label: string
   to: string
-  imageUrl?: string | null
+  image_url?: string | null
 }
 
 function isOptionalString(value: unknown): value is string | null {
@@ -148,8 +148,8 @@ export function isTenantPageListResponse(value: unknown): value is { pages: Tena
       && typeof page.removable === 'boolean')
 }
 
-function isEditorContextResponse(value: unknown): value is { context: { previewToken: string; sourceLocale: string; organization: { subdomain: string | null } } } {
-  return isRecord(value) && isRecord(value.context) && typeof value.context.previewToken === 'string' && typeof value.context.sourceLocale === 'string'
+function isEditorContextResponse(value: unknown): value is { context: { preview_token: string; source_locale: string; organization: { subdomain: string | null } } } {
+  return isRecord(value) && isRecord(value.context) && typeof value.context.preview_token === 'string' && typeof value.context.source_locale === 'string'
     && isRecord(value.context.organization)
 }
 
@@ -197,7 +197,7 @@ export function useTenantPageDraft(organizationId: string, pageId: string) {
     key,
     async () => {
       const [context, page] = await Promise.all([
-        dashboardApi<{ context: { previewToken: string; sourceLocale: string; organization: { subdomain: string | null } } }>(
+        dashboardApi<{ context: { preview_token: string; source_locale: string; organization: { subdomain: string | null } } }>(
           `/api/editor/organizations/${organizationId}/context`,
           { validate: isEditorContextResponse },
         ),
@@ -214,7 +214,7 @@ export function useTenantPageDraft(organizationId: string, pageId: string) {
       getCachedData(cacheKey, nuxtApp, ctx) {
         if (ctx?.cause === 'refresh:manual' || ctx?.cause === 'refresh:hook') return undefined
         return nuxtApp.payload.data[cacheKey] as {
-          context: { previewToken: string; sourceLocale: string; organization: { subdomain: string | null } }
+          context: { preview_token: string; source_locale: string; organization: { subdomain: string | null } }
           page: TenantPageResponse | null
           public_url: string | null
         } | undefined
@@ -242,7 +242,7 @@ export function useTenantPageDraft(organizationId: string, pageId: string) {
 
   function seed(page: TenantPageResponse | null) {
     accepted.value = page
-    draft.value = page ? toDraft(page) : emptyDraft(data.value?.context.sourceLocale)
+    draft.value = page ? toDraft(page) : emptyDraft(data.value?.context.source_locale)
     baseline.value = JSON.stringify(draft.value)
     seededFrom.value = page?.document.updated_at ?? 'new'
   }
@@ -296,10 +296,10 @@ export function useTenantPageDraft(organizationId: string, pageId: string) {
    */
   const previewUrl = computed(() => {
     const page = data.value?.page
-    const token = data.value?.context.previewToken
+    const token = data.value?.context.preview_token
     const subdomain = data.value?.context.organization.subdomain
     if (!page || !token || !subdomain) return ''
-    const localizedPath = formatTenantLocalePath(page.path, page.locale, data.value!.context.sourceLocale)
+    const localizedPath = formatTenantLocalePath(page.path, page.locale, data.value!.context.source_locale)
     const origin = tenantOrganizationOrigin({
       platformDomain: String(runtimeConfig.public.platformDomain),
       freeOrganizationDomain: String(runtimeConfig.public.freeOrganizationDomain),

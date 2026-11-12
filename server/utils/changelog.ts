@@ -34,7 +34,7 @@ export interface RecentChange {
 export interface RecentChanges {
   commits: Record<ChangeType, RecentChange[]>
   total: number
-  lastUpdated: string | null
+  last_updated: string | null
   limit: number
 }
 
@@ -169,7 +169,7 @@ export async function getRecentChanges(options: GetRecentChangesOptions): Promis
   return {
     commits: categorizePullRequests(mergedPullRequests),
     total: mergedPullRequests.length,
-    lastUpdated: mergedPullRequests[0]?.merged_at ?? null,
+    last_updated: mergedPullRequests[0]?.merged_at ?? null,
     limit,
   }
 }

@@ -33,7 +33,7 @@ interface PublishedArticlesResponse {
   /** The collection's categories that hold a published article, or sit above one, depth-first in the owner's order. */
   categories: Array<{ id: string; name: string; slug: string; description: string | null; parent_id: string | null; locales: string[] }>
   /** The languages the index is read in; a category page is the same prefix under its own path. */
-  localeRepresentations: PublicLocaleRepresentation[]
+  locale_representations: PublicLocaleRepresentation[]
 }
 
 export interface PublishedArticleCategory {
@@ -91,18 +91,18 @@ export async function usePublishedArticles(collection: MaybeRefOrGetter<ArticleC
         ])
         const env = cloudflareEnv(requestEvent)
         if (!env.db) throw createError({ statusCode: 503, statusMessage: 'Articles are temporarily unavailable' })
-        const [posts, index, categories, localeRepresentations] = await Promise.all([
+        const [posts, index, categories, locale_representations] = await Promise.all([
           listPublishedArticles(env.db, env, organizationId, toValue(collection), locale.value),
           getArticleCollectionIndex(env.db, organizationId, toValue(collection), locale.value),
           listPublicArticleCategories(env, env.db, organizationId, toValue(collection), locale.value),
           listArticleCollectionRepresentations(env, env.db, organizationId, toValue(collection)),
         ])
-        return { posts, index, categories, localeRepresentations } as unknown as PublishedArticlesResponse
+        return { posts, index, categories, locale_representations } as unknown as PublishedArticlesResponse
       }
       return await publicApiRequest<PublishedArticlesResponse>('/api/public/blog', {
         query: { collection: toValue(collection), locale: locale.value },
         validate: validateApiShape({ posts: { arrayOf: { id: 'string', slug: 'string', title: 'string', sort_order: 'number' } }, index: 'nullable-object',
-          categories: { arrayOf: { id: 'string', name: 'string', slug: 'string', parent_id: 'nullable-string', locales: { arrayOf: 'string' } } }, localeRepresentations: { arrayOf: { locale: 'string', route_path: 'string' } } }),
+          categories: { arrayOf: { id: 'string', name: 'string', slug: 'string', parent_id: 'nullable-string', locales: { arrayOf: 'string' } } }, locale_representations: { arrayOf: { locale: 'string', route_path: 'string' } } }),
       })
     },
   )
@@ -144,7 +144,7 @@ export async function usePublishedArticles(collection: MaybeRefOrGetter<ArticleC
 
   if (error.value) throw error.value
   return { posts, categories, categoryTree, readingOrder, pending, index: computed(() => data.value?.index ?? null),
-    localeRepresentations: computed(() => data.value?.localeRepresentations ?? []) }
+    locale_representations: computed(() => data.value?.locale_representations ?? []) }
 }
 
 export interface PublishedArticleDetail {
@@ -162,13 +162,13 @@ export interface PublishedArticleDetail {
   cover?: PublishedArticle['cover']
   social_image: SocialImageSource | null
   content_blocks: ContentBlockSnapshot[]
-  localeRepresentations: PublicLocaleRepresentation[]
+  locale_representations: PublicLocaleRepresentation[]
 }
 
 const isArticleResponse = (value: unknown): value is { post: PublishedArticleDetail } =>
   isRecord(value) && isRecord(value.post)
   && typeof value.post.id === 'string' && typeof value.post.title === 'string' && typeof value.post.slug === 'string'
-  && Array.isArray(value.post.content_blocks) && Array.isArray(value.post.localeRepresentations)
+  && Array.isArray(value.post.content_blocks) && Array.isArray(value.post.locale_representations)
 
 /**
  * One published article of a collection, in the page's language — the read
@@ -181,7 +181,7 @@ export async function usePublishedArticle(collection: ArticleCollection, slug: M
   const { id: organizationId } = useTenantOrganization().organization
   const locale = useState<string>('public-locale', () => 'en')
   // Taken before the read: after an await the component's context is gone.
-  const localeRepresentations = useState<PublicLocaleRepresentation[]>('public-locale-representations', () => [])
+  const locale_representations = useState<PublicLocaleRepresentation[]>('public-locale-representations', () => [])
 
   const { data, error } = await useAsyncData(
     () => `published-article:${collection}:${locale.value}:${toValue(slug)}`,
@@ -210,7 +210,7 @@ export async function usePublishedArticle(collection: ArticleCollection, slug: M
   if (!data.value) throw createError({ statusCode: 404, statusMessage: 'Article not found', fatal: true })
   if (!data.value.content_blocks.length) throw createError({ statusCode: 500, statusMessage: 'Published article content is missing its canonical blocks' })
   // The language switcher offers this article's own translations.
-  localeRepresentations.value = data.value.localeRepresentations
+  locale_representations.value = data.value.locale_representations
   return computed(() => data.value!)
 }
 

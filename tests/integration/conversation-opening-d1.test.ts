@@ -76,7 +76,7 @@ test('a table booking opens with its own message and the guest note, written onc
     await reservation('old', 'Window seat if possible', sentence)
     await appendMessage(db, { conversationId: 'old', authorKind: 'guest', authorUserId: null, channel: 'email', body: 'Running ten minutes late', occurredAt: '2026-11-04T06:50:00.000Z' })
     const rows = await listConversations(db, ORG, { userId: OWNER, principal, mailbox: 'current' }, new Date('2026-11-05T00:00:00.000Z'))
-    assert.deepEqual(rows.map(row => [row.id, row.previewFrom, row.preview]), [['old', 'Filip', 'Running ten minutes late'], ['new', 'Filip', 'Window seat if possible']])
+    assert.deepEqual(rows.map(row => [row.id, row.preview_from, row.preview]), [['old', 'Filip', 'Running ten minutes late'], ['new', 'Filip', 'Window seat if possible']])
   } finally {
     await runtime.dispose()
   }

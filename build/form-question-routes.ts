@@ -5,11 +5,11 @@
 // the record a mount edits; useFormQuestionsOwner reads it.
 import { nodeAt, renamed, type PageNode } from './booking-routes'
 
-const SOURCE_PATH = '/dashboard/:orgSlug()/website/inquiry-form'
-const SOURCE_NAME = 'dashboard-orgSlug-website-inquiry-form'
+const SOURCE_PATH = '/dashboard/:org_slug()/website/inquiry-form'
+const SOURCE_NAME = 'dashboard-org_slug-website-inquiry-form'
 const MOUNTS = [
-  { owner: 'booking', parent: '/dashboard/:orgSlug()/products/:productId()/booking', name: 'dashboard-orgSlug-products-productId-booking-questions' },
-  { owner: 'stay', parent: '/dashboard/:orgSlug()/products/:productId()', name: 'dashboard-orgSlug-products-productId-questions' },
+  { owner: 'booking', parent: '/dashboard/:org_slug()/products/:product_id()/booking', name: 'dashboard-org_slug-products-product_id-booking-questions' },
+  { owner: 'stay', parent: '/dashboard/:org_slug()/products/:product_id()', name: 'dashboard-org_slug-products-product_id-questions' },
 ] as const
 
 function owned(node: PageNode, owner: string): PageNode {

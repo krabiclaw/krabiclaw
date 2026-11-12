@@ -45,8 +45,8 @@ const isCount = (value: unknown) => Number.isSafeInteger(value) && Number(value)
 
 function isRow(value: unknown): value is InboxRow {
   return isRecord(value) && isText(value.id) && (value.kind === 'guest' || value.kind === 'support' || value.kind === 'team')
-    && isText(value.guestName) && isText(value.avatarInitial) && (value.channel === 'airbnb' || value.channel === 'direct')
-    && isNullableText(value.home) && isNullableText(value.when) && typeof value.preview === 'string' && (value.preview ? isText(value.previewFrom) : value.previewFrom === null)
+    && isText(value.title) && isText(value.avatar_initial) && (value.channel === 'airbnb' || value.channel === 'direct')
+    && isNullableText(value.home) && isNullableText(value.when) && typeof value.preview === 'string' && (value.preview ? isText(value.preview_from) : value.preview_from === null)
     && isText(value.time) && typeof value.unread === 'boolean'
 }
 
@@ -55,44 +55,44 @@ export function isThreadListResponse(value: unknown): value is ThreadListPage {
     && isRecord(value.pagination)
     && Number.isInteger(value.pagination.limit) && Number(value.pagination.limit) >= 1 && Number(value.pagination.limit) <= 100
     && Number.isSafeInteger(value.pagination.offset) && Number(value.pagination.offset) >= 0
-    && typeof value.pagination.hasMore === 'boolean'
-    && (value.pagination.hasMore
-      ? value.pagination.nextOffset === Number(value.pagination.offset) + Number(value.pagination.limit)
-      : value.pagination.nextOffset === null)
+    && typeof value.pagination.has_more === 'boolean'
+    && (value.pagination.has_more
+      ? value.pagination.next_offset === Number(value.pagination.offset) + Number(value.pagination.limit)
+      : value.pagination.next_offset === null)
     && Array.isArray(value.threads)
     && value.threads.length <= Number(value.pagination.limit)
-    && (!value.pagination.hasMore || value.threads.length === Number(value.pagination.limit))
+    && (!value.pagination.has_more || value.threads.length === Number(value.pagination.limit))
     && new Set(value.threads.map(thread => isRecord(thread) ? thread.id : undefined)).size === value.threads.length
     && value.threads.every(isRow)
     && (value.unread === undefined || (isRecord(value.unread) && ['all', 'guests', 'support', 'team'].every(kind => isCount((value.unread as Record<string, unknown>)[kind]))))
 }
 
 function isPhoto(value: unknown): boolean {
-  return isRecord(value) && isText(value.id) && isText(value.url) && isText(value.thumbnailUrl)
+  return isRecord(value) && isText(value.id) && isText(value.url) && isText(value.thumbnail_url)
     && (value.width === null || isCount(value.width)) && (value.height === null || isCount(value.height))
 }
 
 function isStreamItem(value: unknown): value is InboxStreamItem {
   if (!isRecord(value) || !isText(value.id)) return false
   if (value.type === 'day') return isText(value.label)
-  if (value.type === 'event') return isText(value.text) && isText(value.sentAt)
-  if (value.type === 'change') return isText(value.sentAt) && isRecord(value.change)
+  if (value.type === 'event') return isText(value.text) && isText(value.sent_at)
+  if (value.type === 'change') return isText(value.sent_at) && isRecord(value.change)
     && ['pending', 'accepted', 'declined', 'withdrawn', 'stale', 'expired'].includes(String(value.change.status))
   return value.type === 'message' && (value.side === 'guest' || value.side === 'business') && isText(value.author)
-    && isNullableText(value.label) && isText(value.sentAt) && isNullableText(value.time) && isNullableText(value.body)
+    && isNullableText(value.label) && isText(value.sent_at) && isNullableText(value.time) && isNullableText(value.body)
     && Array.isArray(value.photos) && value.photos.every(isPhoto)
     && (value.translated === null || (isRecord(value.translated) && typeof value.translated.original === 'string'))
-    && isNullableText(value.receipt) && typeof value.retryable === 'boolean' && isCount(value.unshownFiles)
+    && isNullableText(value.receipt) && typeof value.retryable === 'boolean' && isCount(value.unshown_files)
 }
 
 export function isThreadDetailResponse(value: unknown): value is { thread: ThreadDetail } {
   const thread = isRecord(value) ? value.thread : null
   return isRecord(thread)
     && isText(thread.id) && (thread.kind === 'guest' || thread.kind === 'support')
-    && isText(thread.guestName) && isText(thread.avatarInitial) && (thread.channel === 'airbnb' || thread.channel === 'direct')
+    && isText(thread.title) && isText(thread.avatar_initial) && (thread.channel === 'airbnb' || thread.channel === 'direct')
     && isNullableText(thread.home) && isNullableText(thread.when) && typeof thread.translated === 'boolean'
-    && isNullableText(thread.recordId) && isNullableText(thread.recordTitle) && (thread.recordKind === null || ['stay', 'booking'].includes(String(thread.recordKind)))
-    && isNullableText(thread.activityPath)
+    && isNullableText(thread.booking_id) && isNullableText(thread.record_title) && (thread.record_kind === null || ['stay', 'booking'].includes(String(thread.record_kind)))
+    && isNullableText(thread.activity_path)
     && Array.isArray(thread.stream) && thread.stream.every(isStreamItem)
     && Array.isArray(thread.pending) && thread.pending.every(item => isRecord(item) && isText(item.id) && (item.source === 'automatic' || item.source === 'later')
       && isText(item.label) && isText(item.due_at) && isText(item.time) && typeof item.body === 'string' && typeof item.cancellable === 'boolean')
@@ -103,6 +103,6 @@ export function isThreadDetails(value: unknown): value is ThreadDetails {
   return isRecord(value)
     && Array.isArray(value.participants) && value.participants.every(person => isRecord(person) && isText(person.name) && isText(person.initial)
       && ['Guest', 'Host', 'Co-host', 'Airbnb Support'].includes(String(person.role)))
-    && Array.isArray(value.photos) && value.photos.every(photo => isPhoto(photo) && isRecord(photo) && isText(photo.sentAt))
-    && isRecord(value.actions) && ['showReservation', 'archive', 'unarchive', 'report', 'block', 'unblock'].every(key => typeof (value.actions as Record<string, unknown>)[key] === 'boolean')
+    && Array.isArray(value.photos) && value.photos.every(photo => isPhoto(photo) && isRecord(photo) && isText(photo.sent_at))
+    && isRecord(value.actions) && ['show_reservation', 'archive', 'unarchive', 'report', 'block', 'unblock'].every(key => typeof (value.actions as Record<string, unknown>)[key] === 'boolean')
 }

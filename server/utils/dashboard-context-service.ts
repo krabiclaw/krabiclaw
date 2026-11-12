@@ -35,9 +35,10 @@ export async function loadDashboardContext(
   ])
   recordRequestPhase(event, 'resources', resourcesStartedAt)
 
+  const { memberId, ...business } = organization
   return {
     success: true as const,
-    organization: { ...organization, ...card, features },
+    organization: { ...business, ...card, features, member_id: memberId },
     locations,
   }
 }

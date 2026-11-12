@@ -23,7 +23,7 @@ test('a page tree claims the paths its routes resolve, and only those', () => {
       { path: '/absolute-child' },
     ] },
     { path: '/help', alias: '/hilfe' },
-    { path: '/:tenantPath(.*)*' },
+    { path: '/:tenant_path(.*)*' },
   ])
   const patterns = claims.map(claim => `${claim.subtree ? 'subtree ' : 'exact '}${claim.pattern}`)
 

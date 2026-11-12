@@ -58,7 +58,7 @@ export const useTeamGroupLeaveRequest = () => useState<string | null>('team-grou
 export async function useTeamGroup() {
   const route = useRoute()
   const api = useDashboardApi()
-  const threadId = computed(() => String(route.params.teamThreadId))
+  const threadId = computed(() => String(route.params.conversation_id))
   const { data, error, refresh } = await useTeamThread(threadId)
   const thread = computed(() => data.value?.thread ?? null)
   const leaving = useTeamGroupLeaveRequest()

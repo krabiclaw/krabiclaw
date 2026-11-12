@@ -42,8 +42,8 @@ export interface BusinessOutcomeReceipt {
   channel: string
   provider: string
   status: string
-  providerMessageId: string | null
-  nonDeliveryConfirmed?: boolean | null
+  provider_message_id: string | null
+  non_delivery_confirmed?: boolean | null
 }
 
 export interface BusinessOutcome {
@@ -52,26 +52,26 @@ export interface BusinessOutcome {
   source: { table: 'activity_entries' | 'messages' | 'post_publications' | 'reviews' | 'analytics_events'; id: string }
   event: BusinessOutcomeEvent
   subject: { kind: string; id: string }
-  actor: { kind: 'guest' | 'member' | 'system' | 'cloudflare' | 'user' | 'agent' | 'unknown'; userId: string | null }
-  occurredAt: string
+  actor: { kind: 'guest' | 'member' | 'system' | 'cloudflare' | 'user' | 'agent' | 'unknown'; user_id: string | null }
+  occurred_at: string
   /** The recorded domain state, not an invented universal completion state. */
   state: string | null
-  changedFields: string[]
-  requestedFields?: string[]
+  changed_fields: string[]
+  requested_fields?: string[]
   revision: string | null
   references: Array<{ kind: string; id: string }>
   /** Existing metadata and recorded beforeState/afterState, including booleans and source revisions; no inferred completion. */
   details?: Record<string, unknown>
   value?: ConversionValue
-  moneyOwner?: 'customer_business' | 'platform'
+  money_owner?: 'customer_business' | 'platform'
   measurement?: {
     stage: string
     surface: string
-    conversionType: string | null
-    attribution: AttributionTouch | null
-    attributedAt: string | null
-    originEventId: string | null
-    assignedMemberId: string | null
+    conversion_type: string | null
+    attribution: (Omit<AttributionTouch, 'referrerHost'> & { referrer_host: string | null }) | null
+    attributed_at: string | null
+    origin_event_id: string | null
+    assigned_member_id: string | null
   }
   verification: {
     status: 'verified' | 'unconfirmed' | 'failed'
@@ -82,24 +82,63 @@ export interface BusinessOutcome {
 
 export interface BusinessOutcomePage {
   outcomes: BusinessOutcome[]
-  pagination: { limit: number; offset: number; hasMore: boolean; nextOffset: number | null }
+  pagination: { limit: number; offset: number; has_more: boolean; next_offset: number | null }
   coverage: {
-    supportedEvents: readonly BusinessOutcomeEvent[]
+    supported_events: readonly BusinessOutcomeEvent[]
     sources: readonly BusinessOutcome['source']['table'][]
     attribution: 'recorded_actor_only'
     article: 'persisted_change_only'
-    webReply: 'stored_message_only'
-    externalReply: 'provider_acceptance_requires_receipt'
+    web_reply: 'stored_message_only'
+    external_reply: 'provider_acceptance_requires_receipt'
     verification: 'only_the_named_evidence_basis'
     unverified: readonly ['public_visibility', 'operation_completion', 'recipient_notification', 'conversation_resolution', 'business_goal_achievement', 'attendance_or_fulfilment', 'causal_revenue_attribution']
   }
 }
 
+export const PROGRESS_WIRE_KEYS = {
+  activityEntryId: 'activity_entry_id',
+  assetId: 'asset_id',
+  assetUpdatedAt: 'asset_updated_at',
+  blockedAt: 'blocked_at',
+  cardPaymentsStatus: 'card_payments_status',
+  configurationUpdatedAt: 'configuration_updated_at',
+  endsAt: 'ends_at',
+  latestGuestEntryId: 'latest_guest_entry_id',
+  latestMemberEntryId: 'latest_member_entry_id',
+  latestReplyEntryId: 'latest_reply_entry_id',
+  placementId: 'placement_id',
+  providerPostId: 'provider_post_id',
+  publishedAt: 'published_at',
+  startsAt: 'starts_at',
+  targetId: 'target_id',
+  updatedAt: 'updated_at',
+  postId: 'post_id',
+  paymentRequired: 'online_payment_required',
+} as const
+type ProgressWire<T> = T extends readonly (infer Item)[] ? ProgressWire<Item>[]
+  : T extends object ? { [K in keyof T as K extends keyof typeof PROGRESS_WIRE_KEYS ? typeof PROGRESS_WIRE_KEYS[K] : K]: ProgressWire<T[K]> }
+  : T
+
+export function progressWire<T extends BusinessProgressEvidence>(value: T): ProgressWire<T> {
+  function project(data: unknown): unknown {
+    if (Array.isArray(data)) return data.map(project)
+    if (!data || typeof data !== 'object') return data
+    return Object.fromEntries(Object.entries(data).map(([key, item]) => [
+      Object.hasOwn(PROGRESS_WIRE_KEYS, key) ? PROGRESS_WIRE_KEYS[key as keyof typeof PROGRESS_WIRE_KEYS] : key,
+      project(item),
+    ]))
+  }
+  return project(value) as ProgressWire<T>
+}
+
 export interface BusinessProgressReference {
   operation: BusinessProgressOperation
-  subjectId: string
-  evidenceRevision: string
-  evidence: {
+  subject_id: string
+  evidence_revision: string
+  evidence: ProgressWire<BusinessProgressEvidence>
+}
+
+export type BusinessProgressEvidence = {
     kind: 'article'
     status: string | null
     updatedAt: string
@@ -153,7 +192,6 @@ export interface BusinessProgressReference {
     latestMemberEntryId: string | null
     commitment: { kind: 'booking' | 'stay'; id: string; status: string; startsAt: string; endsAt: string } | null
   }
-}
 
 export interface RecommendationPublication {
   id: string

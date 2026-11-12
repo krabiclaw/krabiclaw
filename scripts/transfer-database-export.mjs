@@ -1175,7 +1175,10 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
       const approved = stage.prepare("SELECT count(*) AS n FROM product_nights WHERE min_stay_through IS NOT NULL AND source = 'host'").get().n
       if (approved) manifest.transforms.push({ name: 'owner_approved_saltleaf_through_minimum_removed', changes: approved })
     }
-    if (sourceDirectory !== MIGRATIONS_DIRECTORY) await consolidateV26(stage, baseSql, manifest)
+    if (sourceDirectory !== MIGRATIONS_DIRECTORY) {
+      await consolidateV26(stage, baseSql, manifest)
+      for (const name of files.slice(1)) stage.exec(readFileSync(resolve(MIGRATIONS_DIRECTORY, name), 'utf8'))
+    }
     const names = tableNames(stage)
     const count = (db, table) => db.prepare(`SELECT count(*) AS n FROM ${qi(table)}`).get().n
     target.exec(schemaSql)

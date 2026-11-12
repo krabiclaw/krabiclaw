@@ -22,28 +22,28 @@ export function earningsFigure(summary:EarningsSummary):string {
 /** What `view=performance` answers: the year by month and one month by what was sold. */
 export interface EarningsPerformance {
  currency:string
- channelReservations:Array<{channel:string;currency:string;amount:number;count:number}>
+ channel_reservations:Array<{channel:string;currency:string;amount:number;count:number}>
  months:Array<{month:string;paid:number;refunded:number}>
- items:Array<{title:string;imageUrl:string|null;paid:number;count:number}>
+ items:Array<{title:string;image_url:string|null;paid:number;count:number}>
 }
 const record=(value:unknown):value is Record<string,unknown>=>!!value&&typeof value==='object'&&!Array.isArray(value)
 export function isEarningsPerformance(value:unknown):value is EarningsPerformance {
  return record(value)&&isCurrencyCode(value.currency)
-  &&Array.isArray(value.channelReservations)&&value.channelReservations.every(row=>record(row)&&['airbnb','booking_com','vrbo'].includes(String(row.channel))&&isCurrencyCode(row.currency)&&Number.isSafeInteger(row.amount)&&Number(row.amount)>=0&&Number.isSafeInteger(row.count)&&Number(row.count)>0)
+  &&Array.isArray(value.channel_reservations)&&value.channel_reservations.every(row=>record(row)&&['airbnb','booking_com','vrbo'].includes(String(row.channel))&&isCurrencyCode(row.currency)&&Number.isSafeInteger(row.amount)&&Number(row.amount)>=0&&Number.isSafeInteger(row.count)&&Number(row.count)>0)
   &&Array.isArray(value.months)&&value.months.length===12&&value.months.every(row=>record(row)&&typeof row.month==='string'&&/^\d{4}-\d{2}$/.test(row.month)&&Number.isSafeInteger(row.paid)&&Number.isSafeInteger(row.refunded))
-  &&Array.isArray(value.items)&&value.items.every(row=>record(row)&&typeof row.title==='string'&&(row.imageUrl===null||typeof row.imageUrl==='string')&&Number.isSafeInteger(row.paid)&&Number.isSafeInteger(row.count))
+  &&Array.isArray(value.items)&&value.items.every(row=>record(row)&&typeof row.title==='string'&&(row.image_url===null||typeof row.image_url==='string')&&Number.isSafeInteger(row.paid)&&Number.isSafeInteger(row.count))
 }
 
 /** One payment a payout carried, or one line of the transactions list. */
-export interface PayoutItem { paymentId:string; title:string; imageUrl:string|null; amount:number; currency:string; startsAt:string|null; endsAt:string|null; timeZone:string|null; subjectTitle:string|null }
+export interface PayoutItem { payment_id:string; title:string; image_url:string|null; amount:number; currency:string; starts_at:string|null; ends_at:string|null; timezone:string|null; name:string|null }
 export function isPayoutItem(value:unknown):value is PayoutItem {
- return record(value)&&typeof value.paymentId==='string'&&typeof value.title==='string'&&(value.imageUrl===null||typeof value.imageUrl==='string')&&Number.isSafeInteger(value.amount)&&isCurrencyCode(value.currency)
-  &&[value.startsAt,value.endsAt,value.timeZone,value.subjectTitle].every(field=>field===null||typeof field==='string')
+ return record(value)&&typeof value.payment_id==='string'&&typeof value.title==='string'&&(value.image_url===null||typeof value.image_url==='string')&&Number.isSafeInteger(value.amount)&&isCurrencyCode(value.currency)
+  &&[value.starts_at,value.ends_at,value.timezone,value.name].every(field=>field===null||typeof field==='string')
 }
-export interface PayoutDetail { id:string; amount:number; currency:string; status:string; arrivalDate:number; bank:{bankName:string|null;last4:string}|null; items:PayoutItem[] }
+export interface PayoutDetail { id:string; amount:number; currency:string; status:string; arrival_date:number; bank:{bank_name:string|null;last4:string}|null; items:PayoutItem[] }
 export function isPayoutDetail(value:unknown):value is PayoutDetail {
- return record(value)&&typeof value.id==='string'&&Number.isSafeInteger(value.amount)&&isCurrencyCode(value.currency)&&typeof value.status==='string'&&Number.isSafeInteger(value.arrivalDate)
-  &&(value.bank===null||(record(value.bank)&&(value.bank.bankName===null||typeof value.bank.bankName==='string')&&typeof value.bank.last4==='string'))
+ return record(value)&&typeof value.id==='string'&&Number.isSafeInteger(value.amount)&&isCurrencyCode(value.currency)&&typeof value.status==='string'&&Number.isSafeInteger(value.arrival_date)
+  &&(value.bank===null||(record(value.bank)&&(value.bank.bank_name===null||typeof value.bank.bank_name==='string')&&typeof value.bank.last4==='string'))
   &&Array.isArray(value.items)&&value.items.every(isPayoutItem)
 }
 /** Stripe's payout list rows, as the Earnings and Paid screens read them. */

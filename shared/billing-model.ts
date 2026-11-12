@@ -249,6 +249,6 @@ export function getNewSalePlan(value: unknown): NewSalePlanId | null {
 /** Surcharge policy shared by web and native clients; fee explanations live on the pricing page. */
 export const SURCHARGE_POLICY = Object.freeze({
   surcharge: 'Pass credit card fees on to the buyer. The surcharge is shown before they pay and included in the total. Stripe caps it for each card and never adds one to debit or prepaid cards.',
-  minimumBasisPoints: 1,
-  maximumBasisPoints: 10_000,
+  minimum_basis_points: 1,
+  maximum_basis_points: 10_000,
 })

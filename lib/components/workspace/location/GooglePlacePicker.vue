@@ -64,7 +64,7 @@ const suggestions = ref<GooglePlaceSuggestion[]>([])
 let chosenName: string | null = null
 const items = computed(() => suggestions.value.map(suggestion => ({
   label: suggestion.name,
-  description: suggestion.addressLabel,
+  description: suggestion.address_label,
   onSelect: () => void select(suggestion),
 })))
 const loading = ref(false)
@@ -78,11 +78,11 @@ let debounce: ReturnType<typeof setTimeout> | null = null
 let latestRequest = 0
 
 const isSuggestions = validateApiShape<{ suggestions: GooglePlaceSuggestion[] }>({
-  suggestions: { arrayOf: { placeId: 'string', name: 'string', addressLabel: 'string', fullText: 'string' } },
+  suggestions: { arrayOf: { google_place_id: 'string', name: 'string', address_label: 'string', full_text: 'string' } },
 })
 const isPlace = validateApiShape<OnboardingPlacePreview>({
-  placeId: 'string', name: 'string', address: 'nullable-object', phone: 'nullable-string',
-  mapsUrl: 'nullable-string', timezone: 'nullable-string',
+  google_place_id: 'string', name: 'string', address: 'nullable-object', phone: 'nullable-string',
+  maps_url: 'nullable-string', timezone: 'nullable-string',
 })
 
 const emptyText = computed(() => {
@@ -117,7 +117,7 @@ async function search(input: string) {
   const request = ++latestRequest
   try {
     const response = await applicationFetch('/api/dashboard/google-places/autocomplete', {
-      method: 'POST', body: { input, sessionToken }, validate: isSuggestions,
+      method: 'POST', body: { input, session_token: sessionToken }, validate: isSuggestions,
     })
     if (request === latestRequest) suggestions.value = response.suggestions
   } catch (cause) {
@@ -143,7 +143,7 @@ async function select(suggestion: GooglePlaceSuggestion) {
   error.value = null
   try {
     const place = await applicationFetch('/api/dashboard/google-places/details', {
-      method: 'POST', body: { placeId: suggestion.placeId, sessionToken: token }, validate: isPlace,
+      method: 'POST', body: { google_place_id: suggestion.google_place_id, session_token: token }, validate: isPlace,
     })
     emit('select', place)
   } catch (cause) {

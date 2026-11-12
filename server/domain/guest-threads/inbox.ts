@@ -115,7 +115,7 @@ async function threadFacts(db: DbClient, raw: GuestThreadDetailViewModel, organi
       'SELECT message_id, template_title FROM scheduled_guest_messages WHERE organization_id = ? AND message_id IN (SELECT value FROM json_each(?))',
       [organizationId, d1JsonStringSet(automaticIds)]) : [],
   ])
-  if (!place) throw new HTTPError({ statusCode: 404, message: 'Thread not found', data: { code: 'THREAD_NOT_FOUND', field: 'threadId' } })
+  if (!place) throw new HTTPError({ statusCode: 404, message: 'Thread not found', data: { code: 'THREAD_NOT_FOUND', field: 'conversation_id' } })
   const timeZone = place.location_timezone ?? place.organization_timezone
   const inquiry = raw.inquiry
   const record = raw.operationalRecord
@@ -206,11 +206,11 @@ function stream(facts: ThreadFacts, viewer: Viewer, now: Date, canReply: boolean
     const key = localDateKey(sentAt, timeZone)
     if (key !== day) { items.push({ type: 'day', id: `day:${id}`, label: dayLabel(sentAt, timeZone, now) }); day = key; previous = null }
   }
-  const message = (entry: GuestThreadEntryViewModel, body: string | null, item: Omit<MessageItem, 'type' | 'id' | 'sentAt' | 'time' | 'body' | 'receipt' | 'retryable' | 'unshownFiles'>) => {
+  const message = (entry: GuestThreadEntryViewModel, body: string | null, item: Omit<MessageItem, 'type' | 'id' | 'sent_at' | 'time' | 'body' | 'receipt' | 'retryable' | 'unshown_files'>) => {
     const sentAt = entrySentAt(entry)
     place(sentAt, entry.id)
     const run = previous !== null && previous.side === item.side && previous.author === item.author
-    const next: MessageItem = { type: 'message', id: entry.id, sentAt, time: run ? null : clockTime(sentAt, timeZone), body, receipt: null, retryable: false, unshownFiles: unshownFiles(entry), ...item }
+    const next: MessageItem = { type: 'message', id: entry.id, sent_at: sentAt, time: run ? null : clockTime(sentAt, timeZone), body, receipt: null, retryable: false, unshown_files: unshownFiles(entry), ...item }
     items.push(next)
     previous = next
     return next
@@ -241,7 +241,7 @@ function stream(facts: ThreadFacts, viewer: Viewer, now: Date, canReply: boolean
     if (entry.kind === 'message') {
       // A message with no words, photo or file (an Airbnb host action Channex records that way) says nothing.
       if (!text(entry.body) && !entry.attachments.length && !unshownFiles(entry)) continue
-      const photos = entry.attachments.map(photo => ({ id: photo.id, url: photo.url, thumbnailUrl: photo.thumbnailUrl, width: photo.width, height: photo.height }))
+      const photos = entry.attachments.map(photo => ({ id: photo.id, url: photo.url, thumbnail_url: photo.thumbnailUrl, width: photo.width, height: photo.height }))
       if (entry.actorKind === 'guest') {
         const translation = text(meta(entry)?.translated_message)
         const translated = translation !== null && translation !== text(entry.body)
@@ -264,13 +264,13 @@ function stream(facts: ThreadFacts, viewer: Viewer, now: Date, canReply: boolean
     if (entry.bookingChange) {
       const sentAt = entry.occurredAt
       place(sentAt, entry.id)
-      items.push({ type: 'change', id: entry.id, sentAt, change: entry.bookingChange })
+      items.push({ type: 'change', id: entry.id, sent_at: sentAt, change: entry.bookingChange })
       previous = null
       continue
     }
     const sentence = eventSentence(entry, facts, viewer)
     place(entry.occurredAt, entry.id)
-    items.push({ type: 'event', id: entry.id, text: sentence, sentAt: entry.occurredAt })
+    items.push({ type: 'event', id: entry.id, text: sentence, sent_at: entry.occurredAt })
     previous = null
   }
   if (newestBusiness && viewer.audience === 'member') {
@@ -313,16 +313,16 @@ export async function getInboxThread(db: DbClient, threadId: string, organizatio
   return {
     id: raw.id,
     kind: facts.kind,
-    guestName: viewer.audience === 'buyer' ? raw.organizationName ?? facts.guestName : facts.guestName,
-    avatarInitial: initial(viewer.audience === 'buyer' ? raw.organizationName ?? facts.guestName : facts.guestName),
+    title: viewer.audience === 'buyer' ? raw.organizationName ?? facts.guestName : facts.guestName,
+    avatar_initial: initial(viewer.audience === 'buyer' ? raw.organizationName ?? facts.guestName : facts.guestName),
     channel: facts.channel,
     home: facts.home,
     when: facts.when,
     translated: items.some(item => item.type === 'message' && item.translated !== null),
-    recordId: record ? record.unit === 'nights' ? record.id : raw.id : null,
-    recordKind: record ? record.unit === 'nights' ? 'stay' : 'booking' : null,
-    recordTitle: record ? recordTitle(record, raw.organizationVertical) : null,
-    activityPath: raw.activityPath,
+    booking_id: record?.id ?? null,
+    record_kind: record ? record.unit === 'nights' ? 'stay' : 'booking' : null,
+    record_title: record ? recordTitle(record, raw.organizationVertical) : null,
+    activity_path: raw.activityPath,
     stream: items,
     pending,
     composer: replyComposer,
@@ -360,8 +360,8 @@ export async function getInboxThreadDetails(db: DbClient, threadId: string, orga
      ORDER BY m.role = 'owner' DESC, m.createdAt, m.id`,
   [organizationId, d1JsonStringSet(raw.entries.flatMap(entry => entry.actorKind === 'member' && entry.actorUserId ? [entry.actorUserId] : [])), raw.id])
   const photos = raw.entries.filter(entry => entry.kind === 'message')
-    .flatMap(entry => entry.attachments.map(photo => ({ id: photo.id, url: photo.url, thumbnailUrl: photo.thumbnailUrl, width: photo.width, height: photo.height, sentAt: entrySentAt(entry) })))
-    .sort((a, b) => b.sentAt.localeCompare(a.sentAt))
+    .flatMap(entry => entry.attachments.map(photo => ({ id: photo.id, url: photo.url, thumbnail_url: photo.thumbnailUrl, width: photo.width, height: photo.height, sent_at: entrySentAt(entry) })))
+    .sort((a, b) => b.sent_at.localeCompare(a.sent_at))
   const support = facts.kind === 'support'
   return {
     participants: [
@@ -370,7 +370,7 @@ export async function getInboxThreadDetails(db: DbClient, threadId: string, orga
     ],
     photos,
     actions: {
-      showReservation: raw.operationalRecord !== null,
+      show_reservation: raw.operationalRecord !== null,
       archive: raw.canArchive,
       unarchive: raw.canUnarchive,
       report: !support,

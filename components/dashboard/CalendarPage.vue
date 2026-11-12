@@ -12,9 +12,9 @@
   >
     <template #right>
       <div class="flex items-center gap-1">
-        <UButton v-if="!personalScope && !sessionProduct && canCreateStay" label="Add stay" icon="i-lucide-plus" :to="`/dashboard/${route.params.orgSlug}/bookings/stay/new`" :disabled="Boolean(level.child.value)" />
+        <UButton v-if="!personalScope && !sessionProduct && canCreateStay" label="Add stay" icon="i-lucide-plus" :to="`/dashboard/${route.params.org_slug}/bookings/stay/new`" :disabled="Boolean(level.child.value)" />
         <UButton v-if="sessionProduct && !providerHours && canCreate" label="Add availability" icon="i-lucide-plus" :to="addAvailabilityTo" :disabled="Boolean(level.child.value)" />
-        <UButton v-else-if="providerHours && sessionProduct?.booking" label="Bookable times" icon="i-lucide-clock" :to="sessionProduct.booking.assigned_member_id ? `/dashboard/${route.params.orgSlug}/team/${sessionProduct.booking.assigned_member_id}/hours` : `/dashboard/${route.params.orgSlug}/team`" />
+        <UButton v-else-if="providerHours && sessionProduct?.booking" label="Bookable times" icon="i-lucide-clock" :to="sessionProduct.booking.assigned_member_id ? `/dashboard/${route.params.org_slug}/team/${sessionProduct.booking.assigned_member_id}/hours` : `/dashboard/${route.params.org_slug}/team`" />
         <UButton
           v-if="!personalScope && !sessionProduct && chosenLocation && !selecting && view === 'month'"
           label="Select dates"
@@ -52,7 +52,7 @@
         <!-- One search for every calendar: homes by name or address, places by name and where, bookings by who, what and where. -->
         <UInput :model-value="search" icon="i-lucide-search" :placeholder="searchLabel" :aria-label="searchLabel" :class="gridView ? 'min-w-0 flex-1 sm:w-72 sm:flex-none' : 'w-full sm:w-72'" :ui="{ base: 'rounded-full' }" @update:model-value="setSearch" />
         <UTooltip v-if="sessionProduct && physicalLocation" text="Repeating times">
-          <UButton icon="i-lucide-settings" color="neutral" variant="soft" square class="size-10 justify-center rounded-full" aria-label="Schedule settings" :to="{ path: `/dashboard/${route.params.orgSlug}/products/${sessionProduct.id}/booking/schedule`, query: { location_id: physicalLocation.id } }" />
+          <UButton icon="i-lucide-settings" color="neutral" variant="soft" square class="size-10 justify-center rounded-full" aria-label="Schedule settings" :to="{ path: `/dashboard/${route.params.org_slug}/products/${sessionProduct.id}/booking/schedule`, query: { location_id: physicalLocation.id } }" />
         </UTooltip>
       </div>
       <UAlert
@@ -412,11 +412,11 @@ const creationUnavailable = computed(() => {
   return {
     message: physicalLocation.value ? `${physicalLocation.value.title} is inactive.` : `No active ${office ? 'office' : 'location'} is assigned to this ${office ? 'consultation' : 'experience'}.`,
     label: office ? 'Edit offices' : 'Edit locations',
-    to: `/dashboard/${route.params.orgSlug}/products/${product.id}/locations`,
+    to: `/dashboard/${route.params.org_slug}/products/${product.id}/locations`,
   }
 })
 function addTo(date?: string) {
-  return { path: `/dashboard/${route.params.orgSlug}/calendar/sessions/new`, query: { product_id: sessionProduct.value?.id, location_id: physicalLocation.value?.id, date, month: monthKey.value, view: view.value === 'month' ? undefined : view.value } }
+  return { path: `/dashboard/${route.params.org_slug}/calendar/sessions/new`, query: { product_id: sessionProduct.value?.id, location_id: physicalLocation.value?.id, date, month: monthKey.value, view: view.value === 'month' ? undefined : view.value } }
 }
 const addAvailabilityTo = computed(() => addTo(openDay.value ?? undefined))
 

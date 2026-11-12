@@ -10,6 +10,6 @@ export default defineHandler(async (event) => {
   const env = cloudflareEnv(event), session = await getAuthSession(event, env)
   if (!session) throw new HTTPError({ statusCode: 401, statusMessage: 'Sign in to view your bookings' })
   const today = await listTodayAgenda(env.DB, { buyerUserId: session.user.id }, {})
-  const feed = todayFeedSchema.parse({ cards: today.items.map(item => agendaToTodayCard(item, { resolvedAt: today.resolved_at })), resolvedAt: today.resolved_at })
+  const feed = todayFeedSchema.parse({ cards: today.items.map(item => agendaToTodayCard(item, { resolved_at: today.resolved_at })), resolved_at: today.resolved_at })
   return jsonResponse(finalizeRequestMetrics(event, 'account-today', feed), { headers: { 'cache-control': 'private, no-store' } })
 })

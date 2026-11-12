@@ -37,5 +37,5 @@ export default defineHandler(async (event) => {
     query: "UPDATE organization SET theme_id = ? WHERE id = ? AND onboarding_status = 'active'",
     params: [PLATFORM_THEME_ID, organization.id],
   }], { operation: 'assign the local platform template' })
-  return jsonResponse({ admin: { id }, platformOrganizationId: organization.id }, { status: 201 })
+  return jsonResponse({ admin: { id }, organization_id: organization.id }, { status: 201 })
 })

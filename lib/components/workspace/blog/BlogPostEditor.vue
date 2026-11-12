@@ -119,7 +119,7 @@ const props = withDefaults(defineProps<{ repository: BlogPostRepository; initial
   panelId: 'blog-post-editor',
 })
 const route = useRoute()
-const postId = computed(() => String(route.params.postId || ''))
+const postId = computed(() => String(route.params.post_id || ''))
 const newArticle = postId.value === 'new'
 const post = ref<BlogPost | null>(null)
 const persistedPostId = computed(() => post.value?.id || postId.value)
@@ -180,7 +180,7 @@ const { data: categories, error: categoriesError, refresh: refreshCategories } =
 // Category management opens its existing owner in another tab, leaving this
 // unsaved canvas intact. Returning reads any category created there.
 if (newArticle) useEventListener(import.meta.client ? window : undefined, 'focus', () => refreshCategories())
-const categoriesPath = computed(() => `/dashboard/${String(route.params.orgSlug)}/website/blog/categories`)
+const categoriesPath = computed(() => `/dashboard/${String(route.params.org_slug)}/website/blog/categories`)
 const categoryOptions = computed(() => {
   const all = categories.value ?? []
   const byId = new Map(all.map(category => [category.id, category]))

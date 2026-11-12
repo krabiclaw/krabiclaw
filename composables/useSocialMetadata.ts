@@ -88,7 +88,7 @@ export function useSocialMetadata(input: MaybeRefOrGetter<PageSocialMetadataInpu
   const { organization, previewAuthorized } = useTenantOrganization()
   const shell = organization.site.slug === 'platform' ? null : useOrganizationShellState()
   const publicLocale = useState<string>('public-locale', () => 'en')
-  const localeRepresentations = useState<PublicLocaleRepresentation[]>('public-locale-representations', () => [])
+  const locale_representations = useState<PublicLocaleRepresentation[]>('public-locale-representations', () => [])
 
   const normalized = computed(() => {
     const value = toValue(input)
@@ -98,7 +98,7 @@ export function useSocialMetadata(input: MaybeRefOrGetter<PageSocialMetadataInpu
       ? config.public.siteUrl
       : requestURL.origin
     const privatePage = value.discoverability === 'private'
-    const exactRepresentation = privatePage ? undefined : localeRepresentations.value.find(item => item.locale === publicLocale.value)
+    const exactRepresentation = privatePage ? undefined : locale_representations.value.find(item => item.locale === publicLocale.value)
     if (!privatePage && publicLocale.value !== 'en' && !exactRepresentation) {
       throw createError({ statusCode: 404, statusMessage: 'Localized route representation was not found' })
     }
@@ -129,7 +129,7 @@ export function useSocialMetadata(input: MaybeRefOrGetter<PageSocialMetadataInpu
   useHead(() => {
     const resolved = normalized.value
     if (!resolved) return {}
-    const alternateLinks: Array<{ rel: 'alternate'; hreflang: string; href: string }> = (resolved.value.discoverability === 'private' ? [] : localeRepresentations.value).map(representation => ({
+    const alternateLinks: Array<{ rel: 'alternate'; hreflang: string; href: string }> = (resolved.value.discoverability === 'private' ? [] : locale_representations.value).map(representation => ({
       rel: 'alternate',
       hreflang: representation.locale,
       href: resolveSeoUrl(representation.route_path, resolved.origin),
@@ -301,7 +301,7 @@ export function useSocialMetadata(input: MaybeRefOrGetter<PageSocialMetadataInpu
         }))
         if (actions.length) webpageNode.potentialAction = actions
       }
-      if (recipe === 'schedule' && shell?.canSchedule.value && shell.consultation.value) {
+      if (recipe === 'schedule' && shell?.can_schedule.value && shell.consultation.value) {
         const consultation = shell.consultation.value
         webpageNode.potentialAction = {
           '@type': 'ScheduleAction',

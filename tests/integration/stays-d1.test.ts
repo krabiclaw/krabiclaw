@@ -17,9 +17,9 @@ import { writeMemberScheduling } from '../../server/domain/member-scheduling.ts'
 import { isDashboardInvalidation, type DashboardInvalidation } from '../../shared/dashboard-invalidations.ts'
 import { getQuery, H3 } from 'nitro/h3'
 import { createAuth } from '../../server/utils/auth.ts'
-import guestStayRoute from '../../server/api/public/guest-stays/[activityId].get.ts'
-import accountStayRoute from '../../server/api/account/stays/[activityId].get.ts'
-import paymentReturnRoute from '../../server/api/public/payments/[paymentId]/return.post.ts'
+import guestStayRoute from '../../server/api/public/guest-stays/[activity_id].get.ts'
+import accountStayRoute from '../../server/api/account/stays/[activity_id].get.ts'
+import paymentReturnRoute from '../../server/api/public/payments/[payment_id]/return.post.ts'
 import { tokenHash } from '../../server/domain/payments/buyer.ts'
 import { createLocation, updateLocation } from '../../server/utils/location-management.ts'
 import publicLocationsRoute from '../../server/api/public/locations.get.ts'
@@ -46,7 +46,7 @@ import Ajv from 'ajv'
 import { stayPhotoRoomName, type StayPhotoRoom } from '../../shared/stay-photos.ts'
 import { STAY_HOME_ACCESSIBILITY_FEATURES } from '../../shared/stay-accessibility.ts'
 import { hashPassword } from 'better-auth/crypto'
-import editNightsRoute from '../../server/api/dashboard/stay-homes/[productId]/nights.put.ts'
+import editNightsRoute from '../../server/api/dashboard/stay-homes/[product_id]/nights.put.ts'
 import { buyStay } from './support/stay-checkout.ts'
 
 const ORG = 'org'
@@ -1347,7 +1347,7 @@ test('gap recommendations follow live listing state, effective night rules and a
     assert.ok(membership)
     const principal = memberAccessPrincipal(membership, { env })
     for (const [from, to] of [['invalid', gap.to], ['2027-02-30', gap.to], [gap.from, gap.from], [gap.to, gap.from], ['2027-05-03', '2027-08-03'], ['0000-01-01', '0000-01-02'], ['9999-12-30', '9999-12-31']]) {
-      await assert.rejects(readBusinessProgressReference(db, principal, { operation: 'stay.gap', subjectId: JSON.stringify([cabin.id, from, to]) }), { status: 404, data: { code: 'PROGRESS_SUBJECT_NOT_FOUND', field: 'subjectId' } })
+      await assert.rejects(readBusinessProgressReference(db, principal, { operation: 'stay.gap', subject_id: JSON.stringify([cabin.id, from, to]) }), { status: 404, data: { code: 'PROGRESS_SUBJECT_NOT_FOUND', field: 'subject_id' } })
     }
     // The gap opportunities Today offers the owner, by the subject each one records.
     const gapOpportunities = async () => {
@@ -1572,12 +1572,12 @@ test('a business’s site shows a guest the stay its signed link names, from any
     const read = (organizationId: string, token?: string) => {
       const app = new H3()
       app.use((event) => { event.context.organizationId = organizationId })
-      app.get('/api/public/guest-stays/:activityId', guestStayRoute)
+      app.get('/api/public/guest-stays/:activity_id', guestStayRoute)
       return app.request(Object.assign(new Request(`https://org.proof.example/api/public/guest-stays/${activityId}`, { headers: token ? { authorization: `Bearer ${token}` } : {} }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
     }
     const accountRead = (cookie?: string) => {
       const app = new H3()
-      app.get('/api/account/stays/:activityId', accountStayRoute)
+      app.get('/api/account/stays/:activity_id', accountStayRoute)
       return app.request(Object.assign(new Request(`https://proof.example/api/account/stays/${activityId}`, { headers: cookie ? { cookie } : {} }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
     }
 
@@ -1770,9 +1770,9 @@ test('a stay paid on a business’s site returns to that site’s stay confirmat
     })
     const app = new H3()
     app.use((event) => { event.context.organizationId = ORG })
-    app.post('/api/public/payments/:paymentId/return', paymentReturnRoute)
-    app.get('/api/public/guest-stays/:activityId', guestStayRoute)
-    app.get('/api/account/stays/:activityId', accountStayRoute)
+    app.post('/api/public/payments/:payment_id/return', paymentReturnRoute)
+    app.get('/api/public/guest-stays/:activity_id', guestStayRoute)
+    app.get('/api/account/stays/:activity_id', accountStayRoute)
     const call = (path: string, init: RequestInit = {}, headers: Record<string, string> = { cookie }) => app.request(Object.assign(new Request(`https://org.proof.example${path}`, { ...init, headers: { ...headers, 'content-type': 'application/json' } }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
 
     const back = await call('/api/public/payments/stay-pay/return', { method: 'POST', body: JSON.stringify({ claim }) })
@@ -1946,11 +1946,11 @@ test('home location sharing protects every public projection after localization 
       assert.equal(reviews.length, 1)
       assert.equal(reviews[0]!.original_reference, null)
       assert.equal(reviews[0]!.google_review_metadata?.flag_content_uri, null)
-      const locationReviews = await listOrganizationReviews(db, ORG, { locationId: 'cabin-site', publishedOnly: true })
-      assert.equal(locationReviews.length, 1)
-      assert.equal(locationReviews[0]!.original_reference, null)
+      const location_reviews = await listOrganizationReviews(db, ORG, { locationId: 'cabin-site', publishedOnly: true })
+      assert.equal(location_reviews.length, 1)
+      assert.equal(location_reviews[0]!.original_reference, null)
       // The site's review list includes location reviews, still projected for the private home.
-      const siteReview = (await listOrganizationReviews(db, ORG, { publishedOnly: true })).find(review => review.id === locationReviews[0]!.id)
+      const siteReview = (await listOrganizationReviews(db, ORG, { publishedOnly: true })).find(review => review.id === location_reviews[0]!.id)
       assert.equal(siteReview?.original_reference, null)
     }
 
@@ -2015,7 +2015,7 @@ test('native calendar writes retain real session and impersonator evidence with 
       return cookie(response)
     }
     const app = new H3()
-    app.put('/api/dashboard/stay-homes/:productId/nights', editNightsRoute)
+    app.put('/api/dashboard/stay-homes/:product_id/nights', editNightsRoute)
     const put = (sessionCookie: string, minimum: number) => app.request(Object.assign(new Request(`https://proof.example/api/dashboard/stay-homes/${cabin.id}/nights?org=org`, {
       method: 'PUT', headers: { cookie: sessionCookie, origin: 'https://proof.example', 'content-type': 'application/json', 'user-agent': 'Krabiclaw/25 CalendarAuditProof', 'x-request-id': 'calendar-audit-proof', 'cf-ray': 'calendar-proof-ray' },
       body: JSON.stringify({ from: '2026-11-04', to: '2026-11-05', min_stay_arrival: minimum }),

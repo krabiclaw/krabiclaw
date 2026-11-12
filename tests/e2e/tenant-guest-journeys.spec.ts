@@ -311,7 +311,7 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     const threadURL = `${baseURL}/api/dashboard/organizations/${wheel.organizationId}/guest-threads/${body.conversation_id}`
     const pendingThread = await request.get(threadURL)
     expect(pendingThread.status(), await pendingThread.text()).toBe(200)
-    expect((await pendingThread.json() as { thread: InboxThread }).thread).toMatchObject({ id: body.conversation_id, guestName: 'Cancel Once', recordKind: 'booking' })
+    expect((await pendingThread.json() as { thread: InboxThread }).thread).toMatchObject({ id: body.conversation_id, title: 'Cancel Once', record_kind: 'booking' })
     // Whether a reply is owed is the ledger's, which MCP reads out; the inbox view keeps it on the server.
     const conversationLedger = async () => {
       const response = await mcpRequest(request, baseURL, { method: 'tools/call', toolName: 'get_conversation', args: { organization_id: wheel.organizationId, conversation_id: body.conversation_id } })
@@ -325,11 +325,6 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     const todayBeforePayload = await todayBefore.json() as { tasks: TaskSection[] }
     const todayBeforeTasks = todayBeforePayload.tasks.flatMap(section => section.tasks).filter(task => task.conversation_id === body.conversation_id)
     expect(todayBeforeTasks.filter(task => task.kind === 'guest_reply')).toEqual([])
-    // If booked for today, the teacher's visit job is to prepare for the booking; if booked ahead, Today holds no tasks for it yet.
-    for (const task of todayBeforeTasks) {
-      expect(task.kind).toBe('consultation_prep')
-      expect(task.status).toBe('open')
-    }
     const day = persistedBooking.booking_date
     // Calendar owns confirmed commitments; quests do not repeat its agenda.
     const scheduleParams = { org: wheel.slug, from: day, to: day }
@@ -359,13 +354,13 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     const cancelEntries = cancelledLedger.messages.filter(entry => entry.event === 'booking.cancel')
     expect(cancelEntries).toHaveLength(1)
     expect(thread.stream.filter(item => item.type === 'event' && item.id === cancelEntries[0]!.id)).toMatchObject([{ text: expect.stringMatching(/ canceled the booking$/) }])
-    const scheduleAfter = await request.get(`${baseURL}/api/dashboard/agenda`, { params: scheduleParams })
-    expect(scheduleAfter.status(), await scheduleAfter.text()).toBe(200)
-    expect((await scheduleAfter.json() as { items: Array<{ id: string }> }).items.some(item => item.id === `booking:${body.conversation_id}`)).toBe(false)
     const todayAfter = await request.get(`${baseURL}/api/dashboard/today`, { params: { org: wheel.slug } })
     expect(todayAfter.status(), await todayAfter.text()).toBe(200)
     const todayAfterPayload = await todayAfter.json() as { tasks: TaskSection[] }
     expect(todayAfterPayload.tasks.flatMap(section => section.tasks).filter(task => task.conversation_id === body.conversation_id && task.status === 'open')).toEqual([])
+    const scheduleAfter = await request.get(`${baseURL}/api/dashboard/agenda`, { params: scheduleParams })
+    expect(scheduleAfter.status(), await scheduleAfter.text()).toBe(200)
+    expect((await scheduleAfter.json() as { items: Array<{ id: string }> }).items.some(item => item.id === `booking:${body.conversation_id}`)).toBe(false)
     expect((await request.post(cancelURL, {
       headers: { ...headers, Authorization: 'Bearer invalid-cancellation-token' },
     })).status()).toBe(404)
@@ -382,6 +377,65 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
       expect(await denied.json()).toEqual({ error: 'Booking not found' })
     }
   })
+
+  test('two class bookings share one prep task and keep one follow-up each', async ({ request }) => {
+    const baseURL = testBaseUrl()
+    const wheel = wheelClass()
+    const locationId = seededTenant('experience').locations['ao-nang']!.id
+    await loginAs(request, baseURL, 'user-e2e-pottery-owner')
+    const call = async <T>(toolName: string, args: Record<string, unknown>): Promise<T> => {
+      const response = await mcpRequest(request, baseURL, { method: 'tools/call', toolName, args: { organization_id: wheel.organizationId, ...args } })
+      expect(response.status()).toBe(200)
+      return mcpData<T>(await response.json())
+    }
+    // A dedicated afternoon occurrence keeps other journeys' morning bookings out of this session.
+    const startsAt = new Date(Date.now() + 2 * 86_400_000)
+    startsAt.setUTCHours(8, 0, 0, 0)
+    const { sessions: [session] } = await call<{ sessions: Array<{ id: string }> }>('create_product_session', {
+      product_id: wheel.product.id, location_id: locationId, starts_at: startsAt.toISOString(),
+      ends_at: new Date(startsAt.getTime() + 7_200_000).toISOString(), capacity: 8, idempotency_key: crypto.randomUUID(),
+    })
+    const sessionId = session!.id
+    const headers = { ...devLoginHeaders(), ...seededSiteHeaders('experience') }
+    const book = async (index: number, partySize: number) => {
+      const response = await request.post(`${baseURL}/api/public/products/${wheel.product.slug}/book`, {
+        headers, data: { product_session_id: sessionId, party_size: partySize, guest_name: `Class Prep Guest ${index}`,
+          guest_email: `class-prep-${index}@playwright.example`, idempotency_key: crypto.randomUUID() },
+      })
+      expect(response.status(), await response.text()).toBe(201)
+      return await response.json() as { booking_id: string; conversation_id: string; cancellation_token: string }
+    }
+    const tasks = async (kind: string, status: 'open' | 'cancelled' = 'open') => {
+      const { sections } = await call<{ sections: TaskSection[] }>('list_tasks', {
+        range: status === 'open' ? 'upcoming' : 'today', status, kind, assignee: 'all',
+      })
+      return sections.flatMap(section => section.tasks)
+    }
+    const prepTasks = async (status?: 'cancelled') => (await tasks('consultation_prep', status)).filter(task => task.product_session_id === sessionId)
+    const first = await book(1, 3)
+    const prep = await prepTasks()
+    expect(prep).toMatchObject([{ kind: 'consultation_prep', status: 'open', booking_id: null, path: expect.stringContaining(`/calendar/sessions/${sessionId}?`) }])
+    const second = await book(2, 1)
+    expect(await prepTasks()).toMatchObject([{ id: prep[0]!.id, version: prep[0]!.version }])
+    const bookingIds = [first.booking_id, second.booking_id].sort()
+    const followUps = async () => (await tasks('consultation_follow_up')).filter(task => bookingIds.includes(task.booking_id ?? '')).map(task => task.booking_id).sort()
+    expect(await followUps()).toEqual(bookingIds)
+    const cancel = async (booking: typeof first) => {
+      const cancelled = await request.post(`${baseURL}/api/public/booking-requests/${booking.conversation_id}/cancel`, {
+        headers: { ...headers, Authorization: `Bearer ${booking.cancellation_token}` },
+      })
+      expect(cancelled.status(), await cancelled.text()).toBe(200)
+      expect((await call<{ record: { status: string } }>('get_product_booking', { booking_id: booking.booking_id })).record.status).toBe('cancelled')
+    }
+    await cancel(first)
+    expect(await prepTasks()).toMatchObject([{ id: prep[0]!.id }])
+    expect(await followUps()).toEqual([second.booking_id])
+    await cancel(second)
+    expect(await prepTasks()).toEqual([])
+    expect(await prepTasks('cancelled')).toMatchObject([{ id: prep[0]!.id }])
+    expect(await followUps()).toEqual([])
+  })
+
 })
 
 for (const seeded of [

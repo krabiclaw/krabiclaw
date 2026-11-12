@@ -33,9 +33,9 @@ import { createAuth } from '../../server/utils/auth.ts'
 import servicesPostRoute from '../../server/api/dashboard/services.post.ts'
 import servicesGetRoute from '../../server/api/dashboard/services.get.ts'
 import mcpRoute from '../../server/api/mcp.ts'
-import paymentReturnRoute from '../../server/api/public/payments/[paymentId]/return.post.ts'
-import paymentCancelRoute from '../../server/api/public/payments/[paymentId]/cancel.post.ts'
-import paymentHandoffRoute from '../../server/api/public/payments/[paymentId].get.ts'
+import paymentReturnRoute from '../../server/api/public/payments/[payment_id]/return.post.ts'
+import paymentCancelRoute from '../../server/api/public/payments/[payment_id]/cancel.post.ts'
+import paymentHandoffRoute from '../../server/api/public/payments/[payment_id].get.ts'
 import { readStayCalendar } from '../../server/domain/stays.ts'
 import bookingReceiptRoute from '../../server/api/public/booking-requests/[conversation_id].get.ts'
 import { createReplayableReservationCancelToken, hashReservationCancelToken } from '../../server/utils/reservation-cancel-token.ts'
@@ -712,7 +712,7 @@ test('a payment back on the business’s site claims for that site’s buyer and
 
   const app = new H3()
   app.use((event) => { event.context.organizationId = ORG })
-  app.post('/api/public/payments/:paymentId/return', paymentReturnRoute)
+  app.post('/api/public/payments/:payment_id/return', paymentReturnRoute)
   app.get('/api/public/booking-requests/:conversation_id', bookingReceiptRoute)
   const call = (path: string, init: { method?: string; headers?: Record<string, string>; body?: unknown } = {}) => app.request(Object.assign(new Request(`https://payments.proof.example${path}`, {
    method: init.method ?? 'GET', headers: { origin: 'https://payments.proof.example', 'content-type': 'application/json', ...init.headers }, ...(init.body ? { body: JSON.stringify(init.body) } : {}),
@@ -736,7 +736,7 @@ test('a payment back on the business’s site claims for that site’s buyer and
   // Another business's site cannot complete this business's payment.
   const elsewhere = new H3()
   elsewhere.use((event) => { event.context.organizationId = 'another-org' })
-  elsewhere.post('/api/public/payments/:paymentId/return', paymentReturnRoute)
+  elsewhere.post('/api/public/payments/:payment_id/return', paymentReturnRoute)
   const foreign = await elsewhere.request(Object.assign(new Request('https://another.proof.example/api/public/payments/deposit/return', { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ claim: claims.deposit }) }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
   assert.equal(foreign.status, 404)
   assert.equal(await db.prepare("SELECT claimed_at FROM payments WHERE id='deposit'").first('claimed_at'), null)
@@ -785,7 +785,7 @@ test('buyer Activity groups exact owned visits and immutable orders without manu
   await db.prepare("UPDATE payment_checkout_holds SET buyer_user_id='verified',conversation_id=?,status='converted' WHERE payment_id='visit-payment'").bind(opening.id).run()
   await db.prepare("INSERT INTO payments(id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,subject_id,currency,amount,captured_amount,price_snapshot_json,created_at,updated_at) VALUES('other-payment',?,'other','acct_seller',0,'booking',?,'USD',10000,10000,?,?,?)").bind(ORG,booking.bookingId,JSON.stringify({title:'Other private purchase'}),NOW,NOW).run()
   const visits=(await buyerActivities(db,'verified')).activities
-  assert.deepEqual(visits.map(({kind,id,requestId,operationalId})=>({kind,id,requestId,operationalId})),[{kind:'booking',id:opening.id,requestId:opening.id,operationalId:booking.bookingId}])
+  assert.deepEqual(visits.map(({kind,id,conversation_id,booking_id})=>({kind,id,conversation_id,booking_id})),[{kind:'booking',id:opening.id,conversation_id:opening.id,booking_id:booking.bookingId}])
   assert.equal(await buyerPaymentActivityPath(db,'verified','visit-payment'),`/dashboard/account/activity/booking/${opening.id}`)
   // The team's private note on the booking is never the buyer's to read.
   await db.prepare("UPDATE bookings SET private_notes='Team-only note' WHERE id=?").bind(booking.bookingId).run()
@@ -856,7 +856,7 @@ test('buyer conversations hide merchant facts and preserve public unread receipt
   const inbox=await listConversations(db,null,{userId:'verified',buyerAudience:true})
   // The newest messages are the internal note and the dispute; the buyer's row previews the newest message they can read
   // (KrabiClaw's payment message, from the business), unread.
-  assert.deepEqual(inbox.map(row=>[row.id,row.preview,row.previewFrom,row.guestName,row.unread]),[['buyer-conversation','Payment received','Payments','Payments',true]])
+  assert.deepEqual(inbox.map(row=>[row.id,row.preview,row.preview_from,row.title,row.unread]),[['buyer-conversation','Payment received','Payments','Payments',true]])
   assert.deepEqual(await listConversations(db,null,{userId:'other',buyerAudience:true}),[])
   // Opening it reads it through the newest message they were shown; what they cannot see does not keep it unread.
   await markConversationRead(db,{organizationId:ORG,conversationId:'buyer-conversation',userId:'verified',throughMessageId:capture.id})
@@ -1064,8 +1064,8 @@ test('a stay purchase claim cancels Stripe before releasing only its held nights
     })
     const app = new H3()
     app.use(event => { event.context.organizationId = event.req.headers.get('x-test-organization') ?? ORG })
-    app.get('/api/public/payments/:paymentId', paymentHandoffRoute)
-    app.post('/api/public/payments/:paymentId/cancel', paymentCancelRoute)
+    app.get('/api/public/payments/:payment_id', paymentHandoffRoute)
+    app.post('/api/public/payments/:payment_id/cancel', paymentCancelRoute)
     const cancel = (claim: string, organizationId = ORG) => app.request(Object.assign(new Request('https://payments.proof.example/api/public/payments/changing/cancel', {
       method: 'POST', headers: { 'content-type': 'application/json', 'x-test-organization': organizationId }, body: JSON.stringify({ claim }),
     }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))

@@ -144,7 +144,7 @@ async function loadThreadList(request: APIRequestContext, guestName: string) {
   })
   await expectStatus(response, 200)
   const { threads } = await response.json() as { threads: InboxRow[] }
-  return { threads: threads.filter(thread => thread.guestName === guestName) }
+  return { threads: threads.filter(thread => thread.title === guestName) }
 }
 
 async function loadThreadDetail(
@@ -259,19 +259,19 @@ test('guest thread state stays source-owned, per-user, tenant-isolated, and idem
     expect(secondOwnerListBefore.threads[0]!.id).toBe(threadId)
     // The row is the guest's own words, from them, on the business's own channel.
     const guestFirstName = guestName.split(' ')[0]!
-    expect(ownerListBefore.threads[0]).toMatchObject({ guestName, kind: 'guest', channel: 'direct', preview: message, previewFrom: guestFirstName, unread: true })
-    expect(secondOwnerListBefore.threads[0]).toMatchObject({ guestName, kind: 'guest', channel: 'direct', preview: message, previewFrom: guestFirstName, unread: true })
+    expect(ownerListBefore.threads[0]).toMatchObject({ title: guestName, kind: 'guest', channel: 'direct', preview: message, preview_from: guestFirstName, unread: true })
+    expect(secondOwnerListBefore.threads[0]).toMatchObject({ title: guestName, kind: 'guest', channel: 'direct', preview: message, preview_from: guestFirstName, unread: true })
 
     const detail = await loadThreadDetail(owner, threadId)
     // A contact has no record behind it, and a reply goes to the email the guest left.
     expect(detail).toMatchObject({
       id: threadId,
       kind: 'guest',
-      guestName,
+      title: guestName,
       channel: 'direct',
       when: null,
-      recordId: null,
-      recordKind: null,
+      booking_id: null,
+      record_kind: null,
       composer: { channel: 'email', available: true },
     })
     // The guest's own words open the conversation, once, as their message.
@@ -362,7 +362,7 @@ test('guest thread state stays source-owned, per-user, tenant-isolated, and idem
     expect(ownerListAfterReply.threads[0]).toMatchObject({
       id: threadId,
       preview: replyBody,
-      previewFrom: 'You',
+      preview_from: 'You',
       unread: false,
     })
     // A reply is an answer once a provider accepted it. This environment delivers email log-only, so the record
@@ -412,8 +412,8 @@ test('archive and Move to messages file a conversation for the one member, witho
     await submitContact(guest, newerName)
 
     const current = await loadMailbox(owner, 'current')
-    const filed = current.find(thread => thread.guestName === filedName)
-    const newer = current.find(thread => thread.guestName === newerName)
+    const filed = current.find(thread => thread.title === filedName)
+    const newer = current.find(thread => thread.title === newerName)
     expect(filed).toBeDefined()
     const threadId = filed!.id
     expect(await loadThreadActions(owner, threadId)).toMatchObject({ archive: true, unarchive: false })
@@ -474,7 +474,7 @@ test('suggested replies fill the composer, hide while typing or after ×, and co
   // The drafts come from Workers AI, which the E2E server has no binding for; the
   // composer's behaviour around them is what this covers, so their words are fixed here.
   const drafts = ['Thanks for writing, we will check and get back to you.', 'Happy to help with that.']
-  await page.route(new RegExp(`/guest-threads/${threadId}/suggested-reply(\\?|$)`), route => route.fulfill({ json: { generationId: 'e2e-generation', suggestions: drafts } }))
+  await page.route(new RegExp(`/guest-threads/${threadId}/suggested-reply(\\?|$)`), route => route.fulfill({ json: { generation_id: 'e2e-generation', suggestions: drafts } }))
   await dismissPreviewToolbar(page)
   await page.goto(`${baseURL}/dashboard/${organizationSlug()}/messages/${threadId}`)
 
@@ -623,10 +623,11 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
   expect(todaySeating, 'The seating added for today is offered on the site').toBeDefined()
 
   const bookingIds: string[] = []
+  const futureSeating = await openSeating(page.request, 2, 2 * 86_400_000)
   // Two days out, so the change request below is inside the 24-hour change window whatever the hour.
   for (const [name, email, seating] of [
     [guestName, guestEmail, todaySeating!],
-    ['Priya Patel', `priya-${now}@example.test`, await openSeating(page.request, 2, 2 * 86_400_000)],
+    ['Priya Patel', `priya-${now}@example.test`, futureSeating],
   ] as const) {
     bookingIds.push((await bookTable(page.request, { name, email, phone: '+12025550123', partySize: 2, seating })).requestId)
   }
@@ -639,19 +640,25 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
   const todayResponse = await page.request.get('/api/dashboard/today', { params: { org: demoSlug() } })
   await expectStatus(todayResponse, 200)
   const todayFeed = await todayResponse.json() as BusinessToday
-  expect(todayFeed.tasks.flatMap(section => section.tasks).filter(task => task.conversation_id === bookingIds[0]).map(task => task.kind)).toContain('consultation_prep')
+  const prep = todayFeed.tasks.flatMap(section => section.tasks).filter(task => task.kind === 'consultation_prep' && task.product_session_id === todaySeating!.id)
+  expect(prep).toMatchObject([{ booking_id: null, status: 'open', path: expect.stringContaining(`/calendar?date=${localToday.date}`) }])
   const agendaResponse = await page.request.get('/api/dashboard/agenda', { params: { org: demoSlug(), from: localToday.date, to: localDateAt(new Date(now + 5 * 86_400_000), timezone) } })
   await expectStatus(agendaResponse, 200)
-  const agenda = await agendaResponse.json() as { items: Array<{ id: string; to: string; startsAt: string }> }
+  const agenda = await agendaResponse.json() as { items: Array<{ id: string; to: string; starts_at: string; ends_at: string }> }
   const reservation = agenda.items.find(item => item.id === `booking:${bookingIds[0]}`)
   expect(reservation?.to).toBe(`/dashboard/${demoSlug()}/bookings/booking/${bookingIds[0]}`)
   await expect(page.getByRole('tab', { name: 'Today', exact: true })).toBeVisible()
   await expect(page.getByRole('tab', { name: 'Upcoming', exact: true })).toBeVisible()
+  const prepCalendar = await page.goto(`${baseURL}${prep[0]!.path}`)
+  expect(prepCalendar?.status()).toBe(200)
+  await expect(page.getByRole('heading', { name: 'Calendar', exact: true })).toBeVisible()
+  await expect(page.getByText('The calendar could not be loaded')).toHaveCount(0)
 
   const upcomingResponse = await page.request.get('/api/dashboard/today', { params: { org: demoSlug(), range: 'upcoming' } })
   await expectStatus(upcomingResponse, 200)
   const upcomingFeed = await upcomingResponse.json() as BusinessToday
-  expect(upcomingFeed.tasks.flatMap(section => section.tasks).filter(task => task.conversation_id === upcomingBookingId).map(task => task.kind)).toContain('consultation_prep')
+  expect(upcomingFeed.tasks.flatMap(section => section.tasks).filter(task => task.kind === 'consultation_prep' && task.product_session_id === futureSeating.id))
+    .toMatchObject([{ booking_id: null, status: 'open' }])
   const upcomingReservation = agenda.items.find(item => item.id === `booking:${upcomingBookingId}`)
   expect(upcomingReservation?.to).toBe(`/dashboard/${demoSlug()}/bookings/booking/${upcomingBookingId}`)
   expect(localDateAt(new Date(upcomingReservation!.starts_at), timezone) > localToday.date).toBe(true)
@@ -843,7 +850,7 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
   await expect(page).toHaveURL(`${baseURL}/dashboard/${demoSlug()}/bookings/booking/${upcomingBookingId}${changeContext}`)
 
   const detail = await loadThreadDetail(page.request, before.booking.conversation_id, demoOrganizationId())
-  const requests = streamChanges(detail).filter(item => item.sentAt >= requestedAt)
+  const requests = streamChanges(detail).filter(item => item.sent_at >= requestedAt)
   expect(requests).toHaveLength(1)
   expect(requests[0]!.change).toMatchObject({ requested_by: 'business', status: 'pending', after: { party_size: targetPartySize } })
   const deliveryResponse = await page.request.get('/api/dev/notifications', {
@@ -874,7 +881,7 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
     // The proposal reads accepted, and the conversation says so once.
     const afterDetail = await loadThreadDetail(page.request, before.booking.conversation_id, demoOrganizationId())
     expect(streamChanges(afterDetail).find(item => item.id === request.id)?.change.status).toBe('accepted')
-    expect(streamEvents(afterDetail, `${afterDetail.guestName}’s change was accepted`)).toHaveLength(1)
+    expect(streamEvents(afterDetail, `${afterDetail.title}’s change was accepted`)).toHaveLength(1)
   }
 })
 
@@ -968,7 +975,7 @@ test('buyer conversation approves and declines canonical changes without moving 
     const changeMessage = 'Could we move this reservation later? Please send an available time.'
     await expect(page.getByText('Describe the dates, time or guest details you would like to change. The business will review your request before anything changes.', { exact: true })).toBeVisible()
     await page.getByRole('textbox', { name: 'Write a message…', exact: true }).fill(changeMessage)
-    const sentAt = new Date().toISOString()
+    const sent_at = new Date().toISOString()
     const sentRequest = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === `/api/account/messages/${threadId}/reply`)
     await page.getByRole('button', { name: 'Send a change request', exact: true }).click()
     await expectStatus(await sentRequest, 200)
@@ -984,7 +991,7 @@ test('buyer conversation approves and declines canonical changes without moving 
     })] }])
     const customerRequest = streamMessages(requested).filter(item => item.side === 'guest' && item.body === changeMessage)
     expect(customerRequest).toMatchObject([{ author: 'E2E Buyer' }])
-    const requestDelivery = await owner.get('/api/dev/notifications', { headers: devLoginHeaders(), params: { organization_id: demoOrganizationId(), since: sentAt } })
+    const requestDelivery = await owner.get('/api/dev/notifications', { headers: devLoginHeaders(), params: { organization_id: demoOrganizationId(), since: sent_at } })
     await expectStatus(requestDelivery, 200)
     expect((await requestDelivery.json() as DeliveryList).deliveries.some(delivery => delivery.message_id === customerRequest[0]!.id && delivery.purpose === 'owner_alert' && delivery.status === 'sent')).toBe(true)
   } finally {

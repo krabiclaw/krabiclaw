@@ -1,21 +1,21 @@
 {
   "pagination": {
-    "hasMore": false,
+    "has_more": false,
     "limit": 100,
-    "nextOffset": null,
+    "next_offset": null,
     "offset": 0
   },
   "threads": [
     {
-      "avatarInitial": "J",
+      "avatar_initial": "J",
       "channel": "direct",
-      "guestName": "Jo Park",
       "home": "74 D · Sky",
       "id": "quiet-contact",
       "kind": "guest",
       "preview": "Do you allow dogs at 74 D?",
-      "previewFrom": "Jo",
+      "preview_from": "Jo",
       "time": "Oct 1",
+      "title": "Jo Park",
       "unread": true,
       "when": null
     }

@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:df9e8d5415f28e4be25d847e47fb7d0f5a12408fa72090f20b2bf8acde3e74ea",
-  "documentationFingerprint": "sha256:d955f39647a0ab17dfb8de98c7bdfedd27c4781abb5323556503d6088d9a2f95",
+  "fingerprint": "sha256:d2af3bbd63c6ec33bcd5bf34e40b02a34d50022b4c0f8a69fe9db2a7cb502a21",
+  "documentationFingerprint": "sha256:5f1743bfdf895c56897c2441a4dabaeb022c182e88d3c1f95efe26653bd80d8d",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -255,6 +255,9 @@
                   "string",
                   "null"
                 ]
+              },
+              "product_session_id": {
+                "type": "string"
               },
               "reservation": {
                 "properties": {
@@ -13836,6 +13839,9 @@
                   "string",
                   "null"
                 ]
+              },
+              "product_session_id": {
+                "type": "string"
               },
               "reservation": {
                 "properties": {
@@ -37809,6 +37815,9 @@
                   "null"
                 ]
               },
+              "product_session_id": {
+                "type": "string"
+              },
               "reservation": {
                 "properties": {
                   "conversation": {
@@ -48577,6 +48586,9 @@
                           "string",
                           "null"
                         ]
+                      },
+                      "product_session_id": {
+                        "type": "string"
                       },
                       "reservation": {
                         "properties": {
@@ -72671,6 +72683,9 @@
                           "string",
                           "null"
                         ]
+                      },
+                      "product_session_id": {
+                        "type": "string"
                       },
                       "reservation": {
                         "properties": {
@@ -103494,6 +103509,9 @@
                   "null"
                 ]
               },
+              "product_session_id": {
+                "type": "string"
+              },
               "reservation": {
                 "properties": {
                   "conversation": {
@@ -128191,6 +128209,9 @@
                   "null"
                 ]
               },
+              "product_session_id": {
+                "type": "string"
+              },
               "reservation": {
                 "properties": {
                   "conversation": {
@@ -128448,7 +128469,7 @@
       "toolContracts": {
         "cancel_product_booking": "sha256:208a0c823b7f31153a89ffd5f63fe4d9af96f29cda1f4da0ffac35be49fb2951",
         "confirm_product_booking": "sha256:1c9695ad981f010718a3f36845717ed36a1546018f196b5f0292ac9a07f9fc8d",
-        "get_conversation": "sha256:0bb638b4ce881d5db51291ff262e13633e2b2a6bcbeca21246027deb716fcd84",
+        "get_conversation": "sha256:9ecff07dc40a9054c6c234c1ecfaea30669ec0c52f232feb7cdb0145ab0401e4",
         "get_product_booking": "sha256:20230c21eae72abeb5dadb0c555588a6ef1b336aa125edf5c3df38698c22982b",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_conversation_recipients": "sha256:439170e450547b9261d1f0499d27ef7ca95dd024cacf847719fee4f4c40e249e",
@@ -128578,7 +128599,7 @@
       },
       "toolContracts": {
         "create_post": "sha256:a2a95f5e752b47a10f2d42dfaaca0caca19afd2a4110adc3fd97dad2eb8a763a",
-        "get_conversation": "sha256:0bb638b4ce881d5db51291ff262e13633e2b2a6bcbeca21246027deb716fcd84",
+        "get_conversation": "sha256:9ecff07dc40a9054c6c234c1ecfaea30669ec0c52f232feb7cdb0145ab0401e4",
         "get_organization_analytics": "sha256:4fcc7f6cef537aa552200cc74b666d866684657015427e256651d7791140b814",
         "get_product": "sha256:b2afea3d084c67b0aacc46c8fbdbcf652dfaa2554de42de7bef06b16312f05e1",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",

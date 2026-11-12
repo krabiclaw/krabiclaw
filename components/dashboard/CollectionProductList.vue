@@ -99,7 +99,7 @@ const route = useRoute()
 const level = useRouteLevel()
 const router = useRouter()
 const organizationId = useDashboardOrganizationId()
-const collectionId = computed(() => String(route.params.collectionId ?? ''))
+const collectionId = computed(() => String(route.params.collection_id ?? ''))
 const locationId = useLocationScope()
 // A section's full membership is independent of the location used for prices.
 const catalog = useProductCatalog(organizationId, ref(null))
@@ -112,7 +112,7 @@ const loadError = computed(() => {
   const cause = catalog.error.value ?? locationsError.value
   return cause ? getErrorMessage(cause, 'The section could not be loaded') : null
 })
-const catalogPath = computed(() => '/dashboard/' + String(route.params.orgSlug) + '/products')
+const catalogPath = computed(() => '/dashboard/' + String(route.params.org_slug) + '/products')
 const scoped = (path: string, query: Record<string, string | undefined> = {}) => router.resolve({ path, query: { location_id: locationId.value ?? undefined, kind: route.query.kind === 'dish' ? 'dish' : undefined, ...query } }).fullPath
 
 function membersFor(id: string): Product[] {

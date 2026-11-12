@@ -103,8 +103,8 @@ export interface PublicProductSession {
 
 export interface PublicProductDetail extends PublicProductCollection {
   location: PublicProductLocation | null
-  scopeRequired?: boolean
-  onlineAvailable?: boolean
+  scope_required?: boolean
+  online_available?: boolean
   product: PublicProduct
   /**
    * Present exactly when the Product takes bookings.
@@ -115,26 +115,26 @@ export interface PublicProductDetail extends PublicProductCollection {
    * bookable Product with nothing scheduled.
    */
   booking: PublicProductBooking | null
-  localeRepresentations: PublicLocaleRepresentation[]
+  locale_representations: PublicLocaleRepresentation[]
 }
 
 export interface PublicProductDetailPayload {
   product: PublicProduct
   location: PublicProductLocation | null
   locations?: PublicProductLocation[]
-  scopeRequired?: boolean
-  onlineAvailable?: boolean
+  scope_required?: boolean
+  online_available?: boolean
   currency: CurrencyCode
   vertical: string
-  brandName: string
+  organization_name: string
   reviews: PublicProductReview[]
   booking: PublicProductBooking | null
   sessions: PublicProductSession[]
-  collectionName: string
-  collectionSiblings: ProductCollectionSibling[]
-  localeRepresentations: PublicLocaleRepresentation[]
+  collection_name: string
+  collection_siblings: ProductCollectionSibling[]
+  locale_representations: PublicLocaleRepresentation[]
   /** A place to stay is paid for on the site only once the business's Payments setup is complete; until then it takes enquiries. */
-  stayCheckoutAvailable: boolean
+  stay_checkout_available: boolean
 }
 
 export interface PublicProductReview {
@@ -251,7 +251,7 @@ export async function loadPublicProductDetail(
     if (!found || !offeredHere || !publishedHere || !onThisSurface) return null
     const product = found
     if (!product) return null
-    const localeRepresentations = await listPublicLocaleRepresentations(env, db, {
+    const locale_representations = await listPublicLocaleRepresentations(env, db, {
       organizationId: collection.organization.id,
       
       sourcePath: collection.presentation.productPath(location.slug, product.slug),
@@ -262,7 +262,7 @@ export async function loadPublicProductDetail(
       location,
       product,
       booking: product.booking,
-      localeRepresentations,
+      locale_representations,
     }
   }
 
@@ -300,7 +300,7 @@ export async function loadPublicProductDetail(
   const localizedOrganization = organizationLocalization
     ? projectExactLocalizedResource('organization', collection.organization, organizationLocalization)
     : { ...collection.organization, name: '' }
-  const localeRepresentations = await listPublicLocaleRepresentations(env, db, {
+  const locale_representations = await listPublicLocaleRepresentations(env, db, {
     organizationId: collection.organization.id,
     
     sourcePath: collection.presentation.productPath(sourceLocation.slug, sourceProduct.slug),
@@ -314,7 +314,7 @@ export async function loadPublicProductDetail(
     location,
     product,
     booking: sourceProduct.booking,
-    localeRepresentations,
+    locale_representations,
   }
 }
 
@@ -383,14 +383,14 @@ async function projectPublicOffering(
   const organizationId = collection.organization.id
   const offeredAt = new Set(found.locations.filter(entry => previewAuthorized || (entry.published && entry.active)).map(entry => entry.location_id))
   const locations = collection.locations.filter(location => offeredAt.has(location.id))
-  const onlineAvailable = Boolean(found.booking?.held_online)
+  const online_available = Boolean(found.booking?.held_online)
   let location: PublicProductLocation | null = null
   if (requestedScope && requestedScope !== 'online') {
     location = locations.find(entry => entry.id === requestedScope) ?? null
     if (!location) return null
-  } else if (requestedScope === 'online' && !onlineAvailable) return null
-  else if (!requestedScope && locations.length === 1 && !onlineAvailable) location = locations[0]!
-  const scopeRequired = !requestedScope && locations.length + Number(onlineAvailable) > 1
+  } else if (requestedScope === 'online' && !online_available) return null
+  else if (!requestedScope && locations.length === 1 && !online_available) location = locations[0]!
+  const scope_required = !requestedScope && locations.length + Number(online_available) > 1
   let product = found
   let organization = collection.organization
   let products = collection.products
@@ -405,10 +405,10 @@ async function projectPublicOffering(
     const translatedOrganization = localizations.find(item => item.resourceType === 'organization' && item.resourceId === organizationId)
     if (translatedOrganization) organization = projectExactLocalizedResource('organization', organization, translatedOrganization)
   }
-  const localeRepresentations = await listPublicLocaleRepresentations(env, db, {
+  const locale_representations = await listPublicLocaleRepresentations(env, db, {
     organizationId, sourcePath, resource: { type: 'product', id: found.id },
   })
-  return { ...collection, organization, products, collections, locations, location, product, booking: found.booking, scopeRequired, onlineAvailable, localeRepresentations }
+  return { ...collection, organization, products, collections, locations, location, product, booking: found.booking, scope_required, online_available, locale_representations }
 }
 
 /** One public response for server rendering and API navigation. */
@@ -422,14 +422,14 @@ export async function publicProductDetailPayload(db: DbClient, env: CloudflareEn
   ])
   return {
     product: detail.product, location: detail.location, locations: detail.locations,
-    scopeRequired: detail.scopeRequired, onlineAvailable: detail.onlineAvailable,
-    currency: detail.currency, vertical: detail.organization.vertical, brandName: detail.organization.name,
+    scope_required: detail.scope_required, online_available: detail.online_available,
+    currency: detail.currency, vertical: detail.organization.vertical, organization_name: detail.organization.name,
     reviews,
     booking: detail.booking, sessions,
-    collectionName: collection?.name ?? '',
-    collectionSiblings: collection ? selectProductCollectionSiblings(detail.products, detail.product, collection.id, { currency: detail.currency, location_id: detail.location?.id ?? null, at: new Date().toISOString() }) : [],
-    localeRepresentations: detail.localeRepresentations,
-    stayCheckoutAvailable: staySetup !== null && staySetup.missing.length === 0,
+    collection_name: collection?.name ?? '',
+    collection_siblings: collection ? selectProductCollectionSiblings(detail.products, detail.product, collection.id, { currency: detail.currency, location_id: detail.location?.id ?? null, at: new Date().toISOString() }) : [],
+    locale_representations: detail.locale_representations,
+    stay_checkout_available: staySetup !== null && staySetup.missing.length === 0,
   }
 }
 
@@ -495,7 +495,7 @@ export async function loadPublicProductSessions(
 ): Promise<PublicProductSession[]> {
   // A saved draft can be previewed before it is bookable. Its public booking
   // API keeps its publication gate; previewing never opens that write path.
-  if (!detail.product.active || !detail.booking || detail.scopeRequired
+  if (!detail.product.active || !detail.booking || detail.scope_required
     || !detail.product.publications.some(publication => publication.organization_id === detail.organization.id && publication.published)) return []
   // A branch with no zone cannot state when anything starts, so it offers
   // nothing here rather than a time in a zone nobody chose.

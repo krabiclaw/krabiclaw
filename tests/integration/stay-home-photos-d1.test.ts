@@ -10,14 +10,14 @@ import * as schema from '../../server/db/schema.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 import createHomeRoute from '../../server/api/dashboard/stay-homes/index.post.ts'
 import listHomesRoute from '../../server/api/dashboard/stay-homes/index.get.ts'
-import updateHomeRoute from '../../server/api/dashboard/stay-homes/[productId].patch.ts'
-import addPhotoRoute from '../../server/api/dashboard/stay-homes/[productId]/photos/index.post.ts'
-import orderPhotosRoute from '../../server/api/dashboard/stay-homes/[productId]/photos/index.put.ts'
-import describePhotoRoute from '../../server/api/dashboard/stay-homes/[productId]/photos/[photoId].patch.ts'
-import removePhotoRoute from '../../server/api/dashboard/stay-homes/[productId]/photos/[photoId].delete.ts'
-import createRoomRoute from '../../server/api/dashboard/stay-homes/[productId]/rooms/index.post.ts'
-import updateRoomRoute from '../../server/api/dashboard/stay-homes/[productId]/rooms/[roomId].patch.ts'
-import updateAccessibilityRoute from '../../server/api/dashboard/stay-homes/[productId]/accessibility.patch.ts'
+import updateHomeRoute from '../../server/api/dashboard/stay-homes/[product_id].patch.ts'
+import addPhotoRoute from '../../server/api/dashboard/stay-homes/[product_id]/photos/index.post.ts'
+import orderPhotosRoute from '../../server/api/dashboard/stay-homes/[product_id]/photos/index.put.ts'
+import describePhotoRoute from '../../server/api/dashboard/stay-homes/[product_id]/photos/[photo_id].patch.ts'
+import removePhotoRoute from '../../server/api/dashboard/stay-homes/[product_id]/photos/[photo_id].delete.ts'
+import createRoomRoute from '../../server/api/dashboard/stay-homes/[product_id]/rooms/index.post.ts'
+import updateRoomRoute from '../../server/api/dashboard/stay-homes/[product_id]/rooms/[room_id].patch.ts'
+import updateAccessibilityRoute from '../../server/api/dashboard/stay-homes/[product_id]/accessibility.patch.ts'
 import { getProduct, hydrateProductMedia } from '../../server/utils/product-management.ts'
 import { writeMemberScheduling } from '../../server/domain/member-scheduling.ts'
 import publicShellRoute from '../../server/api/public/shell.get.ts'
@@ -69,14 +69,14 @@ test('a home authors room details and manages its product photos through authent
     app.get('/api/public/shell', publicShellRoute)
     app.post('/api/dashboard/stay-homes', createHomeRoute)
     app.get('/api/dashboard/stay-homes', listHomesRoute)
-    app.patch('/api/dashboard/stay-homes/:productId', updateHomeRoute)
-    app.post('/api/dashboard/stay-homes/:productId/photos', addPhotoRoute)
-    app.put('/api/dashboard/stay-homes/:productId/photos', orderPhotosRoute)
-    app.patch('/api/dashboard/stay-homes/:productId/photos/:photoId', describePhotoRoute)
-    app.delete('/api/dashboard/stay-homes/:productId/photos/:photoId', removePhotoRoute)
-    app.post('/api/dashboard/stay-homes/:productId/rooms', createRoomRoute)
-    app.patch('/api/dashboard/stay-homes/:productId/rooms/:roomId', updateRoomRoute)
-    app.patch('/api/dashboard/stay-homes/:productId/accessibility', updateAccessibilityRoute)
+    app.patch('/api/dashboard/stay-homes/:product_id', updateHomeRoute)
+    app.post('/api/dashboard/stay-homes/:product_id/photos', addPhotoRoute)
+    app.put('/api/dashboard/stay-homes/:product_id/photos', orderPhotosRoute)
+    app.patch('/api/dashboard/stay-homes/:product_id/photos/:photo_id', describePhotoRoute)
+    app.delete('/api/dashboard/stay-homes/:product_id/photos/:photo_id', removePhotoRoute)
+    app.post('/api/dashboard/stay-homes/:product_id/rooms', createRoomRoute)
+    app.patch('/api/dashboard/stay-homes/:product_id/rooms/:room_id', updateRoomRoute)
+    app.patch('/api/dashboard/stay-homes/:product_id/accessibility', updateAccessibilityRoute)
     const call = async (cookie: string, method: string, path: string, body?: Record<string, unknown> | FormData) => {
       const json = body !== undefined && !(body instanceof FormData)
       const response = await app.request(Object.assign(new Request(`${BASE}/api/dashboard/stay-homes${path}?org=org`, {

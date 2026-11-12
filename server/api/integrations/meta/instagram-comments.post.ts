@@ -80,7 +80,7 @@ export default defineHandler(async (event) => {
   }
 
   const entries = Array.isArray(payload.entry) ? payload.entry : []
-  let repliesDispatched = 0
+  let replies_dispatched = 0
   const deliveryErrors: string[] = []
 
   for (const entry of entries) {
@@ -127,7 +127,7 @@ export default defineHandler(async (event) => {
             message: { text: messageText },
           }),
         })
-        repliesDispatched++
+        replies_dispatched++
       } catch (err) {
         deliveryErrors.push(`${comment.id}: ${err instanceof Error ? err.message : String(err)}`)
       }
@@ -135,8 +135,8 @@ export default defineHandler(async (event) => {
   }
 
   if (deliveryErrors.length) {
-    return jsonResponse({ success: false, repliesDispatched, errors: deliveryErrors }, { status: 502 })
+    return jsonResponse({ success: false, replies_dispatched, errors: deliveryErrors }, { status: 502 })
   }
 
-  return jsonResponse({ success: true, repliesDispatched })
+  return jsonResponse({ success: true, replies_dispatched })
 })

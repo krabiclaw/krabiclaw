@@ -42,8 +42,8 @@ test('autocomplete keeps well-formed predictions and drops malformed ones', asyn
     ],
   }, () => autocompletePlaces('key-1', 'Kikuzuki', SESSION))
   assert.deepEqual(result, [
-    { placeId: 'ChIJ-a', name: 'Kikuzuki', addressLabel: 'Ao Nang, Thailand', fullText: 'Kikuzuki, Ao Nang, Thailand' },
-    { placeId: 'ChIJ-b', name: 'Thailand', addressLabel: '', fullText: 'Thailand' },
+    { google_place_id: 'ChIJ-a', name: 'Kikuzuki', address_label: 'Ao Nang, Thailand', full_text: 'Kikuzuki, Ao Nang, Thailand' },
+    { google_place_id: 'ChIJ-b', name: 'Thailand', address_label: '', full_text: 'Thailand' },
   ])
 })
 

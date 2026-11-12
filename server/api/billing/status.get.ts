@@ -15,9 +15,9 @@ export default defineHandler(async (event) => {
   const session = await getAuthSession(event, env)
   if (!session?.user.id) throw new HTTPError({ statusCode: 401, statusMessage: 'Sign in to read billing', data: { code: 'AUTHENTICATION_REQUIRED', field: 'session' } })
   const query = getQuery(event)
-  if (query.organizationId !== undefined && (typeof query.organizationId !== 'string' || !query.organizationId.trim())) throw new HTTPError({ statusCode: 422, statusMessage: 'A valid organization ID is required', data: { code: 'INVALID_QUERY', field: 'organizationId' } })
+  if (query.organization_id !== undefined && (typeof query.organization_id !== 'string' || !query.organization_id.trim())) throw new HTTPError({ statusCode: 422, statusMessage: 'A valid organization ID is required', data: { code: 'INVALID_QUERY', field: 'organization_id' } })
   if (query.include_price !== undefined && query.include_price !== 'true' && query.include_price !== 'false') throw new HTTPError({ statusCode: 422, statusMessage: 'include_price must be true or false', data: { code: 'INVALID_QUERY', field: 'include_price' } })
-  const organization = await resolveRequestedOrganization(event, db, session.user.id, { explicitOrganizationId: typeof query.organizationId === 'string' ? query.organizationId : null })
+  const organization = await resolveRequestedOrganization(event, db, session.user.id, { explicitOrganizationId: typeof query.organization_id === 'string' ? query.organization_id : null })
   if (!organization) throw new HTTPError({ statusCode: 400, statusMessage: 'Choose a workspace to read billing', data: { code: 'ORGANIZATION_REQUIRED', field: 'org' } })
   await assertRoleAllows({ organizationId: organization.id, role: organization.role, permissions: { billing: ['read'] } })
   try {
@@ -28,7 +28,7 @@ export default defineHandler(async (event) => {
       status.stripeScheduleId ? scheduledPlanChange(env, status.stripeScheduleId) : null,
     ])
     return jsonResponse({ success: true, billing: {
-      ...status, subscription_price, scheduled_plan, organizationId: organization.id,
+      ...status, subscription_price, scheduled_plan, organization_id: organization.id,
       can_update, actions: billingPlanActions(status, scheduled_plan),
     }, user_role: organization.role }, { headers: { 'cache-control': 'private, no-store' } })
   } catch (cause) {

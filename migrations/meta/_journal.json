@@ -8,6 +8,13 @@
       "when": 1794397676242,
       "tag": "0000_baseline",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1794448023793,
+      "tag": "0001_session_prep_tasks",
+      "breakpoints": true
     }
   ]
 }

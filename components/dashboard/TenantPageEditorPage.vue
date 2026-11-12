@@ -75,7 +75,7 @@ export const tenantPageEditorKey = Symbol('tenant-page-editor') as InjectionKey<
 /** Which page document this editor and every level beneath it edit: the one its URL names. */
 export function useTenantPageId(): ComputedRef<string> {
   const route = useRoute()
-  return computed(() => String(route.params.pageId ?? ''))
+  return computed(() => String(route.params.variant_id ?? ''))
 }
 </script>
 
@@ -130,7 +130,7 @@ const errorMessage = ref('')
 const { previewButton, previewPath, previewOpen, previewViewport, previewFailure, changePreviewViewport, restorePreviewFocus } = useDashboardContentPreview(
   computed(() => loadError.value || (!previewUrl.value ? 'The saved page could not be loaded for preview.' : '')),
 )
-const organizationLocalizationSettingsPath = computed(() => `/dashboard/${String(route.params.orgSlug)}/website/preferences/localization`)
+const organizationLocalizationSettingsPath = computed(() => `/dashboard/${String(route.params.org_slug)}/website/preferences/localization`)
 
 function preview(value: string, empty: string) {
   return value.trim() || empty
@@ -180,7 +180,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
     // A page a product owns says which, and leads back to it: one page, two ways in.
     ...(draft.value.product_id ? [{
       id: 'offering',
-      items: [{ id: 'offering', label: 'Offering', summary: 'The product this page shows', lead: { icon: 'i-lucide-briefcase' }, to: `/dashboard/${String(route.params.orgSlug)}/products/${encodeURIComponent(draft.value.product_id)}` }],
+      items: [{ id: 'offering', label: 'Offering', summary: 'The product this page shows', lead: { icon: 'i-lucide-briefcase' }, to: `/dashboard/${String(route.params.org_slug)}/products/${encodeURIComponent(draft.value.product_id)}` }],
     }] : []),
   ]
 })

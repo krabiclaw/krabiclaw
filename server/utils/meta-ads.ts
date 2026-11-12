@@ -9,14 +9,14 @@ const GRAPH_BASE = `https://graph.facebook.com/${META_ADS_GRAPH_VERSION}`
 
 export interface MetaAdAccount {
   id: string
-  accountId: string
+  account_id: string
   name: string
   currency: string
-  timezoneName: string
-  accountStatus: number
-  amountSpent?: string
-  isManager?: boolean
-  notEnabled?: boolean
+  timezone_name: string
+  account_status: number
+  amount_spent?: string
+  is_manager?: boolean
+  not_enabled?: boolean
   error?: string
 }
 
@@ -60,8 +60,8 @@ export async function listMetaAdAccounts(accessToken: string): Promise<MetaAdAcc
 
   return response.data.map((item) => {
     const id = String(item.id ?? '')
-    const accountId = String(item.account_id ?? rawMetaAdAccountId(id))
-    const name = String(item.name ?? accountId)
+    const account_id = String(item.account_id ?? rawMetaAdAccountId(id))
+    const name = String(item.name ?? account_id)
     if (typeof item.currency !== 'string' || !item.currency) {
       throw new Error(`Meta Ad Account ${id} is missing required currency`)
     }
@@ -69,24 +69,24 @@ export async function listMetaAdAccounts(accessToken: string): Promise<MetaAdAcc
     if (typeof item.timezone_name !== 'string' || !item.timezone_name) {
       throw new Error(`Meta Ad Account ${id} is missing required timezone_name`)
     }
-    const timezoneName = item.timezone_name
+    const timezone_name = item.timezone_name
     if (typeof item.account_status !== 'number') {
       throw new Error(`Meta Ad Account ${id} is missing required account_status`)
     }
-    const accountStatus = item.account_status
+    const account_status = item.account_status
     // Meta account_status 1 = ACTIVE; 2 = DISABLED, 3 = UNSETTLED, 100 = PENDING_CLOSURE, 101 = CLOSED
-    const notEnabled = accountStatus !== 1
+    const not_enabled = account_status !== 1
 
     return {
       id,
-      accountId,
+      account_id,
       name,
       currency,
-      timezoneName,
-      accountStatus,
-      amountSpent: typeof item.amount_spent === 'string' ? item.amount_spent : undefined,
-      notEnabled,
-      isManager: false,
+      timezone_name,
+      account_status,
+      amount_spent: typeof item.amount_spent === 'string' ? item.amount_spent : undefined,
+      not_enabled,
+      is_manager: false,
     }
   })
 }
@@ -100,7 +100,7 @@ export async function getMetaAdAccount(accessToken: string, adAccountId: string)
   })
 
   const id = String(item.id ?? actId)
-  const accountId = String(item.account_id ?? rawMetaAdAccountId(id))
+  const account_id = String(item.account_id ?? rawMetaAdAccountId(id))
   if (typeof item.currency !== 'string' || !item.currency) {
     throw new Error(`Meta Ad Account ${id} is missing required currency`)
   }
@@ -113,12 +113,12 @@ export async function getMetaAdAccount(accessToken: string, adAccountId: string)
 
   return {
     id,
-    accountId,
-    name: String(item.name ?? accountId),
+    account_id,
+    name: String(item.name ?? account_id),
     currency: item.currency,
-    timezoneName: item.timezone_name,
-    accountStatus: item.account_status,
-    amountSpent: typeof item.amount_spent === 'string' ? item.amount_spent : undefined,
+    timezone_name: item.timezone_name,
+    account_status: item.account_status,
+    amount_spent: typeof item.amount_spent === 'string' ? item.amount_spent : undefined,
   }
 }
 
@@ -126,7 +126,7 @@ export async function getMetaAdAccount(accessToken: string, adAccountId: string)
 export async function selectMetaAdAccount(
   env: CloudflareEnv,
   organizationId: string,
-  accountId: string,
+  account_id: string,
   adAccountId: string,
   adAccountName: string,
 ): Promise<string> {
@@ -135,15 +135,15 @@ export async function selectMetaAdAccount(
     throw new HTTPError({ statusCode: 409, message: 'Disconnect Meta Ads before connecting again.' })
   }
 
-  const { accessToken } = await linkedAccountAccessToken(env, accountId)
+  const { accessToken } = await linkedAccountAccessToken(env, account_id)
   const targetId = formatMetaAdAccountId(adAccountId)
   const account = await getMetaAdAccount(accessToken, targetId)
-  if (account.accountStatus !== 1) {
+  if (account.account_status !== 1) {
     throw new HTTPError({ statusCode: 422, message: 'That Meta Ad Account is not active or has been disabled.' })
   }
 
   return await storeIntegration(env.DB, organizationId, 'meta_ads', {
-    account_id: accountId,
+    account_id: account_id,
     target_id: targetId,
     target_name: adAccountName || account.name,
   }, { revision: null })

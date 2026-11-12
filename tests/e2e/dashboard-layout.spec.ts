@@ -73,7 +73,7 @@ test.describe('dashboard pane hierarchy', () => {
 
     // Menu is a launcher: no destination nests under it. Each declares Menu as
     // its tab and exits to Menu; Catalog is a primary destination with no exit.
-    const o = '/dashboard/:orgSlug()'
+    const o = '/dashboard/:org_slug()'
     const website = { tab: 'menu', back: 'menu' }
     expect(resolved).toEqual({
       'website/pages': { path: `${ORG}/website/pages`, levels: [`${o}/website`, `${o}/website/pages`], ...website },
@@ -1106,7 +1106,7 @@ test.describe('dashboard pane hierarchy', () => {
       const forbiddenPreview = await memberContext.request.get(`/api/editor/organizations/${organizationId}/context`)
       expect(forbiddenPreview.status(), await forbiddenPreview.text()).toBe(404)
       const deniedPreview = await forbiddenPreview.json()
-      expect(deniedPreview).not.toHaveProperty('context.previewToken')
+      expect(deniedPreview).not.toHaveProperty('context.preview_token')
       expect(deniedPreview).not.toHaveProperty('previewToken')
       const memberPage = await memberContext.newPage()
       await dismissPreviewToolbar(memberPage)
@@ -1631,7 +1631,7 @@ test.describe('dashboard pane hierarchy', () => {
       expect(isAccountActivityResponse(activity), 'the account API returns actual owned activity').toBe(true)
       if (!isAccountActivityResponse(activity)) throw new Error('Invalid account activity response')
       await expect(page.getByRole('heading', { name: 'Past activity', exact: true })).toBeVisible()
-      const past = activity.activities.filter(item => item.kind === 'order' || item.kind === 'payment' || (item.status !== 'cancelled' && item.endsAt !== null && Date.parse(item.endsAt) < Date.now()))
+      const past = activity.activities.filter(item => item.kind === 'order' || item.kind === 'payment' || (item.status !== 'cancelled' && item.ends_at !== null && Date.parse(item.ends_at) < Date.now()))
       const cancelled = activity.activities.filter(item => item.kind === 'booking' && item.status === 'cancelled')
       await expect(page.getByTestId('account-activity-cancelled')).toHaveCount(cancelled.length ? 1 : 0)
       await expect(page.locator('[data-testid^="account-activity-"]:not([data-testid="account-activity-cancelled"])')).toHaveCount(past.length)
@@ -1685,11 +1685,11 @@ test.describe('dashboard pane hierarchy', () => {
       for (const entry of entries.slice(0, 10)) {
         const row = payments.getByTestId(`account-payment-${entry.id}`)
         await expect(row).toHaveAttribute('href', entry.to)
-        await expect(row).toContainText(`${entry.kind === 'paid' ? 'Paid' : 'Refunded'} ${formatTimestamp(entry.occurredAt, 'en', 'UTC', { month: 'short', day: 'numeric' })}`)
+        await expect(row).toContainText(`${entry.kind === 'paid' ? 'Paid' : 'Refunded'} ${formatTimestamp(entry.created_at, 'en', 'UTC', { month: 'short', day: 'numeric' })}`)
         await expect(row).toContainText(entry.title)
         await expect(row).toContainText(paymentMoney(entry.amount, entry.currency))
         await expect(row).toContainText(entry.currency)
-        if (entry.organizationName) await expect(row).toContainText(entry.organizationName)
+        if (entry.organization_name) await expect(row).toContainText(entry.organization_name)
       }
       if (!expectedPaymentIds.size) await expect(payments.getByText('No payments yet', { exact: true })).toBeVisible()
       await payments.getByTestId('dashboard-navbar-close').click()
@@ -2745,10 +2745,10 @@ test.describe('dashboard pane hierarchy', () => {
     expect(discarded.status(), await discarded.text()).toBe(200)
     const name = `E2E Organization ${Date.now().toString(36)}`
     const draft = await page.request.post('/api/dashboard/onboarding/drafts/active', {
-      data: { sourceType: 'manual', vertical: 'restaurant', name, details: { sourceLocale: 'en', country: 'TH', city: 'Ao Nang', streetAddress: '88 Moo 2', currency: 'THB', timezone: 'Asia/Bangkok' } },
+      data: { source_type: 'manual', vertical: 'restaurant', name, details: { source_locale: 'en', country: 'TH', city: 'Ao Nang', street_address: '88 Moo 2', currency: 'THB', timezone: 'Asia/Bangkok' } },
     })
     expect(draft.status(), await draft.text()).toBe(200)
-    const { organizationId } = await draft.json() as { organizationId: string }
+    const { organization_id: organizationId } = await draft.json() as { organization_id: string }
     const listed = async () => (await (await page.request.get('/api/auth/organization/list')).json() as Array<{ id: string }>).map(organization => organization.id)
     try {
       // Deleting is the list's edit state, on the rows Better Auth lets this account delete.

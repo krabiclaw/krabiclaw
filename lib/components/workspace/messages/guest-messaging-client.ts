@@ -28,8 +28,8 @@ export function isMessageTemplate(value: unknown): value is MessageTemplate {
 export function isMessageTemplateResponse(value: unknown): value is { template: MessageTemplate } { return isRecord(value) && isMessageTemplate(value.template) }
 function isPagination(value: unknown): boolean {
   return isRecord(value) && Number.isInteger(value.limit) && Number(value.limit) > 0 && Number(value.limit) <= 100
-    && Number.isSafeInteger(value.offset) && Number(value.offset) >= 0 && typeof value.hasMore === 'boolean'
-    && (value.hasMore ? value.nextOffset === Number(value.offset) + Number(value.limit) : value.nextOffset === null)
+    && Number.isSafeInteger(value.offset) && Number(value.offset) >= 0 && typeof value.has_more === 'boolean'
+    && (value.has_more ? value.next_offset === Number(value.offset) + Number(value.limit) : value.next_offset === null)
 }
 export function isMessageTemplatePage(value: unknown): value is MessageTemplatePage {
   return isRecord(value) && isPagination(value.pagination) && Array.isArray(value.templates) && value.templates.every(isMessageTemplate)
@@ -81,7 +81,7 @@ export function messageScheduleLabel(schedule: GuestMessageSchedule, vertical: s
 }
 
 export function isScheduledMessageResponse(value: unknown): value is { message: ScheduledMessage } { return isRecord(value) && isScheduledMessage(value.message) }
-export function isSuggestedReplies(value: unknown): value is { generationId: string; suggestions: string[] } { return isRecord(value) && typeof value.generationId === 'string' && Boolean(value.generationId) && Array.isArray(value.suggestions) && value.suggestions.length > 0 && value.suggestions.length <= 3 && value.suggestions.every(item => typeof item === 'string' && Boolean(item.trim())) }
+export function isSuggestedReplies(value: unknown): value is { generation_id: string; suggestions: string[] } { return isRecord(value) && typeof value.generation_id === 'string' && Boolean(value.generation_id) && Array.isArray(value.suggestions) && value.suggestions.length > 0 && value.suggestions.length <= 3 && value.suggestions.every(item => typeof item === 'string' && Boolean(item.trim())) }
 
 /** Suggested replies are each person's choice for one workspace in this browser; on until turned off. */
 export function useSuggestedReplies(organizationId: MaybeRefOrGetter<string | null>) {

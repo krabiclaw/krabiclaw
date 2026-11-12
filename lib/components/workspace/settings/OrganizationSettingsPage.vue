@@ -559,7 +559,7 @@ const dashboardApi = useDashboardApi()
 const route = useRoute()
 const editorError = ref<string | null>(null)
 const dashboard = useDashboardOrganization()
-const organizationDashboardPath = computed(() => `/dashboard/${String(route.params.orgSlug)}`)
+const organizationDashboardPath = computed(() => `/dashboard/${String(route.params.org_slug)}`)
 const brandPath = computed(() => `${organizationDashboardPath.value}/website/brand`)
 const preferencesPath = computed(() => `${organizationDashboardPath.value}/website/preferences`)
 const panelId = computed(() => {
@@ -990,7 +990,7 @@ function resetDraft() {
   originalSignature.value = editorSignature(detailKey.value)
 }
 
-const settingsResourceKey = computed(() => `dashboard-organization-settings:${String(route.params.orgSlug)}`)
+const settingsResourceKey = computed(() => `dashboard-organization-settings:${String(route.params.org_slug)}`)
 const { data: settingsResource, error: settingsResourceError, refresh: refreshSettingsResource } = await useAsyncData<SettingsPageResource>(settingsResourceKey, async () => {
   const [settings] = await Promise.all([
     dashboardApi<{ success: boolean; settings: OrganizationSettingsResponse }>('/api/dashboard/settings', { validate: isSettingsResponse }),

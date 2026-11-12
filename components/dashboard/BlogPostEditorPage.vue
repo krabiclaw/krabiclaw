@@ -46,9 +46,9 @@ import { getErrorMessage, isNotFoundError } from '~/utils/errors'
 // One post. Rendered by `blog.vue`, which owns the frame — this level draws its
 // own panel and navbar because it is the outermost level on screen.
 const route = useRoute()
-const orgSlug = route.params.orgSlug as string
+const orgSlug = route.params.org_slug as string
 const organizationId = useDashboardOrganizationId()
-const postId = String(route.params.postId || '')
+const postId = String(route.params.post_id || '')
 if (!postId) throw createError({ statusCode: 400, statusMessage: 'Post ID is required' })
 
 const organizationLocalizationSettingsPath = `/dashboard/${orgSlug}/website/preferences/localization`

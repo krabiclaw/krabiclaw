@@ -72,7 +72,7 @@ export async function handleGuestMessagingTools(ctx: McpExecutorContext): Promis
     case 'list_message_templates': {
       const resource = `message-templates:${access.organizationId}`, window = mcpPageWindow(args, { resource })
       const page = await listMessageTemplates(db, access, window)
-      return { templates: page.templates, page_info: mcpPageInfo(window, page.templates.length, page.pagination.hasMore, { resource }) }
+      return { templates: page.templates, page_info: mcpPageInfo(window, page.templates.length, page.pagination.has_more, { resource }) }
     }
     case 'create_message_template': return { template: await saveMessageTemplate(db, env, access, null, { title: args.title, body: args.body, schedule: args.schedule }) }
     case 'update_message_template': return { template: await saveMessageTemplate(db, env, access, requiredString(args, 'template_id'), { title: args.title, body: args.body, schedule: args.schedule, version: args.version }) }
@@ -94,7 +94,7 @@ export async function handleGuestMessagingTools(ctx: McpExecutorContext): Promis
       if (conversationId !== null) await assertConversationAccess(db, principal, conversationId)
       const resource = `scheduled-guest-messages:${access.organizationId}:${conversationId}`, window = mcpPageWindow(args, { resource })
       const page = await listScheduledGuestMessages(db, access, window, conversationId)
-      return { messages: page.messages, page_info: mcpPageInfo(window, page.messages.length, page.pagination.hasMore, { resource }) }
+      return { messages: page.messages, page_info: mcpPageInfo(window, page.messages.length, page.pagination.has_more, { resource }) }
     }
     case 'cancel_scheduled_guest_message': {
       const saved = await cancelScheduledGuestMessage(db, env, access, requiredString(args, 'scheduled_message_id'))

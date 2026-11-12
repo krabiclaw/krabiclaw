@@ -42,13 +42,13 @@ export default defineHandler(async (event) => {
   const locale = assertExactCanonicalLocale(query.locale ?? await getSourceLocale(db, organizationId))
 
   try {
-    const [posts, index, categories, localeRepresentations] = await Promise.all([
+    const [posts, index, categories, locale_representations] = await Promise.all([
       listPublishedArticles(db, env, organizationId, collection, locale),
       getArticleCollectionIndex(db, organizationId, collection, locale),
       listPublicArticleCategories(env, db, organizationId, collection, locale),
       listArticleCollectionRepresentations(env, db, organizationId, collection),
     ])
-    return jsonResponse({ posts, index, categories, localeRepresentations })
+    return jsonResponse({ posts, index, categories, locale_representations })
   } catch (err) {
     rethrowHttpError(err)
     console.error('Failed to fetch public blog posts:', err)

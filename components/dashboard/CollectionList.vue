@@ -62,7 +62,7 @@ const props = defineProps<{
 }>()
 
 const locationId = useLocationScope()
-const menuPath = computed(() => `/dashboard/${String(route.params.orgSlug)}/products/menu`)
+const menuPath = computed(() => `/dashboard/${String(route.params.org_slug)}/products/menu`)
 
 interface CollectionRow extends Collection {
   product_count: number

@@ -71,7 +71,7 @@ const description = computed(() => blockTextOrNull(props.block.data.description)
 const variant = computed<'home' | 'pricing'>(() => (props.page.path === '/pricing' ? 'pricing' : 'home'))
 
 const { plans, monthlyPrice } = await usePlans()
-const notice = computed(() => pricingNotice(plans.value.find(plan => plan.betaSpotsLeft !== undefined)?.betaSpotsLeft ?? 0))
+const notice = computed(() => pricingNotice(plans.value.find(plan => plan.beta_spots_left !== undefined)?.beta_spots_left ?? 0))
 const config = useRuntimeConfig()
 const pageUrl = resolveSeoUrl('/pricing', config.public.siteUrl)
 

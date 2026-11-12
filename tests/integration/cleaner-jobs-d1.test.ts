@@ -215,13 +215,13 @@ test('a consultation gives its attorney jobs that follow the booking and an aler
     await recompute()
     assert.deepEqual(await jobs(), [
       { kind: 'consultation_follow_up', subject_type: 'booking', subject_id: booking.bookingId, assigned_member_id: 'host-member', starts_at: '2099-10-02T14:00:00.000Z', status: 'open' },
-      { kind: 'consultation_prep', subject_type: 'booking', subject_id: booking.bookingId, assigned_member_id: 'host-member', starts_at: '2099-10-01T13:00:00.000Z', status: 'open' },
+      { kind: 'consultation_prep', subject_type: 'product_session', subject_id: 'session', assigned_member_id: 'host-member', starts_at: '2099-10-01T13:00:00.000Z', status: 'open' },
     ])
     await recompute()
     assert.equal((await jobs()).length, 2)
 
     // The attorney's jobs live in a conversation with the owner, tied to the booking and named for the client.
-    const prep = await db.prepare('SELECT id FROM tasks WHERE dedupe_key = ?').bind(`consultation_prep:${booking.bookingId}`).first<{ id: string }>()
+    const prep = await db.prepare('SELECT id FROM tasks WHERE dedupe_key = ?').bind('consultation_prep:session:session').first<{ id: string }>()
     const view = await taskViewForUser(db, ORG, prep!.id, 'host')
     assert.deepEqual([view.title, view.sheet.heading], ['Client', 'Prepare for consultation'])
     await db.prepare("INSERT INTO user(id,name,email,emailVerified) VALUES('partner','Pat Partner','partner@example.test',1)").run()

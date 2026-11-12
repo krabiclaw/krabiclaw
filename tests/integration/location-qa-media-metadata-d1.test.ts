@@ -6,11 +6,11 @@ import { H3 } from 'nitro/h3'
 import { hashPassword } from 'better-auth/crypto'
 import * as schema from '../../server/db/schema.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
-import organizationQaRoute from '../../server/api/editor/organizations/[organizationId]/qa.get.ts'
-import createOrganizationQaRoute from '../../server/api/editor/organizations/[organizationId]/qa.post.ts'
-import updateOrganizationQaRoute from '../../server/api/editor/organizations/[organizationId]/qa/[qaId].patch.ts'
-import reorderOrganizationQaRoute from '../../server/api/editor/organizations/[organizationId]/qa/reorder.post.ts'
-import reorderLocationQaRoute from '../../server/api/editor/organizations/[organizationId]/locations/[locationId]/qa/reorder.post.ts'
+import organizationQaRoute from '../../server/api/editor/organizations/[organization_id]/qa.get.ts'
+import createOrganizationQaRoute from '../../server/api/editor/organizations/[organization_id]/qa.post.ts'
+import updateOrganizationQaRoute from '../../server/api/editor/organizations/[organization_id]/qa/[qa_id].patch.ts'
+import reorderOrganizationQaRoute from '../../server/api/editor/organizations/[organization_id]/qa/reorder.post.ts'
+import reorderLocationQaRoute from '../../server/api/editor/organizations/[organization_id]/locations/[location_id]/qa/reorder.post.ts'
 import { handleQaTools } from '../../server/utils/mcp-tools/qa.ts'
 import type { McpExecutorContext } from '../../server/utils/mcp-tools/execution.ts'
 import { createQa, deleteQa, listQa, reorderQa, updateQa } from '../../server/utils/location-qa.ts'
@@ -54,9 +54,9 @@ test('resuming onboarding updates the existing location without changing its his
     const payload = buildOnboardingDraftPayload({
       name: 'Renamed Restaurant', vertical: 'restaurant', place: null,
       details: {
-        name: 'Renamed Restaurant', streetAddress: '88 Beach Road', addressLine2: null, city: 'Ao Nang', region: null, postalCode: null,
-        country: 'TH', phone: null, websiteUrl: null, openingHours: null, specialHours: null,
-        timezone: 'Asia/Bangkok', currency: 'THB', sourceLocale: 'en',
+        name: 'Renamed Restaurant', street_address: '88 Beach Road', address_line_2: null, city: 'Ao Nang', region: null, postal_code: null,
+        country: 'TH', phone: null, website_url: null, opening_hours: null, special_hours: null,
+        timezone: 'Asia/Bangkok', currency: 'THB', source_locale: 'en',
       },
     })
     const draft = { id: 'onboarding-draft', user_id: userId, updated_at: NOW }
@@ -129,11 +129,11 @@ test('organization Q&A route finds a page record by id without widening tenant a
     assert.equal(login.status, 200)
     const cookie = login.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
     const app = new H3()
-    app.get('/api/editor/organizations/:organizationId/qa', organizationQaRoute)
-    app.post('/api/editor/organizations/:organizationId/qa', createOrganizationQaRoute)
-    app.patch('/api/editor/organizations/:organizationId/qa/:qaId', updateOrganizationQaRoute)
-    app.post('/api/editor/organizations/:organizationId/qa/reorder', reorderOrganizationQaRoute)
-    app.post('/api/editor/organizations/:organizationId/locations/:locationId/qa/reorder', reorderLocationQaRoute)
+    app.get('/api/editor/organizations/:organization_id/qa', organizationQaRoute)
+    app.post('/api/editor/organizations/:organization_id/qa', createOrganizationQaRoute)
+    app.patch('/api/editor/organizations/:organization_id/qa/:qa_id', updateOrganizationQaRoute)
+    app.post('/api/editor/organizations/:organization_id/qa/reorder', reorderOrganizationQaRoute)
+    app.post('/api/editor/organizations/:organization_id/locations/:location_id/qa/reorder', reorderLocationQaRoute)
     const request = (org: string, query = '', authenticated = true) => app.request(Object.assign(new Request(`https://proof.example/api/editor/organizations/${org}/qa${query}`, {
       headers: authenticated ? { cookie } : {},
     }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))

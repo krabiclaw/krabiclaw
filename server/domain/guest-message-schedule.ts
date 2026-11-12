@@ -115,6 +115,6 @@ export function parseMessageListQuery(query: Record<string, unknown>, allowed: r
 }
 
 export function messageListPage<T>(rows: T[], query: MessageListQuery) {
-  const hasMore = rows.length > query.limit
-  return { items: rows.slice(0, query.limit), pagination: { ...query, hasMore, nextOffset: hasMore ? query.offset + query.limit : null } }
+  const has_more = rows.length > query.limit
+  return { items: rows.slice(0, query.limit), pagination: { ...query, has_more, next_offset: has_more ? query.offset + query.limit : null } }
 }

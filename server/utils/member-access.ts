@@ -401,6 +401,13 @@ export async function reconcileResponsibilities(env: GuestInboxPublicationEnv, d
       if (chunk.some((_row, index) => results[index * 2]?.meta.changes === 1)) changed = true
     }
   }
+  if (changed) {
+    const { sessionPrepTaskQueries } = await import('~/server/domain/tasks')
+    await executeBatch(db, sessionPrepTaskQueries({
+      query: "SELECT subject_id FROM tasks WHERE organization_id = ? AND kind = 'consultation_prep' AND subject_type = 'product_session' AND status = 'open'",
+      params: [input.organizationId],
+    }, now), { operation: 'Reconcile session prep after member departure' })
+  }
   // Someone who left the organization leaves its conversations: their seats in
   // the team's, and their read positions in the guests'. A guest keeps their own.
   const [left] = await executeBatch(db, [{

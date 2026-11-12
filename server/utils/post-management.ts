@@ -602,8 +602,8 @@ export async function getPublicSocialPost(
   if (!row) return null
   const [post] = await projectPublicPosts(env, db, organizationId, [row], locale)
   const source = await queryFirst<{ slug: string }>(db, 'SELECT slug FROM content_documents WHERE id = ?', [row.id])
-  const localeRepresentations = await listPublicLocaleRepresentations(env, db, {
+  const locale_representations = await listPublicLocaleRepresentations(env, db, {
     organizationId, sourcePath: postPublicPath(source!.slug), documentId: row.id,
   })
-  return { ...post!, localeRepresentations }
+  return { ...post!, locale_representations }
 }

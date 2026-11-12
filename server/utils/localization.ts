@@ -358,7 +358,7 @@ export async function resolveLocalizedPublicRoute(
       locale,
       route_path: routePath,
       platform_messages: language.platform_messages,
-      locale_representations: detail.localeRepresentations,
+      locale_representations: detail.locale_representations,
       representation: { kind: 'resource', resource_type: 'product', resource_id: detail.product.id, localization },
     }
   }

@@ -9,7 +9,7 @@ import * as schema from '../../server/db/schema.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 import createHomeRoute from '../../server/api/dashboard/stay-homes/index.post.ts'
 import listHomesRoute from '../../server/api/dashboard/stay-homes/index.get.ts'
-import editHomeRoute from '../../server/api/dashboard/stay-homes/[productId].patch.ts'
+import editHomeRoute from '../../server/api/dashboard/stay-homes/[product_id].patch.ts'
 import { getLocation, updateLocation } from '../../server/utils/location-management.ts'
 import { getProduct } from '../../server/utils/product-management.ts'
 import { createStayHome, quoteStay, readPublicStayCalendar, readStayHome, stayHomeInput } from '../../server/domain/stays.ts'
@@ -59,7 +59,7 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     const app = new H3()
     app.post('/api/dashboard/stay-homes', createHomeRoute)
     app.get('/api/dashboard/stay-homes', listHomesRoute)
-    app.patch('/api/dashboard/stay-homes/:productId', editHomeRoute)
+    app.patch('/api/dashboard/stay-homes/:product_id', editHomeRoute)
     const call = async (cookie: string, method: 'GET' | 'POST' | 'PATCH', body?: Record<string, unknown>, productId?: string) => {
       const response = await app.request(Object.assign(new Request(`${BASE}/api/dashboard/stay-homes${productId ? `/${productId}` : ''}?org=org`, {
         method, headers: { cookie, 'content-type': 'application/json', origin: BASE }, ...(body ? { body: JSON.stringify(body) } : {}),

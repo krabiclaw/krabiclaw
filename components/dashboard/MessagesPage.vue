@@ -37,7 +37,7 @@ const props = defineProps<{ personalScope?: boolean }>()
 const route = useRoute()
 const router = useRouter()
 const dashboard = useDashboardOrganization()
-const listPath = computed(() => `/dashboard/${encodeURIComponent(String(route.params.orgSlug))}/messages`)
+const listPath = computed(() => `/dashboard/${encodeURIComponent(String(route.params.org_slug))}/messages`)
 const role = computed(() => dashboard.organization.value?.role as keyof typeof organizationRoles | undefined)
 const canReadTeam = computed(() => Boolean(role.value && authClient.organization.checkRolePermission({ role: role.value, permissions: { team_messages: ['read'] } })))
 const canSendTeam = computed(() => Boolean(role.value && authClient.organization.checkRolePermission({ role: role.value, permissions: { team_messages: ['send'] } })))
@@ -73,7 +73,7 @@ watch(realtime.event, async event => {
   if (event?.type !== 'CONVERSATION_LEAVE' || event.organization_id !== dashboard.organizationId.value || event.user_id !== session.value.data?.user.id) return
   clearNuxtData(`team-conversation:${event.organization_id}:${event.conversation_id}`)
   clearNuxtData(`team-messages:${event.organization_id}:${event.conversation_id}`)
-  if (route.params.teamThreadId !== event.conversation_id) return
+  if (route.params.conversation_id !== event.conversation_id) return
   if (leaveRequest.value === event.conversation_id) return
   firstThread.value = null
   try { await navigateTo({ path: listPath.value, query: { kind: 'team' } }, { replace: true }) }

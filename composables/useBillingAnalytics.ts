@@ -16,7 +16,7 @@ export async function recordBillingAnalyticsIntent(
   dashboardApi: ReturnType<typeof useDashboardApi>,
   input: BillingAnalyticsIntentInput,
 ): Promise<void> {
-  await dashboardApi<{ success: true; intentId: string }>('/api/billing/analytics-intent', {
+  await dashboardApi<{ success: true; intent_id: string }>('/api/billing/analytics-intent', {
     method: 'POST',
     body: {
       organizationId: input.organizationId,
@@ -30,7 +30,7 @@ export async function recordBillingAnalyticsIntent(
       effectiveTiming: input.effectiveTiming ?? 'immediate',
       source: input.source ?? 'browser',
     },
-    validate: (value): value is { success: true; intentId: string } =>
-      isRecord(value) && value.success === true && typeof value.intentId === 'string',
+    validate: (value): value is { success: true; intent_id: string } =>
+      isRecord(value) && value.success === true && typeof value.intent_id === 'string',
   })
 }

@@ -226,7 +226,7 @@ async function loadPublicPageSource(
   // to prevent unbounded cache entries from arbitrary variants.
   const VALID_DATASETS = new Set([
     'content', 'location', 'products', 'reviews', 'photos', 'qa',
-    'blogPost',
+    'blog_post',
   ]);
   // Mirrors composables/usePublicPageRequest.ts's getPublicPageRequest() — the only
   // page values the frontend ever requests. A regex alone (e.g. /^[a-z0-9_-]+$/)
@@ -442,7 +442,7 @@ async function loadPublicPageSource(
       locationId ? [organizationId, locationId] : [organizationId],
     );
 
-  if (requestedDatasets.has("blogPost") && blogSlug)
+  if (requestedDatasets.has("blog_post") && blogSlug)
     idxBlogPost = push(
       `SELECT p.id, root.id AS root_id, root.slug AS source_slug, p.title, p.slug, p.summary AS excerpt, ${ARTICLE_CATEGORY_SELECT}, (p.metadata_json ->> '$.nav_title') AS nav_title, p.seo_keywords,
               root.published_at, p.created_at, p.updated_at,
@@ -585,10 +585,10 @@ async function loadPublicPageSource(
     throw new HTTPError({ statusCode: 404, statusMessage: 'Localized page was not found' })
   }
   const contentRows: OrganizationContent[] = tenantPage ? tenantPageToContentRows(tenantPage) : []
-  const localeRepresentations = ownRepresentations
-    ?? (!representationResource && tenantPage?.localeRepresentations ? tenantPage.localeRepresentations : await readLocaleRepresentations())
+  const locale_representations = ownRepresentations
+    ?? (!representationResource && tenantPage?.locale_representations ? tenantPage.locale_representations : await readLocaleRepresentations())
   options.signal?.throwIfAborted()
-  sourceShell.platformMessages = language.platform_messages
+  sourceShell.platform_messages = language.platform_messages
   const shell = (() => {
     if (!localizedLocale) return sourceShell
     const organizationLocalization = publicLocalizations.find(item => item.resourceType === 'organization' && item.resourceId === organizationId)
@@ -618,8 +618,8 @@ async function loadPublicPageSource(
         brand_description: localizedOrganization.brand_description,
       },
       config,
-      googleMaps: {
-        ...sourceShell.googleMaps,
+      google_maps: {
+        ...sourceShell.google_maps,
         business: null,
       },
     }
@@ -677,7 +677,7 @@ async function loadPublicPageSource(
   // chooses a time: the same summary a booking freezes, at today's price.
   const policyLocale = locale ?? sourceLocale
   const currency = organization.default_currency
-  const tablePolicySummaries: Record<string, FormattedBookingPolicySummary> = Object.fromEntries(products.flatMap((product) => {
+  const table_policy_summaries: Record<string, FormattedBookingPolicySummary> = Object.fromEntries(products.flatMap((product) => {
     if (product.kind !== 'table' || !product.booking) return []
     if (!currency) throw new HTTPError({ statusCode: 500, statusMessage: 'Organization currency is not configured' })
     const variant = product.variants.find(candidate => candidate.active)
@@ -701,7 +701,7 @@ async function loadPublicPageSource(
     review_count: null,
     last_synced_at: null,
   };
-  const reviewsAggregate = buildPublicReviewAggregate(
+  const reviews_aggregate = buildPublicReviewAggregate(
     normalizePublicReviewAggregateRows(reviewAggregateRows.results),
     aggregateLocation,
   );
@@ -729,14 +729,14 @@ async function loadPublicPageSource(
     ? projectLocalizedMediaAlt(sourceMedia, publicLocalizations)
     : sourceMedia
 
-  let blogPost: ApiRecord | null = null;
+  let blog_post: ApiRecord | null = null;
   if (postRow) {
     options.signal?.throwIfAborted();
     const loadedBlocks = await getContentBlocksForDocument(db, String(postRow.id));
     const contentBlocks = loadedBlocks
       ? await attachPageQa(db, organizationId, tenantBlogPostPath(String(postRow.source_slug)), loadedBlocks, localizedLocale ?? 'en')
       : loadedBlocks
-    blogPost = (await localizeArticleCategories(env, db, orgId, localizedLocale ?? 'en',
+    blog_post = (await localizeArticleCategories(env, db, orgId, localizedLocale ?? 'en',
       [attachArticleCategory(attachCoverMedia({ ...postRow, content_blocks: contentBlocks }))], publicLocalizations))[0]!;
   }
 
@@ -744,7 +744,7 @@ async function loadPublicPageSource(
     if (typeof row.id !== 'string') throw new HTTPError({ statusCode: 500, statusMessage: 'Stored public Q&A is invalid' })
     return { ...row, id: row.id }
   })
-  const qaList = sourceQaList
+  const qa_list = sourceQaList
 
   const pagePayload = {
     kind: page ?? 'home',
@@ -755,25 +755,25 @@ async function loadPublicPageSource(
     tenant_page: tenantPage,
     products,
     collections,
-    locationReviews: (locationReviewRows?.results ?? []).map(({ is_stay_location, ...review }) => projectPublicLocationReview(review, publicLocationIsProtected(is_stay_location))),
-    globalReviews: needsGlobalReviews ? (reviewRows.results ?? []).map(({ is_stay_location, ...review }) => projectPublicLocationReview(review, publicLocationIsProtected(is_stay_location))) : [],
-    reviewsAggregate: requestedDatasets.has("reviews") ? reviewsAggregate : null,
-    reviewsList: requestedDatasets.has("reviews") ? fullReviews : [],
+    location_reviews: (locationReviewRows?.results ?? []).map(({ is_stay_location, ...review }) => projectPublicLocationReview(review, publicLocationIsProtected(is_stay_location))),
+    global_reviews: needsGlobalReviews ? (reviewRows.results ?? []).map(({ is_stay_location, ...review }) => projectPublicLocationReview(review, publicLocationIsProtected(is_stay_location))) : [],
+    reviews_aggregate: requestedDatasets.has("reviews") ? reviews_aggregate : null,
+    reviews_list: requestedDatasets.has("reviews") ? fullReviews : [],
     media: requestedDatasets.has("photos") ? media : [],
-    qaList,
-    blogPost: requestedDatasets.has("blogPost") ? blogPost : null,
-    tablePolicySummaries,
-    localeRepresentations,
+    qa_list,
+    blog_post: requestedDatasets.has("blog_post") ? blog_post : null,
+    table_policy_summaries,
+    locale_representations,
   };
   const payload = pagePayload;
 
   // Slug-shaped inputs are only worth caching once they've resolved to a real
   // row — otherwise a stream of made-up slugs (still regex-valid) would each
-  // mint their own permanent KV entry. locationRow/blogPost are the actual
+  // mint their own permanent KV entry. locationRow/blog_post are the actual
   // D1-resolved lookups for locationSlug/blogSlug.
   const resolvedSlugsValid =
     (!locationSlug || !!locationRow) &&
-    (!blogSlug || !!blogPost);
+    (!blogSlug || !!blog_post);
 
   if (usePageCache && resolvedSlugsValid) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

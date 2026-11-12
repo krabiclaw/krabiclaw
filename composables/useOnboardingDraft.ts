@@ -41,33 +41,33 @@ export function useOnboardingDraft() {
       name: details.name.trim(),
       country: details.country.trim().toUpperCase() || null,
       city: details.city.trim() || null,
-      streetAddress: details.streetAddress.trim() || null,
-      addressLine2: details.addressLine2.trim() || null,
+      street_address: details.streetAddress.trim() || null,
+      address_line_2: details.addressLine2.trim() || null,
       region: details.region.trim() || null,
-      postalCode: details.postalCode.trim() || null,
+      postal_code: details.postalCode.trim() || null,
       phone: details.phone.trim() || null,
-      openingHours: parseOpeningHours(state.value.hours.hours),
-      specialHours: parseSpecialHours(state.value.hours.specialHours),
+      opening_hours: parseOpeningHours(state.value.hours.hours),
+      special_hours: parseSpecialHours(state.value.hours.specialHours),
       timezone: state.value.hours.timezone.trim() || null,
       currency: details.currency ?? null,
-      sourceLocale: details.sourceLocale,
+      source_locale: details.sourceLocale,
     }
   }
 
   function serializeBrandDraft() {
     const brand = state.value.brand
     return {
-      paletteStarter: brand.paletteStarter,
-      fontPreset: brand.fontPreset,
-      logoShape: brand.logoShape,
-      logoNote: brand.logoNote.trim() || null,
-      logoPreviewUrl: brand.logoPreviewUrl.trim() || null,
-      heroPhotoNote: brand.heroPhotoNote.trim() || null,
-      heroPreviewUrl: brand.heroPreviewUrl.trim() || null,
-      logoImage: brand.logoImage,
-      heroImage: brand.heroImage,
-      heroHeadline: brand.heroHeadline.trim() || null,
-      heroSubtitle: brand.heroSubtitle.trim() || null,
+      palette_starter: brand.paletteStarter,
+      font_preset: brand.fontPreset,
+      logo_shape: brand.logoShape,
+      logo_note: brand.logoNote.trim() || null,
+      logo_preview_url: brand.logoPreviewUrl.trim() || null,
+      hero_photo_note: brand.heroPhotoNote.trim() || null,
+      hero_preview_url: brand.heroPreviewUrl.trim() || null,
+      logo_image: brand.logoImage,
+      hero_image: brand.heroImage,
+      hero_headline: brand.heroHeadline.trim() || null,
+      hero_subtitle: brand.heroSubtitle.trim() || null,
     }
   }
 
@@ -77,7 +77,7 @@ export function useOnboardingDraft() {
       .map(product => ({
         name: product.name.trim(),
         category: product.category.trim(),
-        amountMinor: product.amountMinor,
+        unit_amount: product.amountMinor,
       }))
   }
 
@@ -89,28 +89,28 @@ export function useOnboardingDraft() {
       const res = await applicationFetch<Record<string, unknown>>('/api/dashboard/onboarding/drafts/active', {
         method: 'POST',
         body: {
-          draftId: state.value.draftId ?? undefined,
+          draft_id: state.value.draftId ?? undefined,
           updated_at: state.value.draftRevision,
-          sourceType: state.value.source ?? 'manual',
-          placeId: state.value.placeId,
+          source_type: state.value.source ?? 'manual',
+          google_place_id: state.value.placeId,
           name: state.value.details.name.trim(),
           vertical: state.value.vertical,
           details: serializeDetails(),
-          brandDraft: serializeBrandDraft(),
+          brand_draft: serializeBrandDraft(),
           products: serializeProducts(),
         },
         validate: (value): value is Record<string, unknown> => isRecord(value),
       })
-      if (res.success !== true || typeof res.draftId !== 'string' || typeof res.updated_at !== 'string' || typeof res.organizationId !== 'string'
-        || typeof res.previewToken !== 'string' || typeof res.draftName !== 'string'
-        || typeof res.subdomainCandidate !== 'string') {
+      if (res.success !== true || typeof res.draft_id !== 'string' || typeof res.updated_at !== 'string' || typeof res.organization_id !== 'string'
+        || typeof res.preview_token !== 'string' || typeof res.name !== 'string'
+        || typeof res.subdomain_candidate !== 'string') {
         throw new Error(typeof res.error === 'string' ? res.error : 'Could not save your answers. Please try again.')
       }
-      state.value.draftId = res.draftId
+      state.value.draftId = res.draft_id
       state.value.draftRevision = res.updated_at
       state.value.preview = {
-        draftId: res.draftId, organizationId: res.organizationId, previewToken: res.previewToken,
-        draftName: res.draftName, subdomainCandidate: res.subdomainCandidate,
+        draftId: res.draft_id, organizationId: res.organization_id, previewToken: res.preview_token,
+        draftName: res.name, subdomainCandidate: res.subdomain_candidate,
       }
       return true
     } catch (cause) {
@@ -128,7 +128,7 @@ export function useOnboardingDraft() {
    */
   function seedFromPlace(preview: OnboardingPlacePreview) {
     state.value.source = 'google_places'
-    state.value.placeId = preview.placeId
+    state.value.placeId = preview.google_place_id
     const details = state.value.details
     details.name = preview.name ?? ''
     // Places answers with the address already split, so every field seeds from
@@ -142,7 +142,7 @@ export function useOnboardingDraft() {
     details.country = address?.regionCode ?? ''
     // The server hands the place's number over in E.164.
     details.phone = preview.phone ?? ''
-    state.value.hours.hours = parseOpeningHours((preview.openingHours ?? null) as OpeningHours)
+    state.value.hours.hours = parseOpeningHours((preview.opening_hours ?? null) as OpeningHours)
     state.value.hours.specialHours = null
     state.value.hours.timezone = preview.timezone ?? ''
   }
@@ -161,15 +161,12 @@ export function useOnboardingDraft() {
         `/api/dashboard/onboarding/drafts/${draftId}/activate`,
         { method: 'POST', body: { updated_at: state.value.draftRevision }, validate: (value): value is Record<string, unknown> => isRecord(value) },
       )
-      if (res.success !== true) {
-        throw new Error(typeof res.error === 'string' ? res.error : 'Failed to create your organization. Please try again.')
+      if (res.success !== true || typeof res.organization_slug !== 'string' || !res.organization_slug
+        || typeof res.subdomain !== 'string' || !res.subdomain || typeof res.organization_id !== 'string' || !res.organization_id) {
+        throw new Error(typeof res.error === 'string' ? res.error : 'The published website could not be read.')
       }
-      state.value.created = {
-        orgSlug: typeof res.orgSlug === 'string' ? res.orgSlug : null,
-        organizationSlug: typeof res.organizationSlug === 'string' ? res.organizationSlug : null,
-        locationSlug: typeof res.locationSlug === 'string' ? res.locationSlug : null,
-      }
-      if (typeof res.organizationId === 'string') trackOrganizationCreated(res.organizationId)
+      state.value.created = { organization_slug: res.organization_slug, subdomain: res.subdomain }
+      trackOrganizationCreated(res.organization_id)
       return true
     } catch (cause) {
       error.value = cause instanceof Error ? cause.message : 'Something went wrong. Please try again.'
@@ -198,7 +195,7 @@ export function useOnboardingDraft() {
       validate: (value): value is Record<string, unknown> => isRecord(value),
     })
     const draft = isRecord(res.draft) ? res.draft : null
-    return draft && typeof draft.organizationId === 'string' ? draft.organizationId : null
+    return draft && typeof draft.organization_id === 'string' ? draft.organization_id : null
   }
 
   /**
@@ -240,7 +237,7 @@ export function useOnboardingDraft() {
 
   function restoredImage(value: unknown): typeof state.value.brand.logoImage {
     if (value === null) return null
-    if (!isRecord(value) || typeof value.draftAssetId !== 'string' || typeof value.cloudflareImageId !== 'string' || typeof value.publicUrl !== 'string') throw new Error('Saved website image is unavailable')
+    if (!isRecord(value) || typeof value.asset_id !== 'string' || typeof value.cloudflare_image_id !== 'string' || typeof value.public_url !== 'string') throw new Error('Saved website image is unavailable')
     return value as NonNullable<typeof state.value.brand.logoImage>
   }
 
@@ -251,7 +248,7 @@ export function useOnboardingDraft() {
     })
     const draft = isRecord(res.draft) ? res.draft : null
     if (!draft) return false
-    if (typeof draft.draftId !== 'string' || typeof draft.updated_at !== 'string') throw new Error('Saved website draft identity and revision are unavailable')
+    if (typeof draft.draft_id !== 'string' || typeof draft.updated_at !== 'string') throw new Error('Saved website draft identity and revision are unavailable')
     const details = isRecord(draft.details) ? draft.details : {}
     const config = isRecord(draft.config) ? draft.config : {}
     const text = (value: unknown) => typeof value === 'string' ? value : ''
@@ -259,25 +256,25 @@ export function useOnboardingDraft() {
     // parse, and assigning as we went left the flow half-restored — name and
     // address in place, hours silently empty — which the next save would have
     // written back over the hours the owner had already given.
-    const openingHours = parseOpeningHours(details.openingHours as OpeningHours)
-    const specialHours = parseSpecialHours(details.specialHours)
+    const openingHours = parseOpeningHours(details.opening_hours as OpeningHours)
+    const specialHours = parseSpecialHours(details.special_hours)
 
-    const logoImage = restoredImage(draft.logoImage)
-    const heroImage = restoredImage(draft.heroImage)
+    const logoImage = restoredImage(draft.logo_image)
+    const heroImage = restoredImage(draft.hero_image)
 
-    state.value.draftId = draft.draftId
+    state.value.draftId = draft.draft_id
     state.value.draftRevision = draft.updated_at
     if (!ALL_VERTICALS.includes(draft.vertical as OrganizationVertical)) throw new Error(`Saved website draft has an unknown business type: ${String(draft.vertical)}`)
     state.value.vertical = draft.vertical as OrganizationVertical
-    state.value.source = draft.sourceType === 'google_places' ? 'google_places' : 'manual'
-    state.value.placeId = typeof draft.placeId === 'string' && draft.placeId ? draft.placeId : null
-    state.value.details.sourceLocale = typeof details.sourceLocale === 'string' ? details.sourceLocale : null
+    state.value.source = draft.source_type === 'google_places' ? 'google_places' : 'manual'
+    state.value.placeId = typeof draft.google_place_id === 'string' && draft.google_place_id ? draft.google_place_id : null
+    state.value.details.sourceLocale = typeof details.source_locale === 'string' ? details.source_locale : null
     state.value.details.name = text(details.name)
     state.value.details.city = text(details.city)
-    state.value.details.streetAddress = text(details.streetAddress)
-    state.value.details.addressLine2 = text(details.addressLine2)
+    state.value.details.streetAddress = text(details.street_address)
+    state.value.details.addressLine2 = text(details.address_line_2)
     state.value.details.region = text(details.region)
-    state.value.details.postalCode = text(details.postalCode)
+    state.value.details.postalCode = text(details.postal_code)
     state.value.details.phone = text(details.phone)
     if (typeof details.country === 'string' && details.country) state.value.details.country = details.country
     if (typeof details.currency === 'string' && details.currency) {
@@ -291,8 +288,8 @@ export function useOnboardingDraft() {
     state.value.brand.logoShape = (LOGO_SHAPES as readonly unknown[]).includes(config.logo_shape) ? config.logo_shape as LogoShape : null
     state.value.brand.logoImage = logoImage
     state.value.brand.heroImage = heroImage
-    state.value.brand.logoPreviewUrl = logoImage?.publicUrl ?? ''
-    state.value.brand.heroPreviewUrl = heroImage?.publicUrl ?? ''
+    state.value.brand.logoPreviewUrl = logoImage?.public_url ?? ''
+    state.value.brand.heroPreviewUrl = heroImage?.public_url ?? ''
     state.value.brand.logoNote = text(config.draft_logo_note)
     state.value.brand.heroPhotoNote = text(config.draft_hero_photo_note)
     state.value.brand.heroHeadline = text(config.draft_hero_headline)
@@ -302,18 +299,18 @@ export function useOnboardingDraft() {
         ? [{
             name: entry.name,
             category: typeof entry.category === 'string' ? entry.category : '',
-            amountMinor: typeof entry.amountMinor === 'number' ? entry.amountMinor : null,
+            amountMinor: typeof entry.unit_amount === 'number' ? entry.unit_amount : null,
           }]
         : [])
       : []
 
-    if (typeof draft.organizationId === 'string' && typeof draft.previewToken === 'string' && typeof draft.subdomainCandidate === 'string') {
+    if (typeof draft.organization_id === 'string' && typeof draft.preview_token === 'string' && typeof draft.subdomain_candidate === 'string') {
       state.value.preview = {
-        draftId: draft.draftId,
-        organizationId: draft.organizationId,
-        previewToken: draft.previewToken,
-        draftName: typeof draft.draftName === 'string' ? draft.draftName : state.value.details.name,
-        subdomainCandidate: draft.subdomainCandidate,
+        draftId: draft.draft_id,
+        organizationId: draft.organization_id,
+        previewToken: draft.preview_token,
+        draftName: typeof draft.name === 'string' ? draft.name : state.value.details.name,
+        subdomainCandidate: draft.subdomain_candidate,
       }
     }
     return true

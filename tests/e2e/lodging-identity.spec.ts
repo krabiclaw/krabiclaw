@@ -101,15 +101,15 @@ test.describe('lodging identity boundary', () => {
       // A single-use link adds whoever accepts it, with the link's role.
       const link = await api.post(`/api/organizations/${encodeURIComponent(organization.id)}/invite-links`, { headers: bearer, data: { role: 'admin' } })
       expect(link.status, await link.text()).toBe(201)
-      const { id: inviteLinkId, token: inviteToken, expiresAt } = await link.json() as { id: string; token: string; expiresAt: string }
-      expect(Date.parse(expiresAt) - Date.now()).toBeGreaterThan(6.9 * 24 * 60 * 60 * 1000)
+      const { id: inviteLinkId, token: inviteToken, expires_at } = await link.json() as { id: string; token: string; expires_at: string }
+      expect(Date.parse(expires_at) - Date.now()).toBeGreaterThan(6.9 * 24 * 60 * 60 * 1000)
       const pending = await api.get(`/api/organizations/${encodeURIComponent(organization.id)}/invite-links`, { headers: bearer })
       expect(pending.status, await pending.text()).toBe(200)
-      expect((await pending.json() as { inviteLinks: Array<{ id: string; role: string }> }).inviteLinks).toEqual([expect.objectContaining({ id: inviteLinkId, role: 'admin' })])
+      expect((await pending.json() as { invite_links: Array<{ id: string; role: string }> }).invite_links).toEqual([expect.objectContaining({ id: inviteLinkId, role: 'admin' })])
       // Anyone holding the link reads what it offers, and the public page shows it.
       const offered = await api.get(`/api/invite-links/${encodeURIComponent(inviteToken)}`)
       expect(offered.status, await offered.text()).toBe(200)
-      expect(await offered.json()).toEqual({ organization: { name: organization.name }, role: 'admin', expiresAt })
+      expect(await offered.json()).toEqual({ organization: { name: organization.name }, role: 'admin', expires_at })
       const invitePage = await api.get(`/invite/${encodeURIComponent(inviteToken)}`)
       expect(invitePage.status).toBe(200)
       expect(await invitePage.text()).toContain(`Join ${organization.name}`)
@@ -122,9 +122,9 @@ test.describe('lodging identity boundary', () => {
       const inviteeBearer = await signInBearer(invitee.email)
       const accepted = await api.post(`/api/invite-links/${encodeURIComponent(inviteToken)}/accept`, { headers: inviteeBearer })
       expect(accepted.status, await accepted.text()).toBe(200)
-      const joined = await accepted.json() as { organization: { id: string; name: string }; role: string; memberId: string }
+      const joined = await accepted.json() as { organization: { id: string; name: string }; role: string; member_id: string }
       expect(joined).toMatchObject({ organization: { id: organization.id, name: organization.name }, role: 'admin' })
-      expect(await members()).toEqual(expect.arrayContaining([expect.objectContaining({ id: joined.memberId, userId: invitee.id, role: 'admin' })]))
+      expect(await members()).toEqual(expect.arrayContaining([expect.objectContaining({ id: joined.member_id, userId: invitee.id, role: 'admin' })]))
 
       // MCP and the native app address the same participants, messages and read
       // positions. This organization already exists for the invitation journey.
@@ -330,7 +330,7 @@ test.describe('lodging identity boundary', () => {
       expect(usedRead.status).toBe(410)
       expect(await usedRead.json()).toMatchObject({ data: { code: 'INVITE_LINK_USED', field: 'token' } })
       // Used links are no longer pending, and a withdrawn link cannot be read or accepted.
-      expect((await (await api.get(`/api/organizations/${encodeURIComponent(organization.id)}/invite-links`, { headers: bearer })).json() as { inviteLinks: unknown[] }).inviteLinks).toEqual([])
+      expect((await (await api.get(`/api/organizations/${encodeURIComponent(organization.id)}/invite-links`, { headers: bearer })).json() as { invite_links: unknown[] }).invite_links).toEqual([])
       const withdrawn = await api.post(`/api/organizations/${encodeURIComponent(organization.id)}/invite-links`, { headers: bearer, data: { role: 'member' } })
       expect(withdrawn.status, await withdrawn.text()).toBe(201)
       const withdrawnLink = await withdrawn.json() as { id: string; token: string }
@@ -402,10 +402,10 @@ test.describe('lodging identity boundary', () => {
       try {
         const provisioned = await api.post('/api/organizations', {
           headers: ownerBearer,
-          data: { organizationId: organization.id, name, subdomain: slug, vertical, sourceLocale: 'en' },
+          data: { organization_id: organization.id, name, subdomain: slug, vertical, source_locale: 'en' },
         })
         expect(provisioned.status, await provisioned.text()).toBe(200)
-        expect(await provisioned.json()).toMatchObject({ organizationId: organization.id, subdomain: slug })
+        expect(await provisioned.json()).toMatchObject({ organization_id: organization.id, subdomain: slug })
         const context = await api.get(`/api/dashboard/context?org=${slug}`, { headers: ownerBearer })
         expect(context.status, await context.text()).toBe(200)
         expect(await context.json()).toMatchObject({ success: true, organization: { id: organization.id, name, slug, subdomain: slug, vertical } })
@@ -597,14 +597,14 @@ test.describe('lodging identity boundary', () => {
     const organization = await created.json() as { id: string }
     const memberContext = await browser.newContext()
     try {
-      const provisioned = await api.post('/api/organizations', { headers: ownerBearer, data: { organizationId: organization.id, name, subdomain: slug, vertical: 'experience', sourceLocale: 'en' } })
+      const provisioned = await api.post('/api/organizations', { headers: ownerBearer, data: { organization_id: organization.id, name, subdomain: slug, vertical: 'experience', source_locale: 'en' } })
       expect(provisioned.status, await provisioned.text()).toBe(200)
       const offered = await api.post(`/api/organizations/${organization.id}/invite-links`, { headers: ownerBearer, data: { role: 'member' } })
       expect(offered.status, await offered.text()).toBe(201)
       const { token } = await offered.json() as { token: string }
       const accepted = await api.post(`/api/invite-links/${token}/accept`, { headers: memberBearer })
       expect(accepted.status, await accepted.text()).toBe(200)
-      const { memberId } = await accepted.json() as { memberId: string }
+      const { member_id: memberId } = await accepted.json() as { member_id: string }
       const profile = await api.put(`/api/organizations/${organization.id}/members/${memberId}/scheduling`, { headers: ownerBearer, data: { updated_at: null, public_name: 'Experience guide', public_bio: 'Leads the local experience.', public_approved: true } })
       expect(profile.status, await profile.text()).toBe(200)
       const context = await api.get(`/api/dashboard/context?org=${slug}`, { headers: ownerBearer })
@@ -656,7 +656,7 @@ test.describe('lodging identity boundary', () => {
       const inboxPath = `/api/dashboard/organizations/${organization.id}/guest-threads/${requestId}`
       const memberBooking = await api.get(bookingPath, { headers: memberBearer })
       expect(memberBooking.status, await memberBooking.text()).toBe(200)
-      expect(await memberBooking.json()).toMatchObject({ booking: { id: requestId, assigned_member_id: memberId, product_id: product.id, guest_name: guestName } })
+      expect(await memberBooking.json()).toMatchObject({ booking: { conversation_id: requestId, assigned_member_id: memberId, product_id: product.id, guest_name: guestName } })
       await loginAs(memberContext.request, baseURL!, invitee.id)
       const memberPage = await memberContext.newPage()
       let socket: WebSocket | undefined
@@ -681,7 +681,7 @@ test.describe('lodging identity boundary', () => {
       expect((await api.get(inboxPath, { headers: memberBearer })).status).toBe(404)
       const retained = await api.get(bookingPath, { headers: ownerBearer })
       expect(retained.status, await retained.text()).toBe(200)
-      expect(await retained.json()).toMatchObject({ booking: { id: requestId, assigned_member_id: ownerMemberId, product_id: product.id, guest_name: guestName } })
+      expect(await retained.json()).toMatchObject({ booking: { conversation_id: requestId, assigned_member_id: ownerMemberId, product_id: product.id, guest_name: guestName } })
     } finally {
       try {
         const deleted = await api.post('/api/auth/organization/delete', { headers: ownerBearer, data: { organizationId: organization.id } })
@@ -704,10 +704,10 @@ test.describe('lodging identity boundary', () => {
 
     const provisioned = await api.post('/api/organizations', {
       headers: bearer,
-      data: { organizationId: organization.id, name, subdomain: slug, vertical: 'lodging', sourceLocale: 'en' },
+      data: { organization_id: organization.id, name, subdomain: slug, vertical: 'lodging', source_locale: 'en' },
     })
     expect(provisioned.status, await provisioned.text()).toBe(200)
-    expect(await provisioned.json()).toMatchObject({ organizationId: organization.id, subdomain: slug })
+    expect(await provisioned.json()).toMatchObject({ organization_id: organization.id, subdomain: slug })
 
     // The public site, read through the tenant host rather than the API that wrote it.
     const home = await api.get('/', { headers: { 'x-preview-tenant': slug } })

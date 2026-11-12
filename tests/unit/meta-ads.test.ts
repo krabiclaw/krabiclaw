@@ -46,13 +46,13 @@ test('listMetaAdAccounts and getMetaAdAccount map accounts and detect inactive s
   try {
     const accounts = await listMetaAdAccounts('test-token')
     assert.equal(accounts.length, 2)
-    assert.equal(accounts[0]!.accountId, '101')
-    assert.equal(accounts[0]!.notEnabled, false)
-    assert.equal(accounts[1]!.accountId, '102')
-    assert.equal(accounts[1]!.notEnabled, true)
+    assert.equal(accounts[0]!.account_id, '101')
+    assert.equal(accounts[0]!.not_enabled, false)
+    assert.equal(accounts[1]!.account_id, '102')
+    assert.equal(accounts[1]!.not_enabled, true)
 
     const single = await getMetaAdAccount('test-token', '101')
-    assert.equal(single?.accountId, '101')
+    assert.equal(single?.account_id, '101')
     assert.equal(single?.currency, 'USD')
   } finally {
     globalThis.fetch = originalFetch

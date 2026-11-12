@@ -37,7 +37,7 @@ const props = defineProps<{
 }>()
 
 const { localePath, t } = useI18n()
-const { consultation, canSchedule } = useOrganizationShellState()
+const { consultation, can_schedule } = useOrganizationShellState()
 
 const title = computed(() => blockText(props.block.data.title))
 const description = computed(() => blockTextOrNull(props.block.data.description))
@@ -52,17 +52,17 @@ const destination = computed(() => {
   const url = rawUrl || (consultation.value ? consultation.value.schedule_path : '')
   if (targetsSchedule.value && consultation.value) {
     if (props.page.recipe === 'schedule') {
-      if (!canSchedule.value) return localePath('/contact')
+      if (!can_schedule.value) return localePath('/contact')
       if (consultation.value.mode === 'native') return '#consultations'
       if (!consultation.value.external_url) throw new Error('An external scheduler has no address')
       return consultation.value.external_url
     }
-    if (!canSchedule.value) return ''
+    if (!can_schedule.value) return ''
   }
   return url ? (isInternalRoute(url) ? localePath(url) : url) : ''
 })
 
-const label = computed(() => targetsSchedule.value && props.page.recipe === 'schedule' && consultation.value && !canSchedule.value ? t('site_pages.contact') : blockText(props.block.data.label))
+const label = computed(() => targetsSchedule.value && props.page.recipe === 'schedule' && consultation.value && !can_schedule.value ? t('site_pages.contact') : blockText(props.block.data.label))
 const priceLine = computed(() => blockTextOrNull(props.block.data.price_line))
 const notice = computed(() => blockTextOrNull(props.block.data.notice))
 const backgroundUrl = computed(() => blockMedia(props.block, 'media')[0]?.public_url ?? null)

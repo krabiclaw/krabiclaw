@@ -33,7 +33,7 @@
           v-for="thread in threads"
           :key="thread.id"
           :unread="thread.unread"
-          :name="thread.guestName"
+          :name="thread.title"
           :enabled="!personalScope"
           :archivable="!pastOnly && !blockedOnly"
           @toggle="toggleRead(thread)"
@@ -46,15 +46,15 @@
             class="relative flex items-start gap-4 rounded-xl py-4 pl-7 pr-3 transition duration-200 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             :class="thread.id === openThreadId ? 'bg-elevated' : 'hover:bg-elevated/60'"
           >
-            <span v-if="thread.unread" class="absolute left-2.5 top-[38px] size-2 rounded-full bg-primary" :aria-label="`${thread.guestName}: unread`" />
-            <InboxAvatar :name="thread.guestName" :initial="thread.avatarInitial" :support="thread.kind === 'support'" :channel="thread.kind === 'team' ? null : thread.channel" size="lg" />
+            <span v-if="thread.unread" class="absolute left-2.5 top-[38px] size-2 rounded-full bg-primary" :aria-label="`${thread.title}: unread`" />
+            <InboxAvatar :name="thread.title" :initial="thread.avatar_initial" :support="thread.kind === 'support'" :channel="thread.kind === 'team' ? null : thread.channel" size="lg" />
             <span class="min-w-0 flex-1">
               <span class="flex items-baseline justify-between gap-3 text-sm text-muted">
                 <span class="min-w-0 truncate">{{ [thread.when, thread.home].filter(Boolean).join(' · ') }}</span>
                 <span class="shrink-0">{{ thread.time }}</span>
               </span>
-              <span class="block truncate text-base text-highlighted" :class="thread.unread ? 'font-semibold' : 'font-medium'">{{ thread.guestName }}</span>
-              <span v-if="thread.preview" class="mt-0.5 line-clamp-2 text-sm" :class="thread.unread ? 'text-default' : 'text-muted'">{{ thread.previewFrom }}: {{ thread.preview }}</span>
+              <span class="block truncate text-base text-highlighted" :class="thread.unread ? 'font-semibold' : 'font-medium'">{{ thread.title }}</span>
+              <span v-if="thread.preview" class="mt-0.5 line-clamp-2 text-sm" :class="thread.unread ? 'text-default' : 'text-muted'">{{ thread.preview_from }}: {{ thread.preview }}</span>
             </span>
           </NuxtLink>
         </MessageRowActions>
@@ -71,7 +71,7 @@
         </div>
       </div>
 
-      <div v-if="page?.pagination.hasMore" class="flex justify-center py-3">
+      <div v-if="page?.pagination.has_more" class="flex justify-center py-3">
         <UButton color="neutral" variant="ghost" :loading="loadingMore" :disabled="pending" @click="loadMore">Load more conversations</UButton>
       </div>
 
@@ -121,7 +121,7 @@ const dashboard = useDashboardOrganization()
 const route = useRoute()
 const organizationId = computed(() => dashboard.organizationId.value)
 
-const listRoute = computed(() => props.personalScope ? '/dashboard/account/messages' : `/dashboard/${String(route.params.orgSlug)}/messages`)
+const listRoute = computed(() => props.personalScope ? '/dashboard/account/messages' : `/dashboard/${String(route.params.org_slug)}/messages`)
 
 // The open conversation, for the selected row, read from the route below this list.
 const openThreadId = computed(() => {
@@ -163,7 +163,7 @@ const listQuery = computed(() => ({
 
 const listKey = computed(() => [
   props.personalScope ? `account-conversations:${session.value.data?.user.id}` : 'dashboard-conversations',
-  String(route.params.orgSlug ?? ''),
+  String(route.params.org_slug ?? ''),
   organizationId.value,
   kind.value ?? 'all',
   search.value ?? '',
@@ -205,9 +205,9 @@ async function loadWindow(pages: number, scope: string, signal: AbortSignal): Pr
     try {
       let page = await loadPage(0, signal)
       let fetched = 1
-      while (fetched < pages && page.pagination.nextOffset !== null) {
+      while (fetched < pages && page.pagination.next_offset !== null) {
         if (scope !== listKey.value) throw new DOMException('The message scope changed', 'AbortError')
-        page = appendLoadedPage(page, await loadPage(page.pagination.nextOffset, signal))
+        page = appendLoadedPage(page, await loadPage(page.pagination.next_offset, signal))
         fetched += 1
       }
       return { page, fetched }
@@ -253,14 +253,14 @@ const threads = computed(() => page.value?.threads ?? [])
 
 async function loadMore() {
   const before = data.value
-  if (!before || before.pagination.nextOffset === null || loadingMore.value || pending.value) return
+  if (!before || before.pagination.next_offset === null || loadingMore.value || pending.value) return
   const key = listKey.value
   const controller = new AbortController()
   pageController = controller
   loadingMore.value = true
   nextPageError.value = null
   try {
-    const page = await loadPage(before.pagination.nextOffset, controller.signal)
+    const page = await loadPage(before.pagination.next_offset, controller.signal)
     if (controller.signal.aborted || key !== listKey.value || data.value !== before) return
     try {
       data.value = appendLoadedPage(before, page)

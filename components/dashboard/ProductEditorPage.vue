@@ -466,7 +466,7 @@ const { locale } = useI18n()
 const { formatExactDateTime } = useHumanTime()
 const router = useRouter()
 const dashboardApi = useDashboardApi()
-const productId = computed(() => String(route.params.productId ?? ''))
+const productId = computed(() => String(route.params.product_id ?? ''))
 // Catalog's explicit scope. No location is the whole organization: its own
 // prices and settings, not whichever location was visited last.
 const locationScope = useLocationScope()
@@ -478,7 +478,7 @@ const createCollectionId = computed(() => typeof route.query.collection_id === '
 const level = useRouteLevel()
 /** The record's own URL. It is the route level's, never rebuilt from params. */
 const itemPath = level.path
-const catalogPath = computed(() => `/dashboard/${String(route.params.orgSlug)}/products`)
+const catalogPath = computed(() => `/dashboard/${String(route.params.org_slug)}/products`)
 /**
  * A URL beneath this record. An existing product's sections keep its location
  * scope and nothing else; a product being created keeps the whole creation query,
@@ -555,7 +555,7 @@ const sectionLabels: Record<SectionKey, string> = {
   },
 }
 
-const detailKey = computed(() => typeof route.params.definitionId === 'string' ? 'attributes' : level.child.value)
+const detailKey = computed(() => typeof route.params.definition_id === 'string' ? 'attributes' : level.child.value)
 const editorKey = computed<SectionKey>(() => (detailKey.value ?? 'photo') as SectionKey)
 
 const isNew = computed(() => productId.value === 'new')
@@ -608,8 +608,8 @@ const { data: loaded, error: loadFailure, refresh } = await useAsyncData<Product
     let previewToken: string | null = kept
     if (kept === null && canPreview.value && ['stay', 'dish', 'experience', 'service'].includes(productResponse.product.kind)) {
       const response = await dashboardApi(`/api/editor/organizations/${organizationId}/context`, { validate: isRecord })
-      if (!isRecord(response.context) || typeof response.context.previewToken !== 'string' || !response.context.previewToken) throw new Error('The product preview could not be loaded.')
-      previewToken = response.context.previewToken
+      if (!isRecord(response.context) || typeof response.context.preview_token !== 'string' || !response.context.preview_token) throw new Error('The product preview could not be loaded.')
+      previewToken = response.context.preview_token
     }
     return { collections: collectionResponse.collections, product: productResponse.product, previewToken, publicUrl: productResponse.public_url, publicUrls: productResponse.public_urls }
   },
@@ -888,7 +888,7 @@ const homeBilling = computed<{ text: string; billing?: string } | null>(() => {
   if (!homeQuoted.value || arrivalTab.value) return null
   const quote = homeQuote.value
   if (!quote) return null
-  if (!quote.adding.allowed) return { text: `Basic includes ${quote.homes.included} live ${quote.homes.included === 1 ? 'home' : 'homes'}. Choose Growth or Business to publish this one.`, billing: `/dashboard/${String(route.params.orgSlug)}/billing` }
+  if (!quote.adding.allowed) return { text: `Basic includes ${quote.homes.included} live ${quote.homes.included === 1 ? 'home' : 'homes'}. Choose Growth or Business to publish this one.`, billing: `/dashboard/${String(route.params.org_slug)}/billing` }
   const billed = homeLive.value ? quote.homes.used > quote.homes.included : quote.adding.additional_homes > 0
   if (!billed) return { text: homeLive.value ? 'This home is included in Basic.' : 'Published, this home is included in Basic.' }
   if (!quote.homes.additional_price_minor) return { text: 'This home is not billed on your current subscription.' }
@@ -1249,7 +1249,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
       })
       const cover = photoAssets.value[0]
       const photoItem = { id: 'photo', label: 'Media', image: cover ? mediaStillUrl(cover) || undefined : undefined, summary: photoAssets.value.length ? `${photoAssets.value.length} ${photoAssets.value.length === 1 ? 'item' : 'items'}` : 'No media', placeholder: !photoAssets.value.length, to: sectionPath('photo') }
-      const pageItems = row.page || legalEditor.value ? [{ id: 'page', label: 'Page content', summary: row.page?.title || 'No page', placeholder: !row.page, ...(canPreview.value ? { to: row.page ? `/dashboard/${String(route.params.orgSlug)}/website/pages/${encodeURIComponent(row.page.id)}` : sectionPath('page') } : {}) }] : []
+      const pageItems = row.page || legalEditor.value ? [{ id: 'page', label: 'Page content', summary: row.page?.title || 'No page', placeholder: !row.page, ...(canPreview.value ? { to: row.page ? `/dashboard/${String(route.params.org_slug)}/website/pages/${encodeURIComponent(row.page.id)}` : sectionPath('page') } : {}) }] : []
       return [{ id: legalEditor.value ? 'legal' : 'experience', items: [
         ...(legalEditor.value ? [] : [photoItem]),
         { id: 'name', label: 'Name', summary: row.name, to: sectionPath('name') },
@@ -1319,7 +1319,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
       { id: 'name', label: 'Listing title', summary: form.name || 'Not named yet', placeholder: !form.name, to: sectionPath('name') },
       { id: 'description', label: 'Description', summary: form.description || 'Nothing written yet', placeholder: !form.description, to: sectionPath('description') },
       ...(product.value.page
-        ? [{ id: 'page', label: 'Page content', summary: product.value.page.title, ...(canPreview.value ? { to: `/dashboard/${String(route.params.orgSlug)}/website/pages/${encodeURIComponent(product.value.page.id)}` } : {}) }]
+        ? [{ id: 'page', label: 'Page content', summary: product.value.page.title, ...(canPreview.value ? { to: `/dashboard/${String(route.params.org_slug)}/website/pages/${encodeURIComponent(product.value.page.id)}` } : {}) }]
         : []),
       { id: 'price', label: 'Nightly price', summary: priceSummary(), placeholder: priceSummary() === 'No price set', to: sectionPath('price') },
       {
@@ -1385,7 +1385,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
 })
 
 const activeNavigationItem = computed(() => {
-  const directDetail = typeof route.params.definitionId === 'string' ? route.params.definitionId : null
+  const directDetail = typeof route.params.definition_id === 'string' ? route.params.definition_id : null
   if (detailKey.value === 'attributes' && directDetail && navigationGroups.value.some(group => group.items.some(item => item.id === directDetail))) return directDetail
   return (experienceEditor.value || legalEditor.value) && detailKey.value === 'booking' && route.params.concern === 'assignment' ? 'assignment' : detailKey.value
 })
@@ -1409,7 +1409,7 @@ function rowRank(id: string) {
  * than from a list of every section a product could ever have — a product being
  * created composes its essential facts together rather than opening rows.
  */
-const openSections = computed(() => [...navigationGroups.value.flatMap(group => group.items.filter(item => item.id !== 'page' || canPreview.value).map(item => item.id)), ...additionalDetails.value.map(item => item.id), ...(!isNew.value && definitions.value.some(field => field.id === route.params.definitionId && field.key !== PRICING_NOTE_HANDLE && field.key !== 'tagline' && !isStayFocusedDetail(field.key)) ? ['attributes'] : [])])
+const openSections = computed(() => [...navigationGroups.value.flatMap(group => group.items.filter(item => item.id !== 'page' || canPreview.value).map(item => item.id)), ...additionalDetails.value.map(item => item.id), ...(!isNew.value && definitions.value.some(field => field.id === route.params.definition_id && field.key !== PRICING_NOTE_HANDLE && field.key !== 'tagline' && !isStayFocusedDetail(field.key)) ? ['attributes'] : [])])
 
 // A section this product does not have 404s. A watcher, not a setup-time check:
 // moving between leaves reuses this component.
@@ -1494,7 +1494,7 @@ function payload(concern?: ProductConcern) {
         : { ...version, description: form.description, details_mode: 'merge', details: { tagline: form.details.tagline ?? null } }
     }
     if (editorKey.value === 'attributes') {
-      const field = definitions.value.find(entry => entry.id === route.params.definitionId)
+      const field = definitions.value.find(entry => entry.id === route.params.definition_id)
       if (!field) throw new Error('Choose a product detail before saving.')
       return { ...version, details_mode: 'merge', details: { [field.key]: form.details[field.key] ?? null } }
     }
@@ -1504,8 +1504,8 @@ function payload(concern?: ProductConcern) {
     if (editorKey.value === 'name') return { ...version, name: form.name.trim() }
     if (editorKey.value === 'order-url') return { ...version, order_url: form.order_url || null }
     if (editorKey.value === 'kind') return { ...version, kind: assertProductKind(form.kind) }
-    if (editorKey.value === 'price' && typeof route.params.variantId === 'string') {
-      const variant = form.variants.find(entry => entry.id === route.params.variantId)
+    if (editorKey.value === 'price' && typeof route.params.product_variant_id === 'string') {
+      const variant = form.variants.find(entry => entry.id === route.params.product_variant_id)
       if (!variant) throw new Error('Choose a saved variant before editing its price.')
       const selection = { currency, location_id: priceLocationId(), at: new Date().toISOString() }
       const governing = selectPrice(variant.prices.filter(price => price.location_id === selection.location_id), selection)
@@ -1644,11 +1644,11 @@ const sectionUnchanged = computed(() => {
       : form.description === row.description && (form.details.tagline ?? null) === (row.details.tagline ?? null)
   }
   if (editorKey.value === 'attributes') {
-    const field = definitions.value.find(entry => entry.id === route.params.definitionId)
+    const field = definitions.value.find(entry => entry.id === route.params.definition_id)
     return Boolean(field && JSON.stringify(form.details[field.key] ?? null) === JSON.stringify(row.details[field.key] ?? null))
   }
   if (editorKey.value === 'price') {
-    const variant = typeof route.params.variantId === 'string' ? form.variants.find(entry => entry.id === route.params.variantId) : stayEditor.value ? form.variants[0] : null
+    const variant = typeof route.params.product_variant_id === 'string' ? form.variants.find(entry => entry.id === route.params.product_variant_id) : stayEditor.value ? form.variants[0] : null
     return Boolean(variant && variant.price_major.trim() === variant.loaded_price_major.trim() && (form.details[PRICING_NOTE_HANDLE] ?? null) === (row.details[PRICING_NOTE_HANDLE] ?? null))
   }
   return false
@@ -1882,7 +1882,7 @@ async function savePublication() {
 
 /** The one location the Locations leaf has open: offered there, and shown there. */
 async function saveLocation() {
-  const target = typeof route.params.locationId === 'string' ? route.params.locationId : null
+  const target = typeof route.params.location_id === 'string' ? route.params.location_id : null
   if (!target) throw new Error('Choose a location.')
   const entry = form.locations[target]
   if (!entry) throw new Error('This location has no settings to save.')
@@ -1996,7 +1996,7 @@ async function createPage() {
     await reload()
     if (product.value) loadForm(product.value)
     // The page is edited where every page is.
-    await navigateTo(`/dashboard/${String(route.params.orgSlug)}/website/pages/${encodeURIComponent(created.page.id)}`)
+    await navigateTo(`/dashboard/${String(route.params.org_slug)}/website/pages/${encodeURIComponent(created.page.id)}`)
   } catch (error) {
     saveError.value = getErrorMessage(error, 'Failed to create the page')
   } finally {
@@ -2231,7 +2231,7 @@ const productLocalizationFields = computed(() => {
   return fields
 })
 
-const organizationLocalizationSettingsPath = computed(() => `/dashboard/${route.params.orgSlug}/website/preferences/localization`)
+const organizationLocalizationSettingsPath = computed(() => `/dashboard/${route.params.org_slug}/website/preferences/localization`)
 
 function isProductLocalizationResponse(value: unknown): value is { localization: { values: Record<string, unknown> } } {
   return isRecord(value) && isRecord(value.localization) && isRecord(value.localization.values)

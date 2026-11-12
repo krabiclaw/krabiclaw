@@ -107,7 +107,7 @@ test('MCP Product booking uses public capacity, durable replay, guest identity a
 
       const dashboard = await request.get(`${baseURL}/api/dashboard/bookings/booking/${created.conversation_id}?org=${encodeURIComponent(orgSlug)}`)
       expect(dashboard.status(), await dashboard.text()).toBe(200)
-      expect((await dashboard.json()).booking).toMatchObject({ id: created.conversation_id, status: 'pending', conversation_id: created.conversation_id, booking_id: created.booking_id })
+      expect((await dashboard.json()).booking).toMatchObject({ status: 'pending', conversation_id: created.conversation_id, booking_id: created.booking_id })
       await loginAs(page.request, baseURL!, 'user-e2e-pottery-owner')
       await page.goto(`${baseURL}/dashboard/${encodeURIComponent(orgSlug)}/bookings/booking/${created.conversation_id}`)
       await expect(page.getByText('MCP Guest', { exact: true }).first()).toBeVisible()
@@ -204,7 +204,7 @@ test('MCP Product booking uses public capacity, durable replay, guest identity a
       const beforePaymentPolicy = await request.get(editor)
       expect(beforePaymentPolicy.status()).toBe(200)
       const payLaterPolicy = (await beforePaymentPolicy.json()).product.booking as ProductBookingConfig
-      const billing = await request.get(`${baseURL}/api/billing/status?organizationId=${org}`)
+      const billing = await request.get(`${baseURL}/api/billing/status?organization_id=${org}`)
       expect(billing.status(), await billing.text()).toBe(200)
       expect((await billing.json()).billing).toMatchObject({ plan: 'growth', status: 'active' })
       const usage = await request.get(`${baseURL}/api/dashboard/payments/billing?org=${encodeURIComponent(orgSlug)}`)
@@ -283,7 +283,7 @@ test('MCP online collection returns the real Payments setup handoff without chan
       return mcpData<T>(await response.json())
     }
     const context = await call<{ context: { organization_slug: string } }>('get_organization')
-    const billing = await request.get(`${baseURL}/api/billing/status?organizationId=${organizationId}`)
+    const billing = await request.get(`${baseURL}/api/billing/status?organization_id=${organizationId}`)
     expect(billing.status(), await billing.text()).toBe(200)
     expect((await billing.json()).billing).toMatchObject({ plan: 'business', status: 'active' })
     const usage = await request.get(`${baseURL}/api/dashboard/payments/billing?org=${encodeURIComponent(context.context.organization_slug)}`)

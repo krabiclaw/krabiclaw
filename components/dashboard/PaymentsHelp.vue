@@ -6,7 +6,7 @@
         <span class="text-base font-medium text-highlighted underline underline-offset-4">{{ article.title }}</span>
         <UIcon name="i-lucide-chevron-right" class="size-5 shrink-0 text-muted" />
       </NuxtLink>
-      <NuxtLink :to="`/dashboard/${route.params.orgSlug}/earnings/transactions`" class="flex items-center justify-between gap-4 py-4">
+      <NuxtLink :to="`/dashboard/${route.params.org_slug}/earnings/transactions`" class="flex items-center justify-between gap-4 py-4">
         <span class="text-base font-medium text-highlighted underline underline-offset-4">Go to your transactions</span>
         <UIcon name="i-lucide-chevron-right" class="size-5 shrink-0 text-muted" />
       </NuxtLink>

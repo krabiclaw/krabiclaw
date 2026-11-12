@@ -61,7 +61,7 @@ async function createStayHome(page: Page, baseURL: string, selectDifferentLocati
   const created = await request.post(`${baseURL}/api/auth/organization/create`, { headers, data: { name: `Stays ${slug}`, slug, default_currency: 'THB', timezone: TIME_ZONE } })
   await expectStatus(created, 200)
   const organizationId = (await created.json() as { id: string }).id
-  const provisioned = await request.post(`${baseURL}/api/organizations`, { headers, data: { organizationId, name: `Stays ${slug}`, subdomain: slug, vertical: 'lodging', sourceLocale: 'en' } })
+  const provisioned = await request.post(`${baseURL}/api/organizations`, { headers, data: { organization_id: organizationId, name: `Stays ${slug}`, subdomain: slug, vertical: 'lodging', source_locale: 'en' } })
   await expectStatus(provisioned, 200)
   expect((await request.post(`${baseURL}/api/auth/organization/set-active`, { headers, data: { organizationId } })).status()).toBe(200)
   const call = <T>(name: string, args: Record<string, unknown>) => tool<T>(request, baseURL, organizationId, name, args)
@@ -233,7 +233,7 @@ test('a home keeps its operator name independent from its public title across CM
   expect(stay.conversation_id).toBeTruthy()
   const questionText = 'Can you send the check-in instructions?'
   const question = await request.post('/api/dev/inbound-whatsapp', { headers: devLoginHeaders(), data: {
-    organizationId, from: '+66812345001', body: questionText, messageId: crypto.randomUUID(),
+    organization_id: organizationId, from: '+66812345001', body: questionText, message_id: crypto.randomUUID(),
   } })
   await expectStatus(question, 200)
   const today = await request.get(api('today'))
@@ -353,7 +353,7 @@ test('a home keeps its operator name independent from its public title across CM
   await expectStatus(past, 201)
   const pastStay = (await past.json() as { stay: StayDetail }).stay
   const pastQuestion = await request.post('/api/dev/inbound-whatsapp', { headers: devLoginHeaders(), data: {
-    organizationId, from: '+66812345002', body: 'Can you send the receipt for my stay?', messageId: crypto.randomUUID(),
+    organization_id: organizationId, from: '+66812345002', body: 'Can you send the receipt for my stay?', message_id: crypto.randomUUID(),
   } })
   await expectStatus(pastQuestion, 200)
   const pastWork = await request.get(api('today'))
@@ -376,7 +376,7 @@ test('a responsible home member reads its stays as turnovers on every surface un
     const { token } = await offered.json() as { token: string }
     const accepted = await memberContext.request.post(`/api/invite-links/${token}/accept`, { data: {} })
     await expectStatus(accepted, 200)
-    const { memberId } = await accepted.json() as { memberId: string }
+    const { member_id: memberId } = await accepted.json() as { member_id: string }
     const memberSession = await memberContext.request.get('/api/auth/get-session')
     await expectStatus(memberSession, 200)
     const memberName = (await memberSession.json() as { user: { name: string } }).user.name
@@ -3815,7 +3815,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
   const created = await page.request.post('/api/auth/organization/create', { headers, data: { name: `Cleaner ${slug}`, slug, default_currency: 'THB', timezone: TIME_ZONE } })
   await expectStatus(created, 200)
   const organizationId = (await created.json() as { id: string }).id
-  const provisioned = await page.request.post('/api/organizations', { headers, data: { organizationId, name: `Cleaner ${slug}`, subdomain: slug, vertical: 'lodging', sourceLocale: 'en' } })
+  const provisioned = await page.request.post('/api/organizations', { headers, data: { organization_id: organizationId, name: `Cleaner ${slug}`, subdomain: slug, vertical: 'lodging', source_locale: 'en' } })
   await expectStatus(provisioned, 200)
   const api = (path: string) => `/api/dashboard/${path}${path.includes('?') ? '&' : '?'}org=${encodeURIComponent(slug)}`
   const call = <T>(name: string, args: Record<string, unknown>) => tool<T>(page.request, baseURL!, organizationId, name, args)
@@ -3827,7 +3827,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
     const token = (await offered.json() as { token: string }).token
     const accepted = await cleaner.request.post(`/api/invite-links/${encodeURIComponent(token)}/accept`, { data: {} })
     await expectStatus(accepted, 200)
-    const memberId = (await accepted.json() as { memberId: string }).memberId
+    const { member_id: memberId } = await accepted.json() as { member_id: string }
     const listedMembers = await page.request.get('/api/auth/organization/list-members', { params: { organizationId } })
     await expectStatus(listedMembers, 200)
     const ownerMemberId = (await listedMembers.json() as { members: Array<{ id: string; role: string }> }).members.find(member => member.role === 'owner')!.id
@@ -4750,7 +4750,7 @@ test('a stay socket in a service organization closes when Better Auth removes it
   const created = await page.request.post('/api/auth/organization/create', { headers, data: { name: `Live ${slug}`, slug, default_currency: 'THB', timezone: TIME_ZONE } })
   await expectStatus(created, 200)
   const organizationId = (await created.json() as { id: string }).id
-  const provisioned = await page.request.post('/api/organizations', { headers, data: { organizationId, name: `Live ${slug}`, subdomain: slug, vertical: 'service', sourceLocale: 'en' } })
+  const provisioned = await page.request.post('/api/organizations', { headers, data: { organization_id: organizationId, name: `Live ${slug}`, subdomain: slug, vertical: 'service', source_locale: 'en' } })
   await expectStatus(provisioned, 200)
   const api = (path: string) => `/api/dashboard/${path}?org=${encodeURIComponent(slug)}`
   const cleaner = await browser.newContext({ baseURL: baseURL! })
@@ -4760,7 +4760,7 @@ test('a stay socket in a service organization closes when Better Auth removes it
     await expectStatus(offered, 201)
     const accepted = await cleaner.request.post(`/api/invite-links/${encodeURIComponent((await offered.json() as { token: string }).token)}/accept`, { data: {} })
     await expectStatus(accepted, 200)
-    const memberId = (await accepted.json() as { memberId: string }).memberId
+    const { member_id: memberId } = await accepted.json() as { member_id: string }
     const listedMembers = await page.request.get('/api/auth/organization/list-members', { params: { organizationId } })
     await expectStatus(listedMembers, 200)
     const ownerMemberId = (await listedMembers.json() as { members: Array<{ id: string; role: string }> }).members.find(member => member.role === 'owner')!.id

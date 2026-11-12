@@ -21,9 +21,9 @@
         </article>
       </div>
       <p v-if="!data.messages.length" class="py-8 text-muted">No scheduled messages yet.</p>
-      <div v-if="offset || data.pagination.hasMore" class="mt-6 flex justify-between gap-3">
+      <div v-if="offset || data.pagination.has_more" class="mt-6 flex justify-between gap-3">
         <UButton label="Previous" color="neutral" variant="outline" :disabled="!offset || status === 'pending'" @click="offset = Math.max(0, offset - 25)" />
-        <UButton label="Next" color="neutral" variant="outline" :disabled="!data.pagination.hasMore || status === 'pending'" @click="offset = data.pagination.nextOffset!" />
+        <UButton label="Next" color="neutral" variant="outline" :disabled="!data.pagination.has_more || status === 'pending'" @click="offset = data.pagination.next_offset!" />
       </div>
     </template>
     <p v-else role="status" class="text-muted">Loading scheduled messages…</p>
@@ -41,7 +41,7 @@ const { locale } = useI18n()
 const offset = ref(0)
 const actionError = ref('')
 const cancelling = ref<string | null>(null)
-const messagesPath = computed(() => `/dashboard/${encodeURIComponent(String(route.params.orgSlug))}/messages`)
+const messagesPath = computed(() => `/dashboard/${encodeURIComponent(String(route.params.org_slug))}/messages`)
 const role = computed(() => dashboard.organization.value?.role as keyof typeof organizationRoles | undefined)
 const manage = computed(() => Boolean(role.value && authClient.organization.checkRolePermission({ role: role.value, permissions: { operations: ['update'] } })))
 const session = authClient.useSession()

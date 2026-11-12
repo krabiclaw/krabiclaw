@@ -206,8 +206,8 @@ test('empty greenfield collections are valid; inquiries mirror into the canonica
     assert.equal(rows.length, 1)
     // An unbooked Airbnb conversation with no guest name reads as the title Airbnb gave it, on the home it was asked about, with no dates invented.
     // The guest's mirrored words are from someone else, so the conversation is unread until the owner opens it.
-    assert.deepEqual({ ...rows[0]!, time: undefined }, { id: rows[0]!.id, kind: 'guest', guestName: 'Conversation supplied by Airbnb', avatarInitial: 'C', channel: 'airbnb', home: 'Cabin', when: null,
-      preview: 'Sent a photo', previewFrom: 'Airbnb Support', time: undefined, unread: true })
+    assert.deepEqual({ ...rows[0]!, time: undefined }, { id: rows[0]!.id, kind: 'guest', title: 'Conversation supplied by Airbnb', avatar_initial: 'C', channel: 'airbnb', home: 'Cabin', when: null,
+      preview: 'Sent a photo', preview_from: 'Airbnb Support', time: undefined, unread: true })
     assert.deepEqual(await listConversations(db, ORG, { userId: OWNER, type: 'stay', mailbox: 'past' }), [])
     assert.equal(await db.prepare('SELECT product_id FROM channel_threads WHERE conversation_id = ?').bind(rows[0]!.id).first('product_id'), productId)
     const detail = (await getGuestThreadDetail(db, rows[0]!.id, ORG))!
@@ -315,7 +315,7 @@ test('empty Channex host actions stay recorded without clearing reply work; a re
     const thread = (await getInboxThread(db, requestId, ORG, { audience: 'member', userId: OWNER, principal: owner }))!
     assert.deepEqual(thread.stream.filter(item => item.type === 'message').map(item => item.type === 'message' ? [item.side, item.body] : null), [['guest', 'Hello']])
     const [row] = await listConversations(db, ORG, { userId: OWNER, type: 'stay', mailbox: 'current' })
-    assert.deepEqual([row!.preview, row!.previewFrom], ['Hello', 'Conversation supplied by Airbnb'])
+    assert.deepEqual([row!.preview, row!.preview_from], ['Hello', 'Conversation supplied by Airbnb'])
 
     // A webhook re-mirror of the same conversation records it once and still succeeds.
     await mirrorChannexThread(db, env, 'thread', 'property')
@@ -474,10 +474,10 @@ test('the inbox exposes every page with a stable tie order and validates paginat
     }
     const first = guestThreadListPage(await listConversations(db, ORG, { userId: OWNER, limit: 4, offset: 0 }), { limit: 3, offset: 0 })
     assert.deepEqual(first.threads.map(thread => thread.id), ['a', 'b', 'c'])
-    assert.deepEqual(first.pagination, { limit: 3, offset: 0, hasMore: true, nextOffset: 3 })
+    assert.deepEqual(first.pagination, { limit: 3, offset: 0, has_more: true, next_offset: 3 })
     const last = guestThreadListPage(await listConversations(db, ORG, { userId: OWNER, limit: 4, offset: 3 }), { limit: 3, offset: 3 })
     assert.deepEqual(last.threads.map(thread => thread.id), ['d', 'e'])
-    assert.deepEqual(last.pagination, { limit: 3, offset: 3, hasMore: false, nextOffset: null })
+    assert.deepEqual(last.pagination, { limit: 3, offset: 3, has_more: false, next_offset: null })
     for (const [query, field] of [[{ limit: '0' }, 'limit'], [{ limit: '101' }, 'limit'], [{ offset: '-1' }, 'offset'], [{ limit: ['3'] }, 'limit'],
       [{ type: 'everything' }, 'type'], [{ conversation_state: 'resolved' }, 'conversation_state'], [{ q: 'x'.repeat(201) }, 'q'], [{ mailbox: ['past'] }, 'mailbox'], [{ unread: 'yes' }, 'unread'], [{ location_id: ' ' }, 'location_id'], [{ organization_id: 'org' }, 'organization_id']] as const) {
       assert.throws(() => parseGuestThreadListQuery(query), { status: 400, data: { code: 'INVALID_GUEST_THREAD_FILTER', field } })
@@ -668,7 +668,7 @@ test('a reply is sent with the message id Channex returns, and any Channex error
     assert.ok(refusedEntry)
     const refusedProgress = (await listBusinessOutcomes(db, principal, { limit: 100 })).outcomes.find(outcome => outcome.id === refusedEntry.id)
     assert.deepEqual(refusedProgress?.verification, { status: 'failed', basis: 'provider_acceptance', receipts: [{
-      id: `guest-thread-channex:${result.conversation_id}:refused`, channel: 'airbnb', provider: 'channex', status: 'failed', providerMessageId: null,
+      id: `guest-thread-channex:${result.conversation_id}:refused`, channel: 'airbnb', provider: 'channex', status: 'failed', provider_message_id: null,
     }] })
     assert.equal((await getGuestThreadDetail(db, result.conversation_id, ORG))!.deliveryFailures.length, 3)
 
@@ -694,7 +694,7 @@ test('a reply is sent with the message id Channex returns, and any Channex error
     assert.deepEqual(await db.prepare('SELECT status, provider_message_id, error FROM guest_thread_deliveries WHERE message_id = ?').bind(refusedEntry.id).first(),
       { status: 'accepted', provider_message_id: `accepted-${provider.sends}`, error: null })
     const recoveredProgress = (await listBusinessOutcomes(db, principal, { limit: 100 })).outcomes.find(outcome => outcome.id === refusedEntry.id)
-    assert.deepEqual([recoveredProgress?.verification.status, recoveredProgress?.verification.receipts.map(receipt => [receipt.status, receipt.providerMessageId])],
+    assert.deepEqual([recoveredProgress?.verification.status, recoveredProgress?.verification.receipts.map(receipt => [receipt.status, receipt.provider_message_id])],
       ['verified', [['accepted', `accepted-${provider.sends}`]]])
   } finally { releaseRetry?.(); globalThis.fetch = realFetch; await runtime.dispose() }
 })

@@ -26,10 +26,8 @@ interface GoalRow {
   id: string; intent: string; constraints: string | null; target_at: string | null; status: BusinessGoal['status']; strategy_json: string | null
   created_by_user_id: string | null; updated_by_user_id: string | null; created_at: string; updated_at: string
 }
-const goalOf = (row: GoalRow): BusinessGoal => ({
-  id: row.id, intent: row.intent, constraints: row.constraints, targetAt: row.target_at, status: row.status,
-  strategy: row.strategy_json === null ? null : businessGoalStrategySchema.parse(JSON.parse(row.strategy_json)),
-  createdBy: row.created_by_user_id, updatedBy: row.updated_by_user_id, createdAt: row.created_at, revision: row.updated_at,
+const goalOf = ({ strategy_json, ...row }: GoalRow): BusinessGoal => ({
+  ...row, strategy: strategy_json === null ? null : businessGoalStrategySchema.parse(JSON.parse(strategy_json)),
 })
 const conflict = (message: string) => new HTTPError({ statusCode: 409, message, data: { code: 'PROGRESS_REVISION_CONFLICT' } })
 
@@ -39,7 +37,7 @@ async function authorize(db: DbClient, principal: MemberAccessPrincipal) {
 }
 
 async function readGoal(db: DbClient, organizationId: string, id: string): Promise<BusinessGoal> {
-  const row = await queryFirst<GoalRow>(db, 'SELECT * FROM organization_goals WHERE organization_id = ? AND id = ?', [organizationId, id])
+  const row = await queryFirst<GoalRow>(db, 'SELECT id, intent, constraints, target_at, status, strategy_json, created_by_user_id, updated_by_user_id, created_at, updated_at FROM organization_goals WHERE organization_id = ? AND id = ?', [organizationId, id])
   if (!row) throw new HTTPError({ statusCode: 404, message: 'Goal not found', data: { code: 'GOAL_NOT_FOUND' } })
   return goalOf(row)
 }
@@ -48,10 +46,10 @@ export async function createBusinessGoal(db: DbClient, principal: MemberAccessPr
   await authorize(db, principal)
   const parsed = createBusinessGoalSchema.safeParse(body)
   if (!parsed.success) throw new HTTPError({ statusCode: 400, message: 'Invalid goal', data: parsed.error.flatten() })
-  const { idempotencyKey, intent } = parsed.data
-  const constraints = parsed.data.constraints ?? null, targetAt = parsed.data.targetAt ?? null
+  const { idempotency_key, intent } = parsed.data
+  const constraints = parsed.data.constraints ?? null, targetAt = parsed.data.target_at ?? null
   const strategy = parsed.data.strategy ?? null
-  const key = creationDedupeKey('organization_goal', principal.organizationId, idempotencyKey)
+  const key = creationDedupeKey('organization_goal', principal.organizationId, idempotency_key)
   const requestHash = await creationRequestHash({ actorId: principal.userId, intent, constraints, targetAt, strategy: strategy ?? undefined })
   const replay = async () => {
     const record = await readCreationRecord(db, key)
@@ -88,19 +86,19 @@ export async function updateBusinessGoal(db: DbClient, principal: MemberAccessPr
   const parsed = updateBusinessGoalSchema.safeParse(body)
   if (!parsed.success) throw new HTTPError({ statusCode: 400, message: 'Invalid goal update', data: parsed.error.flatten() })
   const current = await readGoal(db, principal.organizationId, id)
-  const { revision, ...patch } = parsed.data
-  if (current.revision !== revision) throw conflict('The goal changed; read its current revision before editing')
-  const next = { intent: current.intent, constraints: current.constraints, targetAt: current.targetAt, strategy: current.strategy, status: current.status, ...patch }
-  if (next.intent === current.intent && next.constraints === current.constraints && next.targetAt === current.targetAt && next.status === current.status && JSON.stringify(next.strategy) === JSON.stringify(current.strategy)) {
+  const { updated_at, ...patch } = parsed.data
+  if (current.updated_at !== updated_at) throw conflict('The goal changed; read its current revision before editing')
+  const next = { intent: current.intent, constraints: current.constraints, target_at: current.target_at, strategy: current.strategy, status: current.status, ...patch }
+  if (next.intent === current.intent && next.constraints === current.constraints && next.target_at === current.target_at && next.status === current.status && JSON.stringify(next.strategy) === JSON.stringify(current.strategy)) {
     await publishBusinessInvalidation(principal.env, principal.organizationId)
     return current
   }
-  const now = new Date(Math.max(Date.now(), Date.parse(current.revision) + 1)).toISOString()
+  const now = new Date(Math.max(Date.now(), Date.parse(current.updated_at) + 1)).toISOString()
   const result = await executeBatch(db, [
     { query: `UPDATE organization_goals SET intent = ?, constraints = ?, target_at = ?, strategy_json = ?, status = ?, updated_by_user_id = ?, updated_at = ?
-      WHERE id = ? AND organization_id = ? AND updated_at = ?`, params: [next.intent, next.constraints, next.targetAt, next.strategy === null ? null : JSON.stringify(next.strategy), next.status, principal.userId, now, id, principal.organizationId, revision] },
+      WHERE id = ? AND organization_id = ? AND updated_at = ?`, params: [next.intent, next.constraints, next.target_at, next.strategy === null ? null : JSON.stringify(next.strategy), next.status, principal.userId, now, id, principal.organizationId, updated_at] },
     organizationEventQuery({ organizationId: principal.organizationId, actorId: principal.userId, eventType: 'goal.updated', entityType: 'organization_goal', entityId: id,
-      beforeState: current, afterState: { ...next, revision: now }, onlyIfPreviousChangedOneRow: true }),
+      beforeState: current, afterState: { ...next, updated_at: now }, onlyIfPreviousChangedOneRow: true }),
   ])
   if (result[0]?.meta.changes !== 1) throw conflict('The goal changed while this edit was being saved')
   await publishBusinessInvalidation(principal.env, principal.organizationId)
@@ -109,7 +107,7 @@ export async function updateBusinessGoal(db: DbClient, principal: MemberAccessPr
 
 export async function readRecommendationReference(db: DbClient, principal: MemberAccessPrincipal, subject: { operation: BusinessProgressOperation; subjectId: string }) {
   try {
-    return await readBusinessProgressReference(db, principal, subject)
+    return await readBusinessProgressReference(db, principal, { operation: subject.operation, subject_id: subject.subjectId })
   } catch (error) {
     if (!(error instanceof HTTPError) || error.statusCode !== 404) throw error
     return null
@@ -121,7 +119,7 @@ export async function readBusinessProgress(db: DbClient, principal: MemberAccess
   await authorize(db, principal)
   const [outcomes, goalRows] = await Promise.all([
     listBusinessOutcomes(db, principal, page),
-    queryAllPages<GoalRow>(db, 'SELECT * FROM organization_goals WHERE organization_id = ? ORDER BY updated_at DESC, id DESC', [principal.organizationId]),
+    queryAllPages<GoalRow>(db, 'SELECT id, intent, constraints, target_at, status, strategy_json, created_by_user_id, updated_by_user_id, created_at, updated_at FROM organization_goals WHERE organization_id = ? ORDER BY updated_at DESC, id DESC', [principal.organizationId]),
   ])
   return { goals: goalRows.map(goalOf), ...outcomes }
 }
@@ -221,7 +219,7 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
     'SELECT slug,name,vertical,timezone,default_currency,analytics_data_start_at FROM organization WHERE id=?', [organizationId])
   if (!organization) throw new HTTPError({ statusCode: 404, message: 'Organization not found' })
   if (input.locationId && !await queryFirst(db, 'SELECT id FROM business_locations WHERE id=? AND organization_id=?', [input.locationId, organizationId])) throw new HTTPError({ statusCode: 404, message: 'Location not found' })
-  const goals = (await queryAllPages<GoalRow>(db, "SELECT * FROM organization_goals WHERE organization_id = ? AND status = 'active' ORDER BY updated_at DESC, id DESC", [organizationId])).map(goalOf)
+  const goals = (await queryAllPages<GoalRow>(db, "SELECT id, intent, constraints, target_at, status, strategy_json, created_by_user_id, updated_by_user_id, created_at, updated_at FROM organization_goals WHERE organization_id = ? AND status = 'active' ORDER BY updated_at DESC, id DESC", [organizationId])).map(goalOf)
   const structured = goals.filter(goal => goal.strategy !== null)
   // Explicit strategies prioritize their channels. They do not turn a payments goal
   // into a marketing dead end or require a goal before a business can grow.

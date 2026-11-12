@@ -42,14 +42,14 @@ export interface PublicShellPayload {
   organization: PublicShellOrganization
   locations: PublicShellLocation[]
   config: Record<string, string>
-  googleMaps: ApiRecord
+  google_maps: ApiRecord
   sections: Record<PublicSiteSection, boolean>
-  platformMessages: Record<string, string> | null
+  platform_messages: Record<string, string> | null
   consultation?: import('~/types/public-site').PublicConsultationSettings | null
-  canSchedule?: boolean
+  can_schedule?: boolean
   compliance?: import('~/types/public-site').PublicCompliance | null
-  pageLinks?: import('~/types/public-site').PublicPageLink[]
-  searchConsoleVerification?: string | null
+  page_links?: import('~/types/public-site').PublicPageLink[]
+  search_console_verification?: string | null
 }
 
 const sectionFlags = (value: unknown, names: readonly string[]): boolean =>
@@ -91,17 +91,17 @@ export const isPublicShellPayload = (value: unknown): value is PublicShellPayloa
       && sectionFlags(location.sections, PUBLIC_LOCATION_SECTIONS))) return false
   if (!isRecord(value.config)
     || !Object.values(value.config).every(item => typeof item === 'string')) return false
-  if (!isRecord(value.googleMaps)
-    || (value.googleMaps.business !== null && !isRecord(value.googleMaps.business))
-    || !Array.isArray(value.googleMaps.reviews)
-    || !Array.isArray(value.googleMaps.media)) return false
-  if (value.platformMessages !== null && (!isRecord(value.platformMessages)
-    || !Object.values(value.platformMessages).every(message => typeof message === 'string'))) return false
+  if (!isRecord(value.google_maps)
+    || (value.google_maps.business !== null && !isRecord(value.google_maps.business))
+    || !Array.isArray(value.google_maps.reviews)
+    || !Array.isArray(value.google_maps.media)) return false
+  if (value.platform_messages !== null && (!isRecord(value.platform_messages)
+    || !Object.values(value.platform_messages).every(message => typeof message === 'string'))) return false
   if (value.consultation !== undefined && value.consultation !== null && (!isRecord(value.consultation) || typeof value.consultation.mode !== 'string')) return false
-  if (value.canSchedule !== undefined && typeof value.canSchedule !== 'boolean') return false
+  if (value.can_schedule !== undefined && typeof value.can_schedule !== 'boolean') return false
   if (value.compliance !== undefined && value.compliance !== null && !isRecord(value.compliance)) return false
-  if (value.pageLinks !== undefined && !Array.isArray(value.pageLinks)) return false
-  if (value.searchConsoleVerification !== undefined && value.searchConsoleVerification !== null && typeof value.searchConsoleVerification !== 'string') return false
+  if (value.page_links !== undefined && !Array.isArray(value.page_links)) return false
+  if (value.search_console_verification !== undefined && value.search_console_verification !== null && typeof value.search_console_verification !== 'string') return false
   return sectionFlags(value.sections, PUBLIC_SITE_SECTIONS)
 }
 
@@ -111,18 +111,18 @@ export interface PublicPagePayload {
   content: ApiRecord[]
   content_blocks: ApiRecord[]
   tenant_page: PublicTenantPage | null
-  locationReviews: ApiRecord[]
-  globalReviews: ApiRecord[]
-  reviewsAggregate: ApiRecord | null
-  reviewsList: ApiRecord[]
+  location_reviews: ApiRecord[]
+  global_reviews: ApiRecord[]
+  reviews_aggregate: ApiRecord | null
+  reviews_list: ApiRecord[]
   media: ApiRecord[]
-  qaList: ApiRecord[]
-  blogPost: ApiRecord | null
+  qa_list: ApiRecord[]
+  blog_post: ApiRecord | null
   /** Each table product's terms in the page's language, by product id: what the reservations page states before booking. */
-  tablePolicySummaries: Record<string, FormattedBookingPolicySummary>
+  table_policy_summaries: Record<string, FormattedBookingPolicySummary>
   products: Product[]
   collections: Collection[]
-  localeRepresentations: PublicLocaleRepresentation[]
+  locale_representations: PublicLocaleRepresentation[]
 }
 
 export interface PublicLocaleRepresentation {
@@ -196,22 +196,22 @@ export const isPublicPagePayload = (
     && typeof value.tenant_page.path === 'string'
     && typeof value.tenant_page.title === 'string'
     && Array.isArray(value.tenant_page.blocks)))
-  && Array.isArray(value.locationReviews)
-  && Array.isArray(value.globalReviews)
-  && value.globalReviews.every(item => isRecord(item) && typeof item.rating === 'number')
-  && (value.reviewsAggregate === null || isRecord(value.reviewsAggregate))
-  && Array.isArray(value.reviewsList)
+  && Array.isArray(value.location_reviews)
+  && Array.isArray(value.global_reviews)
+  && value.global_reviews.every(item => isRecord(item) && typeof item.rating === 'number')
+  && (value.reviews_aggregate === null || isRecord(value.reviews_aggregate))
+  && Array.isArray(value.reviews_list)
   && Array.isArray(value.media)
-  && Array.isArray(value.qaList)
-  && (value.blogPost === null || isRecord(value.blogPost))
-  && isRecord(value.tablePolicySummaries)
-  && Object.values(value.tablePolicySummaries).every(item => isRecord(item) && typeof item.heading === 'string' && Array.isArray(item.items))
+  && Array.isArray(value.qa_list)
+  && (value.blog_post === null || isRecord(value.blog_post))
+  && isRecord(value.table_policy_summaries)
+  && Object.values(value.table_policy_summaries).every(item => isRecord(item) && typeof item.heading === 'string' && Array.isArray(item.items))
   && Array.isArray(value.products)
   && value.products.every(isPublicProduct)
   && Array.isArray(value.collections)
   && value.collections.every(isPublicCollection)
-  && Array.isArray(value.localeRepresentations)
-  && value.localeRepresentations.every(item => isRecord(item)
+  && Array.isArray(value.locale_representations)
+  && value.locale_representations.every(item => isRecord(item)
     && typeof item.locale === 'string'
     && typeof item.label === 'string'
     && typeof item.route_path === 'string'

@@ -10,7 +10,7 @@ import { getPublishedTenantPage } from '~/server/utils/content/pages'
 import { renderContentBlocksForLlm } from '~/server/utils/platform-llm'
 
 export function renderPlansMarkdown(plans: Plan[]): string {
-  const betaSpotsLeft = plans.find(plan => plan.betaSpotsLeft !== undefined)?.betaSpotsLeft ?? 0
+  const betaSpotsLeft = plans.find(plan => plan.beta_spots_left !== undefined)?.beta_spots_left ?? 0
   const lines: string[] = [
     '# KrabiClaw Pricing & Plans',
     '',
@@ -38,8 +38,8 @@ export function renderPlansMarkdown(plans: Plan[]): string {
 
     if (plan.limits) {
       lines.push('- **Limits & Entitlements**:')
-      lines.push(`  - Custom Domain: ${plan.limits.customDomain ? 'Included' : 'Not included'}`)
-      lines.push(`  - Google Places Integration: ${plan.limits.googlePlaces ? 'Included' : 'Not included'}`)
+      lines.push(`  - Custom Domain: ${plan.limits.custom_domains ? 'Included' : 'Not included'}`)
+      lines.push(`  - Google Places Integration: ${plan.limits.google_places ? 'Included' : 'Not included'}`)
       lines.push(`  - Support Tier: ${plan.limits.support}`)
     }
 
