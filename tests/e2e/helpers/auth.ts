@@ -51,3 +51,19 @@ export async function loginAs(request: APIRequestContext, baseURL: string, userI
   expect(session.status(), await session.text()).toBe(200)
   await expect(session.json()).resolves.toMatchObject({ user: fixture ? { id: fixture.id } : { email } })
 }
+
+export async function sendOrganizationInvitation(request: APIRequestContext, baseURL: string, organizationId: string, email: string, role: 'member' | 'admin') {
+  const response = await request.post('/api/auth/organization/invite-member', {
+    headers: authRequestHeaders(baseURL), data: { organizationId, email, role },
+  })
+  expect(response.status(), await response.text()).toBe(200)
+  return (await response.json() as { id: string }).id
+}
+
+export async function acceptOrganizationInvitation(request: APIRequestContext, baseURL: string, invitationId: string) {
+  const response = await request.post('/api/auth/organization/accept-invitation', {
+    headers: authRequestHeaders(baseURL), data: { invitationId },
+  })
+  expect(response.status(), await response.text()).toBe(200)
+  return (await response.json() as { member: { id: string; role: string; organizationId: string } }).member
+}

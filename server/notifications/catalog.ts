@@ -35,7 +35,6 @@ import {
   organizationInviteMessage,
   resetPasswordMessage,
   reviewRequestMessage,
-  signInCodeMessage,
   verifyEmailMessage,
 } from './guest-events'
 
@@ -463,7 +462,6 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
 
   // Guest and account mail — email only.
   { id: 'auth-verify', audience: 'guest', title: 'Sign-up — verify your email', message: verifyEmailMessage({ verificationUrl: 'https://krabiclaw.com/api/auth/verify-email?token=preview' }) },
-  { id: 'auth-sign-in-code', audience: 'guest', title: 'Sign-in — email code', message: signInCodeMessage({ code: '482913' }) },
   { id: 'auth-reset', audience: 'guest', title: 'Sign-in — reset your password', message: resetPasswordMessage({ resetUrl: 'https://krabiclaw.com/reset-password?token=preview' }) },
   { id: 'organization-invite', audience: 'guest', title: 'Invitee — organization invitation', message: organizationInviteMessage({ organizationName: studio, inviterName: 'Priya Shah', role: 'Admin', inviteUrl: 'https://demo.krabiclaw.com/accept-invitation/preview', expires: 'Nov 8, 2026, 2:00 PM UTC' }) },
   { id: 'guest-reservation-received', audience: 'guest', title: 'Guest — table reservation confirmed', message: guestBookingReceivedMessage({ ...guestVisit, productTitle: 'Main Dining Room table', status: 'confirmed', wording: 'reservation' }) },

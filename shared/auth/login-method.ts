@@ -6,6 +6,6 @@ export function loginMethodForPath(path: string | undefined, body?: { provider?:
   if (path === '/callback/google') return 'google'
   // The website returns from Apple here; the native app posts its identity token to /sign-in/social.
   if (path === '/callback/apple' || (path === '/sign-in/social' && body?.provider === 'apple')) return 'apple'
-  if (path === '/sign-in/email' || path === '/sign-up/email' || path === '/sign-in/email-otp') return 'email'
+  if (path === '/sign-in/email' || path === '/sign-up/email') return 'email'
   return null
 }

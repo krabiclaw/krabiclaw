@@ -16,7 +16,6 @@ extend that model. Never add a second one beside it.
 |---|---|---|---|
 | Identity and sessions | `user` `session` `account` `verification` `jwks` `rate_limits` | Better Auth | Better Auth |
 | Organization and membership | `organization` `member` `invitation` | Better Auth organization plugin | Better Auth |
-| Shareable invite link (Better Auth invitations are email-bound) | `organization_invite_links` | server/utils/invite-links.ts | KrabiClaw |
 | OAuth provider for MCP clients | `oauthClient` `oauthClientAssertion` `oauthResource` `oauthClientResource` `oauthConsent` `oauthAccessToken` `oauthRefreshToken` | Better Auth OAuth provider | Better Auth |
 | KrabiClaw subscription | `subscription` | Better Auth Stripe | Better Auth Stripe |
 | Onboarding draft | `onboarding_drafts` | server/utils/onboarding-drafts.ts | KrabiClaw |

@@ -3,7 +3,7 @@ import { createAuthMiddleware, getOAuthState, isAPIError } from 'better-auth/api
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
 import { DISCORD_BOT_PERMISSIONS } from '~/server/utils/discord-bot'
 import { loginMethodForPath } from '~/shared/auth/login-method'
-import { admin, anonymous, bearer, emailOTP, genericOAuth, getOrgAdapter, hasPermission, jwt, lastLoginMethod, organization, phoneNumber, type UserWithAnonymous } from 'better-auth/plugins'
+import { admin, anonymous, bearer, genericOAuth, getOrgAdapter, hasPermission, jwt, lastLoginMethod, organization, phoneNumber, type UserWithAnonymous } from 'better-auth/plugins'
 import { stripe as betterAuthStripe } from '@better-auth/stripe'
 import { oauthProvider } from '@better-auth/oauth-provider'
 import { cimd } from '@better-auth/cimd'
@@ -20,7 +20,7 @@ import { isValidTimezone } from '~/utils/timezone'
 import { departedParticipantsQuery } from '~/server/domain/conversations'
 import { measurementOutcome, readPageEventId, recordAndDeliverConversion } from '~/server/utils/organization-conversions'
 import { getPlatformOrganization } from '~/server/utils/platform-organization'
-import { sendPasswordResetEmail, sendSignInCodeEmail, sendVerificationEmail } from '~/server/utils/auth-email'
+import { sendPasswordResetEmail, sendVerificationEmail } from '~/server/utils/auth-email'
 import { validatePassword } from '~/utils/password-validation'
 import { organizationEventQuery } from '~/server/utils/organization-events'
 import { organizationAccessControl, organizationRoles } from '~/utils/organization-access'
@@ -34,7 +34,6 @@ import { anonymousLinkQueries, linkGuestIdentitiesByVerifiedEmail } from '~/serv
 import { recordRequestExternalCall, unwrapInstrumentedD1 } from '~/server/utils/request-metrics'
 import { timingSafeEqualText } from '~/server/utils/dev-route-auth'
 import { notifyOrganizationInvited } from '~/server/utils/notifications'
-import { assertNoPendingInvitation } from '~/server/utils/email-invitations'
 import { cleanupOrganizationBeforeDelete } from '~/server/utils/tenant-deletion'
 import { APPLE_AUTHORIZATION_CODE_HEADER, APPLE_CLIENT_SECRET_MAX_LIFETIME_SECONDS, appleClientSecret, exchangeAppleAuthorizationCode, revokeAppleGrant } from '~/server/utils/apple-revocation'
 import { reconcileZarazAnalytics } from '~/server/utils/zaraz-analytics'
@@ -74,6 +73,7 @@ export function oauthSigningConfig(authBaseUrl: string) {
 }
 
 export const organizationOptions = {
+  creatorRole: 'owner',
   ac: organizationAccessControl,
   roles: organizationRoles,
   // A business cannot exist without the currency it sells in and the clock it
@@ -377,7 +377,15 @@ function buildAuth(env: CloudflareEnv) {
     organizationHooks: {
       beforeCreateOrganization: async ({ organization, user }: { organization: Record<string, unknown>; user: { email: string } }) => {
         assertOrganizationFacts(organization)
-        await assertNoPendingInvitation(db, user.email)
+        const adapter = getOrgAdapter(getCurrentAuthEndpointContext().context, organizationOptions)
+        const hasPendingInvitation = (await adapter.listUserInvitations(user.email))
+          .some(invitation => invitation.status === 'pending' && invitation.expiresAt.getTime() > Date.now())
+        if (hasPendingInvitation) {
+          throw new APIError('FORBIDDEN', {
+            code: 'PENDING_INVITATION',
+            message: 'Accept or decline your pending invitation before creating a business.',
+          })
+        }
       },
       beforeUpdateOrganization: async ({ organization }: { organization: Record<string, unknown> }) => assertOrganizationFacts(organization),
       afterAddMember: async ({ member }: { member: { organizationId: string } }) => recordMemberChange(member.organizationId),
@@ -445,13 +453,8 @@ function buildAuth(env: CloudflareEnv) {
     // An administrator does not delete accounts: /admin/remove-user would skip
     // the ownership guard and Apple revocation that /delete-user runs in
     // deleteUser.beforeDelete.
-    //
-    // An email code only signs in; verifying, resetting a password and changing
-    // an address keep their existing link flows.
     disabledPaths: [
       '/sign-in/phone-number', '/phone-number/request-password-reset', '/phone-number/reset-password', '/admin/remove-user',
-      '/email-otp/verify-email', '/email-otp/request-password-reset', '/forget-password/email-otp', '/email-otp/reset-password',
-      '/email-otp/request-email-change', '/email-otp/change-email',
     ],
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
@@ -770,15 +773,6 @@ function buildAuth(env: CloudflareEnv) {
         defaultRole: 'user',
         roles: platformAdminRoles,
         impersonationSessionDuration: 15 * 60,
-      }),
-      // Someone invited by email signs in with a code sent to that address, so
-      // the account that accepts is the one the invitation names. Only sign-in
-      // codes are sent; verification and password reset stay on their links.
-      emailOTP({
-        sendVerificationOTP: async ({ email, otp, type }) => {
-          if (type !== 'sign-in') throw new APIError('BAD_REQUEST', { code: 'UNSUPPORTED_OTP_TYPE', message: 'Email codes are used only to sign in.' })
-          await sendSignInCodeEmail(env, { email, code: otp })
-        },
       }),
       phoneNumber({
         sendOTP: async ({ phoneNumber: phone, code }) => {

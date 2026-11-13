@@ -212,10 +212,8 @@ management or leave controls. The iPhone app's Message host action includes all
 workspace owners and admins in the stay conversation. Other conversations
 include the sender and the recipients they explicitly choose.
 
-Owners and admins add people with a single-use invite link that lasts seven
-days. Whoever opens it sees the workspace and the role on KrabiClaw's invite
-page, signs in or creates an account, and joins; the iPhone app accepts the
-same link. A used, expired or withdrawn link says so.
+Owners and admins send email invitations from Team. The recipient opens the
+link on the web or in the iPhone app and signs in with the invited email to join.
 
 ## Plans
 

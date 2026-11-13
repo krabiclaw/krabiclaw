@@ -110,7 +110,7 @@ export const E2E_AUTH_FIXTURES: readonly E2eAuthFixture[] = [
     // Signs in like the native app, with a bearer session and no cookies, and
     // owns the organization it creates for the lodging-identity spec.
     'lodging-native',
-    // Joins that organization through an invite link.
+    // Joins that organization through an email invitation.
     'lodging-invitee',
     // Owns the lodging organization the stays spec creates, with its homes and stays.
     'lodging-host',

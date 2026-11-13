@@ -15,44 +15,26 @@
 
     <template v-else-if="invitation">
       <div>
-        <h1 class="text-2xl font-semibold tracking-tight text-highlighted">Join {{ invitation.organization.name }}</h1>
+        <h1 class="text-2xl font-semibold tracking-tight text-highlighted">Join {{ invitation.organizationName }}</h1>
         <p class="mt-2 text-sm text-muted">
-          You've been invited to join {{ invitation.organization.name }} on KrabiClaw as {{ roleLabel }}.
+          You've been invited to join {{ invitation.organizationName }} on KrabiClaw as {{ roleLabel }}.
           The invitation is for {{ invitation.email }} and expires on {{ expiresOn }}.
         </p>
       </div>
 
-      <!-- The session resolves on the client after mount; until it is known
-           both renders show this, so the choices never flash at a signed-in person. -->
-      <div v-if="sessionLoading" class="text-sm text-muted">Checking your session…</div>
-
-      <template v-else-if="signedInEmail && !invitedAccount">
-        <UAlert color="warning" variant="soft" :description="`You're signed in as ${signedInEmail}, but this invitation is for ${invitation.email}.`" />
-        <UButton block size="lg" :loading="busy" @click="switchAccount">Sign out and continue as {{ invitation.email }}</UButton>
-      </template>
-
-      <template v-else-if="invitedAccount">
-        <p class="text-sm text-muted">Signed in as {{ signedInEmail }}.</p>
-        <UButton block size="lg" :loading="busy" @click="accept">Accept invitation</UButton>
-        <UButton block size="lg" color="neutral" variant="ghost" :disabled="busy" @click="decline">Decline</UButton>
-      </template>
-
-      <form v-else-if="codeSent" class="space-y-3" @submit.prevent="signInWithCode">
-        <p class="text-sm text-muted">We sent a 6-digit code to {{ invitation.email }}. It expires in 5 minutes.</p>
-        <UFormField label="Code">
-          <UInput v-model="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000" class="w-full font-mono tracking-widest" autofocus />
-        </UFormField>
-        <UButton type="submit" block size="lg" :loading="busy" :disabled="code.length !== 6">Sign in</UButton>
-        <UButton block color="neutral" variant="ghost" :disabled="busy" @click="sendCode">Send a new code</UButton>
-      </form>
-
-      <template v-else>
-        <p class="text-sm text-muted">Sign in with {{ invitation.email }} to answer this invitation. We'll email you a code; no password needed.</p>
-        <UButton block size="lg" :loading="busy" @click="sendCode">Email me a code</UButton>
-      </template>
-
+      <p class="text-sm text-muted">Signed in as {{ invitation.email }}.</p>
+      <UButton block size="lg" :loading="busy" @click="accept">Accept invitation</UButton>
+      <UButton block size="lg" color="neutral" variant="ghost" :disabled="busy" @click="decline">Decline</UButton>
       <UButton :to="appUrl" external color="neutral" variant="link" block>Open this invitation in the KrabiClaw app</UButton>
       <UAlert v-if="failure" color="error" variant="soft" :description="failure" />
+    </template>
+
+    <template v-else-if="!signedInEmail">
+      <h1 class="text-2xl font-semibold tracking-tight text-highlighted">Join a workspace</h1>
+      <p class="text-sm text-muted">Sign in or create an account using the email address that received this invitation.</p>
+      <UButton :to="loginUrl" block size="lg">Sign in</UButton>
+      <UButton :to="signupUrl" block size="lg" color="neutral" variant="outline">Create an account</UButton>
+      <UButton :to="appUrl" external color="neutral" variant="link" block>Open this invitation in the KrabiClaw app</UButton>
     </template>
 
     <div v-else-if="declined">
@@ -60,9 +42,14 @@
       <p class="mt-2 text-sm text-muted">You won't join this workspace. Ask the person who invited you if you change your mind.</p>
     </div>
 
-    <div v-else-if="unavailable">
-      <h1 class="text-2xl font-semibold tracking-tight text-highlighted">{{ unavailable.title }}</h1>
-      <p class="mt-2 text-sm text-muted">{{ unavailable.message }}</p>
+    <div v-else-if="lookupError" class="space-y-3">
+      <h1 class="text-2xl font-semibold tracking-tight text-highlighted">Invitation unavailable</h1>
+      <p class="text-sm text-muted">{{ lookupError.message }}</p>
+      <template v-if="lookupError.code === 'YOU_ARE_NOT_THE_RECIPIENT_OF_THE_INVITATION'">
+        <p class="text-sm text-muted">You're signed in as {{ signedInEmail }}. Use the account that received the invitation.</p>
+        <UButton block size="lg" :loading="busy" @click="switchAccount">Use a different account</UButton>
+      </template>
+      <UAlert v-if="failure" color="error" variant="soft" :description="failure" />
     </div>
   </div>
 </template>
@@ -71,39 +58,40 @@
 import { authClient } from '~/lib/auth-client'
 import PushAsk from '~/components/dashboard/PushAsk.vue'
 import { NOTIFICATION_CATEGORY_LABELS } from '~/shared/notification-categories'
-import { ApiClientError } from '~/utils/api-clients'
+import { buildLoginUrl } from '~/shared/auth/return-target'
+import { normalizeApiError } from '~/utils/api-clients'
 
 definePageMeta({ layout: 'access', auth: false })
 useResponseHeader('cache-control').value = 'private, no-store'
 useSeoMeta({ title: 'Accept invitation | KrabiClaw', robots: 'noindex, nofollow' })
 
-type Invitation = { email: string; organization: { name: string }; role: string; expiresAt: string }
-type Unavailable = { title: string; message: string }
+type Invitation = { email: string; organizationName: string; organizationSlug: string; role: string; expiresAt: string }
 
 const route = useRoute()
 const invitationId = String(route.params.invitation_id || '')
-const appUrl = `krabiclaw://invitation?id=${encodeURIComponent(invitationId)}`
+const invitationPath = '/accept-invitation/' + encodeURIComponent(invitationId)
+const loginUrl = buildLoginUrl({ redirect: invitationPath })
+const signupUrl = { path: '/signup', query: { redirect: invitationPath } }
+const appUrl = 'krabiclaw://invitation?id=' + encodeURIComponent(invitationId)
 
-// Each refusal is the server's own coded answer; its code says which state the page is in.
-function unavailableFor(error: unknown): Unavailable {
-  const code = error instanceof ApiClientError ? error.code : undefined
-  const message = getErrorMessage(error, 'This invitation could not be opened.')
-  if (code === 'INVITATION_NOT_FOUND') return { title: 'Invitation not found', message: `${message}. Ask the person who invited you to send it again.` }
-  if (code === 'INVITATION_ACCEPTED') return { title: 'Invitation already accepted', message: `${message}. Sign in to open the workspace.` }
-  if (code === 'INVITATION_REJECTED' || code === 'INVITATION_CANCELED') return { title: 'Invitation closed', message: `${message}. Ask for a new one if you still want to join.` }
-  if (code === 'INVITATION_EXPIRED') return { title: 'Invitation expired', message: `${message}. Ask the person who invited you to send it again.` }
-  return { title: 'Something went wrong', message }
-}
-
-const unavailable = ref<Unavailable | null>(null)
+const session = await applicationFetch<typeof authClient.$Infer.Session | null>('/api/auth/get-session', {
+  validate: (value): value is typeof authClient.$Infer.Session | null => value === null || isRecord(value),
+})
+const signedInEmail = session && !session.user.isAnonymous ? session.user.email : null
+const lookupError = ref<{ code: string; message: string } | null>(null)
 const invitation = ref<Invitation | null>(null)
-try {
-  invitation.value = await applicationFetch<Invitation>(`/api/invitations/${encodeURIComponent(invitationId)}`, {
-    validate: (value): value is Invitation => isRecord(value) && typeof value.email === 'string' && isRecord(value.organization)
-      && typeof value.organization.name === 'string' && typeof value.role === 'string' && typeof value.expiresAt === 'string',
-  })
-} catch (error) {
-  unavailable.value = unavailableFor(error)
+if (signedInEmail) {
+  try {
+    invitation.value = await applicationFetch<Invitation>('/api/auth/organization/get-invitation', {
+      query: { id: invitationId },
+      validate: (value): value is Invitation => isRecord(value) && typeof value.email === 'string'
+        && typeof value.organizationName === 'string' && typeof value.organizationSlug === 'string'
+        && typeof value.role === 'string' && typeof value.expiresAt === 'string' && Number.isFinite(Date.parse(value.expiresAt)),
+    })
+  } catch (error) {
+    const { code, message } = normalizeApiError(error)
+    lookupError.value = { code, message }
+  }
 }
 
 const ROLE_LABELS: Record<string, string> = { owner: 'an owner', admin: 'an admin', member: 'a team member' }
@@ -112,24 +100,14 @@ const expiresOn = computed(() => invitation.value
   ? new Date(invitation.value.expiresAt).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
   : '')
 
-const session = authClient.useSession()
-const sessionLoading = computed(() => session.value.isPending)
-// An anonymous guest identity is not an account that can join a workspace.
-const signedInEmail = computed(() => session.value.data?.user && !session.value.data.user.isAnonymous ? session.value.data.user.email : null)
-// Better Auth accepts an invitation only for the account with the invited address.
-const invitedAccount = computed(() => Boolean(signedInEmail.value && invitation.value
-  && signedInEmail.value.toLowerCase() === invitation.value.email.toLowerCase()))
-
 const busy = ref(false)
 const failure = ref<string | null>(null)
-const codeSent = ref(false)
-const code = ref('')
 const declined = ref(false)
 const joined = ref<{ organizationName: string; lede: string; destination: string } | null>(null)
 const askingPush = ref(false)
 const linking = ref<'apple' | 'google' | null>(null)
 const pushSubscription = usePushSubscription()
-const preferences = useNotificationPreferences(() => session.value.data?.user?.id)
+const preferences = useNotificationPreferences(() => session?.user.id)
 
 async function step(operation: () => Promise<void>) {
   busy.value = true
@@ -143,27 +121,14 @@ async function step(operation: () => Promise<void>) {
   }
 }
 
-const sendCode = () => step(async () => {
-  const { error } = await authClient.emailOtp.sendVerificationOtp({ email: invitation.value!.email, type: 'sign-in' })
-  if (error) throw new Error(error.message || 'The code could not be sent.')
-  code.value = ''
-  codeSent.value = true
-})
-
-const signInWithCode = () => step(async () => {
-  const { error } = await authClient.signIn.emailOtp({ email: invitation.value!.email, otp: code.value })
-  if (error) throw new Error(error.message || 'That code did not work.')
-  await session.value.refetch()
-})
-
 const accept = () => step(async () => {
   const result = await authClient.organization.acceptInvitation({ invitationId })
   if (result.error) throw new Error(result.error.message || 'The invitation could not be accepted.')
   const member = result.data.member
-  const organizationName = invitation.value!.organization.name
+  const organizationName = invitation.value!.organizationName
   const destination = member.role === 'member'
     ? `/dashboard/account/profile/calendar/${encodeURIComponent(member.organizationId)}`
-    : '/dashboard'
+    : '/dashboard/' + encodeURIComponent(invitation.value!.organizationSlug)
   // Joining has succeeded: a browser whose push state cannot be read is reported and not asked.
   await pushSubscription.refresh().catch(error => globalThis.reportError(error))
   if (pushSubscription.state.value.askable) {
@@ -207,6 +172,6 @@ async function link(provider: 'apple' | 'google') {
 const switchAccount = () => step(async () => {
   const { error } = await authClient.signOut()
   if (error) throw new Error(error.message || 'Could not sign out. Please try again.')
-  codeSent.value = false
+  await navigateTo(loginUrl, { external: true })
 })
 </script>

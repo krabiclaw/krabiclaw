@@ -1,3 +1,4 @@
+import { findE2eAuthFixture } from '../../config/development-auth-fixtures'
 import { expect, request as playwrightRequest, test, type APIResponse } from '@playwright/test'
 import sharp from 'sharp'
 import type { BusinessOutcomePage, BusinessProgressReference } from '../../shared/business-outcomes'
@@ -5,7 +6,7 @@ import type { BusinessGoal } from '../../shared/business-progress'
 import type { TaskSection, TaskView } from '../../server/domain/tasks'
 import type { OpportunityView } from '../../server/domain/opportunities'
 import type { InboxRow, InboxThread } from '../../server/domain/guest-threads/types'
-import { authRequestHeaders, loginAs } from './helpers/auth'
+import { acceptOrganizationInvitation, authRequestHeaders, loginAs, sendOrganizationInvitation } from './helpers/auth'
 import { mcpData, mcpRequest } from './helpers/mcp'
 import { seededTenant } from './seed/manifest'
 
@@ -283,10 +284,11 @@ test('authored goals and evidence-bound opportunity decisions follow persisted w
 
     await responseBody(await request.get(`/api/organizations/${seededTenant('restaurant').organizationId}/progress`), 404)
     await responseBody(await request.get(`${api}/progress/reference`, { params: { operation: 'article.update', subject_id: crypto.randomUUID() } }), 404)
-    const { token } = await responseBody<{ token: string }>(await request.post(`${api}/invite-links`, { data: { role: 'member' } }), 201)
-    await loginAs(member, baseURL!, 'user-e2e-demo-role-owner')
-    const joined = await responseBody<{ role: string; organization: { id: string } }>(await member.post(`/api/invite-links/${token}/accept`))
-    expect(joined).toMatchObject({ role: 'member', organization: { id: organization.id } })
+    const actor = findE2eAuthFixture('user-e2e-demo-role-owner')
+    const invitationId = await sendOrganizationInvitation(request, baseURL!, organization.id, actor.email, 'member')
+    await loginAs(member, baseURL!, actor.id)
+    const joined = await acceptOrganizationInvitation(member, baseURL!, invitationId)
+    expect(joined).toMatchObject({ role: 'member', organizationId: organization.id })
     await responseBody(await member.get(`${api}/progress`), 404)
     await responseBody(await member.get(`${api}/progress/reference`, { params: { operation: 'article.update', subject_id: postId } }), 404)
     await responseBody(await member.post(`${api}/goals`, { data: { ...intent, idempotency_key: crypto.randomUUID() } }), 404)

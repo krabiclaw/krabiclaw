@@ -270,8 +270,6 @@ export const invitation = sqliteTable("invitation", {
 	createdAt: integer({ mode: "timestamp" }).default(sql`(unixepoch())`).notNull(),
 }, (table) => [
 	index("invitation_organizationId_idx").on(table.organizationId),
-	uniqueIndex("idx_invitation_org_pending_owner").on(table.organizationId).where(sql`role = 'owner' AND status = 'pending'`),
-	uniqueIndex("idx_invitation_org_email_pending_unique").on(table.organizationId, sql`lower(${table.email})`).where(sql`status = 'pending'`),
 ]);
 
 export const jwks = sqliteTable("jwks", {
@@ -2064,28 +2062,6 @@ export const onboarding_drafts = sqliteTable("onboarding_drafts", {
 	check("onboarding_drafts_payload_json_check", sql`payload_json IS NULL OR (json_valid(payload_json) AND json_type(payload_json) IS 'object')`),
 	uniqueIndex("idx_onboarding_drafts_active_user_unique").on(table.user_id).where(sql`status = 'active'`),
 	index("onboarding_drafts_user_id_idx").on(table.user_id),
-]);
-
-// A single-use link that adds whoever opens it to an organization. Better Auth
-// invitations are bound to an email address, which an inviter cannot know for
-// a person who signs in with Apple's private relay; the link carries the role
-// instead, and accepting it adds the member through Better Auth's addMember.
-// Only the token's SHA-256 is stored.
-export const organization_invite_links = sqliteTable("organization_invite_links", {
-	id: text().primaryKey(),
-	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" } ),
-	role: text().notNull(),
-	token_hash: text().notNull(),
-	inviter_id: text().notNull().references(() => user.id, { onDelete: "cascade" } ),
-	expires_at: text().notNull(),
-	used_at: text(),
-	used_by_user_id: text().references(() => user.id, { onDelete: "set null" } ),
-	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
-}, (table) => [
-	check("organization_invite_links_instants_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', expires_at, '+0 days') IS expires_at AND (used_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', used_at, '+0 days') IS used_at) AND strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at`),
-	check("organization_invite_links_role_check", sql`role IN ('admin', 'member')`),
-	uniqueIndex("organization_invite_links_token_hash_unique").on(table.token_hash),
-	index("organization_invite_links_organization_id_idx").on(table.organization_id),
 ]);
 
 export const rate_limits = sqliteTable("rate_limits", {

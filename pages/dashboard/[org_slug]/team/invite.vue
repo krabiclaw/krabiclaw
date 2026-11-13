@@ -4,7 +4,7 @@
     title="Invite a team member"
     :save-label="savedInvitation ? 'Resend invite' : 'Send invite'"
     :saving="inviting"
-    :disabled="!inviteForm.email.trim()"
+    :disabled="!inviteForm.email.trim() || !inviteForm.role"
     :error="inviteError ?? ''"
     @cancel="resetInvite"
     @save="sendInvite"
@@ -31,22 +31,20 @@ const level = useRouteLevel()
 const dashboard = useDashboardOrganization()
 const dashboardApi = useDashboardApi()
 
-const isOwner = computed(() => dashboard.organization.value?.role === 'owner')
-const BASE_ROLE_OPTIONS = [
-  { label: 'Member — own scheduling', value: 'member' },
-  { label: 'Admin', value: 'admin' },
-]
-// Owner is offered only to an owner, as Better Auth's creatorRole rule has it; enforced again server-side.
-const roleOptions = computed(() => (isOwner.value ? [...BASE_ROLE_OPTIONS, { label: 'Owner', value: 'owner' }] : BASE_ROLE_OPTIONS))
-
-const inviteForm = reactive({ email: '', role: 'member' })
+const { data, error } = await useAsyncData(
+  () => organizationMembersKey(String(route.params.org_slug)),
+  () => dashboardApi('/api/dashboard/members', { validate: isOrganizationMembersData }),
+)
+if (error.value) throw error.value
+const roleOptions = computed(() => data.value?.inviteRoles ?? [])
+const inviteForm = reactive({ email: '', role: roleOptions.value[0]?.value })
 const inviting = ref(false)
 const inviteError = ref<string | null>(null)
 const savedInvitation = ref<string | null>(null)
 watch(() => [inviteForm.email,inviteForm.role], () => { savedInvitation.value = null })
 
 function resetInvite() {
-  Object.assign(inviteForm, { email: '', role: 'member' })
+  Object.assign(inviteForm, { email: '', role: roleOptions.value[0]?.value })
   inviteError.value = null
   savedInvitation.value = null
 }
@@ -56,10 +54,10 @@ async function sendInvite() {
   inviteError.value = null
   try {
     const organizationId = dashboard.organization.value?.id
-    if (!organizationId) throw new Error('Organization context is unavailable')
+    if (!organizationId || !inviteForm.role) throw new Error('Invitation details are unavailable')
     const result = await authClient.organization.inviteMember({
       email: inviteForm.email,
-      role: inviteForm.role as 'admin' | 'owner' | 'member',
+      role: inviteForm.role,
       organizationId,
       resend: Boolean(savedInvitation.value),
     })
@@ -69,7 +67,7 @@ async function sendInvite() {
     const members = await dashboardApi('/api/dashboard/members', {validate:isOrganizationMembersData})
     const delivery = members.invitations.find(invitation => invitation.id === result.data!.id)?.delivery
     await refreshNuxtData(organizationMembersKey(String(route.params.org_slug ?? '')))
-    if (!delivery || ['pending','failed'].includes(delivery.status)) throw new Error(delivery?.error || 'Invitation is saved, but email delivery is unconfirmed. You can resend it.')
+    if (!delivery?.sent) throw new Error(delivery?.message ?? 'Invitation saved. Email delivery is unconfirmed.')
     resetInvite()
     await navigateTo(level.to.value ?? '/dashboard')
   } catch (error) {

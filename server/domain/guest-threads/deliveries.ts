@@ -14,7 +14,7 @@ import type {
 } from './types'
 
 /** The provider took it: its answer carried the message's id. */
-export function isDeliverySent(delivery: GuestThreadDeliveryRow): boolean {
+export function isDeliverySent(delivery: Pick<GuestThreadDeliveryRow, 'status'>): boolean {
   return delivery.status === 'accepted' || delivery.status === 'sent' || delivery.status === 'delivered' || delivery.status === 'read'
 }
 
