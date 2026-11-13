@@ -473,18 +473,30 @@ for (const viewport of [
     test.skip(!writable, 'Guest-thread writes require disposable local or preview data')
     await page.setViewportSize({ width: viewport.width, height: viewport.height })
     await loginAs(page.request, baseURL, ownerId)
-    const guestName = `Mailbox row ${viewport.name} ${Date.now()}`
+    const nonce = Date.now()
+    const guestName = `Mailbox row ${viewport.name} ${nonce}`
+    await submitContact(request, `Mailbox next row ${viewport.name} ${nonce}`)
     await submitContact(request, guestName)
     await dismissPreviewToolbar(page)
 
-    // The rows are server-rendered. Wait for hydration before exercising the list.
+    // The rows are server-rendered. Wait for hydration and the desktop selection.
     const messages = `${baseURL}/dashboard/${organizationSlug()}/messages`
     const thread = page.locator('#dashboard-panel-organization-messages-thread')
+    const expectInbox = async (query: string) => {
+      await expect(page.locator('[data-conversation-list-hydrated="true"]')).toBeVisible()
+      if (viewport.name === 'desktop') {
+        await expect(page).toHaveURL(url => url.href.startsWith(`${messages}/`) && url.search === query)
+        const selected = page.locator('[data-thread-row]').first()
+        await expect(selected).toHaveAttribute('data-thread-row', /.+/)
+        await expect(page).toHaveURL(`${messages}/${await selected.getAttribute('data-thread-row')}${query}`)
+      } else {
+        await expect(page).toHaveURL(`${messages}${query}`)
+        await expect(thread).toHaveCount(0)
+      }
+    }
     const openMessages = async (query = '') => {
       await page.goto(`${messages}${query}`)
-      await expect(page.locator('[data-conversation-list-hydrated="true"]')).toBeVisible()
-      await expect(page).toHaveURL(`${messages}${query}`)
-      await expect(thread).toHaveCount(0)
+      await expectInbox(query)
     }
     const rowFor = (name: string) => page.locator('[data-thread-row]').filter({ hasText: name })
     // The conversation's actions are in its header's "In this conversation" sheet, not on the row.
@@ -500,9 +512,7 @@ for (const viewport of [
 
     await openMessages()
     await page.reload()
-    await expect(page.locator('[data-conversation-list-hydrated="true"]')).toBeVisible()
-    await expect(page).toHaveURL(messages)
-    await expect(thread).toHaveCount(0)
+    await expectInbox('')
     await expect(rowFor(guestName)).toBeVisible()
     await expect(rowFor(guestName).getByRole('button')).toHaveCount(0)
     const threadId = await rowFor(guestName).getAttribute('data-thread-row')
@@ -515,9 +525,8 @@ for (const viewport of [
     expect((await archived).status()).toBe(200)
     await expect(sheet).toHaveCount(0)
     await expect(rowFor(guestName)).toHaveCount(0)
-    // The user returns to the inbox without selecting another conversation.
-    await expect(page).toHaveURL(messages)
-    await expect(thread).toHaveCount(0)
+    // The archived conversation closes. Desktop selects the next visible row.
+    await expectInbox('')
 
     await openMessages('?archived=')
     await expect(rowFor(guestName)).toBeVisible()
