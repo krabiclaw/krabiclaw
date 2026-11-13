@@ -265,6 +265,7 @@ function setAddress(key: string, value: string) {
   if (key !== 'timezone' && answers.value[key] !== value) {
     delete answers.value.latitude
     delete answers.value.longitude
+    delete answers.value.timezone
   }
   answers.value[key] = value
 }
@@ -275,13 +276,12 @@ function selectAddress(place: OnboardingPlacePreview) {
     error.value = 'This result has no street address. Choose another result or enter it manually.'
     return
   }
-  const timezone = place.timezone ?? (textValue('country') === address.regionCode ? textValue('timezone') : '')
   setAddress('country', address.regionCode)
   setAddress('address', address.addressLines.join(', '))
   setAddress('city', address.locality ?? '')
   setAddress('state', address.administrativeArea ?? '')
   setAddress('zip_code', address.postalCode ?? '')
-  setAddress('timezone', timezone)
+  if (place.timezone) setAddress('timezone', place.timezone)
   void advance(true)
 }
 
