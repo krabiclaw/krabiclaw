@@ -6,6 +6,7 @@ import { getDashboardMemberContext } from '~/server/utils/dashboard-context'
 import { assignedMemberSql, memberAccessPrincipal } from '~/server/utils/member-access'
 import { BOOKING_RECORDS_SQL, getGuestRequest, getThreadOperationalRecord, requestActions, type BookedRecord } from '~/server/domain/requests'
 import { guestReplyDestination } from '~/server/domain/guest-threads/operations'
+import { pendingStayChanges } from '~/server/domain/guest-threads/stay-change-requests'
 import { getStay, listStays, readStayCalendar, readStayCalendars, stayAccessFor } from '~/server/domain/stays'
 import { readPlacesCalendar } from '~/server/domain/places'
 import { loadDashboardBookingDetails } from '~/server/utils/dashboard-booking-details'
@@ -38,7 +39,7 @@ export async function dashboardBookingContext(event: H3Event) {
 }
 
 export async function dashboardBookingDetails(event: H3Event) {
-  const { access, db, organization, bookingId, booking } = await dashboardBookingContext(event)
+  const { access, db, organization, userId, bookingId, booking } = await dashboardBookingContext(event)
   if (booking.unit === 'slot') {
     return { booking: await loadDashboardBookingDetails(event, { type: 'booking', bookingId, lookup: 'booking' }), manage: access.manage }
   }
@@ -46,7 +47,13 @@ export async function dashboardBookingDetails(event: H3Event) {
   const stay = await getStay(db, access, bookingId)
   const conversation = await getGuestRequest(db, booking.conversation_id, organization.id, 'booking')
   if (!conversation) throw new Error('The booking has no guest conversation')
-  const [destination, record] = await Promise.all([guestReplyDestination(db, conversation), getThreadOperationalRecord(db, conversation.id)])
+  const [destination, record, pending_changes] = await Promise.all([
+    guestReplyDestination(db, conversation),
+    getThreadOperationalRecord(db, conversation.id, conversation),
+    stay.channel === 'airbnb' && isChannelManagedStay(stay)
+      ? pendingStayChanges(db, { bookingId, conversationId: conversation.id, organizationId: organization.id, userId })
+      : [],
+  ])
   if (!record) throw new Error('The conversation has no booking')
   const channelOwned = isChannelManagedStay(stay)
   const actions = requestActions(record, new Date().toISOString())
@@ -54,7 +61,7 @@ export async function dashboardBookingDetails(event: H3Event) {
     ...actions.filter(action => action === 'no_show' && !channelOwned),
     ...(stay.status === 'cancelled' ? [] : ['move', ...(!channelOwned ? ['edit', 'cancel'] : [])]),
   ]
-  return { booking: { ...nightBooking(stay), available_actions }, manage: true, can_message_guest: destination.channel !== null && !conversation.blocked_at }
+  return { booking: { ...nightBooking(stay), available_actions, pending_changes }, manage: true, can_message_guest: destination.channel !== null && !conversation.blocked_at }
 }
 
 interface BookingListQuery { unit?: unknown; from?: unknown; to?: unknown; product_id?: unknown; include_cancelled?: unknown }

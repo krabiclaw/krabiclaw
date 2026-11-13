@@ -127,7 +127,7 @@ const listRoute = computed(() => props.personalScope ? '/dashboard/account/messa
 const openThreadId = computed(() => {
   if (!route.path.startsWith(`${listRoute.value}/`)) return null
   const segments = route.path.slice(listRoute.value.length + 1).split('/')
-  return decodeURIComponent((segments[0] === 'team' ? segments[1] : segments[0]) ?? '') || null
+  return decodeURIComponent(segments[0] ?? '') || null
 })
 
 // Filter and corpus live in the URL, so a filtered list is a link.
@@ -142,8 +142,6 @@ const listHydrated = ref(false)
 const realtime = useDashboardInvalidations()
 onMounted(() => { listHydrated.value = true })
 
-const dashboardScope = useDashboardRouteScope()
-const dashboardApi = useDashboardApi(dashboardScope)
 const unreadCounts = useInboxUnread(organizationId)
 
 const emptyTitle = computed(() => search.value || kind.value || unreadOnly.value ? 'No conversations match' : 'No conversations yet.')
@@ -179,13 +177,9 @@ let pageController: AbortController | null = null
 let loadedScope = listKey.value
 let loadedPages = 1
 async function loadPage(offset: number, signal?: AbortSignal): Promise<ThreadListPage> {
-  const query = { ...listQuery.value, limit: 100, offset }
-  if (!props.personalScope && !dashboardScope.value) {
-    throw createError({ statusCode: 400, statusMessage: 'Dashboard route scope is incomplete' })
-  }
-  const page = props.personalScope
-    ? await applicationFetch<ThreadListPage>('/api/account/messages', { query, signal, validate: isThreadListResponse })
-    : await dashboardApi<ThreadListPage>(`/api/dashboard/organizations/${organizationId.value}/conversations`, { query, signal, validate: isThreadListResponse })
+  if (!props.personalScope && !organizationId.value) throw createError({ statusCode: 400, statusMessage: 'Messages require a workspace' })
+  const query = { ...listQuery.value, limit: 100, offset, ...!props.personalScope && { organization_id: organizationId.value, sort_key: '1' } }
+  const page = await applicationFetch<ThreadListPage>('/api/messages', { query, signal, validate: isThreadListResponse })
   if (page.pagination.limit !== query.limit || page.pagination.offset !== offset) throw createError({ statusCode: 502, statusMessage: 'Messages returned a different page than requested' })
   return page
 }
@@ -194,7 +188,7 @@ class ShiftedPages extends Error {}
 function appendLoadedPage(before: ThreadListPage, page: ThreadListPage): ThreadListPage {
   const ids = new Set(before.threads.map(thread => thread.id))
   if (page.threads.some(thread => ids.has(thread.id))) throw new ShiftedPages('Conversations moved between pages while loading')
-  return { threads: [...before.threads, ...page.threads], pagination: page.pagination }
+  return { ...page, threads: [...before.threads, ...page.threads] }
 }
 // New activity reorders the inbox while its pages are read, which shifts a row
 // across a page boundary. That ordinary case re-reads the window from the top;
@@ -221,7 +215,7 @@ async function loadWindow(pages: number, scope: string, signal: AbortSignal): Pr
 // its rows; a different list (another mailbox, filter or search) shows the
 // loading state until its own rows arrive, never the previous list's.
 const rowsKey = ref(listKey.value)
-const { data, pending, error: threadsError, refresh } = await useAsyncData<ThreadListPage>(listKey, async (_app, { signal }) => {
+const { data, pending, error: threadsError, refresh, clear } = await useAsyncData<ThreadListPage>(listKey, async (_app, { signal }) => {
   pageController?.abort()
   nextPageError.value = null
   const scope = listKey.value
@@ -241,13 +235,6 @@ const { data, pending, error: threadsError, refresh } = await useAsyncData<Threa
   },
 })
 
-if (import.meta.client) {
-  onMounted(() => {
-    if (useNuxtApp().payload.data[listKey.value]) {
-      void refresh()
-    }
-  })
-}
 const page = computed(() => rowsKey.value === listKey.value ? data.value ?? null : null)
 const threads = computed(() => page.value?.threads ?? [])
 
@@ -261,7 +248,12 @@ async function loadMore() {
   nextPageError.value = null
   try {
     const page = await loadPage(before.pagination.next_offset, controller.signal)
-    if (controller.signal.aborted || key !== listKey.value || data.value !== before) return
+    if (controller.signal.aborted || key !== listKey.value) return
+    if (data.value !== before) {
+      loadedPages = Math.ceil((data.value?.threads.length ?? 100) / 100) + 1
+      await refresh()
+      return
+    }
     try {
       data.value = appendLoadedPage(before, page)
       loadedPages = Math.ceil(data.value.threads.length / 100)
@@ -296,7 +288,7 @@ watch([threads, openThreadId, pending], ([rows, open, loading]) => {
 
 // A conversation opens beside this list: a guest's at its id, the team's on the team screen.
 function threadRoute(thread: ThreadListItem) {
-  return thread.kind === 'team' ? `${listRoute.value}/team/${encodeURIComponent(thread.id)}` : `${listRoute.value}/${encodeURIComponent(thread.id)}`
+  return `${listRoute.value}/${encodeURIComponent(thread.id)}`
 }
 
 // Read or unread without opening it: the row changes at once, and the list and
@@ -316,22 +308,22 @@ async function saveRead(thread: ThreadListItem) {
   }
   mark(!read)
   try {
-    await dashboardApi(`${conversationPath(thread)}/${read ? 'read' : 'unread'}`, {
+    await applicationFetch(`${conversationPath(thread)}/${read ? 'read' : 'unread'}`, {
       method: 'POST',
       ...(read ? { body: {} } : {}),
       validate: (value: unknown): value is { read: boolean } => typeof value === 'object' && value !== null && Reflect.get(value, 'read') === read,
     })
-    refreshConversationUnreadCount()
   } catch (error) {
     mark(read)
+    reconcile(thread.id)
     toast.add({ color: 'error', title: read ? 'Could not mark as read' : 'Could not mark as unread', description: getErrorMessage(error, 'Try again') })
   }
-  // Saved or not, the server says what the row is now: a save can land while telling other devices fails.
-  await refresh()
+  // A successful save publishes its reader-scoped acknowledgement.
+  if (realtime.status.value !== 'open') reconcile(thread.id)
 }
 
 function conversationPath(thread: ThreadListItem) {
-  return `/api/dashboard/organizations/${organizationId.value}/conversations/${encodeURIComponent(thread.id)}`
+  return `/api/messages/${encodeURIComponent(thread.id)}`
 }
 
 // Archive files the conversation away for this member alone; a new message from someone else brings it back.
@@ -339,33 +331,125 @@ async function archive(thread: ThreadListItem) {
   if (toggling.has(thread.id)) return
   toggling.add(thread.id)
   try {
-    await dashboardApi(`${conversationPath(thread)}/archive`, {
+    await applicationFetch(`${conversationPath(thread)}/archive`, {
       method: 'POST',
       body: { archived: true },
       validate: (value: unknown): value is { archived: boolean } => typeof value === 'object' && value !== null && Reflect.get(value, 'archived') === true,
     })
-    refreshConversationUnreadCount()
   } catch (error) {
+    reconcile(thread.id)
     toast.add({ color: 'error', title: 'Could not archive the conversation', description: getErrorMessage(error, 'Try again') })
   } finally {
     toggling.delete(thread.id)
   }
-  await refresh()
+  if (realtime.status.value !== 'open') reconcile(thread.id)
 }
 
-// The menu's counts are the list's, read with it.
-watch(data, page => { if (page?.unread) unreadCounts.value = page.unread }, { immediate: true })
+// Changes received during a read stay queued until that read has settled.
+const changedIds = new Set<string>()
+let fullRefresh = false
+let reconciling = false
+let generation = 0
+let disposed = false
+let reconcileAbort: AbortController | undefined
 
-watch(realtime.event, (event) => {
-  // MESSAGE_ACK: this member read, marked or archived a conversation on another device or tab.
-  if (props.personalScope || !event || !['access.changed', 'MESSAGE_CREATE', 'MESSAGE_UPDATE', 'MESSAGE_ACK', 'CONVERSATION_LEAVE'].includes(event.type)) return
-  if (organizationId.value && event.organization_id !== organizationId.value) return
-  void refresh()
-})
+function publishUnread(value: ThreadListPage | undefined) {
+  if (!props.personalScope && value?.unread) unreadCounts.value = value.unread
+}
+watch(page, value => publishUnread(value ?? undefined), { immediate: true })
+watch(listKey, () => {
+  generation++
+  changedIds.clear()
+  reconcileAbort?.abort()
+}, { flush: 'sync' })
+onScopeDispose(() => { disposed = true; reconcileAbort?.abort() })
 
-watch(realtime.connectionEpoch, (epoch) => {
-  if (epoch <= 0) return
-  if (!props.personalScope) realtime.connect()
-  void refresh()
+function reconcile(id?: string) {
+  if (id) changedIds.add(id)
+  else fullRefresh = true
+  void drainChanges()
+}
+
+async function drainChanges() {
+  if (disposed || reconciling || pending.value || loadingMore.value || (!fullRefresh && !changedIds.size)) return
+  reconciling = true
+  nextPageError.value = null
+  const generationAtStart = generation
+  const scope = listKey.value
+  try {
+    const ids = [...changedIds].slice(0, 100)
+    for (const id of ids) changedIds.delete(id)
+    const all = fullRefresh || !data.value
+    fullRefresh = false
+    if (all) {
+      changedIds.clear()
+      await refresh()
+      return
+    }
+    const before = data.value!
+    const controller = new AbortController()
+    reconcileAbort = controller
+    const changed = await applicationFetch<ThreadListPage>('/api/messages', {
+      query: { ...listQuery.value, organization_id: organizationId.value, sort_key: '1', ids: ids.join(',') },
+      signal: controller.signal, validate: isThreadListResponse,
+    })
+    if (disposed || generationAtStart !== generation || scope !== listKey.value) return
+    if (data.value !== before) {
+      for (const id of ids) changedIds.add(id)
+      return
+    }
+    // A later event may already have moved this row. Apply it from the next read.
+    if (fullRefresh || ids.some(id => changedIds.has(id))) {
+      for (const id of ids) changedIds.add(id)
+      return
+    }
+    const replacements = new Map(changed.threads.map(row => [row.id, row]))
+    const affected = new Set(ids)
+    const rows = before.threads.filter(row => !affected.has(row.id)).concat(changed.threads)
+    rows.sort((a, b) => (b.last_message_at ?? '').localeCompare(a.last_message_at ?? '') || (a.id < b.id ? -1 : a.id === b.id ? 0 : 1))
+    if (before.pagination.has_more && (rows.length < before.threads.length
+      || before.threads.some(row => affected.has(row.id) && replacements.has(row.id)
+        && replacements.get(row.id)!.last_message_at! < row.last_message_at!))) {
+      // A hole or a row moving past the known boundary requires an authoritative window.
+      fullRefresh = true
+      return
+    }
+    const threads = before.pagination.has_more ? rows.slice(0, before.threads.length) : rows
+    data.value = { ...before, threads, unread: changed.unread }
+  } catch (error) {
+    if (!disposed && generationAtStart === generation && scope === listKey.value) nextPageError.value = error
+  } finally {
+    reconcileAbort = undefined
+    reconciling = false
+    void drainChanges()
+  }
+}
+watch([pending, loadingMore], () => { void drainChanges() })
+
+watch(realtime.event, event => {
+  if (props.personalScope || !event || event.organization_id !== organizationId.value) return
+  if (event.type === 'MESSAGE_UPDATE' && event.scheduled) return
+  if ((event.type === 'MESSAGE_ACK' || event.type === 'CONVERSATION_LEAVE') && event.user_id !== session.value.data?.user.id) return
+  if (event.type === 'access.changed') {
+    generation++
+    reconcileAbort?.abort()
+    pageController?.abort()
+    unreadCounts.value = null
+    clear()
+    loadedPages = 1
+    reconcile()
+  } else if ('conversation_id' in event) {
+    if (event.type === 'CONVERSATION_LEAVE') {
+      generation++
+      reconcileAbort?.abort()
+      if (data.value) data.value = { ...data.value, threads: data.value.threads.filter(row => row.id !== event.conversation_id), unread: undefined }
+      unreadCounts.value = null
+    }
+    reconcile(event.conversation_id)
+  }
+}, { flush: 'sync' })
+
+watch(realtime.connectionEpoch, epoch => {
+  if (epoch > 1 && !props.personalScope) reconcile()
 })
 </script>

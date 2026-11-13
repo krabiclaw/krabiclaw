@@ -1,17 +1,8 @@
-import { isRecord } from '~/utils/api-clients'
 import { localDateAt } from '~/utils/timezone'
 import { resolveBookingPresentation, type BookingPresentation } from '~/utils/booking-presentation'
 import { paymentStateLabel } from '~/shared/payment-display'
 import type { DashboardBookingDetails, DashboardRecordType } from '~/server/utils/dashboard-booking-details'
 
-/**
- * One booking record, loaded once per route.
- *
- * The record is drawn in two places — its own screen under Today, and the
- * detail column of the guest thread it belongs to — and the screen that draws
- * the chrome needs the same title the body does. Both call this; the shared
- * `useAsyncData` key means that is one request, not two.
- */
 // A purchase is not a booking of anything; its one word is the same for every vertical.
 const PURCHASE: BookingPresentation = {
   noun: 'purchase',
@@ -42,13 +33,20 @@ export async function useBookingDetails(bookingType: DashboardRecordType, bookin
   const canonical = !personalScope && bookingType === 'booking'
     ? await useDashboardBooking(bookingId)
     : null
-  const details = canonical ?? await useAsyncData<{ booking: DashboardBookingDetails }>(
+  const accountOrPurchase = canonical ? null : await useAsyncData<{ booking: DashboardBookingDetails }>(
     key, () => dashboardApi(endpoint, { validate: isBookingDetailsResponse }),
   )
+  const details = canonical ?? accountOrPurchase!
   const { error, refresh: reread } = details
   const resource = computed<{ booking: DashboardBookingDetails } | null>({
     get: () => isBookingDetailsResponse(details.data.value) ? details.data.value : null,
-    set: (value) => { if (value && details.data.value && isRecord(details.data.value)) Object.assign(details.data.value, value) },
+    set: (value) => {
+      if (!value) return
+      if (accountOrPurchase) accountOrPurchase.data.value = value
+      else if (canonical?.data.value?.booking.unit === 'slot') {
+        canonical.data.value = { ...canonical.data.value, booking: { ...value.booking, unit: 'slot' } }
+      }
+    },
   })
 
   const booking = computed(() => resource.value?.booking ?? null)

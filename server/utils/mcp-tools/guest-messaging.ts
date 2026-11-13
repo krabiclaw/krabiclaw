@@ -1,7 +1,6 @@
 import { organizationTool, paginationInputSchema, pageInfoObject, type McpToolDefinition } from './shared'
 import { NOT_HANDLED, requiredString, type McpExecutorContext } from './execution'
 import { memberAccessPrincipal } from '~/server/utils/member-access'
-import { assertConversationAccess } from '~/server/domain/conversations'
 import { stayAccessFor, updateStayHome } from '~/server/domain/stays'
 import { cancelScheduledGuestMessage, deleteMessageTemplate, guestThreadMessagingContext, listMessageTemplates, listScheduledGuestMessages, saveMessageTemplate } from '~/server/domain/guest-messaging'
 import { scheduleGuestReply } from '~/server/domain/scheduled-guest-messages'
@@ -67,7 +66,14 @@ export const GUEST_MESSAGING_TOOLS: McpToolDefinition[] = [
 
 export async function handleGuestMessagingTools(ctx: McpExecutorContext): Promise<unknown> {
   const { args, organization, toolName } = ctx, { db, env } = organization
-  const principal = memberAccessPrincipal(organization.membership, { env }), access = await stayAccessFor(principal)
+  const principal = memberAccessPrincipal(organization.membership, { env })
+  if (toolName === 'list_scheduled_guest_messages') {
+    const conversationId = typeof args.conversation_id === 'string' ? args.conversation_id : null
+    const resource = `scheduled-guest-messages:${principal.organizationId}:${conversationId}`, window = mcpPageWindow(args, { resource })
+    const page = await listScheduledGuestMessages(db, principal, window, conversationId)
+    return { messages: page.messages, page_info: mcpPageInfo(window, page.messages.length, page.pagination.has_more, { resource }) }
+  }
+  const access = await stayAccessFor(principal)
   switch (toolName) {
     case 'list_message_templates': {
       const resource = `message-templates:${access.organizationId}`, window = mcpPageWindow(args, { resource })
@@ -88,13 +94,6 @@ export async function handleGuestMessagingTools(ctx: McpExecutorContext): Promis
       const { product_id: _productId, ...guide } = args
       const saved = await updateStayHome(env, db, access, requiredString(args, 'product_id'), guide)
       return { product_id: saved.home.product_id, guide: Object.fromEntries(Object.keys(guide).map(key => [key, saved.home[key as keyof typeof saved.home]])), channel_push: saved.channel_push, airbnb_unsynced: saved.airbnb_unsynced }
-    }
-    case 'list_scheduled_guest_messages': {
-      const conversationId = typeof args.conversation_id === 'string' ? args.conversation_id : null
-      if (conversationId !== null) await assertConversationAccess(db, principal, conversationId)
-      const resource = `scheduled-guest-messages:${access.organizationId}:${conversationId}`, window = mcpPageWindow(args, { resource })
-      const page = await listScheduledGuestMessages(db, access, window, conversationId)
-      return { messages: page.messages, page_info: mcpPageInfo(window, page.messages.length, page.pagination.has_more, { resource }) }
     }
     case 'cancel_scheduled_guest_message': {
       const saved = await cancelScheduledGuestMessage(db, env, access, requiredString(args, 'scheduled_message_id'))

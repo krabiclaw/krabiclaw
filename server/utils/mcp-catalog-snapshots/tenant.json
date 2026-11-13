@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:4214614ae9652f20655710a0c7e845a5682e01b5a13aa94fbfe7e44c9b0a7b6a",
-  "documentationFingerprint": "sha256:2ca05740792e52bc6ab5b54ed01f271be841546c0760b01e8d7f16dcf983c170",
+  "fingerprint": "sha256:00b9694d135a5756bfd5c8c6a6f958bcd0ea4a70ed39a2e93b19948e9bf6f4ff",
+  "documentationFingerprint": "sha256:a2a5c02d321a5742db3d44289cb838f3ebec7812a8509f0dd24c6a286d7f4d72",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -47744,27 +47744,18 @@
     {
       "name": "get_conversation",
       "title": "Get conversation",
-      "description": "Read one conversation. A guest conversation returns the guest, their answers to the business’s questions, the booking and every message with proposals, attachments and delivery receipts. A team conversation returns its people and context and its messages newest first (default 20, maximum 100; page back with before and before_id from the oldest loaded message’s created_at and id). Reading does not mark the conversation read: use mark_conversation_read.",
+      "description": "Read the latest page of a conversation you participate in. Entries are in sequence order. Pass page.before to read older messages. Reading does not acknowledge messages.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "before": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "before_id": {
-            "minLength": 1,
-            "type": "string"
+            "minimum": 1,
+            "type": "integer"
           },
           "conversation_id": {
             "description": "A conversation_id from list_conversations, start_conversation or a booking read.",
             "minLength": 1,
             "type": "string"
-          },
-          "limit": {
-            "maximum": 100,
-            "minimum": 1,
-            "type": "integer"
           },
           "organization_id": {
             "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
@@ -47782,1189 +47773,108 @@
         "$defs": {},
         "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
         "properties": {
-          "conversation_id": {
-            "type": "string"
-          },
-          "guest": {
-            "description": "A guest conversation: its guest, answers, booking and every message.",
+          "conversation": {
             "properties": {
-              "answers": {
-                "description": "Answers to the tenant's own questions, with the wording the guest answered. Later edits to the questions do not change them.",
-                "items": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "help_text": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "label": {
-                      "type": "string"
-                    },
-                    "question_id": {
-                      "type": "string"
-                    },
-                    "selected_choices": {
-                      "items": {
-                        "additionalProperties": false,
-                        "properties": {
-                          "id": {
-                            "type": "string"
-                          },
-                          "label": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "id",
-                          "label"
-                        ],
-                        "type": "object"
-                      },
-                      "type": "array"
-                    },
-                    "type": {
-                      "enum": [
-                        "short_text",
-                        "long_text",
-                        "single_choice",
-                        "multiple_choice",
-                        "yes_no"
-                      ],
-                      "type": "string"
-                    },
-                    "value": {
-                      "anyOf": [
-                        {
-                          "type": "string"
-                        },
-                        {
-                          "items": {
-                            "type": "string"
-                          },
-                          "type": "array"
-                        },
-                        {
-                          "type": "boolean"
-                        }
-                      ],
-                      "description": "Text, the selected choice ID, the selected choice IDs, or true/false for yes/no."
-                    }
-                  },
-                  "required": [
-                    "question_id",
-                    "label",
-                    "type",
-                    "help_text",
-                    "value",
-                    "selected_choices"
-                  ],
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              "archived": {
-                "description": "Archived by you.",
-                "type": "boolean"
-              },
-              "guest": {
-                "properties": {
-                  "email": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "name": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "phone": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  }
-                },
-                "required": [
-                  "name",
-                  "email",
-                  "phone"
-                ],
-                "type": "object"
-              },
-              "last_message_at": {
+              "id": {
                 "type": "string"
               },
-              "messages": {
-                "items": {
-                  "properties": {
-                    "actor": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "attachments": {
-                      "items": {
-                        "properties": {
-                          "alt": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          },
-                          "height": {
-                            "type": [
-                              "integer",
-                              "null"
-                            ]
-                          },
-                          "id": {
-                            "type": "string"
-                          },
-                          "url": {
-                            "type": "string"
-                          },
-                          "width": {
-                            "type": [
-                              "integer",
-                              "null"
-                            ]
-                          }
-                        },
-                        "required": [
-                          "id",
-                          "url",
-                          "alt",
-                          "width",
-                          "height"
-                        ],
-                        "type": "object"
-                      },
-                      "type": "array"
-                    },
-                    "author": {
-                      "description": "krabiclaw: written by KrabiClaw — an automatic message, a booking’s opening, Airbnb Support relayed, or an event such as a cancellation or payment.",
-                      "enum": [
-                        "guest",
-                        "member",
-                        "krabiclaw"
-                      ],
-                      "type": "string"
-                    },
-                    "body": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "booking_change": {
-                      "description": "Canonical proposal details and current response state. A pending proposal does not change the operational record.",
-                      "properties": {
-                        "after": {
-                          "properties": {
-                            "assigned_member_id": {
-                              "type": [
-                                "string",
-                                "null"
-                              ]
-                            },
-                            "assigned_member_name": {
-                              "type": [
-                                "string",
-                                "null"
-                              ]
-                            },
-                            "party_size": {
-                              "type": "integer"
-                            },
-                            "when_label": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "when_label",
-                            "party_size",
-                            "assigned_member_id",
-                            "assigned_member_name"
-                          ],
-                          "type": "object"
-                        },
-                        "before": {
-                          "properties": {
-                            "assigned_member_id": {
-                              "type": [
-                                "string",
-                                "null"
-                              ]
-                            },
-                            "assigned_member_name": {
-                              "type": [
-                                "string",
-                                "null"
-                              ]
-                            },
-                            "party_size": {
-                              "type": "integer"
-                            },
-                            "when_label": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "when_label",
-                            "party_size",
-                            "assigned_member_id",
-                            "assigned_member_name"
-                          ],
-                          "type": "object"
-                        },
-                        "location_title": {
-                          "type": "string"
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "original_location_title": {
-                          "type": "string"
-                        },
-                        "status": {
-                          "enum": [
-                            "pending",
-                            "accepted",
-                            "declined",
-                            "withdrawn",
-                            "stale",
-                            "expired"
-                          ],
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "status",
-                        "before",
-                        "after",
-                        "location_title",
-                        "original_location_title"
-                      ],
-                      "type": [
-                        "object",
-                        "null"
-                      ]
-                    },
-                    "channel": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "deliveries": {
-                      "items": {
-                        "properties": {
-                          "channel": {
-                            "type": "string"
-                          },
-                          "id": {
-                            "type": "string"
-                          },
-                          "provider": {
-                            "description": "log_only records the message locally without sending it through a provider.",
-                            "type": "string"
-                          },
-                          "purpose": {
-                            "type": "string"
-                          },
-                          "status": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "id",
-                          "channel",
-                          "provider",
-                          "purpose",
-                          "status"
-                        ],
-                        "type": "object"
-                      },
-                      "type": "array"
-                    },
-                    "event": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "id": {
-                      "type": "string"
-                    },
-                    "occurred_at": {
-                      "type": "string"
-                    },
-                    "payload": {
-                      "type": [
-                        "object",
-                        "null"
-                      ]
-                    },
-                    "provider_timestamp": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "author",
-                    "actor",
-                    "channel",
-                    "body",
-                    "event",
-                    "occurred_at",
-                    "provider_timestamp",
-                    "booking_change",
-                    "deliveries",
-                    "attachments"
-                  ],
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              "needs_reply": {
-                "type": "boolean"
-              },
-              "operational_record": {
-                "description": "The booking the conversation is about. unit nights is a stay: check_in_date and check_out_date are its nights in its home’s clock, and starts_at/ends_at hold a day alone where the home has no check-in or checkout time.",
-                "properties": {
-                  "check_in_date": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "check_out_date": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "ends_at": {
-                    "type": "string"
-                  },
-                  "id": {
-                    "type": "string"
-                  },
-                  "party_size": {
-                    "type": "integer"
-                  },
-                  "product_kind": {
-                    "type": "string"
-                  },
-                  "starts_at": {
-                    "type": "string"
-                  },
-                  "status": {
-                    "type": "string"
-                  },
-                  "timezone": {
-                    "type": "string"
-                  },
-                  "unit": {
-                    "enum": [
-                      "slot",
-                      "nights"
-                    ],
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "id",
-                  "unit",
-                  "product_kind",
-                  "status",
-                  "starts_at",
-                  "ends_at",
-                  "timezone",
-                  "party_size",
-                  "check_in_date",
-                  "check_out_date"
+              "kind": {
+                "enum": [
+                  "guest",
+                  "support",
+                  "team"
                 ],
-                "type": [
-                  "object",
-                  "null"
-                ]
-              },
-              "participant_label": {
                 "type": "string"
               },
-              "reply_channel": {
-                "description": "Where send_message sends: Airbnb’s conversation, the guest’s email, or their KrabiClaw account inbox. Null when the guest cannot be replied to; reply_not_possible says why.",
-                "enum": [
-                  "airbnb",
-                  "email",
-                  "account",
-                  null
-                ],
-                "type": [
-                  "string",
-                  "null"
-                ]
+              "organization_id": {
+                "type": "string"
               },
-              "reply_not_possible": {
-                "type": [
-                  "string",
-                  "null"
-                ]
+              "participants": {
+                "type": "array"
               },
-              "type": {
-                "enum": [
-                  "contact",
-                  "booking",
-                  "stay"
-                ],
+              "title": {
                 "type": "string"
               }
             },
             "required": [
-              "type",
-              "needs_reply",
-              "archived",
-              "last_message_at",
-              "participant_label",
-              "reply_channel",
-              "reply_not_possible",
-              "guest",
-              "answers",
-              "operational_record",
-              "messages"
+              "id",
+              "organization_id",
+              "title",
+              "kind",
+              "participants"
             ],
-            "type": [
-              "object",
-              "null"
-            ]
+            "type": "object"
           },
-          "kind": {
-            "enum": [
-              "contact",
-              "booking",
-              "team"
-            ],
-            "type": "string"
-          },
-          "team": {
-            "properties": {
-              "has_more": {
-                "type": "boolean"
-              },
-              "messages": {
-                "items": {
-                  "properties": {
-                    "attachments": {
-                      "items": {
-                        "properties": {
-                          "height": {
-                            "type": [
-                              "number",
-                              "null"
-                            ]
-                          },
-                          "id": {
-                            "type": "string"
-                          },
-                          "url": {
-                            "type": "string"
-                          },
-                          "width": {
-                            "type": [
-                              "number",
-                              "null"
-                            ]
-                          }
-                        },
-                        "required": [
-                          "id",
-                          "url",
-                          "width",
-                          "height"
-                        ],
-                        "type": "object"
-                      },
-                      "type": "array"
-                    },
-                    "author_user_id": {
-                      "description": "The sender; null for an automatic message, or once a person’s account was deleted.",
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "automatic": {
-                      "description": "Written by KrabiClaw (a cleaning job, a reminder, a move), not by a member. It is unread until read, like any message from someone else.",
-                      "type": "boolean"
-                    },
-                    "body": {
-                      "type": "string"
-                    },
-                    "conversation_id": {
-                      "type": "string"
-                    },
-                    "created_at": {
-                      "type": "string"
-                    },
-                    "deliveries": {
-                      "items": {
-                        "properties": {
-                          "channel": {
-                            "enum": [
-                              "email",
-                              "whatsapp",
-                              "push"
-                            ],
-                            "type": "string"
-                          },
-                          "error": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          },
-                          "id": {
-                            "type": "string"
-                          },
-                          "status": {
-                            "type": "string"
-                          },
-                          "updated_at": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "id",
-                          "channel",
-                          "status",
-                          "error",
-                          "updated_at"
-                        ],
-                        "type": "object"
-                      },
-                      "type": "array"
-                    },
-                    "id": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "conversation_id",
-                    "author_user_id",
-                    "automatic",
-                    "body",
-                    "created_at",
-                    "attachments",
-                    "deliveries"
+          "entries": {
+            "items": {
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "type": {
+                  "enum": [
+                    "message",
+                    "day",
+                    "event"
                   ],
-                  "type": "object"
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "type"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "page": {
+            "properties": {
+              "before": {
+                "minimum": 1,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "failed_messages": {
+                "items": {
+                  "type": "string"
                 },
                 "type": "array"
               },
-              "thread": {
-                "description": "A team conversation: its people, what it is about and its newest message.",
-                "properties": {
-                  "booking_id": {
-                    "description": "The booking the conversation is about: a stay (see stay) or a class, consultation or table (see record).",
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "can_leave": {
-                    "type": "boolean"
-                  },
-                  "can_manage": {
-                    "type": "boolean"
-                  },
-                  "created_at": {
-                    "type": "string"
-                  },
-                  "created_by_user_id": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "id": {
-                    "type": "string"
-                  },
-                  "is_group": {
-                    "type": "boolean"
-                  },
-                  "job": {
-                    "description": "The job for the conversation’s booked record (a turnover or home-ready job for a stay, the prep or follow-up for a booking) as list_tasks presents it; null when there is none the caller may see.",
-                    "properties": {
-                      "action": {
-                        "type": [
-                          "object",
-                          "null"
-                        ]
-                      },
-                      "assignee": {
-                        "anyOf": [
-                          {
-                            "properties": {
-                              "id": {
-                                "type": "string"
-                              },
-                              "initial": {
-                                "type": "string"
-                              },
-                              "name": {
-                                "type": "string"
-                              },
-                              "type": {
-                                "enum": [
-                                  "member"
-                                ],
-                                "type": "string"
-                              },
-                              "you": {
-                                "type": "boolean"
-                              }
-                            },
-                            "required": [
-                              "type",
-                              "id",
-                              "name",
-                              "initial",
-                              "you"
-                            ],
-                            "type": "object"
-                          },
-                          {
-                            "type": "null"
-                          }
-                        ]
-                      },
-                      "avatar": {
-                        "type": [
-                          "object",
-                          "null"
-                        ]
-                      },
-                      "booking_id": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      },
-                      "can": {
-                        "properties": {
-                          "assign": {
-                            "type": "boolean"
-                          },
-                          "complete": {
-                            "type": "boolean"
-                          },
-                          "edit": {
-                            "type": "boolean"
-                          },
-                          "reopen": {
-                            "type": "boolean"
-                          },
-                          "skip": {
-                            "type": "boolean"
-                          }
-                        },
-                        "required": [
-                          "complete",
-                          "skip",
-                          "reopen",
-                          "assign",
-                          "edit"
-                        ],
-                        "type": "object"
-                      },
-                      "conversation_id": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      },
-                      "detail": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      },
-                      "due_at": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      },
-                      "error": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      },
-                      "face": {
-                        "enum": [
-                          "photo",
-                          "compact"
-                        ],
-                        "type": "string"
-                      },
-                      "id": {
-                        "type": "string"
-                      },
-                      "image_url": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      },
-                      "kind": {
-                        "enum": [
-                          "turnover",
-                          "guest_reply",
-                          "message_delivery",
-                          "booking_review",
-                          "booking_change",
-                          "opportunity",
-                          "custom",
-                          "stay_ready",
-                          "consultation_prep",
-                          "consultation_follow_up"
-                        ],
-                        "type": "string"
-                      },
-                      "location_id": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      },
-                      "note": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      },
-                      "notes": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      },
-                      "outcome": {
-                        "type": [
-                          "object",
-                          "null"
-                        ]
-                      },
-                      "path": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      },
-                      "person": {
-                        "anyOf": [
-                          {
-                            "properties": {
-                              "id": {
-                                "type": "string"
-                              },
-                              "initial": {
-                                "type": "string"
-                              },
-                              "name": {
-                                "type": "string"
-                              },
-                              "type": {
-                                "enum": [
-                                  "member"
-                                ],
-                                "type": "string"
-                              },
-                              "you": {
-                                "type": "boolean"
-                              }
-                            },
-                            "required": [
-                              "type",
-                              "id",
-                              "name",
-                              "initial",
-                              "you"
-                            ],
-                            "type": "object"
-                          },
-                          {
-                            "type": "null"
-                          }
-                        ]
-                      },
-                      "product_id": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      },
-                      "product_session_id": {
-                        "type": "string"
-                      },
-                      "reservation": {
-                        "properties": {
-                          "conversation": {
-                            "anyOf": [
-                              {
-                                "properties": {
-                                  "description": {
-                                    "type": [
-                                      "string",
-                                      "null"
-                                    ]
-                                  },
-                                  "label": {
-                                    "type": "string"
-                                  },
-                                  "to": {
-                                    "type": "string"
-                                  }
-                                },
-                                "required": [
-                                  "label",
-                                  "description",
-                                  "to"
-                                ],
-                                "type": "object"
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "date_label": {
-                            "type": "string"
-                          },
-                          "guest_image_url": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          },
-                          "headline": {
-                            "type": "string"
-                          },
-                          "name": {
-                            "type": "string"
-                          },
-                          "status_label": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "date_label",
-                          "headline",
-                          "name",
-                          "status_label",
-                          "guest_image_url",
-                          "conversation"
-                        ],
-                        "type": "object"
-                      },
-                      "sheet": {
-                        "type": "object"
-                      },
-                      "starts_at": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      },
-                      "status": {
-                        "enum": [
-                          "open",
-                          "done",
-                          "skipped",
-                          "cancelled"
-                        ],
-                        "type": "string"
-                      },
-                      "status_line": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      },
-                      "tag": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      },
-                      "timezone": {
-                        "type": "string"
-                      },
-                      "title": {
-                        "type": "string"
-                      },
-                      "version": {
-                        "type": "integer"
-                      },
-                      "when": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "id",
-                      "kind",
-                      "status",
-                      "version",
-                      "face",
-                      "tag",
-                      "image_url",
-                      "avatar",
-                      "status_line",
-                      "title",
-                      "when",
-                      "detail",
-                      "error",
-                      "note",
-                      "person",
-                      "assignee",
-                      "sheet",
-                      "starts_at",
-                      "due_at",
-                      "timezone",
-                      "notes",
-                      "outcome",
-                      "action",
-                      "path",
-                      "product_id",
-                      "location_id",
-                      "booking_id",
-                      "conversation_id",
-                      "can"
-                    ],
-                    "type": [
-                      "object",
-                      "null"
-                    ]
-                  },
-                  "last_message": {
-                    "properties": {
-                      "attachment_count": {
-                        "type": "integer"
-                      },
-                      "author_user_id": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      },
-                      "body": {
-                        "type": "string"
-                      },
-                      "created_at": {
-                        "type": "string"
-                      },
-                      "id": {
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "id",
-                      "author_user_id",
-                      "body",
-                      "attachment_count",
-                      "created_at"
-                    ],
-                    "type": [
-                      "object",
-                      "null"
-                    ]
-                  },
-                  "last_message_at": {
-                    "type": "string"
-                  },
-                  "location": {
-                    "properties": {
-                      "id": {
-                        "type": "string"
-                      },
-                      "slug": {
-                        "type": "string"
-                      },
-                      "timezone": {
-                        "type": "string"
-                      },
-                      "title": {
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "id",
-                      "title",
-                      "slug",
-                      "timezone"
-                    ],
-                    "type": [
-                      "object",
-                      "null"
-                    ]
-                  },
-                  "location_id": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "name": {
-                    "description": "A group’s name; a stay conversation is titled by the home the guest sleeps in.",
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "participants": {
-                    "items": {
-                      "properties": {
-                        "id": {
-                          "type": "string"
-                        },
-                        "image": {
-                          "type": [
-                            "string",
-                            "null"
-                          ]
-                        },
-                        "member_id": {
-                          "type": "string"
-                        },
-                        "name": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "id",
-                        "member_id",
-                        "name",
-                        "image"
-                      ],
-                      "type": "object"
-                    },
-                    "type": "array"
-                  },
-                  "record": {
-                    "description": "The booking (a class, consultation or table) the conversation is about: who booked, else what.",
-                    "properties": {
-                      "id": {
-                        "type": "string"
-                      },
-                      "title": {
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "id",
-                      "title"
-                    ],
-                    "type": [
-                      "object",
-                      "null"
-                    ]
-                  },
-                  "stay": {
-                    "properties": {
-                      "check_in_date": {
-                        "type": "string"
-                      },
-                      "check_out_date": {
-                        "type": "string"
-                      },
-                      "id": {
-                        "type": "string"
-                      },
-                      "name": {
-                        "type": "string"
-                      },
-                      "product_id": {
-                        "type": "string"
-                      },
-                      "status": {
-                        "enum": [
-                          "pending",
-                          "confirmed",
-                          "cancelled"
-                        ],
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "id",
-                      "product_id",
-                      "name",
-                      "check_in_date",
-                      "check_out_date",
-                      "status"
-                    ],
-                    "type": [
-                      "object",
-                      "null"
-                    ]
-                  },
-                  "unread": {
-                    "type": "boolean"
-                  }
-                },
-                "required": [
-                  "id",
-                  "created_at",
-                  "last_message_at",
-                  "booking_id",
-                  "location_id",
-                  "record",
-                  "name",
-                  "is_group",
-                  "created_by_user_id",
-                  "can_manage",
-                  "can_leave",
-                  "participants",
-                  "unread",
-                  "stay",
-                  "job",
-                  "location",
-                  "last_message"
-                ],
-                "type": "object"
+              "newest": {
+                "minimum": 1,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "oldest": {
+                "minimum": 1,
+                "type": [
+                  "integer",
+                  "null"
+                ]
               }
             },
             "required": [
-              "thread",
-              "messages",
-              "has_more"
+              "before",
+              "oldest",
+              "newest",
+              "failed_messages"
             ],
-            "type": [
-              "object",
-              "null"
-            ]
+            "type": "object"
+          },
+          "viewer_role": {
+            "const": "member"
           }
         },
         "required": [
-          "conversation_id",
-          "kind",
-          "guest",
-          "team"
+          "conversation",
+          "entries",
+          "page",
+          "viewer_role"
         ],
         "type": "object"
       },
@@ -100458,8 +99368,9 @@
             "type": "object"
           },
           "idempotency_key": {
-            "maxLength": 200,
-            "minLength": 1,
+            "maxLength": 128,
+            "minLength": 8,
+            "pattern": "^[a-zA-Z0-9_-]{8,128}$",
             "type": "string"
           },
           "message": {
@@ -100488,24 +99399,26 @@
           "conversation_id": {
             "type": "string"
           },
-          "created": {
-            "type": "boolean"
-          },
-          "message_id": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "outcome": {
+          "message": {
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "sequence": {
+                "minimum": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "id",
+              "sequence"
+            ],
             "type": "object"
           }
         },
         "required": [
           "conversation_id",
-          "outcome",
-          "message_id",
-          "created"
+          "message"
         ],
         "type": "object"
       },
@@ -128797,7 +127710,7 @@
       "toolContracts": {
         "cancel_product_booking": "sha256:117436c3b77b52e28d4c7baa8f2a7b128c044f4265fc20d038ef5a8e72ddd0f6",
         "confirm_product_booking": "sha256:44be0ae50ae38e0e7f9610cd8eff82af1212af3eb160c66d082804673dafd71e",
-        "get_conversation": "sha256:9ecff07dc40a9054c6c234c1ecfaea30669ec0c52f232feb7cdb0145ab0401e4",
+        "get_conversation": "sha256:e11cc7a96a999e502c71e835faddbd0ef06c6590d8db3d9acfe32e185638dc29",
         "get_product_booking": "sha256:dc627db96028c7e276e50d86819579fe2e1ec552cda94ea7e3b75edab8ceae15",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_conversation_recipients": "sha256:439170e450547b9261d1f0499d27ef7ca95dd024cacf847719fee4f4c40e249e",
@@ -128808,7 +127721,7 @@
         "mark_conversation_unread": "sha256:93abd5acbb4e271d1a1bf843bc1c9a3ef04a44e20b3252461c089d612ab69161",
         "reject_product_booking": "sha256:3b265f1588dfdd8d008d243b0a93e298afb2bc7ac7ff265afe72de2aebfd475f",
         "request_product_booking_change": "sha256:38fb4dac33da0ac9401338b2c2e1886e3f9122857c614f32b468d2d02d1c5879",
-        "send_message": "sha256:8636238ba370bd243b7a3f2d4c1f6a5993223e916e3695bfd8f2a3696f80e6e2",
+        "send_message": "sha256:68970aa62c1c6403a63df6ea0d1212c9d6d8f864e53d7d57c2872130d99b49cb",
         "start_conversation": "sha256:a39d46341c069673d967628f78638bb7ddbcf94a8689796860962531e8d2192d",
         "update_conversation_group": "sha256:ba2e91f788924f66ef33ef7341f8267f9aab72aa9eeae6139927a7be9c040278"
       }
@@ -128927,7 +127840,7 @@
       },
       "toolContracts": {
         "create_post": "sha256:a2a95f5e752b47a10f2d42dfaaca0caca19afd2a4110adc3fd97dad2eb8a763a",
-        "get_conversation": "sha256:9ecff07dc40a9054c6c234c1ecfaea30669ec0c52f232feb7cdb0145ab0401e4",
+        "get_conversation": "sha256:e11cc7a96a999e502c71e835faddbd0ef06c6590d8db3d9acfe32e185638dc29",
         "get_organization_analytics": "sha256:4fcc7f6cef537aa552200cc74b666d866684657015427e256651d7791140b814",
         "get_product": "sha256:114fce9013309b4bd92ea1bd3012b7fc9b6293a09be3cef9c7402c86df8fe954",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
@@ -128935,7 +127848,7 @@
         "list_product_booking_sessions": "sha256:06526c6170e88700736a723c638488475c76c1db82bcc7082ab478e28ce83a51",
         "list_products": "sha256:bd6b30cee8a405d0bcdf6313fa20396a2e287bb3285b977fdc1c27baed9c48f0",
         "publish_post": "sha256:752fb1e9c0267e6ba03088081fa8a0e5c5f8034640f03df3c52078a8df8f95d4",
-        "send_message": "sha256:8636238ba370bd243b7a3f2d4c1f6a5993223e916e3695bfd8f2a3696f80e6e2",
+        "send_message": "sha256:68970aa62c1c6403a63df6ea0d1212c9d6d8f864e53d7d57c2872130d99b49cb",
         "update_product": "sha256:afed95fa490fdae7aed3b9d4e6f5db435e1ab4c8d3909b260fbe380a82f9d461"
       }
     }

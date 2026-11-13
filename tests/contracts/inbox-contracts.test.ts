@@ -10,7 +10,8 @@ import { applyBookingRevision } from '../../server/integrations/channex/booking-
 import { mirrorChannexMessageEvent } from '../../server/domain/guest-threads/channel-messages.ts'
 import { runAlterationRequestFeed } from '../../server/domain/guest-threads/stay-change-requests.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
-import { getInboxThread, getInboxThreadDetails } from '../../server/domain/guest-threads/inbox.ts'
+import { getInboxThreadDetails } from '../../server/domain/guest-threads/inbox.ts'
+import { conversationPageFor } from '../integration/support/conversation-page.ts'
 import { scheduleGuestReply } from '../../server/domain/scheduled-guest-messages.ts'
 import { suggestGuestReplies } from '../../server/domain/suggested-reply.ts'
 import { memberInbox } from '../../server/utils/dashboard-guest-threads.ts'
@@ -94,9 +95,10 @@ const generatedId = (sequence: number) => `00000000-0000-4000-8000-${String(sequ
 /** Generated ids, numbered in the order the contract files first show them: an id the server draws elsewhere leaves the files as they are. */
 const shown = new Map<string, string>()
 
-async function check(name: string, value: unknown) {
+async function check(name: string, value: unknown, providerGuestId?: string) {
   const path = new URL(`../../contracts/inbox/${name}.json`, import.meta.url)
-  const text = `${JSON.stringify(stable(value), null, 2)}\n`.replace(/00000000-0000-4000-8000-\d{12}/g, id => shown.get(id) ?? shown.set(id, generatedId(shown.size + 1)).get(id)!)
+  const serialized = `${JSON.stringify(stable(value), null, 2)}\n`.replace(/00000000-0000-4000-8000-\d{12}/g, id => shown.get(id) ?? shown.set(id, generatedId(shown.size + 1)).get(id)!)
+  const text = providerGuestId ? serialized.replaceAll(JSON.stringify(providerGuestId), '"airbnb-guest-account"') : serialized
   if (WRITE) { await writeFile(path, text); return }
   const committed = await readFile(path, 'utf8').catch((error: unknown) => { throw new Error(`contracts/inbox/${name}.json is missing; run yarn contracts:write`, { cause: error }) })
   assert.equal(text, committed, `contracts/inbox/${name}.json differs from what the inbox view model returns; run yarn contracts:write and commit the diff`)
@@ -149,7 +151,7 @@ test('the inbox view model matches contracts/inbox', { timeout: 120_000 }, async
     const suggestions = await suggestGuestReplies(db, env as unknown as Record<string, unknown>, principal, threadId)
 
     // An automatic message already sent, the guest's change request, filing the conversation away and back, a payment, and a reply Airbnb refused.
-    const stay = (await db.prepare("SELECT b.id, b.version FROM bookings b JOIN conversations c ON c.booking_id = b.id AND c.kind = 'booking' WHERE c.id = ?").bind(threadId).first<{ id: string; version: number }>())!
+    const stay = (await db.prepare("SELECT b.id, b.version, b.user_id FROM bookings b JOIN conversations c ON c.booking_id = b.id AND c.kind = 'booking' WHERE c.id = ?").bind(threadId).first<{ id: string; version: number; user_id: string | null }>())!
     await appendMessage(db, { id: 'automatic-contract', conversationId: threadId, authorKind: 'krabiclaw', authorUserId: null, channel: 'airbnb', body: 'Your door code is 1106. Garage D is unlocked.',
       eventName: 'thread.scheduled_message', dedupeKey: 'automatic-contract', occurredAt: NOW })
     await db.prepare(`INSERT INTO scheduled_guest_messages (id, organization_id, product_id, booking_id, template_id, template_title, template_version, body, due_at, timezone, status, message_id, sent_at, created_at, updated_at)
@@ -162,7 +164,7 @@ test('the inbox view model matches contracts/inbox', { timeout: 120_000 }, async
       payload: { payment_id: 'contract-payment', status: 'succeeded', amount: 45000, currency: 'USD' }, dedupeKey: 'financial-operation:contract', occurredAt: NOW })
     const refused = await executeGuestThreadOperation(db, { threadId, organizationId: ORG, action: 'reply', body: 'Check-in is from 4 PM.', actorUserId: OWNER, idempotencyKey: 'contract-reply', env })
     assert.equal(refused.ok, false)
-    // A message the host set to send later is the pending row above the composer.
+    // The outbox has a pending reply that does not appear in delivered chat history.
     await scheduleGuestReply(db, principal, threadId, { body: 'Enjoy your stay!', due_at: '2026-11-08T23:00:00.000Z' })
 
     // A stay booked and paid on the site, as its captured payment converts it: the stay's own message, then the guest's note.
@@ -184,16 +186,17 @@ test('the inbox view model matches contracts/inbox', { timeout: 120_000 }, async
       payload: { guest: { name: 'Jo Park', email: 'jo@example.test', phone: null, locale: 'en' }, subject: null, consent_at: null, ip_hash: null, source: null, route_context: null, suggested_summary: null, agent_metadata: null, answers: [] },
       created_at: quiet }, undefined, { words: 'Do you allow dogs at 74 D?' }))
 
-    const thread = await getInboxThread(db, threadId, ORG, viewer, new Date(NOW))
-    assert.ok(thread)
+    const thread = await conversationPageFor(db, principal, threadId, { before: null, limit: 40 }, new Date(NOW))
+    assert.notEqual(thread.conversation.kind, 'team')
+    if (thread.conversation.kind === 'team') throw new Error('Expected the Airbnb stay conversation')
     // Every item type the clients draw is in the contract thread.
-    const kinds = new Set(thread.stream.map(item => item.type === 'message' ? `${item.type}:${item.side}${item.label ? ':automatic' : ''}${item.photos.length ? ':photo' : ''}${item.translated ? ':translated' : ''}${item.retryable ? ':retryable' : ''}` : item.type))
-    for (const kind of ['day', 'event', 'change', 'message:guest:translated', 'message:guest:photo', 'message:business:automatic', 'message:business:retryable']) assert.ok(kinds.has(kind), `the contract thread has no ${kind}`)
-    assert.equal(thread.pending.length, 1)
+    const kinds = new Set(thread.entries.map(item => item.type === 'message' ? `${item.type}:${item.side}${item.label ? ':automatic' : ''}${item.photos.length ? ':photo' : ''}${item.translated ? ':translated' : ''}${item.retryable ? ':retryable' : ''}` : item.type))
+    for (const kind of ['day', 'event', 'message:guest:translated', 'message:guest:photo', 'message:business:automatic', 'message:business:retryable']) assert.ok(kinds.has(kind), `the contract thread has no ${kind}`)
+    assert.ok(thread.entries.some(item => item.type === 'event' && /on Airbnb to change the stay/.test(item.text)))
+    assert.ok(!JSON.stringify(thread).includes('Enjoy your stay!'))
 
-    const opened = await getInboxThread(db, siteThreadId, ORG, viewer, new Date(NOW))
-    assert.ok(opened)
-    assert.deepEqual(opened.stream.flatMap(item => item.type === 'message' ? [[item.side, item.body.split('\n')[0]]] : []),
+    const opened = await conversationPageFor(db, principal, siteThreadId, { before: null, limit: 40 }, new Date(NOW))
+    assert.deepEqual(opened.entries.flatMap(item => item.type === 'message' ? [[item.side, item.body?.split('\n')[0]]] : []),
       [['guest', '74 D · Sky from Fri, Nov 20 to Mon, Nov 23 for 2 guests. Ana Ruiz, +1 303 555 0123.'], ['guest', 'We arrive late, around 9 PM.']])
     const current = await memberInbox(db, ORG, principal, { limit: 100, offset: 0, mailbox: 'current', locationId: null, type: null, kind: null, q: null, unreadOnly: false })
     const past = await memberInbox(db, ORG, principal, { limit: 100, offset: 0, mailbox: 'past', locationId: null, type: null, kind: null, q: null, unreadOnly: false })
@@ -201,8 +204,11 @@ test('the inbox view model matches contracts/inbox', { timeout: 120_000 }, async
 
     await check('list', current)
     await check('past', past)
-    await check('thread', { thread })
-    await check('opening', { thread: opened })
+    // Better Auth owns the anonymous account ID. Assert the exact stored identity before stabilizing its value in the fixture.
+    assert.ok(stay.user_id)
+    assert.deepEqual(thread.conversation.participants.filter(person => person.role === 'guest').map(person => person.id), [stay.user_id])
+    await check('thread', thread, stay.user_id)
+    await check('opening', opened)
     await check('details', await getInboxThreadDetails(db, threadId, ORG, viewer, new Date(NOW)))
     await check('suggestions', suggestions)
   } finally {

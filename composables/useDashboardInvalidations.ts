@@ -1,4 +1,4 @@
-import { inject, onBeforeUnmount, onMounted, provide, ref, shallowRef, watch, type InjectionKey, type Ref } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, provide, ref, shallowRef, watch, type InjectionKey, type Ref } from 'vue'
 import { isDashboardInvalidation, type DashboardInvalidation } from '~/shared/dashboard-invalidations'
 
 export type DashboardInvalidationStatus = 'closed' | 'connecting' | 'open' | 'failed'
@@ -19,20 +19,19 @@ const CONNECT_TIMEOUT_MS = 8_000
 const HEARTBEAT_INTERVAL_MS = 20_000
 const HEARTBEAT_TIMEOUT_MS = 8_000
 
-export function provideDashboardInvalidations(organizationSlug: Readonly<Ref<string | null>>): DashboardInvalidationConnection {
+function useInvalidationSocket(path: Readonly<Ref<string | null>>, organizationId: Readonly<Ref<string | null | undefined>>): DashboardInvalidationConnection {
   // `nuxt dev` cannot carry this socket: its dev server answers the upgrade
   // with a plain 200 (docs/local-development.md). Realtime runs under
   // `yarn dev:worker`, staging and production; here the dashboard stays on its
   // reads instead of retrying a connection that cannot open and reporting it.
   if (import.meta.dev) {
-    const connection: DashboardInvalidationConnection = { status: ref('closed'), event: shallowRef(null), connectionEpoch: ref(0), connect: () => {} }
-    provide(dashboardInvalidationKey, connection)
-    return connection
+    return { status: ref('closed'), event: shallowRef(null), connectionEpoch: ref(0), connect: () => {} }
   }
 
   const status = ref<DashboardInvalidationStatus>('closed')
   const event = shallowRef<DashboardInvalidation | null>(null)
   const connectionEpoch = ref(0)
+  let receivedAccessChange = false
   const seenEventIds = new Set<string>()
   let socket: WebSocket | null = null
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
@@ -52,7 +51,7 @@ export function provideDashboardInvalidations(organizationSlug: Readonly<Ref<str
   }
 
   function scheduleReconnect() {
-    if (stopped || reconnectTimer || !organizationSlug.value || !window.navigator.onLine) return
+    if (stopped || reconnectTimer || !path.value || !window.navigator.onLine) return
     status.value = 'failed'
     const delay = Math.min(10_000, 500 * 2 ** Math.min(reconnectAttempt, 5))
     reconnectAttempt += 1
@@ -81,13 +80,14 @@ export function provideDashboardInvalidations(organizationSlug: Readonly<Ref<str
   }
 
   function connect() {
-    if (!import.meta.client || stopped || !organizationSlug.value) return
+    if (!import.meta.client || stopped || !path.value) return
     if (socket?.readyState === WebSocket.OPEN || socket?.readyState === WebSocket.CONNECTING) return
 
     clearReconnectTimer()
     clearHealthTimer()
     const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const url = `${scheme}//${window.location.host}/api/dashboard/guest-inbox/socket?org=${encodeURIComponent(organizationSlug.value)}`
+    const url = `${scheme}//${window.location.host}${path.value}`
+    receivedAccessChange = false
     const nextSocket = new WebSocket(url)
     socket = nextSocket
     status.value = 'connecting'
@@ -125,14 +125,18 @@ export function provideDashboardInvalidations(organizationSlug: Readonly<Ref<str
         const first = seenEventIds.values().next().value
         if (first) seenEventIds.delete(first)
       }
+      if (parsed.type === 'access.changed') receivedAccessChange = true
       event.value = parsed
     })
 
-    nextSocket.addEventListener('close', () => {
+    nextSocket.addEventListener('close', (closed) => {
       if (socket !== nextSocket) return
       clearHealthTimer()
       socket = null
-      if (stopped || !organizationSlug.value) {
+      if (closed.code === 1008 && organizationId.value && !receivedAccessChange) {
+        event.value = { type: 'access.changed', organization_id: organizationId.value, event_id: crypto.randomUUID(), occurred_at: new Date().toISOString() }
+      }
+      if (stopped || !path.value) {
         status.value = 'closed'
         return
       }
@@ -153,8 +157,8 @@ export function provideDashboardInvalidations(organizationSlug: Readonly<Ref<str
     reconnectAttempt = 0
     seenEventIds.clear()
     event.value = null
-    status.value = organizationSlug.value ? 'connecting' : 'closed'
-    if (mounted && organizationSlug.value) connect()
+    status.value = path.value ? 'connecting' : 'closed'
+    if (mounted && path.value) connect()
   }
 
   function handleOffline() {
@@ -164,14 +168,14 @@ export function provideDashboardInvalidations(organizationSlug: Readonly<Ref<str
     const activeSocket = socket
     socket = null
     activeSocket?.close()
-    status.value = organizationSlug.value ? 'failed' : 'closed'
+    status.value = path.value ? 'failed' : 'closed'
   }
 
   function handleOnline() {
-    if (!stopped && organizationSlug.value) connect()
+    if (!stopped && path.value) connect()
   }
 
-  watch(organizationSlug, resetConnection, { flush: 'sync' })
+  watch(path, resetConnection, { flush: 'sync' })
 
   onMounted(() => {
     mounted = true
@@ -191,9 +195,20 @@ export function provideDashboardInvalidations(organizationSlug: Readonly<Ref<str
     status.value = 'closed'
   })
 
-  const connection = { status, event, connectionEpoch, connect }
+  return { status, event, connectionEpoch, connect }
+}
+
+export function provideDashboardInvalidations(organizationSlug: Readonly<Ref<string | null>>): DashboardInvalidationConnection {
+  const path = computed(() => organizationSlug.value ? `/api/dashboard/guest-inbox/socket?org=${encodeURIComponent(organizationSlug.value)}` : null)
+  const connection = useInvalidationSocket(path, useDashboardOrganization().organizationId)
   provide(dashboardInvalidationKey, connection)
   return connection
+}
+
+export function useConversationInvalidations(threadId: Readonly<Ref<string>>, organizationId: Readonly<Ref<string | undefined>>, personalScope: boolean) {
+  if (!personalScope) return useDashboardInvalidations()
+  const path = computed(() => threadId.value && organizationId.value ? `/api/messages/${encodeURIComponent(threadId.value)}/socket` : null)
+  return useInvalidationSocket(path, organizationId)
 }
 
 export function useDashboardInvalidations(): DashboardInvalidationConnection {

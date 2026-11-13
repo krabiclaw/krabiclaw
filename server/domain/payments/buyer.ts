@@ -1,3 +1,4 @@
+import {transferBookingGuestSeat} from '~/server/domain/conversation-participants'
 import {HTTPError} from 'nitro'
 import {executeBatch,queryAll,queryFirst,type DbClient} from '~/server/db'
 import {CURRENT_GUEST_SQL} from '~/server/domain/conversations'
@@ -113,13 +114,16 @@ export async function claimCheckoutReturn(db:DbClient,userId:string,token:string
  const claim=await queryFirst<{payment_id:string;claimed_at:string|null}>(db,available,params)
  if(!claim) throw new HTTPError({statusCode:404,statusMessage:'Purchase return proof expired or already used'})
  if(claim.claimed_at)return {payment_id:claim.payment_id,claimed:true}
+ const conversationId="COALESCE((SELECT conversation_id FROM payment_checkout_holds WHERE payment_id=?),(SELECT c.id FROM conversations c JOIN payments p ON p.subject_id=c.booking_id AND p.subject_type='booking' AND p.organization_id=c.organization_id WHERE p.id=? AND c.kind='booking'))"
+ const claimedConversation={query:`c.id=${conversationId} AND EXISTS(SELECT 1 FROM payments claim WHERE claim.return_token_hash=? AND claim.claimed_user_id=? AND claim.claimed_at=?)`,params:[claim.payment_id,claim.payment_id,hash,userId,now]}
  const result=await executeBatch(db,[
   {query:'UPDATE payments SET claimed_at=?,claimed_user_id=?,buyer_user_id=? WHERE return_token_hash=? AND return_expires_at>? AND claimed_at IS NULL AND captured_amount>0 AND (buyer_user_id IS NULL OR buyer_user_id=? OR EXISTS(SELECT 1 FROM user u WHERE u.id=payments.buyer_user_id AND u.isAnonymous=1))',params:[now,userId,userId,hash,now,userId]},
   {query:'UPDATE payment_orders SET buyer_user_id=? WHERE payment_id=? AND EXISTS(SELECT 1 FROM payments claim WHERE claim.return_token_hash=? AND claim.claimed_user_id=? AND claim.claimed_at=?)',params:[userId,claim.payment_id,hash,userId,now]},
   {query:'UPDATE payment_checkout_holds SET buyer_user_id=? WHERE payment_id=? AND EXISTS(SELECT 1 FROM payments claim WHERE claim.return_token_hash=? AND claim.claimed_user_id=? AND claim.claimed_at=?)',params:[userId,claim.payment_id,hash,userId,now]},
   {query:"UPDATE bookings SET user_id=? WHERE id=(SELECT subject_id FROM payments WHERE id=? AND subject_type='booking') AND EXISTS(SELECT 1 FROM payments claim WHERE claim.return_token_hash=? AND claim.claimed_user_id=? AND claim.claimed_at=?)",params:[userId,claim.payment_id,hash,userId,now]},
   // The booking's conversation: a session booking's checkout waited in it, a stay's opened with the booking.
-  {query:"UPDATE conversations SET user_id=? WHERE id=COALESCE((SELECT conversation_id FROM payment_checkout_holds WHERE payment_id=?),(SELECT c.id FROM conversations c JOIN payments p ON p.subject_id=c.booking_id AND p.subject_type='booking' AND p.organization_id=c.organization_id WHERE p.id=? AND c.kind='booking')) AND EXISTS(SELECT 1 FROM payments claim WHERE claim.return_token_hash=? AND claim.claimed_user_id=? AND claim.claimed_at=?)",params:[userId,claim.payment_id,claim.payment_id,hash,userId,now]},
+  ...transferBookingGuestSeat(claimedConversation,userId,now),
+  {query:`UPDATE conversations AS c SET user_id=? WHERE ${claimedConversation.query}`,params:[userId,...claimedConversation.params]},
  ],{operation:'Attach verified Checkout purchase'})
  if(result[0]?.meta.changes!==1){
   const replay=await queryFirst<{payment_id:string;claimed_at:string|null}>(db,available,params)

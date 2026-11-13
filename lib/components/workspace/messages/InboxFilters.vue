@@ -45,7 +45,6 @@
 import { normalizeVertical } from '~/utils/vertical-copy'
 import { useInboxUnread } from './inbox-unread'
 
-const props = defineProps<{ canReadTeam: boolean; canReadGuests: boolean }>()
 const route = useRoute()
 const router = useRouter()
 const dashboard = useDashboardOrganization()
@@ -63,12 +62,10 @@ function setQuery(patch: Record<string, string | undefined>) {
 // All is every conversation this member sees, the team's included: one list, as Slack's.
 const kinds = computed(() => [
   { value: 'all', label: 'All', icon: 'i-lucide-message-circle', count: counts.value?.all ?? 0 },
-  ...(props.canReadGuests ? [
     { value: 'guests', label: vertical.value && normalizeVertical(vertical.value) === 'service' ? 'Clients' : 'Guests', icon: 'i-lucide-house', count: counts.value?.guests ?? 0 },
     // Airbnb Support writes to a business that hosts on Airbnb.
     ...(dashboard.hasFeature('stays') ? [{ value: 'support', label: 'Airbnb Support', icon: 'i-simple-icons-airbnb', count: counts.value?.support ?? 0 }] : []),
-  ] : []),
-  ...(props.canReadTeam ? [{ value: 'team', label: 'Team', icon: 'i-lucide-messages-square', count: counts.value?.team ?? 0 }] : []),
+  { value: 'team', label: 'Team', icon: 'i-lucide-messages-square', count: counts.value?.team ?? 0 },
 ])
 const selectedLabel = computed(() => kinds.value.find(kind => kind.value === selected.value)?.label ?? 'All')
 

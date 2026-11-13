@@ -22,7 +22,7 @@
         variant="soft"
         square
         data-testid="dashboard-search"
-        @click="openSearch"
+        @click="openDashboardSearch"
       />
     </template>
     <DashboardMenuContent />
@@ -31,13 +31,10 @@
 
 <script setup lang="ts">
 import DashboardMenuContent from '~/lib/components/workspace/dashboard/DashboardMenuContent.vue'
+import { dashboardSearchOpenKey } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
 
 definePageMeta({ layout: 'dashboard', tab: 'menu' })
 useSeoMeta({ title: 'Menu | KrabiClaw Dashboard', robots: 'noindex, nofollow' })
 
-const nuxtApp = useNuxtApp()
-
-function openSearch() {
-  nuxtApp.hooks.callHook('dashboard:search:toggle')
-}
+const openDashboardSearch = inject(dashboardSearchOpenKey)!
 </script>

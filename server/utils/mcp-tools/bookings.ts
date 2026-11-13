@@ -256,7 +256,7 @@ export async function handleBookingsTools(ctx: McpExecutorContext): Promise<unkn
   }
   if (!action || typeof args.version !== 'number') throw new HTTPError({ statusCode: 400, message: 'Booking version is required' })
   const result = await executeBookingStatus(db, { bookingId: id, version: args.version, threadId: thread.id, organizationId, action, actorUserId: organization.userId,
-    idempotencyKey: key, env, stayAccess: access, stayManager: access?.manage, reason: optionalString(args, 'reason') ?? undefined, financialWritesAllowed: false })
+    idempotencyKey: key, env, stayAccess: access, reason: optionalString(args, 'reason') ?? undefined, financialWritesAllowed: false })
   if (result.kind === 'stay') {
     const { stay } = result
     if (stay.cancelled_at === null) throw new Error(`Cancelled booking ${id} has no cancellation time`)

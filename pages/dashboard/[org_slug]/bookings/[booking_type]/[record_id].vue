@@ -25,9 +25,10 @@ else if (rawType === 'stay') await redirectToBooking(bookingId)
 else if (rawType === 'booking' || rawType === 'reservation') {
   if (!/^[\w:-]+$/u.test(bookingId)) showNotFound()
   else {
-    const { thread, error } = await useGuestThread(computed(() => bookingId))
+    const { data, error } = await useConversation(computed(() => bookingId)).request
+    const thread = data.value?.conversation
     if (error.value && error.value.statusCode !== 403 && error.value.statusCode !== 404) showError(error.value)
-    else if (thread.value?.record_kind === 'booking' && thread.value.booking_id) await redirectToBooking(thread.value.booking_id)
+    else if (thread && thread.kind !== 'team' && thread.record_kind === 'booking' && thread.booking_id) await redirectToBooking(thread.booking_id)
     else showNotFound()
   }
 } else if (rawType && !purchase) showNotFound()

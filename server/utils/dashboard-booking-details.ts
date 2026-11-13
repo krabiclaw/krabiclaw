@@ -17,7 +17,7 @@ import { loadOwnerPictures } from '~/server/notifications/hero'
 import { addLocalDays, isValidCalendarDate, localDateTimeToInstant, localPartsAt } from '~/utils/timezone'
 import { listBookableSessions } from '~/server/utils/availability'
 import { formatPostalAddress, parsePostalAddress } from '~/utils/postal-address'
-import { bookingChangeViews } from '~/server/domain/guest-threads/booking-changes'
+import { pendingBookingChangeView } from '~/server/domain/guest-threads/booking-changes'
 import { isBookingComplete, type BookingStatus } from '~/shared/bookings'
 import { readPaymentDetails } from '~/server/domain/payments'
 import { formAnswerSnapshotsSchema, type FormAnswerSnapshot } from '~/shared/form-questions'
@@ -27,6 +27,13 @@ import {paymentStateLabel,paymentDisplay,paymentRefundsDisplay,paymentOrderDispl
 export type DashboardBookingType = 'booking'
 /** What the record screen can show: a visit, or a purchase that stands on its own (an order, or a payment whose visit is gone). */
 export type DashboardRecordType = DashboardBookingType | 'order' | 'payment'
+
+interface BookingChangeTerms {
+  when_label: string
+  location_title: string
+  party_size: number
+  assigned_member_name: string | null
+}
 
 interface BookingRow {
   assigned_member_id: string | null
@@ -128,7 +135,7 @@ export interface DashboardBookingDetails {
   /** The guest's answers to the business's own questions, in the wording they answered. A request made before questions has none. */
   answers: FormAnswerSnapshot[]
   /** A change the business proposed that the guest has not answered; Airbnb's "Change requested". */
-  pending_change: { message_id: string; created_at: string; before_label: string; after_label: string; party_size: number; before_assigned_member_name: string | null; after_assigned_member_name: string | null } | null
+  pending_change: { message_id: string; before: BookingChangeTerms; after: BookingChangeTerms } | null
   locations: Array<{ id: string; title: string; image_url: string | null }>
   payments: Array<{payment:PaymentDisplay;refunds:PaymentRefundDisplay[];order:PaymentOrderDisplay|null}> | null
   /** The guest's own self-service cancellation is still open. */
@@ -220,10 +227,16 @@ async function pendingBookingChange(db: DbClient, threadId: string | null): Prom
   if (!row) return null
   const thread = await getGuestRequest(db, threadId)
   if (!thread) return null
-  const proposal = (await bookingChangeViews(db, thread, [row])).get(row.id)
-  if (!proposal || proposal.status !== 'pending') return null
-  return { message_id: row.id, created_at: row.created_at, before_label: proposal.before.when_label, after_label: proposal.after.when_label, party_size: proposal.after.party_size,
-    before_assigned_member_name: proposal.before.assigned_member_name, after_assigned_member_name: proposal.after.assigned_member_name }
+  const proposal = await pendingBookingChangeView(db, thread, row)
+  if (!proposal) return null
+  const terms = ({ when_label, party_size, assigned_member_name }: Omit<BookingChangeTerms, 'location_title'>, location_title: string): BookingChangeTerms => ({
+    when_label, party_size, assigned_member_name, location_title,
+  })
+  return {
+    message_id: row.id,
+    before: terms(proposal.before, proposal.original_location_title),
+    after: terms(proposal.after, proposal.location_title),
+  }
 }
 
 export async function loadDashboardBookingDetails(

@@ -1,6 +1,7 @@
 import type { CreateTenant } from '../seed.ts'
 import { SEED_SUBDOMAINS, type SeedTenant } from '../manifest.ts'
 import { alwaysOpen, everyDay, publishProfile, recordProduct, seedLocation, seedMedia, toolFor } from './common.ts'
+import type { ConversationPage } from '../../../../shared/messages-contract.ts'
 
 const HOST_ID = 'user-e2e-pottery-location-owner'
 
@@ -67,10 +68,11 @@ export async function seedExperience(createTenant: CreateTenant): Promise<SeedTe
       source: 'phone', guest_acknowledgement: false, idempotency_key: 'seed-experience-ended-booking',
     })
     // The owner opens the conversation, as a click on it does: the screen reads it through to the newest message it shows.
-    const opened = await owner.json<{ thread: { stream: Array<{ type: string; id: string }> } }>('GET', `/api/dashboard/organizations/${tenant.organizationId}/guest-threads/${pastGuest.conversation_id}`)
-    const newest = opened.thread.stream.filter(item => item.type !== 'day').at(-1)
+    const conversationPath = `/api/messages/${pastGuest.conversation_id}`
+    const opened = await owner.json<ConversationPage>('GET', conversationPath)
+    const newest = opened.entries.findLast(item => item.type !== 'day')
     if (!newest) throw new Error('The ended booking’s conversation shows no message to read')
-    await owner.json('POST', `/api/dashboard/organizations/${tenant.organizationId}/conversations/${pastGuest.conversation_id}/read`, { message_id: newest.id })
+    await owner.json('POST', `${conversationPath}/read`, { message_id: newest.id })
     tenant.endedSessionEndsAt = endsAt.toISOString()
     return tenant
   } finally { await owner.dispose() }

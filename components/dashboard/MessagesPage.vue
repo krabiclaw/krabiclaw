@@ -2,17 +2,17 @@
   <DefineControls>
     <div class="space-y-3">
       <UInput v-if="searching" v-model="query" icon="i-lucide-search" placeholder="Search messages" aria-label="Search messages" autofocus size="lg" class="w-full" :ui="{ base: 'rounded-full' }" />
-      <InboxFilters v-if="!personalScope" :can-read-team="canReadTeam" :can-read-guests="canReadGuests" />
+      <InboxFilters v-if="!personalScope" />
     </div>
   </DefineControls>
   <DashboardIndexPanel :id="personalScope ? 'account-messages' : 'organization-messages'" :title="blockedOnly ? 'Blocked guests' : pastOnly ? 'Past conversations' : 'Messages'" :auto-open="firstThread" fill>
     <!-- Search and settings beside the title, as on Airbnb. -->
     <template #right>
       <UButton icon="i-lucide-search" color="neutral" variant="soft" class="rounded-full" :aria-label="searching ? 'Close search' : 'Search messages'" :aria-pressed="searching" @click="toggleSearch" />
-      <UButton v-if="!personalScope && canReadGuests" icon="i-lucide-settings" color="neutral" variant="soft" class="rounded-full" aria-label="Messaging settings" @click="settingsOpen = true" />
-      <UButton v-if="!personalScope && canSendTeam" :to="`${listPath}/new`" icon="i-lucide-square-pen" color="neutral" variant="soft" class="rounded-full" aria-label="New team conversation" />
+      <UButton v-if="!personalScope && canManageMessages" icon="i-lucide-settings" color="neutral" variant="soft" class="rounded-full" aria-label="Messaging settings" @click="settingsOpen = true" />
+      <UButton v-if="!personalScope && hasWorkspaceMembership" :to="`${listPath}/new`" icon="i-lucide-square-pen" color="neutral" variant="soft" class="rounded-full" aria-label="New team conversation" />
     </template>
-    <ConversationList v-if="personalScope || canReadGuests || canReadTeam" :personal-scope="personalScope" @first="firstThread = $event">
+    <ConversationList v-if="personalScope || hasWorkspaceMembership" :personal-scope="personalScope" @first="firstThread = $event">
       <template #filters><ReuseControls /></template>
     </ConversationList>
     <UAlert v-else class="m-6" color="error" title="Messages are unavailable" description="Your membership does not allow access to conversations." />
@@ -39,9 +39,7 @@ const router = useRouter()
 const dashboard = useDashboardOrganization()
 const listPath = computed(() => `/dashboard/${encodeURIComponent(String(route.params.org_slug))}/messages`)
 const role = computed(() => dashboard.organization.value?.role as keyof typeof organizationRoles | undefined)
-const canReadTeam = computed(() => Boolean(role.value && authClient.organization.checkRolePermission({ role: role.value, permissions: { team_messages: ['read'] } })))
-const canSendTeam = computed(() => Boolean(role.value && authClient.organization.checkRolePermission({ role: role.value, permissions: { team_messages: ['send'] } })))
-const canReadGuests = computed(() => Boolean(role.value && (authClient.organization.checkRolePermission({ role: role.value, permissions: { operations: ['read'] } }) || authClient.organization.checkRolePermission({ role: role.value, permissions: { operations: ['assigned'] } }))))
+const hasWorkspaceMembership = computed(() => Boolean(role.value))
 const canManageMessages = computed(() => Boolean(role.value && authClient.organization.checkRolePermission({ role: role.value, permissions: { operations: ['update'] } })))
 const settingsOpen = ref(false)
 const [DefineControls, ReuseControls] = createReusableTemplate()
@@ -68,15 +66,14 @@ const session = authClient.useSession()
 const accessError = ref('')
 const leaveRequest = useTeamGroupLeaveRequest()
 const realtime = useDashboardInvalidations()
-// This member left a team conversation or was removed from it: its screen closes, wherever it is open.
+// This member left a conversation or was removed from it: its screen closes, wherever it is open.
 watch(realtime.event, async event => {
   if (event?.type !== 'CONVERSATION_LEAVE' || event.organization_id !== dashboard.organizationId.value || event.user_id !== session.value.data?.user.id) return
-  clearNuxtData(`team-conversation:${event.organization_id}:${event.conversation_id}`)
-  clearNuxtData(`team-messages:${event.organization_id}:${event.conversation_id}`)
+  clearNuxtData(`messages:${event.organization_id}:${event.conversation_id}`)
   if (route.params.conversation_id !== event.conversation_id) return
   if (leaveRequest.value === event.conversation_id) return
   firstThread.value = null
-  try { await navigateTo({ path: listPath.value, query: { kind: 'team' } }, { replace: true }) }
+  try { await navigateTo({ path: listPath.value, query: route.query }, { replace: true }) }
   catch (error) { accessError.value = getErrorMessage(error, 'The conversation could not be closed after access ended') }
 })
 useSeoMeta({ title: 'Messages | KrabiClaw', robots: 'noindex, nofollow' })

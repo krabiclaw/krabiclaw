@@ -1,5 +1,6 @@
-import { execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
+import { d1JsonStringSet, execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import type { WebhookEventPayload } from 'resend'
+import { groupMessagePhotos, messagePhotosQuery, type MessagePhotoRow } from './attachments'
 import type { ReplyEmailEnv } from '~/server/utils/submission-messages'
 import { buildReplyToAddress } from '~/server/utils/reply-address'
 import { emailSender, getEmailDeliveryMode, isEmailMessageId, sendEmail, type EmailInput } from '~/server/utils/email-delivery'
@@ -349,9 +350,9 @@ export async function applyResendEmailEvent(
   const changed = await advanceDeliveryStatus(db, delivery, status, status === 'failed' ? resendFailureReason(event) : null)
   if (!changed) return 'unchanged'
   if (delivery.message_id) {
-    const message = await queryFirst<{ conversation_id: string }>(db, 'SELECT conversation_id FROM messages WHERE id = ?', [delivery.message_id])
+    const message = await queryFirst<{ conversation_id: string; sequence: number }>(db, 'SELECT conversation_id, sequence FROM messages WHERE id = ?', [delivery.message_id])
     if (!message) throw new Error(`Message ${delivery.message_id} for delivery ${delivery.id} not found`)
-    await publishConversationEvent(env, db, { conversationId: message.conversation_id, type: 'MESSAGE_UPDATE' })
+    await publishConversationEvent(env, db, { conversationId: message.conversation_id, type: 'MESSAGE_UPDATE', message: { id: delivery.message_id, sequence: message.sequence } })
   }
   return 'advanced'
 }
@@ -418,13 +419,41 @@ export async function deliverGuestThreadEmail(
  * detail view reads all of them from here and decides what to show; a query
  * that returned failures alone is why a successful send had no channel on it.
  */
-export async function listThreadDeliveries(db: DbClient, threadId: string): Promise<GuestThreadDeliveryRow[]> {
-  return queryAll<GuestThreadDeliveryRow>(db, `
+export function threadDeliveriesQuery(threadId: string, messageIds?: string[], purpose?: GuestThreadDeliveryPurpose): BatchQuery {
+  return { query: `
     SELECT d.* FROM guest_thread_deliveries d
     JOIN messages m ON m.id = d.message_id
-    WHERE m.conversation_id = ?
-    ORDER BY d.created_at DESC
-  `, [threadId])
+    WHERE m.conversation_id = ? ${messageIds ? 'AND m.id IN (SELECT value FROM json_each(?))' : ''}
+      ${purpose ? 'AND d.purpose = ?' : ''}
+    ORDER BY ${purpose ? 'd.created_at, d.id' : 'd.created_at DESC'}
+  `, params: [threadId, ...(messageIds ? [d1JsonStringSet(messageIds)] : []), ...(purpose ? [purpose] : [])] }
+}
+
+export async function listThreadDeliveries(db: DbClient, threadId: string): Promise<GuestThreadDeliveryRow[]> {
+  const { query, params } = threadDeliveriesQuery(threadId)
+  return queryAll<GuestThreadDeliveryRow>(db, query, params)
+}
+
+/** Enrich a page of messages in one D1 call after the page reveals its IDs. */
+export async function readConversationEnrichment(db: DbClient, messageIds: string[], authorIds: string[], receipts: BatchQuery | null = null) {
+  const photoQuery = messageIds.length ? messagePhotosQuery('message', messageIds) : null
+  const authorQuery = authorIds.length ? {
+    query: 'SELECT id, name FROM user WHERE id IN (SELECT value FROM json_each(?))',
+    params: [d1JsonStringSet(authorIds)],
+  } : null
+  const batch = [photoQuery, authorQuery, receipts].filter(query => query !== null)
+  const results = batch.length ? await executeBatch(db, batch, { operation: 'Read conversation enrichment' }) : []
+  const photos = photoQuery ? results.shift()!.results as MessagePhotoRow[] : []
+  const actors = authorQuery ? results.shift()!.results as { id: string; name: string }[] : []
+  const deliveries = receipts ? results.shift()!.results as GuestThreadDeliveryRow[] : []
+  const deliveriesByMessage = new Map<string, GuestThreadDeliveryRow[]>()
+  for (const delivery of deliveries) {
+    if (!delivery.message_id) throw new Error(`Message delivery ${delivery.id} names no message`)
+    const attempts = deliveriesByMessage.get(delivery.message_id)
+    if (attempts) attempts.push(delivery)
+    else deliveriesByMessage.set(delivery.message_id, [delivery])
+  }
+  return { photos: groupMessagePhotos(photos), actors, deliveries, deliveriesByMessage }
 }
 
 /** A failure worth showing in the thread. */

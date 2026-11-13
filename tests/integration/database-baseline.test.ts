@@ -150,6 +150,48 @@ test('session prep migration keeps the completed task and delivery history for b
   }
 })
 
+test('the conversation migration grants only known guests, owners, and team seats', () => {
+  const database = new Database(':memory:')
+  database.pragma('foreign_keys = ON')
+  try {
+    for (const tag of ['0000_baseline', '0001_session_prep_tasks', '0002_use_better_auth_organization_invitations', '0003_stay_home_setup_drafts']) {
+      database.exec(readFileSync(`migrations/${tag}.sql`, 'utf8'))
+    }
+    database.exec(`
+      INSERT INTO organization (id, name, slug, default_currency, timezone) VALUES ('org', 'Studio', 'studio', 'USD', 'UTC');
+      INSERT INTO user (id, name, email) VALUES ('guest', 'Guest', 'guest@example.test'), ('owner', 'Owner', 'owner@example.test'),
+        ('staff', 'Staff', 'staff@example.test'), ('former', 'Former', 'former@example.test'), ('old-write', 'Old write', 'old@example.test');
+      INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES
+        ('om', 'org', 'owner', 'owner', 1), ('sm', 'org', 'staff', 'member', 1), ('lm', 'org', 'old-write', 'admin', 1);
+      INSERT INTO conversations (id, organization_id, kind, user_id, participants_key, payload_json, last_message_at) VALUES
+        ('thread', 'org', 'contact', 'guest', NULL, '{"guest":{"name":"Guest","email":"guest@example.test","phone":null}}', '2026-11-13T00:00:00.000Z'),
+        ('team', 'org', 'team', NULL, 'staff|former', '{}', '2026-11-13T00:00:00.000Z');
+      INSERT INTO messages (id, organization_id, conversation_id, sequence, author_kind, body, dedupe_key, occurred_at)
+        VALUES ('m', 'org', 'thread', 1, 'krabiclaw', 'Opening', 'opening', '2026-11-13T00:00:00.000Z');
+      INSERT INTO conversation_participants (conversation_id, organization_id, user_id, last_read_message_id, archived_at) VALUES
+        ('thread', 'org', 'guest', 'm', NULL), ('thread', 'org', 'staff', 'm', '2026-11-13T00:00:00.000Z'),
+        ('team', 'org', 'staff', NULL, NULL), ('team', 'org', 'former', NULL, NULL);
+      INSERT INTO stay_home_setup_drafts (organization_id, member_id, payload_json, revision) VALUES ('org', 'om', '{}', 'saved');
+    `)
+    database.exec(readFileSync('migrations/0004_conversation_participants.sql', 'utf8'))
+    // The old Worker can still persist a read position during deployment.
+    database.exec("INSERT INTO conversation_participants (conversation_id, organization_id, user_id, last_read_message_id) VALUES ('thread', 'org', 'old-write', 'm')")
+    assert.deepEqual(database.prepare(`SELECT conversation_id, user_id, role, last_read_message_id, archived_at
+      FROM conversation_participants ORDER BY conversation_id, user_id`).all(), [
+      { conversation_id: 'team', user_id: 'former', role: null, last_read_message_id: null, archived_at: null },
+      { conversation_id: 'team', user_id: 'staff', role: 'member', last_read_message_id: null, archived_at: null },
+      { conversation_id: 'thread', user_id: 'guest', role: 'guest', last_read_message_id: 'm', archived_at: null },
+      { conversation_id: 'thread', user_id: 'old-write', role: null, last_read_message_id: 'm', archived_at: null },
+      { conversation_id: 'thread', user_id: 'owner', role: 'member', last_read_message_id: null, archived_at: null },
+      { conversation_id: 'thread', user_id: 'staff', role: null, last_read_message_id: 'm', archived_at: '2026-11-13T00:00:00.000Z' },
+    ])
+    assert.equal(database.prepare('SELECT revision FROM stay_home_setup_drafts').pluck().get(), 'saved')
+    assert.deepEqual(database.pragma('foreign_key_check'), [])
+  } finally {
+    database.close()
+  }
+})
+
 test('the v25 forward migration initializes the internal name of an existing home', () => {
   const database = new Database(':memory:')
   database.pragma('foreign_keys = ON')
