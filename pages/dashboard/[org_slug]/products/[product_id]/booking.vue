@@ -32,14 +32,14 @@ const groups = computed<EditorNavigationGroup[]>(() => {
     table.value
       ? row('seatings', 'Seatings', `${config.duration_minutes} minutes each · every ${config.seating_interval_minutes} minutes`, 'i-lucide-clock')
       : row('duration', 'Duration', config.duration_minutes ? `${config.duration_minutes} minutes` : 'Choose a duration'),
-    p.product.value?.kind === 'experience' || legal.value
+    ...(p.managesCatalog.value ? [p.product.value?.kind === 'experience' || legal.value
       ? row('location', 'Meeting format', config.held_online ? legal.value ? 'Online consultations available' : 'Online booking available' : p.product.value!.locations.length ? legal.value ? 'At assigned offices' : 'At physical locations' : legal.value ? 'No offices assigned' : 'No physical locations assigned')
-      : p.locationId.value ? { id: 'location', label: 'Meeting location', summary: p.location.value?.title ?? '' } : row('location', 'Meeting location', config.held_online ? 'Online' : 'Not set'),
+      : p.locationId.value ? { id: 'location', label: 'Meeting location', summary: p.location.value?.title ?? '' } : row('location', 'Meeting location', config.held_online ? 'Online' : 'Not set')] : []),
     row('capacity', legal.value ? 'Client limit' : 'Guest limit', config.default_capacity === null ? `No ${copy.guestLabel} limit` : config.default_capacity === 1 ? `One ${copy.guestLabel} per ${occurrence}` : config.default_capacity === 0 ? `Closed to new ${copy.guestsLabelPlural}` : `Up to ${config.default_capacity} ${copy.guestsLabelPlural} per ${occurrence}`),
     row('party', 'Party size', config.party_size_min === null && config.party_size_max === null ? 'Any party the times have room for'
       : config.party_size_max === null ? `${config.party_size_min} or more` : `${config.party_size_min ?? 1} to ${config.party_size_max}`, 'i-lucide-users'),
     row('guest-terms', 'Guest requirements', [config.minimum_guest_age ? `Ages ${config.minimum_guest_age}+` : null, config.accessibility_contact_required ? 'Access support by contact' : null].filter(Boolean).join(' · ') || 'None', 'i-lucide-shield-check'),
-    row('assignment', copy.assigneeLabel, p.assignmentSummary.value, 'i-lucide-user-round'),
+    ...(p.managesCatalog.value ? [row('assignment', copy.assigneeLabel, p.assignmentSummary.value, 'i-lucide-user-round')] : []),
     row('confirmation', 'Confirmation', config.confirmation_mode === 'instant' ? 'Confirm automatically' : 'Review each request'),
     row('notice', 'Advance notice', noticeSummary(config.advance_notice_minutes), 'i-lucide-alarm-clock'),
     row('questions', 'Questions', formQuestionsSummary(config.questions), 'i-lucide-message-square-text'),
@@ -60,7 +60,7 @@ const groups = computed<EditorNavigationGroup[]>(() => {
   // One flat list. Whether guests book on the website at all is the
   // organization's setting, under Website, not this product's.
   if (config) items.push(
-    row('enabled', legal.value ? 'Consultation calendar' : 'Booking calendar', 'Set up', 'i-lucide-calendar-check'),
+    ...(p.managesCatalog.value ? [row('enabled', legal.value ? 'Consultation calendar' : 'Booking calendar', 'Set up', 'i-lucide-calendar-check')] : []),
     row('payment', 'Payment', !config.online_payment_required ? 'No payment collected at booking'
       : `${config.payment_basis === 'per_booking' ? 'Paid once per booking' : `Online payment required for paid ${occurrence}s`}${config.payment_min_party_size ? ` · parties of ${config.payment_min_party_size}+` : ''}`, 'i-lucide-credit-card'),
   )

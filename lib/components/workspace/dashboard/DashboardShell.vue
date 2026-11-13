@@ -52,6 +52,7 @@
       data-testid="dashboard-status-banner"
     />
     <DashboardTopNav
+      v-if="!embedded"
       :items="showNavChrome ? primaryNavItems : []"
       :home-to="topNavHomeTo"
       :menu-active="isMenuPageActive"
@@ -63,7 +64,7 @@
       below the shared overlay target, where drawers and nested pickers render.
     -->
     <UDashboardGroup
-      :ui="{ base: ['z-40', showNavChrome ? 'top-(--kc-dashboard-banner) md:top-(--kc-dashboard-chrome-top)' : 'top-(--kc-dashboard-chrome-top)', showBottomNav ? 'max-md:bottom-(--kc-dashboard-bottom-nav)' : ''].join(' ') }"
+      :ui="{ base: ['z-40', embedded ? 'top-(--kc-dashboard-banner)' : showNavChrome ? 'top-(--kc-dashboard-banner) md:top-(--kc-dashboard-chrome-top)' : 'top-(--kc-dashboard-chrome-top)', showBottomNav ? 'max-md:bottom-(--kc-dashboard-bottom-nav)' : ''].join(' ') }"
     >
       <UDashboardSearch
         v-model:open="dashboardSearchOpen"
@@ -431,7 +432,9 @@ const primaryNavItems = computed(() => navTargets.value.map(item => ({ ...item, 
 const showNavChrome = computed(() => primaryNavItems.value.length > 0)
 // Inline commit bars replace phone navigation. Drawers cover the intact shell.
 const inlineFooters = useDashboardInlineFooters()
-const showBottomNav = computed(() => showNavChrome.value && inlineFooters.value === 0)
+// The iPhone already draws the workspace tabs around this same dashboard.
+const embedded = import.meta.client && /\bKrabiClaw-iOS\b/.test(navigator.userAgent)
+const showBottomNav = computed(() => !embedded && showNavChrome.value && inlineFooters.value === 0)
 const topNavHomeTo = computed(() => {
   if (personal.value) return '/dashboard/account'
   return scopeOrganization.value ? `/dashboard/${encodeURIComponent(scopeOrganization.value.slug)}` : '/dashboard'

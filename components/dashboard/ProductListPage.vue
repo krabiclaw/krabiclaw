@@ -7,7 +7,7 @@
   -->
   <DashboardIndexPanel id="catalog" title="Catalog">
     <template #right>
-      <UButton :to="newProductTo" icon="i-lucide-plus" color="neutral" variant="soft" square aria-label="Add" data-testid="catalog-add" />
+      <UButton v-if="canCreate" :to="newProductTo" icon="i-lucide-plus" color="neutral" variant="soft" square aria-label="Add" data-testid="catalog-add" />
     </template>
 
     <UAlert v-if="loadError" color="error" variant="soft" icon="i-lucide-triangle-alert" title="Catalog could not be loaded" :description="loadError" />
@@ -59,6 +59,8 @@ import OrganizationLocationSelector, { type OrganizationLocationSelectorItem } f
 import type { ProductKind } from '~/shared/product-details'
 import { groupProductsByCollection } from '~/utils/product-presentation'
 import { getErrorMessage } from '~/utils/errors'
+import { authClient } from '~/lib/auth-client'
+import type { organizationRoles } from '~/utils/organization-access'
 
 const level = useRouteLevel()
 const route = useRoute()
@@ -142,9 +144,13 @@ function isHomeSetupAction(value: unknown): value is HomeSetupAction {
 
 const { organization } = useDashboardOrganization()
 const dashboardApi = useDashboardApi()
-const showFirstHomeSetup = computed(() => organization.value?.vertical === 'lodging' && !offered('stay')
+const canCreate = computed(() => {
+  const role = organization.value?.role as keyof typeof organizationRoles | undefined
+  return !!role && authClient.organization.checkRolePermission({ role, permissions: { products: ['create'] } })
+})
+const showFirstHomeSetup = computed(() => canCreate.value && organization.value?.vertical === 'lodging' && !offered('stay')
   && (kind.value === 'stay' || (kind.value === 'all' && items.value.length === 0)))
-const loadsHomeSetup = computed(() => organization.value?.vertical === 'lodging' && (kind.value === 'stay' || showFirstHomeSetup.value))
+const loadsHomeSetup = computed(() => canCreate.value && organization.value?.vertical === 'lodging' && (kind.value === 'stay' || showFirstHomeSetup.value))
 const { data: setup, error: setupError, pending: setupPending } = await useAsyncData(
   () => `first-home-setup:${organizationId}`,
   () => loadsHomeSetup.value

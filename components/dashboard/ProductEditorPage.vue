@@ -335,6 +335,7 @@ export interface ProductEditor {
   /** The host by its loaded name, or what is missing. */
   assignmentSummary: ComputedRef<string>
   bookingCopy: ComputedRef<VerticalCopy>
+  managesCatalog: ComputedRef<boolean>
   product: ComputedRef<Product | null>
   /** Saved publication state, separate from the visibility leaf's draft. */
   published: ComputedRef<boolean>
@@ -508,6 +509,10 @@ const dashboard = useDashboardOrganization()
 const canPreview = computed(() => {
   const role = dashboard.organization.value?.role
   return Boolean(role) && authClient.organization.checkRolePermission({ role: role as keyof typeof organizationRoles, permissions: { content: ['read'] } })
+})
+const managesCatalog = computed(() => {
+  const role = dashboard.organization.value?.role
+  return Boolean(role) && authClient.organization.checkRolePermission({ role: role as keyof typeof organizationRoles, permissions: { products: ['update'] } })
 })
 const { locations: allOrganizationLocations, error: locationsError, pending: locationsPending } = await useOrganizationLocations({ includeInactive: true })
 const organizationLocations = computed(() => allOrganizationLocations.value.filter(entry => entry.status === 'active'))
@@ -1248,12 +1253,12 @@ const additionalDetails = computed(() => {
   return [
     ...definitions.value.filter(field => ![PRICING_NOTE_HANDLE, 'tagline'].includes(field.key) && !isStayFocusedDetail(field.key) && !visible.has(field.key)).map(field => ({ id: field.key, label: field.name, icon: field.icon, to: sectionPath(`attributes/${field.id}`) })),
     ...(!row.order_url && row.kind !== 'stay' ? [{ id: 'order-url', label: sectionLabels['order-url'], to: sectionPath('order-url') }] : []),
-    ...(!visible.has('collections') ? [{ id: 'collections', label: sectionLabels.collections, to: sectionPath('collections') }] : []),
+    ...(managesCatalog.value && !visible.has('collections') ? [{ id: 'collections', label: sectionLabels.collections, to: sectionPath('collections') }] : []),
     ...(legalEditor.value ? [
       ...(!visible.has('price') ? [{ id: 'price', label: sectionLabels.price, to: sectionPath('price') }] : []),
       ...(!row.booking ? [{ id: 'booking', label: 'Set up consultations', to: sectionPath('booking') }] : []),
       ...(!visible.has('locations') ? [{ id: 'locations', label: 'Offices', to: sectionPath('locations') }] : []),
-      ...(!visible.has('photo') ? [{ id: 'photo', label: 'Media', to: sectionPath('photo') }] : []),
+      ...(managesCatalog.value && !visible.has('photo') ? [{ id: 'photo', label: 'Media', to: sectionPath('photo') }] : []),
     ] : []),
   ]
 })
@@ -1307,22 +1312,22 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
       const photoItem = { id: 'photo', label: 'Media', image: cover ? mediaStillUrl(cover) || undefined : undefined, summary: photoAssets.value.length ? `${photoAssets.value.length} ${photoAssets.value.length === 1 ? 'item' : 'items'}` : 'No media', placeholder: !photoAssets.value.length, to: sectionPath('photo') }
       const pageItems = row.page || legalEditor.value ? [{ id: 'page', label: 'Page content', summary: row.page?.title || 'No page', placeholder: !row.page, ...(canPreview.value ? { to: row.page ? `/dashboard/${String(route.params.org_slug)}/website/pages/${encodeURIComponent(row.page.id)}` : sectionPath('page') } : {}) }] : []
       return [{ id: legalEditor.value ? 'legal' : 'experience', items: [
-        ...(legalEditor.value ? [] : [photoItem]),
+        ...(!legalEditor.value && managesCatalog.value ? [photoItem] : []),
         { id: 'name', label: 'Name', summary: row.name, to: sectionPath('name') },
         { id: 'description', label: sectionLabels.description, summary: row.description || 'Nothing written yet', placeholder: !row.description, to: sectionPath('description') },
         ...(legalEditor.value ? pageItems : []),
         ...(!legalEditor.value || row.booking || prices !== 'No price set' ? [{ id: 'price', label: location.value ? `Price at ${location.value.title}` : sectionLabels.price, summary: prices, placeholder: prices === 'No price set', to: sectionPath('price') }] : []),
-        ...(!legalEditor.value || row.booking ? [{ id: 'assignment', label: bookingCopy.value.assigneeLabel, icon: 'i-lucide-user-round', summary: row.booking ? assignmentSummary() : 'Set up bookings first', placeholder: !row.booking || !row.booking.assigned_member_id, to: sectionPath(row.booking ? 'booking/assignment' : 'booking') }] : []),
+        ...(!legalEditor.value || row.booking ? [{ id: 'assignment', label: bookingCopy.value.assigneeLabel, icon: 'i-lucide-user-round', summary: row.booking ? assignmentSummary() : 'Set up bookings first', placeholder: !row.booking || !row.booking.assigned_member_id, ...(managesCatalog.value ? { to: sectionPath(row.booking ? 'booking/assignment' : 'booking') } : {}) }] : []),
         ...(!legalEditor.value || row.booking ? [{ id: 'booking', label: sectionLabels.booking, icon: 'i-lucide-calendar-check', summary: row.booking ? bookingSummary() : 'No booking calendar', placeholder: !row.booking, to: sectionPath('booking') }] : []),
         ...(!legalEditor.value || row.booking || row.locations.length ? [{ id: 'locations', label: sectionLabels.locations, icon: 'i-lucide-map-pin', summary: productLocationSummary(), placeholder: !row.locations.length && !row.booking?.held_online, to: sectionPath('locations') }] : []),
         ...details,
-        ...(legalEditor.value && photoAssets.value.length ? [photoItem] : []),
+        ...(legalEditor.value && managesCatalog.value && photoAssets.value.length ? [photoItem] : []),
         { id: 'publication', label: 'Website visibility', summary: publicationSummary(), status: published.value ? 'success' as const : 'neutral' as const, to: sectionPath('publication') },
         ...(row.order_url ? [{ id: 'order-url', label: sectionLabels['order-url'], summary: row.order_url, to: sectionPath('order-url') }] : []),
         ...(legalEditor.value ? [] : pageItems),
         ...otherDetails,
-        ...(sections.length ? [{ id: 'collections', label: sectionLabels.collections, summary: sections.join('\n'), to: sectionPath('collections') }] : []),
-        { id: 'kind', label: 'Type', summary: PRODUCT_KIND_LABELS[row.kind], to: sectionPath('kind') },
+        ...(managesCatalog.value && sections.length ? [{ id: 'collections', label: sectionLabels.collections, summary: sections.join('\n'), to: sectionPath('collections') }] : []),
+        ...(managesCatalog.value ? [{ id: 'kind', label: 'Type', summary: PRODUCT_KIND_LABELS[row.kind], to: sectionPath('kind') }] : []),
       ] }]
     }
     const food = ['dietary_notes', 'allergens', 'ingredients'].map(key => {
@@ -1472,7 +1477,7 @@ const openSections = computed(() => [...navigationGroups.value.flatMap(group => 
 // moving between leaves reuses this component.
 watchEffect(() => {
   if (isNew.value) {
-    if (detailKey.value) showError(createError({ statusCode: 404, statusMessage: 'Page not found' }))
+    if (detailKey.value || !managesCatalog.value) showError(createError({ statusCode: 404, statusMessage: 'Page not found' }))
     return
   }
   // A product that failed to load has no rows, and every real section would
@@ -2364,6 +2369,7 @@ provide(productEditorKey, {
   form,
   assignmentSummary: computed(assignmentSummary),
   bookingCopy,
+  managesCatalog,
   product,
   published,
   bookingOffering,
