@@ -5,12 +5,17 @@ import { isCurrencyCode } from '~/shared/currencies'
 import { emptyOnboardingState, useOnboardingState, type OnboardingPlacePreview } from '~/composables/useOnboardingFlow'
 import { ALL_VERTICALS, type OrganizationVertical } from '~/utils/vertical-copy'
 
-export async function readActiveWebsiteDraft() {
-  const response = await applicationFetch<{ success: true; draft: Record<string, unknown> | null }>('/api/dashboard/onboarding/drafts/active', {
-    validate: (value): value is { success: true; draft: Record<string, unknown> | null } => isRecord(value)
-      && value.success === true && (value.draft === null || isRecord(value.draft)),
+type ActiveWebsiteDraft = { success: true } & (
+  | { draft: null; resume_action: null }
+  | { draft: Record<string, unknown>; resume_action: { label: string; to: string } }
+)
+
+export function readActiveWebsiteDraft() {
+  return applicationFetch<ActiveWebsiteDraft>('/api/dashboard/onboarding/drafts/active', {
+    validate: (value): value is ActiveWebsiteDraft => isRecord(value) && value.success === true
+      && (value.draft === null ? value.resume_action === null : isRecord(value.draft)
+        && isRecord(value.resume_action) && typeof value.resume_action.label === 'string' && typeof value.resume_action.to === 'string'),
   })
-  return response.draft
 }
 
 /**
@@ -95,10 +100,10 @@ export function useOnboardingDraft() {
     } catch (cause) {
       subdomainConflict.value = cause instanceof ApiClientError && cause.code === 'SUBDOMAIN_TAKEN'
       if (subdomainConflict.value) {
-        const response = await readActiveWebsiteDraft()
-        if (!response || typeof response.draft_id !== 'string' || typeof response.updated_at !== 'string') throw cause
-        state.value.draftId = response.draft_id
-        state.value.draftRevision = response.updated_at
+        const { draft } = await readActiveWebsiteDraft()
+        if (!draft || typeof draft.draft_id !== 'string' || typeof draft.updated_at !== 'string') throw cause
+        state.value.draftId = draft.draft_id
+        state.value.draftRevision = draft.updated_at
       }
       error.value = cause instanceof Error ? cause.message : 'Something went wrong. Please try again.'
       return false
@@ -163,7 +168,7 @@ export function useOnboardingDraft() {
 
   /** Read the unfinished draft back into the flow. Returns false when there is none. */
   async function restore(): Promise<boolean> {
-    const draft = await readActiveWebsiteDraft()
+    const { draft } = await readActiveWebsiteDraft()
     if (!draft) {
       state.value = emptyOnboardingState()
       return false

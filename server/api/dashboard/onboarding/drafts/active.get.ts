@@ -9,6 +9,8 @@ import { createPreviewToken, PREVIEW_TOKEN_TTL_MS, previewSecretOf } from '~/ser
 import { defineHandler, HTTPError } from 'nitro'
 import { deleteAbandonedDraftTenant } from '~/server/utils/tenant-deletion'
 
+const noDraft = { success: true, draft: null, resume_action: null }
+
 export default defineHandler(async (event) => {
   const env = cloudflareEnv(event)
   const db = env.DB
@@ -19,7 +21,7 @@ export default defineHandler(async (event) => {
 
   const row = await readActiveOnboardingDraft(db, session.user.id, true)
 
-  if (!row) return jsonResponse({ success: true, draft: null })
+  if (!row) return jsonResponse(noDraft)
   if (row.status === 'abandoned') {
     if (!row.organization_id || !row.subdomain_candidate) throw new HTTPError({ statusCode: 409, statusMessage: 'Website draft cleanup has no recorded organization or address. Its native ownership must be verified.', data: { code: 'ONBOARDING_DRAFT_DISCARD_INCOMPLETE', draft_id: row.id } })
     const outcome = await deleteAbandonedDraftTenant(env, {
@@ -32,7 +34,7 @@ export default defineHandler(async (event) => {
       statusMessage: outcome.refused === 'organization_is_live' ? 'This site is already live. Delete it from its dashboard instead.' : 'Website draft cleanup is incomplete. Retry discarding this draft.',
       data: { code: 'ONBOARDING_DRAFT_DISCARD_INCOMPLETE', draft_id: row.id, organization_id: row.organization_id },
     })
-    return jsonResponse({ success: true, draft: null })
+    return jsonResponse(noDraft)
   }
 
   const payload = parseStoredOnboardingDraftPayload(row.payload_json)
@@ -54,6 +56,7 @@ export default defineHandler(async (event) => {
 
   return jsonResponse({
     success: true,
+    resume_action: { label: 'Continue website setup', to: '/dashboard/onboarding' },
     draft: {
       draft_id: row.id,
       updated_at: row.updated_at,

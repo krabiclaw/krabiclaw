@@ -96,13 +96,18 @@ test('a new owner builds a draft and creates a site through the routed flow', as
     await expect(page).toHaveURL(/\/dashboard\/account$/)
   }
   const continueSetup = async (next: string) => {
-    await page.getByRole('link', { name: 'Continue website setup', exact: true }).click()
+    const action = page.getByRole('link', { name: 'Continue website setup', exact: true })
+    await expect(action).toHaveAttribute('href', '/dashboard/onboarding')
+    await action.click()
     await expect(step(next)).toBeVisible()
   }
   await exitSetup()
   const typeDraft = await page.request.get('/api/dashboard/onboarding/drafts/active')
   expect(typeDraft.status(), await typeDraft.text()).toBe(200)
-  expect(await typeDraft.json()).toMatchObject({ draft: { vertical: 'restaurant', organization_id: null, paused_step: 'type' } })
+  expect(await typeDraft.json()).toMatchObject({
+    draft: { vertical: 'restaurant', organization_id: null, paused_step: 'type' },
+    resume_action: { label: 'Continue website setup', to: '/dashboard/onboarding' },
+  })
   await continueSetup('type')
   await expect(step('type').getByRole('button', { name: 'Restaurant, café or bar' })).toHaveAttribute('aria-pressed', 'true')
   await advance('Continue', 'business')
@@ -271,7 +276,7 @@ test('a new experience site saves its first experience privately until booking s
   expect(discarded.status(), await discarded.text()).toBe(200)
   const empty = await page.request.get('/api/dashboard/onboarding/drafts/active')
   expect(empty.status(), await empty.text()).toBe(200)
-  expect(await empty.json()).toEqual({ success: true, draft: null })
+  expect(await empty.json()).toEqual({ success: true, draft: null, resume_action: null })
   try {
     const created = await page.request.post('/api/dashboard/onboarding/drafts/active', {
       data: { source_type: 'manual', vertical: 'experience', name: `E2E experience ${Date.now().toString(36)}`, details: { source_locale: 'en', currency: 'THB', timezone: 'Asia/Bangkok', country: 'TH', city: 'Ao Nang', street_address: '88 Moo 2', phone: '+66812345678' } },
@@ -314,7 +319,7 @@ test('a new experience site saves its first experience privately until booking s
     expect(removed.status(), await removed.text()).toBe(200)
     const discardedDraft = await page.request.get('/api/dashboard/onboarding/drafts/active')
     expect(discardedDraft.status(), await discardedDraft.text()).toBe(200)
-    expect(await discardedDraft.json()).toEqual({ success: true, draft: null })
+    expect(await discardedDraft.json()).toEqual({ success: true, draft: null, resume_action: null })
   }
 })
 
@@ -374,7 +379,7 @@ test('an owner changes their restaurant draft to lodging and saves their first h
   expect(await discarded.json()).toEqual({ success: true, deleted: previousDraft?.organization_id != null })
   const cleared = await page.request.get('/api/dashboard/onboarding/drafts/active')
   expect(cleared.status(), await cleared.text()).toBe(200)
-  expect(await cleared.json()).toEqual({ success: true, draft: null })
+  expect(await cleared.json()).toEqual({ success: true, draft: null, resume_action: null })
   const name = `E2E Lodging ${Date.now().toString(36)}`
   const step = (id: string) => page.locator(`[data-onboarding-step="${id}"]`)
   const advance = async (label: string, next: string) => {
@@ -759,7 +764,7 @@ test('deleting a site through Better Auth also deletes the draft that created it
   expect(organizations.map(organization => organization.id)).not.toContain(organizationId)
   const resumed = await page.request.get('/api/dashboard/onboarding/drafts/active')
   expect(resumed.status(), await resumed.text()).toBe(200)
-  expect(await resumed.json()).toEqual({ success: true, draft: null })
+  expect(await resumed.json()).toEqual({ success: true, draft: null, resume_action: null })
 })
 
 test('the business search API refuses what the picker would never send', async ({ request, baseURL }) => {
