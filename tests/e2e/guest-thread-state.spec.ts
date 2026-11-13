@@ -140,7 +140,7 @@ test.afterEach(async ({ page }) => {
 // The one conversation list, narrowed to the tenant's contact conversations; the guest under test is picked out of it.
 async function loadThreadList(request: APIRequestContext, guestName: string) {
   const response = await request.get('/api/messages', {
-    params: { organization_id: organizationId(), type: 'contact' },
+    params: { organization_id: organizationId(), type: 'contact', q: guestName },
   })
   await expectStatus(response, 200)
   const { threads } = await response.json() as { threads: InboxRow[] }
@@ -410,13 +410,15 @@ test('archive and Move to messages file a conversation for the one member, witho
   }
 })
 
-test('suggested replies fill the composer, hide while typing or after ×, and come back from +', async ({ page }) => {
+test('suggested replies fill the composer, hide while typing or after ×, and come back from +', async ({ page, request }) => {
   test.skip(!writable, 'Guest-thread writes require disposable local or preview data')
   await page.setViewportSize({ width: 1440, height: 900 })
   await loginAs(page.request, baseURL, ownerId)
   const guestName = `Suggestions ${Date.now()}`
-  await submitContact(page.request, guestName)
-  const threadId = (await loadThreadList(page.request, guestName)).threads[0]!.id
+  await submitContact(request, guestName)
+  const { threads } = await loadThreadList(page.request, guestName)
+  expect(threads).toHaveLength(1)
+  const threadId = threads[0]!.id
   // The drafts come from Workers AI, which the E2E server has no binding for; the
   // composer's behaviour around them is what this covers, so their words are fixed here.
   const drafts = ['Thanks for writing, we will check and get back to you.', 'Happy to help with that.']
@@ -455,7 +457,9 @@ test('suggested replies fill the composer, hide while typing or after ×, and co
 
   // A tap fills the field and sends nothing.
   let replies = 0
-  page.on('request', request => { if (request.method() === 'POST' && request.url().includes(`/guest-threads/${threadId}/operations/reply`)) replies += 1 })
+  page.on('request', request => {
+    if (request.method() === 'POST' && new URL(request.url()).pathname === `/api/messages/${threadId}`) replies += 1
+  })
   await rows[1]!.click()
   await expect(field).toHaveValue(drafts[1]!)
   expect(replies).toBe(0)
@@ -465,27 +469,25 @@ for (const viewport of [
   { name: 'desktop', width: 1440, height: 900 },
   { name: 'mobile', width: 375, height: 812 },
 ]) {
-  test(`In this conversation archives a conversation and moves it back (${viewport.name})`, async ({ page }) => {
+  test(`In this conversation archives a conversation and moves it back (${viewport.name})`, async ({ page, request }) => {
     test.skip(!writable, 'Guest-thread writes require disposable local or preview data')
     await page.setViewportSize({ width: viewport.width, height: viewport.height })
     await loginAs(page.request, baseURL, ownerId)
     const guestName = `Mailbox row ${viewport.name} ${Date.now()}`
-    await submitContact(page.request, guestName)
+    await submitContact(request, guestName)
     await dismissPreviewToolbar(page)
 
-    // The rows are server-rendered, so they are visible before they have a
-    // handler: the list says when it has hydrated, and nothing is pressed
-    // before. On desktop the index then opens its newest thread beside the
-    // list, and that navigation re-renders the rows, so the screen has settled
-    // only once a thread is open.
+    // The rows are server-rendered. Wait for hydration before exercising the list.
+    const messages = `${baseURL}/dashboard/${organizationSlug()}/messages`
+    const thread = page.locator('#dashboard-panel-organization-messages-thread')
     const openMessages = async (query = '') => {
-      await page.goto(`${baseURL}/dashboard/${organizationSlug()}/messages${query}`)
+      await page.goto(`${messages}${query}`)
       await expect(page.locator('[data-conversation-list-hydrated="true"]')).toBeVisible()
-      if (viewport.name === 'desktop') await expect(page).toHaveURL(/\/messages\/[^/?]+(\?|$)/)
+      await expect(page).toHaveURL(`${messages}${query}`)
+      await expect(thread).toHaveCount(0)
     }
     const rowFor = (name: string) => page.locator('[data-thread-row]').filter({ hasText: name })
     // The conversation's actions are in its header's "In this conversation" sheet, not on the row.
-    const thread = page.locator('#dashboard-panel-organization-messages-thread')
     const sheetButton = thread.getByRole('button', { name: 'In this conversation', exact: true })
     const sheet = page.getByRole('dialog', { name: 'In this conversation' })
     const openConversation = async (id: string, query = '') => {
@@ -497,6 +499,10 @@ for (const viewport of [
     }
 
     await openMessages()
+    await page.reload()
+    await expect(page.locator('[data-conversation-list-hydrated="true"]')).toBeVisible()
+    await expect(page).toHaveURL(messages)
+    await expect(thread).toHaveCount(0)
     await expect(rowFor(guestName)).toBeVisible()
     await expect(rowFor(guestName).getByRole('button')).toHaveCount(0)
     const threadId = await rowFor(guestName).getAttribute('data-thread-row')
@@ -509,8 +515,9 @@ for (const viewport of [
     expect((await archived).status()).toBe(200)
     await expect(sheet).toHaveCount(0)
     await expect(rowFor(guestName)).toHaveCount(0)
-    // The archived conversation is not left open beside the list.
-    await expect(page).not.toHaveURL(new RegExp(`/messages/${threadId}`))
+    // The user returns to the inbox without selecting another conversation.
+    await expect(page).toHaveURL(messages)
+    await expect(thread).toHaveCount(0)
 
     await openMessages('?archived=')
     await expect(rowFor(guestName)).toBeVisible()

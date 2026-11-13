@@ -812,7 +812,7 @@ test('a host creates a stay, records its payments and arrival guide, and cancels
   expect(restoredPaymentRead.status()).toBe(200)
   const { id: paidBookingId, ...paidDetails } = paid.data!.record
   expect((await restoredPaymentRead.json()).booking).toEqual({
-    ...paidDetails, booking_id: paidBookingId, unit: 'nights', available_actions: expect.any(Array),
+    ...paidDetails, booking_id: paidBookingId, unit: 'nights', available_actions: expect.any(Array), pending_changes: [],
   })
 
   const guide = { check_in_method: 'lockbox', check_in_instructions: 'Use the garden lockbox.', wifi_network: 'Cabin guests', wifi_password: 'private-cabin-wifi', directions: 'Use the east entrance.', house_manual: 'Keep the gate closed.', checkout_instructions: [{ task: 'return_keys', details: 'Leave keys in the box.' }] }
