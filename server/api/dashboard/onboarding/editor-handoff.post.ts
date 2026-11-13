@@ -9,8 +9,8 @@ import { validatedInternalPath } from '~/shared/auth/return-target'
 
 export default defineHandler(async (event) => {
   const invalid = () => new HTTPError({ statusCode: 400, message: 'Choose a saved offering to open.', data: { code: 'INVALID_EDITOR_DESTINATION' } })
-  const authorization = event.req.headers.get('authorization')
-  if (!authorization?.startsWith('Bearer ') || event.req.headers.has('cookie')) {
+  const authorization = event.req.headers.get('authorization') ?? ''
+  if (!/^Bearer [^\s]+$/i.test(authorization) || event.req.headers.has('cookie')) {
     throw new HTTPError({ statusCode: 401, message: 'Sign in to open the editor.', data: { code: 'UNAUTHORIZED' } })
   }
   const body = await readRequiredBody<{ path?: unknown }>(event)

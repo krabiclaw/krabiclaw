@@ -665,7 +665,7 @@ function buildAuth(env: CloudflareEnv) {
     },
     plugins: [
       bearer(),
-      oneTimeToken({ disableClientRequest: true, storeToken: 'hashed', expiresIn: 1 }),
+      oneTimeToken({ disableClientRequest: true, storeToken: 'hashed' }),
       lastLoginMethod({ customResolveMethod: ctx => loginMethodForPath(ctx.path, ctx.body) }),
       jwt({
         // The plugin's default after-hook mints a fresh JWT on every
