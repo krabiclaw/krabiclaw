@@ -31,10 +31,10 @@ import { assertOrganizationLanguage, getLocalizationForAuthoring, getProductCata
 import { RESOURCE_LOCALIZATIONS_SQL } from '~/shared/content-registries'
 import { z } from 'zod'
 import { groupProductsByCollection } from '~/utils/product-presentation'
-import { createStayPhotoRoom, moveStayPhotos, readStayHome, removeStayPhotoRoom, stayAccessFor, updateStayHomeAccessibility, updateStayPhotoRoom } from '~/server/domain/stays'
+import { createStayPhotoRoom, moveStayPhotos, readStayHome, removeStayPhotoRoom, stayAccessFor, updateStayHome, updateStayHomeAccessibility, updateStayPhotoRoom } from '~/server/domain/stays'
 import { isStayHomeAccessibilityFeature, isStayRoomAccessibilityFeature, STAY_HOME_ACCESSIBILITY_FEATURES, STAY_ROOM_ACCESSIBILITY_FEATURES } from '~/shared/stay-accessibility'
 import { STAY_BED_TYPES, STAY_PHOTO_ROOM_TYPES, stayPhotoRoomName, type StayBedType } from '~/shared/stay-photos'
-import { STAY_AMENITIES } from '~/shared/stay-listing'
+import { STAY_AMENITIES, STAY_LISTING_TYPES, STAY_PROPERTY_SIZE_UNITS } from '~/shared/stay-listing'
 import { getLocation } from '~/server/utils/location-management'
 import { getContentDocumentById, getContentEditorSnapshotForDocument, getContentRepresentation, type ContentBlockInput } from '~/server/utils/content/documents'
 import { getLinksPage } from '~/server/utils/links-page'
@@ -795,7 +795,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     await assertProductAccess(db, { ...principal, productId, patch: changes as Record<string, unknown> })
     await updateProduct(db, { ...target, patch: { updated_at: product.updated_at, ...changes }, actor, env })
   }
-  if (product.kind === 'stay' && !['questions', 'question', 'question-order', 'stay-details', 'stay-field', 'stay-safety', 'stay-rules', 'stay-accessibility', 'stay-accessibility-feature', ...STAY_ROOM_VIEWS].includes(view)) return missing('Offering not found')
+  if (product.kind === 'stay' && !['questions', 'question', 'question-order', 'stay-details', 'stay-field', 'stay-safety', 'stay-rules', 'stay-property', 'stay-accessibility', 'stay-accessibility-feature', ...STAY_ROOM_VIEWS].includes(view)) return missing('Offering not found')
   const setBooking = async (changes: Parameters<typeof setProductBookingConfig>[1]['patch']) => {
     await assertProductAccess(db, { ...principal, productId, patch: changes as Record<string, unknown> })
     await setProductBookingConfig(db, { ...target, patch: changes, actorId: userId, env })
@@ -819,7 +819,38 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
   const memberList = () => memberSchedulingList({ env, userId, organizationId: organization.id })
   const locationsUsed = locations.filter(entry => product.locations.some(binding => binding.location_id === entry.id))
 
-  if (STAY_ROOM_VIEWS.includes(view)) {
+  if (view === 'stay-property') {
+    if (product.kind !== 'stay' || !wide) return missing('Listing details not found')
+    const access = await stayAccessFor(principal)
+    if (!access.manage) return missing('Listing details not found')
+    const home = await readStayHome(db, access, productId)
+    const options = (values: Record<string, { label: string }>) => [
+      { value: '', label: 'Unspecified' },
+      ...Object.entries(values).map(([value, item]) => ({ value, label: item.label })),
+    ]
+    form('Property details', [
+      field('listing_type', 'Accommodation type', 'select', home.listing_type, { choices: options(STAY_LISTING_TYPES) }),
+      field('total_floors', 'Total floors', 'number', home.total_floors, { optional: true }),
+      field('listing_floor', 'Listing floor', 'text', home.listing_floor, { optional: true }),
+      field('year_built', 'Year built', 'number', home.year_built, { optional: true }),
+      field('property_size', 'Property size', 'text', home.property_size, { optional: true }),
+      field('property_size_unit', 'Unit', 'select', home.property_size_unit, { choices: options(STAY_PROPERTY_SIZE_UNITS) }),
+    ], async values => {
+      const patch: Record<string, unknown> = {}
+      for (const item of screen.fields) {
+        const value = values(item.key).trim()
+        if (value === item.value) continue
+        if (item.kind === 'select') patch[item.key] = value || null
+        else if (!value) patch[item.key] = null
+        else {
+          const number = Number(value)
+          if (!Number.isFinite(number)) return invalid(`Enter a valid number for ${item.label}`)
+          patch[item.key] = number
+        }
+      }
+      if (Object.keys(patch).length) await updateStayHome(env, db, access, productId, patch)
+    })
+  } else if (STAY_ROOM_VIEWS.includes(view)) {
     if (product.kind !== 'stay' || !wide) return missing('Photo tour not found')
     const access = await stayAccessFor(principal)
     if (!access.manage) return missing('Photo tour not found')
@@ -953,6 +984,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
         ...Object.entries(STAY_SAFETY_SECTIONS).map(([key, section]) => leaf(key, section.label, undefined, { view: 'stay-safety', query: { section: key } })),
         leaf('stay-accessibility', 'Accessibility'),
         leaf('stay-rooms', 'Photo tour rooms'),
+        leaf('stay-property', 'Property details'),
       ] }
     } else {
       const section = Object.keys(STAY_SAFETY_SECTIONS).find(key => key === query.section) as StaySafetySection | undefined
