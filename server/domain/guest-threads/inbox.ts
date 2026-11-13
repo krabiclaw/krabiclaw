@@ -4,7 +4,7 @@ import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import { SCHEDULED_MESSAGE_CONVERSATION_SQL, visibleScheduledMessagesSql } from '~/server/domain/guest-messaging'
 import { stayAccessFor } from '~/server/domain/stays'
 import type { MemberAccessPrincipal } from '~/server/utils/member-access'
-import { getGuestThreadDetail } from './detail'
+import { loadGuestThreadDetail } from './detail'
 import { guestReplyDestination } from './operations'
 import { MEMBER_REPLY_EVENT, MIRRORED_EVENT, OPENING_EVENT, SCHEDULED_MESSAGE_EVENT, SUBMISSION_EVENT, type ConversationRow } from '~/server/domain/conversations'
 import { formatFormAnswer } from '~/shared/form-questions'
@@ -99,7 +99,7 @@ export function inboxGuestNames(raw: GuestThreadDetailViewModel): { kind: InboxT
   return { kind, guestName, guestFullName }
 }
 
-async function threadFacts(db: DbClient, raw: GuestThreadDetailViewModel & { timeZone: string }, organizationId: string, now: Date): Promise<ThreadFacts> {
+async function threadFacts(db: DbClient, raw: GuestThreadDetailViewModel, organizationId: string, timeZone: string, now: Date): Promise<ThreadFacts> {
   const { kind, guestName, guestFullName } = inboxGuestNames(raw)
   const automaticIds = raw.entries.filter(entry => entry.eventName === SCHEDULED_MESSAGE_EVENT).map(entry => entry.id)
   const [owner, automatic] = await Promise.all([
@@ -109,7 +109,6 @@ async function threadFacts(db: DbClient, raw: GuestThreadDetailViewModel & { tim
       'SELECT message_id, template_title FROM scheduled_guest_messages WHERE organization_id = ? AND message_id IN (SELECT value FROM json_each(?))',
       [organizationId, d1JsonStringSet(automaticIds)]) : [],
   ])
-  const { timeZone } = raw
   const inquiry = raw.inquiry
   const record = raw.operationalRecord
   // A stay is its nights; a booking is its start, in the home's clock; an inquiry is the dates asked about.
@@ -289,19 +288,20 @@ async function pendingMessages(db: DbClient, threadId: string, organizationId: s
 }
 
 function rawThread(db: DbClient, threadId: string, organizationId: string, viewer: Viewer, now: Date) {
-  return getGuestThreadDetail(db, threadId, organizationId, viewer.audience === 'buyer'
+  return loadGuestThreadDetail(db, threadId, organizationId, viewer.audience === 'buyer'
     ? { buyerUserId: viewer.userId }
     : { memberUserId: viewer.userId, conversation: viewer.conversation }, now)
 }
 
 /** The conversation's view model, or null when the viewer has no such conversation. */
 export async function getInboxThread(db: DbClient, threadId: string, organizationId: string, viewer: Viewer, now = new Date()): Promise<InboxThread | null> {
-  const raw = await rawThread(db, threadId, organizationId, viewer, now)
-  if (!raw) return null
+  const detail = await rawThread(db, threadId, organizationId, viewer, now)
+  if (!detail) return null
+  const { view: raw, timeZone } = detail
   const [facts, replyComposer, pending] = await Promise.all([
-    threadFacts(db, raw, organizationId, now),
-    composer(db, raw, viewer),
-    viewer.audience === 'member' ? pendingMessages(db, raw.id, organizationId, viewer.principal, raw.timeZone) : [],
+    threadFacts(db, raw, organizationId, timeZone, now),
+    composer(db, detail, viewer),
+    viewer.audience === 'member' ? pendingMessages(db, raw.id, organizationId, viewer.principal, timeZone) : [],
   ])
   const items = stream(facts, viewer, now, replyComposer.available)
   const record = raw.operationalRecord
@@ -329,10 +329,10 @@ export async function getInboxThread(db: DbClient, threadId: string, organizatio
  * would send (`guestReplyDestination`); where it cannot, there is no composer and
  * its reason shows instead. An Airbnb conversation is always Airbnb's.
  */
-async function composer(db: DbClient, raw: NonNullable<Awaited<ReturnType<typeof rawThread>>>, viewer: Viewer): Promise<InboxThread['composer']> {
+async function composer(db: DbClient, detail: NonNullable<Awaited<ReturnType<typeof rawThread>>>, viewer: Viewer): Promise<InboxThread['composer']> {
   if (viewer.audience === 'buyer') return { channel: 'email', available: true, reason: null }
-  const destination = await guestReplyDestination(db, raw.request, raw.channelFacts)
-  return { channel: raw.conversationChannel === 'airbnb' ? 'airbnb' : 'email', available: destination.channel !== null, reason: destination.channel === null ? destination.reason : null }
+  const destination = await guestReplyDestination(db, detail.request, detail.channelFacts)
+  return { channel: detail.view.conversationChannel === 'airbnb' ? 'airbnb' : 'email', available: destination.channel !== null, reason: destination.channel === null ? destination.reason : null }
 }
 
 /**
@@ -341,8 +341,9 @@ async function composer(db: DbClient, raw: NonNullable<Awaited<ReturnType<typeof
  * Block: Airbnb is not a guest.
  */
 export async function getInboxThreadDetails(db: DbClient, threadId: string, organizationId: string, viewer: Extract<Viewer, { audience: 'member' }>, now = new Date()): Promise<InboxThreadDetails | null> {
-  const raw = await rawThread(db, threadId, organizationId, viewer, now)
-  if (!raw) return null
+  const detail = await rawThread(db, threadId, organizationId, viewer, now)
+  if (!detail) return null
+  const raw = detail.view
   const { kind, guestFullName } = inboxGuestNames(raw)
   const team = await queryAll<{ user_id: string; name: string; role: string }>(db, `
     SELECT m.userId AS user_id, u.name, m.role FROM member m JOIN user u ON u.id = m.userId

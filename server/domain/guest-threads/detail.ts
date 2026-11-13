@@ -38,13 +38,25 @@ export async function getGuestThreadDetail(
   db: DbClient,
   threadId: string,
   organizationId: string,
+  viewer?: { buyerUserId: string } | { memberUserId: string },
+): Promise<GuestThreadDetailViewModel | null> {
+  const detail = await loadGuestThreadDetail(db, threadId, organizationId, viewer)
+  return detail ? detail.view : null
+}
+
+/** Request and routing facts stay beside the view so they never enter its guest projection. */
+export async function loadGuestThreadDetail(
+  db: DbClient,
+  threadId: string,
+  organizationId: string,
   viewer?: { buyerUserId: string } | { memberUserId: string; conversation?: ConversationRow },
   at = new Date(),
-): Promise<(GuestThreadDetailViewModel & {
+): Promise<{
+  view: GuestThreadDetailViewModel
   request: GuestRequest
   channelFacts: NonNullable<Awaited<ReturnType<typeof guestThreadChannel>>>
   timeZone: string
-}) | null> {
+} | null> {
   const audience = viewer && 'buyerUserId' in viewer ? viewer : undefined
   const member = viewer && 'memberUserId' in viewer ? viewer : undefined
   const memberUserId = member?.memberUserId ?? null
@@ -144,7 +156,7 @@ export async function getGuestThreadDetail(
   // A stay's conversation is presented as a stay: the booking is its nights, or a channel's guest has not booked yet.
   const submissionType = thread.kind === 'booking' && (record ? record.unit === 'nights' : channelThread.productId !== null) ? 'stay' : thread.kind
 
-  return {
+  const view: GuestThreadDetailViewModel = {
     id: thread.id,
     organizationName: organization.name,
     organizationVertical: organization.vertical,
@@ -152,9 +164,6 @@ export async function getGuestThreadDetail(
     guestName: summary.guestName,
     participantLabel: summary.participantLabel,
     conversationChannel: channelThread.productId !== null ? 'airbnb' : 'direct',
-    request: thread,
-    channelFacts: channelThread,
-    timeZone: summary.locationTimezone ?? organization.timezone,
     guestEmail: summary.guestEmail,
     guestPhone: summary.guestPhone,
     submissionType,
@@ -213,6 +222,7 @@ export async function getGuestThreadDetail(
     createdAt: thread.created_at,
     lastMessageAt: thread.last_message_at,
   }
+  return { view, request: thread, channelFacts: channelThread, timeZone: summary.locationTimezone ?? organization.timezone }
 }
 
 /**
