@@ -12,7 +12,7 @@
       <UButton v-if="!personalScope && canManageMessages" icon="i-lucide-settings" color="neutral" variant="soft" class="rounded-full" aria-label="Messaging settings" @click="settingsOpen = true" />
       <UButton v-if="!personalScope && hasWorkspaceMembership" :to="`${listPath}/new`" icon="i-lucide-square-pen" color="neutral" variant="soft" class="rounded-full" aria-label="New team conversation" />
     </template>
-    <ConversationList v-if="personalScope || hasWorkspaceMembership" :personal-scope="personalScope" @first="firstThread = $event">
+    <ConversationList v-if="personalScope || hasWorkspaceMembership" ref="conversationList" :personal-scope="personalScope" @first="firstThread = $event">
       <template #filters><ReuseControls /></template>
     </ConversationList>
     <UAlert v-else class="m-6" color="error" title="Messages are unavailable" description="Your membership does not allow access to conversations." />
@@ -29,6 +29,7 @@ import { createReusableTemplate, watchDebounced } from '@vueuse/core'
 import ConversationList from '~/lib/components/workspace/messages/ConversationList.vue'
 import InboxFilters from '~/lib/components/workspace/messages/InboxFilters.vue'
 import MessagingSettings from '~/lib/components/workspace/messages/MessagingSettings.vue'
+import { removeInboxConversationKey } from '~/lib/components/workspace/messages/guest-thread-client'
 import { authClient } from '~/lib/auth-client'
 import type { organizationRoles } from '~/utils/organization-access'
 import { useTeamGroupLeaveRequest } from '~/lib/components/workspace/messages/team-thread-client'
@@ -62,6 +63,11 @@ watchDebounced(query, words => {
 const pastOnly = computed(() => route.query.archived !== undefined)
 const blockedOnly = computed(() => !props.personalScope && route.query.blocked !== undefined)
 const firstThread = ref<RouteLocationRaw | null>(null)
+const conversationList = useTemplateRef('conversationList')
+provide(removeInboxConversationKey, id => {
+  firstThread.value = null
+  conversationList.value?.removeConversation(id)
+})
 const session = authClient.useSession()
 const accessError = ref('')
 const leaveRequest = useTeamGroupLeaveRequest()

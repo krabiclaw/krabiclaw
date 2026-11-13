@@ -280,8 +280,7 @@ useIntervalFn(()=>{if(props.personalScope&&documentVisibility.value==='visible')
 // While a list loads there is none: the rows on screen may be another
 // mailbox's, and the shell must not keep one of them to open.
 watch([threads, openThreadId, pending], ([rows, open, loading]) => {
-  if (open) return
-  if (loading) { emit('first', null); return }
+  if (open || loading) { emit('first', null); return }
   const first = rows[0]
   emit('first', first ? { path: threadRoute(first), query: route.query } : null)
 }, { immediate: true })
@@ -336,13 +335,13 @@ async function archive(thread: ThreadListItem) {
       body: { archived: true },
       validate: (value: unknown): value is { archived: boolean } => typeof value === 'object' && value !== null && Reflect.get(value, 'archived') === true,
     })
+    removeConversation(thread.id)
   } catch (error) {
     reconcile(thread.id)
     toast.add({ color: 'error', title: 'Could not archive the conversation', description: getErrorMessage(error, 'Try again') })
   } finally {
     toggling.delete(thread.id)
   }
-  if (realtime.status.value !== 'open') reconcile(thread.id)
 }
 
 // Changes received during a read stay queued until that read has settled.
@@ -369,6 +368,16 @@ function reconcile(id?: string) {
   else fullRefresh = true
   void drainChanges()
 }
+
+/** Apply a confirmed archive or block before the route can select the first visible row. */
+function removeConversation(id: string) {
+  const current = page.value
+  if (!current?.threads.some(row => row.id === id)) return
+  data.value = { ...current, threads: current.threads.filter(row => row.id !== id) }
+  if (pending.value) void refresh({ dedupe: 'cancel' })
+  else reconcile(current.pagination.has_more ? undefined : id)
+}
+defineExpose({ removeConversation })
 
 async function drainChanges() {
   if (disposed || reconciling || pending.value || loadingMore.value || (!fullRefresh && !changedIds.size)) return

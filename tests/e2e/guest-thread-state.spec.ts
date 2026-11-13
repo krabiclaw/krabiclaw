@@ -482,6 +482,7 @@ for (const viewport of [
     // The rows are server-rendered. Wait for hydration and the desktop selection.
     const messages = `${baseURL}/dashboard/${organizationSlug()}/messages`
     const thread = page.locator('#dashboard-panel-organization-messages-thread')
+    const rowFor = (name: string) => page.locator('[data-thread-row]').filter({ hasText: name })
     const expectInbox = async (query: string) => {
       await expect(page.locator('[data-conversation-list-hydrated="true"]')).toBeVisible()
       if (viewport.name === 'desktop') {
@@ -498,7 +499,6 @@ for (const viewport of [
       await page.goto(`${messages}${query}`)
       await expectInbox(query)
     }
-    const rowFor = (name: string) => page.locator('[data-thread-row]').filter({ hasText: name })
     // The conversation's actions are in its header's "In this conversation" sheet, not on the row.
     const sheetButton = thread.getByRole('button', { name: 'In this conversation', exact: true })
     const sheet = page.getByRole('dialog', { name: 'In this conversation' })
@@ -511,8 +511,10 @@ for (const viewport of [
     }
 
     await openMessages()
+    if (viewport.name === 'desktop') await expect(rowFor(guestName)).toHaveAttribute('aria-current', 'page')
     await page.reload()
     await expectInbox('')
+    if (viewport.name === 'desktop') await expect(rowFor(guestName)).toHaveAttribute('aria-current', 'page')
     await expect(rowFor(guestName)).toBeVisible()
     await expect(rowFor(guestName).getByRole('button')).toHaveCount(0)
     const threadId = await rowFor(guestName).getAttribute('data-thread-row')
@@ -520,13 +522,24 @@ for (const viewport of [
     await sheetButton.click()
     await expect(sheet.getByRole('button', { name: 'Archive', exact: true })).toBeVisible()
     await expect(sheet.getByRole('button', { name: 'Move to Messages', exact: true })).toHaveCount(0)
-    const archived = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname.endsWith(`/messages/${threadId}/archive`))
-    await sheet.getByRole('button', { name: 'Archive', exact: true }).click()
-    expect((await archived).status()).toBe(200)
-    await expect(sheet).toHaveCount(0)
-    await expect(rowFor(guestName)).toHaveCount(0)
-    // The archived conversation closes. Desktop selects the next visible row.
-    await expectInbox('')
+    // Let the save finish before the socket's scoped list request can return.
+    const reconciliation = Promise.withResolvers<void>()
+    await page.route(url => url.pathname === '/api/messages' && url.searchParams.get('mailbox') === 'current'
+      && url.searchParams.get('ids')?.split(',').includes(threadId!) === true, async route => {
+      await reconciliation.promise
+      await route.continue()
+    })
+    try {
+      const archived = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname.endsWith(`/messages/${threadId}/archive`))
+      await sheet.getByRole('button', { name: 'Archive', exact: true }).click()
+      expect((await archived).status()).toBe(200)
+      await expect(sheet).toHaveCount(0)
+      await expect(rowFor(guestName)).toHaveCount(0)
+      // The archived conversation closes. Desktop selects the next visible row.
+      await expectInbox('')
+    } finally {
+      reconciliation.resolve()
+    }
 
     await openMessages('?archived=')
     await expect(rowFor(guestName)).toBeVisible()
