@@ -7,7 +7,7 @@ import { createSession, deleteProductBookingConfig, getScheduleSession, listAvai
 import { attachMediaPlacement, removeMediaPlacement, reorderMediaPlacements, setSingleMediaPlacement } from '~/server/utils/media-placement'
 import { purgePublicResourceCacheNow } from '~/server/utils/public-resource-cache'
 import { memberSchedulingList } from '~/server/domain/member-scheduling'
-import { editableProductKinds, PRODUCT_KIND_LABELS, productDetailFields, STAY_DESCRIPTION_DETAIL_KEYS, STAY_LOCATION_DETAIL_KEYS, type ProductDetailsPatch } from '~/shared/product-details'
+import { editableProductKinds, PRODUCT_KIND_LABELS, productDetailFields, STAY_DESCRIPTION_DETAIL_KEYS, STAY_HOUSE_RULE_DETAIL_KEYS, STAY_LOCATION_DETAIL_KEYS, type ProductDetailsPatch } from '~/shared/product-details'
 import { STAY_SAFETY_FIELDS, STAY_SAFETY_SECTIONS, staySafetySectionKeys, type StaySafetySection } from '~/shared/stay-safety'
 import { formatMinorAmount, majorAmountToMinor, minorAmountToMajor, scopedPriceAmountPatch, selectPrice } from '~/shared/prices'
 import { isCurrencyCode } from '~/shared/currencies'
@@ -795,7 +795,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     await assertProductAccess(db, { ...principal, productId, patch: changes as Record<string, unknown> })
     await updateProduct(db, { ...target, patch: { updated_at: product.updated_at, ...changes }, actor, env })
   }
-  if (product.kind === 'stay' && !['questions', 'question', 'question-order', 'stay-details', 'stay-field', 'stay-safety', 'stay-accessibility', 'stay-accessibility-feature', ...STAY_ROOM_VIEWS].includes(view)) return missing('Offering not found')
+  if (product.kind === 'stay' && !['questions', 'question', 'question-order', 'stay-details', 'stay-field', 'stay-safety', 'stay-rules', 'stay-accessibility', 'stay-accessibility-feature', ...STAY_ROOM_VIEWS].includes(view)) return missing('Offering not found')
   const setBooking = async (changes: Parameters<typeof setProductBookingConfig>[1]['patch']) => {
     await assertProductAccess(db, { ...principal, productId, patch: changes as Record<string, unknown> })
     await setProductBookingConfig(db, { ...target, patch: changes, actorId: userId, env })
@@ -940,7 +940,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
         await updateStayHomeAccessibility(db, env, access, productId, { updated_at: revision, accessibility: { feature, available, photo_ids } })
       })
     }
-  } else if (view === 'stay-details' || view === 'stay-field' || view === 'stay-safety') {
+  } else if (view === 'stay-details' || view === 'stay-field' || view === 'stay-safety' || view === 'stay-rules') {
     if (product.kind !== 'stay' || !wide) return missing('Listing settings not found')
     const definitions = productDetailFields('stay')
     const keys = [...STAY_DESCRIPTION_DETAIL_KEYS, ...STAY_LOCATION_DETAIL_KEYS, 'featured']
@@ -956,16 +956,18 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
       ] }
     } else {
       const section = Object.keys(STAY_SAFETY_SECTIONS).find(key => key === query.section) as StaySafetySection | undefined
-      const selected = view === 'stay-safety'
+      const selected = view === 'stay-rules'
+        ? definitions.filter(definition => STAY_HOUSE_RULE_DETAIL_KEYS.some(key => key === definition.key))
+        : view === 'stay-safety'
         ? definitions.filter(definition => staySafetySectionKeys(section ?? missing('Safety section not found')).includes(definition.key as never))
         : definitions.filter(definition => definition.key === query.field && keys.includes(definition.key))
       if (!selected.length) return missing('Listing details not found')
-      form(section ? STAY_SAFETY_SECTIONS[section].label : selected[0]!.name, selected.map(definition => field(
-        definition.key, definition.name, definition.value_type === 'boolean' ? 'select' : 'textarea', detail(definition.key),
-        definition.value_type === 'boolean'
-          ? { choices: [{ value: '', label: 'Unspecified' }, { value: 'true', label: 'Yes' }, { value: 'false', label: 'No' }], optional: true }
-          : { optional: true },
-      )), async values => {
+      form(view === 'stay-rules' ? 'Guest rules' : section ? STAY_SAFETY_SECTIONS[section].label : selected[0]!.name, selected.map(definition => {
+        const choices = definition.value_type === 'boolean'
+          ? [{ value: '', label: 'Unspecified' }, { value: 'true', label: 'Yes' }, { value: 'false', label: 'No' }]
+          : definition.validations.choices?.map(value => ({ value, label: value }))
+        return field(definition.key, definition.name, choices ? 'select' : 'textarea', detail(definition.key), { choices, optional: true })
+      }), async values => {
         const details: ProductDetailsPatch = {}
         for (const definition of selected) {
           const value = values(definition.key).trim()
@@ -975,6 +977,10 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
           for (const [key, item] of Object.entries(STAY_SAFETY_FIELDS)) {
             if (Object.hasOwn(details, key) && details[key as keyof ProductDetailsPatch] !== true) details[item.detailsKey] = null
           }
+        }
+        if (view === 'stay-rules' && details.quiet_hours !== true) {
+          details.quiet_hours_start = null
+          details.quiet_hours_end = null
         }
         await patch({ details_mode: 'merge', details })
       })
