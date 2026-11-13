@@ -2,13 +2,14 @@ import { HTTPError, type H3Event } from 'nitro'
 import { getQuery } from 'nitro/h3'
 import { getDashboardMemberContext, listDashboardLocations } from '~/server/utils/dashboard-context'
 import { assertProductAccess, isOrganizationWideRole, memberAccessPrincipal, roleAllows } from '~/server/utils/member-access'
-import { createCollection, deleteCollection, getProduct, hydrateProductMedia, listCollectionProducts, listCollections, listOrganizationProducts, reorderCollections, setCollectionProducts, setProductLocation, setProductPublication, updateCollection, updateProduct } from '~/server/utils/product-management'
+import { createCollection, createProduct, deleteCollection, getProduct, hydrateProductMedia, listCollectionProducts, listCollections, listOrganizationProducts, reorderCollections, setCollectionProducts, setProductLocation, setProductPublication, updateCollection, updateProduct } from '~/server/utils/product-management'
 import { createSession, deleteProductBookingConfig, getScheduleSession, listAvailabilityRules, listScheduleSessions, replaceWeeklySchedule, setProductBookingConfig, updateSession } from '~/server/utils/availability'
 import { attachMediaPlacement, removeMediaPlacement, reorderMediaPlacements, setSingleMediaPlacement } from '~/server/utils/media-placement'
 import { purgePublicResourceCacheNow } from '~/server/utils/public-resource-cache'
 import { memberSchedulingList } from '~/server/domain/member-scheduling'
-import { editableProductKinds, PRODUCT_KIND_LABELS, productDetailFields, type ProductDetailsPatch } from '~/shared/product-details'
-import { formatMinorAmount, minorAmountToMajor, scopedPriceAmountPatch, selectPrice } from '~/shared/prices'
+import { editableProductKinds, PRODUCT_KIND_LABELS, productDetailFields, STAY_DESCRIPTION_DETAIL_KEYS, STAY_LOCATION_DETAIL_KEYS, type ProductDetailsPatch } from '~/shared/product-details'
+import { STAY_SAFETY_FIELDS, STAY_SAFETY_SECTIONS, staySafetySectionKeys, type StaySafetySection } from '~/shared/stay-safety'
+import { formatMinorAmount, majorAmountToMinor, minorAmountToMajor, scopedPriceAmountPatch, selectPrice } from '~/shared/prices'
 import { isCurrencyCode } from '~/shared/currencies'
 import { mediaStillUrl } from '~/shared/media-placement-contract'
 import type { CatalogAnswer, CatalogField, CatalogRow, CatalogScreen } from '~/shared/catalog-screen'
@@ -16,8 +17,9 @@ import type { UpdateProductInput } from '~/server/types/products'
 import { getVerticalCopy } from '~/utils/vertical-copy'
 import { NOTICE_OPTIONS, noticeSummary } from '~/shared/availability-settings'
 import { createTenantPage, getTenantPageById, listTenantPages, updateTenantPage } from '~/server/utils/content/pages'
-import { alignTenantPageTranslationBlocks, createTenantPageTranslationBlocks, tenantPageLocalizedTextFields, tenantPageTranslationSourceBlockId, writeTenantPageLocalizedText } from '~/utils/tenant-page-blocks'
+import { alignTenantPageTranslationBlocks, createTenantPageBlock, createTenantPageTranslationBlocks, isTenantPageBlockAllowed, TENANT_PAGE_BLOCK_REGISTRY, tenantPageLocalizedTextFields, tenantPageTranslationSourceBlockId, writeTenantPageLocalizedText } from '~/utils/tenant-page-blocks'
 import { tenantPageBlockLabel } from '~/utils/tenant-page-block-sections'
+import { createTenantPageEditorData, validateTenantPageBlock } from '~/utils/tenant-page-editor'
 import { addOrganizationLanguage, disableOrganizationLanguage, getOrganizationLanguageSettings, publishOrganizationLanguage } from '~/server/utils/organization-languages'
 import { getOrganizationLocalizationProgress } from '~/server/utils/organization-localization-opportunities'
 import { isDemoOrganization } from '~/shared/demo'
@@ -25,8 +27,10 @@ import { hasPlatformEventPermission } from '~/server/utils/platform-admin-users'
 import { FORM_QUESTION_LIMITS, FORM_QUESTION_TYPES, isChoiceQuestionType } from '~/shared/form-questions'
 import { FORM_QUESTION_TYPE_LABELS, formQuestionRowSummary, formQuestionsSummary } from '~/utils/form-question-editing'
 import { queryFirst } from '~/server/db'
-import { assertOrganizationLanguage, putResourceLocalization } from '~/server/utils/localization'
+import { assertOrganizationLanguage, getProductCatalogLocalization, putResourceLocalization } from '~/server/utils/localization'
 import { RESOURCE_LOCALIZATIONS_SQL } from '~/shared/content-registries'
+import { z } from 'zod'
+import { groupProductsByCollection } from '~/utils/product-presentation'
 
 const invalid = (message: string): never => { throw new HTTPError({ statusCode: 422, message }) }
 const missing = (message: string): never => { throw new HTTPError({ statusCode: 404, message }) }
@@ -38,6 +42,66 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
   const principal = memberAccessPrincipal(organization, { env, event })
   const query = getQuery(event)
   const view = typeof query.view === 'string' ? query.view : ''
+  if (view === 'create-offering' || view === 'section-move') {
+    if (!isOrganizationWideRole(organization.role)) return missing('Catalog not found')
+    const scope = { organizationId: organization.id }
+    const actor = { actorId: userId }
+    const creating = view === 'create-offering'
+    if (creating && !await roleAllows({ ...principal, permissions: { products: ['create'] } })) return missing('Catalog not found')
+    const sections = query.section_id === undefined ? [] : await listCollections(db, scope)
+    const section = query.section_id === undefined ? null : sections.find(item => item.id === query.section_id) ?? missing('Section not found')
+    const members = section ? await listCollectionProducts(db, { ...scope, collectionId: section.id }) : []
+    const ids = members.map(product => product.id)
+    const destinations = sections.filter(item => item.id !== section?.id)
+    const currency = organization.default_currency
+    if (!isCurrencyCode(currency)) throw new Error('Unsupported organization currency')
+    const kinds = editableProductKinds('dish').filter(kind => !section || kind === 'dish')
+    const fields = creating ? [
+      field('kind', 'Type', 'select', section ? 'dish' : '', { choices: kinds.map(value => ({ value, label: PRODUCT_KIND_LABELS[value] })) }),
+      field('name', 'Name', 'text', ''),
+      field('description', 'Description', 'textarea', '', { optional: true }),
+      field('price', `Price (${currency})`, 'money', '', { optional: true }),
+    ] : [
+      field('product', 'Dish', 'select', '', { choices: members.filter(product => product.kind === 'dish').map(product => ({ value: product.id, label: product.name })) }),
+      field('destination', 'Destination section', 'select', '', { choices: destinations.map(item => ({ value: item.id, label: item.name })) }),
+    ]
+    if (!creating && !section) return missing('Choose a source section')
+    const grouped = !creating ? groupProductsByCollection(await listOrganizationProducts(db, scope), destinations) : []
+    const membersBySection = new Map(grouped.map(group => [group.id, group.products.map(product => product.id)]))
+    const destinationMembers = !creating ? destinations.map(section => [section.id, membersBySection.get(section.id) ?? []] as const) : []
+    const revision = JSON.stringify([section?.id ?? null, ids, destinationMembers])
+    const screen = { title: creating ? 'Add offering' : 'Move a dish', rows: [], fields, revision, save_label: creating ? 'Create' : 'Move' }
+    if (!answer) return screen
+    if (!creating && answer.revision !== revision) throw new HTTPError({ statusCode: 409, message: 'The section changed. Reopen it before saving.' })
+    if (fields.length !== Object.keys(answer.values).length || fields.some(row => typeof answer.values[row.key] !== 'string')) invalid('The saved fields do not match this editor')
+    if (creating) {
+      let submitted: unknown
+      try { submitted = JSON.parse(answer.revision) } catch { return invalid('Invalid section revision') }
+      const snapshot = z.tuple([z.string().nullable(), z.array(z.string()), z.tuple([])]).safeParse(submitted)
+      if (!snapshot.success || snapshot.data[0] !== (section?.id ?? null)) return invalid('Invalid section revision')
+      const kind = kinds.find(value => value === answer.values.kind) ?? invalid('Choose an offering type')
+      const name = answer.values.name!.trim()
+      const amount = answer.values.price!.trim()
+      await createProduct(db, {
+        ...scope, actor, env, publication: { published: false }, idempotencyKey: answer.idempotency_key,
+        product: {
+          kind, name, description: answer.values.description!, ...(kind === 'service' ? { active: false } : {}),
+          ...(amount ? { variants: [{ name, prices: [{ unit_amount: majorAmountToMinor(amount, currency), currency, location_id: section?.location_id ?? null }] }] } : {}),
+        },
+        ...(section ? { firstMenuSection: { id: section.id, locationId: section.location_id, expectedProductIds: snapshot.data[1] } } : {}),
+      })
+    } else {
+      const source = section ?? missing('Choose a source section')
+      const product = members.find(product => product.kind === 'dish' && product.id === answer.values.product) ?? invalid('Choose a dish')
+      const destination = destinationMembers.find(([id]) => id === answer.values.destination) ?? invalid('Choose a destination section')
+      await setCollectionProducts(db, {
+        ...scope, actor, collectionId: source.id, productIds: ids.filter(id => id !== product.id), expectedProductIds: ids,
+        moveTo: { collection_id: destination[0], expected_product_ids: destination[1] },
+      })
+    }
+    await purgePublicResourceCacheNow(env, organization.id)
+    return screen
+  }
   if (['languages', 'add-language', 'language', 'language-visibility'].includes(view)) {
     if (!isOrganizationWideRole(organization.role)) return missing('Languages not found')
     const scope = { organizationId: organization.id }
@@ -61,6 +125,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
       return { title: language.label, fields: [], rows: [
         { id: 'translate-brand', label: 'Translate brand', native: 'brand-translation', query: { locale: language.locale } },
         { id: 'translate-pages', label: 'Translate pages', native: 'pages', query: { locale: language.locale } },
+        { id: 'translate-catalog', label: 'Translate Catalog', native: 'catalog-translation', query: { locale: language.locale } },
         ...progress.opportunities.map(item => ({ id: item.id, label: item.label, summary: `${item.completed} of ${item.total} translated` })),
         ...(editable ? [{ id: 'visibility', label: 'Website visibility', summary: language.status === 'published' ? 'Published' : 'Draft', native: 'language-visibility', query: { locale: language.locale } }] : []),
       ] }
@@ -83,6 +148,39 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     } else if (answer.values.value === 'false') {
       await disableOrganizationLanguage(db, { ...scope, locale: language!.locale })
     } else invalid('Choose On or Off')
+    await purgePublicResourceCacheNow(env, organization.id)
+    return screen
+  }
+  if (view === 'catalog-translation' || view === 'catalog-translation-item') {
+    if (!isOrganizationWideRole(organization.role)) return missing('Catalog not found')
+    const catalog = await getProductCatalogLocalization(env, db, organization.id, query.locale)
+    const rows = [...catalog.products.map(item => ({ ...item, type: 'product' as const })), ...catalog.collections.map(item => ({ ...item, type: 'collection' as const }))]
+    if (view === 'catalog-translation') {
+      if (answer) return missing('Choose a Catalog item')
+      return { title: 'Catalog translations', fields: [], rows: rows.map(item => ({
+        id: `${item.type}:${item.id}`, label: item.source.name, summary: item.type === 'collection' ? 'Collection' : undefined,
+        native: 'catalog-translation-item', query: { locale: catalog.locale, resource_id: item.id, resource_type: item.type },
+      })) }
+    }
+    const item = rows.find(item => item.id === query.resource_id && item.type === query.resource_type) ?? missing('Catalog item not found')
+    const values = (item.localization?.values ?? {}) as Record<string, unknown>
+    const original = item.source
+    const fields = [
+      field('name', 'Name', 'text', values.name, { hint: original.name, optional: true }),
+      field('description', 'Description', 'textarea', values.description, { hint: original.description ?? undefined, optional: true }),
+    ]
+    const revision = JSON.stringify([original, values])
+    const screen = { title: original.name, rows: [], fields, revision, save_label: 'Save' }
+    if (!answer) return screen
+    if (isDemoOrganization(organization) && !await hasPlatformEventPermission(event, env, { platform: ['access'] })) throw new HTTPError({ statusCode: 403, message: 'Demo organization is read-only' })
+    if (answer.revision !== revision) throw new HTTPError({ statusCode: 409, message: 'This translation changed. Reopen it before saving.' })
+    const next = { ...values }
+    for (const { key } of fields) {
+      const value = (answer.values[key] ?? invalid('Missing translation field')).trim()
+      if (value) next[key] = value
+      else Reflect.deleteProperty(next, key)
+    }
+    await putResourceLocalization(env, db, { organizationId: organization.id, resourceType: item.type, resourceId: item.id, locale: catalog.locale, values: next, userId })
     await purgePublicResourceCacheNow(env, organization.id)
     return screen
   }
@@ -124,7 +222,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     await purgePublicResourceCacheNow(env, organization.id)
     return screen
   }
-  if (view === 'pages' || view === 'page-content') {
+  if (['pages', 'page', 'page-content', 'page-sections', 'page-order', 'page-section-add', 'page-section-remove'].includes(view)) {
     if (!isOrganizationWideRole(organization.role)) return missing('Page not found')
     const scope = { organizationId: organization.id }
     const locale = typeof query.locale === 'string' ? query.locale : undefined
@@ -132,12 +230,77 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
       if (answer) return missing('Choose a page to edit')
       const pages = await listTenantPages(db, organization.id)
       return { title: 'Pages', fields: [], rows: pages.map(page => ({
-        id: page.id, label: page.title, summary: page.path, native: 'page-content',
+        id: page.id, label: page.title, summary: page.path, native: locale ? 'page-content' : 'page',
         query: { page_id: page.id, ...(locale ? { locale } : {}) },
       })) }
     }
     const sourceId = typeof query.page_id === 'string' ? query.page_id : missing('Choose a page')
     const source = await getTenantPageById(db, sourceId, scope)
+    if (view === 'page') {
+      if (answer) return missing('Choose a page setting')
+      return { title: source.title, fields: [], rows: [
+        { id: 'copy', label: 'Page text', summary: source.summary ?? undefined, native: 'page-content', query: { page_id: source.id } },
+        { id: 'sections', label: 'Sections', summary: String(source.blocks.length), native: 'page-sections', query: { page_id: source.id } },
+      ] }
+    }
+    if (['page-sections', 'page-order', 'page-section-add', 'page-section-remove'].includes(view)) {
+      if (locale) return missing('Edit the layout in the source language')
+      const row = (id: string, label: string, native: string, query: Record<string, string> = {}): CatalogRow => ({
+        id, label, native, query: { page_id: source.id, ...query },
+      })
+      const allowed = Object.values(TENANT_PAGE_BLOCK_REGISTRY)
+        .filter(block => isTenantPageBlockAllowed(block, source.recipe, source.page_type, organization.vertical))
+      if (view === 'page-sections') {
+        if (answer) return missing('Choose a page section')
+        return { title: 'Sections', fields: [], rows: [
+          ...source.blocks.map(block => row(block.id, tenantPageBlockLabel(block.type), 'page-content', { block_id: block.id })),
+          ...(allowed.length ? [row('add', 'Add a section', 'page-section-add')] : []),
+          ...(source.blocks.length > 1 ? [row('order', 'Reorder sections', 'page-order')] : []),
+          ...(source.blocks.length ? [row('remove', 'Remove a section', 'page-section-remove')] : []),
+        ] }
+      }
+      const order = view === 'page-order'
+      const add = view === 'page-section-add'
+      if (add && query.block_type === undefined) {
+        if (answer) return missing('Choose a section type')
+        return { title: 'Add a section', fields: [], rows: allowed.map(block => row(block.type, block.label, view, { block_type: block.type })) }
+      }
+      const type = add ? allowed.find(block => block.type === query.block_type)?.type ?? missing('Section type not found') : null
+      const draft = type ? createTenantPageBlock(type, createTenantPageEditorData(type), source.blocks.length) : null
+      const textFields = draft ? tenantPageLocalizedTextFields(draft) : []
+      const choices = add
+        ? allowed.map(block => ({ value: block.type, label: block.label }))
+        : source.blocks.map((block, index) => ({ value: block.id, label: `${tenantPageBlockLabel(block.type)} ${index + 1}` }))
+      const title = order ? 'Reorder sections' : add ? 'Add a section' : 'Remove a section'
+      const revision = source.document.updated_at
+      const screen = { title, rows: [], fields: draft
+        ? textFields.map(({ label, path, value }) => field(path.join('.'), label, 'textarea', value, { optional: true }))
+        : [field('value', title, order ? 'order' : 'select', order ? choices.map(item => item.value).join('\n') : '', { choices })],
+      revision, save_label: 'Save', allow_unchanged: Boolean(draft && !validateTenantPageBlock(draft).length) }
+      if (!answer) return screen
+      if (answer.revision !== revision) throw new HTTPError({ statusCode: 409, message: 'This page changed. Reopen it before saving.' })
+      let blocks = source.blocks
+      if (draft) {
+        for (const { path } of textFields) writeTenantPageLocalizedText(draft, path, answer.values[path.join('.')] ?? invalid('Missing section field'))
+        const problem = validateTenantPageBlock(draft)[0]
+        if (problem) return invalid(problem)
+        blocks = [...blocks, draft]
+      } else if (order) {
+        const value = answer.values.value ?? invalid('Choose a section')
+        const ids = value ? value.split('\n') : []
+        if (ids.length !== blocks.length || new Set(ids).size !== ids.length) invalid('Include each section once')
+        blocks = ids.map(id => source.blocks.find(block => block.id === id) ?? invalid('Section not found'))
+      } else {
+        const value = answer.values.value ?? invalid('Choose a section')
+        if (!blocks.some(block => block.id === value)) return invalid('Choose a saved section')
+        blocks = blocks.filter(block => block.id !== value)
+      }
+      await updateTenantPage(db, source.id, { userId, scope, env, data: {
+        path: source.path, title: source.title, summary: source.summary, page_type: source.page_type, recipe: source.recipe,
+        sort_order: source.sort_order, updated_at: revision, blocks: blocks.map((block, position) => ({ ...block, position })),
+      } })
+      return screen
+    }
     const translated = locale && locale !== source.locale
     const translationId = translated
       ? (await listTenantPages(db, organization.id, { locale })).find(page => page.page_id === source.page_id)?.id
@@ -146,11 +309,13 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     const blocks = translated
       ? saved ? alignTenantPageTranslationBlocks(source.blocks, saved.blocks) : createTenantPageTranslationBlocks(source.blocks)
       : source.blocks
-    const fields = [
+    const selected = query.block_id === undefined ? null : source.blocks.find(block => block.id === query.block_id) ?? missing('Section not found')
+    const fields = selected ? [] : [
       field('title', 'Title', 'text', saved?.title, { hint: translated ? source.title : undefined }),
       field('summary', 'Summary', 'textarea', saved?.summary, { optional: true, hint: translated ? source.summary ?? undefined : undefined }),
     ]
     const edits = source.blocks.flatMap((block, index) => {
+      if (selected && selected.id !== block.id) return []
       const target = translated ? blocks.find(item => tenantPageTranslationSourceBlockId(item) === block.id) : block
       if (!target) throw new Error('Page section is missing from the translation')
       return tenantPageLocalizedTextFields(target).map(({ path, label, value }) => {
@@ -161,14 +326,15 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
       })
     })
     const revision = JSON.stringify([source.document.updated_at, saved?.document.updated_at])
-    const screen = { title: saved?.title ?? source.title, rows: [], fields, revision, save_label: 'Save' }
+    const screen = { title: selected ? tenantPageBlockLabel(selected.type) : saved?.title ?? source.title, rows: [], fields, revision, save_label: 'Save' }
     if (!answer) return screen
     if (answer.revision !== revision) throw new HTTPError({ statusCode: 409, message: 'This page changed. Reopen it before saving.' })
     if (fields.length !== Object.keys(answer.values).length || fields.some(row => typeof answer.values[row.key] !== 'string')) invalid('The saved fields do not match this page')
     for (const edit of edits) writeTenantPageLocalizedText(edit.target, edit.path, answer.values[edit.key]!)
     const data = {
       page_id: source.page_id, locale: locale ?? source.locale, path: saved?.path ?? source.path,
-      title: answer.values.title!, summary: answer.values.summary!, page_type: source.page_type,
+      title: selected ? saved?.title ?? source.title : answer.values.title!,
+      summary: selected ? saved?.summary ?? null : answer.values.summary!, page_type: source.page_type,
       recipe: source.recipe, blocks,
     }
     if (saved) await updateTenantPage(db, saved.id, { userId, scope, data: { ...data, sort_order: source.sort_order, updated_at: saved.document.updated_at }, env })
@@ -291,7 +457,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     await assertProductAccess(db, { ...principal, productId, patch: changes as Record<string, unknown> })
     await updateProduct(db, { ...target, patch: { updated_at: product.updated_at, ...changes }, actor, env })
   }
-  if (product.kind === 'stay' && !['questions', 'question', 'question-order'].includes(view)) return missing('Offering not found')
+  if (product.kind === 'stay' && !['questions', 'question', 'question-order', 'stay-details', 'stay-field', 'stay-safety'].includes(view)) return missing('Offering not found')
   const setBooking = async (changes: Parameters<typeof setProductBookingConfig>[1]['patch']) => {
     await assertProductAccess(db, { ...principal, productId, patch: changes as Record<string, unknown> })
     await setProductBookingConfig(db, { ...target, patch: changes, actorId: userId, env })
@@ -315,7 +481,44 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
   const memberList = () => memberSchedulingList({ env, userId, organizationId: organization.id })
   const locationsUsed = locations.filter(entry => product.locations.some(binding => binding.location_id === entry.id))
 
-  if (!view) {
+  if (view === 'stay-details' || view === 'stay-field' || view === 'stay-safety') {
+    if (product.kind !== 'stay' || !wide) return missing('Listing settings not found')
+    const definitions = productDetailFields('stay')
+    const keys = [...STAY_DESCRIPTION_DETAIL_KEYS, ...STAY_LOCATION_DETAIL_KEYS, 'featured']
+    if (view === 'stay-details') {
+      screen = { title: 'Listing details', fields: [], rows: [
+        ...definitions.filter(definition => keys.includes(definition.key)).map(definition => leaf(
+          definition.key, definition.name, text(detail(definition.key)) || undefined,
+          { view: 'stay-field', query: { field: definition.key } },
+        )),
+        ...Object.entries(STAY_SAFETY_SECTIONS).map(([key, section]) => leaf(key, section.label, undefined, { view: 'stay-safety', query: { section: key } })),
+      ] }
+    } else {
+      const section = Object.keys(STAY_SAFETY_SECTIONS).find(key => key === query.section) as StaySafetySection | undefined
+      const selected = view === 'stay-safety'
+        ? definitions.filter(definition => staySafetySectionKeys(section ?? missing('Safety section not found')).includes(definition.key as never))
+        : definitions.filter(definition => definition.key === query.field && keys.includes(definition.key))
+      if (!selected.length) return missing('Listing details not found')
+      form(section ? STAY_SAFETY_SECTIONS[section].label : selected[0]!.name, selected.map(definition => field(
+        definition.key, definition.name, definition.value_type === 'boolean' ? 'select' : 'textarea', detail(definition.key),
+        definition.value_type === 'boolean'
+          ? { choices: [{ value: '', label: 'Unspecified' }, { value: 'true', label: 'Yes' }, { value: 'false', label: 'No' }], optional: true }
+          : { optional: true },
+      )), async values => {
+        const details: ProductDetailsPatch = {}
+        for (const definition of selected) {
+          const value = values(definition.key).trim()
+          Object.assign(details, { [definition.key]: !value ? null : definition.value_type === 'boolean' ? bool(value) : value })
+        }
+        if (section) {
+          for (const [key, item] of Object.entries(STAY_SAFETY_FIELDS)) {
+            if (Object.hasOwn(details, key) && details[key as keyof ProductDetailsPatch] !== true) details[item.detailsKey] = null
+          }
+        }
+        await patch({ details_mode: 'merge', details })
+      })
+    }
+  } else if (!view) {
     const prices = product.variants.map(variant => {
       const price = chosenPrice(variant)
       const amount = price ? formatMinorAmount(price.unit_amount, currency) : text(detail('pricing_note')) || 'No price set'
@@ -331,7 +534,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
       leaf('description', description, product.description || 'Nothing written yet'),
       ...(service ? [{ id: 'page', label: 'Page content', summary: product.page?.title ?? 'No page', ...(wide ? {
         to: product.page ? `/dashboard/${organization.slug}/website/pages/${product.page.id}` : `${web}/page`,
-        ...(product.page ? { native: 'page-content', query: { page_id: product.page.id } } : { native: 'create-page', query: params }),
+        ...(product.page ? { native: 'page', query: { page_id: product.page.id } } : { native: 'create-page', query: params }),
       } : {}) }] : []),
       leaf('price', priceLabel, prices),
       ...(!dish && (booking || manages) ? [

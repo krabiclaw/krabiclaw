@@ -84,6 +84,8 @@ export async function loadDashboardCatalog(event: H3Event) {
           edit('section-description', 'Description', section.description ?? undefined),
           { ...edit('section-photo', 'Photo'), image: mediaStillUrl(section.image) },
           edit('section-membership', 'Choose dishes'),
+          edit('section-move', 'Move a dish'),
+          edit('create-offering', 'Create a dish'),
           edit('section-items', 'Order items'),
           edit('delete-section', 'Delete section'),
         )
@@ -101,6 +103,9 @@ export async function loadDashboardCatalog(event: H3Event) {
       ]
     }
   } else {
+    if (wide && can_create && query.native === '1') screen.rows.push({
+      id: 'create-offering', label: 'Add offering', native: 'create-offering', query: {},
+    })
     if ((kind === 'all' || kind === 'menu') && offers('menu')) {
       const menuLocations = locations.length
         ? [...locations, ...(menu.some(section => section.location_id === null) ? [null] : [])]
