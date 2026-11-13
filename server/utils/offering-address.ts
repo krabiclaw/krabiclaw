@@ -8,8 +8,9 @@ import { postalAddressFromAnswers, type PostalAddress } from '~/utils/postal-add
 
 export function offeringHasStreetAddress(address: PostalAddress | null) {
   if (!address) return false
+  const street = address.addressLines[0]?.trim()
   const area = [address.locality, address.administrativeArea].filter(Boolean).join(', ')
-  return address.addressLines.some(line => line.trim() && line !== area && line !== address.sublocality && line !== address.postalCode)
+  return Boolean(street && street !== area && street !== address.sublocality && street !== address.postalCode)
 }
 
 export function offeringAddressFields(address: PostalAddress | null, defaults?: {
