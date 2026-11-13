@@ -1,3 +1,4 @@
+import type { InjectionKey } from 'vue'
 import { isRecord } from '~/utils/api-clients'
 import { isMessageIdentity, type MessageIdentity } from '~/shared/dashboard-invalidations'
 import type { ConversationEntry, ConversationPage } from '~/shared/messages-contract'
@@ -28,6 +29,8 @@ export type ThreadListPage = InboxListPage & { unread?: InboxUnreadCounts }
 export type ThreadDetail = InboxThread
 export type ThreadDetails = InboxThreadDetails
 export type StreamItem = InboxStreamItem
+
+export const removeInboxConversationKey: InjectionKey<(id: string) => void> = Symbol('remove-inbox-conversation')
 
 /**
  * The plural, for the filter that narrows a list to this kind. A booking may be

@@ -73,25 +73,51 @@ test('automation remains in Inbox while Today keeps the unanswered inquiry', asy
     const otherTranscript = await otherOwner.request.get(`/api/messages/${threadId}`)
     expect(otherTranscript.status(), await otherTranscript.text()).toBe(200)
     const otherPage = await otherOwner.newPage()
-    const otherSocketCapture = otherPage.waitForEvent('websocket', { predicate: connected => new URL(connected.url()).pathname === '/api/dashboard/guest-inbox/socket' })
-    expect((await otherPage.goto(ORG))?.status()).toBe(200)
-    const otherSocket = await otherSocketCapture
+    expect((await otherPage.goto('/api/health'))?.status()).toBe(200)
+    const socketPath = '/api/dashboard/guest-inbox/socket?org=ember-slice-demo'
+    const otherSocketCapture = otherPage.waitForEvent('websocket', {
+      predicate: connected => `${new URL(connected.url()).pathname}${new URL(connected.url()).search}` === socketPath,
+      timeout: 10_000,
+    })
+    const otherSocketReady = otherPage.evaluate(path => new Promise<void>((resolve, reject) => {
+      const url = new URL(path, location.href)
+      url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
+      const socket = new WebSocket(url)
+      const timeout = window.setTimeout(() => {
+        socket.close()
+        reject(new Error('The second owner’s socket did not answer ping'))
+      }, 10_000)
+      socket.addEventListener('open', () => socket.send('ping'), { once: true })
+      socket.addEventListener('message', event => {
+        if (event.data !== 'pong') return
+        window.clearTimeout(timeout)
+        resolve()
+      })
+      socket.addEventListener('close', event => {
+        window.clearTimeout(timeout)
+        reject(new Error(`The second owner’s socket closed before pong (${event.code})`))
+      }, { once: true })
+    }), socketPath)
+    const [otherSocket] = await Promise.all([otherSocketCapture, otherSocketReady])
     const otherScheduleUpdates: string[] = []
     otherSocket.on('framereceived', frame => {
       if (frame.payload === 'pong') return
       const event: unknown = JSON.parse(String(frame.payload))
       if (isDashboardInvalidation(event) && event.type === 'MESSAGE_UPDATE' && event.scheduled && event.conversation_id === threadId) otherScheduleUpdates.push(event.event_id)
     })
-    // An authenticated acknowledgement gives the second socket an observable ready boundary.
+    // The read acknowledgement proves this connection receives reader-scoped events.
     const originalMessage = (await otherTranscript.json() as ConversationPage).entries.find(entry => entry.type === 'message')
     expect(originalMessage).toBeDefined()
     const [read] = await Promise.all([
-      otherOwner.request.post(`/api/messages/${threadId}/read`, { headers: authRequestHeaders(baseURL!), data: { message_id: originalMessage!.id } }),
-      otherSocket.waitForEvent('framereceived', { predicate: frame => {
-        if (frame.payload === 'pong') return false
-        const event: unknown = JSON.parse(String(frame.payload))
-        return isDashboardInvalidation(event) && event.type === 'MESSAGE_ACK' && event.conversation_id === threadId
-      } }),
+      otherOwner.request.post(`/api/messages/${threadId}/read`, { headers: authRequestHeaders(baseURL!), data: { message_id: originalMessage!.id }, timeout: 10_000 }),
+      otherSocket.waitForEvent('framereceived', {
+        predicate: frame => {
+          if (frame.payload === 'pong') return false
+          const event: unknown = JSON.parse(String(frame.payload))
+          return isDashboardInvalidation(event) && event.type === 'MESSAGE_ACK' && event.conversation_id === threadId
+        },
+        timeout: 10_000,
+      }),
     ])
     expect(read.status(), await read.text()).toBe(200)
 

@@ -24,12 +24,14 @@
 import ConversationThread from '~/lib/components/workspace/messages/ConversationThread.vue'
 import ConversationSheet from '~/lib/components/workspace/messages/ConversationSheet.vue'
 import InboxAvatar from '~/lib/components/workspace/messages/InboxAvatar.vue'
+import { removeInboxConversationKey } from '~/lib/components/workspace/messages/guest-thread-client'
 
 definePageMeta({ layout: 'dashboard', tab: 'messages', key: route => `conversation:${route.params.org_slug}:${route.params.conversation_id}` })
 
 const route = useRoute()
 const router = useRouter()
 const level = useRouteLevel()
+const removeInboxConversation = inject(removeInboxConversationKey)
 const threadId = computed(() => String(route.params.conversation_id))
 const history = useConversation(threadId)
 const { data, refresh } = await history.request
@@ -42,6 +44,7 @@ const reservationTo = computed(() => guestConversation.value?.booking_id
 
 async function moved(transition: string) {
   if (transition === 'archive' || transition === 'block') {
+    removeInboxConversation?.(threadId.value)
     await router.push({ path: `/dashboard/${String(route.params.org_slug)}/messages`, query: route.query })
   } else await refresh()
 }

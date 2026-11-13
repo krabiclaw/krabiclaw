@@ -96,6 +96,7 @@
 <script setup lang="ts">
 import { useIntervalFn, useDocumentVisibility } from '@vueuse/core'
 import { authClient } from '~/lib/auth-client'
+import type { LocationQueryRaw } from 'vue-router'
 import { getErrorMessage } from '~/utils/errors'
 import { isThreadListResponse, type ThreadListItem, type ThreadListPage } from '~/lib/components/workspace/messages/guest-thread-client'
 import { useDashboardInvalidations } from '~/composables/useDashboardInvalidations'
@@ -114,6 +115,8 @@ import { useInboxUnread } from './inbox-unread'
 */
 const props = withDefaults(defineProps<{ personalScope?: boolean }>(), { personalScope: false })
 const session = authClient.useSession()
+const emit = defineEmits<{ first: [target: { path: string; query: LocationQueryRaw } | null] }>()
+defineExpose({ removeConversation })
 
 const dashboard = useDashboardOrganization()
 const route = useRoute()
@@ -273,7 +276,17 @@ onScopeDispose(() => pageController?.abort())
 const documentVisibility=useDocumentVisibility()
 useIntervalFn(()=>{if(props.personalScope&&documentVisibility.value==='visible')void refresh()},15_000)
 
-// A conversation opens beside this list at its id.
+// The newest thread, for the index above to open into its second column on
+// arrival. The list only says which; whether there is a column is the shell's.
+// While a list loads there is none: the rows on screen may be another
+// mailbox's, and the shell must not keep one of them to open.
+watch([threads, openThreadId, pending], ([rows, open, loading]) => {
+  if (open || loading) { emit('first', null); return }
+  const first = rows[0]
+  emit('first', first ? { path: threadRoute(first), query: route.query } : null)
+}, { immediate: true })
+
+// A conversation opens beside this list: a guest's at its id, the team's on the team screen.
 function threadRoute(thread: ThreadListItem) {
   return `${listRoute.value}/${encodeURIComponent(thread.id)}`
 }
@@ -323,13 +336,13 @@ async function archive(thread: ThreadListItem) {
       body: { archived: true },
       validate: (value: unknown): value is { archived: boolean } => typeof value === 'object' && value !== null && Reflect.get(value, 'archived') === true,
     })
+    removeConversation(thread.id)
   } catch (error) {
     reconcile(thread.id)
     toast.add({ color: 'error', title: 'Could not archive the conversation', description: getErrorMessage(error, 'Try again') })
   } finally {
     toggling.delete(thread.id)
   }
-  if (realtime.status.value !== 'open') reconcile(thread.id)
 }
 
 // Changes received during a read stay queued until that read has settled.
@@ -355,6 +368,15 @@ function reconcile(id?: string) {
   if (id) changedIds.add(id)
   else fullRefresh = true
   void drainChanges()
+}
+
+/** Apply a confirmed archive or block before the route can select the first visible row. */
+function removeConversation(id: string) {
+  const current = page.value
+  if (!current?.threads.some(row => row.id === id)) return
+  data.value = { ...current, threads: current.threads.filter(row => row.id !== id) }
+  if (pending.value) void refresh({ dedupe: 'cancel' })
+  else reconcile(current.pagination.has_more ? undefined : id)
 }
 
 async function drainChanges() {
