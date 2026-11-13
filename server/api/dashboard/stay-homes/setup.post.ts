@@ -1,22 +1,25 @@
 import { defineHandler, HTTPError } from 'nitro'
 import { queryFirst } from '~/server/db'
-import { createStayHome, placeStayHomePhotosFirst, stayAccessFor, stayHomeInput, stayHomeSetupAddress, updateStayHome } from '~/server/domain/stays'
+import { createStayHome, placeStayHomePhotosFirst, readStayHome, stayAccessFor, stayHomeInput, stayHomeSetupAddress, updateStayHome } from '~/server/domain/stays'
 import { jsonResponse, readRequiredBody } from '~/server/utils/api-response'
 import { requireStays } from '~/server/utils/cms-capabilities'
 import { getDashboardMemberContext } from '~/server/utils/dashboard-context'
-import { productEditorPath } from '~/server/utils/dashboard-links'
+import { firstHomeSetupPath, productEditorPath } from '~/server/utils/dashboard-links'
 import { memberAccessPrincipal } from '~/server/utils/member-access'
 import { planStayListing } from '~/server/utils/product-management'
 import { isRecord } from '~/server/utils/type-guards'
-import { STAY_SETUP_DESCRIPTION_LIMIT, STAY_SETUP_TITLE_LIMIT, STAY_WEEKEND_ADJUSTMENT_MIN, STAY_WEEKEND_ADJUSTMENT_MAX, staySetupNightlyRates, type StayHomeSetupResponse } from '~/shared/stay-home-setup'
-import { parseStayMapSharing, STAY_AMENITIES, STAY_AMENITY_GROUPS, STAY_LISTING_TYPES, STAY_PROPERTY_TYPE_GROUPS, STAY_PROPERTY_TYPES } from '~/shared/stay-listing'
-import { hydrateMediaAssetRefs } from '~/server/utils/media-asset-manager'
+import { STAY_SETUP_DESCRIPTION_LIMIT, STAY_SETUP_TITLE_LIMIT, STAY_WEEKEND_ADJUSTMENT_MIN, STAY_WEEKEND_ADJUSTMENT_MAX, stayHomeDraftInput, staySetupNightlyRates, type StayHomeSetupResponse } from '~/shared/stay-home-setup'
+import { isStayAmenityCodes, parseStayMapSharing, STAY_AMENITIES, STAY_AMENITY_GROUPS, STAY_LISTING_TYPES, STAY_PROPERTY_TYPE_GROUPS, STAY_PROPERTY_TYPES } from '~/shared/stay-listing'
 import { MAX_ORDERED_MEDIA_ASSETS } from '~/shared/media-placement-contract'
 import { coordinatesFailure } from '~/utils/location-map'
 import { parsePostalAddress } from '~/utils/postal-address'
 import { MAX_STAY_NIGHTS, STAY_DIRECT_DISCOUNTS } from '~/shared/bookings'
 import { isCurrencyCode } from '~/shared/currencies'
 import { STAY_SAFETY_FIELDS, STAY_SAFETY_DETAILS_LIMIT } from '~/shared/stay-safety'
+import { clearStayHomeSetupDraft, readStayHomeSetupDraft, reopenUncommittedStayHomeSetupDraft, stayHomeDraftChanged, stayHomeDraftPhotos, writeStayHomeSetupDraft } from '~/server/utils/stay-home-setup-draft'
+import { creationDedupeKey, readCreationRecord } from '~/server/utils/organization-events'
+
+type SetupDraft = Extract<StayHomeSetupResponse, { steps: unknown }>['draft']
 
 const propertyChoices = Object.entries(STAY_PROPERTY_TYPES).map(([value, { label, icon }]) => ({
   value,
@@ -119,9 +122,15 @@ export default defineHandler(async (event) => {
   const workspace = await queryFirst<{ timezone: string | null; default_currency: string }>(db, 'SELECT timezone, default_currency FROM organization WHERE id = ?', [organization.id])
   if (!isCurrencyCode(workspace?.default_currency)) throw new Error('Workspace is missing its pricing currency')
   const currency = workspace.default_currency
+  const current = await readStayHomeSetupDraft(db, organization)
   if (body.step === undefined) {
     const { main, address } = await defaults()
-    return jsonResponse({ steps: steps.map(step => step.id === 'pricing' ? { ...step, currency, currency_symbol: new Intl.NumberFormat('en', { style: 'currency', currency, currencyDisplay: 'narrowSymbol' }).formatToParts(0).find(part => part.type === 'currency')!.value } : step), defaults: { ...address, ...(main ? { location_id: main.id } : {}), ...(main?.latitude != null && main.longitude != null ? { latitude: main.latitude, longitude: main.longitude } : {}), stay_map_sharing: main?.stay_map_sharing ?? 'general', timezone: address.timezone || workspace?.timezone || '', min_nights: 1, max_guests: 1, bedrooms: 0, beds: 0, bathrooms: 0 }, exit_label: 'Save & exit', back_label: 'Back' })
+    let draft: SetupDraft = null
+    if (current) {
+      const { photo_ids, finishHash, ...saved } = current
+      draft = { ...saved, photos: await stayHomeDraftPhotos(db, organization.id, photo_ids), ...(finishHash ? { finishing: true } : {}) }
+    }
+    return jsonResponse({ steps: steps.map(step => step.id === 'pricing' ? { ...step, currency, currency_symbol: new Intl.NumberFormat('en', { style: 'currency', currency, currencyDisplay: 'narrowSymbol' }).formatToParts(0).find(part => part.type === 'currency')!.value } : step), defaults: { ...address, ...(main ? { location_id: main.id } : {}), ...(main?.latitude != null && main.longitude != null ? { latitude: main.latitude, longitude: main.longitude } : {}), stay_map_sharing: main?.stay_map_sharing ?? 'general', timezone: address.timezone || workspace?.timezone || '', min_nights: 1, max_guests: 1, bedrooms: 0, beds: 0, bathrooms: 0 }, exit_label: 'Save & exit', back_label: 'Back', draft })
   }
 
   const index = steps.findIndex(step => step.id === body.step)
@@ -131,6 +140,29 @@ export default defineHandler(async (event) => {
   const next = () => jsonResponse({ next: steps[index + 1]!.id })
   const invalid = (field: string, message: string): never => {
     throw new HTTPError({ statusCode: 422, message, data: { code: 'VALIDATION_ERROR', field } })
+  }
+  if (body.action !== undefined && body.action !== 'exit') return invalid('action', 'Choose a home setup action')
+  const revision = body.revision ?? null
+  const key = typeof body.idempotency_key === 'string' ? body.idempotency_key.trim() : ''
+  const finishing = step.id === 'disclosures' && body.action !== 'exit'
+  const snapshot = () => {
+    const { amenities = [], photo_ids = [], ...values } = answers
+    const parsed = stayHomeDraftInput.safeParse({ step: step.id, answers: values, amenities, photo_ids, idempotency_key: key })
+    if (!parsed.success) return invalid('answers', 'Home setup answers could not be saved')
+    if (!isStayAmenityCodes(parsed.data.amenities)) return invalid('amenities', 'Choose amenities from the listing options')
+    return parsed.data
+  }
+  const savedHome = (home: Awaited<ReturnType<typeof readStayHome>>) => jsonResponse({ home, to: productEditorPath(organization.slug, home.product_id) }, { status: 201 })
+  const completedHome = finishing && key && key.length <= 200
+    ? await readCreationRecord(db, creationDedupeKey('product', organization.id, key))
+    : null
+  const retryingFinish = finishing && current?.finishHash && current.idempotency_key === key
+  if (current ? !retryingFinish && (current.revision !== revision || current.idempotency_key !== key) : revision !== null && !completedHome) throw stayHomeDraftChanged()
+  if (body.action === 'exit') {
+    const input = snapshot()
+    await stayHomeDraftPhotos(db, organization.id, input.photo_ids)
+    await writeStayHomeSetupDraft(db, organization, input, current)
+    return jsonResponse({ to: firstHomeSetupPath(organization.slug) })
   }
   const address = stayHomeSetupAddress(answers)
   if (step.id === 'address') return next()
@@ -164,7 +196,7 @@ export default defineHandler(async (event) => {
   if (step.id === 'amenities') return next()
   const photoIds = answers.photo_ids ?? []
   if (!Array.isArray(photoIds) || photoIds.some(id => typeof id !== 'string' || !id)) return invalid('photo_ids', 'Choose photos from your library')
-  await hydrateMediaAssetRefs(db, { organizationId: organization.id, refs: photoIds.map(asset_id => ({ asset_id })), allowedKinds: ['image'], fieldName: 'photos' })
+  await stayHomeDraftPhotos(db, organization.id, photoIds)
   if (step.id === 'photos') return next()
   if (typeof answers.name !== 'string' || !answers.name.trim() || answers.name.trim().length > STAY_SETUP_TITLE_LIMIT) return invalid('name', `Enter a listing title of up to ${STAY_SETUP_TITLE_LIMIT} characters`)
   if (step.id === 'title') return next()
@@ -204,10 +236,9 @@ export default defineHandler(async (event) => {
     return selected ? [[key, true], [detail_key, String(detail).trim()]] : [[key, false]]
   }))
 
-  const key = typeof body.idempotency_key === 'string' ? body.idempotency_key.trim() : ''
   if (!key || key.length > 200) throw new HTTPError({ statusCode: 400, message: 'A valid idempotency key is required' })
   let locationId: string | undefined
-  if (typeof answers.location_id === 'string' && answers.location_id) {
+  if (!completedHome && typeof answers.location_id === 'string' && answers.location_id) {
     const { main, address: original } = await defaults(answers.location_id)
     if (!main) throw new HTTPError({ statusCode: 409, message: 'The starting location changed. Open home setup again.' })
     if (Object.entries(address).every(([key, value]) => (value ?? '') === original[key as keyof typeof original])) locationId = main.id
@@ -221,12 +252,27 @@ export default defineHandler(async (event) => {
   home.details = details
   home.listing = { property_type_group, property_type, listing_type, bedrooms, beds, bathrooms, amenities }
   home.description = typeof answers.description === 'string' ? answers.description.trim() : ''
-  let saved = await createStayHome(env, db, access, home, key, locationId)
+  const existing = completedHome ? await readStayHome(db, access, completedHome.entityId) : null
+  if (existing && !current) {
+    const replay = await createStayHome(env, db, access, home, key, existing.location_id)
+    if (replay.latitude !== pin.latitude || replay.longitude !== pin.longitude || replay.stay_map_sharing !== sharing
+      || photoIds.some((id, index) => replay.photos[index]?.id !== id)) throw stayHomeDraftChanged()
+    return savedHome(replay)
+  }
+  if (existing && !current?.finishHash) throw stayHomeDraftChanged()
+  const claimed = await writeStayHomeSetupDraft(db, organization, snapshot(), current, true)
+  let saved = await createStayHome(env, db, access, home, key, existing?.location_id ?? locationId).catch(async error => {
+    if (HTTPError.isError(error) && error.status >= 400 && error.status < 500 && (!isRecord(error.data) || error.data.committed !== true)) {
+      await reopenUncommittedStayHomeSetupDraft(db, organization, claimed, key)
+    }
+    throw error
+  })
   if (!saved.live && (saved.latitude !== pin.latitude || saved.longitude !== pin.longitude || saved.stay_map_sharing !== sharing)) {
     saved = (await updateStayHome(env, db, access, saved.product_id, { ...pin, stay_map_sharing: sharing })).home
   }
   if (!saved.live && photoIds.some(id => !saved.photos.some(photo => photo.id === id))) {
     saved = await placeStayHomePhotosFirst(db, env, access, principal, saved.product_id, photoIds)
   }
-  return jsonResponse({ home: saved, to: productEditorPath(organization.slug, saved.product_id) }, { status: 201 })
+  await clearStayHomeSetupDraft(db, organization, claimed)
+  return savedHome(saved)
 })

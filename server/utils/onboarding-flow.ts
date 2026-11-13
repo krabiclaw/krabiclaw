@@ -87,7 +87,7 @@ export function onboardingFlow(answers: z.infer<typeof onboardingAnswers>, optio
     },
     {
       id: 'business', title: 'What’s your business called?',
-      fields: [{ key: 'name', label: 'Business name' }, ...(askSubdomain ? [{ key: 'subdomain', label: 'Website address' } as const] : [])],
+      fields: [{ key: 'name', label: 'Business name' }, ...(askSubdomain ? [{ key: 'subdomain', label: 'Website address', description: 'Use letters A–Z, numbers, or hyphens.' } as const] : [])],
       nextLabel: 'Next', canAdvance: Boolean(name) && validSubdomain && !options.subdomainTaken && (answers.source === 'manual' || (
         answers.source === 'google_places' && Boolean(answers.placeId)
       )),
@@ -131,6 +131,8 @@ export function onboardingFlow(answers: z.infer<typeof onboardingAnswers>, optio
     subdomainError: options.subdomainTaken
       ? 'That website address is taken. Choose another.'
       : answers.subdomain?.trim() && !validSubdomain ? 'Start and end with a letter or number.' : undefined,
+    neutralWebsiteExample: { name: 'Your business website', image: '/images/website/onboarding-neutral.webp' },
+    businessLookup: { importLabel: 'Import from Google Maps', manualLabel: 'Enter details manually', searchPlaceholder: 'Search for your business' },
     countries: listPhoneCountries(),
     currencies: CURRENCY_OPTIONS,
     timezones,

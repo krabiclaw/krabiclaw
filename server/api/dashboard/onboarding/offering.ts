@@ -1,14 +1,14 @@
 import { defineHandler, HTTPError } from 'nitro'
 import { getQuery, readBody } from 'nitro/h3'
 import { z } from 'zod'
-import { offeringSetupAnswer, type OfferingSetupResponse } from '~/shared/offering-setup'
+import { offeringReturnTo, offeringSetupAnswer, type OfferingSetupResponse } from '~/shared/offering-setup'
 import { getDashboardMemberContext } from '~/server/utils/dashboard-context'
 import { firstExperienceSetup } from '~/server/utils/experience-setup'
 import { firstMenuSetup } from '~/server/utils/first-menu-setup'
 import { firstPracticeAreaSetup } from '~/server/utils/practice-area-setup'
 import { assertOrganizationWideAccess, assertRoleAllows, memberAccessPrincipal } from '~/server/utils/member-access'
 
-const scope = z.object({ location_id: z.string().min(1).optional(), product_id: z.string().min(1).optional(), step: z.string().min(1).optional() })
+const scope = z.object({ location_id: z.string().min(1).optional(), product_id: z.string().min(1).optional(), step: z.string().min(1).optional(), return_to: z.string().max(2048).optional() })
 
 export default defineHandler(async (event): Promise<OfferingSetupResponse> => {
   const { db, env, organization, userId } = await getDashboardMemberContext(event)
@@ -26,7 +26,9 @@ export default defineHandler(async (event): Promise<OfferingSetupResponse> => {
   await assertOrganizationWideAccess(db, principal)
   await assertRoleAllows({ ...principal, permissions: { products: [answer ? 'create' : 'read'] } })
   if (answer) await assertRoleAllows({ ...principal, permissions: { products: ['update'] } })
-  const context = { db, env, organizationId: organization.id, orgSlug: organization.slug, actorId: userId, principal }
+  const exitTo = offeringReturnTo(query.data.return_to, organization.slug)
+  if (query.data.return_to !== undefined && !exitTo) throw new HTTPError({ statusCode: 400, statusMessage: 'Invalid offering setup return destination' })
+  const context = { db, env, organizationId: organization.id, orgSlug: organization.slug, actorId: userId, principal, exitTo }
   switch (organization.vertical) {
     case 'restaurant': return firstMenuSetup(context, query.data.location_id, requested, answer)
     case 'experience': return firstExperienceSetup(context, requested, answer)

@@ -1453,7 +1453,7 @@ const activeNavigationItem = computed(() => {
  * Pricing — would open that level too and push this index off the screen.
  */
 const LEAF_SECTIONS: readonly string[] = ['photo', 'internal-name', 'name', 'description', 'price', 'kind', 'order-url', 'property-type', 'rooms', 'guests', 'availability', 'arrival-time', 'directions', 'wifi', 'house-manual', 'house-rules', 'team']
-const autoOpenTarget = computed(() => draftStay.value ? null : navigationGroups.value[0]?.items.find(item => LEAF_SECTIONS.includes(item.id) && !(stayEditor.value && item.id === 'description') && item.to === sectionPath(item.id))?.to ?? null)
+const autoOpenTarget = computed(() => draftStay.value && !arrivalTab.value ? null : navigationGroups.value[0]?.items.find(item => LEAF_SECTIONS.includes(item.id) && !(stayEditor.value && item.id === 'description') && item.to === sectionPath(item.id))?.to ?? null)
 
 const STAY_ROW_ORDER = ['publication', 'photo', 'internal-name', 'name', 'property-type', 'rooms', 'price', 'availability', 'guests', 'description', 'amenities', 'accessibility', 'location', 'house-rules', 'guest-safety', 'cancellation', 'team', 'questions', 'featured', 'collections']
 function rowRank(id: string) {

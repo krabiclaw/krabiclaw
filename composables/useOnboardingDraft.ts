@@ -45,6 +45,9 @@ export function useOnboardingDraft() {
         && Array.isArray(value.steps) && typeof value.resumeStep === 'string'
         && typeof value.canSave === 'boolean' && typeof value.canFinish === 'boolean' && typeof value.exitLabel === 'string'
         && typeof value.backLabel === 'string' && Array.isArray(value.businessTypes) && Array.isArray(value.languages)
+        && isRecord(value.neutralWebsiteExample) && typeof value.neutralWebsiteExample.name === 'string' && typeof value.neutralWebsiteExample.image === 'string'
+        && isRecord(value.businessLookup) && typeof value.businessLookup.importLabel === 'string'
+        && typeof value.businessLookup.manualLabel === 'string' && typeof value.businessLookup.searchPlaceholder === 'string'
         && Array.isArray(value.countries) && Array.isArray(value.currencies) && Array.isArray(value.timezones),
     })
   }

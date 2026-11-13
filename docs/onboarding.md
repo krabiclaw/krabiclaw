@@ -116,6 +116,10 @@ address, property, space, map pin, location sharing, capacity, amenities,
 photos, title, description highlights, description, minimum stay, prices,
 discounts, and safety disclosures. Finish creates a private listing. The public
 listing shows the saved safety details before guests book.
+Save & exit preserves unfinished answers and the current question for the
+signed-in manager across web and iOS. A membership-scoped setup draft covers
+existing organizations and managers who never had a website onboarding draft.
+The home enters Catalog when Finish creates the unpublished product.
 The listing editor owns publication and subsequent changes. Weekly, monthly,
 and last-minute discounts apply to direct booking quotes, using the largest
 eligible percentage. They do not change channel rates.

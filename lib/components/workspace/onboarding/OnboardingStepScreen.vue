@@ -4,16 +4,16 @@
       v-if="step.id === 'type'"
       class="flex flex-col gap-6 md:gap-8"
     >
-      <figure class="flex items-center justify-center bg-[var(--kc-coral-50)] px-8 py-6 md:py-9">
+      <figure v-if="websiteExample" class="flex items-center justify-center bg-[var(--kc-coral-50)] px-8 py-6 md:py-9">
         <div class="w-full max-w-[15rem] overflow-hidden rounded-2xl bg-white p-2 text-slate-900 shadow-xl md:max-w-[27rem] md:p-3">
           <img
-            :src="websiteExample?.image ?? '/images/website/onboarding-neutral.webp'"
-            :alt="websiteExample ? `Website preview for ${websiteExample.name}` : ''"
+            :src="websiteExample.image"
+            alt=""
             class="aspect-[3/2] w-full rounded-xl object-cover object-top"
             fetchpriority="high"
           >
           <figcaption class="truncate px-2 py-2 text-sm font-semibold md:py-3" aria-live="polite">
-            {{ websiteExample?.name ?? 'Your business website' }}
+            {{ websiteExample.name }}
           </figcaption>
         </div>
       </figure>
@@ -33,15 +33,15 @@
         <UFormField :label="fieldLabel('name')" required>
           <UInput :model-value="state.details.name" class="w-full" size="lg" autocomplete="organization" @update:model-value="setBusinessName" />
         </UFormField>
-        <UButton type="button" label="Import from Google Maps" color="neutral" variant="link" class="self-start px-0" @click="googleImport = true" />
+        <UButton v-if="plan" type="button" :label="plan.businessLookup.importLabel" color="neutral" variant="link" class="self-start px-0" @click="googleImport = true" />
       </template>
-      <template v-else>
-        <GooglePlacePicker v-model="businessSearch" @select="choosePlace" />
-        <UButton type="button" label="Enter details manually" color="neutral" variant="link" class="self-start px-0" @click="enterManually" />
+      <template v-else-if="plan">
+        <GooglePlacePicker v-model="businessSearch" :placeholder="plan.businessLookup.searchPlaceholder" @select="choosePlace" />
+        <UButton type="button" :label="plan.businessLookup.manualLabel" color="neutral" variant="link" class="self-start px-0" @click="enterManually" />
       </template>
       <UFormField v-if="!googleImport && fieldLabel('subdomain')" :label="fieldLabel('subdomain')"
         :hint="plan?.includedDomain ? `.${plan.includedDomain}` : undefined" :error="plan?.subdomainError"
-        description="Use letters A–Z, numbers, or hyphens." required>
+        :description="field('subdomain')?.description" required>
         <UInput v-model="state.subdomain" class="w-full" size="lg" maxlength="63" autocapitalize="none" :spellcheck="false" />
       </UFormField>
     </div>
@@ -96,10 +96,11 @@ const props = defineProps<{ step: OnboardingStep }>()
 const state = useOnboardingState()
 const plan = useOnboardingPlan()
 const { seedFromPlace } = useOnboardingDraft()
-const websiteExample = computed(() => plan.value?.businessTypes.find(choice => choice.value === state.value.vertical)?.example)
+const websiteExample = computed(() => plan.value?.businessTypes.find(choice => choice.value === state.value.vertical)?.example ?? plan.value?.neutralWebsiteExample)
 const selectedLanguage = computed(() => plan.value?.languages.find(choice => choice.value === state.value.details.sourceLocale))
 
-const fieldLabel = (key: OnboardingStepField['key']) => props.step.fields.find(field => field.key === key)?.label
+const field = (key: OnboardingStepField['key']) => props.step.fields.find(field => field.key === key)
+const fieldLabel = (key: OnboardingStepField['key']) => field(key)?.label
 const addressKeys = ['country', 'streetAddress', 'addressLine2', 'city', 'region', 'postalCode'] as const
 type AddressKey = typeof addressKeys[number]
 const isAddressKey = (key: string): key is AddressKey => addressKeys.some(candidate => candidate === key)

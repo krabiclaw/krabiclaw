@@ -85,10 +85,11 @@ export async function firstMenuSetup(context: OfferingSetupContext, locationId: 
     throw new HTTPError({ statusCode: 404, statusMessage: 'Active location not found' })
   }
   const today = offeringToday(orgSlug)
+  const exitTo = context.exitTo ?? today
   const state = await readMenuSetup(db, organizationId, locationId)
-  if (!state) return { to: `${today}/products/menu?location_id=${encodeURIComponent(locationId)}` }
+  if (!state) return { to: answer?.action === 'exit' ? exitTo : `${today}/products/menu?location_id=${encodeURIComponent(locationId)}` }
   const { draft, menuSections, section, chosenSectionId, creationKey, dish, variant, currency, price, photo, resume } = state
-  if (!resume && dish) return answer?.action === 'exit' ? { to: today } : offeringDestination(orgSlug, dish.id, locationId)
+  if (!resume && dish) return answer?.action === 'exit' ? { to: exitTo } : offeringDestination(orgSlug, dish.id, locationId)
   const canNameSection = menuSections.length === 0
     || (menuSections.length === 1 && section?.location_id === locationId && chosenSectionId === section.id)
   const steps = stages.filter(step => step !== 'section' || menuSections.length > 1 || canNameSection)
@@ -119,11 +120,11 @@ export async function firstMenuSetup(context: OfferingSetupContext, locationId: 
       offeringField('price', 'Price', 'money', price ? minorAmountToMajor(price.unit_amount, currency) : '', { optional: true, symbol: currencySymbol(currency), min: 0 }),
     ] },
   }
-  if (!answer) return offeringScreen({ id: step, ...questions[step], index, total: steps.length, backTo: index > 0 ? stepPath(steps[index - 1]!) : today, exitTo: today, revision })
+  if (!answer) return offeringScreen({ id: step, ...questions[step], index, total: steps.length, backTo: index > 0 ? stepPath(steps[index - 1]!) : exitTo, exitTo, revision })
   if (answer.step !== step || answer.revision !== revision) throw offeringSetupChanged()
   const value = submittedValue(answer, step)
   const exit = answer.action === 'exit'
-  if (exit && !value && (!questions[step].fields[0]?.optional || !questions[step].fields[0]?.value)) return { to: today }
+  if (exit && !value && (!questions[step].fields[0]?.optional || !questions[step].fields[0]?.value)) return { to: exitTo }
   if (step === 'section') {
     let selected = section
     if (menuSections.length > 1) {
@@ -192,7 +193,7 @@ export async function firstMenuSetup(context: OfferingSetupContext, locationId: 
       if (result.meta.changes !== 1) throw offeringSetupChanged()
     }
   }
-  if (exit) return { to: today }
+  if (exit) return { to: exitTo }
   if (step === 'price' && dish) return offeringDestination(orgSlug, dish.id, locationId)
   return { to: stepPath(steps[index + 1]!), guide: true }
 }

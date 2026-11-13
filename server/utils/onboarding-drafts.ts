@@ -674,7 +674,7 @@ export async function upsertActiveOnboardingDraft(db: D1Database, input: {
   vertical: OrganizationVertical
   sourceType: DraftSourceType
   payload: StoredOnboardingDraftPayload
-  subdomain: string | null
+  subdomain?: string | null
   updated_at: string | null
   draftId?: string
   idempotencyKey?: string
@@ -695,7 +695,8 @@ export async function upsertActiveOnboardingDraft(db: D1Database, input: {
   if (existing && input.draftId !== existing.id) throw new HTTPError({ statusCode: 409, statusMessage: 'Resume your saved website draft before creating another', data: { code: 'ONBOARDING_DRAFT_EXISTS', draft_id: existing.id } })
   if (input.draftId && !existing) throw new HTTPError({ statusCode: 404, statusMessage: 'Active website draft not found' })
   if ((existing?.updated_at ?? null) !== input.updated_at) throw new HTTPError({ statusCode: 409, statusMessage: 'Website draft changed; reload before saving', data: { code: 'ONBOARDING_DRAFT_CHANGED', draft_id: existing?.id } })
-  if (existing?.organization_id && input.subdomain !== existing.subdomain_candidate) {
+  const subdomain = input.subdomain === undefined ? existing?.subdomain_candidate ?? null : input.subdomain
+  if (existing?.organization_id && subdomain !== existing.subdomain_candidate) {
     const organization = await queryFirst<{ subdomain: string | null; onboarding_status: string }>(db, 'SELECT subdomain, onboarding_status FROM organization WHERE id = ?', [existing.organization_id])
     if (!organization || organization.subdomain !== null || !['pending', 'failed'].includes(organization.onboarding_status)) throw new HTTPError({ statusCode: 409, statusMessage: 'A saved draft already owns its website address' })
   }
@@ -708,7 +709,7 @@ export async function upsertActiveOnboardingDraft(db: D1Database, input: {
   const draft = await queryFirst<{ id: string; updated_at: string }>(db, existing ? `
     UPDATE onboarding_drafts SET name = ?, vertical = ?, subdomain_candidate = ?, source_type = ?, payload_json = ?, updated_at = ?
     WHERE id = ? AND user_id = ? AND status = 'active' AND updated_at = ?
-      AND (organization_id IS NULL OR subdomain_candidate = ? OR EXISTS (
+      AND (organization_id IS NULL OR subdomain_candidate IS ? OR EXISTS (
         SELECT 1 FROM organization o WHERE o.id = onboarding_drafts.organization_id
           AND o.subdomain IS NULL AND o.onboarding_status IN ('pending', 'failed')
       ))
@@ -718,7 +719,7 @@ export async function upsertActiveOnboardingDraft(db: D1Database, input: {
     VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
     ON CONFLICT DO NOTHING
     RETURNING id, updated_at
-  `, existing ? [input.name, input.vertical, input.subdomain, input.sourceType, payloadJson, now, existing.id, input.userId, input.updated_at, input.subdomain] : [id, input.userId, input.organizationId ?? null, input.name, input.vertical, input.subdomain, input.sourceType, payloadJson, now, now])
+  `, existing ? [input.name, input.vertical, subdomain, input.sourceType, payloadJson, now, existing.id, input.userId, input.updated_at, subdomain] : [id, input.userId, input.organizationId ?? null, input.name, input.vertical, subdomain, input.sourceType, payloadJson, now, now])
   if (!draft) throw new HTTPError({ statusCode: 409, statusMessage: 'Website draft changed; read it before retrying', data: { code: 'ONBOARDING_DRAFT_CHANGED' } })
   return { id: draft.id, updatedAt: draft.updated_at }
 }

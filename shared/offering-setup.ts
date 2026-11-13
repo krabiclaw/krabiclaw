@@ -1,4 +1,24 @@
 import { z } from 'zod'
+import { validatedInternalPath } from '~/shared/auth/return-target'
+
+export function isOfferingSetupPath(pathname: string) {
+  return /^\/dashboard\/[^/]+\/(?:products\/(?:first-menu|first-experience)|first-practice-area(?:\/[^/]+)?)\/?$/.test(pathname)
+}
+
+export function offeringReturnTo(value: unknown, orgSlug: string) {
+  const target = validatedInternalPath(value)
+  if (!target) return undefined
+  const pathname = target.split(/[?#]/, 1)[0]!
+  const base = `/dashboard/${encodeURIComponent(orgSlug)}`
+  if ((pathname !== base && !pathname.startsWith(`${base}/`)) || isOfferingSetupPath(pathname)) return undefined
+  return target
+}
+
+export function withOfferingReturnTo(path: string, returnTo: string) {
+  const url = new URL(path, 'https://krabiclaw.internal')
+  url.searchParams.set('return_to', returnTo)
+  return `${url.pathname}${url.search}${url.hash}`
+}
 
 const choice = z.object({ value: z.string(), label: z.string(), detail: z.string().optional(), flag: z.string().optional() })
 const field = z.object({

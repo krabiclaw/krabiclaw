@@ -16,6 +16,7 @@ export type OnboardingStepId = typeof ONBOARDING_STEP_IDS[number]
 export interface OnboardingStepField {
   key: 'name' | 'subdomain' | 'country' | 'streetAddress' | 'addressLine2' | 'city' | 'region' | 'postalCode' | 'timezone' | 'sourceLocale' | 'currency'
   label: string
+  description?: string
 }
 
 export interface OnboardingStep {
@@ -44,6 +45,8 @@ export interface OnboardingFlow {
   proposedCurrency: CurrencyCode | null
   includedDomain?: string
   subdomainError?: string
+  neutralWebsiteExample: { name: string; image: string }
+  businessLookup: { importLabel: string; manualLabel: string; searchPlaceholder: string }
   countries: PhoneCountry[]
   currencies: Array<{ value: CurrencyCode; label: string }>
   timezones: Array<{ value: string; label: string }>

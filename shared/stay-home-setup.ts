@@ -26,6 +26,16 @@ const field = z.object({ key: z.string(), label: z.string(), required: z.boolean
 const count = z.object({ key: z.string(), label: z.string(), min: z.number(), max: z.number(), step: z.number() })
 const actionStep = z.object({ title: z.string(), action: z.string(), detail: z.string().optional() })
 const ids = ['address', 'property', 'access', 'pin', 'visibility', 'rooms', 'amenities', 'photos', 'title', 'highlights', 'description', 'booking', 'pricing', 'discounts', 'disclosures'] as const
+const draftAnswers = z.record(z.string(), z.union([z.string(), z.number()]))
+export const stayHomeDraftInput = z.object({
+  step: z.enum(ids),
+  answers: draftAnswers,
+  amenities: z.array(z.string()),
+  photo_ids: z.array(z.string().trim().min(1)),
+  idempotency_key: z.string().trim().min(1).max(200),
+})
+export type StayHomeDraftInput = z.infer<typeof stayHomeDraftInput>
+
 const step = z.discriminatedUnion('id', [
   actionStep.extend({ id: z.literal('highlights'), choices: z.array(choice), max_selections: z.number().int().positive() }),
   actionStep.extend({ id: z.literal('booking'), counts: z.array(count) }),
@@ -46,19 +56,12 @@ const step = z.discriminatedUnion('id', [
 ])
 
 export const stayHomeSetupResponse = z.union([
-  z.object({ steps: z.array(step).nonempty(), defaults: z.record(z.string(), z.union([z.string(), z.number()])), exit_label: z.string(), back_label: z.string() }),
+  z.object({ steps: z.array(step).nonempty(), defaults: draftAnswers, exit_label: z.string(), back_label: z.string(), draft: stayHomeDraftInput.omit({ photo_ids: true }).extend({
+    photos: z.array(z.object({ asset_id: z.string(), public_url: z.string() })), revision: z.string(), finishing: z.literal(true).optional(),
+  }).nullable() }),
   z.object({ next: z.enum(ids), suggested_description: z.string().optional() }).strip(),
   z.object({ home: z.object({ product_id: z.string(), live: z.literal(false) }), to: z.string() }),
+  z.object({ to: z.string() }),
 ])
 
 export type StayHomeSetupResponse = z.infer<typeof stayHomeSetupResponse>
-
-export const staySetupDraft = z.object({
-  step: z.string(),
-  answers: z.record(z.string(), z.union([z.string(), z.number()])),
-  amenities: z.array(z.string()),
-  photos: z.array(z.object({ asset_id: z.string(), public_url: z.string() })),
-  idempotency_key: z.string().uuid(),
-})
-
-export const staySetupDraftKey = (organizationId: string, userId: string) => `stay-setup:${organizationId}:${userId}`

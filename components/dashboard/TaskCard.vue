@@ -58,13 +58,18 @@ import type { TaskView } from '~/server/domain/tasks'
 import type { OpportunityView } from '~/server/domain/opportunities'
 import type { TodayReservation } from '~/shared/dashboard-today'
 import { cfImageVariant } from '~/utils/cf-image'
+import { isOfferingSetupPath, withOfferingReturnTo } from '~/shared/offering-setup'
 
 /** A task, an opportunity, or a booking with the suggestion at its foot. */
 const props = defineProps<{ task?: TaskView; opportunity?: OpportunityView; booking?: TodayReservation; busy?: boolean }>()
 const emit = defineEmits<{ open: []; skip: []; dismiss: [] }>()
 
 const face = computed(() => props.task?.face ?? 'compact')
-const destination = computed(() => props.booking?.to ?? props.opportunity?.path ?? (props.task?.action?.type === 'open' ? props.task.action.path : null))
+const route = useRoute()
+const destination = computed(() => {
+  const path = props.booking?.to ?? props.opportunity?.path ?? (props.task?.action?.type === 'open' ? props.task.action.path : null)
+  return path && isOfferingSetupPath(path.split(/[?#]/, 1)[0]!) ? withOfferingReturnTo(path, route.fullPath) : path
+})
 // A booking and a guest's reply about a stay draw the same reservation face.
 const reservation = computed(() => props.booking
   ? { ...props.booking, conversation: null }

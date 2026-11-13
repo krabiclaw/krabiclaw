@@ -47,7 +47,7 @@ import GuidedSetupShell from './GuidedSetupShell.vue'
 import GuidedSetupPhotos from './GuidedSetupPhotos.vue'
 import OnboardingAddressFields from '~/lib/components/workspace/onboarding/OnboardingAddressFields.vue'
 import { isNavigationFailure } from 'vue-router'
-import { offeringSetupResponse, type OfferingSetupResponse } from '~/shared/offering-setup'
+import { isOfferingSetupPath, offeringReturnTo, offeringSetupResponse, withOfferingReturnTo, type OfferingSetupResponse } from '~/shared/offering-setup'
 import { getErrorMessage } from '~/utils/errors'
 import { TIMEZONE_OPTIONS, timezoneLabel } from '~/utils/timezone'
 
@@ -56,10 +56,13 @@ const api = useDashboardApi()
 const organizationId = useDashboardOrganizationId()
 const router = useRouter()
 const endpoint = '/api/dashboard/onboarding/offering'
+const slug = String(route.params.org_slug)
+const returnTo = offeringReturnTo(route.query.return_to, slug)
 const query = {
   location_id: route.query.location_id,
   product_id: route.params.product_id,
   step: route.query.step,
+  return_to: returnTo,
 }
 const validate = (value: unknown): value is OfferingSetupResponse => offeringSetupResponse.safeParse(value).success
 const { data, error: loadError, pending, refresh } = await useAsyncData('offering-setup:' + route.fullPath,
@@ -88,11 +91,12 @@ function answer(key: string, kind: string) {
 
 async function goTo(to: string) {
   try {
-    if (router.resolve(to).fullPath === route.fullPath) {
+    const destination = returnTo && isOfferingSetupPath(router.resolve(to).path) ? withOfferingReturnTo(to, returnTo) : to
+    if (router.resolve(destination).fullPath === route.fullPath) {
       await refresh()
       return
     }
-    const navigation = await navigateTo(to, { replace: true })
+    const navigation = await navigateTo(destination, { replace: true })
     if (isNavigationFailure(navigation)) throw navigation
   } catch (cause) {
     saveError.value = getErrorMessage(cause, 'The next screen could not be opened.')

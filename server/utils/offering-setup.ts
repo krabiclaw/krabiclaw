@@ -14,6 +14,7 @@ export interface OfferingSetupContext {
   orgSlug: string
   actorId: string
   principal: MemberAccessPrincipal
+  exitTo?: string
 }
 
 export const invalidOfferingAnswer = (message: string) => new HTTPError({ statusCode: 400, statusMessage: message, data: { code: 'INVALID_OFFERING_ANSWER' } })

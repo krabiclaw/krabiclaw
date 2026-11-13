@@ -92,34 +92,36 @@ export async function firstPracticeAreaSetupIncomplete(context: OfferingSetupCon
 export async function firstPracticeAreaSetup(context: OfferingSetupContext, productId: string | undefined, requested: string | undefined, answer: OfferingSetupAnswer | null): Promise<OfferingSetupResponse> {
   const { db, env, organizationId, orgSlug, actorId } = context
   const actor = { actorId }
-  const home = offeringToday(orgSlug)
+  const exitTo = context.exitTo ?? offeringToday(orgSlug)
   const start = firstPracticeAreaPath(orgSlug)
   if (!productId) {
     const areas = await listOrganizationProducts(db, { organizationId, kind: 'service', window: { limit: 2, offset: 0 } })
-    if (areas.length === 1 && areas[0]!.page?.path && !areas[0]!.order_url) return { to: `${start}/${encodeURIComponent(areas[0]!.id)}`, guide: true }
-    if (areas.length) return { to: catalogPath(orgSlug) }
+    if (areas.length === 1 && areas[0]!.page?.path && !areas[0]!.order_url) {
+      return answer?.action === 'exit' ? { to: exitTo } : { to: `${start}/${encodeURIComponent(areas[0]!.id)}`, guide: true }
+    }
+    if (areas.length) return { to: answer?.action === 'exit' ? exitTo : catalogPath(orgSlug) }
     if (!answer) return offeringScreen({
       id: 'name', title: 'What’s your first practice area?',
       fields: [offeringField('name', 'Practice area name', 'text', '', { placeholder: 'Family law', max_length: PRODUCT_LIMITS.name })],
-      index: 0, total: steps.length - 1, backTo: home, exitTo: home,
+      index: 0, total: steps.length - 1, backTo: exitTo, exitTo,
     })
     if (answer.step !== 'name') throw offeringSetupChanged()
     const value = submittedValue(answer, 'name')
-    if (!value && answer.action === 'exit') return { to: home }
+    if (!value && answer.action === 'exit') return { to: exitTo }
     const name = requireTrimmedProductString(value, 'practice area name', PRODUCT_LIMITS.name)
     const creation = await offeringProductCreation(db, organizationId, productKey)
-    if (creation.productId) return answer.action === 'exit' ? { to: home } : { to: `${start}/${encodeURIComponent(creation.productId)}`, guide: true }
+    if (creation.productId) return answer.action === 'exit' ? { to: exitTo } : { to: `${start}/${encodeURIComponent(creation.productId)}`, guide: true }
     const product = await createProduct(db, { organizationId, env, actor, product: { kind: 'service', name, active: false }, publication: { published: false }, idempotencyKey: creation.key })
-    return answer.action === 'exit' ? { to: home } : { to: `${start}/${encodeURIComponent(product.id)}`, guide: true }
+    return answer.action === 'exit' ? { to: exitTo } : { to: `${start}/${encodeURIComponent(product.id)}`, guide: true }
   }
 
   const guide = `${start}/${encodeURIComponent(productId)}`
   const stepPath = (id: StepId) => `${guide}?step=${id}`
   const state = await readPracticeArea(context, productId)
-  if (!state) return offeringDestination(orgSlug, productId)
+  if (!state) return answer?.action === 'exit' ? { to: exitTo } : offeringDestination(orgSlug, productId)
   const { product, booking, attorney, members, schedule, office, activeOffices, officeRules, officeTime, scope, format, variant, currency, price, draft, intake, progress, complete } = state
   const resume = steps.find(step => !complete[step])
-  if (!resume) return answer?.action === 'exit' ? { to: home } : offeringDestination(orgSlug, productId)
+  if (!resume) return answer?.action === 'exit' ? { to: exitTo } : offeringDestination(orgSlug, productId)
   const applicable = steps.filter(step => {
     if (step === 'office-times') return Boolean(office) && format !== 'online'
     if (step === 'office-address') return Boolean(office) && format !== 'online'
@@ -133,7 +135,7 @@ export async function firstPracticeAreaSetup(context: OfferingSetupContext, prod
   const index = requestedIndex >= 0 && requestedIndex <= resumeIndex ? requestedIndex : resumeIndex
   const step = applicable[index]!
   const backTo = step === 'duration' && !applicable.includes('hours')
-    ? stepPath('hours') : index > 0 ? stepPath(applicable[index - 1]!) : home
+    ? stepPath('hours') : index > 0 ? stepPath(applicable[index - 1]!) : exitTo
   const weekday = (value: number | undefined) => offeringField('weekday', 'Day of the week', 'select', value?.toString(), { choices: weekdayChoices })
   const workingWindow = schedule?.weekly?.[0]
   const officeWeekday = officeTime?.weekday ?? (schedule?.timezone === office?.timezone && schedule?.weekly?.length === 1 ? workingWindow?.weekday : undefined)
@@ -198,7 +200,7 @@ export async function firstPracticeAreaSetup(context: OfferingSetupContext, prod
     attorneyId: attorney?.id, schedulingRevision: schedule?.updated_at, locationRevision, progress,
     officeRules: step === 'office-times' ? officeRules : undefined,
   })
-  if (!answer) return offeringScreen({ id: step, ...question, fields, index, total: applicable.length, backTo, exitTo: home, revision })
+  if (!answer) return offeringScreen({ id: step, ...question, fields, index, total: applicable.length, backTo, exitTo, revision })
   if (answer.step !== step || answer.revision !== revision) throw offeringSetupChanged()
   const exit = answer.action === 'exit'
   const value = submittedValue(answer, step)
@@ -233,7 +235,7 @@ export async function firstPracticeAreaSetup(context: OfferingSetupContext, prod
         await saveProgress({ partial: { ...progress.partial, [partialStep]: { scope_id: partialScope, values } } })
       }
     }
-    return { to: home }
+    return { to: exitTo }
   }
 
   const dayAnswer = () => {
@@ -363,7 +365,7 @@ export async function firstPracticeAreaSetup(context: OfferingSetupContext, prod
     }
   }
   await purgePublicResourceCacheNow(env, organizationId)
-  if (exit) return { to: home }
+  if (exit) return { to: exitTo }
   if (step === 'fee') return offeringDestination(orgSlug, productId)
   return { to: index < resumeIndex ? stepPath(applicable[index + 1]!) : guide, guide: true }
 }

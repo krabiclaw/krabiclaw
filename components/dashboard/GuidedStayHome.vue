@@ -1,11 +1,11 @@
 <template>
   <GuidedSetupShell id="guided-stay-home" :title="step?.title" :detail="step && 'detail' in step ? step.detail : undefined"
     :wide="step && ['property', 'pin', 'visibility', 'amenities', 'photos', 'description'].includes(step.id)"
-    :position="position" :total="flow?.steps.length" :next-label="step?.action" :back-label="flow?.back_label"
-    :exit-label="flow?.exit_label ?? 'Save & exit'" :exit-disabled="uploadingPhotos || !step" :busy="pending"
-    :disabled="incomplete || uploadingPhotos" @next="advance" @back="back" @exit="saveAndExit">
+    :position="position" :total="flow?.steps.length" :next-label="step?.action" :back-label="finishing ? undefined : flow?.back_label"
+    :exit-label="finishing ? undefined : flow?.exit_label ?? 'Save & exit'" :exit-disabled="uploadingPhotos || !step || draftChanged" :busy="pending"
+    :disabled="incomplete || uploadingPhotos || draftChanged" @next="advance" @back="back" @exit="saveAndExit">
     <USkeleton v-if="!step && pending" class="h-12 w-3/4" />
-    <template v-if="step">
+    <fieldset v-if="step" :inert="finishing">
       <div v-if="step.id === 'address'" class="divide-y divide-default overflow-hidden rounded-xl border border-default">
         <UFormField v-for="field in step.fields" :key="field.key" :label="field.label" :required="field.required" class="px-4 py-2" :ui="{ label: 'text-xs text-muted' }">
           <CountrySelect
@@ -156,9 +156,9 @@
         <UTextarea v-model="writtenAnswer" :aria-label="step.name_label" :maxlength="step.max_length" :rows="step.id === 'description' ? 10 : 4" size="xl" class="w-full" />
         <p class="mt-2 text-sm text-muted" aria-hidden="true">{{ writtenAnswer.length }}/{{ step.max_length }}</p>
       </UFormField>
-    </template>
+    </fieldset>
     <UAlert v-if="error" color="error" variant="soft" class="mt-5" :description="error" />
-    <UButton v-if="!step && error" type="button" color="neutral" variant="outline" class="mt-4" @click="load">Try again</UButton>
+    <UButton v-if="error && (!step || draftChanged)" type="button" color="neutral" variant="outline" class="mt-4" @click="load">{{ draftChanged ? 'Reload saved answers' : 'Try again' }}</UButton>
   </GuidedSetupShell>
 </template>
 
@@ -168,34 +168,33 @@ import GuidedSetupPhotos from './GuidedSetupPhotos.vue'
 import { projectPublicLocation } from '~/shared/location-sharing'
 import StaySetupMap from './StaySetupMap.client.vue'
 import OnboardingChoiceGrid from '~/lib/components/workspace/onboarding/OnboardingChoiceGrid.vue'
-import { authClient } from '~/lib/auth-client'
-import { stayHomeSetupResponse, staySetupDraft, staySetupDraftKey, staySetupNightlyRates, type StayHomeSetupResponse } from '~/shared/stay-home-setup'
+import { stayHomeSetupResponse, staySetupNightlyRates, type StayHomeSetupResponse } from '~/shared/stay-home-setup'
 import { minorAmountToMajor } from '~/shared/prices'
 import { isCurrencyCode } from '~/shared/currencies'
 import { getErrorMessage } from '~/utils/errors'
+import { ApiClientError } from '~/utils/api-clients'
 import { listPhoneCountries } from '~/utils/phone'
 import { TIMEZONE_OPTIONS, timezoneLabel } from '~/utils/timezone'
 
 type Flow = Extract<StayHomeSetupResponse, { steps: unknown }>
 
-const route = useRoute()
-const session = authClient.useSession()
 const api = useDashboardApi()
 const organizationId = useDashboardOrganizationId()
 const photos = ref<{ asset_id: string; public_url: string }[]>([])
 const amenities = ref<string[]>([])
 const uploadingPhotos = ref(false)
-const catalog = `/dashboard/${encodeURIComponent(String(route.params.org_slug))}/products?kind=stay`
 const countries = listPhoneCountries()
-const answers = reactive<Record<string, string | number | undefined>>({})
+const answers = ref<Record<string, string | number | undefined>>({})
 const flow = shallowRef<Flow>()
 const position = ref(0)
 const step = computed(() => flow.value?.steps[position.value])
 const pricing = computed(() => flow.value?.steps.find(item => item.id === 'pricing'))
 const pending = ref(true)
+const finishing = ref(false)
+const draftChanged = ref(false)
 const error = ref('')
-const textValue = (key: string) => String(answers[key] ?? '')
-const numberValue = (key: string) => typeof answers[key] === 'number' ? answers[key] : undefined
+const textValue = (key: string) => String(answers.value[key] ?? '')
+const numberValue = (key: string) => typeof answers.value[key] === 'number' ? answers.value[key] : undefined
 const weekendRate = computed(() => {
   const currency = pricing.value?.currency
   if (!isCurrencyCode(currency) || !textValue('base_price').trim()) return null
@@ -208,8 +207,8 @@ const weekendRate = computed(() => {
   }
 })
 const writtenField = computed(() => step.value?.id === 'description' ? 'description' : 'name')
-const writtenAnswer = computed({ get: () => textValue(writtenField.value), set: value => { answers[writtenField.value] = value } })
-const specificLocation = computed({ get: () => answers.stay_map_sharing === 'specific', set: value => { answers.stay_map_sharing = value ? 'specific' : 'general' } })
+const writtenAnswer = computed({ get: () => textValue(writtenField.value), set: value => { answers.value[writtenField.value] = value } })
+const specificLocation = computed({ get: () => answers.value.stay_map_sharing === 'specific', set: value => { answers.value.stay_map_sharing = value ? 'specific' : 'general' } })
 const coordinates = computed(() => ({ latitude: numberValue('latitude') ?? null, longitude: numberValue('longitude') ?? null }))
 const pin = computed(() => coordinates.value.latitude != null && coordinates.value.longitude != null ? { latitude: coordinates.value.latitude, longitude: coordinates.value.longitude } : null)
 const location = computed(() => ({
@@ -241,23 +240,23 @@ const incomplete = computed(() => {
 })
 const autocomplete: Record<string, string> = { address: 'street-address', city: 'address-level2', state: 'address-level1', zip_code: 'postal-code' }
 let idempotencyKey: string | undefined
-let draftKey: string | undefined
+let revision: string | undefined
 
 function setAddress(key: string, value: string) {
-  if (key !== 'timezone' && answers[key] !== value) {
-    delete answers.latitude
-    delete answers.longitude
+  if (key !== 'timezone' && answers.value[key] !== value) {
+    delete answers.value.latitude
+    delete answers.value.longitude
   }
-  answers[key] = value
+  answers.value[key] = value
 }
 
 function placePin(pin: { latitude: number; longitude: number }) {
-  answers.latitude = pin.latitude
-  answers.longitude = pin.longitude
+  answers.value.latitude = pin.latitude
+  answers.value.longitude = pin.longitude
 }
 
 function toggle(key: string) {
-  answers[key] = numberValue(key) === 1 ? 0 : 1
+  answers.value[key] = numberValue(key) === 1 ? 0 : 1
 }
 
 function toggleAmenity(code: string) {
@@ -276,22 +275,20 @@ async function load() {
   try {
     const response = await request({})
     if (!('steps' in response)) throw new Error('Home setup returned no steps.')
-    Object.assign(answers, response.defaults)
+    draftChanged.value = false
+    const draft = response.draft
+    answers.value = { ...(draft?.answers ?? response.defaults) }
     flow.value = response
-    const user = session.value.data?.user ?? (await authClient.getSession()).data?.user
-    if (!user) throw new Error('Sign in again to resume home setup.')
-    draftKey = staySetupDraftKey(organizationId, user.id)
-    const saved = localStorage.getItem(draftKey)
-    if (!saved) return
-    const draft = staySetupDraft.safeParse(JSON.parse(saved))
-    if (!draft.success) return
-    const index = response.steps.findIndex(step => step.id === draft.data.step)
-    if (index === -1) return
-    Object.assign(answers, draft.data.answers)
-    photos.value = draft.data.photos
-    amenities.value = draft.data.amenities
+    photos.value = draft?.photos ?? []
+    amenities.value = draft?.amenities ?? []
+    idempotencyKey = draft?.idempotency_key
+    revision = draft?.revision
+    finishing.value = draft?.finishing === true
+    position.value = 0
+    if (!draft) return
+    const index = response.steps.findIndex(step => step.id === draft.step)
+    if (index === -1) throw new Error('Home setup returned an unknown saved step.')
     position.value = index
-    idempotencyKey = draft.data.idempotency_key
   } catch (cause) {
     error.value = getErrorMessage(cause, 'Could not open home setup.')
   } finally {
@@ -300,20 +297,28 @@ async function load() {
 }
 
 async function saveAndExit() {
-  if (!step.value || !draftKey || pending.value || uploadingPhotos.value) return
+  if (!step.value || pending.value || uploadingPhotos.value) return
+  pending.value = true
   error.value = ''
   try {
-    localStorage.setItem(draftKey, JSON.stringify({
-      step: step.value.id, answers, amenities: amenities.value, photos: photos.value,
-      idempotency_key: idempotencyKey ??= crypto.randomUUID(),
-    }))
-    await navigateTo(`${catalog}&setup=resume`, { replace: true })
+    const response = await request({ ...submission(step.value.id), action: 'exit' })
+    if (!('to' in response)) throw new Error('Home setup returned no exit destination.')
+    await refreshNuxtData(`first-home-setup:${organizationId}`)
+    await navigateTo(response.to, { replace: true })
   } catch (cause) {
+    draftChanged.value = cause instanceof ApiClientError && cause.code === 'STAY_HOME_DRAFT_CHANGED'
     error.value = getErrorMessage(cause, 'Could not save your progress.')
+  } finally {
+    pending.value = false
   }
 }
 
+function submission(id: string) {
+  return { step: id, answers: { ...answers.value, amenities: amenities.value, photo_ids: photos.value.map(photo => photo.asset_id) }, idempotency_key: idempotencyKey ??= crypto.randomUUID(), revision }
+}
+
 function back() {
+  if (draftChanged.value) return
   position.value--
   error.value = ''
 }
@@ -323,19 +328,20 @@ async function advance() {
   pending.value = true
   error.value = ''
   try {
-    const response = await request({ step: step.value.id, answers: { ...answers, amenities: amenities.value, photo_ids: photos.value.map(photo => photo.asset_id) }, idempotency_key: idempotencyKey ??= crypto.randomUUID() })
+    const response = await request(submission(step.value.id))
     if ('next' in response) {
-      if (response.suggested_description && !answers.description) answers.description = response.suggested_description
+      if (response.suggested_description && !answers.value.description) answers.value.description = response.suggested_description
       const index = flow.value?.steps.findIndex(step => step.id === response.next) ?? -1
       if (index < 0) throw new Error('Home setup returned an unknown step.')
       position.value = index
     } else if ('home' in response) {
-      if (draftKey) localStorage.removeItem(draftKey)
+      await refreshNuxtData([`first-home-setup:${organizationId}`, `product-catalog:${organizationId}`])
       await navigateTo(response.to, { replace: true })
     } else {
       throw new Error('Home setup did not advance.')
     }
   } catch (cause) {
+    draftChanged.value = cause instanceof ApiClientError && cause.code === 'STAY_HOME_DRAFT_CHANGED'
     error.value = getErrorMessage(cause, 'Could not continue home setup.')
   } finally {
     pending.value = false

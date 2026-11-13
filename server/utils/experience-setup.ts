@@ -102,9 +102,9 @@ export async function firstExperienceSetup(context: OfferingSetupContext, reques
   const { db, env, organizationId, orgSlug, actorId, principal } = context
   const state = await loadSetup(context)
   const { product, resume, booking, location, host, locations, members, photo, currency, price, variant, meetingPoint, hasStreet, needsHost, storedAddress, savedAddress, partialAddress, meetingStep } = state
-  const today = offeringToday(orgSlug)
-  if (product && state.complete) return answer?.action === 'exit' ? { to: today } : offeringDestination(orgSlug, product.id)
-  if (state.existing[0]) return offeringDestination(orgSlug, state.existing[0].id)
+  const exitTo = context.exitTo ?? offeringToday(orgSlug)
+  if (product && state.complete) return answer?.action === 'exit' ? { to: exitTo } : offeringDestination(orgSlug, product.id)
+  if (state.existing[0]) return answer?.action === 'exit' ? { to: exitTo } : offeringDestination(orgSlug, state.existing[0].id)
 
   const venueStep = requested === 'venue-street' || requested === 'venue-directions' ? requested : meetingStep
   const steps = stages.filter(step => {
@@ -195,7 +195,7 @@ export async function firstExperienceSetup(context: OfferingSetupContext, reques
     ? question.fields.map(field => ({ ...field, value: partialAddress.values[field.key] ?? field.value }))
     : question.fields
   if (!answer) return offeringScreen({
-    id: step, ...question, fields, index, total: steps.length, backTo: index ? stepPath(steps[index - 1]) : today, exitTo: today, revision,
+    id: step, ...question, fields, index, total: steps.length, backTo: index ? stepPath(steps[index - 1]) : exitTo, exitTo, revision,
   })
   if (answer.step !== step || answer.revision !== revision) throw offeringSetupChanged()
   const exit = answer.action === 'exit'
@@ -217,7 +217,7 @@ export async function firstExperienceSetup(context: OfferingSetupContext, reques
         await saveVenueAddressProgress({ product_id: product.id, location_id: location.id, partial: { location_revision: addressRevision, values } })
       }
     }
-    return { to: today }
+    return { to: exitTo }
   }
 
   const actor = { actorId }
@@ -246,7 +246,7 @@ export async function firstExperienceSetup(context: OfferingSetupContext, reques
         break
       }
       case 'photo': {
-        if (exit && !value && !photo) return { to: today }
+        if (exit && !value && !photo) return { to: exitTo }
         if (value !== (photo?.asset_id ?? '')) {
           await setSingleMediaPlacement(db, { organizationId, env, principal, placement: { owner_type: 'product', owner_id: product.id, slot: 'image' }, assetId: value || null, imageOnly: true })
         }
@@ -259,7 +259,7 @@ export async function firstExperienceSetup(context: OfferingSetupContext, reques
       }
       case 'location':
       case 'venue': {
-        if (step === 'location' && value === addVenue) return exit ? { to: today } : { to: stepPath('venue'), guide: true }
+        if (step === 'location' && value === addVenue) return exit ? { to: exitTo } : { to: stepPath('venue'), guide: true }
         const editAddress = step === 'location' && value.startsWith(editVenuePrefix)
         let id = locations.find(row => row.id === (editAddress ? value.slice(editVenuePrefix.length) : value))?.id
         if (step === 'venue') {
@@ -283,11 +283,11 @@ export async function firstExperienceSetup(context: OfferingSetupContext, reques
           if (storedAddress) await saveVenueAddressProgress(null)
         }
         await purgePublicResourceCacheNow(env, organizationId)
-        return exit ? { to: today } : { to: stepPath(editAddress ? 'venue-street' : undefined), guide: true }
+        return exit ? { to: exitTo } : { to: stepPath(editAddress ? 'venue-street' : undefined), guide: true }
       }
       case 'venue-address': {
         if (value !== 'street' && value !== 'directions') throw invalidOfferingAnswer('Choose how guests should find the venue')
-        return exit ? { to: today } : { to: stepPath(value === 'street' ? 'venue-street' : 'venue-directions'), guide: true }
+        return exit ? { to: exitTo } : { to: stepPath(value === 'street' ? 'venue-street' : 'venue-directions'), guide: true }
       }
       case 'venue-street': {
         if (!location || !addressLocation) throw offeringSetupChanged()
@@ -298,14 +298,14 @@ export async function firstExperienceSetup(context: OfferingSetupContext, reques
         if (meetingStep !== 'venue-street' || partialAddress) {
           await saveVenueAddressProgress({ product_id: product.id, location_id: location.id })
         }
-        return exit ? { to: today } : { to: stepPath(), guide: true }
+        return exit ? { to: exitTo } : { to: stepPath(), guide: true }
       }
       case 'venue-directions': {
         if (!location) throw offeringSetupChanged()
         const directions = requireTrimmedProductString(submittedValue(answer, 'meeting_point'), 'meeting directions', PRODUCT_LIMITS.description)
         if (directions !== meetingPoint) await updateProduct(db, { ...target, actor, patch: { details_mode: 'merge', details: { meeting_point: directions }, updated_at: product.updated_at } })
         if (storedAddress) await saveVenueAddressProgress(null)
-        return exit ? { to: today } : { to: stepPath(), guide: true }
+        return exit ? { to: exitTo } : { to: stepPath(), guide: true }
       }
       case 'host':
       case 'duration':
@@ -331,10 +331,10 @@ export async function firstExperienceSetup(context: OfferingSetupContext, reques
         const end = new Date(start.getTime() + duration * 60_000)
         if (!Number.isFinite(end.getTime())) throw invalidOfferingAnswer('Choose a shorter duration.')
         await createSession(db, { ...target, locationId: location.id, actorId, startsAt: start.toISOString(), endsAt: end.toISOString(), capacity, idempotencyKey: sessionKey(product.id) })
-        return exit ? { to: today } : offeringDestination(orgSlug, product.id)
+        return exit ? { to: exitTo } : offeringDestination(orgSlug, product.id)
       }
     }
   }
-  if (exit) return { to: today }
+  if (exit) return { to: exitTo }
   return { to: index < resumeIndex ? stepPath(steps[index + 1]) : stepPath(), guide: true }
 }

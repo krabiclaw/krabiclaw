@@ -377,6 +377,13 @@ for (const setup of [
       await expect(page).toHaveURL(url => url.pathname === `/dashboard/${outcome.organization_slug}${setup.path}`)
       await expect(page.getByRole('heading', { name: setup.question, exact: true })).toBeVisible()
       await expect(page.getByRole('button', { name: 'Next', exact: true })).toBeDisabled()
+      const guide = new URL(page.url())
+      const caller = `/dashboard/${outcome.organization_slug}/products`
+      guide.searchParams.set('return_to', caller)
+      await page.goto(guide.href)
+      await expect(page.getByRole('heading', { name: setup.question, exact: true })).toBeVisible()
+      await page.getByRole('button', { name: 'Save & exit', exact: true }).click()
+      await expect(page).toHaveURL(`${baseURL}${caller}`)
       const anonymous = await readLocalTenant(request, outcome.subdomain, outcome.public_url)
       expect(anonymous.status(), await anonymous.text()).toBe(404)
     } finally {
@@ -388,7 +395,7 @@ for (const setup of [
   })
 }
 
-test('an owner changes their restaurant draft to lodging and saves their first home as a draft', async ({ page, baseURL, request }, testInfo) => {
+test('an owner changes their restaurant draft to lodging and saves their first home as a draft', async ({ page, baseURL, request, browser }, testInfo) => {
   test.setTimeout(90_000)
   await page.setViewportSize({ width: 1440, height: 900 })
   await dismissPreviewToolbar(page)
@@ -493,6 +500,27 @@ test('an owner changes their restaurant draft to lodging and saves their first h
   await next.click()
   await page.getByRole('button', { name: /^Private room/ }).click()
   await page.getByRole('button', { name: 'Save & exit' }).click()
+  await expect(page).toHaveURL(`/dashboard/${created!.slug}/products?kind=stay`)
+  const homeSetup = '/api/dashboard/stay-homes/setup'
+  const scope = { params: { org: created!.slug } }
+  const savedHomeDraft = await page.request.post(homeSetup, { ...scope, data: {} })
+  expect(savedHomeDraft.status(), await savedHomeDraft.text()).toBe(200)
+  const { draft: partialHome } = await savedHomeDraft.json() as { draft: { step: string; answers: Record<string, string | number>; revision: string; idempotency_key: string } }
+  expect(partialHome).toMatchObject({ step: 'access', answers: { property_type: 'house', listing_type: 'private_room' } })
+  const stale = await page.request.post(homeSetup, { ...scope, data: { action: 'exit', step: 'property', answers: { property_type: 'apartment' }, idempotency_key: partialHome.idempotency_key } })
+  expect(stale.status(), await stale.text()).toBe(409)
+  const separateBrowser = await browser.newContext()
+  try {
+    await loginAs(separateBrowser.request, baseURL!, 'user-e2e-onboarding-wizard')
+    const resumed = await separateBrowser.newPage()
+    await dismissPreviewToolbar(resumed)
+    await resumed.goto(`/dashboard/${created!.slug}/products?kind=stay`)
+    await resumed.getByRole('link', { name: /Continue your listing/ }).click()
+    await expect(resumed.getByRole('heading', { name: 'What space will guests have?' })).toBeVisible()
+    await expect(resumed.getByRole('button', { name: /^Private room/ })).toHaveAttribute('aria-pressed', 'true')
+  } finally {
+    await separateBrowser.close()
+  }
   await page.getByRole('link', { name: /Continue your listing/ }).click()
   await expect(page.getByRole('button', { name: /^Private room/ })).toHaveAttribute('aria-pressed', 'true')
   await page.screenshot({ path: testInfo.outputPath('03-home-access.png') })
@@ -643,6 +671,9 @@ test('an owner changes their restaurant draft to lodging and saves their first h
   await expect(page.getByRole('link', { name: /Publish listing/ })).toHaveCount(0)
   await page.screenshot({ path: testInfo.outputPath('16-home-publish-steps.png') })
   const listing = savedProducts[0]!
+  const closedHomeDraft = await page.request.post(homeSetup, { ...scope, data: {} })
+  expect(closedHomeDraft.status(), await closedHomeDraft.text()).toBe(200)
+  expect(await closedHomeDraft.json()).toMatchObject({ draft: null })
   const productUrl = `/api/editor/organizations/${created!.id}/products/${listing.id}`
   {
     await page.goto(`/dashboard/${created!.slug}/products/${listing.id}`)
