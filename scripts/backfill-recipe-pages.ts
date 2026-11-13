@@ -34,7 +34,7 @@ function uid(prefix: string) {
 async function backfill(db: DbClient, env: CloudflareEnv) {
   const orgs = await queryAll<{ id: string; name: string; vertical: OrganizationVertical }>(
     db,
-    'SELECT id, name, vertical FROM organization ORDER BY id',
+    "SELECT id, name, vertical FROM organization WHERE id <> 'platform' ORDER BY id",
   )
 
   const report: Array<{ organizationId: string; name: string; addedPages: string[] }> = []
@@ -63,7 +63,7 @@ async function backfill(db: DbClient, env: CloudflareEnv) {
         locale: string
         path: string
         title: string
-        pageType: 'recipe'
+        page_type: 'recipe'
         recipe: string
         blocks: Array<{ id: string; type: string; position: number; data: Record<string, unknown> }>
       }
@@ -81,7 +81,7 @@ async function backfill(db: DbClient, env: CloudflareEnv) {
           locale: source.locale,
           path: def.path,
           title: def.title,
-          pageType: 'recipe',
+          page_type: 'recipe',
           recipe: def.recipe,
           blocks: [
             {
@@ -141,7 +141,8 @@ const runtime = new Miniflare({
 })
 try {
   const db = await runtime.getD1Database('DB')
-  const result = await backfill(db as unknown as DbClient, {} as CloudflareEnv)
+  const env = { DB: db } as unknown as CloudflareEnv
+  const result = await backfill(db as unknown as DbClient, env)
   console.log(`Recipe pages on ${database.database_name}${dryRun ? ' (dry run, nothing written)' : ''}:\n`, JSON.stringify(result, null, 2))
 } finally {
   await runtime.dispose()

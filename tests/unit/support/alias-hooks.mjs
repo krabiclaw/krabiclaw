@@ -22,10 +22,14 @@ function isFile(candidate) {
   }
 }
 
+const generatedRoutesPath = path.join(rootDir, '.nuxt-generated/claimed-public-routes.mjs')
+
 // Build-only virtual modules the Nitro bundle provides; see the file itself for
 // why this resolves to something that throws rather than to an empty value.
 const BUILD_VIRTUAL_MODULES = {
-  '#claimed-public-routes': 'tests/unit/support/claimed-public-routes-unavailable.mjs',
+  '#claimed-public-routes': existsSync(generatedRoutesPath)
+    ? '.nuxt-generated/claimed-public-routes.mjs'
+    : 'tests/unit/support/claimed-public-routes-unavailable.mjs',
   '#nitro/virtual/app': 'tests/unit/support/nitro-virtual-app.mjs',
   '#nitro/virtual/routing': 'tests/unit/support/nitro-virtual-routing.mjs',
 }

@@ -87,9 +87,26 @@
               </span>
             </div>
           </div>
-          <div v-else class="flex flex-col items-center justify-center h-40 my-3 rounded-2xl bg-[#F7F7F7] dark:bg-neutral-800 text-muted">
-            <UIcon name="i-lucide-file-text" class="size-8 mb-1.5 opacity-60" />
-            <span class="text-xs font-medium">{{ pagesCount }} {{ pagesCount === 1 ? 'page' : 'pages' }}</span>
+          <!-- Image Fan Stack (Placeholder when no images) -->
+          <div v-else class="relative flex items-center justify-center h-44 sm:h-52 my-3 select-none">
+            <!-- Left placeholder card -->
+            <div
+              class="absolute left-1/2 -translate-x-[115%] w-36 sm:w-44 h-28 sm:h-36 rounded-2xl bg-[#F7F7F7] dark:bg-neutral-800 border border-neutral-200/70 dark:border-neutral-700/60 shadow-md -rotate-6 opacity-90 transition-transform group-hover:-rotate-8 group-hover:-translate-x-[120%]"
+            />
+            <!-- Right placeholder card -->
+            <div
+              class="absolute left-1/2 translate-x-[15%] w-36 sm:w-44 h-28 sm:h-36 rounded-2xl bg-[#F7F7F7] dark:bg-neutral-800 border border-neutral-200/70 dark:border-neutral-700/60 shadow-md rotate-6 opacity-90 transition-transform group-hover:rotate-8 group-hover:translate-x-[20%]"
+            />
+            <!-- Center placeholder card with icon and badge -->
+            <div class="relative w-40 sm:w-48 h-32 sm:h-40 rounded-2xl overflow-hidden bg-[#F7F7F7] dark:bg-neutral-800 border border-neutral-200/70 dark:border-neutral-700/60 shadow-xl z-10 flex items-center justify-center transition-transform group-hover:scale-105">
+              <UIcon
+                name="i-lucide-image"
+                class="size-10 sm:size-12 text-neutral-300 dark:text-neutral-600 transition-transform duration-300 group-hover:scale-110"
+              />
+              <span class="absolute top-2.5 left-2.5 bg-white/95 dark:bg-neutral-900/95 text-neutral-900 dark:text-neutral-100 shadow-sm text-xs font-semibold px-2.5 py-1 rounded-full">
+                {{ pagesCount }} {{ pagesCount === 1 ? 'page' : 'pages' }}
+              </span>
+            </div>
           </div>
 
           <!-- Task note under images -->
