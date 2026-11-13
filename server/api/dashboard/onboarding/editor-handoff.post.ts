@@ -19,7 +19,10 @@ export default defineHandler(async (event) => {
   const target = new URL(path, event.url.origin)
   const match = /^\/dashboard\/([a-z0-9-]+)\/products\/([a-zA-Z0-9-]+)$/.exec(target.pathname)
   if (!match || target.hash || [...target.searchParams.keys()].some(key => key !== 'location_id')) throw invalid()
-  const { db, env, organization, userId } = await getDashboardMemberContext(event, { organizationSlug: match[1]! })
+  const { db, env, organization, userId, session } = await getDashboardMemberContext(event, { organizationSlug: match[1]! })
+  if (session.user.isAnonymous || session.session.impersonatedBy) {
+    throw new HTTPError({ statusCode: 403, message: 'Sign in with your own account to open the editor.', data: { code: 'EDITOR_HANDOFF_REQUIRES_OWN_ACCOUNT' } })
+  }
   await assertOrganizationWideAccess(db, memberAccessPrincipal(organization, { env, event }))
   const product = await getProduct(db, organization.id, match[2]!)
   const locationId = target.searchParams.get('location_id')
