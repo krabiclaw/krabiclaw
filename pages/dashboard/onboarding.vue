@@ -95,7 +95,11 @@ async function goNext() {
     if (!step?.canAdvance) return
 
     if (step.action === 'commit') {
-      if (!flow.canSave || !await draft.save(flow) || !await draft.activate()) return
+      if (!flow.canSave) {
+        await router.push(onboardingStepPath(flow.resumeStep))
+        return
+      }
+      if (!await saveOrReopenBusiness(flow) || !await draft.activate()) return
       const created = state.value.created
       if (!created) throw new Error('The private website could not be read.')
       await router.push(created.next_url)
@@ -120,7 +124,7 @@ async function saveAndExit() {
     if (!restoreError.value) {
       const flow = await draft.readFlow()
       plan.value = flow
-      if (flow.canSave && !await draft.save(flow)) return
+      if (flow.canSave && !await saveOrReopenBusiness(flow)) return
     }
     await router.push('/dashboard')
   } catch (error) {
@@ -128,6 +132,15 @@ async function saveAndExit() {
   } finally {
     advancing.value = false
   }
+}
+
+async function saveOrReopenBusiness(flow: NonNullable<typeof plan.value>) {
+  if (await draft.save(flow)) return true
+  if (draft.subdomainConflict.value) {
+    plan.value = await draft.readFlow()
+    await router.push(onboardingStepPath('business'))
+  }
+  return false
 }
 
 watch(requestedId, () => {

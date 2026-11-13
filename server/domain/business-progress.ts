@@ -9,7 +9,6 @@ import { publishBusinessInvalidation } from '~/server/cloudflare/guest-inbox-eve
 import { queryOrganizationAnalytics } from '~/server/utils/analytics-query'
 import { addLocalDays, formatCalendarRange, formatTimestamp, localDateAt } from '~/utils/timezone'
 import { articleSocialPostPath, blogCreatePath, blogEditorPath, firstExperienceSetupPath, firstHomeSetupPath, firstMenuSectionSetupPath, firstPracticeAreaPath, guestConversationPath, postEditorPath, productEditorPath, productPaymentPath } from '~/server/utils/dashboard-links'
-import { firstMenuSetupApplies, parseOnboardingDraftPayload } from '~/server/utils/onboarding-drafts'
 import { listBookableSessions } from '~/server/utils/availability'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import { readStayGapCandidates, stayAccessFor } from '~/server/domain/stays'
@@ -24,7 +23,7 @@ import { experiencePublicationBlocker, getProduct, listOrganizationProducts, res
 import type { CurrencyCode } from '~/shared/currencies'
 import { errorChainForTelemetry } from '~/shared/error-telemetry'
 import { firstExperienceSetupProgress } from '~/server/utils/experience-setup'
-import { firstMenuSetupIncomplete } from '~/server/utils/first-menu-setup'
+import { firstMenuSetupLocation } from '~/server/utils/first-menu-setup'
 import { firstPracticeAreaSetupIncomplete } from '~/server/utils/practice-area-setup'
 
 interface GoalRow {
@@ -378,20 +377,19 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
     const experienceSetup = organization.vertical === 'experience'
       ? await firstExperienceSetupProgress(db, organizationId)
       : null
-    if (experienceSetup && !experienceSetup.sessionId) {
+    if (experienceSetup && !experienceSetup.complete) {
       offer('product.create', organizationId, 'Continue experience setup', 'Finish setting up your first session.',
         firstExperienceSetupPath(organization.slug), 110, { icon: 'i-lucide-list-checks' })
     } else if (nextProduct) {
       const [kind, title, detail] = nextProduct
       const areas = kind === 'service' ? await listOrganizationProducts(db, { organizationId, kind, window: { limit: 2, offset: 0 } }) : []
       const existing = kind === 'service' ? areas.length : products.filter(product => product.kind === kind).length
-      const menuLocations = kind === 'dish' && existing <= 1 && firstMenuSetupApplies(parseOnboardingDraftPayload(setupDraft.payload_json))
-        ? await queryAll<{ id: string }>(db, "SELECT id FROM business_locations WHERE organization_id=? AND status='active' LIMIT 2", [organizationId])
-        : []
-      const menuLocation = menuLocations.length === 1 ? menuLocations[0] : undefined
+      const menuLocation = kind === 'dish'
+        ? await firstMenuSetupLocation(db, organizationId, setupDraft.payload_json, !firstRun || existing > 0)
+        : null
       if (menuLocation) {
-        if (await firstMenuSetupIncomplete(db, organizationId, menuLocation.id, !firstRun)) offer('product.create', organizationId, existing ? 'Continue your menu setup' : 'Set up your menu',
-          existing ? 'Pick up where you left off.' : detail,
+        offer('product.create', organizationId, menuLocation.started ? 'Continue your menu setup' : 'Set up your menu',
+          menuLocation.started ? 'Pick up where you left off.' : detail,
           firstMenuSectionSetupPath(organization.slug, menuLocation.id), 110, { icon: 'i-lucide-list-checks' })
       } else if (areas.length === 1) {
         const area = areas[0]!

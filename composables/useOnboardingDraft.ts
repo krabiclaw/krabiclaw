@@ -1,5 +1,5 @@
 import { applicationFetch } from '~/composables/dashboardFetch'
-import { isRecord } from '~/utils/api-clients'
+import { ApiClientError, isRecord } from '~/utils/api-clients'
 import type { OnboardingFlow } from '~/shared/onboarding-flow'
 import { emptyOnboardingState, useOnboardingState, type OnboardingPlacePreview } from '~/composables/useOnboardingFlow'
 import { ALL_VERTICALS, type OrganizationVertical } from '~/utils/vertical-copy'
@@ -12,12 +12,13 @@ export function useOnboardingDraft() {
   const state = useOnboardingState()
   const busy = ref(false)
   const error = ref<string | null>(null)
+  const subdomainConflict = ref(false)
   const { trackOrganizationCreated } = useAnalytics()
 
   const flowAnswers = computed(() => {
-    const { vertical, source, placeId, details, timezone, timezoneStepVisited } = state.value
+    const { vertical, source, placeId, subdomain, savedSubdomain, details, timezone, timezoneStepVisited } = state.value
     const { name, sourceLocale, country, currency } = details
-    return { vertical, source, placeId, name, sourceLocale, country, currency, timezone, timezoneStepVisited }
+    return { vertical, source, placeId, subdomain, savedSubdomain, name, sourceLocale, country, currency, timezone, timezoneStepVisited }
   })
 
   function readFlow(answers = flowAnswers.value, signal?: AbortSignal) {
@@ -28,7 +29,8 @@ export function useOnboardingDraft() {
       validate: (value): value is OnboardingFlow => isRecord(value)
         && Array.isArray(value.steps) && typeof value.resumeStep === 'string'
         && typeof value.canSave === 'boolean' && typeof value.exitLabel === 'string'
-        && typeof value.backLabel === 'string' && Array.isArray(value.businessTypes) && Array.isArray(value.languages),
+        && typeof value.backLabel === 'string' && Array.isArray(value.businessTypes) && Array.isArray(value.languages)
+        && Array.isArray(value.countries) && Array.isArray(value.currencies) && Array.isArray(value.timezones),
     })
   }
 
@@ -36,6 +38,7 @@ export function useOnboardingDraft() {
   async function save(flow: OnboardingFlow): Promise<boolean> {
     busy.value = true
     error.value = null
+    subdomainConflict.value = false
     try {
       const { details, timezone } = state.value
       const res = await applicationFetch<Record<string, unknown>>('/api/dashboard/onboarding/drafts/active', {
@@ -46,6 +49,7 @@ export function useOnboardingDraft() {
           source_type: state.value.source ?? 'manual',
           google_place_id: state.value.placeId,
           name: state.value.details.name.trim(),
+          subdomain: state.value.subdomain?.trim() || undefined,
           vertical: state.value.vertical,
           details: {
             name: details.name.trim(),
@@ -62,13 +66,24 @@ export function useOnboardingDraft() {
         },
         validate: (value): value is Record<string, unknown> => isRecord(value),
       })
-      if (res.success !== true || typeof res.draft_id !== 'string' || typeof res.updated_at !== 'string') {
+      if (res.success !== true || typeof res.draft_id !== 'string' || typeof res.updated_at !== 'string' || typeof res.subdomain_candidate !== 'string') {
         throw new Error(typeof res.error === 'string' ? res.error : 'Could not save your answers. Please try again.')
       }
       state.value.draftId = res.draft_id
       state.value.draftRevision = res.updated_at
+      state.value.savedSubdomain = res.subdomain_candidate
+      state.value.subdomain = undefined
       return true
     } catch (cause) {
+      subdomainConflict.value = cause instanceof ApiClientError && cause.code === 'SUBDOMAIN_TAKEN'
+      if (subdomainConflict.value) {
+        const response = (await applicationFetch<Record<string, unknown>>('/api/dashboard/onboarding/drafts/active', {
+          validate: (value): value is Record<string, unknown> => isRecord(value),
+        })).draft
+        if (!isRecord(response) || typeof response.draft_id !== 'string' || typeof response.updated_at !== 'string') throw cause
+        state.value.draftId = response.draft_id
+        state.value.draftRevision = response.updated_at
+      }
       error.value = cause instanceof Error ? cause.message : 'Something went wrong. Please try again.'
       return false
     } finally {
@@ -146,6 +161,10 @@ export function useOnboardingDraft() {
     state.value = emptyOnboardingState()
     state.value.draftId = draft.draft_id
     state.value.draftRevision = draft.updated_at
+    if (typeof draft.subdomain_candidate === 'string') {
+      if (draft.organization_id) state.value.savedSubdomain = draft.subdomain_candidate
+      else state.value.subdomain = draft.subdomain_candidate
+    }
     state.value.vertical = draft.vertical as OrganizationVertical
     state.value.source = draft.source_type === 'google_places' ? 'google_places' : 'manual'
     state.value.placeId = typeof draft.google_place_id === 'string' && draft.google_place_id ? draft.google_place_id : null
@@ -164,5 +183,5 @@ export function useOnboardingDraft() {
     return true
   }
 
-  return { busy, error, flowAnswers, readFlow, save, seedFromPlace, activate, restore }
+  return { busy, error, subdomainConflict, flowAnswers, readFlow, save, seedFromPlace, activate, restore }
 }

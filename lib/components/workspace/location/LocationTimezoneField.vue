@@ -7,8 +7,8 @@
 <script setup lang="ts">
 import { TIMEZONE_OPTIONS, timezoneLabel } from '~/utils/timezone'
 
-withDefaults(defineProps<{ label?: string }>(), { label: 'Time zone' })
+const props = withDefaults(defineProps<{ label?: string; items?: Array<{ value: string; label: string }> }>(), { label: 'Time zone' })
 const timezone = defineModel<string>({ required: true })
 // Keep an existing explicit zone selectable, including UTC and ICU aliases.
-const options = computed(() => [...new Set([...(timezone.value ? [timezone.value] : []), ...TIMEZONE_OPTIONS])].map(value => ({ value, label: timezoneLabel(value) })))
+const options = computed(() => props.items ?? [...new Set([...(timezone.value ? [timezone.value] : []), ...TIMEZONE_OPTIONS])].map(value => ({ value, label: timezoneLabel(value) })))
 </script>

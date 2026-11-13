@@ -1,10 +1,10 @@
 import { z } from 'zod'
 
-const choice = z.object({ value: z.string(), label: z.string(), detail: z.string().optional() })
+const choice = z.object({ value: z.string(), label: z.string(), detail: z.string().optional(), flag: z.string().optional() })
 const field = z.object({
   key: z.string(),
   label: z.string(),
-  kind: z.enum(['text', 'textarea', 'choice', 'money', 'number', 'photo', 'date', 'time', 'timezone']),
+  kind: z.enum(['text', 'textarea', 'choice', 'country', 'select', 'money', 'number', 'photo', 'date', 'time', 'timezone']),
   value: z.string(),
   choices: z.array(choice).optional(),
   optional: z.boolean().optional(),

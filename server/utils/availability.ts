@@ -623,6 +623,7 @@ export async function replaceWeeklySchedule(db: DbClient, input: {
   timezone?: string
   slots: unknown
   actorId: string
+  requireBookableTime?: { env: CloudflareEnv; slot: WeeklySlotInput }
 }): Promise<{ rules: ProductAvailabilityRule[]; cancelled: number }> {
   if ((await requireOrganizationProduct(db, input)).kind === 'table') badRequest(TABLE_HOURS_ONLY)
   const config = await requireBookingConfig(db, input.organizationId, input.productId)
@@ -635,6 +636,15 @@ export async function replaceWeeklySchedule(db: DbClient, input: {
   const now = new Date().toISOString()
   const existing = await listAvailabilityRules(db, input.organizationId, input.productId, locationId)
   const schedule = prepareWeeklySchedule({ ...input, locationId, now }, config, timezone, existing)
+  if (input.requireBookableTime) {
+    const { env, slot } = input.requireBookableTime
+    const rule = schedule.rules.find(candidate => weeklySlotKey(candidate) === weeklySlotKey(slot))
+    if (!rule || !await hasBookableOpening(db, { ...input, env, now }, {
+      config, locations: new Map([[locationId, location]]), rules: [rule], provider: await readScheduleProvider(db, config),
+    }, rule.id)) {
+      throw new HTTPError({ statusCode: 400, statusMessage: 'Choose a time that fits the office and attorney’s availability', data: { code: 'TIME_NOT_BOOKABLE' } })
+    }
+  }
   const writes = [...schedule.queries, publicResourceCacheInvalidationQuery(input.organizationId, 'product-weekly-schedule')]
   if (writes.length > MAX_D1_BATCH_STATEMENTS) badRequest('This weekly schedule exceeds one atomic update')
   const results = await executeBatch(db, writes, { operation: 'Replace weekly schedule' })
@@ -946,7 +956,7 @@ async function readScheduleProvider(db: DbClient, config: ProductBookingConfigRe
 
 type SlotReadScope = 'bookable' | 'editor' | 'publication'
 
-async function readSlotSchedule(db: DbClient, input: SlotRange, scope: SlotReadScope): Promise<SlotSchedule> {
+async function readSlotSchedule(db: DbClient, input: Pick<SlotRange, 'organizationId' | 'productId' | 'locationId'>, scope: SlotReadScope): Promise<SlotSchedule> {
   const config = await requireBookingConfig(db, input.organizationId, input.productId)
   if (config.unit !== 'slot') badRequest('Choose an offering booked by time')
   const explicitLocation = typeof input.locationId === 'string'
@@ -1121,8 +1131,13 @@ export async function listBookableSessions(db: DbClient, input: SlotRange & { en
   if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from || to - from > 94 * 86_400_000) badRequest('Choose a valid availability range of at most 93 days')
   const now = input.now ?? new Date().toISOString()
   const schedule = await readSlotSchedule(db, input, scope)
+  return bookableSessionsForSchedule(db, input, schedule, now)
+}
+
+async function bookableSessionsForSchedule(db: DbClient, input: SlotRange & { env: CloudflareEnv }, schedule: SlotSchedule, now: string, ruleId?: string) {
   const horizons = new Map<string, string>()
   const openings = (await readOpenings(db, input, schedule, now)).flatMap(({ session }) => {
+    if (ruleId !== undefined && session.availability_rule_id !== ruleId) return []
     let until = horizons.get(session.timezone)
     if (!until) {
       until = bookingWindow(session.timezone, BOOKING_HORIZON_DAYS, now).toInstant
@@ -1131,6 +1146,33 @@ export async function listBookableSessions(db: DbClient, input: SlotRange & { en
     return fitsPublicWindow(session, schedule.config, now, until) ? [session] : []
   })
   return readOpeningCapacity(db, input.env, schedule, openings)
+}
+
+/** Find a bookable time before publishing the selected draft scope. */
+export async function hasDraftBookableTime(db: DbClient, input: {
+  env: CloudflareEnv; organizationId: string; productId: string; locationId: string | null; durationMinutes?: number
+}): Promise<boolean> {
+  const schedule = await readSlotSchedule(db, input, 'editor')
+  if (input.durationMinutes !== undefined) schedule.config = { ...schedule.config, duration_minutes: input.durationMinutes }
+  return hasBookableOpening(db, { ...input, now: new Date().toISOString() }, schedule)
+}
+
+async function hasBookableOpening(db: DbClient, input: {
+  env: CloudflareEnv; organizationId: string; productId: string; locationId: string | null; now: string
+}, schedule: SlotSchedule, ruleId?: string): Promise<boolean> {
+  const timezone = input.locationId === null ? schedule.provider?.timezone : schedule.locations.get(input.locationId)?.timezone
+  if (!timezone || !schedule.config.duration_minutes) return false
+  const { fromInstant, toInstant } = bookingWindow(timezone, BOOKING_HORIZON_DAYS, input.now)
+  const until = Date.parse(toInstant)
+  const page = AVAILABILITY_PAGE_DAYS * 86_400_000
+  const partySize = schedule.config.party_size_min ?? 1
+  for (let start = Date.parse(fromInstant); start < until; start += page) {
+    const sessions = await bookableSessionsForSchedule(db, {
+      ...input, fromInstant: new Date(start).toISOString(), toInstant: new Date(Math.min(until, start + page)).toISOString(),
+    }, schedule, input.now, ruleId)
+    if (sessions.some(session => session.remaining === null || session.remaining >= partySize)) return true
+  }
+  return false
 }
 
 async function providerAvailabilityForOpenings(db: DbClient, env: CloudflareEnv, schedule: SlotSchedule, openings: SessionFacts[]): Promise<string> {

@@ -9,10 +9,9 @@ import { firstMenuSectionSetupPath } from '~/server/utils/dashboard-links'
 import { getLocation } from '~/server/utils/location-management'
 import { getMediaPlacements, setSingleMediaPlacement } from '~/server/utils/media-placement'
 import { firstMenuSetupApplies, parseOnboardingDraftPayload } from '~/server/utils/onboarding-drafts'
-import { creationDedupeKey, readCreationRecord } from '~/server/utils/organization-events'
 import { createCollection, createProduct, listCollectionProducts, listCollections, listLocationProducts, organizationDefaultCurrency, resolveVariantPrice, setCollectionProducts, updateCollection, updateProduct } from '~/server/utils/product-management'
 import { requireTrimmedProductString } from '~/server/utils/product-validation'
-import { currencySymbol, invalidOfferingAnswer, offeringDestination, offeringField, offeringScreen, offeringSetupChanged, offeringToday, submittedValue, type OfferingSetupContext } from '~/server/utils/offering-setup'
+import { currencySymbol, invalidOfferingAnswer, offeringDestination, offeringField, offeringProductCreation, offeringScreen, offeringSetupChanged, offeringToday, submittedValue, type OfferingSetupContext } from '~/server/utils/offering-setup'
 
 const menuKey = (locationId: string) => `first-menu-setup:${locationId}`
 const stages = ['section', 'dish', 'photo', 'description', 'price'] as const
@@ -23,7 +22,7 @@ async function readMenuSetup(db: DbClient, organizationId: string, locationId: s
     queryFirst<{ id: string; payload_json: string }>(db, "SELECT id, payload_json FROM onboarding_drafts WHERE organization_id = ? AND status = 'committed'", [organizationId]),
     listCollections(db, { organizationId }),
     listLocationProducts(db, { organizationId, locationId, kind: 'dish' }),
-    readCreationRecord(db, creationDedupeKey('product', organizationId, menuKey(locationId))),
+    offeringProductCreation(db, organizationId, menuKey(locationId)),
     organizationDefaultCurrency(db, organizationId),
   ])
   const payload = draft ? parseOnboardingDraftPayload(draft.payload_json) : null
@@ -31,11 +30,12 @@ async function readMenuSetup(db: DbClient, organizationId: string, locationId: s
   const menuSections = sections.filter(section => section.location_id === locationId || section.location_id === null)
   const draftDishes = products.filter(product => product.variants.length === 1 && !product.publications.some(row => row.published)
     && product.locations.some(row => row.location_id === locationId && row.active && !row.published))
-  const dish = creation ? draftDishes.find(product => product.id === creation.entityId)
+  const dish = creation.productId ? draftDishes.find(product => product.id === creation.productId)
     : draftDishes.find(product => product.id === payload.first_menu_skips?.dish_id)
       ?? (draftDishes.length === 1 && products.length === 1 ? draftDishes[0] : undefined)
   if (products.length && !dish) return null
-  const section = menuSections.find(candidate => candidate.id === payload.first_menu_section_id
+  const selectedSectionId = !payload.first_menu_location_id || payload.first_menu_location_id === locationId ? payload.first_menu_section_id : undefined
+  const section = menuSections.find(candidate => candidate.id === selectedSectionId
     && (!dish || dish.collections.some(row => row.collection_id === candidate.id)))
     ?? (dish ? menuSections.find(candidate => dish.collections.some(row => row.collection_id === candidate.id)) : undefined)
     ?? (menuSections.length === 1 ? menuSections[0] : undefined)
@@ -50,12 +50,24 @@ async function readMenuSetup(db: DbClient, organizationId: string, locationId: s
     : !photo && !skips?.photo ? 'photo'
       : !dish.description.trim() && !skips?.description ? 'description'
         : !price && !skips?.price ? 'price' : undefined
-  return { draft, menuSections, section, chosenSectionId: payload.first_menu_section_id, dish, variant, currency, price, photo, resume }
+  return { draft, menuSections, section, creationKey: creation.key, chosenSectionId: selectedSectionId, dish, variant, currency, price, photo, resume }
 }
 
-export async function firstMenuSetupIncomplete(db: DbClient, organizationId: string, locationId: string, begunOnly: boolean) {
-  const setup = await readMenuSetup(db, organizationId, locationId)
-  return Boolean(setup?.resume && (!begunOnly || setup.dish || setup.chosenSectionId))
+export async function firstMenuSetupLocation(db: DbClient, organizationId: string, raw: string, begunOnly: boolean) {
+  const payload = parseOnboardingDraftPayload(raw)
+  if (!firstMenuSetupApplies(payload)) return null
+  const candidates = await queryFirst<{ id: string }>(db, `
+    SELECT l.id FROM business_locations l
+    WHERE l.organization_id = ? AND l.status = 'active'
+    ORDER BY CASE WHEN l.id = ? THEN 0
+      WHEN EXISTS (SELECT 1 FROM collections c WHERE c.organization_id = l.organization_id AND c.id = ? AND c.location_id = l.id) THEN 1
+      ELSE 2 END, l.created_at, l.id LIMIT 1
+  `, [organizationId, payload.first_menu_location_id ?? null, payload.first_menu_section_id ?? null])
+  if (!candidates) return null
+  const setup = await readMenuSetup(db, organizationId, candidates.id)
+  return setup?.resume && (!begunOnly || setup.dish || setup.chosenSectionId)
+    ? { id: candidates.id, started: Boolean(setup.dish || setup.chosenSectionId) }
+    : null
 }
 
 export async function firstMenuSetup(context: OfferingSetupContext, locationId: string | undefined, requested: string | undefined, answer: OfferingSetupAnswer | null): Promise<OfferingSetupResponse> {
@@ -68,7 +80,7 @@ export async function firstMenuSetup(context: OfferingSetupContext, locationId: 
   const today = offeringToday(orgSlug)
   const state = await readMenuSetup(db, organizationId, locationId)
   if (!state) return { to: `${today}/products/menu?location_id=${encodeURIComponent(locationId)}` }
-  const { draft, menuSections, section, chosenSectionId, dish, variant, currency, price, photo, resume } = state
+  const { draft, menuSections, section, chosenSectionId, creationKey, dish, variant, currency, price, photo, resume } = state
   if (!resume && dish) return answer?.action === 'exit' ? { to: today } : offeringDestination(orgSlug, dish.id, locationId)
   const canNameSection = menuSections.length === 0
     || (menuSections.length === 1 && section?.location_id === locationId && chosenSectionId === section.id)
@@ -127,7 +139,7 @@ export async function firstMenuSetup(context: OfferingSetupContext, locationId: 
       else if (selected.location_id !== locationId) throw offeringSetupChanged()
       else if (name !== selected.name) await updateCollection(db, { organizationId, collectionId: selected.id, patch: { name }, actor, expectedUpdatedAt: selected.updated_at })
     }
-    const result = await execute(db, "UPDATE onboarding_drafts SET payload_json = json_set(payload_json, '$.first_menu_section_id', ?) WHERE id = ? AND organization_id = ? AND status = 'committed'", [selected.id, draft.id, organizationId])
+    const result = await execute(db, "UPDATE onboarding_drafts SET payload_json = json_set(payload_json, '$.first_menu_section_id', ?, '$.first_menu_location_id', ?) WHERE id = ? AND organization_id = ? AND status = 'committed'", [selected.id, locationId, draft.id, organizationId])
     if (result.meta.changes !== 1) throw offeringSetupChanged()
   } else if (step === 'dish') {
     const name = requireTrimmedProductString(value, 'dish name', PRODUCT_LIMITS.name)
@@ -136,8 +148,10 @@ export async function firstMenuSetup(context: OfferingSetupContext, locationId: 
       const existing = await listCollectionProducts(db, { organizationId, collectionId: section.id })
       await createProduct(db, {
         organizationId, env, actor, product: { kind: 'dish', name }, publication: { published: false },
-        firstMenuSection: { id: section.id, locationId, expectedProductIds: existing.map(row => row.id) }, idempotencyKey: menuKey(locationId),
+        firstMenuSection: { id: section.id, locationId, expectedProductIds: existing.map(row => row.id) }, idempotencyKey: creationKey,
       })
+      const scoped = await execute(db, "UPDATE onboarding_drafts SET payload_json = json_set(payload_json, '$.first_menu_location_id', ?) WHERE id = ? AND organization_id = ? AND status = 'committed'", [locationId, draft.id, organizationId])
+      if (scoped.meta.changes !== 1) throw offeringSetupChanged()
     } else if (name !== dish.name) {
       await updateProduct(db, { organizationId, env, actor, productId: dish.id, patch: { name, updated_at: dish.updated_at } })
     }

@@ -1,9 +1,10 @@
 import { HTTPError } from 'nitro'
 import type { OfferingSetupAnswer, OfferingSetupField, OfferingSetupResponse } from '~/shared/offering-setup'
-import type { DbClient } from '~/server/db'
+import { queryFirst, type DbClient } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import type { MemberAccessPrincipal } from '~/server/utils/member-access'
 import { productEditorPath } from '~/server/utils/dashboard-links'
+import { creationDedupeKey, readCreationRecord } from '~/server/utils/organization-events'
 import { TIMEZONE_OPTIONS, timezoneLabel } from '~/utils/timezone'
 
 export interface OfferingSetupContext {
@@ -15,8 +16,8 @@ export interface OfferingSetupContext {
   principal: MemberAccessPrincipal
 }
 
-export const invalidOfferingAnswer = (message: string) => new HTTPError({ statusCode: 400, statusMessage: message })
-export const offeringSetupChanged = () => new HTTPError({ statusCode: 409, statusMessage: 'Setup changed. Reopen it to continue.' })
+export const invalidOfferingAnswer = (message: string) => new HTTPError({ statusCode: 400, statusMessage: message, data: { code: 'INVALID_OFFERING_ANSWER' } })
+export const offeringSetupChanged = () => new HTTPError({ statusCode: 409, statusMessage: 'Setup changed. Reopen it to continue.', data: { code: 'OFFERING_SETUP_CHANGED' } })
 export const offeringToday = (orgSlug: string) => `/dashboard/${encodeURIComponent(orgSlug)}`
 
 export function offeringDestination(orgSlug: string, productId: string, locationId?: string): OfferingSetupResponse {
@@ -62,4 +63,18 @@ export function offeringTimezone(value = ''): OfferingSetupField {
 
 export function submittedValue(answer: OfferingSetupAnswer, key: string): string {
   return answer.values[key]?.trim() ?? ''
+}
+
+
+/** A deliberate restart after deletion is a new creation; retries share that key. */
+export async function offeringProductCreation(db: DbClient, organizationId: string, baseKey: string) {
+  let key = baseKey
+  for (;;) {
+    const creation = await readCreationRecord(db, creationDedupeKey('product', organizationId, key))
+    if (!creation) return { key, productId: undefined }
+    if (await queryFirst(db, 'SELECT 1 FROM products WHERE organization_id = ? AND id = ?', [organizationId, creation.entityId])) {
+      return { key, productId: creation.entityId }
+    }
+    key = `${baseKey}:after:${creation.entityId}`
+  }
 }

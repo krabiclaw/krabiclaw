@@ -29,6 +29,7 @@ export function assertCloudflareImagesConfigured(env: CloudflareImagesEnv): void
   throw new HTTPError({
     statusCode: 503,
     statusMessage: 'Cloudflare Images is not configured in this environment, by design',
+    data: { code: 'IMAGE_UPLOAD_UNAVAILABLE' },
     message: 'Cloudflare Images is not configured in this environment, by design. Only production holds the Images credentials: staging, preview, local development and E2E run on copies of production data, so storing or deleting an image from them would change production\'s images. Image uploads, social-card generation and image deletion run only in production; do not add the credentials here to make this pass.',
   })
 }

@@ -6,13 +6,19 @@
     @next="submit('next')" @back="goBack" @exit="submit('exit')">
     <USkeleton v-if="pending && !screen" class="h-12 w-3/4" />
     <fieldset v-if="screen" class="space-y-4" :disabled="saving">
-      <template v-for="field in screen.step.fields" :key="field.key">
+      <OnboardingAddressFields v-if="addressCountry"
+        :fields="screen.step.fields.map(field => ({ ...field, value: answers[field.key] ?? '', required: !field.optional }))"
+        :countries="addressCountry.choices?.map(({ value, label }) => ({ code: value, name: label })) ?? []"
+        @answer="(key, value) => answers[key] = value" />
+      <template v-for="field in addressCountry ? [] : screen.step.fields" :key="field.key">
         <GuidedSetupPhotos v-if="field.kind === 'photo'" v-model="photos" v-model:uploading="uploading" :limit="1" :disabled="saving" />
         <URadioGroup v-else-if="field.kind === 'choice'" v-model="answers[field.key]" :aria-label="field.label"
           :items="field.choices?.map(choice => ({ ...choice, description: choice.detail }))" variant="card" />
         <UFormField v-else :label="field.label" :ui="{ label: screen.step.fields.length === 1 ? 'sr-only' : undefined }">
           <UTextarea v-if="field.kind === 'textarea'" v-model="answers[field.key]" :maxlength="field.max_length"
             :aria-label="field.label" :placeholder="field.placeholder" :rows="10" size="xl" class="w-full" />
+          <USelect v-else-if="field.kind === 'select'" v-model="answers[field.key]" :items="field.choices"
+            :aria-label="field.label" :placeholder="field.placeholder" size="xl" class="w-full" />
           <USelectMenu v-else-if="field.kind === 'timezone'" v-model="answers[field.key]" :items="field.choices ?? timezones" value-key="value"
             :aria-label="field.label" placeholder="Select time zone" size="xl" class="w-full" />
           <div v-else-if="field.kind === 'money'" class="flex items-center gap-1 rounded-2xl border border-default bg-elevated/40 p-5">
@@ -39,6 +45,7 @@
 <script setup lang="ts">
 import GuidedSetupShell from './GuidedSetupShell.vue'
 import GuidedSetupPhotos from './GuidedSetupPhotos.vue'
+import OnboardingAddressFields from '~/lib/components/workspace/onboarding/OnboardingAddressFields.vue'
 import { isNavigationFailure } from 'vue-router'
 import { offeringSetupResponse, type OfferingSetupResponse } from '~/shared/offering-setup'
 import { getErrorMessage } from '~/utils/errors'
@@ -59,6 +66,7 @@ const { data, error: loadError, pending, refresh } = await useAsyncData('offerin
   () => api(endpoint, { query, validate }),
 )
 const screen = computed(() => data.value && 'step' in data.value ? data.value : undefined)
+const addressCountry = computed(() => screen.value?.step.fields.find(field => field.kind === 'country'))
 const answers = ref<Record<string, string>>({})
 const photos = ref<{ asset_id: string; public_url: string }[]>([])
 const uploading = ref(false)

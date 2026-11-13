@@ -1,10 +1,11 @@
 import { z } from 'zod'
 import type { OnboardingFlow, OnboardingStep, OnboardingStepField } from '~/shared/onboarding-flow'
 import { PLATFORM_LOCALES, platformLocale } from '~/shared/platform-locales'
-import { currencyForCountry, isCurrencyCode } from '~/shared/currencies'
-import { isValidTimezone, singleTimezoneForCountry } from '~/utils/timezone'
-import { getPhoneCountry } from '~/utils/phone'
+import { CURRENCY_OPTIONS, currencyForCountry, isCurrencyCode } from '~/shared/currencies'
+import { TIMEZONE_OPTIONS, isValidTimezone, singleTimezoneForCountry, timezoneLabel } from '~/utils/timezone'
+import { getPhoneCountry, listPhoneCountries } from '~/utils/phone'
 import { ALL_VERTICALS, type OrganizationVertical } from '~/utils/vertical-copy'
+import { isOnboardingSubdomain, onboardingSubdomainCandidate } from '~/server/utils/onboarding-drafts'
 
 const presentation: Record<OrganizationVertical, Omit<OnboardingFlow['businessTypes'][number], 'value'>> = {
   restaurant: {
@@ -34,6 +35,8 @@ export const onboardingAnswers = z.object({
   source: z.enum(['google_places', 'manual']).nullable(),
   placeId: z.string().nullable(),
   name: z.string(),
+  subdomain: z.string().optional(),
+  savedSubdomain: z.string().nullable().optional(),
   sourceLocale: z.string().nullable(),
   country: z.string(),
   timezone: z.string(),
@@ -51,12 +54,30 @@ const locationFields: OnboardingStepField[] = [
 ]
 const timezoneField: OnboardingStepField = { key: 'timezone', label: 'Time zone' }
 
-export function onboardingFlow(answers: z.infer<typeof onboardingAnswers>): OnboardingFlow {
+let timezoneChoices: { day: string; items: OnboardingFlow['timezones'] } | undefined
+
+export function proposedOnboardingSubdomain(answers: z.infer<typeof onboardingAnswers>) {
+  return answers.savedSubdomain ?? (answers.subdomain ?? onboardingSubdomainCandidate(answers.name.trim())).trim().toLowerCase()
+}
+
+export function onboardingFlow(answers: z.infer<typeof onboardingAnswers>, options: { includedDomain?: string; subdomainTaken?: boolean } = {}): OnboardingFlow {
   const country = getPhoneCountry(answers.country)?.code ?? ''
   const proposedTimezone = singleTimezoneForCountry(country)
   const proposedCurrency = currencyForCountry(country)
-  const timezoneKnown = isValidTimezone(answers.timezone || proposedTimezone)
+  const zone = answers.timezone || proposedTimezone
+  const timezoneKnown = isValidTimezone(zone)
   const askTimezone = !timezoneKnown || answers.timezoneStepVisited === true
+  const name = answers.name.trim()
+  const subdomain = proposedOnboardingSubdomain(answers)
+  const validSubdomain = isOnboardingSubdomain(subdomain)
+  const askSubdomain = !answers.savedSubdomain && (answers.subdomain !== undefined || Boolean(name && (!validSubdomain || options.subdomainTaken)))
+  const day = new Date().toISOString().slice(0, 10)
+  if (timezoneChoices?.day !== day) {
+    timezoneChoices = { day, items: TIMEZONE_OPTIONS.map(value => ({ value, label: timezoneLabel(value) })) }
+  }
+  const timezones = timezoneKnown && !TIMEZONE_OPTIONS.includes(zone)
+    ? [{ value: zone, label: timezoneLabel(zone) }, ...timezoneChoices.items]
+    : timezoneChoices.items
 
   const steps: OnboardingStep[] = [
     {
@@ -64,8 +85,9 @@ export function onboardingFlow(answers: z.infer<typeof onboardingAnswers>): Onbo
       nextLabel: 'Continue', canAdvance: answers.vertical !== null,
     },
     {
-      id: 'business', title: 'What’s your business called?', fields: [{ key: 'name', label: 'Business name' }],
-      nextLabel: 'Next', canAdvance: Boolean(answers.name.trim()) && (answers.source === 'manual' || (
+      id: 'business', title: 'What’s your business called?',
+      fields: [{ key: 'name', label: 'Business name' }, ...(askSubdomain ? [{ key: 'subdomain', label: 'Website address' } as const] : [])],
+      nextLabel: 'Next', canAdvance: Boolean(name) && validSubdomain && !options.subdomainTaken && (answers.source === 'manual' || (
         answers.source === 'google_places' && Boolean(answers.placeId)
       )),
     },
@@ -101,6 +123,13 @@ export function onboardingFlow(answers: z.infer<typeof onboardingAnswers>): Onbo
     backLabel: 'Back',
     proposedTimezone,
     proposedCurrency,
+    includedDomain: options.includedDomain,
+    subdomainError: options.subdomainTaken
+      ? 'That website address is taken. Choose another.'
+      : answers.subdomain?.trim() && !validSubdomain ? 'Start and end with a letter or number.' : undefined,
+    countries: listPhoneCountries(),
+    currencies: CURRENCY_OPTIONS,
+    timezones,
     languages: PLATFORM_LOCALES.map(({ locale, label }) => ({ value: locale, label, icon: 'i-lucide-languages' })),
     businessTypes: ALL_VERTICALS.map(value => ({ value, ...presentation[value] })),
   }

@@ -6,48 +6,58 @@ import { memberSchedulingList } from '~/server/domain/member-scheduling'
 import { createSession, setProductBookingConfig } from '~/server/utils/availability'
 import { listDashboardLocations } from '~/server/utils/dashboard-context'
 import { firstExperienceSetupPath } from '~/server/utils/dashboard-links'
-import { createLocation, type LocationRecord } from '~/server/utils/location-management'
+import { createLocation, getLocation, type LocationRecord } from '~/server/utils/location-management'
 import { getMediaPlacements, setSingleMediaPlacement } from '~/server/utils/media-placement'
-import { parseOnboardingDraftPayload } from '~/server/utils/onboarding-drafts'
-import { creationDedupeKey, readCreationRecord } from '~/server/utils/organization-events'
+import { parseOnboardingDraftPayload, type OnboardingDraftPayload } from '~/server/utils/onboarding-drafts'
+import { creationRequestHash } from '~/server/utils/organization-events'
+import { offeringAddressFields, offeringHasStreetAddress, saveOfferingAddress } from '~/server/utils/offering-address'
 import {
-  createProduct, getProduct, listOrganizationProducts, organizationDefaultCurrency, removeProductLocation,
+  createProduct, getProduct, listOrganizationProducts, organizationDefaultCurrency,
   setProductLocation, updateProduct,
 } from '~/server/utils/product-management'
 import { PRODUCT_LIMITS, requireTrimmedProductString } from '~/server/utils/product-validation'
 import { purgePublicResourceCacheNow } from '~/server/utils/public-resource-cache'
 import { mediaStillUrl } from '~/shared/media-placement-contract'
 import {
-  currencySymbol, invalidOfferingAnswer, offeringDestination, offeringField, offeringScreen, offeringSetupChanged,
+  currencySymbol, invalidOfferingAnswer, offeringDestination, offeringField, offeringProductCreation, offeringScreen, offeringSetupChanged,
   offeringTimezone, offeringToday, submittedValue, type OfferingSetupContext,
 } from '~/server/utils/offering-setup'
+import { formatPostalAddress } from '~/utils/postal-address'
 import { isValidCalendarDate, isValidTimezone, localDateAt, localDateTimeToInstant, MINUTE_TIME_PATTERN } from '~/utils/timezone'
 
-const stages = ['title', 'location', 'host', 'duration', 'capacity', 'photo', 'description', 'price', 'session'] as const
+const stages = ['title', 'location', 'venue', 'venue-address', 'venue-street', 'venue-directions', 'host', 'duration', 'capacity', 'photo', 'description', 'price', 'session'] as const
 type Step = typeof stages[number]
+type VenueAddressProgress = NonNullable<OnboardingDraftPayload['first_experience_venue_address']>
 const productKey = 'first-experience-setup'
 const sessionKey = (productId: string) => `first-experience-setup:${productId}`
+const addVenue = 'new'
+const editVenuePrefix = 'edit:'
+
+async function experienceCompletion(db: DbClient, organizationId: string, productId: string) {
+  const [published, session] = await Promise.all([
+    queryFirst(db, 'SELECT 1 FROM product_publications WHERE organization_id = ? AND product_id = ? AND published = 1', [organizationId, productId]),
+    queryFirst(db, 'SELECT 1 FROM product_sessions WHERE organization_id = ? AND product_id = ? LIMIT 1', [organizationId, productId]),
+  ])
+  return Boolean(published || session)
+}
 
 export async function firstExperienceSetupProgress(db: DbClient, organizationId: string) {
-  const created = await readCreationRecord(db, creationDedupeKey('product', organizationId, productKey))
-  if (!created) return null
-  const product = await queryFirst<{ id: string; kind: string }>(db, 'SELECT id, kind FROM products WHERE organization_id = ? AND id = ?', [organizationId, created.entityId])
-  if (!product || product.kind !== 'experience') return null
-  const session = await readCreationRecord(db, `session:${organizationId}:${sessionKey(product.id)}`)
-  return { productId: product.id, sessionId: session?.entityId ?? null }
+  const creation = await offeringProductCreation(db, organizationId, productKey)
+  return creation.productId ? { complete: await experienceCompletion(db, organizationId, creation.productId) } : null
 }
 
 async function loadSetup(context: OfferingSetupContext) {
   const { db, organizationId, env, actorId } = context
-  const progress = await firstExperienceSetupProgress(db, organizationId)
-  const existing = progress ? [] : await listOrganizationProducts(db, { organizationId, kind: 'experience', window: { limit: 1, offset: 0 } })
-  const product = progress ? await getProduct(db, organizationId, progress.productId) : null
-  const [currency, workspaceLocations, { members }, draft, placements] = await Promise.all([
+  const creation = await offeringProductCreation(db, organizationId, productKey)
+  const existing = creation.productId ? [] : await listOrganizationProducts(db, { organizationId, kind: 'experience', window: { limit: 1, offset: 0 } })
+  const product = creation.productId ? await getProduct(db, organizationId, creation.productId) : null
+  const [currency, workspaceLocations, { members }, draft, placements, complete] = await Promise.all([
     organizationDefaultCurrency(db, organizationId),
     listDashboardLocations(db, organizationId),
     memberSchedulingList({ env, organizationId, userId: actorId }),
     queryFirst<{ id: string; payload_json: string }>(db, "SELECT id, payload_json FROM onboarding_drafts WHERE organization_id = ? AND status = 'committed' AND vertical = 'experience'", [organizationId]),
     product ? getMediaPlacements(db, { organizationId, ownerType: 'product', ownerIds: [product.id], slot: 'image' }) : null,
+    product ? experienceCompletion(db, organizationId, product.id) : false,
   ])
   const payload = draft ? parseOnboardingDraftPayload(draft.payload_json) : null
   const photo = product ? placements?.get(product.id)?.[0] : undefined
@@ -55,20 +65,31 @@ async function loadSetup(context: OfferingSetupContext) {
   const variant = product?.variants[0]
   const price = variant ? selectPrice(variant.prices, { currency, location_id: null }) : null
   const placedAt = product?.locations.filter(placement => placement.active && locations.some(location => location.id === placement.location_id)) ?? []
-  const savedLocation = placedAt.length === 1 ? locations.find(entry => entry.id === placedAt[0]!.location_id) : undefined
-  const location = savedLocation ?? (locations.length === 1 ? locations[0] : undefined)
+  const location = placedAt.length === 1 ? locations.find(entry => entry.id === placedAt[0]!.location_id) : undefined
   const booking = product?.booking
-  const host = members.find(member => member.id === booking?.assigned_member_id) ?? (members.length === 1 ? members[0] : undefined)
-  const steps = stages.filter(step => (step !== 'location' || locations.length !== 1) && (step !== 'host' || members.length !== 1))
+  const assignedHost = members.find(member => member.id === booking?.assigned_member_id)
+  const host = assignedHost ?? (members.length === 1 ? members[0] : undefined)
+  const meetingPoint = typeof product?.details.meeting_point === 'string' ? product.details.meeting_point : ''
+  const hasStreet = offeringHasStreetAddress(location?.address ?? null)
+  const storedAddress = payload?.first_experience_venue_address
+  const venueAddress = storedAddress?.product_id === product?.id && storedAddress?.location_id === location?.id ? storedAddress : undefined
+  const savedAddress = venueAddress?.partial && location
+    ? await getLocation(env.DB, organizationId, location.id) : null
+  const partialAddress = savedAddress && savedAddress.updated_at === venueAddress?.partial?.location_revision ? venueAddress?.partial : undefined
+  const completedStreet = hasStreet && venueAddress && !venueAddress.partial
+  const meetingStep = partialAddress || completedStreet ? 'venue-street' : meetingPoint ? 'venue-directions' : undefined
+  const needsHost = !host || Boolean(booking && !assignedHost)
   const resume: Step = !product ? 'title'
-    : !location ? 'location'
-      : !host ? 'host'
-        : !booking?.duration_minutes ? 'duration'
-          : !booking.default_capacity ? 'capacity'
-            : !photo && payload?.first_experience_photo_skipped !== product.id ? 'photo'
-              : !product.description.trim() ? 'description'
-                : price?.type !== 'one_time' ? 'price' : 'session'
-  return { product, existing, sessionId: progress?.sessionId, currency, price, variant, locations, location, savedLocation, members, host, booking, steps, resume, draft, payload, photo }
+    : !location ? locations.length ? 'location' : 'venue'
+      : partialAddress ? 'venue-street'
+        : !hasStreet && !meetingPoint ? 'venue-address'
+          : needsHost ? 'host'
+            : !booking?.duration_minutes ? 'duration'
+              : !booking.default_capacity ? 'capacity'
+                : !photo && payload?.first_experience_photo_skipped !== product.id ? 'photo'
+                  : !product.description.trim() ? 'description'
+                    : price?.type !== 'one_time' ? 'price' : 'session'
+  return { product, existing, complete, creationKey: creation.key, currency, price, variant, locations, location, members, host, booking, resume, draft, payload, photo, meetingPoint, hasStreet, needsHost, storedAddress, savedAddress, partialAddress, meetingStep }
 }
 
 function positiveInteger(value: string, label: string) {
@@ -80,26 +101,71 @@ function positiveInteger(value: string, label: string) {
 export async function firstExperienceSetup(context: OfferingSetupContext, requested: string | undefined, answer: OfferingSetupAnswer | null): Promise<OfferingSetupResponse> {
   const { db, env, organizationId, orgSlug, actorId, principal } = context
   const state = await loadSetup(context)
-  const { product, steps, resume, booking, location, host, locations, members, photo, currency, price, variant } = state
+  const { product, resume, booking, location, host, locations, members, photo, currency, price, variant, meetingPoint, hasStreet, needsHost, storedAddress, savedAddress, partialAddress, meetingStep } = state
   const today = offeringToday(orgSlug)
-  if (product && (state.sessionId || product.publications.some(row => row.published))) return answer?.action === 'exit' ? { to: today } : offeringDestination(orgSlug, product.id)
+  if (product && state.complete) return answer?.action === 'exit' ? { to: today } : offeringDestination(orgSlug, product.id)
   if (state.existing[0]) return offeringDestination(orgSlug, state.existing[0].id)
 
-  const resumeIndex = steps.indexOf(resume)
+  const venueStep = requested === 'venue-street' || requested === 'venue-directions' ? requested : meetingStep
+  const steps = stages.filter(step => {
+    if (step === 'location') return locations.length > 0
+    if (step === 'venue') return locations.length === 0 || requested === 'venue'
+    if (step === 'venue-address') return !hasStreet || Boolean(venueStep) || requested === step
+    if (step === 'venue-street' || step === 'venue-directions') return venueStep === step
+    if (step === 'host') return members.length !== 1 || needsHost
+    return true
+  })
+  const resumeIndex = steps.indexOf(resume === 'venue-street' && venueStep !== resume ? 'venue-address' : resume)
   const requestedIndex = steps.findIndex(step => step === requested)
-  const index = requestedIndex >= 0 && requestedIndex <= resumeIndex ? requestedIndex : resumeIndex
+  const withinVenueChoice = (requested === 'venue-street' || requested === 'venue-directions') && (resume === 'venue-address' || resume === 'venue-street')
+  const index = requestedIndex >= 0 && (requestedIndex <= resumeIndex || requested === 'venue' && resume === 'location' || withinVenueChoice)
+    ? requestedIndex : resumeIndex
   const step = steps[index]!
   const stepPath = (next?: Step) => firstExperienceSetupPath(orgSlug, next)
+  const addressLocation = step === 'venue-street' && location ? savedAddress ?? await getLocation(env.DB, organizationId, location.id) : null
+  const addressRevision = addressLocation?.updated_at
+  const revision = JSON.stringify([
+    product?.id, product?.updated_at, location?.id, addressRevision, booking?.assigned_member_id,
+    booking?.duration_minutes, booking?.default_capacity, photo?.asset_id,
+    ...(step === 'location' ? [locations.map(row => row.id)] : []),
+    ...(step === 'host' ? [members.map(row => row.id)] : []),
+    ...(step === 'venue-street' || step === 'venue-directions' ? [partialAddress] : []),
+  ])
   const scheduleDate = location && isValidTimezone(location.timezone) ? localDateAt(new Date(), location.timezone) : undefined
+  const details = state.payload?.source.details
   const questions = {
     title: { title: 'What’s your experience called?', fields: [
       offeringField('title', 'Experience title', 'text', product?.name, { max_length: PRODUCT_LIMITS.name }),
     ] },
-    location: locations.length ? { title: 'Where will guests meet?', fields: [
-      offeringField('location', 'Venue', 'choice', location?.id, { choices: locations.map(row => ({ value: row.id, label: row.title })) }),
-    ] } : { title: 'Where will guests meet?', fields: [
+    location: { title: 'Where will guests meet?', fields: [
+      offeringField('location', 'Venue', 'choice', location?.id ?? (locations.length === 1 ? locations[0]?.id : ''), { choices: [
+        ...locations.flatMap(row => {
+          const address = offeringHasStreetAddress(row.address) ? formatPostalAddress(row.address) : ''
+          return [
+            { value: row.id, label: row.title, ...(address ? { detail: address } : {}) },
+            ...(address && row.id === (location?.id ?? (locations.length === 1 ? locations[0]?.id : undefined))
+              ? [{ value: `${editVenuePrefix}${row.id}`, label: `Edit address for ${row.title}` }]
+              : []),
+          ]
+        }),
+        { value: addVenue, label: 'Add a venue' },
+      ] }),
+    ] },
+    venue: { title: 'Where will guests meet?', fields: [
       offeringField('title', 'Venue name', 'text', '', { max_length: PRODUCT_LIMITS.name }),
-      offeringTimezone(state.payload?.source.details.timezone ?? ''),
+      offeringTimezone(details?.timezone ?? ''),
+    ] },
+    'venue-address': { title: 'How should guests find the venue?', fields: [
+      offeringField('venue-address', 'Meeting details', 'choice', meetingStep === 'venue-directions' ? 'directions' : hasStreet || partialAddress ? 'street' : '', { choices: [
+        { value: 'street', label: 'Enter a street address' },
+        { value: 'directions', label: 'Give meeting directions' },
+      ] }),
+    ] },
+    'venue-street': { title: 'What’s the venue address?', fields: offeringAddressFields(addressLocation?.address ?? null, {
+      country: addressLocation?.slug === 'main' ? details?.country : undefined,
+    }) },
+    'venue-directions': { title: 'Where should guests meet?', fields: [
+      offeringField('meeting_point', 'Meeting directions', 'textarea', meetingPoint, { max_length: PRODUCT_LIMITS.description }),
     ] },
     host: { title: 'Who will host it?', fields: [
       offeringField('host', 'Host', 'choice', host?.id, { choices: members.map(row => ({ value: row.id, label: row.name })) }),
@@ -124,16 +190,41 @@ export async function firstExperienceSetup(context: OfferingSetupContext, reques
       offeringField('time', 'Start time', 'time'),
     ] },
   }
-  if (!answer) return offeringScreen({ id: step, ...questions[step], index, total: steps.length, backTo: index ? stepPath(steps[index - 1]) : today, exitTo: today })
-  if (answer.step !== step) throw offeringSetupChanged()
+  const question = questions[step]
+  const fields = step === 'venue-street' && partialAddress
+    ? question.fields.map(field => ({ ...field, value: partialAddress.values[field.key] ?? field.value }))
+    : question.fields
+  if (!answer) return offeringScreen({
+    id: step, ...question, fields, index, total: steps.length, backTo: index ? stepPath(steps[index - 1]) : today, exitTo: today, revision,
+  })
+  if (answer.step !== step || answer.revision !== revision) throw offeringSetupChanged()
   const exit = answer.action === 'exit'
-  if (exit && questions[step].fields.some(field => !field.optional && !submittedValue(answer, field.key))) return { to: today }
+  async function saveVenueAddressProgress(value: VenueAddressProgress | null) {
+    if (!state.draft) throw offeringSetupChanged()
+    const serialized = value ? JSON.stringify(value) : null
+    const result = await execute(db, `UPDATE onboarding_drafts
+      SET payload_json = CASE WHEN ? IS NULL THEN json_remove(payload_json, '$.first_experience_venue_address')
+        ELSE json_set(payload_json, '$.first_experience_venue_address', json(?)) END
+      WHERE id = ? AND organization_id = ? AND status = 'committed'
+        AND json_extract(payload_json, '$.first_experience_venue_address') IS ?`,
+    [serialized, serialized, state.draft.id, organizationId, storedAddress ? JSON.stringify(storedAddress) : null])
+    if (result.meta.changes !== 1) throw offeringSetupChanged()
+  }
+  if (exit && fields.some(field => !field.optional && !submittedValue(answer, field.key))) {
+    if (step === 'venue-street' && product && location && addressRevision) {
+      const values = Object.fromEntries(fields.map(field => [field.key, submittedValue(answer, field.key)]))
+      if (fields.some(field => values[field.key] !== field.value)) {
+        await saveVenueAddressProgress({ product_id: product.id, location_id: location.id, partial: { location_revision: addressRevision, values } })
+      }
+    }
+    return { to: today }
+  }
 
   const actor = { actorId }
   const value = submittedValue(answer, step)
   if (!product) {
     const name = requireTrimmedProductString(value, 'title', PRODUCT_LIMITS.name)
-    await createProduct(db, { env, organizationId, actor, product: { kind: 'experience', name }, publication: { published: false }, idempotencyKey: productKey })
+    await createProduct(db, { env, organizationId, actor, product: { kind: 'experience', name }, publication: { published: false }, idempotencyKey: state.creationKey })
   } else {
     const target = { env, organizationId, productId: product.id }
     switch (step) {
@@ -166,13 +257,17 @@ export async function firstExperienceSetup(context: OfferingSetupContext, reques
         }
         break
       }
-      case 'location': {
-        let id = locations.find(row => row.id === value)?.id
-        if (!locations.length) {
+      case 'location':
+      case 'venue': {
+        if (step === 'location' && value === addVenue) return exit ? { to: today } : { to: stepPath('venue'), guide: true }
+        const editAddress = step === 'location' && value.startsWith(editVenuePrefix)
+        let id = locations.find(row => row.id === (editAddress ? value.slice(editVenuePrefix.length) : value))?.id
+        if (step === 'venue') {
           const title = requireTrimmedProductString(submittedValue(answer, 'title'), 'venue name', PRODUCT_LIMITS.name)
           const timezone = submittedValue(answer, 'timezone')
           if (!isValidTimezone(timezone)) throw invalidOfferingAnswer('Choose a time zone')
-          const result = await createLocation(env, env.DB, organizationId, { title, timezone }, actorId, { idempotencyKey: `first-experience-venue:${product.id}` })
+          const key = await creationRequestHash({ title, timezone })
+          const result = await createLocation(env, env.DB, organizationId, { title, timezone }, actorId, { idempotencyKey: `first-experience-venue:${product.id}:${key}` })
           if (result.status !== 201 || !('location' in result.data)) {
             const message = 'error' in result.data && typeof result.data.error === 'string' ? result.data.error : 'Could not save the venue'
             throw new HTTPError({ statusCode: result.status, statusMessage: message, data: result.data })
@@ -180,19 +275,41 @@ export async function firstExperienceSetup(context: OfferingSetupContext, reques
           id = (result.data.location as LocationRecord).id
         }
         if (!id) throw invalidOfferingAnswer('Choose a venue')
-        const earlier = product.locations.filter(placement => placement.active && placement.location_id !== id)
-        if (earlier.some(placement => placement.published)) throw new HTTPError({ statusCode: 409, statusMessage: 'Manage published locations in the Catalog editor' })
-        if (state.savedLocation?.id !== id) await setProductLocation(db, { ...target, locationId: id, active: true, published: false, actor })
-        for (const placement of earlier) await removeProductLocation(db, { ...target, locationId: placement.location_id })
+        if (location?.id !== id) {
+          await setProductLocation(db, {
+            ...target, locationId: id, active: true, published: false, actor,
+            moveDraftExperience: { updatedAt: product.updated_at, activeLocationIds: product.locations.filter(row => row.active).map(row => row.location_id) },
+          })
+          if (storedAddress) await saveVenueAddressProgress(null)
+        }
         await purgePublicResourceCacheNow(env, organizationId)
-        break
+        return exit ? { to: today } : { to: stepPath(editAddress ? 'venue-street' : undefined), guide: true }
+      }
+      case 'venue-address': {
+        if (value !== 'street' && value !== 'directions') throw invalidOfferingAnswer('Choose how guests should find the venue')
+        return exit ? { to: today } : { to: stepPath(value === 'street' ? 'venue-street' : 'venue-directions'), guide: true }
+      }
+      case 'venue-street': {
+        if (!location || !addressLocation) throw offeringSetupChanged()
+        if (!offeringHasStreetAddress(addressLocation.address)
+          || questions['venue-street'].fields.some(field => submittedValue(answer, field.key) !== field.value)) {
+          await saveOfferingAddress(context, location.id, { ...answer, revision: addressRevision })
+        }
+        if (meetingStep !== 'venue-street' || partialAddress) {
+          await saveVenueAddressProgress({ product_id: product.id, location_id: location.id })
+        }
+        return exit ? { to: today } : { to: stepPath(), guide: true }
+      }
+      case 'venue-directions': {
+        if (!location) throw offeringSetupChanged()
+        const directions = requireTrimmedProductString(submittedValue(answer, 'meeting_point'), 'meeting directions', PRODUCT_LIMITS.description)
+        if (directions !== meetingPoint) await updateProduct(db, { ...target, actor, patch: { details_mode: 'merge', details: { meeting_point: directions }, updated_at: product.updated_at } })
+        if (storedAddress) await saveVenueAddressProgress(null)
+        return exit ? { to: today } : { to: stepPath(), guide: true }
       }
       case 'host':
       case 'duration':
       case 'capacity': {
-        if (step === 'duration' && !state.savedLocation && location) {
-          await setProductLocation(db, { ...target, actor, locationId: location.id, active: true, published: false })
-        }
         const patch = step === 'host' ? { assigned_member_id: value }
           : step === 'duration' ? { duration_minutes: positiveInteger(value, 'duration'), ...(!booking && host ? { assigned_member_id: host.id } : {}) }
             : { default_capacity: positiveInteger(value, 'places') }

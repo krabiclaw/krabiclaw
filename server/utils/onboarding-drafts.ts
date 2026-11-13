@@ -157,10 +157,26 @@ export function firstMenuSetupApplies(payload: OnboardingDraftPayload): boolean 
 export interface OnboardingDraftPayload {
   version: 3
   first_menu_section_id?: string
+  first_menu_location_id?: string
   first_menu_skips?: { dish_id: string; price?: true; photo?: true; description?: true }
   first_experience_photo_skipped?: string
+  first_experience_venue_address?: {
+    product_id: string
+    location_id: string
+    partial?: { location_revision: string; values: Record<string, string> }
+  }
   first_practice_area_meeting?: { product_id: string; format: string }
   first_practice_area_attorney?: { product_id: string; member_id: string }
+  first_practice_area_progress?: {
+    product_id: string
+    profile_member_id?: string
+    hours_member_id?: string
+    office_address_location_id?: string
+    partial?: Partial<Record<'office-address' | 'hours' | 'office-times', {
+      scope_id: string
+      values: Record<string, string>
+    }>>
+  }
   request?: { key: string; fingerprint: string }
   source: {
     type: DraftSourceType
@@ -286,6 +302,14 @@ export function slugify(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
 }
 
+export function onboardingSubdomainCandidate(name: string) {
+  return slugify(name.normalize('NFKD').replace(/\p{M}/gu, '')).slice(0, 40).replace(/-+$/, '')
+}
+
+export function isOnboardingSubdomain(value: string) {
+  return /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(value)
+}
+
 function nowIso() {
   return new Date().toISOString()
 }
@@ -347,7 +371,7 @@ export function buildOnboardingDraftPayload(input: {
   const source_locale = input.details.source_locale ? platformLocale(input.details.source_locale) : null
   if (!source_locale) throw new HTTPError({ statusCode: 400, statusMessage: 'Choose a supported website language' })
   const brandName = input.details.name || input.name
-  const subdomainCandidate = slugify(brandName).slice(0, 40)
+  const subdomainCandidate = onboardingSubdomainCandidate(brandName)
   const placeSnapshot = input.place ? asPlaceSnapshot(input.place) : null
   // No stock photo fallback here: a generic stock image isn't actually theirs, and the
   // Saya hero renders a brand-color + icon treatment when no real photo is available yet.
@@ -572,7 +596,7 @@ export function normalizeOnboardingDraftInput(input: OnboardingDraftInput, exist
   }
   const payload = buildOnboardingDraftPayload({ name, vertical: vertical as OrganizationVertical, place, details, brandDraft, products })
   const subdomain = answer(input as unknown as Record<string, unknown>, 'subdomain')?.toLowerCase() ?? existing?.preview.subdomainCandidate ?? payload.preview.subdomainCandidate
-  if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(subdomain)) throw new HTTPError({ statusCode: 400, statusMessage: 'Choose a website address using Latin letters, digits or hyphens', data: { missing_fields: ['subdomain'] } })
+  if (!isOnboardingSubdomain(subdomain)) throw new HTTPError({ statusCode: 400, statusMessage: 'Choose a website address using Latin letters, digits or hyphens', data: { missing_fields: ['subdomain'] } })
   payload.preview.subdomainCandidate = subdomain
   return payload
 }

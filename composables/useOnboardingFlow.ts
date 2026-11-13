@@ -20,6 +20,8 @@ export interface OnboardingFlowState {
   source: 'google_places' | 'manual' | null
   /** The Google place the owner picked; null on the manual path. */
   placeId: string | null
+  subdomain: string | undefined
+  savedSubdomain: string | null
   details: {
     name: string
     city: string
@@ -43,6 +45,8 @@ export function emptyOnboardingState(): OnboardingFlowState {
     vertical: null,
     source: null,
     placeId: null,
+    subdomain: undefined,
+    savedSubdomain: null,
     details: {
       name: '', city: '', streetAddress: '', addressLine2: '', region: '', postalCode: '',
       country: '', currency: null, sourceLocale: null,

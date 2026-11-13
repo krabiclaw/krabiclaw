@@ -39,18 +39,23 @@
         <GooglePlacePicker v-model="businessSearch" @select="choosePlace" />
         <UButton type="button" label="Enter details manually" color="neutral" variant="link" class="self-start px-0" @click="enterManually" />
       </template>
+      <UFormField v-if="!googleImport && fieldLabel('subdomain')" :label="fieldLabel('subdomain')"
+        :hint="plan?.includedDomain ? `.${plan.includedDomain}` : undefined" :error="plan?.subdomainError"
+        description="Use letters A–Z, numbers, or hyphens." required>
+        <UInput v-model="state.subdomain" class="w-full" size="lg" maxlength="63" autocapitalize="none" :spellcheck="false" />
+      </UFormField>
     </div>
 
     <template v-else-if="step.id === 'location'">
-      <IntakeDetailsCard
-        v-model:form="state.details"
-        :fields="step.fields"
-        @change-country="setCountry"
+      <OnboardingAddressFields
+        :fields="addressFields"
+        :countries="plan?.countries ?? []"
+        @answer="setAddress"
       />
-      <LocationTimezoneField v-if="fieldLabel('timezone')" v-model="timezone" :label="fieldLabel('timezone')" />
+      <LocationTimezoneField v-if="fieldLabel('timezone')" v-model="timezone" :items="plan?.timezones" :label="fieldLabel('timezone')" />
     </template>
 
-    <LocationTimezoneField v-else-if="step.id === 'timezone'" v-model="timezone" :label="fieldLabel('timezone')" />
+    <LocationTimezoneField v-else-if="step.id === 'timezone'" v-model="timezone" :items="plan?.timezones" :label="fieldLabel('timezone')" />
 
     <div v-else-if="step.id === 'language'" role="group" :aria-label="fieldLabel('sourceLocale')">
       <p v-if="state.draftId && selectedLanguage">{{ selectedLanguage.label }}</p>
@@ -65,27 +70,27 @@
     <UFormField v-else-if="step.id === 'currency'" :label="fieldLabel('currency')" required>
       <USelectMenu
         :model-value="state.details.currency ?? plan?.proposedCurrency ?? undefined"
-        :items="CURRENCY_OPTIONS"
+        :items="plan?.currencies ?? []"
         :filter-fields="['label', 'value']"
         value-key="value"
         placeholder="Select currency"
         class="w-full"
         size="lg"
-        @update:model-value="state.details.currency = $event ?? null"
+        @update:model-value="state.details.currency = isCurrencyCode($event) ? $event : null"
       />
     </UFormField>
   </div>
 </template>
 
 <script setup lang="ts">
-import IntakeDetailsCard from '~/lib/components/workspace/onboarding/IntakeDetailsCard.vue'
+import OnboardingAddressFields from '~/lib/components/workspace/onboarding/OnboardingAddressFields.vue'
 import OnboardingChoiceGrid from '~/lib/components/workspace/onboarding/OnboardingChoiceGrid.vue'
 import GooglePlacePicker from '~/lib/components/workspace/location/GooglePlacePicker.vue'
 import LocationTimezoneField from '~/lib/components/workspace/location/LocationTimezoneField.vue'
 import { useOnboardingPlan, useOnboardingState, type OnboardingPlacePreview } from '~/composables/useOnboardingFlow'
 import { useOnboardingDraft } from '~/composables/useOnboardingDraft'
 import type { OnboardingStep, OnboardingStepField } from '~/shared/onboarding-flow'
-import { CURRENCY_OPTIONS } from '~/shared/currencies'
+import { isCurrencyCode } from '~/shared/currencies'
 
 const props = defineProps<{ step: OnboardingStep }>()
 const state = useOnboardingState()
@@ -95,6 +100,12 @@ const websiteExample = computed(() => plan.value?.businessTypes.find(choice => c
 const selectedLanguage = computed(() => plan.value?.languages.find(choice => choice.value === state.value.details.sourceLocale))
 
 const fieldLabel = (key: OnboardingStepField['key']) => props.step.fields.find(field => field.key === key)?.label
+const addressKeys = ['country', 'streetAddress', 'addressLine2', 'city', 'region', 'postalCode'] as const
+type AddressKey = typeof addressKeys[number]
+const isAddressKey = (key: string): key is AddressKey => addressKeys.some(candidate => candidate === key)
+const addressFields = computed(() => props.step.fields.flatMap(field => isAddressKey(field.key)
+  ? [{ ...field, value: state.value.details[field.key], required: field.key === 'country' }]
+  : []))
 
 function selectVertical(value: string) {
   const choice = plan.value?.businessTypes.find(option => option.value === value)
@@ -125,11 +136,13 @@ function enterManually() {
   setBusinessName(businessSearch.value.trim())
 }
 
-function setCountry(country: string) {
-  if (country === state.value.details.country) return
-  state.value.details.country = country
-  state.value.timezone = ''
-  state.value.timezoneStepVisited = false
+function setAddress(key: string, value: string) {
+  if (!isAddressKey(key) || state.value.details[key] === value) return
+  state.value.details[key] = value
+  if (key === 'country') {
+    state.value.timezone = ''
+    state.value.timezoneStepVisited = false
+  }
 }
 
 const timezone = computed({

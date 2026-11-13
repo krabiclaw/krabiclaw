@@ -1,9 +1,11 @@
 import type { OrganizationVertical } from '~/utils/vertical-copy'
+import type { PhoneCountry } from '~/utils/phone'
+import type { CurrencyCode } from '~/shared/currencies'
 
 export type OnboardingStepId = 'type' | 'business' | 'location' | 'timezone' | 'language' | 'currency'
 
 export interface OnboardingStepField {
-  key: 'name' | 'country' | 'streetAddress' | 'addressLine2' | 'city' | 'region' | 'postalCode' | 'timezone' | 'sourceLocale' | 'currency'
+  key: 'name' | 'subdomain' | 'country' | 'streetAddress' | 'addressLine2' | 'city' | 'region' | 'postalCode' | 'timezone' | 'sourceLocale' | 'currency'
   label: string
 }
 
@@ -29,7 +31,12 @@ export interface OnboardingFlow {
   exitLabel: string
   backLabel: string
   proposedTimezone: string | null
-  proposedCurrency: string | null
+  proposedCurrency: CurrencyCode | null
+  includedDomain?: string
+  subdomainError?: string
+  countries: PhoneCountry[]
+  currencies: Array<{ value: CurrencyCode; label: string }>
+  timezones: Array<{ value: string; label: string }>
   languages: OnboardingChoice[]
   businessTypes: Array<OnboardingChoice & {
     value: OrganizationVertical
