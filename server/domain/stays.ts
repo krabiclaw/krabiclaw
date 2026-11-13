@@ -3237,9 +3237,15 @@ export async function expireStayRequests(db: DbClient, env: StayMutationEnv, now
         AND ${noStayRequestPaymentInFlightSql('r.id')}
       ORDER BY s.starts_at, s.id LIMIT 100`, [now, now])
   let released = 0
+  const failures: unknown[] = []
   for (const row of expired) {
-    if (await cancelUnpaidStayRequest(db, env, row.organization_id, mapStay(row), now)) released++
+    try {
+      if (await cancelUnpaidStayRequest(db, env, row.organization_id, mapStay(row), now)) released++
+    } catch (error) {
+      failures.push(error)
+    }
   }
+  if (failures.length) throw new AggregateError(failures, `${failures.length} stay requests could not be expired. ${failures.map(error => error instanceof Error ? error.message : String(error)).join(' ')}`)
   return released
 }
 

@@ -12,7 +12,7 @@ import { paymentsStripe, requireStripeCheckoutAcceptance, type StripeConnectedAc
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { tokenHash } from './buyer'
 import { connectedBuyerCustomer } from '~/server/utils/billing-customer'
-import { assertMinorAmount, requirePayment } from './index'
+import { approvedStayBooking, assertMinorAmount, requirePayment, type ApprovedStayBooking } from './index'
 import { recordCheckoutStarted } from '~/server/domain/booking-analytics'
 import { isCurrencyCode } from '~/shared/currencies'
 import { quotePaymentsBillingFx, requireBillingFxQuote } from './fx'
@@ -45,26 +45,11 @@ export type CheckoutInput = CheckoutInputBase & (
 /** Which stay a guest asked for: the home, the nights and the party. */
 export type StayRequest = Pick<StayQuote, 'product_id' | 'check_in_date' | 'check_out_date' | 'adults' | 'children' | 'infants'>
 
-interface ApprovedStayBooking {
-  bookingId: string
-  version: number
-}
-
 interface StayCheckoutApproval extends ApprovedStayBooking {
   conversationId: string
   buyerUserId: string
   expiresAt: string
   policy: string
-}
-
-/** An approved stay keeps its original booking while the guest pays. */
-export function approvedStayBooking(snapshot: Record<string, unknown>): ApprovedStayBooking | null {
-  if (snapshot.approved_stay === undefined) return null
-  const approval = snapshot.approved_stay
-  if (!isRecord(approval) || typeof approval.bookingId !== 'string' || typeof approval.version !== 'number' || !Number.isSafeInteger(approval.version)) {
-    throw new Error('Approved stay checkout has no valid booking and version')
-  }
-  return { bookingId: approval.bookingId, version: approval.version }
 }
 
 /** The stay a checkout froze: the quote's nights and money, and the guest who is paying. */

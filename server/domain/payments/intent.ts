@@ -5,8 +5,8 @@ import { execute, executeBatch, queryFirst, type DbClient } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { connectedBuyerCustomer } from '~/server/utils/billing-customer'
 import { claimCheckoutReturn, tokenHash } from './buyer'
-import { requirePayment, type Payment } from './index'
-import { approvedStayBooking, isStayPurchase, surchargeBasisPoints, type PaymentReview } from './checkout'
+import { approvedStayBooking, requirePayment, type Payment } from './index'
+import { isStayPurchase, surchargeBasisPoints, type PaymentReview } from './checkout'
 import { PRICE_TAX_BEHAVIORS, type Price } from '~/shared/prices'
 import { reconcilePaymentIntent, confirmationHoldUntil } from './events'
 import { notifyPaymentFinancialEvent } from './notifications'
@@ -244,19 +244,24 @@ export async function confirmPayment(db: DbClient, stripe: Stripe, env: Cloudfla
   const started = new Date().toISOString()
   const approval = snapshotOf(payment).approval
   const expired = () => new HTTPError({ statusCode: 409, statusMessage: 'This payment can no longer be confirmed; start the booking again', data: { code: 'payment_expired' } })
+  let confirmingPayment = payment
   if (approval) {
     const hold = await queryFirst<{ conversation_id: string | null; buyer_user_id: string | null }>(db, 'SELECT conversation_id,buyer_user_id FROM payment_checkout_holds WHERE payment_id=? AND organization_id=?', [payment.id, organizationId])
     if (!hold?.conversation_id || !hold.buyer_user_id) throw new Error('Approved stay payment has no guest conversation')
     const bookable = approvedStayPaymentPredicate({ ...approval, organizationId, conversationId: hold.conversation_id, buyerUserId: hold.buyer_user_id, through: started })
     try {
-      await executeBatch(db, [
+      const [written] = await executeBatch(db, [
         { query: `UPDATE payments SET review_json=json_set(review_json,'$.confirmation_started_at',?) WHERE id=? AND organization_id=?
-          AND captured_amount=0 AND json_extract(review_json,'$.reviewed_at')=? AND ${bookable.query}
-          AND EXISTS (SELECT 1 FROM payment_checkout_holds h WHERE h.payment_id=payments.id AND h.status='active')`,
-        params: [started, payment.id, organizationId, review.reviewed_at, ...bookable.params] },
+          AND captured_amount=0 AND review_json=? AND ${bookable.query}
+          AND EXISTS (SELECT 1 FROM payment_checkout_holds h WHERE h.payment_id=payments.id AND h.status='active')
+          RETURNING review_json`,
+        params: [started, payment.id, organizationId, payment.review_json, ...bookable.params] },
         assertBookingBatchWrite({ query: 'changes() = 1', params: [] }),
         { query: "UPDATE payment_checkout_holds SET expires_at=? WHERE payment_id=? AND status='active'", params: [confirmationHoldUntil(payment, started), payment.id] },
       ], { operation: 'Begin payment for approved stay' })
+      const updated = written?.results[0]
+      if (!isRecord(updated) || typeof updated.review_json !== 'string') throw new Error('Approved stay confirmation has no saved payment review')
+      confirmingPayment = { ...payment, review_json: updated.review_json }
     } catch (error) {
       if (bookingBatchWriteRefused(error)) throw expired()
       throw error
@@ -265,13 +270,21 @@ export async function confirmPayment(db: DbClient, stripe: Stripe, env: Cloudfla
     const held = await execute(db, "UPDATE payment_checkout_holds SET expires_at=MAX(expires_at,?) WHERE payment_id=? AND status='active' AND expires_at>?", [confirmationHoldUntil(payment), payment.id, started])
     if (held.meta.changes !== 1) throw expired()
   }
-  const confirmed = await stripe.paymentIntents.confirm(current.id, {
-    // A method that leaves the site comes back to this pay page, which completes the return there.
-    return_url: new URL(`/pay/${encodeURIComponent(payment.id)}?claim=${encodeURIComponent(claim)}`, siteOrigin).toString(),
-    // The surcharged total is what Stripe charges; the surcharge inside it is named so receipts and refunds carry it.
-    ...(review.surcharge > 0 ? { amount_to_confirm: review.total, amount_details: { surcharge: { amount: review.surcharge, enforce_validation: 'enabled' } } } : {}),
-  } as Stripe.PaymentIntentConfirmParams, { stripeAccount: payment.stripe_account_id, idempotencyKey: `krabiclaw-confirm:${payment.id}:${review.reviewed_at}` })
-  const settled = await reconcilePaymentIntent(db, stripe, payment, confirmed, env)
+  let confirmed: Stripe.PaymentIntent
+  try {
+    confirmed = await stripe.paymentIntents.confirm(current.id, {
+      // A method that leaves the site comes back to this pay page, which completes the return there.
+      return_url: new URL(`/pay/${encodeURIComponent(payment.id)}?claim=${encodeURIComponent(claim)}`, siteOrigin).toString(),
+      // The surcharged total is what Stripe charges; the surcharge inside it is named so receipts and refunds carry it.
+      ...(review.surcharge > 0 ? { amount_to_confirm: review.total, amount_details: { surcharge: { amount: review.surcharge, enforce_validation: 'enabled' } } } : {}),
+    } as Stripe.PaymentIntentConfirmParams, { stripeAccount: payment.stripe_account_id, idempotencyKey: `krabiclaw-confirm:${payment.id}:${review.reviewed_at}` })
+  } catch (error) {
+    if (approval && error instanceof stripe.errors.StripeCardError && error.payment_intent) {
+      await reconcilePaymentIntent(db, stripe, confirmingPayment, error.payment_intent, env)
+    }
+    throw error
+  }
+  const settled = await reconcilePaymentIntent(db, stripe, confirmingPayment, confirmed, env)
   // Automatic confirmation lets whoever holds this secret confirm the intent, so only a payment that needs the browser gets it. Bank verification happens on Stripe's own page.
   const verifying = settled.next_action?.type === 'verify_with_microdeposits'
   const authenticating = settled.status === 'requires_action' && !verifying

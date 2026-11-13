@@ -11,6 +11,7 @@
     </div>
     <p v-if="error" role="alert" class="absolute inset-x-4 top-4 rounded-lg bg-default p-3 text-sm">{{ error }}</p>
     <p v-else-if="!ready" role="status" class="absolute inset-0 grid place-items-center text-sm text-muted">Loading map…</p>
+    <p v-else-if="nearbyError" role="alert" class="absolute inset-x-4 bottom-9 rounded-lg bg-default p-3 text-sm">{{ nearbyError }}</p>
   </div>
 </template>
 
@@ -33,6 +34,7 @@ const container = useTemplateRef('container')
 const ready = ref(false)
 const zoom = ref(2)
 const error = ref('')
+const nearbyError = ref('')
 const controller = new AbortController()
 let map: MapLibreMap | undefined
 
@@ -41,9 +43,13 @@ async function findCity(): Promise<[number, number] | undefined> {
   const url = new URL('https://photon.komoot.io/api/')
   url.search = new URLSearchParams({ q: [props.city, props.region].filter(Boolean).join(', '), countrycode: props.country, limit: '1' }).toString()
   const result = await fetch(url, { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(4500)]) })
-  if (!result.ok) return
-  const coordinates = (await result.json() as { features?: { geometry?: { coordinates?: unknown[] } }[] }).features?.[0]?.geometry?.coordinates
+  if (!result.ok) throw new Error(`The town lookup returned HTTP ${result.status}.`)
+  const { features } = await result.json() as { features?: { geometry?: { coordinates?: unknown[] } }[] }
+  if (!Array.isArray(features)) throw new Error('The town lookup returned invalid results.')
+  if (!features.length) return
+  const coordinates = features[0]?.geometry?.coordinates
   if (typeof coordinates?.[0] === 'number' && typeof coordinates[1] === 'number') return [coordinates[0], coordinates[1]]
+  throw new Error('The town lookup returned invalid coordinates.')
 }
 
 onMounted(async () => {
@@ -83,8 +89,14 @@ onMounted(async () => {
     }
     if (!center) {
       // Only the town and region leave the app. A town center is a starting view, never a saved pin.
-      const nearby = await findCity().catch(() => undefined)
-      if (nearby && !controller.signal.aborted && instance.getZoom() === 2) instance.jumpTo({ center: nearby, zoom: 13 })
+      try {
+        const nearby = await findCity()
+        if (nearby && !controller.signal.aborted && instance.getZoom() === 2) instance.jumpTo({ center: nearby, zoom: 13 })
+      } catch {
+        if (!controller.signal.aborted) nearbyError.value = props.interactive
+          ? 'Could not locate the town. Zoom in and move the map to place your pin.'
+          : 'Could not locate the town.'
+      }
     }
   } catch {
     if (!controller.signal.aborted) error.value = 'The map could not load.'

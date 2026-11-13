@@ -126,7 +126,7 @@ test.describe('Plan and billing', () => {
           await page.setViewportSize({ width, height: 1200 })
           const wide = width >= 1024
 
-          // The index: the plan as its one card, the firm's Offices and the two services. No portal without a Stripe customer.
+          // Basic shows its plan and the two service offers. A billing portal needs a Stripe customer.
           await open(page, `${BASIC}/billing`)
           const index = page.locator('#dashboard-panel-organization-billing')
           await expect(index.getByRole('heading', { name: 'Plan and billing', exact: true })).toBeVisible()
@@ -138,8 +138,14 @@ test.describe('Plan and billing', () => {
           await expect(index.getByTestId('editor-card-locations')).toHaveCount(0)
           await expect(index.getByTestId('editor-card-homes')).toHaveCount(0)
           await expect(index.getByTestId('editor-card-portal')).toHaveCount(0)
-          await expect(index.getByTestId('editor-card-managed-ads')).toContainText('10% of monthly ad spend')
-          await expect(index.getByTestId('editor-card-strategy')).toContainText('$2,000/mo')
+          const managedAdsCard = index.getByTestId('editor-card-managed-ads')
+          await expect(managedAdsCard.getByRole('heading', { name: 'Get more from this budget', exact: true })).toBeVisible()
+          await expect(managedAdsCard.getByText('10% of monthly ad spend', { exact: true })).toBeVisible()
+          await expect(managedAdsCard).toHaveAttribute('href', `${BASIC}/billing/managed-ads`)
+          const strategyCard = index.getByTestId('editor-card-strategy')
+          await expect(strategyCard.getByRole('heading', { name: 'Rank for what your clients search', exact: true })).toBeVisible()
+          await expect(strategyCard.getByText('$2,000/mo', { exact: true })).toBeVisible()
+          await expect(strategyCard).toHaveAttribute('href', `${BASIC}/billing/strategy`)
           // Beside a pane the index opens the plan's one change; on a narrower screen it is the screen.
           await expect(page).toHaveURL(wide ? `${BASIC}/billing/upgrade` : `${BASIC}/billing`)
 
@@ -159,14 +165,22 @@ test.describe('Plan and billing', () => {
             await expect(index.getByRole('heading', { name: 'Plan and billing', exact: true })).toBeVisible()
           }
 
-          // Managed ads off: three unmet requirements, and no consent until they hold.
-          await open(page, `${BASIC}/billing/managed-ads`)
+          await managedAdsCard.click()
+          await expect(page).toHaveURL(`${BASIC}/billing/managed-ads`)
           const ads = page.locator('#dashboard-panel-organization-managed-ads')
           await expect(ads.getByText('10% of monthly ad spend, added to your plan\'s invoice.', { exact: true })).toBeVisible()
-          // Managed ads presents the first action. The plan and payment follow the account.
-          await expect(ads.getByRole('link', { name: 'Connect Google Ads', exact: true })).toHaveAttribute('href', `${BASIC}/integrations/google-ads?service=managed-ads`)
+          // Setup starts with the USD account. Plan, payment and consent are later actions.
+          await expect(ads.getByText('Choose the Google Ads account you want Chris to manage. Managed ads uses accounts billed in USD.', { exact: true })).toBeVisible()
+          const connect = ads.getByRole('link', { name: 'Connect Google Ads', exact: true })
+          await expect(connect).toHaveAttribute('href', `${BASIC}/integrations/google-ads?service=managed-ads`)
           await expect(ads.getByRole('link', { name: 'Review Business plan', exact: true })).toHaveCount(0)
+          await expect(ads.getByRole('button', { name: 'Add payment method', exact: true })).toHaveCount(0)
           await expect(ads.getByRole('button', { name: 'Agree and turn on', exact: true })).toHaveCount(0)
+          await connect.click()
+          await expect(page).toHaveURL(`${BASIC}/integrations/google-ads?service=managed-ads`)
+          const googleAds = page.locator('#dashboard-panel-integration-google-ads')
+          await expect(googleAds.getByRole('heading', { name: 'Google Ads', exact: true })).toBeVisible()
+          await expect(googleAds.getByText('Choose the account billed in USD that you want Chris to manage.', { exact: true })).toBeVisible()
         }
       })
     } finally {

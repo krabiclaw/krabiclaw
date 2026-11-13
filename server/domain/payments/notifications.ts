@@ -9,9 +9,8 @@ import { publishConversationEvent } from '~/server/cloudflare/guest-inbox-events
 import { dashboardOrigin } from '~/server/utils/dashboard-notification-links'
 import { readOrganizationSubscriptions } from '~/server/utils/billing-access'
 import type { StripePlanLoader } from '~/server/utils/better-auth-stripe'
-import type { Payment } from './index'
+import { approvedStayBooking, type Payment } from './index'
 import { buyerPaymentActivityPath } from './buyer'
-import { approvedStayBooking } from './checkout'
 
 export async function notifyPaymentFinancialEvent(db: DbClient, stripe: Stripe, env: CloudflareEnv, payment: Payment, input: {
   kind: GuestPaymentNotificationKind | 'dispute_needs_response' | 'dispute_won' | 'dispute_lost' | 'dispute_closed'
