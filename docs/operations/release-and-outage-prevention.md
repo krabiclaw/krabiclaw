@@ -71,6 +71,12 @@ assets have converged on the exact deployed build before browser coverage
 starts. Retry only the verification job after a verification failure; do not
 redeploy a healthy production Worker to repeat browser checks.
 
+For every iOS App Store submission, select **Automatically release this
+version** in App Store Connect and verify the selection before submitting for
+review. When submitting a build to an existing external TestFlight group,
+select **Automatically notify testers** so the build becomes available to that
+group after Beta App Review.
+
 GitHub workflow runs and Cloudflare's native deployment history are sufficient
 release evidence. Do not invent a second mapping between Git commits and Worker
 version identifiers.
@@ -987,4 +993,4 @@ On November 12 the owner approved deploying v27 before iOS App Review.
 The published iOS 1.5 build 35 uses the previous API. iOS 1.6 build 37
 points at production and Apple needs the new API to test the demo workspace.
 After the v27 deployment, verify the production demo sign-in, Today, Messages
-and a stay before submitting build 37. Use manual release after Apple approval.
+and a stay before submitting build 37.
