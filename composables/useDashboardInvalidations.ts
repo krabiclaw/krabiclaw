@@ -34,6 +34,7 @@ export function provideDashboardInvalidations(organizationSlug: Readonly<Ref<str
   const status = ref<DashboardInvalidationStatus>('closed')
   const event = shallowRef<DashboardInvalidation | null>(null)
   const connectionEpoch = ref(0)
+  let receivedAccessChange = false
   const seenEventIds = new Set<string>()
   let socket: WebSocket | null = null
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
@@ -89,6 +90,7 @@ export function provideDashboardInvalidations(organizationSlug: Readonly<Ref<str
     clearHealthTimer()
     const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const url = `${scheme}//${window.location.host}/api/dashboard/guest-inbox/socket?org=${encodeURIComponent(organizationSlug.value)}`
+    receivedAccessChange = false
     const nextSocket = new WebSocket(url)
     socket = nextSocket
     status.value = 'connecting'
@@ -126,6 +128,7 @@ export function provideDashboardInvalidations(organizationSlug: Readonly<Ref<str
         const first = seenEventIds.values().next().value
         if (first) seenEventIds.delete(first)
       }
+      if (parsed.type === 'access.changed') receivedAccessChange = true
       event.value = parsed
     })
 
@@ -133,8 +136,8 @@ export function provideDashboardInvalidations(organizationSlug: Readonly<Ref<str
       if (socket !== nextSocket) return
       clearHealthTimer()
       socket = null
-      if (closed.code === 1008 && organizationSlug.value) {
-        event.value = { type: 'access.changed', organization_id: currentOrganizationId.value ?? '', event_id: crypto.randomUUID(), occurred_at: new Date().toISOString() }
+      if (closed.code === 1008 && currentOrganizationId.value && !receivedAccessChange) {
+        event.value = { type: 'access.changed', organization_id: currentOrganizationId.value, event_id: crypto.randomUUID(), occurred_at: new Date().toISOString() }
       }
       if (stopped || !organizationSlug.value) {
         status.value = 'closed'

@@ -192,6 +192,9 @@ export class GuestInboxHubObject extends DurableObject<GuestInboxHubEnv> {
       }
       const membership = await socketMembership(this.env, attachment)
       if (!membership) {
+        // This message carries no resource data. Send it before closing so
+        // the client can clear its views even if the close frame is lost.
+        if (event.type === 'access.changed') socket.send(encoded)
         socket.close(1008, 'Session or organization access ended')
         continue
       }
