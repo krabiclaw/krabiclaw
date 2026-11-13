@@ -31,6 +31,8 @@ export default defineHandler(async (event) => {
   if (redirect !== path) throw invalid()
   const { token } = await createAuth(env).api.generateOneTimeToken({ headers: event.req.headers })
   const url = new URL('/onboarding-editor', event.url.origin)
+  // Safari can reuse the previous document when only the fragment changes.
+  url.searchParams.set('attempt', crypto.randomUUID())
   url.hash = new URLSearchParams({ token, redirect, user: userId }).toString()
   return jsonResponse({ url: url.toString() }, { headers: { 'cache-control': 'no-store' } })
 })

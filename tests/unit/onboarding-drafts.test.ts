@@ -43,9 +43,32 @@ test('a different Google place seeds its own time zone while a saved place prese
     source: { type: 'google_places', placeId: place.placeId, place, details: { ...details, timezone: 'Asia/Tokyo' } },
     preview,
   }))
-  assert.equal(normalizeOnboardingDraftInput({}, existing, place).source.details.timezone, 'Asia/Tokyo')
+  const row = { vertical: 'restaurant', subdomain_candidate: 'kikuzuki', organization_id: null } as const
+  assert.equal(normalizeOnboardingDraftInput({}, row, existing, 'google_places', place.placeId, place).payload.source.details.timezone, 'Asia/Tokyo')
   const replacement = { ...place, placeId: 'ChIJ-replacement', timezone: 'Europe/London' }
-  assert.equal(normalizeOnboardingDraftInput({}, existing, replacement).source.details.timezone, 'Europe/London')
-  const edited = normalizeOnboardingDraftInput({ details: { timezone: 'Europe/Paris' } }, existing, replacement)
-  assert.equal(edited.source.details.timezone, 'Europe/Paris')
+  assert.equal(normalizeOnboardingDraftInput({}, row, existing, 'google_places', replacement.placeId, replacement).payload.source.details.timezone, 'Europe/London')
+  const edited = normalizeOnboardingDraftInput({ details: { timezone: 'Europe/Paris' } }, row, existing, 'google_places', replacement.placeId, replacement)
+  assert.equal(edited.payload.source.details.timezone, 'Europe/Paris')
+})
+
+test('a partial update retains an omitted website address and distinguishes clearing it', () => {
+  const start = normalizeOnboardingDraftInput({ partial: true, vertical: 'restaurant', name: 'Kikuzuki', subdomain: 'our-custom-address' }, null, null, 'manual', null, null)
+  const row = { vertical: start.vertical, subdomain_candidate: start.subdomain, organization_id: null }
+  const paused = normalizeOnboardingDraftInput({ partial: true, paused_step: 'location' }, row, start.payload, 'manual', null, null)
+  assert.equal(paused.subdomain, 'our-custom-address')
+  const cleared = normalizeOnboardingDraftInput({ partial: true, subdomain: '' }, row, start.payload, 'manual', null, null)
+  assert.equal(cleared.subdomain, '')
+  const complete = normalizeOnboardingDraftInput({ details: { source_locale: 'en' } }, row, paused.payload, 'manual', null, null)
+  assert.equal(complete.subdomain, 'our-custom-address')
+})
+
+test('completing a partial Google draft retains an edited name for the same place', () => {
+  const start = normalizeOnboardingDraftInput({ partial: true, vertical: 'restaurant', name: 'Our Local Name' }, null, null, 'google_places', place.placeId, null)
+  const row = { vertical: start.vertical, subdomain_candidate: start.subdomain, organization_id: null }
+  const finish = { details: { source_locale: 'en' } }
+  const complete = normalizeOnboardingDraftInput(finish, row, start.payload, 'google_places', place.placeId, place)
+  assert.equal(complete.name, 'Our Local Name')
+  assert.equal(complete.subdomain, 'our-local-name')
+  const replacement = { ...place, placeId: 'ChIJ-replacement', name: 'New Place' }
+  assert.equal(normalizeOnboardingDraftInput(finish, row, start.payload, 'google_places', replacement.placeId, replacement).name, 'New Place')
 })

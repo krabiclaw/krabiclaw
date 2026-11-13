@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { OnboardingFlow, OnboardingStep, OnboardingStepField } from '~/shared/onboarding-flow'
+import { ONBOARDING_STEP_IDS, type OnboardingFlow, type OnboardingStep, type OnboardingStepField } from '~/shared/onboarding-flow'
 import { PLATFORM_LOCALES, platformLocale } from '~/shared/platform-locales'
 import { CURRENCY_OPTIONS, currencyForCountry, isCurrencyCode } from '~/shared/currencies'
 import { TIMEZONE_OPTIONS, isValidTimezone, singleTimezoneForCountry, timezoneLabel } from '~/utils/timezone'
@@ -41,6 +41,7 @@ export const onboardingAnswers = z.object({
   country: z.string(),
   timezone: z.string(),
   timezoneStepVisited: z.boolean().optional(),
+  pausedStep: z.enum(ONBOARDING_STEP_IDS).optional(),
   currency: z.string().nullable(),
 })
 
@@ -114,12 +115,15 @@ export function onboardingFlow(answers: z.infer<typeof onboardingAnswers>, optio
     },
   )
 
-  const incomplete = steps.find(step => !step.canAdvance)
+  const firstIncomplete = steps.findIndex(step => !step.canAdvance)
+  const paused = steps.findIndex(step => step.id === answers.pausedStep)
+  const furthest = firstIncomplete === -1 ? steps.length - 1 : firstIncomplete
   return {
     steps,
-    resumeStep: incomplete?.id ?? 'currency',
-    canSave: !incomplete,
-    exitLabel: incomplete ? 'Exit' : 'Save & exit',
+    resumeStep: steps[paused === -1 ? furthest : Math.min(paused, furthest)]!.id,
+    canSave: answers.vertical !== null,
+    canFinish: firstIncomplete === -1,
+    exitLabel: answers.vertical ? 'Save & exit' : 'Exit',
     backLabel: 'Back',
     proposedTimezone,
     proposedCurrency,

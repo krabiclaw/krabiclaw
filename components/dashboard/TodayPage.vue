@@ -24,6 +24,7 @@
 
       <!-- A guest account's own visits. -->
       <template v-if="personalScope">
+        <slot name="personal-setup" />
         <ul v-if="visits.length" class="space-y-4" role="list" data-testid="today-list">
           <li v-for="item in visits" :key="item.id"><TodayAgendaCard :item="item" /></li>
         </ul>

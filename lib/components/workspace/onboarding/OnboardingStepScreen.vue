@@ -58,7 +58,7 @@
     <LocationTimezoneField v-else-if="step.id === 'timezone'" v-model="timezone" :items="plan?.timezones" :label="fieldLabel('timezone')" />
 
     <div v-else-if="step.id === 'language'" role="group" :aria-label="fieldLabel('sourceLocale')">
-      <p v-if="state.draftId && selectedLanguage">{{ selectedLanguage.label }}</p>
+      <p v-if="state.languageLocked && selectedLanguage">{{ selectedLanguage.label }}</p>
       <OnboardingChoiceGrid
         v-else
         :choices="plan?.languages ?? []"

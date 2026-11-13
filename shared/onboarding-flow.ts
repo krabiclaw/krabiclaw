@@ -2,7 +2,8 @@ import type { OrganizationVertical } from '~/utils/vertical-copy'
 import type { PhoneCountry } from '~/utils/phone'
 import type { CurrencyCode } from '~/shared/currencies'
 
-export type OnboardingStepId = 'type' | 'business' | 'location' | 'timezone' | 'language' | 'currency'
+export const ONBOARDING_STEP_IDS = ['type', 'business', 'location', 'timezone', 'language', 'currency'] as const
+export type OnboardingStepId = typeof ONBOARDING_STEP_IDS[number]
 
 export interface OnboardingStepField {
   key: 'name' | 'subdomain' | 'country' | 'streetAddress' | 'addressLine2' | 'city' | 'region' | 'postalCode' | 'timezone' | 'sourceLocale' | 'currency'
@@ -28,6 +29,7 @@ export interface OnboardingFlow {
   steps: OnboardingStep[]
   resumeStep: OnboardingStepId
   canSave: boolean
+  canFinish: boolean
   exitLabel: string
   backLabel: string
   proposedTimezone: string | null

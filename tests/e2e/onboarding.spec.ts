@@ -90,6 +90,21 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   await expect(step('type')).toContainText('Your business website')
   await page.getByRole('button', { name: 'Restaurant, café or bar' }).click()
   await expect(step('type')).toContainText('Kikuzuki')
+
+  const exitSetup = async () => {
+    await page.getByRole('button', { name: 'Save & exit', exact: true }).click()
+    await expect(page).toHaveURL(/\/dashboard\/account$/)
+  }
+  const continueSetup = async (next: string) => {
+    await page.getByRole('link', { name: 'Continue website setup', exact: true }).click()
+    await expect(step(next)).toBeVisible()
+  }
+  await exitSetup()
+  const typeDraft = await page.request.get('/api/dashboard/onboarding/drafts/active')
+  expect(typeDraft.status(), await typeDraft.text()).toBe(200)
+  expect(await typeDraft.json()).toMatchObject({ draft: { vertical: 'restaurant', organization_id: null, paused_step: 'type' } })
+  await continueSetup('type')
+  await expect(step('type').getByRole('button', { name: 'Restaurant, café or bar' })).toHaveAttribute('aria-pressed', 'true')
   await advance('Continue', 'business')
 
   const placesRequests: string[] = []
@@ -97,6 +112,9 @@ test('a new owner builds a draft and creates a site through the routed flow', as
     if (sent.url().includes('/api/dashboard/google-places/')) placesRequests.push(sent.url())
   })
   await page.getByRole('textbox', { name: 'Business name' }).fill(name)
+  await exitSetup()
+  await continueSetup('business')
+  await expect(page.getByRole('textbox', { name: 'Business name' })).toHaveValue(name)
   await advance('Next', 'location')
 
   // A country is required, while the street and city can stay empty.
@@ -107,6 +125,11 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   await page.getByRole('option', { name: /Thailand/ }).click()
   await expect(step('location')).toContainText('🇹🇭')
   await expect(step('location')).toContainText('Bangkok · GMT+7')
+  await step('location').getByRole('textbox', { name: 'City or town' }).fill('Ao Nang')
+  await exitSetup()
+  await continueSetup('location')
+  await expect(step('location').getByRole('textbox', { name: 'City or town' })).toHaveValue('Ao Nang')
+  await step('location').getByRole('textbox', { name: 'City or town' }).clear()
   await step('location').getByRole('button', { name: 'Country', exact: true }).click()
   await page.getByPlaceholder('Search country...').fill('United States')
   await page.getByRole('option', { name: 'United States', exact: true }).click()

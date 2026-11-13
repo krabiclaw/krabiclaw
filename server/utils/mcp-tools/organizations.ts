@@ -80,11 +80,11 @@ const websiteDraftProductSchema = {
 const websiteDraftOutputSchema = {
   type: 'object', properties: {
     draft_id: { type: 'string' }, updated_at: { type: 'string', format: 'date-time' }, organization_id: { type: 'string' }, idempotency_key: { type: 'string' },
-    status: { type: 'string', enum: ['active', 'committed'] }, subdomain: { type: 'string' },
-    name: { type: 'string' }, vertical: { type: 'string', enum: ALL_VERTICALS }, source_locale: { type: 'string' },
+    status: { type: 'string', enum: ['active', 'committed'] }, subdomain: { type: ['string', 'null'] },
+    name: { type: 'string' }, vertical: { type: 'string', enum: ALL_VERTICALS }, source_locale: { type: ['string', 'null'] },
     currency: { type: 'string' }, timezone: { type: 'string' }, location: websiteDraftLocationSchema,
     hero_headline: { type: 'string' }, hero_subtitle: { type: 'string' }, products: { type: 'array', items: websiteDraftProductSchema },
-    missing_fields: { type: 'array', items: { type: 'string', enum: ['source_locale', 'currency', 'timezone', 'subdomain'] } },
+    missing_fields: { type: 'array', items: { type: 'string', enum: ['name', 'source_locale', 'currency', 'timezone', 'subdomain'] } },
   }, required: ['draft_id', 'updated_at', 'status', 'subdomain', 'name', 'vertical', 'source_locale', 'location', 'products', 'missing_fields'], additionalProperties: false,
 } as const
 

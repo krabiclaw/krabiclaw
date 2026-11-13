@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:a90afaf642225d8b7088f17c8df80e82fc15b990ca4debe5cf1ee65ff4a2737d",
-  "documentationFingerprint": "sha256:8f76e1a31233335f2ea454536d0884448882a1e9e4944e06d4242e21853a52b2",
+  "fingerprint": "sha256:4214614ae9652f20655710a0c7e845a5682e01b5a13aa94fbfe7e44c9b0a7b6a",
+  "documentationFingerprint": "sha256:2ca05740792e52bc6ab5b54ed01f271be841546c0760b01e8d7f16dcf983c170",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -66885,6 +66885,7 @@
           "missing_fields": {
             "items": {
               "enum": [
+                "name",
                 "source_locale",
                 "currency",
                 "timezone",
@@ -66925,7 +66926,10 @@
             "type": "array"
           },
           "source_locale": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "status": {
             "enum": [
@@ -66935,7 +66939,10 @@
             "type": "string"
           },
           "subdomain": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "timezone": {
             "type": "string"
@@ -100073,6 +100080,7 @@
           "missing_fields": {
             "items": {
               "enum": [
+                "name",
                 "source_locale",
                 "currency",
                 "timezone",
@@ -100113,7 +100121,10 @@
             "type": "array"
           },
           "source_locale": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "status": {
             "enum": [
@@ -100123,7 +100134,10 @@
             "type": "string"
           },
           "subdomain": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "timezone": {
             "type": "string"
@@ -128850,14 +128864,14 @@
         "create_product": "sha256:f7e979538daf37680ab576caa9a7e21728858fcb53da524b409476f3092a9dba",
         "get_organization": "sha256:7659406922dc74826fdfd890dc16fb069dbc35c3af276860b62306848b471f06",
         "get_site_page": "sha256:19e8f6df9f3d8dba2fa2a14be053e505abd0564cdf279d649db199c2afdd46d6",
-        "get_website_draft": "sha256:c9a35d9cbeeac75d7f0be22022549499d6f881100f1ef31851ba08ec238baed5",
+        "get_website_draft": "sha256:c1444d21ed13337ab56e9d48764d8befe1e0016ba625bc70c8b7d6f29d179d24",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_organizations": "sha256:1d699ce3820543aed0a3f9b17007d6f33a3c498d17a73f77de0971943a98d30a",
         "list_products": "sha256:bd6b30cee8a405d0bcdf6313fa20396a2e287bb3285b977fdc1c27baed9c48f0",
         "list_site_pages": "sha256:5a49aa342807192ee45d329880f2f459d1914154e9a04a43562c0ea3587879cc",
         "publish_website": "sha256:05e40520e524c3ab6c5cf48d56bd0cc94e9e18f61c11b519930950ecc0c7fdee",
-        "save_website_draft": "sha256:3fa5e06d7509ac6181e1f7c4f2bb44e570e52ba6e28109c82fd7f8e11686a0d2",
+        "save_website_draft": "sha256:175fdfcf6b66beeecf25d2db60354d5273ea34c59ad8140487e3e714001cfc35",
         "update_menu": "sha256:947551eb104f6be470aeaab3b3570d0ab9924d01450192f8ac88a77f91de7433",
         "update_organization_settings": "sha256:7191c77fc0ed6eb5ce818283be58acb26679a8cf793cbba600dccb694e8051a6",
         "update_site_page": "sha256:d1e8cc9a99c9970e6f8c84785867979a71b4adb09725cd72fe7d81c9af6350cb"

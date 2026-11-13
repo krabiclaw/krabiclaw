@@ -12,7 +12,7 @@ export default defineHandler(() => {
 <noscript>Return to the KrabiClaw app to open your editor.</noscript></main>
 <script nonce="${nonce}">
 const params = new URLSearchParams(location.hash.slice(1));
-history.replaceState(null, '', location.pathname);
+history.replaceState(null, '', location.pathname + location.search);
 const token = params.get('token');
 const path = params.get('redirect');
 const user = params.get('user');
@@ -21,7 +21,10 @@ const button = document.getElementById('continue');
 if (!token || !user || !path || !/^\\/dashboard\\/[a-z0-9-]+\\/products\\/[a-zA-Z0-9-]+(?:\\?location_id=[a-zA-Z0-9-]+)?$/.test(path)) {
   status.textContent = 'Return to the app and open the editor again.';
 } else {
-  const unavailable = () => { status.textContent = 'This link couldn’t open the editor. Return to the app and try again.'; };
+  const unavailable = () => {
+    button.hidden = true;
+    status.textContent = 'This link couldn’t open the editor. Return to the app and try again.';
+  };
   button.addEventListener('click', async () => {
     button.disabled = true;
     try {

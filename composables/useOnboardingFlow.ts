@@ -22,6 +22,7 @@ export interface OnboardingFlowState {
   placeId: string | null
   subdomain: string | undefined
   savedSubdomain: string | null
+  languageLocked: boolean
   details: {
     name: string
     city: string
@@ -35,6 +36,7 @@ export interface OnboardingFlowState {
   }
   timezone: string
   timezoneStepVisited: boolean
+  pausedStep: OnboardingStepId | undefined
   draftId: string | null
   draftRevision: string | null
   created: { organization_slug: string; subdomain: string; next_url: string } | null
@@ -47,12 +49,14 @@ export function emptyOnboardingState(): OnboardingFlowState {
     placeId: null,
     subdomain: undefined,
     savedSubdomain: null,
+    languageLocked: false,
     details: {
       name: '', city: '', streetAddress: '', addressLine2: '', region: '', postalCode: '',
       country: '', currency: null, sourceLocale: null,
     },
     timezone: '',
     timezoneStepVisited: false,
+    pausedStep: undefined,
     draftId: null,
     draftRevision: null,
     created: null,

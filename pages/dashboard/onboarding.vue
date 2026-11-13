@@ -46,7 +46,7 @@ const isWelcome = computed(() => requestedId.value === 'type')
 const nuxtApp = useNuxtApp()
 const { data: initialPlan, error: restoreError } = await useAsyncData('onboarding-flow', async () => {
   await draft.restore()
-  return nuxtApp.runWithContext(() => draft.readFlow())
+  return nuxtApp.runWithContext(() => draft.readFlow({ ...draft.flowAnswers.value, pausedStep: state.value.pausedStep }))
 })
 plan.value = initialPlan.value ?? null
 
@@ -95,7 +95,7 @@ async function goNext() {
     if (!step?.canAdvance) return
 
     if (step.action === 'commit') {
-      if (!flow.canSave) {
+      if (!flow.canFinish) {
         await router.push(onboardingStepPath(flow.resumeStep))
         return
       }
@@ -124,9 +124,9 @@ async function saveAndExit() {
     if (!restoreError.value) {
       const flow = await draft.readFlow()
       plan.value = flow
-      if (flow.canSave && !await saveOrReopenBusiness(flow)) return
+      if (flow.canSave && !await saveOrReopenBusiness(flow, currentStep.value?.id)) return
     }
-    await router.push('/dashboard')
+    await router.push('/dashboard/account')
   } catch (error) {
     flowError.value = getErrorMessage(error, 'Could not exit setup.')
   } finally {
@@ -134,8 +134,8 @@ async function saveAndExit() {
   }
 }
 
-async function saveOrReopenBusiness(flow: NonNullable<typeof plan.value>) {
-  if (await draft.save(flow)) return true
+async function saveOrReopenBusiness(flow: NonNullable<typeof plan.value>, step?: NonNullable<typeof currentStep.value>['id']) {
+  if (await draft.save(flow, step)) return true
   if (draft.subdomainConflict.value) {
     plan.value = await draft.readFlow()
     await router.push(onboardingStepPath('business'))
