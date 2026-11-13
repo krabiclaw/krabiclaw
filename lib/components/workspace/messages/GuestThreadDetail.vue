@@ -128,6 +128,8 @@
 </template>
 
 <script setup lang="ts">
+import { isMessageIdentity, type MessageIdentity } from '~/shared/dashboard-invalidations'
+
 import { useIntervalFn, useDocumentVisibility } from '@vueuse/core'
 import { getErrorMessage, isNotFoundError } from '~/utils/errors'
 import { isThreadDetailResponse, type StreamItem, type ThreadDetail } from '~/lib/components/workspace/messages/guest-thread-client'
@@ -190,6 +192,31 @@ type Row =
 */
 const attempt = ref<{ key: string; body: string; photos: MessagePhotoDraft[]; sentAfter: Set<string> } | null>(null)
 const sending = ref(false)
+let settledReply: MessageIdentity | undefined
+const deferredCreates: MessageIdentity[] = []
+let reconcileRequested = false
+let reconciling = false
+let accessRevision = 0
+
+function reconcileThread() {
+  reconcileRequested = true
+  void drainThreadChanges()
+}
+
+async function drainThreadChanges() {
+  if (reconciling || pending.value || sending.value || !reconcileRequested) return
+  reconciling = true
+  try {
+    while (reconcileRequested && !sending.value) {
+      reconcileRequested = false
+      await refresh({ dedupe: 'defer' })
+    }
+  } finally {
+    reconciling = false
+  }
+}
+watch([pending, sending], () => { void drainThreadChanges() })
+
 // The server's message for a reply that was on screen as a pending one takes its key, so it settles in place.
 const settledKeys = ref<Record<string, string>>({})
 
@@ -377,29 +404,36 @@ async function sendReply() {
     attempt.value = { key: crypto.randomUUID(), body, photos, sentAfter: new Set(thread.value.stream.map(item => item.id)) }
   }
   const current = attempt.value
+  const revision = accessRevision
   sending.value = true
   actionError.value = null
   void scrollToLatest()
   try {
-    const res = await (props.personalScope ? applicationFetch : dashboardApi)<{ thread: ThreadDetail }>(`${threadPath.value}/${props.personalScope ? 'reply' : 'operations/reply'}`, {
+    const res = await (props.personalScope ? applicationFetch : dashboardApi)<{ thread: ThreadDetail; message?: MessageIdentity }>(`${threadPath.value}/${props.personalScope ? 'reply' : 'operations/reply'}`, {
       method: 'POST',
       body: photos.length ? messageReplyForm(body, photos, current.key, props.personalScope ? null : usedSuggestion.value) : { body, idempotency_key: current.key, ...(!props.personalScope && usedSuggestion.value ? { suggestion: usedSuggestion.value } : {}) },
-      validate: isThreadDetailResponse,
+      validate: (value): value is { thread: ThreadDetail; message?: MessageIdentity } => isThreadDetailResponse(value)
+        && (props.personalScope || isMessageIdentity(Reflect.get(value, 'message'))),
     })
-    const reply = res.thread.stream.findLast(item => item.type === 'message' && item.side === mineSide.value && !current.sentAfter.has(item.id))
+    if (revision !== accessRevision) return
+    settledReply = res.message
+    const reply = res.message ? res.thread.stream.find(item => item.type === 'message' && item.id === res.message?.id) : res.thread.stream.findLast(item => item.type === 'message' && item.side === mineSide.value && !current.sentAfter.has(item.id))
     if (reply) settledKeys.value = { ...settledKeys.value, [reply.id]: `pending:${current.key}` }
-    data.value = res
+    if (pending.value) clear()
+    data.value = { thread: res.thread }
     if (requestingChange.value) changeRequestSent.value = true
     attempt.value = null
     draft.value = ''
     usedSuggestion.value = null
     chosen.value = []
   } catch (err) {
+    if (revision !== accessRevision) return
     actionError.value = getErrorMessage(err, 'Failed to send reply')
     // The words and photos come back to the composer rather than vanishing with the bubble.
     if (!draft.value) draft.value = body
     if (!chosen.value.length) chosen.value = photos
   } finally {
+    if (deferredCreates.splice(0).some(message => message.id !== settledReply?.id || message.sequence !== settledReply.sequence)) reconcileThread()
     sending.value = false
   }
 }
@@ -420,13 +454,24 @@ async function retry(messageId: string) {
   }
 }
 
-watch(realtime.event, (event) => {
-  if (props.personalScope || !event) return
-  if (event.organization_id !== dashboard.organizationId.value) return
-  // Access changes invalidate the cached identity, including hydration data and in-flight reads.
-  if (event.type === 'access.changed') clear()
-  if (event.type === 'access.changed' || ((event.type === 'MESSAGE_CREATE' || event.type === 'MESSAGE_UPDATE') && event.conversation_id === props.threadId)) void refresh()
-})
+watch(realtime.event, event => {
+  if (props.personalScope || !event || event.organization_id !== dashboard.organizationId.value) return
+  if (event.type === 'access.changed') {
+    accessRevision++
+    settledReply = undefined
+    deferredCreates.length = 0
+    clear()
+    reconcileThread()
+    return
+  }
+  if ((event.type !== 'MESSAGE_CREATE' && event.type !== 'MESSAGE_UPDATE') || event.team || event.conversation_id !== props.threadId) return
+  if (event.type === 'MESSAGE_CREATE' && event.message) {
+    const message = event.message
+    if (sending.value) { deferredCreates.push(message); return }
+    if (message.id === settledReply?.id && message.sequence === settledReply.sequence) return
+  }
+  reconcileThread()
+}, { flush: 'sync' })
 
 watch(error, cause => {
   if (cause?.statusCode !== 403 && cause?.statusCode !== 404) return
@@ -439,9 +484,7 @@ watch(error, cause => {
 }, { flush: 'sync' })
 
 watch(realtime.connectionEpoch, (epoch) => {
-  if (epoch <= 0) return
-  if (!props.personalScope) realtime.connect()
-  void refresh()
+  if (epoch > 1 && !props.personalScope) reconcileThread()
 })
 
 const documentVisibility = useDocumentVisibility()
@@ -464,7 +507,7 @@ async function readThroughNewest() {
   if (!import.meta.client || markingRead || documentVisibility.value !== 'visible' || pending.value || !fromSomeoneElse.value) return
   const newest = shownMessages.value.at(-1)?.id
   const target = newest ? `${readScope.value}:${newest}` : null
-  if (!newest || target === readThrough) return
+  if (!newest || target === readThrough || (!props.personalScope && newest === settledReply?.id)) return
   markingRead = true
   try {
     await (props.personalScope ? applicationFetch : dashboardApi)(readPath.value, {
@@ -473,9 +516,12 @@ async function readThroughNewest() {
     })
     readThrough = target
     readError.value = null
-    refreshConversationUnreadCount()
+    if (props.personalScope || realtime.status.value !== 'open') refreshConversationUnreadCount()
   } catch (cause) { readError.value = getErrorMessage(cause, 'Message read state could not be saved') }
-  finally { markingRead = false }
+  finally {
+    markingRead = false
+    if (!readError.value && shownMessages.value.at(-1)?.id !== newest) void readThroughNewest()
+  }
 }
 watch([() => shownMessages.value.at(-1)?.id, documentVisibility, pending, readScope], readThroughNewest, { immediate: true })
 

@@ -26,7 +26,7 @@ export default defineHandler(async (event) => {
   if (!thread) return jsonResponse({ error: 'Thread not found', code: 'THREAD_NOT_FOUND', field: 'conversation_id' }, { status: 404 })
   const principal = memberAccessPrincipal(organization.membership, { env, event })
   await assertGuestOperations(principal)
-  await assertConversationAccess(db, principal, thread.id)
+  const conversation = await assertConversationAccess(db, principal, thread.id)
 
   // A reply with photos arrives as a form, its photos as `photos` parts in the
   // order they were chosen; every other operation is JSON.
@@ -86,7 +86,7 @@ export default defineHandler(async (event) => {
 
   // The change is not done until the open inboxes have been told about it.
   if (outcome.ok || outcome.reason === 'delivery_failed') {
-    await publishConversationEvent(env, db, { conversationId: thread.id, type: ['reply', 'confirm', 'reject', 'cancel', 'no_show', 'retry'].includes(action) ? 'MESSAGE_CREATE' : 'MESSAGE_UPDATE' })
+    await publishConversationEvent(env, db, { conversationId: thread.id, message: outcome.ok ? outcome.message : undefined, type: ['reply', 'confirm', 'reject', 'cancel', 'no_show', 'retry'].includes(action) ? 'MESSAGE_CREATE' : 'MESSAGE_UPDATE' })
   }
 
   if (outcome.ok === false) {
@@ -114,6 +114,6 @@ export default defineHandler(async (event) => {
     throw new HTTPError({ statusCode: 500, message: 'Guest-thread operation returned an unhandled outcome', data: { code: 'INVALID_OPERATION_OUTCOME', field: 'outcome.reason' } })
   }
 
-  const detail = await getInboxThread(db, threadId, organizationId, { audience: 'member', userId: principal.userId, principal })
-  return jsonResponse({ thread: detail, available_actions: outcome.availableActions }, { status: outcome.status })
+  const detail = await getInboxThread(db, threadId, organizationId, { audience: 'member', userId: principal.userId, principal, conversation: action === 'reply' ? conversation : undefined })
+  return jsonResponse({ thread: detail, available_actions: outcome.availableActions, ...outcome.message && { message: outcome.message } }, { status: outcome.status })
 })

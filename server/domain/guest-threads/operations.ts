@@ -43,7 +43,7 @@ import type {
 // person's own (conversations.ts archiveQuery), not an operation here.
 export const GUEST_THREAD_ACTIONS = new Set(['reply', 'report', 'block', 'unblock', 'accept_change', 'decline_change', 'retry'])
 
-type SuccessfulOperationOutcome = { ok: true; status: 200; thread: GuestThreadRow; availableActions: string[] }
+type SuccessfulOperationOutcome = { ok: true; status: 200; thread: GuestThreadRow; availableActions: string[]; message?: { id: string; sequence: number } }
 
 export type OperationOutcome =
   | SuccessfulOperationOutcome
@@ -132,6 +132,7 @@ function conflict(message = 'Idempotency key was reused with a different request
 async function successfulOutcome(
   db: DbClient,
   context: ThreadContext,
+  message?: { id: string; sequence: number },
 ): Promise<SuccessfulOperationOutcome | NotFoundOutcome> {
   const current = await loadThreadContext(db, context.thread.id, context.thread.organization_id)
   if ('ok' in current) return current
@@ -140,6 +141,7 @@ async function successfulOutcome(
     ok: true,
     status: 200,
     thread: current.thread,
+    ...message && { message: { id: message.id, sequence: message.sequence } },
     availableActions: requestActions(current.record, new Date().toISOString()),
   }
 }
@@ -491,7 +493,7 @@ async function executeReply(
     })
     if (sent instanceof MessagePhotoRejection) return { ok: false, status: 400, reason: 'invalid_photo', message: sent.message }
     if (!sent.ok) return { ...sent, reason: 'delivery_failed' }
-    return successfulOutcome(db, context)
+    return successfulOutcome(db, context, sent.message)
   }
   const dedupeKey = operationDedupeKey(input)
   const deliveryKey = deliveryDedupeKey(input)
@@ -502,7 +504,7 @@ async function executeReply(
     if (!earlier || earlier.message_id !== entry.id) throw new Error('Reply delivery receipt does not match its message')
     if (isDeliverySent(earlier) && !earlier.error) {
       await reconcileConversationTasks(db, context.thread.id)
-      return successfulOutcome(db, context)
+      return successfulOutcome(db, context, entry)
     }
   }
 
@@ -560,7 +562,7 @@ async function executeReply(
   if (entry.channel === 'web') {
     // The guest reads it in their own inbox, where it is unread until they open it.
     await reconcileConversationTasks(db, context.thread.id)
-    return await successfulOutcome(db, context)
+    return await successfulOutcome(db, context, entry)
   }
   // A reply saved for email whose address has since been removed is not sent anywhere else.
   if (!guestEmail) return { ok: false, status: 409, reason: 'delivery_failed', code: 'GUEST_EMAIL_REQUIRED', field: 'guest.email', message: 'This reply was saved to be emailed, but the guest no longer has an email address.' }
@@ -568,7 +570,7 @@ async function executeReply(
   if (!delivery || delivery.message_id !== entry.id) throw new Error('Reply delivery receipt does not match its message')
   if (isDeliverySent(delivery) && !delivery.error) {
     await reconcileConversationTasks(db, context.thread.id)
-    return successfulOutcome(db, context)
+    return successfulOutcome(db, context, entry)
   }
 
   const fromName = await getOrganizationBrandName(db, context.thread.organization_id)
@@ -584,7 +586,7 @@ async function executeReply(
 
   if (isDeliverySent(outcome)) {
     await reconcileConversationTasks(db, context.thread.id)
-    return await successfulOutcome(db, context)
+    return await successfulOutcome(db, context, entry)
   }
   if (typeof outcome.error !== 'string' || !outcome.error.trim()) {
     throw new HTTPError({ statusCode: 502, statusMessage: 'Failed email delivery did not provide its error', data: { code: 'INVALID_DELIVERY_RESPONSE', field: 'error' } })

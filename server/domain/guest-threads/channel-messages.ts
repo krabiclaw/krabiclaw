@@ -394,7 +394,7 @@ export async function backfillChannexMessages(db: DbClient, env: ChannelEnv, pro
 }
 
 /** Channel replies use the same canonical ledger, photo owner and delivery receipts as every inbox reply. */
-export type ChannelReplyOutcome = { ok: true } | {
+export type ChannelReplyOutcome = { ok: true; message: { id: string; sequence: number } } | {
   ok: false; status: 409 | 502; code: 'CHANNEL_REPLY_FAILED'; field: 'delivery.status'; message: string
   mutation_applied: true; operation_completed: false; request_id: string; retry_with_same_idempotency_key: true
   provider_error?: ChannexError['data']
@@ -426,7 +426,7 @@ export async function replyThroughChannex(db: DbClient, env: ChannexEnv & Upload
     if (isDeliverySent(receipt)) {
       if (!receipt.provider_message_id?.trim()) fail(500, 'CHANNEL_RECEIPT_INVALID', 'A successful channel reply has no provider message ID', 'delivery.provider_message_id')
       await reconcileConversationTasks(db, input.mapping.conversation_id)
-      return { ok: true }
+      return { ok: true, message: { id: entry.id, sequence: entry.sequence } }
     }
   }
   // Whether the home may still be written to is the caller's (guestReplyDestination);
@@ -473,7 +473,7 @@ export async function replyThroughChannex(db: DbClient, env: ChannexEnv & Upload
   if (isDeliverySent(receipt)) {
     if (!receipt.provider_message_id?.trim()) fail(500, 'CHANNEL_RECEIPT_INVALID', 'A successful channel reply has no provider message ID', 'delivery.provider_message_id')
     await reconcileConversationTasks(db, input.mapping.conversation_id)
-    return { ok: true }
+    return { ok: true, message: { id: entry.id, sequence: entry.sequence } }
   }
   let photo: ReturnType<typeof assertMessagePhotos>[number] | undefined
   if (input.photoCount) {
@@ -526,5 +526,5 @@ export async function replyThroughChannex(db: DbClient, env: ChannexEnv & Upload
     { query: `DELETE FROM messages WHERE id IN (${echoed})`, params: echoParams },
   ])
   await reconcileConversationTasks(db, input.mapping.conversation_id)
-  return { ok: true }
+  return { ok: true, message: { id: entry.id, sequence: entry.sequence } }
 }

@@ -30,6 +30,7 @@ export function provideDashboardInvalidations(organizationSlug: Readonly<Ref<str
     return connection
   }
 
+  const currentOrganizationId = useDashboardOrganization().organizationId
   const status = ref<DashboardInvalidationStatus>('closed')
   const event = shallowRef<DashboardInvalidation | null>(null)
   const connectionEpoch = ref(0)
@@ -128,10 +129,13 @@ export function provideDashboardInvalidations(organizationSlug: Readonly<Ref<str
       event.value = parsed
     })
 
-    nextSocket.addEventListener('close', () => {
+    nextSocket.addEventListener('close', (closed) => {
       if (socket !== nextSocket) return
       clearHealthTimer()
       socket = null
+      if (closed.code === 1008 && organizationSlug.value) {
+        event.value = { type: 'access.changed', organization_id: currentOrganizationId.value ?? '', event_id: crypto.randomUUID(), occurred_at: new Date().toISOString() }
+      }
       if (stopped || !organizationSlug.value) {
         status.value = 'closed'
         return

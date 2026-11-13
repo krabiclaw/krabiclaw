@@ -171,6 +171,10 @@ async function inboxScope(organizationId: string | null, opts: ListGuestThreadsO
     where += ` AND ${access.sql}`
     params.push(...access.params)
   }
+  if (opts.conversationIds) {
+    where += " AND gt.id IN (SELECT value FROM json_each(?))"
+    params.push(d1JsonStringSet(opts.conversationIds))
+  }
   if (opts.locationId) { where += ' AND gt.location_id = ?'; params.push(opts.locationId) }
   if (opts.assignedMemberId) { where += ' AND op.assigned_member_id = ?'; params.push(opts.assignedMemberId) }
   if (opts.type) where += threadTypeWhere(opts.type)
@@ -198,6 +202,7 @@ type ListRow = {
   kind: 'contact' | 'booking' | 'team'
   name: string | null
   created_at: string
+  last_message_at: string
   reply_channel: 'email' | 'airbnb'
   support: number
   organization_name: string
@@ -266,7 +271,7 @@ export async function listConversations(
       const others = people.filter(person => person.conversation_id === row.id && person.user_id !== opts.userId).map(person => person.name)
       const title = row.name ?? row.record_title ?? (others.length ? others.join(', ') : 'You')
       return {
-        id: row.id, kind: 'team', title, avatar_initial: initial(title), channel: 'direct',
+        id: row.id, ...opts.includeSortKey && { last_message_at: row.last_message_at }, kind: 'team', title, avatar_initial: initial(title), channel: 'direct',
         home: row.record_unit === 'nights' ? row.record_title : row.location_title, when,
         preview: message ? messagePreview(message.text, message.photos) : '',
         preview_from: message ? message.actorUserId === opts.userId ? 'You' : message.actorName ? firstName(message.actorName) : 'KrabiClaw' : null,
@@ -282,6 +287,7 @@ export async function listConversations(
     const inquiry = request.kind === 'booking' ? request.payload.inquiry : undefined
     return {
       id: row.id,
+      ...opts.includeSortKey && { last_message_at: row.last_message_at },
       kind: support ? 'support' : 'guest',
       title: shownName,
       avatar_initial: initial(shownName),
@@ -335,7 +341,7 @@ function previewFrom(message: LatestMessage, context: { guestName: string; viewe
  * scope and the one unread statement, so a count never disagrees with a row.
  */
 export async function countUnreadConversations(db: DbClient, organizationId: string, opts: ListGuestThreadsOptions): Promise<UnreadCounts> {
-  const scope = await inboxScope(organizationId, { ...opts, kind: null, q: null, mailbox: 'current', unreadOnly: false }, new Date().toISOString())
+  const scope = await inboxScope(organizationId, { ...opts, conversationIds: undefined, kind: null, q: null, mailbox: 'current', unreadOnly: false }, new Date().toISOString())
   const unread = unreadSql('gt', opts.userId)
   const rows = await queryAll<{ list_kind: 'guests' | 'support' | 'team'; count: number }>(db, `
     SELECT CASE WHEN gt.kind = 'team' THEN 'team' WHEN ${SUPPORT_CONVERSATION_SQL('gt')} THEN 'support' ELSE 'guests' END AS list_kind, COUNT(*) AS count

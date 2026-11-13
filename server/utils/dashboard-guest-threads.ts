@@ -17,6 +17,8 @@ import type { CloudflareEnv } from '~/server/utils/auth'
 import { messageListPage } from '~/server/domain/guest-message-schedule'
 
 export interface DashboardGuestThreadListQuery {
+  conversationIds?: string[]
+  includeSortKey?: boolean
   limit?: number
   offset?: number
   locationId?: string | null
@@ -57,12 +59,19 @@ export function parseGuestThreadListQuery(query: Record<string, unknown>): Dashb
     if (typeof value === 'string' && value.trim()) return value.trim()
     throw invalid(key, `${key} must be a non-empty string`)
   }
+  const ids = id('ids')?.split(',')
+  if (ids && (ids.length > 100 || ids.some(value => !value || value.length > 200) || query.offset !== undefined)) {
+    throw invalid('ids', 'ids must name up to 100 conversations without an offset')
+  }
+  const includeSortKey = filter('sort_key', ['1'])
   const unread = filter('unread', ['1', 'true', '0', 'false'])
   const q = id('q')
   if (q !== null && q.length > 200) throw invalid('q', 'q must be at most 200 characters')
   // The menu's kinds: All is no filter.
   const kind = filter('kind', ['all', 'guests', 'support', 'team'])
   return {
+    conversationIds: ids,
+    includeSortKey: Boolean(includeSortKey),
     limit: query.limit === undefined ? 100 : Number(query.limit),
     offset: query.offset === undefined ? 0 : Number(query.offset),
     locationId: id('location_id'),
@@ -76,7 +85,7 @@ export function parseGuestThreadListQuery(query: Record<string, unknown>): Dashb
 
 // `org` is the dashboard's route scope, not a filter, and is read elsewhere.
 const GUEST_THREAD_LIST_PARAMS = new Set([
-  'location_id', 'type', 'kind', 'q', 'unread', 'mailbox', 'org', 'limit', 'offset',
+  'location_id', 'type', 'kind', 'q', 'unread', 'mailbox', 'org', 'limit', 'offset', 'ids', 'sort_key',
 ])
 
 /** The extra row proves whether another page exists; no total is inferred. */
@@ -88,6 +97,8 @@ export function guestThreadListPage(rows: InboxRow[], query: Pick<DashboardGuest
 /** The list response the dashboard and the app read, with its unread counts; the contract fixtures in contracts/inbox are generated from it. */
 export async function memberInbox(db: DbClient, organizationId: string, principal: MemberAccessPrincipal, query: DashboardGuestThreadListQuery): Promise<InboxListPage & { unread: InboxUnreadCounts }> {
   const options = {
+    conversationIds: query.conversationIds,
+    includeSortKey: query.includeSortKey,
     limit: (query.limit ?? 100) + 1,
     offset: query.offset ?? 0,
     locationId: query.locationId ?? null,
@@ -110,6 +121,12 @@ export async function memberInbox(db: DbClient, organizationId: string, principa
 export async function loadOrganizationConversations(event: H3Event, organizationId: string, query: DashboardGuestThreadListQuery) {
   const { db, env, organization } = await requireOrganizationMembership(event, organizationId)
   return memberInbox(db, organizationId, memberAccessPrincipal(organization.membership, { env, event }), query)
+}
+
+/** The workspace Messages badge counts exactly the same Current conversations as the list. */
+export async function loadOrganizationConversationUnread(event: H3Event, organizationId: string) {
+  const { db, principal } = await requireOrganizationPrincipal(event, organizationId)
+  return countUnreadConversations(db, organizationId, { principal, userId: principal.userId })
 }
 
 /** One conversation the member may read, by the one access statement. */

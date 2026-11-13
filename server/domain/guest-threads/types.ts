@@ -193,6 +193,7 @@ export type InboxChannel = 'airbnb' | 'direct'
 /** One row of the list, as Airbnb's hosting inbox draws it. */
 export interface InboxRow {
   id: string
+  last_message_at?: string
   kind: InboxThreadKind
   title: string
   avatar_initial: string
@@ -300,6 +301,8 @@ export interface InboxThreadDetails {
 }
 
 export interface ListGuestThreadsOptions {
+  conversationIds?: string[]
+  includeSortKey?: boolean
   buyerAudience?: boolean
   organizationId?: string | null
   locationId?: string | null

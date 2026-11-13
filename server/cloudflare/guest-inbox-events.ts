@@ -10,7 +10,7 @@ export interface GuestInboxPublicationEnv {
 export async function publishConversationEvent(
   env: GuestInboxPublicationEnv,
   db: DbClient,
-  input: { conversationId: string; type: ConversationEvent['type'] },
+  input: { conversationId: string; type: ConversationEvent['type']; message?: ConversationEvent['message'] },
 ): Promise<void> {
   const conversation = await queryFirst<{ id: string; organization_id: string; location_id: string | null; kind: string }>(db,
     'SELECT id, organization_id, location_id, kind FROM conversations WHERE id = ?', [input.conversationId])
@@ -22,6 +22,7 @@ export async function publishConversationEvent(
     location_id: conversation.location_id,
     conversation_id: conversation.id,
     team: conversation.kind === 'team',
+    ...input.message && { message: input.message },
     occurred_at: new Date().toISOString(),
   })
 }
