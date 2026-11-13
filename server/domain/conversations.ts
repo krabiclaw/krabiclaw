@@ -187,8 +187,8 @@ function messageTime(input: MessageInput, occurredAt: string): string {
 export function messageQueries(input: MessageInput): { id: string; dedupeKey: string; queries: BatchQuery[] } {
   const id = input.id ?? crypto.randomUUID()
   const dedupeKey = input.dedupeKey ?? `message:${id}`
-  const occurredAt = input.occurredAt ?? new Date().toISOString()
   const createdAt = new Date().toISOString()
+  const occurredAt = input.occurredAt ?? createdAt
   const written = 'EXISTS (SELECT 1 FROM messages written WHERE written.id = ?)'
   const queries: BatchQuery[] = [{
     query: `INSERT INTO messages (id, organization_id, conversation_id, sequence, author_kind, author_user_id, channel, body, event_name, payload_json, dedupe_key, occurred_at, created_at)

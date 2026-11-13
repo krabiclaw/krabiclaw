@@ -41,10 +41,11 @@ export async function getOrganizationMembersData(env: CloudflareEnv, organizatio
     .filter(role => role !== creatorRole || canGrantOwner)
     .map(value => ({ value, label: organizationRoleLabel(value) }))
   const inviteRoles = canInvite ? roleChoices : []
+  const canViewInvitations = canInvite || canCancel
   const adapter = await organizationAdapter(env)
   const [memberRows, invitationRows] = await Promise.all([
     listAllOrganizationMembers(adapter, organization.id),
-    canInvite || canCancel ? adapter.findPendingInvitations({ organizationId: organization.id }) : [],
+    canViewInvitations ? adapter.findPendingInvitations({ organizationId: organization.id }) : [],
   ])
   const onlyOwner = memberRows.filter(member => hasCreatorRole(member.role)).length === 1
   const roleOrder = new Map([['owner', 0], ['admin', 1]])
@@ -54,6 +55,7 @@ export async function getOrganizationMembersData(env: CloudflareEnv, organizatio
       return {
         id: member.id,
         userId: member.userId,
+        isCurrentUser: member.userId === userId,
         user: { name: member.user.name, email: member.user.email, image: member.user.image ?? null },
         role: member.role,
         roleLabel: roleLabel(member.role),
@@ -71,6 +73,7 @@ export async function getOrganizationMembersData(env: CloudflareEnv, organizatio
         role: invitation.role,
         roleLabel: roleLabel(invitation.role),
         expiresAt: invitation.expiresAt,
+        statusLabel: 'Pending',
         canResend: canInvite && (!hasCreatorRole(invitation.role) || canGrantOwner),
         canCancel,
         delivery: {
@@ -81,5 +84,5 @@ export async function getOrganizationMembersData(env: CloudflareEnv, organizatio
       }
     })
 
-  return { members, invitations, inviteRoles }
+  return { members, invitations, inviteRoles, canViewInvitations }
 }
