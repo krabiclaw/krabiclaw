@@ -14,7 +14,7 @@ export function readActiveWebsiteDraft() {
   return applicationFetch<ActiveWebsiteDraft>('/api/dashboard/onboarding/drafts/active', {
     validate: (value): value is ActiveWebsiteDraft => isRecord(value) && value.success === true
       && (value.draft === null ? value.resume_action === null : isRecord(value.draft)
-        && isRecord(value.resume_action) && typeof value.resume_action.title === 'string'
+        && isRecord(value.resume_action)
         && typeof value.resume_action.label === 'string' && value.resume_action.to === WEBSITE_ONBOARDING_PATH),
   })
 }

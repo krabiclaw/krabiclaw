@@ -12,7 +12,6 @@ import { WEBSITE_ONBOARDING_PATH, type WebsiteOnboardingResumeAction } from '~/s
 
 const noDraft = { success: true, draft: null, resume_action: null }
 const resumeAction: WebsiteOnboardingResumeAction = {
-  title: 'Your website setup is saved',
   label: 'Continue website setup',
   to: WEBSITE_ONBOARDING_PATH,
 }

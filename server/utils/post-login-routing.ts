@@ -2,7 +2,7 @@ import type { CloudflareEnv } from '~/server/utils/auth'
 import { isOrganizationWideRole, listUserOrganizations, resolveUserOrganization } from '~/server/utils/member-access'
 import { buyerActivities } from '~/server/domain/payments/buyer'
 import { readActiveOnboardingDraft } from '~/server/utils/onboarding-drafts'
-import { WEBSITE_ONBOARDING_PATH, WEBSITE_ONBOARDING_SAVED_PATH } from '~/shared/onboarding-flow'
+import { WEBSITE_ONBOARDING_EXIT_PATH, WEBSITE_ONBOARDING_PATH } from '~/shared/onboarding-flow'
 
 export type PostLoginDestination = `/dashboard/${string}`
 
@@ -29,7 +29,7 @@ export type PostLoginRoute =
   | { kind: 'enter', destination: PostLoginDestination }
   | { kind: 'activate', organizationId: string, destination: PostLoginDestination }
   | { kind: 'choose', destination: '/dashboard/select-organization' }
-  | { kind: 'onboard', destination: typeof WEBSITE_ONBOARDING_PATH | typeof WEBSITE_ONBOARDING_SAVED_PATH }
+  | { kind: 'onboard', destination: typeof WEBSITE_ONBOARDING_PATH | typeof WEBSITE_ONBOARDING_EXIT_PATH }
 
 function organizationDestination(organization: { id: string; slug: string; role: string }): PostLoginDestination {
   return isOrganizationWideRole(organization.role)
@@ -54,9 +54,8 @@ export async function resolvePostLoginRoute(
   // makes the organization a dashboard destination.
   const organizations = (await listUserOrganizations(env, userId)).filter(org => org.id !== draft?.organization_id)
   if (organizations.length === 0) {
-    if (draft?.status === 'active') return { kind: 'onboard', destination: WEBSITE_ONBOARDING_SAVED_PATH }
     if ((await buyerActivities(env.DB, userId)).activities.length) return { kind: 'enter', destination: '/dashboard/account' }
-    return { kind: 'onboard', destination: WEBSITE_ONBOARDING_PATH }
+    return { kind: 'onboard', destination: draft?.status === 'active' ? WEBSITE_ONBOARDING_EXIT_PATH : WEBSITE_ONBOARDING_PATH }
   }
   if (organizations.length > 1) return { kind: 'choose', destination: '/dashboard/select-organization' }
 

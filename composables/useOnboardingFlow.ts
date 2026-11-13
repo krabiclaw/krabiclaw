@@ -2,6 +2,7 @@ import type { CurrencyCode } from '~/shared/currencies'
 import type { PostalAddress } from '~/utils/postal-address'
 import type { OpeningHours } from '~/shared/reservation-hours'
 import { WEBSITE_ONBOARDING_PATH, type OnboardingFlow, type OnboardingStepId } from '~/shared/onboarding-flow'
+import { validatedInternalPath } from '~/shared/auth/return-target'
 import type { OrganizationVertical } from '~/utils/vertical-copy'
 
 /** The place the business picker hands back: Place Details for the chosen prediction. */
@@ -72,6 +73,18 @@ export function useOnboardingPlan() {
   return useState<OnboardingFlow | null>('onboarding-plan', () => null)
 }
 
-export function onboardingStepPath(id: OnboardingStepId) {
-  return id === 'type' ? WEBSITE_ONBOARDING_PATH : `${WEBSITE_ONBOARDING_PATH}/${id}`
+export function onboardingReturnTarget(value: unknown) {
+  const target = validatedInternalPath(value)
+  const pathname = target?.split(/[?#]/, 1)[0]
+  if (!pathname?.startsWith('/dashboard/') || /^\/dashboard\/(?:onboarding|app)(?:\/|$)/i.test(pathname)) return undefined
+  return target
+}
+
+export function onboardingLink(to: string, origin: unknown) {
+  const returnTo = onboardingReturnTarget(origin)
+  return returnTo ? `${to}?${new URLSearchParams({ returnTo })}` : to
+}
+
+export function onboardingStepPath(id: OnboardingStepId, origin?: string) {
+  return onboardingLink(id === 'type' ? WEBSITE_ONBOARDING_PATH : `${WEBSITE_ONBOARDING_PATH}/${id}`, origin)
 }

@@ -45,7 +45,7 @@ Evaluate the CMS on Android as well as desktop.
 
 | Moment | Existing surface / owner | Outcome and independent readback |
 | --- | --- | --- |
-| Arrive or resume | `/api/post-login`, `/dashboard/onboarding`, and the iOS guide | A new owner starts on Business type with a neutral illustration. Selecting a type shows an example website. After **Save & exit**, the saved setup screen offers **Continue website setup**, which opens the saved question or the first incomplete prerequisite. |
+| Arrive or resume | `/api/post-login`, `/dashboard/onboarding`, and the iOS guide | A new owner starts on Business type with a neutral illustration. Selecting a type shows an example website. **Save & exit** returns to the page that opened setup. **Continue website setup** in the organization controls reopens the saved question or the first incomplete prerequisite. |
 | Describe the business | Server flow projection, web step controls and native iOS views | Collect type, name, country, a time zone, website language and pricing currency. Address fields are optional. An unambiguous time zone appears in the address screen. |
 | Save | **Save & exit** or **Finish**, through the shared draft operation | Save answers from Business type onward. A partial save leaves organization creation until the answers are complete. Read the saved draft through the active-draft endpoint. The same draft retains prior contact, hours, brand and authored products. |
 | Finish | Existing activation operation | Activate the organization, set session scope and close the draft. The site is private. The server routes the owner to their first offering where applicable. |
@@ -132,11 +132,12 @@ Each question occupies one screen. The web paths live under
 | `language` | What language is your website in? | Select a supported language. The source language of existing draft content is fixed. |
 | `currency` | What currency do you price in? | Confirm or change the proposed pricing currency and select **Finish**. |
 
-`GET /api/post-login` sends new owners to the business picker and returns
-owners whose only site is a draft to `/dashboard/onboarding/saved`. iOS
-requests `?format=json` to read the same destination without changing the
-active organization. `GET /api/dashboard/onboarding/drafts/active` supplies
-the saved answers and the saved screen’s title and action for both clients.
+`GET /api/post-login` sends new owners to the business picker. Owners with a
+draft and no business dashboard can continue from Account → Organizations on
+web and the account setup view on iOS. iOS requests `?format=json` to read the
+destination without changing the active organization.
+`GET /api/dashboard/onboarding/drafts/active` supplies the saved answers and
+the resume action for both clients.
 
 `POST /api/dashboard/onboarding/flow` evaluates the current answers and returns
 the ordered steps, field labels, business and language choices, currency and

@@ -3,10 +3,9 @@ import type { PhoneCountry } from '~/utils/phone'
 import type { CurrencyCode } from '~/shared/currencies'
 
 export const WEBSITE_ONBOARDING_PATH = '/dashboard/onboarding'
-export const WEBSITE_ONBOARDING_SAVED_PATH = '/dashboard/onboarding/saved'
+export const WEBSITE_ONBOARDING_EXIT_PATH = '/dashboard/account/profile/organizations'
 
 export interface WebsiteOnboardingResumeAction {
-  title: string
   label: string
   to: typeof WEBSITE_ONBOARDING_PATH
 }

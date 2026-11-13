@@ -7,6 +7,7 @@ import { seededTenant } from './seed/manifest'
 import { readLocalTenant } from './test-env'
 import { formatMinorAmount } from '../../shared/prices'
 import { starterPalette } from '../../shared/site-palette'
+import { WEBSITE_ONBOARDING_EXIT_PATH } from '../../shared/onboarding-flow'
 import type { Product } from '../../server/types/products'
 
 // The manual-name path of the new-site flow, driven the way an owner drives it:
@@ -77,8 +78,7 @@ test('a new owner builds a draft and creates a site through the routed flow', as
     await expect(step(next)).toBeVisible()
   }
 
-  await page.goto('/dashboard/onboarding/saved')
-  await expect(page).toHaveURL(/\/dashboard\/onboarding$/)
+  await page.goto('/dashboard/onboarding')
   // The shell reads the saved draft back before it renders a screen at all, and
   // a click that lands on pre-hydration markup has no handler, so wait for the
   // screen to say it is hydrated rather than merely present.
@@ -94,12 +94,11 @@ test('a new owner builds a draft and creates a site through the routed flow', as
 
   const exitSetup = async () => {
     await page.getByRole('button', { name: 'Save & exit', exact: true }).click()
-    await expect(page).toHaveURL(/\/dashboard\/onboarding\/saved$/)
-    await expect(page.getByRole('heading', { name: 'Your website setup is saved' })).toBeVisible()
+    await expect(page).toHaveURL(`${baseURL}${WEBSITE_ONBOARDING_EXIT_PATH}`)
   }
   const continueSetup = async (next: string) => {
     const action = page.getByRole('link', { name: 'Continue website setup', exact: true })
-    await expect(action).toHaveAttribute('href', '/dashboard/onboarding')
+    await expect(action).toHaveAttribute('href', /^\/dashboard\/onboarding(?:\?|$)/)
     await action.click()
     await expect(step(next)).toBeVisible()
   }
@@ -108,18 +107,26 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   expect(typeDraft.status(), await typeDraft.text()).toBe(200)
   expect(await typeDraft.json()).toMatchObject({
     draft: { vertical: 'restaurant', organization_id: null, paused_step: 'type' },
-    resume_action: { title: 'Your website setup is saved', label: 'Continue website setup', to: '/dashboard/onboarding' },
+    resume_action: { label: 'Continue website setup', to: '/dashboard/onboarding' },
   })
   const personal = await page.context().newPage()
   await personal.goto('/dashboard/account')
-  await expect(personal.getByRole('link', { name: 'Continue website setup' })).toHaveCount(0)
+  await expect(personal.locator('#account-today').getByRole('link', { name: 'Continue website setup' })).toHaveCount(0)
   await personal.close()
   const signedInAgain = await page.request.get('/api/post-login', { maxRedirects: 0 })
   expect(signedInAgain.status()).toBe(302)
-  expect(signedInAgain.headers().location).toBe('/dashboard/onboarding/saved')
+  expect(signedInAgain.headers().location).toBe(WEBSITE_ONBOARDING_EXIT_PATH)
+  const personalMenu = '/dashboard/account/menu'
+  await page.goto(personalMenu)
   await continueSetup('type')
   await expect(step('type').getByRole('button', { name: 'Restaurant, café or bar' })).toHaveAttribute('aria-pressed', 'true')
   await advance('Continue', 'business')
+  await page.reload()
+  await expect(step('business')).toBeVisible()
+  await page.getByRole('button', { name: 'Save & exit', exact: true }).click()
+  await expect(page).toHaveURL(`${baseURL}${personalMenu}`)
+  await page.goto(WEBSITE_ONBOARDING_EXIT_PATH)
+  await continueSetup('business')
 
   const placesRequests: string[] = []
   page.on('request', (sent) => {
@@ -178,10 +185,10 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   expect((await nativeWorkspaces.json()).organizations).not.toContainEqual(expect.objectContaining({ id: initialDraft.organization_id }))
   const draftDestination = await page.request.get('/api/post-login?format=json')
   expect(draftDestination.status()).toBe(200)
-  expect(await draftDestination.json()).toEqual({ destination: '/dashboard/onboarding/saved' })
+  expect(await draftDestination.json()).toEqual({ destination: WEBSITE_ONBOARDING_EXIT_PATH })
   const webDraftDestination = await page.request.get('/api/post-login', { maxRedirects: 0 })
   expect(webDraftDestination.status()).toBe(302)
-  expect(webDraftDestination.headers().location).toBe('/dashboard/onboarding/saved')
+  expect(webDraftDestination.headers().location).toBe(WEBSITE_ONBOARDING_EXIT_PATH)
   const anonymousPreview = await readLocalTenant(request, subdomain, '/')
   expect(anonymousPreview.status()).toBe(404)
 
@@ -310,7 +317,7 @@ test('a new experience site saves its first experience privately until booking s
     await page.goto('/dashboard/onboarding')
     await expect(page.locator('[data-onboarding-step="currency"]')).toBeVisible()
     await page.getByRole('button', { name: 'Save & exit', exact: true }).click()
-    await expect(page).toHaveURL(/\/dashboard\/onboarding\/saved$/)
+    await expect(page).toHaveURL(`${baseURL}${WEBSITE_ONBOARDING_EXIT_PATH}`)
 
     // Read the actual catalog independently of the onboarding draft writer.
     const catalog = await page.request.get(`/api/editor/organizations/${organizationId}/products`)
@@ -420,7 +427,7 @@ test('an owner changes their restaurant draft to lodging and saves their first h
   await advance('Next', 'language')
   await advance('Next', 'currency')
   await page.getByRole('button', { name: 'Save & exit', exact: true }).click()
-  await expect(page).toHaveURL(/\/dashboard\/onboarding\/saved$/)
+  await expect(page).toHaveURL(`${baseURL}${WEBSITE_ONBOARDING_EXIT_PATH}`)
 
   const saved = await page.request.get('/api/dashboard/onboarding/drafts/active')
   expect(saved.status(), await saved.text()).toBe(200)
@@ -743,7 +750,7 @@ test('a new owner picks their Google listing and it seeds location, contact and 
   await page.getByRole('button', { name: 'Next', exact: true }).click()
   await expect(step('currency')).toContainText('Thai Baht (THB)')
   await page.getByRole('button', { name: 'Save & exit', exact: true }).click()
-  await expect(page).toHaveURL(/\/dashboard\/onboarding\/saved$/)
+  await expect(page).toHaveURL(`${baseURL}${WEBSITE_ONBOARDING_EXIT_PATH}`)
 
   // The saved draft names the Google place, which the server fetched itself.
   const saved = await page.request.get('/api/dashboard/onboarding/drafts/active')
