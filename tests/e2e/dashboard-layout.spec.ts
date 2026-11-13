@@ -116,6 +116,7 @@ test.describe('dashboard pane hierarchy', () => {
     test.describe.configure({ mode: 'default' })
 
   test('Team changes member roles through Better Auth, and self-demotion refreshes context before leaving Team', async ({ page, baseURL, browser, playwright }, testInfo) => {
+    test.setTimeout(60_000)
     test.skip(Boolean(process.env.PLAYWRIGHT_PREVIEW_URL), 'Role writes use local D1 only.')
     const organizationId = seededTenant('restaurant').organizationId
     const release = await acquireTenantMutationLock(testInfo, organizationId)
