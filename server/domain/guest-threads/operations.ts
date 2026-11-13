@@ -17,7 +17,7 @@ import { renderNotificationEmail } from '~/server/emails/render'
 import { guestThreadReplyMessage, guestThreadStatusMessage } from '~/server/notifications/guest-events'
 import { organizationLogo } from '~/server/notifications/hero'
 import { getPlatformDomain, buildBuyerRequestActivityUrl } from '~/server/utils/dashboard-notification-links'
-import { isBookingComplete, isChannelManagedStay, STAY_CHANNEL_LABELS, type StayChannel } from '~/shared/bookings'
+import { isBookingComplete, isChannelManagedStay, STAY_CHANNEL_LABELS } from '~/shared/bookings'
 import { creationRequestHash } from '~/server/utils/organization-events'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import { guestPresentation } from '~/server/utils/notifications'
@@ -26,7 +26,7 @@ import { platformLocale } from '~/shared/platform-locales'
 import { formatTimestamp } from '~/utils/timezone'
 import { publishConversationEvent } from '~/server/cloudflare/guest-inbox-events'
 import { describeErrorForTelemetry } from '~/shared/error-telemetry'
-import { assertReplyIntent, getChannelThreadMapping, replyThroughChannex, type ChannelThreadMapping } from './channel-messages'
+import { assertReplyIntent, guestThreadChannel, replyThroughChannex, type ChannelThreadMapping } from './channel-messages'
 import { respondToStayChangeRequest } from './stay-change-requests'
 import type { ChannexEnv, ChannexError } from '~/server/integrations/channex/client'
 import { announceContentReport, assertSameReport, contentReportId, contentReportInsert, guestThreadExcerpt, reportReason, type ContentReportEnv } from '~/server/domain/content-reports'
@@ -472,8 +472,9 @@ async function executeReply(
   }
   // A recorded reply continues on the channel it was recorded on; a new one goes where the rule says.
   const recorded = await findMessageByDedupeKey(db, operationDedupeKey(input))
-  const destination = await guestReplyDestination(db, context.thread)
-  const recordedMapping = recorded?.channel === 'airbnb' ? await getChannelThreadMapping(db, context.thread.id, context.thread.organization_id) : null
+  const channelFacts = await guestThreadChannel(db, context.thread.id, context.thread.organization_id)
+  const destination = await guestReplyDestination(db, context.thread, channelFacts)
+  const recordedMapping = recorded?.channel === 'airbnb' ? channelFacts?.mapping ?? null : null
   if (recorded?.channel === 'airbnb' && !recordedMapping) throw new Error(`Reply ${recorded.id} was recorded on Airbnb but its conversation has no channel mapping`)
   const channel = recorded ? recordedMapping : destination.channel === 'airbnb' ? destination.mapping : null
   if (channel && (photoCount > 1 || (photoCount && body))) throw new HTTPError({ statusCode: 400, message: 'Send one Airbnb photo at a time, separately from text', data: { code: 'CHANNEL_PHOTO_MESSAGE_INVALID', field: 'photos' } })
@@ -613,15 +614,16 @@ export type GuestReplyDestination =
  * (a direct stay's current contact), or their KrabiClaw account inbox, also
  * emailed when that account has a verified email.
  */
-export async function guestReplyDestination(db: DbClient, thread: Pick<GuestRequest, 'id' | 'organization_id' | 'kind' | 'user_id' | 'booking_id' | 'payload'>): Promise<GuestReplyDestination> {
-  const mapping = await getChannelThreadMapping(db, thread.id, thread.organization_id)
-  if (mapping) {
-    const connected = await queryFirst(db, "SELECT 1 FROM product_channel_mappings WHERE provider = 'channex' AND organization_id = ? AND product_id = ? AND enabled = 1", [thread.organization_id, mapping.product_id])
-    return connected ? { channel: 'airbnb', mapping } : { channel: null, reason: GUEST_DISCONNECTED_MESSAGE }
-  }
+export async function guestReplyDestination(
+  db: DbClient,
+  thread: Pick<GuestRequest, 'id' | 'organization_id' | 'user_id' | 'payload'>,
+  channelFacts?: Awaited<ReturnType<typeof guestThreadChannel>>,
+): Promise<GuestReplyDestination> {
+  const facts = channelFacts === undefined ? await guestThreadChannel(db, thread.id, thread.organization_id) : channelFacts
+  if (!facts) throw new Error(`Conversation ${thread.id} has no channel facts`)
+  if (facts.mapping) return facts.connected ? { channel: 'airbnb', mapping: facts.mapping } : { channel: null, reason: GUEST_DISCONNECTED_MESSAGE }
   // A channel's reservation is answered on its channel: until that conversation exists there is nowhere to reply.
-  const channelBooking = thread.kind === 'booking' && thread.booking_id ? await queryFirst<{ channel: StayChannel; owner: 'app' | 'channel' }>(db, 'SELECT channel, owner FROM bookings WHERE organization_id = ? AND id = ?', [thread.organization_id, thread.booking_id]) : null
-  if (channelBooking && isChannelManagedStay(channelBooking)) return { channel: null, reason: `This ${STAY_CHANNEL_LABELS[channelBooking.channel]} stay has no conversation to reply in yet.` }
+  if (facts.booking && isChannelManagedStay(facts.booking)) return { channel: null, reason: `This ${STAY_CHANNEL_LABELS[facts.booking.channel]} stay has no conversation to reply in yet.` }
   const email = thread.payload.guest.email?.trim() || null
   if (email) return { channel: 'email', email }
   if (thread.user_id === null) return { channel: null, reason: GUEST_UNREACHABLE_MESSAGE }
