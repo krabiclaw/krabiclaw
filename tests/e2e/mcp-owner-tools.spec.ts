@@ -10,7 +10,8 @@ import { bookTable, openSeating, seededTables, tableSeatings } from './helpers/t
 import { getDateIntervals, toTimeString, type OpeningHours, type SpecialHours } from '../../shared/reservation-hours'
 import { addLocalDays, localDateAt, localDateTimeToInstant, localNow } from '../../utils/timezone'
 import type { Product } from '../../server/types/products'
-import type { InboxThread, InboxThreadDetails } from '../../server/domain/guest-threads/types'
+import type { InboxThreadDetails } from '../../server/domain/guest-threads/types'
+import type { ConversationPage } from '../../shared/messages-contract'
 import { formQuestionsRevision } from '../../shared/form-questions'
 import type { SessionAvailability } from '../../server/utils/availability'
 import type { readMemberScheduling } from '../../server/domain/member-scheduling'
@@ -378,12 +379,11 @@ test.describe('stateless MCP server', () => {
       const contactSubmission = (await listConversations('contact')).find(row => row.title === `MCP Contact ${contactEmail}`)
       expect(contactSubmission).toMatchObject({ conversation_id: expect.any(String), preview: 'hello from MCP e2e' })
       const conversationId = contactSubmission!.conversation_id
-      const readContact = async () => mcpData<{ guest: { guest: { email: string }; archived: boolean; messages: Array<{ id: string; author: string; body: string | null; event: string | null }> } }>(await (await mcpRequest(request, baseURL!, {
-        method: 'tools/call', toolName: 'get_conversation', args: { organization_id: organizationId, conversation_id: conversationId } })).json()).guest
+      const readContact = async () => mcpData<ConversationPage>(await (await mcpRequest(request, baseURL!, {
+        method: 'tools/call', toolName: 'get_conversation', args: { organization_id: organizationId, conversation_id: conversationId } })).json())
       const contact = await readContact()
-      expect(contact.guest.email).toBe(contactEmail)
       // The contact's words are the guest's first message.
-      expect(contact.messages[0]).toMatchObject({ author: 'guest', body: 'hello from MCP e2e', event: 'thread.submission' })
+      expect(contact.entries.find(entry => entry.type === 'message')).toMatchObject({ side: 'guest', body: 'hello from MCP e2e' })
       const emptyReply = await mcpRequest(request,baseURL!,{method:'tools/call',toolName:'send_message',args:{organization_id:organizationId,conversation_id:conversationId,idempotency_key:crypto.randomUUID()}})
       expect(emptyReply.status()).toBe(200)
       const emptyReplyResult = (await emptyReply.json()).result
@@ -391,11 +391,11 @@ test.describe('stateless MCP server', () => {
       expect(emptyReplyResult.structuredContent).toBeUndefined()
       expect(emptyReplyResult.content[0].text).toContain('Invalid arguments for tool send_message')
       // The refused reply wrote nothing: the conversation MCP and the dashboard read are as they were.
-      expect((await readContact()).messages.map(message => message.id)).toEqual(contact.messages.map(message => message.id))
-      const unchangedContact = await request.get(`${baseURL}/api/dashboard/organizations/${organizationId}/guest-threads/${conversationId}`)
+      expect((await readContact()).entries.map(message => message.id)).toEqual(contact.entries.map(message => message.id))
+      const unchangedContact = await request.get(`${baseURL}/api/messages/${conversationId}`)
       expect(unchangedContact.status()).toBe(200)
-      const unchangedContactState = (await unchangedContact.json() as { thread: InboxThread }).thread
-      expect(unchangedContactState.stream.filter(item => item.type === 'message')).toMatchObject([{ side: 'guest', body: 'hello from MCP e2e' }])
+      const unchangedContactState = (await unchangedContact.json() as ConversationPage)
+      expect(unchangedContactState.entries.filter(item => item.type === 'message')).toMatchObject([{ side: 'guest', body: 'hello from MCP e2e' }])
       // Reading writes nothing: the guest's message is still unread. MCP marks it read and unread, and the list reads each back.
       const contactUnread = async () => (await listConversations('contact')).find(row => row.conversation_id === conversationId)?.unread
       expect(await contactUnread()).toBe(true)
@@ -410,12 +410,11 @@ test.describe('stateless MCP server', () => {
         const archive = await mcpRequest(request,baseURL!,{method:'tools/call',toolName:'set_conversation_archived',args:{organization_id:organizationId,conversation_id:conversationId,archived}})
         expect(archive.status()).toBe(200)
         expect(mcpData<{ conversation_id: string; archived: boolean }>(await archive.json())).toEqual({ conversation_id: conversationId, archived })
-        expect((await readContact()).archived).toBe(archived)
-        const nativeActions = await request.get(`${baseURL}/api/dashboard/organizations/${organizationId}/guest-threads/${conversationId}/details`)
+          const nativeActions = await request.get(`${baseURL}/api/dashboard/organizations/${organizationId}/guest-threads/${conversationId}/details`)
         expect(nativeActions.status()).toBe(200)
         expect((await nativeActions.json() as InboxThreadDetails).actions).toMatchObject({ archive: !archived, unarchive: archived })
-        const native = await request.get(`${baseURL}/api/dashboard/organizations/${organizationId}/guest-threads/${conversationId}`)
-        expect(((await native.json() as { thread: InboxThread }).thread.stream.filter(item => item.type !== 'day'))).toEqual(unchangedContactState.stream.filter(item => item.type !== 'day'))
+        const native = await request.get(`${baseURL}/api/messages/${conversationId}`)
+        expect(((await native.json() as ConversationPage).entries.filter(item => item.type !== 'day'))).toEqual(unchangedContactState.entries.filter(item => item.type !== 'day'))
       }
 
       // The assistant reads the table booking with every other booking, at its seating.

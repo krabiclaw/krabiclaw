@@ -4,9 +4,12 @@ import type { InboxUnreadCounts } from '~/server/domain/guest-threads/types'
 /** The current mailbox count belongs to a reader and workspace, independent of list filters. */
 export function useInboxUnread(organizationId: Ref<string | null | undefined>) {
   const session = authClient.useSession()
-  const scopes = useState<Record<string, { unread: InboxUnreadCounts | null; lists: number }>>('inbox-unread', () => ({}))
+  const scopes = useState<Record<string, InboxUnreadCounts | null>>('inbox-unread', () => ({}))
   const key = computed(() => JSON.stringify([session.value.data?.user.id, organizationId.value]))
-  return computed(() => scopes.value[key.value] ??= { unread: null, lists: 0 })
+  return computed({
+    get: () => scopes.value[key.value] ?? null,
+    set: value => { scopes.value[key.value] = value },
+  })
 }
 
 export function isInboxUnread(value: unknown): value is InboxUnreadCounts {

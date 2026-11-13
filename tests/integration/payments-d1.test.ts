@@ -18,7 +18,8 @@ import { ingestStripeFeeReport, stripeFeeMinor, stripeFeeScaled } from '../../se
 import { buyerActivities, buyerPaymentActivityPath, claimCheckoutReturn, tokenHash } from '../../server/domain/payments/buyer.ts'
 import { loadBuyerBookingDetails } from '../../server/utils/dashboard-booking-details.ts'
 import { cancelBookingRequest, requestInsertQueries, threadPayloadForGuest } from '../../server/domain/requests.ts'
-import { appendMessage, markConversationRead } from '../../server/domain/conversations.ts'
+import { appendMessage, markConversationRead, readGuestConversation, resolveConversationAccess } from '../../server/domain/conversations.ts'
+import { transferBookingGuestSeat } from '../../server/domain/conversation-participants.ts'
 import { getGuestThreadDetail } from '../../server/domain/guest-threads/detail.ts'
 import { getInboxThread } from '../../server/domain/guest-threads/inbox.ts'
 import { archiveConversation, listConversations } from '../../server/domain/guest-threads/repository.ts'
@@ -248,6 +249,10 @@ test('a checkout thread stays out of Messages until payment creates its booking'
  const { db, runtime, env } = await boot()
  try {
   const provenance = { source: 'website', external_reference: null, actor_user_id: null, idempotency_key: 'checkout-key', fingerprint: 'checkout-fingerprint', guest_acknowledgement: true, creation_kind: 'checkout' as const, creation_status: 'confirmed' as const, followups_completed: false }
+  await db.batch([
+    db.prepare("INSERT INTO user(id,name,email,emailVerified) VALUES('owner-reader','Owner','owner-reader@example.com',1)"),
+    db.prepare("INSERT INTO member(id,organizationId,userId,role) VALUES('owner-reader-member',?,'owner-reader','owner')").bind(ORG),
+  ])
   const opening = { id: 'checkout-request', kind: 'booking' as const, organization_id: ORG, location_id: null, user_id: 'verified', booking_id: null, payload: { ...threadPayloadForGuest({ name: 'Verified', email: 'verified@example.com' }), provenance }, created_at: NOW }
   await db.batch(requestInsertQueries(opening, undefined, { opening: 'Class for 1 guest', note: 'A note before paying' }).map(write => db.prepare(write.query).bind(...write.params)))
   const owner = async () => (await listConversations(db, ORG, { userId: 'owner-reader' })).map(row => row.id)
@@ -844,7 +849,13 @@ test('buyer Activity groups exact owned visits and immutable orders without manu
   assert.deepEqual(order.payments![0]!.order,{lines:[{id:'immutable-line',title:'Original item title',unit_amount:1250,quantity:2,currency:'USD'}]})
   assert.deepEqual((await db.prepare('SELECT * FROM conversations ORDER BY id').all()).results,requestsBefore)
   await assert.rejects(()=>loadBuyerBookingDetails(db, env,'other','order','order-payment'),error=>error instanceof HTTPError&&error.statusCode===404)
-  await db.prepare("UPDATE bookings SET user_id='other' WHERE id=?").bind(booking.bookingId).run()
+  await db.batch([
+    db.prepare("UPDATE bookings SET user_id='other' WHERE id=?").bind(booking.bookingId),
+    ...transferBookingGuestSeat({ query: 'c.id = ?', params: [opening.id] }, 'other', NOW).map(write => db.prepare(write.query).bind(...(write.params ?? []))),
+    db.prepare("UPDATE conversations SET user_id='other' WHERE id=?").bind(opening.id),
+  ])
+  assert.equal(await readGuestConversation(db, 'verified', opening.id), null)
+  assert.equal((await readGuestConversation(db, 'other', opening.id))?.id, opening.id)
   assert.equal((await buyerActivities(db,'verified')).activities.some(item=>item.kind==='booking'),false)
   await assert.rejects(()=>loadBuyerBookingDetails(db, env,'verified','booking',opening.id),error=>error instanceof HTTPError&&error.statusCode===404)
   const retainedPayment=await loadBuyerBookingDetails(db, env,'verified','payment','visit-payment')
@@ -901,7 +912,12 @@ test('buyer conversations hide merchant facts and preserve public unread receipt
   assert.deepEqual(await listConversations(db,null,{userId:'verified',buyerAudience:true,unreadOnly:true}),[])
   assert.deepEqual((await getGuestThreadDetail(db,'buyer-conversation',ORG,{buyerUserId:'verified'}))?.entries,view.entries)
   const input={threadId:'buyer-conversation',userId:'verified',body:'My web reply',photos:[],idempotencyKey:'buyer-reply-key'}
-  await receiveGuestWebReply(env,input)
+  const send = async ({threadId,userId,...reply}: typeof input) => {
+    const {conversation,role} = await resolveConversationAccess(db,userId,threadId)
+    if (role !== 'guest') throw new HTTPError({statusCode:404,statusMessage:'Conversation not found'})
+    return await receiveGuestWebReply(env,{...reply,conversation,userId})
+  }
+  await send(input)
   const ledger=(await db.prepare("SELECT * FROM messages WHERE conversation_id='buyer-conversation' ORDER BY sequence").all()).results
   const message=ledger.find(entry=>entry.body===input.body)
   assert(message)
@@ -918,25 +934,28 @@ test('buyer conversations hide merchant facts and preserve public unread receipt
   // The owner's alert about it is sent once and recorded on the message.
   const notices=(await db.prepare("SELECT * FROM guest_thread_deliveries WHERE message_id=? ORDER BY id").bind(message.id).all()).results
   assert.deepEqual(notices.map(notice=>[notice.channel,notice.purpose,notice.status]),[['email','owner_alert','sent']])
-  await receiveGuestWebReply(env,input)
+  await send(input)
   assert.deepEqual((await db.prepare("SELECT * FROM messages WHERE conversation_id='buyer-conversation' ORDER BY sequence").all()).results,ledger)
   assert.deepEqual(await projectionOf(),projection)
   assert.deepEqual((await db.prepare("SELECT * FROM guest_thread_deliveries WHERE message_id=? ORDER BY id").bind(message.id).all()).results,notices)
-  await assert.rejects(()=>receiveGuestWebReply(env,{...input,body:'Changed message'}),error=>error instanceof HTTPError&&error.statusCode===409)
-  await assert.rejects(()=>receiveGuestWebReply(env,{...input,userId:'other'}),error=>error instanceof HTTPError&&error.statusCode===404)
+  await assert.rejects(()=>send({...input,body:'Changed message'}),error=>error instanceof HTTPError&&error.statusCode===409)
+  await assert.rejects(()=>send({...input,userId:'other'}),error=>error instanceof HTTPError&&error.statusCode===404)
   // The conversation now belongs to another account: the key names the earlier owner's message, so their retry is refused and writes nothing.
-  await db.prepare("UPDATE conversations SET user_id='other' WHERE id='buyer-conversation'").run()
-  await assert.rejects(()=>receiveGuestWebReply(env,{...input,userId:'other'}),error=>error instanceof HTTPError&&error.statusCode===409)
+  await db.batch([
+    ...transferBookingGuestSeat({query:"c.id='buyer-conversation'"},'other',NOW).map(write=>db.prepare(write.query).bind(...(write.params??[]))),
+    db.prepare("UPDATE conversations SET user_id='other' WHERE id='buyer-conversation'"),
+  ])
+  await assert.rejects(()=>send({...input,userId:'other'}),error=>error instanceof HTTPError&&error.statusCode===409)
   assert.deepEqual((await db.prepare("SELECT * FROM messages WHERE conversation_id='buyer-conversation' ORDER BY sequence").all()).results,ledger)
   const previousActorView=await getGuestThreadDetail(db,'buyer-conversation',ORG,{buyerUserId:'other'})
   assert(previousActorView?.entries.every(entry=>entry.actorUserId===null))
-  await assert.rejects(()=>receiveGuestWebReply(env,input),error=>error instanceof HTTPError&&error.statusCode===404)
+  await assert.rejects(()=>send(input),error=>error instanceof HTTPError&&error.statusCode===404)
   await db.prepare('UPDATE messages SET author_user_id=NULL WHERE id=?').bind(message.id).run()
   const retained=(await db.prepare("SELECT * FROM messages WHERE conversation_id='buyer-conversation' ORDER BY sequence").all()).results
-  await assert.rejects(()=>receiveGuestWebReply(env,{...input,userId:'other'}),error=>error instanceof HTTPError&&error.statusCode===409)
+  await assert.rejects(()=>send({...input,userId:'other'}),error=>error instanceof HTTPError&&error.statusCode===409)
   const historicalNullView=await getGuestThreadDetail(db,'buyer-conversation',ORG,{buyerUserId:'other'})
   assert(historicalNullView?.entries.every(entry=>entry.actorUserId===null))
-  await assert.rejects(()=>receiveGuestWebReply(env,input),error=>error instanceof HTTPError&&error.statusCode===404)
+  await assert.rejects(()=>send(input),error=>error instanceof HTTPError&&error.statusCode===404)
   assert.deepEqual((await db.prepare("SELECT * FROM messages WHERE conversation_id='buyer-conversation' ORDER BY sequence").all()).results,retained)
   assert.deepEqual(await projectionOf(),projection)
   assert.deepEqual((await db.prepare("SELECT * FROM guest_thread_deliveries WHERE message_id=? ORDER BY id").bind(message.id).all()).results,notices)

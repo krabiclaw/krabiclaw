@@ -1,3 +1,4 @@
+import { initialConversationParticipants, initialListingParticipants } from '~/server/domain/conversation-participants'
 import { openingMessageQueries } from '~/server/domain/guest-threads/opening'
 import { bookingStatusQuery } from '~/server/domain/bookings'
 import { SUBMISSION_EVENT, messageQueries, type ConversationRow } from '~/server/domain/conversations'
@@ -299,7 +300,9 @@ export function requestInsertQueries(request: Omit<GuestRequest, 'blocked_at' | 
   return [{
     query: claimedBy ? `${insert} SELECT ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (${claimedBy.query})` : `${insert} VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     params: claimedBy ? [...values, ...(claimedBy.params ?? [])] : values,
-  }, ...messages, publicResourceCacheInvalidationQuery(request.organization_id, 'guest-thread-create')]
+  }, initialConversationParticipants(request.id, request.organization_id),
+  initialListingParticipants(request.organization_id, request.id), ...messages,
+  publicResourceCacheInvalidationQuery(request.organization_id, 'guest-thread-create')]
 }
 
 /**
@@ -320,7 +323,8 @@ export function bookingConversationQueries(input: {
       SELECT ?, 'booking', ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM bookings WHERE organization_id = ? AND id = ?)
         AND NOT EXISTS (SELECT 1 FROM conversations WHERE kind = 'booking' AND booking_id = ?)`,
     params: [input.requestId, input.organizationId, input.locationId, input.bookingId, input.userId, JSON.stringify(payload), input.now, input.now, input.organizationId, input.bookingId, input.bookingId],
-  }, publicResourceCacheInvalidationQuery(input.organizationId, 'guest-thread-create')]
+  }, initialConversationParticipants(input.requestId, input.organizationId),
+  initialListingParticipants(input.organizationId, input.requestId), publicResourceCacheInvalidationQuery(input.organizationId, 'guest-thread-create')]
 }
 
 /**

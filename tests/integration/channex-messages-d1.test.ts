@@ -254,10 +254,10 @@ test('empty greenfield collections are valid; inquiries mirror into the canonica
     const afterToday = (await getGuestThreadDetail(db, rows[0]!.id, ORG))!
     assert.deepEqual([afterToday.guestName, afterToday.guestEmail, afterToday.guestPhone, afterToday.operationalRecord], [null, null, null, null])
     assert.equal(await db.prepare('SELECT count(*) FROM bookings').first('count(*)'), 0)
-    // An Airbnb conversation is the stay's guest conversation: owners and admins open it; a member does not, even one responsible for the home.
+    // The host has a seat from creation. Another member's booking duties cannot grant one.
     const principal = (userId: string, role: string) => memberAccessPrincipal({ userId, organizationId: ORG, role }, { env })
     await assertConversationAccess(db, principal(OWNER, 'owner'), rows[0]!.id)
-    await assert.rejects(assertConversationAccess(db, principal(OWNER, 'member'), rows[0]!.id), code('THREAD_NOT_FOUND'))
+    await assertConversationAccess(db, principal(OWNER, 'member'), rows[0]!.id)
     await assert.rejects(assertConversationAccess(db, principal('unassigned-user', 'member'), rows[0]!.id), code('THREAD_NOT_FOUND'))
     await mirrorChannexThread(db, env, 'thread', 'property')
     assert.equal(await db.prepare('SELECT count(*) FROM messages').first('count(*)'), 2)
@@ -470,7 +470,10 @@ test('the inbox exposes every page with a stable tie order and validates paginat
   try {
     const payload = JSON.stringify({ guest: { name: 'Guest', email: 'guest@example.test', phone: null }, subject: null, consent_at: null, ip_hash: null })
     for (const id of ['e', 'c', 'b', 'd', 'a']) {
-      await db.prepare("INSERT INTO conversations (id, kind, organization_id, payload_json, last_message_at, created_at) VALUES (?, 'contact', ?, ?, ?, ?)").bind(id, ORG, payload, NOW, NOW).run()
+      await db.batch([
+        db.prepare("INSERT INTO conversations (id, kind, organization_id, payload_json, last_message_at, created_at) VALUES (?, 'contact', ?, ?, ?, ?)").bind(id, ORG, payload, NOW, NOW),
+        db.prepare('INSERT INTO conversation_participants (conversation_id, organization_id, user_id) VALUES (?, ?, ?)').bind(id, ORG, OWNER),
+      ])
     }
     const first = guestThreadListPage(await listConversations(db, ORG, { userId: OWNER, limit: 4, offset: 0 }), { limit: 3, offset: 0 })
     assert.deepEqual(first.threads.map(thread => thread.id), ['a', 'b', 'c'])

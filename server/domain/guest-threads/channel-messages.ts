@@ -1,3 +1,4 @@
+import { initialConversationParticipants, initialListingParticipants, reconcileGuestListingParticipants } from '~/server/domain/conversation-participants'
 import { HTTPError } from 'nitro'
 import { execute, executeBatch, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { publishConversationEvent, publishStayInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
@@ -99,16 +100,23 @@ export async function joinBookingConversationQueries(db: DbClient, input: { orga
   return [
     // The inquiry's messages are as read, and it has no booking of its own, or the batch fails here.
     { query: `SELECT CASE WHEN (SELECT COALESCE(MAX(sequence), 0) FROM messages WHERE conversation_id = ?) = ? AND (SELECT booking_id FROM conversations WHERE id = ?) IS NULL THEN NULL ELSE json('CHANNEL_CONVERSATION_CHANGED') END`, params: [input.into, last.sequence, input.into] },
+    { query: `DELETE FROM conversation_participants WHERE conversation_id = ? AND role = 'guest'
+        AND user_id = (SELECT c.user_id FROM conversations c WHERE c.id = conversation_participants.conversation_id)
+        AND user_id IS NOT (SELECT c.user_id FROM conversations c WHERE c.id = ?) AND ${owned}`,
+      params: [input.into, input.from, ...ownedParams] },
     { query: `UPDATE conversations SET user_id = (SELECT user_id FROM conversations WHERE id = ?),
         location_id = (SELECT location_id FROM conversations WHERE id = ?),
         last_message_at = max(last_message_at, (SELECT last_message_at FROM conversations WHERE id = ?)),
         payload_json = json_set(payload_json, '$.guest', json((SELECT json_extract(payload_json, '$.guest') FROM conversations WHERE id = ?)))
         WHERE id = ? AND organization_id = ? AND ${owned}`, params: [input.from, input.from, input.from, input.from, input.into, input.organizationId, ...ownedParams] },
     { query: `UPDATE messages SET conversation_id = ?, sequence = sequence + ? WHERE conversation_id = ? AND ${owned}`, params: [input.into, last.sequence, input.from, ...ownedParams] },
-    { query: `INSERT OR IGNORE INTO conversation_participants (conversation_id, organization_id, user_id, last_read_message_id, archived_at, created_at)
-        SELECT ?, organization_id, user_id, last_read_message_id, archived_at, created_at FROM conversation_participants WHERE conversation_id = ? AND ${owned}`, params: [input.into, input.from, ...ownedParams] },
+    { query: `INSERT INTO conversation_participants (conversation_id, organization_id, user_id, role, host_listing_id, last_read_message_id, archived_at, created_at)
+        SELECT ?, organization_id, user_id, role, host_listing_id, last_read_message_id, archived_at, created_at
+        FROM conversation_participants WHERE conversation_id = ? AND ${owned}
+        ON CONFLICT(conversation_id,user_id) DO UPDATE SET role='guest', host_listing_id=NULL, last_read_message_id=excluded.last_read_message_id, archived_at=excluded.archived_at
+        WHERE excluded.role='guest' AND conversation_participants.role='member'`, params: [input.into, input.from, ...ownedParams] },
     { query: `DELETE FROM conversation_participants WHERE conversation_id = ? AND ${owned}`, params: [input.from, ...ownedParams] },
-    ...['scheduled_guest_messages', 'content_reports', 'payment_checkout_holds'].map(table => ({
+    ...['scheduled_guest_messages', 'content_reports', 'payment_checkout_holds', 'conversation_guest_invites'].map(table => ({
       query: `UPDATE ${table} SET conversation_id = ? WHERE conversation_id = ? AND ${owned}`, params: [input.into, input.from, ...ownedParams],
     })),
     { query: `UPDATE google_calendar_event_links SET request_id = ? WHERE request_id = ? AND ${owned}`, params: [input.into, input.from, ...ownedParams] },
@@ -117,6 +125,7 @@ export async function joinBookingConversationQueries(db: DbClient, input: { orga
     // The booking is the inquiry's conversation's: unlinked from its own, then linked, then its own is gone.
     { query: "UPDATE conversations SET booking_id = NULL WHERE id = ? AND organization_id = ? AND booking_id = ? AND kind = 'booking'", params: [input.from, input.organizationId, input.bookingId] },
     { query: 'UPDATE conversations SET booking_id = ? WHERE id = ? AND organization_id = ? AND booking_id IS NULL AND changes() = 1', params: [input.bookingId, input.into, input.organizationId] },
+    ...reconcileGuestListingParticipants(input.organizationId, { query: 'c.id = ? AND c.booking_id = ?', params: [input.into, input.bookingId] }),
     { query: 'DELETE FROM conversations WHERE id = ? AND organization_id = ? AND booking_id IS NULL AND NOT EXISTS (SELECT 1 FROM messages WHERE conversation_id = ?)', params: [input.from, input.organizationId, input.from] },
   ]
 }
@@ -160,7 +169,7 @@ async function adoptThread(db: DbClient, env: ChannelEnv, home: HomeMapping, thr
       WHERE NOT EXISTS (SELECT 1 FROM conversations WHERE id = ?)
         AND NOT EXISTS (SELECT 1 FROM channel_threads WHERE provider = 'channex' AND external_thread_id = ?)`,
     params: [requestId, home.organization_id, home.location_id, JSON.stringify({ participant: { kind: 'channel', title: thread.title }, guest: { name: null, email: null, phone: null }, ip_hash: null, cancellation: { token_hash: null, expires_at: null, used_at: null } }), now, now, requestId, thread.id],
-  }, {
+  }, initialConversationParticipants(requestId, home.organization_id), {
     query: `INSERT INTO channel_threads (provider, external_thread_id, organization_id, product_id, conversation_id, external_booking_id, provider_updated_at, created_at, updated_at)
       SELECT 'channex', ?, ?, ?, r.id, ?, ?, ?, ? FROM conversations r WHERE r.id = ? AND r.organization_id = ? AND r.kind = 'booking'
         AND (CASE WHEN r.booking_id IS NULL THEN r.location_id = ?
@@ -176,7 +185,7 @@ async function adoptThread(db: DbClient, env: ChannelEnv, home: HomeMapping, thr
       WHERE id = ? AND organization_id = ? AND (json_type(payload_json, '$.participant') IS NULL OR json_extract(payload_json, '$.participant.kind') = 'channel')
         AND EXISTS (SELECT 1 FROM channel_threads WHERE provider = 'channex' AND external_thread_id = ? AND conversation_id = conversations.id)`,
     params: [thread.title, requestId, home.organization_id, thread.id],
-  }], { operation: 'Adopt channel guest conversation' })
+  }, initialListingParticipants(home.organization_id, requestId)], { operation: 'Adopt channel guest conversation' })
   const saved = await queryFirst<ChannelThreadMapping>(db, "SELECT * FROM channel_threads WHERE provider = 'channex' AND external_thread_id = ?", [thread.id])
   if (!saved || saved.organization_id !== home.organization_id || saved.product_id !== home.product_id) fail(409, 'CHANNEL_THREAD_ASSOCIATION_CONFLICT', 'The channel conversation could not be associated atomically', 'conversation_id')
   if (stay) {
@@ -419,8 +428,14 @@ export async function replyThroughChannex(db: DbClient, env: ChannexEnv & Upload
   const deliveryId = `guest-thread-channex:${input.mapping.conversation_id}:${input.idempotencyKey}`
   const requestHash = input.requestHash
   let entry = await findMessageByDedupeKey(db, key)
+  const assertOwnIntent = (message: MessageRow) => {
+    if (!input.idempotencyKey.startsWith('send-later:') && message.author_user_id !== input.actorUserId) {
+      fail(409, 'IDEMPOTENCY_CONFLICT', 'The reply key was already used for a different message', 'idempotencyKey')
+    }
+    assertReplyIntent(message, input.body, requestHash, eventName)
+  }
   if (entry) {
-    assertReplyIntent(entry, input.body, requestHash, eventName)
+    assertOwnIntent(entry)
     const receipt = await getDeliveryById(db, deliveryId)
     if (!receipt || receipt.message_id !== entry.id) fail(500, 'CHANNEL_RECEIPT_INVALID', 'The reply has no matching delivery receipt', 'delivery')
     if (isDeliverySent(receipt)) {
@@ -460,14 +475,14 @@ export async function replyThroughChannex(db: DbClient, env: ChannexEnv & Upload
       }
       if (concurrent?.id !== id) await discardMessagePhotos(db, env, input.mapping.organization_id, assetIds.splice(0), input.actorUserId, error)
       if (!concurrent) throw error
-      assertReplyIntent(concurrent, input.body, requestHash, eventName)
+      assertOwnIntent(concurrent)
     }
     entry = await findMessageByDedupeKey(db, key)
     // Concurrent identical keys share one message; only its photo placements survive.
     if (entry?.id !== id && assetIds.length) await discardMessagePhotos(db, env, input.mapping.organization_id, assetIds, input.actorUserId, new Error('The reply did not keep these photos'))
   }
   if (!entry) fail(404, 'THREAD_NOT_FOUND', 'Conversation not found or access denied', 'conversation_id')
-  assertReplyIntent(entry, input.body, requestHash, eventName)
+  assertOwnIntent(entry)
   const receipt = await getDeliveryById(db, deliveryId)
   if (!receipt || receipt.message_id !== entry.id) fail(500, 'CHANNEL_RECEIPT_INVALID', 'The reply has no matching delivery receipt', 'delivery')
   if (isDeliverySent(receipt)) {

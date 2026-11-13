@@ -1698,6 +1698,7 @@ export async function notifyGuestThreadReply(
     organizationId: opts.organizationId,
     category: ownerMessage.category,
     emailPurpose: ownerMessage.emailPurpose,
+    requestId: opts.threadId,
     guestMessage: true,
   })
 
@@ -1857,7 +1858,7 @@ export async function notifyTeamMessage(env: NotificationEnv, db: DbClient, inpu
   const organization = await queryFirst<{ name: string }>(db,
     'SELECT name FROM organization WHERE id = ?', [input.organizationId])
   if (!organization) throw new HTTPError({ statusCode: 500, message: 'The team conversation organization is missing', data: { code: 'TEAM_ORGANIZATION_MISSING', field: 'organization_id' } })
-  const replyUrl = await dashboardPathUrl(env, db, input.organizationId, `/messages/team/${encodeURIComponent(input.threadId)}?view=team`)
+  const replyUrl = await dashboardPathUrl(env, db, input.organizationId, `/messages/${encodeURIComponent(input.threadId)}`)
   const message = { ...messageReceived({ sender: { kind: 'person', name: input.senderName, email: null }, conversationLabel: 'Team', about: null, messagePreview: input.messagePreview, body: input.messagePreview, photos: [], history: [], translation: null, record: null, organizationName: organization.name, replyUrl }),
     organizationLogoUrl: await organizationLogo(db, input.organizationId) }
   const recipients = (await resolveOwnerRecipients(env, db, {

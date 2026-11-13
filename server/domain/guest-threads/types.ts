@@ -95,6 +95,8 @@ export interface GuestThreadEntryDeliveryViewModel {
   provider: GuestThreadDeliveryProvider
   purpose: GuestThreadDeliveryPurpose
   status: GuestThreadDeliveryStatus
+  error: string | null
+  updated_at: string
 }
 
 /** A photo a message carries. */

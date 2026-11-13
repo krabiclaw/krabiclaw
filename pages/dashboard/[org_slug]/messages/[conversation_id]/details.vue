@@ -14,7 +14,8 @@ const threadId = computed(() => String(route.params.conversation_id))
 
 // Airbnb's Reservation pane: the record the conversation is about, read from
 // the thread. A conversation with no record has no level here.
-const { thread } = await useGuestThread(threadId)
+const { data } = await useConversation(threadId).request
+const thread = computed(() => data.value?.conversation?.kind === 'team' ? null : data.value?.conversation)
 if (thread.value && !thread.value.booking_id) {
   showError(createError({ statusCode: 404, statusMessage: 'This conversation has no reservation' }))
 }

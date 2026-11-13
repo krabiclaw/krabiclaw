@@ -9,7 +9,7 @@ import { canMarkNoShow, getGuestRequest, validateGuestRequest, getThreadOperatio
 import type { StayAccess } from '~/server/domain/stays'
 import { revokeReviewRequestQuery } from '~/server/utils/review-requests'
 import { deliverGuestThreadEmail, getDeliveryById, isDeliverySent } from './deliveries'
-import { MEMBER_REPLY_EVENT, SCHEDULED_MESSAGE_EVENT, conversationAccessSql, findMessageByDedupeKey, messageQueries, parseMessagePayload, type ConversationRow, type MessageRow } from '~/server/domain/conversations'
+import { MEMBER_REPLY_EVENT, SCHEDULED_MESSAGE_EVENT, conversationAccessSql, findMessageByDedupeKey, messageQueries, parseMessagePayload, type ConversationGuard, type ConversationRow, type MessageRow } from '~/server/domain/conversations'
 import { discardMessagePhotos, listMessagePhotos, MessagePhotoRejection, messagePhotoPlacements, uploadMessagePhotos, type MessagePhotoInput } from './attachments'
 import type { UploadResolvedMediaInput } from '~/server/utils/media-upload'
 import { conversationTaskQueries, reconcileConversationTasks } from './repository'
@@ -42,7 +42,7 @@ import type {
 // (server/domain/tasks.ts): a reply, a cancellation, archiving or blocking
 // closes it. There is no separate resolve or reopen. Archiving is each
 // person's own (conversations.ts archiveQuery), not an operation here.
-export const GUEST_THREAD_ACTIONS = new Set(['reply', 'report', 'block', 'unblock', 'accept_change', 'decline_change', 'retry'])
+export const GUEST_THREAD_ACTIONS = new Set(['report', 'block', 'unblock', 'accept_change', 'decline_change', 'retry'])
 
 type SuccessfulOperationOutcome = { ok: true; status: 200; thread: GuestThreadRow; availableActions: string[]; message?: { id: string; sequence: number } }
 
@@ -61,6 +61,7 @@ type NotFoundOutcome = Extract<OperationOutcome, { status: 404 }>
 export type ExecuteOperationInput = {
   conversation?: ConversationRow
   principal?: MemberAccessPrincipal
+  messageGuard?: ConversationGuard
   threadId: string
   organizationId: string
   action: string
@@ -475,7 +476,7 @@ async function executeReply(
   if (!body && !photoCount) return { ok: false, status: 400, reason: 'empty_body' }
   const actorUserId = input.actorUserId
   if (actorUserId === null && photoCount) throw new HTTPError({ statusCode: 400, message: 'Scheduled messages carry text only', data: { code: 'SCHEDULED_MESSAGE_PHOTOS_UNSUPPORTED', field: 'photos' } })
-  const access = input.principal ? await conversationAccessSql('c', input.principal) : null
+  const access = input.messageGuard ?? (input.principal ? conversationAccessSql('c', input.principal) : null)
   const guard = {
     sql: `c.organization_id = ?${access ? ` AND ${access.sql}` : ''}`,
     params: [context.thread.organization_id, ...(access?.params ?? [])],
@@ -490,7 +491,7 @@ async function executeReply(
   // nowhere is refused before anything is sent. Only a reply this key already
   // delivered replays where it went, whatever has changed since.
   const matchesReply = (entry: MessageRow): boolean => {
-    if (!entryMatchesRequest(entry, eventName, body)) return false
+    if ((!input.idempotencyKey?.startsWith('send-later:') && entry.author_user_id !== actorUserId) || !entryMatchesRequest(entry, eventName, body)) return false
     return parseMessagePayload(entry).request_hash === requestHash
   }
   // A recorded reply continues on the channel it was recorded on; a new one goes where the rule says.
@@ -498,6 +499,7 @@ async function executeReply(
     findMessageByDedupeKey(db, operationDedupeKey(input)),
     guestThreadChannel(db, context.thread.id, context.thread.organization_id),
   ])
+  if (recorded && !input.idempotencyKey?.startsWith('send-later:') && recorded.author_user_id !== actorUserId) return conflict()
   const destination = await guestReplyDestination(db, context.thread, channelFacts)
   const recordedMapping = recorded?.channel === 'airbnb' ? channelFacts?.mapping ?? null : null
   if (recorded?.channel === 'airbnb' && !recordedMapping) throw new Error(`Reply ${recorded.id} was recorded on Airbnb but its conversation has no channel mapping`)

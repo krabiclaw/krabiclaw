@@ -127,7 +127,7 @@ const listRoute = computed(() => props.personalScope ? '/dashboard/account/messa
 const openThreadId = computed(() => {
   if (!route.path.startsWith(`${listRoute.value}/`)) return null
   const segments = route.path.slice(listRoute.value.length + 1).split('/')
-  return decodeURIComponent((segments[0] === 'team' ? segments[1] : segments[0]) ?? '') || null
+  return decodeURIComponent(segments[0] ?? '') || null
 })
 
 // Filter and corpus live in the URL, so a filtered list is a link.
@@ -142,14 +142,7 @@ const listHydrated = ref(false)
 const realtime = useDashboardInvalidations()
 onMounted(() => { listHydrated.value = true })
 
-const dashboardScope = useDashboardRouteScope()
-const dashboardApi = useDashboardApi(dashboardScope)
 const unreadCounts = useInboxUnread(organizationId)
-watch(() => props.personalScope ? null : unreadCounts.value, (state, _, cleanup) => {
-  if (!import.meta.client || !state) return
-  state.lists++
-  cleanup(() => { state.lists-- })
-}, { immediate: true })
 
 const emptyTitle = computed(() => search.value || kind.value || unreadOnly.value ? 'No conversations match' : 'No conversations yet.')
 const emptyDescription = computed(() => {
@@ -184,13 +177,9 @@ let pageController: AbortController | null = null
 let loadedScope = listKey.value
 let loadedPages = 1
 async function loadPage(offset: number, signal?: AbortSignal): Promise<ThreadListPage> {
-  const query = { ...listQuery.value, limit: 100, offset, ...!props.personalScope && { sort_key: '1' } }
-  if (!props.personalScope && !dashboardScope.value) {
-    throw createError({ statusCode: 400, statusMessage: 'Dashboard route scope is incomplete' })
-  }
-  const page = props.personalScope
-    ? await applicationFetch<ThreadListPage>('/api/account/messages', { query, signal, validate: isThreadListResponse })
-    : await dashboardApi<ThreadListPage>(`/api/dashboard/organizations/${organizationId.value}/conversations`, { query, signal, validate: isThreadListResponse })
+  if (!props.personalScope && !organizationId.value) throw createError({ statusCode: 400, statusMessage: 'Messages require a workspace' })
+  const query = { ...listQuery.value, limit: 100, offset, ...!props.personalScope && { organization_id: organizationId.value, sort_key: '1' } }
+  const page = await applicationFetch<ThreadListPage>('/api/messages', { query, signal, validate: isThreadListResponse })
   if (page.pagination.limit !== query.limit || page.pagination.offset !== offset) throw createError({ statusCode: 502, statusMessage: 'Messages returned a different page than requested' })
   return page
 }
@@ -299,7 +288,7 @@ watch([threads, openThreadId, pending], ([rows, open, loading]) => {
 
 // A conversation opens beside this list: a guest's at its id, the team's on the team screen.
 function threadRoute(thread: ThreadListItem) {
-  return thread.kind === 'team' ? `${listRoute.value}/team/${encodeURIComponent(thread.id)}` : `${listRoute.value}/${encodeURIComponent(thread.id)}`
+  return `${listRoute.value}/${encodeURIComponent(thread.id)}`
 }
 
 // Read or unread without opening it: the row changes at once, and the list and
@@ -319,7 +308,7 @@ async function saveRead(thread: ThreadListItem) {
   }
   mark(!read)
   try {
-    await dashboardApi(`${conversationPath(thread)}/${read ? 'read' : 'unread'}`, {
+    await applicationFetch(`${conversationPath(thread)}/${read ? 'read' : 'unread'}`, {
       method: 'POST',
       ...(read ? { body: {} } : {}),
       validate: (value: unknown): value is { read: boolean } => typeof value === 'object' && value !== null && Reflect.get(value, 'read') === read,
@@ -334,7 +323,7 @@ async function saveRead(thread: ThreadListItem) {
 }
 
 function conversationPath(thread: ThreadListItem) {
-  return `/api/dashboard/organizations/${organizationId.value}/conversations/${encodeURIComponent(thread.id)}`
+  return `/api/messages/${encodeURIComponent(thread.id)}`
 }
 
 // Archive files the conversation away for this member alone; a new message from someone else brings it back.
@@ -342,7 +331,7 @@ async function archive(thread: ThreadListItem) {
   if (toggling.has(thread.id)) return
   toggling.add(thread.id)
   try {
-    await dashboardApi(`${conversationPath(thread)}/archive`, {
+    await applicationFetch(`${conversationPath(thread)}/archive`, {
       method: 'POST',
       body: { archived: true },
       validate: (value: unknown): value is { archived: boolean } => typeof value === 'object' && value !== null && Reflect.get(value, 'archived') === true,
@@ -365,7 +354,7 @@ let disposed = false
 let reconcileAbort: AbortController | undefined
 
 function publishUnread(value: ThreadListPage | undefined) {
-  if (!props.personalScope && value?.unread) unreadCounts.value.unread = value.unread
+  if (!props.personalScope && value?.unread) unreadCounts.value = value.unread
 }
 watch(page, value => publishUnread(value ?? undefined), { immediate: true })
 watch(listKey, () => {
@@ -400,8 +389,8 @@ async function drainChanges() {
     const before = data.value!
     const controller = new AbortController()
     reconcileAbort = controller
-    const changed = await dashboardApi<ThreadListPage>(`/api/dashboard/organizations/${organizationId.value}/conversations`, {
-      query: { ...listQuery.value, sort_key: '1', ids: ids.join(',') },
+    const changed = await applicationFetch<ThreadListPage>('/api/messages', {
+      query: { ...listQuery.value, organization_id: organizationId.value, sort_key: '1', ids: ids.join(',') },
       signal: controller.signal, validate: isThreadListResponse,
     })
     if (disposed || generationAtStart !== generation || scope !== listKey.value) return

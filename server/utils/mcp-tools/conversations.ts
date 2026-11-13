@@ -1,17 +1,15 @@
 import { HTTPError } from 'nitro'
-import { TASK_VIEW_SCHEMA } from '~/server/utils/mcp-tools/tasks'
-import { createTeamThread, getTeamThread, listTeamMembers, listTeamMessages, operateTeamGroup, sendTeamMessage } from '~/server/domain/team-messages'
-import { assertConversationAccess, conversationAccessSql, markConversationRead, markConversationUnread, type ConversationRow } from '~/server/domain/conversations'
+import { createTeamThread, listTeamMembers, operateTeamGroup } from '~/server/domain/team-messages'
+import { assertConversationAccess, conversationAccessDenied, conversationAccessSql, markConversationRead, markConversationUnread, resolveConversationAccess } from '~/server/domain/conversations'
 import { archiveConversation, countUnreadConversations, listConversations } from '~/server/domain/guest-threads/repository'
-import { loadGuestThreadDetail } from '~/server/domain/guest-threads/detail'
-import { executeGuestThreadOperation, guestReplyDestination } from '~/server/domain/guest-threads/operations'
+import { loadConversationPage } from '~/server/domain/conversation-history'
+import { sendConversationMessage } from '~/server/domain/send-conversation-message'
+import { queryFirst } from '~/server/db'
 import type { InboxThreadKind } from '~/server/domain/guest-threads/types'
 import { memberAccessPrincipal } from '~/server/utils/member-access'
-import { publishConversationAck, publishConversationEvent } from '~/server/cloudflare/guest-inbox-events'
-import { renderStructuredResponse } from '~/server/utils/mcp-render'
+import { publishConversationAck } from '~/server/cloudflare/guest-inbox-events'
 import { mcpPageInfo, mcpPageWindow } from '~/server/utils/mcp-pagination'
 import { MAX_IMAGE_BYTES } from '~/server/utils/media-mime'
-import { formAnswerSnapshotsJsonSchema } from '~/shared/form-questions'
 import { chatgptFileInput, organizationTool, pageInfoObject, paginationInputSchema, type McpToolDefinition } from './shared'
 import { NOT_HANDLED, optionalString, requiredString, resolveUserUploadedMediaFile, toolFileReference, type McpExecutorContext } from './execution'
 
@@ -34,34 +32,13 @@ const listRow = { type: 'object', properties: {
   unread: { type: 'boolean', description: 'A message from someone else you have not read, as Messages shows it.' },
 }, required: ['conversation_id', 'kind', 'title', 'channel', 'home', 'when', 'preview', 'preview_from', 'time', 'unread'], additionalProperties: false }
 const unreadCounts = { type: 'object', properties: { all: { type: 'integer' }, guests: { type: 'integer' }, support: { type: 'integer' }, team: { type: 'integer' } }, required: ['all', 'guests', 'support', 'team'] }
-const changeSide = { type: 'object', properties: { when_label: text, party_size: { type: 'integer' }, assigned_member_id: nullableText, assigned_member_name: nullableText }, required: ['when_label', 'party_size', 'assigned_member_id', 'assigned_member_name'] }
-const bookingChange = { type: ['object', 'null'], description: 'Canonical proposal details and current response state. A pending proposal does not change the operational record.', properties: { status: { type: 'string', enum: ['pending', 'accepted', 'declined', 'withdrawn', 'stale', 'expired'] }, before: changeSide, after: changeSide, location_title: text, original_location_title: text, message: text }, required: ['status', 'before', 'after', 'location_title', 'original_location_title'] }
-const guestConversation = { type: 'object', description: 'A guest conversation: its guest, answers, booking and every message.', properties: {
-  type: { type: 'string', enum: ['contact', 'booking', 'stay'] }, needs_reply: { type: 'boolean' }, archived: { type: 'boolean', description: 'Archived by you.' }, last_message_at: text,
-  participant_label: text, reply_channel: { type: ['string', 'null'], enum: ['airbnb', 'email', 'account', null], description: 'Where send_message sends: Airbnb’s conversation, the guest’s email, or their KrabiClaw account inbox. Null when the guest cannot be replied to; reply_not_possible says why.' }, reply_not_possible: nullableText,
-  guest: { type: 'object', properties: { name: nullableText, email: nullableText, phone: nullableText }, required: ['name', 'email', 'phone'] },
-  answers: formAnswerSnapshotsJsonSchema(),
-  operational_record: { type: ['object', 'null'], description: 'The booking the conversation is about. unit nights is a stay: check_in_date and check_out_date are its nights in its home’s clock, and starts_at/ends_at hold a day alone where the home has no check-in or checkout time.', properties: { id: text, unit: { type: 'string', enum: ['slot', 'nights'] }, product_kind: text, status: text, starts_at: text, ends_at: text, timezone: text, party_size: { type: 'integer' }, check_in_date: nullableText, check_out_date: nullableText }, required: ['id', 'unit', 'product_kind', 'status', 'starts_at', 'ends_at', 'timezone', 'party_size', 'check_in_date', 'check_out_date'] },
-  messages: { type: 'array', items: { type: 'object', properties: { id: text, author: { type: 'string', enum: ['guest', 'member', 'krabiclaw'], description: 'krabiclaw: written by KrabiClaw — an automatic message, a booking’s opening, Airbnb Support relayed, or an event such as a cancellation or payment.' }, actor: nullableText, channel: nullableText, body: nullableText, event: nullableText, occurred_at: text, provider_timestamp: nullableText, payload: { type: ['object', 'null'] }, booking_change: bookingChange,
-    deliveries: { type: 'array', items: { type: 'object', properties: { id: text, channel: text, provider: { ...text, description: 'log_only records the message locally without sending it through a provider.' }, purpose: text, status: text }, required: ['id', 'channel', 'provider', 'purpose', 'status'] } },
-    attachments: { type: 'array', items: { type: 'object', properties: { id: text, url: text, alt: nullableText, width: { type: ['integer', 'null'] }, height: { type: ['integer', 'null'] } }, required: ['id', 'url', 'alt', 'width', 'height'] } },
-  }, required: ['id', 'author', 'actor', 'channel', 'body', 'event', 'occurred_at', 'provider_timestamp', 'booking_change', 'deliveries', 'attachments'] } },
-}, required: ['type', 'needs_reply', 'archived', 'last_message_at', 'participant_label', 'reply_channel', 'reply_not_possible', 'guest', 'answers', 'operational_record', 'messages'] }
-const teamThread = { type: 'object', description: 'A team conversation: its people, what it is about and its newest message.', properties: {
-  id: text, created_at: text, last_message_at: text, booking_id: { ...nullableText, description: 'The booking the conversation is about: a stay (see stay) or a class, consultation or table (see record).' }, location_id: nullableText,
-  name: { ...nullableText, description: 'A group’s name; a stay conversation is titled by the home the guest sleeps in.' }, is_group: { type: 'boolean' }, created_by_user_id: nullableText, can_manage: { type: 'boolean' }, can_leave: { type: 'boolean' },
-  participants: { type: 'array', items: participant }, unread: { type: 'boolean' },
-  stay: { type: ['object', 'null'], properties: { id: text, product_id: text, name: text, check_in_date: text, check_out_date: text, status: { type: 'string', enum: ['pending', 'confirmed', 'cancelled'] } }, required: ['id', 'product_id', 'name', 'check_in_date', 'check_out_date', 'status'] },
-  job: { ...TASK_VIEW_SCHEMA, type: ['object', 'null'], description: 'The job for the conversation’s booked record (a turnover or home-ready job for a stay, the prep or follow-up for a booking) as list_tasks presents it; null when there is none the caller may see.' },
-  location: { type: ['object', 'null'], properties: { id: text, title: text, slug: text, timezone: text }, required: ['id', 'title', 'slug', 'timezone'] },
-  record: { type: ['object', 'null'], description: 'The booking (a class, consultation or table) the conversation is about: who booked, else what.', properties: { id: text, title: text }, required: ['id', 'title'] },
-  last_message: { type: ['object', 'null'], properties: { id: text, author_user_id: nullableText, body: text, attachment_count: { type: 'integer' }, created_at: text }, required: ['id', 'author_user_id', 'body', 'attachment_count', 'created_at'] },
-}, required: ['id', 'created_at', 'last_message_at', 'booking_id', 'location_id', 'record', 'name', 'is_group', 'created_by_user_id', 'can_manage', 'can_leave', 'participants', 'unread', 'stay', 'job', 'location', 'last_message'] }
-const teamMessage = { type: 'object', properties: {
-  id: text, conversation_id: text, author_user_id: { ...nullableText, description: 'The sender; null for an automatic message, or once a person’s account was deleted.' }, automatic: { type: 'boolean', description: 'Written by KrabiClaw (a cleaning job, a reminder, a move), not by a member. It is unread until read, like any message from someone else.' }, body: text, created_at: text,
-  attachments: { type: 'array', items: { type: 'object', properties: { id: text, url: text, width: { type: ['number', 'null'] }, height: { type: ['number', 'null'] } }, required: ['id', 'url', 'width', 'height'] } },
-  deliveries: { type: 'array', items: { type: 'object', properties: { id: text, channel: { type: 'string', enum: ['email', 'whatsapp', 'push'] }, status: text, error: nullableText, updated_at: text }, required: ['id', 'channel', 'status', 'error', 'updated_at'] } },
-}, required: ['id', 'conversation_id', 'author_user_id', 'automatic', 'body', 'created_at', 'attachments', 'deliveries'] }
+const cursor = { type: ['integer', 'null'], minimum: 1 }
+const messagePage = { type: 'object', properties: {
+  conversation: { type: 'object', properties: { id: text, organization_id: text, title: text, kind: { type: 'string', enum: ['guest', 'support', 'team'] }, participants: { type: 'array' } }, required: ['id', 'organization_id', 'title', 'kind', 'participants'] },
+  entries: { type: 'array', items: { type: 'object', properties: { id: text, type: { type: 'string', enum: ['message', 'day', 'event', 'change'] } }, required: ['id', 'type'] } },
+  page: { type: 'object', properties: { before: cursor, oldest: cursor, newest: cursor, failed_messages: { type: 'array', items: text }, booking_actions: { type: 'array' } }, required: ['before', 'oldest', 'newest', 'failed_messages', 'booking_actions'] },
+  viewer_role: { const: 'member' },
+}, required: ['conversation', 'entries', 'page', 'viewer_role'] }
 const readState = { type: 'object', properties: { conversation_id: text, unread: { type: 'boolean' }, last_read_message_id: nullableText }, required: ['conversation_id', 'unread', 'last_read_message_id'], additionalProperties: false }
 
 export const CONVERSATION_TOOLS: McpToolDefinition[] = [
@@ -75,13 +52,13 @@ export const CONVERSATION_TOOLS: McpToolDefinition[] = [
     },
     outputSchema: { type: 'object', properties: { conversations: { type: 'array', items: listRow }, unread: unreadCounts, page_info: pageInfoObject }, required: ['conversations', 'unread', 'page_info'] },
   }),
-  organizationTool({ name: 'get_conversation', domain: 'conversations', minimumRole: 'member', description: 'Read one conversation. A guest conversation returns the guest, their answers to the business’s questions, the booking and every message with proposals, attachments and delivery receipts. A team conversation returns its people and context and its messages newest first (default 20, maximum 100; page back with before and before_id from the oldest loaded message’s created_at and id). Reading does not mark the conversation read: use mark_conversation_read.',
-    inputSchema: { conversation_id: conversationId, limit: { type: 'integer', minimum: 1, maximum: 100 }, before: { ...text, minLength: 1 }, before_id: { ...text, minLength: 1 } }, required: ['conversation_id'],
-    outputSchema: { type: 'object', properties: { conversation_id: text, kind: { type: 'string', enum: ['contact', 'booking', 'team'] }, guest: { ...guestConversation, type: ['object', 'null'] }, team: { type: ['object', 'null'], properties: { thread: teamThread, messages: { type: 'array', items: teamMessage }, has_more: { type: 'boolean' } }, required: ['thread', 'messages', 'has_more'] } }, required: ['conversation_id', 'kind', 'guest', 'team'] },
+  organizationTool({ name: 'get_conversation', domain: 'conversations', minimumRole: 'member', description: 'Read the latest page of a conversation you participate in. Entries are in sequence order. Pass page.before to read older messages. Reading does not acknowledge messages.',
+    inputSchema: { conversation_id: conversationId, before: { type: 'integer', minimum: 1 } }, required: ['conversation_id'],
+    outputSchema: messagePage,
   }),
   organizationTool({ name: 'send_message', domain: 'conversations', minimumRole: 'member', description: 'Send text and/or one photo in a conversation, as you. In a guest conversation it is your reply through its reply_channel (get_conversation): Airbnb replies accept text or one photo, sent separately; email replies accept text, a photo or both; a guest with neither email nor account is refused with GUEST_UNREACHABLE. In a team conversation it reaches its participants by their notification choices. Reuse the same idempotency_key for an identical retry. A failed Airbnb attempt may retry only when retry_with_same_idempotency_key is true; a realtime failure may report committed:true and must retry that same request. A saved message does not prove delivery.',
-    inputSchema: { conversation_id: conversationId, message: { ...text, minLength: 1, maxLength: 5000, pattern: '^[\\s\\S]*\\S[\\s\\S]*$' }, file: { ...chatgptFileInput, description: 'Optional photo supplied as a ChatGPT file attachment.' }, idempotency_key: { ...text, minLength: 1, maxLength: 200 }, anyOf: [{ required: ['message'] }, { required: ['file'] }] }, required: ['conversation_id', 'idempotency_key'], fileParams: ['file'],
-    outputSchema: { type: 'object', properties: { conversation_id: text, outcome: { type: 'object' }, message_id: nullableText, created: { type: 'boolean' } }, required: ['conversation_id', 'outcome', 'message_id', 'created'] },
+    inputSchema: { conversation_id: conversationId, message: { ...text, minLength: 1, maxLength: 5000, pattern: '^[\\s\\S]*\\S[\\s\\S]*$' }, file: { ...chatgptFileInput, description: 'Optional photo supplied as a ChatGPT file attachment.' }, idempotency_key: { ...text, minLength: 8, maxLength: 128, pattern: '^[a-zA-Z0-9_-]{8,128}$' }, anyOf: [{ required: ['message'] }, { required: ['file'] }] }, required: ['conversation_id', 'idempotency_key'], fileParams: ['file'],
+    outputSchema: { type: 'object', properties: { conversation_id: text, message: { type: 'object', properties: { id: text, sequence: { type: 'integer', minimum: 1 } }, required: ['id', 'sequence'] } }, required: ['conversation_id', 'message'] },
   }),
   organizationTool({ name: 'mark_conversation_read', domain: 'conversations', minimumRole: 'member', description: 'Mark a conversation read for you, through its newest message or through message_id (the newest one you were shown). Needs a message from someone else (409 NOTHING_TO_MARK). Changes only your own read position; sends nothing and changes nobody else’s unread state.',
     inputSchema: { conversation_id: conversationId, message_id: { ...text, minLength: 1 } }, required: ['conversation_id'], outputSchema: readState,
@@ -111,23 +88,6 @@ export const CONVERSATION_TOOLS: McpToolDefinition[] = [
   }),
 ]
 
-/** A guest conversation as get_conversation returns it. */
-async function guestConversationView(ctx: McpExecutorContext, conversation: ConversationRow) {
-  const { db, organizationId, userId } = ctx.organization
-  const loaded = await loadGuestThreadDetail(db, conversation.id, organizationId, { memberUserId: userId, conversation })
-  if (!loaded) throw new HTTPError({ statusCode: 404, message: `Conversation '${conversation.id}' not found in this organization`, data: { code: 'THREAD_NOT_FOUND', field: 'conversation_id' } })
-  // Where send_message would send, by the reply operation's own rule.
-  const { view: detail, request, channelFacts } = loaded
-  const destination = await guestReplyDestination(db, request, channelFacts)
-  return {
-    type: detail.submissionType, needs_reply: detail.needsReply, archived: detail.manuallyArchived, last_message_at: conversation.last_message_at,
-    participant_label: detail.participantLabel, reply_channel: destination.channel, reply_not_possible: destination.channel === null ? destination.reason : null,
-    guest: { name: detail.guestName, email: detail.guestEmail, phone: detail.guestPhone }, answers: detail.source.fields.answers,
-    operational_record: detail.operationalRecord,
-    messages: detail.entries.map(entry => ({ id: entry.id, author: entry.actorKind, actor: entry.actorLabel, channel: entry.channel, body: entry.body, event: entry.eventName, payload: entry.payload, booking_change: entry.bookingChange, occurred_at: entry.occurredAt, provider_timestamp: entry.providerTimestamp, deliveries: entry.deliveries, attachments: entry.attachments })),
-  }
-}
-
 export async function handleConversationTools(ctx: McpExecutorContext): Promise<unknown> {
   const { toolName, args, organization } = ctx
   if (!CONVERSATION_TOOLS.some(tool => tool.name === toolName)) return NOT_HANDLED
@@ -150,13 +110,16 @@ export async function handleConversationTools(ctx: McpExecutorContext): Promise<
       return { conversation_id: thread.id, created: thread.created }
     }
   }
-  const conversation = await assertConversationAccess(db, principal, requiredString(args, 'conversation_id'))
+  const conversationId = requiredString(args, 'conversation_id')
+  if (toolName === 'get_conversation') {
+    const before = args.before ?? null
+    if (before !== null && (typeof before !== 'number' || !Number.isSafeInteger(before) || before < 1)) throw new HTTPError({ statusCode: 400, message: 'Invalid transcript cursor', data: { code: 'INVALID_TRANSCRIPT_CURSOR', field: 'before' } })
+    const access = await resolveConversationAccess(db, userId, conversationId)
+    if (access.role !== 'member' || access.conversation.organization_id !== organizationId) conversationAccessDenied()
+    return await loadConversationPage(db, { ...access, userId, principal }, { before, limit: 40 })
+  }
+  const conversation = await assertConversationAccess(db, principal, conversationId)
   switch (toolName) {
-    case 'get_conversation': {
-      if (conversation.kind !== 'team') return { conversation_id: conversation.id, kind: conversation.kind, guest: await guestConversationView(ctx, conversation), team: null }
-      const [thread, page] = await Promise.all([getTeamThread(db, principal, conversation.id), listTeamMessages(db, principal, conversation.id, { limit: args.limit, before: args.before, before_id: args.before_id })])
-      return { conversation_id: conversation.id, kind: conversation.kind, guest: null, team: { thread, ...page } }
-    }
     case 'mark_conversation_read':
     case 'mark_conversation_unread': {
       const guard = await conversationAccessSql('c', principal)
@@ -183,17 +146,10 @@ export async function handleConversationTools(ctx: McpExecutorContext): Promise<
         return [{ bytes: resolved.buffer, filename: resolved.filename }]
       } } : null
       const idempotencyKey = requiredString(args, 'idempotency_key')
-      if (conversation.kind === 'team') {
-          const sender = (await listTeamMembers(env, principal)).find(member => member.id === userId)
-        if (!sender) throw new HTTPError({ statusCode: 404, statusMessage: 'Organization membership not found' })
-        const sent = await sendTeamMessage(env, db, principal, conversation.id, { body: args.message, photos: photo ?? [], idempotency_key: idempotencyKey, senderName: sender.name })
-        return { conversation_id: conversation.id, outcome: { ok: true }, message_id: sent.message.id, created: sent.created }
-      }
-      const outcome = await executeGuestThreadOperation(db, { conversation, principal, threadId: conversation.id, organizationId, action: 'reply', body: optionalString(args, 'message') ?? undefined,
-        ...(photo ? { photos: photo } : {}), actorUserId: userId, idempotencyKey, env, financialWritesAllowed: false })
-      if (outcome.ok || outcome.reason === 'delivery_failed') await publishConversationEvent(env, db, { conversationId: conversation.id, type: 'MESSAGE_CREATE', message: outcome.ok ? outcome.message : undefined })
-      const messageId = outcome.ok ? outcome.message?.id ?? null : null
-      return renderStructuredResponse({ conversation_id: conversation.id, outcome: outcome.ok ? { ok: true } : outcome, message_id: messageId, created: outcome.ok }, undefined, undefined, !outcome.ok)
+      const sender = await queryFirst<{ name: string }>(db, 'SELECT name FROM user WHERE id = ?', [userId])
+      if (!sender) throw new Error('Message sender account is missing')
+      const message = await sendConversationMessage(env, { conversation, role: 'member', userId, senderName: sender.name, body: optionalString(args, 'message') ?? '', photos: photo ?? [], idempotencyKey, principal })
+      return { conversation_id: conversation.id, message: { id: message.id, sequence: message.sequence } }
     }
     default: return NOT_HANDLED
   }

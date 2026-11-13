@@ -75,6 +75,14 @@ export function memberAccessPrincipal(
   } as MemberAccessPrincipal
 }
 
+/** The conversation seat query has already joined this live Better Auth member row. */
+export function conversationMemberPrincipal(
+  membership: NonNullable<Awaited<ReturnType<typeof import('~/server/domain/conversations').resolveConversationAccess>>['membership']>,
+  input: { env: CloudflareEnv; event?: H3Event },
+): MemberAccessPrincipal {
+  return memberAccessPrincipal(resolvedMembershipOf(membership), input)
+}
+
 export async function resolveMemberId(
   input: { organizationId: string; userId: string; env: CloudflareEnv },
 ): Promise<string | null> {
@@ -304,16 +312,21 @@ export async function listOrganizationNotificationMembers(
   // a duplicated alert.
   const byUserId = new Map<string, { id: string; email: string; organizationWide: boolean }>()
   const included = new Set(options.includeMemberIds)
-  if (options.requestId && !options.guestMessage) {
+  if (options.guestMessage) {
+    if (!options.requestId) throw new Error('Guest message notifications require a conversation')
+    const seats = await queryAll<{ id: string }>(env.DB, `SELECT m.id FROM conversation_participants seat
+      JOIN member m ON m.userId = seat.user_id AND m.organizationId = seat.organization_id
+      WHERE seat.organization_id = ? AND seat.conversation_id = ? AND seat.role = 'member'`, [organizationId, options.requestId])
+    included.clear()
+    for (const seat of seats) included.add(seat.id)
+  } else if (options.requestId) {
     const scope = assignedGuestThreadScope('r', { column: 'recipient.userId' })
     const responsible = await queryAll<{ id: string }>(env.DB, `SELECT recipient.id FROM member recipient JOIN conversations r ON r.organization_id = recipient.organizationId
       WHERE recipient.organizationId = ? AND r.id = ? AND ${scope.sql}`, [organizationId, options.requestId])
     for (const member of responsible) included.add(member.id)
   }
   for (const member of members) {
-    if (options.guestMessage
-      ? !await roleAllows({ organizationId, role: member.role, permissions: { operations: ['reply'] } })
-      : !(isOrganizationWideRole(member.role) || included.has(member.id))) continue
+    if (!included.has(member.id) && (options.guestMessage || !isOrganizationWideRole(member.role))) continue
     const organizationWide = isOrganizationWideRole(member.role) || byUserId.get(member.user.id)?.organizationWide === true
     byUserId.set(member.user.id, { id: member.user.id, email: member.user.email, organizationWide })
   }
@@ -418,7 +431,7 @@ export async function reconcileResponsibilities(env: GuestInboxPublicationEnv, d
   const [left] = await executeBatch(db, [{
     query: `DELETE FROM conversation_participants WHERE organization_id = ?
       AND NOT EXISTS (SELECT 1 FROM member m WHERE m.organizationId = conversation_participants.organization_id AND m.userId = conversation_participants.user_id)
-      AND NOT EXISTS (SELECT 1 FROM conversations c WHERE c.id = conversation_participants.conversation_id AND c.user_id = conversation_participants.user_id)`,
+      AND role = 'member'`,
     params: [input.organizationId],
   }], { operation: 'Remove departed members from conversations' })
   if (Number(left?.meta.changes ?? 0) > 0) changed = true

@@ -1,3 +1,4 @@
+import { bookChannelConversationGuest, reconcileGuestListingParticipants } from '~/server/domain/conversation-participants'
 import { HTTPError } from 'nitro'
 import { bookingStatusQuery } from '~/server/domain/bookings'
 import { CURRENT_GUEST_SQL } from '~/server/domain/conversations'
@@ -37,7 +38,7 @@ import { bookingPolicy, type BookingPolicy } from '~/server/utils/booking-policy
 import { requireBookingConfig } from '~/server/utils/availability'
 import { openingMessageQueries, openingSentence } from '~/server/domain/guest-threads/opening'
 import { ownedBuyerRequest } from '~/server/domain/payments/buyer'
-import { publishBusinessInvalidation, publishConversationEvent, publishStayInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
+import { publishAccessInvalidation, publishBusinessInvalidation, publishConversationEvent, publishStayInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 import { planHomeMessages, planSourceMessages } from '~/server/domain/scheduled-guest-messages'
 import { listingCalendar } from '~/server/integrations/channex/airbnb-listing'
 import { joinBookingConversationQueries } from '~/server/domain/guest-threads/channel-messages'
@@ -2025,6 +2026,7 @@ export async function moveStay(db: DbClient, env: StayMutationEnv, access: StayA
       { query: `UPDATE scheduled_guest_messages SET product_id = ?, updated_at = ? WHERE organization_id = ? AND booking_id = ? AND status <> 'sent' AND ${moved}`,
         params: [to.product_id, now, access.organizationId, stayId, ...movedParams] },
       bookingContactQuery({ organizationId: access.organizationId, bookingId: stayId, version: next, updatedAt: now, locationId: to.location_id, guest: { name: current.guest_name, email: current.guest_email, phone: current.guest_phone } }),
+      ...reconcileGuestListingParticipants(access.organizationId, { query: `c.booking_id = ? AND ${moved}`, params: [stayId, ...movedParams] }),
       ...turnovers,
       ...stayReadyTaskQueries({ organizationId: access.organizationId, stayId, now, previousProductId: from.product_id, guard: { query: moved, params: movedParams },
         home: backOnListing ? null : { product_id: to.product_id, location_id: to.location_id, timezone: to.timezone, check_in_time: to.check_in_time, internal_name: to.internal_name, assigned_member_id: config.assigned_member_id },
@@ -2048,6 +2050,7 @@ export async function moveStay(db: DbClient, env: StayMutationEnv, access: StayA
   const channelPush = released instanceof Error || released?.state === 'needs_review' ? released : held
   return completeChannelPush(channelPush, { product_id: to.product_id, booking_id: stayId, version: next, ranges: range }, async () => {
     const stay = await getStay(db, access, stayId)
+    if (listing === null) await publishAccessInvalidation(env, { organizationId: access.organizationId })
     await publishStayChange(env, db, access.organizationId, stay, true)
     const released = { organization_id: access.organizationId, location_id: from.location_id, product_id: from.product_id, booking_id: stayId }
     await publishStayInvalidation(env, { ...released, type: 'stay.changed' }, { version: next })
@@ -2744,9 +2747,11 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
         AND NOT EXISTS (SELECT 1 FROM conversations booked WHERE booked.booking_id = b.id AND booked.kind = 'booking')`,
     params: [id, organizationId, landing, version],
   },
+  bookChannelConversationGuest(organizationId, id, version),
   ...bookingConversationQueries({ organizationId, bookingId: id, requestId: crypto.randomUUID(), locationId: home.location_id, userId: guestUserId, now,
     guest: { name: guestName, email: booking.guest_email, phone: booking.guest_phone }, ...(guestName === null ? { participant: { kind: 'channel' as const, title: reservation } } : {}) }),
   bookingContactQuery({ organizationId, bookingId: id, version, updatedAt: now, locationId: home.location_id, guest: { name: guestName, email: booking.guest_email, phone: booking.guest_phone } }),
+  ...reconcileGuestListingParticipants(organizationId, { query: 'c.booking_id = ?', params: [id] }),
   ...turnovers,
   ...readyJob,
   ]

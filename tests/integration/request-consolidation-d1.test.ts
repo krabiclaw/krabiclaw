@@ -94,6 +94,8 @@ test('a thread and the record it refers to commit and cancel as one', { timeout:
 
     const winner = await db.prepare('SELECT c.id FROM conversations c JOIN bookings b ON b.id = c.booking_id').first<string>('id')
     assert.ok(winner)
+    assert.deepEqual((await db.prepare('SELECT conversation_id, user_id, role FROM conversation_participants').all()).results,
+      [{ conversation_id: winner, user_id: ACTOR, role: 'member' }])
     // The thread holds no copy of when or for how many; the booking does.
     const record = await getThreadOperationalRecord(db, winner)
     assert.equal(record?.unit, 'slot')
@@ -240,8 +242,9 @@ test('archive and unarchive file a conversation for one person without touching 
       thread('booking-ended', 'booking', '2026-09-07T00:00:00.000Z'),
       // The newest real activity in the inbox, which filing others must not overtake.
       thread('newest', 'contact', '2026-09-10T00:00:00.000Z'),
-      // Archived by the owner while it was still to come; it has since ended.
-      `INSERT INTO conversation_participants (conversation_id,organization_id,user_id,archived_at) VALUES ('ended-archived','${ORG}','${ACTOR}','1999-12-31T00:00:00.000Z')`,
+      // The owner holds a seat in each fixture conversation and archived one while it was still to come.
+      `INSERT INTO conversation_participants (conversation_id, organization_id, user_id, archived_at)
+        SELECT id, organization_id, '${ACTOR}', CASE WHEN id = 'ended-archived' THEN '1999-12-31T00:00:00.000Z' END FROM conversations`,
     ].map(statement => db.prepare(statement)))
 
     const ids = async (mailbox: 'current' | 'past', unreadOnly = false) => (await listConversations(db, ORG, { userId: ACTOR, principal: OWNER, mailbox, unreadOnly })).map(row => row.id)

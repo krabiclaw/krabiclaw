@@ -1,5 +1,6 @@
 import { d1JsonStringSet, execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import type { WebhookEventPayload } from 'resend'
+import { groupMessagePhotos, messagePhotosQuery, type MessagePhotoRow } from './attachments'
 import type { ReplyEmailEnv } from '~/server/utils/submission-messages'
 import { buildReplyToAddress } from '~/server/utils/reply-address'
 import { emailSender, getEmailDeliveryMode, isEmailMessageId, sendEmail, type EmailInput } from '~/server/utils/email-delivery'
@@ -418,18 +419,34 @@ export async function deliverGuestThreadEmail(
  * detail view reads all of them from here and decides what to show; a query
  * that returned failures alone is why a successful send had no channel on it.
  */
-export function threadDeliveriesQuery(threadId: string, messageIds?: string[]): BatchQuery {
+export function threadDeliveriesQuery(threadId: string, messageIds?: string[], purpose?: GuestThreadDeliveryPurpose): BatchQuery {
   return { query: `
     SELECT d.* FROM guest_thread_deliveries d
     JOIN messages m ON m.id = d.message_id
     WHERE m.conversation_id = ? ${messageIds ? 'AND m.id IN (SELECT value FROM json_each(?))' : ''}
-    ORDER BY d.created_at DESC
-  `, params: [threadId, ...(messageIds ? [d1JsonStringSet(messageIds)] : [])] }
+      ${purpose ? 'AND d.purpose = ?' : ''}
+    ORDER BY ${purpose ? 'd.created_at, d.id' : 'd.created_at DESC'}
+  `, params: [threadId, ...(messageIds ? [d1JsonStringSet(messageIds)] : []), ...(purpose ? [purpose] : [])] }
 }
 
 export async function listThreadDeliveries(db: DbClient, threadId: string): Promise<GuestThreadDeliveryRow[]> {
   const { query, params } = threadDeliveriesQuery(threadId)
   return queryAll<GuestThreadDeliveryRow>(db, query, params)
+}
+
+/** Enrich a page of messages in one D1 call after the page reveals its IDs. */
+export async function readConversationEnrichment(db: DbClient, messageIds: string[], authorIds: string[], receipts: BatchQuery | null = null) {
+  const photoQuery = messageIds.length ? messagePhotosQuery('message', messageIds) : null
+  const authorQuery = authorIds.length ? {
+    query: 'SELECT id, name FROM user WHERE id IN (SELECT value FROM json_each(?))',
+    params: [d1JsonStringSet(authorIds)],
+  } : null
+  const batch = [photoQuery, authorQuery, receipts].filter(query => query !== null)
+  const results = batch.length ? await executeBatch(db, batch, { operation: 'Read conversation enrichment' }) : []
+  const photos = photoQuery ? results.shift()!.results as MessagePhotoRow[] : []
+  const actors = authorQuery ? results.shift()!.results as { id: string; name: string }[] : []
+  const deliveries = receipts ? results.shift()!.results as GuestThreadDeliveryRow[] : []
+  return { photos: groupMessagePhotos(photos), actors, deliveries }
 }
 
 /** A failure worth showing in the thread. */

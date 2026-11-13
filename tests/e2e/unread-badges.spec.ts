@@ -1,13 +1,15 @@
 import { expect, test, type APIRequestContext } from '@playwright/test'
-import type { InboxRow, InboxThread } from '../../server/domain/guest-threads/types'
+import type { InboxRow, InboxUnreadCounts } from '../../server/domain/guest-threads/types'
 import { openTenantPage } from './helpers'
-import { loginAs } from './helpers/auth'
+import { authRequestHeaders, loginAs } from './helpers/auth'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { seededTenant } from './seed/manifest'
 import { seededSiteHeaders, testBaseUrl } from './test-env'
 import { bookTable, openSeating } from './helpers/tables'
 
-type ConversationPage = { threads: InboxRow[]; unread: { all: number; guests: number; support: number; team: number } }
+import type { ConversationPage } from '../../shared/messages-contract'
+
+type WorkspaceInbox = { threads: InboxRow[]; unread: InboxUnreadCounts }
 
 test('a new booking, its cancellation and a guest message are unread until read, and one count says so everywhere', async ({ browser, playwright }, testInfo) => {
   test.setTimeout(60_000)
@@ -17,27 +19,32 @@ test('a new booking, its cancellation and a guest message are unread until read,
   const owner = await playwright.request.newContext({ baseURL })
   const guest = await playwright.request.newContext({ baseURL })
   await loginAs(owner, baseURL)
-  const conversations = `/api/dashboard/organizations/${restaurant.organizationId}/conversations`
+  const conversations = '/api/messages'
+  const organization_id = restaurant.organizationId
   // The one unread statement: the list's counts, which Messages' badge reads too.
   const unread = async (request: APIRequestContext = owner) => {
-    const response = await request.get(conversations, { params: { limit: 1, mailbox: 'current' } })
+    const response = await request.get(conversations, { params: { organization_id, limit: 1, mailbox: 'current' } })
     expect(response.status(), await response.text()).toBe(200)
-    return (await response.json() as ConversationPage).unread.all
+    const listCount = (await response.json() as WorkspaceInbox).unread.all
+    const badge = await request.get('/api/messages/unread-count', { params: { organization_id } })
+    expect(badge.status(), await badge.text()).toBe(200)
+    expect((await badge.json() as { unread: InboxUnreadCounts }).unread.all).toBe(listCount)
+    return listCount
   }
   // The row as the list draws it: read back through a different path than the one that moved it.
   const row = async (id: string) => {
-    const response = await owner.get(conversations, { params: { limit: 100, mailbox: 'current' } })
+    const response = await owner.get(conversations, { params: { organization_id, limit: 100, mailbox: 'current' } })
     expect(response.status(), await response.text()).toBe(200)
-    const found = (await response.json() as ConversationPage).threads.find(thread => thread.id === id)
+    const found = (await response.json() as WorkspaceInbox).threads.find(thread => thread.id === id)
     expect(found, `Conversation ${id} is in the current list`).toBeDefined()
     return found!
   }
   const detail = async (id: string) => {
-    const response = await owner.get(`/api/dashboard/organizations/${restaurant.organizationId}/guest-threads/${id}`)
+    const response = await owner.get(`/api/messages/${id}`)
     expect(response.status(), await response.text()).toBe(200)
-    return (await response.json() as { thread: InboxThread }).thread
+    return await response.json() as ConversationPage
   }
-  const newestShown = (thread: InboxThread) => thread.stream.filter(item => item.type !== 'day').at(-1)!.id
+  const newestShown = (thread: ConversationPage) => thread.entries.findLast(item => item.type !== 'day')!.id
   const dashboard = await browser.newContext({ baseURL, storageState: await owner.storageState(), viewport: { width: 1280, height: 900 } })
   try {
     const before = await unread()
@@ -51,7 +58,7 @@ test('a new booking, its cancellation and a guest message are unread until read,
     // Reading the conversation writes nothing: it stays unread until the reader says how far they read.
     const opening = await detail(reservationId)
     expect(await unread()).toBe(before + 1)
-    const read = await owner.post(`${conversations}/${reservationId}/read`, { data: { message_id: newestShown(opening) } })
+    const read = await owner.post(`${conversations}/${reservationId}/read`, { headers: authRequestHeaders(baseURL), data: { message_id: newestShown(opening) } })
     expect(read.status(), await read.text()).toBe(200)
     expect(await read.json()).toEqual({ read: true, last_read_message_id: newestShown(opening) })
     expect(await row(reservationId)).toMatchObject({ unread: false })

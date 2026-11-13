@@ -6,25 +6,26 @@
         color="error"
         variant="soft"
         :title="isNotFoundError(error) ? 'This conversation is no longer available' : 'Conversation could not be loaded'"
-        :description="isNotFoundError(error) ? 'It may have been deleted, or the link is from another business.' : getErrorMessage(error, 'Guest thread request failed')"
+        :description="isNotFoundError(error) ? 'It may have been deleted, or the link is from another business.' : getErrorMessage(error, 'Conversation request failed')"
       />
     </div>
 
     <template v-else-if="thread">
+      <div v-if="thread.kind === 'team' && (thread.stay || thread.record || thread.location)" class="pb-2 pt-3" :class="dashboardGutterClass">
+        <span v-if="thread.stay" class="text-sm text-muted">{{ thread.stay.name }} · {{ thread.stay.check_in_date }} – {{ thread.stay.check_out_date }}</span>
+        <span v-else class="text-sm text-muted">{{ thread.record?.title ?? thread.location?.title }}</span>
+        <TaskCard v-if="thread.job" class="mt-3" :task="thread.job" data-testid="team-thread-job" @open="jobOpen = true" />
+      </div>
       <div ref="scroller" class="min-h-0 flex-1 overflow-y-auto overscroll-contain border-t border-default" style="overflow-anchor: none">
         <div v-if="olderFailureCount" class="px-4 pt-3 text-center text-sm text-error" role="status">
           {{ olderFailureCount === 1 ? 'An older message has a delivery failure.' : `${olderFailureCount} older messages have delivery failures.` }}
         </div>
         <div v-if="before || olderError" class="flex flex-col items-center gap-2 pt-3">
-          <UButton v-if="before" color="neutral" variant="ghost" :loading="loadingOlder" @click="loadOlder">Load older messages</UButton>
+          <UButton v-if="before" color="neutral" variant="ghost" :loading="loadingOlder" @click="loadOlder">{{ thread.kind === 'team' ? 'Earlier messages' : 'Load older messages' }}</UButton>
           <p v-if="olderError" class="text-sm text-error" role="alert">{{ olderError }}</p>
         </div>
-        <!--
-          The stream as the server wrote it: day headers, runs of messages with
-          one "Name time" line each, events as centred sentences, change
-          requests. Nothing here works out a time, a name or a status.
-        -->
         <div class="flex flex-col gap-1 py-4" :class="dashboardGutterClass">
+          <p v-if="!rows.length && !pending && !error" class="py-10 text-center text-muted">Start the conversation</p>
           <template v-for="item in rows" :key="item.key">
             <p v-if="item.type === 'day'" class="mb-1 mt-3 text-center text-xs font-medium text-dimmed">{{ item.label }}</p>
 
@@ -49,11 +50,10 @@
               </div>
             </section>
 
-            <!-- A run: the guest on the left with their circle at its foot, the business on the right. -->
             <div v-else class="flex min-w-0 max-w-[76%] flex-col gap-0.5" :class="item.mine ? 'items-end self-end' : 'relative items-start self-start pl-10'" :data-message="item.key">
               <span v-if="!item.mine" class="absolute bottom-0 left-0"><InboxAvatar :name="item.runs[0]!.author" :initial="initialOf(item.runs[0]!.author)" :support="thread.kind === 'support'" size="sm" /></span>
               <p class="mb-1 mt-2.5 text-sm text-muted"><span class="text-highlighted">{{ item.runs[0]!.label ? `${item.runs[0]!.author} · ${item.runs[0]!.label}` : item.runs[0]!.author }}</span> {{ item.runs[0]!.time }}</p>
-              <template v-for="message in item.runs" :key="message.id">
+              <div v-for="message in item.runs" :key="settledKeys[message.id] ?? message.id" class="flex min-w-0 flex-col" :class="item.mine ? 'items-end' : 'items-start'" :data-team-message="thread.kind === 'team' ? message.id : undefined" :data-automatic="message.automatic || undefined">
                 <div v-if="message.photos.length" class="grid max-w-sm gap-1" :class="[message.photos.length > 1 ? 'grid-cols-2' : 'grid-cols-1', message.sending ? 'opacity-60' : '']">
                   <button
                     v-for="(photo, at) in message.photos"
@@ -63,12 +63,12 @@
                     :aria-label="`Open photo ${at + 1} of ${message.photos.length} from ${message.author}`"
                     @click="viewer = { photos: message.photos.map(item => ({ url: item.url })), at }"
                   >
-                    <img :src="photo.url" alt="" :width="photo.width ?? undefined" :height="photo.height ?? undefined" loading="lazy" class="size-full object-cover" :class="message.photos.length > 1 ? 'aspect-square' : 'max-h-80'">
+                    <img :src="photo.thumbnail_url" alt="" :width="photo.width ?? undefined" :height="photo.height ?? undefined" loading="lazy" class="size-full object-cover" :class="message.photos.length > 1 ? 'aspect-square' : 'max-h-80'">
                   </button>
                 </div>
                 <div
                   v-if="message.body"
-                  class="max-w-full whitespace-pre-wrap rounded-[18px] px-3.5 py-2.5 text-base [overflow-wrap:anywhere]"
+                  class="max-w-full whitespace-pre-wrap break-words rounded-[18px] px-3.5 py-2.5 text-base [overflow-wrap:anywhere]"
                   :class="[item.mine ? 'rounded-br-md bg-inverted text-inverted' : 'rounded-bl-md bg-elevated text-default', message.sending ? 'opacity-60' : '']"
                 >{{ message.translated && originals.has(message.id) ? message.translated.original : message.body }}</div>
                 <p v-if="message.unshown_files" class="mx-1 mt-0.5 flex items-center gap-1.5 text-xs text-muted">
@@ -80,7 +80,17 @@
                 <p v-if="message.receipt" class="mt-0.5 text-xs" :class="message.receipt === 'Not delivered' ? 'text-error' : 'text-muted'">
                   {{ message.receipt }}<template v-if="message.retryable"> · <button type="button" class="underline underline-offset-2 disabled:opacity-50" :disabled="retrying" @click="retry(message.id)">Try again</button></template>
                 </p>
-              </template>
+                <UButton v-if="thread.kind === 'team' && !message.automatic && !item.mine" color="neutral" variant="link" size="xs" class="mt-1 p-0 text-muted" @click="reportError = null; reporting = message">Report</UButton>
+                <div v-if="thread.kind === 'team' && failedDeliveries(message).length" class="mt-1 text-xs text-error" data-team-delivery-failure>
+                  <p>Message saved. {{ failedDeliveries(message).length === 1 ? 'A notification failed.' : `${failedDeliveries(message).length} notifications failed.` }}</p>
+                  <UCollapsible v-if="failedDeliveries(message).some(delivery => delivery.error)">
+                    <UButton color="error" variant="link" size="xs" class="p-0" label="Delivery error details" trailing-icon="i-lucide-chevron-down" />
+                    <template #content>
+                      <p v-for="delivery in failedDeliveries(message).filter(delivery => delivery.error)" :key="delivery.id" class="mt-1 whitespace-pre-wrap break-words">{{ delivery.channel }}: {{ delivery.error }}</p>
+                    </template>
+                  </UCollapsible>
+                </div>
+              </div>
             </div>
           </template>
         </div>
@@ -88,9 +98,10 @@
 
       <div class="shrink-0 pb-6 pt-2" :class="dashboardGutterClass">
         <UAlert v-if="actionError || readError" color="error" variant="soft" icon="i-lucide-circle-alert" :description="actionError ?? readError ?? undefined" class="mb-2" />
+        <UButton v-if="readError" class="mb-2" color="neutral" variant="ghost" @click="readThroughNewest">Retry read receipt</UButton>
 
         <!-- A message still to go out: one row per message, the only place it appears. -->
-        <div v-for="later in thread.pending" :key="later.id" class="mb-2 flex min-h-12 items-center gap-3 rounded-2xl bg-elevated px-4 py-3 text-base text-highlighted">
+        <div v-for="later in guestThread?.pending ?? []" :key="later.id" class="mb-2 flex min-h-12 items-center gap-3 rounded-2xl bg-elevated px-4 py-3 text-base text-highlighted">
           <UIcon name="i-lucide-clock" class="size-4 shrink-0 text-muted" />
           <span class="min-w-0 flex-1 truncate">{{ later.label }} · {{ later.time }}</span>
           <button v-if="later.cancellable" type="button" class="flex size-6 shrink-0 items-center justify-center text-highlighted disabled:opacity-50" :aria-label="`Cancel ${later.label}`" :disabled="cancelling === later.id" @click="cancelPending(later)">
@@ -120,54 +131,63 @@
 
         <UAlert v-if="requestingChange" class="mb-3" color="info" variant="soft" :description="t(changeRequestSent ? 'booking.change_request_sent' : 'booking.change_request_help')" />
         <!-- Where the reply operation cannot send (no email, account or connected Airbnb home), there is no composer: its reason shows instead. -->
-        <p v-if="!thread.composer.available" class="rounded-2xl bg-elevated px-4 py-3 text-sm text-muted">{{ thread.composer.reason }}</p>
-        <MessageComposer v-else v-model="draft" v-model:photos="chosen" v-model:send-at="sendAt" :sending="sending" :channel="thread.composer.channel" :send-later="!personalScope" :suggestions-hidden="suggestionsHidden" :send-label="requestingChange && !changeRequestSent ? t('booking.request_change') : 'Send reply'" @send="sendReply" @show-suggestions="recallSuggestions" />
+        <p v-if="!canSend" class="rounded-2xl bg-elevated px-4 py-3 text-sm text-muted">{{ guestThread?.composer.reason ?? 'Sending is unavailable in this conversation.' }}</p>
+        <MessageComposer v-else v-model="draft" v-model:photos="chosen" v-model:send-at="sendAt" :sending="sending" :channel="guestThread?.composer.channel ?? 'team'" :send-later="!personalScope && guestThread !== null" :suggestions-hidden="suggestionsHidden" :placeholder="thread.kind === 'team' ? 'Message your team' : undefined" :send-label="requestingChange && !changeRequestSent ? t('booking.request_change') : guestThread ? 'Send reply' : 'Send message'" @send="sendReply" @show-suggestions="recallSuggestions" />
         <MessagePhotoViewer v-model="viewer" />
+        <TodayTaskSheet v-if="thread.kind === 'team' && thread.job && dashboard.organizationId.value" v-model:open="jobOpen" :task="thread.job" :organization-id="dashboard.organizationId.value" :assignees="[]" @changed="refresh()" />
+        <ReportDialog :open="reporting !== null" title="Report this message" :description="reporting ? `Tell KrabiClaw what is wrong with ${reporting.author}'s message.` : ''" confirm-label="Report" :saving="reportSaving" :error="reportError" @submit="report" @close="reporting = null" />
       </div>
     </template>
   </div>
 </template>
 
 <script setup lang="ts">
-import { isPagedThreadResponse, type PagedThread } from './guest-thread-client'
-import { isMessageIdentity, type MessageIdentity } from '~/shared/dashboard-invalidations'
+import { isConversationEntry, isConversationOperation } from './guest-thread-client'
+import type { ConversationEntry, ConversationPage } from '~/shared/messages-contract'
+import type { MessageIdentity } from '~/shared/dashboard-invalidations'
 
-import { useIntervalFn, useDocumentVisibility } from '@vueuse/core'
+import { useDocumentVisibility } from '@vueuse/core'
 import { getErrorMessage, isNotFoundError } from '~/utils/errors'
-import type { StreamItem } from '~/lib/components/workspace/messages/guest-thread-client'
 import type { BookingChangeView } from '~/server/domain/guest-threads/booking-changes'
 import type { InboxPendingMessage } from '~/server/domain/guest-threads/types'
-import { useDashboardInvalidations } from '~/composables/useDashboardInvalidations'
+import { useConversationInvalidations } from '~/composables/useDashboardInvalidations'
 import { authClient } from '~/lib/auth-client'
 import MessageComposer, { messageReplyForm, sameMessagePhotos, useMessagePhotoDraft, type MessagePhotoDraft } from './MessageComposer.vue'
 import MessagePhotoViewer, { type MessagePhotoViewerState } from './MessagePhotoViewer.vue'
 import InboxAvatar from './InboxAvatar.vue'
+import ReportDialog from './ReportDialog.vue'
+import TaskCard from '~/components/dashboard/TaskCard.vue'
+import TodayTaskSheet from '~/components/dashboard/TodayTaskSheet.vue'
 import { isScheduledMessageResponse, isSuggestedReplies, useSuggestedReplies } from './guest-messaging-client'
 import { dashboardGutterClass } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
 
-/*
-  One guest thread: the stream and its composer, drawn from the server's view
-  model (inbox-parity.md, "The thread") and nothing else. The header, the
-  conversation sheet and the reservation belong to the route that mounts this.
-*/
-const props = withDefaults(defineProps<{ threadId: string; personalScope?: boolean }>(), { personalScope: false })
+const props = withDefaults(defineProps<{ threadId: string; personalScope?: boolean; history: ReturnType<typeof useConversation> }>(), { personalScope: false })
 
 const dashboard = useDashboardOrganization()
 const route = useRoute()
-const dashboardApi = useDashboardApi(useDashboardRouteScope())
-const realtime = useDashboardInvalidations()
+const dashboardApi = useDashboardApi()
 const { locale, t } = useI18n()
 const session = authClient.useSession()
-
-const { data, thread, pending, error, refresh: refreshHead, clear, readPage } = await useGuestThread(computed(() => props.threadId), computed(() => props.personalScope), true)
-const older = shallowRef<PagedThread[]>([])
+const userId = computed(() => session.value.data?.user.id)
+const { readPage, path, organizationId } = props.history
+const { data, pending, error, refresh: refreshHead, clear } = props.history.request
+const thread = computed(() => data.value?.conversation ?? null)
+const conversationOrganization = computed(() => thread.value?.organization_id ?? organizationId.value ?? undefined)
+const realtime = useConversationInvalidations(computed(() => props.threadId), conversationOrganization, props.personalScope)
+const guestThread = computed(() => thread.value?.kind === 'team' ? null : thread.value)
+const entries = computed(() => data.value?.entries ?? [])
+const canSend = computed(() => data.value?.capabilities.can_send === true)
+const dateFormat = computed(() => new Intl.DateTimeFormat(locale.value, { dateStyle: 'medium' }))
+const clockFormat = computed(() => new Intl.DateTimeFormat(locale.value, { hour: 'numeric', minute: '2-digit' }))
+const older = shallowRef<ConversationPage[]>([])
 const olderError = ref<string | null>(null)
 const loadingOlder = ref(false)
-const transcriptPage = computed(() => thread.value && 'page' in thread.value ? (thread.value as PagedThread).page : null)
+const transcriptPage = computed(() => data.value?.page)
+const jobOpen = ref(false)
 const olderFailureCount = computed(() => {
   const failures = transcriptPage.value?.failed_messages ?? []
   if (!failures.length) return 0
-  const loaded = new Set([...(thread.value?.stream ?? []), ...older.value.flatMap(page => page.stream)].map(item => item.id))
+  const loaded = new Set([...entries.value, ...older.value.flatMap(page => page.entries)].map(item => item.id))
   return failures.filter(id => !loaded.has(id)).length
 })
 const before = computed(() => older.value.length ? older.value[0]!.page.before : transcriptPage.value?.before)
@@ -187,8 +207,8 @@ async function loadOlder() {
   loadingOlder.value = true
   olderError.value = null
   try {
-    const { thread: previous } = await readPage(cursor, controller.signal)
-    if (controller.signal.aborted || cursor !== before.value || previous.id !== props.threadId) return
+    const previous = await readPage(cursor, controller.signal)
+    if (controller.signal.aborted || cursor !== before.value || previous.conversation.id !== props.threadId) return
     const el = scroller.value
     const height = el?.scrollHeight ?? 0
     const top = el?.scrollTop ?? 0
@@ -207,7 +227,7 @@ async function loadOlder() {
 
 async function refresh(options?: Parameters<typeof refreshHead>[0], rebuild = true) {
   olderRequest?.abort()
-  const previous = thread.value && 'page' in thread.value ? thread.value as PagedThread : null
+  const previous = data.value ?? null
   const revision = accessRevision
   await refreshHead(options)
   if (revision !== accessRevision) return
@@ -216,17 +236,17 @@ async function refresh(options?: Parameters<typeof refreshHead>[0], rebuild = tr
 }
 
 // A create can shift rows out of the head without changing the older window.
-function retainOlder(previous: PagedThread | null): boolean {
+function retainOlder(previous: ConversationPage | null): boolean {
   if (!previous || !older.value.length) return true
-  const current = thread.value
-  if (!current || !('page' in current)) return false
-  if (previous.page.oldest === (current as PagedThread).page.oldest) return true
-  const headIds = new Set(current.stream.filter(item => item.type !== 'day').map(item => item.id))
-  const overlap = previous.stream.findIndex(item => headIds.has(item.id))
+  const current = data.value
+  if (!current) return false
+  if (previous.page.oldest === current.page.oldest) return true
+  const headIds = new Set(current.entries.filter(item => item.type !== 'day').map(item => item.id))
+  const overlap = previous.entries.findIndex(item => headIds.has(item.id))
   if (overlap < 0) return false
   const pages = older.value
   const last = pages.at(-1)!
-  older.value = [...pages.slice(0, -1), { ...last, stream: [...last.stream, ...previous.stream.slice(0, overlap)] }]
+  older.value = [...pages.slice(0, -1), { ...last, entries: [...last.entries, ...previous.entries.slice(0, overlap)] }]
   return true
 }
 
@@ -238,12 +258,12 @@ async function reconcileOlder(previousHead: typeof transcriptPage.value | undefi
   if (olderPages && nextHead) {
     const controller = new AbortController()
     olderRequest = controller
-    const pages: PagedThread[] = []
+    const pages: ConversationPage[] = []
     let cursor = nextHead.before
     const oldest = older.value[0]?.page.oldest ?? previousHead?.oldest
     try {
       for (let remaining = olderPages + 1; cursor && remaining > 0; remaining--) {
-        const { thread: page } = await readPage(cursor, controller.signal)
+        const page = await readPage(cursor, controller.signal)
         pages.unshift(page)
         cursor = page.page.before
         if (oldest !== null && oldest !== undefined && page.page.oldest !== null && page.page.oldest <= oldest) break
@@ -258,7 +278,7 @@ async function reconcileOlder(previousHead: typeof transcriptPage.value | undefi
   }
 }
 onScopeDispose(() => olderRequest?.abort())
-const threadPath = computed(() => props.personalScope ? `/api/account/messages/${encodeURIComponent(props.threadId)}` : `/api/dashboard/organizations/${dashboard.organizationId.value}/guest-threads/${encodeURIComponent(props.threadId)}`)
+const guestActions = computed(() => `/api/dashboard/organizations/${organizationId.value}/guest-threads/${encodeURIComponent(props.threadId)}`)
 
 const draft = ref('')
 // A suggestion on Today opens the conversation with its message written in the navigation's state; the owner reviews and sends it.
@@ -269,16 +289,17 @@ watch(() => props.threadId, () => {
   if (!draft.value.trim()) draft.value = written
   window.history.replaceState(state, '')
 }, { immediate: true })
-const requestingChange = computed(() => props.personalScope && route.query.intent === 'booking-change' && thread.value?.booking_id && thread.value.composer.channel === 'email')
+const requestingChange = computed(() => props.personalScope && route.query.intent === 'booking-change' && guestThread.value?.booking_id && guestThread.value.composer.channel === 'email')
 const changeRequestSent = ref(false)
 watch(() => `${props.threadId}:${String(route.query.intent)}`, () => { changeRequestSent.value = false })
 const sendAt = ref<string | null>(null)
 // The business that asked for a change: the one whose inbox this is, or, in a guest's own inbox, the one they are writing to.
-const currentBusiness = computed(() => props.personalScope ? thread.value?.title : dashboard.organization.value?.name)
+const currentBusiness = computed(() => props.personalScope ? guestThread.value?.title : dashboard.organization.value?.name)
 const actionError = ref<string | null>(null)
 const readError = ref<string | null>(null)
 
-type MessageItem = Extract<StreamItem, { type: 'message' }> & { sending?: boolean }
+type MessageItem = Extract<ConversationEntry, { type: 'message' }> & { sending?: boolean }
+const failedDeliveries = (message: MessageItem) => message.deliveries.filter(delivery => delivery.status === 'failed')
 type Row =
   | { type: 'day'; key: string; label: string }
   | { type: 'event'; key: string; text: string }
@@ -331,17 +352,29 @@ const mineSide = computed(() => props.personalScope ? 'guest' : 'business')
 const rows = computed<Row[]>(() => {
   const current = thread.value
   if (!current) return []
-  const items: Array<StreamItem | MessageItem> = []
+  const items: Array<ConversationEntry | MessageItem> = []
   const seen = new Set<string>()
   let previousDay: string | undefined
-  const currentIds = new Set(current.stream.map(item => item.id))
-  for (const item of [...older.value.flatMap(page => page.stream).filter(item => !currentIds.has(item.id)), ...current.stream]) {
+  let previousMessage: MessageItem | undefined
+  const currentIds = new Set(entries.value.map(item => item.id))
+  for (const item of [...older.value.flatMap(page => page.entries).filter(item => !currentIds.has(item.id)), ...entries.value]) {
     if (seen.has(item.id)) continue
     if (item.type === 'day') {
       if (previousDay === item.label) continue
       previousDay = item.label
     }
-    items.push(item)
+    if (current.kind === 'team' && item.type === 'message') {
+      const date = new Date(item.sent_at)
+      const day = dateFormat.value.format(date)
+      if (previousDay !== day) {
+        items.push({ type: 'day', id: `day:${day}`, label: day })
+        previousDay = day
+        previousMessage = undefined
+      }
+      const startsRun = !previousMessage || item.automatic || previousMessage.automatic || item.author_user_id !== previousMessage.author_user_id
+      items.push({ ...item, time: startsRun ? clockFormat.value.format(date) : null })
+      previousMessage = item
+    } else items.push(item)
     seen.add(item.id)
   }
   for (const action of [...(transcriptPage.value?.booking_actions ?? [])].reverse()) {
@@ -349,7 +382,7 @@ const rows = computed<Row[]>(() => {
   }
   if (attempt.value && sending.value && !items.some(item => item.type === 'message' && settledKeys.value[item.id] === `pending:${attempt.value?.key}`)) {
     items.push({
-      type: 'message', id: `pending:${attempt.value.key}`, side: mineSide.value, author: 'You', label: null, sent_at: new Date().toISOString(),
+      type: 'message', id: `pending:${attempt.value.key}`, sequence: Number.MAX_SAFE_INTEGER, side: mineSide.value, author: 'You', author_user_id: userId.value ?? null, automatic: false, deliveries: [], label: null, sent_at: new Date().toISOString(),
       time: 'Sending', body: attempt.value.body || null, translated: null, receipt: null, retryable: false, unshown_files: 0, sending: true,
       photos: attempt.value.photos.map((photo, at) => ({ id: `${attempt.value!.key}:${at}`, url: photo.url, thumbnail_url: photo.url, width: null, height: null })),
     })
@@ -362,8 +395,9 @@ const rows = computed<Row[]>(() => {
     else if (item.type === 'change') out.push({ type: 'change', key, change: item.change })
     else {
       const last = out.at(-1)
-      if (item.time === null && last?.type === 'run' && last.runs[0]!.side === item.side) last.runs.push(item)
-      else out.push({ type: 'run', key, mine: item.side === mineSide.value, runs: [item] })
+      const mine = current.kind === 'team' ? item.author === 'You' : item.side === mineSide.value
+      if (item.time === null && last?.type === 'run' && last.mine === mine && last.runs[0]!.author === item.author) last.runs.push(item)
+      else out.push({ type: 'run', key, mine, runs: [item] })
     }
   }
   return out
@@ -394,9 +428,9 @@ const suggestionAttempt = ref(0)
 const dismissedFor = ref<string | null>(null)
 // None for a conversation nobody can reply to: it has no composer, so nothing is drafted for it.
 const latestGuestMessage = computed(() => {
-  if (!thread.value?.composer.available) return null
-  const last = thread.value.stream.findLast(item => item.type === 'message')
-  return last?.type === 'message' && last.side === 'guest' && thread.value.kind === 'guest' ? last.id : null
+  if (!guestThread.value?.composer.available) return null
+  const last = entries.value.findLast(item => item.type === 'message')
+  return last?.type === 'message' && last.side === 'guest' && guestThread.value.kind === 'guest' ? last.id : null
 })
 // Typing or × puts them away; the composer's + brings them back until the guest writes again.
 const recalledFor = ref<string | null>(null)
@@ -416,7 +450,7 @@ watch([latestGuestMessage, suggestionsOn, suggestionAttempt], async ([messageId,
   suggestionError.value = null
   if (props.personalScope || !on || !messageId || !import.meta.client) return
   try {
-    const result = await dashboardApi(`${threadPath.value}/suggested-reply`, { method: 'POST', validate: isSuggestedReplies })
+    const result = await dashboardApi(`${guestActions.value}/suggested-reply`, { method: 'POST', validate: isSuggestedReplies })
     if (latestGuestMessage.value === messageId) { suggestions.value = result.suggestions; generationId.value = result.generation_id }
   } catch (err) {
     suggestionError.value = `Replies could not be suggested: ${getErrorMessage(err, 'Suggested reply request failed')}`
@@ -447,15 +481,12 @@ async function answerChange(requestId: string, decision: 'accept' | 'decline') {
   try {
     // The host answers a guest's request on their channel through the conversation's operations.
     if (!props.personalScope) {
-      const response = await dashboardApi(`${threadPath.value}/operations/${decision}_change`, {
+      await dashboardApi(`${guestActions.value}/operations/${decision}_change`, {
         method: 'POST',
-        body: { message_id: requestId, idempotency_key: `${requestId}:${decision}` }, query: { transcript: 'latest' },
-        validate: isPagedThreadResponse,
+        body: { message_id: requestId, idempotency_key: `${requestId}:${decision}` },
+        validate: isConversationOperation,
       })
-      if (revision !== accessRevision) return
-      const previousHead = transcriptPage.value
-      data.value = response
-      await reconcileOlder(previousHead, older.value.length)
+      if (revision === accessRevision) await refresh()
       return
     }
     await applicationFetch(`/api/public/booking-changes/${encodeURIComponent(props.threadId)}/${encodeURIComponent(requestId)}`, {
@@ -507,12 +538,12 @@ function changeStatus(change: BookingChangeView) {
 async function sendReply() {
   const body = draft.value.trim()
   const photos = chosen.value
-  if (!thread.value || !thread.value.composer.available || (!body && !photos.length) || sending.value) return
+  if (!thread.value || !canSend.value || (!body && !photos.length) || sending.value) return
   if (sendAt.value) {
     sending.value = true
     actionError.value = null
     try {
-      await dashboardApi(`${threadPath.value}/send-later`, { method: 'POST', body: { body, due_at: sendAt.value, ...(usedSuggestion.value ? { suggestion: usedSuggestion.value } : {}) }, validate: isScheduledMessageResponse })
+      await dashboardApi(`${guestActions.value}/send-later`, { method: 'POST', body: { body, due_at: sendAt.value, ...(usedSuggestion.value ? { suggestion: usedSuggestion.value } : {}) }, validate: isScheduledMessageResponse })
       draft.value = ''
       usedSuggestion.value = null
       sendAt.value = null
@@ -528,42 +559,39 @@ async function sendReply() {
     attempt.value = { key: crypto.randomUUID(), body, photos }
   }
   const current = attempt.value
-  const previous = thread.value && 'page' in thread.value ? thread.value as PagedThread : null
   const revision = accessRevision
   sending.value = true
   actionError.value = null
-  void scrollToLatest()
+  void scrollToLatest('instant')
   try {
-    const options = {
-      method: 'POST' as const,
-      body: photos.length ? messageReplyForm(body, photos, current.key, props.personalScope ? null : usedSuggestion.value) : { body, idempotency_key: current.key, ...(!props.personalScope && usedSuggestion.value ? { suggestion: usedSuggestion.value } : {}) },
+    const { message } = await applicationFetch(path.value, {
+      method: 'POST',
+      body: photos.length ? messageReplyForm(body, photos, current.key, usedSuggestion.value)
+        : { body, idempotency_key: current.key, ...(usedSuggestion.value && { suggestion: usedSuggestion.value }) },
+      validate: (value): value is { message: MessageItem } => isRecord(value) && isConversationEntry(value.message) && value.message.type === 'message',
+    })
+    if (revision !== accessRevision || !data.value) return
+    settledReply = message
+    settledKeys.value = { ...settledKeys.value, [message.id]: `pending:${current.key}` }
+    if (!entries.value.some(item => item.id === message.id)) {
+      // A delayed live refresh may have captured the head before the send landed.
+      const page = data.value
+      if (pending.value) {
+        clear()
+        reconcileThread()
+      }
+      const listed = page.entries
+      const at = listed.findIndex(entry => entry.type !== 'day' && entry.sequence > message.sequence)
+      const previous = listed[at < 0 ? listed.length - 1 : at - 1]
+      const sent = previous?.type === 'message' && previous.author === message.author && previous.side === message.side
+        ? message
+        : { ...message, time: clockFormat.value.format(new Date(message.sent_at)) }
+      data.value = {
+        ...page,
+        entries: at < 0 ? [...listed, sent] : [...listed.slice(0, at), sent, ...listed.slice(at)],
+        page: { ...page.page, oldest: page.page.oldest ?? message.sequence, newest: Math.max(page.page.newest ?? 0, message.sequence) },
+      }
     }
-    if (props.personalScope) {
-      const { message } = await applicationFetch(`${threadPath.value}/reply`, {
-        ...options,
-        validate: (value): value is { message: MessageIdentity } => isRecord(value) && isMessageIdentity(value.message),
-      })
-      if (revision !== accessRevision) return
-      settledReply = message
-      settledKeys.value = { ...settledKeys.value, [message.id]: `pending:${current.key}` }
-      const response = await readPage()
-      if (revision !== accessRevision) return
-      data.value = response
-    } else {
-      const res = await dashboardApi(`${threadPath.value}/operations/reply`, {
-        ...options, query: { transcript: 'latest' },
-        validate: (value): value is { thread: PagedThread; message: MessageIdentity } => isPagedThreadResponse(value) && isMessageIdentity(Reflect.get(value, 'message')),
-      })
-      if (revision !== accessRevision) return
-      settledReply = res.message
-      settledKeys.value = { ...settledKeys.value, [res.message.id]: `pending:${current.key}` }
-      if (pending.value) { clear(); reconcileThread(true) }
-      olderRequest?.abort()
-      data.value = res
-    }
-    if (revision !== accessRevision) return
-    if (!retainOlder(previous)) await reconcileOlder(previous?.page, older.value.length)
-    if (revision !== accessRevision) return
     if (requestingChange.value) changeRequestSent.value = true
     attempt.value = null
     draft.value = ''
@@ -583,6 +611,29 @@ async function sendReply() {
 
 const chosen = useMessagePhotoDraft()
 
+const reporting = ref<MessageItem | null>(null)
+const reportSaving = ref(false)
+const reportError = ref<string | null>(null)
+const reportKeys = new Map<string, string>()
+async function report(reason: string) {
+  const message = reporting.value
+  if (!message) return
+  const key = reportKeys.get(message.id) ?? crypto.randomUUID()
+  reportKeys.set(message.id, key)
+  reportSaving.value = true
+  reportError.value = null
+  try {
+    await dashboardApi(`/api/dashboard/team/threads/${encodeURIComponent(props.threadId)}/messages/${encodeURIComponent(message.id)}/report`, {
+      method: 'POST', body: { reason, idempotency_key: key },
+      validate: (value): value is { report: { id: string; status: 'open' } } =>
+        isRecord(value) && isRecord(value.report) && typeof value.report.id === 'string' && value.report.status === 'open',
+    })
+    reportKeys.delete(message.id)
+    reporting.value = null
+  } catch (cause) { reportError.value = getErrorMessage(cause, 'The report could not be sent') }
+  finally { reportSaving.value = false }
+}
+
 // "Try again" sends the same reply under its own key, so one that did land is not sent twice.
 const retrying = ref(false)
 async function retry(messageId: string) {
@@ -590,11 +641,8 @@ async function retry(messageId: string) {
   retrying.value = true
   actionError.value = null
   try {
-    const response = await dashboardApi(`${threadPath.value}/operations/retry`, { method: 'POST', query: { transcript: 'latest' }, body: { message_id: messageId, idempotency_key: messageId }, validate: isPagedThreadResponse })
-    if (revision !== accessRevision) return
-    const previousHead = transcriptPage.value
-    data.value = response
-    await reconcileOlder(previousHead, older.value.length)
+    await dashboardApi(`${guestActions.value}/operations/retry`, { method: 'POST', body: { message_id: messageId, idempotency_key: messageId }, validate: isConversationOperation })
+    if (revision === accessRevision) await refresh()
   } catch (err) {
     actionError.value = getErrorMessage(err, 'The reply could not be sent again')
   } finally {
@@ -603,16 +651,16 @@ async function retry(messageId: string) {
 }
 
 watch(realtime.event, event => {
-  if (props.personalScope || !event || event.organization_id !== dashboard.organizationId.value) return
-  if (event.type === 'access.changed') {
+  if (!event || event.organization_id !== conversationOrganization.value) return
+  if (event.type === 'access.changed' || (event.type === 'CONVERSATION_LEAVE' && event.conversation_id === props.threadId && event.user_id === userId.value)) {
     accessRevision++
     settledReply = undefined
     deferredCreates.length = 0
     clearTranscript()
-    reconcileThread()
+    if (event.type === 'access.changed') reconcileThread()
     return
   }
-  if ((event.type !== 'MESSAGE_CREATE' && event.type !== 'MESSAGE_UPDATE') || event.team || event.conversation_id !== props.threadId) return
+  if ((event.type !== 'MESSAGE_CREATE' && event.type !== 'MESSAGE_UPDATE') || event.conversation_id !== props.threadId) return
   if (event.type === 'MESSAGE_CREATE' && event.message) {
     const message = event.message
     if (sending.value) { deferredCreates.push(message); return }
@@ -640,11 +688,10 @@ watch(error, cause => {
 }, { flush: 'sync' })
 
 watch(realtime.connectionEpoch, (epoch) => {
-  if (epoch > 1 && !props.personalScope) reconcileThread(true)
+  if (epoch > 1) reconcileThread(true)
 })
 
 const documentVisibility = useDocumentVisibility()
-useIntervalFn(() => { if (props.personalScope && documentVisibility.value === 'visible') void refresh() }, 15_000)
 
 /*
   Opening a conversation reads it through to the newest message shown, while
@@ -655,19 +702,19 @@ useIntervalFn(() => { if (props.personalScope && documentVisibility.value === 'v
 let readThrough: string | null = null
 let markingRead = false
 const readScope = computed(() => `${session.value.data?.user.id ?? ''}:${props.threadId}:${props.personalScope}`)
-const shownMessages = computed(() => thread.value?.stream.filter(item => item.type !== 'day') ?? [])
-const fromSomeoneElse = computed(() => shownMessages.value.some(item => item.type !== 'message' || item.author !== 'You'))
-const readPath = computed(() => props.personalScope ? `${threadPath.value}/read` : `/api/dashboard/organizations/${dashboard.organizationId.value}/conversations/${encodeURIComponent(props.threadId)}/read`)
+const newestShown = computed(() => entries.value.findLast(item => item.type !== 'day'))
 
 async function readThroughNewest() {
-  if (!import.meta.client || markingRead || documentVisibility.value !== 'visible' || pending.value || !fromSomeoneElse.value) return
-  const newest = shownMessages.value.at(-1)?.id
-  const target = newest ? `${readScope.value}:${newest}` : null
-  if (!newest || target === readThrough || newest === settledReply?.id) return
+  if (!import.meta.client || markingRead || documentVisibility.value !== 'visible' || pending.value) return
+  const newest = newestShown.value
+  if (!newest || newest.sequence <= (transcriptPage.value?.read_through ?? 0)) return
+  const target = `${readScope.value}:${newest.id}`
+  if (target === readThrough || newest.id === settledReply?.id || !entries.value.some(item =>
+    item.type !== 'day' && (item.type !== 'message' || item.author !== 'You'))) return
   markingRead = true
   try {
-    await (props.personalScope ? applicationFetch : dashboardApi)(readPath.value, {
-      method: 'POST', body: { message_id: newest },
+    await applicationFetch(`${path.value}/read`, {
+      method: 'POST', body: { message_id: newest.id },
       validate: (value): value is { read: true; last_read_message_id: string } => isRecord(value) && value.read === true && typeof value.last_read_message_id === 'string',
     })
     readThrough = target
@@ -676,10 +723,10 @@ async function readThroughNewest() {
   } catch (cause) { readError.value = getErrorMessage(cause, 'Message read state could not be saved') }
   finally {
     markingRead = false
-    if (!readError.value && shownMessages.value.at(-1)?.id !== newest) void readThroughNewest()
+    if (!readError.value && newestShown.value?.id !== newest.id) void readThroughNewest()
   }
 }
-watch([() => shownMessages.value.at(-1)?.id, documentVisibility, pending, readScope], readThroughNewest, { immediate: true })
+watch([() => newestShown.value?.id, documentVisibility, pending, readScope], readThroughNewest, { immediate: true })
 
 /*
   Following the conversation: it opens at the newest message; one arriving
@@ -692,7 +739,7 @@ async function scrollToLatest(behavior: ScrollBehavior = 'smooth') {
   scroller.value?.scrollTo({ top: scroller.value.scrollHeight, behavior })
 }
 onMounted(() => { void scrollToLatest('instant') })
-watch(() => thread.value?.stream.length, () => {
+watch(() => newestShown.value?.id, () => {
   const el = scroller.value
   if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 120) void scrollToLatest()
 })

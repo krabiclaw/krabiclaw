@@ -3,7 +3,7 @@ import { sessionPrepTaskQueries } from '~/server/domain/tasks'
 import { BOOKING_ENDS_SQL, BOOKING_RECORDS_SQL, bookingDay, parseGuestRequest, participantLabel } from '~/server/domain/requests'
 import {
   MEMBER_REPLY_EVENT, MIRRORED_EVENT, OPENING_EVENT, SUPPORT_CONVERSATION_SQL,
-  archiveQuery, archiveReplyTaskQuery, canMessageGuests, conversationAccessDenied, conversationAccessSql, guestConversationSql, guestOwnsGuard, guestVisibleSql, listUnreadIds, messageHasContentSql, teamSeatSql, unreadSql, type ConversationGuard, type UnreadCounts,
+  archiveQuery, archiveReplyTaskQuery, conversationAccessDenied, participantGuard, guestVisibleSql, listUnreadIds, messageHasContentSql, unreadSql, type ConversationGuard, type UnreadCounts,
 } from '~/server/domain/conversations'
 import { messagePreview } from './attachments'
 import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
@@ -156,21 +156,10 @@ async function inboxScope(organizationId: string | null, opts: ListGuestThreadsO
   const params: Array<string | number> = [opts.userId]
   const from = `conversations gt${operationalRecordSql()}
     LEFT JOIN conversation_participants me ON me.conversation_id = gt.id AND me.user_id = ?`
-  let where: string
-  if (opts.buyerAudience) {
-    const access = guestOwnsGuard(opts.userId, 'gt')
-    where = access.sql
-    params.push(...access.params)
-    if (organizationId) { where += ' AND gt.organization_id = ?'; params.push(organizationId) }
-  } else {
-    where = 'gt.organization_id = ?'
-    params.push(organizationId!)
-    // Without a resolved principal (a server read on the viewer's behalf), every guest conversation and the viewer's team ones.
-    const access = opts.principal ? await conversationAccessSql('gt', opts.principal)
-      : { sql: `(gt.kind IN ('contact', 'booking') OR gt.kind = 'team' AND ${teamSeatSql('gt')})`, params: [opts.userId] }
-    where += ` AND ${access.sql}`
-    params.push(...access.params)
-  }
+  const access = participantGuard('gt', opts.userId, opts.buyerAudience ? 'guest' : 'member')
+  let where = access.sql
+  params.push(...access.params)
+  if (organizationId) { where += ' AND gt.organization_id = ?'; params.push(organizationId) }
   if (opts.conversationIds) {
     where += " AND gt.id IN (SELECT value FROM json_each(?))"
     params.push(d1JsonStringSet(opts.conversationIds))
@@ -181,16 +170,17 @@ async function inboxScope(organizationId: string | null, opts: ListGuestThreadsO
   if (opts.needsReply) where += ` AND ${OPEN_REPLY_TASK_SQL}`
   if (opts.kind) where += kindWhere(opts.kind)
   if (opts.q) {
+    const visible = opts.buyerAudience ? ` AND ${guestVisibleSql('e', 'gt.user_id = me.user_id')}` : ''
     const like = `%${opts.q.toLowerCase().replace(/[\\%_]/g, char => `\\${char}`)}%`
     where += ` AND (LOWER(COALESCE(json_extract(gt.payload_json, '$.guest.name'), '')) LIKE ? ESCAPE '\\'
       OR LOWER(COALESCE(gt.name, '')) LIKE ? ESCAPE '\\'
       OR LOWER(COALESCE(json_extract(gt.payload_json, '$.participant.title'), '')) LIKE ? ESCAPE '\\'
       OR LOWER(COALESCE(${threadLocationTitleSql(opts.buyerAudience)}, '')) LIKE ? ESCAPE '\\'
-      OR EXISTS (SELECT 1 FROM messages e WHERE e.conversation_id = gt.id
+      OR EXISTS (SELECT 1 FROM messages e WHERE e.conversation_id = gt.id${visible}
         AND (LOWER(COALESCE(e.body, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(json_extract(e.payload_json, '$.meta.name'), '')) LIKE ? ESCAPE '\\')))`
     params.push(like, like, like, like, like, like)
   }
-  where += ` AND ${HAS_CONVERSATION_SQL}`
+  where += ` AND (${HAS_CONVERSATION_SQL}${opts.buyerAudience ? ' OR gt.user_id IS NOT me.user_id' : ''})`
   const mailbox = mailboxWhere(opts.mailbox ?? null, now, opts.buyerAudience)
   where += mailbox.sql
   params.push(...mailbox.params)
@@ -200,6 +190,7 @@ async function inboxScope(organizationId: string | null, opts: ListGuestThreadsO
 type ListRow = {
   id: string
   kind: 'contact' | 'booking' | 'team'
+  user_id: string | null
   name: string | null
   created_at: string
   last_message_at: string
@@ -232,7 +223,7 @@ export async function listConversations(
   now = new Date(),
 ): Promise<InboxRow[]> {
   const scope = await inboxScope(organizationId, opts, now.toISOString())
-  const visible = opts.buyerAudience ? ` AND ${guestVisibleSql('e')}` : ''
+  const visible = opts.buyerAudience ? ` AND ${guestVisibleSql('e', 'gt.user_id = me.user_id')}` : ''
   const unread = unreadSql('gt', opts.userId)
   const limit = Math.max(1, Math.min(opts.limit ?? 100, 200))
   const rows = await queryAll<ListRow & Record<string, unknown>>(db, `
@@ -284,6 +275,7 @@ export async function listConversations(
     // Airbnb's first name from the guest's messages, else the booked guest's first name, else what the conversation was recorded as.
     const guestName = support ? 'Airbnb Support' : row.airbnb_name ?? (row.reply_channel === 'airbnb' && request.payload.guest.name ? firstName(request.payload.guest.name) : recordedName)
     const shownName = opts.buyerAudience ? row.organization_name : guestName
+    const traveler = opts.buyerAudience && row.user_id !== opts.userId
     const inquiry = request.kind === 'booking' ? request.payload.inquiry : undefined
     return {
       id: row.id,
@@ -293,9 +285,9 @@ export async function listConversations(
       avatar_initial: initial(shownName),
       channel: row.reply_channel === 'airbnb' ? 'airbnb' : 'direct',
       home: row.location_title,
-      when: support ? null : when ?? (inquiry ? formatCalendarRange(inquiry.check_in_date, inquiry.check_out_date, 'en-US') : null),
+      when: support || traveler ? null : when ?? (inquiry ? formatCalendarRange(inquiry.check_in_date, inquiry.check_out_date, 'en-US') : null),
       preview: message ? messagePreview(message.text, message.photos) : '',
-      preview_from: message ? previewFrom(message, { guestName: row.reply_channel === 'airbnb' ? guestName : firstName(guestName), viewerId: opts.userId, buyer: Boolean(opts.buyerAudience), business: row.organization_name }) : null,
+      preview_from: message ? previewFrom(message, { guestName: row.reply_channel === 'airbnb' ? guestName : firstName(guestName), viewerId: opts.userId, primaryGuestId: row.user_id, buyer: Boolean(opts.buyerAudience), business: row.organization_name }) : null,
       time,
       unread: row.unread === 1,
     } satisfies InboxRow
@@ -323,9 +315,13 @@ async function latestMessages(db: DbClient, ids: string[]): Promise<Map<string, 
 }
 
 /** "You", or the sender's first name, before the preview. */
-function previewFrom(message: LatestMessage, context: { guestName: string; viewerId: string; buyer: boolean; business: string }): string {
+function previewFrom(message: LatestMessage, context: { guestName: string; viewerId: string; primaryGuestId: string | null; buyer: boolean; business: string }): string {
   // The booking's own opening message is the guest's, as the conversation draws it.
-  if (message.authorKind === 'guest' || message.eventName === OPENING_EVENT) return context.buyer ? 'You' : context.guestName
+  if (message.authorKind === 'guest' || message.eventName === OPENING_EVENT) {
+    if (message.actorUserId === context.viewerId || (context.buyer && context.primaryGuestId === context.viewerId && message.actorUserId === null)) return 'You'
+    if (message.actorUserId && message.actorUserId !== context.primaryGuestId && message.actorName) return firstName(message.actorName)
+    return context.guestName
+  }
   if (message.authorKind === 'krabiclaw' && message.eventName === MIRRORED_EVENT) return 'Airbnb Support'
   if (context.buyer) return context.business
   if (message.authorKind === 'member' && message.actorUserId && message.actorUserId !== context.viewerId) {
@@ -367,25 +363,15 @@ export async function countUnreadAsGuest(db: DbClient, userId: string): Promise<
  * count the inbox's filter menu shows.
  */
 export async function unreadBadge(db: DbClient, userId: string): Promise<number> {
-  const memberships = await queryAll<{ organizationId: string; role: string }>(db, 'SELECT organizationId, role FROM member WHERE userId = ?', [userId])
-  const guestMessaging = (await Promise.all(memberships.map(async membership =>
-    await canMessageGuests(membership) ? [membership.organizationId, membership.role] : null,
-  ))).filter(membership => membership !== null)
-  const now = new Date().toISOString()
-  const guest = await inboxScope(null, { userId, buyerAudience: true, mailbox: 'current' }, now)
-  const current = mailboxWhere('current', now)
+  const guest = await inboxScope(null, { userId, buyerAudience: true, mailbox: 'current' }, new Date().toISOString())
+  const current = mailboxWhere('current', new Date().toISOString())
+  const memberAccess = participantGuard('gt', userId, 'member')
   const unread = unreadSql('gt', userId)
   const row = await queryFirst<{ count: number }>(db, `
     SELECT (SELECT COUNT(*) FROM ${guest.from} WHERE ${guest.where} AND ${unread.sql})
-      + (SELECT COUNT(*) FROM member membership
-        JOIN conversations gt ON gt.organization_id = membership.organizationId${operationalRecordSql()}
-        LEFT JOIN conversation_participants me ON me.conversation_id = gt.id AND me.user_id = membership.userId
-        WHERE membership.userId = ?
-          AND ((${guestConversationSql('gt')} AND EXISTS (SELECT 1 FROM json_each(?) allowed
-            WHERE json_extract(allowed.value, '$[0]') = membership.organizationId AND json_extract(allowed.value, '$[1]') = membership.role))
-            OR (gt.kind = 'team' AND ${teamSeatSql('gt')}))
-          AND ${HAS_CONVERSATION_SQL}${current.sql} AND ${unread.sql}) AS count`,
-    [...guest.params, ...unread.params, userId, JSON.stringify(guestMessaging), userId, ...current.params, ...unread.params])
+      + (SELECT COUNT(*) FROM ${guest.from}
+        WHERE ${memberAccess.sql} AND ${HAS_CONVERSATION_SQL}${current.sql} AND ${unread.sql}) AS count`,
+    [...guest.params, ...unread.params, userId, ...memberAccess.params, ...current.params, ...unread.params])
   if (!row) throw new Error('Unread conversations for the app badge could not be counted')
   return Number(row.count)
 }

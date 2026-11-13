@@ -3,7 +3,7 @@ import EmailReplyParser from 'email-reply-parser'
 import { compile } from 'html-to-text'
 import { publishConversationEvent } from '~/server/cloudflare/guest-inbox-events'
 import { getGuestRequest, validateGuestRequest, requestSummary, type GuestRequest } from '~/server/domain/requests'
-import { MessageDedupeConflictError, MessageStateConflictError, appendMessage, findMessageByDedupeKey, getMessage, guestOwnsGuard, readGuestConversation, type MessageRow } from '~/server/domain/conversations'
+import { MessageDedupeConflictError, MessageStateConflictError, appendMessage, findMessageByDedupeKey, getMessage, guestOwnsGuard, type ConversationRow, type MessageRow } from '~/server/domain/conversations'
 import { attachGuestPhotos, sortGuestFiles, type MessagePhoto, assertMessagePhotos } from '~/server/domain/guest-threads/attachments'
 import { conversationTaskQueries } from '~/server/domain/guest-threads/repository'
 import type { CloudflareEnv } from '~/server/utils/auth'
@@ -137,11 +137,9 @@ export async function receiveMemberEmail(env: CloudflareEnv, email: InboundMembe
 }
 
 /** Authenticated web replies use the same immutable guest-message pipeline as email. */
-export async function receiveGuestWebReply(env: CloudflareEnv, input: { threadId: string; userId: string; body: string; photos: MessagePhoto[]; idempotencyKey: string }): Promise<MessageRow> {
+export async function receiveGuestWebReply(env: CloudflareEnv, input: { conversation: ConversationRow; userId: string; body: string; photos: MessagePhoto[]; idempotencyKey: string }): Promise<MessageRow> {
   if (!/^[a-zA-Z0-9_-]{8,128}$/u.test(input.idempotencyKey)) throw new HTTPError({ statusCode: 400, statusMessage: 'A valid idempotency key is required' })
-  const conversation = await readGuestConversation(env.DB, input.userId, input.threadId)
-  if (!conversation) throw new HTTPError({ statusCode: 404, statusMessage: 'Conversation not found' })
-  const thread = await validateGuestRequest(env.DB, conversation)
+  const thread = await validateGuestRequest(env.DB, input.conversation)
   const body = input.body.trim()
   if (!body && !input.photos.length) throw new HTTPError({ statusCode: 400, statusMessage: 'Write a message or add a photo' })
   const photoManifest = await Promise.all(input.photos.map(async photo => ({

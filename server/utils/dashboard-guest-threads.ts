@@ -1,6 +1,6 @@
 import type { DbClient } from '~/server/db'
 import { HTTPError, type H3Event } from 'nitro'
-import { getInboxThread, getInboxThreadDetails } from '~/server/domain/guest-threads/inbox'
+import { getInboxThreadDetails } from '~/server/domain/guest-threads/inbox'
 import { countUnreadConversations, listConversations } from '~/server/domain/guest-threads/repository'
 import type {
   GuestThreadSubmissionType,
@@ -12,7 +12,7 @@ import type {
 import type { GuestThreadMailbox } from '~/server/domain/guest-threads/mailbox'
 import { requireOrganizationPrincipal } from '~/server/utils/location-access'
 import type { MemberAccessPrincipal } from '~/server/utils/member-access'
-import { assertConversationAccess, type ConversationRow, type ConversationWindow } from '~/server/domain/conversations'
+import { assertConversationAccess, type ConversationRow } from '~/server/domain/conversations'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { messageListPage } from '~/server/domain/guest-message-schedule'
 
@@ -135,15 +135,6 @@ export async function memberConversation(event: H3Event, organizationId: string,
   return { db, env, principal, conversation: await assertConversationAccess(db, principal, conversationId, guestOnly) }
 }
 
-/** The conversation as the member reads it. Reading it never writes: the client reads it through with POST …/read. */
-export async function loadDashboardGuestThread(event: H3Event, organizationId: string, threadId: string, window?: ConversationWindow) {
-  const { db, conversation, principal } = await memberConversation(event, organizationId, threadId, true)
-  const view = await getInboxThread(db, threadId, organizationId, { audience: 'member', userId: principal.userId, principal, conversation }, new Date(), window)
-  if (!view) throw new HTTPError({ statusCode: 404, statusMessage: 'Thread not found', data: { code: 'THREAD_NOT_FOUND', field: 'threadId' } })
-  return { thread: view }
-}
-
-/** "In this conversation": its people, gallery and actions. */
 export async function loadDashboardGuestThreadDetails(event: H3Event, organizationId: string, threadId: string) {
   const { db, conversation, principal } = await memberConversation(event, organizationId, threadId, true)
   const details = await getInboxThreadDetails(db, threadId, organizationId, { audience: 'member', userId: principal.userId, principal, conversation })

@@ -15,11 +15,10 @@ export function useConversationUnreadCount(connection?: DashboardInvalidationCon
   const orgId = computed(() => organization.value?.id)
   const inbox = useInboxUnread(orgId)
   const route = useRoute()
-  const dashboardApi = useDashboardApi(computed(() => orgSlug.value ? { orgSlug: orgSlug.value } : null))
   const realtime = connection ?? useDashboardInvalidations()
   const personal = ref(0)
   const error = shallowRef<unknown>(null)
-  const unreadConversations = computed(() => orgId.value ? inbox.value.unread?.all ?? 0 : personal.value)
+  const unreadConversations = computed(() => orgId.value ? inbox.value?.all ?? 0 : personal.value)
   const inboxRoute = computed(() => typeof route.params.org_slug === 'string' && route.path.split('/')[3] === 'messages')
   let revision = 0
   let queued = false
@@ -33,16 +32,17 @@ export function useConversationUnreadCount(connection?: DashboardInvalidationCon
       let started: number
       do {
         started = revision
-        const state = inbox.value
-        if (!reader.value || (orgId.value && (state.lists > 0 || inboxRoute.value))) break
+        const workspace = orgId.value
+        if (!reader.value || (workspace && inboxRoute.value)) break
         try {
-          if (orgId.value) {
-            const response = await dashboardApi(`/api/dashboard/organizations/${encodeURIComponent(orgId.value)}/conversations/unread-count`, {
+          if (workspace) {
+            const response = await applicationFetch('/api/messages/unread-count', {
+              query: { organization_id: workspace },
               validate: (value): value is { unread: InboxUnreadCounts } => isRecord(value) && isInboxUnread(value.unread),
             })
-            if (started === revision && state === inbox.value && !state.lists) state.unread = response.unread
+            if (started === revision && workspace === orgId.value && !inboxRoute.value) inbox.value = response.unread
           } else {
-            const response = await applicationFetch('/api/account/unread-count', {
+            const response = await applicationFetch('/api/messages/unread-count', {
               validate: (value): value is { count: number } => isRecord(value) && Number.isSafeInteger(value.count) && Number(value.count) >= 0,
             })
             if (started === revision) personal.value = response.count
@@ -68,7 +68,7 @@ export function useConversationUnreadCount(connection?: DashboardInvalidationCon
   watch(realtime.event, event => {
     if (!event || event.organization_id !== orgId.value) return
     if ((event.type === 'MESSAGE_ACK' || event.type === 'CONVERSATION_LEAVE') && event.user_id !== reader.value) return
-    if (event.type === 'access.changed') inbox.value.unread = null
+    if (event.type === 'access.changed') inbox.value = null
     if (['MESSAGE_CREATE', 'MESSAGE_UPDATE', 'MESSAGE_ACK', 'CONVERSATION_LEAVE', 'access.changed'].includes(event.type)) void refresh()
   }, { flush: 'sync' })
   watch(realtime.connectionEpoch, epoch => { if (epoch > 1) void refresh() })

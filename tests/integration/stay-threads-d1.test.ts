@@ -4,6 +4,8 @@ import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/
 import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
+import { acceptConversationGuestInvite, createConversationGuestInvite, removeConversationGuest, setListingMessagingAccess } from '../../server/domain/conversation-participants.ts'
+import { readGuestConversation } from '../../server/domain/conversations.ts'
 import { createStay, updateStay, type StayAccess } from '../../server/domain/stays.ts'
 import { getGuestThreadDetail } from '../../server/domain/guest-threads/detail.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
@@ -13,8 +15,8 @@ import { memberAccessPrincipal } from '../../server/utils/member-access.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 
 // A stay's guest conversation lives in the one inbox: a host stay with a guest
-// email or phone opens it, the member who looks after
-// the home sees it, it moves to Past once quiet for 30 days after check-out, it is answered like any
+// email or phone opens it, the listing's messaging participants see it,
+// it moves to Past once quiet for 30 days after check-out, it is answered like any
 // thread, and a stay is changed from its own screen rather than its thread.
 
 const ORG = 'org'
@@ -69,9 +71,12 @@ test('a stay opens its guest conversation in the one inbox', async () => {
       payload_json: { guest: { name: 'Ana Silva', email: 'ana@example.test', phone: '+61491570150' }, ...unanswered },
     })
     assert.equal(await messageCount(ana.conversation_id), 0)
-    // The guest is a Better Auth user: an anonymous one carrying the name the host gave, which owns the conversation.
+    // The booking contact and the workspace owner get their own conversation seats.
     assert.deepEqual(await db.prepare('SELECT u.name, u."isAnonymous" AS anonymous, r.user_id = u.id AS owns FROM bookings b JOIN user u ON u.id = b.user_id JOIN conversations r ON r.booking_id = b.id AND r.kind = \'booking\' WHERE b.id = ?').bind(ana.id).first(),
       { name: 'Ana Silva', anonymous: 1, owns: 1 })
+    assert.deepEqual((await db.prepare(`SELECT p.role, u.name FROM conversation_participants p JOIN user u ON u.id = p.user_id
+      WHERE p.conversation_id = ? ORDER BY p.role`).bind(ana.conversation_id).all()).results,
+    [{ role: 'guest', name: 'Ana Silva' }, { role: 'member', name: OWNER }])
 
     // A guest reachable by phone alone has a thread too, but no email and no account anyone signs in to: a reply has nowhere to go and says so.
     const dee = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'dee', check_in_date: day(30), check_out_date: day(31), adults: 1, guest_name: 'Dee', guest_phone: '+61491570151', total_minor: 15_000 })
@@ -123,7 +128,7 @@ test('a stay opens its guest conversation in the one inbox', async () => {
     assert.deepEqual(await db.prepare(`SELECT d.channel, d.status FROM guest_thread_deliveries d JOIN messages e ON e.id = d.message_id
       WHERE e.conversation_id = ? AND d.purpose = 'member_reply'`).bind(ana.conversation_id).first(), { channel: 'email', status: 'sent' })
 
-    // Once written to, the inbox lists it for owners and admins with the guest, the home and when the stay is, in the home's own clock.
+    // Once written to, the inbox lists it for its host with the guest, home and dates in the home's own clock.
     // A stay's guest conversation is not a member's, even the member who looks after the home: they read its stays as turnovers.
     const listed = await listConversations(db, ORG, { userId: OWNER, principal: principal(OWNER, 'owner'), type: 'stay' })
     assert.deepEqual(listed.map(row => row.id), [ana.conversation_id])
@@ -135,6 +140,37 @@ test('a stay opens its guest conversation in the one inbox', async () => {
     assert.equal((await getGuestThreadDetail(db, ana.conversation_id, ORG))?.mailbox, 'current')
     assert.deepEqual(await listConversations(db, ORG, { userId: CLEANER, principal: principal(CLEANER, 'member') }), [])
     assert.deepEqual(await listConversations(db, ORG, { userId: OUTSIDER, principal: principal(OUTSIDER, 'member') }), [])
+    const host = principal(OWNER, 'owner')
+    const cohost = principal(CLEANER, 'member')
+    const grant = { listingId: cabin.id, memberId: `m-${CLEANER}` }
+    await assert.rejects(setListingMessagingAccess(db, env, cohost, { ...grant, allowed: true }), { statusCode: 403 })
+    await setListingMessagingAccess(db, env, host, { ...grant, allowed: true })
+    assert.deepEqual((await listConversations(db, ORG, { userId: CLEANER, principal: cohost })).map(row => row.id), [ana.conversation_id])
+    const newReservation = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'cohost-future', check_in_date: day(51), check_out_date: day(52), adults: 1,
+      guest_name: 'Leah', guest_email: 'leah@example.test', total_minor: 15_000 })
+    assert.deepEqual(await db.prepare(`SELECT role, host_listing_id FROM conversation_participants WHERE conversation_id = ? AND user_id = ?`).bind(newReservation.conversation_id, CLEANER).first(),
+      { role: 'member', host_listing_id: cabin.id })
+    await setListingMessagingAccess(db, env, host, { ...grant, allowed: false })
+    assert.deepEqual(await listConversations(db, ORG, { userId: CLEANER, principal: cohost }), [])
+    assert.equal(await db.prepare('SELECT COUNT(*) n FROM conversation_participants WHERE organization_id = ? AND user_id = ?').bind(ORG, CLEANER).first('n'), 0)
+
+    const invite = await createConversationGuestInvite(db, host, { conversationId: ana.conversation_id, email: `${OUTSIDER.toUpperCase()}@example.test` })
+    await assert.rejects(acceptConversationGuestInvite(db, env, { token: invite.token, user: { id: CLEANER, email: `${OUTSIDER}@example.test`, emailVerified: true } }), { statusCode: 404 })
+    const traveler = { id: OUTSIDER, email: `${OUTSIDER}@example.test`, emailVerified: true }
+    const accepted = { organization_id: ORG, conversation_id: ana.conversation_id }
+    assert.deepEqual(await acceptConversationGuestInvite(db, env, { token: invite.token, user: traveler }), accepted)
+    assert.deepEqual(await acceptConversationGuestInvite(db, env, { token: invite.token, user: traveler }), accepted)
+    assert.equal((await readGuestConversation(db, OUTSIDER, ana.conversation_id))?.id, ana.conversation_id)
+    assert.equal(await readGuestConversation(db, OUTSIDER, bo.conversation_id), null)
+    assert.deepEqual(await listConversations(db, ORG, { userId: OUTSIDER, principal: principal(OUTSIDER, 'member') }), [])
+    const outstanding = await createConversationGuestInvite(db, host, { conversationId: ana.conversation_id, email: traveler.email })
+    const removal = { organizationId: ORG, conversationId: ana.conversation_id, hostUserId: OWNER, travelerUserId: OUTSIDER }
+    await assert.rejects(removeConversationGuest(db, env, { ...removal, hostUserId: CLEANER }), { statusCode: 404 })
+    assert.deepEqual(await removeConversationGuest(db, env, removal), { removed: true })
+    assert.equal(await readGuestConversation(db, OUTSIDER, ana.conversation_id), null)
+    for (const token of [invite.token, outstanding.token]) await assert.rejects(acceptConversationGuestInvite(db, env, { token, user: traveler }), { statusCode: 404 })
+    assert.deepEqual(await removeConversationGuest(db, env, removal), { removed: true })
+
     const cancel = await executeGuestThreadOperation(db, { threadId: ana.conversation_id, organizationId: ORG, action: 'cancel', actorUserId: OWNER, idempotencyKey: 'cancel-1', env })
     assert.deepEqual(cancel, { ok: false, status: 409, reason: 'invalid_transition', message: '"cancel" is not a valid action for the current state' })
     assert.equal(await db.prepare('SELECT status FROM bookings WHERE id = ?').bind(ana.id).first('status'), 'confirmed')
