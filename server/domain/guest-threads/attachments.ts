@@ -172,11 +172,18 @@ export async function discardMessagePhotos(
   if (failures.length) throw new AggregateError([cause, ...failures], 'Message photos could not be cleaned up after the message failed')
 }
 
-/** Each message's photos, in the order they were sent. */
-export async function listMessagePhotos(db: DbClient, ownerType: MessageOwnerType, messageIds: string[]): Promise<Map<string, GuestThreadEntryAttachmentViewModel[]>> {
-  const photos = new Map<string, GuestThreadEntryAttachmentViewModel[]>()
-  if (!messageIds.length) return photos
-  const rows = await queryAll<{ owner_id: string; id: string; public_url: string; thumbnail_url: string | null; alt_text: string | null; width: number | null; height: number | null }>(db, `
+export interface MessagePhotoRow {
+  owner_id: string
+  id: string
+  public_url: string
+  thumbnail_url: string | null
+  alt_text: string | null
+  width: number | null
+  height: number | null
+}
+
+export function messagePhotosQuery(ownerType: MessageOwnerType, messageIds: string[]): BatchQuery {
+  return { query: `
     SELECT mp.owner_id, ma.id, ma.public_url, ma.thumbnail_url, ma.alt_text, ma.width, ma.height
       FROM media_placements mp
       JOIN media_assets ma ON ma.id = mp.asset_id AND ma.organization_id = mp.organization_id
@@ -184,11 +191,22 @@ export async function listMessagePhotos(db: DbClient, ownerType: MessageOwnerTyp
        AND ma.status = 'active' AND ma.public_url IS NOT NULL
        AND mp.owner_id IN (SELECT value FROM json_each(?))
      ORDER BY mp.owner_id, mp.sort_order
-  `, [ownerType, d1JsonStringSet(messageIds)])
+  `, params: [ownerType, d1JsonStringSet(messageIds)] }
+}
+
+export function groupMessagePhotos(rows: MessagePhotoRow[]): Map<string, GuestThreadEntryAttachmentViewModel[]> {
+  const photos = new Map<string, GuestThreadEntryAttachmentViewModel[]>()
   for (const row of rows) {
     const list = photos.get(row.owner_id) ?? []
     list.push({ id: row.id, url: row.public_url, thumbnailUrl: row.thumbnail_url ?? row.public_url, alt: row.alt_text, width: row.width, height: row.height })
     photos.set(row.owner_id, list)
   }
   return photos
+}
+
+/** Each message's photos, in the order they were sent. */
+export async function listMessagePhotos(db: DbClient, ownerType: MessageOwnerType, messageIds: string[]) {
+  if (!messageIds.length) return groupMessagePhotos([])
+  const { query, params } = messagePhotosQuery(ownerType, messageIds)
+  return groupMessagePhotos(await queryAll<MessagePhotoRow>(db, query, params))
 }

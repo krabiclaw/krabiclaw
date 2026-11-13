@@ -240,16 +240,16 @@ export function bookedRecordGuard(record: Pick<BookedRecord, 'organization_id' |
   return { query: `EXISTS (SELECT 1 FROM ${BOOKING_RECORDS_SQL} br WHERE br.organization_id = ? AND br.id = ? AND br.fingerprint = ?)`, params: [record.organization_id, record.id, record.fingerprint] }
 }
 
-export async function getThreadOperationalRecord(db: DbClient, requestId: string): Promise<ThreadOperationalRecord | null> {
-  const record = await queryFirst<Omit<ThreadOperationalRecord, 'party_size_is_minimum'> & { party_size_is_minimum: number }>(db, `
+export async function getThreadOperationalRecord(db: DbClient, requestId: string, authorized?: Pick<ConversationRow, 'kind' | 'booking_id' | 'organization_id'>): Promise<ThreadOperationalRecord | null> {
+  if (authorized?.kind === 'contact') return null
+  const record = authorized?.booking_id === null ? null : await queryFirst<Omit<ThreadOperationalRecord, 'party_size_is_minimum'> & { party_size_is_minimum: number }>(db, `
     SELECT br.unit, br.id, br.status, br.party_size, br.party_size_is_minimum, br.starts_at, br.ends_at, br.timezone, br.location_id, br.product_id, br.product_kind, br.product_name, br.product_internal_name,
            br.assigned_member_id, br.organization_id, br.user_id, br.no_show_at, br.version,
            (SELECT rv.id FROM reviews rv WHERE rv.organization_id = br.organization_id AND rv.booking_id = br.id ORDER BY rv.created_at LIMIT 1) AS review_id, br.advance_notice_minutes
-      FROM conversations owner
-      JOIN ${BOOKING_RECORDS_SQL} br ON br.id = owner.booking_id AND br.organization_id = owner.organization_id
-     WHERE owner.id = ? AND owner.kind = 'booking'
+      FROM ${authorized ? `${BOOKING_RECORDS_SQL} br` : `conversations owner JOIN ${BOOKING_RECORDS_SQL} br ON br.id = owner.booking_id AND br.organization_id = owner.organization_id`}
+     WHERE ${authorized ? 'br.id = ? AND br.organization_id = ?' : "owner.id = ? AND owner.kind = 'booking'"}
      LIMIT 1
-  `, [requestId])
+  `, authorized ? [authorized.booking_id, authorized.organization_id] : [requestId])
   if (record) return { ...record, party_size_is_minimum: Number(record.party_size_is_minimum) === 1 }
   const request = await queryFirst<{ kind: GuestRequestKind; uncaptured_checkout: number | null }>(db, `
     SELECT r.kind,
@@ -382,11 +382,17 @@ export function stayPreview(record: { starts_at: string; ends_at: string; timezo
   return `${day(record.starts_at)} – ${day(record.ends_at)} · ${record.party_size} ${record.party_size === 1 ? 'guest' : 'guests'}`
 }
 
-export async function requestSummary(db: DbClient, request: GuestRequest, knownRecord?: ThreadOperationalRecord | null) {
+export type RequestLocation = { title: string; timezone: string }
+
+export function requestLocationQuery(request: Pick<ConversationRow, 'location_id' | 'organization_id'>) {
+  return { query: 'SELECT title, timezone FROM business_locations WHERE id = ? AND organization_id = ?', params: [request.location_id, request.organization_id] }
+}
+
+export async function requestSummary(db: DbClient, request: GuestRequest, knownRecord?: ThreadOperationalRecord | null, knownLocation?: RequestLocation | null) {
   const record = knownRecord === undefined ? await getThreadOperationalRecord(db, request.id) : knownRecord
-  // A thread without a location belongs to the business itself; one with a location must find it.
-  const location = request.location_id === null ? null
-    : await queryFirst<{ title: string; timezone: string }>(db, 'SELECT title, timezone FROM business_locations WHERE id = ? AND organization_id = ?', [request.location_id, request.organization_id])
+  const { query, params } = requestLocationQuery(request)
+  const location = knownLocation !== undefined ? knownLocation
+    : request.location_id === null ? null : await queryFirst<RequestLocation>(db, query, params)
   if (request.location_id !== null && !location) throw new HTTPError({ statusCode: 500, message: 'The conversation location does not exist', data: { code: 'INVALID_GUEST_THREAD', field: 'location_id', request_id: request.id } })
   return {
     guestName: request.payload.guest.name, participantLabel: participantLabel(request), guestEmail: request.payload.guest.email, guestPhone: request.payload.guest.phone,

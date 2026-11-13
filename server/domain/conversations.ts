@@ -224,8 +224,13 @@ export async function getMessage(db: DbClient, id: string): Promise<MessageRow |
 }
 
 /** A conversation's messages in order. */
+export function conversationMessagesQuery(conversationId: string, guestAudience: boolean): BatchQuery {
+  return { query: `SELECT m.* FROM messages m WHERE m.conversation_id = ? ${guestAudience ? `AND ${guestVisibleSql('m')}` : ''} ORDER BY m.sequence`, params: [conversationId] }
+}
+
 export async function listConversationMessages(db: DbClient, conversationId: string, guestAudience: boolean): Promise<MessageRow[]> {
-  return await queryAll<MessageRow>(db, `SELECT m.* FROM messages m WHERE m.conversation_id = ? ${guestAudience ? `AND ${guestVisibleSql('m')}` : ''} ORDER BY m.sequence`, [conversationId])
+  const { query, params } = conversationMessagesQuery(conversationId, guestAudience)
+  return queryAll<MessageRow>(db, query, params)
 }
 
 /** A message already under this key is this message, or the key was given to a different one. */

@@ -1,13 +1,13 @@
 import { buyerRequestActivityPath } from '~/server/domain/payments/buyer'
 import { OPEN_REPLY_TASK_SQL } from './repository'
-import { d1JsonStringSet, queryAll, queryFirst, type DbClient } from '~/server/db'
-import { bookingDay, getGuestRequest, getThreadOperationalRecord, requestSummary, requestActions, stayPreview, validateGuestRequest, type GuestRequest } from '~/server/domain/requests'
+import { d1JsonStringSet, executeBatch, queryAll, queryFirst, type DbClient } from '~/server/db'
+import { bookingDay, getGuestRequest, getThreadOperationalRecord, requestSummary, requestLocationQuery, requestActions, stayPreview, validateGuestRequest, type GuestRequest, type RequestLocation } from '~/server/domain/requests'
 import { formatOperationalStatusLabel } from './status-labels'
 import { resolveGuestThreadMailbox } from './mailbox'
-import { GUEST_NOTE_EVENT, MIRRORED_EVENT, OPENING_EVENT, SCHEDULED_MESSAGE_EVENT, SUBMISSION_EVENT, isEventMessage, listConversationMessages, messageRole, parseMessagePayload, type ConversationRow, type MessageRow } from '~/server/domain/conversations'
-import { isDeliverySent, isVisibleDeliveryFailure, listThreadDeliveries } from './deliveries'
-import { listMessagePhotos } from './attachments'
-import type { GuestThreadDetailViewModel, GuestThreadEntryDeliveryViewModel, GuestThreadEntryViewModel } from './types'
+import { GUEST_NOTE_EVENT, MIRRORED_EVENT, OPENING_EVENT, SCHEDULED_MESSAGE_EVENT, SUBMISSION_EVENT, isEventMessage, conversationMessagesQuery, listConversationMessages, messageRole, parseMessagePayload, type ConversationRow, type MessageRow } from '~/server/domain/conversations'
+import { isDeliverySent, isVisibleDeliveryFailure, listThreadDeliveries, threadDeliveriesQuery } from './deliveries'
+import { groupMessagePhotos, listMessagePhotos, messagePhotosQuery, type MessagePhotoRow } from './attachments'
+import type { GuestThreadDeliveryRow, GuestThreadDetailViewModel, GuestThreadEntryDeliveryViewModel, GuestThreadEntryViewModel } from './types'
 import { HTTPError } from 'nitro'
 import { providerTimestamp } from '~/server/integrations/channex/messages'
 import { bookingChangeViews } from './booking-changes'
@@ -58,6 +58,36 @@ type LoadedThread<View> = {
   timeZone: string
 }
 
+type ThreadOrganization = { name: string; vertical: string; timezone: string }
+type ActorName = { id: string; name: string }
+const THREAD_ORGANIZATION_SQL = 'SELECT name, vertical, timezone FROM organization WHERE id = ?'
+const THREAD_ACTORS_SQL = 'SELECT id, name FROM user WHERE id IN (SELECT value FROM json_each(?))'
+
+async function readMemberTranscriptBase(db: DbClient, conversation: ConversationRow) {
+  const [organization, messages, deliveries, location] = await executeBatch(db, [
+    { query: THREAD_ORGANIZATION_SQL, params: [conversation.organization_id] },
+    conversationMessagesQuery(conversation.id, false),
+    threadDeliveriesQuery(conversation.id),
+    ...conversation.location_id === null ? [] : [requestLocationQuery(conversation)],
+  ], { operation: 'Read member transcript' })
+  return {
+    organization: organization!.results[0] as ThreadOrganization | undefined,
+    entryRows: messages!.results as MessageRow[],
+    deliveryRows: deliveries!.results as GuestThreadDeliveryRow[],
+    location: (location?.results[0] as RequestLocation | undefined) ?? null,
+  }
+}
+
+async function readTranscriptActorsAndPhotos(db: DbClient, messageIds: string[], authorIds: string[]) {
+  const actors = { query: THREAD_ACTORS_SQL, params: [d1JsonStringSet(authorIds)] }
+  if (!messageIds.length || !authorIds.length) return Promise.all([
+    listMessagePhotos(db, 'message', messageIds),
+    authorIds.length ? queryAll<ActorName>(db, actors.query, actors.params) : [],
+  ] as const)
+  const [photos, names] = await executeBatch(db, [messagePhotosQuery('message', messageIds), actors], { operation: 'Read transcript photos and authors' })
+  return [groupMessagePhotos(photos!.results as MessagePhotoRow[]), names!.results as ActorName[]] as const
+}
+
 export function loadGuestThreadDetail(db: DbClient, threadId: string, organizationId: string, viewer?: ThreadViewer, at?: Date, transcript?: false): Promise<LoadedThread<GuestThreadDetailViewModel> | null>
 export function loadGuestThreadDetail(db: DbClient, threadId: string, organizationId: string, viewer: ThreadViewer, at: Date, transcript: true): Promise<LoadedThread<TranscriptView> | null>
 export async function loadGuestThreadDetail(
@@ -76,18 +106,20 @@ export async function loadGuestThreadDetail(
     throw new Error('The authorized guest conversation does not match the requested thread')
   }
   const now = at.toISOString()
-  // Everything read by the conversation's id goes in one wave: a D1 read is a
-  // round trip, and this view made a dozen of them one after another.
-  const [thread, record, organization, entryRows, deliveryRows, channelThread, needsReply, archive] = await Promise.all([
+  const batched = transcript && conversation ? readMemberTranscriptBase(db, conversation) : null
+  const [thread, record, base, channelThread, needsReply, archive] = await Promise.all([
     conversation ? validateGuestRequest(db, conversation) : getGuestRequest(db, threadId, organizationId, undefined, audience?.buyerUserId),
-    getThreadOperationalRecord(db, threadId),
-    queryFirst<{ name: string; vertical: string; timezone: string }>(db, 'SELECT name, vertical, timezone FROM organization WHERE id = ?', [organizationId]),
-    listConversationMessages(db, threadId, Boolean(audience)),
-    audience ? [] : listThreadDeliveries(db, threadId),
+    getThreadOperationalRecord(db, threadId, conversation),
+    batched ?? Promise.all([
+      queryFirst<ThreadOrganization>(db, THREAD_ORGANIZATION_SQL, [organizationId]),
+      listConversationMessages(db, threadId, Boolean(audience)),
+      audience ? [] : listThreadDeliveries(db, threadId),
+    ]).then(([organization, entryRows, deliveryRows]) => ({ organization, entryRows, deliveryRows, location: undefined })),
     guestThreadChannel(db, threadId, organizationId),
     audience || transcript ? false : queryFirst(db, `SELECT 1 AS open FROM conversations gt WHERE gt.id = ? AND ${OPEN_REPLY_TASK_SQL}`, [threadId]).then(Boolean),
     memberUserId && !transcript ? queryFirst<{ archived_at: string | null }>(db, 'SELECT archived_at FROM conversation_participants WHERE conversation_id = ? AND user_id = ?', [threadId, memberUserId]) : null,
   ])
+  const { organization, entryRows, deliveryRows, location } = base
   if (!thread || (audience && thread.user_id !== audience.buyerUserId)) return null
   if (audience && record && (record.user_id !== audience.buyerUserId || record.organization_id !== organizationId)) return null
   if (!organization) throw new Error('Conversation has no organization')
@@ -109,12 +141,15 @@ export async function loadGuestThreadDetail(
   // The second wave: what the conversation's own rows point at. Who on the team
   // said or did each thing is read by the name their account carries.
   const actorUserIds = entryRows.flatMap(entry => entry.author_user_id ? [entry.author_user_id] : [])
-  const [photos, actorRows, changes, answers, summary, home, activityPath] = await Promise.all([
-    listMessagePhotos(db, 'message', entryRows.filter(entry => !isEventMessage(entry)).map(entry => entry.id)),
-    actorUserIds.length ? queryAll<{ id: string; name: string }>(db, 'SELECT id, name FROM user WHERE id IN (SELECT value FROM json_each(?))', [d1JsonStringSet(actorUserIds)]) : [],
+  const messageIds = entryRows.filter(entry => !isEventMessage(entry)).map(entry => entry.id)
+  const [[photos, actorRows], changes, answers, summary, home, activityPath] = await Promise.all([
+    batched ? readTranscriptActorsAndPhotos(db, messageIds, actorUserIds) : Promise.all([
+      listMessagePhotos(db, 'message', messageIds),
+      actorUserIds.length ? queryAll<ActorName>(db, THREAD_ACTORS_SQL, [d1JsonStringSet(actorUserIds)]) : [],
+    ] as const),
     bookingChangeViews(db, thread, entryRows, now),
     !transcript || entryRows.some(entry => entry.event_name === SUBMISSION_EVENT) ? threadAnswers(db, thread) : [],
-    requestSummary(db, thread, record),
+    requestSummary(db, thread, record, location),
     audience || record?.unit === 'nights' || !channelThread.productId ? null
       : queryFirst<{ internal_name: string }>(db, 'SELECT internal_name FROM product_stay_configs WHERE organization_id = ? AND product_id = ?', [organizationId, channelThread.productId]),
     audience && thread.kind !== 'contact' ? buyerRequestActivityPath(db, audience.buyerUserId, thread.id) : null,
