@@ -1,6 +1,6 @@
 <template>
-  <StayDetails v-if="unit === 'nights'" :stay-id="bookingId" :embedded="embedded" />
-  <BookingDetails v-else-if="unit === 'slot'" booking-type="booking" :booking-id="bookingId" :editor-path="editorPath" :embedded="embedded" />
+  <StayDetails v-if="unit === 'nights'" :stay-id="bookingId" />
+  <BookingDetails v-else-if="unit === 'slot'" booking-type="booking" :booking-id="bookingId" :editor-path="editorPath" />
   <p v-else-if="error" role="alert" class="p-4 text-sm text-error">{{ getErrorMessage(error, 'Booking could not be loaded') }}</p>
 </template>
 
@@ -10,11 +10,11 @@ import StayDetails from '~/components/dashboard/StayDetails.vue'
 import { normalizeApiError } from '~/utils/api-clients'
 import { getErrorMessage, showNotFound } from '~/utils/errors'
 
-const props = defineProps<{ bookingId: string; editorPath: string; embedded?: boolean }>()
+const props = defineProps<{ bookingId: string; editorPath: string }>()
 const { data, error } = await useDashboardBooking(props.bookingId)
 const unit = computed(() => data.value?.booking.unit)
 
 watchEffect(() => {
-  if (!props.embedded && error.value && [403, 404].includes(normalizeApiError(error.value).statusCode)) showNotFound()
+  if (error.value && [403, 404].includes(normalizeApiError(error.value).statusCode)) showNotFound()
 })
 </script>

@@ -67,7 +67,7 @@ async function start() {
       method: 'POST', body: { ...body, idempotency_key: attempt.key },
       validate: (value): value is { conversation_id: string } => isRecord(value) && typeof value.conversation_id === 'string' && Boolean(value.conversation_id),
     })
-    await navigateTo({ path: `/dashboard/${encodeURIComponent(String(route.params.org_slug))}/messages/team/${encodeURIComponent(thread.conversation_id)}`, query: { kind: 'team' } })
+    await navigateTo({ path: `/dashboard/${encodeURIComponent(String(route.params.org_slug))}/messages/${encodeURIComponent(thread.conversation_id)}`, query: { kind: 'team' } })
   } catch (error) { actionError.value = getErrorMessage(error, 'The team conversation could not be started') }
   finally { saving.value = false }
 }

@@ -4,7 +4,6 @@ import { cloudflareEnv } from '~/server/utils/api-response'
 import { createDb } from '~/server/db'
 import { respondToBookingChange } from '~/server/domain/guest-threads/booking-changes'
 import { readBearerToken } from '~/server/utils/reservation-cancel-token'
-import { publishConversationEvent } from '~/server/cloudflare/guest-inbox-events'
 import { getAuthSession } from '~/server/utils/auth'
 import { requireFinancialBrowserOrigin } from '~/server/utils/financial-browser'
 
@@ -34,6 +33,5 @@ export default defineHandler(async (event) => {
   const decision = body?.decision === 'accept' || body?.decision === 'decline' ? body.decision : undefined
   const db = createDb(env.DB)
   const result = await respondToBookingChange(db, env, { threadId, requestId, decision, ...caller })
-  if (decision) await publishConversationEvent(env, db, { conversationId: threadId, type: 'MESSAGE_CREATE' })
   return new Response(JSON.stringify(result), { status: 200, headers: { 'content-type': 'application/json', 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' } })
 })

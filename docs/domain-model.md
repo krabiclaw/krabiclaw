@@ -31,7 +31,9 @@ extend that model. Never add a second one beside it.
 | Night claim (the nights a booking, a checkout hold or a linked calendar holds at a home, as a session's seats are a slot booking's claim) | `stay_nights` | server/domain/stays.ts | KrabiClaw |
 | Home rooms and accessibility | `product_stay_photo_rooms` `product_stay_photo_room_amenities` `product_stay_room_accessibility` `product_stay_accessibility` | server/domain/stays.ts | KrabiClaw |
 | Booked record (a class seat, a consultation, a table or a stay at a home, with the terms frozen when it was made) | `bookings` | server/domain/product-bookings.ts | KrabiClaw |
-| Conversation (a guest's with the business, or the team's: direct, group or a job's), each person's read position and archive, and its messages from people and from KrabiClaw | `conversations` `conversation_participants` `messages` | server/domain/conversations.ts | KrabiClaw |
+| Conversation, its participant roster, each participant's read position and archive, and its messages from people and from KrabiClaw | `conversations` `conversation_participants` `messages` | server/domain/conversations.ts | KrabiClaw |
+| Invitation for a guest account to join one conversation | `conversation_guest_invites` | server/domain/conversation-participants.ts | KrabiClaw |
+| Permission for a workspace member to participate in guest conversations for one listing | `listing_message_members` | server/domain/conversation-participants.ts | KrabiClaw |
 | Audit log (who changed what in an organization) | `activity_entries` | server/utils/organization-events.ts | KrabiClaw |
 | Delivery of a message, an audited event or a task to a person (email, WhatsApp, Airbnb, push) | `guest_thread_deliveries` | server/domain/guest-threads/deliveries.ts | KrabiClaw |
 | Guest message template | `message_templates` | server/domain/scheduled-guest-messages.ts | KrabiClaw |

@@ -114,7 +114,8 @@ export async function runOrganizationJobs(env: CloudflareEnv, db: DbClient, orga
   const seatUsers = new Map<string, string[]>()
   if (threads.size) {
     for (const seat of await queryAll<{ thread_id: string; user_id: string }>(db, `SELECT s.conversation_id AS thread_id, s.user_id FROM conversation_participants s
-        JOIN member m ON m.userId = s.user_id AND m.organizationId = s.organization_id WHERE s.organization_id = ? AND s.conversation_id IN (SELECT value FROM json_each(?))`,
+        JOIN member m ON m.userId = s.user_id AND m.organizationId = s.organization_id WHERE s.organization_id = ? AND s.role = 'member'
+          AND s.conversation_id IN (SELECT value FROM json_each(?))`,
     [organizationId, d1JsonStringSet([...threads.keys()])])) seatUsers.set(seat.thread_id, [...seatUsers.get(seat.thread_id) ?? [], seat.user_id])
   }
   const hostUsers = members.filter(member => isOrganizationWideRole(member.role)).map(member => member.userId)

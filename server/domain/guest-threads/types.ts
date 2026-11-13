@@ -2,7 +2,6 @@ import type { GuestRequest, ThreadOperationalRecord } from '~/server/domain/requ
 import type { MessageAuthorKind, MessageChannel } from '~/server/domain/conversations'
 import type { MemberAccessPrincipal } from '~/server/utils/member-access'
 import type { GuestThreadMailbox } from './mailbox'
-import type { BookingChangeView } from './booking-changes'
 
 export type GuestThreadSubmissionType = 'contact' | 'booking' | 'stay'
 export type GuestThreadDeliveryChannel = 'email' | 'whatsapp' | 'airbnb' | 'push'
@@ -95,6 +94,8 @@ export interface GuestThreadEntryDeliveryViewModel {
   provider: GuestThreadDeliveryProvider
   purpose: GuestThreadDeliveryPurpose
   status: GuestThreadDeliveryStatus
+  error: string | null
+  updated_at: string
 }
 
 /** A photo a message carries. */
@@ -126,8 +127,6 @@ export interface GuestThreadEntryViewModel {
   providerTimestamp: string | null
   deliveries: GuestThreadEntryDeliveryViewModel[]
   attachments: GuestThreadEntryAttachmentViewModel[]
-  /** Canonical consent state and public before/after details for a requested change. */
-  bookingChange: BookingChangeView | null
 }
 
 export interface GuestThreadDeliveryFailureViewModel {
@@ -193,6 +192,7 @@ export type InboxChannel = 'airbnb' | 'direct'
 /** One row of the list, as Airbnb's hosting inbox draws it. */
 export interface InboxRow {
   id: string
+  last_message_at?: string
   kind: InboxThreadKind
   title: string
   avatar_initial: string
@@ -253,20 +253,6 @@ export type InboxStreamItem =
     retryable: boolean
   }
   | { type: 'event'; id: string; text: string; sent_at: string }
-  | { type: 'change'; id: string; sent_at: string; change: BookingChangeView }
-
-/** A message waiting to go out: an automatic message, or one a member set to send later. */
-export interface InboxPendingMessage {
-  id: string
-  source: 'automatic' | 'later'
-  /** "Check-in instructions" for an automatic message; the words for one sent later. */
-  label: string
-  due_at: string
-  /** "Fri, Nov 6, 3:00 PM" in the home's timezone. */
-  time: string
-  body: string
-  cancellable: boolean
-}
 
 export interface InboxThread {
   id: string
@@ -286,7 +272,6 @@ export interface InboxThread {
   /** In a guest's own inbox, where their booking is shown; null for the business. */
   activity_path: string | null
   stream: InboxStreamItem[]
-  pending: InboxPendingMessage[]
   /** Where a reply goes, and whether one can be sent. */
   /** `reason` says why there is no composer: the reply operation's own refusal. */
   composer: { channel: 'airbnb' | 'email'; available: boolean; reason: string | null }
@@ -296,10 +281,12 @@ export interface InboxThread {
 export interface InboxThreadDetails {
   participants: Array<{ name: string; initial: string; role: 'Guest' | 'Host' | 'Co-host' | 'Airbnb Support' }>
   photos: Array<InboxPhoto & { sent_at: string }>
-  actions: { show_reservation: boolean; archive: boolean; unarchive: boolean; report: boolean; block: boolean; unblock: boolean }
+  actions: { archive: boolean; unarchive: boolean; report: boolean; block: boolean; unblock: boolean }
 }
 
 export interface ListGuestThreadsOptions {
+  conversationIds?: string[]
+  includeSortKey?: boolean
   buyerAudience?: boolean
   organizationId?: string | null
   locationId?: string | null

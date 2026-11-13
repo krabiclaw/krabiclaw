@@ -96,7 +96,7 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
     expect(today).toMatchObject({ opportunities: [], opportunity_issues: [], assignees: [] })
     for (const task of today.tasks.flatMap(section => section.tasks)) {
       expect(task.can, `${task.kind} ${task.id} is not a manager's`).toMatchObject({ assign: false, edit: false })
-      if (task.kind === 'guest_reply') await body(await memberContext.request.get(`/api/dashboard/organizations/${ORGANIZATION}/guest-threads/${task.conversation_id}`), 200)
+      if (task.kind === 'guest_reply') await body(await memberContext.request.get(`/api/messages/${task.conversation_id}`), 200)
       else expect(task.assignee, `${task.kind} ${task.id} is given to the member`).toMatchObject({ type: 'member', id: actor.id, you: true })
     }
     // The consultation is the Calendar's: it is on its day there.

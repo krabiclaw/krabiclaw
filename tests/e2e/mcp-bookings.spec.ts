@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { createHmac } from 'node:crypto'
 import type { ProductBookingConfig } from '../../server/types/products'
-import type { InboxThread } from '../../server/domain/guest-threads/types'
+import type { ConversationPage } from '../../shared/messages-contract'
 import { loginAs } from './helpers/auth'
 import { mcpOrganizationId, mcpData, mcpRequest } from './helpers/mcp'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
@@ -119,56 +119,67 @@ test('MCP Product booking uses public capacity, durable replay, guest identity a
       expect(proposed.change_status).toBe('awaiting_guest_acceptance')
       await call('request_product_booking_change', proposals)
       expect((await read(created.booking_id)).record.party_size).toBe(1)
-      const detailResponse = await request.get(`${baseURL}/api/dashboard/organizations/${org}/guest-threads/${created.conversation_id}`)
-      expect(detailResponse.status()).toBe(200)
-      const detail = (await detailResponse.json() as { thread: InboxThread }).thread
-      // Two calls under one key are one proposal in the conversation, waiting for the guest.
-      const changeEntries = detail.stream.filter(item => item.type === 'change')
-      expect(changeEntries).toMatchObject([{ change: { requested_by: 'business', status: 'pending', after: { party_size: 2 } } }])
-      const changeId = changeEntries[0]!.id
+      const pendingChange = async () => {
+        const response = await request.get(`${baseURL}/api/dashboard/bookings/${created.booking_id}`, { params: { org: orgSlug } })
+        expect(response.status(), await response.text()).toBe(200)
+        return ((await response.json()) as { booking: { pending_change: { message_id: string; before: { party_size: number }; after: { party_size: number } } | null } }).booking.pending_change
+      }
+      const changeSummaries = async () => {
+        const response = await request.get(`${baseURL}/api/messages/${created.conversation_id}`)
+        expect(response.status(), await response.text()).toBe(200)
+        return ((await response.json()) as ConversationPage).entries
+          .flatMap(item => item.type === 'event' && item.text.startsWith('Requested ') ? [item.id] : [])
+      }
+      // Replaying one proposal leaves one summary in the conversation and one actionable request on the booking.
+      const change = await pendingChange()
+      expect(change).toMatchObject({ message_id: expect.any(String), before: { party_size: 1 }, after: { party_size: 2 } })
+      const changeId = change!.message_id
+      expect(await changeSummaries()).toEqual([changeId])
       const token = createHmac('sha256', 'local-playwright-email-reply-secret').update(`booking-change:v1:${created.conversation_id}:${changeId}`).digest('hex')
       const accepted = await request.post(`${baseURL}/api/public/booking-changes/${created.conversation_id}/${changeId}`, { headers: { authorization: `Bearer ${token}` }, data: { decision: 'accept' } })
       expect(accepted.status(), await accepted.text()).toBe(200)
       const changed = await read(created.booking_id)
       expect(changed.record).toMatchObject({ id: created.booking_id, status: 'pending', party_size: 2 })
-      const acceptedThread = await request.get(`${baseURL}/api/dashboard/organizations/${org}/guest-threads/${created.conversation_id}`)
+      expect(await pendingChange()).toBeNull()
+      const acceptedThread = await request.get(`${baseURL}/api/messages/${created.conversation_id}`)
       expect(acceptedThread.status()).toBe(200)
-      const acceptedThreadState = (await acceptedThread.json()).thread
+      const acceptedThreadState = await acceptedThread.json() as ConversationPage
       const acceptedNotifications = await request.get(`${baseURL}/api/dev/notifications?organization_id=${org}&since=${encodeURIComponent(since)}`, { headers: devLoginHeaders() })
       expect(acceptedNotifications.status()).toBe(200)
       const acceptedDeliveries = (await acceptedNotifications.json()).deliveries.filter((row: { conversation_id: string }) => row.conversation_id === created.conversation_id)
       expect((await call<{ change_status: string }>('request_product_booking_change', proposals)).change_status).toBe('accepted')
       expect(await read(created.booking_id)).toEqual(changed)
-      const acceptedReplayThread = await request.get(`${baseURL}/api/dashboard/organizations/${org}/guest-threads/${created.conversation_id}`)
+      const acceptedReplayThread = await request.get(`${baseURL}/api/messages/${created.conversation_id}`)
       expect(acceptedReplayThread.status()).toBe(200)
-      expect((await acceptedReplayThread.json()).thread).toEqual(acceptedThreadState)
+      expect(await acceptedReplayThread.json() as ConversationPage).toEqual(acceptedThreadState)
       const acceptedReplayNotifications = await request.get(`${baseURL}/api/dev/notifications?organization_id=${org}&since=${encodeURIComponent(since)}`, { headers: devLoginHeaders() })
       expect(acceptedReplayNotifications.status()).toBe(200)
       expect((await acceptedReplayNotifications.json()).deliveries.filter((row: { conversation_id: string }) => row.conversation_id === created.conversation_id)).toEqual(acceptedDeliveries)
 
       const declineProposal = { ...proposals, product_session_id: available[2]!.id, version: changed.version, idempotency_key: crypto.randomUUID() }
       expect((await call<{ change_status: string }>('request_product_booking_change', declineProposal)).change_status).toBe('awaiting_guest_acceptance')
-      const declineDetail = await request.get(`${baseURL}/api/dashboard/organizations/${org}/guest-threads/${created.conversation_id}`)
-      expect(declineDetail.status()).toBe(200)
-      const declineEntries = (await declineDetail.json() as { thread: InboxThread }).thread.stream.filter(item => item.type === 'change' && item.id !== changeId)
-      expect(declineEntries).toMatchObject([{ change: { status: 'pending' } }])
-      const declineId = declineEntries[0]!.id
+      const declineChange = await pendingChange()
+      expect(declineChange).toMatchObject({ message_id: expect.any(String), before: { party_size: 2 }, after: { party_size: 2 } })
+      const declineId = declineChange!.message_id
+      expect(declineId).not.toBe(changeId)
+      expect(await changeSummaries()).toEqual([changeId, declineId])
       const declineToken = createHmac('sha256', 'local-playwright-email-reply-secret').update(`booking-change:v1:${created.conversation_id}:${declineId}`).digest('hex')
       const declined = await request.post(`${baseURL}/api/public/booking-changes/${created.conversation_id}/${declineId}`, { headers: { authorization: `Bearer ${declineToken}` }, data: { decision: 'decline' } })
       expect(declined.status(), await declined.text()).toBe(200)
-      const declinedThread = await request.get(`${baseURL}/api/dashboard/organizations/${org}/guest-threads/${created.conversation_id}`)
+      const declinedThread = await request.get(`${baseURL}/api/messages/${created.conversation_id}`)
       expect(declinedThread.status()).toBe(200)
-      const declinedThreadState = (await declinedThread.json()).thread
+      const declinedThreadState = await declinedThread.json() as ConversationPage
       const declinedRecord = await read(created.booking_id)
       expect(declinedRecord.record).toEqual(changed.record)
+      expect(await pendingChange()).toBeNull()
       const declinedNotifications = await request.get(`${baseURL}/api/dev/notifications?organization_id=${org}&since=${encodeURIComponent(since)}`, { headers: devLoginHeaders() })
       expect(declinedNotifications.status()).toBe(200)
       const declinedDeliveries = (await declinedNotifications.json()).deliveries.filter((row: { conversation_id: string }) => row.conversation_id === created.conversation_id)
       expect((await call<{ change_status: string }>('request_product_booking_change', declineProposal)).change_status).toBe('declined')
       expect(await read(created.booking_id)).toEqual(declinedRecord)
-      const declinedReplayThread = await request.get(`${baseURL}/api/dashboard/organizations/${org}/guest-threads/${created.conversation_id}`)
+      const declinedReplayThread = await request.get(`${baseURL}/api/messages/${created.conversation_id}`)
       expect(declinedReplayThread.status()).toBe(200)
-      expect((await declinedReplayThread.json()).thread).toEqual(declinedThreadState)
+      expect(await declinedReplayThread.json() as ConversationPage).toEqual(declinedThreadState)
       const declinedReplayNotifications = await request.get(`${baseURL}/api/dev/notifications?organization_id=${org}&since=${encodeURIComponent(since)}`, { headers: devLoginHeaders() })
       expect(declinedReplayNotifications.status()).toBe(200)
       expect((await declinedReplayNotifications.json()).deliveries.filter((row: { conversation_id: string }) => row.conversation_id === created.conversation_id)).toEqual(declinedDeliveries)
@@ -237,12 +248,11 @@ test('MCP Product booking uses public capacity, durable replay, guest identity a
       await page.getByRole('button', { name: 'Send a change request', exact: true }).click()
       await expect(page.getByText('Your change request was sent to the business. Your booking is unchanged while it is reviewed.', { exact: true })).toBeVisible()
       expect((await read(publicCreated.booking_id)).record).toEqual(experienceBeforeRequest.record)
-      const experienceThreadResponse = await request.get(`${baseURL}/api/dashboard/organizations/${org}/guest-threads/${publicCreated.conversation_id}`)
+      const experienceThreadResponse = await request.get(`${baseURL}/api/messages/${publicCreated.conversation_id}`)
       expect(experienceThreadResponse.status(), await experienceThreadResponse.text()).toBe(200)
-      const experienceThread = (await experienceThreadResponse.json() as { thread: InboxThread }).thread
+      const experienceThread = (await experienceThreadResponse.json() as ConversationPage)
       // The guest's request is one message from them that the business now has to answer.
-      expect(experienceThread.stream.filter(item => item.type === 'message' && item.side === 'guest' && item.body === 'Could we attend the following week instead?')).toHaveLength(1)
-      expect((await call<{ guest: { needs_reply: boolean } }>('get_conversation', { conversation_id: publicCreated.conversation_id })).guest.needs_reply).toBe(true)
+      expect(experienceThread.entries.filter(item => item.type === 'message' && item.side === 'guest' && item.body === 'Could we attend the following week instead?')).toHaveLength(1)
       // The unanswered request is the owner's open reply task on Today.
       const replyTasks = (await call<{ sections: Array<{ id: string; tasks: Array<{ kind: string; status: string; conversation_id: string | null }> }> }>('list_tasks', { range: 'today', kind: 'guest_reply' }))
         .sections.flatMap(section => section.tasks).filter(task => task.conversation_id === publicCreated.conversation_id)

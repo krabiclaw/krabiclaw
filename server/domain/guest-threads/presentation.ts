@@ -14,20 +14,22 @@ import { formatCalendarDate, formatCalendarRange } from '~/utils/timezone'
 
 const LOCALE = 'en-US'
 
-function parts(instant: Date, timeZone: string) {
-  const values = Object.fromEntries(new Intl.DateTimeFormat(LOCALE, { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' })
-    .formatToParts(instant).map(part => [part.type, part.value]))
-  return { year: Number(values.year), key: `${values.year}-${values.month}-${values.day}` }
+function dateParts(timeZone: string) {
+  const formatter = new Intl.DateTimeFormat(LOCALE, { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' })
+  return (instant: Date) => {
+    const values = Object.fromEntries(formatter.formatToParts(instant).map(part => [part.type, part.value]))
+    return { year: Number(values.year), key: `${values.year}-${values.month}-${values.day}` }
+  }
 }
 
 /** Whole calendar days from `instant`'s date to `now`'s date, both in `timeZone`. */
-function daysBefore(instant: Date, now: Date, timeZone: string): number {
-  return Math.round((Date.parse(`${parts(now, timeZone).key}T00:00:00Z`) - Date.parse(`${parts(instant, timeZone).key}T00:00:00Z`)) / 86_400_000)
+function daysBefore(instantDay: string, today: string): number {
+  return Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${instantDay}T00:00:00Z`)) / 86_400_000)
 }
 
 /** The local calendar date an instant falls on, as YYYY-MM-DD; what a run of messages is grouped under. */
 export function localDateKey(instant: string, timeZone: string): string {
-  return parts(new Date(instant), timeZone).key
+  return dateParts(timeZone)(new Date(instant)).key
 }
 
 /** "2:33 PM". */
@@ -42,26 +44,40 @@ function monthDay(instant: Date, timeZone: string, withYear: boolean): string {
 /** The list row's time: "2:33 PM", "Yesterday", "Mon", "Nov 2", "Nov 2, 2025". */
 export function listTime(instant: string, timeZone: string, now: Date): string {
   const at = new Date(instant)
-  const days = daysBefore(at, now, timeZone)
+  const parts = dateParts(timeZone)
+  const date = parts(at)
+  const today = parts(now)
+  const days = daysBefore(date.key, today.key)
   if (days <= 0) return clockTime(instant, timeZone)
   if (days === 1) return 'Yesterday'
   if (days < 7) return new Intl.DateTimeFormat(LOCALE, { timeZone, weekday: 'short' }).format(at)
-  return monthDay(at, timeZone, parts(at, timeZone).year !== parts(now, timeZone).year)
+  return monthDay(at, timeZone, date.year !== today.year)
 }
 
-/** A thread's day header: "Today", "Yesterday", "Tuesday", "Nov 2", "Nov 2, 2025". */
-export function dayLabel(instant: string, timeZone: string, now: Date): string {
-  const at = new Date(instant)
-  const days = daysBefore(at, now, timeZone)
-  if (days <= 0) return 'Today'
-  if (days === 1) return 'Yesterday'
-  if (days < 7) return new Intl.DateTimeFormat(LOCALE, { timeZone, weekday: 'long' }).format(at)
-  return monthDay(at, timeZone, parts(at, timeZone).year !== parts(now, timeZone).year)
-}
-
-/** "Fri, Nov 6, 3:00 PM": when a pending message goes out. */
-export function sendTime(instant: string, timeZone: string): string {
-  return new Intl.DateTimeFormat(LOCALE, { timeZone, weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(instant))
+/** A transcript uses the same timezone and current day for every message. */
+export function transcriptDays(timeZone: string, now: Date) {
+  const parts = dateParts(timeZone)
+  const today = parts(now)
+  const clock = new Intl.DateTimeFormat(LOCALE, { timeZone, hour: 'numeric', minute: '2-digit' })
+  const weekday = new Intl.DateTimeFormat(LOCALE, { timeZone, weekday: 'long' })
+  const labels = new Map<boolean, Intl.DateTimeFormat>()
+  return {
+    date: parts,
+    time: (at: Date) => clock.format(at),
+    label(at: Date, date: ReturnType<typeof parts>) {
+      const days = daysBefore(date.key, today.key)
+      if (days <= 0) return 'Today'
+      if (days === 1) return 'Yesterday'
+      if (days < 7) return weekday.format(at)
+      const withYear = date.year !== today.year
+      let formatter = labels.get(withYear)
+      if (!formatter) {
+        formatter = new Intl.DateTimeFormat(LOCALE, { timeZone, month: 'short', day: 'numeric', ...(withYear ? { year: 'numeric' } : {}) })
+        labels.set(withYear, formatter)
+      }
+      return formatter.format(at)
+    },
+  }
 }
 
 /** One calendar date: "Jul 20". */
@@ -75,7 +91,7 @@ export function calendarDate(date: string): string {
  * on the last night.
  */
 export function stayWhen(checkIn: string, checkOut: string, now: Date, timeZone: string): string {
-  const today = parts(now, timeZone).key
+  const today = dateParts(timeZone)(now).key
   const until = (date: string) => Math.round((Date.parse(`${date}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86_400_000)
   const arrival = until(checkIn)
   if (arrival >= 2 && arrival <= 6) return `In ${arrival} days`

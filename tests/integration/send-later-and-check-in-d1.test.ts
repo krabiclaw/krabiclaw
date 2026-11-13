@@ -12,10 +12,10 @@ import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import type { DashboardInvalidation } from '../../shared/dashboard-invalidations.ts'
 import { requestInsertQueries } from '../../server/domain/requests.ts'
 import { appendMessage } from '../../server/domain/conversations.ts'
+import { setListingMessagingAccess } from '../../server/domain/conversation-participants.ts'
 import { applyResendEmailEvent, createDeliveryReceipt, recordDeliveryOutcome } from '../../server/domain/guest-threads/deliveries.ts'
 import { executeGuestThreadOperation, operationDedupeKey } from '../../server/domain/guest-threads/operations.ts'
 import { creationRequestHash } from '../../server/utils/organization-events.ts'
-import { getInboxThread } from '../../server/domain/guest-threads/inbox.ts'
 
 // Every confirmed stay is sent its home's check-in instructions on its own, and
 // a member's send-later reply goes out as their reply at its time, visible only
@@ -29,7 +29,7 @@ const day = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISO
 const minutes = (offset: number) => new Date(Date.now() + offset * 60_000).toISOString()
 /** The outbox as one member reads it, optionally for one conversation. */
 const outbox = async (db: Parameters<typeof listScheduledGuestMessages>[0], principal: MemberAccessPrincipal, threadId: string | null) =>
-  (await listScheduledGuestMessages(db, await stayAccessFor(principal), { limit: 100, offset: 0 }, threadId)).messages
+  (await listScheduledGuestMessages(db, principal, { limit: 100, offset: 0 }, threadId)).messages
 /** A member's own send-later replies in the outbox. */
 const ownReplies = async (db: Parameters<typeof listScheduledGuestMessages>[0], principal: MemberAccessPrincipal, threadId: string | null) =>
   (await outbox(db, principal, threadId)).filter(message => message.author_user_id === principal.userId)
@@ -123,6 +123,7 @@ test('check-in instructions reach every confirmed stay, and send-later replies g
     // Send later: the owner schedules a reply in Ana's conversation; only the owner sees it.
     const owner = memberAccessPrincipal((await resolveMembership(env, { organizationId: ORG, userId: OWNER }))!, { env })
     const admin = memberAccessPrincipal((await resolveMembership(env, { organizationId: ORG, userId: ADMIN }))!, { env })
+    await setListingMessagingAccess(db, env, owner, { listingId: cabin.id, memberId: admin.memberId, allowed: true })
     const hub = env.GUEST_INBOX_HUBS!.get(env.GUEST_INBOX_HUBS!.idFromName(ORG))
     const publications = async () => await (await hub.fetch('https://hub/observed')).json() as DashboardInvalidation[]
     await assert.rejects(scheduleGuestReply(db, owner, ana.conversation_id!, { body: 'Too late', due_at: minutes(-1) }), { data: { code: 'SEND_LATER_IN_PAST', field: 'due_at' } })
@@ -130,7 +131,8 @@ test('check-in instructions reach every confirmed stay, and send-later replies g
     const edited = await scheduleGuestReply(db, owner, ana.conversation_id!, { body: 'Enjoy the hot tub!', due_at: dueAt })
     assert.deepEqual([edited.conversation_id, edited.due_at], [ana.conversation_id, dueAt])
     const createdEvent = (await publications()).at(-1)!
-    assert.deepEqual([createdEvent.type, createdEvent.organization_id, 'location_id' in createdEvent ? createdEvent.location_id : null, 'conversation_id' in createdEvent ? createdEvent.conversation_id : null], ['MESSAGE_UPDATE', ORG, 'cabin-site', ana.conversation_id])
+    assert.equal(createdEvent.type, 'MESSAGE_UPDATE')
+    assert.deepEqual([createdEvent.organization_id, createdEvent.location_id, createdEvent.conversation_id, createdEvent.scheduled], [ORG, 'cabin-site', ana.conversation_id, true])
     assert.deepEqual(await db.prepare('SELECT conversation_id, author_user_id, booking_id, template_title, body, status FROM scheduled_guest_messages WHERE id = ?').bind(edited.id).first(),
       { conversation_id: ana.conversation_id, author_user_id: OWNER, booking_id: null, template_title: null, body: 'Enjoy the hot tub!', status: 'pending' })
     assert.deepEqual((await ownReplies(db, owner, ana.conversation_id!)).map(message => message.id), [edited.id])
@@ -143,7 +145,9 @@ test('check-in instructions reach every confirmed stay, and send-later replies g
     const orphaned = await scheduleGuestReply(db, admin, ana.conversation_id!, { body: 'From the admin', due_at: minutes(20) })
     const cancelled = await scheduleGuestReply(db, owner, ana.conversation_id!, { body: 'Never mind', due_at: minutes(25) })
     assert.equal((await cancelScheduledGuestMessage(db, env, await stayAccessFor(owner), cancelled.id)).status, 'cancelled')
-    assert.equal((await publications()).at(-1)?.type, 'MESSAGE_UPDATE')
+    const cancelledEvent = (await publications()).at(-1)!
+    assert.equal(cancelledEvent.type, 'MESSAGE_UPDATE')
+    assert.equal(cancelledEvent.scheduled, true)
     assert.deepEqual(await db.prepare('SELECT status, reason FROM scheduled_guest_messages WHERE id = ?').bind(cancelled.id).first(), { status: 'cancelled', reason: 'Cancelled by its author.' })
 
     // A committed schedule whose dashboard publication failed is reported as
@@ -173,7 +177,9 @@ test('check-in instructions reach every confirmed stay, and send-later replies g
     })
     const refused = await db.prepare('SELECT status, error_code, message_id FROM scheduled_guest_messages WHERE id = ?').bind(orphaned.id).first()
     assert.deepEqual(refused, { status: 'failed', error_code: 'SEND_LATER_ACCESS_REVOKED', message_id: null })
-    assert.ok((await publications()).slice(beforeSending).some(event => event.type === 'MESSAGE_UPDATE' && event.conversation_id === ana.conversation_id), 'a typed failure with no message still refreshes its conversation')
+    const sendEvents = (await publications()).slice(beforeSending)
+    assert.ok(sendEvents.some(event => event.type === 'MESSAGE_UPDATE' && event.scheduled && event.conversation_id === ana.conversation_id), 'a failure without a transcript message updates the outbox')
+    assert.ok(sendEvents.some(event => event.type === 'MESSAGE_CREATE' && !event.scheduled && event.conversation_id === ana.conversation_id), 'a delivered reply reaches the transcript')
     assert.equal((await db.prepare('SELECT status FROM scheduled_guest_messages WHERE id = ?').bind(cancelled.id).first('status')), 'cancelled')
     // An author's failed reply is theirs to see in its conversation; it is no one's Today task.
     assert.equal(await db.prepare('SELECT count(*) n FROM tasks WHERE subject_id = ?').bind(orphaned.id).first('n'), 0)
@@ -181,8 +187,8 @@ test('check-in instructions reach every confirmed stay, and send-later replies g
     // A repeated run sends nothing again.
     assert.deepEqual(await sendDueScheduledGuestMessages(db, env, minutes(40)), { sent: 0, failed: 0, needs_review: 0 })
 
-    // A stay's automatic messages belong to its conversation, so their changes refresh that conversation.
-    const threadChanges = (events: DashboardInvalidation[]) => events.flatMap(event => event.type === 'MESSAGE_UPDATE' ? [event.conversation_id] : [])
+    // Automatic schedule changes reach the outbox for their conversation.
+    const threadChanges = (events: DashboardInvalidation[]) => events.flatMap(event => event.type === 'MESSAGE_UPDATE' && event.scheduled ? [event.conversation_id] : [])
     let beforeChange = (await publications()).length
     const automatic = await saveMessageTemplate(db, env, manager, null, { title: 'After your stay', body: 'Thanks for staying.',
       schedule: { trigger: 'check_out', offset_days: 7, local_time: '09:00', product_ids: [cabin.id] } })
@@ -199,10 +205,19 @@ test('check-in instructions reach every confirmed stay, and send-later replies g
     const cyCheckIn = (await checkIn(cy.id))!.id!
     assert.deepEqual((await outbox(db, owner, cy.conversation_id!)).filter(message => message.status === 'pending').map(message => [message.id, message.author_user_id, message.template_title]).sort(),
       [[automaticRow!.id, null, 'After your stay'], [cyCheckIn, null, 'Check-in instructions'], [cyReply.id, OWNER, null]].sort())
-    // The inbox draws them above the composer from the same rows.
-    const ownerViewer = { audience: 'member' as const, userId: OWNER, principal: owner }
-    assert.deepEqual((await getInboxThread(db, cy.conversation_id!, ORG, ownerViewer))!.pending.map(item => [item.id, item.source, item.cancellable]).sort(),
-      [[automaticRow!.id, 'automatic', true], [cyCheckIn, 'automatic', true], [cyReply.id, 'later', true]].sort())
+    const firstOutboxPage = await listScheduledGuestMessages(db, owner, { limit: 2, offset: 0 }, cy.conversation_id!)
+    assert.equal(firstOutboxPage.pagination.next_offset, 2)
+    const nextOutboxPage = await listScheduledGuestMessages(db, owner, { limit: 2, offset: 2 }, cy.conversation_id!)
+    assert.equal(nextOutboxPage.pagination.next_offset, null)
+    const scopedMessages = [...firstOutboxPage.messages, ...nextOutboxPage.messages]
+    assert.ok(scopedMessages.every(message => message.conversation_id === cy.conversation_id))
+    assert.deepEqual(scopedMessages.map(message => message.id).sort(), [automaticRow!.id, cyCheckIn, cyReply.id].sort())
+    const listingOutbox = await listScheduledGuestMessages(db, owner, { limit: 1, offset: 0 }, cy.conversation_id!, cabin.id)
+    assert.equal(listingOutbox.pagination.next_offset, 1)
+    const olderListingOutbox = await listScheduledGuestMessages(db, owner, { limit: 1, offset: 1 }, cy.conversation_id!, cabin.id)
+    assert.equal(olderListingOutbox.pagination.next_offset, null)
+    assert.deepEqual([...listingOutbox.messages, ...olderListingOutbox.messages].map(message => [message.id, message.product_id]).sort(),
+      [[automaticRow!.id, cabin.id], [cyCheckIn, cabin.id]].sort())
     // One cancel operation cancels either kind; each is read back through the database.
     beforeChange = (await publications()).length
     await cancelScheduledGuestMessage(db, env, manager, automaticRow!.id)
@@ -210,7 +225,8 @@ test('check-in instructions reach every confirmed stay, and send-later replies g
     assert.deepEqual(threadChanges((await publications()).slice(beforeChange)), [cy.conversation_id])
     await cancelScheduledGuestMessage(db, env, await stayAccessFor(owner), cyReply.id)
     assert.deepEqual(await db.prepare('SELECT status, reason FROM scheduled_guest_messages WHERE id = ?').bind(cyReply.id).first(), { status: 'cancelled', reason: 'Cancelled by its author.' })
-    assert.deepEqual((await getInboxThread(db, cy.conversation_id!, ORG, ownerViewer))!.pending.map(item => item.id), [cyCheckIn])
+    assert.deepEqual((await outbox(db, owner, cy.conversation_id!)).map(item => [item.id, item.status]).sort(),
+      [[automaticRow!.id, 'cancelled'], [cyCheckIn, 'pending'], [cyReply.id, 'cancelled']].sort())
     await assert.rejects(cancelScheduledGuestMessage(db, env, manager, cyReply.id), { status: 409, data: { code: 'SCHEDULED_MESSAGE_NOT_PENDING', field: 'status' } })
     beforeChange = (await publications()).length
     await deleteMessageTemplate(db, env, manager, automatic.id, updatedAutomatic.version)
@@ -252,6 +268,7 @@ test('a scheduled reply keeps its exact failure and Inbox retry completes the sa
       payload: { guest: { name: 'Test inbox', email: 'delivered@resend.dev', phone: null }, subject: null, consent_at: null, ip_hash: null, answers: [] },
       created_at: now }, undefined, { words: 'Hello' }).map(write => db.prepare(write.query).bind(...write.params)))
     const owner = memberAccessPrincipal((await resolveMembership(env, { organizationId: ORG, userId: OWNER }))!, { env })
+    await db.prepare("INSERT INTO conversation_participants (conversation_id, organization_id, user_id, role) VALUES ('recovery-thread', ?, ?, 'member')").bind(ORG, ADMIN).run()
     const historical = await appendMessage(db, { conversationId: 'recovery-thread', authorKind: 'member', authorUserId: OWNER, channel: 'email', body: 'Old reply', eventName: 'thread.member_reply' })
     const expired = await createDeliveryReceipt(db, { subject: { messageId: historical.id }, channel: 'email', provider: 'resend', purpose: 'member_reply', idempotencyKey: 'expired-history' })
     await recordDeliveryOutcome(db, { deliveryId: expired.id, status: 'sent', providerMessageId: 'expired-history' })

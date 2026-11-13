@@ -1,5 +1,6 @@
 import { expect, test, type APIResponse } from '@playwright/test'
-import type { InboxRow, InboxThread } from '../../server/domain/guest-threads/types'
+import type { InboxRow } from '../../server/domain/guest-threads/types'
+import type { ConversationPage } from '../../shared/messages-contract'
 import type { DashboardBookingDetails } from '../../server/utils/dashboard-booking-details'
 import type { ReviewFeedback } from '../../shared/review-feedback'
 import { loginAs } from './helpers/auth'
@@ -29,11 +30,11 @@ test('a guest who did not come is marked a no-show from the booking record, and 
     let target: { thread: InboxRow & { submissionType: 'booking' }; details: DashboardBookingDetails } | null = null
     // An ended visit stays in current Messages until it has been quiet for 30 days, so both lists are read.
     for (const [submissionType, mailbox] of [['booking', 'current'], ['booking', 'past']] as const) {
-      const listed = (await body<{ threads: InboxRow[] }>(await page.request.get(`/api/dashboard/organizations/${organizationId}/conversations`, { params: { mailbox, type: submissionType } }), 200)).threads
+      const listed = (await body<{ threads: InboxRow[] }>(await page.request.get('/api/messages', { params: { organization_id: organizationId, mailbox, type: submissionType } }), 200)).threads
       for (const row of listed) {
-        const { thread } = await body<{ thread: InboxThread }>(await page.request.get(`/api/dashboard/organizations/${organizationId}/guest-threads/${row.id}`), 200)
-        if (!thread.booking_id) throw new Error('Booking conversation has no booking')
-        const { booking } = await body<{ booking: DashboardBookingDetails }>(await page.request.get(`/api/dashboard/bookings/${thread.booking_id}`, { params: { org: slug } }), 200)
+        const { conversation } = await body<ConversationPage>(await page.request.get(`/api/messages/${row.id}`), 200)
+        if (conversation.kind === 'team' || !conversation.booking_id) throw new Error('Booking conversation has no booking')
+        const { booking } = await body<{ booking: DashboardBookingDetails }>(await page.request.get(`/api/dashboard/bookings/${conversation.booking_id}`, { params: { org: slug } }), 200)
         if (booking.can_mark_no_show) { target = { thread: { ...row, submissionType }, details: booking }; break }
       }
       if (target) break
@@ -56,8 +57,8 @@ test('a guest who did not come is marked a no-show from the booking record, and 
     expect(after.can_mark_no_show).toBe(false)
     expect(after.status).toBe(details.status)
     // The conversation says it once, as the owner who marked it reads it.
-    const conversation = (await body<{ thread: InboxThread }>(await page.request.get(`/api/dashboard/organizations/${organizationId}/guest-threads/${thread.id}`), 200)).thread
-    expect(conversation.stream.filter(item => item.type === 'event' && item.text === `You marked the ${thread.submissionType} as a no-show`)).toHaveLength(1)
+    const { entries } = await body<ConversationPage>(await page.request.get(`/api/messages/${thread.id}`), 200)
+    expect(entries.filter(item => item.type === 'event' && item.text === `You marked the ${thread.submissionType} as a no-show`)).toHaveLength(1)
     const repeat = await page.request.post(`/api/dashboard/bookings/${details.booking_id}/no_show`, { params: { org: slug }, data: { version: after.version, idempotency_key: `repeat-${Date.now()}` } })
     expect(repeat.status(), await repeat.text()).toBe(409)
   } finally {
