@@ -212,6 +212,12 @@ test('check-in instructions reach every confirmed stay, and send-later replies g
     const scopedMessages = [...firstOutboxPage.messages, ...nextOutboxPage.messages]
     assert.ok(scopedMessages.every(message => message.conversation_id === cy.conversation_id))
     assert.deepEqual(scopedMessages.map(message => message.id).sort(), [automaticRow!.id, cyCheckIn, cyReply.id].sort())
+    const listingOutbox = await listScheduledGuestMessages(db, owner, { limit: 1, offset: 0 }, cy.conversation_id!, cabin.id)
+    assert.equal(listingOutbox.pagination.next_offset, 1)
+    const olderListingOutbox = await listScheduledGuestMessages(db, owner, { limit: 1, offset: 1 }, cy.conversation_id!, cabin.id)
+    assert.equal(olderListingOutbox.pagination.next_offset, null)
+    assert.deepEqual([...listingOutbox.messages, ...olderListingOutbox.messages].map(message => [message.id, message.product_id]).sort(),
+      [[automaticRow!.id, cabin.id], [cyCheckIn, cabin.id]].sort())
     // One cancel operation cancels either kind; each is read back through the database.
     beforeChange = (await publications()).length
     await cancelScheduledGuestMessage(db, env, manager, automaticRow!.id)

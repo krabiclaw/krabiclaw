@@ -19,7 +19,7 @@ const ORG = '/dashboard/ember-slice-demo'
 /** GET /api/dashboard/today: the business's stored tasks and, for a manager, its opportunities. */
 type BusinessToday = { tasks: TaskSection[]; opportunities: OpportunityView[]; opportunity_issues: string[]; assignees: TaskPerson[]; resolved_at: string }
 
-test('automation remains in Inbox while Today keeps the unanswered inquiry', async ({ page, request, baseURL }, testInfo) => {
+test('automation remains in Inbox while Today keeps the unanswered inquiry', async ({ page, request, browser, baseURL }, testInfo) => {
   test.setTimeout(120_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Scheduled replies use disposable local data only')
   const organizationId = seededTenant('restaurant').organizationId
@@ -28,6 +28,7 @@ test('automation remains in Inbox while Today keeps the unanswered inquiry', asy
   let messageId: string | null = null
   let futureMessageId: string | null = null
   let cancelled = false
+  let otherOwner: BrowserContext | undefined
   try {
     await loginAs(page.request, baseURL!)
     await dismissPreviewToolbar(page)
@@ -66,6 +67,34 @@ test('automation remains in Inbox while Today keeps the unanswered inquiry', asy
     await replyLink.click()
     await expect(page).toHaveURL(new RegExp(`/messages/${threadId}(?:[?#]|$)`))
 
+    // A second owner has the same conversation seat, but the reply is private to its author.
+    otherOwner = await browser.newContext({ baseURL })
+    await loginAs(otherOwner.request, baseURL!, 'user-e2e-demo-owner')
+    const otherTranscript = await otherOwner.request.get(`/api/messages/${threadId}`)
+    expect(otherTranscript.status(), await otherTranscript.text()).toBe(200)
+    const otherPage = await otherOwner.newPage()
+    const otherSocketCapture = otherPage.waitForEvent('websocket', { predicate: connected => new URL(connected.url()).pathname === '/api/dashboard/guest-inbox/socket' })
+    expect((await otherPage.goto(ORG))?.status()).toBe(200)
+    const otherSocket = await otherSocketCapture
+    const otherScheduleUpdates: string[] = []
+    otherSocket.on('framereceived', frame => {
+      if (frame.payload === 'pong') return
+      const event: unknown = JSON.parse(String(frame.payload))
+      if (isDashboardInvalidation(event) && event.type === 'MESSAGE_UPDATE' && event.scheduled && event.conversation_id === threadId) otherScheduleUpdates.push(event.event_id)
+    })
+    // An authenticated acknowledgement gives the second socket an observable ready boundary.
+    const originalMessage = (await otherTranscript.json() as ConversationPage).entries.find(entry => entry.type === 'message')
+    expect(originalMessage).toBeDefined()
+    const [read] = await Promise.all([
+      otherOwner.request.post(`/api/messages/${threadId}/read`, { headers: authRequestHeaders(baseURL!), data: { message_id: originalMessage!.id } }),
+      otherSocket.waitForEvent('framereceived', { predicate: frame => {
+        if (frame.payload === 'pong') return false
+        const event: unknown = JSON.parse(String(frame.payload))
+        return isDashboardInvalidation(event) && event.type === 'MESSAGE_ACK' && event.conversation_id === threadId
+      } }),
+    ])
+    expect(read.status(), await read.text()).toBe(200)
+
     await page.getByRole('textbox', { name: 'Write a message…', exact: true }).fill(reply)
     await page.getByRole('button', { name: 'Add to message' }).click()
     await page.getByRole('menuitem', { name: 'Send later', exact: true }).click()
@@ -78,7 +107,7 @@ test('automation remains in Inbox while Today keeps the unanswered inquiry', asy
     }
     page.on('request', trackChatRead)
     try {
-      const [scheduled] = await Promise.all([
+      const [scheduled, scheduleFrame] = await Promise.all([
         page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === schedulePath),
         socket.waitForEvent('framereceived', { predicate: frame => {
           if (frame.payload === 'pong') return false
@@ -89,6 +118,9 @@ test('automation remains in Inbox while Today keeps the unanswered inquiry', asy
       ])
       expect(scheduled.status(), await scheduled.text()).toBe(201)
       messageId = (await scheduled.json() as { message: { id: string } }).message.id
+      expect(Object.keys(JSON.parse(String(scheduleFrame.payload))).sort()).toEqual(
+        ['conversation_id', 'event_id', 'location_id', 'occurred_at', 'organization_id', 'scheduled', 'team', 'type'],
+      )
       await expect(page.getByText('Message scheduled', { exact: true })).toBeVisible()
       await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
       expect(chatReads).toEqual([])
@@ -109,6 +141,9 @@ test('automation remains in Inbox while Today keeps the unanswered inquiry', asy
     for (const id of [messageId, futureMessageId]) {
       expect(pendingMessages.find(message => message.id === id)).toMatchObject({ id, conversation_id: threadId, status: 'pending', author_user_id: expect.any(String), booking_id: null })
     }
+    const otherOutbox = await otherOwner.request.get('/api/dashboard/scheduled-guest-messages', { params: { org: 'ember-slice-demo', conversation_id: threadId, limit: 25, offset: 0 } })
+    expect(otherOutbox.status(), await otherOutbox.text()).toBe(200)
+    expect(await otherOutbox.json()).toMatchObject({ messages: [] })
     // The thread opens its own view of the outbox, where the author cancels a reply.
     await expect(page.getByText(reply, { exact: true })).toHaveCount(0)
     await page.getByRole('link', { name: 'Sent and upcoming' }).click()
@@ -125,12 +160,16 @@ test('automation remains in Inbox while Today keeps the unanswered inquiry', asy
     expect(await response.json()).toMatchObject({ message: { id: messageId, status: 'cancelled', reason: 'Cancelled by its author.' } })
     cancelled = true
     await expect(scheduledRow.getByText('Cancelled', { exact: true })).toBeVisible()
+    await otherPage.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
+    expect(otherScheduleUpdates).toEqual([])
     const persisted = await outbox()
     expect(persisted.status(), await persisted.text()).toBe(200)
     // The outbox keeps the cancelled reply with its status; cancelled work still leaves Upcoming independently below.
     expect((await persisted.json() as { messages: Array<{ id: string; status: string }> }).messages.filter(message => message.id === messageId).map(message => message.status)).toEqual(['cancelled'])
     await page.getByRole('link', { name: 'Back to conversation' }).click()
     await expect(page).toHaveURL(`${ORG}/messages/${threadId}`)
+    await page.goBack()
+    await expect(page).toHaveURL(ORG)
     // Cancelling a scheduled send answers nothing: the question is still owed.
     expect(await replyTasks('upcoming')).toEqual([])
     expect(await replyTasks('today')).toEqual([{ section: 'open', tasks: [expect.objectContaining({ id: replyTask.id, status: 'open', version: replyTask.version })] }])
@@ -152,7 +191,9 @@ test('automation remains in Inbox while Today keeps the unanswered inquiry', asy
         const response = await page.request.post(`/api/dashboard/scheduled-guest-messages/${futureMessageId}/cancel`, { params: { org: 'ember-slice-demo' } })
         expect(response.status(), await response.text()).toBe(200)
       }
-    } finally { await release() }
+    } finally {
+      try { await otherOwner?.close() } finally { await release() }
+    }
   }
 })
 

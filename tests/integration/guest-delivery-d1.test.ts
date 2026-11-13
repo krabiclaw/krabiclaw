@@ -805,7 +805,7 @@ test('a guest writing while the business edits a table booking does not refuse t
     const [first, , third] = oldTownSeatings
     assert(first && third && harbourSeatings[0])
 
-    const policyJson = JSON.stringify({ advance_notice_minutes: null, party_size_min: null, party_size_max: null, minimum_guest_age: null, accessibility_contact_required: false, payment: null })
+    const policyJson = JSON.stringify({ advance_notice_minutes: null, party_size_min: null, party_size_max: null, minimum_guest_age: null, accessibility_contact_required: false, payment: null, cancellation: null })
     const now = new Date().toISOString()
     await claimSessionCapacity(db, { env, organizationId: 'org-table', productId: oldTown.id, sessionId: first.id, productVariantId: oldTown.variants[0]!.id, partySize: 2, userId: 'guest-table', policyJson,
       following: bookingId => requestInsertQueries({ id: 'table-thread', kind: 'booking', organization_id: 'org-table', location_id: 'loc-old-town', booking_id: bookingId,
@@ -855,6 +855,19 @@ test('a guest writing while the business edits a table booking does not refuse t
     await assert.rejects(requestBookingChange(db, env, (await getGuestRequest(db, 'table-thread'))!, 'user-table', { kind: 'booking', product_session_id: harbourSeatings[1]!.id, product_id: harbour.id, party_size: 4, version: beforeBranch.version }, 'propose-stale'),
       { statusCode: 409, message: 'The booking changed. Reload before sending a request.' })
     assert.equal((await readBookedRecord(db, 'org-table', bookingId))?.starts_at, harbourSeatings[0].starts_at, 'a refused change moved nothing')
+
+    // A branch-only proposal has the same dates and count. The buyer needs both locations to make a decision.
+    assert(atHarbour)
+    assert.equal(first.starts_at, harbourSeatings[0].starts_at)
+    assert.deepEqual(await requestBookingChange(db, env, (await getGuestRequest(db, 'table-thread'))!, 'user-table', {
+      kind: 'booking', product_session_id: first.id, product_id: oldTown.id, party_size: 4, version: atHarbour.version,
+    }, 'propose-old-town'), { changeStatus: 'awaiting_guest_acceptance' })
+    const { loadBuyerBookingDetails } = await import('../../server/utils/dashboard-booking-details.ts')
+    const buyer = await loadBuyerBookingDetails(db, env, 'guest-table', 'booking', 'table-thread')
+    assert.ok(buyer.pending_change)
+    const { before, after } = buyer.pending_change
+    assert.equal(before.when_label, after.when_label)
+    assert.deepEqual([before, after].map(terms => [terms.location_title, terms.party_size]), [['Harbour', 4], ['Old Town', 4]])
   } finally { await runtime.dispose() }
 })
 

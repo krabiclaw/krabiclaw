@@ -24,11 +24,11 @@ function anchors(record: BookedRecord): { check_in: ScheduleAnchor; check_out: S
 export async function publishScheduledGuestMessageChange(
   db: DbClient,
   env: GuestInboxPublicationEnv,
-  conversationId: string | null,
+  row: Pick<ScheduledGuestMessageRow, 'conversation_id' | 'author_user_id'>,
   type: 'MESSAGE_CREATE' | 'MESSAGE_UPDATE' = 'MESSAGE_UPDATE',
 ): Promise<void> {
-  if (conversationId === null) messagingError(500, 'INVALID_MESSAGE_BOOKING', 'The scheduled message has no conversation; open apps could not be updated', 'conversationId')
-  await publishConversationEvent(env, db, { conversationId, type, ...(type === 'MESSAGE_UPDATE' && { scheduled: true }) })
+  if (row.conversation_id === null) messagingError(500, 'INVALID_MESSAGE_BOOKING', 'The scheduled message has no conversation; open apps could not be updated', 'conversationId')
+  await publishConversationEvent(env, db, { conversationId: row.conversation_id, type, scheduledAuthorId: row.author_user_id, ...(type === 'MESSAGE_UPDATE' && { scheduled: true }) })
 }
 
 function validTimestamp(value: string, field: string): void {
@@ -256,7 +256,7 @@ export async function scheduleGuestReply(db: DbClient, principal: MemberAccessPr
   const saved = await queryFirst<ScheduledGuestMessageRow>(db, `${SCHEDULED_MESSAGE_VIEW_SQL} WHERE m.organization_id = ? AND m.id = ?`, [principal.organizationId, id])
   if (!saved) messagingError(500, 'SCHEDULED_MESSAGE_NOT_SAVED', 'The scheduled reply could not be read back', 'scheduled_message_id')
   try {
-    await publishScheduledGuestMessageChange(db, principal.env, saved.conversation_id)
+    await publishScheduledGuestMessageChange(db, principal.env, saved)
   } catch (cause) {
     throw new HTTPError({ statusCode: 503, message: 'Your reply was scheduled, but open apps could not be updated. Reload before scheduling it again.',
       data: { code: 'DASHBOARD_PUBLICATION_FAILED', field: 'realtime', committed: true, scheduled_message_id: saved.id }, cause })
@@ -289,7 +289,7 @@ async function finishSend(db: DbClient, env: SendEnv, row: ScheduledGuestMessage
     params: [values.status, values.reason, values.error_code, values.error_field, values.message_id, values.sent_at, now, row.id],
   }, ...messageDeliveryTaskQueries(row.id, now)], { operation: 'Record scheduled message outcome' })
   if (result?.meta.changes !== 1) messagingError(409, 'SCHEDULED_MESSAGE_NOT_SENDING', 'The scheduled message outcome could not be recorded because it is no longer sending', 'status')
-  if (row.conversation_id !== null) await publishScheduledGuestMessageChange(db, env, row.conversation_id, values.message_id === null ? 'MESSAGE_UPDATE' : 'MESSAGE_CREATE')
+  if (row.conversation_id !== null) await publishScheduledGuestMessageChange(db, env, row, values.message_id === null ? 'MESSAGE_UPDATE' : 'MESSAGE_CREATE')
 }
 
 /** The idempotency key a row is sent under: a reply's is its author's own, which Inbox Retry reuses. */

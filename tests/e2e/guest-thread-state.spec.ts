@@ -803,7 +803,7 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
   expect(requests).toHaveLength(1)
   const pendingRecord = await page.request.get(`/api/dashboard/bookings/${upcomingBookingId}`, { params: { org: demoSlug() } })
   await expectStatus(pendingRecord, 200)
-  expect(await pendingRecord.json()).toMatchObject({ booking: { pending_change: { message_id: requests[0]!.id, party_size: targetPartySize } } })
+  expect(await pendingRecord.json()).toMatchObject({ booking: { pending_change: { message_id: requests[0]!.id, before: { party_size: before.booking.party_size }, after: { party_size: targetPartySize } } } })
   await page.goto(`${baseURL}/dashboard/${demoSlug()}/messages/${before.booking.conversation_id}`)
   const reservationLink = page.getByRole('link', { name: 'Show reservation', exact: true })
   await expect(reservationLink).toHaveAttribute('href', `/dashboard/${demoSlug()}/bookings/${upcomingBookingId}`)
@@ -864,7 +864,7 @@ test('buyer opens the reservation from chat to decide a booking change', async (
     const read = async () => {
       const response = await owner.get(`/api/dashboard/bookings/${booked.bookingId}`, { params: { org: demoSlug() } })
       await expectStatus(response, 200)
-      return (await response.json() as { booking: { version: number; updated_at: string; booking_date: string; booking_time: string; party_size: number; location_id: string; product_session_id: string; pending_change: { message_id: string; party_size: number } | null } }).booking
+      return (await response.json() as { booking: { version: number; updated_at: string; booking_date: string; booking_time: string; party_size: number; location_id: string; product_session_id: string; pending_change: { message_id: string; before: { party_size: number }; after: { party_size: number } } | null } }).booking
     }
     const original = await read()
     const movePath = `/api/dashboard/bookings/${booked.bookingId}/move`
@@ -876,7 +876,7 @@ test('buyer opens the reservation from chat to decide a booking change', async (
       await expectStatus(response, 200)
       expect(await response.json()).toMatchObject({ change_status: 'awaiting_guest_acceptance', booking: { booking_id: booked.bookingId } })
       const proposal = (await read()).pending_change
-      expect(proposal).toMatchObject({ message_id: expect.any(String), party_size: partySize })
+      expect(proposal).toMatchObject({ message_id: expect.any(String), before: { party_size: current.party_size }, after: { party_size: partySize } })
       return { id: proposal!.message_id, data }
     }
     const first = await requestChange(2)
@@ -904,6 +904,7 @@ test('buyer opens the reservation from chat to decide a booking change', async (
     await page.getByRole('link', { name: 'Show reservation', exact: true }).click()
     await expect(page).toHaveURL(`${baseURL}/dashboard/account/activity/booking/${threadId}`)
     const card = page.getByTestId('booking-change-request')
+    await expect(card).toContainText('1 guest')
     await expect(card).toContainText('2 guests')
     const declined = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname.startsWith(`/api/public/booking-changes/${threadId}/`))
     await card.getByRole('button', { name: 'Decline', exact: true }).click()
@@ -917,7 +918,6 @@ test('buyer opens the reservation from chat to decide a booking change', async (
     expect(await declinedReplay.json()).toMatchObject({ change_status: 'declined', booking: { booking_id: booked.bookingId, party_size: 1 } })
 
     const second = await requestChange(2)
-    await page.reload()
     await expect(card).toHaveCount(1)
     const accepted = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname.startsWith(`/api/public/booking-changes/${threadId}/`))
     await card.getByRole('button', { name: 'Accept', exact: true }).click()

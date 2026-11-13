@@ -421,8 +421,6 @@ interface Context {
   messages: Map<string, { title: string; status: string; conversation_id: string | null; booking_id: string }>
   /** A booking's conversation, when it is and what was booked. */
   records: Map<string, { conversation_id: string | null; starts_at: string; product_kind: ProductKind }>
-  /** The message a change task is about. */
-  entries: Map<string, { event_name: string; author_kind: string; body: string | null }>
   photos: Map<string, TaskPhoto[]>
 }
 
@@ -444,8 +442,6 @@ async function loadContext(db: DbClient, viewer: TaskViewer, rows: TaskRow[]): P
      WHERE br.organization_id = ? AND br.id IN (SELECT value FROM json_each(?))`, [organizationId, d1JsonStringSet(bookingIds)]) : []
   const records = booked.filter(record => record.unit === 'slot')
   const changeStayRequests = booked.filter(record => record.unit === 'nights' && rows.some(row => row.kind === 'booking_change' && row.subject_id === record.id))
-  const entryIds = rows.filter(row => row.kind === 'booking_change').map(row => row.dedupe_key.slice('booking_change:'.length))
-  const entries = entryIds.length ? await queryAll<{ id: string; event_name: string; author_kind: string; body: string | null }>(db, 'SELECT id, event_name, author_kind, body FROM messages WHERE id IN (SELECT value FROM json_each(?))', [d1JsonStringSet(entryIds)]) : []
   const requestIds = [...new Set([...ids(row => row.subject_type === 'conversation' ? row.subject_id : null),
     ...records.flatMap(record => record.conversation_id ? [record.conversation_id] : []), ...changeStayRequests.flatMap(stay => stay.conversation_id ? [stay.conversation_id] : [])])]
   // Stay writers load this module; the conversation repository is loaded when a view is drawn.
@@ -513,7 +509,6 @@ async function loadContext(db: DbClient, viewer: TaskViewer, rows: TaskRow[]): P
     requests: new Map(requests.map(request => [request.id, request])),
     messages: new Map(messages.map(message => [message.id, { title: message.template_title, status: message.status, conversation_id: message.conversation_id, booking_id: message.booking_id }])),
     records: new Map(records.map(record => [record.id, { conversation_id: record.conversation_id, starts_at: record.starts_at, product_kind: record.product_kind }])),
-    entries: new Map(entries.map(entry => [entry.id, { event_name: entry.event_name, author_kind: entry.author_kind, body: entry.body }])),
     photos: new Map([...photos].map(([id, list]) => [id, list.map(photo => ({ id: photo.id, url: photo.url, thumbnail_url: photo.thumbnailUrl, width: photo.width, height: photo.height }))])),
   }
 }
@@ -727,18 +722,18 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
       break
     }
     case 'booking_change': {
-      const entry = context.entries.get(row.dedupe_key.slice('booking_change:'.length))
       const stay = context.stays.get(row.subject_id!)
       const record = stay ? null : context.records.get(row.subject_id!)
       conversation_id = stay?.conversation_id ?? record?.conversation_id ?? null
       const request = conversation_id ? context.requests.get(conversation_id) : undefined
-      if (!entry || !conversation_id || !request) throw new Error(`Change task ${row.id} has no change or conversation`)
+      if (!conversation_id || !request) throw new Error(`Change task ${row.id} has no booking conversation`)
       booking_id = stay?.id ?? (record ? row.subject_id : null)
       face = 'compact'
       title = request.guest_name ? firstName(request.guest_name) : request.participant ?? 'Guest'
       avatar = { initial: initialOf(title), tone: 'cool' }
-      const waiting = entry.author_kind !== 'guest' && row.starts_at !== null && row.starts_at > now.toISOString()
-      status_line = [entry.author_kind === 'guest' ? 'Change requested' : waiting ? 'Change proposal waiting on the guest' : 'Change proposal expired', place].filter(Boolean).join(' · ')
+      const status = row.starts_at === null ? 'Change requested'
+        : row.starts_at > now.toISOString() ? 'Change proposal waiting on the guest' : 'Change proposal expired'
+      status_line = [status, place].filter(Boolean).join(' · ')
       detail = record ? `${day(record.starts_at)}, ${time(record.starts_at)}` : null
       path = booking_id ? stayPath(booking_id) : null
       // A change closes when it is answered or proposed again.

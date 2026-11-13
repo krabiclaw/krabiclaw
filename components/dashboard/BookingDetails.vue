@@ -27,12 +27,24 @@
             variant="soft"
             icon="i-lucide-clock"
             :title="personalScope ? `${booking.organization_name} requested a change` : 'Change requested'"
-            :description="pendingChangeDescription"
             :actions="personalScope ? [
               { label: 'Accept', color: 'neutral' as const, loading: answering === 'accept', disabled: answering !== null, onClick: () => answerChange('accept') },
               { label: 'Decline', color: 'neutral' as const, variant: 'soft' as const, loading: answering === 'decline', disabled: answering !== null, onClick: () => answerChange('decline') },
             ] : undefined"
-          />
+          >
+            <template #description>
+              <div class="mt-2 grid grid-cols-2 gap-4">
+                <div v-for="{ label, terms } in [{ label: 'booking.change_before', terms: booking.pending_change.before }, { label: 'booking.change_proposed', terms: booking.pending_change.after }]" :key="label">
+                  <p class="font-medium text-highlighted">{{ t(label) }}</p>
+                  <p>{{ terms.when_label }}</p>
+                  <p>{{ terms.location_title }}</p>
+                  <p>{{ terms.party_size }} {{ terms.party_size === 1 ? recordCopy?.guestLabel : recordCopy?.guestsLabelPlural }}</p>
+                  <p>{{ terms.assigned_member_name ?? t('booking.change_unassigned') }}</p>
+                </div>
+              </div>
+              <p class="mt-2">{{ personalScope ? 'Your booking stays unchanged until you accept.' : `Waiting for ${firstName(booking.guest_name ?? '')} to respond` }}</p>
+            </template>
+          </UAlert>
 
           <UCard v-if="!purchase" variant="record">
             <div class="grid grid-cols-2 divide-x divide-default">
@@ -249,10 +261,14 @@ const route = useRoute()
 type ActionColor = 'success' | 'error' | 'neutral'
 
 const dashboardApi = props.personalScope ? applicationFetch : useDashboardApi()
-const realtime = useDashboardInvalidations()
 const actionError = ref<string | null>(null)
 const editorPath = computed(() => props.editorPath)
 const { resource, booking, error, presentation, noun, pageTitle, orgSlug, purchase, refresh: refreshDetails } = await useBookingDetails(props.bookingType, props.bookingId, props.personalScope)
+const realtime = useConversationInvalidations(
+  computed(() => booking.value?.conversation_id ?? ''),
+  computed(() => booking.value?.organization_id),
+  props.personalScope && props.bookingType === 'booking',
+)
 watchEffect(() => {
   if (error.value && !booking.value) showError(error.value)
 })
@@ -301,15 +317,6 @@ const session = authClient.useSession()
 // The buyer's answer to a change, on the record itself; the email link records the same decision.
 const answering = ref<'accept' | 'decline' | null>(null)
 const changeResult = ref<string | null>(null)
-const pendingChangeDescription = computed(() => {
-  const change = booking.value?.pending_change
-  if (!change) return ''
-  const details = [`${change.before_label} → ${change.after_label}`]
-  if (booking.value?.type === 'booking') details.push(`${change.before_assigned_member_name ?? 'Unassigned'} → ${change.after_assigned_member_name ?? 'Unassigned'}`)
-  details.push(`${change.party_size} ${change.party_size === 1 ? 'guest' : 'guests'}`)
-  details.push(props.personalScope ? 'Your appointment stays unchanged until you accept.' : `Waiting for ${firstName(booking.value?.guest_name ?? '')} to respond`)
-  return details.join(' · ')
-})
 async function answerChange(decision: 'accept' | 'decline') {
   const change = booking.value?.pending_change
   if (!change || !booking.value?.conversation_id || answering.value) return
@@ -392,11 +399,16 @@ function openCancel() {
 }
 
 watch(realtime.event, (event) => {
-  if (!event || (event.type !== 'MESSAGE_CREATE' && event.type !== 'MESSAGE_UPDATE') || event.scheduled) return
-  if (event.conversation_id === booking.value?.conversation_id) void refreshDetails()
+  if (!event || !booking.value || props.bookingType !== 'booking') return
+  if (event.type === 'access.changed' || (
+    (event.type === 'CONVERSATION_LEAVE' || ((event.type === 'MESSAGE_CREATE' || event.type === 'MESSAGE_UPDATE') && !event.scheduled))
+    && event.conversation_id === booking.value.conversation_id
+  )) {
+    void refreshDetails()
+  }
 })
 watch(realtime.connectionEpoch, (epoch) => {
-  if (epoch > 0) void refreshDetails()
+  if (epoch > 0 && props.bookingType === 'booking') void refreshDetails()
 })
 
 // A blur save and the navigation it caused share one write. Failed text stays

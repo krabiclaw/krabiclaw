@@ -400,7 +400,7 @@ async function deliverEmail(db: DbClient, env: ChangeEnv, thread: GuestThreadRow
     location: proposal.locationTitle || 'Online', assignee: guest.after.assigned_member_name }
   await notifyBookingChangeOwner(env, db, {
     organizationId: thread.organization_id, organizationName: guest.fromName,
-    threadId: thread.id, submissionType: 'booking', submissionId: thread.id, messageId: entryId,
+    threadId: thread.id, submissionType: 'booking', submissionId: thread.id, bookingId: proposal.before.recordId, messageId: entryId,
     vertical: guest.vertical,
     locationId: status === 'declined' ? proposal.before.locationId : proposal.afterLocationId !== undefined ? proposal.afterLocationId : proposal.before.locationId,
     assignment: thread.kind === 'booking' && proposal.beforeAssignedMemberName !== undefined && proposal.afterAssignedMemberId !== undefined && proposal.afterAssignedMemberName !== undefined

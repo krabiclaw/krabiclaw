@@ -725,7 +725,7 @@ export async function executeGuestThreadOperation(db: DbClient, input: ExecuteOp
           if (current?.status !== 'sent' || current.message_id !== entry.id) throw new Error('Scheduled reply changed before its sent outcome was recorded')
         }
       }
-      await publishConversationEvent(input.env, db, { conversationId: input.threadId, type: 'MESSAGE_CREATE' })
+      await publishConversationEvent(input.env, db, { conversationId: input.threadId, type: 'MESSAGE_CREATE', scheduledAuthorId: scheduled.author_user_id })
     }
     return outcome
   }

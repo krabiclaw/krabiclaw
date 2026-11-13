@@ -6,6 +6,7 @@ import { assignedMemberSql, memberAccessPrincipal, resolveMembership, roleAllows
 import { assertConversationAccess, guestVisibleSql, participantGuard, resolveConversationAccess, type ParticipantRole } from '~/server/domain/conversations'
 import { createAuth, type CloudflareEnv } from '~/server/utils/auth'
 import { runOrganizationJobs } from '~/server/domain/cleaner-jobs'
+import { SCHEDULED_AUTHOR_HEADER } from '~/server/cloudflare/guest-inbox-events'
 
 type GuestInboxHubEnv = CloudflareEnv
 
@@ -183,6 +184,12 @@ export class GuestInboxHubObject extends DurableObject<GuestInboxHubEnv> {
     if (!organizationId || !isDashboardInvalidation(event) || event.organization_id !== organizationId) {
       return failure(400, 'INVALID_DASHBOARD_INVALIDATION', 'Invalid dashboard invalidation', 'body')
     }
+    const scheduledAuthor = request.headers.get(SCHEDULED_AUTHOR_HEADER)
+    const scheduleOnly = event.type === 'MESSAGE_UPDATE' && event.scheduled === true
+    const scheduledSend = event.type === 'MESSAGE_CREATE' && !event.team && scheduledAuthor !== null
+    if (scheduleOnly ? scheduledAuthor === null : scheduledAuthor !== null && !scheduledSend) {
+      return failure(400, 'INVALID_DASHBOARD_INVALIDATION', 'Invalid scheduled message audience', SCHEDULED_AUTHOR_HEADER)
+    }
     // A stay, booking or task write is announced this way (a booking's in its guest conversation); the organization's jobs follow it.
     if (event.type === 'stay.changed' || event.type === 'business.changed' || ((event.type === 'MESSAGE_CREATE' || event.type === 'MESSAGE_UPDATE') && !event.team)) await this.wakeJobs(organizationId)
 
@@ -191,6 +198,12 @@ export class GuestInboxHubObject extends DurableObject<GuestInboxHubEnv> {
     // publication fails with its code so the committed write's caller sees it
     // and the idempotent retry repairs it.
     const encoded = JSON.stringify(event)
+    const scheduledChange = scheduleOnly || scheduledSend
+      ? JSON.stringify({ ...event, type: 'MESSAGE_UPDATE', scheduled: true, message: undefined, location_id: null })
+      : encoded
+    const scheduleTaskChange = scheduleOnly && scheduledAuthor === '' ? JSON.stringify({
+      type: 'business.changed', event_id: event.event_id, organization_id: organizationId, occurred_at: event.occurred_at,
+    } satisfies DashboardInvalidation) : null
     let eligible = 0
     const failures: string[] = []
     for (const socket of this.ctx.getWebSockets()) {
@@ -202,6 +215,7 @@ export class GuestInboxHubObject extends DurableObject<GuestInboxHubEnv> {
       }
       if (attachment.organizationId !== organizationId) continue
       const scope = attachment.scope
+      if (scope && scheduleOnly) continue
       if (scope && event.type !== 'access.changed' && (!('conversation_id' in event) || event.conversation_id !== scope.conversationId)) continue
       if ((event.type === 'CONVERSATION_LEAVE' || event.type === 'MESSAGE_ACK') && event.user_id !== attachment.userId) continue
       const session = await socketSession(this.env, attachment)
@@ -218,11 +232,15 @@ export class GuestInboxHubObject extends DurableObject<GuestInboxHubEnv> {
         ])
         revoke = !permission
         if (permission && (!permission.can_see_message || event.type === 'access.changed' || event.type === 'CONVERSATION_LEAVE')) continue
-        if (scope.role === 'guest' && (event.type === 'MESSAGE_CREATE' || event.type === 'MESSAGE_UPDATE')) {
-          if (permission && event.scheduled) continue
-          eventToSend = JSON.stringify({ ...event, location_id: null })
+        if (scope.role === 'guest' && (event.type === 'MESSAGE_CREATE' || event.type === 'MESSAGE_UPDATE')) eventToSend = JSON.stringify({ ...event, location_id: null })
+      } else if (membership) {
+        if (scheduleOnly || !await canReceive(this.env, attachment, membership, event)) {
+          const seesSchedule = scheduledAuthor === '' ? await roleAllows({ ...membership, permissions: { operations: ['update'] } }) : scheduledAuthor === attachment.userId
+          if (seesSchedule) eventToSend = scheduledChange
+          else if (scheduleTaskChange && await canReceive(this.env, attachment, membership, event)) eventToSend = scheduleTaskChange
+          else continue
         }
-      } else if (membership && !await canReceive(this.env, attachment, membership, event)) continue
+      }
       if (socket.readyState !== WebSocket.OPEN) continue
       eligible += 1
       try {

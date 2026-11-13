@@ -3,7 +3,7 @@
     <template #right><UButton icon="i-lucide-refresh-cw" aria-label="Refresh scheduled messages" color="neutral" variant="ghost" :loading="status === 'pending'" :disabled="revoked || !!cancelling" @click="reconcile()" /></template>
     <UAlert v-if="revoked" color="error" title="Conversation access changed" description="You no longer have access to this conversation." />
     <UAlert v-else-if="error" color="error" title="Scheduled messages could not be loaded" :description="getErrorMessage(error, 'Scheduled messages request failed')" />
-    <UButton v-if="conversationPath && !revoked && !error" :to="conversationPath" label="Back to conversation" color="neutral" variant="link" class="mb-4" />
+    <UButton v-if="conversationPath && !revoked && !error" :to="conversationPath" replace label="Back to conversation" color="neutral" variant="link" class="mb-4" @click="backToConversation" />
     <template v-if="!revoked && !error && data && status !== 'idle' && data.pagination.offset === offset">
       <div class="divide-y divide-default">
         <article v-for="message in data.messages" :key="message.id" class="space-y-3 py-6 first:pt-0" :data-scheduled-message="message.id">
@@ -57,6 +57,7 @@ const conversationPath = computed(() => {
 const role = computed(() => dashboard.organization.value?.role as keyof typeof organizationRoles | undefined)
 const manage = computed(() => Boolean(role.value && authClient.organization.checkRolePermission({ role: role.value, permissions: { operations: ['update'] } })))
 const session = authClient.useSession()
+const realtime = useDashboardInvalidations()
 // An automatic message is the business's to cancel; a reply sent later is only its author's.
 const cancellable = (message: ScheduledMessage) => message.status === 'pending' && (message.author_user_id === null ? manage.value : message.author_user_id === session.value.data?.user.id)
 const { data, error, status, refresh, clear } = useAsyncData<ScheduledMessagePage>(
@@ -83,7 +84,6 @@ provide(dashboardLeafParentKey, {
   exit: () => revoked.value || (conversationId.value !== undefined && error.value) ? messagesPath.value : conversationPath.value ?? parent?.exit() ?? null,
 })
 
-const realtime = useDashboardInvalidations()
 let refreshRequested = false
 function reconcile() {
   if (revoked.value) return
@@ -108,8 +108,7 @@ watch(realtime.event, event => {
       && (status.value === 'pending' || data.value?.messages.some(message => message.conversation_id === event.conversation_id)))) reconcile()
   }
 }, { flush: 'sync' })
-watch(realtime.connectionEpoch, epoch => {
-  if (epoch < 2) return
+watch(realtime.connectionEpoch, () => {
   revoked.value = false
   reconcile()
 })
@@ -117,6 +116,14 @@ watch(realtime.connectionEpoch, epoch => {
 const statusLabels: Record<ScheduledMessage['status'], string> = { pending: 'Scheduled', sending: 'Sending', sent: 'Sent', failed: 'Failed', needs_review: 'Needs review', cancelled: 'Cancelled', skipped: 'Skipped' }
 // An automatic message is shown in its booking's clock; a reply sent later in this device's.
 function atHome(value: string, timezone: string | null) { return new Intl.DateTimeFormat(locale.value, { ...(timezone ? { timeZone: timezone } : {}), dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) }
+function backToConversation(event: MouseEvent) {
+  if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+  const historyBack = router.options.history.state.back
+  if (typeof historyBack === 'string' && router.resolve(historyBack).fullPath === conversationPath.value) {
+    event.preventDefault()
+    router.back()
+  }
+}
 async function cancel(id: string) {
   if (cancelling.value) return
   cancelling.value = id

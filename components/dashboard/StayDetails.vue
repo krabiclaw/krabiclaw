@@ -6,6 +6,7 @@
     <UAlert v-if="error" color="error" variant="soft" title="This stay could not be loaded" :description="getErrorMessage(error, 'Stay request failed')" />
     <div v-else-if="stay" class="min-w-0 [overflow-wrap:anywhere]">
       <UAlert v-if="actionError" class="mb-5" color="error" variant="soft" icon="i-lucide-circle-alert" :description="actionError" />
+      <UButton v-if="changeRetry" class="mb-5" label="Retry update" color="neutral" variant="outline" :disabled="busy !== null" @click="answerChange(changeRetry.messageId, changeRetry.decision)" />
       <UAlert v-if="homeError" class="mb-5" color="error" variant="soft" title="The home could not be loaded" :description="getErrorMessage(homeError, 'Home request failed')" />
       <p v-if="changeResult" class="mb-5 text-sm text-highlighted" role="status">{{ changeResult }}</p>
       <section v-for="change in pendingChanges" :key="change.id" class="mb-5 rounded-2xl border border-default bg-elevated p-5" :aria-labelledby="`change-title-${change.id}`" data-testid="booking-change-request">
@@ -349,12 +350,16 @@ const canRequestChange = computed(() => props.personalScope && detail.value !== 
   && (detail.value.ends_at.length === 10 ? detail.value.check_out_date >= localDateAt(new Date(), detail.value.timezone) : Date.parse(detail.value.ends_at) > Date.now()))
 const policy = computed(() => detail.value?.cancellation_policy ? bookedPolicyTerms(detail.value.cancellation_policy) : null)
 const paymentPath = computed(() => detail.value?.online_payment ? `/dashboard/${route.params.org_slug}/bookings/payment/${encodeURIComponent(detail.value.online_payment.payment_id)}` : '')
+let accessChangeRevision = 0
 watch(realtime.event, event => {
   if (canonical && (event?.type === 'access.changed' || (event?.type === 'CONVERSATION_LEAVE' && event.conversation_id === detail.value?.conversation_id))) {
+    accessChangeRevision++
+    changeRetry.value = null
+    changeResult.value = null
     canonical.clear()
     void refresh()
   }
-  if (canonical && detail.value?.channel === 'airbnb' && event?.type === 'MESSAGE_CREATE' && !event.message && event.conversation_id === detail.value.conversation_id) {
+  if (canonical && detail.value?.channel === 'airbnb' && event?.type === 'MESSAGE_CREATE' && event.conversation_id === detail.value.conversation_id) {
     void refresh()
   }
   if (event?.type === 'stay.changed' && (event.booking_id === props.stayId || (event.booking_id === null && event.product_id === stay.value?.product_id))) {
@@ -412,6 +417,7 @@ function methodLabel(method: StayPaymentMethod) { return STAY_PAYMENT_METHOD_LAB
 const actionError = ref<string | null>(null)
 const busy = ref<string | null>(null)
 const changeResult = ref<string | null>(null)
+const changeRetry = ref<{ messageId: string; decision: 'accept' | 'decline' } | null>(null)
 // The payment day defaults to today where the home is; one key per payment being entered, kept across retries.
 const homeToday = () => stay.value ? localDateAt(new Date(), stay.value.timezone) : ''
 const draft = reactive({ amount: '', method: 'cash' as StayPaymentMethod, paid_on: homeToday(), reference: '', key: crypto.randomUUID() })
@@ -441,14 +447,25 @@ async function run(key: string, action: () => Promise<unknown>, failure: string)
 
 async function answerChange(messageId: string, decision: 'accept' | 'decline') {
   if (busy.value !== null || !detail.value) return
-  const bookingId = detail.value.id
+  const { id: bookingId, conversation_id: conversationId } = detail.value
+  const accessRevision = accessChangeRevision
+  changeRetry.value = null
   changeResult.value = null
   await run(`${decision}-${messageId}`, async () => {
-    await dashboardApi(`${dashboardBookingPath(bookingId)}/${decision}_change`, {
-      method: 'POST',
-      body: { message_id: messageId },
-      validate: (value): value is undefined => value === undefined,
-    })
+    try {
+      await dashboardApi(`${dashboardBookingPath(bookingId)}/${decision}_change`, {
+        method: 'POST',
+        body: { message_id: messageId },
+        validate: (value): value is undefined => value === undefined,
+      })
+    } catch (cause) {
+      if (cause instanceof ApiClientError && cause.code === 'STAY_CHANGE_INCOMPLETE' && accessRevision === accessChangeRevision && detail.value?.conversation_id === conversationId) {
+        changeRetry.value = { messageId, decision }
+      }
+      throw cause
+    }
+    if (accessRevision !== accessChangeRevision || detail.value?.conversation_id !== conversationId) return
+    changeRetry.value = null
     changeResult.value = decision === 'accept' ? t('booking.change_guest_accepted', { channel: 'Airbnb' }) : t('booking.change_declined')
   }, t('booking.change_failed'))
 }
