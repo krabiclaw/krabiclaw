@@ -55,6 +55,41 @@ test.describe('dashboard pane hierarchy', () => {
     await loginAs(page.request, baseURL!)
   })
 
+  test('Dashboard Search loads when opened from Messages and Menu', async ({ page }) => {
+    await page.setViewportSize(WIDE)
+    const permissionRequests: Request[] = []
+    page.on('request', request => {
+      if (new URL(request.url()).pathname === '/api/auth/organization/has-permission') permissionRequests.push(request)
+    })
+    await open(page, `${ORG}/messages`)
+    await expect(page.getByRole('heading', { name: 'Messages', exact: true })).toBeVisible()
+    const dialog = page.getByRole('dialog', { name: 'Search', exact: true })
+    const input = dialog.getByPlaceholder('Search…')
+    await expect(dialog).toHaveCount(0)
+    expect(permissionRequests).toHaveLength(0)
+
+    const shortcut = await page.evaluate(() => navigator.userAgent.includes('Macintosh;')) ? 'Meta+k' : 'Control+k'
+    await page.keyboard.press(shortcut)
+    await expect(input).toBeFocused()
+    await expect(dialog.getByText('Plan and billing', { exact: true })).toBeVisible()
+    expect(permissionRequests.length).toBeGreaterThan(0)
+    await page.keyboard.press(shortcut)
+    await expect(dialog).toBeHidden()
+
+    await open(page, `${ORG}/messages`)
+    await page.getByTestId('dashboard-top-nav-menu-button').click()
+    await page.getByTestId('dashboard-search').click()
+    await expect(input).toBeFocused()
+    await page.keyboard.press('Escape')
+    await expect(dialog).toBeHidden()
+
+    await page.setViewportSize(PHONE)
+    await open(page, `${ORG}/menu`)
+    await page.getByTestId('dashboard-search').click()
+    await expect(input).toBeFocused()
+    await expect(dialog.getByText('Plan and billing', { exact: true })).toBeVisible()
+  })
+
   test('each Menu destination is a root at its own URL, and Website content nests under Website', async ({ page }) => {
     await page.setViewportSize(WIDE)
     await open(page, `${ORG}/menu`)
