@@ -21,6 +21,7 @@ export interface CatalogField {
   optional?: boolean
   display_url?: string | null
   hint?: string
+  media_kind?: 'image' | 'video' | 'any'
 }
 
 export interface CatalogScreen {

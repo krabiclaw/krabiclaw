@@ -5,6 +5,7 @@ import { assertProductAccess, isOrganizationWideRole, memberAccessPrincipal, rol
 import { createCollection, createProduct, deleteCollection, getProduct, hydrateProductMedia, listCollectionProducts, listCollections, listOrganizationProducts, reorderCollections, setCollectionProducts, setProductLocation, setProductPublication, updateCollection, updateProduct } from '~/server/utils/product-management'
 import { createSession, deleteProductBookingConfig, getScheduleSession, listAvailabilityRules, listScheduleSessions, replaceWeeklySchedule, setProductBookingConfig, updateSession } from '~/server/utils/availability'
 import { attachMediaPlacement, removeMediaPlacement, reorderMediaPlacements, setSingleMediaPlacement } from '~/server/utils/media-placement'
+import { hydrateMediaAssetRefs } from '~/server/utils/media-asset-manager'
 import { purgePublicResourceCacheNow } from '~/server/utils/public-resource-cache'
 import { memberSchedulingList } from '~/server/domain/member-scheduling'
 import { editableProductKinds, PRODUCT_KIND_LABELS, productDetailFields, STAY_DESCRIPTION_DETAIL_KEYS, STAY_HOUSE_RULE_DETAIL_KEYS, STAY_LOCATION_DETAIL_KEYS, type ProductDetailsPatch } from '~/shared/product-details'
@@ -528,8 +529,8 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
       if (locale) return missing('Edit media in the source language')
       const block = source.blocks.find(block => block.id === query.block_id) ?? missing('Section not found')
       const slots = Object.values(TENANT_PAGE_BLOCK_REGISTRY[block.type].fields)
-        .flatMap(definition => definition.kind === 'media' && definition.accept !== 'video'
-          ? [{ slot: definition.slot ?? 'media', label: definition.label }] : [])
+        .flatMap(definition => definition.kind === 'media'
+          ? [{ slot: definition.slot ?? 'media', label: definition.label, accept: definition.accept ?? 'image' as const }] : [])
       const row = (id: string, label: string, native: string, slot: string, asset?: typeof block.media[number]): CatalogRow => ({
         id, label, native, image: mediaStillUrl(asset),
         query: { page_id: source.id, block_id: block.id, slot, ...(asset ? { asset_id: asset.asset_id } : {}) },
@@ -560,13 +561,19 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
       const screen = { title, rows: [], revision, save_label: 'Save', fields: [
         order ? field('value', title, 'order', ids.join('\n'), { choices: media.map((item, index) => ({
           value: item.asset_id, label: `Gallery item ${index + 1}`, image: mediaStillUrl(item),
-        })) }) : field('value', title, 'photo', asset?.asset_id, { optional: true, display_url: mediaStillUrl(asset) }),
+        })) }) : field('value', title, 'photo', asset?.asset_id, { optional: true, display_url: mediaStillUrl(asset), media_kind: slot.accept }),
       ] }
       if (!answer) return screen
       if (answer.revision !== revision) throw new HTTPError({ statusCode: 409, message: 'This media changed. Reopen it before saving.' })
       const value = answer.values.value ?? invalid('Missing media value')
       const placement = { owner_type: 'content_block' as const, owner_id: block.id, slot: slot.slot }
       const input = { env, organizationId: organization.id, principal, placement }
+      if (!order && value && value !== asset?.asset_id) {
+        await hydrateMediaAssetRefs(db, {
+          organizationId: organization.id, refs: [{ asset_id: value }],
+          allowedKinds: slot.accept === 'any' ? ['image', 'video'] : [slot.accept],
+        })
+      }
       if (order) {
         const next = value.split('\n')
         if (next.length !== ids.length || new Set(next).size !== ids.length || !next.every(id => ids.includes(id))) invalid('Include each gallery item once')
@@ -615,7 +622,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
               Object.hasOwn(TENANT_PAGE_RECORD_NOUNS, collection) && item.kind === 'list' && item.of
                 && (!item.availableWhen || item.availableWhen.equals.includes(String(block.data[item.availableWhen.field] ?? '')))
                 ? [row(`${block.id}:${collection}`, `${tenantPageBlockLabel(block.type)} · ${item.label}`, 'page-records', { block_id: block.id, collection })] : []),
-            ...(Object.values(TENANT_PAGE_BLOCK_REGISTRY[block.type].fields).some(item => item.kind === 'media' && item.accept !== 'video')
+            ...(Object.values(TENANT_PAGE_BLOCK_REGISTRY[block.type].fields).some(item => item.kind === 'media')
               ? [row(`${block.id}:media`, `${tenantPageBlockLabel(block.type)} media`, 'page-media', { block_id: block.id })] : []),
           ]),
           ...(allowed.length ? [row('add', 'Add a section', 'page-section-add')] : []),
