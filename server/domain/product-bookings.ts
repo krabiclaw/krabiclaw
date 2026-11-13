@@ -508,16 +508,18 @@ async function createNightBooking(event: H3Event, env: CloudflareEnv, db: DbClie
   const fingerprint = await hashIdentifier(JSON.stringify({ slug, ...request, guest: { name, email, phone, notes }, answers: formAnswersFingerprint(body.answers) }))
 
   const requestResult = async (bookingId: string, conversationId: string, followupsCompleted: boolean, replayed: boolean) => {
-    if (!followupsCompleted) {
-      await notifyProductBookingCreated(env, db, organizationId, conversationId)
-      await execute(db, `UPDATE conversations SET payload_json=json_set(payload_json, '$.provenance.followups_completed', json('true'))
-        WHERE organization_id=? AND id=? AND booking_id=?`, [organizationId, conversationId, bookingId])
-    }
     const current = await getThreadOperationalRecord(db, conversationId)
     if (!current || current.organization_id !== organizationId || current.id !== bookingId || !current.respond_by) {
       throw new Error('The stay request has no operational receipt')
     }
     const progress = stayRequestProgress(current)
+    if (!followupsCompleted) {
+      if (progress.request_status === 'awaiting_approval') {
+        await notifyProductBookingCreated(env, db, organizationId, conversationId)
+      }
+      await execute(db, `UPDATE conversations SET payload_json=json_set(payload_json, '$.provenance.followups_completed', json('true'))
+        WHERE organization_id=? AND id=? AND booking_id=?`, [organizationId, conversationId, bookingId])
+    }
     const message = current.status === 'cancelled' ? 'This stay request was cancelled.'
       : current.status === 'confirmed' ? 'Your stay is confirmed.'
         : progress.request_status === 'awaiting_payment' ? 'The host approved your request. Pay to confirm your stay.'
