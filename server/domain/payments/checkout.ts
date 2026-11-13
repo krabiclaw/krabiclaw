@@ -221,8 +221,8 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
       if (!stay) throw new Error('The selected stay is missing')
       const scope = { organizationId: input.organizationId, productId: stay.product_id, checkIn: stay.check_in_date, checkOut: stay.check_out_date, timezone: stay.timezone }
       const bookable = approval
-        ? approvedStayPaymentPredicate({ ...approval, organizationId: input.organizationId, through: now })
-        : stayHoldPredicate(scope)
+        ? await approvedStayPaymentPredicate(db, { ...approval, ...scope, through: now })
+        : await stayHoldPredicate(db, scope)
       if (!approval) {
         // A lapsed hold on these nights is cleared before the new hold claims them.
         const [clearLapsed, claim] = stayHoldClaimQueries({ ...scope, holdId })

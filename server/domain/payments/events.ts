@@ -139,10 +139,14 @@ async function captureOnceBooked(db:DbClient,stripe:Stripe,env:CloudflareEnv,pay
  if (approval) {
   // The approved booking already owns its nights. Capture first, then confirm that same booking.
   const hold = await queryFirst<Hold>(db, 'SELECT * FROM payment_checkout_holds WHERE payment_id=? AND organization_id=?', [payment.id, payment.organization_id])
-  if (!hold?.conversation_id || !hold.buyer_user_id) throw new Error('Approved stay payment has no guest conversation')
+  const purchase = snapshot.stay
+  if (!hold?.conversation_id || !hold.buyer_user_id || !isStayPurchase(purchase) || purchase.product_id !== hold.product_id) {
+   throw new Error('Approved stay payment has no stay or guest conversation')
+  }
   const now = new Date().toISOString()
-  const bookable = approvedStayPaymentPredicate({ ...approval, organizationId: payment.organization_id, conversationId: hold.conversation_id,
-   buyerUserId: hold.buyer_user_id, through: now, allowInFlight: payment.id })
+  const bookable = await approvedStayPaymentPredicate(db, { ...approval, organizationId: payment.organization_id,
+   productId: purchase.product_id, checkIn: purchase.check_in_date, checkOut: purchase.check_out_date,
+   conversationId: hold.conversation_id, buyerUserId: hold.buyer_user_id, through: now, allowInFlight: payment.id })
   const renewed = await execute(db, `UPDATE payment_checkout_holds SET expires_at=MAX(expires_at, ?)
     WHERE payment_id=? AND organization_id=? AND status='active' AND ${bookable.query}
       AND EXISTS (SELECT 1 FROM payments p WHERE p.id=payment_checkout_holds.payment_id AND json_type(p.review_json,'$.confirmation_started_at')='text')`,
@@ -210,8 +214,9 @@ export async function commitBooking(db:DbClient,env:CloudflareEnv,payment:Paymen
    after: { id: bookingId, product_id: purchase.product_id, status: 'confirmed', check_in_date: purchase.check_in_date, check_out_date: purchase.check_out_date } })
   if (approval) {
    if (!hold.conversation_id || hold.buyer_user_id !== buyerUserId || !hold.location_id) throw new Error('Approved stay payment has no guest conversation')
-   const bookable = approvedStayPaymentPredicate({ ...approval, organizationId: payment.organization_id, conversationId: hold.conversation_id,
-    buyerUserId, through: now, allowInFlight: payment.id })
+   const bookable = await approvedStayPaymentPredicate(db, { ...approval, organizationId: payment.organization_id,
+    productId: purchase.product_id, checkIn: purchase.check_in_date, checkOut: purchase.check_out_date,
+    conversationId: hold.conversation_id, buyerUserId, through: now, allowInFlight: payment.id })
    claim = [
     { query: `UPDATE bookings SET status='confirmed', version=version+1, updated_at=? WHERE id=? AND organization_id=? AND ${bookable.query}`,
       params: [now, bookingId, payment.organization_id, ...bookable.params] },

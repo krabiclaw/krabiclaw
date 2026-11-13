@@ -46,9 +46,9 @@ function bankVerificationUrl(intent: Stripe.PaymentIntent): string {
   return url
 }
 
-function parseReview(value: string | null): PaymentReview | null {
+function parseReview(value: string | null): (PaymentReview & { confirmation_started_at?: string }) | null {
   if (!value) return null
-  const review = JSON.parse(value) as PaymentReview
+  const review = JSON.parse(value) as PaymentReview & { confirmation_started_at?: string }
   if (typeof review.payment_method_id !== 'string' || ![review.subtotal, review.tax, review.tax_included, review.surcharge].every(Number.isSafeInteger) || review.total !== review.subtotal + review.tax + review.surcharge) throw new Error('Stored payment review is invalid')
   return review
 }
@@ -238,17 +238,21 @@ export async function confirmPayment(db: DbClient, stripe: Stripe, env: Cloudfla
   if (state !== 'open') throw new HTTPError({ statusCode: 409, statusMessage: state === 'paid' ? 'This payment is already complete' : state === 'processing' || state === 'verifying' ? 'This payment is already in progress' : 'This payment can no longer be confirmed; start the booking again', data: { code: `payment_${state}` } })
   const review = parseReview(payment.review_json)
   if (!review || review.payment_method_id !== input.payment_method_id || review.total !== input.total) throw new HTTPError({ statusCode: 409, statusMessage: 'Review the payment again before confirming', data: { code: 'review_required' } })
+  const { approval, stay } = snapshotOf(payment)
+  if (approval && review.confirmation_started_at) throw new HTTPError({ statusCode: 409, statusMessage: 'This payment is already in progress', data: { code: 'payment_in_progress' } })
   const attached = typeof current.payment_method === 'string' ? current.payment_method : current.payment_method?.id
   if (current.status !== 'requires_confirmation' || attached !== review.payment_method_id || current.amount !== review.subtotal + review.tax) throw new HTTPError({ statusCode: 409, statusMessage: 'The payment changed since it was reviewed; review it again', data: { code: 'review_required' } })
   // The capacity is kept before Stripe can take the money, against the hold itself: a hold that has gone stops the payment here.
   const started = new Date().toISOString()
-  const approval = snapshotOf(payment).approval
   const expired = () => new HTTPError({ statusCode: 409, statusMessage: 'This payment can no longer be confirmed; start the booking again', data: { code: 'payment_expired' } })
   let confirmingPayment = payment
   if (approval) {
     const hold = await queryFirst<{ conversation_id: string | null; buyer_user_id: string | null }>(db, 'SELECT conversation_id,buyer_user_id FROM payment_checkout_holds WHERE payment_id=? AND organization_id=?', [payment.id, organizationId])
-    if (!hold?.conversation_id || !hold.buyer_user_id) throw new Error('Approved stay payment has no guest conversation')
-    const bookable = approvedStayPaymentPredicate({ ...approval, organizationId, conversationId: hold.conversation_id, buyerUserId: hold.buyer_user_id, through: started })
+    if (!stay || !hold?.conversation_id || !hold.buyer_user_id) throw new Error('Approved stay payment has no stay or guest conversation')
+    const bookable = await approvedStayPaymentPredicate(db, {
+      ...approval, organizationId, productId: stay.product_id, checkIn: stay.check_in_date, checkOut: stay.check_out_date,
+      conversationId: hold.conversation_id, buyerUserId: hold.buyer_user_id, through: started,
+    })
     try {
       const [written] = await executeBatch(db, [
         { query: `UPDATE payments SET review_json=json_set(review_json,'$.confirmation_started_at',?) WHERE id=? AND organization_id=?

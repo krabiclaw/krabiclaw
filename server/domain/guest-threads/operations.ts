@@ -171,6 +171,7 @@ async function sourceMutationPlan(context: ThreadContext, action: string, now: s
 
 
 async function operationEntryQueries(
+  db: DbClient,
   context: ThreadContext,
   plan: SourceMutationPlan,
   input: ExecuteOperationInput,
@@ -182,11 +183,15 @@ async function operationEntryQueries(
 ): Promise<BatchQuery[]> {
   const record = context.record!
   const stay = record.unit === 'nights' ? await import('~/server/domain/stays') : null
+  const channel = stay && plan.payBy ? await stay.stayChannelAvailability(db, {
+    organizationId: record.organization_id, productId: record.product_id,
+    checkIn: bookingDay(record.starts_at, record.timezone), checkOut: bookingDay(record.ends_at, record.timezone),
+  }) : null
   const sourceGuard = stay
     ? `src.product_session_id IS NULL AND src.owner='app' AND src.channel='direct' AND ${stayRequestRespondBySql('src')} IS NOT NULL
       AND ${noStayRequestPaymentInFlightSql('c.id')}
       ${plan.action !== 'cancel' ? `AND ${stayRequestRespondBySql('src')} > strftime('%Y-%m-%dT%H:%M:%fZ','now') AND ${stayRequestPayBySql('c.id')} IS NULL` : ''}
-      ${plan.payBy ? `AND ${stay.noOverlappingChannelStaySql('src')}` : ''}`
+      ${channel ? `AND ${channel.query}` : ''}`
     : `src.product_session_id IS NOT NULL AND src.ends_at > strftime('%Y-%m-%dT%H:%M:%fZ','now')`
   return messageQueries({
     id: entryId, conversationId: context.thread.id, authorKind: 'krabiclaw', authorUserId: input.actorUserId,
@@ -215,7 +220,7 @@ async function operationEntryQueries(
                        AND src.version = ?
                        AND json_array(src.id,src.party_size,src.product_id,src.starts_at,src.ends_at,src.timezone,src.location_id,src.party_size_is_minimum)=json_array(?,CAST(? AS INTEGER),?,?,?,?,?,CAST(? AS INTEGER)))
         AND (${financialGuard?.query ?? '1=1'})`,
-      params: [context.thread.organization_id, plan.kind, context.thread.last_message_at, plan.beforeStatus, ...(stay ? [now] : []), record.version,
+      params: [context.thread.organization_id, plan.kind, context.thread.last_message_at, plan.beforeStatus, ...(stay ? [now] : []), ...(channel?.params ?? []), record.version,
         record.id, record.party_size, record.product_id, record.starts_at, record.ends_at, record.timezone, record.location_id, Number(record.party_size_is_minimum),
         ...(financialGuard?.params ?? [])],
     },
@@ -445,7 +450,7 @@ async function executeSourceMutation(
       check_out_date: bookingDay(context.record.ends_at, context.record.timezone) }, input.organizationId, now)
     : []
   const queries = [
-    ...await operationEntryQueries(context, plan, input, entryId, dedupeKey, now, email,refundPlan.guard),
+    ...await operationEntryQueries(db, context, plan, input, entryId, dedupeKey, now, email, refundPlan.guard),
     sourceUpdateQuery(context, plan, entryId, now),
     ...nightRelease,
     ...refundPlan.queries,

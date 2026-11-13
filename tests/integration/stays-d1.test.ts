@@ -1918,6 +1918,7 @@ test('a stay request can be paid only after approval and Stripe confirms the sam
     let activity = ''
     let approvedPayUrl = ''
     let intentCount = 0
+    let declines = 0
     let captures = 0
     let readinessChecks = 0
     let releaseConcurrentReadiness!: () => void
@@ -1958,6 +1959,11 @@ test('a stay request can be paid only after approval and Stripe confirms the sam
         paymentIntent.last_payment_error = null
       } else if (url.pathname.endsWith('/confirm')) {
         if (paymentIntent.payment_method === 'pm_declined') {
+          if (++declines === 1) {
+            const concurrent = await call(`${paymentPath}/confirm`, { claim, payment_method_id: 'pm_declined', total: expected })
+            assert.equal(concurrent.status, 409, await concurrent.clone().text())
+            assert.equal((await concurrent.json()).data?.code, 'payment_in_progress')
+          }
           const decline = { type: 'card_error', code: 'card_declined', message: 'Your card was declined.' }
           paymentIntent.status = 'requires_payment_method'
           paymentIntent.last_payment_error = decline
@@ -2169,19 +2175,26 @@ test('stay request decisions and expiry reconcile the host task and the exact ni
       assert.equal(await claims(entry.id), 0)
     }
 
+    await updateStayHome(env, db, manager, cabin.id, { timezone: 'Asia/Bangkok', check_in_time: null, check_out_time: null })
     const collision = await submit('stay-ota-conflict', 24)
+    assert.equal(collision.starts_at, date(24))
+    await updateStayHome(env, db, manager, cabin.id, { check_in_time: '16:00', check_out_time: '01:00' })
     const channel = await applyChannelBooking(db, env, ORG, cabin.id, {
       provider: 'channex', external_booking_id: 'ota-stay-review-conflict', channel_booking_id: null, channel: 'airbnb',
       revision_id: 'ota-stay-review-revision', provider_updated_at: new Date().toISOString(), cancelled: false,
-      check_in_date: date(24), check_out_date: date(26), adults: 2, children: 0, infants: 0,
+      check_in_date: date(23), check_out_date: date(25), adults: 2, children: 0, infants: 0,
       guest_name: null, guest_surname: null, guest_email: null, guest_phone: null, total_minor: 20_000, currency: 'USD',
     })
     assert.equal(channel.overbooked, true)
+    assert.equal(channel.ends_at.slice(0, 10), date(24))
     assert.equal((await decide(collision, 'confirm')).ok, false)
     assert.equal((await getStay(db, manager, collision.id)).request_status, 'awaiting_approval')
     assert.equal((await decide(collision, 'reject')).ok, true)
     assert.equal(await claims(collision.id), 0)
     await assert.rejects(submit('stay-ota-refused', 24), code('STAY_NIGHTS_UNAVAILABLE'))
+    const adjacent = await submit('stay-ota-adjacent', 25)
+    assert.equal((await decide(adjacent, 'confirm')).ok, true)
+    assert.equal((await getStay(db, manager, adjacent.id)).request_status, 'awaiting_payment')
   } finally {
     await runtime.dispose()
   }
