@@ -44,19 +44,30 @@ export async function getGuestThreadDetail(
   return detail ? detail.view : null
 }
 
+export type TranscriptView = Pick<GuestThreadDetailViewModel,
+  'id' | 'organizationName' | 'organizationVertical' | 'activityPath' | 'guestName' | 'participantLabel'
+  | 'conversationChannel' | 'locationLabel' | 'operationalRecord' | 'entries' | 'inquiry'>
+  & { answers: FormAnswerSnapshot[] }
+
 /** Request and routing facts stay beside the view so they never enter its guest projection. */
+type ThreadViewer = { buyerUserId: string } | { memberUserId: string; conversation?: ConversationRow }
+type LoadedThread<View> = {
+  view: View
+  request: GuestRequest
+  channelFacts: NonNullable<Awaited<ReturnType<typeof guestThreadChannel>>>
+  timeZone: string
+}
+
+export function loadGuestThreadDetail(db: DbClient, threadId: string, organizationId: string, viewer?: ThreadViewer, at?: Date, transcript?: false): Promise<LoadedThread<GuestThreadDetailViewModel> | null>
+export function loadGuestThreadDetail(db: DbClient, threadId: string, organizationId: string, viewer: ThreadViewer, at: Date, transcript: true): Promise<LoadedThread<TranscriptView> | null>
 export async function loadGuestThreadDetail(
   db: DbClient,
   threadId: string,
   organizationId: string,
-  viewer?: { buyerUserId: string } | { memberUserId: string; conversation?: ConversationRow },
+  viewer?: ThreadViewer,
   at = new Date(),
-): Promise<{
-  view: GuestThreadDetailViewModel
-  request: GuestRequest
-  channelFacts: NonNullable<Awaited<ReturnType<typeof guestThreadChannel>>>
-  timeZone: string
-} | null> {
+  transcript = false,
+): Promise<LoadedThread<GuestThreadDetailViewModel | TranscriptView> | null> {
   const audience = viewer && 'buyerUserId' in viewer ? viewer : undefined
   const member = viewer && 'memberUserId' in viewer ? viewer : undefined
   const memberUserId = member?.memberUserId ?? null
@@ -74,8 +85,8 @@ export async function loadGuestThreadDetail(
     listConversationMessages(db, threadId, Boolean(audience)),
     audience ? [] : listThreadDeliveries(db, threadId),
     guestThreadChannel(db, threadId, organizationId),
-    audience ? false : queryFirst(db, `SELECT 1 AS open FROM conversations gt WHERE gt.id = ? AND ${OPEN_REPLY_TASK_SQL}`, [threadId]).then(Boolean),
-    memberUserId ? queryFirst<{ archived_at: string | null }>(db, 'SELECT archived_at FROM conversation_participants WHERE conversation_id = ? AND user_id = ?', [threadId, memberUserId]) : null,
+    audience || transcript ? false : queryFirst(db, `SELECT 1 AS open FROM conversations gt WHERE gt.id = ? AND ${OPEN_REPLY_TASK_SQL}`, [threadId]).then(Boolean),
+    memberUserId && !transcript ? queryFirst<{ archived_at: string | null }>(db, 'SELECT archived_at FROM conversation_participants WHERE conversation_id = ? AND user_id = ?', [threadId, memberUserId]) : null,
   ])
   if (!thread || (audience && thread.user_id !== audience.buyerUserId)) return null
   if (audience && record && (record.user_id !== audience.buyerUserId || record.organization_id !== organizationId)) return null
@@ -91,7 +102,6 @@ export async function loadGuestThreadDetail(
     forEntry.push({ id: delivery.id, channel: delivery.channel, provider: delivery.provider, purpose: delivery.purpose, status: delivery.status })
     deliveriesByEntry.set(delivery.message_id, forEntry)
   }
-  const deliveryFailureRows = deliveryRows.filter(isVisibleDeliveryFailure)
   if (deliveryRows.some(delivery => delivery.provider === 'channex' && isDeliverySent(delivery) && !delivery.provider_message_id?.trim())) {
     throw new HTTPError({ statusCode: 500, message: 'A successful channel reply has no provider message ID', data: { code: 'CHANNEL_RECEIPT_INVALID', field: 'delivery.provider_message_id' } })
   }
@@ -103,7 +113,7 @@ export async function loadGuestThreadDetail(
     listMessagePhotos(db, 'message', entryRows.filter(entry => !isEventMessage(entry)).map(entry => entry.id)),
     actorUserIds.length ? queryAll<{ id: string; name: string }>(db, 'SELECT id, name FROM user WHERE id IN (SELECT value FROM json_each(?))', [d1JsonStringSet(actorUserIds)]) : [],
     bookingChangeViews(db, thread, entryRows, now),
-    threadAnswers(db, thread),
+    !transcript || entryRows.some(entry => entry.event_name === SUBMISSION_EVENT) ? threadAnswers(db, thread) : [],
     requestSummary(db, thread, record),
     audience || record?.unit === 'nights' || !channelThread.productId ? null
       : queryFirst<{ internal_name: string }>(db, 'SELECT internal_name FROM product_stay_configs WHERE organization_id = ? AND product_id = ?', [organizationId, channelThread.productId]),
@@ -150,28 +160,33 @@ export async function loadGuestThreadDetail(
     const named = record?.unit === 'nights' ? { internal_name: record.product_internal_name } : home
     if (named) { summary.productTitle = named.internal_name; summary.locationTitle = named.internal_name }
   }
-  const mailbox = resolveGuestThreadMailbox({ blocked_at: thread.blocked_at, archived_at: archive?.archived_at ?? null }, record, now, { lastMessageAt: thread.last_message_at }, audience ? 'buyer' : 'member')
-  // The guest's own words: a contact's first message, a booking guest's note.
-  const words = (event: string) => entryRows.find(entry => entry.event_name === event && entry.author_kind === 'guest')?.body ?? null
-  // A stay's conversation is presented as a stay: the booking is its nights, or a channel's guest has not booked yet.
-  const submissionType = thread.kind === 'booking' && (record ? record.unit === 'nights' : channelThread.productId !== null) ? 'stay' : thread.kind
-
-  const view: GuestThreadDetailViewModel = {
+  const sharedView = {
     id: thread.id,
     organizationName: organization.name,
     organizationVertical: organization.vertical,
     activityPath,
     guestName: summary.guestName,
     participantLabel: summary.participantLabel,
-    conversationChannel: channelThread.productId !== null ? 'airbnb' : 'direct',
+    conversationChannel: channelThread.productId !== null ? 'airbnb' as const : 'direct' as const,
+    locationLabel: summary.locationTitle,
+    operationalRecord: record ? { id: record.id, unit: record.unit, product_kind: record.product_kind, status: record.status, starts_at: record.starts_at, ends_at: record.ends_at, timezone: record.timezone, party_size: record.party_size,
+      check_in_date: record.unit === 'nights' ? bookingDay(record.starts_at, record.timezone) : null, check_out_date: record.unit === 'nights' ? bookingDay(record.ends_at, record.timezone) : null } : null,
+    entries,
+    inquiry: thread.kind === 'booking' && thread.payload.inquiry ? { checkIn: thread.payload.inquiry.check_in_date, checkOut: thread.payload.inquiry.check_out_date } : null,
+  }
+  const context = { request: thread, channelFacts: channelThread, timeZone: summary.locationTimezone ?? organization.timezone }
+  if (transcript) return { ...context, view: { ...sharedView, answers } }
+
+  const mailbox = resolveGuestThreadMailbox({ blocked_at: thread.blocked_at, archived_at: archive?.archived_at ?? null }, record, now, { lastMessageAt: thread.last_message_at }, audience ? 'buyer' : 'member')
+  const words = (event: string) => entryRows.find(entry => entry.event_name === event && entry.author_kind === 'guest')?.body ?? null
+  const submissionType = thread.kind === 'booking' && (record ? record.unit === 'nights' : channelThread.productId !== null) ? 'stay' : thread.kind
+  const view: GuestThreadDetailViewModel = {
+    ...sharedView,
     guestEmail: summary.guestEmail,
     guestPhone: summary.guestPhone,
     submissionType,
     submissionId: thread.id,
-    locationLabel: summary.locationTitle,
     needsReply,
-    operationalRecord: record ? { id: record.id, unit: record.unit, product_kind: record.product_kind, status: record.status, starts_at: record.starts_at, ends_at: record.ends_at, timezone: record.timezone, party_size: record.party_size,
-      check_in_date: record.unit === 'nights' ? bookingDay(record.starts_at, record.timezone) : null, check_out_date: record.unit === 'nights' ? bookingDay(record.ends_at, record.timezone) : null } : null,
     source: {
       submissionType,
       submissionId: thread.id,
@@ -200,8 +215,6 @@ export async function loadGuestThreadDetail(
             answers,
           },
     },
-    entries,
-    inquiry: thread.kind === 'booking' && thread.payload.inquiry ? { checkIn: thread.payload.inquiry.check_in_date, checkOut: thread.payload.inquiry.check_out_date } : null,
     availableActions: audience ? [] : requestActions(record, now),
     mailbox: mailbox.mailbox,
     manuallyArchived: mailbox.manuallyArchived,
@@ -209,7 +222,7 @@ export async function loadGuestThreadDetail(
     blockedAt: audience ? null : thread.blocked_at,
     canArchive: audience ? false : mailbox.canArchive,
     canUnarchive: audience ? false : mailbox.canUnarchive,
-    deliveryFailures: audience ? [] : deliveryFailureRows.map(d => ({
+    deliveryFailures: audience ? [] : deliveryRows.filter(isVisibleDeliveryFailure).map(d => ({
       id: d.id,
       channel: d.channel,
       purpose: d.purpose,
@@ -222,7 +235,7 @@ export async function loadGuestThreadDetail(
     createdAt: thread.created_at,
     lastMessageAt: thread.last_message_at,
   }
-  return { view, request: thread, channelFacts: channelThread, timeZone: summary.locationTimezone ?? organization.timezone }
+  return { ...context, view }
 }
 
 /**
