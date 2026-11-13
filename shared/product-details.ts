@@ -4,6 +4,10 @@ import { STAY_ALARM_AMENITIES, STAY_ALARM_DETAIL_KEYS, stayAmenityAvailability, 
 
 /** Named product facts shared by validation, CMS, MCP, localization and templates. */
 export const PRODUCT_KINDS = ['dish', 'experience', 'service', 'stay', 'table'] as const
+
+export function editableProductKinds(kind?: ProductKind) {
+  return PRODUCT_KINDS.filter(value => kind === undefined || (value === 'stay') === (kind === 'stay'))
+}
 export const PRODUCT_KIND_LABELS = { dish: 'Food or drink', experience: 'Experience or class', service: 'Practice area or consultation', stay: 'Place to stay', table: 'Table reservation' } as const
 export type ProductKind = typeof PRODUCT_KINDS[number]
 /** The recognizable kind choices used by the CMS. */

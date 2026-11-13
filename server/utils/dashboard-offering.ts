@@ -4,16 +4,17 @@ import { getDashboardMemberContext, listDashboardLocations } from '~/server/util
 import { assertProductAccess, isOrganizationWideRole, memberAccessPrincipal, roleAllows } from '~/server/utils/member-access'
 import { getProduct, hydrateProductMedia, listCollectionProducts, listCollections, setCollectionProducts, setProductLocation, setProductPublication, updateProduct } from '~/server/utils/product-management'
 import { createSession, deleteProductBookingConfig, getScheduleSession, listAvailabilityRules, listScheduleSessions, replaceWeeklySchedule, setProductBookingConfig, updateSession } from '~/server/utils/availability'
-import { attachMediaPlacement, removeMediaPlacement, setSingleMediaPlacement } from '~/server/utils/media-placement'
+import { attachMediaPlacement, removeMediaPlacement, reorderMediaPlacements, setSingleMediaPlacement } from '~/server/utils/media-placement'
 import { purgePublicResourceCacheNow } from '~/server/utils/public-resource-cache'
 import { memberSchedulingList } from '~/server/domain/member-scheduling'
-import { PRODUCT_KIND_LABELS, productDetailFields, type ProductDetailsPatch } from '~/shared/product-details'
+import { editableProductKinds, PRODUCT_KIND_LABELS, productDetailFields, type ProductDetailsPatch } from '~/shared/product-details'
 import { formatMinorAmount, minorAmountToMajor, scopedPriceAmountPatch, selectPrice } from '~/shared/prices'
 import { isCurrencyCode } from '~/shared/currencies'
 import { mediaStillUrl } from '~/shared/media-placement-contract'
 import type { CatalogAnswer, CatalogField, CatalogRow, CatalogScreen } from '~/shared/catalog-screen'
 import type { UpdateProductInput } from '~/server/types/products'
 import { getVerticalCopy } from '~/utils/vertical-copy'
+import { NOTICE_OPTIONS, noticeSummary } from '~/shared/availability-settings'
 
 const invalid = (message: string): never => { throw new HTTPError({ statusCode: 422, message }) }
 const missing = (message: string): never => { throw new HTTPError({ statusCode: 404, message }) }
@@ -86,6 +87,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
   const selection = { currency, location_id: location?.id ?? null }
   const chosenPrice = (variant: typeof product.variants[number]) => selectPrice(variant.prices, selection)
   const bookingChoices = [{ value: 'instant', label: 'Confirm automatically' }, { value: 'review', label: 'Review each request' }]
+  const noticeChoices = NOTICE_OPTIONS.map(choice => ({ value: String(choice.value), label: choice.label }))
   const memberList = () => memberSchedulingList({ env, userId, organizationId: organization.id })
   const locationsUsed = locations.filter(entry => product.locations.some(binding => binding.location_id === entry.id))
 
@@ -115,8 +117,16 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
       leaf('locations', placeLabel, [...locationsUsed.map(entry => entry.title), ...(booking?.held_online ? ['Online'] : [])].join(', ')),
       { ...leaf('publication', 'Website visibility', published ? 'Published' : 'Hidden'), status: published ? 'success' : 'neutral' },
       leaf('order-url', dish ? 'Ordering link' : service ? 'External consultation link' : 'External booking link', product.order_url ?? undefined),
-      ...(manages ? [{ id: 'kind', label: 'Type', summary: PRODUCT_KIND_LABELS[product.kind], to: `${web}/kind${webQuery}` }] : []),
+      ...(manages ? [leaf('kind', 'Type', PRODUCT_KIND_LABELS[product.kind])] : []),
     ]
+  } else if (view === 'kind' && manages) {
+    const kinds = editableProductKinds(product.kind)
+    form('Type', [field('kind', 'Type', 'select', product.kind, {
+      choices: kinds.map(value => ({ value, label: PRODUCT_KIND_LABELS[value] })),
+    })], async values => {
+      const kind = kinds.find(kind => kind === values('kind')) ?? invalid('Choose an offering type')
+      await patch({ kind })
+    })
   } else if (view === 'name' || view === 'description' || view === 'order-url') {
     if (view === 'name') form('Name', [field('name', 'Name', 'text', product.name)], async values => patch({ name: values('name') }))
     if (view === 'description') form(description, [
@@ -174,13 +184,37 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
         await setProductLocation(db, { ...target, actor, env, locationId: place.id, active: bool(values('active')), published: bool(values('published')) })
       })
     }
-  } else if (view === 'photo' || view === 'cover' || view === 'gallery') {
+  } else if (view === 'photo' || view === 'cover' || view === 'gallery' || view === 'gallery-order') {
     if (!wide) return missing('Media not found')
     if (view === 'photo') screen = { title: 'Media', fields: [], rows: [
       { ...leaf('cover', 'Cover photo'), image: mediaStillUrl(product.image) },
+      ...(product.gallery.length > 1 ? [leaf('gallery-order', 'Reorder gallery')] : []),
       ...product.gallery.map(asset => ({ ...leaf(asset.asset_id, 'Gallery item', undefined, { view: 'gallery', query: { asset_id: asset.asset_id } }), image: mediaStillUrl(asset) })),
       leaf('gallery', 'Add to gallery'),
     ] }
+    else if (view === 'gallery-order') {
+      const ids = product.gallery.map(asset => asset.asset_id)
+      revision = ids.join('\n')
+      form('Reorder gallery', [field('order', 'Gallery order', 'order', revision, {
+        choices: product.gallery.map((asset, index) => ({
+          value: asset.asset_id,
+          label: `Gallery item ${index + 1}`,
+          image: mediaStillUrl(asset),
+        })),
+      })], async values => {
+        const order = values('order').split('\n')
+        if (order.length !== ids.length || new Set(order).size !== ids.length || !order.every(id => ids.includes(id))) {
+          invalid('Gallery order must contain each gallery item once')
+        }
+        const moves = order.slice(1).map((asset_id, index) => ({ asset_id, after_asset_id: order[index]! }))
+        await reorderMediaPlacements(db, {
+          env, organizationId: organization.id, principal,
+          placement: { owner_type: 'product', owner_id: productId, slot: 'gallery' },
+          moves,
+          expectedAssetIds: ids,
+        })
+      })
+    }
     else {
       const asset = query.asset_id ? product.gallery.find(row => row.asset_id === query.asset_id) ?? missing('Media not found') : null
       const current = view === 'cover' ? product.image : asset
@@ -208,20 +242,59 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
   } else if (view === 'booking') {
     screen = { title: bookingLabel, fields: [], rows: booking ? [
       ...(product.kind === 'table'
-        ? [{ id: 'seatings', label: 'Seatings', summary: `${booking.duration_minutes} minutes`, to: `${web}/booking/seatings${webQuery}` }]
+        ? [leaf('seatings', 'Seatings', `${booking.duration_minutes} minutes each · every ${booking.seating_interval_minutes} minutes`, { web: 'booking/seatings' })]
         : [leaf('duration', 'Duration', `${booking.duration_minutes} minutes`, { web: 'booking/duration' })]),
       leaf('capacity', service ? 'Client limit' : 'Guest limit', booking.default_capacity == null ? 'Unlimited' : String(booking.default_capacity), { web: 'booking/capacity' }),
+      leaf('party', 'Party size', undefined, { web: 'booking/party' }),
+      leaf('guest-terms', service ? 'Client requirements' : 'Guest requirements', undefined, { web: 'booking/guest-terms' }),
       leaf('confirmation', 'Confirmation', bookingChoices.find(choice => choice.value === booking.confirmation_mode)?.label, { web: 'booking/confirmation' }),
+      leaf('notice', 'Advance notice', noticeSummary(booking.advance_notice_minutes), { web: 'booking/notice' }),
+      leaf('payment', 'Payment', booking.online_payment_required ? 'Online payment required' : 'No payment collected at booking', { web: 'booking/payment' }),
       ...(manages ? [leaf('assignment', copy.assigneeLabel, undefined, { web: 'booking/assignment' }), leaf('meeting', 'Meeting format', booking.held_online ? 'Online' : 'In person', { web: 'booking/location' }), leaf('enabled', 'Booking calendar', 'Set up', { web: 'booking/enabled' })] : []),
       ...(product.kind === 'table' ? [] : locationsUsed.map(entry => leaf(entry.id, service ? `Availability at ${entry.title}` : `Repeating times at ${entry.title}`, undefined, { view: 'schedule', web: 'booking/schedule', query: { place_id: entry.id } }))),
       ...(experience ? [{ ...leaf('sessions', 'Sessions'), to: `/dashboard/${organization.slug}/calendar?product_id=${productId}` }] : []),
       ...(booking.held_online ? [{ id: 'online', label: 'Online availability', summary: `Uses the ${copy.assigneeNoun}’s working hours` }] : []),
     ] : manages ? [leaf('enabled', service ? 'Set up consultations' : 'Set up bookings', undefined, { web: 'booking/enabled' })] : [] }
-  } else if (view === 'duration' || view === 'capacity' || view === 'confirmation' || view === 'meeting') {
+  } else if (['duration', 'seatings', 'capacity', 'confirmation', 'meeting', 'party', 'guest-terms', 'notice', 'payment'].includes(view)) {
     if (!booking) return missing('Booking calendar not found')
+    if ((view === 'duration' && product.kind === 'table') || (view === 'seatings' && product.kind !== 'table')) return missing('Booking duration not found')
     if (view === 'duration') form('Duration', [field('minutes', 'Duration in minutes', 'number', booking.duration_minutes)], async values => setBooking({ duration_minutes: count(values('minutes')) ?? invalid('Enter a duration') }))
+    if (view === 'seatings') form('Seatings', [
+      field('duration', 'Table held for (minutes)', 'number', booking.duration_minutes),
+      field('interval', 'A seating every (minutes)', 'number', booking.seating_interval_minutes),
+    ], async values => setBooking({
+      duration_minutes: count(values('duration')) ?? invalid('Enter a duration'),
+      seating_interval_minutes: count(values('interval')) ?? invalid('Enter a seating interval'),
+    }))
     if (view === 'capacity') form('Capacity', [field('capacity', service ? 'Maximum clients' : 'Maximum guests', 'number', booking.default_capacity, { optional: true })], async values => setBooking({ default_capacity: count(values('capacity')) }))
     if (view === 'confirmation') form('Confirmation', [field('mode', 'Confirmation', 'select', booking.confirmation_mode, { choices: bookingChoices })], async values => setBooking({ confirmation_mode: values('mode') as 'instant' | 'review' }))
+    if (view === 'party') form('Party size', [
+      field('min', `Fewest ${copy.guestsLabelPlural}`, 'number', booking.party_size_min, { optional: true }),
+      field('max', `Most ${copy.guestsLabelPlural}`, 'number', booking.party_size_max, { optional: true }),
+    ], async values => setBooking({ party_size_min: count(values('min')), party_size_max: count(values('max')) }))
+    if (view === 'guest-terms') form(service ? 'Client requirements' : 'Guest requirements', [
+      field('age', 'Minimum age', 'number', booking.minimum_guest_age, { optional: true }),
+      field('contact', `Ask ${copy.guestsLabelPlural} who need access support to contact you first`, 'toggle', booking.accessibility_contact_required),
+    ], async values => setBooking({ minimum_guest_age: count(values('age')), accessibility_contact_required: bool(values('contact')) }))
+    if (view === 'notice') {
+      const current = booking.advance_notice_minutes ?? 0
+      const choices = noticeChoices.some(choice => choice.value === String(current))
+        ? noticeChoices
+        : [...noticeChoices, { value: String(current), label: noticeSummary(current) }]
+      form('Advance notice', [field('notice', 'Advance notice', 'select', current, { choices })],
+        async values => setBooking({ advance_notice_minutes: Number(choices.find(choice => choice.value === values('notice'))?.value ?? invalid('Choose an advance notice')) }))
+    }
+    if (view === 'payment') form('Payment', [
+      field('required', 'Require online payment', 'toggle', booking.online_payment_required),
+      field('basis', 'The price is paid', 'select', booking.payment_basis, {
+        choices: [{ value: 'per_guest', label: `Per ${copy.guestLabel}` }, { value: 'per_booking', label: 'Once per booking' }],
+      }),
+      field('min', 'Only for parties of at least', 'number', booking.payment_min_party_size, { optional: true }),
+    ], async values => setBooking({
+      online_payment_required: bool(values('required')),
+      payment_basis: values('basis'),
+      payment_min_party_size: count(values('min')),
+    }))
     if (view === 'meeting') {
       if (!manages) return missing('Meeting format not found')
       form('Meeting format', [field('online', service ? 'Offer online consultations' : 'Offer online booking', 'toggle', booking.held_online)], async values => setBooking({ held_online: bool(values('online')) }))
@@ -231,10 +304,25 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     const { members } = await memberList()
     const fields = [field('member', copy.assigneeLabel, 'select', booking?.assigned_member_id, { choices: members.map(member => ({ value: member.id, label: member.name })) })]
     if (!service) fields.push(field('hours', 'Use the host’s working hours', 'toggle', booking?.scheduling_mode === 'provider'))
-    if (view === 'enabled' && booking) fields.unshift(field('enabled', 'Use booking calendar', 'toggle', true))
+    if (view === 'enabled' && booking && wide) fields.unshift(field('enabled', 'Use booking calendar', 'toggle', true))
+    if (view === 'enabled' && product.kind === 'table') fields.push(
+      field('duration', 'Table held for (minutes)', 'number', booking?.duration_minutes),
+      field('interval', 'A seating every (minutes)', 'number', booking?.seating_interval_minutes),
+    )
     form(view === 'enabled' ? bookingLabel : copy.assigneeLabel, fields, async values => {
-      if (view === 'enabled' && booking && values('enabled') === 'false' && wide) await deleteProductBookingConfig(db, target)
-      else await setBooking({ assigned_member_id: values('member'), scheduling_mode: service || values('hours') === 'true' ? 'provider' : 'business' })
+      if (view === 'enabled' && booking && wide && !bool(values('enabled'))) {
+        await deleteProductBookingConfig(db, target)
+        await purgePublicResourceCacheNow(env, organization.id)
+        return
+      }
+      await setBooking({
+        assigned_member_id: values('member'),
+        scheduling_mode: service || bool(values('hours')) ? 'provider' : 'business',
+        ...(view === 'enabled' && product.kind === 'table' ? {
+          duration_minutes: count(values('duration')) ?? invalid('Enter a duration'),
+          seating_interval_minutes: count(values('interval')) ?? invalid('Enter a seating interval'),
+        } : {}),
+      })
     })
   } else if (view === 'schedule') {
     if (!booking || !place || !locationsUsed.some(entry => entry.id === place.id)) return missing('Availability not found')
@@ -275,6 +363,9 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
   if (!save) {
     if (answer) return missing('This screen has no save action')
     return screen
+  }
+  if (['duration', 'seatings', 'capacity', 'confirmation', 'meeting', 'party', 'guest-terms', 'notice', 'payment', 'assignment', 'enabled'].includes(view)) {
+    revision = JSON.stringify([product.updated_at, ...screen.fields.map(row => row.value)])
   }
   if (!answer) return { ...screen, revision }
   if (answer.revision !== revision) throw new HTTPError({ statusCode: 409, message: 'This offering changed. Reopen this setting before saving.' })

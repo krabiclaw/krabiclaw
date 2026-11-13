@@ -15,9 +15,9 @@ export interface CatalogRow {
 export interface CatalogField {
   key: string
   label: string
-  kind: 'text' | 'textarea' | 'number' | 'money' | 'toggle' | 'select' | 'photo' | 'datetime'
+  kind: 'text' | 'textarea' | 'number' | 'money' | 'toggle' | 'select' | 'photo' | 'datetime' | 'order'
   value: string
-  choices?: Array<{ value: string; label: string }>
+  choices?: Array<{ value: string; label: string; image?: string | null }>
   optional?: boolean
   display_url?: string | null
 }
