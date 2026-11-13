@@ -2367,7 +2367,7 @@ test.describe('dashboard pane hierarchy', () => {
       publicURL.searchParams.delete('preview_token')
       const anonymous = await playwright.request.newContext()
       try {
-        const response = await readLocalTenant(anonymous, legal.slug, publicURL)
+        const response = await readLocalTenant(anonymous, legal.subdomain, publicURL)
         expect(response.status()).toBe(404)
         expect(await response.text()).not.toContain(renamed)
       } finally {
