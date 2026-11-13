@@ -20,6 +20,7 @@ export interface CatalogField {
   choices?: Array<{ value: string; label: string; image?: string | null }>
   optional?: boolean
   display_url?: string | null
+  hint?: string
 }
 
 export interface CatalogScreen {
@@ -28,6 +29,7 @@ export interface CatalogScreen {
   fields: CatalogField[]
   revision?: string
   save_label?: string
+  allow_unchanged?: boolean
   empty_title?: string
 }
 

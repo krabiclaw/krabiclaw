@@ -1,7 +1,7 @@
 import { HTTPError, type H3Event } from 'nitro'
 import { getQuery } from 'nitro/h3'
 import { getDashboardMemberContext, listDashboardLocations } from '~/server/utils/dashboard-context'
-import { roleAllows, assertRoleAllows } from '~/server/utils/member-access'
+import { roleAllows, assertRoleAllows, isOrganizationWideRole } from '~/server/utils/member-access'
 import { hydrateProductMedia, listCollections, listOrganizationProducts } from '~/server/utils/product-management'
 import { groupProductsByCollection } from '~/utils/product-presentation'
 import { formatProductPriceRange, summarizeProductPrices } from '~/utils/product-money'
@@ -55,11 +55,12 @@ export async function loadDashboardCatalog(event: H3Event) {
       summary: [price, product.booking?.held_online ? 'Online' : null, ...bindings].filter(Boolean).join(' · '),
       image: mediaStillUrl(product.image),
       to: `${base}/${product.id}${locationId ? `?location_id=${encodeURIComponent(locationId)}&kind=dish` : ''}`,
-      native: product.kind === 'stay' ? undefined : 'offering',
+      native: product.kind === 'stay' ? 'stay' : 'offering',
       query: { product_id: product.id, ...(locationId ? { location_id: locationId } : {}) },
     }
   }
   const screen: CatalogScreen = { title: 'Catalog', fields: [], rows: [], empty_title: 'No offerings' }
+  const wide = isOrganizationWideRole(organization.role)
   if (query.view === 'menu' || query.view === 'section') {
     if (query.location_id && !location) throw new HTTPError({ statusCode: 404, message: 'Location not found' })
     const locationId = location?.id
@@ -74,8 +75,23 @@ export async function loadDashboardCatalog(event: H3Event) {
       const visible = new Set(dishes.map(dish => dish.id))
       screen.rows = (groups.find(group => group.id === section.id)?.products ?? [])
         .filter(dish => visible.has(dish.id)).map(dish => item(dish, locationId))
+      if (wide && section.location_id === (locationId ?? null)) {
+        const edit = (native: string, label: string, summary?: string): CatalogRow => ({
+          id: native, native, label, summary, query: { section_id: section.id },
+        })
+        screen.rows.unshift(
+          edit('section-name', 'Name', section.name),
+          edit('section-description', 'Description', section.description ?? undefined),
+          { ...edit('section-photo', 'Photo'), image: mediaStillUrl(section.image) },
+          edit('section-items', 'Order items'),
+          edit('delete-section', 'Delete section'),
+        )
+      }
     } else {
       screen.rows = [
+        ...(wide && can_create ? [{ id: 'add-section', native: 'add-section', label: 'Add section', query: locationId ? { location_id: locationId } : {} }] : []),
+        ...(wide && sections.filter(section => section.location_id === (locationId ?? null)).length > 1
+          ? [{ id: 'menu-order', native: 'menu-order', label: 'Reorder sections', query: locationId ? { location_id: locationId } : {} }] : []),
         ...sections.map(section => ({
           id: section.id, label: section.name, image: mediaStillUrl(section.image), native: 'section',
           query: { section_id: section.id, ...(locationId ? { location_id: locationId } : {}) },
@@ -85,9 +101,11 @@ export async function loadDashboardCatalog(event: H3Event) {
     }
   } else {
     if ((kind === 'all' || kind === 'menu') && offers('menu')) {
-      const menuLocations = locations.length ? locations : [null]
+      const menuLocations = locations.length
+        ? [...locations, ...(menu.some(section => section.location_id === null) ? [null] : [])]
+        : [null]
       screen.rows.push(...menuLocations.map((place): CatalogRow => ({
-        id: place ? `menu-${place.id}` : 'menu', label: place?.title ?? 'Menu',
+        id: place ? `menu-${place.id}` : 'menu', label: place?.title ?? (locations.length ? 'Shared menu' : 'Menu'),
         summary: 'Menu', image: place?.picture_url ?? null,
         to: `${base}/menu${place ? `?location_id=${encodeURIComponent(place.id)}` : ''}`,
         native: 'menu', query: place ? { location_id: place.id } : {},
