@@ -1,7 +1,7 @@
 import { HTTPError } from 'nitro'
 import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { d1JsonStringSet } from '~/server/db/d1-limits'
-import { assignedGuestThreadScope, assertRoleAllows, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
+import { roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
 
 /**
  * Conversations, as Slack and Discord have them (docs/domain-model.md): a
@@ -140,12 +140,19 @@ export async function readConversation(db: DbClient, organizationId: string, con
 }
 
 /** A person's read position and archive in one conversation. */
-function participantUpsert(input: { conversationId: string; organizationId: string; userId: string; set: 'last_read_message_id' | 'archived_at'; valueSql: string; params: unknown[]; where?: string; whereParams?: unknown[]; now: string }): BatchQuery {
+export interface ConversationGuard { sql: string; params: unknown[] }
+
+function participantWriteGuard(userId: string, guard?: ConversationGuard): ConversationGuard {
+  return guard ?? { sql: `(c.kind <> 'team' OR ${teamSeatSql('c')})`, params: [userId] }
+}
+
+function participantUpsert(input: { conversationId: string; organizationId: string; userId: string; set: 'last_read_message_id' | 'archived_at'; valueSql: string; params: unknown[]; guard?: ConversationGuard; now: string }): BatchQuery {
+  const guard = participantWriteGuard(input.userId, input.guard)
   return {
     query: `INSERT INTO conversation_participants (conversation_id, organization_id, user_id, ${input.set}, created_at)
-      SELECT c.id, c.organization_id, ?, ${input.valueSql}, ? FROM conversations c WHERE c.id = ? AND c.organization_id = ?${input.where ? ` AND ${input.where}` : ''}
+      SELECT c.id, c.organization_id, ?, ${input.valueSql}, ? FROM conversations c WHERE c.id = ? AND c.organization_id = ? AND ${guard.sql}
       ON CONFLICT (conversation_id, user_id) DO UPDATE SET ${input.set} = excluded.${input.set}`,
-    params: [input.userId, ...input.params, input.now, input.conversationId, input.organizationId, ...(input.whereParams ?? [])],
+    params: [input.userId, ...input.params, input.now, input.conversationId, input.organizationId, ...guard.params],
   }
 }
 
@@ -164,7 +171,7 @@ export interface MessageInput {
   dedupeKey?: string
   occurredAt?: string
   /** A predicate on the conversation `c`, checked in the statement that writes the message. */
-  guard?: { sql: string; params: unknown[] }
+  guard?: ConversationGuard
 }
 
 /** The instant a message sorts its conversation by: the channel's own time when it gave one. */
@@ -226,6 +233,16 @@ export async function getMessage(db: DbClient, id: string): Promise<MessageRow |
 /** A conversation's messages in order. */
 export type ConversationWindow = { before: number | null; limit: number }
 
+export function parseTranscriptWindow(query: URLSearchParams): ConversationWindow {
+  const cursors = query.getAll('before')
+  if (!cursors.length) return { before: null, limit: 40 }
+  const before = Number(cursors[0])
+  if (cursors.length !== 1 || !/^\d+$/.test(cursors[0]!) || !Number.isSafeInteger(before) || before < 1) {
+    throw new HTTPError({ statusCode: 400, message: 'Invalid transcript cursor', data: { code: 'INVALID_TRANSCRIPT_CURSOR', field: 'before' } })
+  }
+  return { before, limit: 40 }
+}
+
 export function conversationMessagesQuery(conversationId: string, guestAudience: boolean, window?: ConversationWindow): BatchQuery {
   if (window) return {
     query: `SELECT * FROM (SELECT m.* FROM messages m WHERE m.conversation_id = ?
@@ -235,11 +252,6 @@ export function conversationMessagesQuery(conversationId: string, guestAudience:
     params: [conversationId, ...(window.before === null ? [] : [window.before]), window.limit + 1],
   }
   return { query: `SELECT m.* FROM messages m WHERE m.conversation_id = ? ${guestAudience ? `AND ${guestVisibleSql('m')}` : ''} ORDER BY m.sequence`, params: [conversationId] }
-}
-
-export async function listConversationMessages(db: DbClient, conversationId: string, guestAudience: boolean): Promise<MessageRow[]> {
-  const { query, params } = conversationMessagesQuery(conversationId, guestAudience)
-  return queryAll<MessageRow>(db, query, params)
 }
 
 /** A message already under this key is this message, or the key was given to a different one. */
@@ -255,13 +267,13 @@ function sameMessage(existing: MessageRow, input: MessageInput): MessageRow {
   return existing
 }
 
-/** The guard that the conversation belongs to this guest. */
-export function guestOwnsGuard(guestUserId: string): { sql: string; params: unknown[] } {
-  return { sql: `c.user_id = ? AND ${CURRENT_GUEST_SQL('c')}`, params: [guestUserId] }
+/** Guest access is tied to the booking account wherever the conversation is read or written. */
+export function guestOwnsGuard(guestUserId: string, alias = 'c'): { sql: string; params: string[] } {
+  return { sql: `${alias}.user_id = ? AND ${CURRENT_GUEST_SQL(alias)}`, params: [guestUserId] }
 }
 
 /** A guest conversation is its guest's while every booking it is about is theirs too. */
-export const CURRENT_GUEST_SQL = (conversation: string) => `${conversation}.user_id IS NOT NULL AND ${conversation}.kind IN ('contact', 'booking')
+export const CURRENT_GUEST_SQL = (conversation: string) => `${conversation}.user_id IS NOT NULL AND ${guestConversationSql(conversation)}
   AND NOT EXISTS (SELECT 1 FROM bookings guest_booking WHERE guest_booking.id = ${conversation}.booking_id AND guest_booking.organization_id = ${conversation}.organization_id
     AND (guest_booking.user_id IS NULL OR guest_booking.user_id <> ${conversation}.user_id))`
 
@@ -293,14 +305,17 @@ export function parseMessagePayload(message: Pick<MessageRow, 'payload_json'>): 
 }
 
 /** Read through to `messageId` (the newest message shown), never back past where the reader already is. */
-export function readThroughQuery(input: { conversationId: string; organizationId: string; userId: string; messageId: string; now: string }): BatchQuery {
+export function readThroughQuery(input: { conversationId: string; organizationId: string; userId: string; messageId: string; guard?: ConversationGuard; now: string }): BatchQuery {
+  const guard = participantWriteGuard(input.userId, input.guard)
   return {
     query: `INSERT INTO conversation_participants (conversation_id, organization_id, user_id, last_read_message_id, created_at)
-      SELECT m.conversation_id, m.organization_id, ?, m.id, ? FROM messages m WHERE m.id = ? AND m.conversation_id = ? AND m.organization_id = ?
+      SELECT m.conversation_id, m.organization_id, ?, m.id, ? FROM messages m JOIN conversations c ON c.id = m.conversation_id
+      WHERE m.id = ? AND m.conversation_id = ? AND m.organization_id = ? AND ${guard.sql}
+        AND (c.user_id IS NOT ? OR ${guestVisibleSql('m')})
       ON CONFLICT (conversation_id, user_id) DO UPDATE SET last_read_message_id = excluded.last_read_message_id
         WHERE conversation_participants.last_read_message_id IS NULL
           OR (SELECT sequence FROM messages WHERE id = excluded.last_read_message_id) > (SELECT sequence FROM messages WHERE id = conversation_participants.last_read_message_id)`,
-    params: [input.userId, input.now, input.messageId, input.conversationId, input.organizationId],
+    params: [input.userId, input.now, input.messageId, input.conversationId, input.organizationId, ...guard.params, input.userId],
   }
 }
 
@@ -313,75 +328,88 @@ function nothingToMark(): never {
  * (`throughMessageId`), whatever it holds; Mark as read reads it through to its
  * newest, and needs a message from someone else, as Mark as unread does.
  */
-export async function markConversationRead(db: DbClient, input: { organizationId: string; conversationId: string; userId: string; throughMessageId?: string | null }): Promise<{ read: true; last_read_message_id: string }> {
+export async function markConversationRead(db: DbClient, input: { organizationId: string; conversationId: string; userId: string; throughMessageId?: string | null; guard?: ConversationGuard }): Promise<{ read: true; last_read_message_id: string }> {
   if (!input.throughMessageId && !await newestFromSomeoneElse(db, input.conversationId, input.userId)) nothingToMark()
-  const through = input.throughMessageId ?? (await queryFirst<{ id: string }>(db, 'SELECT id FROM messages WHERE conversation_id = ? ORDER BY sequence DESC LIMIT 1', [input.conversationId]))!.id
+  const through = input.throughMessageId ?? (await queryFirst<{ id: string }>(db, `SELECT m.id FROM messages m JOIN conversations c ON c.id = m.conversation_id
+    WHERE m.conversation_id = ? AND (c.user_id IS NOT ? OR ${guestVisibleSql('m')}) ORDER BY m.sequence DESC LIMIT 1`, [input.conversationId, input.userId]))?.id
+  if (!through) nothingToMark()
   const [written] = await executeBatch(db, [readThroughQuery({ ...input, messageId: through, now: new Date().toISOString() })], { operation: 'Read conversation' })
-  if (input.throughMessageId && Number(written?.meta?.changes ?? 0) === 0
-    && !await queryFirst(db, 'SELECT 1 FROM messages WHERE id = ? AND conversation_id = ?', [through, input.conversationId])) {
-    throw new HTTPError({ statusCode: 422, message: 'That message is not in this conversation', data: { code: 'INVALID_MESSAGE', field: 'messageId' } })
+  if (Number(written?.meta?.changes ?? 0) === 0) {
+    const guard = participantWriteGuard(input.userId, input.guard)
+    const state = await queryFirst<{ message_visible: number }>(db, `SELECT EXISTS (SELECT 1 FROM messages m
+        WHERE m.conversation_id = c.id AND m.id = ? AND (c.user_id IS NOT ? OR ${guestVisibleSql('m')})) AS message_visible
+      FROM conversations c WHERE c.id = ? AND c.organization_id = ? AND ${guard.sql}`,
+    [through, input.userId, input.conversationId, input.organizationId, ...guard.params])
+    if (!state) conversationAccessDenied()
+    if (!state.message_visible) throw new HTTPError({ statusCode: 422, message: 'That message is not in this conversation', data: { code: 'INVALID_MESSAGE', field: 'messageId' } })
   }
   return { read: true, last_read_message_id: through }
 }
 
 /** Mark as unread: the newest message from someone else is unread again, whoever wrote what after it. */
-export async function markConversationUnread(db: DbClient, input: { organizationId: string; conversationId: string; userId: string }): Promise<{ read: false; last_read_message_id: string | null }> {
+export async function markConversationUnread(db: DbClient, input: { organizationId: string; conversationId: string; userId: string; guard?: ConversationGuard }): Promise<{ read: false; last_read_message_id: string | null }> {
   const newest = await newestFromSomeoneElse(db, input.conversationId, input.userId)
   if (!newest) nothingToMark()
-  await executeBatch(db, [participantUpsert({ conversationId: input.conversationId, organizationId: input.organizationId, userId: input.userId,
+  const [written] = await executeBatch(db, [participantUpsert({ ...input,
     set: 'last_read_message_id', valueSql: '?', params: [newest.previous_id], now: new Date().toISOString() })], { operation: 'Mark conversation unread' })
+  if (!written?.meta?.changes) conversationAccessDenied()
   return { read: false, last_read_message_id: newest.previous_id }
 }
 
 /** Archive or unarchive, for this person alone (D2). */
-export function archiveQuery(input: { organizationId: string; conversationId: string; userId: string; archived: boolean; now: string }): BatchQuery {
-  return participantUpsert({ conversationId: input.conversationId, organizationId: input.organizationId, userId: input.userId,
-    set: 'archived_at', valueSql: '?', params: [input.archived ? input.now : null], now: input.now })
+export function archiveQuery(input: { organizationId: string; conversationId: string; userId: string; archived: boolean; guard?: ConversationGuard; now: string }): BatchQuery {
+  return participantUpsert({ ...input,
+    set: 'archived_at', valueSql: '?', params: [input.archived ? input.now : null] })
 }
 
 /** Archiving a guest conversation also dismisses its open reply task, as Dismiss does: what the guest said next is work again. */
-export function archiveReplyTaskQuery(input: { conversationId: string; userId: string; now: string }): BatchQuery {
+export function archiveReplyTaskQuery(input: { conversationId: string; organizationId: string; userId: string; guard?: ConversationGuard; now: string }): BatchQuery {
+  const guard = participantWriteGuard(input.userId, input.guard)
   return {
     query: `UPDATE tasks SET status = 'skipped', closed_at = ?, closed_by_user_id = ?, version = version + 1, updated_at = ?
-      WHERE kind = 'guest_reply' AND subject_type = 'conversation' AND subject_id = ? AND status = 'open'`,
-    params: [input.now, input.userId, input.now, input.conversationId],
+      WHERE kind = 'guest_reply' AND subject_type = 'conversation' AND subject_id = ? AND status = 'open'
+        AND EXISTS (SELECT 1 FROM conversations c WHERE c.id = tasks.subject_id AND c.organization_id = ? AND ${guard.sql})`,
+    params: [input.now, input.userId, input.now, input.conversationId, input.organizationId, ...guard.params],
   }
 }
 
-/**
- * Who sees a conversation, the one statement, for `principal` on the
- * conversation `alias`: a guest conversation by role (operations:read) or by
- * handling its booking's product or its location (operations:assigned); a
- * team conversation by being in it (team_messages:read).
- */
+/** A staff-group seat belongs to a current Better Auth member of the same workspace. */
+export function teamSeatSql(alias: string): string {
+  return `EXISTS (SELECT 1 FROM conversation_participants seat
+    JOIN member m ON m.organizationId = seat.organization_id AND m.userId = seat.user_id
+    WHERE seat.conversation_id = ${alias}.id AND seat.organization_id = ${alias}.organization_id AND seat.user_id = ?)`
+}
+
+export const guestConversationSql = (alias: string) => `${alias}.kind IN ('contact', 'booking')`
+
+export function canMessageGuests(principal: Pick<MemberAccessPrincipal, 'organizationId' | 'role'>) {
+  return roleAllows({ ...principal, permissions: { operations: ['reply'] } })
+}
+
+/** Booking and location assignments grant operational access. Guest messaging requires its own permission. */
 export async function conversationAccessSql(alias: string, principal: Pick<MemberAccessPrincipal, 'organizationId' | 'role' | 'userId'>): Promise<{ sql: string; params: string[] }> {
-  const [allGuests, assignedGuests, team] = await Promise.all([
-    roleAllows({ ...principal, permissions: { operations: ['read'] } }),
-    roleAllows({ ...principal, permissions: { operations: ['assigned'] } }),
-    roleAllows({ ...principal, permissions: { team_messages: ['read'] } }),
-  ])
-  const parts: Array<{ sql: string; params: string[] }> = []
-  if (allGuests) parts.push({ sql: `${alias}.kind IN ('contact', 'booking')`, params: [] })
-  else if (assignedGuests) {
-    const scope = assignedGuestThreadScope(alias, principal.userId)
-    parts.push({ sql: `(${alias}.kind IN ('contact', 'booking') AND ${scope.sql})`, params: scope.params })
-  }
-  if (team) parts.push({ sql: `(${alias}.kind = 'team' AND EXISTS (SELECT 1 FROM conversation_participants seat WHERE seat.conversation_id = ${alias}.id AND seat.user_id = ?))`, params: [principal.userId] })
-  if (!parts.length) return { sql: '0', params: [] }
-  return { sql: `(${parts.map(part => part.sql).join(' OR ')})`, params: parts.flatMap(part => part.params) }
+  const team = `(${alias}.kind = 'team' AND ${teamSeatSql(alias)})`
+  if (!await canMessageGuests(principal)) return { sql: team, params: [principal.userId] }
+  const guest = `(${guestConversationSql(alias)} AND EXISTS (SELECT 1 FROM member m
+    WHERE m.organizationId = ${alias}.organization_id AND m.userId = ? AND m.role = ?))`
+  return { sql: `(${guest} OR ${team})`, params: [principal.userId, principal.role, principal.userId] }
 }
 
-/** The conversation is the principal's to read, or 404. */
-export async function assertConversationAccess(db: DbClient, principal: MemberAccessPrincipal, conversationId: string): Promise<ConversationRow> {
+export async function readGuestConversation(db: DbClient, userId: string, id: string): Promise<ConversationRow | null> {
+  const access = guestOwnsGuard(userId)
+  return await queryFirst<ConversationRow>(db, `SELECT c.* FROM conversations c WHERE c.id = ? AND ${access.sql}`, [id, ...access.params]) ?? null
+}
+
+export function conversationAccessDenied(): never {
+  throw new HTTPError({ statusCode: 404, message: 'Conversation not found or access denied', data: { code: 'THREAD_NOT_FOUND', field: 'conversation_id' } })
+}
+
+/** This statement scopes every workspace conversation read, count and event. */
+export async function assertConversationAccess(db: DbClient, principal: MemberAccessPrincipal, conversationId: string, guestOnly = false): Promise<ConversationRow> {
   const access = await conversationAccessSql('c', principal)
-  const row = await queryFirst<ConversationRow>(db, `SELECT c.* FROM conversations c WHERE c.organization_id = ? AND c.id = ? AND ${access.sql}`, [principal.organizationId, conversationId, ...access.params])
-  if (!row) throw new HTTPError({ statusCode: 404, message: 'Conversation not found or access denied', data: { code: 'THREAD_NOT_FOUND', field: 'conversation_id' } })
+  const row = await queryFirst<ConversationRow>(db, `SELECT c.* FROM conversations c WHERE c.organization_id = ? AND c.id = ? AND ${access.sql}${guestOnly ? " AND c.kind <> 'team'" : ''}`, [principal.organizationId, conversationId, ...access.params])
+  if (!row) conversationAccessDenied()
   return row
-}
-
-/** A guest conversation's operations need a guest role; a team conversation's, being in it. */
-export async function assertGuestOperations(principal: MemberAccessPrincipal): Promise<void> {
-  if (!await roleAllows({ ...principal, permissions: { operations: ['read'] } })) await assertRoleAllows({ ...principal, permissions: { operations: ['assigned'] } })
 }
 
 /** The unread conversations a person sees, per list kind: the filter counts, the nav count and the badge. */

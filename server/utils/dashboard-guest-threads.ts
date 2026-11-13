@@ -10,9 +10,9 @@ import type {
   InboxUnreadCounts,
 } from '~/server/domain/guest-threads/types'
 import type { GuestThreadMailbox } from '~/server/domain/guest-threads/mailbox'
-import { requireOrganizationMembership, requireOrganizationPrincipal } from '~/server/utils/location-access'
-import { memberAccessPrincipal, type MemberAccessPrincipal } from '~/server/utils/member-access'
-import { assertConversationAccess, assertGuestOperations, type ConversationRow, type ConversationWindow } from '~/server/domain/conversations'
+import { requireOrganizationPrincipal } from '~/server/utils/location-access'
+import type { MemberAccessPrincipal } from '~/server/utils/member-access'
+import { assertConversationAccess, type ConversationRow, type ConversationWindow } from '~/server/domain/conversations'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { messageListPage } from '~/server/domain/guest-message-schedule'
 
@@ -119,8 +119,8 @@ export async function memberInbox(db: DbClient, organizationId: string, principa
 
 /** Every conversation the member sees, of every kind: what their role and their seats let them read. */
 export async function loadOrganizationConversations(event: H3Event, organizationId: string, query: DashboardGuestThreadListQuery) {
-  const { db, env, organization } = await requireOrganizationMembership(event, organizationId)
-  return memberInbox(db, organizationId, memberAccessPrincipal(organization.membership, { env, event }), query)
+  const { db, principal } = await requireOrganizationPrincipal(event, organizationId)
+  return memberInbox(db, organizationId, principal, query)
 }
 
 /** The workspace Messages badge counts exactly the same Current conversations as the list. */
@@ -130,22 +130,14 @@ export async function loadOrganizationConversationUnread(event: H3Event, organiz
 }
 
 /** One conversation the member may read, by the one access statement. */
-export async function memberConversation(event: H3Event, organizationId: string, conversationId: string): Promise<{ db: DbClient; env: CloudflareEnv; principal: MemberAccessPrincipal; conversation: ConversationRow }> {
+export async function memberConversation(event: H3Event, organizationId: string, conversationId: string, guestOnly = false): Promise<{ db: DbClient; env: CloudflareEnv; principal: MemberAccessPrincipal; conversation: ConversationRow }> {
   const { db, env, principal } = await requireOrganizationPrincipal(event, organizationId)
-  return { db, env, principal, conversation: await assertConversationAccess(db, principal, conversationId) }
-}
-
-/** One guest conversation for a member, read as the viewer. */
-async function memberThread(event: H3Event, organizationId: string, threadId: string) {
-  const { db, principal, conversation } = await memberConversation(event, organizationId, threadId)
-  await assertGuestOperations(principal)
-  if (conversation.kind === 'team') throw new HTTPError({ statusCode: 404, statusMessage: 'Thread not found', data: { code: 'THREAD_NOT_FOUND', field: 'threadId' } })
-  return { db, conversation, principal }
+  return { db, env, principal, conversation: await assertConversationAccess(db, principal, conversationId, guestOnly) }
 }
 
 /** The conversation as the member reads it. Reading it never writes: the client reads it through with POST …/read. */
 export async function loadDashboardGuestThread(event: H3Event, organizationId: string, threadId: string, window?: ConversationWindow) {
-  const { db, conversation, principal } = await memberThread(event, organizationId, threadId)
+  const { db, conversation, principal } = await memberConversation(event, organizationId, threadId, true)
   const view = await getInboxThread(db, threadId, organizationId, { audience: 'member', userId: principal.userId, principal, conversation }, new Date(), window)
   if (!view) throw new HTTPError({ statusCode: 404, statusMessage: 'Thread not found', data: { code: 'THREAD_NOT_FOUND', field: 'threadId' } })
   return { thread: view }
@@ -153,7 +145,7 @@ export async function loadDashboardGuestThread(event: H3Event, organizationId: s
 
 /** "In this conversation": its people, gallery and actions. */
 export async function loadDashboardGuestThreadDetails(event: H3Event, organizationId: string, threadId: string) {
-  const { db, conversation, principal } = await memberThread(event, organizationId, threadId)
+  const { db, conversation, principal } = await memberConversation(event, organizationId, threadId, true)
   const details = await getInboxThreadDetails(db, threadId, organizationId, { audience: 'member', userId: principal.userId, principal, conversation })
   if (!details) throw new HTTPError({ statusCode: 404, statusMessage: 'Thread not found', data: { code: 'THREAD_NOT_FOUND', field: 'threadId' } })
   return details

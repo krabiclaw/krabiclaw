@@ -3,7 +3,7 @@
     <template v-if="thread?.is_group && !thread.booking_id && !thread.location_id" #right>
       <UButton :to="{ path: `${level.path.value}/details`, query: { kind: 'team' } }" icon="i-lucide-info" aria-label="Conversation details" color="neutral" variant="ghost" />
     </template>
-    <TeamThreadDetail :key="threadId" :thread-id="threadId" :thread="thread" :thread-error="error" />
+    <TeamThreadDetail :key="threadId" :thread-id="threadId" />
   </DashboardIndexPanel>
 </template>
 <script setup lang="ts">
@@ -15,7 +15,7 @@ const route = useRoute()
 const level = useRouteLevel()
 const threadId = computed(() => String(route.params.conversation_id))
 const session = authClient.useSession()
-const { data, error } = await useTeamThread(threadId)
+const { data } = await useTeamThread(threadId)
 const thread = computed(() => data.value?.thread ?? null)
 useSeoMeta({ title: 'Team conversation | KrabiClaw', robots: 'noindex, nofollow' })
 </script>

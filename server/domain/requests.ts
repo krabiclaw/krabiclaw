@@ -1,6 +1,6 @@
 import { openingMessageQueries } from '~/server/domain/guest-threads/opening'
 import { bookingStatusQuery } from '~/server/domain/bookings'
-import { CURRENT_GUEST_SQL, SUBMISSION_EVENT, messageQueries, type ConversationRow } from '~/server/domain/conversations'
+import { SUBMISSION_EVENT, messageQueries, type ConversationRow } from '~/server/domain/conversations'
 import { z } from 'zod'
 import { HTTPError } from 'nitro'
 import { guestVisitRefundQueries, guestVisitRefundKey } from '~/server/domain/payments/visit-refund'
@@ -162,8 +162,8 @@ export function participantLabel(request: GuestRequest): string {
   return request.payload.guest.name
 }
 
-export async function getGuestRequest(db: DbClient, id: string, organizationId?: string, kind?: GuestRequestKind, buyerUserId?:string): Promise<GuestRequest | null> {
-  const row = await queryFirst<Record<string, unknown>>(db, `SELECT r.* FROM conversations r WHERE r.id = ? AND r.kind IN ('contact', 'booking')${organizationId ? ' AND r.organization_id = ?' : ''}${kind ? ' AND r.kind = ?' : ''}${buyerUserId?` AND r.user_id=? AND ${CURRENT_GUEST_SQL('r')}`:''}`, [id, ...(organizationId ? [organizationId] : []), ...(kind ? [kind] : []),...(buyerUserId?[buyerUserId]:[])])
+export async function getGuestRequest(db: DbClient, id: string, organizationId?: string, kind?: GuestRequestKind): Promise<GuestRequest | null> {
+  const row = await queryFirst<Record<string, unknown>>(db, `SELECT r.* FROM conversations r WHERE r.id = ? AND r.kind IN ('contact', 'booking')${organizationId ? ' AND r.organization_id = ?' : ''}${kind ? ' AND r.kind = ?' : ''}`, [id, ...(organizationId ? [organizationId] : []), ...(kind ? [kind] : [])])
   return row ? validateGuestRequest(db, row) : null
 }
 

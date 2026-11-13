@@ -24,7 +24,7 @@ export function isTeamThreadResponse(value: unknown, id: string): value is { thr
 }
 
 function isTeamMessage(value: unknown): value is TeamMessage {
-  return isRecord(value) && typeof value.id === 'string' && typeof value.conversation_id === 'string' && nullableString(value.author_user_id) && typeof value.automatic === 'boolean'
+  return isRecord(value) && typeof value.id === 'string' && typeof value.sequence === 'number' && typeof value.conversation_id === 'string' && nullableString(value.author_user_id) && typeof value.automatic === 'boolean'
     && typeof value.body === 'string' && typeof value.created_at === 'string'
     && Array.isArray(value.attachments) && value.attachments.every(photo => isRecord(photo) && typeof photo.id === 'string' && typeof photo.url === 'string' && (photo.width === null || typeof photo.width === 'number') && (photo.height === null || typeof photo.height === 'number'))
     && Array.isArray(value.deliveries) && value.deliveries.every(delivery => isRecord(delivery) && typeof delivery.id === 'string' && (delivery.channel === 'email' || delivery.channel === 'whatsapp' || delivery.channel === 'push') && typeof delivery.status === 'string' && nullableString(delivery.error) && typeof delivery.updated_at === 'string')
@@ -94,18 +94,16 @@ export async function useTeamGroup() {
   return { thread, error, operate }
 }
 
-/** One team conversation: who is in it, what it is about and what this member may do to it. */
-export async function useTeamThread(threadId: Ref<string> | ComputedRef<string>) {
+/** The header and initial page share the same request and cache key. */
+export function useTeamThread(threadId: Ref<string> | ComputedRef<string>) {
   const dashboard = useDashboardOrganization()
   const api = useDashboardApi()
   return useAsyncData(
     () => `team-conversation:${dashboard.organizationId.value}:${threadId.value}`,
-    () => api(`/api/dashboard/team/threads/${encodeURIComponent(threadId.value)}/messages`, { query: { limit: 1 }, validate: (value): value is { thread: TeamThread } => isTeamThreadResponse(value, threadId.value) }),
-    {
-      getCachedData(cacheKey, nuxtApp, ctx) {
-        if (ctx?.cause === 'refresh:manual' || ctx?.cause === 'refresh:hook') return undefined
-        return nuxtApp.payload.data[cacheKey] as { thread: TeamThread } | undefined
-      },
-    },
+    (_app, { signal }) => api(`/api/dashboard/team/threads/${encodeURIComponent(threadId.value)}/messages`, {
+      signal,
+      validate: (value): value is { thread: TeamThread; messages: TeamMessage[]; has_more: boolean } =>
+        isTeamThreadResponse(value, threadId.value) && isTeamMessagesResponse(value),
+    }),
   )
 }

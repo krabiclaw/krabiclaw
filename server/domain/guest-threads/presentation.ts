@@ -58,14 +58,24 @@ export function listTime(instant: string, timeZone: string, now: Date): string {
 export function transcriptDays(timeZone: string, now: Date) {
   const parts = dateParts(timeZone)
   const today = parts(now)
+  const clock = new Intl.DateTimeFormat(LOCALE, { timeZone, hour: 'numeric', minute: '2-digit' })
+  const weekday = new Intl.DateTimeFormat(LOCALE, { timeZone, weekday: 'long' })
+  const labels = new Map<boolean, Intl.DateTimeFormat>()
   return {
     date: parts,
+    time: (at: Date) => clock.format(at),
     label(at: Date, date: ReturnType<typeof parts>) {
       const days = daysBefore(date.key, today.key)
       if (days <= 0) return 'Today'
       if (days === 1) return 'Yesterday'
-      if (days < 7) return new Intl.DateTimeFormat(LOCALE, { timeZone, weekday: 'long' }).format(at)
-      return monthDay(at, timeZone, date.year !== today.year)
+      if (days < 7) return weekday.format(at)
+      const withYear = date.year !== today.year
+      let formatter = labels.get(withYear)
+      if (!formatter) {
+        formatter = new Intl.DateTimeFormat(LOCALE, { timeZone, month: 'short', day: 'numeric', ...(withYear ? { year: 'numeric' } : {}) })
+        labels.set(withYear, formatter)
+      }
+      return formatter.format(at)
     },
   }
 }

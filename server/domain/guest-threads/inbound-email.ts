@@ -2,13 +2,13 @@ import { HTTPError } from 'nitro'
 import EmailReplyParser from 'email-reply-parser'
 import { compile } from 'html-to-text'
 import { publishConversationEvent } from '~/server/cloudflare/guest-inbox-events'
-import { getGuestRequest, getThreadOperationalRecord, requestSummary } from '~/server/domain/requests'
-import { MessageDedupeConflictError, MessageStateConflictError, appendMessage, findMessageByDedupeKey, getMessage, guestOwnsGuard, type MessageRow } from '~/server/domain/conversations'
+import { getGuestRequest, validateGuestRequest, requestSummary, type GuestRequest } from '~/server/domain/requests'
+import { MessageDedupeConflictError, MessageStateConflictError, appendMessage, findMessageByDedupeKey, getMessage, guestOwnsGuard, readGuestConversation, type MessageRow } from '~/server/domain/conversations'
 import { attachGuestPhotos, sortGuestFiles, type MessagePhoto, assertMessagePhotos } from '~/server/domain/guest-threads/attachments'
 import { conversationTaskQueries } from '~/server/domain/guest-threads/repository'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { notifyGuestThreadReply } from '~/server/utils/notifications'
-import { findSubmissionByPhone, type SubmissionType } from '~/server/utils/submission-messages'
+import { findSubmissionByPhone } from '~/server/utils/submission-messages'
 import { queryFirst } from '~/server/db'
 import { REPLY_FAILED_ALERTED, replyToAlertEntry } from './member-reply'
 import { InboundEmailRejection, verifyReplyToken } from '~/server/utils/reply-address'
@@ -76,8 +76,7 @@ export async function receiveGuestEmail(env: CloudflareEnv, email: InboundGuestE
   if (!email.body && !photos.length && !unshown.length) return
 
   await receiveGuestReply(env, {
-    threadId:thread.id, organizationId:thread.organization_id,
-    submissionType:thread.kind, body:email.body, photos, unshown,
+    thread, body:email.body, photos, unshown,
     channel:'email', userId:null, dedupeKey:`email:${email.messageId}`, headers:email.headers,
   })
 }
@@ -98,8 +97,7 @@ export async function receiveGuestWhatsApp(env: CloudflareEnv, input: { phone: s
   const { photos, unshown } = sortGuestFiles(input.files)
   if (!input.body && !photos.length && !unshown.length) return { conversationId: match.id }
   await receiveGuestReply(env, {
-    threadId: match.id, organizationId: match.organization_id, submissionType: match.kind,
-    body: input.body, photos, unshown, channel: 'whatsapp', userId: null, dedupeKey,
+    thread: match, body: input.body, photos, unshown, channel: 'whatsapp', userId: null, dedupeKey,
   })
   return { conversationId: match.id }
 }
@@ -139,29 +137,33 @@ export async function receiveMemberEmail(env: CloudflareEnv, email: InboundMembe
 }
 
 /** Authenticated web replies use the same immutable guest-message pipeline as email. */
-export async function receiveGuestWebReply(env:CloudflareEnv,input:{threadId:string;userId:string;body:string;photos:MessagePhoto[];idempotencyKey:string}):Promise<void> {
-  if(!/^[a-zA-Z0-9_-]{8,128}$/u.test(input.idempotencyKey))throw new HTTPError({statusCode:400,statusMessage:'A valid idempotency key is required'})
-  const thread=await getGuestRequest(env.DB,input.threadId,undefined,undefined,input.userId)
-  if(!thread||thread.user_id!==input.userId)throw new HTTPError({statusCode:404,statusMessage:'Conversation not found'})
-  const record=await getThreadOperationalRecord(env.DB,thread.id)
-  if(record&&(record.user_id!==input.userId||record.organization_id!==thread.organization_id))throw new HTTPError({statusCode:404,statusMessage:'Conversation not found'})
-  const body=input.body.trim()
-  if(!body&&!input.photos.length)throw new HTTPError({statusCode:400,statusMessage:'Write a message or add a photo'})
-  // The upload's bytes and name are immutable input, so a reused key cannot
-  // silently replace photos already attached to its original message.
-  const photoManifest=await Promise.all(input.photos.map(async photo=>({filename:photo.filename,sha256:Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',photo.bytes))).map(v=>v.toString(16).padStart(2,'0')).join('')})))
+export async function receiveGuestWebReply(env: CloudflareEnv, input: { threadId: string; userId: string; body: string; photos: MessagePhoto[]; idempotencyKey: string }): Promise<MessageRow> {
+  if (!/^[a-zA-Z0-9_-]{8,128}$/u.test(input.idempotencyKey)) throw new HTTPError({ statusCode: 400, statusMessage: 'A valid idempotency key is required' })
+  const conversation = await readGuestConversation(env.DB, input.userId, input.threadId)
+  if (!conversation) throw new HTTPError({ statusCode: 404, statusMessage: 'Conversation not found' })
+  const thread = await validateGuestRequest(env.DB, conversation)
+  const body = input.body.trim()
+  if (!body && !input.photos.length) throw new HTTPError({ statusCode: 400, statusMessage: 'Write a message or add a photo' })
+  const photoManifest = await Promise.all(input.photos.map(async photo => ({
+    filename: photo.filename,
+    sha256: Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', photo.bytes))).map(v => v.toString(16).padStart(2, '0')).join(''),
+  })))
   try {
-    await receiveGuestReply(env, {threadId:thread.id,organizationId:thread.organization_id,submissionType:thread.kind,body,photos:input.photos,unshown:[],channel:'web',userId:input.userId,dedupeKey:`guest-web-reply:${thread.id}:${input.idempotencyKey}`,photoManifest})
-  } catch(error) {
-    if(error instanceof MessageStateConflictError)throw new HTTPError({statusCode:404,statusMessage:'Conversation not found'})
-    if(error instanceof MessageDedupeConflictError)throw new HTTPError({statusCode:409,statusMessage:'This reply key belongs to a different message'})
+    return await receiveGuestReply(env, { thread, body, photos: input.photos, unshown: [], channel: 'web', userId: input.userId,
+      dedupeKey: `guest-web-reply:${thread.id}:${input.idempotencyKey}`, photoManifest })
+  } catch (error) {
+    if (error instanceof MessageStateConflictError) throw new HTTPError({ statusCode: 404, statusMessage: 'Conversation not found' })
+    if (error instanceof MessageDedupeConflictError) throw new HTTPError({ statusCode: 409, statusMessage: 'This reply key belongs to a different message' })
     throw error
   }
 }
 
-async function receiveGuestReply(env:CloudflareEnv,input:{threadId:string;organizationId:string;submissionType:SubmissionType;body:string;photos:MessagePhoto[];unshown:string[];userId:string|null;dedupeKey:string;photoManifest?:Array<{filename:string;sha256:string}>}&({channel:'email';headers:InboundGuestEmail['headers']}|{channel:'web'|'whatsapp';headers?:never})):Promise<void> {
-  const db=env.DB,thread=await getGuestRequest(db,input.threadId,input.organizationId,input.submissionType,input.userId??undefined)
-  if(!thread)throw new Error('Conversation no longer exists')
+async function receiveGuestReply(env: CloudflareEnv, input: {
+  thread: GuestRequest; body: string; photos: MessagePhoto[]; unshown: string[]; userId: string | null; dedupeKey: string
+  photoManifest?: Array<{ filename: string; sha256: string }>
+} & ({ channel: 'email'; headers: InboundGuestEmail['headers'] } | { channel: 'web' | 'whatsapp'; headers?: never })): Promise<MessageRow> {
+  const { DB: db } = env
+  const { thread } = input
   const {photos,unshown}=input
   // Photos are checked before the message is saved, so a rejected photo never leaves a message without it.
   assertMessagePhotos(photos)
@@ -179,14 +181,15 @@ async function receiveGuestReply(env:CloudflareEnv,input:{threadId:string;organi
     if(input.channel==='email'&&error instanceof MessageDedupeConflictError)throw new InboundEmailRejection('A different message with this Message-ID was already received.')
     throw error
   }
-  await attachGuestPhotos(db,env,input.organizationId,entry.id,photos,input.userId?{source:'uploaded',userId:input.userId}:{source:'external',userId:null})
+  await attachGuestPhotos(db, env, thread.organization_id, entry.id, photos, input.userId ? { source: 'uploaded', userId: input.userId } : { source: 'external', userId: null })
   // The guest's message is in the conversation before the owner is alerted, so an alert that fails cannot hide it.
-  await publishConversationEvent(env,db,{conversationId:thread.id,type:'MESSAGE_CREATE'})
+  await publishConversationEvent(env, db, { conversationId: thread.id, type: 'MESSAGE_CREATE', message: { id: entry.id, sequence: entry.sequence } })
   const summary=await requestSummary(db,thread)
   await notifyGuestThreadReply(env,db,{
-    organizationId:input.organizationId,locationId:summary.locationId,threadId:thread.id,messageId:entry.id,
-    submissionType:input.submissionType,submissionId:input.threadId,
+    organizationId:thread.organization_id,locationId:summary.locationId,threadId:thread.id,messageId:entry.id,
+    submissionType:thread.kind,submissionId:thread.id,
     participantLabel:summary.participantLabel,guestEmail:summary.guestEmail,guestPhone:summary.guestPhone,
     inboundChannel:input.channel,
   })
+  return entry
 }

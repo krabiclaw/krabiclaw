@@ -32,7 +32,7 @@ import type {
   leave it.
 */
 
-type Viewer = { audience: 'member'; userId: string; principal: MemberAccessPrincipal; conversation?: ConversationRow } | { audience: 'buyer'; userId: string }
+type Viewer = { audience: 'member'; userId: string; principal: MemberAccessPrincipal; conversation?: ConversationRow } | { audience: 'buyer'; userId: string; conversation?: ConversationRow }
 type MessageItem = Extract<InboxStreamItem, { type: 'message' }>
 
 function invalid(message: string, field: string, entryId: string): never {
@@ -194,16 +194,16 @@ function stream(facts: ThreadFacts, viewer: Viewer, now: Date, canReply: boolean
   const days = transcriptDays(timeZone, now)
   let day: string | null = null
   let previous: MessageItem | null = null
-  const place = (sentAt: string, id: string) => {
-    const at = new Date(sentAt)
+  const place = (at: Date, id: string) => {
     const date = days.date(at)
     if (date.key !== day) { items.push({ type: 'day', id: `day:${id}`, label: days.label(at, date) }); day = date.key; previous = null }
   }
   const message = (entry: GuestThreadEntryViewModel, body: string | null, item: Omit<MessageItem, 'type' | 'id' | 'sent_at' | 'time' | 'body' | 'receipt' | 'retryable' | 'unshown_files'>) => {
     const sentAt = entrySentAt(entry)
-    place(sentAt, entry.id)
+    const at = new Date(sentAt)
+    place(at, entry.id)
     const run = previous !== null && previous.side === item.side && previous.author === item.author
-    const next: MessageItem = { type: 'message', id: entry.id, sent_at: sentAt, time: run ? null : clockTime(sentAt, timeZone), body, receipt: null, retryable: false, unshown_files: unshownFiles(entry), ...item }
+    const next: MessageItem = { type: 'message', id: entry.id, sent_at: sentAt, time: run ? null : days.time(at), body, receipt: null, retryable: false, unshown_files: unshownFiles(entry), ...item }
     items.push(next)
     previous = next
     return next
@@ -261,13 +261,13 @@ function stream(facts: ThreadFacts, viewer: Viewer, now: Date, canReply: boolean
     }
     if (entry.bookingChange) {
       const sentAt = entry.occurredAt
-      place(sentAt, entry.id)
+      place(new Date(sentAt), entry.id)
       items.push({ type: 'change', id: entry.id, sent_at: sentAt, change: entry.bookingChange })
       previous = null
       continue
     }
     const sentence = eventSentence(entry, facts, viewer)
-    place(entry.occurredAt, entry.id)
+    place(new Date(entry.occurredAt), entry.id)
     items.push({ type: 'event', id: entry.id, text: sentence, sent_at: entry.occurredAt })
     previous = null
   }
@@ -297,7 +297,7 @@ function pendingMessages(rows: Awaited<ReturnType<typeof readPendingMessages>>, 
 export async function getInboxThread(db: DbClient, threadId: string, organizationId: string, viewer: Viewer, now = new Date(), window?: ConversationWindow): Promise<(InboxThread & { page?: InboxTranscriptPage }) | null> {
   const [detail, scheduled] = await Promise.all([
     loadGuestThreadDetail(db, threadId, organizationId, viewer.audience === 'buyer'
-      ? { buyerUserId: viewer.userId }
+      ? { buyerUserId: viewer.userId, conversation: viewer.conversation }
       : { memberUserId: viewer.userId, conversation: viewer.conversation }, now, true, window),
     viewer.audience === 'member' && viewer.conversation
       ? readPendingMessages(db, threadId, organizationId, viewer.principal)

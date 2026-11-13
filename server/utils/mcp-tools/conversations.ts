@@ -1,12 +1,12 @@
 import { HTTPError } from 'nitro'
 import { TASK_VIEW_SCHEMA } from '~/server/utils/mcp-tools/tasks'
-import { createTeamThread, getTeamThread, listTeamMembers, listTeamMessages, operateTeamGroup, sendTeamMessage, teamAccessFor } from '~/server/domain/team-messages'
-import { assertConversationAccess, findMessageByDedupeKey, markConversationRead, markConversationUnread, type ConversationRow } from '~/server/domain/conversations'
+import { createTeamThread, getTeamThread, listTeamMembers, listTeamMessages, operateTeamGroup, sendTeamMessage } from '~/server/domain/team-messages'
+import { assertConversationAccess, conversationAccessSql, markConversationRead, markConversationUnread, type ConversationRow } from '~/server/domain/conversations'
 import { archiveConversation, countUnreadConversations, listConversations } from '~/server/domain/guest-threads/repository'
 import { loadGuestThreadDetail } from '~/server/domain/guest-threads/detail'
-import { executeGuestThreadOperation, guestReplyDestination, operationDedupeKey } from '~/server/domain/guest-threads/operations'
+import { executeGuestThreadOperation, guestReplyDestination } from '~/server/domain/guest-threads/operations'
 import type { InboxThreadKind } from '~/server/domain/guest-threads/types'
-import { memberAccessPrincipal, resolveMemberId, type MemberAccessPrincipal } from '~/server/utils/member-access'
+import { memberAccessPrincipal } from '~/server/utils/member-access'
 import { publishConversationAck, publishConversationEvent } from '~/server/cloudflare/guest-inbox-events'
 import { renderStructuredResponse } from '~/server/utils/mcp-render'
 import { mcpPageInfo, mcpPageWindow } from '~/server/utils/mcp-pagination'
@@ -128,13 +128,6 @@ async function guestConversationView(ctx: McpExecutorContext, conversation: Conv
   }
 }
 
-async function teamAccess(ctx: McpExecutorContext, principal: MemberAccessPrincipal, action: 'read' | 'send') {
-  const { organization } = ctx
-  const memberId = await resolveMemberId({ env: organization.env, organizationId: organization.organizationId, userId: organization.userId })
-  if (!memberId) throw new HTTPError({ statusCode: 404, statusMessage: 'Organization membership not found' })
-  return await teamAccessFor(principal, memberId, action)
-}
-
 export async function handleConversationTools(ctx: McpExecutorContext): Promise<unknown> {
   const { toolName, args, organization } = ctx
   if (!CONVERSATION_TOOLS.some(tool => tool.name === toolName)) return NOT_HANDLED
@@ -151,9 +144,9 @@ export async function handleConversationTools(ctx: McpExecutorContext): Promise<
       const conversations = rows.slice(0, window.limit).map(row => ({ conversation_id: row.id, kind: row.kind, title: row.title, channel: row.channel, home: row.home, when: row.when, preview: row.preview, preview_from: row.preview_from, time: row.time, unread: row.unread }))
       return { conversations, unread, page_info: mcpPageInfo(window, conversations.length, rows.length > window.limit, resource) }
     }
-    case 'list_conversation_recipients': return { current_user_id: userId, members: await listTeamMembers(env, await teamAccess(ctx, principal, 'read')) }
+    case 'list_conversation_recipients': return { current_user_id: userId, members: await listTeamMembers(env, principal) }
     case 'start_conversation': {
-      const thread = await createTeamThread(env, db, await teamAccess(ctx, principal, 'send'), args)
+      const thread = await createTeamThread(env, db, principal, args)
       return { conversation_id: thread.id, created: thread.created }
     }
   }
@@ -161,26 +154,26 @@ export async function handleConversationTools(ctx: McpExecutorContext): Promise<
   switch (toolName) {
     case 'get_conversation': {
       if (conversation.kind !== 'team') return { conversation_id: conversation.id, kind: conversation.kind, guest: await guestConversationView(ctx, conversation), team: null }
-      const access = await teamAccess(ctx, principal, 'read')
-      const [thread, page] = await Promise.all([getTeamThread(env, db, access, conversation.id), listTeamMessages(db, access, conversation.id, { limit: args.limit, before: args.before, before_id: args.before_id })])
+      const [thread, page] = await Promise.all([getTeamThread(db, principal, conversation.id), listTeamMessages(db, principal, conversation.id, { limit: args.limit, before: args.before, before_id: args.before_id })])
       return { conversation_id: conversation.id, kind: conversation.kind, guest: null, team: { thread, ...page } }
     }
     case 'mark_conversation_read':
     case 'mark_conversation_unread': {
+      const guard = await conversationAccessSql('c', principal)
       const position = toolName === 'mark_conversation_read'
-        ? await markConversationRead(db, { organizationId, conversationId: conversation.id, userId, throughMessageId: optionalString(args, 'message_id') })
-        : await markConversationUnread(db, { organizationId, conversationId: conversation.id, userId })
+        ? await markConversationRead(db, { organizationId, conversationId: conversation.id, userId, guard, throughMessageId: optionalString(args, 'message_id') })
+        : await markConversationUnread(db, { organizationId, conversationId: conversation.id, userId, guard })
       await publishConversationAck(env, { organizationId, conversationId: conversation.id, targetUserId: userId })
       return { conversation_id: conversation.id, unread: !position.read, last_read_message_id: position.last_read_message_id }
     }
     case 'set_conversation_archived': {
       if (typeof args.archived !== 'boolean') throw new HTTPError({ statusCode: 400, message: 'archived must be true or false', data: { code: 'VALIDATION_ERROR', field: 'archived' } })
-      const result = await archiveConversation(db, { organizationId, conversationId: conversation.id, userId, archived: args.archived })
+      const result = await archiveConversation(db, { organizationId, conversationId: conversation.id, userId, guard: await conversationAccessSql('c', principal), archived: args.archived })
       await publishConversationAck(env, { organizationId, conversationId: conversation.id, targetUserId: userId })
       return { conversation_id: conversation.id, archived: result.archived }
     }
     case 'update_conversation_group': {
-      return await operateTeamGroup(env, db, await teamAccess(ctx, principal, 'send'), conversation.id, { ...args, action: args.action, idempotency_key: args.idempotency_key })
+      return await operateTeamGroup(env, db, principal, conversation.id, { ...args, action: args.action, idempotency_key: args.idempotency_key })
     }
     case 'send_message': {
       const file = args.file === undefined ? null : toolFileReference(args.file, 'file')
@@ -191,16 +184,15 @@ export async function handleConversationTools(ctx: McpExecutorContext): Promise<
       } } : null
       const idempotencyKey = requiredString(args, 'idempotency_key')
       if (conversation.kind === 'team') {
-        const access = await teamAccess(ctx, principal, 'send')
-        const sender = (await listTeamMembers(env, access)).find(member => member.id === userId)
+          const sender = (await listTeamMembers(env, principal)).find(member => member.id === userId)
         if (!sender) throw new HTTPError({ statusCode: 404, statusMessage: 'Organization membership not found' })
-        const sent = await sendTeamMessage(env, db, access, conversation.id, { body: args.message, photos: photo ?? [], idempotency_key: idempotencyKey, senderName: sender.name })
+        const sent = await sendTeamMessage(env, db, principal, conversation.id, { body: args.message, photos: photo ?? [], idempotency_key: idempotencyKey, senderName: sender.name })
         return { conversation_id: conversation.id, outcome: { ok: true }, message_id: sent.message.id, created: sent.created }
       }
-      const outcome = await executeGuestThreadOperation(db, { threadId: conversation.id, organizationId, action: 'reply', body: optionalString(args, 'message') ?? undefined,
+      const outcome = await executeGuestThreadOperation(db, { conversation, principal, threadId: conversation.id, organizationId, action: 'reply', body: optionalString(args, 'message') ?? undefined,
         ...(photo ? { photos: photo } : {}), actorUserId: userId, idempotencyKey, env, financialWritesAllowed: false })
-      if (outcome.ok || outcome.reason === 'delivery_failed') await publishConversationEvent(env, db, { conversationId: conversation.id, type: 'MESSAGE_CREATE' })
-      const messageId = outcome.ok ? (await findMessageByDedupeKey(db, operationDedupeKey({ threadId: conversation.id, idempotencyKey })))?.id ?? null : null
+      if (outcome.ok || outcome.reason === 'delivery_failed') await publishConversationEvent(env, db, { conversationId: conversation.id, type: 'MESSAGE_CREATE', message: outcome.ok ? outcome.message : undefined })
+      const messageId = outcome.ok ? outcome.message?.id ?? null : null
       return renderStructuredResponse({ conversation_id: conversation.id, outcome: outcome.ok ? { ok: true } : outcome, message_id: messageId, created: outcome.ok }, undefined, undefined, !outcome.ok)
     }
     default: return NOT_HANDLED

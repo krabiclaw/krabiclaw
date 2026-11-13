@@ -1,6 +1,5 @@
 import type { DashboardInvalidationConnection } from '~/composables/useDashboardInvalidations'
 import { isInboxUnread, useInboxUnread } from '~/lib/components/workspace/messages/inbox-unread'
-import type { organizationRoles } from '~/utils/organization-access'
 import { authClient } from '~/lib/auth-client'
 import type { InboxUnreadCounts } from '~/server/domain/guest-threads/types'
 
@@ -16,19 +15,12 @@ export function useConversationUnreadCount(connection?: DashboardInvalidationCon
   const orgId = computed(() => organization.value?.id)
   const inbox = useInboxUnread(orgId)
   const route = useRoute()
-  const dashboard = useDashboardOrganization()
-  const role = computed(() => dashboard.organization.value?.role as keyof typeof organizationRoles | undefined)
   const dashboardApi = useDashboardApi(computed(() => orgSlug.value ? { orgSlug: orgSlug.value } : null))
   const realtime = connection ?? useDashboardInvalidations()
   const personal = ref(0)
   const error = shallowRef<unknown>(null)
   const unreadConversations = computed(() => orgId.value ? inbox.value.unread?.all ?? 0 : personal.value)
-  const inboxRoute = computed(() => typeof route.params.org_slug === 'string' && route.path.split('/')[3] === 'messages'
-    && Boolean(role.value && (
-      authClient.organization.checkRolePermission({ role: role.value, permissions: { operations: ['read'] } })
-      || authClient.organization.checkRolePermission({ role: role.value, permissions: { operations: ['assigned'] } })
-      || authClient.organization.checkRolePermission({ role: role.value, permissions: { team_messages: ['read'] } })
-    )))
+  const inboxRoute = computed(() => typeof route.params.org_slug === 'string' && route.path.split('/')[3] === 'messages')
   let revision = 0
   let queued = false
   let active = false

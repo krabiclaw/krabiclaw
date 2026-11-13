@@ -409,7 +409,7 @@ export function assertReplyIntent(entry: MessageRow, body: string, requestHash: 
 
 export async function replyThroughChannex(db: DbClient, env: ChannexEnv & UploadResolvedMediaInput['env'] & { MEDIA_BUCKET?: R2Bucket }, input: {
   mapping: ChannelThreadMapping; body: string; actorUserId: string | null; idempotencyKey: string; requestHash: string
-  photoCount: number; resolvePhotos: () => Promise<MessagePhoto[]>
+  guard: { sql: string; params: unknown[] }; photoCount: number; resolvePhotos: () => Promise<MessagePhoto[]>
 }): Promise<ChannelReplyOutcome> {
   const eventName = input.actorUserId === null ? SCHEDULED_MESSAGE_EVENT : MEMBER_REPLY_EVENT
   const purpose = input.actorUserId === null ? 'scheduled_message' : 'member_reply'
@@ -445,7 +445,7 @@ export async function replyThroughChannex(db: DbClient, env: ChannexEnv & Upload
     try {
       await executeBatch(db, [...messageQueries({ id, conversationId: input.mapping.conversation_id, authorKind: input.actorUserId === null ? 'krabiclaw' : 'member', authorUserId: input.actorUserId,
         channel: 'airbnb', body: input.body, eventName, payload: { request_hash: requestHash }, dedupeKey: key, occurredAt: now,
-        guard: { sql: 'c.organization_id = ?', params: [input.mapping.organization_id] } }).queries, {
+        guard: input.guard }).queries, {
         query: `INSERT INTO guest_thread_deliveries (id, message_id, channel, provider, purpose, status, created_at, updated_at)
           SELECT ?, id, 'airbnb', 'channex', ?, 'pending', ?, ? FROM messages WHERE dedupe_key = ? AND conversation_id = ?
           ON CONFLICT(id) DO NOTHING`,
@@ -464,9 +464,9 @@ export async function replyThroughChannex(db: DbClient, env: ChannexEnv & Upload
     }
     entry = await findMessageByDedupeKey(db, key)
     // Concurrent identical keys share one message; only its photo placements survive.
-    if (entry && entry.id !== id) await discardMessagePhotos(db, env, input.mapping.organization_id, assetIds, input.actorUserId, new Error('Concurrent channel reply retained the existing photo'))
+    if (entry?.id !== id && assetIds.length) await discardMessagePhotos(db, env, input.mapping.organization_id, assetIds, input.actorUserId, new Error('The reply did not keep these photos'))
   }
-  if (!entry) fail(500, 'CHANNEL_REPLY_INTENT_INVALID', 'The reply intent was not recorded', 'entry')
+  if (!entry) fail(404, 'THREAD_NOT_FOUND', 'Conversation not found or access denied', 'conversation_id')
   assertReplyIntent(entry, input.body, requestHash, eventName)
   const receipt = await getDeliveryById(db, deliveryId)
   if (!receipt || receipt.message_id !== entry.id) fail(500, 'CHANNEL_RECEIPT_INVALID', 'The reply has no matching delivery receipt', 'delivery')

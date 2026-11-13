@@ -7,13 +7,13 @@ import * as schema from '../../server/db/schema.ts'
 import { createDb } from '../../server/db/index.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
 import { createTables } from './support/table-product.ts'
-import { listOrganizationNotificationMembers, memberAccessPrincipal, reconcileResponsibilities } from '../../server/utils/member-access.ts'
+import { listOrganizationNotificationMembers, memberAccessPrincipal, reconcileResponsibilities, type MemberAccessPrincipal } from '../../server/utils/member-access.ts'
 import { assertConversationAccess, markConversationRead, markConversationUnread } from '../../server/domain/conversations.ts'
 import { listConversations } from '../../server/domain/guest-threads/repository.ts'
 import { createStay, listStayHomes, stayAccessFor, updateStayHome, type StayAccess } from '../../server/domain/stays.ts'
 import { receiveMemberEmail } from '../../server/domain/guest-threads/inbound-email.ts'
 import { InboundEmailRejection, parseReplyToAddress } from '../../server/utils/reply-address.ts'
-import { createTeamThread, getTeamThread, listTeamMembers, listTeamMessages, operateTeamGroup, sendTeamMessage, teamAccessFor, type TeamAccess } from '../../server/domain/team-messages.ts'
+import { createTeamThread, getTeamThread, listTeamMembers, listTeamMessages, operateTeamGroup, sendTeamMessage } from '../../server/domain/team-messages.ts'
 import { setNotificationPreference } from '../../server/domain/notification-preferences.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 
@@ -74,16 +74,15 @@ test('members talk in team conversations, see unread state and receive recorded 
     const manager: StayAccess = { organizationId: ORG, actorId: 'owner', manage: true }
     const stay = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'dee', check_in_date: day(3), check_out_date: day(5), adults: 1, guest_name: 'Dee', guest_phone: '+61491570151', total_minor: 30_000 })
 
-    const principal = (userId: string, role: string) => memberAccessPrincipal({ userId, role, organizationId: ORG } as never, { env })
-    const team = (userId: string, role: string, memberId: string, action: 'read' | 'send' = 'send') => teamAccessFor(principal(userId, role), memberId, action)
-    const owner = await team('owner', 'owner', 'm-owner')
-    const cleaner = await team('cleaner', 'member', 'm-cleaner')
-    const cook = await team('cook', 'member', 'm-cook')
+    const principal = (userId: string, role: string, memberId = 'm-' + userId) => memberAccessPrincipal({ userId, role, memberId, organizationId: ORG } as never, { env })
+    const owner = principal('owner', 'owner', 'm-owner')
+    const cleaner = principal('cleaner', 'member', 'm-cleaner')
+    const cook = principal('cook', 'member', 'm-cook')
     const refused = (status: number, code: string, field: string) => ({ status, data: { code, field } })
     // The caller's team conversations, each as its conversation screen reads it.
-    const teamThreads = async (access: TeamAccess) => Promise.all((await db.prepare(`SELECT c.id FROM conversations c JOIN conversation_participants seat ON seat.conversation_id = c.id
-      WHERE c.organization_id = ? AND c.kind = 'team' AND seat.user_id = ? ORDER BY c.last_message_at DESC, c.id DESC`).bind(ORG, access.userId).all<{ id: string }>()).results.map(row => getTeamThread(env, db, access, row.id)))
-    const teamThread = (access: TeamAccess, id: string) => getTeamThread(env, db, access, id)
+    const teamThreads = async (access: MemberAccessPrincipal) => Promise.all((await db.prepare(`SELECT c.id FROM conversations c JOIN conversation_participants seat ON seat.conversation_id = c.id
+      WHERE c.organization_id = ? AND c.kind = 'team' AND seat.user_id = ? ORDER BY c.last_message_at DESC, c.id DESC`).bind(ORG, access.userId).all<{ id: string }>()).results.map(row => getTeamThread(db, access, row.id)))
+    const teamThread = (access: MemberAccessPrincipal, id: string) => getTeamThread(db, access, id)
 
     // Everyone in the organization, owners first; nobody from another one.
     assert.deepEqual((await listTeamMembers(env, cleaner)).map(member => [member.member_id, member.id, member.role, member.image]),
@@ -176,7 +175,7 @@ test('members talk in team conversations, see unread state and receive recorded 
     assert.deepEqual(ownerView.participants.map(participant => participant.id).sort(), ['cleaner', 'owner'])
     assert.equal((await teamThread(cleaner, direct.id)).unread, false)
     // The one list says the same, with the same statement.
-    const ownerRow = (await listConversations(db, ORG, { userId: 'owner', principal: owner.principal, kind: 'team' })).find(row => row.id === direct.id)
+    const ownerRow = (await listConversations(db, ORG, { userId: 'owner', principal: owner, kind: 'team' })).find(row => row.id === direct.id)
     assert.deepEqual([ownerRow?.kind, ownerRow?.unread, ownerRow?.preview], ['team', true, 'Towels are out'])
     const stayView = await teamThread(owner, about.id)
     assert.deepEqual(stayView.stay, { id: stay.id, product_id: cabin.id, name: 'Cabin', check_in_date: day(3), check_out_date: day(5), status: stay.status })
@@ -311,7 +310,7 @@ test('members talk in team conversations, see unread state and receive recorded 
     const hubs = env.GUEST_INBOX_HUBS!
     env.GUEST_INBOX_HUBS = { idFromName: (name: string) => hubs.idFromName(name), get: () => ({ fetch: () => Promise.resolve(new Response(null, { status: 500 })) }) } as unknown as typeof hubs
     const unfinished = { ...emailedReply, body: 'Keys are in the box', messageId: '<team-reply-unfinished@mail.example.test>' }
-    // The send's own receipt is the first to tell open apps, so the failure arrives as that send's.
+    // The send publishes after recording its receipts, so a publication failure retains the saved message.
     await assert.rejects(receiveMemberEmail(env, unfinished, unexpectedReport), (error: unknown) => (error as { cause?: { data?: { code?: string } } }).cause?.data?.code === 'DASHBOARD_PUBLICATION_FAILED')
     env.GUEST_INBOX_HUBS = hubs
     await receiveMemberEmail(env, unfinished, unexpectedReport)
@@ -359,13 +358,23 @@ test('members talk in team conversations, see unread state and receive recorded 
         return typeof value === 'function' ? value.bind(target) : value
       } })
       try {
-        const rows = await listConversations(revokingDb, ORG, { userId: 'cook', principal: cook.principal, kind: 'team' })
+        const rows = await listConversations(revokingDb, ORG, { userId: 'cook', principal: cook, kind: 'team' })
         assert.equal(interleaved, true)
         assert.equal(JSON.stringify(rows).includes('After preview access ended'), false)
-        await assert.rejects(getTeamThread(env, db, cook, separateGroup.id), refused(404, 'TEAM_THREAD_NOT_FOUND', 'conversation_id'))
+        await assert.rejects(getTeamThread(db, cook, separateGroup.id), refused(404, 'TEAM_THREAD_NOT_FOUND', 'conversation_id'))
         assert.equal((await listTeamMessages(db, owner, separateGroup.id, {})).messages[0]?.body, 'After preview access ended')
       } finally {
         await operateTeamGroup(env, db, owner, separateGroup.id, { action: 'add', member_user_ids: ['cook'], idempotency_key: 'list-race-readd' })
+      }
+    })
+    await context.test('a read acknowledgement cannot restore a removed team seat', async () => {
+      const message = (await listTeamMessages(db, cook, separateGroup.id, {})).messages[0]!
+      await operateTeamGroup(env, db, owner, separateGroup.id, { action: 'remove', user_id: 'cook', idempotency_key: 'read-race-remove' })
+      try {
+        await assert.rejects(markConversationRead(db, { organizationId: ORG, conversationId: separateGroup.id, userId: 'cook', throughMessageId: message.id }), refused(404, 'THREAD_NOT_FOUND', 'conversation_id'))
+        await assert.rejects(listTeamMessages(db, cook, separateGroup.id, {}), refused(404, 'TEAM_THREAD_NOT_FOUND', 'conversation_id'))
+      } finally {
+        await operateTeamGroup(env, db, owner, separateGroup.id, { action: 'add', member_user_ids: ['cook'], idempotency_key: 'read-race-readd' })
       }
     })
     await context.test('a text send losing its seat before commit changes no message, receipt or read state', async () => {

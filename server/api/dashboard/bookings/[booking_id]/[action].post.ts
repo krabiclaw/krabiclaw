@@ -3,7 +3,6 @@ import { getRouterParam } from 'nitro/h3'
 import { jsonResponse, readRequiredBody } from '~/server/utils/api-response'
 import { dashboardBookingContext, dashboardBookingDetails, nightBooking } from '~/server/utils/dashboard-bookings'
 import { executeBookingStatus } from '~/server/domain/guest-threads/operations'
-import { assertConversationAccess, assertGuestOperations } from '~/server/domain/conversations'
 import { roleAllows } from '~/server/utils/member-access'
 import { publishConversationEvent } from '~/server/cloudflare/guest-inbox-events'
 
@@ -15,8 +14,6 @@ export default defineHandler(async event => {
   if (booking.unit === 'nights' && !access.manage) {
     throw new HTTPError({ statusCode: 403, message: 'Only organization owners and admins can change stays', data: { code: 'STAY_ROLE_REQUIRED' } })
   }
-  await assertGuestOperations(principal)
-  await assertConversationAccess(db, principal, booking.conversation_id)
   const body = await readRequiredBody<Record<string, unknown>>(event)
   const { version } = body
   if (typeof version !== 'number' || !Number.isSafeInteger(version) || version < 1) throw new HTTPError({ statusCode: 400, message: 'Booking version is required' })

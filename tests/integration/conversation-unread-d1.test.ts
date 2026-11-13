@@ -39,15 +39,15 @@ test('unread is a message from someone else after your read position, the same c
         SELECT 'booking','${ORG}','class',id,'seat',location_id,starts_at,ends_at,timezone,'${GUEST}',1,'{"advance_notice_minutes":null,"party_size_min":null,"party_size_max":null,"minimum_guest_age":null,"accessibility_contact_required":false,"payment":null,"cancellation":null}','confirmed','${NOW}','${NOW}' FROM product_sessions WHERE id = 'session'`,
     ].map(statement => db.prepare(statement)))
     const env = await runtime.getBindings<CloudflareEnv>()
-    const owner = memberAccessPrincipal({ userId: OWNER, organizationId: ORG, role: 'owner' }, { env })
-    const cleaner = memberAccessPrincipal({ userId: CLEANER, organizationId: ORG, role: 'member' }, { env })
+    const owner = memberAccessPrincipal({ userId: OWNER, organizationId: ORG, memberId: 'm-owner', role: 'owner' }, { env })
+    const cleaner = memberAccessPrincipal({ userId: CLEANER, organizationId: ORG, memberId: 'm-cleaner', role: 'member' }, { env })
 
     /** Every surface's reading of one person's unread state, which must agree. */
     const surfaces = async (principal: typeof owner) => {
       const rows = await listConversations(db, ORG, { userId: principal.userId, principal, mailbox: 'current' })
       const filtered = await listConversations(db, ORG, { userId: principal.userId, principal, mailbox: 'current', unreadOnly: true })
       const counts = await countUnreadConversations(db, ORG, { userId: principal.userId, principal })
-      const badge = await unreadBadge(env, db, principal.userId)
+      const badge = await unreadBadge(db, principal.userId)
       const unread = rows.filter(row => row.unread).map(row => row.id)
       assert.deepEqual(filtered.map(row => row.id), unread, 'the Unread filter is the rows marked unread')
       assert.equal(counts.all, unread.length, 'the filter counts are the rows marked unread')

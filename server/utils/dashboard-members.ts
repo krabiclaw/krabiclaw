@@ -1,5 +1,5 @@
 import { organizationOptions, type CloudflareEnv } from '~/server/utils/auth'
-import { assertRoleAllows, listAllOrganizationMembers, organizationAdapter, roleAllows } from '~/server/utils/member-access'
+import { listAllOrganizationMembers, organizationAdapter, roleAllows } from '~/server/utils/member-access'
 import { createDb, queryAll, type DbClient } from '~/server/db'
 import { isDeliverySent } from '~/server/domain/guest-threads/deliveries'
 import { organizationRoleLabel } from '~/utils/organization-access'
@@ -26,7 +26,6 @@ export async function getInvitationDeliveries(db: DbClient, organizationId: stri
 
 export async function getOrganizationMembersData(env: CloudflareEnv, organization: { id: string; role: string }, userId: string) {
   const principal = { organizationId: organization.id, role: organization.role }
-  await assertRoleAllows({ ...principal, permissions: { team_messages: ['read'] } })
   const [canInvite, canCancel, canUpdate, canRemove] = await Promise.all([
     roleAllows({ ...principal, permissions: { invitation: ['create'] } }),
     roleAllows({ ...principal, permissions: { invitation: ['cancel'] } }),

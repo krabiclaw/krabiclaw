@@ -2,7 +2,7 @@ import { defineHandler } from 'nitro'
 import { getRouterParam } from 'nitro/h3'
 import { jsonResponse, readStrictBody } from '~/server/utils/api-response'
 import { memberConversation } from '~/server/utils/dashboard-guest-threads'
-import { markConversationRead } from '~/server/domain/conversations'
+import { conversationAccessSql, markConversationRead } from '~/server/domain/conversations'
 import { publishConversationAck } from '~/server/cloudflare/guest-inbox-events'
 import { messageText } from '~/server/domain/guest-message-schedule'
 
@@ -15,7 +15,7 @@ export default defineHandler(async (event) => {
   const conversationId = messageText(getRouterParam(event, 'conversation_id'), 'conversation_id', 200)
   const body = await readStrictBody<{ message_id?: string | null }>(event, { message_id: 'nullable-string' })
   const { db, env, principal } = await memberConversation(event, organizationId, conversationId)
-  const read = await markConversationRead(db, { organizationId, conversationId, userId: principal.userId, throughMessageId: body.message_id ?? null })
+  const read = await markConversationRead(db, { organizationId, conversationId, userId: principal.userId, guard: await conversationAccessSql('c', principal), throughMessageId: body.message_id ?? null })
   await publishConversationAck(env, { organizationId, conversationId, targetUserId: principal.userId })
   return jsonResponse(read)
 })

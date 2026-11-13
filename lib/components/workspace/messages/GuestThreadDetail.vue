@@ -24,13 +24,7 @@
           one "Name time" line each, events as centred sentences, change
           requests. Nothing here works out a time, a name or a status.
         -->
-        <TransitionGroup
-          tag="div"
-          class="flex flex-col gap-1 py-4"
-          :class="dashboardGutterClass"
-          enter-from-class="opacity-0 translate-y-3 scale-[0.98]"
-          enter-active-class="transition duration-300 ease-out motion-reduce:transition-none"
-        >
+        <div class="flex flex-col gap-1 py-4" :class="dashboardGutterClass">
           <template v-for="item in rows" :key="item.key">
             <p v-if="item.type === 'day'" class="mb-1 mt-3 text-center text-xs font-medium text-dimmed">{{ item.label }}</p>
 
@@ -89,7 +83,7 @@
               </template>
             </div>
           </template>
-        </TransitionGroup>
+        </div>
       </div>
 
       <div class="shrink-0 pb-6 pt-2" :class="dashboardGutterClass">
@@ -140,7 +134,7 @@ import { isMessageIdentity, type MessageIdentity } from '~/shared/dashboard-inva
 
 import { useIntervalFn, useDocumentVisibility } from '@vueuse/core'
 import { getErrorMessage, isNotFoundError } from '~/utils/errors'
-import { isThreadDetailResponse, type StreamItem, type ThreadDetail } from '~/lib/components/workspace/messages/guest-thread-client'
+import type { StreamItem } from '~/lib/components/workspace/messages/guest-thread-client'
 import type { BookingChangeView } from '~/server/domain/guest-threads/booking-changes'
 import type { InboxPendingMessage } from '~/server/domain/guest-threads/types'
 import { useDashboardInvalidations } from '~/composables/useDashboardInvalidations'
@@ -165,7 +159,7 @@ const realtime = useDashboardInvalidations()
 const { locale, t } = useI18n()
 const session = authClient.useSession()
 
-const { data, thread, pending, error, refresh: refreshHead, clear, readPage } = await useGuestThread(computed(() => props.threadId), computed(() => props.personalScope), !props.personalScope)
+const { data, thread, pending, error, refresh: refreshHead, clear, readPage } = await useGuestThread(computed(() => props.threadId), computed(() => props.personalScope), true)
 const older = shallowRef<PagedThread[]>([])
 const olderError = ref<string | null>(null)
 const loadingOlder = ref(false)
@@ -211,15 +205,32 @@ async function loadOlder() {
   }
 }
 
-async function refresh(options?: Parameters<typeof refreshHead>[0]) {
+async function refresh(options?: Parameters<typeof refreshHead>[0], rebuild = true) {
   olderRequest?.abort()
-  const previousHead = transcriptPage.value
-  const olderPages = older.value.length
+  const previous = thread.value && 'page' in thread.value ? thread.value as PagedThread : null
+  const revision = accessRevision
   await refreshHead(options)
-  await reconcileOlder(previousHead, olderPages)
+  if (revision !== accessRevision) return
+  if (!rebuild && retainOlder(previous)) return
+  await reconcileOlder(previous?.page, older.value.length)
 }
 
-async function reconcileOlder(previousHead: typeof transcriptPage.value, olderPages: number) {
+// A create can shift rows out of the head without changing the older window.
+function retainOlder(previous: PagedThread | null): boolean {
+  if (!previous || !older.value.length) return true
+  const current = thread.value
+  if (!current || !('page' in current)) return false
+  if (previous.page.oldest === (current as PagedThread).page.oldest) return true
+  const headIds = new Set(current.stream.filter(item => item.type !== 'day').map(item => item.id))
+  const overlap = previous.stream.findIndex(item => headIds.has(item.id))
+  if (overlap < 0) return false
+  const pages = older.value
+  const last = pages.at(-1)!
+  older.value = [...pages.slice(0, -1), { ...last, stream: [...last.stream, ...previous.stream.slice(0, overlap)] }]
+  return true
+}
+
+async function reconcileOlder(previousHead: typeof transcriptPage.value | undefined, olderPages: number) {
   if (!thread.value) { older.value = []; return }
   // Rebuild the loaded cursor window when the head moves or an existing
   // message changes. Commit the older pages together so deleted rows vanish.
@@ -279,16 +290,18 @@ type Row =
   has it. The attempt keeps its idempotency key until it succeeds, so sending
   the same words again after a failure is the same request, not a second one.
 */
-const attempt = ref<{ key: string; body: string; photos: MessagePhotoDraft[]; sentAfter: Set<string> } | null>(null)
+const attempt = ref<{ key: string; body: string; photos: MessagePhotoDraft[] } | null>(null)
 const sending = ref(false)
 let settledReply: MessageIdentity | undefined
 const deferredCreates: MessageIdentity[] = []
 let reconcileRequested = false
+let rebuildRequested = false
 let reconciling = false
 let accessRevision = 0
 
-function reconcileThread() {
+function reconcileThread(rebuild = false) {
   reconcileRequested = true
+  rebuildRequested ||= rebuild
   void drainThreadChanges()
 }
 
@@ -298,7 +311,9 @@ async function drainThreadChanges() {
   try {
     while (reconcileRequested && !sending.value) {
       reconcileRequested = false
-      await refresh({ dedupe: 'defer' })
+      const rebuild = rebuildRequested
+      rebuildRequested = false
+      await refresh({ dedupe: 'defer' }, rebuild)
     }
   } finally {
     reconciling = false
@@ -319,7 +334,8 @@ const rows = computed<Row[]>(() => {
   const items: Array<StreamItem | MessageItem> = []
   const seen = new Set<string>()
   let previousDay: string | undefined
-  for (const item of [...older.value.flatMap(page => page.stream), ...current.stream]) {
+  const currentIds = new Set(current.stream.map(item => item.id))
+  for (const item of [...older.value.flatMap(page => page.stream).filter(item => !currentIds.has(item.id)), ...current.stream]) {
     if (seen.has(item.id)) continue
     if (item.type === 'day') {
       if (previousDay === item.label) continue
@@ -331,7 +347,7 @@ const rows = computed<Row[]>(() => {
   for (const action of [...(transcriptPage.value?.booking_actions ?? [])].reverse()) {
     if (!seen.has(action.id)) items.unshift(action)
   }
-  if (attempt.value && sending.value) {
+  if (attempt.value && sending.value && !items.some(item => item.type === 'message' && settledKeys.value[item.id] === `pending:${attempt.value?.key}`)) {
     items.push({
       type: 'message', id: `pending:${attempt.value.key}`, side: mineSide.value, author: 'You', label: null, sent_at: new Date().toISOString(),
       time: 'Sending', body: attempt.value.body || null, translated: null, receipt: null, retryable: false, unshown_files: 0, sending: true,
@@ -449,7 +465,7 @@ async function answerChange(requestId: string, decision: 'accept' | 'decline') {
     })
     // Read the conversation after the answer, not through a refresh that a read
     // started before the answer could satisfy with the pending card.
-    data.value = await applicationFetch<{ thread: ThreadDetail }>(threadPath.value, { validate: isThreadDetailResponse })
+    await refresh()
     await refreshNuxtData(`account-activity:${session.value.data?.user.id}`)
   } catch (cause) {
     actionError.value = getErrorMessage(cause, 'Your answer could not be saved')
@@ -509,29 +525,44 @@ async function sendReply() {
     return
   }
   if (attempt.value?.body !== body || !sameMessagePhotos(attempt.value.photos, photos)) {
-    attempt.value = { key: crypto.randomUUID(), body, photos, sentAfter: new Set(thread.value.stream.map(item => item.id)) }
+    attempt.value = { key: crypto.randomUUID(), body, photos }
   }
   const current = attempt.value
+  const previous = thread.value && 'page' in thread.value ? thread.value as PagedThread : null
   const revision = accessRevision
   sending.value = true
   actionError.value = null
   void scrollToLatest()
   try {
-    const res = await (props.personalScope ? applicationFetch : dashboardApi)<{ thread: ThreadDetail; message?: MessageIdentity }>(`${threadPath.value}/${props.personalScope ? 'reply' : 'operations/reply'}`, {
-      method: 'POST',
-      query: props.personalScope ? undefined : { transcript: 'latest' },
+    const options = {
+      method: 'POST' as const,
       body: photos.length ? messageReplyForm(body, photos, current.key, props.personalScope ? null : usedSuggestion.value) : { body, idempotency_key: current.key, ...(!props.personalScope && usedSuggestion.value ? { suggestion: usedSuggestion.value } : {}) },
-      validate: (value): value is { thread: ThreadDetail; message?: MessageIdentity } => isThreadDetailResponse(value)
-        && (props.personalScope || (isPagedThreadResponse(value) && isMessageIdentity(Reflect.get(value, 'message')))),
-    })
+    }
+    if (props.personalScope) {
+      const { message } = await applicationFetch(`${threadPath.value}/reply`, {
+        ...options,
+        validate: (value): value is { message: MessageIdentity } => isRecord(value) && isMessageIdentity(value.message),
+      })
+      if (revision !== accessRevision) return
+      settledReply = message
+      settledKeys.value = { ...settledKeys.value, [message.id]: `pending:${current.key}` }
+      const response = await readPage()
+      if (revision !== accessRevision) return
+      data.value = response
+    } else {
+      const res = await dashboardApi(`${threadPath.value}/operations/reply`, {
+        ...options, query: { transcript: 'latest' },
+        validate: (value): value is { thread: PagedThread; message: MessageIdentity } => isPagedThreadResponse(value) && isMessageIdentity(Reflect.get(value, 'message')),
+      })
+      if (revision !== accessRevision) return
+      settledReply = res.message
+      settledKeys.value = { ...settledKeys.value, [res.message.id]: `pending:${current.key}` }
+      if (pending.value) { clear(); reconcileThread(true) }
+      olderRequest?.abort()
+      data.value = res
+    }
     if (revision !== accessRevision) return
-    settledReply = res.message
-    const reply = res.message ? res.thread.stream.find(item => item.type === 'message' && item.id === res.message?.id) : res.thread.stream.findLast(item => item.type === 'message' && item.side === mineSide.value && !current.sentAfter.has(item.id))
-    if (reply) settledKeys.value = { ...settledKeys.value, [reply.id]: `pending:${current.key}` }
-    const previousHead = transcriptPage.value
-    if (pending.value) clear()
-    data.value = { thread: res.thread }
-    if (older.value.length) await reconcileOlder(previousHead, older.value.length)
+    if (!retainOlder(previous)) await reconcileOlder(previous?.page, older.value.length)
     if (revision !== accessRevision) return
     if (requestingChange.value) changeRequestSent.value = true
     attempt.value = null
@@ -587,7 +618,13 @@ watch(realtime.event, event => {
     if (sending.value) { deferredCreates.push(message); return }
     if (message.id === settledReply?.id && message.sequence === settledReply.sequence) return
   }
-  reconcileThread()
+  const oldest = older.value[0]?.page.oldest ?? transcriptPage.value?.oldest
+  if (event.type === 'MESSAGE_UPDATE' && event.message && oldest != null && event.message.sequence < oldest) {
+    // Thread-wide delivery failure summaries still depend on offscreen messages.
+    reconcileThread()
+    return
+  }
+  reconcileThread(event.type === 'MESSAGE_UPDATE' && (!event.message || transcriptPage.value?.oldest == null || event.message.sequence < transcriptPage.value.oldest))
 }, { flush: 'sync' })
 
 watch(error, cause => {
@@ -603,7 +640,7 @@ watch(error, cause => {
 }, { flush: 'sync' })
 
 watch(realtime.connectionEpoch, (epoch) => {
-  if (epoch > 1 && !props.personalScope) reconcileThread()
+  if (epoch > 1 && !props.personalScope) reconcileThread(true)
 })
 
 const documentVisibility = useDocumentVisibility()
@@ -626,7 +663,7 @@ async function readThroughNewest() {
   if (!import.meta.client || markingRead || documentVisibility.value !== 'visible' || pending.value || !fromSomeoneElse.value) return
   const newest = shownMessages.value.at(-1)?.id
   const target = newest ? `${readScope.value}:${newest}` : null
-  if (!newest || target === readThrough || (!props.personalScope && newest === settledReply?.id)) return
+  if (!newest || target === readThrough || newest === settledReply?.id) return
   markingRead = true
   try {
     await (props.personalScope ? applicationFetch : dashboardApi)(readPath.value, {

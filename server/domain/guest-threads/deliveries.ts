@@ -349,9 +349,9 @@ export async function applyResendEmailEvent(
   const changed = await advanceDeliveryStatus(db, delivery, status, status === 'failed' ? resendFailureReason(event) : null)
   if (!changed) return 'unchanged'
   if (delivery.message_id) {
-    const message = await queryFirst<{ conversation_id: string }>(db, 'SELECT conversation_id FROM messages WHERE id = ?', [delivery.message_id])
+    const message = await queryFirst<{ conversation_id: string; sequence: number }>(db, 'SELECT conversation_id, sequence FROM messages WHERE id = ?', [delivery.message_id])
     if (!message) throw new Error(`Message ${delivery.message_id} for delivery ${delivery.id} not found`)
-    await publishConversationEvent(env, db, { conversationId: message.conversation_id, type: 'MESSAGE_UPDATE' })
+    await publishConversationEvent(env, db, { conversationId: message.conversation_id, type: 'MESSAGE_UPDATE', message: { id: delivery.message_id, sequence: message.sequence } })
   }
   return 'advanced'
 }

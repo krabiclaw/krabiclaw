@@ -4,7 +4,7 @@ import { HTTPError } from 'nitro'
 import { z } from 'zod'
 import { formatFormAnswer, type FormAnswerSnapshot } from '~/shared/form-questions'
 import { formatCalendarDate, formatTime, formatTimestamp } from '~/utils/timezone'
-import { bookingDay, getGuestRequest, isBookingDay, requestSummary, type cancelBookingRequest, type GuestRequest } from '~/server/domain/requests'
+import { bookingDay, getGuestRequest, isBookingDay, participantLabel, requestSummary, type cancelBookingRequest, type GuestRequest } from '~/server/domain/requests'
 import { execute, queryAll, queryFirst, type DbClient } from '~/server/db'
 import { organizationEventQuery, type OrganizationEventType } from '~/server/utils/organization-events'
 import { getEmailDeliveryMode, hashEmail, sendEmail, type EmailSendResult } from '~/server/utils/email-delivery'
@@ -197,6 +197,7 @@ interface ThreadDeliveryContext {
   subject: DeliverySubject
   purpose: GuestThreadDeliveryPurpose
   idempotencyKey: string
+  publishWithMessage?: boolean
 }
 
 /** The business is read from the conversation's organization, never passed in. */
@@ -339,10 +340,11 @@ async function resolveOwnerRecipients(
     assignedMemberId?: string | null
     memberIds?: string[]
     requestId?: string
+    guestMessage?: boolean
   },
 ): Promise<NotificationRecipient[]> {
   const [members, messagingEnabled] = await Promise.all([
-    listOrganizationNotificationMembers(env, opts.organizationId, { includeMemberIds: [...(opts.assignedMemberId ? [opts.assignedMemberId] : []), ...(opts.memberIds ?? [])], requestId: opts.requestId }),
+    listOrganizationNotificationMembers(env, opts.organizationId, { includeMemberIds: [...(opts.assignedMemberId ? [opts.assignedMemberId] : []), ...(opts.memberIds ?? [])], requestId: opts.requestId, guestMessage: opts.guestMessage }),
     hasOrganizationEntitlement(env, opts.organizationId, 'messaging'),
   ])
   const recipients = await Promise.all(members.map(async (member) => {
@@ -374,7 +376,7 @@ function requireDeliveryMessage(delivery: ThreadDeliveryContext | null | undefin
 
 /** Open apps redraw the conversation a receipt changed. */
 async function publishReceipt(env: NotificationEnv, db: DbClient, delivery: ThreadDeliveryContext) {
-  if (delivery.conversationId) await publishConversationEvent(env, db, { conversationId: delivery.conversationId, type: 'MESSAGE_UPDATE' })
+  if (delivery.conversationId && !delivery.publishWithMessage) await publishConversationEvent(env, db, { conversationId: delivery.conversationId, type: 'MESSAGE_UPDATE' })
 }
 
 async function sendEmailNotification(
@@ -494,7 +496,7 @@ async function dispatchPush(env: NotificationEnv, db: DbClient, userId: string, 
   if (device.kind === 'apns') {
     const apnsId = crypto.randomUUID()
     // Read when it is sent, after the notification it announces was recorded, so the icon counts it.
-    const result = await sendApnsAlert(env, { deviceToken: device.token, environment: device.environment, apnsId, alert: { title: alert.title, body: alert.body, threadId: alert.threadId, data: alert.data, badge: await unreadBadge(env, db, userId) } })
+    const result = await sendApnsAlert(env, { deviceToken: device.token, environment: device.environment, apnsId, alert: { title: alert.title, body: alert.body, threadId: alert.threadId, data: alert.data, badge: await unreadBadge(db, userId) } })
     return result.status === 'sent' ? { status: 'sent', providerMessageId: apnsId } : { status: 'failed', error: result.error, deviceGone: result.tokenRetired }
   }
   const result = await sendWebPush(env, {
@@ -640,7 +642,7 @@ async function getOpeningThreadContext(db: DbClient, conversationId: string): Pr
 }
 
 /** What a send is recorded on: a message of a conversation, an audit row, or a task. */
-type DeliveryAnchor = { conversationId: string | null; subject: DeliverySubject }
+type DeliveryAnchor = { conversationId: string | null; subject: DeliverySubject; publishWithMessage?: boolean }
 const anchorId = (subject: DeliverySubject) => 'messageId' in subject ? subject.messageId : 'activityEntryId' in subject ? subject.activityEntryId : subject.taskId
 
 /**
@@ -671,6 +673,7 @@ function threadDelivery(
   return {
     conversationId: context.conversationId,
     subject: context.subject,
+    publishWithMessage: context.publishWithMessage,
     purpose,
     idempotencyKey: eventKey
       ? createHash('sha256').update(JSON.stringify([eventKey, purpose, channel, hashEmail(recipient)])).digest('hex')
@@ -815,6 +818,7 @@ export async function notifyOwner(
     assignedMemberId: assigned?.assigned_member_id ?? null,
     memberIds: opts.memberIds ?? [],
     requestId: threadContext?.conversationId ?? opts.responsibleRequestId,
+    guestMessage: opts.message.category === 'messages',
   })
 
   // The owner reads mail sent for their business, framed by its own mark.
@@ -1674,7 +1678,7 @@ export async function notifyGuestThreadReply(
   if (!entry || entry.conversation_id !== opts.threadId) throw new Error(`Message ${opts.messageId} is not in conversation ${opts.threadId}`)
   const support = isAirbnbSupportMessage(entry)
   if (entry.author_kind !== 'guest' && !support) throw new Error(`Message ${entry.id} is neither a guest's nor Airbnb Support's; nobody is alerted to it`)
-  const { guestName, body, photos, preview, history } = await alertedMessage(db, thread, entry)
+  const { guestName, body, photos, preview, history } = await alertedMessage(db, thread, entry, business)
   const ownerMessage = {
     ...messageReceived({
       sender: support ? { kind: 'support' } : { kind: 'person', name: guestName, email: opts.guestEmail ?? null },
@@ -1694,7 +1698,7 @@ export async function notifyGuestThreadReply(
     organizationId: opts.organizationId,
     category: ownerMessage.category,
     emailPurpose: ownerMessage.emailPurpose,
-    requestId: opts.threadId,
+    guestMessage: true,
   })
 
   const results = await Promise.allSettled(recipients.flatMap(recipient => memberNotificationSends(env, db, recipient, {
@@ -1715,20 +1719,15 @@ const ALERT_HISTORY = 3
  * can fetch), what a list says when it has no words, and the last messages
  * before it, named as the inbox names their authors.
  */
-async function alertedMessage(db: DbClient, thread: GuestRequest, entry: MessageRow) {
+async function alertedMessage(db: DbClient, thread: GuestRequest, entry: MessageRow, business: string) {
   // The conversation reader depends on this module through the inbox, so it is loaded when an alert needs it.
-  const [{ getGuestThreadDetail }, { inboxGuestNames }] = await Promise.all([import('~/server/domain/guest-threads/detail'), import('~/server/domain/guest-threads/inbox')])
-  const detail = await getGuestThreadDetail(db, thread.id, thread.organization_id)
-  if (!detail) throw new Error(`Conversation ${thread.id} could not be read for its alert`)
-  const { guestName: guest, guestFullName } = inboxGuestNames(detail)
-  const messages = detail.entries.filter(item => item.kind === 'message')
-  const position = messages.findIndex(item => item.id === entry.id)
-  const alerted = messages[position]
-  if (!alerted) throw new Error(`Message ${entry.id} is not shown in conversation ${thread.id}`)
+  const { guestMessageAlertWindow } = await import('~/server/domain/guest-threads/detail')
+  const { messages, channelGuestName } = await guestMessageAlertWindow(db, entry, thread, business, ALERT_HISTORY)
+  const alerted = messages.at(-1)!
+  const guestFullName = isAirbnbSupportMessage(entry) ? 'Airbnb Support' : thread.payload.guest.name ?? channelGuestName ?? participantLabel(thread)
+  const guest = isAirbnbSupportMessage(entry) ? guestFullName : channelGuestName ?? guestFullName
   const author = (item: typeof alerted): string => {
-    const name = item.actorLabel ?? (item.actorKind === 'guest' ? guest : detail.organizationName)
-    if (!name) throw new Error(`Message ${item.id} in conversation ${thread.id} has no author to name`)
-    return name
+    return item.actorLabel ?? (item.actorKind === 'guest' ? guest : business)
   }
   const fileCount = (payload: Record<string, unknown> | null) =>
     (Array.isArray(payload?.attachments) ? payload.attachments.length : 0) + (Array.isArray(payload?.unshownFiles) ? payload.unshownFiles.length : 0)
@@ -1740,7 +1739,7 @@ async function alertedMessage(db: DbClient, thread: GuestRequest, entry: Message
     body: alerted.body?.trim() || (alerted.attachments.length ? '' : said(alerted)),
     photos: alerted.attachments.map(photo => ({ imageUrl: photo.url, alt: photo.alt ?? `Photo from ${guest}` })),
     preview: said(alerted),
-    history: messages.slice(0, position).filter(item => item.body?.trim() || item.attachments.length || fileCount(item.payload)).slice(-ALERT_HISTORY)
+    history: messages.slice(0, -1)
       .map(item => ({ author: author(item), text: said(item) })),
   }
 }
@@ -1865,7 +1864,8 @@ export async function notifyTeamMessage(env: NotificationEnv, db: DbClient, inpu
     organizationId: input.organizationId, category: message.category, emailPurpose: message.emailPurpose,
     memberIds: members.filter(member => recipientIds.has(member.userId)).map(member => member.id),
   })).filter(recipient => recipientIds.has(recipient.userId))
-  const context: DeliveryAnchor = { conversationId: input.threadId, subject: { messageId: input.messageId } }
+  // The caller publishes one event after all initial notification receipts are saved.
+  const context: DeliveryAnchor = { conversationId: input.threadId, subject: { messageId: input.messageId }, publishWithMessage: true }
   const results = await Promise.allSettled(recipients.flatMap(recipient => memberNotificationSends(env, db, recipient, {
     organizationId: input.organizationId, organizationName: organization.name,
     context, template: 'team_message', pushTemplate: 'team_message',

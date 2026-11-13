@@ -2,13 +2,12 @@ import { HTTPError } from 'nitro'
 import { sessionPrepTaskQueries } from '~/server/domain/tasks'
 import { BOOKING_ENDS_SQL, BOOKING_RECORDS_SQL, bookingDay, parseGuestRequest, participantLabel } from '~/server/domain/requests'
 import {
-  CURRENT_GUEST_SQL, MEMBER_REPLY_EVENT, MIRRORED_EVENT, OPENING_EVENT, SUPPORT_CONVERSATION_SQL,
-  archiveQuery, archiveReplyTaskQuery, conversationAccessSql, guestVisibleSql, listUnreadIds, messageHasContentSql, unreadSql, type UnreadCounts,
+  MEMBER_REPLY_EVENT, MIRRORED_EVENT, OPENING_EVENT, SUPPORT_CONVERSATION_SQL,
+  archiveQuery, archiveReplyTaskQuery, canMessageGuests, conversationAccessDenied, conversationAccessSql, guestConversationSql, guestOwnsGuard, guestVisibleSql, listUnreadIds, messageHasContentSql, teamSeatSql, unreadSql, type ConversationGuard, type UnreadCounts,
 } from '~/server/domain/conversations'
 import { messagePreview } from './attachments'
 import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { d1JsonStringSet } from '~/server/db/d1-limits'
-import type { CloudflareEnv } from '~/server/utils/auth'
 import type { GuestThreadSubmissionType, InboxRow, ListGuestThreadsOptions } from './types'
 import { calendarDate, clockTime, firstName, initial, listTime, localDateKey, providerInstant, stayWhen } from './presentation'
 import { formatCalendarRange } from '~/utils/timezone'
@@ -159,15 +158,16 @@ async function inboxScope(organizationId: string | null, opts: ListGuestThreadsO
     LEFT JOIN conversation_participants me ON me.conversation_id = gt.id AND me.user_id = ?`
   let where: string
   if (opts.buyerAudience) {
-    where = `gt.user_id = ? AND ${CURRENT_GUEST_SQL('gt')}`
-    params.push(opts.userId)
+    const access = guestOwnsGuard(opts.userId, 'gt')
+    where = access.sql
+    params.push(...access.params)
     if (organizationId) { where += ' AND gt.organization_id = ?'; params.push(organizationId) }
   } else {
     where = 'gt.organization_id = ?'
     params.push(organizationId!)
     // Without a resolved principal (a server read on the viewer's behalf), every guest conversation and the viewer's team ones.
     const access = opts.principal ? await conversationAccessSql('gt', opts.principal)
-      : { sql: "(gt.kind IN ('contact', 'booking') OR me.user_id IS NOT NULL AND gt.kind = 'team')", params: [] }
+      : { sql: `(gt.kind IN ('contact', 'booking') OR gt.kind = 'team' AND ${teamSeatSql('gt')})`, params: [opts.userId] }
     where += ` AND ${access.sql}`
     params.push(...access.params)
   }
@@ -345,7 +345,7 @@ export async function countUnreadConversations(db: DbClient, organizationId: str
   const unread = unreadSql('gt', opts.userId)
   const rows = await queryAll<{ list_kind: 'guests' | 'support' | 'team'; count: number }>(db, `
     SELECT CASE WHEN gt.kind = 'team' THEN 'team' WHEN ${SUPPORT_CONVERSATION_SQL('gt')} THEN 'support' ELSE 'guests' END AS list_kind, COUNT(*) AS count
-      FROM ${scope.from} LEFT JOIN business_locations bl ON bl.id = gt.location_id
+      FROM ${scope.from}
      WHERE ${scope.where} AND ${unread.sql}
      GROUP BY 1`, [...scope.params, ...unread.params])
   const count = (kind: 'guests' | 'support' | 'team') => Number(rows.find(row => row.list_kind === kind)?.count ?? 0)
@@ -366,15 +366,28 @@ export async function countUnreadAsGuest(db: DbClient, userId: string): Promise<
  * organization they belong to, and their own as a guest. Each is the same
  * count the inbox's filter menu shows.
  */
-export async function unreadBadge(env: CloudflareEnv, db: DbClient, userId: string): Promise<number> {
+export async function unreadBadge(db: DbClient, userId: string): Promise<number> {
   const memberships = await queryAll<{ organizationId: string; role: string }>(db, 'SELECT organizationId, role FROM member WHERE userId = ?', [userId])
-  const counts = await Promise.all([
-    ...memberships.map(membership => countUnreadConversations(db, membership.organizationId, {
-      userId, principal: { organizationId: membership.organizationId, role: membership.role, userId },
-    }).then(count => count.all)),
-    countUnreadAsGuest(db, userId),
-  ])
-  return counts.reduce((sum, count) => sum + count, 0)
+  const guestMessaging = (await Promise.all(memberships.map(async membership =>
+    await canMessageGuests(membership) ? [membership.organizationId, membership.role] : null,
+  ))).filter(membership => membership !== null)
+  const now = new Date().toISOString()
+  const guest = await inboxScope(null, { userId, buyerAudience: true, mailbox: 'current' }, now)
+  const current = mailboxWhere('current', now)
+  const unread = unreadSql('gt', userId)
+  const row = await queryFirst<{ count: number }>(db, `
+    SELECT (SELECT COUNT(*) FROM ${guest.from} WHERE ${guest.where} AND ${unread.sql})
+      + (SELECT COUNT(*) FROM member membership
+        JOIN conversations gt ON gt.organization_id = membership.organizationId${operationalRecordSql()}
+        LEFT JOIN conversation_participants me ON me.conversation_id = gt.id AND me.user_id = membership.userId
+        WHERE membership.userId = ?
+          AND ((${guestConversationSql('gt')} AND EXISTS (SELECT 1 FROM json_each(?) allowed
+            WHERE json_extract(allowed.value, '$[0]') = membership.organizationId AND json_extract(allowed.value, '$[1]') = membership.role))
+            OR (gt.kind = 'team' AND ${teamSeatSql('gt')}))
+          AND ${HAS_CONVERSATION_SQL}${current.sql} AND ${unread.sql}) AS count`,
+    [...guest.params, ...unread.params, userId, JSON.stringify(guestMessaging), userId, ...current.params, ...unread.params])
+  if (!row) throw new Error('Unread conversations for the app badge could not be counted')
+  return Number(row.count)
 }
 
 /** Which of these conversations the viewer has unread, by the one statement. */
@@ -555,7 +568,7 @@ export async function reconcileConversationTasks(db: DbClient, conversationId: s
  * conversation the quiet rule keeps in Past cannot be brought back by
  * unarchiving, and a blocked one is in Blocked, not in either.
  */
-export async function archiveConversation(db: DbClient, input: { organizationId: string; conversationId: string; userId: string; archived: boolean }): Promise<{ archived: boolean }> {
+export async function archiveConversation(db: DbClient, input: { organizationId: string; conversationId: string; userId: string; archived: boolean; guard?: ConversationGuard }): Promise<{ archived: boolean }> {
   const now = new Date().toISOString()
   const rule = pastByRuleSql(now)
   const row = await queryFirst<{ kind: string; blocked_at: string | null; past_by_rule: number }>(db, `
@@ -564,9 +577,10 @@ export async function archiveConversation(db: DbClient, input: { organizationId:
   if (!row) throw new HTTPError({ statusCode: 404, message: 'Conversation not found', data: { code: 'THREAD_NOT_FOUND', field: 'conversation_id' } })
   if (row.blocked_at !== null) throw new HTTPError({ statusCode: 409, message: 'A blocked guest’s conversation is in Blocked; unblock it first', data: { code: 'INVALID_TRANSITION', field: 'archived' } })
   if (!input.archived && row.past_by_rule === 1) throw new HTTPError({ statusCode: 409, message: 'This conversation is past because it has been quiet for 30 days', data: { code: 'INVALID_TRANSITION', field: 'archived' } })
-  await executeBatch(db, [
+  const [written] = await executeBatch(db, [
     archiveQuery({ ...input, now }),
-    ...(input.archived && row.kind !== 'team' ? [archiveReplyTaskQuery({ conversationId: input.conversationId, userId: input.userId, now })] : []),
+    ...(input.archived && row.kind !== 'team' ? [archiveReplyTaskQuery({ ...input, now })] : []),
   ], { operation: input.archived ? 'Archive conversation' : 'Unarchive conversation' })
+  if (!written?.meta?.changes) conversationAccessDenied()
   return { archived: input.archived }
 }

@@ -1,16 +1,15 @@
 import { buyerRequestActivityPath } from '~/server/domain/payments/buyer'
 import { OPEN_REPLY_TASK_SQL } from './repository'
 import { d1JsonStringSet, executeBatch, queryAll, queryFirst, type DbClient } from '~/server/db'
-import { bookingDay, getGuestRequest, getThreadOperationalRecord, requestSummary, requestLocationQuery, requestActions, stayPreview, validateGuestRequest, type GuestRequest, type RequestLocation } from '~/server/domain/requests'
+import { bookingDay, getThreadOperationalRecord, requestSummary, requestLocationQuery, requestActions, stayPreview, validateGuestRequest, type GuestRequest, type RequestLocation } from '~/server/domain/requests'
 import { formatOperationalStatusLabel } from './status-labels'
 import { resolveGuestThreadMailbox } from './mailbox'
-import { GUEST_NOTE_EVENT, MIRRORED_EVENT, OPENING_EVENT, SCHEDULED_MESSAGE_EVENT, SUBMISSION_EVENT, isEventMessage, conversationMessagesQuery, listConversationMessages, messageRole, parseMessagePayload, type ConversationRow, type ConversationWindow, type MessageRow } from '~/server/domain/conversations'
-import { isDeliverySent, isVisibleDeliveryFailure, listThreadDeliveries, threadDeliveriesQuery } from './deliveries'
-import { groupMessagePhotos, listMessagePhotos, messagePhotosQuery, type MessagePhotoRow } from './attachments'
+import { GUEST_NOTE_EVENT, MIRRORED_EVENT, OPENING_EVENT, SCHEDULED_MESSAGE_EVENT, SUBMISSION_EVENT, isEventMessage, conversationMessagesQuery, guestVisibleSql, messageHasContentSql, messageRole, readConversation, readGuestConversation, parseMessagePayload, type ConversationRow, type ConversationWindow, type MessageRow } from '~/server/domain/conversations'
+import { isDeliverySent, isVisibleDeliveryFailure, threadDeliveriesQuery } from './deliveries'
+import { groupMessagePhotos, messagePhotosQuery, type MessagePhotoRow } from './attachments'
 import type { GuestThreadDeliveryRow, GuestThreadDetailViewModel, GuestThreadEntryDeliveryViewModel, GuestThreadEntryViewModel } from './types'
 import { HTTPError } from 'nitro'
 import { providerTimestamp } from '~/server/integrations/channex/messages'
-import { bookingChangeStates } from './booking-change-state'
 import { bookingChangeViews } from './booking-changes'
 import { guestThreadChannel } from './channel-messages'
 import { formAnswerSnapshotsSchema, type FormAnswerSnapshot } from '~/shared/form-questions'
@@ -62,7 +61,7 @@ interface TranscriptWindow {
 }
 
 /** Request and routing facts stay beside the view so they never enter its guest projection. */
-type ThreadViewer = { buyerUserId: string } | { memberUserId: string; conversation?: ConversationRow }
+type ThreadViewer = { buyerUserId: string; conversation?: ConversationRow } | { memberUserId: string; conversation?: ConversationRow }
 type LoadedThread<View> = {
   view: View
   request: GuestRequest
@@ -74,40 +73,53 @@ type ThreadOrganization = { name: string; vertical: string; timezone: string }
 type ActorName = { id: string; name: string }
 const THREAD_ORGANIZATION_SQL = 'SELECT name, vertical, timezone FROM organization WHERE id = ?'
 const THREAD_ACTORS_SQL = 'SELECT id, name FROM user WHERE id IN (SELECT value FROM json_each(?))'
+const CHANNEL_GUEST_NAME_SQL = `SELECT trim(json_extract(m.payload_json, '$.meta.name')) FROM messages m
+  WHERE m.conversation_id = ? AND m.author_kind = 'guest' AND m.event_name = '${MIRRORED_EVENT}'
+    AND json_type(m.payload_json, '$.meta.name') = 'text' AND trim(json_extract(m.payload_json, '$.meta.name')) <> ''
+  ORDER BY m.sequence DESC LIMIT 1`
 type ThreadWideFacts = { support: number; channel_guest_name: string | null; translated: number; invalid_receipt: number }
 
-async function readMemberTranscriptBase(db: DbClient, conversation: ConversationRow, window?: ConversationWindow) {
-  const [organization, messages, deliveries, location] = await executeBatch(db, [
+async function readTranscriptBase(db: DbClient, conversation: ConversationRow, buyer: boolean, window?: ConversationWindow) {
+  const results = await executeBatch(db, [
     { query: THREAD_ORGANIZATION_SQL, params: [conversation.organization_id] },
-    conversationMessagesQuery(conversation.id, false, window),
-    window ? {
+    conversationMessagesQuery(conversation.id, buyer, window),
+    ...(conversation.location_id === null ? [] : [requestLocationQuery(conversation)]),
+    ...buyer ? [] : [window ? {
       query: `SELECT
         EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = ? AND m.author_kind = 'krabiclaw' AND m.event_name = '${MIRRORED_EVENT}') AND
         NOT EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = ? AND m.author_kind = 'guest') AS support,
-        (SELECT json_extract(m.payload_json, '$.meta.name') FROM messages m WHERE m.conversation_id = ? AND m.author_kind = 'guest' AND m.event_name = '${MIRRORED_EVENT}' AND json_type(m.payload_json, '$.meta.name') = 'text' AND trim(json_extract(m.payload_json, '$.meta.name')) <> '' ORDER BY m.sequence DESC LIMIT 1) AS channel_guest_name,
+        (${CHANNEL_GUEST_NAME_SQL}) AS channel_guest_name,
         EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = ? AND m.author_kind = 'guest' AND json_type(m.payload_json, '$.meta.translated_message') = 'text' AND trim(json_extract(m.payload_json, '$.meta.translated_message')) <> '' AND trim(json_extract(m.payload_json, '$.meta.translated_message')) IS NOT trim(m.body)) AS translated,
         EXISTS (SELECT 1 FROM messages m JOIN guest_thread_deliveries d ON d.message_id = m.id WHERE m.conversation_id = ? AND d.provider = 'channex' AND d.status IN ('accepted', 'sent', 'delivered', 'read') AND length(trim(COALESCE(d.provider_message_id, ''))) = 0) AS invalid_receipt`,
       params: Array.from({ length: 5 }, () => conversation.id),
-    } : threadDeliveriesQuery(conversation.id),
-    ...conversation.location_id === null ? [] : [requestLocationQuery(conversation)],
-  ], { operation: 'Read member transcript' })
+    } : threadDeliveriesQuery(conversation.id)],
+  ], { operation: 'Read transcript' })
+  const [organization, messages, third, fourth] = results
+  const locationResult = conversation.location_id === null ? undefined : third
+  const deliveryResult = conversation.location_id === null ? third : fourth
   return {
     organization: organization!.results[0] as ThreadOrganization | undefined,
     entryRows: messages!.results as MessageRow[],
-    deliveryRows: window ? [] : deliveries!.results as GuestThreadDeliveryRow[],
-    windowFacts: window ? deliveries!.results[0] as ThreadWideFacts : undefined,
-    location: (location?.results[0] as RequestLocation | undefined) ?? null,
+    deliveryRows: window || buyer ? [] : (deliveryResult?.results ?? []) as GuestThreadDeliveryRow[],
+    windowFacts: window ? deliveryResult?.results[0] as ThreadWideFacts | undefined : undefined,
+    location: (locationResult?.results[0] as RequestLocation | undefined) ?? null,
   }
 }
 
-async function readTranscriptActorsAndPhotos(db: DbClient, messageIds: string[], authorIds: string[]) {
-  const actors = { query: THREAD_ACTORS_SQL, params: [d1JsonStringSet(authorIds)] }
-  if (!messageIds.length || !authorIds.length) return Promise.all([
-    listMessagePhotos(db, 'message', messageIds),
-    authorIds.length ? queryAll<ActorName>(db, actors.query, actors.params) : [],
-  ] as const)
-  const [photos, names] = await executeBatch(db, [messagePhotosQuery('message', messageIds), actors], { operation: 'Read transcript photos and authors' })
-  return [groupMessagePhotos(photos!.results as MessagePhotoRow[]), names!.results as ActorName[]] as const
+async function readTranscriptEnrichment(db: DbClient, messageIds: string[], authorIds: string[], receipts: ReturnType<typeof threadDeliveriesQuery> | null) {
+  const queries = [
+    messageIds.length ? messagePhotosQuery('message', messageIds) : null,
+    authorIds.length ? { query: THREAD_ACTORS_SQL, params: [d1JsonStringSet(authorIds)] } : null,
+    receipts,
+  ]
+  const batch = queries.filter(query => query !== null)
+  const results = batch.length ? await executeBatch(db, batch, { operation: 'Read transcript enrichment' }) : []
+  const [photos, names, deliveries] = queries.map(query => query ? results.shift()!.results : [])
+  return {
+    photos: groupMessagePhotos(photos as MessagePhotoRow[]),
+    actors: names as ActorName[],
+    deliveries: deliveries as GuestThreadDeliveryRow[],
+  }
 }
 
 export function loadGuestThreadDetail(db: DbClient, threadId: string, organizationId: string, viewer?: ThreadViewer, at?: Date, transcript?: false): Promise<LoadedThread<GuestThreadDetailViewModel> | null>
@@ -124,20 +136,17 @@ export async function loadGuestThreadDetail(
   const audience = viewer && 'buyerUserId' in viewer ? viewer : undefined
   const member = viewer && 'memberUserId' in viewer ? viewer : undefined
   const memberUserId = member?.memberUserId ?? null
-  const conversation = member?.conversation
-  if (conversation && (conversation.id !== threadId || conversation.organization_id !== organizationId || conversation.kind === 'team')) {
+  const conversation = viewer?.conversation ?? (audience ? await readGuestConversation(db, audience.buyerUserId, threadId) : await readConversation(db, organizationId, threadId))
+  if (audience && (!conversation || conversation.organization_id !== organizationId || conversation.user_id !== audience.buyerUserId)) return null
+  if (!conversation || conversation.kind === 'team') return null
+  if (conversation.id !== threadId || conversation.organization_id !== organizationId) {
     throw new Error('The authorized guest conversation does not match the requested thread')
   }
   const now = at.toISOString()
-  const batched = transcript && conversation ? readMemberTranscriptBase(db, conversation, window) : null
   const [thread, record, base, channelThread, needsReply, archive] = await Promise.all([
-    conversation ? validateGuestRequest(db, conversation) : getGuestRequest(db, threadId, organizationId, undefined, audience?.buyerUserId),
+    validateGuestRequest(db, conversation),
     getThreadOperationalRecord(db, threadId, conversation),
-    batched ?? Promise.all([
-      queryFirst<ThreadOrganization>(db, THREAD_ORGANIZATION_SQL, [organizationId]),
-      listConversationMessages(db, threadId, Boolean(audience)),
-      audience ? [] : listThreadDeliveries(db, threadId),
-    ]).then(([organization, entryRows, deliveryRows]) => ({ organization, entryRows, deliveryRows, location: undefined, windowFacts: undefined })),
+    readTranscriptBase(db, conversation, Boolean(audience), window),
     guestThreadChannel(db, threadId, organizationId),
     audience || transcript ? false : queryFirst(db, `SELECT 1 AS open FROM conversations gt WHERE gt.id = ? AND ${OPEN_REPLY_TASK_SQL}`, [threadId]).then(Boolean),
     memberUserId && !transcript ? queryFirst<{ archived_at: string | null }>(db, 'SELECT archived_at FROM conversation_participants WHERE conversation_id = ? AND user_id = ?', [threadId, memberUserId]) : null,
@@ -145,34 +154,35 @@ export async function loadGuestThreadDetail(
   const { organization, location, windowFacts } = base
   const hasOlder = window !== undefined && base.entryRows.length > window.limit
   const entryRows = hasOlder ? base.entryRows.slice(1) : base.entryRows
-  if (!thread || (audience && thread.user_id !== audience.buyerUserId)) return null
+  if (audience && thread.user_id !== audience.buyerUserId) return null
   if (audience && record && (record.user_id !== audience.buyerUserId || record.organization_id !== organizationId)) return null
   if (!organization) throw new Error('Conversation has no organization')
   if (!channelThread) throw new Error('Conversation has no channel facts')
-  if (window && !windowFacts) throw new Error('Transcript window is missing thread facts')
+  if (window && !audience && !windowFacts) throw new Error('Transcript window is missing thread facts')
 
   // The second wave: what the conversation's own rows point at. Who on the team
   // said or did each thing is read by the name their account carries.
   const actorUserIds = entryRows.flatMap(entry => entry.author_user_id ? [entry.author_user_id] : [])
   const messageIds = entryRows.filter(entry => !isEventMessage(entry)).map(entry => entry.id)
-  const receiptQuery = window ? threadDeliveriesQuery(threadId, entryRows.map(row => row.id)) : null
-  const [[photos, actorRows], changes, answers, summary, home, activityPath, deliveryRows, failedMessages, pendingProposals] = await Promise.all([
-    batched ? readTranscriptActorsAndPhotos(db, messageIds, actorUserIds) : Promise.all([
-      listMessagePhotos(db, 'message', messageIds),
-      actorUserIds.length ? queryAll<ActorName>(db, THREAD_ACTORS_SQL, [d1JsonStringSet(actorUserIds)]) : [],
-    ] as const),
-    bookingChangeViews(db, thread, entryRows, now),
+  const receiptQuery = window && !audience && entryRows.length ? threadDeliveriesQuery(threadId, entryRows.map(row => row.id)) : null
+  const [enrichment, answers, summary, home, activityPath, failedMessages, pendingProposals] = await Promise.all([
+    readTranscriptEnrichment(db, messageIds, audience ? [] : actorUserIds, receiptQuery),
     !transcript || entryRows.some(entry => entry.event_name === SUBMISSION_EVENT) ? threadAnswers(db, thread) : [],
     requestSummary(db, thread, record, location),
     audience || record?.unit === 'nights' || !channelThread.productId ? null
       : queryFirst<{ internal_name: string }>(db, 'SELECT internal_name FROM product_stay_configs WHERE organization_id = ? AND product_id = ?', [organizationId, channelThread.productId]),
     audience && thread.kind !== 'contact' ? buyerRequestActivityPath(db, audience.buyerUserId, thread.id) : null,
-    receiptQuery && entryRows.length ? queryAll<GuestThreadDeliveryRow>(db, receiptQuery.query, receiptQuery.params) : base.deliveryRows,
-    window ? queryAll<{ id: string }>(db, `SELECT DISTINCT m.id FROM messages m JOIN guest_thread_deliveries d ON d.message_id = m.id
+    window && !audience ? queryAll<{ id: string }>(db, `SELECT DISTINCT m.id FROM messages m JOIN guest_thread_deliveries d ON d.message_id = m.id
       WHERE m.conversation_id = ? AND (d.status = 'failed' OR (d.channel = 'email' AND d.status <> 'skipped' AND length(d.error) > 0))`, [threadId]) : [],
     window?.before === null && thread.kind === 'booking' ? queryAll<MessageRow>(db, `SELECT m.* FROM messages m WHERE m.conversation_id = ? AND m.event_name = 'booking_change.requested'
-      AND NOT EXISTS (SELECT 1 FROM messages decision WHERE decision.dedupe_key = 'booking-change-decision:' || m.id)`, [threadId]) : [],
+      AND NOT EXISTS (SELECT 1 FROM messages decision WHERE decision.dedupe_key = 'booking-change-decision:' || m.id)
+      ${audience ? `AND ${guestVisibleSql('m')}` : ''}`, [threadId]) : [],
   ])
+  const inWindow = new Set(entryRows.map(entry => entry.id))
+  const olderProposals = pendingProposals.filter(entry => !inWindow.has(entry.id))
+  const changes = await bookingChangeViews(db, thread, [...entryRows, ...olderProposals], now)
+  const { photos, actors: actorRows } = enrichment
+  const deliveryRows = receiptQuery ? enrichment.deliveries : base.deliveryRows
   // One read of the deliveries answers both questions the thread asks of them:
   // where each entry went, and which sends failed.
   const deliveriesByEntry = new Map<string, GuestThreadEntryDeliveryViewModel[]>()
@@ -208,7 +218,7 @@ export async function loadGuestThreadDetail(
       actorUserId: audience
         ? role === 'guest' && entry.author_user_id === audience.buyerUserId ? entry.author_user_id : null
         : entry.author_user_id,
-      actorLabel: actorLabel(entry, role, mirrored, actorNames, organization.name),
+      actorLabel: audience ? null : actorLabel(entry, role, mirrored, actorNames, organization.name),
       channel: entry.channel,
       body: entry.body,
       eventName: entry.event_name,
@@ -246,20 +256,16 @@ export async function loadGuestThreadDetail(
   const context = { request: thread, channelFacts: channelThread, timeZone: summary.locationTimezone ?? organization.timezone }
   if (transcript) {
     let windowView: TranscriptWindow | undefined
-    if (window && windowFacts) {
-      const proposals = pendingProposals.filter(entry => !changes.has(entry.id))
-      const states = await bookingChangeStates(db, proposals.map(entry => entry.id), now)
-      const pending = proposals.filter(entry => states.get(entry.id)?.status === 'pending')
-      const pendingViews = await bookingChangeViews(db, thread, pending, now)
+    if (window) {
       windowView = {
         before: hasOlder ? entryRows[0]!.sequence : null,
         oldest: entryRows[0]?.sequence ?? null,
         newest: entryRows.at(-1)?.sequence ?? null,
-        support: Boolean(windowFacts.support),
-        channelGuestName: windowFacts.channel_guest_name?.trim() ?? null,
-        translated: Boolean(windowFacts.translated),
+        support: Boolean(windowFacts?.support),
+        channelGuestName: windowFacts?.channel_guest_name?.trim() ?? null,
+        translated: Boolean(windowFacts?.translated),
         failedMessages: failedMessages.map(row => row.id),
-        bookingActions: pending.map(entry => ({ ...projectEntry(entry), bookingChange: pendingViews.get(entry.id)! })),
+        bookingActions: olderProposals.filter(entry => changes.get(entry.id)?.status === 'pending').map(projectEntry),
       }
     }
     return { ...context, view: { ...sharedView, answers, ...windowView && { window: windowView } } }
@@ -324,6 +330,33 @@ export async function loadGuestThreadDetail(
     lastMessageAt: thread.last_message_at,
   }
   return { ...context, view }
+}
+
+/** The alert projects only its message and the prior messages it can quote. */
+export async function guestMessageAlertWindow(db: DbClient, entry: MessageRow, guest: GuestRequest, business: string, historyLimit: number) {
+  const previous = await queryAll<MessageRow>(db, `
+    SELECT m.* FROM messages m WHERE m.conversation_id = ? AND m.sequence < ?
+      AND (m.author_kind <> 'krabiclaw' OR m.event_name IN ('${OPENING_EVENT}', '${SCHEDULED_MESSAGE_EVENT}', '${MIRRORED_EVENT}'))
+      AND (${messageHasContentSql('m')} OR json_array_length(m.payload_json, '$.unshownFiles') > 0)
+    ORDER BY m.sequence DESC LIMIT ?`, [entry.conversation_id, entry.sequence, historyLimit])
+  const rows = [...previous.reverse(), entry]
+  const [{ photos, actors }, sender] = await Promise.all([
+    readTranscriptEnrichment(db, rows.map(row => row.id), rows.flatMap(row => row.author_user_id ? [row.author_user_id] : []), null),
+    entry.channel === 'airbnb' ? queryFirst<{ name: string | null }>(db, `SELECT (${CHANNEL_GUEST_NAME_SQL}) AS name`, [guest.id]) : null,
+  ])
+  const names = new Map(actors.map(actor => [actor.id, actor.name]))
+  const messages = rows.map(row => {
+    const role = messageRole(row, guest.user_id)
+    return {
+      id: row.id,
+      actorKind: role,
+      actorLabel: actorLabel(row, role, row.event_name === MIRRORED_EVENT, names, business),
+      body: row.body,
+      payload: parseMessagePayload(row),
+      attachments: photos.get(row.id) ?? [],
+    }
+  })
+  return { messages, channelGuestName: sender?.name ?? null }
 }
 
 /**

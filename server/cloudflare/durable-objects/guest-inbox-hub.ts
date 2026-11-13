@@ -2,7 +2,7 @@ import { DurableObject } from 'cloudflare:workers'
 import { HTTPError } from 'nitro'
 import { isDashboardInvalidation, type DashboardInvalidation } from '../../../shared/dashboard-invalidations'
 import { queryFirst } from '~/server/db'
-import { assignedMemberSql, memberAccessPrincipal, resolveOrganizationMembership, roleAllows, type ResolvedMembership } from '~/server/utils/member-access'
+import { assignedMemberSql, memberAccessPrincipal, resolveMembership, roleAllows, type ResolvedMembership } from '~/server/utils/member-access'
 import { assertConversationAccess } from '~/server/domain/conversations'
 import { createAuth, type CloudflareEnv } from '~/server/utils/auth'
 import { runOrganizationJobs } from '~/server/domain/cleaner-jobs'
@@ -41,10 +41,7 @@ async function socketMembership(env: GuestInboxHubEnv, attachment: InboxSocketAt
   // browser's cookie cache. Better Auth remains the session authority.
   const session = await createAuth(env).api.getSession({ headers, query: { disableCookieCache: true, disableRefresh: true } })
   if (!session || session.user.id !== attachment.userId || session.session.id !== attachment.sessionId) return null
-  const membership = await resolveOrganizationMembership(env, { organizationId: attachment.organizationId, userId: session.user.id })
-  if (!membership || (!await roleAllows({ ...membership, permissions: { operations: ['read'] } })
-    && !await roleAllows({ ...membership, permissions: { operations: ['assigned'] } }))) return null
-  return membership
+  return resolveMembership(env, { organizationId: attachment.organizationId, userId: session.user.id })
 }
 
 async function canReceive(env: GuestInboxHubEnv, attachment: InboxSocketAttachment, membership: ResolvedMembership, event: DashboardInvalidation): Promise<boolean> {
@@ -61,7 +58,7 @@ async function canReceive(env: GuestInboxHubEnv, attachment: InboxSocketAttachme
       [attachment.organizationId, event.conversation_id, attachment.userId])
   }
   if (event.type === 'MESSAGE_CREATE' || event.type === 'MESSAGE_UPDATE') {
-    // The one statement of who sees a conversation: a team conversation its participants, a guest one by role or responsibility.
+    // The one statement of who sees a conversation: a team conversation its participants, a guest one by messaging permission.
     try {
       await assertConversationAccess(env.DB, memberAccessPrincipal(membership, { env }), event.conversation_id)
       return true
@@ -109,9 +106,8 @@ export class GuestInboxHubObject extends DurableObject<GuestInboxHubEnv> {
     const auth = createAuth(this.env)
     const session = await auth.api.getSession({ headers: request.headers, query: { disableCookieCache: true, disableRefresh: true } })
     if (!session) return failure(401, 'UNAUTHORIZED', 'Authentication required', 'session')
-    const membership = await resolveOrganizationMembership(this.env, { organizationId, userId: session.user.id })
-    if (!membership || (!await roleAllows({ ...membership, permissions: { operations: ['read'] } })
-      && !await roleAllows({ ...membership, permissions: { operations: ['assigned'] } }))) {
+    const membership = await resolveMembership(this.env, { organizationId, userId: session.user.id })
+    if (!membership) {
       return failure(403, 'FORBIDDEN', 'Access denied', 'permissions')
     }
     const pair = new WebSocketPair()

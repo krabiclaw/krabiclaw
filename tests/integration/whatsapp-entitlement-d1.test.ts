@@ -18,7 +18,7 @@ import whatsappWebhook from '../../server/api/whatsapp/webhook.post.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
 import { createStay } from '../../server/domain/stays.ts'
 import { whatsAppServiceWindowOpen } from '../../server/utils/mcp-context.ts'
-import { createTeamThread, listTeamMessages, sendTeamMessage, teamAccessFor } from '../../server/domain/team-messages.ts'
+import { createTeamThread, listTeamMessages, sendTeamMessage } from '../../server/domain/team-messages.ts'
 import { memberAccessPrincipal } from '../../server/utils/member-access.ts'
 
 // Real D1 billing, membership, preferences and notification persistence. Only
@@ -279,7 +279,7 @@ test('an owner answers a guest by quoting their WhatsApp alert, with nothing ask
     // Quoting a teammate's alert posts to the team conversation as this member, once.
     await db.prepare("INSERT INTO user (id, name, email, \"emailVerified\", createdAt, updatedAt) VALUES ('teammate', 'Teammate', 'teammate@example.test', 1, 0, 0)").run()
     await db.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES ('member-mate', 'paid', 'teammate', 'member', 0)").run()
-    const teamAccess = (userId: string, role: string, memberId: string) => teamAccessFor(memberAccessPrincipal({ userId, role, organizationId: 'paid' } as never, { env }), memberId, 'send')
+    const teamAccess = (userId: string, role: string, memberId: string) => memberAccessPrincipal({ userId, role, memberId, organizationId: 'paid' } as never, { env })
     const [mate, ownerSeat] = await Promise.all([teamAccess('teammate', 'member', 'member-mate'), teamAccess('owner', 'owner', 'member-paid')])
     const teamThread = await createTeamThread(env, db, mate, { member_user_ids: ['owner'] })
     const teamAlerted = await sendTeamMessage(env, db, mate, teamThread.id, { body: 'Towels are out', photos: [], idempotency_key: 'team-alert', senderName: 'Teammate' })

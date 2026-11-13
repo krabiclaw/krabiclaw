@@ -173,7 +173,7 @@ test('an assigned member receives no owner work or unassigned restaurant work', 
   }
 })
 
-test('the member who handles a branch’s tables gains and loses its table bookings on the agenda and in the inbox', async ({ page, browser, request, baseURL }, testInfo) => {
+test('branch assignment opens booking operations and the messaging role opens guest chat', async ({ page, browser, request, baseURL }, testInfo) => {
   test.setTimeout(120_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Table bookings and role changes use disposable local data only')
   const release = await acquireTenantMutationLock(testInfo, seededTenant('restaurant').organizationId)
@@ -240,7 +240,7 @@ test('the member who handles a branch’s tables gains and loses its table booki
     const sockets: WebSocket[] = []
     memberPage.on('websocket', socket => sockets.push(socket))
     await dismissPreviewToolbar(memberPage)
-    const verifyAccess = async (assigned: boolean) => {
+    const verifyAccess = async (assigned: boolean, messaging = false) => {
       const agendaResponse = await memberRequest.get('/api/dashboard/agenda', { params: { org, from: day.date, to: day.date } })
       expect(agendaResponse.status(), await agendaResponse.text()).toBe(200)
       const agenda = await agendaResponse.json() as AgendaPayload
@@ -249,21 +249,17 @@ test('the member who handles a branch’s tables gains and loses its table booki
       const response = await memberRequest.get(listPath, { params: { org, location_id: locationId, type: 'booking' } })
       expect(response.status(), await response.text()).toBe(200)
       const { threads } = await response.json() as InboxListPage
-      if (assigned) expect(threads.find(thread => thread.id === reservationId)).toMatchObject({ id: reservationId, kind: 'guest', title: guestName, home: booking.location_title, when: ownerConversation.when })
+      if (messaging) expect(threads.find(thread => thread.id === reservationId)).toMatchObject({ id: reservationId, kind: 'guest', title: guestName, home: booking.location_title, when: ownerConversation.when })
       else expect(threads.some(thread => thread.id === reservationId)).toBe(false)
       const detail = await memberRequest.get(`${inboxPath}/${reservationId}`)
-      expect(detail.status(), await detail.text()).toBe(assigned ? 200 : 404)
+      expect(detail.status(), await detail.text()).toBe(messaging ? 200 : 404)
       const record = await memberRequest.get(bookingPath, { params: { org } })
       expect(record.status(), await record.text()).toBe(assigned ? 200 : 404)
-      if (assigned) {
-        expect((await detail.json() as { thread: InboxThread }).thread).toMatchObject({ id: reservationId, title: guestName, home: booking.location_title, when: ownerConversation.when, booking_id: booking.booking_id, record_kind: 'booking' })
-        expect((await record.json() as { booking: DashboardBookingDetails }).booking).toMatchObject({ booking_id: booking.booking_id, conversation_id: reservationId, guest_name: guestName, location_id: locationId, status: 'confirmed' })
-        const openedThread = memberPage.waitForResponse(response => response.request().method() === 'GET'
-          && new URL(response.url()).pathname === `${inboxPath}/${reservationId}`)
+      if (assigned) expect((await record.json() as { booking: DashboardBookingDetails }).booking).toMatchObject({ booking_id: bookingId, conversation_id: reservationId, location_id: locationId, status: 'confirmed' })
+      if (messaging) {
+        expect((await detail.json() as { thread: InboxThread }).thread).toMatchObject({ id: reservationId, title: guestName, home: booking.location_title, when: ownerConversation.when, booking_id: bookingId, record_kind: 'booking' })
         expect((await memberPage.goto(`${ORG}/messages/${reservationId}`))?.status()).toBe(200)
         await expect(memberPage.locator(`[data-thread-row="${reservationId}"]`)).toContainText(guestName)
-        // The first-open reconciliation read happens after the real socket upgrade.
-        expect((await openedThread).status()).toBe(200)
         await expect(memberPage.getByText(headerFacts, { exact: true })).toBeVisible()
         await expect(memberPage.getByRole('textbox', { name: 'Write a message…', exact: true })).toBeVisible()
       }
@@ -272,6 +268,16 @@ test('the member who handles a branch’s tables gains and loses its table booki
     await assign(actor.id)
     reassigned = true
     await verifyAccess(true)
+    const deniedSend = await memberRequest.post(`${inboxPath}/${reservationId}/operations/reply`, {
+      data: { body: 'Assignment alone cannot send this', idempotency_key: crypto.randomUUID() },
+    })
+    expect(deniedSend.status(), await deniedSend.text()).toBe(404)
+    const grant = await page.request.post('/api/auth/organization/update-member-role', {
+      headers: authRequestHeaders(baseURL!), data: { organizationId, memberId: actor.id, role: 'admin' },
+    })
+    expect(grant.status(), await grant.text()).toBe(200)
+    await loginAs(memberRequest, baseURL!, actor.userId)
+    await verifyAccess(true, true)
 
     const socket = sockets.findLast(socket => !socket.isClosed() && new URL(socket.url()).pathname === '/api/dashboard/guest-inbox/socket')
     expect(socket, 'The open guest conversation has a live dashboard socket').toBeDefined()
@@ -281,16 +287,20 @@ test('the member who handles a branch’s tables gains and loses its table booki
       const event: unknown = JSON.parse(String(frame.payload))
       return isDashboardInvalidation(event) && event.type === 'access.changed' && event.organization_id === organizationId
     } })
-    // The tables go back to the chef.
-    await assign(chefMemberId)
-    reassigned = false
+    const revoke = await page.request.post('/api/auth/organization/update-member-role', {
+      headers: authRequestHeaders(baseURL!), data: { organizationId, memberId: actor.id, role: 'member' },
+    })
+    expect(revoke.status(), await revoke.text()).toBe(200)
     await accessChanged
-    // Revocation clears the conversation already on screen before any fresh navigation or member reads.
+    // The workspace role ended. The booking assignment still holds.
     await expect(memberPage.getByText(guestName, { exact: true })).toHaveCount(0)
     await expect(memberPage.getByText(headerFacts, { exact: true })).toHaveCount(0)
     await expect(memberPage.getByRole('textbox', { name: 'Write a message…', exact: true })).toHaveCount(0)
     await expect(memberPage.locator(`[data-thread-row="${reservationId}"]`)).toHaveCount(0)
     await expect(memberPage.getByText('This conversation is no longer available', { exact: true })).toBeVisible()
+    await verifyAccess(true)
+    await assign(chefMemberId)
+    reassigned = false
     await verifyAccess(false)
   } catch (error) {
     failures.push(error)

@@ -19,12 +19,15 @@ export async function useGuestThread(threadId: Ref<string> | ComputedRef<string>
   const key = computed(() => `${personalScope.value ? `account-guest-thread:${session.value.data?.user.id}` : `dashboard-guest-thread:${organizationId.value ?? 'pending-organization'}${paged ? ':paged' : ''}`}:${threadId.value}`)
 
   const path = computed(() => `/api/dashboard/organizations/${organizationId.value}/guest-threads/${encodeURIComponent(threadId.value)}`)
-  const readPage = (before?: number, signal?: AbortSignal) => dashboardApi<{ thread: PagedThread }>(`${path.value}/transcript`, {
-    query: before === undefined ? undefined : { before }, signal, validate: isPagedThreadResponse,
-  })
+  const readPage = (before?: number, signal?: AbortSignal) => {
+    const options = { query: before === undefined ? undefined : { before }, signal, validate: isPagedThreadResponse }
+    return personalScope.value
+      ? applicationFetch<{ thread: PagedThread }>(`/api/account/messages/${encodeURIComponent(threadId.value)}`, options)
+      : dashboardApi<{ thread: PagedThread }>(`${path.value}/transcript`, options)
+  }
 
   const { data, pending, error, refresh, clear } = await useAsyncData<{ thread: ThreadDetail }>(key, async (_app, { signal }) => {
-    if (personalScope.value) return await applicationFetch<{thread:ThreadDetail}>(`/api/account/messages/${encodeURIComponent(threadId.value)}`,{signal,validate:isThreadDetailResponse})
+    if (personalScope.value) return await readPage(undefined, signal)
     if (!dashboardScope.value) {
       throw createError({ statusCode: 400, statusMessage: 'Dashboard route scope is incomplete' })
     }

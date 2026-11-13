@@ -10,7 +10,7 @@
     <template #right>
       <UButton icon="i-lucide-search" color="neutral" variant="soft" class="rounded-full" :aria-label="searching ? 'Close search' : 'Search messages'" :aria-pressed="searching" @click="toggleSearch" />
       <UButton v-if="!personalScope && canReadGuests" icon="i-lucide-settings" color="neutral" variant="soft" class="rounded-full" aria-label="Messaging settings" @click="settingsOpen = true" />
-      <UButton v-if="!personalScope && canSendTeam" :to="`${listPath}/new`" icon="i-lucide-square-pen" color="neutral" variant="soft" class="rounded-full" aria-label="New team conversation" />
+      <UButton v-if="!personalScope && canReadTeam" :to="`${listPath}/new`" icon="i-lucide-square-pen" color="neutral" variant="soft" class="rounded-full" aria-label="New team conversation" />
     </template>
     <ConversationList v-if="personalScope || canReadGuests || canReadTeam" :personal-scope="personalScope" @first="firstThread = $event">
       <template #filters><ReuseControls /></template>
@@ -39,9 +39,8 @@ const router = useRouter()
 const dashboard = useDashboardOrganization()
 const listPath = computed(() => `/dashboard/${encodeURIComponent(String(route.params.org_slug))}/messages`)
 const role = computed(() => dashboard.organization.value?.role as keyof typeof organizationRoles | undefined)
-const canReadTeam = computed(() => Boolean(role.value && authClient.organization.checkRolePermission({ role: role.value, permissions: { team_messages: ['read'] } })))
-const canSendTeam = computed(() => Boolean(role.value && authClient.organization.checkRolePermission({ role: role.value, permissions: { team_messages: ['send'] } })))
-const canReadGuests = computed(() => Boolean(role.value && (authClient.organization.checkRolePermission({ role: role.value, permissions: { operations: ['read'] } }) || authClient.organization.checkRolePermission({ role: role.value, permissions: { operations: ['assigned'] } }))))
+const canReadTeam = computed(() => Boolean(role.value))
+const canReadGuests = computed(() => Boolean(role.value && authClient.organization.checkRolePermission({ role: role.value, permissions: { operations: ['reply'] } })))
 const canManageMessages = computed(() => Boolean(role.value && authClient.organization.checkRolePermission({ role: role.value, permissions: { operations: ['update'] } })))
 const settingsOpen = ref(false)
 const [DefineControls, ReuseControls] = createReusableTemplate()
@@ -72,7 +71,6 @@ const realtime = useDashboardInvalidations()
 watch(realtime.event, async event => {
   if (event?.type !== 'CONVERSATION_LEAVE' || event.organization_id !== dashboard.organizationId.value || event.user_id !== session.value.data?.user.id) return
   clearNuxtData(`team-conversation:${event.organization_id}:${event.conversation_id}`)
-  clearNuxtData(`team-messages:${event.organization_id}:${event.conversation_id}`)
   if (route.params.conversation_id !== event.conversation_id) return
   if (leaveRequest.value === event.conversation_id) return
   firstThread.value = null
