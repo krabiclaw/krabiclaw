@@ -376,7 +376,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     await purgePublicResourceCacheNow(env, organization.id)
     return screen
   }
-  if (['pages', 'page', 'page-content', 'page-sections', 'page-order', 'page-section-add', 'page-section-remove', 'page-media', 'page-media-item', 'page-media-order', 'page-records', 'page-record', 'page-record-order'].includes(view)) {
+  if (['pages', 'page', 'page-content', 'page-sections', 'page-order', 'page-section-add', 'page-section-remove', 'page-media', 'page-media-item', 'page-media-order', 'page-records', 'page-record', 'page-record-order', 'page-settings'].includes(view)) {
     if (!isOrganizationWideRole(organization.role)) return missing('Page not found')
     const scope = { organizationId: organization.id }
     const locale = typeof query.locale === 'string' ? query.locale : undefined
@@ -390,6 +390,52 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     }
     const sourceId = typeof query.page_id === 'string' ? query.page_id : missing('Choose a page')
     const source = await getTenantPageById(db, sourceId, scope)
+    if (view === 'page-settings') {
+      if (locale) return missing('Edit section settings in the source language')
+      const block = source.blocks.find(block => block.id === query.block_id) ?? missing('Section not found')
+      const definitions = Object.entries(TENANT_PAGE_BLOCK_REGISTRY[block.type].fields).filter(([, item]) =>
+        item.kind === 'url' || item.kind === 'number' || item.kind === 'enum' || (item.kind === 'list' && !item.of))
+      const fields = definitions.map(([key, item]) => {
+        const value = item.store === 'level' ? block.level : block.data[key]
+        const choices = item.options?.filter(option => !option.platformOnly || option.value === String(value))
+        return field(key, item.label,
+          item.kind === 'enum' && choices?.length ? 'select' : item.kind === 'number' ? 'number' : item.kind === 'list' ? 'textarea' : 'text',
+          Array.isArray(value) ? value.join('\n') : value, { optional: !item.required, choices })
+      })
+      const revision = source.document.updated_at
+      const screen = { title: `${tenantPageBlockLabel(block.type)} settings`, rows: [], fields, revision, save_label: 'Save' }
+      if (!answer) return screen
+      if (answer.revision !== revision) throw new HTTPError({ statusCode: 409, message: 'The page changed. Reopen the section before saving.' })
+      if (fields.length !== Object.keys(answer.values).length || fields.some(item => typeof answer.values[item.key] !== 'string')) invalid('The saved fields do not match this section')
+      for (const [key, item] of definitions) {
+        const value = answer.values[key]!.trim()
+        if (item.store === 'level') {
+          if (!/^\d+$/.test(value)) return invalid('Choose a heading level')
+          block.level = Number(value)
+        } else if (item.kind === 'list') {
+          block.data[key] = value.split('\n').map(line => line.trim()).filter(Boolean)
+        } else if (!value && !item.required) {
+          Reflect.deleteProperty(block.data, key)
+        } else if (item.kind === 'number') {
+          const number = Number(value)
+          if (!value || !Number.isFinite(number) || (item.min !== undefined && number < item.min) || (item.max !== undefined && number > item.max)) {
+            return invalid(`Enter a valid number for ${item.label}`)
+          }
+          block.data[key] = number
+        } else if (item.kind === 'enum' && item.options && !item.options.some(option => option.value === value && (!option.platformOnly || option.value === block.data[key]))) {
+          return invalid(`Choose an available value for ${item.label}`)
+        } else {
+          block.data[key] = value
+        }
+      }
+      const problem = validateTenantPageBlock(block)[0]
+      if (problem) return invalid(problem)
+      await updateTenantPage(db, source.id, { userId, scope, env, data: {
+        path: source.path, title: source.title, summary: source.summary, page_type: source.page_type,
+        recipe: source.recipe, sort_order: source.sort_order, updated_at: revision, blocks: source.blocks,
+      } })
+      return screen
+    }
     if (view === 'page-records' || view === 'page-record' || view === 'page-record-order') {
       if (locale) return missing('Edit section records in the source language')
       const block = source.blocks.find(block => block.id === query.block_id) ?? missing('Section not found')
@@ -537,6 +583,8 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
         return { title: 'Sections', fields: [], rows: [
           ...source.blocks.flatMap(block => [
             row(block.id, tenantPageBlockLabel(block.type), 'page-content', { block_id: block.id }),
+            ...(Object.values(TENANT_PAGE_BLOCK_REGISTRY[block.type].fields).some(item => item.kind === 'url' || item.kind === 'number' || item.kind === 'enum' || (item.kind === 'list' && !item.of))
+              ? [row(`${block.id}:settings`, `${tenantPageBlockLabel(block.type)} settings`, 'page-settings', { block_id: block.id })] : []),
             ...Object.entries(TENANT_PAGE_BLOCK_REGISTRY[block.type].fields).flatMap(([collection, item]) =>
               Object.hasOwn(TENANT_PAGE_RECORD_NOUNS, collection) && item.kind === 'list' && item.of
                 && (!item.availableWhen || item.availableWhen.equals.includes(String(block.data[item.availableWhen.field] ?? '')))
