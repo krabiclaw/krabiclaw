@@ -23,8 +23,8 @@
       </div>
 
       <p class="text-sm text-muted">Signed in as {{ invitation.email }}.</p>
-      <UButton block size="lg" :loading="busy" @click="accept">Accept invitation</UButton>
-      <UButton block size="lg" color="neutral" variant="ghost" :disabled="busy" @click="decline">Decline</UButton>
+      <UButton block size="lg" :loading="busy" :disabled="!ready" @click="accept">Accept invitation</UButton>
+      <UButton block size="lg" color="neutral" variant="ghost" :disabled="busy || !ready" @click="decline">Decline</UButton>
       <UButton :to="appUrl" external color="neutral" variant="link" block>Open this invitation in the KrabiClaw app</UButton>
       <UAlert v-if="failure" color="error" variant="soft" :description="failure" />
     </template>
@@ -47,7 +47,7 @@
       <p class="text-sm text-muted">{{ lookupError.message }}</p>
       <template v-if="lookupError.code === 'YOU_ARE_NOT_THE_RECIPIENT_OF_THE_INVITATION'">
         <p class="text-sm text-muted">You're signed in as {{ signedInEmail }}. Use the account that received the invitation.</p>
-        <UButton block size="lg" :loading="busy" @click="switchAccount">Use a different account</UButton>
+        <UButton block size="lg" :loading="busy" :disabled="!ready" @click="switchAccount">Use a different account</UButton>
       </template>
       <UAlert v-if="failure" color="error" variant="soft" :description="failure" />
     </div>
@@ -100,6 +100,8 @@ const expiresOn = computed(() => invitation.value
   ? new Date(invitation.value.expiresAt).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
   : '')
 
+const ready = ref(false)
+onMounted(() => { ready.value = true })
 const busy = ref(false)
 const failure = ref<string | null>(null)
 const declined = ref(false)
