@@ -10,7 +10,7 @@ interface SubscriptionCheckoutInput {
   previousPriceId?: string | null
   newPriceId?: string | null
   onAction?: (_action: StripeGa4IntentAction) => void
-  /** Where Stripe and Better Auth send the owner back: the page that shows the plan, not the leaf that changed it. */
+  /** Where Stripe and Better Auth send the owner after checkout. */
   returnPath: string
 }
 

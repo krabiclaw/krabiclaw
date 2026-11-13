@@ -120,6 +120,30 @@ export interface ThreadOperationalRecord {
   review_id: string | null
   /** The advance notice the booking was made under (its frozen policy), which closes the guest's own cancellation; null for no notice. */
   advance_notice_minutes: number | null
+  respond_by: string | null
+  pay_by: string | null
+  payment_processing: boolean
+}
+
+/** The guest may pay after the host's decision. The decision message owns its deadline. */
+export const stayRequestRespondBySql = (booking: string) => `json_extract(${booking}.policy_json, '$.stay_request.respond_by')`
+export const stayRequestPayBySql = (conversation: string) => `(SELECT json_extract(approval.payload_json, '$.pay_by') FROM messages approval
+  WHERE approval.conversation_id = ${conversation} AND approval.event_name = 'booking.confirm'
+    AND json_type(approval.payload_json, '$.pay_by') = 'text' ORDER BY approval.sequence DESC LIMIT 1)`
+export const stayRequestConfirmationKey = (bookingId: string) => `stay:${bookingId}:request-paid`
+/** Only a payment confirmation already sent to Stripe protects an expired request. */
+export const noStayRequestPaymentInFlightSql = (conversation: string) => `NOT EXISTS (
+  SELECT 1 FROM payment_checkout_holds h JOIN payments p ON p.id=h.payment_id AND p.organization_id=h.organization_id
+  WHERE h.conversation_id=${conversation} AND h.status='active' AND json_type(p.review_json, '$.confirmation_started_at') = 'text' AND h.expires_at > ?
+)`
+
+export function stayRequestProgress(record: Pick<ThreadOperationalRecord, 'status' | 'respond_by' | 'pay_by'>) {
+  return {
+    request_status: record.status === 'pending' && record.respond_by
+      ? record.pay_by ? 'awaiting_payment' as const : 'awaiting_approval' as const : null,
+    respond_by: record.respond_by,
+    pay_by: record.pay_by,
+  }
 }
 
 /** Whether a stored booking end is a local day alone (its home had no time for it). */
@@ -195,7 +219,7 @@ export const BOOKING_RECORDS_SQL = `(
     SELECT b.id, (SELECT conv.id FROM conversations conv WHERE conv.booking_id = b.id AND conv.kind = 'booking') AS conversation_id, b.organization_id, b.status, b.party_size, b.party_size_is_minimum, b.starts_at, b.ends_at, b.timezone,
            b.location_id, b.product_id, CASE WHEN b.product_session_id IS NULL THEN 'nights' ELSE 'slot' END AS unit,
            p.kind AS product_kind, b.product_id AS offering_id, p.name AS product_name, sc.internal_name AS product_internal_name, c.assigned_member_id, b.user_id,
-           b.no_show_at, b.created_at, b.received_at, b.updated_at, b.version,
+           b.no_show_at, b.created_at, b.received_at, b.updated_at, b.version, ${stayRequestRespondBySql('b')} AS respond_by,
            json_extract(b.policy_json, '$.advance_notice_minutes') AS advance_notice_minutes,
            json_array(b.version, b.status, b.product_id, b.product_session_id, b.starts_at, b.ends_at, b.timezone, b.updated_at) AS fingerprint
       FROM bookings b
@@ -205,7 +229,7 @@ export const BOOKING_RECORDS_SQL = `(
   )`
 
 /** One row of BOOKING_RECORDS_SQL. received_at is null for a booking imported or known before KrabiClaw received it. */
-export interface BookedRecord extends Omit<ThreadOperationalRecord, 'review_id'> {
+export interface BookedRecord extends Omit<ThreadOperationalRecord, 'review_id' | 'pay_by' | 'payment_processing'> {
   conversation_id: string | null
   offering_id: string
   created_at: string
@@ -241,16 +265,17 @@ export function bookedRecordGuard(record: Pick<BookedRecord, 'organization_id' |
 }
 
 export async function getThreadOperationalRecord(db: DbClient, requestId: string): Promise<ThreadOperationalRecord | null> {
-  const record = await queryFirst<Omit<ThreadOperationalRecord, 'party_size_is_minimum'> & { party_size_is_minimum: number }>(db, `
+  const record = await queryFirst<Omit<ThreadOperationalRecord, 'party_size_is_minimum' | 'payment_processing'> & { party_size_is_minimum: number; payment_processing: number }>(db, `
     SELECT br.unit, br.id, br.status, br.party_size, br.party_size_is_minimum, br.starts_at, br.ends_at, br.timezone, br.location_id, br.product_id, br.product_kind, br.product_name, br.product_internal_name,
-           br.assigned_member_id, br.organization_id, br.user_id, br.no_show_at, br.version,
+           br.assigned_member_id, br.organization_id, br.user_id, br.no_show_at, br.version, br.respond_by, ${stayRequestPayBySql('owner.id')} AS pay_by,
+           CASE WHEN br.status='pending' AND br.respond_by IS NOT NULL THEN NOT (${noStayRequestPaymentInFlightSql('owner.id')}) ELSE 0 END AS payment_processing,
            (SELECT rv.id FROM reviews rv WHERE rv.organization_id = br.organization_id AND rv.booking_id = br.id ORDER BY rv.created_at LIMIT 1) AS review_id, br.advance_notice_minutes
       FROM conversations owner
       JOIN ${BOOKING_RECORDS_SQL} br ON br.id = owner.booking_id AND br.organization_id = owner.organization_id
      WHERE owner.id = ? AND owner.kind = 'booking'
      LIMIT 1
-  `, [requestId])
-  if (record) return { ...record, party_size_is_minimum: Number(record.party_size_is_minimum) === 1 }
+  `, [new Date().toISOString(), requestId])
+  if (record) return { ...record, party_size_is_minimum: Number(record.party_size_is_minimum) === 1, payment_processing: record.payment_processing === 1 }
   const request = await queryFirst<{ kind: GuestRequestKind; uncaptured_checkout: number | null }>(db, `
     SELECT r.kind,
       (json_extract(r.payload_json, '$.provenance.creation_kind') = 'checkout'
@@ -357,8 +382,12 @@ export function threadPayloadForGuest(input: GuestThreadInput): GuestThreadPaylo
  */
 export function requestActions(record: ThreadOperationalRecord | null, now: string): string[] {
   const noShow = canMarkNoShow(record, now) ? ['no_show'] : []
-  // A stay is changed and cancelled from its own screen; its thread is the conversation.
-  if (record?.unit === 'nights' || !canCancelBookingRequest(record, now)) return noShow
+  if (!canCancelBookingRequest(record, now)) return noShow
+  if (record.unit === 'nights') {
+    if (record.status !== 'pending' || !record.respond_by) return noShow
+    if (record.pay_by) return !record.payment_processing && record.pay_by > now ? ['cancel'] : noShow
+    return record.respond_by > now ? ['confirm', 'reject'] : noShow
+  }
   return [...(record.status === 'pending' ? ['confirm', 'reject', 'change', 'cancel'] : ['change', 'cancel']), ...noShow]
 }
 

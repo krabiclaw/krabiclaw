@@ -90,6 +90,22 @@ export function catalogPath(orgSlug: string, locationId?: string | null): string
   return scopedTo(`${organizationBase(orgSlug)}/products`, locationId)
 }
 
+export function firstHomeSetupPath(orgSlug: string): string {
+  return `/dashboard/${encodeURIComponent(orgSlug)}/products?kind=stay`
+}
+
+export function firstMenuSectionSetupPath(orgSlug: string, locationId: string): string {
+  return scopedTo(`${organizationBase(orgSlug)}/products/first-menu`, locationId)
+}
+
+export function firstPracticeAreaPath(orgSlug: string): string {
+  return `${organizationBase(orgSlug)}/first-practice-area`
+}
+
+export function firstExperienceSetupPath(orgSlug: string, step?: string): string {
+  return `${catalogPath(orgSlug)}/first-experience${step ? `?step=${encodeURIComponent(step)}` : ''}`
+}
+
 export function productEditorPath(orgSlug: string, productId: string, locationId?: string | null): string {
   return scopedTo(`${organizationBase(orgSlug)}/products/${encodeURIComponent(productId)}`, locationId)
 }

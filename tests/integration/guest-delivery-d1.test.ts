@@ -419,6 +419,7 @@ test('a replayed status email sends its recorded content and refuses a supersede
         unit: 'slot', id: 'reservation-status', status: 'cancelled', version: 2, party_size: 2, party_size_is_minimum: false,
         starts_at: '2098-10-01T11:00:00.000Z', ends_at: '2098-10-01T13:00:00.000Z', timezone: 'Asia/Bangkok',
         location_id: 'location-status', product_id: 'table-status', product_kind: 'table', product_name: 'Dining room', product_internal_name: null, assigned_member_id: null, no_show_at: null, review_id: null, advance_notice_minutes: null,
+        respond_by: null, pay_by: null, payment_processing: false,
         organization_id: 'org-status', user_id: null,
       },
     })

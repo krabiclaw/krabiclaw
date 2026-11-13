@@ -4,7 +4,7 @@ import { getRouterParam } from 'nitro/h3'
 import { d1JsonStringSet, queryAll, queryFirst } from '~/server/db'
 import { getDashboardMemberContext } from '~/server/utils/dashboard-context'
 import { assignedMemberSql, memberAccessPrincipal } from '~/server/utils/member-access'
-import { BOOKING_RECORDS_SQL, getGuestRequest, getThreadOperationalRecord, requestActions } from '~/server/domain/requests'
+import { BOOKING_RECORDS_SQL, getGuestRequest, getThreadOperationalRecord, requestActions, type BookedRecord } from '~/server/domain/requests'
 import { guestReplyDestination } from '~/server/domain/guest-threads/operations'
 import { getStay, listStays, readStayCalendar, readStayCalendars, stayAccessFor } from '~/server/domain/stays'
 import { readPlacesCalendar } from '~/server/domain/places'
@@ -27,8 +27,8 @@ export async function dashboardBookingContext(event: H3Event) {
   const context = await dashboardBookingsContext(event)
   const bookingId = getRouterParam(event, 'booking_id')
   if (!bookingId) throw new HTTPError({ statusCode: 400, message: 'Booking ID is required' })
-  const booking = await queryFirst<{ unit: 'slot' | 'nights'; conversation_id: string }>(context.db, `
-    SELECT b.unit, c.id AS conversation_id FROM ${BOOKING_RECORDS_SQL} b
+  const booking = await queryFirst<Pick<BookedRecord, 'unit' | 'status' | 'respond_by'> & { conversation_id: string }>(context.db, `
+    SELECT b.unit, c.id AS conversation_id, b.status, b.respond_by FROM ${BOOKING_RECORDS_SQL} b
       JOIN conversations c ON c.booking_id=b.id AND c.organization_id=b.organization_id AND c.kind='booking'
       WHERE b.organization_id = ? AND b.id = ?
         ${context.access.manage ? '' : `AND ${assignedMemberSql('b')}`}
@@ -48,9 +48,11 @@ export async function dashboardBookingDetails(event: H3Event) {
   if (!conversation) throw new Error('The booking has no guest conversation')
   const [destination, record] = await Promise.all([guestReplyDestination(db, conversation), getThreadOperationalRecord(db, conversation.id)])
   if (!record) throw new Error('The conversation has no booking')
-  const available_actions = [
-    ...requestActions(record, new Date().toISOString()).filter(action => action === 'no_show' && !isChannelManagedStay(stay)),
-    ...(stay.status === 'cancelled' ? [] : ['move', ...(!isChannelManagedStay(stay) ? ['edit', 'cancel'] : [])]),
+  const channelOwned = isChannelManagedStay(stay)
+  const actions = requestActions(record, new Date().toISOString())
+  const available_actions = stay.request_status ? actions : [
+    ...actions.filter(action => action === 'no_show' && !channelOwned),
+    ...(stay.status === 'cancelled' ? [] : ['move', ...(!channelOwned ? ['edit', 'cancel'] : [])]),
   ]
   return { booking: { ...nightBooking(stay), available_actions }, manage: true, can_message_guest: destination.channel !== null && !conversation.blocked_at }
 }

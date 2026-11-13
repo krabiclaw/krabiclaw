@@ -188,13 +188,13 @@ export async function executeMcpToolCall(
     return {
       draft_id: row.id, updated_at: row.updated_at, ...(row.organization_id ? { organization_id: row.organization_id } : {}), status: row.status,
       ...(payload.request ? { idempotency_key: payload.request.key } : {}),
-      subdomain: row.subdomain_candidate, name: payload.preview.brandName, vertical: payload.preview.vertical, source_locale: details.source_locale,
+      subdomain: row.subdomain_candidate, name: row.name, vertical: row.vertical, source_locale: details.source_locale,
       ...(details.currency ? { currency: details.currency } : {}), ...(details.timezone ? { timezone: details.timezone } : {}),
       location: Object.fromEntries(Object.entries({ street_address: details.street_address, address_line_2: details.address_line_2, city: details.city,
         region: details.region, postal_code: details.postal_code, country: details.country, phone: details.phone, website_url: details.website_url }).filter(([, value]) => value !== null)),
-      ...(payload.preview.config.draft_hero_headline ? { hero_headline: payload.preview.config.draft_hero_headline } : {}),
-      ...(payload.preview.config.draft_hero_subtitle ? { hero_subtitle: payload.preview.config.draft_hero_subtitle } : {}),
-      products: payload.preview.products.map(product => ({ name: product.name, category: product.collection, ...(product.price ? { amount_minor: product.price.unit_amount } : {}) })),
+      ...(payload.preview?.config.draft_hero_headline ? { hero_headline: payload.preview.config.draft_hero_headline } : {}),
+      ...(payload.preview?.config.draft_hero_subtitle ? { hero_subtitle: payload.preview.config.draft_hero_subtitle } : {}),
+      products: (payload.preview?.products ?? []).map(product => ({ name: product.name, category: product.collection, ...(product.price ? { amount_minor: product.price.unit_amount } : {}) })),
       missing_fields: onboardingPublicationMissingFields(row, payload),
     }
   }

@@ -15,11 +15,22 @@ import { dismissOpportunity, listOpportunities } from '../../server/domain/oppor
 import { listTasks, parseTaskListQuery, taskViewer } from '../../server/domain/tasks.ts'
 import { writeMemberScheduling } from '../../server/domain/member-scheduling.ts'
 import { isDashboardInvalidation, type DashboardInvalidation } from '../../shared/dashboard-invalidations.ts'
+import { H3Event } from 'h3'
 import { getQuery, H3 } from 'nitro/h3'
 import { createAuth } from '../../server/utils/auth.ts'
 import guestStayRoute from '../../server/api/public/guest-stays/[activity_id].get.ts'
 import accountCancelRoute from '../../server/api/account/bookings/[booking_id]/cancel.post.ts'
 import accountStayRoute from '../../server/api/account/bookings/[booking_id].get.ts'
+import accountPayRoute from '../../server/api/account/bookings/[booking_id]/pay.post.ts'
+import dashboardBookingPatchRoute from '../../server/api/dashboard/bookings/[booking_id].patch.ts'
+import paymentHandoffRoute from '../../server/api/public/payments/[payment_id].get.ts'
+import paymentConfirmRoute from '../../server/api/public/payments/[payment_id]/confirm.post.ts'
+import paymentReviewRoute from '../../server/api/public/payments/[payment_id]/review.post.ts'
+import { createProductBooking, notifyProductBookingCreated } from '../../server/domain/product-bookings.ts'
+import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
+import { getThreadOperationalRecord, requestActions } from '../../server/domain/requests.ts'
+import { cancelStayAsGuest, createStayRequest, expireStayRequests } from '../../server/domain/stays.ts'
+import { projectStripeConnectedAccount, reserveStripeConnectedAccount } from '../../server/utils/stripe-connect.ts'
 import paymentReturnRoute from '../../server/api/public/payments/[payment_id]/return.post.ts'
 import { tokenHash } from '../../server/domain/payments/buyer.ts'
 import { createLocation, updateLocation } from '../../server/utils/location-management.ts'
@@ -1836,6 +1847,418 @@ test('a stay paid on a business’s site returns to that site’s stay confirmat
     assert.equal(account.status, 200)
     assert.deepEqual((await account.json() as GuestStayAccount).home.location, body.home.location)
     assert.equal((await call(`/api/account/bookings/${stay.id}`, {}, { cookie: checkoutCookie })).status, 404)
+  } finally {
+    await runtime.dispose()
+  }
+})
+
+test('a stay request can be paid only after approval and Stripe confirms the same stay', { timeout: 120_000 }, async t => {
+  const now = Date.now()
+  t.mock.timers.enable({ apis: ['Date'], now })
+  const { runtime, db, env: bindings } = await boot()
+  try {
+    const env = {
+      ...bindings, BETTER_AUTH_URL: 'https://proof.example', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example',
+      NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN: 'https://sites.example', EMAIL_REPLY_SECRET: 'local-stay-reply',
+      EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only', STRIPE_SECRET_KEY: 'sk_live_local_boundary',
+      STRIPE_TEST_SECRET_KEY: 'sk_test_local_boundary', STRIPE_TEST_PUBLISHABLE_KEY: 'pk_test_mock',
+      STRIPE_TEST_PAYMENTS_METHOD_CONFIGURATION: 'pmc_parent',
+    }
+    await db.batch([
+      db.prepare("UPDATE organization SET subdomain='demo',settings_json=json_set(settings_json,'$.lodging_booking.confirmation_mode','review') WHERE id=?").bind(ORG),
+      db.prepare("INSERT INTO organization_locales(id,organization_id,locale,is_source,status) VALUES('org-en',?,'en',1,'published')").bind(ORG),
+      db.prepare("INSERT INTO organization_domains(id,organization_id,domain,type,role,status) VALUES('stay-origin',?,'demo.sites.example','subdomain','canonical','active')").bind(ORG),
+      db.prepare("INSERT INTO subscription(id,plan,referenceId,status,seats) VALUES('stay-plan','business',?,'active',1)").bind(ORG),
+    ])
+    const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site' })
+    await writeMemberScheduling({ env, userId: OWNER, organizationId: ORG }, `m-${OWNER}`, { updated_at: null, public_name: 'Cabin host', public_approved: true })
+    await updateStayHome(env, db, manager, cabin.id, { cancellation_policy: 'moderate', long_term_cancellation_policy: 'firm' })
+    await setProductPublication(db, { env, organizationId: ORG, productId: cabin.id, published: true, actor: { actorId: OWNER } })
+    const reserved = await reserveStripeConnectedAccount(db, { organizationId: ORG, livemode: false })
+    await projectStripeConnectedAccount(db, { reservationId: reserved.id, organizationId: ORG, stripeAccountId: 'acct_seller', country: 'US', livemode: false, cardPaymentsStatus: 'active', cardPaymentsResolutions: [], requirements: [], stripeRefreshedAt: new Date().toISOString() })
+    const template = await saveMessageTemplate(db, env, manager, null, { title: 'Reservation received', body: 'Thanks for your reservation.', schedule: { trigger: 'booking_received', delay_minutes: 5, product_ids: [cabin.id] } })
+
+    const auth = createAuth(env)
+    const buyer = 'previously-verified-stay-buyer'
+    const password = 'CabinProof123!'
+    const hashedPassword = await hashPassword(password)
+    await db.batch([
+      db.prepare('INSERT INTO user(id,name,email,emailVerified) VALUES(?,?,?,1)').bind(buyer, 'Ana', 'ana@example.com'),
+      ...[buyer, OWNER].map(id => db.prepare("INSERT INTO account(id,accountId,providerId,userId,password) VALUES(?,?,'credential',?,?)").bind(id, id, id, hashedPassword)),
+    ])
+    const login = async (email: string) => (await auth.api.signInEmail({ body: { email, password }, returnHeaders: true }))
+      .headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
+    const [cookie, ownerCookie] = await Promise.all([login('ana@example.com'), login(`${OWNER}@example.test`)])
+    const anonymous = await auth.api.signInAnonymous({ headers: new Headers(), returnHeaders: true })
+    const siteCookie = anonymous.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
+    const app = new H3()
+    app.use(event => {
+      event.context.organizationId = ORG
+      event.context.tenantType = 'tenant'
+      event.context.tenantHost = 'demo.sites.example'
+    })
+    app.post('/api/account/bookings/:booking_id/pay', accountPayRoute)
+    app.get('/api/account/bookings/:booking_id', accountStayRoute)
+    app.post('/api/account/bookings/:booking_id/cancel', accountCancelRoute)
+    app.patch('/api/dashboard/bookings/:booking_id', dashboardBookingPatchRoute)
+    app.get('/api/public/payments/:payment_id', paymentHandoffRoute)
+    app.post('/api/public/payments/:payment_id/review', paymentReviewRoute)
+    app.post('/api/public/payments/:payment_id/confirm', paymentConfirmRoute)
+    app.post('/api/public/payments/:payment_id/return', paymentReturnRoute)
+    const runtimeContext = { name: 'cloudflare', cloudflare: { env } }
+    const call = (path: string, body?: Record<string, unknown>, session = cookie, method = body === undefined ? 'GET' : 'POST') => app.request(Object.assign(new Request(`https://proof.example${path}`, {
+      method,
+      headers: { cookie: session, origin: 'https://proof.example', 'content-type': 'application/json', 'cf-connecting-ip': '192.0.2.1' },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    }), { runtime: runtimeContext }))
+
+    const subtotal = 30_000
+    const expected = 31_000
+    const paymentIntent = { id: 'pi_approved_stay', object: 'payment_intent', livemode: false, currency: 'usd', amount: subtotal,
+      amount_received: 0, status: 'requires_payment_method', client_secret: 'pi_approved_stay_secret', customer: null, payment_method_types: ['card'],
+      application_fee_amount: null, latest_charge: null as string | null, payment_method: null as string | null,
+      last_payment_error: null as { type: string; code: string; message: string } | null,
+      hooks: { inputs: { tax: { calculation: null as string | null } } },
+      metadata: { krabiclaw_payment_id: '' } }
+    const charge = { id: 'ch_approved_stay', object: 'charge', livemode: false, amount: expected, currency: 'usd',
+      created: Math.floor(Date.now() / 1000), payment_intent: paymentIntent.id, payment_method: 'pm_card', receipt_url: 'https://pay.stripe.com/receipts/stay',
+      billing_details: { email: 'ana@example.com' } }
+    let bookingId = ''
+    let activity = ''
+    let approvedPayUrl = ''
+    let intentCount = 0
+    let rejections = 0
+    let declines = 0
+    let captures = 0
+    let readinessChecks = 0
+    let releaseConcurrentReadiness!: () => void
+    const concurrentReadiness = new Promise<void>(resolve => { releaseConcurrentReadiness = resolve })
+    const { promise: competingMethodRequested, resolve: methodRequested } = Promise.withResolvers<undefined>()
+    const { promise: allowCompetingMethod, resolve: releaseCompetingMethod } = Promise.withResolvers<undefined>()
+    const nativeFetch = globalThis.fetch
+    t.mock.method(globalThis, 'fetch', async (request: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(request instanceof Request ? request.url : String(request))
+      if (url.origin !== 'https://api.stripe.com') return nativeFetch(request, init)
+      if (url.pathname === '/v2/core/accounts/acct_seller') return Response.json({
+        id: 'acct_seller', livemode: false, dashboard: 'express', identity: { country: 'US' },
+        defaults: { responsibilities: { fees_collector: 'application', losses_collector: 'stripe' } },
+        configuration: { merchant: { capabilities: { card_payments: { status: 'active', status_details: [] } } } }, requirements: { entries: [] },
+      })
+      if (url.pathname === '/v1/payment_method_configurations') {
+        if (++readinessChecks === 2) releaseConcurrentReadiness()
+        await concurrentReadiness
+        return Response.json({ data: [{ id: 'pmc_child', parent: 'pmc_parent', active: true }], has_more: false })
+      }
+      assert.equal(new Headers(init?.headers).get('stripe-account'), 'acct_seller')
+      if (url.pathname === '/v1/tax/settings') return Response.json({ status: 'active' })
+      if (url.pathname === '/v1/tax/registrations') return Response.json({ data: [{ id: 'taxreg_stay' }] })
+      if (url.pathname === '/v1/tax/calculations') {
+        const other = new URLSearchParams(String(init?.body)).get('customer_details[address][postal_code]') === '94016'
+        const tax = other ? 2_000 : 1_000
+        return Response.json({ id: other ? 'taxcalc_other' : 'taxcalc_reviewed', amount_total: subtotal + tax, tax_amount_exclusive: tax, tax_amount_inclusive: 0 })
+      }
+      if (url.pathname === '/v1/tax/calculations/taxcalc_reviewed') return Response.json({ tax_amount_exclusive: 1_000, tax_amount_inclusive: 0 })
+      if (url.pathname === '/v1/payment_intents') {
+        assert.equal(init?.method, 'POST')
+        const params = new URLSearchParams(String(init?.body))
+        assert.equal(params.get('amount'), String(subtotal))
+        paymentIntent.metadata.krabiclaw_payment_id = params.get('metadata[krabiclaw_payment_id]')!
+        intentCount++
+      } else if (url.pathname === '/v1/customers' && init?.method === 'POST') {
+        assert.equal(new URLSearchParams(String(init.body)).get('email'), 'ana@example.com')
+        return Response.json({ id: 'cus_approved_stay' })
+      } else if (url.pathname === '/v1/customers/cus_approved_stay/payment_methods') {
+        return Response.json({ data: [], has_more: false })
+      } else if (url.pathname.startsWith('/v1/payment_methods/')) {
+        const id = url.pathname.split('/').at(-1)
+        const other = id === 'pm_other'
+        if (other) {
+          methodRequested(undefined)
+          await allowCompetingMethod
+        }
+        return Response.json({ id, type: 'card', card: { brand: 'visa', last4: '4242' }, billing_details: { address: { country: 'US', postal_code: other ? '94016' : '98104' } } })
+      } else if (url.pathname === '/v1/charges/ch_approved_stay') {
+        return Response.json(charge)
+      } else if (url.pathname === '/v1/payment_intents/pi_approved_stay' && init?.method === 'POST') {
+        const params = new URLSearchParams(String(init.body))
+        paymentIntent.payment_method = params.get('payment_method')
+        paymentIntent.amount = Number(params.get('amount'))
+        paymentIntent.hooks.inputs.tax.calculation = params.get('hooks[inputs][tax][calculation]')
+        paymentIntent.status = 'requires_confirmation'
+        paymentIntent.last_payment_error = null
+      } else if (url.pathname.endsWith('/confirm')) {
+        if (rejections++ === 0) return Response.json({ error: { type: 'invalid_request_error', code: 'parameter_invalid_integer', param: 'amount_to_confirm', message: 'Invalid amount.' } }, { status: 400 })
+        if (paymentIntent.payment_method === 'pm_declined') {
+          if (++declines === 1) {
+            const waiting = await call(`${paymentPath}?claim=${claim}`)
+            assert.equal(waiting.status, 200, await waiting.clone().text())
+            assert.equal((await waiting.json()).state, 'processing')
+            const pendingReturn = await call(`${paymentPath}/return`, { claim })
+            assert.equal(pendingReturn.status, 200, await pendingReturn.clone().text())
+            assert.deepEqual(await pendingReturn.json(), { state: 'processing' })
+            const concurrent = await call(`${paymentPath}/confirm`, { claim, payment_method_id: 'pm_declined', total: expected })
+            assert.equal(concurrent.status, 409, await concurrent.clone().text())
+            assert.equal((await concurrent.json()).data?.code, 'payment_in_progress')
+          }
+          const decline = { type: 'card_error', code: 'card_declined', message: 'Your card was declined.' }
+          paymentIntent.status = 'requires_payment_method'
+          paymentIntent.last_payment_error = decline
+          return Response.json({ error: { ...decline, payment_intent: paymentIntent } }, { status: 402 })
+        }
+        releaseCompetingMethod(undefined)
+        const competing = await competingReview
+        assert.equal(competing.status, 409, await competing.clone().text())
+        assert.equal((await competing.json()).data.code, 'payment_in_progress')
+        assert.deepEqual([paymentIntent.payment_method, paymentIntent.amount, paymentIntent.hooks.inputs.tax.calculation], ['pm_other', 32_000, 'taxcalc_other'])
+        const params = new URLSearchParams(String(init?.body))
+        paymentIntent.payment_method = params.get('payment_method') ?? paymentIntent.payment_method
+        paymentIntent.amount = Number(params.get('amount_to_confirm') ?? paymentIntent.amount)
+        paymentIntent.hooks.inputs.tax.calculation = params.get('hooks[inputs][tax][calculation]') ?? paymentIntent.hooks.inputs.tax.calculation
+        assert.deepEqual([paymentIntent.payment_method, paymentIntent.amount, paymentIntent.hooks.inputs.tax.calculation], ['pm_card', expected, 'taxcalc_reviewed'])
+        paymentIntent.latest_charge = charge.id
+        paymentIntent.status = 'requires_capture'
+      } else if (url.pathname.endsWith('/capture')) {
+        // The buyer paid just before the deadline. An existing in-flight checkout is still accessible.
+        t.mock.timers.setTime(now + 86_400_001)
+        const resumed = await call(`/api/account/bookings/${bookingId}/pay`, {})
+        assert.equal(resumed.status, 200, await resumed.clone().text())
+        assert.deepEqual(await resumed.json(), { pay_url: approvedPayUrl })
+        assert.equal(intentCount, 1)
+        const activityRead = await call(`/api/account/bookings/${activity}?lookup=conversation`)
+        assert.equal(activityRead.status, 200, await activityRead.clone().text())
+        const paying = await activityRead.json() as GuestStayAccount
+        assert.equal(paying.booking.status, 'pending')
+        assert.equal(paying.payment_processing, true)
+        assert.deepEqual(requestActions(await getThreadOperationalRecord(db, activity), new Date().toISOString()), [])
+        const withdraw = await call(`/api/account/bookings/${bookingId}/cancel`, { version: paying.booking.version })
+        assert.equal(withdraw.status, 409)
+        paymentIntent.amount_received = expected
+        paymentIntent.status = 'succeeded'
+        captures++
+      } else {
+        assert.equal(url.pathname, '/v1/payment_intents/pi_approved_stay')
+        assert.equal(init?.method, 'GET')
+      }
+      return Response.json(paymentIntent)
+    })
+
+    const date = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10)
+    const requestBody = {
+      guest_name: 'Ana', guest_email: 'ana@example.com', guest_phone: '+12025550123', check_in_date: date(10), check_out_date: date(12),
+      adults: 2, idempotency_key: 'stay-request', confirmation_mode: 'review',
+    }
+    const submitStayRequest = (session: string, body = requestBody) => createProductBooking(new H3Event(Object.assign(new Request('https://proof.example/api/public/stays/cabin/bookings', {
+      headers: { cookie: session, 'cf-connecting-ip': '192.0.2.1' },
+    }), { runtime: runtimeContext })), { organizationId: ORG, slug: cabin.slug, body })
+    const concurrent = await Promise.all([submitStayRequest(siteCookie), submitStayRequest(siteCookie)])
+    const [initial, duplicate] = concurrent.sort((left, right) => right.status - left.status)
+    assert(initial && duplicate)
+    assert.equal(initial.status, 201, JSON.stringify(initial.body))
+    assert.equal(initial.body.status, 'pending')
+    assert.equal(initial.body.request_status, 'awaiting_approval')
+    assert.deepEqual(duplicate, { status: 200, body: { ...initial.body, replayed: true } })
+    bookingId = initial.body.booking_id as string
+    activity = initial.body.conversation_id as string
+    const payPath = `/api/account/bookings/${bookingId}/pay`
+    const scheduledReservationMessage = () => db.prepare('SELECT status, due_at FROM scheduled_guest_messages WHERE booking_id=? AND template_id=?').bind(bookingId, template.id).first()
+    const read = async () => {
+      const response = await call(`/api/account/bookings/${activity}?lookup=conversation`)
+      assert.equal(response.status, 200, await response.clone().text())
+      return await response.json() as GuestStayAccount
+    }
+
+    assert.equal(await db.prepare('SELECT user_id FROM bookings WHERE id=?').bind(bookingId).first('user_id'), anonymous.response!.user.id)
+    assert.equal((await read()).booking.request_status, 'awaiting_approval')
+    assert.equal(await scheduledReservationMessage(), null)
+    assert.equal(await db.prepare('SELECT user_id FROM bookings WHERE id=?').bind(bookingId).first('user_id'), buyer)
+    assert.equal((await call(payPath, {})).status, 409)
+    assert.equal(intentCount, 0)
+    const originalClaims = await db.prepare('SELECT date,booking_id,hold_id FROM stay_nights WHERE booking_id=? ORDER BY date').bind(bookingId).all()
+    assert.deepEqual(originalClaims.results, [date(10), date(11)].map(date => ({ date, booking_id: bookingId, hold_id: null })))
+
+    const decision = await executeGuestThreadOperation(db, { threadId: activity, organizationId: ORG, action: 'confirm', actorUserId: OWNER,
+      idempotencyKey: 'approve-stay-request', stayManager: true, version: (await read()).booking.version, env })
+    assert.equal(decision.ok, true, JSON.stringify(decision))
+    assert.equal((await read()).booking.request_status, 'awaiting_payment')
+    const approvedReplay = await submitStayRequest(cookie)
+    assert.equal(approvedReplay.status, 200)
+    assert.equal(approvedReplay.body.request_status, 'awaiting_payment')
+    assert.equal(approvedReplay.body.booking_id, bookingId)
+    assert.deepEqual(requestActions(await getThreadOperationalRecord(db, activity), new Date().toISOString()), ['cancel'])
+    assert.equal(await scheduledReservationMessage(), null)
+    assert.equal((await read()).home.location, null)
+    const pay = await call(payPath, {})
+    assert.equal(pay.status, 200, await pay.clone().text())
+    const { pay_url: url } = await pay.json() as { pay_url: string }
+    approvedPayUrl = url
+    const target = new URL(url)
+    assert.equal(target.origin, 'https://demo.sites.example')
+    const claim = target.hash.slice(1)
+    const paymentPath = target.pathname.replace('/pay/', '/api/public/payments/')
+    const beforeNote = await getStay(db, manager, bookingId)
+    const note = await call(`/api/dashboard/bookings/${bookingId}?org=${ORG}`, {
+      version: beforeNote.version, private_notes: 'Guest asked about parking',
+    }, ownerCookie, 'PATCH')
+    assert.equal(note.status, 409, await note.clone().text())
+    assert.equal((await note.json()).data.code, 'STAY_REQUEST_PENDING')
+    const afterNote = await getStay(db, manager, bookingId)
+    assert.deepEqual([afterNote.private_notes, afterNote.version], [beforeNote.private_notes, beforeNote.version])
+    assert.deepEqual(await (await call(payPath, {})).json(), { pay_url: url })
+    assert.equal(intentCount, 1)
+    t.mock.timers.setTime(now + 86_400_000 - 60_000)
+    const rejectedReview = await call(`${paymentPath}/review`, { claim, payment_method_id: 'pm_declined' })
+    assert.equal(rejectedReview.status, 200, await rejectedReview.clone().text())
+    const rejected = await call(`${paymentPath}/confirm`, { claim, payment_method_id: 'pm_declined', total: expected })
+    assert.equal(rejected.status, 400, await rejected.clone().text())
+    assert.equal((await read()).payment_processing, false)
+    assert.equal(await db.prepare(`SELECT h.expires_at=p.checkout_expires_at AS deadline_restored
+      FROM payment_checkout_holds h JOIN payments p ON p.id=h.payment_id WHERE p.id=?`).bind(paymentIntent.metadata.krabiclaw_payment_id).first('deadline_restored'), 1)
+    t.mock.timers.setTime(Date.now() + 1)
+    const declinedReview = await call(`${paymentPath}/review`, { claim, payment_method_id: 'pm_declined' })
+    assert.equal(declinedReview.status, 200, await declinedReview.clone().text())
+    const declined = await call(`${paymentPath}/confirm`, { claim, payment_method_id: 'pm_declined', total: expected })
+    assert.equal(declined.status, 402, await declined.clone().text())
+    const afterDecline = await read()
+    assert.equal(afterDecline.booking.request_status, 'awaiting_payment')
+    assert.equal(afterDecline.payment_processing, false)
+    assert.equal(await db.prepare(`SELECT h.expires_at=p.checkout_expires_at AS deadline_restored
+      FROM payment_checkout_holds h JOIN payments p ON p.id=h.payment_id WHERE p.id=?`).bind(paymentIntent.metadata.krabiclaw_payment_id).first('deadline_restored'), 1)
+    t.mock.timers.setTime(Date.now() + 1)
+    const review = await call(`${paymentPath}/review`, { claim, payment_method_id: 'pm_card' })
+    assert.equal(review.status, 200, await review.clone().text())
+    assert.equal((await review.json()).total, expected)
+    const competingReview = call(`${paymentPath}/review`, { claim, payment_method_id: 'pm_other' })
+    await competingMethodRequested
+    const confirm = await call(`${paymentPath}/confirm`, { claim, payment_method_id: 'pm_card', total: expected })
+    assert.equal(confirm.status, 200, await confirm.clone().text())
+    assert.equal((await confirm.json()).status, 'succeeded')
+    assert.equal(captures, 1)
+
+    const receipt = await call(`${paymentPath}/return`, { claim }, '')
+    assert.equal(receipt.status, 200, await receipt.clone().text())
+    assert.equal((await receipt.json()).activity_id, activity)
+    assert.deepEqual(receipt.headers.getSetCookie(), [])
+    const confirmed = await read()
+    assert.deepEqual({ id: confirmed.booking.booking_id, status: confirmed.booking.status, paid: confirmed.booking.paid_minor,
+      progress: confirmed.booking.request_status }, { id: bookingId, status: 'confirmed', paid: expected, progress: null })
+    const confirmedReplay = await submitStayRequest(cookie)
+    assert.equal(confirmedReplay.status, 200)
+    assert.equal(confirmedReplay.body.status, 'confirmed')
+    assert.equal(confirmedReplay.body.request_status, null)
+    assert.equal(confirmedReplay.body.activity_path, initial.body.activity_path)
+    await assert.rejects(submitStayRequest(cookie, { ...requestBody, adults: 1 }), code('IDEMPOTENCY_CONFLICT'))
+    await assert.rejects(submitStayRequest('', requestBody), code('IDEMPOTENCY_CONFLICT'))
+    assert.equal(await db.prepare('SELECT received_at FROM bookings WHERE id=?').bind(bookingId).first('received_at'), new Date(now).toISOString())
+    assert.deepEqual(await scheduledReservationMessage(), { status: 'pending', due_at: new Date(Date.now() + 5 * 60_000).toISOString() })
+    assert.deepEqual((await db.prepare('SELECT date,booking_id,hold_id FROM stay_nights WHERE booking_id=? ORDER BY date').bind(bookingId).all()).results, originalClaims.results)
+    assert.equal(await db.prepare('SELECT COUNT(*) FROM bookings WHERE product_id=?').bind(cabin.id).first('COUNT(*)'), 1)
+
+    const toWithdraw = { ...requestBody, idempotency_key: 'withdraw-this-stay', check_in_date: date(14), check_out_date: date(16) }
+    const second = await submitStayRequest(cookie, toWithdraw)
+    const secondId = second.body.booking_id as string
+    const cancellable = await call(`/api/account/bookings/${secondId}`)
+    assert.equal(cancellable.status, 200, await cancellable.clone().text())
+    const { booking: { version } } = await cancellable.json() as GuestStayAccount
+    const withdrawn = await call(`/api/account/bookings/${secondId}/cancel`, { version })
+    assert.equal(withdrawn.status, 200, await withdrawn.clone().text())
+    const cancelledReplay = await submitStayRequest(cookie, toWithdraw)
+    assert.equal(cancelledReplay.status, 200)
+    assert.equal(cancelledReplay.body.status, 'cancelled')
+    assert.equal(cancelledReplay.body.request_status, null)
+    assert.equal(cancelledReplay.body.booking_id, secondId)
+    assert.equal(cancelledReplay.body.activity_path, second.body.activity_path)
+  } finally {
+    await runtime.dispose()
+  }
+})
+
+test('stay request decisions and expiry reconcile the host task and the exact nights', { timeout: 120_000 }, async () => {
+  const { runtime, db, env: bindings } = await boot()
+  try {
+    const env = {
+      ...bindings, NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-stay-reply', EMAIL_DELIVERY_MODE: 'log_only',
+    }
+    await db.prepare("INSERT INTO organization_locales(id,organization_id,locale,is_source,status) VALUES('org-en',?,'en',1,'published')").bind(ORG).run()
+    const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site', member: `m-${CLEANER}` })
+    await writeMemberScheduling({ env, userId: OWNER, organizationId: ORG }, `m-${CLEANER}`, { updated_at: null, public_name: 'Cabin host', public_approved: true })
+    await updateStayHome(env, db, manager, cabin.id, { cancellation_policy: 'moderate', long_term_cancellation_policy: 'firm' })
+    await setProductPublication(db, { env, organizationId: ORG, productId: cabin.id, published: true, actor: { actorId: OWNER } })
+    const date = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10)
+    const submit = async (key: string, offset: number) => {
+      const listing = await readStayHome(db, manager, cabin.id)
+      const quote = await quoteStay(db, ORG, listing, { check_in_date: date(offset), check_out_date: date(offset + 2), adults: 2 })
+      return createStayRequest(db, env, { organizationId: ORG, buyerUserId: OUTSIDER, key, fingerprint: key, home: listing, quote,
+        guest: { name: 'Ana', email: 'ana@example.com', phone: null, notes: null }, locale: 'en', ipHash: 'proof' })
+    }
+    const decide = (stay: Awaited<ReturnType<typeof submit>>, action: 'confirm' | 'reject', suffix = '') => executeGuestThreadOperation(db, {
+      threadId: stay.conversation_id, organizationId: ORG, action, actorUserId: OWNER, idempotencyKey: `${action}:${stay.id}${suffix}`, stayManager: true,
+      version: stay.version, env,
+    })
+    const claims = async (id: string) => await db.prepare('SELECT count(*) AS n FROM stay_nights WHERE booking_id=?').bind(id).first('n')
+    const owner = await resolveMembership(env, { organizationId: ORG, userId: OWNER })
+    const cleanerMembership = await resolveMembership(env, { organizationId: ORG, userId: CLEANER })
+    const visibleTasks = async (membership: NonNullable<typeof owner>) => (await listTasks(db,
+      await taskViewer(db, memberAccessPrincipal(membership, { env })), parseTaskListQuery({ kind: 'booking_review' }))).sections.flatMap(section => section.tasks)
+
+    const approved = await submit('stay-approval', 8)
+    assert.equal(approved.request_status, 'awaiting_approval')
+    assert.equal(await claims(approved.id), 2)
+    assert((await visibleTasks(owner!)).some(task => task.booking_id === approved.id && task.action?.path === `/dashboard/org/bookings/stay/${approved.id}`))
+    assert.equal((await visibleTasks(cleanerMembership!)).length, 0)
+    await notifyProductBookingCreated(env, db, ORG, approved.conversation_id)
+    const { results: deliveries } = await db.prepare(`SELECT d.purpose, d.status FROM guest_thread_deliveries d JOIN messages m ON m.id=d.message_id
+      WHERE m.conversation_id=? AND d.channel='email' AND d.purpose IN ('owner_alert','guest_acknowledgement') ORDER BY d.purpose`).bind(approved.conversation_id).all()
+    assert.deepEqual(deliveries, [{ purpose: 'guest_acknowledgement', status: 'sent' }, { purpose: 'owner_alert', status: 'sent' }])
+    assert.equal((await decide(approved, 'confirm')).ok, true)
+    assert.equal((await getStay(db, manager, approved.id)).request_status, 'awaiting_payment')
+    const approval = await db.prepare(`SELECT json_extract(m.payload_json, '$.subject') AS subject, json_extract(m.payload_json, '$.email.html') AS html,
+      d.status FROM messages m JOIN guest_thread_deliveries d ON d.message_id=m.id WHERE m.conversation_id=? AND m.event_name='booking.confirm'`).bind(approved.conversation_id).first<{ subject: string; html: string; status: string }>()
+    assert.equal(approval?.subject, 'Stay request approved — Cabin')
+    assert(approval?.html.includes(`/dashboard/account/activity/stay/${approved.conversation_id}`))
+    assert.equal(approval?.status, 'sent')
+    assert.equal(await db.prepare('SELECT status FROM tasks WHERE dedupe_key=?').bind(`booking_review:${approved.id}`).first('status'), 'done')
+    assert.equal(await claims(approved.id), 2)
+
+    const declined = await submit('stay-decline', 12)
+    assert.equal((await decide(declined, 'reject')).ok, true)
+    assert.equal((await getStay(db, manager, declined.id)).cancellation_reason, 'host_rejected')
+    assert.equal(await claims(declined.id), 0)
+    assert.equal(await db.prepare('SELECT status FROM tasks WHERE dedupe_key=?').bind(`booking_review:${declined.id}`).first('status'), 'cancelled')
+
+    const withdrawn = await submit('stay-withdraw', 16)
+    const cancelled = await cancelStayAsGuest(db, env, ORG, withdrawn.id, OUTSIDER, undefined, withdrawn.version)
+    assert.equal(cancelled.stay.cancellation_reason, 'guest_withdrew')
+    assert.equal(cancelled.refund_minor, 0)
+    assert.equal(await claims(withdrawn.id), 0)
+
+    const expired = await submit('stay-expire', 20)
+    const payBy = (await getStay(db, manager, approved.id)).pay_by!
+    assert.equal(await expireStayRequests(db, env, new Date(Math.max(Date.parse(expired.respond_by!), Date.parse(payBy)) + 1).toISOString()), 2)
+    for (const entry of [expired, approved]) {
+      assert.equal((await getStay(db, manager, entry.id)).cancellation_reason, 'stay_request_expired')
+      assert.equal(await claims(entry.id), 0)
+    }
+
+    await updateStayHome(env, db, manager, cabin.id, { timezone: 'Asia/Bangkok', check_in_time: null, check_out_time: null })
+    const collision = await submit('stay-ota-conflict', 24)
+    assert.equal(collision.starts_at, date(24))
+    await updateStayHome(env, db, manager, cabin.id, { check_in_time: '16:00', check_out_time: '01:00' })
+    const channel = await applyChannelBooking(db, env, ORG, cabin.id, {
+      provider: 'channex', external_booking_id: 'ota-stay-review-conflict', channel_booking_id: null, channel: 'airbnb',
+      revision_id: 'ota-stay-review-revision', provider_updated_at: new Date().toISOString(), cancelled: false,
+      check_in_date: date(23), check_out_date: date(25), adults: 2, children: 0, infants: 0,
+      guest_name: null, guest_surname: null, guest_email: null, guest_phone: null, total_minor: 20_000, currency: 'USD',
+    })
+    assert.equal(channel.overbooked, true)
+    assert.equal(channel.ends_at.slice(0, 10), date(24))
+    assert.equal((await decide(collision, 'confirm')).ok, false)
+    assert.equal((await getStay(db, manager, collision.id)).request_status, 'awaiting_approval')
+    assert.equal((await decide(collision, 'reject')).ok, true)
+    assert.equal(await claims(collision.id), 0)
+    await assert.rejects(submit('stay-ota-refused', 24), code('STAY_NIGHTS_UNAVAILABLE'))
+    const adjacent = await submit('stay-ota-adjacent', 25)
+    assert.equal((await decide(adjacent, 'confirm')).ok, true)
+    assert.equal((await getStay(db, manager, adjacent.id)).request_status, 'awaiting_payment')
   } finally {
     await runtime.dispose()
   }

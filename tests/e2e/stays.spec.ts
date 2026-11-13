@@ -110,6 +110,12 @@ async function createStayHome(page: Page, baseURL: string, options: { selectDiff
     }
     await page.getByRole('textbox', { name: 'Internal name', exact: true }).fill(internalName)
     await page.getByRole('textbox', { name: 'Listing title', exact: true }).fill('Cliff Cabin')
+    if (selectDifferentLocation) {
+      await page.getByRole('link', { name: /^(Add|Edit) address$/ }).click()
+      await expect(page.getByRole('heading', { name: 'Address', exact: true })).toBeVisible()
+      await page.goBack()
+      await expect(page.getByRole('textbox', { name: 'Listing title', exact: true })).toHaveValue('Cliff Cabin')
+    }
     await page.getByRole('textbox', { name: 'Sleeps' }).fill('4')
     await page.getByRole('textbox', { name: 'Minimum nights' }).fill('2')
     await page.getByRole('combobox', { name: 'Looked after by*', exact: true }).click()
@@ -1270,7 +1276,7 @@ test('a host saves cancellation policies, guests, minimum nights and arrival tim
     await expect(arrivalPanel).toBeVisible()
     await arrivalPanel.getByRole('button', { name: 'Cancel', exact: true }).click()
     await page.getByRole('tab', { name: 'Your space', exact: true }).click()
-    await expect(page).toHaveURL(url => url.pathname.endsWith(`/products/${productId}/photo`) && !url.searchParams.has('guide'))
+    await expect(page).toHaveURL(url => url.pathname.endsWith(`/products/${productId}`) && !url.searchParams.has('guide'))
     await expect(page.getByRole('tab', { name: 'Your space', exact: true })).toHaveAttribute('aria-selected', 'true')
     await expect(page.getByRole('tab', { name: 'Arrival guide', exact: true })).toHaveAttribute('aria-selected', 'false')
     await expect(arrivalPanel).not.toBeVisible()
@@ -1291,7 +1297,7 @@ test('a host saves cancellation policies, guests, minimum nights and arrival tim
     expect((await homes.json() as { homes: unknown[] }).homes).toEqual([{
       product_id: productId, variant_id: settingsRead.data!.product.variants[0]!.id, updated_at: settingsRead.data!.product.updated_at, name: 'Cliff Cabin', internal_name: 'Cliff Cabin', location_id: location.id, timezone: TIME_ZONE, currency: 'THB', base_price_minor: null, base_price_tax_behavior: null,
       // A home the editor creates has a flexible check-in end until the host chooses one.
-      check_in_time: '16:00', check_in_end_time: null, check_out_time: '10:00', max_guests: 6, min_nights: 1, calendar_rules: null, assigned_member_id: ownerMemberId, channel: null,
+      check_in_time: '16:00', check_in_end_time: null, check_out_time: '10:00', max_guests: 6, min_nights: 1, calendar_rules: null, assigned_member_id: ownerMemberId, host_profile_published: false, channel: null,
       check_in_instructions: null, photos: [], photo_rooms: [],
       // The editor's listing choices persist through the native home projection too.
       description: listingDescription, published: false, live: false, airbnb_listing_id: null, airbnb_editor_url: null, address: homeAddress, latitude: null, longitude: null, stay_map_sharing: 'general',
@@ -1516,7 +1522,7 @@ test('a host answers guest safety disclosures and keeps an unanswered choice dis
     await expect(safetyGuide.getByRole('heading', { name: 'Safety & property', exact: true }).locator('..').getByRole('listitem')).toHaveText([...authoredSafetyLines, 'Smoke alarm'])
     await safetyGuidePreview.getByRole('button', { name: 'Close', exact: true }).click()
     await page.getByRole('tab', { name: 'Your space', exact: true }).click()
-    await expect(page).toHaveURL(url => url.pathname.endsWith(`/products/${productId}/photo`) && !url.searchParams.has('guide'))
+    await expect(page).toHaveURL(url => url.pathname.endsWith(`/products/${productId}`) && !url.searchParams.has('guide'))
   })
 })
 
@@ -1559,7 +1565,7 @@ test('a stale detail leaf refuses its save after a concurrent safety answer unti
     const reviewedAttributeResponse = await reviewedAttributeSaved
     await expectStatus(reviewedAttributeResponse, 200)
     expect(reviewedAttributeResponse.request().postDataJSON().updated_at).toBe(refusedAttribute.data!.product.updated_at)
-    await expect(page).toHaveURL(`/dashboard/${slug}/products/${productId}/photo`)
+    await expect(page).toHaveURL(`/dashboard/${slug}/products/${productId}`)
     const savedAttributeSafety = await call<{ product: Product }>('get_product', { product_id: productId })
     expect(savedAttributeSafety.error).toBeNull()
     expect(savedAttributeSafety.data!.product.details).toEqual({ ...propertySetup.data!.product.details, ...safetyFacts, dangerous_animals: false, featured: false })
@@ -1586,7 +1592,7 @@ test('a host previews the saved guest page around an unsaved draft without recor
     const url = new URL(outgoing.url())
     if (outgoing.frame() !== page.mainFrame() && ['/api/analytics/track', '/api/analytics/interactions', '/api/public/conversion-events'].includes(url.pathname)) previewCollections.push(url.pathname)
   })
-  const previewURL = await test.step('the listing preview shows marketing details without post-booking rules and safety', async () => {
+  const previewURL = await test.step('the listing preview shows marketing and safety details without post-booking rules', async () => {
     await expect(previewLink).toHaveAttribute('href', /editMode=preview/)
     await previewLink.click()
     await expect(page).toHaveURL(url => url.pathname.endsWith(`/products/${productId}/name`) && url.searchParams.get('location_id') === location.id && url.searchParams.get('editMode') === 'preview' && url.searchParams.get('previewViewport') === 'desktop')
@@ -1602,7 +1608,8 @@ test('a host previews the saved guest page around an unsaved draft without recor
     }
     await expect(preview.locator('article')).toContainText('6 guests')
     await expect(preview.locator('article')).toContainText('Add your dates to see the cancellation policy for your stay.')
-    await expect(preview.locator('#things-to-know')).toHaveCount(0)
+    const guestSafety = preview.locator('#things-to-know')
+    await expect(guestSafety.getByRole('listitem')).toHaveText([...authoredSafetyLines, 'Smoke alarm'])
     const productURL = new URL(previewURL)
     productURL.pathname = productURL.pathname.replace(/^\/stays\//, '/api/public/stays/')
     const publicRead = await readLocalTenant(request, slug, productURL)
@@ -1615,7 +1622,6 @@ test('a host previews the saved guest page around an unsaved draft without recor
     } })
     expect(publicProduct.details).toEqual(pageSeed.data!.product.details)
     await expect(preview.getByRole('heading', { name: 'Safety & property', exact: true })).toHaveCount(0)
-    for (const line of authoredSafetyLines) await expect(preview.getByText(line, { exact: true })).toHaveCount(0)
     await expect(preview.getByText('This draft camera detail must be cleared by No.', { exact: true })).toHaveCount(0)
     for (const key of ['pets_allowed', 'events_allowed', 'smoking_allowed', 'quiet_hours', 'commercial_photography_allowed', 'quiet_hours_start', 'quiet_hours_end', 'house_rules']) expect(publicProduct.details).not.toHaveProperty(key)
     await expect(preview.getByRole('heading', { name: 'House rules', exact: true })).toHaveCount(0)
@@ -3294,7 +3300,7 @@ test('a host lists, pauses and unlists a priced place to stay', async ({ page, b
   const priceSaved = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === `/api/editor/organizations/${organizationId}/products/${productId}`)
   await nightlyPrice.getByRole('button', { name: 'Save', exact: true }).click()
   expect((await priceSaved).status()).toBe(200)
-  await expect(page).toHaveURL(url => url.pathname.endsWith(`/products/${productId}/photo`))
+  await expect(page).toHaveURL(url => url.pathname.endsWith(`/products/${productId}`))
   const policySaved = await request.patch(`${baseURL}/api/editor/organizations/${organizationId}/products/${productId}`, { data: { stay: { cancellation_policy: 'flexible' } } })
   await expectStatus(policySaved, 200)
   const pricedProduct = await call<{ product: Product }>('get_product', { product_id: productId })
@@ -3348,10 +3354,12 @@ test('a host lists, pauses and unlists a priced place to stay', async ({ page, b
   const savedVisibility = publicationOverview.getByTestId('editor-card-visibility')
   const visibility = page.locator('#dashboard-panel-product-visibility')
   await expect(savedVisibility).toBeVisible()
-  await expect(savedVisibility).toContainText('Unlisted')
+  await expect(savedVisibility).toContainText('Publish listing')
+  await expect(savedVisibility).toContainText('Show on your website')
+  await expect(visibility.getByRole('radio', { name: /^Unlisted/ })).toBeChecked()
   await visibility.getByText('Listed', { exact: true }).click()
   await expect(visibility.getByRole('radio', { name: /^Listed/ })).toBeChecked()
-  await expect(savedVisibility).toContainText('Unlisted')
+  await expect(savedVisibility).toContainText('Publish listing')
   const interceptVisibility = (url: URL) => url.pathname === publicationEndpoint
   await page.route(interceptVisibility, async route => route.request().method() === 'PUT' ? await route.abort('failed') : await route.continue())
   const interruptedVisibility = page.waitForEvent('requestfailed', outgoing => outgoing.method() === 'PUT' && new URL(outgoing.url()).pathname === publicationEndpoint)
@@ -3360,7 +3368,7 @@ test('a host lists, pauses and unlists a priced place to stay', async ({ page, b
   await expect(visibility.getByText('Failed to fetch', { exact: false })).toBeVisible()
   await expect(visibility.getByRole('radio', { name: /^Listed/ })).toBeChecked()
   await expect(visibility.getByRole('button', { name: 'Save', exact: true })).toBeEnabled()
-  await expect(savedVisibility).toContainText('Unlisted')
+  await expect(savedVisibility).toContainText('Publish listing')
   expect(publicationBodies).toEqual([{ published: true }])
   expect(availabilityBodies).toEqual([])
   const failedVisibility = await call<{ product: Product }>('get_product', { product_id: productId })
@@ -3372,7 +3380,7 @@ test('a host lists, pauses and unlists a priced place to stay', async ({ page, b
   await visibility.getByRole('button', { name: 'Save', exact: true }).click()
   expect((await visibilitySaved).status()).toBe(200)
   await expect(page).toHaveURL(`${baseURL}${publicationPath}`)
-  await expect(savedVisibility).toContainText('Listed')
+  await expect(savedVisibility).toContainText('Listed · Visible on your website')
   const listedProduct = await call<{ product: Product }>('get_product', { product_id: productId })
   expect(listedProduct.error).toBeNull()
   expect(listedProduct.data!.product).toMatchObject({ active: true, name: pricedProduct.data!.product.name, details: pricedProduct.data!.product.details })
@@ -3816,7 +3824,8 @@ test('a host lists, pauses and unlists a priced place to stay', async ({ page, b
     await visibility.getByRole('button', { name: 'Save', exact: true }).click()
     expect((await hiddenSaved).status()).toBe(200)
     await expect(page).toHaveURL(`${baseURL}${publicationPath}`)
-    await expect(savedVisibility).toContainText('Unlisted')
+    await expect(savedVisibility).toContainText('Publish listing')
+    await expect(savedVisibility).toContainText('Show on your website')
     const hiddenProduct = await call<{ product: Product }>('get_product', { product_id: productId })
     expect(hiddenProduct.error).toBeNull()
     expect(hiddenProduct.data!.product).toMatchObject({ active: false, name: pricedProduct.data!.product.name, details: pricedProduct.data!.product.details })
@@ -4002,7 +4011,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       // House rules distinguish an unanswered choice from an explicit No. The
       // focused text editor and preview retain pending rule and guest choices.
       await page.getByRole('tab', { name: 'Your space', exact: true }).click()
-      await expect(page).toHaveURL(url => url.pathname === `${productPath}/photo` && !url.searchParams.has('guide'))
+      await expect(page).toHaveURL(url => url.pathname === productPath && !url.searchParams.has('guide'))
       const beforeRules = await call<{ product: Product }>('get_product', { product_id: assignedHome.product_id })
       expect(beforeRules.error).toBeNull()
       for (const key of [...Object.keys(houseRuleChoices), 'house_rules']) expect(beforeRules.data!.product.details).not.toHaveProperty(key)
@@ -4329,7 +4338,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       expect((await cancelledGuide.json() as { home: Record<string, unknown> }).home).toMatchObject(guide)
       await page.setViewportSize({ width: 1440, height: 900 })
       await page.getByRole('tab', { name: 'Your space', exact: true }).click()
-      await expect(page).toHaveURL(url => url.pathname === `${productPath}/photo` && !url.searchParams.has('guide'))
+      await expect(page).toHaveURL(url => url.pathname === productPath && !url.searchParams.has('guide'))
       const publicView = page.locator('#dashboard-panel-product').getByRole('link', { name: 'View', exact: true })
       await expect(publicView).toHaveAttribute('href', /editMode=preview/)
       await publicView.click()
@@ -4370,7 +4379,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
         expect(publicJSON).not.toContain(value)
       }
       await publicPreviewModal.getByRole('button', { name: 'Close', exact: true }).click()
-      await expect(page).toHaveURL(`${baseURL}${productPath}/photo`)
+      await expect(page).toHaveURL(`${baseURL}${productPath}`)
 
       // Reading the new private home endpoint follows the same assigned-home
       // scope as Today. A member can read the guide but cannot change it.

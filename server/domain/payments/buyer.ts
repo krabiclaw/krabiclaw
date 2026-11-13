@@ -42,7 +42,7 @@ function paymentActivity(row:BuyerPaymentRow):AccountActivityItem {
  return {kind,id:row.id,conversation_id:kind==='payment'?row.hold_conversation_id:null,booking_id:null,payment_id:row.id,organization_id:row.organization_id,organization_name:row.organization_name,organization_slug:row.organization_slug,title:snapshot.title,status:row.captured_amount===0?'pending':row.refunded_amount===row.captured_amount?'refunded':'captured',starts_at:scheduled?row.hold_starts_at:null,ends_at:scheduled?row.hold_ends_at:null,timezone:scheduled?row.hold_timezone:null,created_at:row.created_at,image_url:null,location_title:null,party_size:null}
 }
 function resolvePaymentActivity(rows:Awaited<ReturnType<typeof buyerActivityRows>>,payment:BuyerPaymentRow):AccountActivityItem {
- const visits=rows.visits.filter(row=>payment.subject_type==='booking'&&row.booking_id===payment.subject_id&&row.organization_id===payment.organization_id)
+ const visits=rows.visits.filter(row=>payment.subject_type==='booking'&&row.organization_id===payment.organization_id&&(row.booking_id===payment.subject_id||(row.kind==='stay'&&row.conversation_id!==null&&row.conversation_id===payment.hold_conversation_id)))
  if(visits.length>1)throw new Error('Owned payment has ambiguous visit associations')
  return visits[0]?visitActivity(visits[0]):paymentActivity(payment)
 }

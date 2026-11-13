@@ -1,14 +1,15 @@
 <template>
-  <div class="grid gap-3 sm:grid-cols-2">
+  <div class="grid gap-3 sm:grid-cols-2" :class="{ 'grid-cols-2 lg:grid-cols-4': compact }">
     <button
       v-for="choice in choices"
       :key="choice.value"
       type="button"
       :aria-pressed="choice.value === modelValue"
-      class="flex flex-col gap-6 rounded-xl border-2 p-5 text-left transition-colors"
-      :class="choice.value === modelValue
-        ? 'border-inverted bg-elevated'
-        : 'border-default hover:border-accented'"
+      class="flex flex-col rounded-xl border-2 text-left transition-colors"
+      :class="[
+        compact ? 'gap-3 p-3 md:gap-6 md:p-5' : 'gap-6 p-5',
+        choice.value === modelValue ? 'border-inverted bg-elevated' : 'border-default hover:border-accented',
+      ]"
       @click="emit('update:modelValue', choice.value)"
     >
       <UIcon :name="choice.icon" class="size-7 text-highlighted" />
@@ -30,6 +31,6 @@ export interface OnboardingChoice {
   icon: string
 }
 
-defineProps<{ choices: OnboardingChoice[]; modelValue: string | null }>()
+defineProps<{ choices: OnboardingChoice[]; modelValue: string | null; compact?: boolean }>()
 const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
 </script>

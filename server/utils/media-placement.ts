@@ -166,6 +166,7 @@ export async function setSingleMediaPlacement(db: DbClient, input: {
   principal?: MemberAccessPrincipal
   placement: MediaPlacementKey
   assetId: string | null
+  imageOnly?: true
   /** A logo placement's shape and focal point. */
   presentation?: LogoPresentation | null
 }) {
@@ -175,7 +176,7 @@ export async function setSingleMediaPlacement(db: DbClient, input: {
   const media = await hydrateMediaAssetRefs(db, {
     organizationId: input.organizationId,
     refs,
-    allowedKinds: allowedKindsFor(input.placement),
+    allowedKinds: input.imageOnly ? allowedKindsFor(input.placement).filter(kind => kind === 'image') : allowedKindsFor(input.placement),
     fieldName: 'asset_id',
   })
   const current = await canonicalPlacementState(db, input)

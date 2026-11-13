@@ -7,7 +7,7 @@ export default defineHandler(async (event) => {
   const productId = getRouterParam(event, 'product_id')
   if (!organizationId || !productId) return jsonResponse({ error: 'Organization and Product IDs are required' }, { status: 400 })
   try {
-    return jsonResponse(await loadDashboardProduct(event, organizationId, null, productId))
+    return jsonResponse(await loadDashboardProduct(event, organizationId, null, productId), { headers: { 'cache-control': 'private, no-store' } })
   } catch (error) {
     rethrowHttpError(error)
     return jsonResponse({ error: 'Failed to load Product' }, { status: 500 })

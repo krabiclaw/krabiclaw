@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { HTTPError } from 'nitro'
 import { z } from 'zod'
 import { formatFormAnswer, type FormAnswerSnapshot } from '~/shared/form-questions'
-import { formatCalendarDate, formatTime, formatTimestamp } from '~/utils/timezone'
+import { formatCalendarDate, formatCalendarRange, formatTime, formatTimestamp } from '~/utils/timezone'
 import { bookingDay, getGuestRequest, isBookingDay, requestSummary, type cancelBookingRequest, type GuestRequest } from '~/server/domain/requests'
 import { execute, queryAll, queryFirst, type DbClient } from '~/server/db'
 import { organizationEventQuery, type OrganizationEventType } from '~/server/utils/organization-events'
@@ -141,6 +141,7 @@ interface BookingNotificationInput extends OrganizationContext {
    */
   startsAt: string
   timezone: string
+  stayDates?: { checkIn: string; checkOut: string }
   partySize: number
   /** The guest asked for this many or more ("8+"). */
   partySizeIsMinimum: boolean
@@ -1128,8 +1129,9 @@ export async function notifyBookingCreated(
   opts: BookingNotificationInput & { status: 'pending' | 'confirmed'; answers: FormAnswerSnapshot[] }
 ) {
   const studio = organizationName(opts)
-  const prettyDate = new Intl.DateTimeFormat('en-US', { timeZone: opts.timezone, dateStyle: 'medium' }).format(new Date(opts.startsAt))
-  const prettyTime = formatTimestamp(opts.startsAt, 'en', opts.timezone, { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })
+  const date = (locale: string) => opts.stayDates ? formatCalendarRange(opts.stayDates.checkIn, opts.stayDates.checkOut, locale)
+    : formatTimestamp(opts.startsAt, locale, opts.timezone, { dateStyle: 'medium' })
+  const time = (locale: string) => opts.stayDates ? '' : formatTimestamp(opts.startsAt, locale, opts.timezone, { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })
   const platformDomain = getPlatformDomain(env)
   const inboxUrl = opts.ownerInboxUrl !== undefined
     ? opts.ownerInboxUrl
@@ -1160,7 +1162,8 @@ export async function notifyBookingCreated(
   ])
   const ownerMessage = bookingCreatedMessage({
     guestName: opts.guestName, guestEmail: opts.email, guestPhone: opts.guestPhone ?? null,
-    date: prettyDate, day: formatTimestamp(opts.startsAt, 'en-US', opts.timezone, { month: 'short', day: 'numeric' }), time: prettyTime, partySize: formattedPartySize,
+    date: date('en-US'), day: opts.stayDates ? date('en-US') : formatTimestamp(opts.startsAt, 'en-US', opts.timezone, { month: 'short', day: 'numeric' }),
+    time: time('en'), partySize: formattedPartySize,
     locationName, organizationName: studio, productTitle: opts.productTitle,
     presentation, status: opts.status,
     notes: opts.notes ?? null, heroImageUrl: hero?.imageUrl ?? null, replyUrl: inboxUrl,
@@ -1173,8 +1176,8 @@ export async function notifyBookingCreated(
     ...guest, manageUrl: await buildBuyerRequestActivityUrl(env, db, { organizationId: opts.organizationId, threadId: opts.bookingId }),
     guestName: opts.guestName, organizationLogoUrl: logoUrl, status: opts.status, wording,
     productTitle: guest.productTitle!,
-    date: formatTimestamp(opts.startsAt, guest.locale, opts.timezone, { dateStyle: 'medium' }),
-    time: formatTimestamp(opts.startsAt, guest.locale, opts.timezone, { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }),
+    date: date(guest.locale),
+    time: time(guest.locale),
     partySize: formattedPartySize,
     partyLabel: copy.guestsLabel,
     notes: opts.notes, contactPhone: opts.contactPhone ?? null, contactEmail: opts.contactEmail ?? null,
@@ -1196,7 +1199,7 @@ export async function notifyBookingCreated(
       title: ownerMessage.title,
       payload,
       message: ownerMessage,
-      whatsappTemplate: 'new_reservation',
+      ...(opts.stayDates ? { memberIds: [] } : { whatsappTemplate: 'new_reservation' as const }),
     }),
     ...(opts.guestAcknowledgement === false ? [] : [sendEmailNotification(env, db, {
       ...opts,

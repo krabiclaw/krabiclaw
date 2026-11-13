@@ -133,14 +133,15 @@ export function paymentsStripe(env: CloudflareEnv, livemode: boolean): Stripe {
   return createStripeClient(keys.secretKey, 'payments')
 }
 
-function platformOriginUrl(platformOrigin: string): URL {
+function platformOriginUrl(platformOrigin: string, allowLocalHttp = false): URL {
   let origin: URL
   try {
     origin = new URL(platformOrigin)
   } catch {
     throw new Error('Stripe Connect platform origin is invalid')
   }
-  if (origin.protocol !== 'https:') throw new Error('Stripe Connect platform origin must use HTTPS')
+  const localHttp = allowLocalHttp && origin.protocol === 'http:' && origin.hostname === 'localhost'
+  if (origin.protocol !== 'https:' && !localHttp) throw new Error('Stripe Connect platform origin must use HTTPS')
   if (origin.username || origin.password || origin.pathname !== '/' || origin.search || origin.hash) {
     throw new Error('Stripe Connect platform origin must be an origin without credentials, path, query, or fragment')
   }
@@ -161,8 +162,10 @@ export function buildAppPayoutsOnboardingUrls(platformOrigin: string): { returnU
 export function buildStripeConnectOnboardingUrls(
   platformOrigin: string,
   organizationSlug: string,
+  livemode: boolean,
 ): { returnUrl: string; refreshUrl: string } {
-  const origin = platformOriginUrl(platformOrigin)
+  // Stripe accepts localhost return and refresh URLs in test mode.
+  const origin = platformOriginUrl(platformOrigin, !livemode)
   if (!organizationSlug.trim() || /[\/\\]/u.test(organizationSlug) || Array.from(organizationSlug).some(character => character.codePointAt(0)! < 32)) {
     throw new Error('Stripe Connect organization slug is invalid')
   }

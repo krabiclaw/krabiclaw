@@ -7,6 +7,17 @@
         <URadioGroup v-model="creationKind" :items="creationKinds" variant="card" indicator="hidden" />
       </UFormField>
       <template v-if="form.kind">
+        <UFormField v-if="form.kind === 'stay'" label="Location" required>
+          <p v-if="locationsError" role="alert" class="text-error">{{ getErrorMessage(locationsError, 'Locations could not be loaded') }}</p>
+          <USelect v-else v-model="form.stay_location_id" :items="creationLocations" placeholder="Choose a location" class="w-full" />
+          <div v-if="creationHomeLocation" class="mt-2 flex flex-wrap items-center gap-x-3 text-sm text-muted">
+            <span v-if="creationHomeLocation.address">{{ formatPostalAddress(creationHomeLocation.address) }}</span>
+            <NuxtLink
+              :to="creationHomeAddressPath"
+              class="underline underline-offset-4"
+            >{{ creationHomeLocation.address ? 'Edit address' : 'Add address' }}</NuxtLink>
+          </div>
+        </UFormField>
         <template v-if="form.kind !== 'service'">
           <DashboardCoverPhotoField v-if="!creationSubmitted" :organization-id="organizationId" :location-id="locationId" :model-value="form.image_asset_id" :preview-url="creationPhoto?.public_url" :preview-alt="form.name" :title="`${itemLabel} photo`" testid="product-create-photo" @change="selectCreationPhoto" />
           <img v-else-if="creationPhoto?.public_url" :src="creationPhoto.public_url" :alt="form.name" class="aspect-[4/3] w-full rounded-xl object-cover">
@@ -30,10 +41,6 @@
           </template>
         </UCollapsible>
         <template v-if="form.kind === 'stay'">
-          <UFormField label="Location" required>
-            <p v-if="locationsError" role="alert" class="text-error">{{ getErrorMessage(locationsError, 'Locations could not be loaded') }}</p>
-            <USelect v-else v-model="form.stay_location_id" :items="creationLocations" placeholder="Choose a location" class="w-full" />
-          </UFormField>
           <UFormField label="Looked after by" required>
             <p v-if="schedulingMembersError" role="alert" class="text-error">{{ getErrorMessage(schedulingMembersError, 'Team members could not be loaded') }}</p>
             <USelect v-else v-model="stayMemberChoice" :items="creationMembers" placeholder="Choose a team member" class="w-full" />
@@ -301,6 +308,8 @@ export interface ProductForm {
   check_out_time: string
   max_guests: string
   min_nights: string
+  weekend_price_major: string
+  direct_discounts: NonNullable<StayCalendarRules['direct_discounts']>
   /** Null is the home looked after by owners and admins only: no member is assigned. */
   stay_member_id: string | null
   stay_property_type_group: StayPropertyTypeGroup | null
@@ -359,6 +368,8 @@ export interface ProductEditor {
   photoError: Ref<string | null>
   saveLabel: Ref<string>
   saveDisabled: Ref<boolean>
+  stayHasNightlyPrice: ComputedRef<boolean>
+  stayHostProfilePublished: ComputedRef<boolean>
   homeQuotePending: ComputedRef<boolean>
   homeQuoteError: Readonly<Ref<unknown>>
   propertyTypeErrors: ComputedRef<Record<string, string>>
@@ -415,7 +426,7 @@ export const productEditorKey = Symbol('product-editor') as InjectionKey<Product
 </script>
 
 <script setup lang="ts">
-import { MAX_STAY_NIGHTS } from '~/shared/bookings'
+import { MAX_STAY_NIGHTS, STAY_DIRECT_DISCOUNTS, parseStayCalendarRules, type StayCalendarRules } from '~/shared/bookings'
 import { noticeSummary } from '~/shared/availability-settings'
 import { cloneFnJSON } from '@vueuse/core'
 import EditorNavigationList, { type EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
@@ -578,8 +589,10 @@ const isCollectionList = (value: unknown): value is { collections: Collection[] 
   isRecord(value) && Array.isArray(value.collections)
 const isOne = (value: unknown): value is { success: true, product: Product } =>
   isRecord(value) && value.success === true && isRecord(value.product) && typeof value.product.id === 'string' && Boolean(value.product.id.trim())
-const isProductRead = (value: unknown): value is { success: true; product: Product; public_url: string | null; public_urls: Record<string, string> } =>
+const isProductRead = (value: unknown): value is { success: true; product: Product; public_url: string | null; public_urls: Record<string, string>; preview_url: string | null; host_profile_published: boolean | null } =>
   isOne(value) && 'public_url' in value && (value.public_url === null || typeof value.public_url === 'string')
+  && 'preview_url' in value && (value.preview_url === null || typeof value.preview_url === 'string')
+  && 'host_profile_published' in value && (value.host_profile_published === null || typeof value.host_profile_published === 'boolean')
   && 'public_urls' in value && isRecord(value.public_urls) && Object.values(value.public_urls).every(url => typeof url === 'string')
 const isMutation = (value: unknown): value is { success: true; product: ProductMutation } =>
   isOne(value) && value.success === true && 'channel_push' in value.product && isSuccessfulChannelPush(value.product.channel_push)
@@ -587,7 +600,7 @@ const isMutation = (value: unknown): value is { success: true; product: ProductM
 
 // The product in this scope, read before the level renders. Keyed by location
 // and product, so a scope change reads that location's prices and settings.
-type ProductEditorRead = { collections: Collection[]; product: Product; previewToken: string | null; publicUrl: string | null; publicUrls: Record<string, string> } | null
+type ProductEditorRead = { collections: Collection[]; product: Product; previewToken: string | null; previewUrl: string | null; publicUrl: string | null; publicUrls: Record<string, string>; hostProfilePublished: boolean | null } | null
 const productReadKey = computed(() => `dashboard-product:${organizationId}:${locationScope.value ?? 'organization'}:${productId.value}`)
 const { data: loaded, error: loadFailure, refresh } = await useAsyncData<ProductEditorRead>(
   productReadKey,
@@ -606,12 +619,12 @@ const { data: loaded, error: loadFailure, refresh } = await useAsyncData<Product
     const current = nuxtApp.payload.data[productReadKey.value] as ProductEditorRead | undefined
     const kept = current?.product.id === productResponse.product.id ? current.previewToken : null
     let previewToken: string | null = kept
-    if (kept === null && canPreview.value && ['stay', 'dish', 'experience', 'service'].includes(productResponse.product.kind)) {
+    if (kept === null && canPreview.value && ['dish', 'experience', 'service'].includes(productResponse.product.kind)) {
       const response = await dashboardApi(`/api/editor/organizations/${organizationId}/context`, { validate: isRecord })
       if (!isRecord(response.context) || typeof response.context.preview_token !== 'string' || !response.context.preview_token) throw new Error('The product preview could not be loaded.')
       previewToken = response.context.preview_token
     }
-    return { collections: collectionResponse.collections, product: productResponse.product, previewToken, publicUrl: productResponse.public_url, publicUrls: productResponse.public_urls }
+    return { collections: collectionResponse.collections, product: productResponse.product, previewToken, previewUrl: productResponse.preview_url, publicUrl: productResponse.public_url, publicUrls: productResponse.public_urls, hostProfilePublished: productResponse.host_profile_published }
   },
   {
     getCachedData(cacheKey, nuxtApp, ctx) {
@@ -730,6 +743,7 @@ const previewLocationChoices = computed<EditorNavigationGroup[]>(() => [{ id: 'p
 }])
 const productPreviewUrl = computed(() => {
   const row = product.value
+  if (row?.kind === 'stay') return loaded.value?.previewUrl ?? null
   const subdomain = dashboard.organization.value?.subdomain
   const token = loaded.value?.previewToken
   if (!row || !summaryCards.value || !subdomain || !token) return null
@@ -869,7 +883,7 @@ const draft = useState<ProductForm>(draftKey, () => ({
   payment_basis: 'per_guest', payment_min_party_size: '', party_size_min: '', party_size_max: '', minimum_guest_age: '', accessibility_contact_required: false,
   image_asset_id: null as string | null,
   // A new place to stay starts from these settings; an existing one is loaded from its own.
-  stay_location_id: '', check_in_time: '15:00', check_in_end_time: '', check_out_time: '11:00', max_guests: '', min_nights: '', stay_member_id: null,
+  stay_location_id: '', check_in_time: '15:00', check_in_end_time: '', check_out_time: '11:00', max_guests: '', min_nights: '', weekend_price_major: '', direct_discounts: {}, stay_member_id: null,
   stay_property_type_group: null, stay_property_type: null,
   stay_listing_type: null, stay_total_floors: '', stay_listing_floor: '', stay_year_built: '', stay_property_size: '', stay_property_size_unit: null,
   stay_bedrooms: '', stay_beds: '', stay_bathrooms: '',
@@ -882,6 +896,13 @@ const form = reactive(draft.value)
 // home's is its share of the homes billed now.
 const homeQuoted = computed(() => !isNew.value && product.value?.kind === 'stay')
 const homeLive = computed(() => product.value?.stay?.live === true)
+const stayHasNightlyPrice = computed(() => {
+  const row = product.value
+  if (!row?.stay) return false
+  const locationId = row.stay.location_id
+  return row.variants.some(variant => variant.active && selectPrice(variant.prices, { currency, location_id: locationId }))
+})
+const draftStay = computed(() => stayEditor.value && !published.value && !homeLive.value)
 const { quote: homeQuote, quoteError: homeQuoteError, quotePending: homeQuotePending } = useHomesQuote(organizationId, () => homeLive.value ? 0 : 1, () => homeQuoted.value && !arrivalTab.value)
 const homeBilling = computed<{ text: string; billing?: string } | null>(() => {
   if (isNew.value && form.kind === 'stay') return { text: 'A new home is a free draft until it is published or synced with Airbnb.' }
@@ -907,14 +928,22 @@ const creationSubmitted = useState(`${draftKey}:submitted`, () => false)
 const creationPhoto = useState<CoverPhotoAsset | null>(`${draftKey}:photo`, () => null)
 const creationPrice = useState(`${draftKey}:price`, () => '')
 let commitNavigation = false
-onBeforeRouteLeave(() => !isNew.value || !saving.value || commitNavigation)
+let editingCreationAddress = false
+onBeforeRouteLeave((to) => {
+  if (isNew.value && saving.value && !commitNavigation) return false
+  editingCreationAddress = isNew.value && to.path === creationHomeAddressPath.value
+})
 onBeforeRouteUpdate((to, from) => !isNew.value || !saving.value || commitNavigation || to.path === from.path
   && JSON.stringify([to.query.kind, to.query.location_id, to.query.collection_id]) === JSON.stringify([from.query.kind, from.query.location_id, from.query.collection_id]))
 onUnmounted(() => {
-  if (productId.value === 'new' && !creationSubmitted.value) clearNuxtState([draftKey, createKeyName, `${draftKey}:created`, `${draftKey}:submitted`, `${draftKey}:photo`, `${draftKey}:price`])
+  if (productId.value === 'new' && !creationSubmitted.value && !editingCreationAddress) clearNuxtState([draftKey, createKeyName, `${draftKey}:created`, `${draftKey}:submitted`, `${draftKey}:photo`, `${draftKey}:price`])
 })
 const creationKind = computed({ get: () => form.kind || undefined, set: value => { form.kind = value ?? '' } })
 const creationKinds = PRODUCT_KINDS.map(value => ({ value, label: PRODUCT_KIND_LABELS[value], icon: PRODUCT_KIND_ICONS[value] }))
+const creationHomeLocation = computed(() => organizationLocations.value.find(location => location.id === form.stay_location_id))
+const creationHomeAddressPath = computed(() => creationHomeLocation.value
+  ? `/dashboard/${encodeURIComponent(String(route.params.org_slug))}/locations/${encodeURIComponent(creationHomeLocation.value.slug)}/address`
+  : undefined)
 const creationLocations = computed(() => organizationLocations.value.map(entry => ({ label: entry.title, value: entry.id })))
 const creationMembers = computed(() => (schedulingMembers.value?.members ?? []).map(member => ({ label: member.name, value: member.id })))
 const stayMemberChoice = computed({ get: () => form.stay_member_id ?? undefined, set: (value: string | undefined) => { form.stay_member_id = value ?? null } })
@@ -1016,6 +1045,9 @@ function loadForm(row: Product) {
   form.check_out_time = stay?.check_out_time ?? ''
   form.max_guests = stay ? String(stay.max_guests) : ''
   form.min_nights = stay ? String(stay.min_nights) : ''
+  const weekend = stay?.calendar_rules?.weekend_price_minor
+  form.weekend_price_major = weekend === undefined ? '' : minorAmountToMajor(weekend, currency)
+  form.direct_discounts = { ...stay?.calendar_rules?.direct_discounts }
   form.stay_member_id = stay ? stay.assigned_member_id : null
   form.stay_property_type_group = stay ? stay.property_type_group : null
   form.stay_property_type = stay ? stay.property_type : null
@@ -1063,7 +1095,30 @@ const propertyTypeErrors = computed(() => {
   return errors
 })
 
+const stayPricingRules = () => {
+  const previous = product.value?.stay?.calendar_rules
+  const weekend = form.weekend_price_major.trim()
+  return parseStayCalendarRules({
+    day_of_week_min_nights: previous?.day_of_week_min_nights,
+    weekend_price_minor: weekend ? majorAmountToMinor(weekend, currency) : undefined,
+    direct_discounts: Object.fromEntries(Object.keys(STAY_DIRECT_DISCOUNTS)
+      .map(key => [key, form.direct_discounts[key as keyof typeof STAY_DIRECT_DISCOUNTS]])
+      .filter(([, value]) => value)),
+  })
+}
+const stayPricingRulesChanged = () => JSON.stringify(stayPricingRules()) !== JSON.stringify(product.value?.stay?.calendar_rules ?? null)
+
 const sectionValid = computed(() => {
+  if (stayEditor.value && editorKey.value === 'price') {
+    try {
+      stayPricingRules()
+      const base = form.variants[0]?.price_major.trim()
+      if (base) majorAmountToMinor(base, currency)
+      return true
+    } catch {
+      return false
+    }
+  }
   if (editorKey.value === 'kind') return PRODUCT_KINDS.includes(form.kind as ProductKind)
   if (editorKey.value === 'internal-name') return Boolean(form.internal_name.trim())
   if (editorKey.value === 'name') return Boolean(form.name.trim())
@@ -1103,6 +1158,7 @@ function checkInWindowValid(): boolean {
   return (form.check_in_time === '' || MINUTE_TIME_PATTERN.test(form.check_in_time)) && (form.check_out_time === '' || MINUTE_TIME_PATTERN.test(form.check_out_time))
     && (form.check_in_end_time === '' || (MINUTE_TIME_PATTERN.test(form.check_in_end_time) && form.check_in_end_time !== form.check_in_time))
 }
+const stayHostProfilePublished = computed(() => loaded.value?.hostProfilePublished === true)
 function stayAssigneeSummary(): string {
   if (!form.stay_member_id) return 'Unassigned'
   if (schedulingMembersError.value) return 'Team members could not be loaded'
@@ -1375,9 +1431,10 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
       ...(form.collection_ids.length ? [{ id: 'collections', label: sectionLabels.collections, summary: collectionsSummary(), to: sectionPath('collections') }] : []),
       {
         id: 'publication',
-        label: published.value ? 'Listed' : 'Unlisted',
-        summary: published.value ? (product.value.active ? 'Your listing is visible on your website.' : 'Your listing is visible. Bookings are paused.') : 'Your listing is hidden from your website. Publish it when you’re ready.',
-        status: published.value ? 'success' as const : 'neutral' as const,
+        label: draftStay.value ? 'Complete steps to publish' : published.value ? 'Listed' : 'Unlisted',
+        lead: draftStay.value ? { icon: 'i-lucide-list-checks' } : undefined,
+        summary: draftStay.value ? (stayHasNightlyPrice.value ? stayHostProfilePublished.value ? 'Review and publish your listing' : 'Publish your host profile' : 'Add a nightly price') : published.value ? (product.value.active ? 'Your listing is visible on your website.' : 'Your listing is visible. Bookings are paused.') : 'Your listing is hidden from your website. Publish it when you’re ready.',
+        status: draftStay.value ? undefined : published.value ? 'success' as const : 'neutral' as const,
         to: sectionPath('publication'),
       },
     ].sort((left, right) => rowRank(left.id) - rowRank(right.id)),
@@ -1396,7 +1453,7 @@ const activeNavigationItem = computed(() => {
  * Pricing — would open that level too and push this index off the screen.
  */
 const LEAF_SECTIONS: readonly string[] = ['photo', 'internal-name', 'name', 'description', 'price', 'kind', 'order-url', 'property-type', 'rooms', 'guests', 'availability', 'arrival-time', 'directions', 'wifi', 'house-manual', 'house-rules', 'team']
-const autoOpenTarget = computed(() => navigationGroups.value[0]?.items.find(item => LEAF_SECTIONS.includes(item.id) && !(stayEditor.value && item.id === 'description') && item.to === sectionPath(item.id))?.to ?? null)
+const autoOpenTarget = computed(() => draftStay.value && !arrivalTab.value ? null : navigationGroups.value[0]?.items.find(item => LEAF_SECTIONS.includes(item.id) && !(stayEditor.value && item.id === 'description') && item.to === sectionPath(item.id))?.to ?? null)
 
 const STAY_ROW_ORDER = ['publication', 'photo', 'internal-name', 'name', 'property-type', 'rooms', 'price', 'availability', 'guests', 'description', 'amenities', 'accessibility', 'location', 'house-rules', 'guest-safety', 'cancellation', 'team', 'questions', 'featured', 'collections']
 function rowRank(id: string) {
@@ -1613,6 +1670,9 @@ function payload(concern?: ProductConcern) {
     ...(form.kind === 'stay' && !isNew.value && editorKey.value === 'guests' ? { stay: {
       max_guests: Number(form.max_guests),
     } } : {}),
+    ...(form.kind === 'stay' && !isNew.value && editorKey.value === 'price' && stayPricingRulesChanged() ? { stay: {
+      calendar_rules: stayPricingRules(),
+    } } : {}),
     ...(form.kind === 'stay' && !isNew.value && editorKey.value === 'availability' ? { stay: {
       min_nights: Number(form.min_nights),
     } } : {}),
@@ -1649,7 +1709,7 @@ const sectionUnchanged = computed(() => {
   }
   if (editorKey.value === 'price') {
     const variant = typeof route.params.product_variant_id === 'string' ? form.variants.find(entry => entry.id === route.params.product_variant_id) : stayEditor.value ? form.variants[0] : null
-    return Boolean(variant && variant.price_major.trim() === variant.loaded_price_major.trim() && (form.details[PRICING_NOTE_HANDLE] ?? null) === (row.details[PRICING_NOTE_HANDLE] ?? null))
+    return Boolean((!stayEditor.value || !sectionValid.value || !stayPricingRulesChanged()) && variant && variant.price_major.trim() === variant.loaded_price_major.trim() && (form.details[PRICING_NOTE_HANDLE] ?? null) === (row.details[PRICING_NOTE_HANDLE] ?? null))
   }
   return false
 })
@@ -1780,7 +1840,11 @@ async function commit(concern?: ProductConcern) {
       const destinationLocationId = form.kind === 'stay' ? form.stay_location_id : id
       commitNavigation = true
       try {
-        const navigation = await navigateTo(router.resolve({ path: `${catalogPath.value}/${createdId}`, query: { location_id: destinationLocationId ?? undefined, ...(route.query.kind === 'dish' ? { kind: 'dish' } : {}) } }).fullPath, { replace: true })
+        const destination = router.resolve({
+          path: `${catalogPath.value}/${createdId}`,
+          query: { location_id: destinationLocationId ?? undefined, ...(route.query.kind === 'dish' ? { kind: 'dish' } : {}) },
+        }).fullPath
+        const navigation = await navigateTo(destination, { replace: true })
         if (isNavigationFailure(navigation)) throw navigation
       } finally { commitNavigation = false }
       clearNuxtState([draftKey, createKeyName, `${draftKey}:created`, `${draftKey}:submitted`, `${draftKey}:photo`, `${draftKey}:price`])
@@ -2324,6 +2388,8 @@ provide(productEditorKey, {
   photoError,
   saveLabel,
   saveDisabled,
+  stayHasNightlyPrice,
+  stayHostProfilePublished,
   homeQuotePending,
   homeQuoteError,
   propertyTypeErrors,

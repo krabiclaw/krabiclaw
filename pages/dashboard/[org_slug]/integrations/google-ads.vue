@@ -3,24 +3,27 @@
     id="integration-google-ads"
     icon="i-logos-google-ads"
     title="Google Ads"
-    :lead="integrationDefinition('google-ads').purpose"
+    :back-to="managedAdsPath"
+    :lead="managedAdsPath ? undefined : integrationDefinition('google-ads').purpose"
     :saving="saving"
     :disabled="!accountId || !selected"
     :error="error || data?.error || integrations.failure.value || loadFailure"
-    :footer="!ads && Boolean(accountId) && options.length > 0 && !data?.error"
+    :footer="(!ads || Boolean(managedAdsPath)) && Boolean(accountId) && options.length > 0 && !data?.error"
+    :save-label="managedAdsPath ? 'Use this account' : 'Save'"
     @save="select"
   >
     <IntegrationLeaf
       integration="google-ads"
-      :connection="ads && { name: ads.target_name, connectedAt: ads.connected_at, through: ads.connected_through, status: ads.status, lastError: ads.last_error }"
+      :connection="!managedAdsPath && ads ? { name: ads.target_name, connectedAt: ads.connected_at, through: ads.connected_through, status: ads.status, lastError: ads.last_error } : null"
       :disconnecting="disconnecting"
       @disconnect="disconnect"
     >
+      <p v-if="managedAdsPath" class="mb-4 text-sm text-muted">Choose the account billed in USD that you want Chris to manage.</p>
       <UButton v-if="!accountId || loadFailure || data?.error || !options.length" icon="i-simple-icons-google" size="xl" block :loading="linking" @click="connect({ access_type: 'offline', prompt: 'consent select_account' })">Connect Google Ads</UButton>
 
-      <UFormField v-if="data?.account_id" label="Google Ads account" :error="data.error ?? undefined">
+      <UFormField v-if="data?.account_id && (!managedAdsPath || accountId)" label="Google Ads account" :error="data.error ?? undefined">
         <USelectMenu v-model="selected" :items="options" value-key="value" placeholder="Choose a Google Ads account" class="w-full" />
-        <p v-if="!data.error && !options.length" class="mt-2 text-sm text-muted">This Google account has no accessible Google Ads accounts.</p>
+        <p v-if="!data.error && !options.length" class="mt-2 text-sm text-muted">{{ managedAdsPath ? 'This Google account has no accessible Google Ads accounts billed in USD.' : 'This Google account has no accessible Google Ads accounts.' }}</p>
         <p v-for="line in accountErrors" :key="line" class="mt-2 text-sm text-error">{{ line }}</p>
         <p v-if="notEnabledCount" class="mt-2 text-sm text-muted">{{ notEnabledCount === 1 ? '1 account is' : `${notEnabledCount} accounts are` }} cancelled or not yet set up in Google Ads.</p>
       </UFormField>
@@ -39,10 +42,14 @@ definePageMeta({ layout: 'dashboard' })
 interface AdsLeaf {
   account_id: string | null
   ads: ConnectedIntegration | null
-  accounts: Array<{ customerId: string; formatted_customer_id: string; descriptiveName: string | null; is_manager?: boolean; not_enabled?: true; error?: string }>
+  accounts: Array<{ customerId: string; formatted_customer_id: string; descriptiveName: string | null; currencyCode?: string; is_manager?: boolean; not_enabled?: true; error?: string }>
   error: string | null
 }
 
+const route = useRoute()
+const managedAdsPath = computed(() => route.query.service === 'managed-ads'
+  ? `/dashboard/${encodeURIComponent(String(route.params.org_slug))}/billing/managed-ads`
+  : undefined)
 const integrations = inject(integrationsKey)!
 const dashboardApi = useDashboardApi()
 const api = `/api/organizations/${integrations.organizationId}/integrations/google-ads`
@@ -56,12 +63,12 @@ const isSuccess = (value: unknown): value is { success: true } => isRecord(value
 
 const { data, refresh, error: loadError } = await useAsyncData(
   () => `integration-google-ads:${integrations.organizationId}:${accountId.value ?? ''}`,
-  () => dashboardApi(`${api}/accounts`, { query: !ads.value && accountId.value ? { account_id: accountId.value } : {}, validate: isLeaf }),
+  () => dashboardApi(`${api}/accounts`, { query: (!ads.value || managedAdsPath.value) && accountId.value ? { account_id: accountId.value } : {}, validate: isLeaf }),
   { watch: [accountId] },
 )
 const selected = ref<string | undefined>()
 
-const options = computed(() => (data.value?.accounts ?? []).filter(account => !account.not_enabled).map(account => ({
+const options = computed(() => (data.value?.accounts ?? []).filter(account => !account.not_enabled && (!managedAdsPath.value || (account.currencyCode === 'USD' && !account.is_manager && !account.error))).map(account => ({
   label: `${account.descriptiveName ? `${account.descriptiveName} (${account.formatted_customer_id})` : account.formatted_customer_id}${account.is_manager ? ' · manager account' : ''}`,
   value: account.customerId,
   // A manager account holds other accounts and has no campaigns or results of its own.
@@ -78,7 +85,7 @@ const disconnecting = ref(false)
 
 async function select() {
   const account = data.value?.accounts.find(candidate => candidate.customerId === selected.value)
-  if (!account || !accountId.value) return
+  if (!account || !accountId.value || (managedAdsPath.value && account.currencyCode !== 'USD')) return
   saving.value = true
   error.value = ''
   try {
@@ -90,6 +97,10 @@ async function select() {
     await clear()
     selected.value = undefined
     await Promise.all([refresh(), integrations.refresh()])
+    if (managedAdsPath.value) {
+      clearNuxtData(`dashboard-services-requirements:${String(route.params.org_slug)}`)
+      await navigateTo(managedAdsPath.value, { replace: true })
+    }
   } catch (cause) {
     error.value = getErrorMessage(cause, 'Could not choose that Google Ads account.')
   } finally {

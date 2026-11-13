@@ -19,6 +19,7 @@ extend that model. Never add a second one beside it.
 | OAuth provider for MCP clients | `oauthClient` `oauthClientAssertion` `oauthResource` `oauthClientResource` `oauthConsent` `oauthAccessToken` `oauthRefreshToken` | Better Auth OAuth provider | Better Auth |
 | KrabiClaw subscription | `subscription` | Better Auth Stripe | Better Auth Stripe |
 | Onboarding draft | `onboarding_drafts` | server/utils/onboarding-drafts.ts | KrabiClaw |
+| Unfinished home setup | `stay_home_setup_drafts` | server/utils/stay-home-setup-draft.ts | KrabiClaw |
 | Place (a branch or a home's address and clock) | `business_locations` | server/utils/location-management.ts | KrabiClaw |
 | Catalog | `products` `product_variants` `product_publications` `product_locations` `collections` `collection_products` | server/utils/product-management.ts | KrabiClaw (Stripe-shaped) |
 | Price (offers, table deposits, weekend rates and dated nightly overrides) | `prices` | server/utils/product-management.ts | KrabiClaw |

@@ -126,7 +126,7 @@ const level = useRouteLevel()
 const scopeHeaderModel = inject(dashboardScopeHeaderModelKey, null)
 const organizationsSummary = computed(() => {
   const count = (scopeHeaderModel?.value.peers ?? []).filter(peer => peer.id).length
-  return count === 0 ? 'New organization' : count === 1 ? '1 organization' : `${count} organizations`
+  return count === 0 ? undefined : count === 1 ? '1 organization' : `${count} organizations`
 })
 const profilePath = level.path
 const session = authClient.useSession()

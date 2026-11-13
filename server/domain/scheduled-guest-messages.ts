@@ -8,7 +8,7 @@ import { guestReplyDestination, operationDedupeKey, sendScheduledGuestReply, typ
 import { assertConversationAccess, findMessageByDedupeKey } from './conversations'
 import { publishConversationEvent, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 import { ChannexError } from '~/server/integrations/channex/client'
-import { BOOKING_RECORDS_SQL, bookedRecordGuard, bookedRecordWindow, getGuestRequest, readBookedRecord, type BookedRecord } from './requests'
+import { BOOKING_RECORDS_SQL, bookedRecordGuard, bookedRecordWindow, getGuestRequest, readBookedRecord, stayRequestConfirmationKey, type BookedRecord } from './requests'
 import { memberAccessPrincipal, resolveMembership, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import type { CloudflareEnv } from '~/server/utils/auth'
 
@@ -37,6 +37,8 @@ function validTimestamp(value: string, field: string): void {
 
 /** Only pending plans change. A completed or attempted send can never be recreated. */
 async function plan(db: DbClient, template: MessageTemplateRow, source: BookedRecord, now: string): Promise<void> {
+  // A review-mode lodging request becomes a reservation when its payment confirms it.
+  if (source.status === 'pending' && source.respond_by !== null) return
   const existing = await queryFirst<ScheduledGuestMessageRow>(db, 'SELECT * FROM scheduled_guest_messages WHERE template_id = ? AND booking_id = ?', [template.id, source.id])
   if (existing && existing.status !== 'pending') return
   const schedule = templateSchedule(template)
@@ -54,19 +56,25 @@ async function plan(db: DbClient, template: MessageTemplateRow, source: BookedRe
   try {
     let due: string
     if (schedule.trigger === 'booking_received') {
-      if (source.received_at === null) {
+      const receivedAt = source.respond_by === null ? source.received_at : await queryFirst<{ occurred_at: string }>(db,
+        'SELECT occurred_at FROM activity_entries WHERE organization_id = ? AND dedupe_key = ?',
+        [source.organization_id, stayRequestConfirmationKey(source.id)]).then(confirmation => {
+          if (!confirmation) messagingError(500, 'INVALID_MESSAGE_SOURCE', 'The confirmed stay has no confirmation event.', 'source')
+          return confirmation.occurred_at
+        })
+      if (receivedAt === null) {
         values = { due_at: null, status: 'skipped', reason: 'This stay was imported or was already known before new-reservation scheduling. No new-reservation message will be sent.', error_code: null, error_field: null }
         await savePlan(db, template, source, existing, values, now)
         return
       }
-      validTimestamp(source.received_at, 'receivedAt')
+      validTimestamp(receivedAt, 'receivedAt')
       if (template.schedule_enabled_at === null) messagingError(500, 'INVALID_MESSAGE_TEMPLATE', 'The schedule has no activation timestamp', 'scheduleEnabledAt')
-      if (source.received_at <= template.schedule_enabled_at) {
+      if (receivedAt <= template.schedule_enabled_at) {
         values = { due_at: null, status: 'skipped', reason: `The ${bookingNoun(source)} was received before this schedule was activated. No new-${bookingNoun(source)} message will be sent.`, error_code: null, error_field: null }
         await savePlan(db, template, source, existing, values, now)
         return
       }
-      due = new Date(Date.parse(source.received_at) + schedule.delay_minutes * 60000).toISOString()
+      due = new Date(Date.parse(receivedAt) + schedule.delay_minutes * 60000).toISOString()
     } else due = guestMessageDueAt(schedule, anchors(source), source.timezone)
     validTimestamp(template.updated_at, 'template.updated_at')
     validTimestamp(source.updated_at, 'source.updatedAt')

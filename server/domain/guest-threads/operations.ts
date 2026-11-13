@@ -5,7 +5,7 @@ import { recordBookingCancelled, recordBookingDecision } from '~/server/domain/b
 import { execute, executeBatch, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { shouldSendRealEmail } from '~/server/utils/email-delivery'
 import type { ReplyEmailEnv } from '~/server/utils/submission-messages'
-import { canMarkNoShow, getGuestRequest, getThreadOperationalRecord, requestActions, requestSummary, type GuestRequest, type ThreadOperationalRecord } from '~/server/domain/requests'
+import { bookingDay, canMarkNoShow, getGuestRequest, getThreadOperationalRecord, noStayRequestPaymentInFlightSql, requestActions, requestSummary, stayRequestPayBySql, stayRequestRespondBySql, type GuestRequest, type ThreadOperationalRecord } from '~/server/domain/requests'
 import type { StayAccess } from '~/server/domain/stays'
 import { revokeReviewRequestQuery } from '~/server/utils/review-requests'
 import { deliverGuestThreadEmail, getDeliveryById, isDeliverySent } from './deliveries'
@@ -23,7 +23,7 @@ import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import { guestPresentation } from '~/server/utils/notifications'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { platformLocale } from '~/shared/platform-locales'
-import { formatTimestamp } from '~/utils/timezone'
+import { formatCalendarRange, formatTimestamp } from '~/utils/timezone'
 import { publishConversationEvent } from '~/server/cloudflare/guest-inbox-events'
 import { describeErrorForTelemetry } from '~/shared/error-telemetry'
 import { assertReplyIntent, guestThreadChannel, replyThroughChannex, type ChannelThreadMapping } from './channel-messages'
@@ -93,7 +93,8 @@ interface SourceMutationPlan {
   kind: 'booking'
   action: 'confirm' | 'reject' | 'cancel'
   beforeStatus: string
-  afterStatus: 'confirmed' | 'cancelled'
+  afterStatus: 'confirmed' | 'cancelled' | 'pending'
+  payBy?: string
   requiresNotification: boolean
 }
 
@@ -144,13 +145,21 @@ async function successfulOutcome(
   }
 }
 
-function sourceMutationPlan(context: ThreadContext, action: string): SourceMutationPlan | null {
-  // A stay is changed from its own screen; its thread converses about it.
-  if (context.thread.kind === 'contact' || !context.record || context.record.unit === 'nights') return null
+async function sourceMutationPlan(context: ThreadContext, action: string, now: string): Promise<SourceMutationPlan | null> {
+  if (context.thread.kind === 'contact' || !context.record) return null
   const kind = 'booking' as const
-  const { status: beforeStatus } = context.record
+  const { status: beforeStatus, respond_by, pay_by, unit } = context.record
+  if (unit === 'nights') {
+    if (beforeStatus !== 'pending' || !respond_by || (action !== 'cancel' && (pay_by || respond_by <= now))) return null
+    if (action === 'cancel' && context.record.payment_processing) return null
+    if (action === 'reject' || action === 'cancel') return { kind, action, beforeStatus, afterStatus: 'cancelled', requiresNotification: true }
+    if (action !== 'confirm') return null
+    const { stayRequestDeadline } = await import('~/server/domain/stays')
+    const payBy = stayRequestDeadline(now, context.record.starts_at, context.record.timezone)
+    return payBy > now ? { kind, action, beforeStatus, afterStatus: 'pending', payBy, requiresNotification: true } : null
+  }
   // Pending review and confirmed appointments share the same temporal guard.
-  if (context.record.ends_at <= new Date().toISOString() || isBookingComplete(context.record, new Date().toISOString())) return null
+  if (context.record.ends_at <= now || isBookingComplete(context.record, now)) return null
   if (beforeStatus === 'pending' && (action === 'confirm' || action === 'reject')) {
     return { kind, action, beforeStatus, afterStatus: action === 'confirm' ? 'confirmed' : 'cancelled', requiresNotification: true }
   }
@@ -161,7 +170,8 @@ function sourceMutationPlan(context: ThreadContext, action: string): SourceMutat
 }
 
 
-function operationEntryQueries(
+async function operationEntryQueries(
+  db: DbClient,
   context: ThreadContext,
   plan: SourceMutationPlan,
   input: ExecuteOperationInput,
@@ -170,13 +180,25 @@ function operationEntryQueries(
   now: string,
   email: Awaited<ReturnType<typeof renderStatusUpdate>> | null,
   financialGuard: BatchQuery | null = null,
-): BatchQuery[] {
+): Promise<BatchQuery[]> {
   const record = context.record!
+  const stay = record.unit === 'nights' ? await import('~/server/domain/stays') : null
+  const channel = stay && plan.payBy ? await stay.stayChannelAvailability(db, {
+    organizationId: record.organization_id, productId: record.product_id,
+    checkIn: bookingDay(record.starts_at, record.timezone), checkOut: bookingDay(record.ends_at, record.timezone),
+  }) : null
+  const sourceGuard = stay
+    ? `src.product_session_id IS NULL AND src.owner='app' AND src.channel='direct' AND ${stayRequestRespondBySql('src')} IS NOT NULL
+      AND ${noStayRequestPaymentInFlightSql('c.id')}
+      ${plan.action !== 'cancel' ? `AND ${stayRequestRespondBySql('src')} > strftime('%Y-%m-%dT%H:%M:%fZ','now') AND ${stayRequestPayBySql('c.id')} IS NULL` : ''}
+      ${channel ? `AND ${channel.query}` : ''}`
+    : `src.product_session_id IS NOT NULL AND src.ends_at > strftime('%Y-%m-%dT%H:%M:%fZ','now')`
   return messageQueries({
     id: entryId, conversationId: context.thread.id, authorKind: 'krabiclaw', authorUserId: input.actorUserId,
     body: email?.body ?? null, eventName: `${plan.kind}.${plan.action}`, dedupeKey, occurredAt: now,
     payload: {
       action: plan.action, beforeStatus: plan.beforeStatus, afterStatus: plan.afterStatus,
+      ...(plan.payBy ? { pay_by: plan.payBy } : {}),
       booking_id: record.id,
       subject: email?.subject ?? null,
       email: email ? { to: email.to, fromName: email.fromName, locale: email.locale, ...email.email } : null,
@@ -194,11 +216,11 @@ function operationEntryQueries(
     guard: {
       sql: `c.organization_id = ? AND c.kind = ? AND c.last_message_at = ?
         AND EXISTS (SELECT 1 FROM bookings src
-                     WHERE src.id = c.booking_id AND src.organization_id = c.organization_id AND src.status = ? AND src.product_session_id IS NOT NULL AND src.ends_at > strftime('%Y-%m-%dT%H:%M:%fZ','now')
+                     WHERE src.id = c.booking_id AND src.organization_id = c.organization_id AND src.status = ? AND ${sourceGuard}
                        AND src.version = ?
                        AND json_array(src.id,src.party_size,src.product_id,src.starts_at,src.ends_at,src.timezone,src.location_id,src.party_size_is_minimum)=json_array(?,CAST(? AS INTEGER),?,?,?,?,?,CAST(? AS INTEGER)))
         AND (${financialGuard?.query ?? '1=1'})`,
-      params: [context.thread.organization_id, plan.kind, context.thread.last_message_at, plan.beforeStatus, record.version,
+      params: [context.thread.organization_id, plan.kind, context.thread.last_message_at, plan.beforeStatus, ...(stay ? [now] : []), ...(channel?.params ?? []), record.version,
         record.id, record.party_size, record.product_id, record.starts_at, record.ends_at, record.timezone, record.location_id, Number(record.party_size_is_minimum),
         ...(financialGuard?.params ?? [])],
     },
@@ -219,7 +241,7 @@ function sourceUpdateQuery(context: ThreadContext, plan: SourceMutationPlan, ent
   return bookingStatusQuery({
     organizationId: context.thread.organization_id, bookingId: context.record!.id, now,
     guard: { query: 'status = ? AND EXISTS (SELECT 1 FROM messages WHERE id = ?)', params: [plan.beforeStatus, entryId] },
-    ...(plan.afterStatus === 'cancelled' ? { status: 'cancelled', reason: plan.action === 'reject' ? 'host_rejected' : 'host_cancelled' } : { status: 'confirmed' }),
+    ...(plan.afterStatus === 'cancelled' ? { status: 'cancelled', reason: plan.action === 'reject' ? 'host_rejected' : 'host_cancelled' } : { status: plan.afterStatus }),
   })
 }
 
@@ -280,8 +302,9 @@ async function renderMemberReply(env: ReplyEmailEnv, db: DbClient, organizationI
   }), { platformDomain: getPlatformDomain(env) })
 }
 
-async function renderStatusUpdate(env: ReplyEmailEnv, db: DbClient, context: ThreadContext, action: SourceMutationPlan['action'], to: string, locationName: string | null) {
+async function renderStatusUpdate(env: ReplyEmailEnv, db: DbClient, context: ThreadContext, plan: SourceMutationPlan, to: string, locationName: string | null) {
   if (!context.record) throw new Error('This thread has no booking')
+  const { action, payBy } = plan
   const fromName = await getOrganizationBrandName(db, context.thread.organization_id)
   const guest = await guestPresentation(db, {
     organizationId: context.thread.organization_id, organizationName: fromName,
@@ -294,14 +317,22 @@ async function renderStatusUpdate(env: ReplyEmailEnv, db: DbClient, context: Thr
   const titleKey = action === 'reject' ? 'booking.request_declined'
     : action === 'confirm' ? table ? 'reservations.confirmed' : 'booking.confirmed'
       : table ? 'site.reservation_cancel.cancelled_title' : 'site.experience_cancel.cancelled_title'
-  const subject = `${labels[titleKey]} — ${guest.productTitle ?? guest.organizationName}`
+  const subject = `${payBy ? labels['booking.stay_request_approved'] : labels[titleKey]} — ${guest.productTitle ?? guest.organizationName}`
   const org = await queryFirst<{ vertical: string | null }>(db, 'SELECT vertical FROM organization WHERE id = ?', [context.thread.organization_id])
   const presentation = resolveBookingPresentation(context.record.product_kind, org?.vertical)
   const countStr = `${context.record.party_size}${context.record.party_size_is_minimum ? '+' : ''}`
   const guests = presentation.formatCount(countStr)
-  const body = [guest.locationName, formatTimestamp(context.record.starts_at, guest.locale, context.record.timezone, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }), guests].filter(Boolean).join(' · ')
+  const dates = context.record.unit === 'nights'
+    ? formatCalendarRange(bookingDay(context.record.starts_at, context.record.timezone), bookingDay(context.record.ends_at, context.record.timezone), guest.locale)
+    : formatTimestamp(context.record.starts_at, guest.locale, context.record.timezone, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })
+  const deadline = payBy ? labels['booking.stay_request_pay_by']!.replace('{deadline}', formatTimestamp(payBy, guest.locale, context.record.timezone, { dateStyle: 'medium', timeStyle: 'short' })) : null
+  const body = [[guest.locationName, dates, guests].filter(Boolean).join(' · '), deadline].filter(Boolean).join('\n')
   const organizationLogoUrl = await organizationLogo(db, context.thread.organization_id)
-  const email = await renderNotificationEmail(guestThreadStatusMessage({ locale: guest.locale, organizationName: guest.organizationName, organizationLogoUrl, heading: subject, body, manageUrl: await buildBuyerRequestActivityUrl(env, db, { organizationId: context.thread.organization_id, threadId: context.thread.id }) }), { platformDomain: getPlatformDomain(env) })
+  const manageUrl = await buildBuyerRequestActivityUrl(env, db, { organizationId: context.thread.organization_id, threadId: context.thread.id })
+  if (payBy && !manageUrl) throw new Error('A stay request has no guest activity link')
+  const email = await renderNotificationEmail(guestThreadStatusMessage({ locale: guest.locale, organizationName: guest.organizationName, organizationLogoUrl, heading: subject, body,
+    ...(payBy ? { actionUrl: manageUrl, actionLabel: labels['booking.stay_request_pay'] } : { manageUrl }),
+  }), { platformDomain: getPlatformDomain(env) })
   return { to, fromName, locale: guest.locale, subject, body, email }
 }
 
@@ -383,11 +414,13 @@ async function executeSourceMutation(
 ): Promise<OperationOutcome> {
   if (!context.record) return { ok: false, status: 404, reason: 'source_not_found' }
   const dedupeKey = operationDedupeKey(input)
+  const nightly = context.record.unit === 'nights'
   const eventName = `${context.thread.kind}.${input.action}`
   const existing = await findMessageByDedupeKey(db, dedupeKey)
   if (existing) {
     if (!entryMatchesRequest(existing, eventName)) return conflict()
-    await (await import('~/server/domain/scheduled-guest-messages')).planSourceMessages(db, context.thread.organization_id, context.record.id)
+    if (nightly) await (await import('~/server/domain/stays')).publishStayRequest(db, input.env, input.organizationId, context.record.id)
+    else await (await import('~/server/domain/scheduled-guest-messages')).planSourceMessages(db, context.thread.organization_id, context.record.id)
     const delivery = await getDeliveryById(db, deliveryDedupeKey(input))
     if (!delivery) throw new Error('Status update delivery receipt was not created')
     const outcome = await sendStatusUpdate(db, context, input, existing, delivery)
@@ -395,25 +428,31 @@ async function executeSourceMutation(
     return outcome
   }
 
-  const plan = sourceMutationPlan(context, input.action)
+  const now = new Date().toISOString()
+  const plan = await sourceMutationPlan(context, input.action, now)
   if (!plan) return conflict(`"${input.action}" is not a valid action for the current state`)
   if (input.version !== undefined && context.record.version !== input.version) return conflict('This booking changed since you opened it. Reload and try again.')
   const summary = await requestSummary(db, context.thread)
 
   const entryId = crypto.randomUUID()
   const deliveryId = deliveryDedupeKey(input)
-  const now = new Date().toISOString()
   // A booking always has its guest's email (requests.ts `guest`); one without is broken data.
   if (plan.requiresNotification && !summary.guestEmail) throw new Error(`${plan.kind} conversation ${context.thread.id} has no guest email`)
   const email = plan.requiresNotification && summary.guestEmail
-    ? await renderStatusUpdate(input.env, db, context, plan.action, summary.guestEmail, summary.locationTitle)
+    ? await renderStatusUpdate(input.env, db, context, plan, summary.guestEmail, summary.locationTitle)
     : null
   // Declining or cancelling a paid booking returns the payment in the same batch, once the operator approved it.
   const refundPlan = (plan.action === 'reject' || plan.action === 'cancel') && context.record
     ? await visitRefundQueries(db,{action:plan.action,organizationId:context.thread.organization_id,actorUserId:input.actorUserId,bookingId:context.record.id,authorizationId:input.financialAuthorizationId,financialWritesAllowed:input.financialWritesAllowed,note:input.body,committed:{query:'EXISTS(SELECT 1 FROM messages WHERE id=?)',params:[entryId]},now}) : {queries:[],guard:null}
+  const stay = nightly ? await import('~/server/domain/stays') : null
+  const nightRelease = stay && plan.afterStatus === 'cancelled'
+    ? stay.stayRequestReleaseQueries({ ...context.record, check_in_date: bookingDay(context.record.starts_at, context.record.timezone),
+      check_out_date: bookingDay(context.record.ends_at, context.record.timezone) }, input.organizationId, now)
+    : []
   const queries = [
-    ...operationEntryQueries(context, plan, input, entryId, dedupeKey, now, email,refundPlan.guard),
+    ...await operationEntryQueries(db, context, plan, input, entryId, dedupeKey, now, email, refundPlan.guard),
     sourceUpdateQuery(context, plan, entryId, now),
+    ...nightRelease,
     ...refundPlan.queries,
     // An approval closes the booking's review; a cancellation also answers what the guest asked before it.
     ...conversationTaskQueries(context.thread.id, now),
@@ -428,7 +467,8 @@ async function executeSourceMutation(
   if (!applied) return conflict(`"${input.action}" is not a valid action for the current state`)
   if (!entryMatchesRequest(applied, eventName)) return conflict()
   // A confirmed, declined or cancelled visit's automatic messages follow it.
-  await (await import('~/server/domain/scheduled-guest-messages')).planSourceMessages(db, context.thread.organization_id, context.record.id)
+  if (stay) await stay.publishStayRequest(db, input.env, input.organizationId, context.record.id)
+  else await (await import('~/server/domain/scheduled-guest-messages')).planSourceMessages(db, context.thread.organization_id, context.record.id)
   if (plan.requiresNotification) {
     const delivery = await getDeliveryById(db, deliveryId)
     if (!delivery) throw new Error('Status update delivery receipt was not created')
@@ -679,15 +719,19 @@ export async function executeBookingStatus(db: DbClient, input: Omit<ExecuteOper
   stayAccess?: StayAccess
 }) {
   if (!Number.isSafeInteger(input.version) || input.version < 1) throw new HTTPError({ statusCode: 400, message: 'Booking version is required' })
-  const record = await queryFirst<{ unit: 'slot' | 'nights'; conversation_id: string | null }>(db, `SELECT CASE WHEN b.product_session_id IS NULL THEN 'nights' ELSE 'slot' END AS unit,
+  const record = await queryFirst<{ unit: 'slot' | 'nights'; conversation_id: string | null; status: string; respond_by: string | null }>(db, `SELECT CASE WHEN b.product_session_id IS NULL THEN 'nights' ELSE 'slot' END AS unit,
+    b.status, ${stayRequestRespondBySql('b')} AS respond_by,
     (SELECT c.id FROM conversations c WHERE c.booking_id=b.id AND c.organization_id=b.organization_id AND c.kind='booking') AS conversation_id
     FROM bookings b WHERE b.id=? AND b.organization_id=?`, [input.bookingId, input.organizationId])
   if (!record) throw new HTTPError({ statusCode: 404, message: 'Booking not found' })
   if (input.threadId && input.threadId !== record.conversation_id) throw new HTTPError({ statusCode: 404, message: 'Booking conversation not found' })
-  if (record.unit === 'nights' && input.action === 'cancel') {
-    if (input.stayAccess?.organizationId !== input.organizationId || input.stayAccess.actorId !== input.actorUserId) throw new HTTPError({ statusCode: 403, message: 'Organization access required' })
+  if (record.unit === 'nights' && input.action !== 'no_show'
+    && (!input.stayAccess?.manage || input.stayAccess.organizationId !== input.organizationId || input.stayAccess.actorId !== input.actorUserId)) {
+    throw new HTTPError({ statusCode: 403, message: 'Organization access required' })
+  }
+  if (record.unit === 'nights' && input.action === 'cancel' && (!record.respond_by || record.status === 'confirmed')) {
     const { cancelStay } = await import('~/server/domain/stays')
-    const stay = await cancelStay(db, input.env, input.stayAccess, input.bookingId, {
+    const stay = await cancelStay(db, input.env, input.stayAccess!, input.bookingId, {
       version: input.version, reason: input.reason ?? input.body, authorization_id: input.financialAuthorizationId, financial_writes_allowed: input.financialWritesAllowed,
     })
     return { kind: 'stay' as const, stay }

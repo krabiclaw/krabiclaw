@@ -12,7 +12,7 @@
 
 import { timingSafeEqual } from 'node:crypto'
 import type { H3Event } from 'nitro/h3'
-import { getCookie, getQuery, setCookie } from 'nitro/h3'
+import { deleteCookie, getCookie, getQuery, setCookie } from 'nitro/h3'
 
 const textEncoder = new TextEncoder()
 
@@ -21,6 +21,13 @@ export const PREVIEW_COOKIE_NAME = 'kc_preview'
 /** The query parameter that mints the cookie. */
 export const PREVIEW_TOKEN_QUERY = 'preview_token'
 export const PREVIEW_TOKEN_TTL_MS = 12 * 60 * 60 * 1000
+export const PUBLIC_WEBSITE_QUERY = '?view=public'
+
+const previewCookie = { httpOnly: true, secure: true, sameSite: 'none', partitioned: true, path: '/' } as const
+
+export function clearPreviewAuthorization(event: H3Event) {
+  deleteCookie(event, PREVIEW_COOKIE_NAME, previewCookie)
+}
 
 const base64UrlEncode = (bytes: ArrayBuffer) =>
   btoa(String.fromCharCode(...new Uint8Array(bytes)))
@@ -87,11 +94,7 @@ export async function resolvePreviewAuthorization(
   if (token) {
     if (!await verifyPreviewToken(previewSecret, organizationId, token)) return false
     setCookie(event, PREVIEW_COOKIE_NAME, token, {
-      httpOnly: true,
-      secure: true,
-      sameSite: 'none',
-      partitioned: true,
-      path: '/',
+      ...previewCookie,
       maxAge: Math.floor(PREVIEW_TOKEN_TTL_MS / 1000),
     })
     return true

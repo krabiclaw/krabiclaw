@@ -18,6 +18,7 @@ import type { DashboardLocation } from '../../composables/useDashboardOrganizati
 import { countCatalog, type CatalogCounts } from '../../utils/product-presentation'
 import { seededTenant } from './seed/manifest'
 import { seededTables } from './helpers/tables'
+import { readLocalTenant } from './test-env'
 
 // The dashboard's pane topology is the nested route tree (DESIGN.md, Route
 // hierarchy). On a wide screen a level renders beside the parent its Back goes
@@ -2226,8 +2227,9 @@ test.describe('dashboard pane hierarchy', () => {
   // A service is a Product and the page that shows it: Catalog's Add opens the
   // shared creation form, and Create writes both, bound, through one request.
   test('Catalog adds a service with its page through the one Product editor', async ({ page, baseURL, playwright }) => {
-    const services = '/dashboard/harbor-legal-aid'
-    const editor = `/api/editor/organizations/${seededTenant('legal').organizationId}`
+    const legal = seededTenant('legal')
+    const services = `/dashboard/${legal.slug}`
+    const editor = `/api/editor/organizations/${legal.organizationId}`
     await page.setViewportSize(WIDE)
     await page.context().clearCookies()
     await loginAs(page.request, baseURL!, 'user-e2e-ncls-owner')
@@ -2356,14 +2358,26 @@ test.describe('dashboard pane hierarchy', () => {
       const preview = page.getByRole('dialog', { name: 'Legal Services preview', exact: true })
       const frame = preview.getByTestId('content-preview-frame')
       await expect(frame).toHaveAttribute('src', new RegExp(`${product.page!.path.replaceAll('/', '\\/')}\\?preview_token=`))
-      await expect(preview.getByTestId('preview-private')).toBeVisible()
+      const listing = frame.contentFrame().getByRole('heading', { name: renamed, level: 1, exact: true })
+      await expect(listing).toBeVisible()
       await expect(preview.getByTestId('preview-share')).toHaveCount(0)
+      // The signed preview renders the saved practice area. A visitor without
+      // the preview token still cannot load the unpublished page.
+      const publicURL = new URL((await frame.getAttribute('src'))!)
+      publicURL.searchParams.delete('preview_token')
+      const anonymous = await playwright.request.newContext()
+      try {
+        const response = await readLocalTenant(anonymous, legal.subdomain, publicURL)
+        expect(response.status()).toBe(404)
+        expect(await response.text()).not.toContain(renamed)
+      } finally {
+        await anonymous.dispose()
+      }
       await preview.getByRole('tab', { name: 'Mobile view', exact: true }).click()
       await expect(page).toHaveURL(url => url.searchParams.get('previewViewport') === 'mobile')
       await expect(frame).toHaveCSS('max-width', '390px')
       await page.setViewportSize(PHONE)
-      await expect(preview).toBeVisible()
-      await expect(preview.getByTestId('preview-private')).toBeVisible()
+      await expect(listing).toBeVisible()
       await preview.getByRole('button', { name: 'Close', exact: true }).click()
       await expect(preview).toHaveCount(0)
       await page.setViewportSize(WIDE)

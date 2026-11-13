@@ -1,170 +1,171 @@
 <template>
-  <div class="flex min-h-0 flex-col gap-6 py-6" :data-onboarding-step="step.id" data-onboarding-hydrated="true">
-    <div class="flex flex-col gap-3">
-      <h1 :class="dashboardTitleClass">{{ step.title(state) }}</h1>
-      <p v-if="step.lede" class="text-base text-muted">{{ step.lede(state) }}</p>
-    </div>
-
-    <OnboardingChoiceGrid
+  <div class="flex min-h-0 flex-col gap-6" :data-onboarding-step="step.id" data-onboarding-hydrated="true">
+    <div
       v-if="step.id === 'type'"
-      :choices="VERTICAL_CHOICES"
-      :model-value="state.vertical"
-      @update:model-value="choose(() => selectOnboardingVertical(state, $event as OrganizationVertical))"
-    />
-
-    <OnboardingChoiceGrid
-      v-else-if="step.id === 'language'"
-      :choices="LANGUAGE_CHOICES"
-      :model-value="state.details.sourceLocale"
-      @update:model-value="choose(() => { state.details.sourceLocale = $event })"
-    />
+      class="flex flex-col gap-6 md:gap-8"
+    >
+      <figure v-if="websiteExample" class="flex items-center justify-center bg-[var(--kc-coral-50)] px-8 py-6 md:py-9">
+        <div class="w-full max-w-[15rem] overflow-hidden rounded-2xl bg-white p-2 text-slate-900 shadow-xl md:max-w-[27rem] md:p-3">
+          <img
+            :src="websiteExample.image"
+            alt=""
+            class="aspect-[3/2] w-full rounded-xl object-cover object-top"
+            fetchpriority="high"
+          >
+          <figcaption class="truncate px-2 py-2 text-sm font-semibold md:py-3" aria-live="polite">
+            {{ websiteExample.name }}
+          </figcaption>
+        </div>
+      </figure>
+      <div class="mx-auto w-full max-w-4xl space-y-5 px-5 pb-5 sm:px-8 md:pb-6">
+        <h1 class="text-center text-2xl font-semibold tracking-tight md:text-4xl">{{ step.title }}</h1>
+        <OnboardingChoiceGrid
+          compact
+          :choices="plan?.businessTypes ?? []"
+          :model-value="state.vertical"
+          @update:model-value="selectVertical"
+        />
+      </div>
+    </div>
 
     <div v-else-if="step.id === 'business'" class="flex flex-col gap-3">
       <template v-if="!googleImport">
-        <UFormField label="Name" required>
-          <UInput :model-value="state.details.name" class="w-full" autofocus @update:model-value="setManualName" />
+        <UFormField :label="fieldLabel('name')" required>
+          <UInput :model-value="state.details.name" class="w-full" size="lg" autocomplete="organization" @update:model-value="setBusinessName" />
         </UFormField>
-        <UButton label="Import from Google Maps" variant="link" class="self-start" @click="googleImport = true" />
+        <UButton v-if="plan" type="button" :label="plan.businessLookup.importLabel" color="neutral" variant="link" class="self-start px-0" @click="openBusinessLookup" />
       </template>
-      <template v-else>
-        <GooglePlacePicker v-model="businessSearch" @select="choosePlace" />
-        <UButton label="Enter details manually" color="neutral" variant="ghost" class="self-start" @click="enterManually" />
+      <template v-else-if="plan">
+        <GooglePlacePicker v-model="businessSearch" :placeholder="plan.businessLookup.searchPlaceholder" @select="choosePlace" />
+        <UButton type="button" :label="plan.businessLookup.manualLabel" color="neutral" variant="link" class="self-start px-0" @click="enterManually" />
       </template>
+      <UFormField v-if="!googleImport && fieldLabel('subdomain')" :label="fieldLabel('subdomain')"
+        :hint="plan?.includedDomain ? `.${plan.includedDomain}` : undefined" :error="plan?.subdomainError"
+        :description="field('subdomain')?.description" required>
+        <UInput v-model="state.subdomain" class="w-full" size="lg" maxlength="63" autocapitalize="none" :spellcheck="false" />
+      </UFormField>
     </div>
 
-    <IntakeDetailsCard
-      v-else-if="step.id === 'location'"
-      v-model:form="detailsForm"
-      section="location"
-      :require-location-basics="false"
+    <template v-else-if="step.id === 'location'">
+      <OnboardingAddressFields
+        :fields="addressFields"
+        :countries="plan?.countries ?? []"
+        @answer="setAddress"
+      />
+      <LocationTimezoneField v-if="fieldLabel('timezone')" v-model="timezone" :items="plan?.timezones" :label="fieldLabel('timezone')" />
+    </template>
+
+    <LocationTimezoneField v-else-if="step.id === 'timezone'" v-model="timezone" :items="plan?.timezones" :label="fieldLabel('timezone')" />
+
+    <div v-else-if="step.id === 'language'" role="group" :aria-label="fieldLabel('sourceLocale')">
+      <p v-if="state.languageLocked && selectedLanguage">{{ selectedLanguage.label }}</p>
+      <OnboardingChoiceGrid
+        v-else
+        :choices="plan?.languages ?? []"
+        :model-value="state.details.sourceLocale"
+        @update:model-value="state.details.sourceLocale = $event"
+      />
+    </div>
+
+    <UFormField v-else-if="step.id === 'currency'" :label="fieldLabel('currency')" required>
+      <USelectMenu
+        :model-value="state.details.currency ?? plan?.proposedCurrency ?? undefined"
+        :items="plan?.currencies ?? []"
+        :filter-fields="['label', 'value']"
+        value-key="value"
+        placeholder="Select currency"
+        class="w-full"
+        size="lg"
+        @update:model-value="state.details.currency = isCurrencyCode($event) ? $event : null"
+      />
+    </UFormField>
+
+    <LodgingBookingChoices
+      v-else-if="step.id === 'booking' && plan"
+      v-model="state.details.confirmationMode"
+      :choices="plan.bookingChoices"
+      :label="step.title"
     />
-
-    <IntakeDetailsCard
-      v-else-if="step.id === 'contact'"
-      v-model:form="detailsForm"
-      section="contact"
-      :require-location-basics="false"
-    />
-
-    <!-- One control and nothing else to confirm, so the selection is the answer
-         and the flow moves on — the same as the other single-choice steps. The
-         card emits submit when a currency is picked. -->
-    <IntakeDetailsCard
-      v-else-if="step.id === 'currency'"
-      v-model:form="detailsForm"
-      section="currency"
-      :require-location-basics="true"
-      @submit="emit('advance')"
-    />
-
-    <LocationHoursCard v-else-if="step.id === 'hours'" v-model:form="state.hours" />
-
-    <OnboardingProductsCard v-else-if="step.id === 'products'" />
-
-    <DraftBrandCard v-else-if="step.id === 'look'" v-model:form="state.brand" v-model:revision="state.draftRevision" section="look" :draft-id="state.draftId" @uploading="emit('uploading', $event)" />
-
-    <OnboardingReviewCard v-else-if="step.id === 'review'" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { dashboardTitleClass } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
-import { PLATFORM_LOCALES } from '~/shared/platform-locales'
-const LANGUAGE_CHOICES = PLATFORM_LOCALES.map(locale => ({ value: locale.locale, label: locale.label, icon: 'i-lucide-languages' }))
-import IntakeDetailsCard from '~/lib/components/workspace/onboarding/IntakeDetailsCard.vue'
-import DraftBrandCard from '~/lib/components/workspace/onboarding/DraftBrandCard.vue'
-import LocationHoursCard from '~/lib/components/workspace/location/LocationHoursCard.vue'
+import OnboardingAddressFields from '~/lib/components/workspace/onboarding/OnboardingAddressFields.vue'
+import LodgingBookingChoices from '~/lib/components/workspace/settings/LodgingBookingChoices.vue'
 import OnboardingChoiceGrid from '~/lib/components/workspace/onboarding/OnboardingChoiceGrid.vue'
 import GooglePlacePicker from '~/lib/components/workspace/location/GooglePlacePicker.vue'
-import OnboardingProductsCard from '~/lib/components/workspace/onboarding/OnboardingProductsCard.vue'
-import OnboardingReviewCard from '~/lib/components/workspace/onboarding/OnboardingReviewCard.vue'
-import { selectOnboardingVertical, useOnboardingState, type OnboardingPlacePreview, type OnboardingStep } from '~/composables/useOnboardingFlow'
+import LocationTimezoneField from '~/lib/components/workspace/location/LocationTimezoneField.vue'
+import { useOnboardingPlan, useOnboardingState, type OnboardingPlacePreview } from '~/composables/useOnboardingFlow'
 import { useOnboardingDraft } from '~/composables/useOnboardingDraft'
-import { currencyForCountry } from '~/shared/currencies'
-import { singleTimezoneForCountry } from '~/utils/timezone'
-import { ALL_VERTICALS, type OrganizationVertical } from '~/utils/vertical-copy'
+import type { OnboardingStep, OnboardingStepField } from '~/shared/onboarding-flow'
+import { isCurrencyCode } from '~/shared/currencies'
 
-/**
- * One step of the new-site flow, rendered.
- *
- * The screen owns the controls and nothing else: the shell owns the footer,
- * the server calls and where "next" goes.
- */
 const props = defineProps<{ step: OnboardingStep }>()
-const emit = defineEmits<{ advance: []; uploading: [value: boolean] }>()
-
 const state = useOnboardingState()
+const plan = useOnboardingPlan()
+const { seedFromPlace } = useOnboardingDraft()
+const websiteExample = computed(() => plan.value?.businessTypes.find(choice => choice.value === state.value.vertical)?.example ?? plan.value?.neutralWebsiteExample)
+const selectedLanguage = computed(() => plan.value?.languages.find(choice => choice.value === state.value.details.sourceLocale))
 
-const VERTICAL_PRESENTATION: Record<OrganizationVertical, { label: string; icon: string }> = {
-  restaurant: { label: 'Restaurant, café or bar', icon: 'i-lucide-utensils' },
-  experience: { label: 'Experience or activity', icon: 'i-lucide-ticket' },
-  service: { label: 'Law firm or legal practice', icon: 'i-lucide-briefcase' },
-  lodging: { label: 'Lodging or vacation rentals', icon: 'i-lucide-house' },
+const field = (key: OnboardingStepField['key']) => props.step.fields.find(field => field.key === key)
+const fieldLabel = (key: OnboardingStepField['key']) => field(key)?.label
+const addressKeys = ['country', 'streetAddress', 'addressLine2', 'city', 'region', 'postalCode'] as const
+type AddressKey = typeof addressKeys[number]
+const isAddressKey = (key: string): key is AddressKey => addressKeys.some(candidate => candidate === key)
+const addressFields = computed(() => props.step.fields.flatMap(field => isAddressKey(field.key)
+  ? [{ ...field, value: state.value.details[field.key], required: field.key === 'country' }]
+  : []))
+
+function selectVertical(value: string) {
+  const choice = plan.value?.businessTypes.find(option => option.value === value)
+  if (choice && choice.value !== state.value.vertical) {
+    state.value.vertical = choice.value
+    state.value.details.confirmationMode = null
+  }
 }
-const VERTICAL_CHOICES = ALL_VERTICALS.map(value => ({ value, ...VERTICAL_PRESENTATION[value] }))
 
-// A single-choice step has nothing left to confirm once the card is pressed, so
-// the press is the answer and the flow moves on.
-function choose(answer: () => void) {
-  answer()
-  emit('advance')
-}
-
-// The business search starts from the name already given, so Back to this step
-// shows what the owner picked rather than an empty box. Both shells keep this
-// screen mounted across steps, so it is read each time the step is entered.
 const businessSearch = ref('')
 const googleImport = ref(false)
 watch(() => props.step.id, (id) => {
-  if (id === 'business') {
-    businessSearch.value = state.value.details.name
-    state.value.source ??= 'manual'
-  }
+  if (id !== 'business') return
+  state.value.source ??= 'manual'
 }, { immediate: true })
-const { seedFromPlace } = useOnboardingDraft()
 
-function choosePlace(place: OnboardingPlacePreview) {
-  googleImport.value = false
-  choose(() => seedFromPlace(place))
+function openBusinessLookup() {
+  businessSearch.value = state.value.details.name
+  googleImport.value = true
 }
 
-function setManualName(value: string | number | undefined) {
-  const previousName = state.value.details.name
+function choosePlace(place: OnboardingPlacePreview) {
+  seedFromPlace(place)
+  googleImport.value = false
+}
+
+function setBusinessName(value: string | number | undefined) {
   state.value.details.name = String(value ?? '')
-  state.value.source = 'manual'
-  state.value.placeId = null
-  if (!state.value.brand.heroHeadline || state.value.brand.heroHeadline === previousName) state.value.brand.heroHeadline = state.value.details.name
 }
 
 function enterManually() {
-  choose(() => {
-    googleImport.value = false
-    setManualName(businessSearch.value.trim())
-  })
+  googleImport.value = false
+  state.value.source = 'manual'
+  state.value.placeId = null
+  setBusinessName(businessSearch.value.trim())
 }
 
-// IntakeDetailsCard owns its own form object; the flow's details are that
-// object, so the card edits the answers directly rather than a copy that has to
-// be synced back.
-const detailsForm = computed({
-  get: () => state.value.details,
-  set: (value) => { state.value.details = value },
+function setAddress(key: string, value: string) {
+  if (!isAddressKey(key) || state.value.details[key] === value) return
+  state.value.details[key] = value
+  if (key === 'country') {
+    state.value.timezone = ''
+    state.value.timezoneStepVisited = false
+  }
+}
+
+const timezone = computed({
+  get: () => state.value.timezone || plan.value?.proposedTimezone || '',
+  set: (value) => {
+    state.value.timezone = value
+    if (props.step.id === 'location') state.value.timezoneStepVisited = false
+  },
 })
-
-// The owner named their country on the location step. When that country has
-// exactly one IANA zone, that is their timezone; when it has several, the field
-// stays empty and they search the list. Never overwrite a zone the owner or the
-// Google import already set.
-watch(() => props.step.id, (id) => {
-  if (id !== 'hours' || state.value.hours.timezone) return
-  const zone = singleTimezoneForCountry(state.value.details.country)
-  if (zone) state.value.hours.timezone = zone
-}, { immediate: true })
-
-// Same shape for the currency: the country proposes it, the owner confirms it on
-// this step, and an answer already given is never overwritten.
-watch(() => props.step.id, (id) => {
-  if (id !== 'currency' || state.value.details.currency) return
-  state.value.details.currency = currencyForCountry(state.value.details.country)
-}, { immediate: true })
 </script>

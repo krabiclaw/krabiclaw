@@ -1,18 +1,11 @@
 <template>
-  <!--
-    Plan and billing: what the organization pays KrabiClaw, apart from the
-    money it takes in (Earnings → Payments). Airbnb's host tools have no plan,
-    so this is the smallest honest index: the plan as the page's one card with
-    its one change, the locations it bills, the services sold beside it, and
-    Stripe's own portal for the card, invoices and cancelling.
-  -->
-  <DashboardIndexPanel id="organization-billing" title="Plan and billing" lead="What you pay KrabiClaw. Money you take from guests is under Earnings." :auto-open="firstLeaf">
+  <DashboardIndexPanel id="organization-billing" title="Plan and billing" :auto-open="firstLeaf">
     <div class="pb-10">
       <p v-if="!dashboard.canUpdateBilling.value" class="mb-6 text-sm text-muted" data-testid="billing-owner-line">
         Only the organization owner can manage billing.<template v-if="owner"> Contact {{ owner }} to change or cancel your plan.</template>
       </p>
       <UAlert v-if="billingError" class="mb-6" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="getErrorMessage(billingError, 'Failed to load billing')" />
-      <p v-if="homesPending" role="status" class="mb-6 text-sm text-muted">Loading home cost…</p>
+      <p v-if="dashboard.hasFeature('stays') && homesPending" role="status" class="mb-6 text-sm text-muted">Loading home cost…</p>
       <UAlert v-else-if="homesError" class="mb-6" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="getErrorMessage(homesError, 'Homes could not be loaded')" />
       <UAlert v-if="servicesError" class="mb-6" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="getErrorMessage(servicesError, 'Services could not be loaded')" />
       <UAlert v-if="methodsError" class="mb-6" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="getErrorMessage(methodsError, 'Payment methods could not be loaded')" />
@@ -20,30 +13,55 @@
       <UAlert v-if="errorMessage" class="mb-6" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="errorMessage" />
       <UAlert v-if="successMessage" class="mb-6" color="success" variant="soft" icon="i-lucide-circle-check" :description="successMessage" />
 
-      <!-- The plan: the page's one card, with its price and its one change. -->
-      <UCard v-if="billing" variant="subtle" class="mb-6" data-testid="billing-plan-card">
-        <div class="flex items-baseline justify-between gap-4">
-          <h2 class="text-2xl font-semibold text-highlighted">{{ planName }}</h2>
-          <span class="text-base font-medium text-highlighted">{{ price }}</span>
+      <UCard v-if="billing" variant="record" class="mb-6 rounded-3xl" data-testid="billing-plan-card">
+        <div class="flex items-center justify-between gap-3">
+          <div class="min-w-0">
+            <p class="text-sm font-medium text-muted">Current plan</p>
+            <div class="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <h2 class="text-3xl font-semibold tracking-tight text-highlighted">{{ planName }}</h2>
+              <span class="text-base font-medium text-highlighted">{{ price }}</span>
+            </div>
+            <UButton v-if="dashboard.canUpdateBilling.value && change" class="mt-5 rounded-full px-4" :label="change.label" :to="change.to" :variant="change.outline ? 'outline' : 'solid'" />
+            <UButton v-else-if="dashboard.canUpdateBilling.value && pending" class="mt-5 rounded-full px-4" :label="`Keep ${planName}`" variant="outline" :loading="busy" @click="keepPlan" />
+          </div>
+          <img src="/images/website/storefront.webp" alt="" class="size-20 shrink-0 object-contain sm:size-28" />
         </div>
-        <p v-if="planLine" class="mt-1 text-sm text-muted">{{ planLine }}</p>
-        <UButton v-if="dashboard.canUpdateBilling.value && change" class="mt-6" :label="change.label" :to="change.to" :variant="change.outline ? 'outline' : 'solid'" />
-        <!-- A pending cancellation or plan change is undone here, by Better Auth's restore at Stripe. -->
-        <UButton v-else-if="dashboard.canUpdateBilling.value && pending" class="mt-6" :label="`Keep ${planName}`" variant="outline" :loading="busy" @click="keepPlan" />
+        <p v-if="planLine" class="mt-4 border-t border-default pt-3 text-sm text-muted">{{ planLine }}</p>
       </UCard>
 
-      <EditorNavigationList :groups="groups" :active-item="level.child.value" @act="onRowAction">
-        <!-- A service states whether it is on before what it costs. -->
-        <template #summary="{ item }">
-          <UBadge v-if="serviceState[item.id]" :label="serviceState[item.id]!.on ? 'On' : 'Off'" :color="serviceState[item.id]!.on ? 'success' : 'neutral'" :variant="serviceState[item.id]!.on ? 'solid' : 'soft'" size="lg" class="me-2 align-middle" :class="serviceState[item.id]!.on ? undefined : 'bg-muted text-highlighted'" />{{ item.summary }}
-        </template>
-      </EditorNavigationList>
+      <div v-if="serviceCards.length" class="mb-6 grid grid-cols-[repeat(auto-fit,minmax(min(100%,15rem),1fr))] gap-4">
+        <NuxtLink
+          v-for="card in serviceCards"
+          :key="card.id"
+          :to="to(card.id)"
+          :aria-current="level.child.value === card.id ? 'page' : undefined"
+          :data-testid="`editor-card-${card.id}`"
+          class="group flex flex-col overflow-hidden rounded-3xl bg-elevated text-highlighted shadow-[0_4px_24px_rgb(0_0_0/0.08)] transition-shadow hover:shadow-[0_6px_28px_rgb(0_0_0/0.14)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-highlighted aria-[current=page]:ring-2 aria-[current=page]:ring-highlighted"
+        >
+          <img :src="card.offer.banner" alt="" width="512" height="512" class="aspect-[8/5] w-full bg-[#f9efe7] object-contain" />
+          <div class="flex flex-1 flex-col gap-3 p-5">
+            <div class="flex flex-wrap items-center gap-2 text-sm font-medium text-muted">
+              {{ card.offer.name }}
+              <UBadge v-if="card.active" label="On" color="success" variant="soft" />
+            </div>
+            <h2 class="text-lg font-semibold leading-snug">{{ card.offer.headline }}</h2>
+            <p class="text-sm leading-relaxed text-toned">{{ card.offer.line }}</p>
+            <div class="mt-auto flex items-center justify-between gap-2 pt-2 text-sm font-semibold">
+              <span>{{ card.price }}</span>
+              <UIcon name="i-lucide-arrow-right" class="size-5 shrink-0 transition-transform group-hover:translate-x-0.5" />
+            </div>
+          </div>
+        </NuxtLink>
+      </div>
+
+      <EditorNavigationList v-if="groups[0]?.items.length" variant="cards" :groups="groups" @act="onRowAction" />
     </div>
   </DashboardIndexPanel>
 </template>
 
 <script setup lang="ts">
 import EditorNavigationList, { type EditorNavigationGroup, type EditorNavigationItem } from '~/components/dashboard/EditorNavigationList.vue'
+import { offer } from '~/shared/offers'
 import { authClient } from '~/lib/auth-client'
 import { classifyStripePlanChange } from '~/shared/stripe-ga4'
 import { SERVICE_PRICES, SERVICES, STARTER_PLAN_ID, isNewSalePlan } from '~/shared/billing-model'
@@ -133,7 +151,10 @@ const change = computed<{ label: string; to: string; outline?: boolean } | null>
 const pending = computed(() => billing.value?.actions.restore === true)
 
 // Beside a pane the index opens a way up; Business, with nothing above it, opens its first service.
-const firstLeaf = computed(() => !dashboard.canUpdateBilling.value ? null : change.value && !change.value.outline ? change.value.to : to('managed-ads'))
+const firstLeaf = computed(() => {
+  if (!dashboard.canUpdateBilling.value || route.path === level.path.value && route.query.checkout) return null
+  return change.value && !change.value.outline ? change.value.to : to('managed-ads')
+})
 
 // Homes from the quote the capacity check answers by: live (billed on a paid
 // plan, up to what Basic includes on Basic), drafts (free), and what the live
@@ -152,21 +173,21 @@ const homesRow = computed<EditorNavigationItem | null>(() => {
   return { id: 'homes', label: 'Homes', summary }
 })
 
-const serviceRows = computed<EditorNavigationItem[]>(() => {
+const serviceCards = computed(() => {
   const current = services.value
   if (!current) return []
   return [
-    { id: 'managed-ads', label: SERVICES.managed_ads.name, to: to('managed-ads'),
-      summary: `${current.managed_ads ? `since ${formatExactDateTime(current.managed_ads.agreed_at)} · ` : ''}${SERVICES.managed_ads.price}` },
-    { id: 'strategy', label: SERVICES.strategy.name, to: to('strategy'),
-      summary: current.strategy
-        ? `since ${formatExactDateTime(current.strategy.since)} · ${formatRecurring(current.strategy.amount, current.strategy.currency)}`
-        : monthly(SERVICE_PRICES.strategy.monthly) },
+    {
+      id: 'managed-ads', offer: offer('managed_ads'),
+      price: SERVICES.managed_ads.price, active: Boolean(current.managed_ads),
+    },
+    {
+      id: 'strategy', offer: offer('strategy'),
+      price: current.strategy ? formatRecurring(current.strategy.amount, current.strategy.currency) : monthly(SERVICE_PRICES.strategy.monthly),
+      active: Boolean(current.strategy),
+    },
   ]
 })
-const serviceState = computed<Record<string, { on: boolean } | undefined>>(() => services.value
-  ? { 'managed-ads': { on: !!services.value.managed_ads }, 'strategy': { on: !!services.value.strategy } }
-  : {})
 
 // Stripe's portal owns the card, invoices, receipts and cancelling; the row opens it.
 const portalRow = computed<EditorNavigationItem | null>(() => dashboard.canUpdateBilling.value && billing.value?.stripeCustomerId
@@ -177,7 +198,6 @@ const groups = computed<EditorNavigationGroup[]>(() => [{
   id: 'billing',
   items: [
     ...(homesRow.value ? [homesRow.value] : []),
-    ...serviceRows.value,
     ...(portalRow.value ? [portalRow.value] : []),
   ],
 }])
@@ -215,7 +235,8 @@ async function onRowAction(id: string) {
 // Stripe sends the owner back to the leaf they left with success or canceled;
 // /api/post-login?plan=… arrives here with the plan still to buy.
 onMounted(async () => {
-  const { success, plan, canceled, ...restQuery } = route.query
+  const { success, plan, canceled, checkout, ...restQuery } = route.query
+  if (!success && !canceled && (!checkout || route.path !== level.path.value)) return
   if (success === 'true') {
     const id = dashboard.organization.value?.id
     if (id) trackSubscriptionCheckoutSuccess(id, typeof plan === 'string' ? plan : undefined)
@@ -224,11 +245,11 @@ onMounted(async () => {
       : 'Payment is processing. Your plan will activate after Stripe confirms the subscription.'
   }
   if (canceled === 'true') errorMessage.value = 'Payment was canceled. Your plan was not changed.'
-  if (success || plan || canceled) await router.replace({ query: restQuery })
+  await router.replace({ query: restQuery })
   if (success || canceled) return
   // A plan chosen on the pricing page starts only a way up, and only for someone who changes billing:
   // the current plan, a lower one, a plan already changing or an admin's visit leaves the index as it is.
-  const planId = Array.isArray(plan) ? plan[0] : plan
+  const planId = Array.isArray(checkout) ? checkout[0] : checkout
   const status = billing.value
   const step = typeof planId === 'string' && status && !status.cancelAtPeriodEnd && !status.scheduled_plan ? classifyStripePlanChange(status.plan, planId, Boolean(status.stripeSubscriptionId)) : null
   if (typeof planId === 'string' && isNewSalePlan(planId) && (step === 'upgrade' || step === 'initial_subscription') && dashboard.canUpdateBilling.value && !busy.value) {

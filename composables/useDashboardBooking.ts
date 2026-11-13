@@ -3,8 +3,9 @@ import type { StayDetail, StayTurnover } from '~/server/domain/stays'
 import { isRecord } from '~/utils/api-clients'
 
 type NightBooking<T> = Omit<T, 'id'> & { booking_id: string; unit: 'nights' }
+type ManagedNightBooking = NightBooking<StayDetail> & { available_actions: string[] }
 export type DashboardNightBooking =
-  | { booking: NightBooking<StayDetail>; manage: true; can_message_guest: boolean }
+  | { booking: ManagedNightBooking; manage: true; can_message_guest: boolean }
   | { booking: NightBooking<StayTurnover>; manage: false }
 export type DashboardBooking = DashboardNightBooking | { booking: DashboardBookingDetails & { unit: 'slot' }; manage: boolean }
 
@@ -32,7 +33,9 @@ export function isBookingDetailsResponse(value: unknown): value is { booking: Da
 
 export function isDashboardBooking(value: unknown): value is DashboardBooking {
   if (!isRecord(value) || !isRecord(value.booking) || typeof value.manage !== 'boolean' || typeof value.booking.booking_id !== 'string') return false
-  if (value.booking.unit === 'nights') return !value.manage || (typeof value.can_message_guest === 'boolean' && isNightBooking(value))
+  if (value.booking.unit === 'nights') return !value.manage || (typeof value.can_message_guest === 'boolean'
+    && Array.isArray(value.booking.available_actions) && value.booking.available_actions.every(action => typeof action === 'string')
+    && isNightBooking(value))
   return value.booking.unit === 'slot' && isBookingDetailsResponse(value)
 }
 

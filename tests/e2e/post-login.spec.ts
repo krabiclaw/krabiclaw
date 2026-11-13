@@ -13,6 +13,9 @@ test('signed-out dashboard deep links preserve their destination through login',
   const appResponse = await request.get(appTarget, { maxRedirects: 0 })
   expect(appResponse.status()).toBe(302)
   expect(appResponse.headers().location).toBe(`/login?redirect=${encodeURIComponent(appTarget)}`)
+
+  const accountDestination = await request.get('/api/post-login?format=json', { maxRedirects: 0 })
+  expect(accountDestination.status()).toBe(401)
 })
 
 test('a verified user without an organization starts onboarding and can explicitly visit their profile', async ({ request, baseURL }) => {
@@ -21,6 +24,10 @@ test('a verified user without an organization starts onboarding and can explicit
   const destination = await request.get('/api/post-login', { maxRedirects: 0 })
   expect(destination.status()).toBe(302)
   expect(destination.headers().location).toBe('/dashboard/onboarding')
+
+  const accountDestination = await request.get('/api/post-login?format=json', { maxRedirects: 0 })
+  expect(accountDestination.status()).toBe(200)
+  expect(await accountDestination.json()).toEqual({ destination: destination.headers().location })
 
   const appDestination = await request.get('/api/post-login?redirect=/dashboard/app/products', { maxRedirects: 0 })
   expect(appDestination.status()).toBe(302)
@@ -134,7 +141,7 @@ test('signed-in paid CTAs retain their selected plan through the canonical billi
     await expect(page.getByRole('link', { name: label, exact: true })).toHaveAttribute('href', `/api/post-login?plan=${plan}`)
     const destination = await page.request.get(`/api/post-login?plan=${plan}`, { maxRedirects: 0 })
     expect(destination.status()).toBe(302)
-    expect(destination.headers().location).toBe(`/dashboard/ember-slice-demo/billing?plan=${plan}`)
+    expect(destination.headers().location).toBe(`/dashboard/ember-slice-demo/billing?checkout=${plan}`)
   }
   for (const plan of ['commerce', 'marketing', 'unknown']) {
     const invalid = await page.request.get(`/api/post-login?plan=${plan}`, { maxRedirects: 0 })

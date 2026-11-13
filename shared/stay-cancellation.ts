@@ -1,5 +1,5 @@
-import { STAY_CANCELLATION_POLICIES, STAY_LONG_TERM_CANCELLATION_POLICIES, type StayCancellationPolicy, type StayLongTermCancellationPolicy } from './stay-listing'
-import { localDateTimeToInstant } from '../utils/timezone'
+import { STAY_CANCELLATION_POLICIES, STAY_LONG_TERM_CANCELLATION_POLICIES, type StayCancellationPolicy, type StayLongTermCancellationPolicy } from './stay-listing.ts'
+import { localDateTimeToInstant } from '../utils/timezone.ts'
 
 /**
  * What a guest's cancellation returns, by the policy the stay was booked under,

@@ -1,3 +1,4 @@
+import { hasPublishedHost } from '~/server/utils/public-provider'
 import { getSourceLocale } from '~/server/utils/organization-locales'
 import { mcpPageWindow } from '~/server/utils/mcp-pagination'
 import { HTTPError } from 'nitro';
@@ -11,6 +12,7 @@ import {
   assertLocationAccess,
   assertResourceAccess,
   memberAccessPrincipal,
+  roleAllows,
 } from '~/server/utils/member-access'
 import { getMediaAsset, listMediaAssets } from '~/server/utils/media-asset-manager'
 import { getDashboardLocationContext } from '~/server/utils/dashboard-context'
@@ -19,7 +21,9 @@ import { getProduct, hydrateProductMedia, productPublicPresentation, summarizeLo
 import { requireBlogAccess } from '~/server/utils/blog-access'
 import { getBlogPost, listBlogPosts } from '~/server/utils/content/publishing'
 import { isArticleCollection } from '~/utils/article-collections'
-import { createPreviewToken, PREVIEW_TOKEN_TTL_MS } from '~/server/utils/preview-token'
+import { createPreviewToken, PREVIEW_TOKEN_QUERY, PREVIEW_TOKEN_TTL_MS } from '~/server/utils/preview-token'
+import { presentationForProduct } from '~/utils/product-presentation'
+import { tenantOrganizationOrigin } from '~/utils/tenant-organization-origin'
 import { resolveOrganizationCmsCapabilities } from '~/server/utils/cms-capabilities'
 import { getEditablePages } from '~/config/content-registry'
 
@@ -28,6 +32,13 @@ interface EditorLocationRow {
   slug: string
   title: string
   status: 'active' | 'inactive'
+}
+
+async function editorPreviewToken(secret: unknown, organizationId: string) {
+  if (typeof secret !== 'string' || !secret) {
+    throw new HTTPError({ statusCode: 500, statusMessage: 'PREVIEW_SECRET is required for editor previews' })
+  }
+  return await createPreviewToken(secret, organizationId, Date.now() + PREVIEW_TOKEN_TTL_MS)
 }
 
 export async function loadDashboardEditorContext(event: H3Event, organizationId: string) {
@@ -48,10 +59,7 @@ export async function loadDashboardEditorContext(event: H3Event, organizationId:
     getSourceLocale(db, organization.id),
   ])
   const locations = locationRows
-  if (typeof env.PREVIEW_SECRET !== 'string' || !env.PREVIEW_SECRET) {
-    throw new HTTPError({ statusCode: 500, statusMessage: 'PREVIEW_SECRET is required for editor previews' })
-  }
-  const preview_token = await createPreviewToken(env.PREVIEW_SECRET, organizationId, Date.now() + PREVIEW_TOKEN_TTL_MS)
+  const preview_token = await editorPreviewToken(env.PREVIEW_SECRET, organizationId)
   const { vertical, site } = resolveOrganizationCmsCapabilities(organization.vertical, organization.theme_id, null)
   return {
     success: true as const,
@@ -249,6 +257,23 @@ export async function loadDashboardProduct(
   }
   // Both editor scopes show the same organization-owned media as the catalog.
   const [hydrated] = await hydrateProductMedia(db, organization.id, [product])
-  const { publicUrl, publicUrls } = await productPublicPresentation(db, env, organization.id, hydrated!)
-  return { success: true as const, product: hydrated!, public_url: publicUrl, public_urls: publicUrls }
+  const [{ publicUrl, publicUrls }, hostProfilePublished] = await Promise.all([
+    productPublicPresentation(db, env, organization.id, hydrated!),
+    product.stay ? hasPublishedHost(db, organization.id, product.stay) : null,
+  ])
+  let previewUrl: string | null = null
+  if (product.kind === 'stay' && organization.subdomain && await roleAllows({
+    organizationId, role: organization.member_role, permissions: { content: ['read'] },
+  })) {
+    const origin = tenantOrganizationOrigin({
+      platformDomain: env.NUXT_PUBLIC_PLATFORM_DOMAIN ?? '',
+      freeOrganizationDomain: env.NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN ?? '',
+      subdomain: organization.subdomain,
+    })
+    if (!origin) throw new Error('Listing preview has no configured site address')
+    const url = new URL(presentationForProduct(product).productPath('', product.slug), origin)
+    url.searchParams.set(PREVIEW_TOKEN_QUERY, await editorPreviewToken(env.PREVIEW_SECRET, organizationId))
+    previewUrl = url.toString()
+  }
+  return { success: true as const, product: hydrated!, public_url: publicUrl, public_urls: publicUrls, preview_url: previewUrl, host_profile_published: hostProfilePublished }
 }

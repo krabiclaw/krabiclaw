@@ -72,7 +72,10 @@ export async function getOrganizationBillingStatus(
   ])
   if (!organization) throw new HTTPError({ statusCode: 404, statusMessage: 'Organization not found' })
   const subscriptions = subscriptionsByOrganization.get(organizationId) ?? []
-  const current = subscriptions.filter(row => row.status !== 'canceled' && row.status !== 'incomplete_expired')
+  // Better Auth reserves an incomplete row before opening Checkout. Stripe has
+  // no subscription or billing interval for that row until Checkout completes.
+  const current = subscriptions.filter(row => row.status !== 'canceled' && row.status !== 'incomplete_expired'
+    && (row.status !== 'incomplete' || row.stripeSubscriptionId))
   if (current.length > 1) throw new Error('Organization has multiple current subscriptions')
   const subscription = current[0]
   const plan = planFromSubscriptions(organizationId, subscriptions)

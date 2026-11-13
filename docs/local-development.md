@@ -45,6 +45,11 @@ platform proxy that `server/plugins/00.cloudflare-dev-bindings.ts` starts in
 each thread is disposed with it. Without that, each rebuild left another
 Miniflare holding the local D1 file until queries failed with `SQLITE_BUSY`.
 
+If D1 reports `Failed to get session commit token` while testing workspace
+creation or Today under `yarn dev`, stop that server and run `yarn dev:worker`.
+The built Worker runs the app and inbox Durable Object in the same runtime
+against the existing local database.
+
 The auxiliary Worker loads the same root `.env`, derives its database binding
 from the root Wrangler `dev` environment, and shares the root local persistence
 directory. Its broadcasts authorize connected members through Better Auth

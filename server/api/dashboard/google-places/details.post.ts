@@ -13,29 +13,30 @@ import { HOUR_MS, incrementHourlyRateLimit } from '~/server/utils/hourly-rate-li
 export default defineHandler(async (event) => {
   const env = cloudflareEnv(event)
   const db = env.DB
-  if (!db) return jsonResponse({ error: 'Database not available' }, { status: 500 })
+  if (!db) return jsonResponse({ error: 'Database not available', code: 'DATABASE_UNAVAILABLE' }, { status: 500 })
 
   const session = await getAuthSession(event, env)
-  if (!session?.user?.id) return jsonResponse({ error: 'Authentication required' }, { status: 401 })
+  if (!session?.user?.id) return jsonResponse({ error: 'Authentication required', code: 'UNAUTHENTICATED' }, { status: 401 })
 
-  const body = await readBody(event) as { google_place_id?: unknown; session_token?: unknown } | undefined
+  const body = await readBody(event) as { google_place_id?: unknown; session_token?: unknown; purpose?: unknown } | undefined
   const placeId = typeof body?.google_place_id === 'string' ? body.google_place_id.trim() : ''
-  if (!placeId || placeId.length > 300) return jsonResponse({ error: 'google_place_id is required and at most 300 characters' }, { status: 400 })
-  if (!isPlacesSessionToken(body?.session_token)) return jsonResponse({ error: 'session_token must be a UUID' }, { status: 400 })
+  if (!placeId || placeId.length > 300) return jsonResponse({ error: 'google_place_id is required and at most 300 characters', code: 'INVALID_BODY_FIELD' }, { status: 400 })
+  if (!isPlacesSessionToken(body?.session_token)) return jsonResponse({ error: 'session_token must be a UUID', code: 'INVALID_BODY_FIELD' }, { status: 400 })
+  if (body.purpose !== undefined && body.purpose !== 'address') return jsonResponse({ error: 'Invalid search purpose', code: 'INVALID_BODY_FIELD' }, { status: 400 })
 
   const apiKey = env.GOOGLE_PLACES_API_KEY as string | undefined
-  if (!apiKey) return jsonResponse({ error: 'Google Places API key not configured' }, { status: 503 })
+  if (!apiKey) return jsonResponse({ error: 'Google Maps search is unavailable here.', code: 'GOOGLE_PLACES_UNAVAILABLE' }, { status: 503 })
 
   const hourWindow = Math.floor(Date.now() / HOUR_MS)
   if (!await incrementHourlyRateLimit(db, `rate:places-details:user:${session.user.id}:${hourWindow}`, 30, HOUR_MS)) {
-    return jsonResponse({ error: 'Too many requests. Please try again later.' }, { status: 429 })
+    return jsonResponse({ error: 'Too many requests. Please try again later.', code: 'RATE_LIMITED' }, { status: 429 })
   }
 
   let place
   try {
-    place = await getPlaceDetails(apiKey, placeId, { sessionToken: body.session_token })
+    place = await getPlaceDetails(apiKey, placeId, { sessionToken: body.session_token, purpose: body.purpose })
   } catch (error) {
-    return jsonResponse({ error: error instanceof Error ? error.message : 'Could not fetch place details. Try again.' }, { status: 502 })
+    return jsonResponse({ error: error instanceof Error ? error.message : 'Could not fetch place details. Try again.', code: 'GOOGLE_PLACES_FAILED' }, { status: 502 })
   }
 
   return jsonResponse({

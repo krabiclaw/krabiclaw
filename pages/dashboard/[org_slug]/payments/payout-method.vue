@@ -7,7 +7,7 @@
 
     <p v-if="needsCountry && !connectError && !connectPending && countriesPending" role="status" class="text-muted">Loading countries…</p>
     <UFormField v-else-if="needsCountry && !connectError && !connectPending" label="Business country" description="Where your business is legally established.">
-      <USelectMenu v-model="country" :items="countries" value-key="value" class="w-full" placeholder="Choose a country" />
+      <CountrySelect v-model="country" :items="countries" class="w-full" placeholder="Choose a country" />
     </UFormField>
 
     <UButton v-if="!account && !connectError && !connectPending" class="mt-6" size="xl" :loading="starting" :disabled="needsCountry && !country" label="Add payout method" @click="startOnboarding" />
@@ -45,17 +45,27 @@ const dashboardApi = useDashboardApi()
 const route = useRoute()
 const router = useRouter()
 const { connect, connectError, connectPending, refreshConnect, account, payout, setAccount } = useConnectAccount()
-const country = ref<string>()
+type CountryChoices = { success: true; countries: string[]; suggested_country: string | null }
+const selectedCountry = ref<string>()
 const needsCountry = computed(() => !account.value?.stripe_account_id)
 // Read only while a country is still to be chosen; Stripe answers this slowly.
 const { data: countryList, error: countriesError, status: countriesStatus, execute: loadCountries } = useAsyncData(`dashboard-connect-countries:${String(route.params.org_slug)}`,
-  () => dashboardApi<{ success: true; countries: string[] }>('/api/dashboard/connect/countries', { validate: (value): value is { success: true; countries: string[] } => isRecord(value) && value.success === true && Array.isArray(value.countries) && value.countries.every(code => typeof code === 'string') }),
+  () => dashboardApi<CountryChoices>('/api/dashboard/connect/countries', {
+    validate: (value): value is CountryChoices => isRecord(value) && value.success === true
+      && Array.isArray(value.countries) && value.countries.every(code => typeof code === 'string')
+      && (value.suggested_country === null || typeof value.suggested_country === 'string' && value.countries.includes(value.suggested_country)),
+  }),
   { server: false, lazy: true, immediate: false })
+const country = computed({
+  get: () => selectedCountry.value ?? countryList.value?.suggested_country ?? undefined,
+  set: value => { selectedCountry.value = value },
+})
+watch(() => route.params.org_slug, () => { selectedCountry.value = undefined })
 watch(() => !connectPending.value && !connectError.value && needsCountry.value, (needed) => { if (needed && countriesStatus.value === 'idle') void loadCountries() }, { immediate: true })
 const countriesPending = computed(() => countriesStatus.value === 'idle' || countriesStatus.value === 'pending')
 const countries = computed(() => {
   const names = new Intl.DisplayNames(['en'], { type: 'region' })
-  return (countryList.value?.countries ?? []).map(value => ({ value, label: names.of(value) ?? value })).sort((a, b) => a.label.localeCompare(b.label))
+  return (countryList.value?.countries ?? []).map(code => ({ code, name: names.of(code) ?? code })).sort((a, b) => a.name.localeCompare(b.name))
 })
 const scheduleLabel = computed(() => {
   const schedule = payout.value?.schedule

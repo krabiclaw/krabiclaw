@@ -8,6 +8,22 @@ import { notifyPaymentFinancialEvent } from './notifications'
 import { readPaymentOrder } from './orders'
 import { recordPaymentRefunded } from '~/server/domain/booking-analytics'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
+import { isRecord } from '~/server/utils/type-guards'
+
+export interface ApprovedStayBooking {
+  bookingId: string
+  version: number
+}
+
+/** An approved stay keeps its original booking while the guest pays. */
+export function approvedStayBooking(snapshot: Record<string, unknown>): ApprovedStayBooking | null {
+  if (snapshot.approved_stay === undefined) return null
+  const approval = snapshot.approved_stay
+  if (!isRecord(approval) || typeof approval.bookingId !== 'string' || typeof approval.version !== 'number' || !Number.isSafeInteger(approval.version)) {
+    throw new Error('Approved stay checkout has no valid booking and version')
+  }
+  return { bookingId: approval.bookingId, version: approval.version }
+}
 
 /** What a guest paid on the site for one booking, net of refunds; null when it was not paid online. */
 export async function paidOnline(db: DbClient, organizationId: string, bookingId: string): Promise<{ amount: number; currency: CurrencyCode } | null> {

@@ -1,10 +1,4 @@
 <template>
-  <!--
-    SEO and marketing strategy: what Julia does and what it costs, what agreeing
-    needs as a row that says where it stands, and the consent that adds it to the
-    plan's subscription, which Stripe prorates and bills. Until the plan allows
-    it the line under the row says what is left. The same leaf turns it off.
-  -->
   <DashboardLeafPanel
     id="organization-strategy"
     :title="SERVICES.strategy.name"
@@ -15,45 +9,48 @@
     :save-label="on ? 'Turn off' : 'Agree and turn on'"
     @save="toggle"
   >
-    <UAlert v-if="success" class="mb-6" color="success" variant="soft" icon="i-lucide-circle-check" :description="success" />
-    <p v-if="!dashboard.canUpdateBilling.value" class="mb-6 text-sm text-muted">Owners turn services on and off.</p>
-    <p class="text-base text-highlighted">{{ SERVICES.strategy.description }}</p>
-    <p class="mt-4 text-base font-semibold text-highlighted">{{ formatPrice(SERVICE_PRICES.strategy.monthly) }} per month, added to your plan and billed with it.</p>
-    <div v-if="on" class="mt-6 space-y-3 text-sm text-muted">
-      <p>On since {{ formatExactDateTime(services!.strategy!.since) }} · {{ formatRecurring(services!.strategy!.amount, services!.strategy!.currency) }}.</p>
-      <p>{{ SERVICES.strategy.ending }}</p>
+    <div class="mx-auto max-w-2xl space-y-6 pb-6">
+      <UAlert v-if="success" color="success" variant="soft" icon="i-lucide-circle-check" :description="success" />
+      <BillingServiceIntro :offer="serviceOffer" :price="priceLine" />
+      <p v-if="!dashboard.canUpdateBilling.value" class="text-sm text-muted">Owners turn services on and off.</p>
+      <div v-if="on" class="space-y-3 rounded-2xl border border-default p-5 text-sm text-toned">
+        <p class="font-semibold text-highlighted">On since {{ formatExactDateTime(services!.strategy!.since) }}</p>
+        <p>{{ SERVICES.strategy.ending }}</p>
+      </div>
+      <template v-else-if="dashboard.canUpdateBilling.value">
+        <div v-if="onPaidPlan === false" class="space-y-3 rounded-2xl border border-default p-5">
+          <p class="text-sm text-toned">Choose a paid plan to add this service to your subscription.</p>
+          <UButton :to="planPath" label="Choose a plan" trailing-icon="i-lucide-arrow-right" />
+        </div>
+        <p v-else-if="onPaidPlan" class="text-sm text-toned">{{ SERVICES.strategy.consent }}</p>
+      </template>
     </div>
-    <template v-else-if="services">
-      <EditorNavigationList class="mt-6" :groups="[{ id: 'requirements', items: requirementRows }]" />
-      <p v-if="onPaidPlan === false" class="mt-6 text-sm text-muted">Choose a plan to turn this on.</p>
-      <p v-else-if="onPaidPlan === true" class="mt-6 text-sm text-muted">{{ SERVICES.strategy.consent }}</p>
-    </template>
   </DashboardLeafPanel>
 </template>
 
 <script setup lang="ts">
-import EditorNavigationList, { type EditorNavigationItem } from '~/components/dashboard/EditorNavigationList.vue'
+import BillingServiceIntro from '~/components/dashboard/BillingServiceIntro.vue'
+import { offer } from '~/shared/offers'
 import { SERVICES, SERVICE_PRICES } from '~/shared/billing-model'
 import { isServices, useOrganizationBilling, useOrganizationServices } from '~/composables/usePaymentsSettings'
 
 definePageMeta({ layout: 'dashboard' })
 useSeoMeta({ title: 'SEO and marketing strategy | KrabiClaw', robots: 'noindex, nofollow' })
 
-const level = useRouteLevel()
+const serviceOffer = offer('strategy')
 const dashboard = useDashboardOrganization()
 const dashboardApi = useDashboardApi()
-const { plans, formatPrice, formatRecurring } = await usePlans()
+const { formatPrice, formatRecurring } = await usePlans()
 const { formatExactDateTime } = useHumanTime()
-const [{ servicesResource, services, servicesError, refreshServices }, { billing, refreshBilling }] = await Promise.all([useOrganizationServices('strategy'), useOrganizationBilling()])
+const [{ servicesResource, services, servicesError, refreshServices }, { refreshBilling }] = await Promise.all([useOrganizationServices('strategy'), useOrganizationBilling()])
 const on = computed(() => !!services.value?.strategy)
 // The service is an item on the plan's subscription, so it needs one that is running.
 const onPaidPlan = computed(() => servicesResource.value?.requirements?.strategy?.paid_plan)
-const planName = computed(() => billing.value?.subscription_price?.name ?? plans.value.find(plan => plan.id === billing.value?.plan)?.name ?? 'your plan')
-const requirementRows = computed<EditorNavigationItem[]>(() => typeof onPaidPlan.value !== 'boolean' ? [] : [{
-  id: 'paid-plan', label: 'Paid plan', mark: onPaidPlan.value ? 'met' : 'open',
-  summary: `On ${planName.value}`,
-  ...(onPaidPlan.value || !dashboard.canUpdateBilling.value || !level.to.value ? {} : { to: `${level.to.value}/upgrade` }),
-}])
+const priceLine = computed(() => services.value?.strategy
+  ? formatRecurring(services.value.strategy.amount, services.value.strategy.currency)
+  : `${formatPrice(SERVICE_PRICES.strategy.monthly)} per month, added to your plan and billed with it.`)
+const route = useRoute()
+const planPath = computed(() => `/dashboard/${encodeURIComponent(String(route.params.org_slug))}/billing/upgrade?service=strategy`)
 
 const busy = ref(false)
 const error = ref('')

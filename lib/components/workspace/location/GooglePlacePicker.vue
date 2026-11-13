@@ -48,7 +48,7 @@ import { getErrorMessage } from '~/utils/errors'
  * The next search mints a new token. Selecting a prediction is the owner's
  * confirmation: the caller receives the place and decides what that means.
  */
-const props = defineProps<{ modelValue?: string; placeholder?: string }>()
+const props = defineProps<{ modelValue?: string; placeholder?: string; purpose?: 'address' }>()
 const emit = defineEmits<{
   'update:modelValue': [value: string]
   select: [place: OnboardingPlacePreview]
@@ -68,7 +68,7 @@ const items = computed(() => suggestions.value.map(suggestion => ({
   onSelect: () => void select(suggestion),
 })))
 const loading = ref(false)
-const selecting = ref(false)
+const selecting = defineModel<boolean>('selecting', { default: false })
 const error = ref<string | null>(null)
 
 let sessionToken: string | null = null
@@ -102,22 +102,21 @@ watch(searchTerm, (value) => {
   chosenName = null
   if (debounce) clearTimeout(debounce)
   error.value = null
+  const request = ++latestRequest
+  suggestions.value = []
   if (value.trim().length < MIN_INPUT) {
-    latestRequest++
-    suggestions.value = []
     loading.value = false
     return
   }
   loading.value = true
-  debounce = setTimeout(() => void search(value.trim()), DEBOUNCE_MS)
+  debounce = setTimeout(() => void search(value.trim(), request), DEBOUNCE_MS)
 })
 
-async function search(input: string) {
+async function search(input: string, request: number) {
   sessionToken ??= crypto.randomUUID()
-  const request = ++latestRequest
   try {
     const response = await applicationFetch('/api/dashboard/google-places/autocomplete', {
-      method: 'POST', body: { input, session_token: sessionToken }, validate: isSuggestions,
+      method: 'POST', body: { input, session_token: sessionToken, purpose: props.purpose }, validate: isSuggestions,
     })
     if (request === latestRequest) suggestions.value = response.suggestions
   } catch (cause) {
@@ -137,16 +136,17 @@ async function select(suggestion: GooglePlaceSuggestion) {
   sessionToken = null
   chosenName = suggestion.name
   if (debounce) clearTimeout(debounce)
-  latestRequest++
+  const request = ++latestRequest
   loading.value = false
   selecting.value = true
   error.value = null
   try {
     const place = await applicationFetch('/api/dashboard/google-places/details', {
-      method: 'POST', body: { google_place_id: suggestion.google_place_id, session_token: token }, validate: isPlace,
+      method: 'POST', body: { google_place_id: suggestion.google_place_id, session_token: token, purpose: props.purpose }, validate: isPlace,
     })
-    emit('select', place)
+    if (request === latestRequest) emit('select', place)
   } catch (cause) {
+    if (request !== latestRequest) return
     // The input still shows the name; it must search again when retyped.
     chosenName = null
     error.value = getErrorMessage(cause, 'Could not load that place from Google Maps. Try again.')
@@ -158,5 +158,6 @@ async function select(suggestion: GooglePlaceSuggestion) {
 onBeforeUnmount(() => {
   if (debounce) clearTimeout(debounce)
   latestRequest++
+  selecting.value = false
 })
 </script>

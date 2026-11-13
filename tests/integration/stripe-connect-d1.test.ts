@@ -115,14 +115,16 @@ test('Stripe account projection preserves provider identity and derives onboardi
 
 test('Connect callback URLs are built only from the configured platform origin and organization slug', () => {
   assert.deepEqual(
-    buildStripeConnectOnboardingUrls('https://krabiclaw.com', 'sun-and-sea'),
+    buildStripeConnectOnboardingUrls('https://krabiclaw.com', 'sun-and-sea', true),
     {
       returnUrl: 'https://krabiclaw.com/dashboard/sun-and-sea/payments?tab=payouts&stripe_connect=returned',
       refreshUrl: 'https://krabiclaw.com/api/dashboard/connect/refresh?org=sun-and-sea',
     },
   )
-  assert.throws(() => buildStripeConnectOnboardingUrls('http://krabiclaw.com', 'sun-and-sea'), /HTTPS/)
-  assert.throws(() => buildStripeConnectOnboardingUrls('https://krabiclaw.com/path', 'sun-and-sea'), /origin/)
+  assert.throws(() => buildStripeConnectOnboardingUrls('http://krabiclaw.com', 'sun-and-sea', false), /HTTPS/)
+  assert.throws(() => buildStripeConnectOnboardingUrls('http://localhost:3000', 'sun-and-sea', true), /HTTPS/)
+  assert.equal(new URL(buildStripeConnectOnboardingUrls('http://localhost:3000', 'sun-and-sea', false).returnUrl).origin, 'http://localhost:3000')
+  assert.throws(() => buildStripeConnectOnboardingUrls('https://krabiclaw.com/path', 'sun-and-sea', true), /origin/)
   assert.deepEqual(buildAppPayoutsOnboardingUrls('https://krabiclaw.com'), {
     returnUrl: 'https://krabiclaw.com/app/return/payouts?outcome=done',
     refreshUrl: 'https://krabiclaw.com/app/return/payouts?outcome=refresh',
@@ -195,6 +197,8 @@ test('Stripe onboarding recommendations follow real account readiness and clear 
       const method = (request instanceof Request ? request.method : init?.method ?? 'GET').toUpperCase()
       if (method === 'POST' && url.pathname === '/v2/core/accounts') {
         assert.equal(created, false, 'Stripe is asked to create the account once')
+        const input = JSON.parse(String(request instanceof Request ? await request.text() : init?.body))
+        assert.equal(input.identity.country, 'US', 'Stripe receives the country the merchant selected')
         created = true
         creating()
         await createReleased
@@ -222,7 +226,7 @@ test('Stripe onboarding recommendations follow real account readiness and clear 
       assert.equal((await call('', { cookie })).status, 403)
       assert.equal((await call('', app_, { return_to: 'web' })).status, 422)
       assert.equal(created, false)
-      const starting = call('', app_, { return_to: 'app' })
+      const starting = call('', app_, { country: 'US', return_to: 'app' })
       await createStarted
       // A second Add payout method while Stripe is still creating the account is refused in words, not with Stripe's idempotency error.
       assert.deepEqual(await call('', app_, { return_to: 'app' }), { status: 409, body: { status: 409, statusText: 'Payout setup is already starting for this business. Finish it in the window where it opened, or try again in a minute.', message: 'Payout setup is already starting for this business. Finish it in the window where it opened, or try again in a minute.', data: { code: 'CONNECT_SETUP_IN_PROGRESS' } } })

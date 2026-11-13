@@ -470,6 +470,18 @@ export const member = sqliteTable("member", {
 	uniqueIndex("member_id_organizationId_unique").on(table.id, table.organizationId),
 ]);
 
+// An unfinished home has no product until Finish. Its manager can resume the same answers on any device.
+export const stay_home_setup_drafts = sqliteTable("stay_home_setup_drafts", {
+	organization_id: text().notNull(),
+	member_id: text().notNull(),
+	payload_json: text().notNull(),
+	revision: text().notNull(),
+}, (table) => [
+	primaryKey({ columns: [table.organization_id, table.member_id] }),
+	foreignKey({ columns: [table.member_id, table.organization_id], foreignColumns: [member.id, member.organizationId] }).onDelete("cascade"),
+	check("stay_home_setup_drafts_payload_check", sql`json_valid(payload_json) AND json_type(payload_json) IS 'object'`),
+]);
+
 // ---------------------------------------------------------------------------
 // Catalog: products, variants, prices, publication, collections.
 //

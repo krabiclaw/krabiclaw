@@ -1,6 +1,8 @@
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { isOrganizationWideRole, listUserOrganizations, resolveUserOrganization } from '~/server/utils/member-access'
 import { buyerActivities } from '~/server/domain/payments/buyer'
+import { readActiveOnboardingDraft } from '~/server/utils/onboarding-drafts'
+import { WEBSITE_ONBOARDING_EXIT_PATH, WEBSITE_ONBOARDING_PATH } from '~/shared/onboarding-flow'
 
 export type PostLoginDestination = `/dashboard/${string}`
 
@@ -27,7 +29,7 @@ export type PostLoginRoute =
   | { kind: 'enter', destination: PostLoginDestination }
   | { kind: 'activate', organizationId: string, destination: PostLoginDestination }
   | { kind: 'choose', destination: '/dashboard/select-organization' }
-  | { kind: 'onboard', destination: '/dashboard/onboarding' }
+  | { kind: 'onboard', destination: typeof WEBSITE_ONBOARDING_PATH | typeof WEBSITE_ONBOARDING_EXIT_PATH }
 
 function organizationDestination(organization: { id: string; slug: string; role: string }): PostLoginDestination {
   return isOrganizationWideRole(organization.role)
@@ -39,7 +41,8 @@ export async function resolvePostLoginRoute(
   env: CloudflareEnv,
   { userId, activeOrganizationId }: PostLoginPrincipal,
 ): Promise<PostLoginRoute> {
-  if (activeOrganizationId) {
+  const draft = await readActiveOnboardingDraft(env.DB, userId, true)
+  if (activeOrganizationId && activeOrganizationId !== draft?.organization_id) {
     // Membership-checked: a stale active organization the user was removed from
     // must not route them into a dashboard they can no longer open. A stale one
     // is not an error — the membership list below answers again from scratch.
@@ -47,10 +50,12 @@ export async function resolvePostLoginRoute(
     if (active) return { kind: 'enter', destination: organizationDestination(active) }
   }
 
-  const organizations = await listUserOrganizations(env, userId)
+  // A provisioned draft can already have an owner membership. Finish is what
+  // makes the organization a dashboard destination.
+  const organizations = (await listUserOrganizations(env, userId)).filter(org => org.id !== draft?.organization_id)
   if (organizations.length === 0) {
     if ((await buyerActivities(env.DB, userId)).activities.length) return { kind: 'enter', destination: '/dashboard/account' }
-    return { kind: 'onboard', destination: '/dashboard/onboarding' }
+    return { kind: 'onboard', destination: draft?.status === 'active' ? WEBSITE_ONBOARDING_EXIT_PATH : WEBSITE_ONBOARDING_PATH }
   }
   if (organizations.length > 1) return { kind: 'choose', destination: '/dashboard/select-organization' }
 

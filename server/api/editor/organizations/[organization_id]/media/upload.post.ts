@@ -1,9 +1,10 @@
-import { defineHandler } from 'nitro';
+import { defineHandler, HTTPError } from 'nitro';
 import { getQuery, getRouterParam } from 'nitro/h3';
 import { jsonResponse, rethrowHttpError } from '~/server/utils/api-response'
 import { requireOrganizationAccess } from '~/server/utils/location-access'
 import { sanitizeFilename, uploadResolvedMediaToAssetStore } from '~/server/utils/media-upload'
 import { sniffMediaMimeType, VIDEO_MIME_TYPES, MAX_VIDEO_BYTES, POSTER_IMAGE_MIME_TYPES, MAX_POSTER_BYTES, RESOLVED_MEDIA_IMAGE_TYPES, MAX_IMAGE_BYTES } from '~/server/utils/media-mime'
+import { isRecord } from '~/utils/api-clients'
 
 const VALID_CATEGORIES = new Set(['exterior', 'interior', 'food', 'menu', 'team', 'other'])
 const MULTIPART_OVERHEAD_BYTES = 64 * 1024
@@ -48,10 +49,10 @@ export default defineHandler(async (event) => {
     // video does. It used to take a request-upload / direct-to-Cloudflare /
     // confirm round trip that left a pending row behind whenever a step failed.
     if (imagePart instanceof File) {
-      if (imagePart.size > MAX_IMAGE_BYTES) return jsonResponse({ error: 'File too large (max 10 MB)' }, { status: 413 })
+      if (imagePart.size > MAX_IMAGE_BYTES) return jsonResponse({ error: 'File too large (max 10 MB)', code: 'UPLOAD_TOO_LARGE' }, { status: 413 })
       const imageData = new Uint8Array(await imagePart.arrayBuffer())
       const imageContentType = sniffMediaMimeType(imageData)
-      if (!RESOLVED_MEDIA_IMAGE_TYPES.has(imageContentType)) return jsonResponse({ error: 'Unsupported image file type' }, { status: 415 })
+      if (!RESOLVED_MEDIA_IMAGE_TYPES.has(imageContentType)) return jsonResponse({ error: 'Unsupported image file type', code: 'UNSUPPORTED_MEDIA_TYPE' }, { status: 415 })
       const uploaded = await uploadResolvedMediaToAssetStore({
         db, env, organizationId,
         userId: session.user.id,
@@ -116,10 +117,13 @@ export default defineHandler(async (event) => {
       status: 'active',
     })
   } catch (error) {
+    if (HTTPError.isError(error) && isRecord(error.data) && error.data.code === 'IMAGE_UPLOAD_UNAVAILABLE') {
+      return jsonResponse({ error: 'Photo uploads are unavailable in this environment.', code: 'IMAGE_UPLOAD_UNAVAILABLE' }, { status: 503 })
+    }
     rethrowHttpError(error)
     const normalizedError = error instanceof Error ? error : new Error('Unknown media upload error')
     console.error('media_upload_failed', { error: normalizedError.message, stack: normalizedError.stack })
     return jsonResponse({
-      error: normalizedError instanceof AggregateError ? normalizedError.message : 'Failed to upload media', message: normalizedError.message, }, { status: 500 })
+      error: normalizedError instanceof AggregateError ? normalizedError.message : 'Failed to upload media', code: 'MEDIA_UPLOAD_FAILED', message: normalizedError.message, }, { status: 500 })
   }
 })

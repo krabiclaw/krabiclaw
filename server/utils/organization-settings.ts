@@ -1,4 +1,6 @@
 import { HTTPError } from 'nitro'
+import { isLodgingConfirmationMode, LODGING_BOOKING_CHOICES } from '~/shared/lodging-booking'
+import { readLodgingBookingPolicy } from '~/server/utils/lodging-booking-policy'
 import { isLegalPracticeSite, PLATFORM_THEME_ID, resolvePublicSite } from '~/utils/site-routing'
 import { getPublicCompliance, getPublicConsultationSettings } from '~/server/utils/professional-services'
 import { deleteConfig, getConfig, setConfig } from '~/server/utils/organization-config'
@@ -192,6 +194,10 @@ export async function loadSettingsPayload(
     canonical_url: updatedOrganization.canonical_url,
     // The website's booking switch exists only where consultation settings do.
     consultation_mode: consultation?.mode ?? updatedOrganization.consultation_mode,
+    ...(updatedOrganization.vertical === 'lodging' ? {
+      lodging_booking: await readLodgingBookingPolicy(db, organizationId),
+      lodging_booking_choices: LODGING_BOOKING_CHOICES,
+    } : {}),
     ...(consultation ? { address_visibility: compliance?.address_visibility ?? 'hidden' } : {}),
     palette: site !== 'platform' ? resolveSitePalette(siteConfig.palette) : null,
     palette_source: site !== 'platform' ? (siteConfig.palette ? 'custom' : 'default') : null,
@@ -314,6 +320,9 @@ async function attemptOrganizationUpdate(
   const organizationMedia = updates.media
 
   const settingsPatch: Record<string, unknown> = {}
+  if (updates.lodging_booking) {
+    settingsPatch.lodging_booking = { confirmation_mode: updates.lodging_booking.confirmation_mode }
+  }
   if (updates.font_preset !== undefined) settingsPatch.config = { font_preset: updates.font_preset }
   for (const key of SITE_RECIPE_KEYS) {
     if (updates[key] !== undefined) settingsPatch.config = { ...(settingsPatch.config as Record<string, unknown> | undefined), [key]: updates[key] }
@@ -485,6 +494,7 @@ async function attemptOrganizationUpdate(
   if (updates.status !== undefined || updates.address_visibility !== undefined || updates.inquiry_questions !== undefined) {
     await purgePublicResourceCacheNow(env, organizationId)
   } else if (
+    updates.lodging_booking !== undefined ||
     updates.font_preset !== undefined ||
     updates.palette !== undefined ||
     updates.announcement !== undefined ||
@@ -568,6 +578,16 @@ export async function updateOrganizationSettingsFields(
     return {
       status: 404,
       data: { error: 'Organization not found or access denied' },
+    }
+  }
+
+  if (updates.lodging_booking !== undefined) {
+    if (organization.vertical !== 'lodging') return { status: 400, data: { error: 'Stay booking settings are available for lodging websites' } }
+    if (!isLodgingConfirmationMode(updates.lodging_booking?.confirmation_mode)) {
+      return { status: 400, data: { error: 'Choose Instant Book or Approve requests' } }
+    }
+    if (updates.lodging_booking.online_payment_required !== undefined && updates.lodging_booking.online_payment_required !== true) {
+      return { status: 400, data: { error: 'Direct stays require online payment' } }
     }
   }
 

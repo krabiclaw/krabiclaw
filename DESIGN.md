@@ -168,7 +168,12 @@ Business Today and Upcoming show two stored things
   top-right dismiss control records a decision about the current evidence.
 
 `GET /api/dashboard/today` returns task sections, opportunities, assignees
-and the resolved time. The server supplies each card's content and destination.
+and the resolved time. The server supplies each card's content and destination. On unfiltered Today,
+workspace managers see the signed preview of a private site and a link into
+the Website status dialog. When Today has no open work, a published site
+links to its public address. Before publishing, a workspace created through
+onboarding can see up to three suggestions. Stripe setup, a custom domain,
+and the first catalog item for its business type take priority when they apply.
 The task sheet holds assignment and completion controls for work that a person
 tracks there. A reply card opens the conversation. A payment card opens that
 offering's Payment settings. Saving the payment requirement completes its
@@ -641,7 +646,8 @@ leaf's sheet has ✕ and its title small and centred, and the leaf's pane its
 title large. Host booking and stay records use the compact status header
 specified below. Back, ✕ and every action are the same round button. Pages
 supply `title`, `lead` and `#right`; they never place a title or an action
-themselves.
+themselves. Use the title on its own wherever it names the task. Keep secondary text beneath a title to one line. Put longer instructions
+and terms beside the control they explain.
 
 **Reuse the card that owns the job.** Saved editor summaries use
 `EditorNavigationList`'s cards; selectable choices use the native radio or
@@ -992,7 +998,15 @@ offers photo, name, description and amount in one screen. The kind, menu
 section and location explicitly supplied by the entrance remain its context;
 the form does not ask for them again or infer another one. Legal practice
 areas do not require photographs. Lodging retains its actual location,
-capacity, arrival/departure and minimum-night requirements.
+capacity, arrival/departure and minimum-night requirements. An empty lodging
+Catalog offers manual creation and Airbnb import side by side, because existing
+hosts can bring over their listings and fill in only the missing details.
+Manual setup confirms the address, then asks for property type, rooms and
+capacity before saving an unpublished Catalog entry. The stay-homes API owns
+the steps and validation for web and iOS. Import opens the Airbnb controls.
+Website → Booking settings owns how direct stays are confirmed and paid across
+all homes. The lodging website setup asks for that choice once. The home
+editor retains the individual property's stay rules, prices and availability.
 
 Optional facts do not block saving a draft. Publishing checks the real domain
 requirements and names actual missing facts. A multi-step task that genuinely
@@ -1340,8 +1354,8 @@ live there too, because appending `s` produces "dishs".
 ### Moving lodging occupancy from Hostaway
 
 The organization owns the one-time migration task at
-`O/integrations/hostaway-migration`, reached from Connections and offered at
-lodging onboarding's final review. Owners and admins with operations-update
+`O/integrations/hostaway-migration`, reached from Connections. Owners and
+admins with operations-update
 permission upload the host's reservation export, confirm column/date/amount
 formats and explicit home matches, review manual blocked dates, and approve
 stays before importing. The task index uses `DashboardIndexPanel`; its focused

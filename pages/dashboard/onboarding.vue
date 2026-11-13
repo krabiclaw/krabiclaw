@@ -1,338 +1,160 @@
 <template>
-  <div class="flex size-full min-h-0 flex-col overflow-hidden bg-muted text-highlighted">
-    <div class="grid min-h-0 flex-1 overflow-hidden lg:grid-cols-[minmax(24rem,45%)_1fr]">
-      <!-- The step column. One question at a time, its own header and footer. -->
-      <div class="flex min-h-0 flex-col border-r border-default bg-default">
-        <div v-if="currentStep && !pushAskHome" class="flex shrink-0 items-center py-3" :class="dashboardGutterClass">
-          <UButton
-            color="neutral"
-            variant="outline"
-            size="sm"
-            :label="canSave || state.draftId ? 'Save & exit' : 'Exit'"
-            :loading="exiting"
-            :disabled="Boolean(restoreError) || busy || (Boolean(state.draftId) && !canSave)"
-            @click="saveAndExit"
-          />
-        </div>
-
-        <div class="min-h-0 flex-1 overflow-y-auto pb-6" :class="dashboardGutterClass" :inert="busy">
-          <PushAsk v-if="pushAskHome" class="py-6" title="Your site is live" :lede="pushAskLede" @done="router.push(pushAskHome)" />
-          <p v-else-if="restoreError" class="py-16 text-sm text-error" role="alert">{{ getErrorMessage(restoreError, 'Your saved answers could not be loaded.') }}</p>
-          <template v-else>
-            <NuxtPage @advance="goNext" @uploading="uploading = $event" />
-            <UCheckbox v-if="currentStep?.id === 'review' && state.vertical === 'lodging'" v-model="migrateHostaway" class="pb-6" label="Move existing stays from Hostaway after creating my site" />
-          </template>
-        </div>
-
-        <div v-if="currentStep && !restoreError && !pushAskHome" class="shrink-0 border-t border-default py-3" :class="dashboardGutterClass">
-          <p v-if="!canSave" class="mb-3 text-sm text-muted">
-            {{ state.draftId ? 'Finish the required details to save your changes.' : 'Your answers have not been saved yet.' }}
-          </p>
-          <p v-if="draft.error.value" class="mb-3 text-sm text-error">{{ draft.error.value }}</p>
-          <div class="flex items-center justify-between gap-4">
-            <UButton variant="link" color="neutral" label="Back" :disabled="busy" @click="goBack" />
-            <UButton
-              :label="nextLabel"
-              :loading="draft.busy.value"
-              :disabled="!canAdvance || busy"
-              @click="goNext"
-            />
-          </div>
-        </div>
-      </div>
-
-      <OnboardingPreviewPane
-        v-if="!isMobilePreviewViewport"
-        class="hidden lg:flex"
-        :iframe-src="iframeSrc"
-        :organization-locations="previewLocations"
-        :selected-location-id="selectedLocationId"
-        selected-page="home"
-        :organization-status="organizationStatus"
-        :organization-domain="organizationDomain"
-        :vertical="state.vertical"
-        :empty-visual-url="preDraftVisual.url"
-        :empty-visual-alt="preDraftVisual.alt"
-        home-only
-        @select-location="selectedLocationId = $event"
-      />
-    </div>
-
-    <USlideover
-      v-if="isMobilePreviewViewport"
-      v-model:open="mobilePreviewOpenForViewport"
-      title="Site preview"
-      description="Close to keep answering."
-      side="bottom"
-      :ui="{ content: 'h-[82vh] overflow-hidden rounded-t-2xl', body: 'flex min-h-0 p-0 sm:p-0' }"
-    >
-      <template #body>
-        <OnboardingPreviewPane
-          class="min-h-0 flex-1"
-          :iframe-src="iframeSrc"
-          :organization-locations="previewLocations"
-          :selected-location-id="selectedLocationId"
-          selected-page="home"
-          :organization-status="organizationStatus"
-          :organization-domain="organizationDomain"
-          :vertical="state.vertical"
-          :empty-visual-url="preDraftVisual.url"
-          :empty-visual-alt="preDraftVisual.alt"
-          home-only
-          @select-location="selectedLocationId = $event"
-        />
-      </template>
-    </USlideover>
-  </div>
+  <GuidedSetupShell
+    id="website-onboarding"
+    :title="isWelcome ? undefined : currentStep?.title"
+    :detail="currentStep?.detail"
+    :wide="currentStep?.id === 'booking'"
+    :centered="currentStep?.id === 'booking'"
+    :full="isWelcome && !restoreError"
+    :position="position"
+    :total="plan?.steps.length"
+    :next-label="currentStep?.nextLabel"
+    :back-label="plan?.backLabel"
+    :exit-label="plan?.exitLabel ?? 'Exit'"
+    :busy="busy"
+    :disabled="!currentStep?.canAdvance"
+    @next="goNext"
+    @back="goBack"
+    @exit="saveAndExit"
+  >
+    <p v-if="restoreError" class="py-6 text-sm text-error" role="alert">{{ getErrorMessage(restoreError, 'Your saved answers could not be loaded.') }}</p>
+    <NuxtPage v-else-if="currentStep" :step="currentStep" />
+    <p v-if="draft.error.value || flowError" class="mt-4 text-sm text-error" role="alert">{{ draft.error.value || flowError }}</p>
+  </GuidedSetupShell>
 </template>
 
 <script setup lang="ts">
-import { tenantOrganizationOrigin } from '~/utils/tenant-organization-origin'
-import { useDashboardTopNavAction } from '~/composables/useDashboardTopNavActions'
-import {
-  onboardingStep,
-  onboardingStepPath,
-  useOnboardingState,
-  useOnboardingSteps,
-} from '~/composables/useOnboardingFlow'
+import GuidedSetupShell from '~/components/dashboard/GuidedSetupShell.vue'
+import { onboardingReturnTarget, onboardingStepPath, useOnboardingPlan, useOnboardingState } from '~/composables/useOnboardingFlow'
 import { useOnboardingDraft } from '~/composables/useOnboardingDraft'
-import { dashboardGutterClass } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
-import PushAsk from '~/components/dashboard/PushAsk.vue'
-import { notificationCategoryLabels } from '~/shared/notification-categories'
+import { WEBSITE_ONBOARDING_EXIT_PATH, type OnboardingStepId } from '~/shared/onboarding-flow'
 
-// This route creates a new site, so it has no org or site of its own yet: there
-// is no orgSlug segment, so the dashboard layout requests no context, and it
-// declares no tabs, so the layout renders the shared header without them.
 definePageMeta({ layout: 'dashboard', tabs: false })
 
 const route = useRoute()
 const router = useRouter()
-const config = useRuntimeConfig()
+const { organization } = useDashboardMenu()
+const returnTo = computed(() => {
+  const target = onboardingReturnTarget(route.query.returnTo)
+  return target && router.resolve(target).matched.some(record => record.meta.layout === 'dashboard') ? target : undefined
+})
+const stepPath = (step: OnboardingStepId) => onboardingStepPath(step, returnTo.value)
 const state = useOnboardingState()
 const draft = useOnboardingDraft()
-const { steps, indexOf, nextOf, previousOf, resumeStep } = useOnboardingSteps()
-const exiting = ref(false)
-const migrateHostaway = ref(false)
-const uploading = ref(false)
-const busy = computed(() => draft.busy.value || exiting.value || uploading.value)
-onBeforeRouteLeave(() => !draft.busy.value && !uploading.value)
-onBeforeRouteUpdate(() => !draft.busy.value && !uploading.value)
+const plan = useOnboardingPlan()
+const advancing = ref(false)
+const flowError = ref<string | null>(null)
+const busy = computed(() => draft.busy.value || advancing.value)
+onBeforeRouteLeave(() => !draft.busy.value)
+onBeforeRouteUpdate(() => !draft.busy.value)
 
-const currentStep = computed(() => onboardingStep(String(route.params.step ?? '')))
+const requestedId = computed(() => String(route.params.step ?? 'type'))
+const position = computed(() => plan.value?.steps.findIndex(step => step.id === requestedId.value) ?? -1)
+const currentStep = computed(() => plan.value?.steps[position.value])
+const isWelcome = computed(() => requestedId.value === 'type')
 
-const pushSubscription = usePushSubscription()
-// The dashboard the new site opens on, once the push ask is answered.
-const pushAskHome = ref<string | null>(null)
-const pushAskLede = computed(() => {
-  const labels = notificationCategoryLabels([state.value.vertical])
-  return `Get new ${labels.reservations_bookings.toLowerCase()} and ${labels.messages.toLowerCase()} as they arrive.`
+const nuxtApp = useNuxtApp()
+const { data: initialPlan, error: restoreError } = await useAsyncData('onboarding-flow', async () => {
+  await draft.restore()
+  return nuxtApp.runWithContext(() => draft.readFlow({ ...draft.flowAnswers.value, pausedStep: state.value.pausedStep }))
 })
-const previousStep = computed(() => currentStep.value ? previousOf(currentStep.value.id) : null)
-const nextStep = computed(() => currentStep.value ? nextOf(currentStep.value.id) : null)
-const nextLabel = computed(() => currentStep.value?.nextLabel?.(state.value)
-  ?? (currentStep.value?.optional && !currentStep.value.complete(state.value) ? 'Skip for now' : 'Next'))
-const canAdvance = computed(() => {
-  const step = currentStep.value
-  if (!step) return false
-  return step.intro || step.optional || step.complete(state.value)
-})
-const canSave = computed(() => steps.value.every(step => step.intro || step.optional || step.complete(state.value)))
+plan.value = initialPlan.value ?? null
 
-// ─── Entering the flow ────────────────────────────────────────────────────────
-// The answers live in useState, which a page load starts empty, so every entry
-// point reads the saved draft back before a step renders: the welcome screen, a
-// step reloaded mid-flow, a step URL opened cold. This component is the parent
-// route — step-to-step navigation keeps it mounted — so the draft is fetched
-// once per page load and never again while the flow runs.
-const requested = currentStep.value
-// Starting from an empty form would save blanks over the draft, so a draft
-// that cannot be read stops the flow here.
-const { error: restoreError } = await useAsyncData('onboarding-draft', () => draft.restore())
-if (!restoreError.value) {
-  if (route.params.step && !requested) {
-    // Not a step at all.
-    await navigateTo('/dashboard/onboarding', { replace: true })
-  } else if (requested) {
-    // A step the owner has not reached, or one that no longer applies to the
-    // answers they gave, is not theirs to land on: an empty form there would
-    // save blanks over the draft. Send them to the step the draft stopped at.
-    // Only the requested URL is judged; once the flow is running, Next decides
-    // where it goes.
-    const resume = resumeStep.value
-    if (indexOf(requested.id) === -1 || indexOf(requested.id) > indexOf(resume.id)) {
-      await navigateTo(onboardingStepPath(resume.id), { replace: true })
-    }
+if (plan.value) {
+  const resume = plan.value.steps.findIndex(step => step.id === plan.value?.resumeStep)
+  if (position.value === -1 || position.value > resume || (!route.params.step && state.value.draftId && resume > 0)) {
+    await navigateTo(stepPath(plan.value.resumeStep), { replace: true })
   }
 }
+
+// A second read on Next makes navigation depend on the latest server answer.
+watch(draft.flowAnswers, (answers, _, onCleanup) => {
+  const request = new AbortController()
+  const timer = setTimeout(async () => {
+    try {
+      plan.value = await draft.readFlow(answers, request.signal)
+      flowError.value = null
+    } catch (error) {
+      if (!request.signal.aborted) flowError.value = getErrorMessage(error, 'Could not check your answers.')
+    }
+  }, 120)
+  onCleanup(() => {
+    clearTimeout(timer)
+    request.abort()
+  })
+})
 
 async function goBack() {
   if (busy.value) return
-  const target = previousStep.value
-  await router.push(target ? onboardingStepPath(target.id) : '/dashboard/onboarding')
+  const previous = plan.value?.steps[position.value - 1]
+  if (previous) await router.push(stepPath(previous.id))
 }
 
 async function goNext() {
-  const step = currentStep.value
-  if (!step || !canAdvance.value || busy.value) return
+  if (busy.value) return
+  const startingRoute = router.currentRoute.value
+  const stepId = requestedId.value
+  advancing.value = true
+  try {
+    const flow = await draft.readFlow()
+    if (router.currentRoute.value !== startingRoute) return
+    plan.value = flow
+    flowError.value = null
+    const index = flow.steps.findIndex(step => step.id === stepId)
+    const step = flow.steps[index]
+    if (!step?.canAdvance) return
 
-  // The first save creates the site, so it waits for the currency and the clock the site cannot exist without.
-  if (!['type', 'language', 'business', 'location', 'hours'].includes(step.id) && !await draft.save()) return
-
-  if (step.action === 'commit') {
-    if (!await draft.activate()) return
-    const created = state.value.created
-    const home = created?.organization_slug
-      ? `/dashboard/${created.organization_slug}${migrateHostaway.value && state.value.vertical === 'lodging' ? '/integrations/hostaway-migration' : ''}`
-      : '/dashboard'
-    // The site takes requests from here on, so this is when to offer push — once, where the browser can still be asked.
-    // The site exists either way: a browser whose push state cannot be read is reported and not asked.
-    await pushSubscription.refresh().catch(error => globalThis.reportError(error))
-    if (pushSubscription.state.value.askable) {
-      pushAskHome.value = home
+    if (step.action === 'commit') {
+      if (!flow.canFinish) {
+        await router.push(stepPath(flow.resumeStep))
+        return
+      }
+      if (!await saveOrReopenBusiness(flow) || !await draft.activate()) return
+      const created = state.value.created
+      if (!created) throw new Error('The private website could not be read.')
+      await router.push(created.next_url)
       return
     }
-    await router.push(home)
-    return
-  }
 
-  const target = nextStep.value
-  if (target) await router.push(onboardingStepPath(target.id))
+    const next = flow.steps[index + 1]
+    if (!next) return
+    if (next.id === 'timezone') state.value.timezoneStepVisited = true
+    await router.push(stepPath(next.id))
+  } catch (error) {
+    flowError.value = getErrorMessage(error, 'Could not continue setup.')
+  } finally {
+    advancing.value = false
+  }
 }
 
 async function saveAndExit() {
-  if (restoreError.value || busy.value || (state.value.draftId && !canSave.value)) return
-  exiting.value = true
+  if (busy.value) return
+  advancing.value = true
   try {
-    if (canSave.value && !await draft.save()) return
-    await router.push('/dashboard')
-  } finally {
-    exiting.value = false
-  }
-}
-
-// ─── Preview ──────────────────────────────────────────────────────────────────
-const selectedLocationId = ref<string | null>(null)
-const previewReloadToken = ref(0)
-const mobilePreviewOpen = ref(false)
-const hasAutoOpenedMobilePreview = ref(false)
-const pane = useDashboardPane()
-const isMobilePreviewViewport = computed(() => !pane.value)
-watch(pane, (wide) => { if (wide) mobilePreviewOpen.value = false })
-
-const organizationOriginFor = (subdomain: string) => tenantOrganizationOrigin({
-  platformDomain: String(config.public.platformDomain),
-  freeOrganizationDomain: String(config.public.freeOrganizationDomain),
-  subdomain,
-})
-
-const previewLocations = computed(() => state.value.preview
-  ? [{ id: state.value.preview.organizationId, slug: state.value.preview.subdomainCandidate, title: state.value.preview.draftName }]
-  : [])
-
-const organizationDomain = computed(() => {
-  const slug = state.value.created?.subdomain ?? state.value.preview?.subdomainCandidate
-  return slug ? organizationOriginFor(slug).replace(/^https?:\/\//, '') : ''
-})
-
-// The preview is the site itself, on its own subdomain: the same host, the same
-// templates and the same navigation the public gets. Before activation the site
-// is pending, so the first load carries its preview token — the tenant host
-// turns that into a preview cookie for the rest of the visit.
-const iframeSrc = computed(() => {
-  const slug = state.value.created?.subdomain ?? state.value.preview?.subdomainCandidate
-  const origin = slug ? organizationOriginFor(slug) : ''
-  if (!origin) return ''
-  const url = new URL(`${origin}/`)
-  if (!state.value.created && state.value.preview) {
-    url.searchParams.set('preview_token', state.value.preview.previewToken)
-  }
-  if (previewReloadToken.value) url.searchParams.set('t', String(previewReloadToken.value))
-  return url.toString()
-})
-
-const PRE_DRAFT_VISUALS: Record<string, { url: string; alt: string }> = {
-  welcome: {
-    url: 'https://imagedelivery.net/Frxyb2_d_vGyiaXhS5xqCg/65141776-f50d-4a1e-e223-774747d55000/w=800',
-    alt: 'Start building your business website',
-  },
-  type: {
-    url: 'https://imagedelivery.net/Frxyb2_d_vGyiaXhS5xqCg/48434034-9751-4d60-3c88-83c0dea5c600/w=800',
-    alt: 'Choose your business type',
-  },
-  business: {
-    url: 'https://imagedelivery.net/Frxyb2_d_vGyiaXhS5xqCg/85418a57-9b58-4657-e151-53738ac99100/w=800',
-    alt: 'Find your business on Google Maps',
-  },
-}
-// Preloading them makes each swap instant instead of a blank pane while the
-// next image downloads.
-useHead({
-  link: Object.values(PRE_DRAFT_VISUALS).map(visual => ({ rel: 'preload', as: 'image', href: visual.url })),
-})
-// Until the first save there is no site to frame, so the pane carries an
-// illustration rather than an empty column. The welcome screen has no step, and
-// a step with no illustration of its own keeps showing the last one instead of
-// blanking mid-flow.
-const lastVisual = ref(PRE_DRAFT_VISUALS.welcome!)
-watchEffect(() => {
-  const visual = PRE_DRAFT_VISUALS[currentStep.value?.id ?? 'welcome']
-  if (visual) lastVisual.value = visual
-})
-const preDraftVisual = computed(() => iframeSrc.value ? { url: '', alt: '' } : lastVisual.value)
-
-const organizationStatus = computed((): 'setup' | 'progress' | 'live' => {
-  if (state.value.created) return 'live'
-  if (state.value.preview) return 'progress'
-  return 'setup'
-})
-
-const mobilePreviewOpenForViewport = computed({
-  get: () => isMobilePreviewViewport.value && mobilePreviewOpen.value,
-  set: value => { mobilePreviewOpen.value = value },
-})
-
-// The pane reloads whenever a save changed the site behind it, and on mobile it
-// shows itself the first time there is anything to see.
-watch(() => state.value.preview?.previewToken, (token) => {
-  if (!token) return
-  previewReloadToken.value = Date.now()
-  selectedLocationId.value = state.value.preview?.organizationId ?? null
-  if (isMobilePreviewViewport.value && !hasAutoOpenedMobilePreview.value) {
-    hasAutoOpenedMobilePreview.value = true
-    mobilePreviewOpen.value = true
-  }
-})
-
-useDashboardTopNavAction(() => state.value.preview
-  ? {
-      key: 'onboarding-preview',
-      icon: 'i-lucide-eye',
-      ariaLabel: 'Preview draft',
-      class: 'lg:hidden',
-      onSelect: () => {
-        previewReloadToken.value = Date.now()
-        if (isMobilePreviewViewport.value) mobilePreviewOpen.value = true
-      },
+    if (!restoreError.value) {
+      const flow = await draft.readFlow()
+      plan.value = flow
+      if (flow.canSave && !await saveOrReopenBusiness(flow, currentStep.value?.id)) return
     }
-  : null)
-
-onMounted(() => {
-  if (route.query.payment === 'cancelled') {
-    draft.error.value = 'Payment cancelled. Your subscription was not completed.'
-    void router.replace({ query: { ...route.query, payment: undefined } })
+    await router.replace(returnTo.value ?? (organization.value ? `/dashboard/${encodeURIComponent(organization.value.slug)}` : WEBSITE_ONBOARDING_EXIT_PATH))
+  } catch (error) {
+    flowError.value = getErrorMessage(error, 'Could not exit setup.')
+  } finally {
+    advancing.value = false
   }
-})
+}
 
-// Step order changes with the answers (the products step does not exist for a
-// service business), so a step that no longer applies redirects to the one
-// that does.
-//
-// A failed save belongs to the step it was attempted on. The message used to
-// outlive the step and follow the owner around the flow, so a save that failed
-// on one screen was still being reported at the bottom of the next one — which
-// is what made a 500 on the products step look like Back itself was broken.
-watch([currentStep, () => indexOf(currentStep.value?.id ?? 'type')], async ([step], [previous]) => {
-  if ((step as typeof currentStep.value)?.id !== (previous as typeof currentStep.value)?.id) draft.error.value = null
-  if (route.params.step && !currentStep.value) await router.replace('/dashboard/onboarding')
+async function saveOrReopenBusiness(flow: NonNullable<typeof plan.value>, step?: NonNullable<typeof currentStep.value>['id']) {
+  if (await draft.save(flow, step)) return true
+  if (draft.subdomainConflict.value) {
+    plan.value = await draft.readFlow()
+    await router.push(stepPath('business'))
+  }
+  return false
+}
+
+watch(requestedId, () => {
+  draft.error.value = null
+  if (!currentStep.value && plan.value) void router.replace(stepPath(plan.value.resumeStep))
 })
 </script>

@@ -171,12 +171,12 @@ export async function provisionOrganization(
   }
 }
 
-/** Makes a pending tenant public. */
-export async function activateOrganization(db: D1Database, organizationId: string, writeGuard: BatchQuery, draft?: Pick<SavedOnboardingDraft, 'id' | 'user_id' | 'updated_at'> | null): Promise<void> {
+/** Completes workspace setup and sets its initial website visibility. */
+export async function activateOrganization(db: D1Database, organizationId: string, writeGuard: BatchQuery, draft?: Pick<SavedOnboardingDraft, 'id' | 'user_id' | 'updated_at'> | null, status?: 'active' | 'inactive'): Promise<void> {
   const now = new Date(Math.max(Date.now(), draft ? Date.parse(draft.updated_at) + 1 : 0)).toISOString()
   const queries: BatchQuery[] = [writeGuard, {
-    query: "UPDATE organization SET onboarding_status = 'active', updated_at = ? WHERE id = ? AND onboarding_status = 'pending' AND NOT EXISTS (SELECT 1 FROM onboarding_drafts WHERE organization_id = organization.id AND status = 'abandoned')",
-    params: [now, organizationId],
+    query: "UPDATE organization SET onboarding_status = 'active', status = COALESCE(?, status), updated_at = ? WHERE id = ? AND onboarding_status = 'pending' AND NOT EXISTS (SELECT 1 FROM onboarding_drafts WHERE organization_id = organization.id AND status = 'abandoned')",
+    params: [status ?? null, now, organizationId],
   }, { query: "SELECT CASE WHEN changes() = 1 THEN NULL ELSE json('Website activation is no longer available') END" }]
   if (draft) queries.push({
     query: "UPDATE onboarding_drafts SET status = 'committed', committed_at = COALESCE(committed_at, ?), updated_at = ? WHERE id = ? AND user_id = ? AND organization_id = ? AND status = 'active' AND updated_at = ?",
@@ -186,7 +186,7 @@ export async function activateOrganization(db: D1Database, organizationId: strin
 }
 
 /**
- * A new business is live: record the onboarding conversion and email the
+ * A new business finished setup: record the onboarding conversion and email the
  * KrabiClaw operator. Neither waits on or hides the other, and neither fails
  * the activation that already committed; each outcome is reported.
  */
@@ -232,7 +232,7 @@ async function emailOperatorOnboardingComplete(env: SetupEnv, db: D1Database, or
   const ownerId = await originatingOwnerId(db, platformOrganizationId, organizationId)
   if (!ownerId) throw new Error(`Organization ${organizationId} has no owner`)
   const [business, owner, platform, siteUrl] = await Promise.all([
-    queryFirst<{ name: string }>(db, 'SELECT name FROM organization WHERE id = ?', [organizationId]),
+    queryFirst<{ name: string; status: string }>(db, 'SELECT name, status FROM organization WHERE id = ?', [organizationId]),
     queryFirst<{ name: string; email: string }>(db, 'SELECT name, email FROM user WHERE id = ?', [ownerId]),
     queryFirst<{ slug: string }>(db, 'SELECT slug FROM organization WHERE id = ?', [platformOrganizationId]),
     organizationPublicUrl(env, db, organizationId),
@@ -247,6 +247,7 @@ async function emailOperatorOnboardingComplete(env: SetupEnv, db: D1Database, or
     ownerName: owner.name,
     ownerEmail: owner.email,
     siteUrl,
+    privateSite: business.status === 'inactive',
     viewCustomerUrl: `https://${platformDomain}/dashboard/${platform.slug}/platform-accounts?${query}`,
   })
   const email = await renderNotificationEmail(message, { platformDomain })
@@ -266,7 +267,7 @@ async function emailOwnerWelcome(env: SetupEnv, db: D1Database, organizationId: 
   const ownerId = await originatingOwnerId(db, platformOrganizationId, organizationId)
   if (!ownerId) throw new Error(`Organization ${organizationId} has no owner`)
   const [business, owner, siteUrl] = await Promise.all([
-    queryFirst<{ name: string; slug: string; vertical: string | null }>(db, 'SELECT name, slug, vertical FROM organization WHERE id = ?', [organizationId]),
+    queryFirst<{ name: string; slug: string; vertical: string | null; status: string }>(db, 'SELECT name, slug, vertical, status FROM organization WHERE id = ?', [organizationId]),
     queryFirst<{ name: string; email: string }>(db, 'SELECT name, email FROM user WHERE id = ?', [ownerId]),
     organizationPublicUrl(env, db, organizationId),
   ])
@@ -281,6 +282,7 @@ async function emailOwnerWelcome(env: SetupEnv, db: D1Database, organizationId: 
     siteUrl,
     dashboardUrl,
     vertical: business.vertical,
+    privateSite: business.status === 'inactive',
   })
   const email = await renderNotificationEmail(message, { platformDomain })
 

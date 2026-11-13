@@ -14,7 +14,7 @@ export default defineHandler(async (event) => {
     return jsonResponse({ error: 'Organization ID, location ID and product ID are required' }, { status: 400 })
   }
   try {
-    return jsonResponse(await loadDashboardProduct(event, organizationId, locationId, productId))
+    return jsonResponse(await loadDashboardProduct(event, organizationId, locationId, productId), { headers: { 'cache-control': 'private, no-store' } })
   } catch (error) {
     rethrowHttpError(error)
     console.error('location_product_read_failed', { organizationId, locationId, productId, error: error instanceof Error ? error.message : String(error) })

@@ -24,22 +24,24 @@
 
       <div class="space-y-6">
         <!-- Default Website Address (Design System Parity) -->
-        <div class="rounded-3xl p-5 sm:p-6 bg-white dark:bg-neutral-900 shadow-[0_4px_24px_rgba(0,0,0,0.06)] dark:shadow-[0_4px_24px_rgba(0,0,0,0.3)]">
+        <div v-if="domainSettings?.included_address" class="rounded-3xl p-5 sm:p-6 bg-white dark:bg-neutral-900 shadow-[0_4px_24px_rgba(0,0,0,0.06)] dark:shadow-[0_4px_24px_rgba(0,0,0,0.3)]">
           <div class="flex items-center justify-between gap-4">
             <a
-              :href="defaultUrl"
+              v-if="domainSettings.included_address.url"
+              :href="domainSettings.included_address.url"
               target="_blank"
               rel="noopener noreferrer"
               class="font-mono text-base font-semibold text-primary hover:underline inline-flex items-center gap-1.5 truncate"
               data-testid="default-domain-link"
             >
-              <span class="truncate">{{ defaultHostname }}</span>
+              <span class="truncate">{{ domainSettings.included_address.host }}</span>
               <UIcon name="i-lucide-external-link" class="size-4 shrink-0 text-muted" />
             </a>
+            <span v-else class="truncate font-mono text-base font-semibold">{{ domainSettings.included_address.host }}</span>
 
             <span class="inline-flex items-center gap-1.5 text-xs text-muted shrink-0">
-              <span class="size-2 rounded-full bg-emerald-500" />
-              <span>Active</span>
+              <span class="size-2 rounded-full" :class="domainSettings.included_address.url ? 'bg-emerald-500' : 'bg-muted'" />
+              <span>{{ domainSettings.included_address.status }}</span>
             </span>
           </div>
         </div>
@@ -51,42 +53,35 @@
               Custom domain
             </h3>
             <UButton
-              v-if="domainGroups?.length"
+              v-if="domainSettings?.action && !domainSettings.action.to"
               icon="i-lucide-plus"
-              label="Connect domain"
+              :aria-label="domainSettings.action.label"
               color="neutral"
-              variant="ghost"
-              size="sm"
+              variant="outline"
+              class="rounded-full"
               @click="openAddModal"
             />
           </div>
 
           <!-- Empty state when no custom domains connected -->
           <div
-            v-if="!loadError && !domainGroups?.length"
+            v-if="domainSettings && !loadError && !domainGroups?.length"
             class="rounded-3xl p-6 sm:p-8 text-center bg-white dark:bg-neutral-900 shadow-[0_4px_24px_rgba(0,0,0,0.06)] dark:shadow-[0_4px_24px_rgba(0,0,0,0.3)]"
           >
             <div class="size-12 rounded-full bg-accented flex items-center justify-center mx-auto mb-3">
               <UIcon name="i-lucide-globe" class="size-6 text-muted" />
             </div>
             <h4 class="text-sm sm:text-base font-semibold text-highlighted">
-              Connect your own domain
+              {{ domainSettings.empty_title }}
             </h4>
-            <p class="mt-1 text-xs sm:text-sm text-muted max-w-sm mx-auto leading-relaxed">
-              Use your own web address (like yourbusiness.com) so clients and guests find you easily.
-            </p>
-            <div class="mt-5">
-              <UButton
-                label="Connect a custom domain"
-                icon="i-lucide-plus"
-                color="neutral"
-                variant="outline"
-                size="md"
-                class="rounded-xl font-semibold border border-neutral-900 dark:border-white cursor-pointer"
-                data-testid="empty-connect-domain-button"
-                @click="openAddModal"
-              />
-            </div>
+            <UButton
+              v-if="domainSettings?.action?.to"
+              :label="domainSettings.action.label"
+              :to="domainSettings.action.to"
+              color="neutral"
+              variant="outline"
+              class="mt-4 rounded-xl"
+            />
           </div>
 
           <!-- Custom domains list -->
@@ -291,7 +286,6 @@ definePageMeta({ layout: 'dashboard' })
 const confirmDialog = useOverlay().create(DashboardConfirmDialog)
 const dashboardApi = useDashboardApi()
 const dashboard = useDashboardOrganization()
-const runtimeConfig = useRuntimeConfig()
 const route = useRoute()
 const { trackDomainConnected } = useAnalytics()
 
@@ -333,6 +327,12 @@ interface DomainsResponse {
   domain_groups: DomainGroup[]
 }
 
+interface DomainSettings extends DomainsResponse {
+  included_address: { host: string; url: string | null; status: string } | null
+  empty_title: string
+  action: { label: string; to: string | null } | null
+}
+
 interface AddDomainResponse extends DomainsResponse {
   requested_hostnames: string[]
 }
@@ -371,22 +371,21 @@ if (!organizationId.value) {
   throw createError({ statusCode: 404, statusMessage: 'Organization not found' })
 }
 
-const freeOrganizationDomain = computed(() =>
-  String(runtimeConfig.public.freeOrganizationDomain || 'krabiclaw.com').replace(/^https?:\/\//, ''),
-)
-
-const defaultHostname = computed(() => {
-  const subdomain = dashboard.organization.value?.subdomain
-  if (!subdomain) return freeOrganizationDomain.value
-  return `${subdomain}.${freeOrganizationDomain.value}`
-})
-
-const defaultUrl = computed(() => `https://${defaultHostname.value}`)
-
-const { data: domainGroups, error: domainsError, refresh: loadDomains } = await useAsyncData(
+const { data: domainSettings, error: domainsError, refresh: loadDomains } = await useAsyncData(
   () => `organization-domains:${organizationId.value}`,
-  async () => (await dashboardApi<DomainsResponse>(`/api/organizations/${organizationId.value}/domains`, { validate: isDomainsResponse })).domain_groups,
+  () => dashboardApi<DomainSettings>(`/api/organizations/${organizationId.value}/domains`, {
+    validate: (value): value is DomainSettings => {
+      if (!isRecord(value)) return false
+      const { action, included_address } = value
+      return typeof value.empty_title === 'string' && isDomainsResponse(value)
+        && (action === null || isRecord(action) && typeof action.label === 'string'
+          && (action.to === null || typeof action.to === 'string'))
+        && (included_address === null || isRecord(included_address) && typeof included_address.host === 'string'
+          && typeof included_address.status === 'string' && (included_address.url === null || typeof included_address.url === 'string'))
+    },
+  }),
 )
+const domainGroups = computed(() => domainSettings.value?.domain_groups)
 
 const loadError = computed(() => domainsError.value ? getErrorMessage(domainsError.value, 'Failed to load domains') : null)
 
@@ -447,7 +446,9 @@ async function addDomain() {
           && requestedHostnames.every(hostname => typeof hostname === 'string')
       },
     })
-    domainGroups.value = mergeGroups(domainGroups.value ?? [], response.domain_groups ?? [])
+    if (domainSettings.value) {
+      domainSettings.value = { ...domainSettings.value, domain_groups: mergeGroups(domainSettings.value.domain_groups, response.domain_groups) }
+    }
     const newGroup = response.domain_groups?.[0]
     if (newGroup) expandedGroups.value[newGroup.id] = true
     trackDomainConnected(addForm.domain.trim(), organizationId.value)
@@ -575,7 +576,9 @@ async function deleteGroup(group: DomainGroup) {
           isRecord(value) && value.success === true,
       })
     }
-    domainGroups.value = domainGroups.value?.filter((candidate) => candidate.id !== group.id)
+    if (domainSettings.value) {
+      domainSettings.value = { ...domainSettings.value, domain_groups: domainSettings.value.domain_groups.filter(candidate => candidate.id !== group.id) }
+    }
   } catch {
     await loadDomains()
     actionError.value = 'Failed to remove domain'

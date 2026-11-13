@@ -146,7 +146,6 @@ import { dashboardScopeHeaderModelKey } from '~/lib/components/workspace/dashboa
 import { authClient } from '~/lib/auth-client'
 import { reconcileAnalyticsConsent } from '~/composables/useAnalyticsConsentReconciliation'
 import { useAnalytics } from '~/composables/useAnalytics'
-import '~/assets/css/dashboard.css'
 import { mediaStillUrl } from '~/shared/media-placement-contract'
 
 // ─────────────────────────────────────────────────────────────────────────

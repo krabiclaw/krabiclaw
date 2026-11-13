@@ -122,6 +122,7 @@ export function publicSections(vertical: string | null, catalog: readonly Public
 export function appendPublicShellQueries(
   queries: BatchQuery[],
   organizationId: string,
+  previewMenu = false,
 ): PublicShellQueryIndexes {
   const push = (query: string, params: unknown[]) => {
     const index = queries.length
@@ -146,7 +147,11 @@ export function appendPublicShellQueries(
                WHERE s.id = ?
                  AND setting.key IN ('press_email', 'partnerships_email', 'catering_email', 'careers_email')
               `, [organizationId]),
-    catalog: push(PUBLIC_CATALOG_SECTIONS_SQL, [organizationId]),
+    catalog: push(previewMenu ? `${PUBLIC_CATALOG_SECTIONS_SQL}
+      UNION SELECT DISTINCT p.kind, pl.location_id FROM products p
+      JOIN product_locations pl ON pl.product_id = p.id AND pl.organization_id = p.organization_id
+      WHERE p.organization_id = ? AND p.kind = 'dish'` : PUBLIC_CATALOG_SECTIONS_SQL,
+    previewMenu ? [organizationId, organizationId] : [organizationId]),
     content: Object.fromEntries(PUBLIC_CONTENT_SECTIONS.map(section => [section, push(PUBLIC_CONTENT_SECTION_QUERIES[section], [organizationId])])) as Record<PublicContentSection, number>,
     // The organization's own placements and its locations' heroes and cards,
     // in one read: the shell's logo and favicon, and each location's og:image.
