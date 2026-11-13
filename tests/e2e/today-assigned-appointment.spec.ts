@@ -1,5 +1,6 @@
+import { findE2eAuthFixture } from '../../config/development-auth-fixtures'
 import { expect, test, type APIResponse } from '@playwright/test'
-import { authRequestHeaders, loginAs } from './helpers/auth'
+import { acceptOrganizationInvitation, authRequestHeaders, loginAs, sendOrganizationInvitation } from './helpers/auth'
 import { dismissPreviewToolbar, waitForNuxtHydration } from './helpers'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { seededSiteHeaders } from './test-env'
@@ -242,12 +243,12 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
       } else if (scheduleWritten) {
         // An absent schedule is restored through Better Auth's existing removal
         // and invitation lifecycle, rather than direct authentication-row writes.
-        const invitation = await body<{ token: string }>(await page.request.post(`/api/organizations/${ORGANIZATION}/invite-links`, { data: { role: 'member' } }), 201)
         await body(await page.request.post('/api/auth/organization/remove-member', { headers: authRequestHeaders(baseURL!), data: { organizationId: ORGANIZATION, memberIdOrEmail: actor.id } }), 200)
-        const joined = await body<{ member_id: string }>(await memberContext.request.post(`/api/invite-links/${encodeURIComponent(invitation.token)}/accept`, { data: {} }), 200)
-        await body(await page.request.post('/api/auth/organization/update-member-role', { headers: authRequestHeaders(baseURL!), data: { organizationId: ORGANIZATION, memberId: joined.member_id, role: actor.role } }), 200)
+        const invitationId = await sendOrganizationInvitation(page.request, baseURL!, ORGANIZATION, findE2eAuthFixture(ACTOR).email, 'member')
+        const joined = await acceptOrganizationInvitation(memberContext.request, baseURL!, invitationId)
+        await body(await page.request.post('/api/auth/organization/update-member-role', { headers: authRequestHeaders(baseURL!), data: { organizationId: ORGANIZATION, memberId: joined.id, role: actor.role } }), 200)
         roleChanged = false
-        const restored = await body<{ scheduling: Schedule | null }>(await page.request.get(`/api/organizations/${ORGANIZATION}/members/${joined.member_id}/scheduling`), 200)
+        const restored = await body<{ scheduling: Schedule | null }>(await page.request.get(`/api/organizations/${ORGANIZATION}/members/${joined.id}/scheduling`), 200)
         expect(restored.scheduling).toBeNull()
       }
       if (roleChanged) await body(await page.request.post('/api/auth/organization/update-member-role', { headers: authRequestHeaders(baseURL!), data: { organizationId: ORGANIZATION, memberId: actor.id, role: actor.role } }), 200)

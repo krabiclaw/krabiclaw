@@ -193,7 +193,7 @@ rm /tmp/staging-admin.jar
 
 Repeat the second call for each role the app needs to exercise (an owner who
 creates a lodging organization, and a co-host and cleaner who join it through an
-invite link). Each answers `{"user":{…}}`; then sign in once from the app to
+Better Auth email invitation). Each answers `{"user":{…}}`; then sign in once from the app to
 confirm.
 
 `schema:local` applies new forward migrations when the schema changes. After a

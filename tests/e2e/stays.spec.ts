@@ -1,7 +1,8 @@
 import { expect, test, type APIRequestContext, type APIResponse, type Page, type Request, type WebSocket } from '@playwright/test'
 import Ajv from 'ajv'
+import { findE2eAuthFixture } from '../../config/development-auth-fixtures'
 import sharp from 'sharp'
-import { authRequestHeaders, loginAs } from './helpers/auth'
+import { acceptOrganizationInvitation, authRequestHeaders, loginAs, sendOrganizationInvitation } from './helpers/auth'
 import { mcpRequest, publishOwnHostProfile } from './helpers/mcp'
 import { waitForNuxtHydration } from './helpers'
 import { devLoginHeaders, readLocalTenant } from './test-env'
@@ -392,12 +393,9 @@ test('a responsible home member reads its stays as turnovers on every surface un
   const memberContext = await browser.newContext({ baseURL })
   try {
     await loginAs(memberContext.request, baseURL!, 'user-e2e-lodging-native')
-    const offered = await page.request.post(`/api/organizations/${organizationId}/invite-links`, { data: { role: 'member' } })
-    await expectStatus(offered, 201)
-    const { token } = await offered.json() as { token: string }
-    const accepted = await memberContext.request.post(`/api/invite-links/${token}/accept`, { data: {} })
-    await expectStatus(accepted, 200)
-    const { member_id: memberId } = await accepted.json() as { member_id: string }
+    const email = findE2eAuthFixture('user-e2e-lodging-native').email
+    const invitationId = await sendOrganizationInvitation(page.request, baseURL!, organizationId, email, 'member')
+    const { id: memberId } = await acceptOrganizationInvitation(memberContext.request, baseURL!, invitationId)
     const memberSession = await memberContext.request.get('/api/auth/get-session')
     await expectStatus(memberSession, 200)
     const memberName = (await memberSession.json() as { user: { name: string } }).user.name
@@ -3860,12 +3858,9 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
   const cleaner = await browser.newContext({ baseURL: baseURL! })
   try {
     await loginAs(cleaner.request, baseURL!, 'user-e2e-demo-role-owner')
-    const offered = await page.request.post(`/api/organizations/${organizationId}/invite-links`, { data: { role: 'member' } })
-    await expectStatus(offered, 201)
-    const token = (await offered.json() as { token: string }).token
-    const accepted = await cleaner.request.post(`/api/invite-links/${encodeURIComponent(token)}/accept`, { data: {} })
-    await expectStatus(accepted, 200)
-    const { member_id: memberId } = await accepted.json() as { member_id: string }
+    const email = findE2eAuthFixture('user-e2e-demo-role-owner').email
+    const invitationId = await sendOrganizationInvitation(page.request, baseURL!, organizationId, email, 'member')
+    const { id: memberId } = await acceptOrganizationInvitation(cleaner.request, baseURL!, invitationId)
     const listedMembers = await page.request.get('/api/auth/organization/list-members', { params: { organizationId } })
     await expectStatus(listedMembers, 200)
     const ownerMemberId = (await listedMembers.json() as { members: Array<{ id: string; role: string }> }).members.find(member => member.role === 'owner')!.id
@@ -4795,11 +4790,9 @@ test('a stay socket in a service organization closes when Better Auth removes it
   const cleaner = await browser.newContext({ baseURL: baseURL! })
   try {
     await loginAs(cleaner.request, baseURL!, 'user-e2e-demo-role-owner')
-    const offered = await page.request.post(`/api/organizations/${organizationId}/invite-links`, { data: { role: 'member' } })
-    await expectStatus(offered, 201)
-    const accepted = await cleaner.request.post(`/api/invite-links/${encodeURIComponent((await offered.json() as { token: string }).token)}/accept`, { data: {} })
-    await expectStatus(accepted, 200)
-    const { member_id: memberId } = await accepted.json() as { member_id: string }
+    const email = findE2eAuthFixture('user-e2e-demo-role-owner').email
+    const invitationId = await sendOrganizationInvitation(page.request, baseURL!, organizationId, email, 'member')
+    const { id: memberId } = await acceptOrganizationInvitation(cleaner.request, baseURL!, invitationId)
     const listedMembers = await page.request.get('/api/auth/organization/list-members', { params: { organizationId } })
     await expectStatus(listedMembers, 200)
     const ownerMemberId = (await listedMembers.json() as { members: Array<{ id: string; role: string }> }).members.find(member => member.role === 'owner')!.id

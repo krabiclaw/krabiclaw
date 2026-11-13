@@ -3,7 +3,6 @@ import { request as httpsRequest } from 'node:https'
 import { expect, request as playwrightRequest, test, type WebSocket } from '@playwright/test'
 import sharp from 'sharp'
 import { E2E_PASSWORD, findE2eAuthFixture } from '../../config/development-auth-fixtures'
-import { seededTenant } from './seed/manifest'
 import { devLoginHeaders } from './test-env'
 import { loginAs } from './helpers/auth'
 import { mcpData, mcpRequest } from './helpers/mcp'
@@ -98,33 +97,20 @@ test.describe('lodging identity boundary', () => {
     try {
       expect(await members()).toEqual([expect.objectContaining({ userId: fixture.id, role: 'owner' })])
 
-      // A single-use link adds whoever accepts it, with the link's role.
-      const link = await api.post(`/api/organizations/${encodeURIComponent(organization.id)}/invite-links`, { headers: bearer, data: { role: 'admin' } })
-      expect(link.status, await link.text()).toBe(201)
-      const { id: inviteLinkId, token: inviteToken, expires_at } = await link.json() as { id: string; token: string; expires_at: string }
-      expect(Date.parse(expires_at) - Date.now()).toBeGreaterThan(6.9 * 24 * 60 * 60 * 1000)
-      const pending = await api.get(`/api/organizations/${encodeURIComponent(organization.id)}/invite-links`, { headers: bearer })
-      expect(pending.status, await pending.text()).toBe(200)
-      expect((await pending.json() as { invite_links: Array<{ id: string; role: string }> }).invite_links).toEqual([expect.objectContaining({ id: inviteLinkId, role: 'admin' })])
-      // Anyone holding the link reads what it offers, and the public page shows it.
-      const offered = await api.get(`/api/invite-links/${encodeURIComponent(inviteToken)}`)
-      expect(offered.status, await offered.text()).toBe(200)
-      expect(await offered.json()).toEqual({ organization: { name: organization.name }, role: 'admin', expires_at })
-      const invitePage = await api.get(`/invite/${encodeURIComponent(inviteToken)}`)
-      expect(invitePage.status).toBe(200)
-      expect(await invitePage.text()).toContain(`Join ${organization.name}`)
-      // In a browser with no session the page offers sign-in and the app.
-      await page.goto(`/invite/${encodeURIComponent(inviteToken)}`)
-      await expect(page.getByRole('heading', { name: `Join ${organization.name}`, level: 1 })).toBeVisible()
-      await expect(page.getByRole('link', { name: 'Sign in with email' })).toHaveAttribute('href', `/login?redirect=${encodeURIComponent(`/invite/${encodeURIComponent(inviteToken)}`)}`)
-      await expect(page.getByRole('link', { name: 'Open this invite in the KrabiClaw app' })).toHaveAttribute('href', `krabiclaw://invite?token=${encodeURIComponent(inviteToken)}`)
-      expect((await api.post(`/api/invite-links/${encodeURIComponent(inviteToken)}/accept`)).status).toBe(401)
+      const invitation = await api.post('/api/auth/organization/invite-member', {
+        headers: bearer, data: { organizationId: organization.id, email: invitee.email, role: 'admin' },
+      })
+      expect(invitation.status, await invitation.text()).toBe(200)
+      const { id: invitationId } = await invitation.json() as { id: string }
       const inviteeBearer = await signInBearer(invitee.email)
-      const accepted = await api.post(`/api/invite-links/${encodeURIComponent(inviteToken)}/accept`, { headers: inviteeBearer })
+      const offered = await api.get('/api/auth/organization/get-invitation?id=' + encodeURIComponent(invitationId), { headers: inviteeBearer })
+      expect(offered.status, await offered.text()).toBe(200)
+      expect(await offered.json()).toMatchObject({ organizationName: organization.name, email: invitee.email, role: 'admin' })
+      const accepted = await api.post('/api/auth/organization/accept-invitation', { headers: inviteeBearer, data: { invitationId } })
       expect(accepted.status, await accepted.text()).toBe(200)
-      const joined = await accepted.json() as { organization: { id: string; name: string }; role: string; member_id: string }
-      expect(joined).toMatchObject({ organization: { id: organization.id, name: organization.name }, role: 'admin' })
-      expect(await members()).toEqual(expect.arrayContaining([expect.objectContaining({ id: joined.member_id, userId: invitee.id, role: 'admin' })]))
+      const { member: joined } = await accepted.json() as { member: { id: string; organizationId: string; role: string } }
+      expect(joined).toMatchObject({ organizationId: organization.id, role: 'admin' })
+      expect(await members()).toEqual(expect.arrayContaining([expect.objectContaining({ id: joined.id, userId: invitee.id, role: 'admin' })]))
 
       // MCP and the native app address the same participants, messages and read
       // positions. This organization already exists for the invitation journey.
@@ -323,23 +309,9 @@ test.describe('lodging identity boundary', () => {
       const retained = await retainedHistory.json() as { messages: TeamMessage[]; has_more: boolean }
       expect(retained.has_more).toBe(false)
       expect(await page.locator('[data-team-message]').evaluateAll(rows => rows.map(row => row.getAttribute('data-team-message')))).toEqual(retained.messages.map(message => message.id).reverse())
-      const reused = await api.post(`/api/invite-links/${encodeURIComponent(inviteToken)}/accept`, { headers: inviteeBearer })
-      expect(reused.status).toBe(410)
-      expect(await reused.json()).toMatchObject({ data: { code: 'INVITE_LINK_USED', field: 'token' } })
-      const usedRead = await api.get(`/api/invite-links/${encodeURIComponent(inviteToken)}`)
-      expect(usedRead.status).toBe(410)
-      expect(await usedRead.json()).toMatchObject({ data: { code: 'INVITE_LINK_USED', field: 'token' } })
-      // Used links are no longer pending, and a withdrawn link cannot be read or accepted.
-      expect((await (await api.get(`/api/organizations/${encodeURIComponent(organization.id)}/invite-links`, { headers: bearer })).json() as { invite_links: unknown[] }).invite_links).toEqual([])
-      const withdrawn = await api.post(`/api/organizations/${encodeURIComponent(organization.id)}/invite-links`, { headers: bearer, data: { role: 'member' } })
-      expect(withdrawn.status, await withdrawn.text()).toBe(201)
-      const withdrawnLink = await withdrawn.json() as { id: string; token: string }
-      expect((await api.delete(`/api/organizations/${encodeURIComponent(organization.id)}/invite-links/${withdrawnLink.id}`, { headers: bearer })).status).toBe(204)
-      const gone = await api.get(`/api/invite-links/${encodeURIComponent(withdrawnLink.token)}`)
-      expect(gone.status).toBe(404)
-      expect(await gone.json()).toMatchObject({ data: { code: 'INVITE_LINK_NOT_FOUND', field: 'token' } })
-      expect((await api.post(`/api/invite-links/${encodeURIComponent(withdrawnLink.token)}/accept`, { headers: inviteeBearer })).status).toBe(404)
-      expect((await api.post(`/api/organizations/${seededTenant('restaurant').organizationId}/invite-links`, { headers: inviteeBearer, data: { role: 'member' } })).status).toBe(404)
+      const reused = await api.post('/api/auth/organization/accept-invitation', { headers: inviteeBearer, data: { invitationId } })
+      expect(reused.status).toBe(400)
+      expect(await reused.json()).toMatchObject({ code: 'INVITATION_NOT_FOUND' })
       const inviteeLeft = await api.post('/api/auth/organization/leave', { headers: inviteeBearer, data: { organizationId: organization.id } })
       expect(inviteeLeft.status, await inviteeLeft.text()).toBe(200)
       expect(await members()).toEqual([expect.objectContaining({ userId: fixture.id, role: 'owner' })])
@@ -409,15 +381,16 @@ test.describe('lodging identity boundary', () => {
         const context = await api.get(`/api/dashboard/context?org=${slug}`, { headers: ownerBearer })
         expect(context.status, await context.text()).toBe(200)
         expect(await context.json()).toMatchObject({ success: true, organization: { id: organization.id, name, slug, subdomain: slug, vertical } })
-        // Invitations use the same single-use link as a new teammate joining from the app.
         const join = async (actor: typeof invitee, role: 'admin' | 'member') => {
-          const link = await api.post(`/api/organizations/${organization.id}/invite-links`, { headers: ownerBearer, data: { role } })
-          expect(link.status, await link.text()).toBe(201)
-          const { token } = await link.json() as { token: string }
+          const invitation = await api.post('/api/auth/organization/invite-member', {
+            headers: ownerBearer, data: { organizationId: organization.id, email: actor.email, role },
+          })
+          expect(invitation.status, await invitation.text()).toBe(200)
+          const { id: invitationId } = await invitation.json() as { id: string }
           const bearer = await signInBearer(actor.email)
-          const accepted = await api.post(`/api/invite-links/${encodeURIComponent(token)}/accept`, { headers: bearer })
+          const accepted = await api.post('/api/auth/organization/accept-invitation', { headers: bearer, data: { invitationId } })
           expect(accepted.status, await accepted.text()).toBe(200)
-          expect(await accepted.json()).toMatchObject({ organization: { id: organization.id }, role })
+          expect(await accepted.json()).toMatchObject({ member: { organizationId: organization.id, role } })
           return bearer
         }
         const adminBearer = await join(invitee, 'admin')
@@ -599,12 +572,14 @@ test.describe('lodging identity boundary', () => {
     try {
       const provisioned = await api.post('/api/organizations', { headers: ownerBearer, data: { organization_id: organization.id, name, subdomain: slug, vertical: 'experience', source_locale: 'en' } })
       expect(provisioned.status, await provisioned.text()).toBe(200)
-      const offered = await api.post(`/api/organizations/${organization.id}/invite-links`, { headers: ownerBearer, data: { role: 'member' } })
-      expect(offered.status, await offered.text()).toBe(201)
-      const { token } = await offered.json() as { token: string }
-      const accepted = await api.post(`/api/invite-links/${token}/accept`, { headers: memberBearer })
+      const offered = await api.post('/api/auth/organization/invite-member', {
+        headers: ownerBearer, data: { organizationId: organization.id, email: invitee.email, role: 'member' },
+      })
+      expect(offered.status, await offered.text()).toBe(200)
+      const { id: invitationId } = await offered.json() as { id: string }
+      const accepted = await api.post('/api/auth/organization/accept-invitation', { headers: memberBearer, data: { invitationId } })
       expect(accepted.status, await accepted.text()).toBe(200)
-      const { member_id: memberId } = await accepted.json() as { member_id: string }
+      const { member: { id: memberId } } = await accepted.json() as { member: { id: string } }
       const profile = await api.put(`/api/organizations/${organization.id}/members/${memberId}/scheduling`, { headers: ownerBearer, data: { updated_at: null, public_name: 'Experience guide', public_bio: 'Leads the local experience.', public_approved: true } })
       expect(profile.status, await profile.text()).toBe(200)
       const context = await api.get(`/api/dashboard/context?org=${slug}`, { headers: ownerBearer })
