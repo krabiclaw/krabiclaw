@@ -79,11 +79,19 @@
         @update:model-value="state.details.currency = isCurrencyCode($event) ? $event : null"
       />
     </UFormField>
+
+    <LodgingBookingChoices
+      v-else-if="step.id === 'booking' && plan"
+      v-model="state.details.confirmationMode"
+      :choices="plan.bookingChoices"
+      :label="step.title"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import OnboardingAddressFields from '~/lib/components/workspace/onboarding/OnboardingAddressFields.vue'
+import LodgingBookingChoices from '~/lib/components/workspace/settings/LodgingBookingChoices.vue'
 import OnboardingChoiceGrid from '~/lib/components/workspace/onboarding/OnboardingChoiceGrid.vue'
 import GooglePlacePicker from '~/lib/components/workspace/location/GooglePlacePicker.vue'
 import LocationTimezoneField from '~/lib/components/workspace/location/LocationTimezoneField.vue'
@@ -110,7 +118,10 @@ const addressFields = computed(() => props.step.fields.flatMap(field => isAddres
 
 function selectVertical(value: string) {
   const choice = plan.value?.businessTypes.find(option => option.value === value)
-  if (choice) state.value.vertical = choice.value
+  if (choice && choice.value !== state.value.vertical) {
+    state.value.vertical = choice.value
+    state.value.details.confirmationMode = null
+  }
 }
 
 const businessSearch = ref('')

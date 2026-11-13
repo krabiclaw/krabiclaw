@@ -48,9 +48,11 @@ export async function dashboardBookingDetails(event: H3Event) {
   if (!conversation) throw new Error('The booking has no guest conversation')
   const [destination, record] = await Promise.all([guestReplyDestination(db, conversation), getThreadOperationalRecord(db, conversation.id)])
   if (!record) throw new Error('The conversation has no booking')
-  const available_actions = [
-    ...requestActions(record, new Date().toISOString()).filter(action => action === 'no_show' && !isChannelManagedStay(stay)),
-    ...(stay.status === 'cancelled' ? [] : ['move', ...(!isChannelManagedStay(stay) ? ['edit', 'cancel'] : [])]),
+  const channelOwned = isChannelManagedStay(stay)
+  const actions = requestActions(record, new Date().toISOString())
+  const available_actions = stay.request_status ? actions : [
+    ...actions.filter(action => action === 'no_show' && !channelOwned),
+    ...(stay.status === 'cancelled' ? [] : ['move', ...(!channelOwned ? ['edit', 'cancel'] : [])]),
   ]
   return { booking: { ...nightBooking(stay), available_actions }, manage: true, can_message_guest: destination.channel !== null && !conversation.blocked_at }
 }

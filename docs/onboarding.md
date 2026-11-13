@@ -109,7 +109,11 @@ The business types are restaurant, experience, Legal Services (`service`) and
 lodging, from `ALL_VERTICALS` in `utils/vertical-copy.ts`. Lodging uses the shared
 customer-site renderer and its stay routes. Creating the site does not create a
 home or enable online payments: homes and their calendars are configured after
-site setup, and direct paid stay bookings require Business and Stripe setup.
+site setup, and direct paid stay bookings require Business and Stripe setup. Lodging owners
+choose once between **Instant Book** and **Approve requests** for all homes on
+their own website. Both take payment online. With approval, the guest pays
+after the host accepts the request. Owners can change this under
+**Website → Booking settings** on web and iOS.
 
 Manual lodging setup in Catalog uses the same server steps on web and iOS:
 address search and confirmation, property, space, map pin, location sharing,
@@ -135,7 +139,8 @@ Each question occupies one screen. The web paths live under
 | `location` | Where is your business based? | Select a country. Add an address if useful. Edit the time zone here if the server can propose one or the draft already has one. |
 | `timezone` | What time zone do you use? | Choose a time zone if one could not be determined on Location. |
 | `language` | What language is your website in? | Select a supported language. The source language of existing draft content is fixed. |
-| `currency` | What currency do you price in? | Confirm or change the proposed pricing currency and select **Finish**. |
+| `currency` | What currency do you price in? | Confirm or change the proposed pricing currency. For lodging, continue to Booking settings. |
+| `booking` | Pick your booking settings | Lodging only. Select Instant Book or Approve requests, then select **Finish**. |
 
 `GET /api/post-login` sends new owners to the business picker. Owners with a
 draft and no business dashboard can continue from Account → Organizations on

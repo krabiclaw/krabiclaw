@@ -1,5 +1,6 @@
 import type { ProductSurface } from '~/server/types/products'
 import type { PublicProductDetailPayload } from '~/server/utils/public-products'
+import { isLodgingConfirmationMode } from '~/shared/lodging-booking'
 import { isCurrencyCode } from '~/shared/currencies'
 import { isRecord, publicApiRequest } from '~/utils/api-clients'
 import { isPublicProduct, type PublicLocaleRepresentation } from '~/utils/public-resource-contracts'
@@ -56,6 +57,7 @@ export function isPublicProductDetailPayload(value: unknown): value is PublicPro
       && typeof sibling.name === 'string'
       && typeof sibling.slug === 'string')
     && typeof value.stay_checkout_available === 'boolean'
+    && (value.product.kind === 'stay' ? isLodgingConfirmationMode(value.stay_confirmation_mode) : value.stay_confirmation_mode === null)
     && Array.isArray(value.locale_representations)
     && value.locale_representations.every(item => isRecord(item)
       && typeof item.locale === 'string'

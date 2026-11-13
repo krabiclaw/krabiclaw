@@ -30,7 +30,7 @@
             <button type="button" class="rounded-lg bg-muted px-3 py-2 font-semibold" @click="editDates">{{ t('payment.change') }}</button>
           </div>
           <StayGuestFields v-if="!checkout" :controller="controller" class="mt-5 border-t border-default pt-2" />
-          <TenantButton block class="mt-6" :disabled="quotePending" :to="checkout ? undefined : enquiryPath" @click="continueBooking">{{ t(checkout ? 'stay.reserve' : 'stay.send_enquiry') }}</TenantButton>
+          <TenantButton block class="mt-6" :disabled="quotePending" :to="checkout ? undefined : enquiryPath" @click="continueBooking">{{ actionLabel }}</TenantButton>
         </template>
       </div>
     </template>
@@ -43,7 +43,7 @@ import { UDrawer, UPopover } from '#components'
 import type { StayBookingController } from '~/composables/useStayBooking'
 import StayGuestFields from './StayGuestFields.vue'
 const props = defineProps<{ controller: StayBookingController; large?: boolean }>()
-const { quote, quotePending, priceSummary, breakdown, money, checkout, enquiryPath, checkIn, checkOut } = props.controller
+const { actionLabel, quote, quotePending, priceSummary, breakdown, money, checkout, enquiryPath, checkIn, checkOut } = props.controller
 const { t, locale } = useI18n()
 const mobile = useMediaQuery('(max-width: 767px)')
 const open = ref(false)

@@ -494,6 +494,7 @@ export interface OrganizationSettingsForm {
   seo_description: string
   canonical_url: string
   native_consultations: boolean
+  stay_confirmation_mode: LodgingConfirmationMode | null
 }
 
 /** Live and Draft are the tenant's; Suspended is KrabiClaw's hold. */
@@ -517,6 +518,8 @@ export interface OrganizationSettingsResponse {
   canonical_url: string | null
   /** Null when the organization has no consultation settings, so no website booking to switch. */
   consultation_mode: 'native' | 'external_url' | 'native_disabled' | null
+  lodging_booking?: LodgingBookingPolicy
+  lodging_booking_choices?: LodgingBookingChoice[]
   inquiry_questions: FormQuestion[]
   inquiry_questions_revision: string
   vertical?: string
@@ -548,6 +551,7 @@ export interface OrganizationSettingsEditor {
   resetPalette: () => Promise<void>
   /** The saved website booking mode, or null where the organization has no consultation settings. */
   consultationMode: ComputedRef<OrganizationSettingsResponse['consultation_mode']>
+  lodgingBookingChoices: ComputedRef<LodgingBookingChoice[]>
   /** The saved logo assets' URLs, for previews before a new pick is saved. */
   logoUrl: (assetId: string | null) => string | null
   revert: () => void
@@ -564,6 +568,7 @@ export const organizationSettingsEditorKey = Symbol('organization-settings-edito
 <script setup lang="ts">
 import DashboardResourceLocalization from '~/components/dashboard/DashboardResourceLocalization.vue'
 import EditorNavigationList, { type EditorNavigationItem } from '~/components/dashboard/EditorNavigationList.vue'
+import { isLodgingConfirmationMode, type LodgingBookingChoice, type LodgingBookingPolicy, type LodgingConfirmationMode } from '~/shared/lodging-booking'
 import { isCurrencyCode } from '~/shared/currencies'
 import { ORGANIZATION_FONT_OPTIONS, isOrganizationFontPreset, resolveOrganizationFontPreset } from '~/shared/organization-fonts'
 import { parseSitePalette } from '~/shared/site-palette'
@@ -610,6 +615,14 @@ const isSettingsResponse = (value: unknown): value is { success: boolean; settin
   && (value.settings.font_preset === undefined || isOrganizationFontPreset(value.settings.font_preset))
   && (value.settings.palette === null || isRecord(value.settings.palette))
   && (value.settings.default_currency === undefined || value.settings.default_currency === null || typeof value.settings.default_currency === 'string')
+  && (value.settings.vertical !== 'lodging' || (
+    isRecord(value.settings.lodging_booking)
+    && isLodgingConfirmationMode(value.settings.lodging_booking.confirmation_mode)
+    && value.settings.lodging_booking.online_payment_required === true
+    && Array.isArray(value.settings.lodging_booking_choices)
+    && value.settings.lodging_booking_choices.every(choice => isRecord(choice) && isLodgingConfirmationMode(choice.value)
+      && typeof choice.label === 'string' && typeof choice.description === 'string' && typeof choice.icon === 'string')
+  ))
   && [value.settings.seo_title, value.settings.seo_description, value.settings.canonical_url].every(field => field === null || typeof field === 'string')
   && (value.settings.consultation_mode === null || value.settings.consultation_mode === 'native' || value.settings.consultation_mode === 'external_url' || value.settings.consultation_mode === 'native_disabled')
   && isOrganizationStatus(value.settings.status)
@@ -631,7 +644,7 @@ const form = reactive<OrganizationSettingsForm>({
   logoAssetId: null, logoPresentation: ORIGINAL_LOGO_PRESENTATION, logoDarkAssetId: null, logoDarkPresentation: ORIGINAL_LOGO_PRESENTATION,
   faviconAssetId: null, socialShareAssetId: null, contact_email: '', palette: null, font_preset: 'default',
   default_currency: null, status: 'inactive',
-  seo_title: '', seo_description: '', canonical_url: '', native_consultations: false,
+  seo_title: '', seo_description: '', canonical_url: '', native_consultations: false, stay_confirmation_mode: null,
 })
 
 const statusModalOpen = ref(false)
@@ -828,11 +841,15 @@ const bookingCardSubtitle = computed(() => {
       ? 'Accepting consultation requests online'
       : 'Inquiries only (offline scheduling)'
   }
+  if (v === 'lodging') {
+    const settings = loadedSettings.value
+    return settings?.lodging_booking_choices?.find(choice => choice.value === settings.lodging_booking?.confirmation_mode)?.label
+  }
   const questionsCount = loadedSettings.value?.inquiry_questions?.length ?? 0
   if (questionsCount > 0) {
     return `${questionsCount} intake ${questionsCount === 1 ? 'question' : 'questions'} configured`
   }
-  return 'All bookings are automatically approved'
+  return 'Contact fields only'
 })
 
 const brandLogoUrl = computed(() => {
@@ -895,7 +912,7 @@ const preferencesItems = computed<EditorNavigationItem[]>(() => [
     label: bookingCardTitle.value,
     summary: bookingCardSubtitle.value,
     icon: 'i-lucide-calendar-check',
-    to: `${preferencesPath.value}/booking`,
+    to: `${settingsPath.value}/booking`,
   },
   {
     id: 'reviews',
@@ -939,7 +956,7 @@ function editorSignature(key: string | null) {
     case 'currency': return JSON.stringify(form.default_currency)
     case 'status': return JSON.stringify(form.status)
     case 'search': return JSON.stringify([form.seo_title, form.seo_description, form.canonical_url])
-    case 'booking': return JSON.stringify(form.native_consultations)
+    case 'booking': return JSON.stringify([form.native_consultations, form.stay_confirmation_mode])
     default: return ''
   }
 }
@@ -1010,6 +1027,7 @@ function fillForm(settings: OrganizationSettingsResponse) {
   form.seo_description = settings.seo_description ?? ''
   form.canonical_url = settings.canonical_url ?? ''
   form.native_consultations = settings.consultation_mode === 'native'
+  form.stay_confirmation_mode = settings.lodging_booking?.confirmation_mode ?? null
 }
 function resetDraft() {
   editorError.value = null
@@ -1096,6 +1114,10 @@ async function saveCurrentEditor() {
       case 'status': await patchSettings({ status: form.status }); break
       case 'search': await patchSettings({ seo_title: form.seo_title.trim() || null, seo_description: form.seo_description.trim() || null, canonical_url: form.canonical_url.trim() || null }); break
       case 'booking': {
+        if (form.stay_confirmation_mode) {
+          await patchSettings({ lodging_booking: { confirmation_mode: form.stay_confirmation_mode } })
+          break
+        }
         const current = loadedSettings.value?.consultation_mode
         if (!current) throw new Error('This website has no booking to switch.')
         // The one writer of the consultation mode, shared with MCP's set_consultation_mode.
@@ -1127,6 +1149,7 @@ provide(organizationSettingsEditorKey, {
   paletteSource,
   resetPalette,
   consultationMode: computed(() => loadedSettings.value?.consultation_mode ?? null),
+  lodgingBookingChoices: computed(() => loadedSettings.value?.lodging_booking_choices ?? []),
   logoUrl,
   // A cancelled leaf puts the loaded settings back before it closes.
   revert: resetDraft,

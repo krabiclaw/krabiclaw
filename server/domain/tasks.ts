@@ -291,7 +291,8 @@ function scopeSql(viewer: TaskViewer, alias = 't'): { sql: string; params: unkno
   if (viewer.manage) return { sql: '1 = 1', params: [] }
   const conversation = assignedGuestThreadScope('r', viewer.principal.userId)
   return {
-    sql: `(${alias}.assigned_member_id = ?
+    sql: `NOT (${alias}.kind='booking_review' AND EXISTS (SELECT 1 FROM bookings b WHERE b.id=${alias}.subject_id
+      AND b.organization_id=${alias}.organization_id AND b.product_session_id IS NULL)) AND (${alias}.assigned_member_id = ?
       OR EXISTS (SELECT 1 FROM product_booking_configs c WHERE c.organization_id = ${alias}.organization_id AND c.product_id = ${alias}.product_id AND ${assignedMemberSql('c')})
       OR (${alias}.product_id IS NULL AND ${alias}.location_id IS NOT NULL AND ${locationMemberSql(`${alias}.organization_id`, `${alias}.location_id`)})
       OR (${alias}.kind = 'guest_reply' AND EXISTS (SELECT 1 FROM conversations r WHERE r.id = ${alias}.subject_id AND r.organization_id = ${alias}.organization_id AND ${conversation.sql})))`,
@@ -420,7 +421,7 @@ interface Context {
   requests: Map<string, { guest_name: string | null; participant: string | null; preview: string | null; asked_at: string | null }>
   messages: Map<string, { title: string; status: string; conversation_id: string | null; booking_id: string }>
   /** A booking's conversation, when it is and what was booked. */
-  records: Map<string, { conversation_id: string | null; starts_at: string; product_kind: ProductKind }>
+  records: Map<string, { conversation_id: string | null; starts_at: string; ends_at: string; timezone: string; product_kind: ProductKind; unit: 'slot' | 'nights' }>
   /** The message a change task is about. */
   entries: Map<string, { event_name: string; author_kind: string; body: string | null }>
   photos: Map<string, TaskPhoto[]>
@@ -439,10 +440,10 @@ async function loadContext(db: DbClient, viewer: TaskViewer, rows: TaskRow[]): P
       WHERE candidate.organization_id = ? AND candidate.id IN (SELECT value FROM json_each(?))`, [organizationId, d1JsonStringSet(sessions)]) : []
   const consultations = new Map(privateConsultations.flatMap(row => row.booking_id ? [[row.id, row.booking_id] as const] : []))
   const bookingIds = [...new Set([...ids(row => row.subject_type === 'booking' ? row.subject_id : null), ...messages.map(message => message.booking_id), ...consultations.values()])]
-  const booked = bookingIds.length ? await queryAll<{ id: string; conversation_id: string | null; starts_at: string; product_kind: ProductKind; unit: 'slot' | 'nights' }>(db, `SELECT br.id, br.starts_at, br.product_kind, br.unit,
+  const booked = bookingIds.length ? await queryAll<{ id: string; conversation_id: string | null; starts_at: string; ends_at: string; timezone: string; product_kind: ProductKind; unit: 'slot' | 'nights' }>(db, `SELECT br.id, br.starts_at, br.ends_at, br.timezone, br.product_kind, br.unit,
        (SELECT c.id FROM conversations c WHERE c.organization_id = br.organization_id AND c.booking_id = br.id AND c.kind = 'booking') AS conversation_id FROM ${BOOKING_RECORDS_SQL} br
      WHERE br.organization_id = ? AND br.id IN (SELECT value FROM json_each(?))`, [organizationId, d1JsonStringSet(bookingIds)]) : []
-  const records = booked.filter(record => record.unit === 'slot')
+  const records = booked.filter(record => record.unit === 'slot' || rows.some(row => row.kind === 'booking_review' && row.subject_id === record.id))
   const changeStayRequests = booked.filter(record => record.unit === 'nights' && rows.some(row => row.kind === 'booking_change' && row.subject_id === record.id))
   const entryIds = rows.filter(row => row.kind === 'booking_change').map(row => row.dedupe_key.slice('booking_change:'.length))
   const entries = entryIds.length ? await queryAll<{ id: string; event_name: string; author_kind: string; body: string | null }>(db, 'SELECT id, event_name, author_kind, body FROM messages WHERE id IN (SELECT value FROM json_each(?))', [d1JsonStringSet(entryIds)]) : []
@@ -512,7 +513,7 @@ async function loadContext(db: DbClient, viewer: TaskViewer, rows: TaskRow[]): P
     arrivals,
     requests: new Map(requests.map(request => [request.id, request])),
     messages: new Map(messages.map(message => [message.id, { title: message.template_title, status: message.status, conversation_id: message.conversation_id, booking_id: message.booking_id }])),
-    records: new Map(records.map(record => [record.id, { conversation_id: record.conversation_id, starts_at: record.starts_at, product_kind: record.product_kind }])),
+    records: new Map(records.map(record => [record.id, record])),
     entries: new Map(entries.map(entry => [entry.id, { event_name: entry.event_name, author_kind: entry.author_kind, body: entry.body }])),
     photos: new Map([...photos].map(([id, list]) => [id, list.map(photo => ({ id: photo.id, url: photo.url, thumbnail_url: photo.thumbnailUrl, width: photo.width, height: photo.height }))])),
   }
@@ -668,10 +669,13 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
       title = request.guest_name ? firstName(request.guest_name) : request.participant ?? 'Guest'
       avatar = { initial: initialOf(title), tone: 'warm' }
       status_line = ['Waiting for your approval', place].filter(Boolean).join(' · ')
-      detail = `${day(record.starts_at)}, ${time(record.starts_at)}`
-      path = bookingEditorPath(context.slug, 'booking', record.conversation_id)
+      const nights = record.unit === 'nights'
+      const checkin = nights ? bookingDay(record.starts_at, record.timezone) : null
+      const checkout = nights ? bookingDay(record.ends_at, record.timezone) : null
+      detail = checkin && checkout ? `${calendarDay(checkin)} – ${calendarDay(checkout)}` : `${day(record.starts_at)}, ${time(record.starts_at)}`
+      path = bookingEditorPath(context.slug, nights ? 'stay' : 'booking', nights ? row.subject_id! : record.conversation_id)
       action = { type: 'open', label: 'Review', path }
-      sheet = { heading: 'Booking request', title, date: day(record.starts_at), checkout: null, checkin: null }
+      sheet = { heading: nights ? 'Stay request' : 'Booking request', title, date: checkin ? calendarDay(checkin) : day(record.starts_at), checkout: null, checkin: null }
       break
     }
     case 'consultation_prep': {

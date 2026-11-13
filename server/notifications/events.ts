@@ -200,7 +200,7 @@ export function bookingCreatedMessage(input: BookingEventInput & { status: 'pend
     title: input.status === 'confirmed'
       ? `${input.presentation.label} confirmed - ${input.guestName}, ${input.day}`
       : `${input.presentation.label} request from ${input.guestName} for ${input.day}`,
-    preheader: `${input.productTitle} · ${input.date} at ${input.time}`,
+    preheader: `${input.productTitle} · ${input.date}${input.time ? ` at ${input.time}` : ''}`,
     hero: input.heroImageUrl ? { imageUrl: input.heroImageUrl, alt: input.productTitle } : null,
     facts: facts(
       fact('context', input.presentation.label, bookedWhat(input), true),

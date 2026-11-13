@@ -1,5 +1,6 @@
 import type { OrganizationVertical } from '~/utils/vertical-copy'
 import type { PhoneCountry } from '~/utils/phone'
+import type { LodgingBookingChoice } from '~/shared/lodging-booking'
 import type { CurrencyCode } from '~/shared/currencies'
 
 export const WEBSITE_ONBOARDING_PATH = '/dashboard/onboarding'
@@ -10,7 +11,7 @@ export interface WebsiteOnboardingResumeAction {
   to: typeof WEBSITE_ONBOARDING_PATH
 }
 
-export const ONBOARDING_STEP_IDS = ['type', 'business', 'location', 'timezone', 'language', 'currency'] as const
+export const ONBOARDING_STEP_IDS = ['type', 'business', 'location', 'timezone', 'language', 'currency', 'booking'] as const
 export type OnboardingStepId = typeof ONBOARDING_STEP_IDS[number]
 
 export interface OnboardingStepField {
@@ -22,6 +23,7 @@ export interface OnboardingStepField {
 export interface OnboardingStep {
   id: OnboardingStepId
   title: string
+  detail?: string
   fields: OnboardingStepField[]
   nextLabel: string
   canAdvance: boolean
@@ -50,6 +52,7 @@ export interface OnboardingFlow {
   countries: PhoneCountry[]
   currencies: Array<{ value: CurrencyCode; label: string }>
   timezones: Array<{ value: string; label: string }>
+  bookingChoices: LodgingBookingChoice[]
   languages: OnboardingChoice[]
   businessTypes: Array<OnboardingChoice & {
     value: OrganizationVertical

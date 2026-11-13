@@ -2,6 +2,9 @@
   <GuidedSetupShell
     id="website-onboarding"
     :title="isWelcome ? undefined : currentStep?.title"
+    :detail="currentStep?.detail"
+    :wide="currentStep?.id === 'booking'"
+    :centered="currentStep?.id === 'booking'"
     :full="isWelcome && !restoreError"
     :position="position"
     :total="plan?.steps.length"

@@ -343,6 +343,14 @@ export async function applyOnboardingDraft(
       WHERE id = ?
     `, params: [defaultCurrency, timezone, new Date().toISOString(), organizationId] }]
 
+  const confirmationMode = payload.source.details.confirmation_mode
+  if (input.target.vertical === 'lodging' && confirmationMode) {
+    settingsQueries.push({
+      query: "UPDATE organization SET settings_json = json_set(settings_json, '$.lodging_booking.confirmation_mode', ?) WHERE id = ?",
+      params: [confirmationMode, organizationId],
+    })
+  }
+
   // The look the owner chose in the brand step: a starter palette and a font,
   // written to the site so the preview and the launched site both wear them.
   const draftConfig = payload.preview.config

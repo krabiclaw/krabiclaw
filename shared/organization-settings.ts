@@ -68,6 +68,8 @@ export interface GoogleCalendarIntegration {
 }
 
 export interface OrganizationSettings {
+  /** How this business's website confirms direct stays for every home. */
+  lodging_booking?: Pick<import('./lodging-booking').LodgingBookingPolicy, 'confirmation_mode'>
   config?: {
     palette?: import('./site-palette').SitePalette
     font_preset?: import('./organization-fonts').OrganizationFontPreset

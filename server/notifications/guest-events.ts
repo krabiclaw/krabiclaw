@@ -146,7 +146,7 @@ export function guestBookingReceivedMessage(input: GuestBookingInput & { product
     locale: locale.locale,
     title: input.status === 'pending' ? locale.messages['booking.request_received']!
       : reservation ? locale.messages['email.subject.reservation_confirmed']!.replace('{place}', input.organizationName) : locale.messages['booking.confirmed']!,
-    preheader: `${input.productTitle} · ${input.date} · ${input.time}`,
+    preheader: [input.productTitle, input.date, input.time].filter(Boolean).join(' · '),
     hero: input.heroImageUrl ? { imageUrl: input.heroImageUrl, alt: input.productTitle } : null,
     intro: input.status === 'pending' ? locale.messages['booking.pending_message']! : undefined,
     facts: guestVisitFacts(input),

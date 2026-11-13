@@ -7,7 +7,7 @@ import { notifyBookingCreated, raiseSettledFailures } from '~/server/utils/notif
 import { measurementOutcome, readPageEventId, recordOrganizationConversionEvent } from '~/server/utils/organization-conversions'
 import { resolveLocationContact } from '~/server/utils/contact-resolution'
 import { toE164 } from '~/utils/phone'
-import { queryAll, queryFirst, type DbClient } from '~/server/db'
+import { execute, queryAll, queryFirst, type DbClient } from '~/server/db'
 import { bookingPolicy, formatBookingPolicySummary } from '~/server/utils/booking-policy-summary'
 import { readTimedBookingPrice } from '~/server/domain/bookings'
 import { isCurrencyCode } from '~/shared/currencies'
@@ -16,8 +16,8 @@ import { assertExactCanonicalLocale, assertPublicOrganizationLanguage } from '~/
 import { formatTenantLocalePath } from '~/utils/tenant-locale-path'
 import { buildOwnerThreadInboxUrl } from '~/server/utils/dashboard-notification-links'
 import { createReplayableReservationCancelToken, hashReservationCancelToken } from '~/server/utils/reservation-cancel-token'
-import { ensureInteractionUser, type CloudflareEnv } from '~/server/utils/auth'
-import { getGuestRequest, getThreadOperationalRecord, requestInsertQueries, threadPayloadForGuest, type BookingOperator } from '~/server/domain/requests'
+import { ensureInteractionUser, getAuthSession, type CloudflareEnv } from '~/server/utils/auth'
+import { bookingDay, getGuestRequest, getThreadOperationalRecord, requestInsertQueries, stayRequestProgress, threadPayloadForGuest, type BookingOperator } from '~/server/domain/requests'
 import { conversationTaskQueries } from '~/server/domain/guest-threads/repository'
 import { GUEST_NOTE_EVENT, openingSentence } from '~/server/domain/guest-threads/opening'
 import { DEFAULT_EMAIL_DAILY_LIMIT as EMAIL_DAILY_LIMIT, DEFAULT_IP_HOURLY_LIMIT as IP_HOURLY_LIMIT, getClientIp, hashClientIp, hashIdentifier, incrementHourlyRateLimit } from '~/server/utils/hourly-rate-limit'
@@ -27,8 +27,11 @@ import { createPaymentCheckout } from '~/server/domain/payments/checkout'
 import { paidOnline } from '~/server/domain/payments'
 import { hasOrganizationEntitlement } from '~/server/utils/billing'
 import { isRecord } from '~/server/utils/type-guards'
-import { createStay, pushStayHoldNights, quoteStay, readPublicStayHome, stayAccessFor, type StayQuote } from '~/server/domain/stays'
+import { createStay, createStayRequest, publishStayRequest, pushStayHoldNights, quoteStay, readPublicStayHome, stayAccessFor, type StayQuote } from '~/server/domain/stays'
 import { requireChannelPush } from '~/server/integrations/channex/ari'
+import { readLodgingBookingPolicy } from '~/server/utils/lodging-booking-policy'
+import { requireStripeCheckoutAcceptance } from '~/server/utils/stripe-connect'
+import { accountActivityPath } from '~/shared/account-activity'
 import { acceptFormAnswers } from '~/server/domain/form-questions'
 import { formAnswerSnapshotsSchema, formAnswersFingerprint } from '~/shared/form-questions'
 import type { ProductKind } from '~/shared/product-details'
@@ -154,7 +157,7 @@ export async function notifyProductBookingCreated(env: CloudflareEnv, db: DbClie
     getThreadOperationalRecord(db, requestId),
     queryFirst<{ name: string | null; vertical: string | null; public_url: string | null }>(db, `SELECT name, vertical, (SELECT 'https://' || domain FROM organization_domains WHERE organization_id = organization.id AND role = 'canonical' AND status = 'active') AS public_url FROM organization WHERE id = ?`, [organizationId]),
   ])
-  if (!request || request.kind !== 'booking' || !record || record.unit !== 'slot' || record.organization_id !== organizationId || !organization) throw new Error('Booking creation delivery requires its canonical tenant, request and offering')
+  if (!request || request.kind !== 'booking' || !record || record.organization_id !== organizationId || !organization) throw new Error('Booking creation delivery requires its canonical tenant, request and offering')
   const { name: guestName, email: guestEmail } = request.payload.guest
   if (guestName === null || guestEmail === null) throw new Error('A booking made on the site or by its operator has its guest\'s name and email')
   // The status the booking was created in, recorded on its conversation in the batch that claimed it.
@@ -188,6 +191,7 @@ export async function notifyProductBookingCreated(env: CloudflareEnv, db: DbClie
       email: guestEmail, guestPhone: request.payload.guest.phone,
       productId: record.product_id, productKind: record.product_kind, productTitle: record.product_name, startsAt: record.starts_at,
       timezone: record.timezone, partySize: record.party_size, partySizeIsMinimum: record.party_size_is_minimum, notes: note?.body ?? null,
+      ...(record.unit === 'nights' ? { stayDates: { checkIn: bookingDay(record.starts_at, record.timezone), checkOut: bookingDay(record.ends_at, record.timezone) } } : {}),
       receiptUrl, paid, contactPhone, contactEmail, ownerInboxUrl, locale, answers: formAnswerSnapshotsSchema.parse(JSON.parse(booking.answers)),
     }),
   ])
@@ -259,7 +263,7 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
     if (operator || context.financialWritesAllowed === false) {
       throw new HTTPError({ statusCode: 409, statusMessage: 'Book these nights through the business’s payment workflow', data: { code: 'financial_action_required' } })
     }
-    return createNightCheckout(event, env, db, context, { name: guestName, email: guestEmail, phone: normalizedGuestPhone, notes, locale, idempotencyKey })
+    return createNightBooking(event, env, db, context, { name: guestName, email: guestEmail, phone: normalizedGuestPhone, notes, locale, idempotencyKey })
   }
 
   const selection = readTimedSelection(body)
@@ -495,7 +499,7 @@ function stayBookingError(statusCode: number, code: string, message: string, fie
  * channel closes them at once, and capture confirms the stay. A retry with the
  * same key returns the same checkout without quoting the nights it holds.
  */
-async function createNightCheckout(event: H3Event, env: CloudflareEnv, db: DbClient, context: BookingCreationContext, contact: BookingContact) {
+async function createNightBooking(event: H3Event, env: CloudflareEnv, db: DbClient, context: BookingCreationContext, contact: BookingContact) {
   const { organizationId, slug, body } = context
   const { name, email, phone, notes, locale, idempotencyKey } = contact
 
@@ -503,18 +507,78 @@ async function createNightCheckout(event: H3Event, env: CloudflareEnv, db: DbCli
   const request = { product_id: home.product_id, check_in_date: body.check_in_date, check_out_date: body.check_out_date, adults: body.adults, children: body.children ?? 0, infants: body.infants ?? 0 }
   const fingerprint = await hashIdentifier(JSON.stringify({ slug, ...request, guest: { name, email, phone, notes }, answers: formAnswersFingerprint(body.answers) }))
 
+  const requestResult = async (bookingId: string, conversationId: string, followupsCompleted: boolean, replayed: boolean) => {
+    if (!followupsCompleted) {
+      await notifyProductBookingCreated(env, db, organizationId, conversationId)
+      await execute(db, `UPDATE conversations SET payload_json=json_set(payload_json, '$.provenance.followups_completed', json('true'))
+        WHERE organization_id=? AND id=? AND booking_id=?`, [organizationId, conversationId, bookingId])
+    }
+    const current = await getThreadOperationalRecord(db, conversationId)
+    if (!current || current.organization_id !== organizationId || current.id !== bookingId || !current.respond_by) {
+      throw new Error('The stay request has no operational receipt')
+    }
+    const progress = stayRequestProgress(current)
+    const message = current.status === 'cancelled' ? 'This stay request was cancelled.'
+      : current.status === 'confirmed' ? 'Your stay is confirmed.'
+        : progress.request_status === 'awaiting_payment' ? 'The host approved your request. Pay to confirm your stay.'
+          : 'Your request was sent to the host.'
+    return creationResult({
+      success: true, status: current.status, booking_id: bookingId, conversation_id: conversationId, ...progress,
+      activity_path: accountActivityPath('stay', conversationId), message, ...(replayed ? { replayed } : {}),
+    }, { status: replayed ? 200 : 201 })
+  }
+  const replayRequest = async (buyerUserId?: string) => {
+    const saved = await queryFirst<{ id: string; conversation_id: string; user_id: string | null; fingerprint: string; followups_completed: number }>(db, `
+      SELECT b.id, r.id AS conversation_id, b.user_id, json_extract(r.payload_json, '$.provenance.fingerprint') AS fingerprint,
+             json_extract(r.payload_json, '$.provenance.followups_completed') AS followups_completed
+        FROM bookings b JOIN conversations r ON r.booking_id=b.id AND r.organization_id=b.organization_id AND r.kind='booking' AND r.user_id=b.user_id
+       WHERE b.organization_id=? AND b.idempotency_key=? AND json_type(b.policy_json, '$.stay_request')='object'`, [organizationId, idempotencyKey])
+    if (!saved) return null
+    const currentUserId = buyerUserId ?? (await getAuthSession(event, env))?.user.id
+    if (!currentUserId || saved.user_id !== currentUserId || saved.fingerprint !== fingerprint) {
+      stayBookingError(409, 'IDEMPOTENCY_CONFLICT', 'This request key belongs to a different stay request.', 'idempotency_key')
+    }
+    if (!saved.followups_completed) await publishStayRequest(db, env, organizationId, saved.id)
+    return requestResult(saved.id, saved.conversation_id, saved.followups_completed === 1, true)
+  }
+  const existing = await replayRequest()
+  if (existing) return existing
   const retrying = await queryFirst(db, 'SELECT 1 FROM payments WHERE idempotency_key = ? AND organization_id = ?', [`checkout:${organizationId}:${idempotencyKey}`, organizationId])
+  const policy = retrying ? null : await readLodgingBookingPolicy(db, organizationId)
+  if (policy && (body.confirmation_mode !== undefined || policy.confirmation_mode === 'review') && body.confirmation_mode !== policy.confirmation_mode) {
+    stayBookingError(409, 'STAY_BOOKING_MODE_CHANGED', 'Refresh this listing to see the host’s current booking settings.', 'confirmation_mode')
+  }
   // A new checkout checks and freezes the answers with the purchase; a retry is
   // held to the purchase it froze, answers included, and does not read the
   // questions again (createPaymentCheckout reads `guest` only for a new checkout).
   const answers = retrying ? [] : await acceptFormAnswers(db, { kind: 'booking', organizationId, productId: home.product_id }, { locale, answers: body.answers, questionsRevision: body.questions_revision, revisionRequired: false })
   const guest = { name, email, phone, notes, answers }
   // The quote's refusals name the rule a guest's choice breaks; they come before rate limits and payment setup.
-  const quoted: StayQuote | null = retrying ? null : await quoteStay(db, organizationId, home, request)
+  let quoted: StayQuote | null = null
+  let buyerUserId: string | undefined
+  try {
+    if (!retrying) quoted = await quoteStay(db, organizationId, home, request)
+    const limited = !retrying && await bookingRateLimit(db, env, await hashClientIp(getClientIp(event)), email)
+    if (limited) stayBookingError(429, 'RATE_LIMITED', limited, 'guest_email')
+    await requireChannelPush(db, env, organizationId, home.product_id)
+    if (policy?.confirmation_mode === 'review') {
+      if (!quoted) throw new Error('A new stay request needs its quote')
+      await requireStripeCheckoutAcceptance(db, env, organizationId)
+      buyerUserId = await ensureInteractionUser(event, env)
+      const stay = await createStayRequest(db, env, {
+        organizationId, buyerUserId, key: idempotencyKey, fingerprint,
+        home, quote: quoted, guest, locale, ipHash: await hashClientIp(getClientIp(event)),
+      })
+      return requestResult(stay.id, stay.conversation_id, false, false)
+    }
+  } catch (error) {
+    if (policy?.confirmation_mode === 'review' && error instanceof HTTPError && isRecord(error.data) && error.data.code === 'STAY_NIGHTS_UNAVAILABLE') {
+      const raced = await replayRequest(buyerUserId)
+      if (raced) return raced
+    }
+    throw error
+  }
   const quote = async () => quoted ?? await quoteStay(db, organizationId, home, request)
-  const limited = !retrying && await bookingRateLimit(db, env, await hashClientIp(getClientIp(event)), email)
-  if (limited) stayBookingError(429, 'RATE_LIMITED', limited, 'guest_email')
-  await requireChannelPush(db, env, organizationId, home.product_id)
   const stay = quoted
     ? { product_id: quoted.product_id, check_in_date: quoted.check_in_date, check_out_date: quoted.check_out_date, adults: quoted.adults, children: quoted.children, infants: quoted.infants }
     : { product_id: home.product_id, check_in_date: String(request.check_in_date), check_out_date: String(request.check_out_date), adults: Number(request.adults), children: Number(request.children), infants: Number(request.infants) }

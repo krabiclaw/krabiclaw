@@ -28,6 +28,8 @@ import { publicTenantVisibilitySql } from '~/server/utils/public-base'
 import { selectProductCollectionSiblings, type ProductCollectionSibling } from '~/utils/product-seo'
 import { getPublicTenantPageForPath } from '~/server/utils/public-tenant-pages'
 import { resolvePublishedTenantPageIdentity } from '~/server/utils/content/pages'
+import type { LodgingConfirmationMode } from '~/shared/lodging-booking'
+import { readLodgingBookingPolicy } from '~/server/utils/lodging-booking-policy'
 import { readStripeCheckoutSetup } from '~/server/utils/stripe-connect'
 import type { CloudflareEnv } from '~/server/utils/auth'
 
@@ -136,6 +138,7 @@ export interface PublicProductDetailPayload {
   locale_representations: PublicLocaleRepresentation[]
   /** A place to stay is paid for on the site only once the business's Payments setup is complete; until then it takes enquiries. */
   stay_checkout_available: boolean
+  stay_confirmation_mode: LodgingConfirmationMode | null
 }
 
 export interface PublicProductReview {
@@ -416,10 +419,11 @@ async function projectPublicOffering(
 export async function publicProductDetailPayload(db: DbClient, env: CloudflareEnv, detail: PublicProductDetail, previewAuthorized = false): Promise<PublicProductDetailPayload> {
   const memberships = new Set(detail.product.collections.map(entry => entry.collection_id))
   const collection = detail.collections.find(collection => memberships.has(collection.id))
-  const [reviews, sessions, staySetup] = await Promise.all([
+  const [reviews, sessions, staySetup, stayPolicy] = await Promise.all([
     loadPublicProductReviews(db, detail),
     loadPublicProductSessions(db, detail, env, previewAuthorized),
     detail.product.kind === 'stay' ? readStripeCheckoutSetup(db, detail.organization.id, env) : null,
+    detail.product.kind === 'stay' ? readLodgingBookingPolicy(db, detail.organization.id) : null,
   ])
   return {
     product: detail.product, location: detail.location, locations: detail.locations,
@@ -431,6 +435,7 @@ export async function publicProductDetailPayload(db: DbClient, env: CloudflareEn
     collection_siblings: collection ? selectProductCollectionSiblings(detail.products, detail.product, collection.id, { currency: detail.currency, location_id: detail.location?.id ?? null, at: new Date().toISOString() }) : [],
     locale_representations: detail.locale_representations,
     stay_checkout_available: staySetup !== null && staySetup.missing.length === 0,
+    stay_confirmation_mode: stayPolicy?.confirmation_mode ?? null,
   }
 }
 

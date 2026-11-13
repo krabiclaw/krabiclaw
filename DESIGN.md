@@ -1004,6 +1004,9 @@ hosts can bring over their listings and fill in only the missing details.
 Manual setup confirms the address, then asks for property type, rooms and
 capacity before saving an unpublished Catalog entry. The stay-homes API owns
 the steps and validation for web and iOS. Import opens the Airbnb controls.
+Website → Booking settings owns how direct stays are confirmed and paid across
+all homes. The lodging website setup asks for that choice once. The home
+editor retains the individual property's stay rules, prices and availability.
 
 Optional facts do not block saving a draft. Publishing checks the real domain
 requirements and names actual missing facts. A multi-step task that genuinely

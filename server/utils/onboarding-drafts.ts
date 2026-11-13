@@ -13,6 +13,7 @@ import type { PriceInput } from '~/shared/prices'
 import type { TenantPageBlock, TenantPageType } from '~/utils/tenant-page-blocks'
 import { postalAddressFromAnswers, type PostalAddress } from '~/utils/postal-address'
 import { HTTPError } from 'nitro'
+import { isLodgingConfirmationMode, type LodgingConfirmationMode } from '~/shared/lodging-booking'
 import { STARTER_PALETTES } from '~/shared/site-palette'
 import { isOrganizationFontPreset } from '~/shared/organization-fonts'
 import { LOGO_SHAPES } from '~/shared/media-placement-contract'
@@ -289,6 +290,7 @@ export interface DraftDetailsInput {
   special_hours: SpecialHours
   timezone: string | null
   currency: CurrencyCode | null
+  confirmation_mode?: LodgingConfirmationMode | null
   source_locale: string | null
 }
 
@@ -501,6 +503,10 @@ export function parseStoredOnboardingDraftPayload(raw: string): StoredOnboarding
     throw new Error(`Onboarding draft source does not match its ${parsed.source.type} type`)
   }
   const payload: StoredOnboardingDraftPayload = { ...parsed, version: 3, source: { ...parsed.source, placeId } }
+  const confirmationMode = payload.source.details.confirmation_mode
+  if (confirmationMode != null && !isLodgingConfirmationMode(confirmationMode)) {
+    throw new Error('Onboarding booking settings are invalid')
+  }
   if (!payload.partial) {
     const source = payload.preview.locales.filter(locale => locale.is_source)
     if (source.length !== 1 || !platformLocale(source[0]!.code)) throw new Error('Onboarding primary language is unavailable')
@@ -577,6 +583,10 @@ export function normalizeOnboardingDraftInput(input: OnboardingDraftInput, exist
   if (country && !getPhoneCountry(country)) throw new HTTPError({ statusCode: 400, statusMessage: 'country must be an ISO 3166-1 alpha-2 code' })
   const currency = answer(raw, 'currency', previous?.currency)?.toUpperCase() ?? null
   if (currency && !isCurrencyCode(currency)) throw new HTTPError({ statusCode: 400, statusMessage: 'Choose a supported currency' })
+  const confirmationMode = vertical === 'lodging' ? answer(raw, 'confirmation_mode', previous?.confirmation_mode) : null
+  if (confirmationMode !== null && !isLodgingConfirmationMode(confirmationMode)) {
+    throw new HTTPError({ statusCode: 400, statusMessage: 'Choose Instant Book or Approve requests' })
+  }
   const timezone = answer(raw, 'timezone', savedPlaceDetails?.timezone ?? place?.timezone)
   if (timezone && !isValidTimezone(timezone)) throw new HTTPError({ statusCode: 400, statusMessage: 'Choose a valid IANA timezone' })
   const savedProviderDetails = place && !existing?.source.place ? undefined : savedPlaceDetails
@@ -586,6 +596,7 @@ export function normalizeOnboardingDraftInput(input: OnboardingDraftInput, exist
   if (phone && !phoneE164) throw new HTTPError({ statusCode: 400, statusMessage: 'Enter a valid phone number with its country calling code' })
   const details: DraftDetailsInput = {
     name, source_locale, country, currency: currency as CurrencyCode | null, timezone, phone: phoneE164,
+    ...(vertical === 'lodging' ? { confirmation_mode: confirmationMode } : {}),
     street_address: answer(raw, 'street_address', previous?.street_address), address_line_2: answer(raw, 'address_line_2', previous?.address_line_2),
     city: answer(raw, 'city', previous?.city), region: answer(raw, 'region', previous?.region), postal_code: answer(raw, 'postal_code', previous?.postal_code),
     website_url: answer(raw, 'website_url', savedProviderDetails ? savedProviderDetails.website_url : place?.websiteUrl ?? null),

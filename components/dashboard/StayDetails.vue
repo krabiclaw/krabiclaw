@@ -43,7 +43,13 @@
         <p v-if="personalScope && home" class="mt-1 text-base text-muted">{{ home.organization_name }}</p>
         <p class="mt-4 text-base text-muted">{{ stayDates }}</p>
         <p v-if="!personalScope && hostHome" class="mt-1 text-base text-muted">{{ hostHome.internal_name }}</p>
-        <UBadge v-if="personalScope" class="mt-3" :color="stay.status === 'cancelled' ? 'neutral' : 'success'" variant="soft" :label="statusLabel" />
+        <UBadge v-if="personalScope || (manage && requestStatus)" class="mt-3" :color="stay.status === 'confirmed' ? 'success' : 'neutral'" variant="soft" :label="statusLabel" />
+        <div v-if="manage && hostActions.includes('confirm')" class="mt-5 flex flex-wrap justify-center gap-3">
+          <UButton color="neutral" size="lg" :label="t('stay.approve_request')" :loading="busy === 'confirm'" :disabled="busy !== null" @click="decide('confirm')" />
+          <UButton color="neutral" variant="outline" size="lg" :label="t('stay.decline_request')" :loading="busy === 'reject'" :disabled="busy !== null" @click="decide('reject')" />
+        </div>
+        <UButton v-if="personalScope && detail?.request_status === 'awaiting_payment' && (paymentProcessing || (detail.pay_by && Date.parse(detail.pay_by) > Date.now()))"
+          class="mt-5" color="neutral" size="lg" :label="t(paymentProcessing ? 'payment.view_payment' : 'payment.continue_to_pay')" :loading="busy === 'pay'" @click="payForStay" />
       </div>
 
       <div class="space-y-4">
@@ -134,7 +140,7 @@
       </UCard>
 
       <!-- The Stripe payment the guest made on the site: its record and refunds are the payment's own screens. -->
-      <UCard v-if="!personalScope && (!channelManaged || detail.online_payment)" variant="record">
+      <UCard v-if="!personalScope && !requestStatus && (!channelManaged || detail.online_payment)" variant="record">
       <h2 class="text-base font-semibold text-highlighted">Payments</h2>
       <template v-if="detail.online_payment">
         <h3 class="mt-6 text-base font-semibold text-highlighted">Paid on your site</h3>
@@ -181,7 +187,7 @@
           </div>
           <UButton type="submit" label="Record payment" :loading="busy === 'record'" :disabled="!draft.amount.trim() || !draft.paid_on" />
         </UForm>
-        <UButton v-if="manage && detail.status !== 'cancelled'" class="mt-8" color="error" variant="soft" label="Cancel stay" :loading="busy === 'cancel'" @click="cancel" />
+        <UButton v-if="manage && hostActions.includes('cancel')" class="mt-8" color="error" variant="soft" label="Cancel stay" :loading="busy === 'cancel'" @click="cancel" />
         <p v-if="!personalScope && detail.no_show_at" class="mt-6 text-sm text-muted" data-testid="stay-no-show">No-show recorded {{ formatCalendarDate(detail.no_show_at.slice(0, 10), 'en') }}. No review invitation is sent.</p>
         <UButton v-else-if="canMarkNoShow" class="mt-4 ms-2" color="neutral" variant="soft" label="Mark as a no-show" :loading="busy === 'no_show'" @click="markNoShow" />
       </template>
@@ -201,7 +207,7 @@
           <dd class="text-right text-base text-highlighted">{{ STAY_CHANNEL_LABELS[detail.channel] }}</dd>
         </div>
       </dl>
-      <UButton v-if="manage && detail.status !== 'cancelled'" class="mt-4" color="neutral" variant="outline" label="Move guest" :to="`/dashboard/${encodeURIComponent(String(route.params.org_slug))}/bookings/${encodeURIComponent(detail.id)}/move`" data-testid="stay-move" />
+      <UButton v-if="manage && hostActions.includes('move')" class="mt-4" color="neutral" variant="outline" label="Move guest" :to="`/dashboard/${encodeURIComponent(String(route.params.org_slug))}/bookings/${encodeURIComponent(detail.id)}/move`" data-testid="stay-move" />
       <p v-if="!personalScope && channelManaged" class="mt-4 text-base text-muted">
         Payments, changes and cancellations for this stay are managed on
         <ULink v-if="detail.channel_booking_url" :to="detail.channel_booking_url" target="_blank" rel="noopener noreferrer" class="text-highlighted underline">{{ channelName }}</ULink><template v-else>{{ channelName }}</template>.
@@ -227,7 +233,9 @@
       <NuxtLink v-if="canRequestChange && messagePath" :to="{ path: messagePath, query: { intent: 'booking-change' } }" class="flex items-center justify-between gap-4 py-4 text-base font-medium text-highlighted" @click="manageOpen = false"><span>{{ t('booking.request_change') }}</span><UIcon name="i-lucide-chevron-right" class="size-5" /></NuxtLink>
       <NuxtLink v-if="messagePath" :to="messagePath" class="flex items-center justify-between gap-4 py-4 text-base font-medium text-highlighted" @click="manageOpen = false"><span>{{ t('stay.message_host') }}</span><UIcon name="i-lucide-chevron-right" class="size-5" /></NuxtLink>
       <p v-if="personalScope && !channelManaged && recordHome?.check_in_time === null && detail.online_payment && detail.status !== 'cancelled'" class="py-4 text-base text-muted">Contact your host to cancel this stay.</p>
-      <UButton v-if="personalScope && !channelManaged && cancellation" color="error" variant="ghost" block class="justify-start py-4" label="Cancel stay" :loading="busy === 'cancel'" @click="manageOpen = false; cancelAsGuest()" />
+      <UButton v-if="personalScope && !channelManaged && !paymentProcessing && (cancellation || detail.request_status)" color="error" variant="ghost" block
+        class="justify-start py-4" :label="detail.request_status ? t('stay.withdraw_request') : 'Cancel stay'" :loading="busy === 'cancel'"
+        @click="manageOpen = false; cancelAsGuest()" />
     </div>
   </DashboardListItemDialog>
 </template>
@@ -332,7 +340,7 @@ const messagePath = computed(() => {
 const callPhone = computed(() => !props.personalScope ? detail.value?.guest_phone ?? null : null)
 const guestAddress = computed(() => home.value?.location?.address ? formatPostalAddress(home.value.location.address) : '')
 const cancellation = computed(() => data.value && 'cancellation' in data.value ? data.value.cancellation : null)
-const canRequestChange = computed(() => props.personalScope && detail.value !== null && !isChannelManagedStay(detail.value) && Boolean(messagePath.value) && ['pending', 'confirmed'].includes(detail.value.status)
+const canRequestChange = computed(() => props.personalScope && detail.value !== null && !isChannelManagedStay(detail.value) && Boolean(messagePath.value) && detail.value.status === 'confirmed'
   && (detail.value.ends_at.length === 10 ? detail.value.check_out_date >= localDateAt(new Date(), detail.value.timezone) : Date.parse(detail.value.ends_at) > Date.now()))
 const policy = computed(() => detail.value?.cancellation_policy ? bookedPolicyTerms(detail.value.cancellation_policy) : null)
 const paymentPath = computed(() => detail.value?.online_payment ? `/dashboard/${route.params.org_slug}/bookings/payment/${encodeURIComponent(detail.value.online_payment.payment_id)}` : '')
@@ -380,7 +388,19 @@ const partyLabel = computed(() => {
 const guestCount = computed(() => stay.value ? stay.value.adults + stay.value.children + stay.value.infants : 0)
 const guestFirstName = computed(() => guest.value.state === 'named' ? guest.value.name.trim().split(/\s+/)[0] || guest.value.name : null)
 const partyTitle = computed(() => guestFirstName.value && guestCount.value > 1 ? `${guestFirstName.value}’s group of ${guestCount.value}` : guestFirstName.value)
-const statusLabel = computed(() => !stay.value ? 'Stay' : stay.value.status === 'cancelled' ? 'Cancelled' : stay.value.status === 'pending' ? 'Pending' : 'Confirmed')
+const paymentProcessing = computed(() => buyer?.data.value?.payment_processing === true)
+const requestStatus = computed(() => detail.value?.request_status)
+const hostActions = computed(() => {
+  const response = canonical?.data.value
+  return response?.booking.unit === 'nights' && response.manage ? response.booking.available_actions : []
+})
+const statusLabel = computed(() => {
+  if (!stay.value) return 'Stay'
+  if (paymentProcessing.value) return t('payment.processing')
+  if (requestStatus.value === 'awaiting_payment') return t('stay.awaiting_payment')
+  if (requestStatus.value === 'awaiting_approval') return t('stay.awaiting_approval')
+  return { pending: 'Pending', cancelled: 'Cancelled', confirmed: 'Confirmed' }[stay.value.status]
+})
 
 function money(minor: number): string {
   const currency = detail.value?.currency
@@ -487,12 +507,12 @@ async function cancel() {
   const held = value.online_payment ? value.online_payment.captured_minor - value.online_payment.refunded_minor : 0
   const description = held > 0
     ? `Its nights become available again and ${guest.value.state === 'named' ? guest.value.name : 'the guest'} is refunded ${money(held)} in full. You approve the refund next.`
-    : 'Its nights become available again. Record any refund as a payment.'
+    : value.request_status ? 'The guest will be notified and the nights will become available again.' : 'Its nights become available again. Record any refund as a payment.'
   if (!await confirmDialog.open({ title: guest.value.state === 'named' ? `Cancel ${guest.value.name}’s stay` : 'Cancel this stay', description, confirmLabel: 'Cancel stay', cancelLabel: 'Keep stay' })) return
   busy.value = 'cancel'
   actionError.value = null
   try {
-    await dashboardApi(`${dashboardBookingPath(value.id)}/cancel`, { method: 'POST', validate: isNightBooking, body: { version: value.version } })
+    await dashboardApi(`${dashboardBookingPath(value.id)}/cancel`, { method: 'POST', validate: isNightBooking, body: { version: value.version, idempotency_key: crypto.randomUUID() } })
     await refresh()
   } catch (cause) {
     const approval = isRecord(cause) && isRecord(cause.data) && isRecord(cause.data.data) && typeof cause.data.data.financial_approval_url === 'string' ? cause.data.data.financial_approval_url : null
@@ -513,15 +533,50 @@ async function cancel() {
   }
 }
 
+async function decide(action: 'confirm' | 'reject') {
+  const value = detail.value
+  if (!value || !hostActions.value.includes(action) || busy.value) return
+  const label = action === 'confirm' ? t('stay.approve_request') : t('stay.decline_request')
+  if (action === 'reject' && !await confirmDialog.open({ title: label, description: '', confirmLabel: label, cancelLabel: t('stay.keep_request') })) return
+  await run(action, async () => {
+    const { booking } = await dashboardApi(`${dashboardBookingPath(value.id)}/${action}`, {
+      method: 'POST', validate: isNightBooking, body: { version: value.version, idempotency_key: crypto.randomUUID() },
+    })
+    if (action === 'confirm' ? booking.request_status !== 'awaiting_payment' : booking.status !== 'cancelled') {
+      throw new Error('The stay request did not reach its expected state.')
+    }
+  }, 'The stay request could not be updated.')
+}
+
+async function payForStay() {
+  if (!stay.value || busy.value) return
+  busy.value = 'pay'
+  actionError.value = null
+  try {
+    const { pay_url } = await applicationFetch(`/api/account/bookings/${encodeURIComponent(stay.value.id)}/pay`, {
+      method: 'POST',
+      validate: (response): response is { pay_url: string } => isRecord(response) && typeof response.pay_url === 'string',
+    })
+    await navigateTo(pay_url, { external: true })
+  } catch (cause) {
+    actionError.value = getErrorMessage(cause, t('payment.unavailable'))
+  } finally {
+    busy.value = null
+  }
+}
+
 /** The guest cancels their own stay; the policy they booked under decides what comes back. */
 async function cancelAsGuest() {
   const value = detail.value
   const quote = cancellation.value
-  if (!value || isChannelManagedStay(value) || !quote || !value.conversation_id || !policy.value) return
-  const description = quote.refund_minor === quote.paid_minor ? `You get back the full ${money(quote.paid_minor)}.`
-    : quote.refund_minor > 0 ? `Under the ${policy.value.label} policy you get back ${money(quote.refund_minor)} of the ${money(quote.paid_minor)} you paid.`
-      : `Under the ${policy.value.label} policy none of the ${money(quote.paid_minor)} you paid comes back.`
-  if (!await confirmDialog.open({ title: 'Cancel your stay?', description, confirmLabel: 'Cancel stay', cancelLabel: 'Keep stay' })) return
+  if (!value || isChannelManagedStay(value) || !value.conversation_id) return
+  const pending = value.request_status !== null
+  if (!pending && (!quote || !policy.value)) return
+  const description = pending || !quote ? '' : quote.refund_minor === quote.paid_minor ? `You get back the full ${money(quote.paid_minor)}.`
+    : quote.refund_minor > 0 ? `Under the ${policy.value?.label} policy you get back ${money(quote.refund_minor)} of the ${money(quote.paid_minor)} you paid.`
+      : `Under the ${policy.value?.label} policy none of the ${money(quote.paid_minor)} you paid comes back.`
+  if (!await confirmDialog.open({ title: pending ? t('stay.withdraw_request_title') : 'Cancel your stay?', description,
+    confirmLabel: pending ? t('stay.withdraw_request') : 'Cancel stay', cancelLabel: pending ? t('stay.keep_request') : 'Keep stay' })) return
   await run('cancel', () => applicationFetch(`/api/account/bookings/${encodeURIComponent(value.id)}/cancel`, {
     method: 'POST', body: { version: value.version },
     validate: (response: unknown): response is { success: true } => isRecord(response) && response.success === true,

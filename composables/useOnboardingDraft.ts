@@ -1,6 +1,7 @@
 import { applicationFetch } from '~/composables/dashboardFetch'
 import { ApiClientError, isRecord } from '~/utils/api-clients'
 import { ONBOARDING_STEP_IDS, WEBSITE_ONBOARDING_PATH, type OnboardingFlow, type OnboardingStepId, type WebsiteOnboardingResumeAction } from '~/shared/onboarding-flow'
+import { isLodgingConfirmationMode } from '~/shared/lodging-booking'
 import { isCurrencyCode } from '~/shared/currencies'
 import { emptyOnboardingState, useOnboardingState, type OnboardingPlacePreview } from '~/composables/useOnboardingFlow'
 import { ALL_VERTICALS, type OrganizationVertical } from '~/utils/vertical-copy'
@@ -32,8 +33,8 @@ export function useOnboardingDraft() {
 
   const flowAnswers = computed(() => {
     const { vertical, source, placeId, subdomain, savedSubdomain, details, timezone, timezoneStepVisited } = state.value
-    const { name, sourceLocale, country, currency } = details
-    return { vertical, source, placeId, subdomain, savedSubdomain, name, sourceLocale, country, currency, timezone, timezoneStepVisited }
+    const { name, sourceLocale, country, currency, confirmationMode } = details
+    return { vertical, source, placeId, subdomain, savedSubdomain, name, sourceLocale, country, currency, timezone, timezoneStepVisited, confirmationMode }
   })
 
   function readFlow(answers: typeof flowAnswers.value & { pausedStep?: OnboardingStepId } = flowAnswers.value, signal?: AbortSignal) {
@@ -48,7 +49,7 @@ export function useOnboardingDraft() {
         && isRecord(value.neutralWebsiteExample) && typeof value.neutralWebsiteExample.name === 'string' && typeof value.neutralWebsiteExample.image === 'string'
         && isRecord(value.businessLookup) && typeof value.businessLookup.importLabel === 'string'
         && typeof value.businessLookup.manualLabel === 'string' && typeof value.businessLookup.searchPlaceholder === 'string'
-        && Array.isArray(value.countries) && Array.isArray(value.currencies) && Array.isArray(value.timezones),
+        && Array.isArray(value.bookingChoices) && Array.isArray(value.countries) && Array.isArray(value.currencies) && Array.isArray(value.timezones),
     })
   }
 
@@ -59,7 +60,7 @@ export function useOnboardingDraft() {
     subdomainConflict.value = false
     try {
       const { details, timezone } = state.value
-      const complete = flow.canFinish && (!pausedStep || pausedStep === 'currency')
+      const complete = flow.canFinish && (!pausedStep || flow.steps.some(step => step.id === pausedStep && step.action === 'commit'))
       const res = await applicationFetch<Record<string, unknown>>('/api/dashboard/onboarding/drafts/active', {
         method: 'POST',
         body: {
@@ -84,6 +85,7 @@ export function useOnboardingDraft() {
             timezone: timezone.trim() || (complete ? flow.proposedTimezone : null),
             currency: details.currency ?? (complete ? flow.proposedCurrency : null),
             source_locale: details.sourceLocale,
+            confirmation_mode: details.confirmationMode,
           },
         },
         validate: (value): value is Record<string, unknown> => isRecord(value),
@@ -199,6 +201,7 @@ export function useOnboardingDraft() {
     state.value.details.postalCode = text(details.postal_code)
     if (typeof details.country === 'string' && details.country) state.value.details.country = details.country
     if (isCurrencyCode(details.currency)) state.value.details.currency = details.currency
+    if (isLodgingConfirmationMode(details.confirmation_mode)) state.value.details.confirmationMode = details.confirmation_mode
     state.value.timezone = text(details.timezone)
     state.value.timezoneStepVisited = draft.timezone_step_visited === true
     state.value.pausedStep = ONBOARDING_STEP_IDS.find(step => step === draft.paused_step)

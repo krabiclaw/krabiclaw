@@ -10,3 +10,7 @@
     </UTheme>
   </ClientOnly>
 </template>
+
+<script setup lang="ts">
+import '~/assets/css/dashboard.css'
+</script>

@@ -1,3 +1,4 @@
+import type { LodgingConfirmationMode } from '~/shared/lodging-booking'
 import type { CurrencyCode } from '~/shared/currencies'
 import type { PostalAddress } from '~/utils/postal-address'
 import type { OpeningHours } from '~/shared/reservation-hours'
@@ -34,6 +35,7 @@ export interface OnboardingFlowState {
     country: string
     currency: CurrencyCode | null
     sourceLocale: string | null
+    confirmationMode: LodgingConfirmationMode | null
   }
   timezone: string
   timezoneStepVisited: boolean
@@ -53,7 +55,7 @@ export function emptyOnboardingState(): OnboardingFlowState {
     languageLocked: false,
     details: {
       name: '', city: '', streetAddress: '', addressLine2: '', region: '', postalCode: '',
-      country: '', currency: null, sourceLocale: null,
+      country: '', currency: null, sourceLocale: null, confirmationMode: null,
     },
     timezone: '',
     timezoneStepVisited: false,

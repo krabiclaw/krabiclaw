@@ -11,6 +11,7 @@ import { readOrganizationSubscriptions } from '~/server/utils/billing-access'
 import type { StripePlanLoader } from '~/server/utils/better-auth-stripe'
 import type { Payment } from './index'
 import { buyerPaymentActivityPath } from './buyer'
+import { approvedStayBooking } from './checkout'
 
 export async function notifyPaymentFinancialEvent(db: DbClient, stripe: Stripe, env: CloudflareEnv, payment: Payment, input: {
   kind: GuestPaymentNotificationKind | 'dispute_needs_response' | 'dispute_won' | 'dispute_lost' | 'dispute_closed'
@@ -31,7 +32,7 @@ export async function notifyPaymentFinancialEvent(db: DbClient, stripe: Stripe, 
   // A deleted merchant and an unclaimed contact have no application audience.
   // The verified return can still claim the purchase and then notify its buyer.
   if (!organization && (!payment.buyer_user_id || !guestKind)) return
-  const snapshot = JSON.parse(payment.price_snapshot_json) as { title?: unknown; stay?: { guest?: { email?: unknown } } }
+  const snapshot = JSON.parse(payment.price_snapshot_json) as Record<string, unknown> & { title?: unknown; stay?: { guest?: { email?: unknown } } }
   if (typeof snapshot.title !== 'string' || !snapshot.title.trim() || !isCurrencyCode(payment.currency)) throw new Error('Payments notification requires its immutable item and currency')
   let email: string | null = null
   if (guestKind && checkout) {
@@ -51,10 +52,11 @@ export async function notifyPaymentFinancialEvent(db: DbClient, stripe: Stripe, 
     }
   }
   const eventKey = `payments:${payment.stripe_account_id}:${payment.livemode}:${input.nativeId}:${input.status}:${input.kind}`
-  // A session booking's checkout waits in its guest's conversation; a stay's conversation opens when its payment is captured, with its booking.
+  // Session and approved stay checkouts already have a guest conversation.
   const nights = Boolean(snapshot.stay)
-  const hold = checkout && !nights && organization ? await queryFirst<{ conversation_id: string | null }>(db, 'SELECT conversation_id FROM payment_checkout_holds WHERE payment_id=? AND organization_id=?', [payment.id, payment.organization_id]) : null
-  if (checkout && !nights && organization && !hold?.conversation_id) throw new Error('Booking payment notification has no guest conversation')
+  const waitingInConversation = checkout && (!nights || approvedStayBooking(snapshot) !== null)
+  const hold = waitingInConversation && organization ? await queryFirst<{ conversation_id: string | null }>(db, 'SELECT conversation_id FROM payment_checkout_holds WHERE payment_id=? AND organization_id=?', [payment.id, payment.organization_id]) : null
+  if (waitingInConversation && organization && !hold?.conversation_id) throw new Error('Booking payment notification has no guest conversation')
   const booking = checkout && payment.subject_id && organization ? await queryFirst<{ conversation_id: string | null }>(db, "SELECT (SELECT c.id FROM conversations c WHERE c.booking_id = b.id AND c.kind = 'booking') AS conversation_id FROM bookings b WHERE b.organization_id=? AND b.id=?", [payment.organization_id, payment.subject_id]) : null
   const threadId = hold?.conversation_id ?? booking?.conversation_id ?? null
   if (booking && booking.conversation_id !== threadId) throw new Error('Booking payment notification conversation does not match its booking')

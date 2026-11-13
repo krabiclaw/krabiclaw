@@ -10,7 +10,7 @@
 
     <template #body>
       <form :id="formId" class="mx-auto w-full pb-6"
-        :class="full ? '' : ['px-6 pt-4 sm:px-8 sm:pt-5', wide ? 'max-w-3xl' : 'max-w-xl']"
+        :class="full ? '' : ['px-6 pt-4 sm:px-8 sm:pt-5', wide ? 'max-w-3xl' : 'max-w-xl', centered ? 'sm:my-auto' : '']"
         @submit.prevent="submit">
         <h1 v-if="title" ref="heading" tabindex="-1" class="text-3xl font-semibold leading-tight text-highlighted sm:text-4xl">{{ title }}</h1>
         <p v-if="detail" class="mt-2 text-muted">{{ detail }}</p>
@@ -46,6 +46,7 @@ const props = withDefaults(defineProps<{
   title?: string
   detail?: string
   wide?: boolean
+  centered?: boolean
   full?: boolean
   position?: number
   total?: number

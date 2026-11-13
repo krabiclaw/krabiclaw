@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { LODGING_BOOKING_CHOICES, LODGING_CONFIRMATION_MODES } from '~/shared/lodging-booking'
 import { ONBOARDING_STEP_IDS, type OnboardingFlow, type OnboardingStep, type OnboardingStepField } from '~/shared/onboarding-flow'
 import { PLATFORM_LOCALES, platformLocale } from '~/shared/platform-locales'
 import { CURRENCY_OPTIONS, currencyForCountry, isCurrencyCode } from '~/shared/currencies'
@@ -43,6 +44,7 @@ export const onboardingAnswers = z.object({
   timezoneStepVisited: z.boolean().optional(),
   pausedStep: z.enum(ONBOARDING_STEP_IDS).optional(),
   currency: z.string().nullable(),
+  confirmationMode: z.enum(LODGING_CONFIRMATION_MODES).nullish(),
 })
 
 const locationFields: OnboardingStepField[] = [
@@ -104,6 +106,7 @@ export function onboardingFlow(answers: z.infer<typeof onboardingAnswers>, optio
       nextLabel: 'Next', canAdvance: timezoneKnown,
     })
   }
+  const lodging = answers.vertical === 'lodging'
   steps.push(
     {
       id: 'language', title: 'What language is your website in?', fields: [{ key: 'sourceLocale', label: 'Website language' }],
@@ -111,9 +114,18 @@ export function onboardingFlow(answers: z.infer<typeof onboardingAnswers>, optio
     },
     {
       id: 'currency', title: 'What currency do you price in?', fields: [{ key: 'currency', label: 'Pricing currency' }],
-      nextLabel: 'Finish', canAdvance: isCurrencyCode(answers.currency ?? proposedCurrency), action: 'commit',
+      nextLabel: lodging ? 'Next' : 'Finish',
+      canAdvance: isCurrencyCode(answers.currency ?? proposedCurrency),
+      ...(lodging ? {} : { action: 'commit' }),
     },
   )
+
+  if (lodging) {
+    steps.push({
+      id: 'booking', title: 'Pick your booking settings', detail: 'You can change this anytime.', fields: [],
+      nextLabel: 'Finish', canAdvance: Boolean(answers.confirmationMode), action: 'commit',
+    })
+  }
 
   const firstIncomplete = steps.findIndex(step => !step.canAdvance)
   const paused = steps.findIndex(step => step.id === answers.pausedStep)
@@ -136,6 +148,7 @@ export function onboardingFlow(answers: z.infer<typeof onboardingAnswers>, optio
     countries: listPhoneCountries(),
     currencies: CURRENCY_OPTIONS,
     timezones,
+    bookingChoices: lodging ? LODGING_BOOKING_CHOICES : [],
     languages: PLATFORM_LOCALES.map(({ locale, label }) => ({ value: locale, label, icon: 'i-lucide-languages' })),
     businessTypes: ALL_VERTICALS.map(value => ({ value, ...presentation[value] })),
   }

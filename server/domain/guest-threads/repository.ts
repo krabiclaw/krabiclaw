@@ -1,6 +1,6 @@
 import { HTTPError } from 'nitro'
 import { sessionPrepTaskQueries } from '~/server/domain/tasks'
-import { BOOKING_ENDS_SQL, BOOKING_RECORDS_SQL, bookingDay, parseGuestRequest, participantLabel } from '~/server/domain/requests'
+import { BOOKING_ENDS_SQL, BOOKING_RECORDS_SQL, bookingDay, parseGuestRequest, participantLabel, stayRequestPayBySql, stayRequestRespondBySql } from '~/server/domain/requests'
 import {
   CURRENT_GUEST_SQL, MEMBER_REPLY_EVENT, MIRRORED_EVENT, OPENING_EVENT, SUPPORT_CONVERSATION_SQL,
   archiveQuery, archiveReplyTaskQuery, conversationAccessSql, guestVisibleSql, listUnreadIds, messageHasContentSql, unreadSql, type UnreadCounts,
@@ -482,18 +482,22 @@ export function conversationTaskQueries(conversationId: string, now: string, pre
     params: [now, now, conversationId],
   }, {
     // A booking waiting for the business's approval is work until it is approved, declined or cancelled.
-    query: `UPDATE tasks SET status = CASE WHEN b.status = 'confirmed' THEN 'done' ELSE 'cancelled' END, closed_at = ?, version = tasks.version + 1, updated_at = ?,
+    query: `UPDATE tasks SET status = CASE WHEN b.status = 'cancelled' THEN 'cancelled' ELSE 'done' END, closed_at = ?, version = tasks.version + 1, updated_at = ?,
         closed_by_user_id = (SELECT e.author_user_id FROM messages e WHERE e.conversation_id = c.id AND e.event_name IN ('booking.confirm', 'booking.reject', 'booking.cancel') ORDER BY e.sequence DESC LIMIT 1)
       FROM conversations c JOIN bookings b ON b.id = c.booking_id AND b.organization_id = c.organization_id
-      WHERE c.id = ? AND tasks.dedupe_key = 'booking_review:' || b.id AND tasks.status = 'open' AND b.status <> 'pending'`,
+      WHERE c.id = ? AND tasks.dedupe_key = 'booking_review:' || b.id AND tasks.status = 'open'
+        AND (b.status <> 'pending' OR ${stayRequestPayBySql('c.id')} IS NOT NULL)`,
     params: [now, now, conversationId],
   }, {
     query: `INSERT INTO tasks (id, organization_id, kind, subject_type, subject_id, product_id, location_id, assigned_member_id, due_at, timezone, status, dedupe_key, version, created_at, updated_at)
-      SELECT ?, b.organization_id, 'booking_review', 'booking', b.id, b.product_id, b.location_id, bc.assigned_member_id, b.starts_at, b.timezone, 'open', 'booking_review:' || b.id, 1, ?, ?
+      SELECT ?, b.organization_id, 'booking_review', 'booking', b.id, b.product_id, b.location_id,
+        CASE WHEN b.product_session_id IS NULL THEN NULL ELSE bc.assigned_member_id END,
+        CASE WHEN ${stayRequestRespondBySql('b')} IS NOT NULL THEN b.created_at ELSE b.starts_at END,
+        b.timezone, 'open', 'booking_review:' || b.id, 1, ?, ?
         FROM conversations c
         JOIN bookings b ON b.id = c.booking_id AND b.organization_id = c.organization_id
         JOIN product_booking_configs bc ON bc.organization_id = b.organization_id AND bc.product_id = b.product_id
-       WHERE c.id = ? AND c.kind = 'booking' AND b.status = 'pending'
+       WHERE c.id = ? AND c.kind = 'booking' AND b.status = 'pending' AND ${stayRequestPayBySql('c.id')} IS NULL
       ON CONFLICT (dedupe_key) DO NOTHING`,
     params: [crypto.randomUUID(), now, now, conversationId],
   }, ...bookingFollowUpQueries(conversationId, now), ...sessionPrepTaskQueries({

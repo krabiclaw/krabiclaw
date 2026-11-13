@@ -75,7 +75,7 @@ export default defineHandler(async (event) => {
       config: payload.preview?.config ?? null,
       logo_image: getDraftMedia(payload, 'logo'),
       hero_image: getDraftMedia(payload, 'hero'),
-      products: (payload.preview?.products ?? []).map(product => ({
+      products: (payload.preview?.vertical === row.vertical ? payload.preview.products : []).map(product => ({
         name: product.name,
         category: product.collection,
         unit_amount: product.price === null ? null : product.price.unit_amount,

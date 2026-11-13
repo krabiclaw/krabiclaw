@@ -235,7 +235,7 @@ export async function prepareProductBookingConfig(db: DbClient, input: {
   const slotFields = ['duration_minutes', 'seating_interval_minutes', 'confirmation_mode', 'online_payment_required', 'held_online', 'scheduling_mode', 'advance_notice_minutes', 'party_size_min', 'party_size_max', 'payment_basis', 'payment_min_party_size'] as const
   const fields = ['duration_minutes', 'seating_interval_minutes', 'default_capacity', 'confirmation_mode', 'online_payment_required', 'held_online', 'scheduling_mode', 'assigned_member_id', 'advance_notice_minutes', ...GUEST_TERMS_FIELDS, ...NIGHTS_BOOKING_FIELDS] as const
   if (Object.keys(patch).some(key => !fields.includes(key as typeof fields[number]) && key !== 'questions' && key !== 'expected_questions_revision')) badRequest('Unknown booking configuration field')
-  // A home is booked by the night on its business's calendar, paid in full on the site and confirmed when paid.
+  // The organization owns direct-stay confirmation and payment settings for all its homes.
   if (unit === 'nights' && slotFields.some(field => patch[field] !== undefined)) badRequest('A place to stay is booked by the night; it takes no session length, scheduling, notice, confirmation or payment setting')
   if (unit === 'slot' && NIGHTS_BOOKING_FIELDS.some(field => patch[field] !== undefined)) badRequest('Only a place to stay takes check-in, checkout, minimum nights and cancellation settings')
   if (patch.calendar_rules && 'weekend_price_minor' in patch.calendar_rules) badRequest('Set the weekend price with the home’s pricing settings')

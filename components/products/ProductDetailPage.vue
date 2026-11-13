@@ -354,7 +354,7 @@
               </TenantButton>
             </div>
 
-            <p v-if="isStay && canBook" class="text-center text-xs text-muted">{{ stayCheckoutAvailable ? 'You won\'t be charged yet' : t('stay.enquiry_note') }}</p>
+            <p v-if="isStay && canBook" class="text-center text-xs text-muted">{{ stayBooking.needsApproval.value ? t('stay.pay_after_approval') : stayCheckoutAvailable ? 'You won\'t be charged yet' : t('stay.enquiry_note') }}</p>
 
             <!-- Airbnb's dates under the price: the next sessions, each one press from booking. -->
             <template v-if="cardListsSessions">
@@ -476,7 +476,7 @@
         v-model="stayBooking.bookingOpen.value"
         target-id="product-booking"
         :title="displayTitle"
-        :can-go-back="stayBooking.bookingStep.value > 1 && !stayBooking.submitting.value"
+        :can-go-back="!stayBooking.submittedRequest.value && !stayBooking.submitting.value"
         @back="stayBooking.bookingStep.value = 1"
       >
         <StayBookingSteps :controller="stayBooking" />
@@ -506,6 +506,7 @@ import WhoYouMeet from '~/components/booking/WhoYouMeet.vue'
 import HostedBy from '~/components/booking/HostedBy.vue'
 import ShareButton from '~/components/tenant/ShareButton.vue'
 import UpcomingSessions from '~/components/booking/UpcomingSessions.vue'
+import type { LodgingConfirmationMode } from '~/shared/lodging-booking'
 import type { ProductPresentation, PublicProduct } from '~/server/types/products'
 import type { Accommodation, PropertyValue } from 'nuxt-schema-org/schema'
 import { useSchemaOrg } from '#imports'
@@ -573,6 +574,7 @@ const props = defineProps<{
   onlineAvailable?: boolean
   /** A place to stay is paid for on the site once the business's Payments setup is complete; until then it takes enquiries. */
   stayCheckoutAvailable: boolean
+  stayConfirmationMode: LodgingConfirmationMode | null
 }>()
 
 const displayTitle = computed(() => props.product.name)
@@ -584,9 +586,9 @@ const privateExperiencePreview = computed(() => previewAuthorized && props.produ
 /** A place to stay is booked by its nights, paid in full; its booking is not a session's. */
 const isStay = computed(() => props.product.kind === 'stay')
 const bookingInteractive = useMounted()
-const stayBooking = useStayBooking(() => ({ product: props.product, location: props.location, checkout: props.stayCheckoutAvailable }))
+const stayBooking = useStayBooking(() => ({ product: props.product, location: props.location, checkout: props.stayCheckoutAvailable, confirmationMode: props.stayConfirmationMode }))
 const bookingLabel = computed(() => isStay.value
-  ? stayBooking.checkIn.value && stayBooking.checkOut.value ? props.stayCheckoutAvailable ? t('stay.reserve') : t('stay.send_enquiry') : t('stay.check_availability')
+  ? stayBooking.checkIn.value && stayBooking.checkOut.value ? stayBooking.actionLabel.value : t('stay.check_availability')
   : props.vertical === 'service'
     ? props.booking?.confirmation_mode === 'review' ? t('booking.request_appointment') : t('booking.book_appointment')
     : t('site.experience_detail.book_now'))
