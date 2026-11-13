@@ -21,9 +21,9 @@ import { cancelBookingRequest, requestInsertQueries, threadPayloadForGuest } fro
 import { appendMessage, markConversationRead, readGuestConversation, resolveConversationAccess } from '../../server/domain/conversations.ts'
 import { transferBookingGuestSeat } from '../../server/domain/conversation-participants.ts'
 import { getGuestThreadDetail } from '../../server/domain/guest-threads/detail.ts'
-import { getInboxThread } from '../../server/domain/guest-threads/inbox.ts'
+import { conversationPageFor } from './support/conversation-page.ts'
 import { archiveConversation, listConversations } from '../../server/domain/guest-threads/repository.ts'
-import { receiveGuestWebReply } from '../../server/domain/guest-threads/inbound-email.ts'
+import { sendConversationMessage } from '../../server/domain/send-conversation-message.ts'
 import { retainPaymentsForTenantDeletion } from '../../server/domain/payments/retention.ts'
 import { deliverPaymentsUsage, paymentsUsage } from '../../server/domain/payments/usage.ts'
 import { agreeToService, endService, listServices, SERVICE_TERMS_VERSION } from '../../server/utils/organization-services.ts'
@@ -894,11 +894,12 @@ test('buyer conversations hide merchant facts and preserve public unread receipt
   const secrets=['private-ip-hash','private-diagnostic','private-charge','private-dispute','Internal staff note','Merchant dispute diagnostic']
   for(const secret of secrets)assert.equal(JSON.stringify(view).includes(secret),false)
   // The buyer's own conversation, as their inbox draws it, says only what the buyer may read.
-  const thread=await getInboxThread(db,'buyer-conversation',ORG,{audience:'buyer',userId:'verified'})
+  const thread=await conversationPageFor(db,'verified','buyer-conversation')
   assert(thread)
-  assert.deepEqual(thread.stream.filter(item=>item.type!=='day').map(item=>item.type==='message'?[item.side,item.author,item.body]:item.type==='event'?['event',item.text]:[item.type]),
+  assert.deepEqual(thread.entries.filter(item=>item.type!=='day').map(item=>item.type==='message'?[item.side,item.author,item.body]:item.type==='event'?['event',item.text]:[item.type]),
    [['guest','You','My question'],['business','Payments','Public host reply'],['event','Payment received']])
-  assert.deepEqual([thread.pending,thread.composer],[[],{channel:'email',available:true,reason:null}])
+  if(thread.conversation.kind==='team')throw new Error('Expected the buyer’s conversation')
+  assert.deepEqual([thread.conversation.pending,thread.conversation.composer],[[],{channel:'email',available:true,reason:null}])
   for(const secret of secrets)assert.equal(JSON.stringify(thread).includes(secret),false,secret)
   const inbox=await listConversations(db,null,{userId:'verified',buyerAudience:true})
   // The newest messages are the internal note and the dispute; the buyer's row previews the newest message they can read
@@ -915,7 +916,7 @@ test('buyer conversations hide merchant facts and preserve public unread receipt
   const send = async ({threadId,userId,...reply}: typeof input) => {
     const {conversation,role} = await resolveConversationAccess(db,userId,threadId)
     if (role !== 'guest') throw new HTTPError({statusCode:404,statusMessage:'Conversation not found'})
-    return await receiveGuestWebReply(env,{...reply,conversation,userId})
+    return await sendConversationMessage(env,{...reply,conversation,role,userId,senderName:userId})
   }
   await send(input)
   const ledger=(await db.prepare("SELECT * FROM messages WHERE conversation_id='buyer-conversation' ORDER BY sequence").all()).results

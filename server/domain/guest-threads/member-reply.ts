@@ -3,7 +3,7 @@ import { queryFirst } from '~/server/db'
 import { findMessageByDedupeKey, resolveConversationAccess } from '~/server/domain/conversations'
 import { sendConversationMessage } from '~/server/domain/send-conversation-message'
 import { teamMessageKey } from '~/server/domain/team-messages'
-import { conversationMemberPrincipal, resolveMembership } from '~/server/utils/member-access'
+import { resolveMembership } from '~/server/utils/member-access'
 import { creationRequestHash } from '~/server/utils/organization-events'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import type { MessagePhoto } from './attachments'
@@ -54,7 +54,7 @@ export async function replyToAlertEntry(env: CloudflareEnv, input: { entryId: st
   try {
     await sendConversationMessage(env, {
       conversation, role: 'member', userId, senderName: alert.sender_name, body, photos: files, idempotencyKey,
-      principal: conversationMemberPrincipal(access.membership, { env }), providerReply: true,
+      providerReply: true,
     })
     return { sent: true, notice: REPLY_SENT, report: null }
   } catch (error) {

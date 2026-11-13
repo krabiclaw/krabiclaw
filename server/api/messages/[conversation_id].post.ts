@@ -5,13 +5,12 @@ import { conversationRequest } from '~/server/utils/conversation-request'
 import { MAX_MESSAGE_PHOTOS } from '~/server/domain/guest-threads/attachments'
 import { MAX_IMAGE_BYTES } from '~/server/utils/media-mime'
 import { sendConversationMessage } from '~/server/domain/send-conversation-message'
-import { conversationMemberPrincipal } from '~/server/utils/member-access'
 import { parseSuggestionUse, recordSuggestionAccepted, suggestedDraft } from '~/server/domain/suggested-reply'
 import { finalizeRequestMetrics } from '~/server/utils/request-metrics'
 
 export default defineHandler(async event => {
   requireFinancialBrowserOrAppRequest(event)
-  const { env, db, user, conversation, role, membership } = await conversationRequest(event)
+  const { env, db, user, conversation, role } = await conversationRequest(event)
   const multipart = event.req.headers.get('content-type')?.startsWith('multipart/form-data') ?? false
   const declared = Number(event.req.headers.get('content-length') ?? '0')
   if (multipart && (!Number.isFinite(declared) || declared > MAX_MESSAGE_PHOTOS * MAX_IMAGE_BYTES + 64 * 1024)) {
@@ -35,8 +34,7 @@ export default defineHandler(async event => {
   const idempotencyKey = text('idempotency_key')
   const suggestion = role === 'member' && conversation.kind !== 'team' ? parseSuggestionUse(form ? form.get('suggestion') : json?.suggestion) : null
   const draft = suggestion ? await suggestedDraft(db, { organizationId: conversation.organization_id, threadId: conversation.id, suggestion }) : null
-  const principal = membership ? conversationMemberPrincipal(membership, { env, event }) : undefined
-  const message = await sendConversationMessage(env, { conversation, role, principal, userId: user.id, senderName: user.name, body, photos, idempotencyKey })
+  const message = await sendConversationMessage(env, { conversation, role, userId: user.id, senderName: user.name, body, photos, idempotencyKey })
   if (draft) await recordSuggestionAccepted(db, { organizationId: conversation.organization_id, threadId: conversation.id, userId: user.id, body, draft })
   return jsonResponse(finalizeRequestMetrics(event, 'messages-send', { message }))
 })

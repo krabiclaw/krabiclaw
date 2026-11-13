@@ -9,8 +9,8 @@ import { canMarkNoShow, getGuestRequest, validateGuestRequest, getThreadOperatio
 import type { StayAccess } from '~/server/domain/stays'
 import { revokeReviewRequestQuery } from '~/server/utils/review-requests'
 import { deliverGuestThreadEmail, getDeliveryById, isDeliverySent } from './deliveries'
-import { MEMBER_REPLY_EVENT, SCHEDULED_MESSAGE_EVENT, conversationAccessSql, findMessageByDedupeKey, messageQueries, parseMessagePayload, type ConversationGuard, type ConversationRow, type MessageRow } from '~/server/domain/conversations'
-import { discardMessagePhotos, listMessagePhotos, MessagePhotoRejection, messagePhotoPlacements, uploadMessagePhotos, type MessagePhotoInput } from './attachments'
+import { MEMBER_REPLY_EVENT, SCHEDULED_MESSAGE_EVENT, MessageDedupeConflictError, MessageStateConflictError, appendMessage, assertMessageWriteAccess, findMessageByDedupeKey, messageQueries, parseMessagePayload, participantGuard, type ConversationGuard, type ConversationRow, type MessageRow } from '~/server/domain/conversations'
+import { listMessagePhotos, MessagePhotoRejection, messagePhotoCount, messagePhotoHashes, type MessagePhotoInput } from './attachments'
 import type { UploadResolvedMediaInput } from '~/server/utils/media-upload'
 import { conversationTaskQueries, reconcileConversationTasks } from './repository'
 import { renderNotificationEmail } from '~/server/emails/render'
@@ -27,7 +27,7 @@ import { platformLocale } from '~/shared/platform-locales'
 import { formatTimestamp } from '~/utils/timezone'
 import { publishConversationEvent } from '~/server/cloudflare/guest-inbox-events'
 import { describeErrorForTelemetry } from '~/shared/error-telemetry'
-import { assertReplyIntent, guestThreadChannel, replyThroughChannex, type ChannelThreadMapping } from './channel-messages'
+import { guestThreadChannel, replyThroughChannex, type ChannelThreadMapping } from './channel-messages'
 import { respondToStayChangeRequest } from './stay-change-requests'
 import type { ChannexEnv, ChannexError } from '~/server/integrations/channex/client'
 import { announceContentReport, assertSameReport, contentReportId, contentReportInsert, guestThreadExcerpt, reportReason, type ContentReportEnv } from '~/server/domain/content-reports'
@@ -44,7 +44,7 @@ import type {
 // person's own (conversations.ts archiveQuery), not an operation here.
 export const GUEST_THREAD_ACTIONS = new Set(['report', 'block', 'unblock', 'accept_change', 'decline_change', 'retry'])
 
-type SuccessfulOperationOutcome = { ok: true; status: 200; thread: GuestThreadRow; availableActions: string[]; message?: { id: string; sequence: number } }
+type SuccessfulOperationOutcome = { ok: true; status: 200; thread: GuestThreadRow; availableActions: string[]; message?: MessageRow }
 
 export type OperationOutcome =
   | SuccessfulOperationOutcome
@@ -70,6 +70,7 @@ export type ExecuteOperationInput = {
   reason?: string
   /** The change request a member accepts or declines. */
   requestId?: string
+  retryMessageId?: string
   /** The member may change stays (owners and admins). */
   stayManager?: boolean
   /** The photos a reply carries, in the order they were chosen. */
@@ -457,10 +458,10 @@ async function executeSourceMutation(
 /** A member reply, or a scheduled message the workspace saved (no member actor). */
 type ReplyInput = Omit<ExecuteOperationInput, 'actorUserId'> & { actorUserId: string | null }
 
-function replyOutcome(context: ThreadContext, message: { id: string; sequence: number }): SuccessfulOperationOutcome {
+function replyOutcome(context: ThreadContext, message: MessageRow): SuccessfulOperationOutcome {
   return {
     ok: true, status: 200, thread: context.thread,
-    message: { id: message.id, sequence: message.sequence },
+    message,
     availableActions: requestActions(context.record, new Date().toISOString()),
   }
 }
@@ -472,11 +473,11 @@ async function executeReply(
 ): Promise<OperationOutcome> {
   const body = (input.body ?? '').trim()
   const photoInput = input.photos ?? []
-  const photoCount = Array.isArray(photoInput) ? photoInput.length : photoInput.sourceIds.length
+  const photoCount = messagePhotoCount(photoInput)
   if (!body && !photoCount) return { ok: false, status: 400, reason: 'empty_body' }
   const actorUserId = input.actorUserId
   if (actorUserId === null && photoCount) throw new HTTPError({ statusCode: 400, message: 'Scheduled messages carry text only', data: { code: 'SCHEDULED_MESSAGE_PHOTOS_UNSUPPORTED', field: 'photos' } })
-  const access = input.messageGuard ?? (input.principal ? conversationAccessSql('c', input.principal) : null)
+  const access = input.messageGuard ?? (actorUserId === null ? null : participantGuard('c', actorUserId, 'member'))
   const guard = {
     sql: `c.organization_id = ?${access ? ` AND ${access.sql}` : ''}`,
     params: [context.thread.organization_id, ...(access?.params ?? [])],
@@ -484,106 +485,68 @@ async function executeReply(
   const eventName = actorUserId === null ? SCHEDULED_MESSAGE_EVENT : MEMBER_REPLY_EVENT
   const purpose = actorUserId === null ? 'scheduled_message' : 'member_reply'
   const photoIdentity = Array.isArray(photoInput)
-    ? await Promise.all(photoInput.map(async photo => ({ filename: photo.filename, hash: [...new Uint8Array(await crypto.subtle.digest('SHA-256', photo.bytes))].map(byte => byte.toString(16).padStart(2, '0')).join('') })))
+    ? (await messagePhotoHashes(photoInput)).map((hash, index) => ({ filename: photoInput[index]!.filename, hash }))
     : photoInput.sourceIds
   const requestHash = await creationRequestHash({ body, photos: photoIdentity })
-  // Where a reply goes is the one rule every surface reads (`guestReplyDestination`);
-  // nowhere is refused before anything is sent. Only a reply this key already
-  // delivered replays where it went, whatever has changed since.
-  const matchesReply = (entry: MessageRow): boolean => {
-    if ((!input.idempotencyKey?.startsWith('send-later:') && entry.author_user_id !== actorUserId) || !entryMatchesRequest(entry, eventName, body)) return false
-    return parseMessagePayload(entry).request_hash === requestHash
-  }
-  // A recorded reply continues on the channel it was recorded on; a new one goes where the rule says.
+  const dedupeKey = operationDedupeKey(input)
   const [recorded, channelFacts] = await Promise.all([
-    findMessageByDedupeKey(db, operationDedupeKey(input)),
+    findMessageByDedupeKey(db, dedupeKey),
     guestThreadChannel(db, context.thread.id, context.thread.organization_id),
   ])
-  if (recorded && !input.idempotencyKey?.startsWith('send-later:') && recorded.author_user_id !== actorUserId) return conflict()
+  const retryMessageId = input.retryMessageId ?? (input.idempotencyKey?.startsWith('send-later:') ? recorded?.id : undefined)
+  if (retryMessageId && recorded?.id !== retryMessageId) return { ok: false, status: 404, reason: 'thread_not_found' }
+  const recordedAuthor = retryMessageId && recorded ? recorded.author_user_id : actorUserId
   const destination = await guestReplyDestination(db, context.thread, channelFacts)
-  const recordedMapping = recorded?.channel === 'airbnb' ? channelFacts?.mapping ?? null : null
-  if (recorded?.channel === 'airbnb' && !recordedMapping) throw new Error(`Reply ${recorded.id} was recorded on Airbnb but its conversation has no channel mapping`)
-  const channel = recorded ? recordedMapping : destination.channel === 'airbnb' ? destination.mapping : null
+  const mapped = recorded?.channel === 'airbnb' ? channelFacts?.mapping ?? null : null
+  if (recorded?.channel === 'airbnb' && !mapped) throw new Error(`Reply ${recorded.id} was recorded on Airbnb but its conversation has no channel mapping`)
+  const channel = recorded ? mapped : destination.channel === 'airbnb' ? destination.mapping : null
   if (channel && (photoCount > 1 || (photoCount && body))) throw new HTTPError({ statusCode: 400, message: 'Send one Airbnb photo at a time, separately from text', data: { code: 'CHANNEL_PHOTO_MESSAGE_INVALID', field: 'photos' } })
-  // A key names one reply: different words under it are refused before whether it can go is asked.
-  if (recorded?.channel === 'airbnb') assertReplyIntent(recorded, body, requestHash, eventName)
-  else if (recorded && !matchesReply(recorded)) return conflict()
-  const delivered = recorded ? await getDeliveryById(db, recorded.channel === 'airbnb' ? `guest-thread-channex:${context.thread.id}:${input.idempotencyKey}` : deliveryDedupeKey(input)) : null
-  if (destination.channel === null && !(delivered && isDeliverySent(delivered))) return { ok: false, status: 409, reason: 'guest_unreachable', code: 'GUEST_UNREACHABLE', field: 'conversation_id', message: destination.reason }
-  if (channel) {
-    const sent = await replyThroughChannex(db, input.env, { mapping: channel, body, actorUserId, idempotencyKey: input.idempotencyKey!, requestHash, guard,
-      photoCount, resolvePhotos: async () => Array.isArray(photoInput) ? photoInput : await photoInput.resolve() }).catch((error: unknown) => {
-      if (error instanceof MessagePhotoRejection) return error
-      throw error
-    })
-    if (sent instanceof MessagePhotoRejection) return { ok: false, status: 400, reason: 'invalid_photo', message: sent.message }
-    if (!sent.ok) return { ...sent, reason: 'delivery_failed' }
-    return replyOutcome(context, sent.message)
+  if (recorded?.channel === 'airbnb' && typeof parseMessagePayload(recorded).request_hash !== 'string') {
+    throw new HTTPError({ statusCode: 500, message: 'The channel reply intent has no recorded request hash', data: { code: 'CHANNEL_REPLY_INTENT_INVALID', field: 'payload.request_hash' } })
   }
-  const dedupeKey = operationDedupeKey(input)
-  const deliveryKey = deliveryDedupeKey(input)
-  let entry = recorded
-  if (entry && entry.channel !== 'web') {
-    const earlier = delivered
-    if (!earlier || earlier.message_id !== entry.id) throw new Error('Reply delivery receipt does not match its message')
-    if (isDeliverySent(earlier) && !earlier.error) {
+  if (recorded && (recorded.author_user_id !== recordedAuthor || !entryMatchesRequest(recorded, eventName, body) || parseMessagePayload(recorded).request_hash !== requestHash)) {
+    if (recorded.channel === 'airbnb') throw new HTTPError({ statusCode: 409, message: 'The reply key was already used for a different message', data: { code: 'IDEMPOTENCY_CONFLICT', field: 'idempotencyKey' } })
+    return conflict()
+  }
+  const deliveryId = channel ? `guest-thread-channex:${context.thread.id}:${input.idempotencyKey}` : deliveryDedupeKey(input)
+  const delivered = recorded && recorded.channel !== 'web' ? await getDeliveryById(db, deliveryId) : null
+  if (destination.channel === null && !(delivered && isDeliverySent(delivered))) return { ok: false, status: 409, reason: 'guest_unreachable', code: 'GUEST_UNREACHABLE', field: 'conversation_id', message: destination.reason }
+  if (recorded && recorded.channel !== 'web' && (!delivered || delivered.message_id !== recorded.id)) {
+    throw new Error('Reply delivery receipt does not match its message')
+  }
+  const guestEmail = destination.channel === 'email' || destination.channel === 'account' ? destination.email : null
+  const messageChannel = recorded?.channel ?? (channel ? 'airbnb' : guestEmail ? 'email' : 'web')
+  const commit = () => appendMessage(db, {
+    conversationId: context.thread.id, authorKind: actorUserId === null ? 'krabiclaw' : 'member', authorUserId: recordedAuthor,
+    channel: messageChannel, body: messageChannel === 'airbnb' ? body : body || null, eventName, payload: { request_hash: requestHash }, dedupeKey, guard,
+  }, {
+    organizationId: context.thread.organization_id, env: input.env, photos: photoInput, uploaderUserId: actorUserId, recorded, retryMessageId,
+    receipt: messageChannel === 'web' ? undefined : {
+      id: deliveryId, channel: messageChannel === 'airbnb' ? 'airbnb' : 'email', provider: messageChannel === 'airbnb' ? 'channex' : emailProvider(input.env), purpose,
+    },
+  })
+  let entry: MessageRow
+  try {
+    if (channel) {
+      const sent = await replyThroughChannex(db, input.env, { mapping: channel, body, guard, receipt: delivered, deliveryId, photoCount, commit })
+      return sent.ok ? replyOutcome(context, sent.message) : { ...sent, reason: 'delivery_failed' }
+    }
+    if (recorded && delivered && isDeliverySent(delivered) && !delivered.error) {
+      entry = await commit()
       await reconcileConversationTasks(db, context.thread.id)
       return replyOutcome(context, entry)
     }
-  }
-
-  if (destination.channel === null || destination.channel === 'airbnb') return { ok: false, status: 409, reason: 'guest_unreachable', code: 'GUEST_UNREACHABLE', field: 'conversation_id', message: destination.channel === null ? destination.reason : GUEST_UNREACHABLE_MESSAGE }
-  const guestEmail = destination.email
-
-  if (!entry) {
-    const entryId = crypto.randomUUID()
-    const deliveryId = deliveryKey
-    const now = new Date().toISOString()
-    const organizationId = context.thread.organization_id
-    const photos = Array.isArray(photoInput) ? photoInput : await photoInput.resolve()
-    if (photos.length !== photoCount) throw new Error('Resolved reply photos do not match their declared sources')
-    // The photos are stored first and placed by the same batch that writes the
-    // message, so a reply exists with all of its photos or not at all.
-    const assetIds = actorUserId === null ? [] : await uploadMessagePhotos(db, input.env, organizationId, photos, { source: 'uploaded', userId: actorUserId })
-      .catch((error: unknown) => {
-        if (error instanceof MessagePhotoRejection) return error
-        throw error
-      })
-    if (assetIds instanceof MessagePhotoRejection) return { ok: false, status: 400, reason: 'invalid_photo', message: assetIds.message }
-    try {
-      await executeBatch(db, [
-        ...messageQueries({ id: entryId, conversationId: context.thread.id, authorKind: actorUserId === null ? 'krabiclaw' : 'member', authorUserId: actorUserId,
-          channel: guestEmail ? 'email' : 'web', body: body || null, eventName, payload: { request_hash: requestHash }, dedupeKey, occurredAt: now,
-          guard }).queries,
-        ...guestEmail ? [{
-          query: `
-            INSERT INTO guest_thread_deliveries
-              (id, message_id, channel, provider, purpose, status, created_at, updated_at)
-            SELECT ?, id, 'email', ?, ?, 'pending', ?, ?
-            FROM messages
-            WHERE id = ? AND conversation_id = ?
-            ON CONFLICT(id) DO NOTHING
-          `,
-          params: [deliveryId, emailProvider(input.env), purpose, now, now, entryId, context.thread.id],
-        }] : [],
-        ...messagePhotoPlacements(organizationId, 'message', entryId, assetIds, now),
-      ], { operation: 'guest thread reply receipt' })
-    } catch (error) {
-      let concurrent: MessageRow | null
-      try {
-        concurrent = await findMessageByDedupeKey(db, dedupeKey)
-      } catch (readError) {
-        throw new AggregateError([error, readError], 'The reply commit could not be read; its photos have been retained', { cause: readError })
-      }
-      if (concurrent?.id !== entryId && actorUserId !== null) await discardMessagePhotos(db, input.env, organizationId, assetIds, actorUserId, error)
-      if (!concurrent || !matchesReply(concurrent)) throw error
+    if (destination.channel === null || destination.channel === 'airbnb') return { ok: false, status: 409, reason: 'guest_unreachable', code: 'GUEST_UNREACHABLE', field: 'conversation_id', message: destination.channel === null ? destination.reason : GUEST_UNREACHABLE_MESSAGE }
+    entry = await commit()
+  } catch (error) {
+    if (error instanceof MessagePhotoRejection) return { ok: false, status: 400, reason: 'invalid_photo', message: error.message }
+    if (error instanceof MessageStateConflictError) return { ok: false, status: 404, reason: 'thread_not_found' }
+    if (error instanceof MessageDedupeConflictError) {
+      if (channel) throw new HTTPError({ statusCode: 409, message: 'The reply key was already used for a different message', data: { code: 'IDEMPOTENCY_CONFLICT', field: 'idempotencyKey' } })
+      return conflict()
     }
-    entry = await findMessageByDedupeKey(db, dedupeKey)
-    if (!entry && actorUserId !== null && assetIds.length) await discardMessagePhotos(db, input.env, organizationId, assetIds, actorUserId, new Error('The conversation no longer allows this reply'))
+    throw error
   }
-
-  if (!entry) return { ok: false, status: 404, reason: 'thread_not_found' }
-  if (!matchesReply(entry)) return conflict()
   if (entry.channel === 'web') {
     // The guest reads it in their own inbox, where it is unread until they open it.
     await reconcileConversationTasks(db, context.thread.id)
@@ -591,7 +554,7 @@ async function executeReply(
   }
   // A reply saved for email whose address has since been removed is not sent anywhere else.
   if (!guestEmail) return { ok: false, status: 409, reason: 'delivery_failed', code: 'GUEST_EMAIL_REQUIRED', field: 'guest.email', message: 'This reply was saved to be emailed, but the guest no longer has an email address.' }
-  const delivery = await getDeliveryById(db, deliveryKey)
+  const delivery = delivered ?? await getDeliveryById(db, deliveryId)
   if (!delivery || delivery.message_id !== entry.id) throw new Error('Reply delivery receipt does not match its message')
   if (isDeliverySent(delivery) && !delivery.error) {
     await reconcileConversationTasks(db, context.thread.id)
@@ -599,13 +562,20 @@ async function executeReply(
   }
 
   const fromName = await getOrganizationBrandName(db, context.thread.organization_id)
+  const email = await renderMemberReply(input.env, db, context.thread.organization_id, fromName, entry, context.thread.payload.guest.locale)
+  try {
+    await assertMessageWriteAccess(db, context.thread.id, guard)
+  } catch (error) {
+    if (error instanceof MessageStateConflictError) return { ok: false, status: 404, reason: 'thread_not_found' }
+    throw error
+  }
   const outcome = await deliverGuestThreadEmail(db, {
     delivery,
     env: input.env,
     to: guestEmail,
     fromName,
     subject: replySubject(context.thread.kind, fromName),
-    email: await renderMemberReply(input.env, db, context.thread.organization_id, fromName, entry, context.thread.payload.guest.locale),
+    email,
     conversationId: context.thread.id,
   })
 

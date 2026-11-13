@@ -48,8 +48,7 @@ import { useInboxUnread } from './inbox-unread'
 const route = useRoute()
 const router = useRouter()
 const dashboard = useDashboardOrganization()
-const unread = useInboxUnread(computed(() => dashboard.organizationId.value))
-const counts = computed(() => unread.value.unread)
+const counts = useInboxUnread(computed(() => dashboard.organizationId.value))
 const listPath = computed(() => `/dashboard/${encodeURIComponent(String(route.params.org_slug))}/messages`)
 const vertical = computed(() => dashboard.organization.value?.vertical ?? null)
 

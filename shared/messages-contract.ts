@@ -37,7 +37,7 @@ export interface ConversationParticipant {
 
 export type ConversationHeader =
   | (Omit<InboxThread, 'stream'> & { kind: 'guest' | 'support'; organization_id: string; participants: ConversationParticipant[] })
-  | (Omit<TeamThread, 'participants' | 'last_message'> & { kind: 'team'; organization_id: string; title: string; participants: ConversationParticipant[] })
+  | (Omit<TeamThread, 'participants'> & { kind: 'team'; organization_id: string; title: string; participants: ConversationParticipant[] })
 
 export interface ConversationPage {
   conversation: ConversationHeader

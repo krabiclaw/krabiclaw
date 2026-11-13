@@ -148,7 +148,7 @@ export async function handleConversationTools(ctx: McpExecutorContext): Promise<
       const idempotencyKey = requiredString(args, 'idempotency_key')
       const sender = await queryFirst<{ name: string }>(db, 'SELECT name FROM user WHERE id = ?', [userId])
       if (!sender) throw new Error('Message sender account is missing')
-      const message = await sendConversationMessage(env, { conversation, role: 'member', userId, senderName: sender.name, body: optionalString(args, 'message') ?? '', photos: photo ?? [], idempotencyKey, principal })
+      const message = await sendConversationMessage(env, { conversation, role: 'member', userId, senderName: sender.name, body: optionalString(args, 'message') ?? '', photos: photo ?? [], idempotencyKey })
       return { conversation_id: conversation.id, message: { id: message.id, sequence: message.sequence } }
     }
     default: return NOT_HANDLED

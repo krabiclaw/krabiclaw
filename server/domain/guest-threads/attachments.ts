@@ -40,6 +40,15 @@ export interface MessagePhoto {
 /** Host file identities keep a replay independent of an expiring download URL. */
 export type MessagePhotoInput = MessagePhoto[] | { sourceIds: string[]; resolve: () => Promise<MessagePhoto[]> }
 
+export function messagePhotoCount(photos: MessagePhotoInput): number {
+  return Array.isArray(photos) ? photos.length : photos.sourceIds.length
+}
+
+export async function messagePhotoHashes(photos: MessagePhoto[]): Promise<string[]> {
+  return await Promise.all(photos.map(async ({ bytes }) =>
+    Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), byte => byte.toString(16).padStart(2, '0')).join('')))
+}
+
 type Uploader = { source: 'uploaded'; userId: string } | { source: 'external'; userId: null }
 
 /** What a message says in a preview line: its words, or what it sent when it has none. */

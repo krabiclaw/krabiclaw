@@ -7,9 +7,11 @@ import * as schema from '../../server/db/schema.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
 import { type MemberAccessPrincipal, memberAccessPrincipal } from '../../server/utils/member-access.ts'
 import { cancelStay, createStay, updateStayHome, type StayAccess } from '../../server/domain/stays.ts'
-import { createTeamThread, getTeamThread, listTeamMessages, sendTeamMessage } from '../../server/domain/team-messages.ts'
+import { conversationPageFor } from './support/conversation-page.ts'
+import { sendConversationMessage } from '../../server/domain/send-conversation-message.ts'
+import { createTeamThread, getTeamThread } from '../../server/domain/team-messages.ts'
 import { closeTask, jobKey, taskViewForUser, taskViewer, updateTask, type TaskRow } from '../../server/domain/tasks.ts'
-import { markConversationRead } from '../../server/domain/conversations.ts'
+import { markConversationRead, resolveConversationAccess } from '../../server/domain/conversations.ts'
 import { runOrganizationJobs } from '../../server/domain/cleaner-jobs.ts'
 import { claimSessionCapacity } from '../../server/utils/availability.ts'
 import { conversationTaskQueries } from '../../server/domain/guest-threads/repository.ts'
@@ -95,7 +97,7 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
     assert.equal(job!.key, jobKey(turnover))
     assert.match(job!.body, /^Turnover: Cabin\n/)
     assert.match(job!.body, /Checkout 10:00 AM · Dee\nCheck-in 3:00 PM · Lee · 1 guest/)
-    const messages = (await listTeamMessages(db, cleaner, thread.id, {})).messages
+    const messages = (await conversationPageFor(db, cleaner, thread.id)).entries.filter(entry => entry.type === 'message').reverse()
     assert.deepEqual([messages[0]!.automatic, messages[0]!.author_user_id], [true, null])
     // The hosts read along, and it is unread for them too until they do.
     assert.equal((await getTeamThread(db, owner, thread.id)).unread, true)
@@ -137,13 +139,13 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
     // Done: the cook's note is their own message in the conversation, nobody is alerted, and the strip shows it done.
     const closed = await closeTask(db, await taskViewer(db, principal('cook', 'member')), turnover.id, { status: 'done', note: 'All clean, towels restocked', photos: [], env })
     assert.equal(closed.status, 'done')
-    const cookMessages = (await listTeamMessages(db, cook, cookThreads[0]!.id, {})).messages
+    const cookMessages = (await conversationPageFor(db, cook, cookThreads[0]!.id)).entries.filter(entry => entry.type === 'message').reverse()
     assert.deepEqual([cookMessages[0]!.author_user_id, cookMessages[0]!.automatic, cookMessages[0]!.body, cookMessages[0]!.deliveries], ['cook', false, 'All clean, towels restocked', []])
     assert.equal((await getTeamThread(db, owner, cookThreads[0]!.id)).job?.status, 'done')
     // The cook's own message reads the conversation through for them and is unread for the hosts; the cleaner, no longer seated with it, never sees it.
     assert.equal((await getTeamThread(db, owner, cookThreads[0]!.id)).unread, true)
     assert.equal((await getTeamThread(db, cook, cookThreads[0]!.id)).unread, false)
-    await assert.rejects(getTeamThread(db, cleaner, cookThreads[0]!.id), { status: 404, data: { code: 'TEAM_THREAD_NOT_FOUND', field: 'conversation_id' } })
+    await assert.rejects(getTeamThread(db, cleaner, cookThreads[0]!.id), { status: 404, data: { code: 'THREAD_NOT_FOUND', field: 'conversation_id' } })
     // The cook, given the job at 13:10, was told today's turnover and the warning then; a closed job is told about no more.
     assert.deepEqual((await automatic(cookThreads[0]!.id)).map(message => message.key), [jobKey(turnover), `reminder:${turnover.id}:morning:${day(3)}`, `warning:${turnover.id}:${turnover.due_at}`])
     await runOrganizationJobs(env, db, ORG, at(day(3), '14:00'))
@@ -175,7 +177,7 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
     // A person's own message in a job conversation counts as unread for the others, from where they read.
     await markConversationRead(db, { organizationId: ORG, conversationId: thread.id, userId: 'cleaner' })
     assert.equal((await getTeamThread(db, cleaner, thread.id)).unread, false)
-    await sendTeamMessage(env, db, owner, thread.id, { body: 'Thanks Cleo', photos: [], idempotency_key: 'thanks', senderName: 'Olive Owner' })
+    await sendConversationMessage(env, { ...await resolveConversationAccess(db, owner.userId, thread.id), userId: owner.userId, body: 'Thanks Cleo', photos: [], idempotencyKey: 'thanks-cleo', senderName: 'Olive Owner' })
     assert.equal((await getTeamThread(db, cleaner, thread.id)).unread, true)
     assert.equal((await getTeamThread(db, owner, thread.id)).unread, false)
   } finally {
@@ -252,9 +254,9 @@ test('a consultation gives its attorney jobs that follow the booking and an aler
     assert.deepEqual((await jobs()).map(job => job.status), ['cancelled', 'cancelled'])
     const runJobs = async () => assert.deepEqual((await runOrganizationJobs(env, db, ORG)).failures, [])
     const oldThread = threads[0]!.id
-    const messages = (threadId: string) => listTeamMessages(db, attorney, threadId, { limit: 100 })
+    const messages = async (threadId: string) => (await conversationPageFor(db, attorney, threadId)).entries.filter(entry => entry.type === 'message')
     await runJobs()
-    assert.ok((await messages(oldThread)).messages.some(message => message.body.startsWith('Cancelled: prepare for consultation')))
+    assert.ok((await messages(oldThread)).some(message => message.body?.startsWith('Cancelled: prepare for consultation')))
     await db.prepare("UPDATE bookings SET status = 'confirmed', cancelled_at = NULL WHERE id = ?").bind(booking.bookingId).run()
     await recompute()
     assert.deepEqual((await jobs()).map(job => job.status), ['open', 'open'])
@@ -275,15 +277,15 @@ test('a consultation gives its attorney jobs that follow the booking and an aler
     await executeBatch(db, conversationTaskQueries(replacement.id, new Date().toISOString()), { operation: 'Recompute replacement consultation jobs' })
     await runJobs()
     const former = await messages(oldThread)
-    assert.ok(former.messages.some(message => message.body === 'No longer yours: prep for this session.'))
-    assert.ok(former.messages.every(message => !message.body.includes('Replacement')))
+    assert.ok(former.some(message => message.body === 'No longer yours: prep for this session.'))
+    assert.ok(former.every(message => !message.body?.includes('Replacement')))
     const newThread = await db.prepare("SELECT id FROM conversations WHERE kind = 'team' AND booking_id = ?").bind(newBooking.bookingId).first<string>('id')
     assert.ok(newThread)
     assert.equal((await getTeamThread(db, attorney, newThread)).job?.id, prep!.id)
     const viewer = await taskViewer(db, memberAccessPrincipal({ userId: 'host', role: 'member', organizationId: ORG } as never, { env }))
     const outcome = 'Private completion note for the current client'
     assert.equal((await closeTask(db, viewer, prep!.id, { status: 'done', note: outcome, photos: [], env })).status, 'done')
-    assert.ok((await messages(newThread)).messages.some(message => message.body === outcome))
-    assert.ok((await messages(oldThread)).messages.every(message => message.body !== outcome))
+    assert.ok((await messages(newThread)).some(message => message.body === outcome))
+    assert.ok((await messages(oldThread)).every(message => message.body !== outcome))
   } finally { await runtime.dispose() }
 })

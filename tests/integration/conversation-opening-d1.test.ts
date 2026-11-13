@@ -8,7 +8,7 @@ import { openingSentence } from '../../server/domain/guest-threads/opening.ts'
 import { appendMessage, markConversationRead, resolveConversationAccess } from '../../server/domain/conversations.ts'
 import { loadConversationPage } from '../../server/domain/conversation-history.ts'
 import { acceptConversationGuestInvite, createConversationGuestInvite } from '../../server/domain/conversation-participants.ts'
-import { getInboxThread } from '../../server/domain/guest-threads/inbox.ts'
+import { conversationPageFor } from './support/conversation-page.ts'
 import { countUnreadAsGuest, listConversations } from '../../server/domain/guest-threads/repository.ts'
 import { memberAccessPrincipal } from '../../server/utils/member-access.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
@@ -47,7 +47,6 @@ test('a table booking opens with its own message and the guest note, written onc
     ].map(statement => db.prepare(statement)))
     const env = await runtime.getBindings<CloudflareEnv>()
     const principal = memberAccessPrincipal({ userId: OWNER, organizationId: ORG, role: 'owner' }, { env })
-    const viewer = { audience: 'member' as const, userId: OWNER, principal }
     const reservation = async (id: string, note: string | null, opening: string, booker: string | null = null) => {
       const payload = threadPayloadForGuest({ name: 'Filip Heurckmans', email: 'filip@example.test', phone: '+32475699444', locale: 'en', ipHash: null })
       await db.batch([
@@ -59,7 +58,7 @@ test('a table booking opens with its own message and the guest note, written onc
     const sentence = openingSentence({ kind: 'booking', vertical: 'restaurant', productKind: 'table', productTitle: 'Krabi tables', guestName: 'Filip Heurckmans', guestPhone: '+32475699444', answers: [], partySize: 4, partySizeIsMinimum: false,
       startsAt: '2026-11-04T07:00:00.000Z', timezone: 'Asia/Bangkok', placeTitle: 'Kikuzuki Krabi' })
     assert.match(sentence, /^Table for 4 on Wed, Nov 4 at 2:00 PM at Kikuzuki Krabi\. Filip Heurckmans, \+32 /)
-    const messages = async (id: string) => (await getInboxThread(db, id, ORG, viewer, new Date('2026-11-05T00:00:00.000Z')))!.stream
+    const messages = async (id: string) => (await conversationPageFor(db, principal, id, { before: null, limit: 40 }, new Date('2026-11-05T00:00:00.000Z'))).entries
       .flatMap(item => item.type === 'message' ? [[item.side, item.body]] : [])
 
     // Created: the booking's own message, then the guest's note, and nothing twice on a replay of the same batch.
@@ -98,6 +97,7 @@ test('a table booking opens with its own message and the guest note, written onc
     const privatePage = await page(traveler.id)
     assert.deepEqual(privatePage.entries, [])
     assert.deepEqual(privatePage.page.booking_actions, [])
+    if (privatePage.conversation.kind === 'team') throw new Error('Expected the traveler’s booking conversation')
     assert.deepEqual([privatePage.conversation.booking_id, privatePage.conversation.when, privatePage.conversation.activity_path], [null, null, null])
     const [travelerRow] = await list()
     assert.deepEqual([travelerRow?.id, travelerRow?.preview, travelerRow?.when, travelerRow?.unread], ['shared', '', null, false])

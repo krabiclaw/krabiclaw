@@ -433,7 +433,7 @@ watch(realtime.event, event => {
     generation++
     reconcileAbort?.abort()
     pageController?.abort()
-    unreadCounts.value.unread = null
+    unreadCounts.value = null
     clear()
     loadedPages = 1
     reconcile()
@@ -442,7 +442,7 @@ watch(realtime.event, event => {
       generation++
       reconcileAbort?.abort()
       if (data.value) data.value = { ...data.value, threads: data.value.threads.filter(row => row.id !== event.conversation_id), unread: undefined }
-      unreadCounts.value.unread = null
+      unreadCounts.value = null
     }
     reconcile(event.conversation_id)
   }

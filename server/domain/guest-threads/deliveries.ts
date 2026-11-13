@@ -446,7 +446,14 @@ export async function readConversationEnrichment(db: DbClient, messageIds: strin
   const photos = photoQuery ? results.shift()!.results as MessagePhotoRow[] : []
   const actors = authorQuery ? results.shift()!.results as { id: string; name: string }[] : []
   const deliveries = receipts ? results.shift()!.results as GuestThreadDeliveryRow[] : []
-  return { photos: groupMessagePhotos(photos), actors, deliveries }
+  const deliveriesByMessage = new Map<string, GuestThreadDeliveryRow[]>()
+  for (const delivery of deliveries) {
+    if (!delivery.message_id) throw new Error(`Message delivery ${delivery.id} names no message`)
+    const attempts = deliveriesByMessage.get(delivery.message_id)
+    if (attempts) attempts.push(delivery)
+    else deliveriesByMessage.set(delivery.message_id, [delivery])
+  }
+  return { photos: groupMessagePhotos(photos), actors, deliveries, deliveriesByMessage }
 }
 
 /** A failure worth showing in the thread. */

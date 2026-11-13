@@ -1,5 +1,12 @@
 {
-  "thread": {
+  "capabilities": {
+    "can_invite_guest": true,
+    "can_leave": false,
+    "can_manage_participants": false,
+    "can_send": true,
+    "can_view_read_receipts": true
+  },
+  "conversation": {
     "activity_path": null,
     "avatar_initial": "M",
     "booking_id": "00000000-0000-4000-8000-000000000003",
@@ -12,6 +19,25 @@
     "home": "74 D · Sky",
     "id": "00000000-0000-4000-8000-000000000001",
     "kind": "guest",
+    "organization_id": "org-contract",
+    "participants": [
+      {
+        "can_remove": false,
+        "id": "airbnb-guest-account",
+        "image": null,
+        "member_id": null,
+        "name": "Mililani Garcia",
+        "role": "guest"
+      },
+      {
+        "can_remove": false,
+        "id": "owner-contract",
+        "image": null,
+        "member_id": "owner-member",
+        "name": "Skyler Baird",
+        "role": "member"
+      }
+    ],
     "pending": [
       {
         "body": "Enjoy your stay!",
@@ -25,157 +51,194 @@
     ],
     "record_kind": "stay",
     "record_title": "Reservation",
-    "stream": [
-      {
-        "id": "day:00000000-0000-4000-8000-000000000005",
-        "label": "Yesterday",
-        "type": "day"
-      },
-      {
-        "author": "Mililani",
-        "body": "In winter, can we park on the street?",
-        "id": "00000000-0000-4000-8000-000000000005",
-        "label": null,
-        "photos": [],
-        "receipt": null,
-        "retryable": false,
-        "sent_at": "2026-11-04T18:16:00.000Z",
-        "side": "guest",
-        "time": "11:16 AM",
-        "translated": {
-          "original": "¿En invierno dejan aparcar en la calle?"
-        },
-        "type": "message",
-        "unshown_files": 0
-      },
-      {
-        "author": "Mililani",
-        "body": null,
-        "id": "00000000-0000-4000-8000-000000000006",
-        "label": null,
-        "photos": [
-          {
-            "height": 3,
-            "id": "00000000-0000-4000-8000-000000000007",
-            "thumbnail_url": "https://media.example.test/organizations/org-contract/media/00000000-0000-4000-8000-000000000007.avif",
-            "url": "https://media.example.test/organizations/org-contract/media/00000000-0000-4000-8000-000000000007.avif",
-            "width": 4
-          }
-        ],
-        "receipt": null,
-        "retryable": false,
-        "sent_at": "2026-11-04T18:17:00.000Z",
-        "side": "guest",
-        "time": null,
-        "translated": null,
-        "type": "message",
-        "unshown_files": 0
-      },
-      {
-        "author": "You",
-        "body": "Yes, the street facing downhill is easiest.",
-        "id": "00000000-0000-4000-8000-000000000008",
-        "label": null,
-        "photos": [],
-        "receipt": null,
-        "retryable": false,
-        "sent_at": "2026-11-04T18:23:00.000Z",
-        "side": "business",
-        "time": "11:23 AM",
-        "translated": null,
-        "type": "message",
-        "unshown_files": 0
-      },
-      {
-        "author": "Mililani",
-        "body": "Thank you! What time is check-in?",
-        "id": "00000000-0000-4000-8000-000000000009",
-        "label": null,
-        "photos": [],
-        "receipt": null,
-        "retryable": false,
-        "sent_at": "2026-11-04T18:31:00.000Z",
-        "side": "guest",
-        "time": "11:31 AM",
-        "translated": null,
-        "type": "message",
-        "unshown_files": 0
-      },
-      {
-        "id": "day:automatic-contract",
-        "label": "Today",
-        "type": "day"
-      },
-      {
-        "author": "Skyler · Automatic",
-        "body": "Your door code is 1106. Garage D is unlocked.",
-        "id": "automatic-contract",
-        "label": "Check-in instructions",
-        "photos": [],
-        "receipt": null,
-        "retryable": false,
-        "sent_at": "2026-11-05T19:00:00.000Z",
-        "side": "business",
-        "time": "12:00 PM",
-        "translated": null,
-        "type": "message",
-        "unshown_files": 0
-      },
-      {
-        "change": {
-          "after": {
-            "assigned_member_id": null,
-            "assigned_member_name": null,
-            "party_size": 2,
-            "total_label": "$900.00",
-            "when_label": "Nov 8, 2026 – Nov 14, 2026"
-          },
-          "before": {
-            "assigned_member_id": null,
-            "assigned_member_name": null,
-            "party_size": 2,
-            "total_label": "$600.00",
-            "when_label": "Nov 8, 2026 – Nov 12, 2026"
-          },
-          "channel": "airbnb",
-          "guest_name": "Mililani Garcia",
-          "locale": "en",
-          "location_title": "74 D · Sky",
-          "noun": "stay",
-          "original_location_title": "74 D · Sky",
-          "requested_by": "guest",
-          "status": "pending",
-          "type": "stay",
-          "vertical": "lodging"
-        },
-        "id": "00000000-0000-4000-8000-000000000010",
-        "sent_at": "2026-11-05T19:00:00.000Z",
-        "type": "change"
-      },
-      {
-        "id": "00000000-0000-4000-8000-000000000011",
-        "sent_at": "2026-11-05T19:00:00.000Z",
-        "text": "Payment received",
-        "type": "event"
-      },
-      {
-        "author": "You",
-        "body": "Check-in is from 4 PM.",
-        "id": "00000000-0000-4000-8000-000000000012",
-        "label": null,
-        "photos": [],
-        "receipt": "Not delivered",
-        "retryable": true,
-        "sent_at": "2026-11-05T19:00:00.000Z",
-        "side": "business",
-        "time": "12:00 PM",
-        "translated": null,
-        "type": "message",
-        "unshown_files": 0
-      }
-    ],
     "title": "Mililani",
     "translated": true,
     "when": "In 3 days"
-  }
+  },
+  "entries": [
+    {
+      "id": "day:00000000-0000-4000-8000-000000000005",
+      "label": "Yesterday",
+      "type": "day"
+    },
+    {
+      "author": "Mililani",
+      "author_user_id": null,
+      "automatic": false,
+      "body": "In winter, can we park on the street?",
+      "deliveries": [],
+      "id": "00000000-0000-4000-8000-000000000005",
+      "label": null,
+      "photos": [],
+      "receipt": null,
+      "retryable": false,
+      "sent_at": "2026-11-04T18:16:00.000Z",
+      "sequence": 1,
+      "side": "guest",
+      "time": "11:16 AM",
+      "translated": {
+        "original": "¿En invierno dejan aparcar en la calle?"
+      },
+      "type": "message",
+      "unshown_files": 0
+    },
+    {
+      "author": "Mililani",
+      "author_user_id": null,
+      "automatic": false,
+      "body": null,
+      "deliveries": [],
+      "id": "00000000-0000-4000-8000-000000000006",
+      "label": null,
+      "photos": [
+        {
+          "height": 3,
+          "id": "00000000-0000-4000-8000-000000000007",
+          "thumbnail_url": "https://media.example.test/organizations/org-contract/media/00000000-0000-4000-8000-000000000007.avif",
+          "url": "https://media.example.test/organizations/org-contract/media/00000000-0000-4000-8000-000000000007.avif",
+          "width": 4
+        }
+      ],
+      "receipt": null,
+      "retryable": false,
+      "sent_at": "2026-11-04T18:17:00.000Z",
+      "sequence": 2,
+      "side": "guest",
+      "time": null,
+      "translated": null,
+      "type": "message",
+      "unshown_files": 0
+    },
+    {
+      "author": "You",
+      "author_user_id": null,
+      "automatic": false,
+      "body": "Yes, the street facing downhill is easiest.",
+      "deliveries": [],
+      "id": "00000000-0000-4000-8000-000000000008",
+      "label": null,
+      "photos": [],
+      "receipt": null,
+      "retryable": false,
+      "sent_at": "2026-11-04T18:23:00.000Z",
+      "sequence": 3,
+      "side": "business",
+      "time": "11:23 AM",
+      "translated": null,
+      "type": "message",
+      "unshown_files": 0
+    },
+    {
+      "author": "Mililani",
+      "author_user_id": null,
+      "automatic": false,
+      "body": "Thank you! What time is check-in?",
+      "deliveries": [],
+      "id": "00000000-0000-4000-8000-000000000009",
+      "label": null,
+      "photos": [],
+      "receipt": null,
+      "retryable": false,
+      "sent_at": "2026-11-04T18:31:00.000Z",
+      "sequence": 4,
+      "side": "guest",
+      "time": "11:31 AM",
+      "translated": null,
+      "type": "message",
+      "unshown_files": 0
+    },
+    {
+      "id": "day:automatic-contract",
+      "label": "Today",
+      "type": "day"
+    },
+    {
+      "author": "Skyler · Automatic",
+      "author_user_id": null,
+      "automatic": true,
+      "body": "Your door code is 1106. Garage D is unlocked.",
+      "deliveries": [],
+      "id": "automatic-contract",
+      "label": "Check-in instructions",
+      "photos": [],
+      "receipt": null,
+      "retryable": false,
+      "sent_at": "2026-11-05T19:00:00.000Z",
+      "sequence": 5,
+      "side": "business",
+      "time": "12:00 PM",
+      "translated": null,
+      "type": "message",
+      "unshown_files": 0
+    },
+    {
+      "change": {
+        "after": {
+          "assigned_member_id": null,
+          "assigned_member_name": null,
+          "party_size": 2,
+          "total_label": "$900.00",
+          "when_label": "Nov 8, 2026 – Nov 14, 2026"
+        },
+        "before": {
+          "assigned_member_id": null,
+          "assigned_member_name": null,
+          "party_size": 2,
+          "total_label": "$600.00",
+          "when_label": "Nov 8, 2026 – Nov 12, 2026"
+        },
+        "channel": "airbnb",
+        "guest_name": "Mililani Garcia",
+        "locale": "en",
+        "location_title": "74 D · Sky",
+        "noun": "stay",
+        "original_location_title": "74 D · Sky",
+        "requested_by": "guest",
+        "status": "pending",
+        "type": "stay",
+        "vertical": "lodging"
+      },
+      "id": "00000000-0000-4000-8000-000000000010",
+      "sent_at": "2026-11-05T19:00:00.000Z",
+      "sequence": 6,
+      "type": "change"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000011",
+      "sent_at": "2026-11-05T19:00:00.000Z",
+      "sequence": 7,
+      "text": "Payment received",
+      "type": "event"
+    },
+    {
+      "author": "You",
+      "author_user_id": "owner-contract",
+      "automatic": false,
+      "body": "Check-in is from 4 PM.",
+      "deliveries": [],
+      "id": "00000000-0000-4000-8000-000000000012",
+      "label": null,
+      "photos": [],
+      "receipt": "Not delivered",
+      "retryable": true,
+      "sent_at": "2026-11-05T19:00:00.000Z",
+      "sequence": 8,
+      "side": "business",
+      "time": "12:00 PM",
+      "translated": null,
+      "type": "message",
+      "unshown_files": 0
+    }
+  ],
+  "page": {
+    "before": null,
+    "booking_actions": [],
+    "failed_messages": [
+      "00000000-0000-4000-8000-000000000012"
+    ],
+    "newest": 8,
+    "oldest": 1,
+    "read_through": 8
+  },
+  "viewer_role": "member"
 }

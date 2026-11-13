@@ -2,7 +2,8 @@ import type { MemberAccessPrincipal } from '~/server/utils/member-access'
 import { runWorkersAiText } from '~/server/utils/workers-ai'
 import { recordUsageEvent } from '~/server/utils/usage-metering'
 import { queryFirst, type DbClient } from '~/server/db'
-import { getInboxThread } from './guest-threads/inbox'
+import { loadConversationPage } from './conversation-history'
+import { resolveConversationAccess } from './conversations'
 import { guestThreadMessagingContext } from './guest-messaging'
 import { messagingError } from './guest-message-schedule'
 
@@ -22,10 +23,11 @@ Output only a JSON array of the reply strings, without commentary, markdown, or 
 export async function suggestGuestReplies(db: DbClient, env: Record<string, unknown>, principal: MemberAccessPrincipal, threadId: string): Promise<{ generation_id: string; suggestions: string[] }> {
   const context = await guestThreadMessagingContext(db, principal, threadId)
   // The conversation as it is shown: a contact form's words are the guest's opening message too.
-  const thread = await getInboxThread(db, threadId, principal.organizationId, { audience: 'member', userId: principal.userId, principal })
-  if (!thread) messagingError(404, 'THREAD_NOT_FOUND', 'This conversation is not in the workspace', 'conversation_id')
+  const access = await resolveConversationAccess(db, principal.userId, threadId)
+  if (access.role !== 'member') messagingError(404, 'THREAD_NOT_FOUND', 'This conversation is not in the workspace', 'conversation_id')
+  const { conversation: thread, entries } = await loadConversationPage(db, { ...access, userId: principal.userId, principal })
   if (thread.kind !== 'guest') messagingError(409, 'SUGGESTION_NEEDS_GUEST_MESSAGE', 'Airbnb Support cases have no suggested replies', 'conversation_id')
-  const messages = thread.stream
+  const messages = entries
     .flatMap(item => item.type === 'message' && item.body?.trim() ? [{ from: item.side, at: item.sent_at, text: item.body }] : [])
     .slice(-40)
   if (messages.at(-1)?.from !== 'guest') messagingError(409, 'SUGGESTION_NEEDS_GUEST_MESSAGE', 'A reply is suggested only when the guest wrote last', 'conversation_id')

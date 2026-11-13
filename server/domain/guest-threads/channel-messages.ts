@@ -5,10 +5,10 @@ import { publishConversationEvent, publishStayInvalidation, type GuestInboxPubli
 import { ChannexError, type ChannexEnv } from '~/server/integrations/channex/client'
 import { landBookingRevision, pendingBookingRevisions } from '~/server/integrations/channex/booking-revisions'
 import { getChannexThread, listChannexMessages, listChannexThreads, sendChannexMessage, type ChannexMessage, type ChannexMessageThread } from '~/server/integrations/channex/messages'
-import { MEMBER_REPLY_EVENT, MIRRORED_EVENT, MessageDedupeConflictError, SCHEDULED_MESSAGE_EVENT, appendMessage, findMessageByDedupeKey, getMessage, messageQueries, parseMessagePayload, type MessageRow } from '~/server/domain/conversations'
+import { MIRRORED_EVENT, MessageDedupeConflictError, SCHEDULED_MESSAGE_EVENT, appendMessage, assertMessageWriteAccess, findMessageByDedupeKey, getMessage, parseMessagePayload, type ConversationGuard, type MessageRow } from '~/server/domain/conversations'
 import { getDeliveryById, getDeliveryByProviderMessageId, isDeliverySent, recordDeliveryOutcome } from './deliveries'
 import { conversationTaskQueries, reconcileConversationTasks } from './repository'
-import { assertMessagePhotos, attachGuestPhotos, discardMessagePhotos, isMessagePhoto, listMessagePhotos, messagePhotoPlacements, sortGuestFiles, uploadMessagePhotos, type MessagePhoto } from './attachments'
+import { assertMessagePhotos, attachGuestPhotos, isMessagePhoto, listMessagePhotos, sortGuestFiles, type MessagePhoto } from './attachments'
 import type { UploadResolvedMediaInput } from '~/server/utils/media-upload'
 import { getMediaAsset, readMediaPlacements } from '~/server/utils/media-asset-manager'
 import { MAX_IMAGE_BYTES } from '~/server/utils/media-mime'
@@ -18,6 +18,7 @@ import { isAirbnbSupportMessage, notifyGuestThreadReply, notifyAirbnbInquiry } f
 import { readAirbnbInquiry } from '~/server/integrations/channex/live-feed'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { planSourceMessages } from '~/server/domain/scheduled-guest-messages'
+import type { GuestThreadDeliveryRow } from './types'
 import type { StayChannel } from '~/shared/bookings'
 
 type ChannelEnv = ChannexEnv & GuestInboxPublicationEnv & CloudflareEnv & UploadResolvedMediaInput['env']
@@ -403,46 +404,26 @@ export async function backfillChannexMessages(db: DbClient, env: ChannelEnv, pro
 }
 
 /** Channel replies use the same canonical ledger, photo owner and delivery receipts as every inbox reply. */
-export type ChannelReplyOutcome = { ok: true; message: { id: string; sequence: number } } | {
+export type ChannelReplyOutcome = { ok: true; message: MessageRow } | {
   ok: false; status: 409 | 502; code: 'CHANNEL_REPLY_FAILED'; field: 'delivery.status'; message: string
   mutation_applied: true; operation_completed: false; request_id: string; retry_with_same_idempotency_key: true
   provider_error?: ChannexError['data']
 }
 
-export function assertReplyIntent(entry: MessageRow, body: string, requestHash: string, eventName: string): void {
-  if (entry.event_name !== eventName) fail(409, 'IDEMPOTENCY_CONFLICT', 'The reply key was already used for a different message', 'idempotencyKey')
-  const payload = parseMessagePayload(entry)
-  if (typeof payload.request_hash !== 'string') fail(500, 'CHANNEL_REPLY_INTENT_INVALID', 'The channel reply intent has no recorded request hash', 'payload.request_hash')
-  if (entry.body !== body || payload.request_hash !== requestHash) fail(409, 'IDEMPOTENCY_CONFLICT', 'The reply key was already used for different content', 'idempotencyKey')
-}
-
 export async function replyThroughChannex(db: DbClient, env: ChannexEnv & UploadResolvedMediaInput['env'] & { MEDIA_BUCKET?: R2Bucket }, input: {
-  mapping: ChannelThreadMapping; body: string; actorUserId: string | null; idempotencyKey: string; requestHash: string
-  guard: { sql: string; params: unknown[] }; photoCount: number; resolvePhotos: () => Promise<MessagePhoto[]>
+  mapping: ChannelThreadMapping; body: string; guard: ConversationGuard
+  /** Register a new send only after Channex validates the conversation mapping. */
+  commit: () => Promise<MessageRow>
+  receipt: GuestThreadDeliveryRow | null
+  deliveryId: string
+  photoCount: number
 }): Promise<ChannelReplyOutcome> {
-  const eventName = input.actorUserId === null ? SCHEDULED_MESSAGE_EVENT : MEMBER_REPLY_EVENT
-  const purpose = input.actorUserId === null ? 'scheduled_message' : 'member_reply'
-  if (!input.body.trim() && !input.photoCount) fail(400, 'EMPTY_MESSAGE', 'Write a message or choose a photo before sending it', 'body')
-  if (input.photoCount > 1 || (input.photoCount && input.body.trim())) fail(400, 'CHANNEL_PHOTO_MESSAGE_INVALID', 'Send one Airbnb photo at a time, separately from text', 'photos')
-  const key = `guest-thread-operation:${input.mapping.conversation_id}:${input.idempotencyKey}`
-  const deliveryId = `guest-thread-channex:${input.mapping.conversation_id}:${input.idempotencyKey}`
-  const requestHash = input.requestHash
-  let entry = await findMessageByDedupeKey(db, key)
-  const assertOwnIntent = (message: MessageRow) => {
-    if (!input.idempotencyKey.startsWith('send-later:') && message.author_user_id !== input.actorUserId) {
-      fail(409, 'IDEMPOTENCY_CONFLICT', 'The reply key was already used for a different message', 'idempotencyKey')
-    }
-    assertReplyIntent(message, input.body, requestHash, eventName)
-  }
-  if (entry) {
-    assertOwnIntent(entry)
-    const receipt = await getDeliveryById(db, deliveryId)
-    if (!receipt || receipt.message_id !== entry.id) fail(500, 'CHANNEL_RECEIPT_INVALID', 'The reply has no matching delivery receipt', 'delivery')
-    if (isDeliverySent(receipt)) {
-      if (!receipt.provider_message_id?.trim()) fail(500, 'CHANNEL_RECEIPT_INVALID', 'A successful channel reply has no provider message ID', 'delivery.provider_message_id')
-      await reconcileConversationTasks(db, input.mapping.conversation_id)
-      return { ok: true, message: { id: entry.id, sequence: entry.sequence } }
-    }
+  const { deliveryId } = input
+  if (input.receipt && isDeliverySent(input.receipt)) {
+    const entry = await input.commit()
+    if (!input.receipt.provider_message_id?.trim()) fail(500, 'CHANNEL_RECEIPT_INVALID', 'A successful channel reply has no provider message ID', 'delivery.provider_message_id')
+    await reconcileConversationTasks(db, input.mapping.conversation_id)
+    return { ok: true, message: entry }
   }
   // Whether the home may still be written to is the caller's (guestReplyDestination);
   // proven accepted replays above remain safe even after it is disconnected.
@@ -452,43 +433,13 @@ export async function replyThroughChannex(db: DbClient, env: ChannexEnv & Upload
   if (!home) throw new Error(`Channel thread ${input.mapping.conversation_id} names a home with no Channex mapping`)
   const current = await getChannexThread(env, input.mapping.external_thread_id)
   if (current.propertyId !== home.property_id || (current.channelId !== null && current.channelId !== home.channel_id)) fail(502, 'INVALID_PROVIDER_RESPONSE', 'The provider conversation is outside its local property mapping', 'relationships.property')
-  if (!entry) {
-    const photos = await input.resolvePhotos()
-    if (photos.length !== input.photoCount) throw new Error('Resolved reply photos do not match their declared sources')
-    const id = crypto.randomUUID(), now = new Date().toISOString()
-    const assetIds = input.actorUserId === null ? [] : await uploadMessagePhotos(db, env, input.mapping.organization_id, photos, { source: 'uploaded', userId: input.actorUserId })
-    try {
-      await executeBatch(db, [...messageQueries({ id, conversationId: input.mapping.conversation_id, authorKind: input.actorUserId === null ? 'krabiclaw' : 'member', authorUserId: input.actorUserId,
-        channel: 'airbnb', body: input.body, eventName, payload: { request_hash: requestHash }, dedupeKey: key, occurredAt: now,
-        guard: input.guard }).queries, {
-        query: `INSERT INTO guest_thread_deliveries (id, message_id, channel, provider, purpose, status, created_at, updated_at)
-          SELECT ?, id, 'airbnb', 'channex', ?, 'pending', ?, ? FROM messages WHERE dedupe_key = ? AND conversation_id = ?
-          ON CONFLICT(id) DO NOTHING`,
-        params: [deliveryId, purpose, now, now, key, input.mapping.conversation_id],
-      }, ...messagePhotoPlacements(input.mapping.organization_id, 'message', id, assetIds, now)], { operation: 'Record channel reply intent' })
-    } catch (error) {
-      let concurrent: MessageRow | null
-      try {
-        concurrent = await findMessageByDedupeKey(db, key)
-      } catch (readError) {
-        throw new AggregateError([error, readError], 'The channel reply commit could not be read; its photos have been retained', { cause: readError })
-      }
-      if (concurrent?.id !== id) await discardMessagePhotos(db, env, input.mapping.organization_id, assetIds.splice(0), input.actorUserId, error)
-      if (!concurrent) throw error
-      assertOwnIntent(concurrent)
-    }
-    entry = await findMessageByDedupeKey(db, key)
-    // Concurrent identical keys share one message; only its photo placements survive.
-    if (entry?.id !== id && assetIds.length) await discardMessagePhotos(db, env, input.mapping.organization_id, assetIds, input.actorUserId, new Error('The reply did not keep these photos'))
-  }
-  if (!entry) fail(404, 'THREAD_NOT_FOUND', 'Conversation not found or access denied', 'conversation_id')
-  assertOwnIntent(entry)
-  const receipt = await getDeliveryById(db, deliveryId)
+  const entry = await input.commit()
+  const receipt = input.receipt ?? await getDeliveryById(db, deliveryId)
   if (!receipt || receipt.message_id !== entry.id) fail(500, 'CHANNEL_RECEIPT_INVALID', 'The reply has no matching delivery receipt', 'delivery')
   if (isDeliverySent(receipt)) {
     if (!receipt.provider_message_id?.trim()) fail(500, 'CHANNEL_RECEIPT_INVALID', 'A successful channel reply has no provider message ID', 'delivery.provider_message_id')
     await reconcileConversationTasks(db, input.mapping.conversation_id)
-    return { ok: true, message: { id: entry.id, sequence: entry.sequence } }
+    return { ok: true, message: entry }
   }
   let photo: ReturnType<typeof assertMessagePhotos>[number] | undefined
   if (input.photoCount) {
@@ -514,8 +465,12 @@ export async function replyThroughChannex(db: DbClient, env: ChannexEnv & Upload
     if (asset.provider === 'cloudflare_r2' && photo.contentType !== asset.mime_type) fail(409, 'CHANNEL_REPLY_PHOTO_UNAVAILABLE', 'The saved reply photo type differs from its recorded file', 'photos')
   }
   // One send at a time per reply: a pending or failed reply is claimed; one already being sent is not.
-  const claim = await execute(db, "UPDATE guest_thread_deliveries SET status = 'sending', error = NULL, updated_at = ? WHERE id = ? AND status IN ('pending', 'failed')", [new Date().toISOString(), deliveryId])
+  const claim = await execute(db, `UPDATE guest_thread_deliveries SET status = 'sending', error = NULL, updated_at = ?
+    WHERE id = ? AND status IN ('pending', 'failed')
+      AND EXISTS (SELECT 1 FROM conversations c WHERE c.id = ? AND (${input.guard.sql}))`,
+  [new Date().toISOString(), deliveryId, input.mapping.conversation_id, ...input.guard.params])
   if (claim.meta.changes !== 1) {
+    await assertMessageWriteAccess(db, input.mapping.conversation_id, input.guard)
     return { ok: false, status: 409, code: 'CHANNEL_REPLY_FAILED', field: 'delivery.status', message: 'This reply is already being sent.',
       mutation_applied: true, operation_completed: false, request_id: input.mapping.conversation_id, retry_with_same_idempotency_key: true }
   }
@@ -541,5 +496,5 @@ export async function replyThroughChannex(db: DbClient, env: ChannexEnv & Upload
     { query: `DELETE FROM messages WHERE id IN (${echoed})`, params: echoParams },
   ])
   await reconcileConversationTasks(db, input.mapping.conversation_id)
-  return { ok: true, message: { id: entry.id, sequence: entry.sequence } }
+  return { ok: true, message: entry }
 }

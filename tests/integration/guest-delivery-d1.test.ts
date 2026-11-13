@@ -4,13 +4,13 @@ import { createHmac } from 'node:crypto'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import * as schema from '../../server/db/schema.ts'
 import { threadPayloadForGuest, requestInsertQueries, getGuestRequest, getThreadOperationalRecord, readBookedRecord } from '../../server/domain/requests.ts'
-import { receiveGuestWebReply } from '../../server/domain/guest-threads/inbound-email.ts'
+import { sendConversationMessage } from '../../server/domain/send-conversation-message.ts'
 import { claimSessionCapacity, listBookableSessions } from '../../server/utils/availability.ts'
 import { createTables } from './support/table-product.ts'
 import test, { mock } from 'node:test'
 import { Miniflare } from 'miniflare'
 import { createDeliveryReceipt, deliverReceiptEmail, getDeliveryById, isVisibleDeliveryFailure, listThreadDeliveries, recordDeliveryOutcome } from '../../server/domain/guest-threads/deliveries.ts'
-import { appendMessage } from '../../server/domain/conversations.ts'
+import { appendMessage, resolveConversationAccess } from '../../server/domain/conversations.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
 import { countUnreadAsGuest, listConversations, reconcileConversationTasks } from '../../server/domain/guest-threads/repository.ts'
 import { moveBooking, requestBookingChange, respondToBookingChange } from '../../server/domain/guest-threads/booking-changes.ts'
@@ -813,11 +813,15 @@ test('a guest writing while the business edits a table booking does not refuse t
       { query: 'SELECT 1 FROM bookings WHERE id = ?', params: [bookingId] }, { opening: 'Table for 2', note: null }) })
     const bookingId = (await getThreadOperationalRecord(db, 'table-thread'))!.id
 
+    const sendGuestMessage = async (body: string, idempotencyKey: string) => sendConversationMessage(env, {
+      ...await resolveConversationAccess(db, 'guest-table', 'table-thread'),
+      userId: 'guest-table', senderName: 'Guest', body, photos: [], idempotencyKey,
+    })
     // The owner opens the booking and reads its version; then the guest writes in the conversation.
     const read = await readBookedRecord(db, 'org-table', bookingId)
     assert(read)
     const threadBefore = (await getGuestRequest(db, 'table-thread'))!.last_message_at
-    await receiveGuestWebReply(env, { threadId: 'table-thread', userId: 'guest-table', body: 'Could we have a window table?', photos: [], idempotencyKey: 'guest-midedit-1' })
+    await sendGuestMessage('Could we have a window table?', 'guest-midedit-1')
     const thread = await getGuestRequest(db, 'table-thread')
     assert(thread)
     assert.notEqual(thread.last_message_at, threadBefore, 'the guest message moved the conversation')
@@ -831,7 +835,7 @@ test('a guest writing while the business edits a table booking does not refuse t
     // Again for a proposal: the guest writes, and the proposal made from the version the owner read still goes to the guest.
     const beforeProposal = await readBookedRecord(db, 'org-table', bookingId)
     assert(beforeProposal)
-    await receiveGuestWebReply(env, { threadId: 'table-thread', userId: 'guest-table', body: 'Thank you!', photos: [], idempotencyKey: 'guest-midedit-2' })
+    await sendGuestMessage('Thank you!', 'guest-midedit-2')
     assert.deepEqual(await requestBookingChange(db, env, (await getGuestRequest(db, 'table-thread'))!, 'user-table', { kind: 'booking', product_session_id: first.id, party_size: 4, version: beforeProposal.version }, 'propose-earlier'),
       { changeStatus: 'awaiting_guest_acceptance' })
     assert.equal((await getThreadOperationalRecord(db, 'table-thread'))?.starts_at, third.starts_at, 'a proposal leaves the booking where it is until the guest accepts')

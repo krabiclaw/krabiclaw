@@ -6,23 +6,12 @@ import { creationRequestHash, isUniqueDedupeConflict, organizationEventQuery, re
 import { publishConversationEvent, publishDashboardInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 import { notifyTeamMessage } from '~/server/utils/notifications'
 import type { CloudflareEnv } from '~/server/utils/auth'
-import { readConversationEnrichment, threadDeliveriesQuery } from '~/server/domain/guest-threads/deliveries'
-import type { ConversationDelivery } from '~/shared/messages-contract'
 import type { MessageIdentity } from '~/shared/dashboard-invalidations'
 import { getStay, stayAccessFor } from '~/server/domain/stays'
 import { subjectJobViews, taskViewer, type JobSubject, type TaskView } from '~/server/domain/tasks'
 import { BOOKING_RECORDS_SQL, bookingDay } from '~/server/domain/requests'
-import { appendMessage, findMessageByDedupeKey, MessageDedupeConflictError, MessageStateConflictError, conversationMessagesQuery, participantGuard, unreadSql, type ConversationGuard, type ConversationWindow, type MessageRow } from '~/server/domain/conversations'
-import {
-  discardMessagePhotos,
-  listMessagePhotos,
-  MAX_MESSAGE_PHOTOS,
-  MessagePhotoRejection,
-  messagePhotoPlacements,
-  messagePreview,
-  uploadMessagePhotos,
-  type MessagePhotoInput,
-} from '~/server/domain/guest-threads/attachments'
+import { appendMessage, conversationAccessDenied, participantGuard, unreadSql, type MessageRow } from '~/server/domain/conversations'
+import { messagePreview } from '~/server/domain/guest-threads/attachments'
 
 /**
  * Team conversations: the organization's own members talking to each other,
@@ -92,24 +81,8 @@ export interface TeamThread {
   job: TaskView | null
   location: TeamLocationSummary | null
   participants: TeamParticipant[]
-  last_message: { id: string; author_user_id: string | null; body: string; attachment_count: number; created_at: string } | null
   /** A message from someone else after the caller's read position (conversations.ts unreadSql). */
   unread: boolean
-}
-
-export interface TeamMessage {
-  id: string
-  sequence: number
-  conversation_id: string
-  /** null for an automatic message, and for a person's message once their account has been deleted. */
-  author_user_id: string | null
-  /** Written by KrabiClaw (a job, a reminder, a move), not by a member: shown as sent automatically. It counts as unread like any message from someone else. */
-  automatic: boolean
-  body: string
-  attachments: Array<{ id: string; url: string; thumbnail_url: string; width: number | null; height: number | null }>
-  /** Each send this message went out as (email, WhatsApp, push), with its outcome. */
-  deliveries: ConversationDelivery[]
-  created_at: string
 }
 
 const MAX_BODY = 5000
@@ -171,18 +144,17 @@ async function publishThreadChanged(env: GuestInboxPublicationEnv, db: DbClient,
 }
 
 /**
- * One of the caller's team conversations with its people, what it is about
- * and its newest message: the header and details a conversation screen draws.
+ * The team context shown above the shared transcript.
  * The list of conversations is the one list (guest-threads/repository.ts
  * listConversations).
  */
-export async function getTeamThread(db: DbClient, access: MemberAccessPrincipal, threadId: string, includePreview = true): Promise<TeamThread> {
+export async function getTeamThread(db: DbClient, access: MemberAccessPrincipal, threadId: string): Promise<TeamThread> {
   const unread = unreadSql('c', access.userId)
   const guard = participantGuard('c', access.userId, 'member')
   const thread = await queryFirst<{ id: string; name: string | null; is_group: number; created_by_user_id: string | null; booking_id: string | null; location_id: string | null; last_message_at: string; created_at: string; unread: number }>(db, `
     SELECT c.id, c.name, c.is_group, c.created_by_user_id, c.booking_id, c.location_id, c.last_message_at, c.created_at, ${unread.sql} AS unread
       FROM conversations c WHERE c.organization_id = ? AND c.id = ? AND c.kind = 'team' AND ${guard.sql}`, [...unread.params, access.organizationId, threadId, ...guard.params])
-  if (!thread) fail(404, 'TEAM_THREAD_NOT_FOUND', 'That conversation is not one of yours', 'conversation_id')
+  if (!thread) conversationAccessDenied()
   // A stay is titled by its home; any other booking by who booked, else what: the offering, or a table's place.
   const booked = thread.booking_id ? await queryFirst<{ unit: 'slot' | 'nights'; id: string; title: string; product_id: string; home_name: string | null; starts_at: string; ends_at: string; timezone: string; status: TeamStaySummary['status'] }>(db, `
     SELECT br.unit, br.id, COALESCE(json_extract(guest.payload_json, '$.guest.name'), CASE WHEN br.product_kind = 'table' THEN l.title END, br.product_name) AS title,
@@ -191,18 +163,14 @@ export async function getTeamThread(db: DbClient, access: MemberAccessPrincipal,
       LEFT JOIN business_locations l ON l.id = br.location_id AND l.organization_id = br.organization_id
      WHERE br.organization_id = ? AND br.id = ?`, [access.organizationId, thread.booking_id]) : null
   if (thread.booking_id && !booked) throw new Error(`Team conversation ${thread.id} names booking ${thread.booking_id}, which was not found`)
-  const [participants, last, location] = await Promise.all([
+  const [participants, location] = await Promise.all([
     queryAll<TeamParticipant>(db, `SELECT u.id, m.id AS member_id, u.name, u.image FROM conversation_participants seat
       JOIN member m ON m.organizationId = seat.organization_id AND m.userId = seat.user_id
       JOIN user u ON u.id = m.userId
       WHERE seat.conversation_id = ? ORDER BY seat.created_at, seat.user_id`, [thread.id]),
-    includePreview ? queryFirst<{ id: string; author_user_id: string | null; body: string | null; created_at: string }>(db,
-      `SELECT m.id, m.author_user_id, m.body, m.created_at FROM messages m JOIN conversations c ON c.id = m.conversation_id
-        WHERE m.conversation_id = ? AND ${guard.sql} ORDER BY m.sequence DESC LIMIT 1`, [thread.id, ...guard.params]) : null,
     thread.location_id ? queryFirst<TeamLocationSummary>(db, 'SELECT id, title, slug, timezone FROM business_locations WHERE organization_id = ? AND id = ?', [access.organizationId, thread.location_id]) : null,
   ])
   if (thread.location_id && !location) throw new Error(`Team conversation ${thread.id} names location ${thread.location_id}, which was not found`)
-  const photos = last ? await listMessagePhotos(db, 'message', [last.id]) : new Map()
   const jobs = thread.booking_id ? await subjectJobViews(db, await taskViewer(db, access), [thread.booking_id]) : new Map<string, TaskView>()
   if (booked?.unit === 'nights' && !booked.home_name) throw new Error(`Team conversation ${thread.id} names stay ${booked.id}, whose home has no name`)
   const stay = booked?.unit === 'nights' ? { id: booked.id, product_id: booked.product_id, name: booked.home_name!, check_in_date: bookingDay(booked.starts_at, booked.timezone), check_out_date: bookingDay(booked.ends_at, booked.timezone), status: booked.status } : null
@@ -224,7 +192,6 @@ export async function getTeamThread(db: DbClient, access: MemberAccessPrincipal,
     job: thread.booking_id ? jobs.get(thread.booking_id) ?? null : null,
     location,
     participants,
-    last_message: last ? { id: last.id, author_user_id: last.author_user_id, body: last.body ?? '', attachment_count: photos.get(last.id)?.length ?? 0, created_at: last.created_at } : null,
     unread: thread.unread === 1,
   }
 }
@@ -476,149 +443,20 @@ export async function operateTeamGroup(env: TeamEnv, db: DbClient, access: Membe
   return await publish()
 }
 
-async function readMessages(db: DbClient, threadId: string, rows: MessageRow[]): Promise<TeamMessage[]> {
-  if (!rows.length) return []
-  const ids = rows.map(row => row.id)
-  const { photos, deliveries } = await readConversationEnrichment(db, ids, [], threadDeliveriesQuery(threadId, ids, 'owner_alert'))
-  const byMessage = new Map<string, ConversationDelivery[]>()
-  for (const delivery of deliveries) {
-    const key = delivery.message_id!
-    const list = byMessage.get(key) ?? []
-    const { id, channel, status, error, updated_at } = delivery
-    list.push({ id, channel, status, error, updated_at })
-    byMessage.set(key, list)
-  }
-  return rows.map(row => ({
-    id: row.id,
-    sequence: row.sequence,
-    conversation_id: row.conversation_id,
-    author_user_id: row.author_user_id,
-    automatic: row.author_kind === 'krabiclaw',
-    body: row.body ?? '',
-    attachments: (photos.get(row.id) ?? []).map(photo => ({ id: photo.id, url: photo.url, thumbnail_url: photo.thumbnailUrl, width: photo.width, height: photo.height })),
-    deliveries: byMessage.get(row.id) ?? [],
-    created_at: row.created_at,
-  }))
-}
-
-/** The shared sequence window projects team delivery receipts for staff. */
-export async function loadTeamMessageWindow(db: DbClient, threadId: string, window: ConversationWindow, guard: ConversationGuard) {
-  const { query, params } = conversationMessagesQuery(threadId, null, window, guard)
-  const rows = await queryAll<MessageRow>(db, query, params)
-  const hasOlder = rows.length > window.limit
-  const messages = await readMessages(db, threadId, hasOlder ? rows.slice(1) : rows)
-  return { messages, before: hasOlder ? messages[0]!.sequence : null }
-}
-
-/** Newest first. `before` and `before_id` name the oldest message already loaded. */
-export async function listTeamMessages(db: DbClient, access: MemberAccessPrincipal, conversation_id: string, query: { limit?: unknown; before?: unknown; before_id?: unknown }): Promise<{ messages: TeamMessage[]; has_more: boolean }> {
-  await requireSeat(db, access, conversation_id)
-  const limit = query.limit === undefined ? 20 : Number(query.limit)
-  if (!Number.isInteger(limit) || limit < 1 || limit > 100) fail(422, 'INVALID_LIMIT', 'limit must be a whole number from 1 to 100', 'limit')
-  if ((query.before === undefined) !== (query.before_id === undefined)) fail(422, 'INVALID_CURSOR', 'before and before_id are sent together', query.before === undefined ? 'before' : 'before_id')
-  if (query.before !== undefined && (typeof query.before !== 'string' || !query.before || typeof query.before_id !== 'string' || !query.before_id)) fail(422, 'INVALID_CURSOR', 'before and before_id must name a loaded message', 'before')
-  let before: number | null = null
-  if (typeof query.before_id === 'string') {
-    const loaded = await queryFirst<{ sequence: number; created_at: string }>(db, 'SELECT sequence, created_at FROM messages WHERE conversation_id = ? AND id = ?', [conversation_id, query.before_id])
-    if (!loaded || loaded.created_at !== query.before) fail(422, 'INVALID_CURSOR', 'before and before_id must name a loaded message', 'before_id')
-    before = loaded.sequence
-  }
-  const guard = participantGuard('c', access.userId, 'member')
-  const page = await loadTeamMessageWindow(db, conversation_id, { before, limit }, {
-    sql: `c.organization_id = ? AND c.kind = 'team' AND ${guard.sql}`, params: [access.organizationId, ...guard.params],
-  })
-  if (!page.messages.length) await requireSeat(db, access, conversation_id)
-  return { messages: page.messages.reverse(), has_more: page.before !== null }
-}
-
-/**
- * Send a message with text, photos or both. The photos are stored first and
- * placed by the batch that writes the message, so a message exists with all of
- * its photos or not at all. The same idempotency key returns the same message;
- * a retry also sends any alert that has not been sent and tells open apps again.
- */
-export async function sendTeamMessage(
-  env: TeamEnv,
-  db: DbClient,
-  access: MemberAccessPrincipal,
-  threadId: string,
-  input: { body: unknown; photos: MessagePhotoInput; idempotency_key: unknown; senderName: string },
-): Promise<{ message: TeamMessage; created: boolean }> {
-  await requireSeat(db, access, threadId)
-  const idempotencyKey = requestKey(input.idempotency_key)
-  if (input.body !== undefined && typeof input.body !== 'string') fail(422, 'INVALID_MESSAGE', 'body must be text', 'body')
-  const body = (input.body ?? '').trim()
-  if (body.length > MAX_BODY) fail(422, 'MESSAGE_TOO_LONG', `A message can be at most ${MAX_BODY} characters`, 'body')
-  const photoInput = input.photos
-  const suppliedPhotoCount = Array.isArray(photoInput) ? photoInput.length : photoInput.sourceIds.length
-  if (!body && !suppliedPhotoCount) fail(422, 'EMPTY_MESSAGE', 'Write a message or add a photo', 'body')
-  if (suppliedPhotoCount > MAX_MESSAGE_PHOTOS) fail(422, 'INVALID_PHOTO', `A message can carry at most ${MAX_MESSAGE_PHOTOS} photos`, 'photos')
-  // What was sent, photos included, so a replay of the key with something else is refused.
-  const requestHash = await creationRequestHash({
-    body,
-    // Keep the native byte-array identity; host file IDs are a different source,
-    // whose bytes are needed only when a message has not already been saved.
-    photos: Array.isArray(photoInput)
-      ? await Promise.all(photoInput.map(async photo => [...new Uint8Array(await crypto.subtle.digest('SHA-256', photo.bytes))].map(byte => byte.toString(16).padStart(2, '0')).join('')))
-      : { sourceIds: photoInput.sourceIds },
-  })
-  const dedupeKey = teamMessageKey(threadId, idempotencyKey)
-  const guard = participantGuard('c', access.userId, 'member')
-  const message = {
-    conversationId: threadId, authorKind: 'member' as const, authorUserId: access.userId, body, payload: { request_hash: requestHash }, dedupeKey,
-    // Written only while the sender still holds a seat.
-    guard: { sql: `c.kind = 'team' AND ${guard.sql}`, params: guard.params },
-  }
-  let row: MessageRow
-  let created = false
-  try {
-    const existing = await findMessageByDedupeKey(db, dedupeKey)
-    if (existing) row = await appendMessage(db, message)
-    else {
-      const id = crypto.randomUUID()
-      const now = new Date().toISOString()
-      let assetIds: string[]
-      try {
-        const photos = Array.isArray(photoInput) ? photoInput : await photoInput.resolve()
-        if (photos.length !== suppliedPhotoCount) throw new Error('Resolved team message photos do not match their declared sources')
-        assetIds = await uploadMessagePhotos(db, env, access.organizationId, photos, { source: 'uploaded', userId: access.userId })
-      } catch (error) {
-        if (error instanceof MessagePhotoRejection) fail(422, 'INVALID_PHOTO', error.message, 'photos')
-        throw error
-      }
-      try {
-        row = await appendMessage(db, { ...message, id }, messagePhotoPlacements(access.organizationId, 'message', id, assetIds, now))
-      } catch (error) {
-        // A message that did not keep this request's id keeps none of its photos.
-        const concurrent = await findMessageByDedupeKey(db, dedupeKey).catch((readError: unknown) => {
-          throw new AggregateError([error, readError], 'The message commit could not be read; its photos have been retained', { cause: readError })
-        })
-        if (concurrent?.id !== id) await discardMessagePhotos(db, env, access.organizationId, assetIds, access.userId, error)
-        throw error
-      }
-      created = row.id === id
-    }
-  } catch (error) {
-    if (error instanceof MessageDedupeConflictError) fail(409, 'IDEMPOTENCY_KEY_REUSED', 'This idempotency key belongs to a different message', 'idempotency_key')
-    // The seat was removed between the check and the write: nothing was written.
-    if (error instanceof MessageStateConflictError) fail(404, 'TEAM_THREAD_NOT_FOUND', 'That conversation is not one of yours', 'conversation_id')
-    throw error
-  }
+/** Team delivery fans out to current participants after the shared message commit. */
+export async function deliverTeamMessage(env: TeamEnv, db: DbClient, row: MessageRow, senderName: string, photoCount: number, created: boolean): Promise<void> {
   const recipients = await queryAll<{ user_id: string }>(db, `SELECT seat.user_id FROM conversation_participants seat
     JOIN member m ON m.organizationId = seat.organization_id AND m.userId = seat.user_id
-    WHERE seat.conversation_id = ? AND seat.user_id <> ?`, [threadId, access.userId])
-  const photoCount = (await listMessagePhotos(db, 'message', [row.id])).get(row.id)?.length ?? 0
+    WHERE seat.conversation_id = ? AND seat.user_id <> ?`, [row.conversation_id, row.author_user_id])
   await notifyTeamMessage(env, db, {
-    organizationId: access.organizationId,
-    threadId,
+    organizationId: row.organization_id,
+    threadId: row.conversation_id,
     messageId: row.id,
-    senderName: input.senderName,
+    senderName,
     messagePreview: messagePreview(row.body, photoCount),
     recipientUserIds: recipients.map(recipient => recipient.user_id),
   })
-  await publishThreadChanged(env, db, threadId, created ? 'MESSAGE_CREATE' : 'MESSAGE_UPDATE', { message_id: row.id }, { id: row.id, sequence: row.sequence })
-  const [read] = await readMessages(db, threadId, [row])
-  return { message: read!, created }
+  await publishThreadChanged(env, db, row.conversation_id, created ? 'MESSAGE_CREATE' : 'MESSAGE_UPDATE', { message_id: row.id }, { id: row.id, sequence: row.sequence })
 }
 
 /**

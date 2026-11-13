@@ -5,17 +5,17 @@ import { SCHEDULED_MESSAGE_CONVERSATION_SQL, visibleScheduledMessagesSql } from 
 import { stayAccessFor } from '~/server/domain/stays'
 import type { MemberAccessPrincipal } from '~/server/utils/member-access'
 import { loadGuestThreadDetail, type TranscriptView } from './detail'
+import type { ConversationHistory } from '~/server/domain/conversation-history-data'
 import { guestReplyDestination } from './operations'
-import { MEMBER_REPLY_EVENT, MIRRORED_EVENT, OPENING_EVENT, SCHEDULED_MESSAGE_EVENT, SUBMISSION_EVENT, type ConversationGuard, type ConversationRow, type ConversationWindow } from '~/server/domain/conversations'
+import { MEMBER_REPLY_EVENT, MIRRORED_EVENT, OPENING_EVENT, SCHEDULED_MESSAGE_EVENT, SUBMISSION_EVENT, type ConversationRow, type ConversationWindow } from '~/server/domain/conversations'
 import { formatFormAnswer } from '~/shared/form-questions'
 import { EXPERIENCE_PRESENTATION } from '~/utils/product-presentation'
 import { normalizeVertical } from '~/utils/vertical-copy'
 import { calendarDate, clockTime, firstName, initial, localDateKey, providerInstant, sendTime, stayWhen, transcriptDays } from './presentation'
-import type { ConversationChange, ConversationEntry, ConversationMessage, ConversationParticipant, ConversationViewerRole } from '~/shared/messages-contract'
+import type { ConversationChange, ConversationEntry, ConversationMessage, ConversationPage, ConversationParticipant, ConversationViewerRole } from '~/shared/messages-contract'
 import { formatCalendarRange } from '~/utils/timezone'
 import type {
   GuestThreadDetailViewModel,
-  InboxTranscriptPage,
   GuestThreadEntryViewModel,
   InboxChannel,
   InboxPendingMessage,
@@ -32,7 +32,7 @@ import type {
   leave it.
 */
 
-type Viewer = ({ audience: 'member'; userId: string; principal: MemberAccessPrincipal } | { audience: 'buyer'; userId: string }) & { conversation?: ConversationRow; guard?: ConversationGuard }
+type Viewer = ({ audience: 'member'; userId: string; principal: MemberAccessPrincipal } | { audience: 'buyer'; userId: string }) & { conversation?: ConversationRow }
 type MessageItem = ConversationMessage
 
 function invalid(message: string, field: string, entryId: string): never {
@@ -305,22 +305,23 @@ function pendingMessages(rows: Awaited<ReturnType<typeof readPendingMessages>>, 
     : { id: row.id, source: 'later' as const, label: row.body, due_at: row.due_at, time: sendTime(row.due_at, timeZone), body: row.body, cancellable: row.status === 'pending' })
 }
 
-/** The conversation's view model, or null when the viewer has no such conversation. */
-export async function getInboxThread(db: DbClient, threadId: string, organizationId: string, viewer: Viewer, now = new Date(), window?: ConversationWindow): Promise<(Omit<InboxThread, 'stream'> & { stream: ConversationEntry[]; page?: Omit<InboxTranscriptPage, 'booking_actions'> & { booking_actions: ConversationChange[] } }) | null> {
+/** Booking and contact context for the shared conversation history. */
+export async function projectGuestConversation(db: DbClient, conversation: ConversationRow, viewer: Viewer, now: Date, window: ConversationWindow | undefined, history: Promise<ConversationHistory>) {
+  const { id: threadId, organization_id: organizationId } = conversation
   const [detail, scheduled] = await Promise.all([
     loadGuestThreadDetail(db, threadId, organizationId, viewer.audience === 'buyer'
-      ? { buyerUserId: viewer.userId, conversation: viewer.conversation, guard: viewer.guard }
-      : { memberUserId: viewer.userId, conversation: viewer.conversation, guard: viewer.guard }, now, true, window),
-    viewer.audience === 'member' && viewer.conversation
+      ? { buyerUserId: viewer.userId, conversation }
+      : { memberUserId: viewer.userId, conversation }, now, true, window, history),
+    viewer.audience === 'member'
       ? readPendingMessages(db, threadId, organizationId, viewer.principal)
-      : null,
+      : [],
   ])
   if (!detail) return null
   const { view: raw, timeZone } = detail
-  const [facts, replyComposer, pending] = await Promise.all([
+  const [facts, replyComposer, { page }] = await Promise.all([
     threadFacts(db, raw, organizationId, timeZone, now),
     viewer.audience === 'member' ? guestReplyDestination(db, detail.request, detail.channelFacts) : null,
-    scheduled ?? (viewer.audience === 'member' ? readPendingMessages(db, raw.id, organizationId, viewer.principal) : []),
+    history,
   ])
   const items = stream(facts, viewer, now, replyComposer?.channel !== null)
   const record = raw.operationalRecord
@@ -338,20 +339,18 @@ export async function getInboxThread(db: DbClient, threadId: string, organizatio
     record_title: record ? recordTitle(record, raw.organizationVertical) : null,
     activity_path: raw.activityPath,
     stream: items,
-    ...raw.window && { page: {
-      before: raw.window.before,
-      oldest: raw.window.oldest,
-      newest: raw.window.newest,
-      failed_messages: raw.window.failedMessages,
-      booking_actions: raw.window.bookingActions.map(entry => ({ type: 'change' as const, id: entry.id, sequence: entry.sequence, sent_at: entry.occurredAt, change: entry.bookingChange! })),
-    } },
-    pending: pendingMessages(pending, timeZone),
+    page: {
+      ...page,
+      failed_messages: raw.window?.failedMessages ?? [],
+      booking_actions: (raw.window?.bookingActions ?? []).map(entry => ({ type: 'change', id: entry.id, sequence: entry.sequence, sent_at: entry.occurredAt, change: entry.bookingChange! }) satisfies ConversationChange),
+    },
+    pending: pendingMessages(scheduled, timeZone),
     composer: {
       channel: viewer.audience === 'member' && raw.conversationChannel === 'airbnb' ? 'airbnb' : 'email',
       available: replyComposer?.channel !== null,
       reason: replyComposer?.channel === null ? replyComposer.reason : null,
     },
-  }
+  } satisfies Omit<InboxThread, 'stream'> & { stream: ConversationEntry[]; page: Omit<ConversationPage['page'], 'read_through'> }
 }
 
 /** Only the live roster is shown. Guests never receive internal account or member IDs. */

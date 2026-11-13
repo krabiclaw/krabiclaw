@@ -1,6 +1,9 @@
 import { HTTPError } from 'nitro'
 import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { d1JsonStringSet } from '~/server/db/d1-limits'
+import type { MessagePhotoInput } from './guest-threads/attachments'
+import type { UploadResolvedMediaInput } from '~/server/utils/media-upload'
+import type { GuestThreadDeliveryChannel, GuestThreadDeliveryProvider, GuestThreadDeliveryPurpose } from './guest-threads/types'
 import type { MemberAccessPrincipal } from '~/server/utils/member-access'
 
 /**
@@ -243,9 +246,9 @@ export function parseTranscriptWindow(query: URLSearchParams): ConversationWindo
   return { before, limit: 40 }
 }
 
-export function conversationMessagesQuery(conversationId: string, guestUserId: string | null, window?: ConversationWindow, guard?: ConversationGuard): BatchQuery {
+export function conversationMessagesQuery(conversationId: string, guestUserId: string | null, window?: ConversationWindow, guard?: ConversationGuard, filter?: string): BatchQuery {
   const source = `messages m${guard || guestUserId ? ' JOIN conversations c ON c.id = m.conversation_id' : ''}`
-  const scope = `m.conversation_id = ?${guard ? ` AND (${guard.sql})` : ''}${guestUserId ? ` AND ${guestVisibleSql('m', 'c.user_id = ?')}` : ''}`
+  const scope = `m.conversation_id = ?${guard ? ` AND (${guard.sql})` : ''}${guestUserId ? ` AND ${guestVisibleSql('m', 'c.user_id = ?')}` : ''}${filter ? ` AND (${filter})` : ''}`
   const params = [conversationId, ...(guard?.params ?? []), ...(guestUserId ? [guestUserId] : [])]
   if (!window) return { query: `SELECT m.* FROM ${source} WHERE ${scope} ORDER BY m.sequence`, params }
   return {
@@ -269,36 +272,103 @@ function sameMessage(existing: MessageRow, input: MessageInput): MessageRow {
   return existing
 }
 
-export function guestOwnsGuard(guestUserId: string, alias = 'c'): ConversationGuard {
-  return participantGuard(alias, guestUserId, 'guest')
-}
-
 /** A guest conversation is its guest's while every booking it is about is theirs too. */
 export const CURRENT_GUEST_SQL = (conversation: string) => `${conversation}.user_id IS NOT NULL AND ${guestConversationSql(conversation)}
   AND NOT EXISTS (SELECT 1 FROM bookings guest_booking WHERE guest_booking.id = ${conversation}.booking_id AND guest_booking.organization_id = ${conversation}.organization_id
     AND (guest_booking.user_id IS NULL OR guest_booking.user_id <> ${conversation}.user_id))`
 
+interface MessageSendWrite {
+  organizationId: string
+  env: UploadResolvedMediaInput['env']
+  photos: MessagePhotoInput
+  /** The source's uploader, independent of the message's recorded author. */
+  uploaderUserId: string | null
+  /** This key was already checked by a caller that needed its recorded destination. */
+  recorded?: MessageRow | null
+  /** A deliberate retry can only resend a specific durable message. */
+  retryMessageId?: string
+  receipt?: { id: string; channel: GuestThreadDeliveryChannel; provider: GuestThreadDeliveryProvider; purpose: GuestThreadDeliveryPurpose }
+  extra?: BatchQuery[]
+}
+
+export async function assertMessageWriteAccess(db: DbClient, conversationId: string, guard: ConversationGuard): Promise<void> {
+  if (!await queryFirst(db, `SELECT 1 FROM conversations c WHERE c.id = ? AND (${guard.sql})`, [conversationId, ...guard.params])) {
+    throw new MessageStateConflictError('The conversation changed before the message could be sent')
+  }
+}
+
 /**
- * Write one message and read it back. A replay of its dedupe key returns the
- * message already written; a different message under the key is refused, and
- * a guard that no longer holds is a state conflict.
+ * One durable append for the ledger and for sends. A send's pending receipt
+ * and photo placements commit with the message. A concurrent replay keeps
+ * the winning row and only its uploads.
  */
-export async function appendMessage(db: DbClient, input: MessageInput, more: BatchQuery[] = []): Promise<MessageRow> {
-  if (input.dedupeKey) {
-    const existing = await findMessageByDedupeKey(db, input.dedupeKey)
-    if (existing) return sameMessage(existing, input)
+export async function appendMessage(db: DbClient, input: MessageInput, additions: BatchQuery[] | MessageSendWrite = []): Promise<MessageRow> {
+  const send = Array.isArray(additions) ? undefined : additions
+  const extra = Array.isArray(additions) ? additions : additions.extra ?? []
+  const writer = messageQueries(input)
+  const { id, dedupeKey } = writer
+  const existing = send && 'recorded' in send ? send.recorded : input.dedupeKey ? await findMessageByDedupeKey(db, dedupeKey) : null
+  // Read again on a deliberate retry so an already removed message cannot be dispatched.
+  if (send?.retryMessageId) {
+    const saved = await findMessageByDedupeKey(db, dedupeKey)
+    if (saved?.id !== send.retryMessageId) throw new MessageStateConflictError('The message to retry no longer exists')
+    if (input.guard) await assertMessageWriteAccess(db, input.conversationId, input.guard)
+    return sameMessage(saved, input)
   }
-  const write = messageQueries(input)
-  const [inserted] = await executeBatch(db, [...write.queries, ...more], { operation: 'Write message' })
-  if (Number(inserted?.meta?.changes ?? 0) === 0) {
-    const replay = await findMessageByDedupeKey(db, write.dedupeKey)
-    if (replay) return sameMessage(replay, input)
-    if (!await queryFirst(db, 'SELECT 1 FROM conversations WHERE id = ?', [input.conversationId])) throw new HTTPError({ statusCode: 404, message: 'Conversation not found', data: { code: 'THREAD_NOT_FOUND', field: 'conversation_id' } })
-    throw new MessageStateConflictError('The conversation changed before the message could be written')
+  if (existing) {
+    if (send && input.guard) await assertMessageWriteAccess(db, input.conversationId, input.guard)
+    return sameMessage(existing, input)
   }
-  const created = await getMessage(db, write.id)
-  if (!created) throw new Error(`Message ${write.id} was written and could not be read back`)
-  return created
+
+  const now = input.occurredAt ?? new Date().toISOString()
+  const photos = send ? Array.isArray(send.photos) ? send.photos : await send.photos.resolve() : []
+  if (send && !Array.isArray(send.photos) && photos.length !== send.photos.sourceIds.length) {
+    throw new Error('Resolved message photos do not match their declared sources')
+  }
+  const media = send && photos.length ? await import('./guest-threads/attachments') : null
+  const assetIds = send && media ? await media.uploadMessagePhotos(db, send.env, send.organizationId, photos,
+    send.uploaderUserId === null ? { source: 'external', userId: null } : { source: 'uploaded', userId: send.uploaderUserId }) : []
+  let row: MessageRow | null
+  try {
+    const receipt = send?.receipt
+    const results = await executeBatch(db, [
+      ...writer.queries,
+      ...receipt ? [{
+        query: `INSERT INTO guest_thread_deliveries (id, message_id, channel, provider, purpose, status, created_at, updated_at)
+          SELECT ?, id, ?, ?, ?, 'pending', ?, ? FROM messages WHERE id = ?
+          ON CONFLICT(id) DO NOTHING`,
+        params: [receipt.id, receipt.channel, receipt.provider, receipt.purpose, now, now, id],
+      }] : [],
+      ...send && media ? media.messagePhotoPlacements(send.organizationId, 'message', id, assetIds, now) : [],
+      ...extra,
+      { query: 'SELECT * FROM messages WHERE dedupe_key = ?', params: [dedupeKey] },
+    ], { operation: 'Write message' })
+    row = results.at(-1)?.results[0] as MessageRow | undefined ?? null
+  } catch (error) {
+    // A rejected response can mean a committed batch. Retain its uploads and
+    // surface the error if the outcome cannot be read; release a losing upload.
+    if (!send) throw error
+    try {
+      row = await findMessageByDedupeKey(db, dedupeKey)
+    } catch (readError) {
+      throw new AggregateError([error, readError], 'The message commit could not be read; its photos have been retained', { cause: readError })
+    }
+    if (!row) {
+      if (media) await media.discardMessagePhotos(db, send.env, send.organizationId, assetIds, send.uploaderUserId, error)
+      if (input.guard) await assertMessageWriteAccess(db, input.conversationId, input.guard)
+      throw error
+    }
+  }
+  if (row?.id !== id && send && media) {
+    await media.discardMessagePhotos(db, send.env, send.organizationId, assetIds, send.uploaderUserId, new Error('The message did not keep these photos'))
+  }
+  if (row) {
+    if (row.id === id) return row
+    if (send && input.guard) await assertMessageWriteAccess(db, input.conversationId, input.guard)
+    return sameMessage(row, input)
+  }
+  if (!await queryFirst(db, 'SELECT 1 FROM conversations WHERE id = ?', [input.conversationId])) throw new HTTPError({ statusCode: 404, message: 'Conversation not found', data: { code: 'THREAD_NOT_FOUND', field: 'conversation_id' } })
+  throw new MessageStateConflictError('The conversation changed before the message could be written')
 }
 
 export function parseMessagePayload(message: Pick<MessageRow, 'payload_json'>): Record<string, unknown> {
