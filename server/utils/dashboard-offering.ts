@@ -31,6 +31,12 @@ import { assertOrganizationLanguage, getProductCatalogLocalization, putResourceL
 import { RESOURCE_LOCALIZATIONS_SQL } from '~/shared/content-registries'
 import { z } from 'zod'
 import { groupProductsByCollection } from '~/utils/product-presentation'
+import { createStayPhotoRoom, moveStayPhotos, readStayHome, removeStayPhotoRoom, stayAccessFor, updateStayHomeAccessibility, updateStayPhotoRoom } from '~/server/domain/stays'
+import { isStayHomeAccessibilityFeature, isStayRoomAccessibilityFeature, STAY_HOME_ACCESSIBILITY_FEATURES, STAY_ROOM_ACCESSIBILITY_FEATURES } from '~/shared/stay-accessibility'
+import { STAY_BED_TYPES, STAY_PHOTO_ROOM_TYPES, stayPhotoRoomName, type StayBedType } from '~/shared/stay-photos'
+import { STAY_AMENITIES } from '~/shared/stay-listing'
+
+const STAY_ROOM_VIEWS = ['stay-rooms', 'stay-room', 'stay-room-add', 'stay-room-beds', 'stay-room-privacy', 'stay-room-remove', 'stay-photo-room', 'stay-room-amenities', 'stay-room-accessibility']
 
 const invalid = (message: string): never => { throw new HTTPError({ statusCode: 422, message }) }
 const missing = (message: string): never => { throw new HTTPError({ statusCode: 404, message }) }
@@ -457,7 +463,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     await assertProductAccess(db, { ...principal, productId, patch: changes as Record<string, unknown> })
     await updateProduct(db, { ...target, patch: { updated_at: product.updated_at, ...changes }, actor, env })
   }
-  if (product.kind === 'stay' && !['questions', 'question', 'question-order', 'stay-details', 'stay-field', 'stay-safety'].includes(view)) return missing('Offering not found')
+  if (product.kind === 'stay' && !['questions', 'question', 'question-order', 'stay-details', 'stay-field', 'stay-safety', 'stay-accessibility', 'stay-accessibility-feature', ...STAY_ROOM_VIEWS].includes(view)) return missing('Offering not found')
   const setBooking = async (changes: Parameters<typeof setProductBookingConfig>[1]['patch']) => {
     await assertProductAccess(db, { ...principal, productId, patch: changes as Record<string, unknown> })
     await setProductBookingConfig(db, { ...target, patch: changes, actorId: userId, env })
@@ -481,7 +487,128 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
   const memberList = () => memberSchedulingList({ env, userId, organizationId: organization.id })
   const locationsUsed = locations.filter(entry => product.locations.some(binding => binding.location_id === entry.id))
 
-  if (view === 'stay-details' || view === 'stay-field' || view === 'stay-safety') {
+  if (STAY_ROOM_VIEWS.includes(view)) {
+    if (product.kind !== 'stay' || !wide) return missing('Photo tour not found')
+    const access = await stayAccessFor(principal)
+    if (!access.manage) return missing('Photo tour not found')
+    const home = await readStayHome(db, access, productId)
+    const rooms = home.photo_rooms
+    const roomLabel = (room: typeof rooms[number]) => stayPhotoRoomName(room, rooms)
+    if (view === 'stay-rooms') {
+      screen = { title: 'Photo tour rooms', fields: [], rows: [
+        ...rooms.map(room => leaf(room.id, roomLabel(room), `${room.photo_ids.length} photos`, { view: 'stay-room', query: { room_id: room.id } })),
+        leaf('stay-room-add', 'Add a room or space'),
+        ...home.photos.map((photo, index) => ({
+          ...leaf(photo.id, photo.alt_text ?? `Photo ${index + 1}`, undefined, { view: 'stay-photo-room', query: { asset_id: photo.id } }),
+          image: photo.url,
+        })),
+      ] }
+    } else if (view === 'stay-room-add') {
+      revision = JSON.stringify(rooms.map(room => room.id))
+      form('Add a room or space', [field('type', 'Room type', 'select', '', {
+        choices: Object.entries(STAY_PHOTO_ROOM_TYPES).map(([value, definition]) => ({ value, label: definition.label })),
+      })], async values => {
+        await createStayPhotoRoom(db, env, access, productId, { type: values('type') })
+      })
+    } else if (view === 'stay-photo-room') {
+      const photo = home.photos.find(photo => photo.id === query.asset_id) ?? missing('Photo not found')
+      const current = rooms.find(room => room.photo_ids.includes(photo.id))?.id ?? null
+      revision = JSON.stringify([current, rooms.map(room => room.id)])
+      form('Move photo', [field('room', 'Room or space', 'select', current, {
+        choices: [{ value: '', label: 'Additional photos' }, ...rooms.map(room => ({ value: room.id, label: roomLabel(room) }))],
+      })], async values => {
+        await moveStayPhotos(db, env, access, productId, { room_id: values('room') || null, photos: [{ photo_id: photo.id, expected_room_id: current }] })
+      })
+    } else {
+      const room = rooms.find(room => room.id === query.room_id) ?? missing('Room not found')
+      const roomQuery = { room_id: room.id }
+      revision = String(room.details_version)
+      if (view === 'stay-room') {
+        screen = { title: roomLabel(room), fields: [], rows: [
+          ...(room.type === 'bedroom' ? [
+            leaf('stay-room-beds', 'Sleeping arrangements', undefined, { query: roomQuery }),
+            leaf('stay-room-privacy', 'Private attached bathroom', undefined, { query: roomQuery }),
+            ...Object.entries(STAY_ROOM_ACCESSIBILITY_FEATURES).map(([feature, definition]) => leaf(feature, definition.label, undefined, { view: 'stay-room-accessibility', query: { ...roomQuery, feature } })),
+          ] : []),
+          leaf('stay-room-amenities', 'Amenities', undefined, { query: roomQuery }),
+          leaf('stay-room-remove', 'Remove room', undefined, { query: roomQuery }),
+        ] }
+      } else if (view === 'stay-room-beds' && room.type === 'bedroom') {
+        const beds = Object.keys(STAY_BED_TYPES) as StayBedType[]
+        form('Sleeping arrangements', beds.map(type => field(type, STAY_BED_TYPES[type].label, 'number',
+          room.sleeping_arrangements?.find(bed => bed.type === type)?.count, { optional: true })), async values => {
+          const sleeping_arrangements = beds.flatMap(type => {
+            const quantity = count(values(type))
+            return quantity ? [{ type, count: quantity }] : []
+          })
+          await updateStayPhotoRoom(db, env, access, productId, room.id, { expected_details_version: room.details_version, sleeping_arrangements })
+        })
+      } else if (view === 'stay-room-privacy' && room.type === 'bedroom') {
+        form('Private attached bathroom', [field('value', 'Private attached bathroom', 'select', room.private_attached_bathroom, {
+          choices: [{ value: '', label: 'Unspecified' }, { value: 'true', label: 'Yes' }, { value: 'false', label: 'No' }],
+        })], async values => {
+          await updateStayPhotoRoom(db, env, access, productId, room.id, { expected_details_version: room.details_version, private_attached_bathroom: values('value') ? bool(values('value')) : null })
+        })
+      } else if (view === 'stay-room-amenities') {
+        const amenities = [...new Set([...home.amenities, ...room.amenities])]
+        revision = JSON.stringify([room.details_version, amenities])
+        form('Room amenities', amenities.map(code => field(code, STAY_AMENITIES[code].label, 'toggle', room.amenities.includes(code))), async values => {
+          await updateStayPhotoRoom(db, env, access, productId, room.id, { expected_details_version: room.details_version, amenities: amenities.filter(code => bool(values(code))) })
+        })
+      } else if (view === 'stay-room-accessibility' && room.type === 'bedroom') {
+        const feature = query.feature
+        if (!isStayRoomAccessibilityFeature(feature)) return missing('Accessibility feature not found')
+        const definition = STAY_ROOM_ACCESSIBILITY_FEATURES[feature]
+        const saved = room.accessibility.find(item => item.feature === feature)
+        const photos = home.photos.filter(photo => photo.kind === 'image' && room.photo_ids.includes(photo.id))
+        revision = JSON.stringify([room.details_version, photos.map(photo => photo.id)])
+        form(definition.label, [
+          field('available', definition.label, 'select', saved?.available, {
+            choices: [{ value: '', label: 'Unspecified' }, { value: 'true', label: 'Yes' }, { value: 'false', label: 'No' }],
+            hint: [definition.description, ...definition.guidelines].join('\n'),
+          }),
+          ...photos.map((photo, index) => field(`evidence:${photo.id}`, photo.alt_text ?? `Use photo ${index + 1}`, 'toggle', saved?.photo_ids.includes(photo.id) ?? false, { display_url: photo.url })),
+        ], async values => {
+          const available = values('available') === '' ? null : bool(values('available'))
+          const photo_ids = available ? photos.filter(photo => bool(values(`evidence:${photo.id}`))).map(photo => photo.id) : []
+          await updateStayPhotoRoom(db, env, access, productId, room.id, { expected_details_version: room.details_version, accessibility: { feature, available, photo_ids } })
+        })
+      } else if (view === 'stay-room-remove') {
+        form('Remove room', [field('remove', `Remove ${roomLabel(room)}`, 'toggle', false, { hint: 'Its photos move to Additional photos.' })], async values => {
+          if (!bool(values('remove'))) return invalid('Confirm room removal')
+          await removeStayPhotoRoom(db, env, access, productId, room.id)
+        })
+      } else return missing('Room setting not found')
+    }
+  } else if (view === 'stay-accessibility' || view === 'stay-accessibility-feature') {
+    if (product.kind !== 'stay' || !wide) return missing('Listing accessibility not found')
+    const access = await stayAccessFor(principal)
+    if (!access.manage) return missing('Listing accessibility not found')
+    const home = await readStayHome(db, access, productId)
+    if (view === 'stay-accessibility') {
+      screen = { title: 'Accessibility', fields: [], rows: Object.entries(STAY_HOME_ACCESSIBILITY_FEATURES).map(([feature, definition]) => {
+        const answer = home.accessibility.find(item => item.feature === feature)?.available
+        return leaf(feature, definition.label, answer == null ? 'Unspecified' : answer ? 'Yes' : 'No', { view: 'stay-accessibility-feature', query: { feature } })
+      }) }
+    } else {
+      const feature = query.feature
+      if (!isStayHomeAccessibilityFeature(feature)) return missing('Accessibility feature not found')
+      const definition = STAY_HOME_ACCESSIBILITY_FEATURES[feature]
+      const saved = home.accessibility.find(item => item.feature === feature)
+      revision = home.updated_at
+      form(definition.label, [
+        field('available', definition.label, 'select', saved?.available, {
+          choices: [{ value: '', label: 'Unspecified' }, { value: 'true', label: 'Yes' }, { value: 'false', label: 'No' }],
+          hint: [definition.description, ...definition.guidelines].join('\n'),
+        }),
+        ...home.photos.filter(photo => photo.kind === 'image').map((photo, index) => field(`evidence:${photo.id}`, photo.alt_text ?? `Use photo ${index + 1}`, 'toggle', saved?.photo_ids.includes(photo.id) ?? false, { display_url: photo.url })),
+      ], async values => {
+        const available = values('available') === '' ? null : bool(values('available'))
+        const photo_ids = available ? home.photos.filter(photo => photo.kind === 'image' && bool(values(`evidence:${photo.id}`))).map(photo => photo.id) : []
+        await updateStayHomeAccessibility(db, env, access, productId, { updated_at: revision, accessibility: { feature, available, photo_ids } })
+      })
+    }
+  } else if (view === 'stay-details' || view === 'stay-field' || view === 'stay-safety') {
     if (product.kind !== 'stay' || !wide) return missing('Listing settings not found')
     const definitions = productDetailFields('stay')
     const keys = [...STAY_DESCRIPTION_DETAIL_KEYS, ...STAY_LOCATION_DETAIL_KEYS, 'featured']
@@ -492,6 +619,8 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
           { view: 'stay-field', query: { field: definition.key } },
         )),
         ...Object.entries(STAY_SAFETY_SECTIONS).map(([key, section]) => leaf(key, section.label, undefined, { view: 'stay-safety', query: { section: key } })),
+        leaf('stay-accessibility', 'Accessibility'),
+        leaf('stay-rooms', 'Photo tour rooms'),
       ] }
     } else {
       const section = Object.keys(STAY_SAFETY_SECTIONS).find(key => key === query.section) as StaySafetySection | undefined
