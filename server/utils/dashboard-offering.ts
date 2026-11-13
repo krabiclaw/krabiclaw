@@ -18,7 +18,7 @@ import { getVerticalCopy } from '~/utils/vertical-copy'
 import { NOTICE_OPTIONS, noticeSummary } from '~/shared/availability-settings'
 import { createTenantPage, getTenantPageById, listTenantPages, updateTenantPage } from '~/server/utils/content/pages'
 import { alignTenantPageTranslationBlocks, createTenantPageBlock, createTenantPageTranslationBlocks, isTenantPageBlockAllowed, TENANT_PAGE_BLOCK_REGISTRY, tenantPageLocalizedTextFields, tenantPageTranslationSourceBlockId, writeTenantPageLocalizedText } from '~/utils/tenant-page-blocks'
-import { tenantPageBlockLabel } from '~/utils/tenant-page-block-sections'
+import { reorderTenantPageRecords, tenantPageBlockLabel, tenantPageRecordTitle, TENANT_PAGE_RECORD_NOUNS, type TenantPageBlockCollection } from '~/utils/tenant-page-block-sections'
 import { createTenantPageEditorData, validateTenantPageBlock } from '~/utils/tenant-page-editor'
 import { addOrganizationLanguage, disableOrganizationLanguage, getOrganizationLanguageSettings, publishOrganizationLanguage } from '~/server/utils/organization-languages'
 import { getOrganizationLocalizationProgress } from '~/server/utils/organization-localization-opportunities'
@@ -26,8 +26,8 @@ import { isDemoOrganization } from '~/shared/demo'
 import { hasPlatformEventPermission } from '~/server/utils/platform-admin-users'
 import { FORM_QUESTION_LIMITS, FORM_QUESTION_TYPES, isChoiceQuestionType } from '~/shared/form-questions'
 import { FORM_QUESTION_TYPE_LABELS, formQuestionRowSummary, formQuestionsSummary } from '~/utils/form-question-editing'
-import { queryFirst } from '~/server/db'
-import { assertOrganizationLanguage, getProductCatalogLocalization, putResourceLocalization } from '~/server/utils/localization'
+import { queryAll, queryFirst } from '~/server/db'
+import { assertOrganizationLanguage, getLocalizationForAuthoring, getProductCatalogLocalization, putLocalizationForAuthoring, putResourceLocalization } from '~/server/utils/localization'
 import { RESOURCE_LOCALIZATIONS_SQL } from '~/shared/content-registries'
 import { z } from 'zod'
 import { groupProductsByCollection } from '~/utils/product-presentation'
@@ -35,6 +35,11 @@ import { createStayPhotoRoom, moveStayPhotos, readStayHome, removeStayPhotoRoom,
 import { isStayHomeAccessibilityFeature, isStayRoomAccessibilityFeature, STAY_HOME_ACCESSIBILITY_FEATURES, STAY_ROOM_ACCESSIBILITY_FEATURES } from '~/shared/stay-accessibility'
 import { STAY_BED_TYPES, STAY_PHOTO_ROOM_TYPES, stayPhotoRoomName, type StayBedType } from '~/shared/stay-photos'
 import { STAY_AMENITIES } from '~/shared/stay-listing'
+import { getLocation } from '~/server/utils/location-management'
+import { getContentDocumentById, getContentEditorSnapshotForDocument, getContentRepresentation, type ContentBlockInput } from '~/server/utils/content/documents'
+import { getLinksPage } from '~/server/utils/links-page'
+import { blankBlogLocalizedText, blogLocalizedTextFields, readBlogLocalizedText, writeBlogLocalizedText } from '~/utils/blog-editor'
+import { isRecord } from '~/server/utils/type-guards'
 
 const STAY_ROOM_VIEWS = ['stay-rooms', 'stay-room', 'stay-room-add', 'stay-room-beds', 'stay-room-privacy', 'stay-room-remove', 'stay-photo-room', 'stay-room-amenities', 'stay-room-accessibility']
 
@@ -132,6 +137,10 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
         { id: 'translate-brand', label: 'Translate brand', native: 'brand-translation', query: { locale: language.locale } },
         { id: 'translate-pages', label: 'Translate pages', native: 'pages', query: { locale: language.locale } },
         { id: 'translate-catalog', label: 'Translate Catalog', native: 'catalog-translation', query: { locale: language.locale } },
+        { id: 'translate-locations', label: organization.vertical === 'service' ? 'Translate offices' : 'Translate locations', native: 'location-translations', query: { locale: language.locale } },
+        ...([['social_post', 'Posts'], ['article', 'Blog'], ['qa', 'Q&A'], ['links', 'Links']] as const).map(([kind, label]) => ({
+          id: `translate-${kind}`, label: `Translate ${label}`, native: 'document-translations', query: { locale: language.locale, kind },
+        })),
         ...progress.opportunities.map(item => ({ id: item.id, label: item.label, summary: `${item.completed} of ${item.total} translated` })),
         ...(editable ? [{ id: 'visibility', label: 'Website visibility', summary: language.status === 'published' ? 'Published' : 'Draft', native: 'language-visibility', query: { locale: language.locale } }] : []),
       ] }
@@ -190,6 +199,145 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     await purgePublicResourceCacheNow(env, organization.id)
     return screen
   }
+  if (view === 'document-translations' || view === 'document-translation') {
+    if (!isOrganizationWideRole(organization.role)) return missing('Content not found')
+    const language = await assertOrganizationLanguage(db, organization.id, query.locale)
+    if (language.source) return missing('Choose an additional language')
+    const kind = query.kind
+    if (kind !== 'article' && kind !== 'social_post' && kind !== 'qa' && kind !== 'links') return missing('Content kind not found')
+    const links = kind === 'links' ? await getLinksPage(db, organization.id) : null
+    const records = links ? links.page ? [{ id: links.page.id, title: links.page.title, summary: null, updated_at: links.page.updated_at, metadata_json: '{}' }] : []
+      : await queryAll<{ id: string; title: string | null; summary: string | null; updated_at: string; metadata_json: string }>(db, `
+        SELECT id, title, summary, updated_at, metadata_json FROM content_documents
+        WHERE organization_id = ? AND kind = ? AND row_role = 'root' AND status = 'published'
+          AND (kind <> 'qa' OR source = 'manual')
+        ORDER BY sort_order, created_at, id
+      `, [organization.id, kind])
+    const title = kind === 'article' ? 'Blog' : kind === 'social_post' ? 'Posts' : kind === 'qa' ? 'Q&A' : 'Links'
+    if (view === 'document-translations') {
+      if (answer) return missing('Choose content to translate')
+      return { title, fields: [], empty_title: 'No content to translate', rows: records.map(record => ({
+        id: record.id, label: record.title || record.summary || title, native: 'document-translation',
+        query: { locale: language.locale, kind, document_id: record.id },
+      })) }
+    }
+    const record = records.find(item => item.id === query.document_id) ?? missing('Content not found')
+    const representation = await getContentRepresentation(db, { rootId: record.id, locale: language.locale })
+    const saved = representation ? await getLocalizationForAuthoring(env, db, organization.id, 'content_document', record.id, language.locale) : null
+    if (saved && !('content_blocks' in saved)) throw new Error('The saved translation has no document blocks')
+    const fields = [
+      field('title', kind === 'qa' ? 'Question' : 'Title', 'text', saved?.title, { hint: record.title ?? undefined, optional: kind !== 'qa' }),
+      ...(!links ? [field('summary', kind === 'qa' ? 'Answer' : kind === 'article' ? 'Excerpt' : 'Caption', 'textarea', saved?.summary, { hint: record.summary ?? undefined, optional: true })] : []),
+    ]
+    let blocks: ContentBlockInput[] | undefined
+    const articleEdits: Array<{ key: string; path: Parameters<typeof writeBlogLocalizedText>[1]; data: Record<string, unknown>; required: boolean }> = []
+    const metadata = JSON.parse(record.metadata_json) as Record<string, unknown>
+    const button = isRecord(metadata.call_to_action) ? metadata.call_to_action : null
+    const savedButton = isRecord(saved?.metadata?.call_to_action) ? saved.metadata.call_to_action : null
+    if (kind === 'social_post' && button) fields.push(field('button', 'Link button label', 'text', savedButton?.label, { hint: typeof button.label === 'string' ? button.label : undefined, optional: true }))
+    if (kind === 'article') {
+      const source = await getContentDocumentById(db, record.id) ?? missing('Article not found')
+      const snapshot = await getContentEditorSnapshotForDocument(db, source)
+      blocks = saved ? structuredClone(saved.content_blocks) : snapshot.blocks.map(blankBlogLocalizedText)
+      for (const [index, block] of snapshot.blocks.entries()) {
+        const translated = blocks[index]
+        if (!translated || translated.type !== block.type) throw new HTTPError({ statusCode: 409, message: 'The source article and translation have different sections.' })
+        for (const item of blogLocalizedTextFields(block)) {
+          const key = `content:${index}:${item.path.join('.')}`
+          fields.push(field(key, `Section ${index + 1} · ${item.label}`, 'textarea', readBlogLocalizedText(translated.data, item.path), { hint: item.value }))
+          articleEdits.push({ key, path: item.path, data: translated.data, required: Boolean(item.value.trim()) })
+        }
+      }
+    } else if (links) {
+      for (const item of links.items) {
+        const translation = saved?.content_blocks.find(block => block.source_block_id === item.id)
+        fields.push(field(`link:${item.id}`, 'Link label', 'text', translation?.data.label, { hint: item.label, optional: true }))
+      }
+    }
+    const revision = JSON.stringify([record.updated_at, saved?.updated_at])
+    const screen = { title: record.title || title, fields, rows: [], revision, save_label: 'Save' }
+    if (!answer) return screen
+    if (isDemoOrganization(organization) && !await hasPlatformEventPermission(event, env, { platform: ['access'] })) throw new HTTPError({ statusCode: 403, message: 'Demo organization is read-only' })
+    if (answer.revision !== revision) throw new HTTPError({ statusCode: 409, message: 'The content changed. Reopen the translation before saving.' })
+    if (fields.length !== Object.keys(answer.values).length || fields.some(item => typeof answer.values[item.key] !== 'string')) invalid('The saved fields do not match this translation')
+    for (const edit of articleEdits) {
+      const value = answer.values[edit.key]!
+      if (edit.required && !value.trim()) invalid('Translate every authored article field before saving')
+      writeBlogLocalizedText(edit.data, edit.path, value)
+    }
+    if (links) blocks = links.items.flatMap(item => {
+      const label = answer.values[`link:${item.id}`]!.trim()
+      if (!label) return []
+      const id = saved?.content_blocks.find(block => block.source_block_id === item.id)?.id
+      return [{ id, source_block_id: item.id, type: 'cta' as const, data: { label } }]
+    })
+    const values = {
+      title: answer.values.title?.trim() || null,
+      summary: answer.values.summary?.trim() || null,
+      ...(!links && kind !== 'qa' ? { seo_keywords: saved?.seo_keywords ?? null } : {}),
+      ...(kind === 'social_post' && answer.values.button?.trim() ? { metadata: { call_to_action: { label: answer.values.button.trim() } } } : {}),
+    }
+    await putLocalizationForAuthoring(env, env.DB, { organizationId: organization.id, resourceType: 'content_document', resourceId: record.id, locale: language.locale, values, contentBlocks: blocks, expectedUpdatedAt: saved?.updated_at, userId })
+    await purgePublicResourceCacheNow(env, organization.id)
+    return screen
+  }
+  if (view === 'location-translations' || view === 'location-translation') {
+    if (!isOrganizationWideRole(organization.role)) return missing('Location not found')
+    const language = await assertOrganizationLanguage(db, organization.id, query.locale)
+    if (language.source) return missing('Choose an additional language')
+    const locations = await listDashboardLocations(db, organization.id, undefined, true)
+    if (view === 'location-translations') {
+      if (answer) return missing('Choose a location')
+      return { title: organization.vertical === 'service' ? 'Office translations' : 'Location translations', fields: [], rows: locations.map(location => ({
+        id: location.id, label: location.title, native: 'location-translation', query: { locale: language.locale, location_id: location.id },
+      })) }
+    }
+    const target = locations.find(location => location.id === query.location_id) ?? missing('Location not found')
+    const location = await getLocation(env.DB, organization.id, target.id) ?? missing('Location not found')
+    const saved = await queryFirst<{ values_json: string; updated_at: string }>(db, `
+      SELECT values_json, updated_at FROM ${RESOURCE_LOCALIZATIONS_SQL}
+      WHERE organization_id = ? AND resource_type = 'business_location' AND resource_id = ? AND locale = ?
+    `, [organization.id, location.id, language.locale])
+    const values = saved ? JSON.parse(saved.values_json) as Record<string, unknown> : {}
+    const address = (values.address ?? {}) as Record<string, unknown>
+    const fields = [
+      field('title', 'Name', 'text', values.title, { hint: location.title, optional: true }),
+      field('short_description', 'Short description', 'text', values.short_description, { hint: location.short_description ?? undefined, optional: true }),
+      field('description', 'Description', 'textarea', values.description, { hint: location.description ?? undefined, optional: true }),
+      field('seo_title', 'SEO title', 'text', values.seo_title, { hint: location.seo_title ?? undefined, optional: true }),
+      field('seo_description', 'SEO description', 'textarea', values.seo_description, { hint: location.seo_description ?? undefined, optional: true }),
+      ...([
+        ['addressLines', 'Address lines'], ['locality', 'City'], ['sublocality', 'District'], ['administrativeArea', 'State or province'],
+      ] as const).map(([key, label]) => {
+        const original = location.address?.[key]
+        const value = address[key]
+        return field(`address.${key}`, label, key === 'addressLines' ? 'textarea' : 'text', Array.isArray(value) ? value.join('\n') : value, {
+          optional: true, hint: Array.isArray(original) ? original.join('\n') : original ?? undefined,
+        })
+      }),
+    ]
+    const revision = JSON.stringify([location.updated_at, saved?.updated_at])
+    const screen = { title: location.title, rows: [], fields, revision, save_label: 'Save' }
+    if (!answer) return screen
+    if (isDemoOrganization(organization) && !await hasPlatformEventPermission(event, env, { platform: ['access'] })) throw new HTTPError({ statusCode: 403, message: 'Demo organization is read-only' })
+    if (answer.revision !== revision) throw new HTTPError({ statusCode: 409, message: 'This translation changed. Reopen it before saving.' })
+    const next = { ...values }
+    const nextAddress = { ...address }
+    for (const { key } of fields) {
+      const value = (answer.values[key] ?? invalid('Missing translation field')).trim()
+      if (key.startsWith('address.')) {
+        const name = key.slice('address.'.length)
+        if (value) nextAddress[name] = name === 'addressLines' ? value.split('\n').map(line => line.trim()).filter(Boolean) : value
+        else Reflect.deleteProperty(nextAddress, name)
+      } else if (value) next[key] = value
+      else Reflect.deleteProperty(next, key)
+    }
+    if (Object.keys(nextAddress).length) next.address = nextAddress
+    else Reflect.deleteProperty(next, 'address')
+    await putResourceLocalization(env, db, { organizationId: organization.id, resourceType: 'business_location', resourceId: location.id, locale: language.locale, values: next, userId })
+    await purgePublicResourceCacheNow(env, organization.id)
+    return screen
+  }
   if (view === 'brand-translation') {
     if (!isOrganizationWideRole(organization.role)) return missing('Brand not found')
     const language = await assertOrganizationLanguage(db, organization.id, query.locale)
@@ -228,7 +376,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     await purgePublicResourceCacheNow(env, organization.id)
     return screen
   }
-  if (['pages', 'page', 'page-content', 'page-sections', 'page-order', 'page-section-add', 'page-section-remove'].includes(view)) {
+  if (['pages', 'page', 'page-content', 'page-sections', 'page-order', 'page-section-add', 'page-section-remove', 'page-media', 'page-media-item', 'page-media-order', 'page-records', 'page-record', 'page-record-order'].includes(view)) {
     if (!isOrganizationWideRole(organization.role)) return missing('Page not found')
     const scope = { organizationId: organization.id }
     const locale = typeof query.locale === 'string' ? query.locale : undefined
@@ -242,6 +390,134 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     }
     const sourceId = typeof query.page_id === 'string' ? query.page_id : missing('Choose a page')
     const source = await getTenantPageById(db, sourceId, scope)
+    if (view === 'page-records' || view === 'page-record' || view === 'page-record-order') {
+      if (locale) return missing('Edit section records in the source language')
+      const block = source.blocks.find(block => block.id === query.block_id) ?? missing('Section not found')
+      const collection = Object.keys(TENANT_PAGE_RECORD_NOUNS).find(key => key === query.collection) as TenantPageBlockCollection | undefined
+      const definition = collection ? TENANT_PAGE_BLOCK_REGISTRY[block.type].fields[collection] : undefined
+      if (!collection || !definition?.of || definition.kind !== 'list') return missing('Section records not found')
+      const value = block.data[collection]
+      if (value !== undefined && (!Array.isArray(value) || !value.every(isRecord))) throw new Error('Section records are invalid')
+      const records = (value ?? []) as Record<string, unknown>[]
+      const copy = TENANT_PAGE_RECORD_NOUNS[collection]
+      const row = (id: string, label: string, native: string, extra: Record<string, string> = {}): CatalogRow => ({
+        id, label, native, query: { page_id: source.id, block_id: block.id, collection, ...extra },
+      })
+      if (view === 'page-records') {
+        if (answer) return missing('Choose a record')
+        return { title: definition.label, fields: [], rows: [
+          ...records.map((record, index) => row(String(index), tenantPageRecordTitle(record, block.type, collection, index), 'page-record', { index: String(index) })),
+          row('add', copy.add, 'page-record'),
+          ...(records.length > 1 ? [row('order', 'Reorder', 'page-record-order')] : []),
+        ] }
+      }
+      const order = view === 'page-record-order'
+      const adding = !order && query.index === undefined
+      const index = adding || order ? -1 : typeof query.index === 'string' && /^\d+$/.test(query.index) ? Number(query.index) : missing('Record not found')
+      const record = adding || order ? {} : records[index] ?? missing('Record not found')
+      const definitions = Object.entries(definition.of).filter(([, item]) => ['text', 'markdown', 'url', 'enum', 'number'].includes(item.kind))
+      const fields = order ? [field('order', 'Order', 'order', records.map((_, index) => String(index)).join('\n'), {
+        choices: records.map((item, index) => ({ value: String(index), label: tenantPageRecordTitle(item, block.type, collection, index) })),
+      })] : [
+        ...definitions.map(([key, item]) => field(`record:${key}`, item.label,
+          item.kind === 'enum' && item.options?.length ? 'select' : item.kind === 'number' ? 'number' : item.multiline || item.kind === 'markdown' ? 'textarea' : 'text',
+          record[key], { optional: !item.required, ...(item.kind === 'enum' && item.options?.length ? { choices: [...item.options] } : {}) },
+        )),
+        ...(!adding ? [field('remove', `Remove ${copy.one.toLowerCase()}`, 'toggle', false)] : []),
+      ]
+      const revision = source.document.updated_at
+      const screen = { title: order ? 'Reorder' : adding ? copy.add : tenantPageRecordTitle(record, block.type, collection, index), fields, rows: [], revision, save_label: 'Save' }
+      if (!answer) return screen
+      if (answer.revision !== revision) throw new HTTPError({ statusCode: 409, message: 'The page changed. Reopen the section before saving.' })
+      if (fields.length !== Object.keys(answer.values).length || fields.some(item => typeof answer.values[item.key] !== 'string')) invalid('The saved fields do not match this section')
+      if (order) {
+        const ids = answer.values.order!.split('\n')
+        if (ids.length !== records.length || ids.some(id => !/^\d+$/.test(id))) return invalid('Include each record once')
+        reorderTenantPageRecords(block, collection, ids.map(Number))
+      } else if (!adding && answer.values.remove === 'true') {
+        reorderTenantPageRecords(block, collection, records.map((_, position) => position).filter(position => position !== index))
+      } else {
+        const next = { ...record }
+        for (const [key, item] of definitions) {
+          const value = answer.values[`record:${key}`]!
+          if (!value && !item.required) Reflect.deleteProperty(next, key)
+          else next[key] = item.kind === 'number' ? Number(value) : value
+        }
+        block.data[collection] = adding ? [...records, next] : records.map((item, position) => position === index ? next : item)
+      }
+      const problem = validateTenantPageBlock(block)[0]
+      if (problem) return invalid(problem)
+      await updateTenantPage(db, source.id, { userId, scope, env, data: {
+        path: source.path, title: source.title, summary: source.summary, page_type: source.page_type,
+        recipe: source.recipe, sort_order: source.sort_order, updated_at: revision, blocks: source.blocks,
+      } })
+      return screen
+    }
+    if (view === 'page-media' || view === 'page-media-item' || view === 'page-media-order') {
+      if (locale) return missing('Edit media in the source language')
+      const block = source.blocks.find(block => block.id === query.block_id) ?? missing('Section not found')
+      const slots = Object.values(TENANT_PAGE_BLOCK_REGISTRY[block.type].fields)
+        .flatMap(definition => definition.kind === 'media' && definition.accept !== 'video'
+          ? [{ slot: definition.slot ?? 'media', label: definition.label }] : [])
+      const row = (id: string, label: string, native: string, slot: string, asset?: typeof block.media[number]): CatalogRow => ({
+        id, label, native, image: mediaStillUrl(asset),
+        query: { page_id: source.id, block_id: block.id, slot, ...(asset ? { asset_id: asset.asset_id } : {}) },
+      })
+      if (view === 'page-media') {
+        if (answer) return missing('Choose a media placement')
+        return { title: 'Section media', fields: [], empty_title: 'No editable media', rows: slots.flatMap(({ slot, label }) => {
+          const media = block.media.filter(asset => asset.slot === slot)
+          if (slot !== 'gallery') return [row(slot, label, 'page-media-item', slot, media[0])]
+          return [
+            ...media.map((asset, index) => row(asset.asset_id, `Gallery item ${index + 1}`, 'page-media-item', slot, asset)),
+            row('gallery-add', 'Add to gallery', 'page-media-item', slot),
+            ...(media.length > 1 ? [row('gallery-order', 'Reorder gallery', 'page-media-order', slot)] : []),
+          ]
+        }) }
+      }
+      const slot = slots.find(item => item.slot === query.slot) ?? missing('Media placement not found')
+      const gallery = slot.slot === 'gallery'
+      const media = block.media.filter(asset => asset.slot === slot.slot)
+      const asset = gallery
+        ? query.asset_id === undefined ? null : media.find(item => item.asset_id === query.asset_id) ?? missing('Media item not found')
+        : media[0] ?? null
+      const ids = media.map(item => item.asset_id)
+      const revision = JSON.stringify([source.document.updated_at, ids])
+      const order = view === 'page-media-order'
+      if (order && !gallery) return missing('Gallery not found')
+      const title = order ? 'Reorder gallery' : slot.label
+      const screen = { title, rows: [], revision, save_label: 'Save', fields: [
+        order ? field('value', title, 'order', ids.join('\n'), { choices: media.map((item, index) => ({
+          value: item.asset_id, label: `Gallery item ${index + 1}`, image: mediaStillUrl(item),
+        })) }) : field('value', title, 'photo', asset?.asset_id, { optional: true, display_url: mediaStillUrl(asset) }),
+      ] }
+      if (!answer) return screen
+      if (answer.revision !== revision) throw new HTTPError({ statusCode: 409, message: 'This media changed. Reopen it before saving.' })
+      const value = answer.values.value ?? invalid('Missing media value')
+      const placement = { owner_type: 'content_block' as const, owner_id: block.id, slot: slot.slot }
+      const input = { env, organizationId: organization.id, principal, placement }
+      if (order) {
+        const next = value.split('\n')
+        if (next.length !== ids.length || new Set(next).size !== ids.length || !next.every(id => ids.includes(id))) invalid('Include each gallery item once')
+        await reorderMediaPlacements(db, { ...input, expectedAssetIds: ids, moves: next.slice(1).map((asset_id, index) => ({ asset_id, after_asset_id: next[index]! })) })
+      } else if (!gallery) {
+        const blocks = source.blocks.map(item => item.id === block.id ? {
+          ...item, media: [...item.media.filter(asset => asset.slot !== slot.slot), ...(value ? [{ asset_id: value, slot: slot.slot }] : [])],
+        } : item)
+        await updateTenantPage(db, source.id, { userId, scope, env, data: {
+          path: source.path, title: source.title, summary: source.summary, page_type: source.page_type,
+          recipe: source.recipe, sort_order: source.sort_order, updated_at: source.document.updated_at, blocks,
+        } })
+      } else if (asset && !value) {
+        await removeMediaPlacement(db, { ...input, assetId: asset.asset_id })
+      } else if (!asset && value) {
+        await attachMediaPlacement(db, { ...input, assetId: value })
+      } else if (asset && value !== asset.asset_id) {
+        invalid('Add the new photo before removing the old one')
+      }
+      await purgePublicResourceCacheNow(env, organization.id)
+      return screen
+    }
     if (view === 'page') {
       if (answer) return missing('Choose a page setting')
       return { title: source.title, fields: [], rows: [
@@ -259,7 +535,15 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
       if (view === 'page-sections') {
         if (answer) return missing('Choose a page section')
         return { title: 'Sections', fields: [], rows: [
-          ...source.blocks.map(block => row(block.id, tenantPageBlockLabel(block.type), 'page-content', { block_id: block.id })),
+          ...source.blocks.flatMap(block => [
+            row(block.id, tenantPageBlockLabel(block.type), 'page-content', { block_id: block.id }),
+            ...Object.entries(TENANT_PAGE_BLOCK_REGISTRY[block.type].fields).flatMap(([collection, item]) =>
+              Object.hasOwn(TENANT_PAGE_RECORD_NOUNS, collection) && item.kind === 'list' && item.of
+                && (!item.availableWhen || item.availableWhen.equals.includes(String(block.data[item.availableWhen.field] ?? '')))
+                ? [row(`${block.id}:${collection}`, `${tenantPageBlockLabel(block.type)} · ${item.label}`, 'page-records', { block_id: block.id, collection })] : []),
+            ...(Object.values(TENANT_PAGE_BLOCK_REGISTRY[block.type].fields).some(item => item.kind === 'media' && item.accept !== 'video')
+              ? [row(`${block.id}:media`, `${tenantPageBlockLabel(block.type)} media`, 'page-media', { block_id: block.id })] : []),
+          ]),
           ...(allowed.length ? [row('add', 'Add a section', 'page-section-add')] : []),
           ...(source.blocks.length > 1 ? [row('order', 'Reorder sections', 'page-order')] : []),
           ...(source.blocks.length ? [row('remove', 'Remove a section', 'page-section-remove')] : []),

@@ -135,6 +135,7 @@
 <script lang="ts">
 import type { MaybeRefOrGetter } from 'vue'
 import {
+  reorderTenantPageRecords,
   TENANT_PAGE_RECORD_NOUNS,
   tenantPageRecordSections,
   tenantPageRecordTitle,
@@ -289,25 +290,10 @@ export function useTenantPageBlockRecords(organizationId: string, pageId: string
     return records.value.length - 1
   }
 
-  // A record's pictures are addressed by the record's position, so any change to
-  // the order has to carry the placements with it. Remapping the whole slot set
-  // from the new order is one rule for removing and reordering alike.
-  function remapMedia(order: number[]) {
-    const current = block.value
-    if (!current || collectionRef.value !== 'items') return
-    current.media = current.media.flatMap((item) => {
-      const match = /^items\.(\d+)\.([a-z]+)$/.exec(item.slot)
-      if (!match) return [item]
-      const position = order.indexOf(Number(match[1]))
-      return position < 0 ? [] : [{ ...item, slot: `items.${position}.${match[2]}` }]
-    })
-  }
-
   function removeRecord(item: { id: string }) {
     const at = Number(item.id)
     const order = records.value.map((_, position) => position).filter(position => position !== at)
-    writeRecords(order.map(position => records.value[position]!))
-    remapMedia(order)
+    if (block.value) reorderTenantPageRecords(block.value, collectionRef.value, order)
   }
 
   function move(item: { id: string }, direction: -1 | 1) {
@@ -318,8 +304,7 @@ export function useTenantPageBlockRecords(organizationId: string, pageId: string
     const [moved] = order.splice(at, 1)
     if (moved === undefined) return
     order.splice(nextIndex, 0, moved)
-    writeRecords(order.map(position => records.value[position]!))
-    remapMedia(order)
+    if (block.value) reorderTenantPageRecords(block.value, collectionRef.value, order)
   }
 
   return { block, records, record, recordTitle, noun, isPerson, isShowcase, isLanguage, isStep, isFaq, localeOptions, recordPictures, recordSections, listItems, leafSummary, str, set, recordMedia, setRecordMedia, addRecord, removeRecord, move }

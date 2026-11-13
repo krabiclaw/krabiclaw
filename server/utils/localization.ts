@@ -668,7 +668,10 @@ export async function putLocalizationForAuthoring(env: CloudflareEnv, db: D1Data
           import('~/server/utils/content/pages'), import('~/server/utils/content/publishing'),
         ])
         const { site } = await loadOrganizationSite(db, input.organizationId)
-        await assertTenantPagePathAvailable(db, { organizationId: input.organizationId, locale, path, site })
+        const links = path === '/links' && await queryFirst(db, `
+          SELECT id FROM content_documents WHERE id = ? AND organization_id = ? AND metadata_json ->> '$.recipe' = 'links'
+        `, [root.id, input.organizationId])
+        await assertTenantPagePathAvailable(db, { organizationId: input.organizationId, locale, path, site, translatingLinks: Boolean(links) })
       }
     }
   }

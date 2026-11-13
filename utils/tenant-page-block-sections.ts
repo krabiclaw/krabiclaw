@@ -236,3 +236,17 @@ export function tenantPageBlockFieldsForSection(
     .map(([key, field]) => ({ key, field }))
   return entries
 }
+
+export function reorderTenantPageRecords(block: TenantPageBlock, collection: TenantPageBlockCollection, order: readonly number[]) {
+  const records = block.data[collection]
+  if (!Array.isArray(records) || new Set(order).size !== order.length || order.some(index => !Number.isInteger(index) || index < 0 || index >= records.length)) {
+    throw new Error('The section records changed. Reload before editing them.')
+  }
+  block.data[collection] = order.map(index => records[index])
+  if (collection === 'items') block.media = block.media.flatMap(item => {
+    const match = /^items\.(\d+)\.([a-z]+)$/.exec(item.slot)
+    if (!match) return [item]
+    const index = order.indexOf(Number(match[1]))
+    return index < 0 ? [] : [{ ...item, slot: `items.${index}.${match[2]}` }]
+  })
+}
