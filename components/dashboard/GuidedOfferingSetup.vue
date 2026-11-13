@@ -46,7 +46,7 @@
 import GuidedSetupShell from './GuidedSetupShell.vue'
 import GuidedSetupPhotos from './GuidedSetupPhotos.vue'
 import OnboardingAddressFields from '~/lib/components/workspace/onboarding/OnboardingAddressFields.vue'
-import { isNavigationFailure } from 'vue-router'
+import { isNavigationFailure, NavigationFailureType } from 'vue-router'
 import { isOfferingSetupPath, offeringReturnTo, offeringSetupResponse, withOfferingReturnTo, type OfferingSetupResponse } from '~/shared/offering-setup'
 import { getErrorMessage } from '~/utils/errors'
 import { TIMEZONE_OPTIONS, timezoneLabel } from '~/utils/timezone'
@@ -92,12 +92,9 @@ function answer(key: string, kind: string) {
 async function goTo(to: string) {
   try {
     const destination = returnTo && isOfferingSetupPath(router.resolve(to).path) ? withOfferingReturnTo(to, returnTo) : to
-    if (router.resolve(destination).fullPath === route.fullPath) {
-      await refresh()
-      return
-    }
     const navigation = await navigateTo(destination, { replace: true })
-    if (isNavigationFailure(navigation)) throw navigation
+    if (isNavigationFailure(navigation, NavigationFailureType.duplicated)) await refresh()
+    else if (isNavigationFailure(navigation)) throw navigation
   } catch (cause) {
     saveError.value = getErrorMessage(cause, 'The next screen could not be opened.')
   }

@@ -86,7 +86,7 @@ export async function saveOnboardingDraft(env: CloudflareEnv, db: D1Database, us
     placeId = (typeof input.google_place_id === 'string' ? input.google_place_id.trim() : existing?.source.placeId) ?? null
     if (!placeId) throw new HTTPError({ statusCode: 400, statusMessage: 'Choose a Google place before importing it' })
     if (existing?.source.place?.placeId === placeId) place = existing.source.place
-    else if (!input.partial) {
+    else {
       if (!env.GOOGLE_PLACES_API_KEY) throw new HTTPError({ statusCode: 503, statusMessage: 'Google Places API key not configured' })
       place = await getPlaceDetails(env.GOOGLE_PLACES_API_KEY, placeId)
     }

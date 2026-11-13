@@ -1,5 +1,5 @@
 import { HTTPError } from 'nitro'
-import { execute, queryFirst } from '~/server/db'
+import { execute, executeBatch, queryFirst } from '~/server/db'
 import { parseOnboardingDraftPayload, type OnboardingDraftPayload } from '~/server/utils/onboarding-drafts'
 import { memberSchedulingList, writeMemberScheduling } from '~/server/domain/member-scheduling'
 import { PRODUCT_LIMITS } from '~/shared/product-limits'
@@ -7,8 +7,8 @@ import { majorAmountToMinor, minorAmountToMajor } from '~/shared/prices'
 import type { OfferingSetupAnswer, OfferingSetupField, OfferingSetupResponse } from '~/shared/offering-setup'
 import { listDashboardLocations } from '~/server/utils/dashboard-context'
 import { catalogPath, firstPracticeAreaPath } from '~/server/utils/dashboard-links'
-import { bookingScheduleScopes, hasDraftBookableTime, listAvailabilityRules, replaceWeeklySchedule, setProductBookingConfig } from '~/server/utils/availability'
-import { createProduct, getProduct, listOrganizationProducts, organizationDefaultCurrency, resolveVariantPrice, setProductLocation, updateProduct } from '~/server/utils/product-management'
+import { bookingConfigurationWriteError, bookingScheduleScopes, hasDraftBookableTime, listAvailabilityRules, prepareProductBookingConfig, replaceWeeklySchedule, setProductBookingConfig } from '~/server/utils/availability'
+import { createProduct, getProduct, listOrganizationProducts, organizationDefaultCurrency, prepareProductLocation, productLocationWriteError, resolveVariantPrice, updateProduct } from '~/server/utils/product-management'
 import { requireTrimmedProductString } from '~/server/utils/product-validation'
 import { purgePublicResourceCacheNow } from '~/server/utils/public-resource-cache'
 import { isValidTimezone, MINUTE_TIME_PATTERN } from '~/utils/timezone'
@@ -208,13 +208,17 @@ export async function firstPracticeAreaSetup(context: OfferingSetupContext, prod
   const memberActor = { env, organizationId, userId: actorId }
   const update = (patch: Parameters<typeof updateProduct>[1]['patch']) => updateProduct(db, { ...target, patch: { ...patch, updated_at: product.updated_at } })
   const configure = (patch: Parameters<typeof setProductBookingConfig>[1]['patch']) => setProductBookingConfig(db, { ...target, actorId, patch })
-  const place = (locationId: string, active: boolean) => setProductLocation(db, { ...target, locationId, active, published: false })
-
-  async function saveDraft(field: 'first_practice_area_meeting' | 'first_practice_area_attorney', data: Record<string, string> | null) {
+  function draftWrite(field: 'first_practice_area_meeting' | 'first_practice_area_attorney', data: Record<string, string> | null) {
     if (!draft) throw new HTTPError({ statusCode: 409, statusMessage: 'The firm’s onboarding draft is unavailable' })
-    const changed = data
-      ? await execute(db, "UPDATE onboarding_drafts SET payload_json = json_set(payload_json, ?, json(?)) WHERE id = ? AND organization_id = ? AND status = 'committed'", [`$.${field}`, JSON.stringify({ product_id: productId, ...data }), draft.id, organizationId])
-      : await execute(db, "UPDATE onboarding_drafts SET payload_json = json_remove(payload_json, ?) WHERE id = ? AND organization_id = ? AND status = 'committed'", [`$.${field}`, draft.id, organizationId])
+    const value = data ? JSON.stringify({ product_id: productId, ...data }) : null
+    return {
+      query: "UPDATE onboarding_drafts SET payload_json = CASE WHEN ? IS NULL THEN json_remove(payload_json, ?) ELSE json_set(payload_json, ?, json(?)) END WHERE id = ? AND organization_id = ? AND status = 'committed'",
+      params: [value, `$.${field}`, `$.${field}`, value, draft.id, organizationId],
+    }
+  }
+  async function saveDraft(field: Parameters<typeof draftWrite>[0], data: Parameters<typeof draftWrite>[1]) {
+    const { query, params } = draftWrite(field, data)
+    const changed = await execute(db, query, params)
     if (changed.meta.changes !== 1) throw offeringSetupChanged()
   }
   async function saveProgress(patch: Partial<GuideProgress>) {
@@ -268,10 +272,15 @@ export async function firstPracticeAreaSetup(context: OfferingSetupContext, prod
         throw new HTTPError({ statusCode: 409, statusMessage: 'Change published offices in the practice area editor' })
       }
       if (value !== format) {
-        if (value !== 'online') await place(value, true)
-        for (const previous of product.locations.filter(row => row.active && row.location_id !== value)) await place(previous.location_id, false)
-        if (booking) await configure({ held_online: value === 'online' })
-        await saveDraft('first_practice_area_meeting', !booking && value === 'online' ? { format: value } : null)
+        const online = value === 'online'
+        const placement = { ...target, locationId: online ? null : value, active: true, published: false,
+          replaceDraftLocations: { updatedAt: product.updated_at, activeLocationIds: product.locations.filter(row => row.active).map(row => row.location_id) } }
+        const [locations, configuration] = await Promise.all([
+          prepareProductLocation(db, placement),
+          booking ? prepareProductBookingConfig(db, { ...target, actorId, patch: { held_online: online } }) : null,
+        ])
+        await executeBatch(db, [...locations, ...(configuration?.queries ?? []), draftWrite('first_practice_area_meeting', !booking && online ? { format: value } : null)], { operation: 'Set practice area meeting location' })
+          .catch(error => { throw productLocationWriteError(bookingConfigurationWriteError(error), placement) })
       }
       break
     case 'office-address':

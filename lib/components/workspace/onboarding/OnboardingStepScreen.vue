@@ -33,7 +33,7 @@
         <UFormField :label="fieldLabel('name')" required>
           <UInput :model-value="state.details.name" class="w-full" size="lg" autocomplete="organization" @update:model-value="setBusinessName" />
         </UFormField>
-        <UButton v-if="plan" type="button" :label="plan.businessLookup.importLabel" color="neutral" variant="link" class="self-start px-0" @click="googleImport = true" />
+        <UButton v-if="plan" type="button" :label="plan.businessLookup.importLabel" color="neutral" variant="link" class="self-start px-0" @click="openBusinessLookup" />
       </template>
       <template v-else-if="plan">
         <GooglePlacePicker v-model="businessSearch" :placeholder="plan.businessLookup.searchPlaceholder" @select="choosePlace" />
@@ -128,9 +128,13 @@ const businessSearch = ref('')
 const googleImport = ref(false)
 watch(() => props.step.id, (id) => {
   if (id !== 'business') return
-  businessSearch.value = state.value.details.name
   state.value.source ??= 'manual'
 }, { immediate: true })
+
+function openBusinessLookup() {
+  businessSearch.value = state.value.details.name
+  googleImport.value = true
+}
 
 function choosePlace(place: OnboardingPlacePreview) {
   seedFromPlace(place)

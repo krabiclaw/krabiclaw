@@ -8,7 +8,7 @@ import { mediaStillUrl } from '~/shared/media-placement-contract'
 import { firstMenuSectionSetupPath } from '~/server/utils/dashboard-links'
 import { getLocation } from '~/server/utils/location-management'
 import { getMediaPlacements, setSingleMediaPlacement } from '~/server/utils/media-placement'
-import { firstMenuSetupApplies, parseOnboardingDraftPayload } from '~/server/utils/onboarding-drafts'
+import { firstMenuSetupApplies, firstMenuSkipsByDish, parseOnboardingDraftPayload } from '~/server/utils/onboarding-drafts'
 import { createCollection, createProduct, listCollectionProducts, listCollections, listLocationProducts, organizationDefaultCurrency, resolveVariantPrice, setCollectionProducts, updateCollection, updateProduct } from '~/server/utils/product-management'
 import { requireTrimmedProductString } from '~/server/utils/product-validation'
 import { currencySymbol, invalidOfferingAnswer, offeringDestination, offeringField, offeringProductCreation, offeringScreen, offeringSetupChanged, offeringToday, submittedValue, type OfferingSetupContext } from '~/server/utils/offering-setup'
@@ -30,8 +30,10 @@ async function readMenuSetup(db: DbClient, organizationId: string, locationId: s
   const menuSections = sections.filter(section => section.location_id === locationId || section.location_id === null)
   const draftDishes = products.filter(product => product.variants.length === 1 && !product.publications.some(row => row.published)
     && product.locations.some(row => row.location_id === locationId && row.active && !row.published))
+  const skipsByDish = firstMenuSkipsByDish(payload.first_menu_skips)
+  const dishesWithSkips = draftDishes.filter(product => skipsByDish?.[product.id])
   const dish = creation.productId ? draftDishes.find(product => product.id === creation.productId)
-    : draftDishes.find(product => product.id === payload.first_menu_skips?.dish_id)
+    : (dishesWithSkips.length === 1 ? dishesWithSkips[0] : undefined)
       ?? (draftDishes.length === 1 && products.length === 1 ? draftDishes[0] : undefined)
   if (products.length && !dish) return null
   const selectedSectionId = !payload.first_menu_location_id || payload.first_menu_location_id === locationId ? payload.first_menu_section_id : undefined
@@ -44,7 +46,7 @@ async function readMenuSetup(db: DbClient, organizationId: string, locationId: s
   const photo = dish ? (await getMediaPlacements(db, {
     organizationId, ownerType: 'product', ownerIds: [dish.id], slot: 'image',
   })).get(dish.id)?.[0] : undefined
-  const skips = payload.first_menu_skips?.dish_id === dish?.id ? payload.first_menu_skips : undefined
+  const skips = dish ? skipsByDish?.[dish.id] : undefined
   const resume: Step | undefined = !dish
     ? section ? 'dish' : 'section'
     : !photo && !skips?.photo ? 'photo'
@@ -186,10 +188,13 @@ export async function firstMenuSetup(context: OfferingSetupContext, locationId: 
     }
     if (!value) {
       const result = await execute(db, `UPDATE onboarding_drafts
-        SET payload_json = json_set(payload_json, '$.first_menu_skips', json_set(
-          CASE WHEN json_extract(payload_json, '$.first_menu_skips.dish_id') = ?
-            THEN json_extract(payload_json, '$.first_menu_skips') ELSE json_object('dish_id', ?) END, ?, json('true')))
-        WHERE id = ? AND organization_id = ? AND status = 'committed'`, [dish.id, dish.id, `$.${step}`, draft.id, organizationId])
+        SET payload_json = json_set(payload_json, '$.first_menu_skips', json_patch(
+          CASE WHEN json_type(payload_json, '$.first_menu_skips.dish_id') = 'text'
+            THEN json_object(json_extract(payload_json, '$.first_menu_skips.dish_id'),
+              json_remove(json_extract(payload_json, '$.first_menu_skips'), '$.dish_id'))
+            ELSE COALESCE(json_extract(payload_json, '$.first_menu_skips'), json('{}')) END,
+          json_object(?, json_object(?, json('true')))))
+        WHERE id = ? AND organization_id = ? AND status = 'committed'`, [dish.id, step, draft.id, organizationId])
       if (result.meta.changes !== 1) throw offeringSetupChanged()
     }
   }

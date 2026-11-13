@@ -8,7 +8,7 @@ import { claimCheckoutReturn, tokenHash } from './buyer'
 import { approvedStayBooking, requirePayment, type Payment } from './index'
 import { isStayPurchase, surchargeBasisPoints, type PaymentReview } from './checkout'
 import { PRICE_TAX_BEHAVIORS, type Price } from '~/shared/prices'
-import { reconcilePaymentIntent, confirmationHoldUntil } from './events'
+import { reconcilePaymentIntent, confirmationHoldUntil, releaseApprovedStayConfirmation } from './events'
 import { notifyPaymentFinancialEvent } from './notifications'
 import { assertBookingBatchWrite, bookingBatchWriteRefused } from '~/server/utils/availability'
 import { approvedStayPaymentPredicate } from '~/server/domain/stays'
@@ -29,14 +29,19 @@ type IntentWithSurcharge = Stripe.PaymentIntent & { amount_details?: { surcharge
 export type PaymentHandoffState = 'open' | 'processing' | 'verifying' | 'paid' | 'failed' | 'expired'
 
 /** The purchase its return token authorizes, with what Stripe says of its intent now. */
-export async function requireClaimedPayment(db: DbClient, stripe: Stripe, organizationId: string, paymentId: string, claim: string): Promise<{ payment: Payment; intent: Stripe.PaymentIntent; state: PaymentHandoffState }> {
+export async function requireClaimedPayment(db: DbClient, stripe: Stripe, organizationId: string, paymentId: string, claim: string): Promise<{ payment: Payment; intent: Stripe.PaymentIntent; state: PaymentHandoffState; confirming: boolean }> {
   if (!/^[a-f0-9-]{72}$/u.test(claim)) throw new HTTPError({ statusCode: 400, statusMessage: 'Purchase claim required' })
-  const payment = await queryFirst<Payment>(db, 'SELECT * FROM payments WHERE id=? AND organization_id=? AND return_token_hash=?', [paymentId, organizationId, await tokenHash(claim)])
+  const now = new Date().toISOString()
+  const payment = await queryFirst<Payment & { confirmation_in_flight: number }>(db, `SELECT p.*,
+    EXISTS (SELECT 1 FROM payment_checkout_holds h WHERE h.payment_id=p.id AND h.organization_id=p.organization_id
+      AND h.status='active' AND h.expires_at>?
+      AND json_type(p.review_json,'$.confirmation_started_at')='text') AS confirmation_in_flight
+    FROM payments p WHERE p.id=? AND p.organization_id=? AND p.return_token_hash=?`, [now, paymentId, organizationId, await tokenHash(claim)])
   if (!payment?.stripe_payment_intent_id || !payment.checkout_expires_at || !payment.return_expires_at) throw new HTTPError({ statusCode: 404, statusMessage: 'Payment not found' })
   const intent = await stripe.paymentIntents.retrieve(payment.stripe_payment_intent_id, { expand: ['latest_charge'] }, { stripeAccount: payment.stripe_account_id })
-  const now = new Date().toISOString()
-  const state: PaymentHandoffState = payment.captured_amount > 0 || intent.status === 'succeeded' ? 'paid' : intent.status === 'requires_capture' || intent.status === 'processing' ? 'processing' : intent.status === 'canceled' ? 'failed' : intent.next_action?.type === 'verify_with_microdeposits' ? 'verifying' : payment.checkout_expires_at <= now || payment.return_expires_at <= now ? 'expired' : 'open'
-  return { payment, intent, state }
+  const confirming = payment.confirmation_in_flight === 1 && (intent.status === 'requires_confirmation' || intent.status === 'requires_payment_method')
+  const state: PaymentHandoffState = payment.captured_amount > 0 || intent.status === 'succeeded' ? 'paid' : intent.status === 'requires_capture' || intent.status === 'processing' || confirming ? 'processing' : intent.status === 'canceled' ? 'failed' : intent.next_action?.type === 'verify_with_microdeposits' ? 'verifying' : payment.checkout_expires_at <= now || payment.return_expires_at <= now ? 'expired' : 'open'
+  return { payment, intent, state, confirming }
 }
 
 /** Stripe's own page for confirming the microdeposits. */
@@ -46,9 +51,11 @@ function bankVerificationUrl(intent: Stripe.PaymentIntent): string {
   return url
 }
 
-function parseReview(value: string | null): (PaymentReview & { confirmation_started_at?: string }) | null {
+type StoredPaymentReview = PaymentReview & { confirmation_started_at?: string; tax_calculation_id?: string }
+
+function parseReview(value: string | null): StoredPaymentReview | null {
   if (!value) return null
-  const review = JSON.parse(value) as PaymentReview & { confirmation_started_at?: string }
+  const review = JSON.parse(value) as StoredPaymentReview
   if (typeof review.payment_method_id !== 'string' || ![review.subtotal, review.tax, review.tax_included, review.surcharge].every(Number.isSafeInteger) || review.total !== review.subtotal + review.tax + review.surcharge) throw new Error('Stored payment review is invalid')
   return review
 }
@@ -168,15 +175,11 @@ export async function cancelStayPayment(db: DbClient, stripe: Stripe, env: Cloud
  * carries none. Stripe's answer missing is an error, never a free payment.
  */
 export async function reviewPayment(db: DbClient, stripe: Stripe, organizationId: string, paymentId: string, claim: string, paymentMethodId: string, buyerIp: string | null) {
-  const { payment, intent: current, state } = await requireClaimedPayment(db, stripe, organizationId, paymentId, claim)
+  const { payment, intent: current, state, confirming } = await requireClaimedPayment(db, stripe, organizationId, paymentId, claim)
+  if (confirming) throw new HTTPError({ statusCode: 409, statusMessage: 'This payment is already in progress', data: { code: 'payment_in_progress' } })
   if (state !== 'open') throw new HTTPError({ statusCode: 409, statusMessage: state === 'paid' ? 'This payment is already complete' : state === 'processing' || state === 'verifying' ? 'This payment is already in progress' : state === 'expired' ? 'This payment has expired; start the booking again' : 'This payment was not accepted; start the booking again', data: { code: `payment_${state}` } })
   if (!/^pm_[A-Za-z0-9]+$/u.test(paymentMethodId)) throw new HTTPError({ statusCode: 400, statusMessage: 'Payment method required' })
   const snapshot = snapshotOf(payment)
-  if (snapshot.approval && await queryFirst(db, `SELECT 1 FROM payment_checkout_holds h JOIN payments p ON p.id=h.payment_id
-    WHERE h.payment_id=? AND h.status='active' AND h.expires_at>?
-      AND json_type(p.review_json,'$.confirmation_started_at')='text'`, [payment.id, new Date().toISOString()])) {
-    throw new HTTPError({ statusCode: 409, statusMessage: 'This payment is already in progress', data: { code: 'payment_in_progress' } })
-  }
   const rate = await surchargeBasisPoints(db, organizationId, payment.stripe_account_id)
   const method = await stripe.paymentMethods.retrieve(paymentMethodId, {}, { stripeAccount: payment.stripe_account_id })
   const tax = snapshot.automatic_tax ? await calculateTax(stripe, payment, snapshot, method, buyerIp) : null
@@ -199,10 +202,12 @@ export async function reviewPayment(db: DbClient, stripe: Stripe, organizationId
   }
   const review: PaymentReview = { payment_method_id: method.id, subtotal: payment.amount, tax: tax?.tax_amount_exclusive ?? 0, tax_included: tax?.tax_amount_inclusive ?? 0, surcharge, total: amount + surcharge, reviewed_at: new Date().toISOString() }
   if (review.total !== review.subtotal + review.tax + review.surcharge) throw new Error('Stripe Tax returned a total that does not add up')
+  if (snapshot.approval && tax && !tax.id) throw new Error('Stripe Tax returned a calculation without an ID')
+  const stored: StoredPaymentReview = { ...review, ...(snapshot.approval && tax?.id ? { tax_calculation_id: tax.id } : {}) }
   const saved = await execute(db, `UPDATE payments SET review_json=?,updated_at=? WHERE id=?${snapshot.approval ? `
     AND NOT EXISTS (SELECT 1 FROM payment_checkout_holds h WHERE h.payment_id=payments.id AND h.status='active'
       AND h.expires_at>? AND json_type(payments.review_json,'$.confirmation_started_at')='text')` : ''}`,
-    [JSON.stringify(review), review.reviewed_at, payment.id, ...(snapshot.approval ? [review.reviewed_at] : [])])
+    [JSON.stringify(stored), review.reviewed_at, payment.id, ...(snapshot.approval ? [review.reviewed_at] : [])])
   if (saved.meta.changes !== 1) throw new HTTPError({ statusCode: 409, statusMessage: 'This payment is already in progress', data: { code: 'payment_in_progress' } })
   return { ...review, currency: payment.currency, method: { type: method.type, brand: method.card?.brand ?? null, last4: method.card?.last4 ?? method.us_bank_account?.last4 ?? null, funding: method.card?.funding ?? null, wallet: method.card?.wallet?.type ?? null, bank_name: method.us_bank_account?.bank_name ?? null } }
 }
@@ -234,12 +239,14 @@ async function calculateTax(stripe: Stripe, payment: Payment, snapshot: ReturnTy
  * Every path settles idempotently from Stripe's own status.
  */
 export async function confirmPayment(db: DbClient, stripe: Stripe, env: CloudflareEnv, organizationId: string, paymentId: string, claim: string, input: { payment_method_id: string; total: number }, siteOrigin: string) {
-  const { payment, intent: current, state } = await requireClaimedPayment(db, stripe, organizationId, paymentId, claim)
+  const { payment, intent: current, state, confirming } = await requireClaimedPayment(db, stripe, organizationId, paymentId, claim)
+  if (confirming) throw new HTTPError({ statusCode: 409, statusMessage: 'This payment is already in progress', data: { code: 'payment_in_progress' } })
   if (state !== 'open') throw new HTTPError({ statusCode: 409, statusMessage: state === 'paid' ? 'This payment is already complete' : state === 'processing' || state === 'verifying' ? 'This payment is already in progress' : 'This payment can no longer be confirmed; start the booking again', data: { code: `payment_${state}` } })
   const review = parseReview(payment.review_json)
   if (!review || review.payment_method_id !== input.payment_method_id || review.total !== input.total) throw new HTTPError({ statusCode: 409, statusMessage: 'Review the payment again before confirming', data: { code: 'review_required' } })
-  const { approval, stay } = snapshotOf(payment)
+  const { approval, stay, automatic_tax } = snapshotOf(payment)
   if (approval && review.confirmation_started_at) throw new HTTPError({ statusCode: 409, statusMessage: 'This payment is already in progress', data: { code: 'payment_in_progress' } })
+  if (approval && automatic_tax && !review.tax_calculation_id) throw new HTTPError({ statusCode: 409, statusMessage: 'Review the payment again before confirming', data: { code: 'review_required' } })
   const attached = typeof current.payment_method === 'string' ? current.payment_method : current.payment_method?.id
   if (current.status !== 'requires_confirmation' || attached !== review.payment_method_id || current.amount !== review.subtotal + review.tax) throw new HTTPError({ statusCode: 409, statusMessage: 'The payment changed since it was reviewed; review it again', data: { code: 'review_required' } })
   // The capacity is kept before Stripe can take the money, against the hold itself: a hold that has gone stops the payment here.
@@ -279,12 +286,20 @@ export async function confirmPayment(db: DbClient, stripe: Stripe, env: Cloudfla
     confirmed = await stripe.paymentIntents.confirm(current.id, {
       // A method that leaves the site comes back to this pay page, which completes the return there.
       return_url: new URL(`/pay/${encodeURIComponent(payment.id)}?claim=${encodeURIComponent(claim)}`, siteOrigin).toString(),
+      // A concurrent review can change the attached method before Stripe receives this confirmation.
+      ...(approval ? { payment_method: review.payment_method_id } : {}),
+      ...(approval && review.tax_calculation_id ? { hooks: { inputs: { tax: { calculation: review.tax_calculation_id } } } } : {}),
+      ...(approval || review.surcharge > 0 ? { amount_to_confirm: review.total } : {}),
       // The surcharged total is what Stripe charges; the surcharge inside it is named so receipts and refunds carry it.
-      ...(review.surcharge > 0 ? { amount_to_confirm: review.total, amount_details: { surcharge: { amount: review.surcharge, enforce_validation: 'enabled' } } } : {}),
+      ...(review.surcharge > 0 ? { amount_details: { surcharge: { amount: review.surcharge, enforce_validation: 'enabled' } } } : {}),
     } as Stripe.PaymentIntentConfirmParams, { stripeAccount: payment.stripe_account_id, idempotencyKey: `krabiclaw-confirm:${payment.id}:${review.reviewed_at}` })
   } catch (error) {
     if (approval && error instanceof stripe.errors.StripeCardError && error.payment_intent) {
       await reconcilePaymentIntent(db, stripe, confirmingPayment, error.payment_intent, env)
+    } else if (approval && (error instanceof stripe.errors.StripeAuthenticationError || error instanceof stripe.errors.StripePermissionError ||
+      (error instanceof stripe.errors.StripeInvalidRequestError && error.statusCode === 400 && error.code !== 'payment_intent_unexpected_state'
+        && (error.param || error.code?.startsWith('parameter_')))) && error.headers?.['stripe-should-retry'] !== 'true') {
+      await releaseApprovedStayConfirmation(db, confirmingPayment)
     }
     throw error
   }
@@ -340,8 +355,16 @@ async function paymentReceipt(db: DbClient, env: CloudflareEnv, payment: Payment
  * buyer and its receipt is named; a payment still clearing claims nothing.
  */
 export async function completePaymentReturn(db: DbClient, stripe: Stripe, env: CloudflareEnv, organizationId: string, paymentId: string, claim: string, buyer: () => Promise<string>): Promise<PaymentReturn> {
-  const { payment, intent } = await requireClaimedPayment(db, stripe, organizationId, paymentId, claim)
-  if (intent.livemode !== Boolean(payment.livemode) || intent.metadata.krabiclaw_payment_id !== payment.id || (intent.status !== 'succeeded' && intent.status !== 'processing' && intent.status !== 'requires_capture')) throw new HTTPError({ statusCode: 409, statusMessage: 'Stripe has not authenticated this purchase' })
+  const { payment, intent, confirming } = await requireClaimedPayment(db, stripe, organizationId, paymentId, claim)
+  if (intent.livemode !== Boolean(payment.livemode) || intent.metadata.krabiclaw_payment_id !== payment.id) throw new HTTPError({ statusCode: 409, statusMessage: 'Stripe has not authenticated this purchase' })
+  if (confirming) {
+    const settled = await reconcilePaymentIntent(db, stripe, payment, intent, env)
+    if (settled.status === 'requires_payment_method' && settled.last_payment_error) {
+      throw new HTTPError({ statusCode: 409, statusMessage: 'Stripe declined this payment', data: { code: 'payment_declined' } })
+    }
+    return { state: 'processing' }
+  }
+  if (intent.status !== 'succeeded' && intent.status !== 'processing' && intent.status !== 'requires_capture') throw new HTTPError({ statusCode: 409, statusMessage: 'Stripe has not authenticated this purchase' })
   const settled = await reconcilePaymentIntent(db, stripe, payment, intent, env)
   if (settled.status === 'processing') return { state: 'processing' }
   if (settled.status !== 'succeeded') return { state: 'expired' }

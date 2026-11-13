@@ -43,10 +43,12 @@ export async function saveOfferingAddress(context: OfferingSetupContext, locatio
   const country = submittedValue(answer, 'country')
   if (!getPhoneCountry(country)) throw invalidOfferingAnswer('Choose the country for this address')
   if (!streetAddress || !city) throw invalidOfferingAnswer('Enter the street address and city or town')
+  const existing = current.address
+  const sameStreet = existing?.regionCode === country && existing.locality === city && existing.addressLines[0] === streetAddress
   const address = postalAddressFromAnswers({
     country, streetAddress, city, addressLine2: submittedValue(answer, 'address_line_2'),
     region: submittedValue(answer, 'region'), postalCode: submittedValue(answer, 'postal_code'),
-    sublocality: current.address?.sublocality,
+    sublocality: sameStreet ? existing.sublocality : undefined,
   })
   if (!address) throw invalidOfferingAnswer('Enter the street address and city or town')
   if (current.address?.languageCode) address.languageCode = current.address.languageCode

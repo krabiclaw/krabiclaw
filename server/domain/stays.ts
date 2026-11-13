@@ -1881,12 +1881,16 @@ export async function createStay(db: DbClient, env: StayMutationEnv & Cloudflare
   return pushed(await getStay(db, access, id))
 }
 
+export function assertStayRequestEditable(stay: Pick<Stay, 'status' | 'respond_by'>): void {
+  if (stay.status === 'pending' && stay.respond_by) fail(409, 'STAY_REQUEST_PENDING', 'A stay request can be edited once the guest has paid.', 'booking_id')
+}
+
 async function requireAppStay(db: DbClient, access: StayAccess, stayId: string, expectedVersion: unknown): Promise<StayDetail> {
   requireManager(access)
   const stay = await getStay(db, access, stayId)
   if (isChannelManagedStay(stay)) channelOwned(stay, 'belongs to')
   if (stay.status === 'cancelled') fail(409, 'STAY_NOT_EDITABLE', 'This stay is cancelled')
-  if (stay.request_status) fail(409, 'STAY_REQUEST_PENDING', 'A stay request can be edited once the guest has paid.', 'booking_id')
+  assertStayRequestEditable(stay)
   if (expectedVersion !== stay.version) fail(409, 'STAY_VERSION_CONFLICT', 'This stay changed since you opened it; reload it and try again', 'version')
   return stay
 }

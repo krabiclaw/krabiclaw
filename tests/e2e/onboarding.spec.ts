@@ -1,5 +1,5 @@
 import { expect, test, type APIRequestContext } from '@playwright/test'
-import { dismissPreviewToolbar } from './helpers'
+import { dismissPreviewToolbar, waitForNuxtHydration } from './helpers'
 import { authRequestHeaders, loginAs } from './helpers/auth'
 import { mcpData, mcpRequest, publishOwnHostProfile } from './helpers/mcp'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
@@ -134,6 +134,10 @@ test('a new owner builds a draft and creates a site through the routed flow', as
     if (sent.url().includes('/api/dashboard/google-places/')) placesRequests.push(sent.url())
   })
   await page.getByRole('textbox', { name: 'Business name' }).fill(name)
+  await page.getByRole('button', { name: 'Import from Google Maps', exact: true }).click()
+  await expect(page.getByPlaceholder('Search for your business', { exact: true })).toHaveValue(name)
+  await page.getByRole('button', { name: 'Enter details manually', exact: true }).click()
+  await expect(page.getByRole('textbox', { name: 'Business name' })).toHaveValue(name)
   await exitSetup()
   await continueSetup('business')
   await expect(page.getByRole('textbox', { name: 'Business name' })).toHaveValue(name)
@@ -257,8 +261,25 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   await expect(page.getByRole('radio', { name: /^Growth/ })).toBeChecked()
   await page.goto(`/dashboard/${created!.slug}`)
   await website.getByRole('link', { name: 'Publish website' }).click()
+  const previewPageviews: string[] = []
+  page.on('request', (outgoing) => {
+    if (new URL(outgoing.url()).pathname === '/api/analytics/track' && outgoing.frame().parentFrame() === page.mainFrame()) {
+      previewPageviews.push(outgoing.url())
+    }
+  })
   await page.getByRole('button', { name: 'Make public' }).click()
   await expect(website).toContainText('Live')
+  const previewFrame = website.locator('iframe')
+  await expect(previewFrame).toHaveAttribute('src', /[?&]preview_token=/)
+  await expect(website.frameLocator('iframe').locator('body')).toContainText(name)
+  const frame = await (await previewFrame.elementHandle())?.contentFrame()
+  if (!frame) throw new Error('Today did not load its website preview')
+  await waitForNuxtHydration(frame)
+  expect(previewPageviews).toEqual([])
+  const visit = website.getByRole('link', { name: 'View website' })
+  const publicAddress = new URL(baseURL!)
+  publicAddress.hostname = subdomain + '.' + publicAddress.hostname
+  await expect(visit).toHaveAttribute('href', publicAddress.href)
   // Publishing makes the same site public, without a preview token.
   const live = await readLocalTenant(request, subdomain, '/')
   expect(live.status()).toBe(200)
@@ -401,6 +422,59 @@ for (const setup of [
         await page.locator('a[href*="/products/menu?"]').first().click()
         await page.getByText('Lunch menu', { exact: true }).click()
         await expect(page.getByText('Tamarind prawns', { exact: true })).toBeVisible()
+      }
+      if (setup.vertical === 'experience') {
+        await page.goto(guide.href)
+        const next = page.getByRole('button', { name: 'Next', exact: true })
+        const exit = page.getByRole('button', { name: 'Save & exit', exact: true })
+        const venue = page.getByRole('textbox', { name: 'Venue name' })
+        await page.getByRole('textbox', { name: 'Experience title' }).fill('Mangrove kayak trip')
+        await next.click()
+        await page.getByText('Add a venue', { exact: true }).click()
+        await exit.click()
+        await expect(page).toHaveURL(`${baseURL}${caller}`)
+        await page.goto(guide.href)
+        await expect(venue).toBeVisible()
+        const timezone = page.getByRole('button', { name: 'Time zone', exact: true })
+        await timezone.click({ timeout: 5_000 })
+        await page.getByRole('combobox').fill('Singapore')
+        await page.getByRole('option', { name: /^Singapore/ }).click()
+        await exit.click()
+        await expect(page).toHaveURL(`${baseURL}${caller}`)
+        await page.goto(guide.href)
+        await expect(venue).toHaveValue('')
+        await expect(timezone).toContainText('Singapore')
+        await venue.fill('Mangrove Pier')
+        await next.click()
+        await page.getByText('Give meeting directions', { exact: true }).click()
+        await exit.click()
+        await expect(page).toHaveURL(`${baseURL}${caller}`)
+        await page.goto(guide.href)
+        await page.getByRole('textbox', { name: 'Meeting directions' }).fill('Meet beside the blue kayak rack.')
+        await next.click()
+        await page.getByRole('textbox', { name: 'Duration in minutes' }).fill('60')
+        await next.click()
+        await page.getByRole('textbox', { name: 'Places per session' }).fill('4')
+        await next.click()
+        await expect(page.getByRole('heading', { name: 'Add a photo of the experience' })).toBeVisible()
+        await next.click()
+        await page.getByRole('textbox', { name: 'Description' }).fill('Paddle through the mangroves with a local guide.')
+        await next.click()
+        await page.getByRole('textbox', { name: 'Price per guest' }).fill('850')
+        await next.click()
+        const sessionDate = page.getByLabel('Date', { exact: true })
+        const date = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+        await sessionDate.fill(date)
+        await exit.click()
+        await expect(page).toHaveURL(`${baseURL}${caller}`)
+        await page.goto(guide.href)
+        await expect(sessionDate).toHaveValue(date)
+        const time = page.getByLabel('Start time', { exact: true })
+        await expect(time).toHaveValue('')
+        await time.fill('14:00')
+        await page.getByRole('button', { name: 'Finish', exact: true }).click()
+        await expect(page).toHaveURL(`${baseURL}${caller}?kind=experience`)
+        await expect(page.getByText('Mangrove kayak trip', { exact: true })).toBeVisible()
       }
       const anonymous = await readLocalTenant(request, outcome.subdomain, outcome.public_url)
       expect(anonymous.status(), await anonymous.text()).toBe(404)
@@ -823,7 +897,7 @@ test('a new owner picks their Google listing and it seeds location, contact and 
 
   // Predictions appear as the owner types; each names the place and its area.
   const autocomplete = page.waitForRequest(sent => sent.url().includes('/api/dashboard/google-places/autocomplete'))
-  await page.getByPlaceholder('Search for your business on Google Maps').pressSequentially('Kikuzuki Krabi')
+  await page.getByPlaceholder('Search for your business', { exact: true }).pressSequentially('Kikuzuki Krabi')
   const sessionToken = ((await autocomplete).postDataJSON() as { session_token: string }).session_token
   const suggestion = page.getByRole('option', { name: new RegExp(KIKUZUKI.name.replace(/[&]/g, '\\$&')) })
   await expect(suggestion).toContainText('Ao Nang')

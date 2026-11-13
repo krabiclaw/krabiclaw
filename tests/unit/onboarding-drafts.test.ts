@@ -62,13 +62,17 @@ test('a partial update retains an omitted website address and distinguishes clea
   assert.equal(complete.subdomain, 'our-custom-address')
 })
 
-test('completing a partial Google draft retains an edited name for the same place', () => {
-  const start = normalizeOnboardingDraftInput({ partial: true, vertical: 'restaurant', name: 'Our Local Name' }, null, null, 'google_places', place.placeId, null)
+test('completing a partial Google draft retains saved answers for the same place', () => {
+  const imported = { ...place, phone: '+66952932112', websiteUrl: 'https://example.com' }
+  const start = normalizeOnboardingDraftInput({ partial: true, vertical: 'restaurant', name: 'Our Local Name', details: { phone: null } }, null, null, 'google_places', place.placeId, imported)
   const row = { vertical: start.vertical, subdomain_candidate: start.subdomain, organization_id: null }
   const finish = { details: { source_locale: 'en' } }
-  const complete = normalizeOnboardingDraftInput(finish, row, start.payload, 'google_places', place.placeId, place)
+  assert.equal(start.payload.source.place?.phone, imported.phone)
+  const complete = normalizeOnboardingDraftInput(finish, row, start.payload, 'google_places', place.placeId, { ...imported, websiteUrl: 'https://changed.example.com' })
   assert.equal(complete.name, 'Our Local Name')
   assert.equal(complete.subdomain, 'our-local-name')
+  assert.equal(complete.payload.source.details.phone, null)
+  assert.equal(complete.payload.source.details.website_url, imported.websiteUrl)
   const replacement = { ...place, placeId: 'ChIJ-replacement', name: 'New Place' }
   assert.equal(normalizeOnboardingDraftInput(finish, row, start.payload, 'google_places', replacement.placeId, replacement).name, 'New Place')
 })

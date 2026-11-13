@@ -22,6 +22,8 @@ import guestStayRoute from '../../server/api/public/guest-stays/[activity_id].ge
 import accountCancelRoute from '../../server/api/account/bookings/[booking_id]/cancel.post.ts'
 import accountStayRoute from '../../server/api/account/bookings/[booking_id].get.ts'
 import accountPayRoute from '../../server/api/account/bookings/[booking_id]/pay.post.ts'
+import dashboardBookingPatchRoute from '../../server/api/dashboard/bookings/[booking_id].patch.ts'
+import paymentHandoffRoute from '../../server/api/public/payments/[payment_id].get.ts'
 import paymentConfirmRoute from '../../server/api/public/payments/[payment_id]/confirm.post.ts'
 import paymentReviewRoute from '../../server/api/public/payments/[payment_id]/review.post.ts'
 import { createProductBooking, notifyProductBookingCreated } from '../../server/domain/product-bookings.ts'
@@ -1873,17 +1875,20 @@ test('a stay request can be paid only after approval and Stripe confirms the sam
     await updateStayHome(env, db, manager, cabin.id, { cancellation_policy: 'moderate', long_term_cancellation_policy: 'firm' })
     await setProductPublication(db, { env, organizationId: ORG, productId: cabin.id, published: true, actor: { actorId: OWNER } })
     const reserved = await reserveStripeConnectedAccount(db, { organizationId: ORG, livemode: false })
-    await projectStripeConnectedAccount(db, { reservationId: reserved.id, organizationId: ORG, stripeAccountId: 'acct_seller', country: 'TH', livemode: false, cardPaymentsStatus: 'active', cardPaymentsResolutions: [], requirements: [], stripeRefreshedAt: new Date().toISOString() })
+    await projectStripeConnectedAccount(db, { reservationId: reserved.id, organizationId: ORG, stripeAccountId: 'acct_seller', country: 'US', livemode: false, cardPaymentsStatus: 'active', cardPaymentsResolutions: [], requirements: [], stripeRefreshedAt: new Date().toISOString() })
     const template = await saveMessageTemplate(db, env, manager, null, { title: 'Reservation received', body: 'Thanks for your reservation.', schedule: { trigger: 'booking_received', delay_minutes: 5, product_ids: [cabin.id] } })
 
     const auth = createAuth(env)
     const buyer = 'previously-verified-stay-buyer'
+    const password = 'CabinProof123!'
+    const hashedPassword = await hashPassword(password)
     await db.batch([
       db.prepare('INSERT INTO user(id,name,email,emailVerified) VALUES(?,?,?,1)').bind(buyer, 'Ana', 'ana@example.com'),
-      db.prepare("INSERT INTO account(id,accountId,providerId,userId,password) VALUES(?,?,'credential',?,?)").bind(buyer, buyer, buyer, await hashPassword('CabinProof123!')),
+      ...[buyer, OWNER].map(id => db.prepare("INSERT INTO account(id,accountId,providerId,userId,password) VALUES(?,?,'credential',?,?)").bind(id, id, id, hashedPassword)),
     ])
-    const signed = await auth.api.signInEmail({ body: { email: 'ana@example.com', password: 'CabinProof123!' }, returnHeaders: true })
-    const cookie = signed.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
+    const login = async (email: string) => (await auth.api.signInEmail({ body: { email, password }, returnHeaders: true }))
+      .headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
+    const [cookie, ownerCookie] = await Promise.all([login('ana@example.com'), login(`${OWNER}@example.test`)])
     const anonymous = await auth.api.signInAnonymous({ headers: new Headers(), returnHeaders: true })
     const siteCookie = anonymous.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
     const app = new H3()
@@ -1895,21 +1900,25 @@ test('a stay request can be paid only after approval and Stripe confirms the sam
     app.post('/api/account/bookings/:booking_id/pay', accountPayRoute)
     app.get('/api/account/bookings/:booking_id', accountStayRoute)
     app.post('/api/account/bookings/:booking_id/cancel', accountCancelRoute)
+    app.patch('/api/dashboard/bookings/:booking_id', dashboardBookingPatchRoute)
+    app.get('/api/public/payments/:payment_id', paymentHandoffRoute)
     app.post('/api/public/payments/:payment_id/review', paymentReviewRoute)
     app.post('/api/public/payments/:payment_id/confirm', paymentConfirmRoute)
     app.post('/api/public/payments/:payment_id/return', paymentReturnRoute)
     const runtimeContext = { name: 'cloudflare', cloudflare: { env } }
-    const call = (path: string, body?: Record<string, unknown>, session = cookie) => app.request(Object.assign(new Request(`https://proof.example${path}`, {
-      method: body === undefined ? 'GET' : 'POST',
+    const call = (path: string, body?: Record<string, unknown>, session = cookie, method = body === undefined ? 'GET' : 'POST') => app.request(Object.assign(new Request(`https://proof.example${path}`, {
+      method,
       headers: { cookie: session, origin: 'https://proof.example', 'content-type': 'application/json', 'cf-connecting-ip': '192.0.2.1' },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     }), { runtime: runtimeContext }))
 
-    const expected = 30_000
-    const paymentIntent = { id: 'pi_approved_stay', object: 'payment_intent', livemode: false, currency: 'usd', amount: expected,
-      amount_received: 0, status: 'requires_payment_method', client_secret: 'pi_approved_stay_secret', customer: null,
+    const subtotal = 30_000
+    const expected = 31_000
+    const paymentIntent = { id: 'pi_approved_stay', object: 'payment_intent', livemode: false, currency: 'usd', amount: subtotal,
+      amount_received: 0, status: 'requires_payment_method', client_secret: 'pi_approved_stay_secret', customer: null, payment_method_types: ['card'],
       application_fee_amount: null, latest_charge: null as string | null, payment_method: null as string | null,
       last_payment_error: null as { type: string; code: string; message: string } | null,
+      hooks: { inputs: { tax: { calculation: null as string | null } } },
       metadata: { krabiclaw_payment_id: '' } }
     const charge = { id: 'ch_approved_stay', object: 'charge', livemode: false, amount: expected, currency: 'usd',
       created: Math.floor(Date.now() / 1000), payment_intent: paymentIntent.id, payment_method: 'pm_card', receipt_url: 'https://pay.stripe.com/receipts/stay',
@@ -1918,17 +1927,20 @@ test('a stay request can be paid only after approval and Stripe confirms the sam
     let activity = ''
     let approvedPayUrl = ''
     let intentCount = 0
+    let rejections = 0
     let declines = 0
     let captures = 0
     let readinessChecks = 0
     let releaseConcurrentReadiness!: () => void
     const concurrentReadiness = new Promise<void>(resolve => { releaseConcurrentReadiness = resolve })
+    const { promise: competingMethodRequested, resolve: methodRequested } = Promise.withResolvers<undefined>()
+    const { promise: allowCompetingMethod, resolve: releaseCompetingMethod } = Promise.withResolvers<undefined>()
     const nativeFetch = globalThis.fetch
     t.mock.method(globalThis, 'fetch', async (request: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(request instanceof Request ? request.url : String(request))
       if (url.origin !== 'https://api.stripe.com') return nativeFetch(request, init)
       if (url.pathname === '/v2/core/accounts/acct_seller') return Response.json({
-        id: 'acct_seller', livemode: false, dashboard: 'express', identity: { country: 'TH' },
+        id: 'acct_seller', livemode: false, dashboard: 'express', identity: { country: 'US' },
         defaults: { responsibilities: { fees_collector: 'application', losses_collector: 'stripe' } },
         configuration: { merchant: { capabilities: { card_payments: { status: 'active', status_details: [] } } } }, requirements: { entries: [] },
       })
@@ -1938,10 +1950,18 @@ test('a stay request can be paid only after approval and Stripe confirms the sam
         return Response.json({ data: [{ id: 'pmc_child', parent: 'pmc_parent', active: true }], has_more: false })
       }
       assert.equal(new Headers(init?.headers).get('stripe-account'), 'acct_seller')
+      if (url.pathname === '/v1/tax/settings') return Response.json({ status: 'active' })
+      if (url.pathname === '/v1/tax/registrations') return Response.json({ data: [{ id: 'taxreg_stay' }] })
+      if (url.pathname === '/v1/tax/calculations') {
+        const other = new URLSearchParams(String(init?.body)).get('customer_details[address][postal_code]') === '94016'
+        const tax = other ? 2_000 : 1_000
+        return Response.json({ id: other ? 'taxcalc_other' : 'taxcalc_reviewed', amount_total: subtotal + tax, tax_amount_exclusive: tax, tax_amount_inclusive: 0 })
+      }
+      if (url.pathname === '/v1/tax/calculations/taxcalc_reviewed') return Response.json({ tax_amount_exclusive: 1_000, tax_amount_inclusive: 0 })
       if (url.pathname === '/v1/payment_intents') {
         assert.equal(init?.method, 'POST')
         const params = new URLSearchParams(String(init?.body))
-        assert.equal(params.get('amount'), String(expected))
+        assert.equal(params.get('amount'), String(subtotal))
         paymentIntent.metadata.krabiclaw_payment_id = params.get('metadata[krabiclaw_payment_id]')!
         intentCount++
       } else if (url.pathname === '/v1/customers' && init?.method === 'POST') {
@@ -1949,17 +1969,33 @@ test('a stay request can be paid only after approval and Stripe confirms the sam
         return Response.json({ id: 'cus_approved_stay' })
       } else if (url.pathname === '/v1/customers/cus_approved_stay/payment_methods') {
         return Response.json({ data: [], has_more: false })
-      } else if (url.pathname === '/v1/payment_methods/pm_card' || url.pathname === '/v1/payment_methods/pm_declined') {
-        return Response.json({ id: url.pathname.split('/').at(-1), type: 'card', card: { brand: 'visa', last4: '4242' }, billing_details: {} })
+      } else if (url.pathname.startsWith('/v1/payment_methods/')) {
+        const id = url.pathname.split('/').at(-1)
+        const other = id === 'pm_other'
+        if (other) {
+          methodRequested(undefined)
+          await allowCompetingMethod
+        }
+        return Response.json({ id, type: 'card', card: { brand: 'visa', last4: '4242' }, billing_details: { address: { country: 'US', postal_code: other ? '94016' : '98104' } } })
       } else if (url.pathname === '/v1/charges/ch_approved_stay') {
         return Response.json(charge)
       } else if (url.pathname === '/v1/payment_intents/pi_approved_stay' && init?.method === 'POST') {
-        paymentIntent.payment_method = new URLSearchParams(String(init.body)).get('payment_method')
+        const params = new URLSearchParams(String(init.body))
+        paymentIntent.payment_method = params.get('payment_method')
+        paymentIntent.amount = Number(params.get('amount'))
+        paymentIntent.hooks.inputs.tax.calculation = params.get('hooks[inputs][tax][calculation]')
         paymentIntent.status = 'requires_confirmation'
         paymentIntent.last_payment_error = null
       } else if (url.pathname.endsWith('/confirm')) {
+        if (rejections++ === 0) return Response.json({ error: { type: 'invalid_request_error', code: 'parameter_invalid_integer', param: 'amount_to_confirm', message: 'Invalid amount.' } }, { status: 400 })
         if (paymentIntent.payment_method === 'pm_declined') {
           if (++declines === 1) {
+            const waiting = await call(`${paymentPath}?claim=${claim}`)
+            assert.equal(waiting.status, 200, await waiting.clone().text())
+            assert.equal((await waiting.json()).state, 'processing')
+            const pendingReturn = await call(`${paymentPath}/return`, { claim })
+            assert.equal(pendingReturn.status, 200, await pendingReturn.clone().text())
+            assert.deepEqual(await pendingReturn.json(), { state: 'processing' })
             const concurrent = await call(`${paymentPath}/confirm`, { claim, payment_method_id: 'pm_declined', total: expected })
             assert.equal(concurrent.status, 409, await concurrent.clone().text())
             assert.equal((await concurrent.json()).data?.code, 'payment_in_progress')
@@ -1969,6 +2005,16 @@ test('a stay request can be paid only after approval and Stripe confirms the sam
           paymentIntent.last_payment_error = decline
           return Response.json({ error: { ...decline, payment_intent: paymentIntent } }, { status: 402 })
         }
+        releaseCompetingMethod(undefined)
+        const competing = await competingReview
+        assert.equal(competing.status, 409, await competing.clone().text())
+        assert.equal((await competing.json()).data.code, 'payment_in_progress')
+        assert.deepEqual([paymentIntent.payment_method, paymentIntent.amount, paymentIntent.hooks.inputs.tax.calculation], ['pm_other', 32_000, 'taxcalc_other'])
+        const params = new URLSearchParams(String(init?.body))
+        paymentIntent.payment_method = params.get('payment_method') ?? paymentIntent.payment_method
+        paymentIntent.amount = Number(params.get('amount_to_confirm') ?? paymentIntent.amount)
+        paymentIntent.hooks.inputs.tax.calculation = params.get('hooks[inputs][tax][calculation]') ?? paymentIntent.hooks.inputs.tax.calculation
+        assert.deepEqual([paymentIntent.payment_method, paymentIntent.amount, paymentIntent.hooks.inputs.tax.calculation], ['pm_card', expected, 'taxcalc_reviewed'])
         paymentIntent.latest_charge = charge.id
         paymentIntent.status = 'requires_capture'
       } else if (url.pathname.endsWith('/capture')) {
@@ -2049,9 +2095,25 @@ test('a stay request can be paid only after approval and Stripe confirms the sam
     assert.equal(target.origin, 'https://demo.sites.example')
     const claim = target.hash.slice(1)
     const paymentPath = target.pathname.replace('/pay/', '/api/public/payments/')
+    const beforeNote = await getStay(db, manager, bookingId)
+    const note = await call(`/api/dashboard/bookings/${bookingId}?org=${ORG}`, {
+      version: beforeNote.version, private_notes: 'Guest asked about parking',
+    }, ownerCookie, 'PATCH')
+    assert.equal(note.status, 409, await note.clone().text())
+    assert.equal((await note.json()).data.code, 'STAY_REQUEST_PENDING')
+    const afterNote = await getStay(db, manager, bookingId)
+    assert.deepEqual([afterNote.private_notes, afterNote.version], [beforeNote.private_notes, beforeNote.version])
     assert.deepEqual(await (await call(payPath, {})).json(), { pay_url: url })
     assert.equal(intentCount, 1)
     t.mock.timers.setTime(now + 86_400_000 - 60_000)
+    const rejectedReview = await call(`${paymentPath}/review`, { claim, payment_method_id: 'pm_declined' })
+    assert.equal(rejectedReview.status, 200, await rejectedReview.clone().text())
+    const rejected = await call(`${paymentPath}/confirm`, { claim, payment_method_id: 'pm_declined', total: expected })
+    assert.equal(rejected.status, 400, await rejected.clone().text())
+    assert.equal((await read()).payment_processing, false)
+    assert.equal(await db.prepare(`SELECT h.expires_at=p.checkout_expires_at AS deadline_restored
+      FROM payment_checkout_holds h JOIN payments p ON p.id=h.payment_id WHERE p.id=?`).bind(paymentIntent.metadata.krabiclaw_payment_id).first('deadline_restored'), 1)
+    t.mock.timers.setTime(Date.now() + 1)
     const declinedReview = await call(`${paymentPath}/review`, { claim, payment_method_id: 'pm_declined' })
     assert.equal(declinedReview.status, 200, await declinedReview.clone().text())
     const declined = await call(`${paymentPath}/confirm`, { claim, payment_method_id: 'pm_declined', total: expected })
@@ -2065,6 +2127,8 @@ test('a stay request can be paid only after approval and Stripe confirms the sam
     const review = await call(`${paymentPath}/review`, { claim, payment_method_id: 'pm_card' })
     assert.equal(review.status, 200, await review.clone().text())
     assert.equal((await review.json()).total, expected)
+    const competingReview = call(`${paymentPath}/review`, { claim, payment_method_id: 'pm_other' })
+    await competingMethodRequested
     const confirm = await call(`${paymentPath}/confirm`, { claim, payment_method_id: 'pm_card', total: expected })
     assert.equal(confirm.status, 200, await confirm.clone().text())
     assert.equal((await confirm.json()).status, 'succeeded')

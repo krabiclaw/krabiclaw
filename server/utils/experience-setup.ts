@@ -27,7 +27,7 @@ import { isValidCalendarDate, isValidTimezone, localDateAt, localDateTimeToInsta
 
 const stages = ['title', 'location', 'venue', 'venue-address', 'venue-street', 'venue-directions', 'host', 'duration', 'capacity', 'photo', 'description', 'price', 'session'] as const
 type Step = typeof stages[number]
-type VenueAddressProgress = NonNullable<OnboardingDraftPayload['first_experience_venue_address']>
+type ExperienceProgressField = 'first_experience_venue_address' | 'first_experience_partial'
 const productKey = 'first-experience-setup'
 const sessionKey = (productId: string) => `first-experience-setup:${productId}`
 const addVenue = 'new'
@@ -76,20 +76,27 @@ async function loadSetup(context: OfferingSetupContext) {
   const savedAddress = venueAddress?.partial && location
     ? await getLocation(env.DB, organizationId, location.id) : null
   const partialAddress = savedAddress && savedAddress.updated_at === venueAddress?.partial?.location_revision ? venueAddress?.partial : undefined
+  const pendingMeetingStep = venueAddress?.pending_method === 'street' ? 'venue-street'
+    : venueAddress?.pending_method === 'directions' ? 'venue-directions' : undefined
   const completedStreet = hasStreet && venueAddress && !venueAddress.partial
-  const meetingStep = partialAddress || completedStreet ? 'venue-street' : meetingPoint ? 'venue-directions' : undefined
+  const meetingStep = pendingMeetingStep ?? (partialAddress || completedStreet ? 'venue-street' : meetingPoint ? 'venue-directions' : undefined)
+  const storedPartial = payload?.first_experience_partial
+  const partial = storedPartial?.product_id === product?.id ? storedPartial : undefined
+  const partialVenue = partial?.venue?.previous_location_id === (location?.id ?? null) ? partial.venue : undefined
+  const partialSession = partial?.session?.location_id === location?.id ? partial?.session : undefined
   const needsHost = !host || Boolean(booking && !assignedHost)
   const resume: Step = !product ? 'title'
-    : !location ? locations.length ? 'location' : 'venue'
-      : partialAddress ? 'venue-street'
-        : !hasStreet && !meetingPoint ? 'venue-address'
-          : needsHost ? 'host'
-            : !booking?.duration_minutes ? 'duration'
-              : !booking.default_capacity ? 'capacity'
-                : !photo && payload?.first_experience_photo_skipped !== product.id ? 'photo'
-                  : !product.description.trim() ? 'description'
-                    : price?.type !== 'one_time' ? 'price' : 'session'
-  return { product, existing, complete, creationKey: creation.key, currency, price, variant, locations, location, members, host, booking, resume, draft, payload, photo, meetingPoint, hasStreet, needsHost, storedAddress, savedAddress, partialAddress, meetingStep }
+    : partialVenue ? 'venue'
+      : !location ? locations.length ? 'location' : 'venue'
+        : pendingMeetingStep ?? (partialAddress ? 'venue-street'
+          : !hasStreet && !meetingPoint ? 'venue-address'
+            : needsHost ? 'host'
+              : !booking?.duration_minutes ? 'duration'
+                : !booking.default_capacity ? 'capacity'
+                  : !photo && payload?.first_experience_photo_skipped !== product.id ? 'photo'
+                    : !product.description.trim() ? 'description'
+                      : price?.type !== 'one_time' ? 'price' : 'session')
+  return { product, existing, complete, creationKey: creation.key, currency, price, variant, locations, location, members, host, booking, resume, draft, payload, photo, meetingPoint, hasStreet, needsHost, storedAddress, savedAddress, partialAddress, meetingStep, partial, partialVenue, partialSession }
 }
 
 function positiveInteger(value: string, label: string) {
@@ -101,7 +108,7 @@ function positiveInteger(value: string, label: string) {
 export async function firstExperienceSetup(context: OfferingSetupContext, requested: string | undefined, answer: OfferingSetupAnswer | null): Promise<OfferingSetupResponse> {
   const { db, env, organizationId, orgSlug, actorId, principal } = context
   const state = await loadSetup(context)
-  const { product, resume, booking, location, host, locations, members, photo, currency, price, variant, meetingPoint, hasStreet, needsHost, storedAddress, savedAddress, partialAddress, meetingStep } = state
+  const { product, resume, booking, location, host, locations, members, photo, currency, price, variant, meetingPoint, hasStreet, needsHost, storedAddress, savedAddress, partialAddress, meetingStep, partial, partialVenue, partialSession } = state
   const exitTo = context.exitTo ?? offeringToday(orgSlug)
   if (product && state.complete) return answer?.action === 'exit' ? { to: exitTo } : offeringDestination(orgSlug, 'experience', product.id)
   if (state.existing[0]) return answer?.action === 'exit' ? { to: exitTo } : offeringDestination(orgSlug, 'experience', state.existing[0].id)
@@ -109,15 +116,16 @@ export async function firstExperienceSetup(context: OfferingSetupContext, reques
   const venueStep = requested === 'venue-street' || requested === 'venue-directions' ? requested : meetingStep
   const steps = stages.filter(step => {
     if (step === 'location') return locations.length > 0
-    if (step === 'venue') return locations.length === 0 || requested === 'venue'
+    if (step === 'venue') return locations.length === 0 || resume === 'venue' || requested === 'venue'
     if (step === 'venue-address') return !hasStreet || Boolean(venueStep) || requested === step
     if (step === 'venue-street' || step === 'venue-directions') return venueStep === step
     if (step === 'host') return members.length !== 1 || needsHost
     return true
   })
-  const resumeIndex = steps.indexOf(resume === 'venue-street' && venueStep !== resume ? 'venue-address' : resume)
+  const addressStep = resume === 'venue-street' || resume === 'venue-directions'
+  const resumeIndex = steps.indexOf(addressStep && venueStep !== resume ? 'venue-address' : resume)
   const requestedIndex = steps.findIndex(step => step === requested)
-  const withinVenueChoice = (requested === 'venue-street' || requested === 'venue-directions') && (resume === 'venue-address' || resume === 'venue-street')
+  const withinVenueChoice = (requested === 'venue-street' || requested === 'venue-directions') && (resume === 'venue-address' || addressStep)
   const index = requestedIndex >= 0 && (requestedIndex <= resumeIndex || requested === 'venue' && resume === 'location' || withinVenueChoice)
     ? requestedIndex : resumeIndex
   const step = steps[index]!
@@ -129,7 +137,9 @@ export async function firstExperienceSetup(context: OfferingSetupContext, reques
     booking?.duration_minutes, booking?.default_capacity, photo?.asset_id,
     ...(step === 'location' ? [locations.map(row => row.id)] : []),
     ...(step === 'host' ? [members.map(row => row.id)] : []),
-    ...(step === 'venue-street' || step === 'venue-directions' ? [partialAddress] : []),
+    ...(step === 'venue-address' || step === 'venue-street' || step === 'venue-directions' ? [storedAddress] : []),
+    ...(step === 'location' || step === 'venue' ? [partialVenue] : []),
+    ...(step === 'session' ? [partialSession] : []),
   ])
   const scheduleDate = location && isValidTimezone(location.timezone) ? localDateAt(new Date(), location.timezone) : undefined
   const details = state.payload?.source.details
@@ -152,11 +162,11 @@ export async function firstExperienceSetup(context: OfferingSetupContext, reques
       ] }),
     ] },
     venue: { title: 'Where will guests meet?', fields: [
-      offeringField('title', 'Venue name', 'text', '', { max_length: PRODUCT_LIMITS.name }),
-      offeringTimezone(details?.timezone ?? ''),
+      offeringField('title', 'Venue name', 'text', partialVenue?.title, { max_length: PRODUCT_LIMITS.name }),
+      offeringTimezone(partialVenue?.timezone ?? details?.timezone ?? ''),
     ] },
     'venue-address': { title: 'How should guests find the venue?', fields: [
-      offeringField('venue-address', 'Meeting details', 'choice', meetingStep === 'venue-directions' ? 'directions' : hasStreet || partialAddress ? 'street' : '', { choices: [
+      offeringField('venue-address', 'Meeting details', 'choice', meetingStep === 'venue-directions' ? 'directions' : meetingStep === 'venue-street' || hasStreet ? 'street' : '', { choices: [
         { value: 'street', label: 'Enter a street address' },
         { value: 'directions', label: 'Give meeting directions' },
       ] }),
@@ -186,8 +196,8 @@ export async function firstExperienceSetup(context: OfferingSetupContext, reques
       offeringField('price', 'Price per guest', 'money', price ? minorAmountToMajor(price.unit_amount, currency) : '', { symbol: currencySymbol(currency), min: 0 }),
     ] },
     session: { title: 'When is the first session?', detail: location && host ? `${location.title} · ${host.name} · ${location.timezone}` : undefined, fields: [
-      offeringField('date', 'Date', 'date', '', { min_date: scheduleDate }),
-      offeringField('time', 'Start time', 'time'),
+      offeringField('date', 'Date', 'date', partialSession?.date, { min_date: scheduleDate }),
+      offeringField('time', 'Start time', 'time', partialSession?.time),
     ] },
   }
   const question = questions[step]
@@ -199,22 +209,33 @@ export async function firstExperienceSetup(context: OfferingSetupContext, reques
   })
   if (answer.step !== step || answer.revision !== revision) throw offeringSetupChanged()
   const exit = answer.action === 'exit'
-  async function saveVenueAddressProgress(value: VenueAddressProgress | null) {
+  async function saveProgress<Field extends ExperienceProgressField>(field: Field, value: OnboardingDraftPayload[Field] | null) {
     if (!state.draft) throw offeringSetupChanged()
+    const path = `$.${field}`
     const serialized = value ? JSON.stringify(value) : null
+    const previous = state.payload?.[field]
     const result = await execute(db, `UPDATE onboarding_drafts
-      SET payload_json = CASE WHEN ? IS NULL THEN json_remove(payload_json, '$.first_experience_venue_address')
-        ELSE json_set(payload_json, '$.first_experience_venue_address', json(?)) END
+      SET payload_json = CASE WHEN ? IS NULL THEN json_remove(payload_json, ?)
+        ELSE json_set(payload_json, ?, json(?)) END
       WHERE id = ? AND organization_id = ? AND status = 'committed'
-        AND json_extract(payload_json, '$.first_experience_venue_address') IS ?`,
-    [serialized, serialized, state.draft.id, organizationId, storedAddress ? JSON.stringify(storedAddress) : null])
+        AND json_extract(payload_json, ?) IS ?`,
+    [serialized, path, path, serialized, state.draft.id, organizationId, path, previous ? JSON.stringify(previous) : null])
     if (result.meta.changes !== 1) throw offeringSetupChanged()
   }
   if (exit && fields.some(field => !field.optional && !submittedValue(answer, field.key))) {
-    if (step === 'venue-street' && product && location && addressRevision) {
-      const values = Object.fromEntries(fields.map(field => [field.key, submittedValue(answer, field.key)]))
-      if (fields.some(field => values[field.key] !== field.value)) {
-        await saveVenueAddressProgress({ product_id: product.id, location_id: location.id, partial: { location_revision: addressRevision, values } })
+    const values = Object.fromEntries(fields.map(field => [field.key, submittedValue(answer, field.key)]))
+    if (product) {
+      const changed = fields.some(field => values[field.key] !== field.value)
+      if (step === 'venue-street' && location && addressRevision && (changed || !partialAddress)) {
+        await saveProgress('first_experience_venue_address', { product_id: product.id, location_id: location.id, partial: { location_revision: addressRevision, values } })
+      } else if (step === 'venue-directions' && location && meetingStep !== 'venue-directions') {
+        await saveProgress('first_experience_venue_address', { product_id: product.id, location_id: location.id, pending_method: 'directions' })
+      } else if (step === 'venue' && (changed || !partialVenue)) {
+        await saveProgress('first_experience_partial', { ...partial, product_id: product.id,
+          venue: { previous_location_id: location?.id ?? null, title: values.title!, timezone: values.timezone! } })
+      } else if (step === 'session' && location && changed) {
+        await saveProgress('first_experience_partial', { ...partial, product_id: product.id,
+          session: { location_id: location.id, date: values.date!, time: values.time! } })
       }
     }
     return { to: exitTo }
@@ -259,7 +280,11 @@ export async function firstExperienceSetup(context: OfferingSetupContext, reques
       }
       case 'location':
       case 'venue': {
-        if (step === 'location' && value === addVenue) return exit ? { to: exitTo } : { to: stepPath('venue'), guide: true }
+        if (step === 'location' && value === addVenue) {
+          if (exit && !partialVenue) await saveProgress('first_experience_partial', { ...partial, product_id: product.id,
+            venue: { previous_location_id: location?.id ?? null, title: '', timezone: details?.timezone ?? '' } })
+          return exit ? { to: exitTo } : { to: stepPath('venue'), guide: true }
+        }
         const editAddress = step === 'location' && value.startsWith(editVenuePrefix)
         let id = locations.find(row => row.id === (editAddress ? value.slice(editVenuePrefix.length) : value))?.id
         if (step === 'venue') {
@@ -278,15 +303,24 @@ export async function firstExperienceSetup(context: OfferingSetupContext, reques
         if (location?.id !== id) {
           await setProductLocation(db, {
             ...target, locationId: id, active: true, published: false, actor,
-            moveDraftExperience: { updatedAt: product.updated_at, activeLocationIds: product.locations.filter(row => row.active).map(row => row.location_id) },
+            replaceDraftLocations: { updatedAt: product.updated_at, activeLocationIds: product.locations.filter(row => row.active).map(row => row.location_id) },
           })
-          if (storedAddress) await saveVenueAddressProgress(null)
+        }
+        if (editAddress && exit) await saveProgress('first_experience_venue_address', { product_id: product.id, location_id: id, pending_method: 'street' })
+        else if (location?.id !== id && storedAddress) await saveProgress('first_experience_venue_address', null)
+        if (partial && (partial.venue || location?.id !== id && partial.session)) {
+          const session = location?.id === id ? partial.session : undefined
+          await saveProgress('first_experience_partial', session ? { product_id: product.id, session } : null)
         }
         await purgePublicResourceCacheNow(env, organizationId)
         return exit ? { to: exitTo } : { to: stepPath(editAddress ? 'venue-street' : undefined), guide: true }
       }
       case 'venue-address': {
         if (value !== 'street' && value !== 'directions') throw invalidOfferingAnswer('Choose how guests should find the venue')
+        if (!location) throw offeringSetupChanged()
+        if (exit && value !== questions['venue-address'].fields[0]?.value) {
+          await saveProgress('first_experience_venue_address', { product_id: product.id, location_id: location.id, pending_method: value })
+        }
         return exit ? { to: exitTo } : { to: stepPath(value === 'street' ? 'venue-street' : 'venue-directions'), guide: true }
       }
       case 'venue-street': {
@@ -295,8 +329,8 @@ export async function firstExperienceSetup(context: OfferingSetupContext, reques
           || questions['venue-street'].fields.some(field => submittedValue(answer, field.key) !== field.value)) {
           await saveOfferingAddress(context, location.id, { ...answer, revision: addressRevision })
         }
-        if (meetingStep !== 'venue-street' || partialAddress) {
-          await saveVenueAddressProgress({ product_id: product.id, location_id: location.id })
+        if (meetingStep !== 'venue-street' || partialAddress || storedAddress?.pending_method) {
+          await saveProgress('first_experience_venue_address', { product_id: product.id, location_id: location.id })
         }
         return exit ? { to: exitTo } : { to: stepPath(), guide: true }
       }
@@ -304,7 +338,7 @@ export async function firstExperienceSetup(context: OfferingSetupContext, reques
         if (!location) throw offeringSetupChanged()
         const directions = requireTrimmedProductString(submittedValue(answer, 'meeting_point'), 'meeting directions', PRODUCT_LIMITS.description)
         if (directions !== meetingPoint) await updateProduct(db, { ...target, actor, patch: { details_mode: 'merge', details: { meeting_point: directions }, updated_at: product.updated_at } })
-        if (storedAddress) await saveVenueAddressProgress(null)
+        if (storedAddress) await saveProgress('first_experience_venue_address', null)
         return exit ? { to: exitTo } : { to: stepPath(), guide: true }
       }
       case 'host':

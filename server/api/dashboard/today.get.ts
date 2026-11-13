@@ -50,11 +50,10 @@ export default defineHandler(async (event) => {
     const address = await organizationPublicUrl(env, db, organization.id)
     if (address) {
       const preview = new URL(address)
-      if (privateSite) {
-        const secret = previewSecretOf(env)
-        if (!secret) throw new Error('Website preview signing is unavailable')
-        preview.searchParams.set(PREVIEW_TOKEN_QUERY, await createPreviewToken(secret, organization.id, now.getTime() + PREVIEW_TOKEN_TTL_MS))
-      }
+      const secret = previewSecretOf(env)
+      if (!secret) throw new Error('Website preview signing is unavailable')
+      // The owner's preview is excluded from customer analytics on draft and live sites.
+      preview.searchParams.set(PREVIEW_TOKEN_QUERY, await createPreviewToken(secret, organization.id, now.getTime() + PREVIEW_TOKEN_TTL_MS))
       website = {
         address,
         preview_url: preview.toString(),

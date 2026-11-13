@@ -58,13 +58,8 @@ async function settlePaymentIntent(db:DbClient,stripe:Stripe,payment:Payment,rep
     }
     if (intent.status === 'requires_payment_method' && intent.last_payment_error) {
       // A bank debit that failed days later gives back the 14 days it was holding.
-      if (approval) {
-        if (!payment.checkout_expires_at) throw new Error('Approved stay payment has no checkout window')
-        await executeBatch(db, [
-          { query: "UPDATE payments SET review_json=json_remove(review_json,'$.confirmation_started_at') WHERE id=? AND captured_amount=0 AND review_json=?", params: [payment.id, payment.review_json] },
-          { query: "UPDATE payment_checkout_holds SET expires_at=? WHERE payment_id=? AND status='active' AND changes()=1", params: [payment.checkout_expires_at, payment.id] },
-        ], { operation: 'Release failed approved-stay payment' })
-      } else {
+      if (approval) await releaseApprovedStayConfirmation(db, payment)
+      else {
         const until=confirmationHoldUntil(payment)
         await execute(db,"UPDATE payment_checkout_holds SET expires_at=? WHERE payment_id=? AND status='active' AND expires_at>?",[until,payment.id,until])
       }
@@ -261,6 +256,17 @@ export async function commitBooking(db:DbClient,env:CloudflareEnv,payment:Paymen
 }
 
 const CONFIRMATION_HOLD_MS=60*60*1000
+
+export async function releaseApprovedStayConfirmation(db: DbClient, payment: Payment) {
+ if (!payment.checkout_expires_at) throw new Error('Approved stay payment has no checkout window')
+ await executeBatch(db, [
+  { query: `UPDATE payments SET review_json=json_remove(review_json,'$.confirmation_started_at')
+    WHERE id=? AND organization_id=? AND captured_amount=0 AND review_json=? AND json_type(review_json,'$.confirmation_started_at')='text'`,
+  params: [payment.id, payment.organization_id, payment.review_json] },
+  { query: "UPDATE payment_checkout_holds SET expires_at=? WHERE payment_id=? AND organization_id=? AND status='active' AND changes()=1",
+  params: [payment.checkout_expires_at, payment.id, payment.organization_id] },
+ ], { operation: 'Release failed approved-stay payment' })
+}
 
 /** When a hold on a payment that has begun confirming ends: an hour on, and never before the buyer's time to pay. */
 export function confirmationHoldUntil(payment:Pick<Payment,'checkout_expires_at'>, approvedStartedAt?: string):string{

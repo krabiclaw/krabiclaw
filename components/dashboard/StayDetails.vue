@@ -140,7 +140,7 @@
       </UCard>
 
       <!-- The Stripe payment the guest made on the site: its record and refunds are the payment's own screens. -->
-      <UCard v-if="!personalScope && !requestStatus && (!channelManaged || detail.online_payment)" variant="record">
+      <UCard v-if="!personalScope && (detail.online_payment || (!channelManaged && !requestStatus))" variant="record">
       <h2 class="text-base font-semibold text-highlighted">Payments</h2>
       <template v-if="detail.online_payment">
         <h3 class="mt-6 text-base font-semibold text-highlighted">Paid on your site</h3>
@@ -157,7 +157,7 @@
         </div>
       </template>
 
-      <template v-if="!channelManaged">
+      <template v-if="!channelManaged && !requestStatus">
         <p class="text-sm text-muted" :class="detail.online_payment ? 'mt-6' : 'mt-1'">Money you received or refunded outside KrabiClaw. Recording it moves no money.</p>
         <ul v-if="detail.payments.length" class="mt-4 divide-y divide-default border-y border-default">
           <li v-for="payment in detail.payments" :key="payment.id" class="flex items-center gap-4 py-3">
@@ -187,11 +187,11 @@
           </div>
           <UButton type="submit" label="Record payment" :loading="busy === 'record'" :disabled="!draft.amount.trim() || !draft.paid_on" />
         </UForm>
-        <UButton v-if="manage && hostActions.includes('cancel')" class="mt-8" color="error" variant="soft" label="Cancel stay" :loading="busy === 'cancel'" @click="cancel" />
         <p v-if="!personalScope && detail.no_show_at" class="mt-6 text-sm text-muted" data-testid="stay-no-show">No-show recorded {{ formatCalendarDate(detail.no_show_at.slice(0, 10), 'en') }}. No review invitation is sent.</p>
         <UButton v-else-if="canMarkNoShow" class="mt-4 ms-2" color="neutral" variant="soft" label="Mark as a no-show" :loading="busy === 'no_show'" @click="markNoShow" />
       </template>
       </UCard>
+      <UButton v-if="manage && !personalScope && !channelManaged && hostActions.includes('cancel')" color="error" variant="soft" label="Cancel stay" :loading="busy === 'cancel'" :disabled="busy !== null" @click="cancel" />
       <UCard v-if="personalScope" as="button" type="button" variant="record" class="w-full text-left" @click="manageOpen = true">
         <span class="flex items-center gap-4"><span class="min-w-0 flex-1 text-base font-semibold text-highlighted">{{ t('booking.manage') }}</span><UIcon name="i-lucide-chevron-right" class="size-5" /></span>
       </UCard>

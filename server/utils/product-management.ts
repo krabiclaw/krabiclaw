@@ -2298,52 +2298,56 @@ export async function setProductPublication(db: DbClient, input: {
   })
 }
 
-export async function setProductLocation(db: DbClient, input: {
-  organizationId: string; productId: string; locationId: string; active?: boolean; published?: boolean; actor: Actor; env: CloudflareEnv
-  /** A draft experience moves to one venue; its old directions belong to the previous venue. */
-  moveDraftExperience?: { updatedAt: string; activeLocationIds: string[] }
-}): Promise<void> {
-  const organization = await queryFirst<{ organization_id: string }>(db, 'SELECT organization_id FROM business_locations WHERE organization_id = ? AND id = ?', [input.organizationId, input.locationId])
-  if (!organization) notFound('Location not found')
+export async function prepareProductLocation(db: DbClient, input: {
+  organizationId: string; productId: string; locationId: string | null; active?: boolean; published?: boolean; actor: Actor; env: CloudflareEnv
+  /** The onboarding guide sets at most one active venue for its draft offering. */
+  replaceDraftLocations?: { updatedAt: string; activeLocationIds: string[] }
+}): Promise<BatchQuery[]> {
+  if (input.locationId !== null && !await queryFirst(db, 'SELECT 1 FROM business_locations WHERE organization_id = ? AND id = ?', [input.organizationId, input.locationId])) notFound('Location not found')
   const product = await requireOrganizationProduct(db, input)
-  const move = input.moveDraftExperience
-  if (move && (product.kind !== 'experience' || input.active !== true || input.published !== false)) invalid('Only a draft experience can move to a new venue')
+  const move = input.replaceDraftLocations
+  const experience = product.kind === 'experience'
+  if (move && ((!experience && product.kind !== 'service') || input.active !== true || input.published !== false)) invalid('Only a draft offering can replace its location in setup')
+  if (input.locationId === null && (!move || product.kind !== 'service')) invalid('Choose a location')
   if (product.stay && product.stay.location_id !== input.locationId) conflict('A place to stay is at exactly one location')
   // A table is seated through one location's hours; a second placement would be a second schedule.
   if (product.kind === 'table' && product.locations.some(location => location.location_id !== input.locationId)) conflict('A location\'s tables are at exactly one location')
   const currentLocation = product.locations.find(location => location.location_id === input.locationId)
   const expectedProductUpdatedAt = product.updated_at
-  const location = { location_id: input.locationId, active: input.active ?? currentLocation?.active ?? true, published: input.published ?? currentLocation?.published ?? true }
+  const location = input.locationId === null ? null : { location_id: input.locationId, active: input.active ?? currentLocation?.active ?? true, published: input.published ?? currentLocation?.published ?? true }
   let readiness: Awaited<ReturnType<typeof productBookingReadiness>> | undefined
-  if (location.published && (product.kind === 'experience' || product.booking)) {
+  if (location?.published && (experience || product.booking)) {
     const newPublication = !currentLocation?.published
     if (newPublication) await assertHostForPublication(db, input.organizationId, product)
     const prospective = { ...product, locations: [...product.locations.filter(existing => existing.location_id !== input.locationId), location] }
-    readiness = await productBookingReadiness(db, input.organizationId, prospective, { locationId: input.locationId, prepareAllocation: newPublication, requireActive: newPublication, env: input.env })
+    readiness = await productBookingReadiness(db, input.organizationId, prospective, { locationId: location.location_id, prepareAllocation: newPublication, requireActive: newPublication, env: input.env })
     if (!readiness.ready) throw new HTTPError({ statusCode: 409, statusMessage: 'This offering needs booking and payment setup at this location before it can be published', data: { code: 'EXPERIENCE_BOOKING_INCOMPLETE', product_id: product.id, location_id: input.locationId, missing: readiness.missing } })
   }
-  if (!move && currentLocation && currentLocation.active === location.active && currentLocation.published === location.published) return
+  if (!move && currentLocation && location && currentLocation.active === location.active && currentLocation.published === location.published) return []
   const now = new Date(Math.max(Date.now(), Date.parse(product.updated_at) + 1)).toISOString()
-  await executeBatch(db, [...(move ? [{
+  return [...(move ? [{
     query: `UPDATE products SET updated_at = CASE WHEN updated_at = ?
       AND NOT EXISTS (SELECT 1 FROM product_publications WHERE organization_id=? AND product_id=? AND published=1)
       AND NOT EXISTS (SELECT 1 FROM product_locations WHERE organization_id=? AND product_id=? AND published=1)
-      AND NOT EXISTS (SELECT 1 FROM product_sessions WHERE organization_id=? AND product_id=?)
-      AND EXISTS (SELECT 1 FROM business_locations WHERE organization_id=? AND id=? AND status='active')
+      AND (kind<>'experience' OR NOT EXISTS (SELECT 1 FROM product_sessions WHERE organization_id=? AND product_id=?))
+      AND (? IS NULL OR EXISTS (SELECT 1 FROM business_locations WHERE organization_id=? AND id=? AND status='active'))
       AND (SELECT count(*) FROM product_locations WHERE organization_id=? AND product_id=? AND active=1)=?
       AND NOT EXISTS (SELECT 1 FROM product_locations WHERE organization_id=? AND product_id=? AND active=1 AND location_id NOT IN (SELECT value FROM json_each(?)))
       THEN ? ELSE NULL END,
       details_json=?, updated_by=?
-      WHERE organization_id=? AND id=? AND kind='experience'`,
+      WHERE organization_id=? AND id=? AND kind=?`,
     params: [move.updatedAt, input.organizationId, input.productId, input.organizationId, input.productId, input.organizationId, input.productId,
-      input.organizationId, input.locationId, input.organizationId, input.productId, move.activeLocationIds.length,
+      input.locationId, input.organizationId, input.locationId, input.organizationId, input.productId, move.activeLocationIds.length,
       input.organizationId, input.productId, d1JsonArray(move.activeLocationIds), now,
-      JSON.stringify(patchProductDetails('experience', product.details, { meeting_point: null }, 'merge')),
-      input.actor.actorId, input.organizationId, input.productId],
-  }, {
+      JSON.stringify(experience ? patchProductDetails('experience', product.details, { meeting_point: null }, 'merge') : product.details),
+      input.actor.actorId, input.organizationId, input.productId, product.kind],
+  }, experience ? {
     query: 'DELETE FROM product_locations WHERE organization_id=? AND product_id=? AND active=1 AND location_id<>?',
     params: [input.organizationId, input.productId, input.locationId],
-  }] : []), {
+  } : {
+    query: 'UPDATE product_locations SET active=0, updated_at=?, updated_by=? WHERE organization_id=? AND product_id=? AND active=1 AND location_id IS NOT ?',
+    params: [now, input.actor.actorId, input.organizationId, input.productId, input.locationId],
+  }] : []), ...(location ? [{
     query: `INSERT INTO product_locations (organization_id, product_id, location_id, active, published, created_at, updated_at, created_by, updated_by)
             VALUES (?, ?, ?, COALESCE(?, 1), COALESCE(?, 1), ?, ?, ?, ?)
             ON CONFLICT (product_id, location_id) DO UPDATE SET active = COALESCE(?, product_locations.active), published = COALESCE(?, product_locations.published),
@@ -2351,20 +2355,28 @@ export async function setProductLocation(db: DbClient, input: {
               WHERE product_locations.active <> COALESCE(?, product_locations.active) OR product_locations.published <> COALESCE(?, product_locations.published)`,
     params: [input.organizationId, input.productId, input.locationId, input.active === undefined ? null : Number(input.active), input.published === undefined ? null : Number(input.published),
       now, now, input.actor.actorId, input.actor.actorId, input.active === undefined ? null : Number(input.active), input.published === undefined ? null : Number(input.published), input.active === undefined ? null : Number(input.active), input.published === undefined ? null : Number(input.published)],
-  }, organizationEventQuery({ organizationId: input.organizationId, locationId: input.locationId, actorId: input.actor.actorId,
+  }] : []), organizationEventQuery({ organizationId: input.organizationId, locationId: input.locationId, actorId: input.actor.actorId,
     eventType: 'product.updated', entityType: 'product', entityId: input.productId,
-    beforeState: currentLocation ?? null, afterState: { ...location, updated_at: now },
-    metadata: { changed_fields: move && product.details.meeting_point ? ['locations', 'details'] : ['locations'], evidence_basis: 'persisted_change' }, onlyIfPreviousChangedOneRow: !move }), {
+    beforeState: currentLocation ?? null, afterState: location ? { ...location, updated_at: now } : { location_id: null, updated_at: now },
+    metadata: { changed_fields: move && experience && product.details.meeting_point ? ['locations', 'details'] : ['locations'], evidence_basis: 'persisted_change' }, onlyIfPreviousChangedOneRow: !move }), ...(location ? [{
     query: `UPDATE product_locations SET published=CASE WHEN EXISTS (SELECT 1 FROM products WHERE organization_id=? AND id=? AND updated_at=?) ${readiness?.allocation ? `AND (${readiness.allocation.query})` : ''} THEN published ELSE NULL END
       WHERE organization_id=? AND product_id=? AND location_id=?`,
     params: [input.organizationId, input.productId, move ? now : expectedProductUpdatedAt, ...(readiness?.allocation?.params ?? []), input.organizationId, input.productId, input.locationId],
-  }, publicResourceCacheInvalidationQuery(input.organizationId, 'product_location_changed')], { operation: 'Set product location' }).catch(error => {
-    if (move && /NOT NULL constraint failed: products\.updated_at/.test(error instanceof Error ? error.message : String(error))) {
-      throw new HTTPError({ statusCode: 409, statusMessage: 'The experience or venue changed. Reopen setup to continue.', data: { code: 'OFFERING_SETUP_CHANGED' }, cause: error })
-    }
-    if (/NOT NULL constraint failed: product_locations\.published/.test(error instanceof Error ? error.message : String(error))) throw new HTTPError({ statusCode: 409, statusMessage: 'The offering or its availability changed before location publication. Review it and retry.', data: { code: 'PRODUCT_LOCATION_PUBLICATION_CONFLICT', product_id: input.productId, location_id: input.locationId }, cause: error })
-    throw error
-  })
+  }] : []), publicResourceCacheInvalidationQuery(input.organizationId, 'product_location_changed')]
+}
+
+export function productLocationWriteError(error: unknown, input: Pick<Parameters<typeof prepareProductLocation>[1], 'productId' | 'locationId' | 'replaceDraftLocations'>) {
+  const message = error instanceof Error ? error.message : String(error)
+  if (input.replaceDraftLocations && /NOT NULL constraint failed: products\.updated_at/.test(message)) {
+    return new HTTPError({ statusCode: 409, statusMessage: 'The offering or location changed. Reopen setup to continue.', data: { code: 'OFFERING_SETUP_CHANGED' }, cause: error })
+  }
+  if (/NOT NULL constraint failed: product_locations\.published/.test(message)) return new HTTPError({ statusCode: 409, statusMessage: 'The offering or its availability changed before location publication. Review it and retry.', data: { code: 'PRODUCT_LOCATION_PUBLICATION_CONFLICT', product_id: input.productId, location_id: input.locationId }, cause: error })
+  return error
+}
+
+export async function setProductLocation(db: DbClient, input: Parameters<typeof prepareProductLocation>[1] & { locationId: string }): Promise<void> {
+  const queries = await prepareProductLocation(db, input)
+  if (queries.length) await executeBatch(db, queries, { operation: 'Set product location' }).catch(error => { throw productLocationWriteError(error, input) })
 }
 
 export async function removeProductLocation(db: DbClient, input: {
@@ -2429,7 +2441,7 @@ export async function createCollection(db: DbClient, input: {
   await executeBatch(db, [{
     query: `INSERT INTO collections (id, organization_id, location_id, name, slug, description, sort_order, created_at, updated_at, created_by, updated_by)
             SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-            ${input.firstAtLocation ? 'WHERE NOT EXISTS (SELECT 1 FROM collections WHERE organization_id = ? AND location_id = ?)' : ''}`,
+            ${input.firstAtLocation ? 'WHERE NOT EXISTS (SELECT 1 FROM collections WHERE organization_id = ? AND location_id IS ?)' : ''}`,
     params: [id, input.organizationId, input.collection.location_id ?? null, name, slug,
       normalizeOptionalProductString(input.collection.description, 'description', PRODUCT_LIMITS.collectionDescription),
       input.collection.sort_order ?? 0, now, now, input.actor.actorId, input.actor.actorId,

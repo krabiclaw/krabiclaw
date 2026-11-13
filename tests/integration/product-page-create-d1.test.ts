@@ -7,7 +7,8 @@ import { executeBatch } from '../../server/db/index.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import { createContentDocumentWithBlocks } from '../../server/utils/content/documents.ts'
 import { createTenantPage, getPublishedTenantPage, getTenantPageForEditor, isProductPageConflict, listPublishedTenantPagePaths, prepareTenantPageCreate, updateTenantPage } from '../../server/utils/content/pages.ts'
-import { createProduct, getProduct, productPublicPresentation, reconcileProducts, setProductPublication, updateProduct } from '../../server/utils/product-management.ts'
+import { createProduct, getProduct, prepareProductLocation, productPublicPresentation, reconcileProducts, setProductPublication, updateProduct } from '../../server/utils/product-management.ts'
+import { createLocation } from '../../server/utils/location-management.ts'
 import { setProductBookingConfig } from '../../server/utils/availability.ts'
 
 // Real D1 and the real Better Auth subscription read. A service is a Product
@@ -215,6 +216,25 @@ test('a bound page and its share address follow publication while its booking is
       'Employment law information remains available before consultations open.')
     await setProductPublication(db, { organizationId: ORG, productId: product.id, published: false, actor: ACTOR })
     assert.deepEqual(await published(), { page: null, listed: false, publicUrl: null })
+
+    const offices = await Promise.all(['First office', 'Second office'].map(title => createLocation(env, db, ORG, { title, timezone: 'America/New_York' }, ACTOR.actorId)))
+    const officeIds = offices.map(office => {
+      assert.equal(office.status, 201)
+      assert.ok('location' in office.data)
+      return office.data.location.id
+    })
+    const placement = async (locationId: string | null, current: typeof saved) => prepareProductLocation(db, {
+      organizationId: ORG, productId: product.id, locationId, actor: ACTOR, env, active: true, published: false,
+      replaceDraftLocations: { updatedAt: current.updated_at, activeLocationIds: current.locations.filter(location => location.active).map(location => location.location_id) },
+    })
+    const unplaced = await getProduct(db, ORG, product.id)
+    const [first, stale] = await Promise.all(officeIds.map(id => placement(id, unplaced)))
+    await executeBatch(db, first!)
+    await assert.rejects(executeBatch(db, stale!), /NOT NULL constraint failed: products\.updated_at/)
+    const placed = await getProduct(db, ORG, product.id)
+    assert.deepEqual(placed.locations.filter(location => location.active).map(location => location.location_id), [officeIds[0]])
+    await executeBatch(db, await placement(null, placed))
+    assert.deepEqual((await getProduct(db, ORG, product.id)).locations, [{ location_id: officeIds[0], active: false, published: false }])
   } finally {
     await runtime.dispose()
   }

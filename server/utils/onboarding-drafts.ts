@@ -156,18 +156,33 @@ export function firstMenuSetupApplies(payload: OnboardingDraftPayload): boolean 
   return payload.preview.vertical === 'restaurant' && payload.preview.products.length === 0
 }
 
+type FirstMenuSkips = { price?: true; photo?: true; description?: true }
+type FirstMenuSkipsByDish = Record<string, FirstMenuSkips>
+
+export function firstMenuSkipsByDish(skips: OnboardingDraftPayload['first_menu_skips']): FirstMenuSkipsByDish | undefined {
+  if (!skips) return undefined
+  const legacy = (value: NonNullable<typeof skips>): value is FirstMenuSkips & { dish_id: string } => typeof value.dish_id === 'string'
+  return legacy(skips) ? { [skips.dish_id]: skips } : skips
+}
+
 export interface OnboardingDraftPayload {
   version: 3
   partial?: false
   timezone_step_visited?: boolean
   first_menu_section_id?: string
   first_menu_location_id?: string
-  first_menu_skips?: { dish_id: string; price?: true; photo?: true; description?: true }
+  first_menu_skips?: FirstMenuSkipsByDish | (FirstMenuSkips & { dish_id: string })
   first_experience_photo_skipped?: string
   first_experience_venue_address?: {
     product_id: string
     location_id: string
+    pending_method?: 'street' | 'directions'
     partial?: { location_revision: string; values: Record<string, string> }
+  }
+  first_experience_partial?: {
+    product_id: string
+    venue?: { previous_location_id: string | null; title: string; timezone: string }
+    session?: { location_id: string; date: string; time: string }
   }
   first_practice_area_meeting?: { product_id: string; format: string }
   first_practice_area_attorney?: { product_id: string; member_id: string }
@@ -589,9 +604,8 @@ export function normalizeOnboardingDraftInput(input: OnboardingDraftInput, exist
   }
   const timezone = answer(raw, 'timezone', savedPlaceDetails?.timezone ?? place?.timezone)
   if (timezone && !isValidTimezone(timezone)) throw new HTTPError({ statusCode: 400, statusMessage: 'Choose a valid IANA timezone' })
-  const savedProviderDetails = place && !existing?.source.place ? undefined : savedPlaceDetails
-  const phone = answer(raw, 'phone', savedProviderDetails ? savedProviderDetails.phone : place?.phone ?? null)
-  const openingHours = savedProviderDetails ? savedProviderDetails.opening_hours : place?.openingHours ?? null
+  const phone = answer(raw, 'phone', savedPlaceDetails ? savedPlaceDetails.phone : place?.phone ?? null)
+  const openingHours = savedPlaceDetails ? savedPlaceDetails.opening_hours : place?.openingHours ?? null
   const phoneE164 = phone ? toE164(phone) : null
   if (phone && !phoneE164) throw new HTTPError({ statusCode: 400, statusMessage: 'Enter a valid phone number with its country calling code' })
   const details: DraftDetailsInput = {
@@ -599,7 +613,7 @@ export function normalizeOnboardingDraftInput(input: OnboardingDraftInput, exist
     ...(vertical === 'lodging' ? { confirmation_mode: confirmationMode } : {}),
     street_address: answer(raw, 'street_address', previous?.street_address), address_line_2: answer(raw, 'address_line_2', previous?.address_line_2),
     city: answer(raw, 'city', previous?.city), region: answer(raw, 'region', previous?.region), postal_code: answer(raw, 'postal_code', previous?.postal_code),
-    website_url: answer(raw, 'website_url', savedProviderDetails ? savedProviderDetails.website_url : place?.websiteUrl ?? null),
+    website_url: answer(raw, 'website_url', savedPlaceDetails ? savedPlaceDetails.website_url : place?.websiteUrl ?? null),
     opening_hours: parseOpeningHours(raw?.opening_hours === undefined ? openingHours : raw.opening_hours),
     special_hours: parseSpecialHours(raw?.special_hours === undefined ? savedPlaceDetails?.special_hours ?? null : raw.special_hours),
   }
@@ -619,7 +633,7 @@ export function normalizeOnboardingDraftInput(input: OnboardingDraftInput, exist
       timezone_step_visited,
       source: {
         type: sourceType, placeId, details,
-        place: existing?.source.place?.placeId === placeId ? existing.source.place : null,
+        place: place ? asPlaceSnapshot(place) : null,
       },
       preview: previousPreview ?? null,
       ...(previousPreview && !existingRow?.organization_id ? { subdomain_answer: typedSubdomain } : {}),
