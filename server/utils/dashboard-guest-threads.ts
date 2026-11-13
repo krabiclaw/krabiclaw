@@ -10,7 +10,7 @@ import type {
   InboxUnreadCounts,
 } from '~/server/domain/guest-threads/types'
 import type { GuestThreadMailbox } from '~/server/domain/guest-threads/mailbox'
-import { requireOrganizationMembership } from '~/server/utils/location-access'
+import { requireOrganizationMembership, requireOrganizationPrincipal } from '~/server/utils/location-access'
 import { memberAccessPrincipal, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import { assertConversationAccess, assertGuestOperations, type ConversationRow } from '~/server/domain/conversations'
 import type { CloudflareEnv } from '~/server/utils/auth'
@@ -114,8 +114,7 @@ export async function loadOrganizationConversations(event: H3Event, organization
 
 /** One conversation the member may read, by the one access statement. */
 export async function memberConversation(event: H3Event, organizationId: string, conversationId: string): Promise<{ db: DbClient; env: CloudflareEnv; principal: MemberAccessPrincipal; conversation: ConversationRow }> {
-  const { db, env, organization } = await requireOrganizationMembership(event, organizationId)
-  const principal = memberAccessPrincipal(organization.membership, { env, event })
+  const { db, env, principal } = await requireOrganizationPrincipal(event, organizationId)
   return { db, env, principal, conversation: await assertConversationAccess(db, principal, conversationId) }
 }
 

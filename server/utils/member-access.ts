@@ -206,9 +206,9 @@ export async function resolveOrganizationMembership(
 export async function resolveMembership(
   env: CloudflareEnv,
   input: { organizationId: string; userId: string },
+  event?: H3Event,
 ): Promise<ResolvedMembership | null> {
-  const adapter = await organizationAdapter(env)
-  const member = await adapter.findMemberByOrgId(input)
+  const member = await membershipRow(env, input, event)
   if (!member) return null
   return resolvedMembershipOf({
     userId: input.userId,
