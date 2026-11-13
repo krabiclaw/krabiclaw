@@ -1,11 +1,7 @@
 import { applicationFetch } from '~/composables/dashboardFetch'
 import { isRecord } from '~/utils/api-clients'
-import { parseOpeningHours, parseSpecialHours, type OpeningHours } from '~/shared/reservation-hours'
 import type { OnboardingFlow } from '~/shared/onboarding-flow'
 import { emptyOnboardingState, useOnboardingState, type OnboardingPlacePreview } from '~/composables/useOnboardingFlow'
-import { formatPostalAddress, postalAddressFromAnswers } from '~/utils/postal-address'
-import { isOrganizationFontPreset } from '~/shared/organization-fonts'
-import { LOGO_SHAPES, type LogoShape } from '~/shared/media-placement-contract'
 import { ALL_VERTICALS, type OrganizationVertical } from '~/utils/vertical-copy'
 
 /**
@@ -18,77 +14,10 @@ export function useOnboardingDraft() {
   const error = ref<string | null>(null)
   const { trackOrganizationCreated } = useAnalytics()
 
-  /** The address as the review step shows it, on one line. */
-  function addressSummary() {
-    return formatPostalAddress(postalAddressFromAnswers(addressParts()))
-  }
-
-  /** The address one field per answer, which is how a location stores it. */
-  function addressParts() {
-    const details = state.value.details
-    return {
-      streetAddress: details.streetAddress,
-      addressLine2: details.addressLine2,
-      city: details.city,
-      region: details.region,
-      postalCode: details.postalCode,
-      country: details.country,
-    }
-  }
-
-  function serializeDetails() {
-    const details = state.value.details
-    return {
-      name: details.name.trim(),
-      country: details.country.trim().toUpperCase() || null,
-      city: details.city.trim() || null,
-      street_address: details.streetAddress.trim() || null,
-      address_line_2: details.addressLine2.trim() || null,
-      region: details.region.trim() || null,
-      postal_code: details.postalCode.trim() || null,
-      phone: details.phone.trim() || null,
-      opening_hours: parseOpeningHours(state.value.hours.hours),
-      special_hours: parseSpecialHours(state.value.hours.specialHours),
-      timezone: state.value.hours.timezone.trim() || null,
-      currency: details.currency ?? null,
-      source_locale: details.sourceLocale,
-    }
-  }
-
-  function serializeBrandDraft() {
-    const brand = state.value.brand
-    return {
-      palette_starter: brand.paletteStarter,
-      font_preset: brand.fontPreset,
-      logo_shape: brand.logoShape,
-      logo_note: brand.logoNote.trim() || null,
-      logo_preview_url: brand.logoPreviewUrl.trim() || null,
-      hero_photo_note: brand.heroPhotoNote.trim() || null,
-      hero_preview_url: brand.heroPreviewUrl.trim() || null,
-      logo_image: brand.logoImage,
-      hero_image: brand.heroImage,
-      hero_headline: brand.heroHeadline.trim() || null,
-      hero_subtitle: brand.heroSubtitle.trim() || null,
-    }
-  }
-
-  function serializeProducts() {
-    return state.value.products
-      .filter(product => product.name.trim())
-      .map(product => ({
-        name: product.name.trim(),
-        category: product.category.trim(),
-        unit_amount: product.amountMinor,
-      }))
-  }
-
   const flowAnswers = computed(() => {
-    const { vertical, source, placeId, details, hours, products, brand } = state.value
-    const { name, sourceLocale, streetAddress, city, country, currency, phone } = details
-    return {
-      vertical, source, placeId, name, sourceLocale, streetAddress, city, country, currency, phone,
-      timezone: hours.timezone, productCount: products.length, heroHeadline: brand.heroHeadline,
-    }
+    const { vertical, source, placeId, details, timezone, timezoneStepVisited } = state.value
+    const { name, sourceLocale, country, currency } = details
+    return { vertical, source, placeId, name, sourceLocale, country, currency, timezone, timezoneStepVisited }
   })
 
   function readFlow(answers = flowAnswers.value, signal?: AbortSignal) {
@@ -98,15 +27,17 @@ export function useOnboardingDraft() {
       signal,
       validate: (value): value is OnboardingFlow => isRecord(value)
         && Array.isArray(value.steps) && typeof value.resumeStep === 'string'
-        && typeof value.canSave === 'boolean' && Array.isArray(value.businessTypes),
+        && typeof value.canSave === 'boolean' && typeof value.exitLabel === 'string'
+        && typeof value.backLabel === 'string' && Array.isArray(value.businessTypes) && Array.isArray(value.languages),
     })
   }
 
-  /** Save the answers so far. Every step calls this; the site follows the draft. */
-  async function save(): Promise<boolean> {
+  /** Save the completed website answers into the pending organization. */
+  async function save(flow: OnboardingFlow): Promise<boolean> {
     busy.value = true
     error.value = null
     try {
+      const { details, timezone } = state.value
       const res = await applicationFetch<Record<string, unknown>>('/api/dashboard/onboarding/drafts/active', {
         method: 'POST',
         body: {
@@ -116,23 +47,26 @@ export function useOnboardingDraft() {
           google_place_id: state.value.placeId,
           name: state.value.details.name.trim(),
           vertical: state.value.vertical,
-          details: serializeDetails(),
-          brand_draft: serializeBrandDraft(),
-          products: serializeProducts(),
+          details: {
+            name: details.name.trim(),
+            country: details.country.trim().toUpperCase(),
+            city: details.city.trim() || null,
+            street_address: details.streetAddress.trim() || null,
+            address_line_2: details.addressLine2.trim() || null,
+            region: details.region.trim() || null,
+            postal_code: details.postalCode.trim() || null,
+            timezone: timezone.trim() || flow.proposedTimezone,
+            currency: details.currency ?? flow.proposedCurrency,
+            source_locale: details.sourceLocale,
+          },
         },
         validate: (value): value is Record<string, unknown> => isRecord(value),
       })
-      if (res.success !== true || typeof res.draft_id !== 'string' || typeof res.updated_at !== 'string' || typeof res.organization_id !== 'string'
-        || typeof res.preview_token !== 'string' || typeof res.name !== 'string'
-        || typeof res.subdomain_candidate !== 'string') {
+      if (res.success !== true || typeof res.draft_id !== 'string' || typeof res.updated_at !== 'string') {
         throw new Error(typeof res.error === 'string' ? res.error : 'Could not save your answers. Please try again.')
       }
       state.value.draftId = res.draft_id
       state.value.draftRevision = res.updated_at
-      state.value.preview = {
-        draftId: res.draft_id, organizationId: res.organization_id, previewToken: res.preview_token,
-        draftName: res.name, subdomainCandidate: res.subdomain_candidate,
-      }
       return true
     } catch (cause) {
       error.value = cause instanceof Error ? cause.message : 'Something went wrong. Please try again.'
@@ -161,14 +95,11 @@ export function useOnboardingDraft() {
     details.region = address?.administrativeArea ?? ''
     details.postalCode = address?.postalCode ?? ''
     details.country = address?.regionCode ?? ''
-    // The server hands the place's number over in E.164.
-    details.phone = preview.phone ?? ''
-    state.value.hours.hours = parseOpeningHours((preview.opening_hours ?? null) as OpeningHours)
-    state.value.hours.specialHours = null
-    state.value.hours.timezone = preview.timezone ?? ''
+    state.value.timezone = preview.timezone ?? ''
+    state.value.timezoneStepVisited = false
   }
 
-  /** Make the pending site public. */
+  /** Activate the organization with its website private. */
   async function activate(): Promise<boolean> {
     const draftId = state.value.draftId
     if (!draftId) {
@@ -185,7 +116,7 @@ export function useOnboardingDraft() {
       if (res.success !== true || typeof res.organization_slug !== 'string' || !res.organization_slug
         || typeof res.next_url !== 'string' || !res.next_url.startsWith('/dashboard/')
         || typeof res.subdomain !== 'string' || !res.subdomain || typeof res.organization_id !== 'string' || !res.organization_id) {
-        throw new Error(typeof res.error === 'string' ? res.error : 'The published website could not be read.')
+        throw new Error(typeof res.error === 'string' ? res.error : 'The private website could not be read.')
       }
       state.value.created = { organization_slug: res.organization_slug, subdomain: res.subdomain, next_url: res.next_url }
       trackOrganizationCreated(res.organization_id)
@@ -196,71 +127,6 @@ export function useOnboardingDraft() {
     } finally {
       busy.value = false
     }
-  }
-
-  /**
-   * The pending site the caller's own active draft owns, or null when they have
-   * no draft.
-   *
-   * DELETE /api/dashboard/onboarding/drafts/active acts on the caller's draft,
-   * not on a site named in the request, so a surface that offers Discard has to
-   * know which site that is. Offering it on a pending site belonging to someone
-   * else's draft would delete the caller's own draft somewhere else — the same
-   * shape of bug as resolving an ambiguous target instead of refusing it.
-   *
-   * Deliberately unguarded: a caller that cannot read this does not know what
-   * Discard would delete, and has to say so rather than offer the control
-   * anyway or hide it without a reason.
-   */
-  async function activeDraftOrganizationId(): Promise<string | null> {
-    const res = await applicationFetch<Record<string, unknown>>('/api/dashboard/onboarding/drafts/active', {
-      validate: (value): value is Record<string, unknown> => isRecord(value),
-    })
-    const draft = isRecord(res.draft) ? res.draft : null
-    return draft && typeof draft.organization_id === 'string' ? draft.organization_id : null
-  }
-
-  /**
-   * Abandon the draft and delete the pending site it created.
-   *
-   * The endpoint refuses rather than half-deleting: 409 when the site is
-   * already live, 403 when the caller is not an owner of its organization, 500
-   * when the delete left the site standing — and it leaves the draft open on
-   * every refusal. Its message is the one the caller shows, because the
-   * previous client swallowed the response and cleared local state regardless,
-   * which is exactly what made those refusals invisible.
-   */
-  async function discard(): Promise<boolean> {
-    busy.value = true
-    error.value = null
-    try {
-      const res = await applicationFetch<Record<string, unknown>>('/api/dashboard/onboarding/drafts/active', {
-        method: 'DELETE',
-        validate: (value): value is Record<string, unknown> => isRecord(value),
-      })
-      if (res.success !== true) {
-        throw new Error(typeof res.error === 'string' ? res.error : 'Could not discard your unfinished organization. Please try again.')
-      }
-      // The endpoint answers `deleted: false` when the caller has no active
-      // draft any more — it activated, or another tab discarded it. Nothing was
-      // removed, so reporting this as done would close the dialog over a site
-      // that is still there. Say what actually happened.
-      if (res.deleted !== true) {
-        throw new Error('Nothing was discarded: you no longer have an unfinished organization. Reload this page to see its current state.')
-      }
-      return true
-    } catch (cause) {
-      error.value = cause instanceof Error ? cause.message : 'Something went wrong. Please try again.'
-      return false
-    } finally {
-      busy.value = false
-    }
-  }
-
-  function restoredImage(value: unknown): typeof state.value.brand.logoImage {
-    if (value === null) return null
-    if (!isRecord(value) || typeof value.asset_id !== 'string' || typeof value.cloudflare_image_id !== 'string' || typeof value.public_url !== 'string') throw new Error('Saved website image is unavailable')
-    return value as NonNullable<typeof state.value.brand.logoImage>
   }
 
   /** Read the unfinished draft back into the flow. Returns false when there is none. */
@@ -275,21 +141,11 @@ export function useOnboardingDraft() {
     }
     if (typeof draft.draft_id !== 'string' || typeof draft.updated_at !== 'string') throw new Error('Saved website draft identity and revision are unavailable')
     const details = isRecord(draft.details) ? draft.details : {}
-    const config = isRecord(draft.config) ? draft.config : {}
     const text = (value: unknown) => typeof value === 'string' ? value : ''
-    // Parse before touching state. These throw on stored hours that no longer
-    // parse, and assigning as we went left the flow half-restored — name and
-    // address in place, hours silently empty — which the next save would have
-    // written back over the hours the owner had already given.
-    const openingHours = parseOpeningHours(details.opening_hours as OpeningHours)
-    const specialHours = parseSpecialHours(details.special_hours)
-
-    const logoImage = restoredImage(draft.logo_image)
-    const heroImage = restoredImage(draft.hero_image)
-
+    if (!ALL_VERTICALS.includes(draft.vertical as OrganizationVertical)) throw new Error(`Saved website draft has an unknown business type: ${String(draft.vertical)}`)
+    state.value = emptyOnboardingState()
     state.value.draftId = draft.draft_id
     state.value.draftRevision = draft.updated_at
-    if (!ALL_VERTICALS.includes(draft.vertical as OrganizationVertical)) throw new Error(`Saved website draft has an unknown business type: ${String(draft.vertical)}`)
     state.value.vertical = draft.vertical as OrganizationVertical
     state.value.source = draft.source_type === 'google_places' ? 'google_places' : 'manual'
     state.value.placeId = typeof draft.google_place_id === 'string' && draft.google_place_id ? draft.google_place_id : null
@@ -300,46 +156,13 @@ export function useOnboardingDraft() {
     state.value.details.addressLine2 = text(details.address_line_2)
     state.value.details.region = text(details.region)
     state.value.details.postalCode = text(details.postal_code)
-    state.value.details.phone = text(details.phone)
     if (typeof details.country === 'string' && details.country) state.value.details.country = details.country
     if (typeof details.currency === 'string' && details.currency) {
       state.value.details.currency = details.currency as typeof state.value.details.currency
     }
-    state.value.hours.timezone = text(details.timezone)
-    state.value.hours.hours = openingHours
-    state.value.hours.specialHours = specialHours
-    state.value.brand.paletteStarter = text(config.palette_starter) || null
-    state.value.brand.fontPreset = isOrganizationFontPreset(config.font_preset) ? config.font_preset : null
-    state.value.brand.logoShape = (LOGO_SHAPES as readonly unknown[]).includes(config.logo_shape) ? config.logo_shape as LogoShape : null
-    state.value.brand.logoImage = logoImage
-    state.value.brand.heroImage = heroImage
-    state.value.brand.logoPreviewUrl = logoImage?.public_url ?? ''
-    state.value.brand.heroPreviewUrl = heroImage?.public_url ?? ''
-    state.value.brand.logoNote = text(config.draft_logo_note)
-    state.value.brand.heroPhotoNote = text(config.draft_hero_photo_note)
-    state.value.brand.heroHeadline = text(config.draft_hero_headline)
-    state.value.brand.heroSubtitle = text(config.draft_hero_subtitle)
-    state.value.products = Array.isArray(draft.products)
-      ? draft.products.flatMap(entry => isRecord(entry) && typeof entry.name === 'string'
-        ? [{
-            name: entry.name,
-            category: typeof entry.category === 'string' ? entry.category : '',
-            amountMinor: typeof entry.unit_amount === 'number' ? entry.unit_amount : null,
-          }]
-        : [])
-      : []
-
-    if (typeof draft.organization_id === 'string' && typeof draft.preview_token === 'string' && typeof draft.subdomain_candidate === 'string') {
-      state.value.preview = {
-        draftId: draft.draft_id,
-        organizationId: draft.organization_id,
-        previewToken: draft.preview_token,
-        draftName: typeof draft.name === 'string' ? draft.name : state.value.details.name,
-        subdomainCandidate: draft.subdomain_candidate,
-      }
-    }
+    state.value.timezone = text(details.timezone)
     return true
   }
 
-  return { busy, error, flowAnswers, readFlow, save, seedFromPlace, activate, restore, activeDraftOrganizationId, discard, addressSummary }
+  return { busy, error, flowAnswers, readFlow, save, seedFromPlace, activate, restore }
 }

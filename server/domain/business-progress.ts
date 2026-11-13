@@ -19,12 +19,13 @@ import { readIntegration } from '~/server/utils/organization-integrations'
 import { linkedAccountAccessToken } from '~/server/utils/auth'
 import { getGoogleAdsReport } from '~/server/utils/google-ads'
 import { querySearchAnalytics } from '~/server/utils/google-search-console'
-import { getPublicConsultationSettings } from '~/server/utils/professional-services'
 import { getSocialConnections } from '~/server/utils/social-publication'
 import { experiencePublicationBlocker, getProduct, listOrganizationProducts, resolveVariantPrice } from '~/server/utils/product-management'
 import type { CurrencyCode } from '~/shared/currencies'
 import { errorChainForTelemetry } from '~/shared/error-telemetry'
 import { firstExperienceSetupProgress } from '~/server/utils/experience-setup'
+import { firstMenuSetupIncomplete } from '~/server/utils/first-menu-setup'
+import { firstPracticeAreaSetupIncomplete } from '~/server/utils/practice-area-setup'
 
 interface GoalRow {
   id: string; intent: string; constraints: string | null; target_at: string | null; status: BusinessGoal['status']; strategy_json: string | null
@@ -353,19 +354,20 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
         postEditorPath(organization.slug, 'new', input.locationId), 30, { goal: goalFor('social'), icon: 'i-lucide-camera' })
     }
   }
-  const firstRun = !input.locationId && organization.status === 'inactive' && await queryFirst<{ payload_json: string }>(db,
+  const setupDraft = !input.locationId && organization.status !== 'suspended' && await queryFirst<{ payload_json: string }>(db,
     "SELECT payload_json FROM onboarding_drafts WHERE organization_id=? AND status='committed' LIMIT 1", [organizationId])
+  const firstRun = organization.status === 'inactive' && setupDraft
   const canManagePayments = await roleAllows({ ...principal, permissions: { payments: ['integration'] } })
   if (firstRun) {
-    const [domain, canConnectDomain, canUpdateBilling, canAddProduct] = await Promise.all([
+    const [domain, canConnectDomain, canUpdateBilling] = await Promise.all([
       queryFirst(db, "SELECT id FROM organization_domains WHERE organization_id=? AND type='custom' AND status<>'deleted' LIMIT 1", [organizationId]),
       hasOrganizationEntitlement(principal.env, organizationId, 'custom_domains'),
       roleAllows({ ...principal, permissions: { billing: ['update'] } }),
-      roleAllows({ ...principal, permissions: { products: ['create'] } }),
     ])
     if (!domain && (canConnectDomain || canUpdateBilling)) offer('domain.connect', organizationId,
       'Connect a custom domain', 'Use your own website address.', `${base}/website/preferences/domains`, 120, { icon: 'i-lucide-globe' })
-
+  }
+  if (setupDraft && await roleAllows({ ...principal, permissions: { products: ['create'] } })) {
     const firstProduct = {
       lodging: ['stay', 'Add your first home', 'Start your listing.'],
       experience: ['experience', 'Add your first experience', 'Give guests something to book.'],
@@ -373,33 +375,33 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
       service: ['service', 'Add your first practice area', 'Start with the name clients will see.'],
     } as const
     const nextProduct = firstProduct[organization.vertical as keyof typeof firstProduct]
-    const experienceSetup = canAddProduct && organization.vertical === 'experience'
+    const experienceSetup = organization.vertical === 'experience'
       ? await firstExperienceSetupProgress(db, organizationId)
       : null
     if (experienceSetup && !experienceSetup.sessionId) {
       offer('product.create', organizationId, 'Continue experience setup', 'Finish setting up your first session.',
         firstExperienceSetupPath(organization.slug), 110, { icon: 'i-lucide-list-checks' })
-    } else if (canAddProduct && nextProduct) {
+    } else if (nextProduct) {
       const [kind, title, detail] = nextProduct
       const areas = kind === 'service' ? await listOrganizationProducts(db, { organizationId, kind, window: { limit: 2, offset: 0 } }) : []
       const existing = kind === 'service' ? areas.length : products.filter(product => product.kind === kind).length
-      const menuLocations = kind === 'dish' && existing <= 1 && firstMenuSetupApplies(parseOnboardingDraftPayload(firstRun.payload_json))
+      const menuLocations = kind === 'dish' && existing <= 1 && firstMenuSetupApplies(parseOnboardingDraftPayload(setupDraft.payload_json))
         ? await queryAll<{ id: string }>(db, "SELECT id FROM business_locations WHERE organization_id=? AND status='active' LIMIT 2", [organizationId])
         : []
       const menuLocation = menuLocations.length === 1 ? menuLocations[0] : undefined
       if (menuLocation) {
-        offer('product.create', organizationId, existing ? 'Continue your menu setup' : 'Set up your menu',
+        if (await firstMenuSetupIncomplete(db, organizationId, menuLocation.id, !firstRun)) offer('product.create', organizationId, existing ? 'Continue your menu setup' : 'Set up your menu',
           existing ? 'Pick up where you left off.' : detail,
           firstMenuSectionSetupPath(organization.slug, menuLocation.id), 110, { icon: 'i-lucide-list-checks' })
       } else if (areas.length === 1) {
         const area = areas[0]!
-        if (area.page?.path && !area.order_url && (!area.active || !area.publications.some(publication => publication.published)
-          || (!area.booking?.held_online && area.locations.some(location => location.active && !location.published))
-          || (await getPublicConsultationSettings(db, organizationId)).mode !== 'native')) {
+        if (area.page?.path && !area.order_url && await firstPracticeAreaSetupIncomplete({
+          db, env: principal.env, organizationId, orgSlug: organization.slug, actorId: principal.userId, principal,
+        }, area.id)) {
           offer('product.create', organizationId, 'Continue consultation setup', area.name,
             `${firstPracticeAreaPath(organization.slug)}/${encodeURIComponent(area.id)}`, 110, { icon: 'i-lucide-list-checks' })
         }
-      } else if (!existing) {
+      } else if (!existing && firstRun) {
         const to = kind === 'stay' ? firstHomeSetupPath(organization.slug)
           : kind === 'experience' ? firstExperienceSetupPath(organization.slug)
             : kind === 'service' ? firstPracticeAreaPath(organization.slug)

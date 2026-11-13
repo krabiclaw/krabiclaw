@@ -1,4 +1,3 @@
-import { onboardingOffersProducts } from '~/server/utils/onboarding-flow'
 import { platformLocale } from '~/shared/platform-locales'
 import { parseOpeningHours, parseSpecialHours, type OpeningHours, type SpecialHours } from '~/shared/reservation-hours'
 import type { OrganizationVertical } from '~/utils/vertical-copy'
@@ -152,12 +151,15 @@ export interface DraftContentRecord {
 }
 
 export function firstMenuSetupApplies(payload: OnboardingDraftPayload): boolean {
-  return payload.preview.vertical === 'restaurant' && payload.source.type === 'manual' && payload.preview.products.length === 0
+  return payload.preview.vertical === 'restaurant' && payload.preview.products.length === 0
 }
 
 export interface OnboardingDraftPayload {
   version: 3
-  first_menu_skips?: { dish_id: string; price?: true; photo?: true }
+  first_menu_section_id?: string
+  first_menu_skips?: { dish_id: string; price?: true; photo?: true; description?: true }
+  first_experience_photo_skipped?: string
+  first_practice_area_meeting?: { product_id: string; format: string }
   first_practice_area_attorney?: { product_id: string; member_id: string }
   request?: { key: string; fingerprint: string }
   source: {
@@ -341,7 +343,7 @@ export function buildOnboardingDraftPayload(input: {
   brandDraft?: DraftBrandInput | null
   products?: DraftProductInput[] | null
 }): OnboardingDraftPayload {
-  if (input.products?.length && !onboardingOffersProducts(input.vertical)) throw new HTTPError({ statusCode: 400, statusMessage: 'This business type adds its offerings after website setup' })
+  if (input.products?.length && input.vertical !== 'restaurant' && input.vertical !== 'experience') throw new HTTPError({ statusCode: 400, statusMessage: 'This business type adds its offerings after website setup' })
   const source_locale = input.details.source_locale ? platformLocale(input.details.source_locale) : null
   if (!source_locale) throw new HTTPError({ statusCode: 400, statusMessage: 'Choose a supported website language' })
   const brandName = input.details.name || input.name
@@ -529,21 +531,23 @@ export function normalizeOnboardingDraftInput(input: OnboardingDraftInput, exist
   if (country && !getPhoneCountry(country)) throw new HTTPError({ statusCode: 400, statusMessage: 'country must be an ISO 3166-1 alpha-2 code' })
   const currency = answer(raw, 'currency', previous?.currency)?.toUpperCase() ?? null
   if (currency && !isCurrencyCode(currency)) throw new HTTPError({ statusCode: 400, statusMessage: 'Choose a supported currency' })
-  const timezone = answer(raw, 'timezone', previous?.timezone ?? place?.timezone)
+  const savedPlaceDetails = !place || existing?.source.placeId === place.placeId ? previous : undefined
+  const timezone = answer(raw, 'timezone', savedPlaceDetails ? savedPlaceDetails.timezone : place?.timezone)
   if (timezone && !isValidTimezone(timezone)) throw new HTTPError({ statusCode: 400, statusMessage: 'Choose a valid IANA timezone' })
-  const phone = answer(raw, 'phone', previous?.phone ?? place?.phone ?? null)
+  const phone = answer(raw, 'phone', savedPlaceDetails ? savedPlaceDetails.phone : place?.phone ?? null)
+  const openingHours = savedPlaceDetails ? savedPlaceDetails.opening_hours : place?.openingHours ?? null
   const phoneE164 = phone ? toE164(phone) : null
   if (phone && !phoneE164) throw new HTTPError({ statusCode: 400, statusMessage: 'Enter a valid phone number with its country calling code' })
   const details: DraftDetailsInput = {
     name, source_locale, country, currency: currency as CurrencyCode | null, timezone, phone: phoneE164,
     street_address: answer(raw, 'street_address', previous?.street_address), address_line_2: answer(raw, 'address_line_2', previous?.address_line_2),
     city: answer(raw, 'city', previous?.city), region: answer(raw, 'region', previous?.region), postal_code: answer(raw, 'postal_code', previous?.postal_code),
-    website_url: answer(raw, 'website_url', previous?.website_url ?? place?.websiteUrl ?? null),
-    opening_hours: parseOpeningHours(raw?.opening_hours === undefined ? previous?.opening_hours ?? place?.openingHours ?? null : raw.opening_hours),
-    special_hours: parseSpecialHours(raw?.special_hours === undefined ? previous?.special_hours ?? null : raw.special_hours),
+    website_url: answer(raw, 'website_url', savedPlaceDetails ? savedPlaceDetails.website_url : place?.websiteUrl ?? null),
+    opening_hours: parseOpeningHours(raw?.opening_hours === undefined ? openingHours : raw.opening_hours),
+    special_hours: parseSpecialHours(raw?.special_hours === undefined ? savedPlaceDetails?.special_hours ?? null : raw.special_hours),
   }
   const products: DraftProductInput[] = input.products === undefined
-    ? (existing?.preview.products ?? []).map(product => ({ name: product.name, category: product.collection, unit_amount: product.price?.unit_amount ?? null }))
+    ? (existing?.preview.vertical === vertical ? existing.preview.products : []).map(product => ({ name: product.name, category: product.collection, unit_amount: product.price?.unit_amount ?? null }))
     : (() => {
         if (!Array.isArray(input.products)) throw new HTTPError({ statusCode: 400, statusMessage: 'products must be an array' })
         return input.products.map((value, index) => {

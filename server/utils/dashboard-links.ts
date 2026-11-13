@@ -1,6 +1,3 @@
-import type { z } from 'zod'
-import type { experienceSetupStep } from '~/shared/experience-setup'
-
 // Shared registry for dashboard deep-links, used by both the client/tenant
 // MCP (server/utils/mcp-tools) and ChowBot's own tool executor
 // (server/utils/chowbot-agent.ts) — two otherwise-separate tool-calling
@@ -105,8 +102,8 @@ export function firstPracticeAreaPath(orgSlug: string): string {
   return `${organizationBase(orgSlug)}/first-practice-area`
 }
 
-export function firstExperienceSetupPath(orgSlug: string, step?: z.infer<typeof experienceSetupStep>): string {
-  return `${catalogPath(orgSlug)}/first-experience${step ? `?step=${step}` : ''}`
+export function firstExperienceSetupPath(orgSlug: string, step?: string): string {
+  return `${catalogPath(orgSlug)}/first-experience${step ? `?step=${encodeURIComponent(step)}` : ''}`
 }
 
 export function productEditorPath(orgSlug: string, productId: string, locationId?: string | null): string {

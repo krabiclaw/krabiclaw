@@ -11,8 +11,8 @@ import type { Product } from '../../server/types/products'
 
 // The manual-name path of the new-site flow, driven the way an owner drives it:
 // the welcome screen, then one question per route, each advanced by the shell's
-// own footer; the preview pane framing the owner's pending site on its own
-// subdomain; and activation committing a private site in a new organization.
+// own footer; activation committing a private site in a new organization;
+// and a real tenant preview on Today.
 // The owner then publishes from Today.
 //
 // Another tenant already holds an organization-wide collection with the slug
@@ -83,103 +83,74 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   // screen to say it is hydrated rather than merely present.
   await expect(page.locator('[data-onboarding-hydrated="true"]')).toBeVisible()
 
-  // The welcome picker requires a business type before Continue.
   await expect(step('type')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Exit', exact: true })).toBeEnabled()
-  await expect(page.getByRole('button', { name: 'Save & exit', exact: true })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Continue', exact: true })).toBeDisabled()
   await expect(step('type').locator('[aria-pressed="true"]')).toHaveCount(0)
+  await expect(step('type')).toContainText('Your business website')
   await page.getByRole('button', { name: 'Restaurant, café or bar' }).click()
-  await page.getByRole('button', { name: 'Continue', exact: true }).click()
-  await expect(step('language')).toBeVisible()
-  await page.getByRole('button', { name: 'English', exact: true }).click()
+  await expect(step('type')).toContainText('Kikuzuki')
+  await advance('Continue', 'business')
 
-  // Manual business entry completes without any Google Places request.
   const placesRequests: string[] = []
   page.on('request', (sent) => {
     if (sent.url().includes('/api/dashboard/google-places/')) placesRequests.push(sent.url())
   })
-  await expect(step('business')).toBeVisible()
-  await page.getByLabel('Name', { exact: true }).fill(name)
+  await page.getByRole('textbox', { name: 'Business name' }).fill(name)
   await advance('Next', 'location')
 
-  // Location: the country is asked once, and nothing proposes one — it is what
-  // the timezone and the currency are both derived from, so the owner names it.
-  await page.getByPlaceholder('123 Main Street').fill('88 Moo 2, Ao Nang Beach Road')
-  await page.getByPlaceholder('City', { exact: true }).fill('Ao Nang')
-  await step('location').getByText('Select country').click()
+  // A country is required, while the street and city can stay empty.
+  const next = page.getByRole('button', { name: 'Next', exact: true })
+  await expect(next).toBeDisabled()
+  await step('location').getByRole('button', { name: 'Country', exact: true }).click()
   await page.getByPlaceholder('Search country...').fill('Thailand')
   await page.getByRole('option', { name: /Thailand/ }).click()
-
-  await advance('Next', 'hours')
-
-  // Hours: the timezone follows the single-zone country the owner named. Zones
-  // read as the city and its current offset, not the IANA identifier.
-  await expect(step('hours')).toContainText('Bangkok · GMT+7')
-  await advance('Save hours', 'currency')
-
-  // Currency: proposed from the country the owner named, and confirmed here
-  // before anything is priced. Thailand prices in baht.
-  await expect(step('currency')).toContainText('Thai Baht (THB)')
-
-  // The first save needs both answers and creates the organization through
-  // Better Auth and its pending site before the pane has anything to frame.
-  await step('currency').getByRole('button', { name: 'Currency*', exact: true }).click()
+  await expect(step('location')).toContainText('🇹🇭')
+  await expect(step('location')).toContainText('Bangkok · GMT+7')
+  await step('location').getByRole('button', { name: 'Country', exact: true }).click()
+  await page.getByPlaceholder('Search country...').fill('United States')
+  await page.getByRole('option', { name: 'United States', exact: true }).click()
+  await advance('Next', 'timezone')
+  await expect(next).toBeDisabled()
+  await page.getByRole('button', { name: 'Time zone', exact: true }).click()
+  await page.getByPlaceholder('Search by city, e.g. Bangkok').fill('Los Angeles')
+  await page.getByRole('option', { name: /Los Angeles/ }).click()
+  await advance('Next', 'language')
+  await advance('Back', 'timezone')
+  await expect(step('timezone')).toContainText('Los Angeles')
+  await advance('Next', 'language')
+  await page.getByRole('button', { name: 'English', exact: true }).click()
+  await advance('Next', 'currency')
+  await expect(step('currency')).toContainText('US Dollar (USD)')
+  await step('currency').getByRole('button', { name: /Pricing currency/ }).click()
   await page.getByRole('option', { name: 'Thai Baht (THB)', exact: true }).click()
-  await expect(step('contact')).toBeVisible()
+  await expect(step('currency')).toContainText('Thai Baht (THB)')
+  await expect(page.locator('iframe[title="Site preview"]')).toHaveCount(0)
 
-  // The draft holds the typed name as a manual business, with no Google place.
+  await page.getByRole('button', { name: 'Save & exit', exact: true }).click()
+  await expect(page).not.toHaveURL(/\/dashboard\/onboarding/)
   const saved = await page.request.get('/api/dashboard/onboarding/drafts/active')
   expect(saved.status(), await saved.text()).toBe(200)
-  const initialDraft = (await saved.json() as { draft: { draft_id: string; organization_id: string; updated_at: string } }).draft
-  expect(initialDraft).toMatchObject({ source_type: 'manual', google_place_id: null, details: { name, currency: 'THB', timezone: 'Asia/Bangkok' } })
+  const initialDraft = (await saved.json() as { draft: { draft_id: string; organization_id: string; updated_at: string; subdomain_candidate: string } }).draft
+  const subdomain = initialDraft.subdomain_candidate
+  expect(initialDraft).toMatchObject({
+    source_type: 'manual', google_place_id: null,
+    details: { name, currency: 'THB', timezone: 'America/Los_Angeles', country: 'US', street_address: null },
+  })
   const nativeWorkspaces = await page.request.get('/api/account/organizations?onboarding_status=active')
   expect(nativeWorkspaces.status()).toBe(200)
   expect((await nativeWorkspaces.json()).organizations).not.toContainEqual(expect.objectContaining({ id: initialDraft.organization_id }))
-
-  await expect(page.getByText('Your answers have not been saved yet.', { exact: true })).toHaveCount(0)
-
-  const previewFrame = page.locator('iframe[title="Site preview"]')
-  await expect(previewFrame).toHaveAttribute('src', /preview_token=/)
-  const organizationURL = new URL((await previewFrame.getAttribute('src'))!)
-  expect(organizationURL.hostname).toMatch(/^[a-z0-9-]+\.localhost$/)
-  const subdomain = organizationURL.hostname.slice(0, -'.localhost'.length)
-  const preview = page.frameLocator('iframe[title="Site preview"]')
-  await expect(preview.locator('body')).toContainText(name)
-  await expect(preview.locator('body')).not.toContainText('did not match its contract')
-
-  // The preview cookie keeps the pending site accessible as its own links open.
-  const frame = page.frame({ url: /preview_token=/ })
-  expect(frame).not.toBeNull()
-  await frame!.evaluate(() => { window.location.href = window.location.pathname })
-  await frame!.waitForURL(`${organizationURL.origin}/`)
-  await expect(preview.locator('body')).toContainText(name)
-  const config = await frame!.evaluate(async () => {
-    const response = await fetch('/api/public/config')
-    return { status: response.status, body: await response.json() }
-  })
-  expect(config.status).toBe(200)
-  expect(config.body).toMatchObject({ success: true, config: { default_currency: 'THB' } })
-
-  // Nobody else can see it yet. `request` has its own cookie jar, so this asks
-  // for the site carrying neither a preview token nor the preview cookie the
-  // framed load leaves behind.
   const anonymousPreview = await readLocalTenant(request, subdomain, '/')
   expect(anonymousPreview.status()).toBe(404)
-  expect(await anonymousPreview.text()).not.toContain(name)
 
-  // Contact: the phone picker arrives seeded with that country, and the number
-  // is accepted the way a Thai owner writes it, trunk zero included.
-  const phone = page.getByLabel('Phone', { exact: true })
-  await expect(page.getByLabel(/^Phone country: /)).toContainText('+66')
-  await expect(phone).toHaveAttribute('placeholder', '081 234 5678')
-  await phone.fill('0812345678')
-  await expect(phone).toHaveValue('081 234 5678')
-
-  // Another editor saves the same draft. Exit must report the stale revision,
-  // keep the owner's edit on screen and leave the newer persisted answer intact.
+  await page.goto('/dashboard/onboarding')
+  await expect(step('currency')).toBeVisible()
   const competingSave = await page.request.post('/api/dashboard/onboarding/drafts/active', {
-    data: { draft_id: initialDraft.draft_id, updated_at: initialDraft.updated_at, details: { phone: '+66821234567' } },
+    data: {
+      draft_id: initialDraft.draft_id, updated_at: initialDraft.updated_at, details: { phone: '+66821234567' },
+      brand_draft: { palette_starter: 'forest', font_preset: 'lora', hero_headline: 'Fresh from the Andaman, every morning' },
+      products: [{ name: 'Grilled squid', category: 'Small plates', unit_amount: 18000 }],
+    },
   })
   expect(competingSave.status(), await competingSave.text()).toBe(200)
   const competingRevision = (await competingSave.json() as { updated_at: string }).updated_at
@@ -189,118 +160,22 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   const failedExit = await failedExitResponse
   expect(failedExit.status(), await failedExit.text()).toBe(409)
   await expect(page.getByText('Website draft changed; read it before saving', { exact: true })).toBeVisible()
-  await expect(page).toHaveURL(/\/dashboard\/onboarding\/contact$/)
-  await expect(phone).toHaveValue('081 234 5678')
+  await expect(step('currency')).toBeVisible()
   const newerDraft = await page.request.get('/api/dashboard/onboarding/drafts/active')
   expect(newerDraft.status(), await newerDraft.text()).toBe(200)
   expect((await newerDraft.json() as { draft: unknown }).draft).toMatchObject({
     draft_id: initialDraft.draft_id, organization_id: initialDraft.organization_id, updated_at: competingRevision,
-    details: { name, phone: '+66821234567', currency: 'THB', timezone: 'Asia/Bangkok' },
+    details: { name, phone: '+66821234567', currency: 'THB', timezone: 'America/Los_Angeles' },
   })
 
   await page.reload()
-  await expect(step('contact')).toBeVisible()
-  await expect(phone).toHaveValue('082 123 4567')
-  await phone.fill('0812345678')
-  // Exit goes through post-login, which lands on the draft's organization.
-  // Wait for that landing so the next navigation doesn't race the redirect.
-  const draftOrganization = (await (await page.request.get('/api/auth/organization/list')).json() as Array<{ id: string; slug: string }>)
-    .find(organization => organization.id === initialDraft.organization_id)
-  await page.getByRole('button', { name: 'Save & exit', exact: true }).click()
-  await expect(page).toHaveURL(new RegExp(`/dashboard/${draftOrganization!.slug}$`))
-  const exitedDraft = await page.request.get('/api/dashboard/onboarding/drafts/active')
-  expect(exitedDraft.status(), await exitedDraft.text()).toBe(200)
-  expect((await exitedDraft.json() as { draft: unknown }).draft).toMatchObject({
-    draft_id: initialDraft.draft_id, organization_id: initialDraft.organization_id,
-    details: { name, phone: '+66812345678', currency: 'THB', timezone: 'Asia/Bangkok' },
-  })
-
-  // A cold entry restores the saved draft. Required answers are complete, so
-  // resume opens review; Back still reaches the saved optional contact answer.
-  await page.goto('/dashboard/onboarding')
-  await expect(page.locator('[data-onboarding-hydrated="true"]')).toBeVisible()
-  await expect(step('review')).toBeVisible()
-  await page.getByRole('button', { name: 'Back', exact: true }).click()
-  await expect(step('look')).toBeVisible()
-  await page.getByRole('button', { name: 'Back', exact: true }).click()
-  await expect(step('products')).toBeVisible()
-  await page.getByRole('button', { name: 'Back', exact: true }).click()
-  await expect(step('contact')).toBeVisible()
-  await expect(phone).toHaveValue('081 234 5678')
-  await advance('Next', 'products')
-
-  // The menu is optional, but a dish the owner names lands in the section they
-  // name, and this save writes that section's collection.
-  await page.getByPlaceholder('Grilled squid').fill('Grilled squid')
-  await page.getByPlaceholder('THB').fill('180')
-  await page.getByPlaceholder('Small plates, Skewers, Drinks…').fill('Small plates')
-  await page.getByRole('button', { name: 'Add dish' }).click()
-  await expect(step('products')).toContainText(formatMinorAmount(18000, 'THB'))
-  // The business name supplies the headline; the owner can customize it.
-  await advance('Next', 'look')
-  const next = page.getByRole('button', { name: 'Next', exact: true })
-  const headline = page.getByPlaceholder('A clear promise guests remember')
-  await expect(headline).toHaveValue(name)
-  await expect(next).toBeEnabled()
-  // The look: a starter palette and a font, both written to the site.
-  await page.getByRole('button', { name: 'Use the Forest colors' }).click()
-  await expect(page.getByRole('button', { name: 'Use the Forest colors' })).toHaveAttribute('aria-pressed', 'true')
-  await step('look').getByRole('combobox').click({ timeout: 30_000 })
-  await page.getByRole('option', { name: 'Lora', exact: true }).click({ timeout: 30_000 })
-  await headline.fill('Fresh from the Andaman, every morning')
-  await expect(next).toBeEnabled()
-
-  // Hold the actual upload in flight so navigation cannot race its revision.
-  // Releasing it reaches the local endpoint and its real Images refusal.
-  const uploadPath = `/api/dashboard/onboarding/drafts/${initialDraft.draft_id}/media/upload`
-  const uploadRoute = `**${uploadPath}`
-  const uploadStarted = Promise.withResolvers<undefined>()
-  const uploadRelease = Promise.withResolvers<undefined>()
-  await page.route(uploadRoute, async route => {
-    uploadStarted.resolve(undefined)
-    await uploadRelease.promise
-    await route.continue()
-  })
-  const uploadResponse = page.waitForResponse(response => new URL(response.url()).pathname === uploadPath
-    && response.request().method() === 'POST')
-  try {
-    await step('look').locator('input[type="file"]').first().setInputFiles({
-      name: 'onboarding-logo.png', mimeType: 'image/png',
-      buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1sAAAAASUVORK5CYII=', 'base64'),
-    })
-    await uploadStarted.promise
-    await expect(page.getByRole('button', { name: 'Save & exit', exact: true })).toBeDisabled()
-    await expect(next).toBeDisabled()
-    await expect(page.getByRole('button', { name: 'Back', exact: true })).toBeDisabled()
-  } finally {
-    uploadRelease.resolve(undefined)
-    await uploadResponse
-    await page.unroute(uploadRoute)
-  }
-  const refusedUpload = await uploadResponse
-  expect(refusedUpload.status(), await refusedUpload.text()).toBe(503)
-  await expect(step('look').getByText(/Cloudflare Images is not configured in this environment, by design/)).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Save & exit', exact: true })).toBeEnabled()
-  await expect(page.getByRole('button', { name: 'Back', exact: true })).toBeEnabled()
-  await expect(next).toBeEnabled()
-  await advance('Next', 'review')
-
-  // Review: the answers, and the address the next press claims.
-  await expect(step('review')).toContainText(name)
-  const liveHost = (await step('review').getByText('Your site stays private until you publish it.').locator('strong').textContent())!.trim()
-  expect(liveHost).toBe(organizationURL.host)
-
-  // There is no done screen. Activation lands the owner in their new
-  // organization's dashboard, so leaving the flow is how the press reports it
-  // finished.
-  await page.getByRole('button', { name: 'Create my site', exact: true }).click()
+  await expect(step('currency')).toBeVisible()
+  await page.getByRole('button', { name: 'Finish', exact: true }).click()
   await expect(page).not.toHaveURL(/\/dashboard\/onboarding/)
 
-  // Activation created a new organization named after the business and made it
-  // the session's active one, so post-login lands there too.
   const session = await (await page.request.get('/api/auth/get-session')).json() as { session: { activeOrganizationId: string | null } }
   const organizationId = session.session.activeOrganizationId
-  expect(typeof organizationId).toBe('string')
+  expect(organizationId).toBe(initialDraft.organization_id)
   const organizations = await (await page.request.get('/api/auth/organization/list')).json() as Array<{ id: string; name: string; slug: string }>
   const created = organizations.find(organization => organization.id === organizationId)
   expect(created?.name).toBe(name)
@@ -313,9 +188,6 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   expect(postLogin.status()).toBe(302)
   expect(postLogin.headers().location).toBe(`/dashboard/${created!.slug}`)
 
-  // The site subdomain and the organization slug are derived separately, so the
-  // host the pane framed names the subdomain, not the slug. The organization is
-  // the site, so the subdomain is the organization's own.
   const context = await (await page.request.get('/api/dashboard/context', { params: { org: created!.slug } })).json() as { organization: { subdomain: string | null } }
   expect(context.organization.subdomain).toBe(subdomain)
 
@@ -359,7 +231,7 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   // An anonymous visitor's menu shows the dish, priced, under that section.
   const visitor = await browser.newContext()
   const menu = await visitor.newPage()
-  const menuResponse = await menu.goto(new URL('/menu', organizationURL).href)
+  const menuResponse = await menu.goto(new URL('/menu', baseURL!.replace('localhost', `${subdomain}.localhost`)).href)
   expect(menuResponse?.status()).toBe(200)
   const section = menu.locator('section').filter({ has: menu.getByRole('heading', { level: 2, name: 'Small plates', exact: true }) })
   await expect(section).toHaveCount(1)
@@ -383,15 +255,20 @@ test('a new experience site saves its first experience privately until booking s
     })
     expect(created.status(), await created.text()).toBe(200)
     const { organization_id: organizationId } = await created.json() as { organization_id: string }
-    await page.goto('/dashboard/onboarding/products')
-    await expect(page.locator('[data-onboarding-hydrated="true"]')).toBeVisible()
-    const products = page.locator('[data-onboarding-step="products"]')
-    await expect(products).toContainText('Booking details are required before an experience can be published.')
-    await page.getByPlaceholder('Sunset kayak tour').fill('Mangrove kayak trip')
-    await products.getByLabel('Price', { exact: true }).fill('850')
-    await page.getByRole('button', { name: 'Add experience', exact: true }).click()
-    await page.getByRole('button', { name: 'Next', exact: true }).click()
-    await expect(page.locator('[data-onboarding-step="look"]')).toBeVisible()
+    const initial = await page.request.get('/api/dashboard/onboarding/drafts/active')
+    expect(initial.status(), await initial.text()).toBe(200)
+    const { draft } = await initial.json() as { draft: { draft_id: string; updated_at: string } }
+    const authored = await page.request.post('/api/dashboard/onboarding/drafts/active', {
+      data: {
+        draft_id: draft.draft_id, updated_at: draft.updated_at,
+        products: [{ name: 'Mangrove kayak trip', category: 'Experiences', unit_amount: 85000 }],
+      },
+    })
+    expect(authored.status(), await authored.text()).toBe(200)
+    await page.goto('/dashboard/onboarding')
+    await expect(page.locator('[data-onboarding-step="currency"]')).toBeVisible()
+    await page.getByRole('button', { name: 'Save & exit', exact: true }).click()
+    await expect(page).not.toHaveURL(/\/dashboard\/onboarding/)
 
     // Read the actual catalog independently of the onboarding draft writer.
     const catalog = await page.request.get(`/api/editor/organizations/${organizationId}/products`)
@@ -409,8 +286,6 @@ test('a new experience site saves its first experience privately until booking s
     const readBack = await page.request.get(`/api/editor/organizations/${organizationId}/products/${experience.id}`)
     expect(readBack.status(), await readBack.text()).toBe(200)
     expect((await readBack.json() as { product: Product }).product.publications).toEqual([expect.objectContaining({ published: false })])
-    await page.goto('/dashboard/onboarding/products')
-    await expect(page.locator('[data-onboarding-step="products"]')).toContainText('Mangrove kayak trip')
   } finally {
     const removed = await page.request.delete('/api/dashboard/onboarding/drafts/active')
     expect(removed.status(), await removed.text()).toBe(200)
@@ -422,8 +297,8 @@ test('a new experience site saves its first experience privately until booking s
 
 for (const setup of [
   { vertical: 'restaurant', path: '/products/first-menu', question: 'What should your first menu section be called?' },
-  { vertical: 'experience', path: '/products/first-experience', question: 'Give your experience a title' },
-  { vertical: 'service', path: '/first-practice-area', question: 'Name your first practice area' },
+  { vertical: 'experience', path: '/products/first-experience', question: 'What’s your experience called?' },
+  { vertical: 'service', path: '/first-practice-area', question: 'What’s your first practice area?' },
 ] as const) {
   test(`a new ${setup.vertical} website opens its first guided offering step and stays private`, async ({ page, request, baseURL }) => {
     await dismissPreviewToolbar(page)
@@ -442,10 +317,10 @@ for (const setup of [
     try {
       await page.goto('/dashboard/onboarding')
       await expect(page.locator('[data-onboarding-hydrated="true"]')).toBeVisible()
-      await expect(page.locator('[data-onboarding-step="review"]')).toBeVisible()
+      await expect(page.locator('[data-onboarding-step="currency"]')).toBeVisible()
       const activation = page.waitForResponse(response => response.request().method() === 'POST'
         && /\/api\/dashboard\/onboarding\/drafts\/[^/]+\/activate$/.test(new URL(response.url()).pathname))
-      await page.getByRole('button', { name: 'Create my site', exact: true }).click()
+      await page.getByRole('button', { name: 'Finish', exact: true }).click()
       const activated = await activation
       expect(activated.status(), await activated.text()).toBe(200)
       const outcome = await activated.json() as { organization_slug: string; subdomain: string; public_url: string }
@@ -484,57 +359,26 @@ test('an owner changes their restaurant draft to lodging and saves their first h
     await expect(step(next)).toBeVisible()
   }
 
-  await page.goto('/dashboard/onboarding/type')
-  await expect(step('type')).toBeVisible()
-  await expect(step('type').getByRole('button')).toHaveCount(4)
-  await page.getByRole('button', { name: 'Restaurant, café or bar', exact: true }).click()
-  await page.getByRole('button', { name: 'Continue', exact: true }).click()
-  await expect(step('language')).toBeVisible()
-  await page.getByRole('button', { name: 'English', exact: true }).click()
-  await expect(step('business')).toBeVisible()
-  await page.getByLabel('Name', { exact: true }).fill(name)
-  await advance('Next', 'location')
-  await page.getByRole('textbox', { name: 'Street address' }).fill('88 Moo 2')
-  await page.getByPlaceholder('City', { exact: true }).fill('Ao Nang')
-  await step('location').getByText('Select country').click()
-  await page.getByPlaceholder('Search country...').fill('Thailand')
-  await page.getByRole('option', { name: /Thailand/ }).click()
-  await advance('Next', 'hours')
-  await expect(step('hours')).toContainText('Bangkok · GMT+7')
-  await advance('Save hours', 'currency')
-  await expect(step('currency')).toContainText('Thai Baht (THB)')
-  await advance('Next', 'contact')
-  await advance('Skip for now', 'products')
-  await page.getByPlaceholder('Grilled squid').fill('Grilled squid')
-  await page.getByRole('button', { name: 'Add dish', exact: true }).click()
-  await advance('Next', 'look')
-  const restaurant = await page.request.get('/api/dashboard/onboarding/drafts/active')
-  expect(restaurant.status(), await restaurant.text()).toBe(200)
-  expect((await restaurant.json() as { draft: unknown }).draft).toMatchObject({
-    vertical: 'restaurant', products: [{ name: 'Grilled squid', category: 'Menu', unit_amount: null }],
+  const restaurant = await page.request.post('/api/dashboard/onboarding/drafts/active', {
+    data: {
+      source_type: 'manual', name, vertical: 'restaurant',
+      details: { country: 'TH', city: 'Ao Nang', street_address: '88 Moo 2', source_locale: 'en', timezone: 'Asia/Bangkok', currency: 'THB' },
+      products: [{ name: 'Grilled squid', category: 'Menu', unit_amount: null }],
+    },
   })
+  expect(restaurant.status(), await restaurant.text()).toBe(200)
 
-  // The saved restaurant offering is restored before the owner changes type.
-  // Selecting lodging removes it from the answers, and the next save must send
-  // the new type with no generic offerings rather than fail on a hidden field.
+  // The first business question restores the saved type and lets the owner
+  // replace it. The former restaurant menu does not become lodging inventory.
   await page.goto('/dashboard/onboarding/type')
   await expect(step('type').getByRole('button', { name: 'Restaurant, café or bar', exact: true })).toHaveAttribute('aria-pressed', 'true')
   await page.getByRole('button', { name: 'Lodging or vacation rentals', exact: true }).click()
-  await page.getByRole('button', { name: 'Continue', exact: true }).click()
-  await expect(step('language')).toBeVisible()
-  await page.getByRole('button', { name: 'English', exact: true }).click()
-  await expect(step('business')).toBeVisible()
+  await advance('Continue', 'business')
   await advance('Next', 'location')
-  await advance('Next', 'hours')
-  await advance('Save hours', 'currency')
-  const convertedSave = page.waitForRequest(sent => sent.method() === 'POST' && new URL(sent.url()).pathname === '/api/dashboard/onboarding/drafts/active')
-  await advance('Next', 'contact')
-  expect((await convertedSave).postDataJSON()).toMatchObject({ vertical: 'lodging', products: [] })
-  await advance('Skip for now', 'look')
-  await expect(step('products')).toHaveCount(0)
-  await advance('Next', 'review')
-  await expect(step('review').getByText('Products', { exact: true })).toHaveCount(0)
-  await expect(step('review').getByText('Menu', { exact: true })).toHaveCount(0)
+  await advance('Next', 'language')
+  await advance('Next', 'currency')
+  await page.getByRole('button', { name: 'Save & exit', exact: true }).click()
+  await expect(page).not.toHaveURL(/\/dashboard\/onboarding/)
 
   const saved = await page.request.get('/api/dashboard/onboarding/drafts/active')
   expect(saved.status(), await saved.text()).toBe(200)
@@ -555,8 +399,8 @@ test('an owner changes their restaurant draft to lodging and saves their first h
   await expect(step('type').getByRole('button', { name: 'Lodging or vacation rentals', exact: true })).toHaveAttribute('aria-pressed', 'true')
   await page.goto('/dashboard/onboarding')
   await expect(page.locator('[data-onboarding-hydrated="true"]')).toBeVisible()
-  await expect(step('review')).toBeVisible()
-  await page.getByRole('button', { name: 'Create my site', exact: true }).click()
+  await expect(step('currency')).toBeVisible()
+  await page.getByRole('button', { name: 'Finish', exact: true }).click()
   await expect(page).not.toHaveURL(/\/dashboard\/onboarding/)
 
   const session = await (await page.request.get('/api/auth/get-session')).json() as { session: { activeOrganizationId: string } }
@@ -827,8 +671,6 @@ test('a new owner picks their Google listing and it seeds location, contact and 
   await expect(page.locator('[data-onboarding-hydrated="true"]')).toBeVisible()
   await page.getByRole('button', { name: 'Restaurant, café or bar' }).click()
   await page.getByRole('button', { name: 'Continue', exact: true }).click()
-  await expect(step('language')).toBeVisible()
-  await page.getByRole('button', { name: 'English', exact: true }).click()
   await expect(step('business')).toBeVisible()
   await page.getByRole('button', { name: 'Import from Google Maps', exact: true }).click()
 
@@ -845,26 +687,20 @@ test('a new owner picks their Google listing and it seeds location, contact and 
   await suggestion.click()
   expect((await details).postDataJSON()).toEqual({ google_place_id: KIKUZUKI.placeId, session_token: sessionToken })
 
-  // Location is seeded from the place and stays editable.
+  await expect(page.getByRole('textbox', { name: 'Business name' })).toHaveValue(KIKUZUKI.name)
+  await page.getByRole('button', { name: 'Next', exact: true }).click()
   await expect(step('location')).toBeVisible()
-  await expect(page.getByPlaceholder('123 Main Street')).toHaveValue('325')
-  await expect(page.getByPlaceholder('City', { exact: true })).toHaveValue('KRABI')
+  await expect(page.getByRole('textbox', { name: 'Street address' })).toHaveValue('325')
+  await expect(page.getByRole('textbox', { name: 'City or town' })).toHaveValue('KRABI')
   await expect(step('location')).toContainText('Thailand')
+  await expect(step('location')).toContainText('Bangkok · GMT+7')
   await page.getByRole('button', { name: 'Next', exact: true }).click()
-
-  // Hours: the place's timezone and its opening hours.
-  await expect(step('hours')).toBeVisible()
-  await expect(step('hours')).toContainText('Bangkok · GMT+7')
-  await page.getByRole('button', { name: 'Save hours', exact: true }).click()
-
-  // Currency is confirmed before the first save creates the pending site.
-  await expect(step('currency')).toBeVisible()
+  await expect(step('language')).toBeVisible()
+  await page.getByRole('button', { name: 'English', exact: true }).click()
+  await page.getByRole('button', { name: 'Next', exact: true }).click()
   await expect(step('currency')).toContainText('Thai Baht (THB)')
-  await page.getByRole('button', { name: 'Next', exact: true }).click()
-
-  // Contact: Google's national number, read in the place's own country.
-  await expect(step('contact')).toBeVisible()
-  await expect(page.getByLabel('Phone', { exact: true })).toHaveValue('095 293 2112')
+  await page.getByRole('button', { name: 'Save & exit', exact: true }).click()
+  await expect(page).not.toHaveURL(/\/dashboard\/onboarding/)
 
   // The saved draft names the Google place, which the server fetched itself.
   const saved = await page.request.get('/api/dashboard/onboarding/drafts/active')

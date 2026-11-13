@@ -1,15 +1,8 @@
 import type { CurrencyCode } from '~/shared/currencies'
 import type { PostalAddress } from '~/utils/postal-address'
-import type { OpeningHours, SpecialHours } from '~/shared/reservation-hours'
+import type { OpeningHours } from '~/shared/reservation-hours'
 import type { OnboardingFlow, OnboardingStepId } from '~/shared/onboarding-flow'
 import type { OrganizationVertical } from '~/utils/vertical-copy'
-import type { DraftBrandForm } from '~/lib/components/workspace/onboarding/DraftBrandCard.vue'
-
-export interface OnboardingProductDraft {
-  name: string
-  category: string
-  amountMinor: number | null
-}
 
 /** The place the business picker hands back: Place Details for the chosen prediction. */
 export interface OnboardingPlacePreview {
@@ -20,14 +13,6 @@ export interface OnboardingPlacePreview {
   maps_url?: string | null
   timezone?: string | null
   opening_hours?: OpeningHours
-}
-
-export interface OnboardingDraftPreview {
-  draftId: string
-  organizationId: string
-  previewToken: string
-  draftName: string
-  subdomainCandidate: string
 }
 
 export interface OnboardingFlowState {
@@ -43,17 +28,13 @@ export interface OnboardingFlowState {
     region: string
     postalCode: string
     country: string
-    phone: string
-    /** null until the currency step is answered. Never seeded with a product default. */
     currency: CurrencyCode | null
     sourceLocale: string | null
   }
-  hours: { timezone: string; hours: OpeningHours; specialHours: SpecialHours }
-  brand: DraftBrandForm
-  products: OnboardingProductDraft[]
+  timezone: string
+  timezoneStepVisited: boolean
   draftId: string | null
   draftRevision: string | null
-  preview: OnboardingDraftPreview | null
   created: { organization_slug: string; subdomain: string; next_url: string } | null
 }
 
@@ -64,18 +45,12 @@ export function emptyOnboardingState(): OnboardingFlowState {
     placeId: null,
     details: {
       name: '', city: '', streetAddress: '', addressLine2: '', region: '', postalCode: '',
-      country: '', phone: '', currency: null, sourceLocale: null,
+      country: '', currency: null, sourceLocale: null,
     },
-    hours: { timezone: '', hours: null, specialHours: null },
-    brand: {
-      paletteStarter: null, fontPreset: null, logoShape: null, logoNote: '', logoPreviewUrl: '', logoImage: null,
-      heroPhotoNote: '', heroPreviewUrl: '', heroImage: null,
-      heroHeadline: '', heroSubtitle: '',
-    },
-    products: [],
+    timezone: '',
+    timezoneStepVisited: false,
     draftId: null,
     draftRevision: null,
-    preview: null,
     created: null,
   }
 }

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { parseOnboardingDraftPayload } from '../../server/utils/onboarding-drafts.ts'
+import { normalizeOnboardingDraftInput, parseOnboardingDraftPayload } from '../../server/utils/onboarding-drafts.ts'
 
 const details = {
   name: 'Kikuzuki', street_address: '88 Moo 2', address_line_2: null, city: 'Ao Nang', region: null, postal_code: null,
@@ -35,4 +35,17 @@ test('a version 3 draft whose source contradicts its type is refused', () => {
   assert.throws(() => parseOnboardingDraftPayload(JSON.stringify({ version: 3, source: { type: 'google_places', placeId: null, place: null, details }, preview })))
   assert.throws(() => parseOnboardingDraftPayload(JSON.stringify({ version: 3, source: { type: 'manual', placeId: 'ChIJ-kikuzuki', place: null, details }, preview })))
   assert.throws(() => parseOnboardingDraftPayload(JSON.stringify({ version: 1, source: { type: 'manual', place: null, details }, preview })))
+})
+
+test('a different Google place seeds its own time zone while a saved place preserves edits', () => {
+  const existing = parseOnboardingDraftPayload(JSON.stringify({
+    version: 3,
+    source: { type: 'google_places', placeId: place.placeId, place, details: { ...details, timezone: 'Asia/Tokyo' } },
+    preview,
+  }))
+  assert.equal(normalizeOnboardingDraftInput({}, existing, place).source.details.timezone, 'Asia/Tokyo')
+  const replacement = { ...place, placeId: 'ChIJ-replacement', timezone: 'Europe/London' }
+  assert.equal(normalizeOnboardingDraftInput({}, existing, replacement).source.details.timezone, 'Europe/London')
+  const edited = normalizeOnboardingDraftInput({ details: { timezone: 'Europe/Paris' } }, existing, replacement)
+  assert.equal(edited.source.details.timezone, 'Europe/Paris')
 })

@@ -9,14 +9,9 @@ const answers = {
   placeId: null,
   name: 'Cozy Cafe',
   sourceLocale: 'en',
-  streetAddress: '',
-  city: '',
   country: '',
   timezone: 'Asia/Bangkok',
   currency: null,
-  phone: '',
-  productCount: 0,
-  heroHeadline: '',
 }
 
 const step = (id: string, overrides: Partial<Parameters<typeof onboardingFlow>[0]> = {}) => {
@@ -48,24 +43,31 @@ test('proposes a default currency for known countries without restricting option
   assert.equal(currencyForCountry(null), null)
 })
 
-test('the optional location step accepts authored partial addresses', () => {
-  assert.equal(step('location').canAdvance, true)
-  assert.equal(step('location').nextLabel, 'Skip for now')
-  for (const authored of [{ country: 'TH' }, { city: 'Krabi' }, { streetAddress: '123 Main Street' }]) {
-    assert.equal(step('location', authored).nextLabel, 'Next')
-  }
+test('country is required, and a known time zone is editable in Location', () => {
+  assert.equal(step('location').canAdvance, false)
+  const known = onboardingFlow({ ...answers, country: 'TH', timezone: '' })
+  assert.equal(known.proposedTimezone, 'Asia/Bangkok')
+  assert.equal(known.steps.some(entry => entry.id === 'timezone'), false)
+  assert.equal(known.steps.find(entry => entry.id === 'location')?.fields.at(-1)?.key, 'timezone')
+  assert.equal(step('location', { country: 'TH' }).canAdvance, true)
 })
 
-test('the currency step is not complete until the currency is answered', () => {
-  assert.equal(step('currency').canAdvance, false)
-  assert.equal(step('currency', { currency: 'THB' }).canAdvance, true)
-  assert.equal(onboardingFlow(answers).resumeStep, 'currency')
+test('the time zone step remains available after answering it', () => {
+  const unresolved = onboardingFlow({ ...answers, country: 'US', timezone: '' })
+  assert.equal(unresolved.resumeStep, 'timezone')
+  assert.equal(unresolved.steps.find(entry => entry.id === 'location')?.fields.some(field => field.key === 'timezone'), false)
+  const answered = { ...answers, country: 'US', timezone: 'America/Los_Angeles', timezoneStepVisited: true }
+  assert.equal(step('timezone', answered).canAdvance, true)
+  assert.equal(onboardingFlow(answered).resumeStep, 'currency')
 })
 
-test('the currency step is asked before anything is priced', () => {
-  const order = onboardingFlow(answers).steps.map(entry => entry.id)
-  assert.ok(order.indexOf('currency') > order.indexOf('location'), 'the country must be answered first')
-  assert.ok(order.indexOf('currency') < order.indexOf('products'), 'prices must not be entered first')
-  assert.ok(order.indexOf('currency') < order.indexOf('review'))
+test('currency confirms an editable proposal and finishes the website setup', () => {
+  assert.equal(step('currency', { country: 'ZA' }).canAdvance, false)
+  assert.equal(step('currency', { country: 'ZA', currency: 'ZAR' }).canAdvance, true)
+  assert.equal(step('currency', { country: 'TH' }).canAdvance, true)
+  const flow = onboardingFlow({ ...answers, country: 'TH' })
+  assert.equal(flow.proposedCurrency, 'THB')
+  assert.equal(flow.resumeStep, 'currency')
+  assert.deepEqual(flow.steps.map(entry => entry.id), ['type', 'business', 'location', 'language', 'currency'])
+  assert.equal(flow.steps.at(-1)?.nextLabel, 'Finish')
 })
-

@@ -1,14 +1,14 @@
 <template>
-  <GuidedExperienceSetup />
+  <GuidedOfferingSetup />
 </template>
 
 <script setup lang="ts">
-import GuidedExperienceSetup from '~/components/dashboard/GuidedExperienceSetup.vue'
+import GuidedOfferingSetup from '~/components/dashboard/GuidedOfferingSetup.vue'
 
 definePageMeta({
   layout: 'dashboard',
   tabs: false,
   dashboardFrame: true,
-  key: route => JSON.stringify([route.params.org_slug, route.query.step ?? null]),
+  key: route => route.fullPath,
 })
 </script>
