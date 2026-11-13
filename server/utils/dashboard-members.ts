@@ -1,5 +1,5 @@
 import { organizationOptions, type CloudflareEnv } from '~/server/utils/auth'
-import { assertRoleAllows, listAllOrganizationMembers, organizationAdapter, roleAllows, type OrganizationAdapter } from '~/server/utils/member-access'
+import { assertRoleAllows, listAllOrganizationMembers, organizationAdapter, roleAllows } from '~/server/utils/member-access'
 import { createDb, queryAll, type DbClient } from '~/server/db'
 import { isDeliverySent } from '~/server/domain/guest-threads/deliveries'
 import { organizationRoleLabel } from '~/utils/organization-access'
@@ -7,12 +7,21 @@ import type { GuestThreadDeliveryRow } from '~/server/domain/guest-threads/types
 
 type InvitationDelivery = Pick<GuestThreadDeliveryRow, 'status' | 'provider' | 'provider_message_id' | 'error'>
 
-export async function getInvitationDeliveries(db: DbClient, organizationId: string, invitations: Pick<Awaited<ReturnType<OrganizationAdapter['listInvitations']>>[number], 'id' | 'expiresAt'>[]) {
-  const rows = invitations.length ? await queryAll<InvitationDelivery & {id:string}>(db, `SELECT d.id,d.status,d.provider,d.provider_message_id,d.error FROM guest_thread_deliveries d
-    JOIN activity_entries a ON a.id=d.activity_entry_id WHERE a.organization_id=? AND a.event_name='member.invited'
-      AND d.id IN (SELECT value FROM json_each(?))`, [organizationId, JSON.stringify(invitations.map(invitation => `organization-invitation-email:${invitation.id}:${invitation.expiresAt.toISOString()}`))]) : []
-  const byId = new Map(rows.map(({id,...delivery}) => [id, delivery]))
-  return new Map(invitations.map(invitation => [invitation.id, byId.get(`organization-invitation-email:${invitation.id}:${invitation.expiresAt.toISOString()}`) ?? null]))
+export async function getInvitationDeliveries(db: DbClient, organizationId: string, invitations: { id: string }[]) {
+  if (!invitations.length) return new Map<string, InvitationDelivery>()
+  // The invitation's audit entry owns every send. Better Auth can update expiresAt
+  // when resending, and the stored expiry has lower precision than the email hook.
+  const rows = await queryAll<InvitationDelivery & { invitationId: string }>(db, `
+    SELECT requested.value AS invitationId, d.status, d.provider, d.provider_message_id, d.error
+    FROM json_each(?) requested
+    JOIN activity_entries a ON a.dedupe_key = 'organization-invitation:' || requested.value
+      AND a.organization_id = ? AND a.event_name = 'member.invited'
+    JOIN guest_thread_deliveries d ON d.id = (
+      SELECT receipt.id FROM guest_thread_deliveries receipt
+      WHERE receipt.activity_entry_id = a.id AND receipt.channel = 'email'
+      ORDER BY receipt.created_at DESC, receipt.id DESC LIMIT 1
+    )`, [JSON.stringify(invitations.map(invitation => invitation.id)), organizationId])
+  return new Map(rows.map(({ invitationId, ...delivery }) => [invitationId, delivery]))
 }
 
 export async function getOrganizationMembersData(env: CloudflareEnv, organization: { id: string; role: string }, userId: string) {

@@ -9,6 +9,7 @@ const writableEnvironment = ['localhost', '127.0.0.1'].includes(new URL(testBase
 test.skip(!writableEnvironment, 'Invitations write only local disposable data')
 
 test('the email link returns through normal sign-in and only the invited account can join', async ({ page, request, baseURL, browser }) => {
+  test.setTimeout(60_000)
   const restaurant = seededTenant('restaurant')
   const invitee = findE2eAuthFixture('user-e2e-lodging-invitee')
   const other = findE2eAuthFixture('user-e2e-oauth-private-cimd')
@@ -35,6 +36,15 @@ test('the email link returns through normal sign-in and only the invited account
     expect(sent).toMatchObject({ status: 'pending', role: 'member' })
     if (!sent) throw new Error('Better Auth did not return the invitation sent by Team')
     invitationId = sent.id
+    const teamRefresh = team.waitForResponse(response => new URL(response.url()).pathname === '/api/dashboard/members')
+    await pending.getByRole('button', { name: 'Resend' }).click()
+    const refreshed = await teamRefresh
+    expect(refreshed.status()).toBe(200)
+    const roster = await refreshed.json() as { invitations: unknown[] }
+    expect(roster.invitations).toContainEqual(expect.objectContaining({
+      id: invitationId, email: invitee.email, delivery: { sent: true, failed: false, message: 'Email: recorded locally' },
+    }))
+    await expect(pending).toContainText('Email: recorded locally')
   } finally {
     await owner.close()
   }
