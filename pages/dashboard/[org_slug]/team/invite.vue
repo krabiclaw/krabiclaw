@@ -30,6 +30,7 @@ const route = useRoute()
 const level = useRouteLevel()
 const dashboard = useDashboardOrganization()
 const dashboardApi = useDashboardApi()
+const toast = useToast()
 
 const { data, error } = await useAsyncData(
   () => organizationMembersKey(String(route.params.org_slug)),
@@ -68,6 +69,7 @@ async function sendInvite() {
     const delivery = members.invitations.find(invitation => invitation.id === result.data!.id)?.delivery
     await refreshNuxtData(organizationMembersKey(String(route.params.org_slug ?? '')))
     if (!delivery?.sent) throw new Error(delivery?.message ?? 'Invitation saved. Email delivery is unconfirmed.')
+    toast.add({ title: 'Invitation sent', color: 'success' })
     resetInvite()
     await navigateTo(level.to.value ?? '/dashboard')
   } catch (error) {

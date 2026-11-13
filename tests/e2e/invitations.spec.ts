@@ -14,13 +14,16 @@ test('the email link returns through normal sign-in and only the invited account
   const invitee = findE2eAuthFixture('user-e2e-lodging-invitee')
   const other = findE2eAuthFixture('user-e2e-oauth-private-cimd')
   await loginAs(request, baseURL!)
-  const owner = await browser.newContext({ baseURL })
+  const owner = await browser.newContext({ baseURL, viewport: { width: 360, height: 780 } })
   let invitationId: string
   try {
     await loginAs(owner.request, baseURL!)
     const team = await owner.newPage()
     await team.goto('/dashboard/' + restaurant.slug + '/team')
     await waitForNuxtHydration(team)
+    await expect(team.getByRole('heading', { name: 'Members', exact: true })).toBeVisible()
+    await expect(team.getByRole('heading', { name: 'Pending invitations', exact: true })).toBeVisible()
+    await expect(team.getByText('No pending invitations.', { exact: true })).toBeVisible()
     await team.getByRole('link', { name: 'Invite a team member' }).click()
     await team.getByLabel('Email address').fill(invitee.email)
     await team.getByRole('combobox', { name: 'Role', exact: true }).click()
@@ -29,7 +32,8 @@ test('the email link returns through normal sign-in and only the invited account
     await team.getByRole('button', { name: 'Send invite', exact: true }).click()
     const pending = team.getByRole('listitem').filter({ hasText: invitee.email })
     await expect(pending).toContainText('Email: recorded locally')
-    await expect(pending.getByRole('button', { name: 'Resend' })).toBeVisible()
+    const pendingActions = pending.getByRole('button', { name: `Actions for ${invitee.email}` })
+    await expect(pendingActions).toBeVisible()
     const list = await request.get('/api/auth/organization/list-invitations', { params: { organizationId: restaurant.organizationId } })
     expect(list.status()).toBe(200)
     const sent = (await list.json() as Array<{ email: string; id: string; status: string; role: string }>).find(invitation => invitation.email === invitee.email)
@@ -37,7 +41,8 @@ test('the email link returns through normal sign-in and only the invited account
     if (!sent) throw new Error('Better Auth did not return the invitation sent by Team')
     invitationId = sent.id
     const teamRefresh = team.waitForResponse(response => new URL(response.url()).pathname === '/api/dashboard/members')
-    await pending.getByRole('button', { name: 'Resend' }).click()
+    await pendingActions.click()
+    await team.getByRole('menuitem', { name: 'Resend invitation' }).click()
     const refreshed = await teamRefresh
     expect(refreshed.status()).toBe(200)
     const roster = await refreshed.json() as { invitations: unknown[] }

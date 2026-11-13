@@ -568,6 +568,19 @@ actions, connection instructions and unavailable/read-only settings have no
 commit footer. New Team invitations start with Member; elevated access is an
 explicit choice through Better Auth's existing roles and permissions.
 
+**Team.** The dashboard is the reference for native Team. Its Team header
+carries the Invite control with a person-plus icon. Members and Pending
+invitations use compact rows and hairline dividers. A member's avatar, name,
+“(you)” marker and muted email go on the left. The role appears once on the
+right as text or a plain role picker with a chevron. The email uses the full
+width beneath the name so the role and menu do not squeeze it. Only rows with
+contextual actions reserve room for the menu. The menu holds Remove member,
+which asks for confirmation. Pending invitations show the email, Pending status,
+delivery feedback and a role on the right. Resend and Revoke invitation sit in
+that row's overflow menu. Show “No pending invitations.” when the viewer can
+manage invitations and none are pending. Both surfaces read the shared Team
+response for role labels, current-user identity and available controls.
+
 **Icons identify destinations and meaningful choices.** Follow the captured
 Airbnb host editor's restraint: amenities have recognizable pictograms;
 ordinary listing fields, house rules and safety switches stay text and their
