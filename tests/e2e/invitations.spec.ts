@@ -8,12 +8,36 @@ import { testBaseUrl } from './test-env'
 const writableEnvironment = ['localhost', '127.0.0.1'].includes(new URL(testBaseUrl()).hostname)
 test.skip(!writableEnvironment, 'Invitations write only local disposable data')
 
-test('the email link returns through normal sign-in and only the invited account can join', async ({ page, request, baseURL }) => {
+test('the email link returns through normal sign-in and only the invited account can join', async ({ page, request, baseURL, browser }) => {
   const restaurant = seededTenant('restaurant')
   const invitee = findE2eAuthFixture('user-e2e-lodging-invitee')
   const other = findE2eAuthFixture('user-e2e-oauth-private-cimd')
   await loginAs(request, baseURL!)
-  const invitationId = await sendOrganizationInvitation(request, baseURL!, restaurant.organizationId, invitee.email, 'member')
+  const owner = await browser.newContext({ baseURL })
+  let invitationId: string
+  try {
+    await loginAs(owner.request, baseURL!)
+    const team = await owner.newPage()
+    await team.goto('/dashboard/' + restaurant.slug + '/team')
+    await waitForNuxtHydration(team)
+    await team.getByRole('link', { name: 'Invite a team member' }).click()
+    await team.getByLabel('Email address').fill(invitee.email)
+    await team.getByRole('combobox', { name: 'Role' }).click()
+    await expect(team.getByRole('option').allTextContents()).resolves.toEqual(['Member', 'Admin', 'Owner'])
+    await team.getByRole('option', { name: 'Member', exact: true }).click()
+    await team.getByRole('button', { name: 'Send invite', exact: true }).click()
+    const pending = team.getByRole('listitem').filter({ hasText: invitee.email })
+    await expect(pending).toContainText('Email: recorded locally')
+    await expect(pending.getByRole('button', { name: 'Resend' })).toBeVisible()
+    const list = await request.get('/api/auth/organization/list-invitations', { params: { organizationId: restaurant.organizationId } })
+    expect(list.status()).toBe(200)
+    const sent = (await list.json() as Array<{ email: string; id: string; status: string; role: string }>).find(invitation => invitation.email === invitee.email)
+    expect(sent).toMatchObject({ status: 'pending', role: 'member' })
+    if (!sent) throw new Error('Better Auth did not return the invitation sent by Team')
+    invitationId = sent.id
+  } finally {
+    await owner.close()
+  }
   const path = '/accept-invitation/' + invitationId
 
   const unsigned = await page.goto(path)
@@ -47,6 +71,13 @@ test('the email link returns through normal sign-in and only the invited account
   expect(await organizations.json()).toMatchObject({ organizations: expect.arrayContaining([
     expect.objectContaining({ id: restaurant.organizationId, role: 'member' }),
   ]) })
+  const team = await page.request.get('/api/dashboard/members', { params: { org: restaurant.slug } })
+  expect(team.status()).toBe(200)
+  const teamData = await team.json() as { inviteRoles: unknown[]; invitations: unknown[]; members: Array<{ canRemove: boolean; roleChoices: unknown[] }> }
+  expect(teamData.inviteRoles).toEqual([])
+  expect(teamData.invitations).toEqual([])
+  expect(teamData.members.length).toBeGreaterThan(0)
+  expect(teamData.members.every(member => !member.canRemove && !member.roleChoices.length)).toBe(true)
   const reopened = await page.request.get('/api/auth/organization/get-invitation', { params: { id: invitationId } })
   expect(reopened.status()).toBe(400)
   await expect(reopened.json()).resolves.toMatchObject({ message: 'Invitation not found!' })

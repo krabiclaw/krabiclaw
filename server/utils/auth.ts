@@ -73,6 +73,7 @@ export function oauthSigningConfig(authBaseUrl: string) {
 }
 
 export const organizationOptions = {
+  creatorRole: 'owner',
   ac: organizationAccessControl,
   roles: organizationRoles,
   // A business cannot exist without the currency it sells in and the clock it

@@ -5,6 +5,9 @@
     own heading, not a second card.
   -->
   <div class="space-y-8">
+    <Teleport v-if="actionsTarget && data?.inviteRoles.length" :to="'#' + actionsTarget" defer>
+      <UButton icon="i-lucide-plus" color="neutral" variant="soft" square class="rounded-full" aria-label="Invite a team member" :to="level.path.value + '/invite'" />
+    </Teleport>
     <section>
       <UAlert
         v-if="loadError"
@@ -27,9 +30,9 @@
             </NuxtLink>
             <div class="flex shrink-0 items-center gap-2">
               <USelect
-                v-if="canEditMemberRole(member)"
+                v-if="member.roleChoices.length"
                 :model-value="member.role"
-                :items="roleOptions"
+                :items="member.roleChoices"
                 variant="soft"
                 size="sm"
                 :ui="{ base: 'rounded-full capitalize' }"
@@ -37,9 +40,9 @@
                 :loading="roleUpdatingId === member.id"
                 @update:model-value="value => onRoleSelected(member, String(value))"
               />
-              <UBadge v-else :label="member.role" color="neutral" variant="soft" size="lg" class="rounded-full capitalize" />
+              <UBadge v-else :label="member.roleLabel" color="neutral" variant="soft" size="lg" class="rounded-full capitalize" />
               <UButton
-                v-if="member.role !== 'owner'"
+                v-if="member.canRemove"
                 icon="i-lucide-x"
                 color="neutral"
                 variant="ghost"
@@ -72,14 +75,15 @@
             <p class="truncate text-sm text-muted">
               Expires {{ formatDate(invitation.expiresAt) }}
             </p>
-            <p class="text-sm" :class="invitation.delivery?.status === 'failed' ? 'text-error' : 'text-muted'">
-              {{ invitation.delivery?.error || (invitation.delivery ? `Email: ${invitation.delivery.provider === 'log_only' ? 'recorded locally' : invitation.delivery.status}` : 'Email delivery is unconfirmed') }}
+            <p class="text-sm" :class="invitation.delivery.failed ? 'text-error' : 'text-muted'">
+              {{ invitation.delivery.message }}
             </p>
           </div>
           <div class="flex shrink-0 items-center gap-2">
-            <UBadge v-if="invitation.role" :label="invitation.role" color="neutral" variant="soft" size="lg" class="rounded-full capitalize" />
-            <UButton v-if="currentUserRole === 'owner' || currentUserRole === 'admin'" color="neutral" variant="ghost" :loading="resendingInviteId === invitation.id" @click="resendInvitation(invitation)">Resend</UButton>
+            <UBadge :label="invitation.roleLabel" color="neutral" variant="soft" size="lg" class="rounded-full capitalize" />
+            <UButton v-if="invitation.canResend" color="neutral" variant="ghost" :loading="resendingInviteId === invitation.id" @click="resendInvitation(invitation)">Resend</UButton>
             <UButton
+              v-if="invitation.canCancel"
               icon="i-lucide-x"
               color="neutral"
               variant="ghost"
@@ -97,6 +101,7 @@
 </template>
 
 <script setup lang="ts">
+import { dashboardPanelActionsKey } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
 import { formatTimestamp } from '~/utils/timezone'
 
 import { authClient } from '~/lib/auth-client'
@@ -107,6 +112,8 @@ type MemberRow = OrganizationMembersData['members'][number]
 type InvitationRow = OrganizationMembersData['invitations'][number]
 
 const route = useRoute()
+const level = useRouteLevel()
+const actionsTarget = inject(dashboardPanelActionsKey)
 const dashboardApi = useDashboardApi()
 
 const dashboard = useDashboardOrganization()
@@ -120,8 +127,6 @@ const invitations = computed(() => data.value?.invitations ?? [])
 
 const session = authClient.useSession()
 const currentUser = computed(() => session.value.data?.user ?? null)
-const currentUserRole = computed(() => dashboard.organization.value?.role)
-const isOwner = computed(() => currentUserRole.value === 'owner')
 
 function memberAvailabilityPath(member: MemberRow) {
   const organization = dashboard.organization.value
@@ -129,23 +134,6 @@ function memberAvailabilityPath(member: MemberRow) {
   return member.userId === currentUser.value?.id
     ? `/dashboard/account/profile/calendar/${encodeURIComponent(organization.id)}`
     : `/dashboard/${encodeURIComponent(organization.slug)}/team/${encodeURIComponent(member.id)}`
-}
-
-const BASE_ROLE_OPTIONS = [
-  { label: 'Member', value: 'member' }, { label: 'Admin', value: 'admin' },
-]
-// Owner is only offered as a choice to an existing owner — mirrors Better
-// Auth's own creatorRole rule (only an owner can grant/touch the owner role),
-// enforced again server-side since this is just UI affordance.
-const roleOptions = computed(() => (
-  isOwner.value ? [...BASE_ROLE_OPTIONS, { label: 'Owner', value: 'owner' }] : BASE_ROLE_OPTIONS
-))
-
-function canEditMemberRole(member: MemberRow): boolean {
-  if (currentUserRole.value !== 'owner' && currentUserRole.value !== 'admin') return false
-  // Only an owner may touch another owner's role.
-  if (member.role === 'owner' && !isOwner.value) return false
-  return true
 }
 
 const removingMemberId = ref<string | null>(null)
@@ -221,10 +209,13 @@ async function resendInvitation(invitation: InvitationRow) {
   pendingInvitationError.value = null
   try {
     const organizationId = dashboard.organization.value?.id
-    if (!organizationId || !['admin','owner','member'].includes(invitation.role ?? '')) throw new Error('Invitation details are unavailable')
+    if (!organizationId || !invitation.canResend) throw new Error('Invitation details are unavailable')
     const result = await authClient.organization.inviteMember({ organizationId, email: invitation.email, role: invitation.role as 'admin' | 'owner' | 'member', resend: true })
     if (result.error) throw new Error(result.error.message || 'Failed to resend invitation')
     await refresh()
+    if (loadError.value) throw loadError.value
+    const delivery = data.value?.invitations.find(item => item.id === invitation.id)?.delivery
+    if (!delivery?.sent) throw new Error(delivery?.message ?? 'Email delivery is unconfirmed')
   } catch (error) {
     pendingInvitationError.value = getErrorMessage(error, 'Failed to resend invitation')
   } finally {
