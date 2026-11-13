@@ -276,12 +276,15 @@ function stream(facts: ThreadFacts, viewer: Viewer, now: Date, canReply: boolean
 }
 
 /** The thread's messages still to go out: its automatic messages for managers, and the viewer's own send-later replies. */
-async function pendingMessages(db: DbClient, threadId: string, organizationId: string, principal: MemberAccessPrincipal, timeZone: string): Promise<InboxPendingMessage[]> {
+async function readPendingMessages(db: DbClient, threadId: string, organizationId: string, principal: MemberAccessPrincipal) {
   const visible = visibleScheduledMessagesSql('m', await stayAccessFor(principal))
-  const rows = await queryAll<{ id: string; author_user_id: string | null; template_title: string | null; body: string; due_at: string; timezone: string | null; status: string }>(db, `
+  return queryAll<{ id: string; author_user_id: string | null; template_title: string | null; body: string; due_at: string; timezone: string | null; status: string }>(db, `
     SELECT m.id, m.author_user_id, m.template_title, m.body, m.due_at, m.timezone, m.status FROM scheduled_guest_messages m
      WHERE m.organization_id = ? AND ${SCHEDULED_MESSAGE_CONVERSATION_SQL} = ? AND ${visible.query} AND m.due_at IS NOT NULL
        AND (m.status = 'pending' OR (m.status = 'sending' AND m.author_user_id IS NOT NULL)) ORDER BY m.due_at, m.id`, [organizationId, threadId, ...visible.params])
+}
+
+function pendingMessages(rows: Awaited<ReturnType<typeof readPendingMessages>>, timeZone: string): InboxPendingMessage[] {
   return rows.map(row => row.author_user_id === null
     ? { id: row.id, source: 'automatic' as const, label: row.template_title!, due_at: row.due_at, time: sendTime(row.due_at, row.timezone!), body: row.body, cancellable: true }
     : { id: row.id, source: 'later' as const, label: row.body, due_at: row.due_at, time: sendTime(row.due_at, timeZone), body: row.body, cancellable: row.status === 'pending' })
@@ -289,15 +292,20 @@ async function pendingMessages(db: DbClient, threadId: string, organizationId: s
 
 /** The conversation's view model, or null when the viewer has no such conversation. */
 export async function getInboxThread(db: DbClient, threadId: string, organizationId: string, viewer: Viewer, now = new Date()): Promise<InboxThread | null> {
-  const detail = await loadGuestThreadDetail(db, threadId, organizationId, viewer.audience === 'buyer'
-    ? { buyerUserId: viewer.userId }
-    : { memberUserId: viewer.userId, conversation: viewer.conversation }, now, true)
+  const [detail, scheduled] = await Promise.all([
+    loadGuestThreadDetail(db, threadId, organizationId, viewer.audience === 'buyer'
+      ? { buyerUserId: viewer.userId }
+      : { memberUserId: viewer.userId, conversation: viewer.conversation }, now, true),
+    viewer.audience === 'member' && viewer.conversation
+      ? readPendingMessages(db, threadId, organizationId, viewer.principal)
+      : null,
+  ])
   if (!detail) return null
   const { view: raw, timeZone } = detail
   const [facts, replyComposer, pending] = await Promise.all([
     threadFacts(db, raw, organizationId, timeZone, now),
     viewer.audience === 'member' ? guestReplyDestination(db, detail.request, detail.channelFacts) : null,
-    viewer.audience === 'member' ? pendingMessages(db, raw.id, organizationId, viewer.principal, timeZone) : [],
+    scheduled ?? (viewer.audience === 'member' ? readPendingMessages(db, raw.id, organizationId, viewer.principal) : []),
   ])
   const items = stream(facts, viewer, now, replyComposer?.channel !== null)
   const record = raw.operationalRecord
@@ -315,7 +323,7 @@ export async function getInboxThread(db: DbClient, threadId: string, organizatio
     record_title: record ? recordTitle(record, raw.organizationVertical) : null,
     activity_path: raw.activityPath,
     stream: items,
-    pending,
+    pending: pendingMessages(pending, timeZone),
     composer: {
       channel: viewer.audience === 'member' && raw.conversationChannel === 'airbnb' ? 'airbnb' : 'email',
       available: replyComposer?.channel !== null,
