@@ -48,10 +48,27 @@ test('an email invitation is private, uses normal sign-in, and creates a members
     }
     const createBusiness = (token: string, slug: string) => post('/organization/create', token, { name: 'Cleaner Co', slug, default_currency: 'USD', timezone: 'America/Denver' })
 
-    // The owner invites the cleaner's address.
-    const invited = await post('/organization/invite-member', await signIn('owner@invitation-proof.example'), { organizationId: ORG, email: INVITEE, role: 'member' })
+    // Better Auth leaves expired invitations in the table. The owner can invite the same address again.
+    const ownerToken = await signIn('owner@invitation-proof.example')
+    const invite = (email: string) => post('/organization/invite-member', ownerToken, { organizationId: ORG, email, role: 'member' })
+    const original = await invite(INVITEE)
+    assert.equal(original.status, 200)
+    await db.prepare('UPDATE invitation SET expiresAt = 0 WHERE id = ?').bind(original.body.id).run()
+    const invited = await invite(INVITEE)
     assert.equal(invited.status, 200)
     const invitationId = String(invited.body.id)
+    assert.notEqual(invitationId, original.body.id)
+    const deliveryReceipts = () => db.prepare(`
+      SELECT d.provider_message_id FROM guest_thread_deliveries d JOIN activity_entries a ON a.id = d.activity_entry_id
+      WHERE a.dedupe_key = ? AND a.organization_id = ? AND d.provider = 'log_only' AND d.status = 'sent'
+    `).bind(`organization-invitation:${invitationId}`, ORG).all<{ provider_message_id: string }>()
+    const beforeResend = await deliveryReceipts()
+    assert.equal(beforeResend.results.length, 1)
+    const resent = await post('/organization/invite-member', ownerToken, { organizationId: ORG, email: INVITEE, role: 'member', resend: true })
+    assert.deepEqual([resent.status, resent.body.id], [200, invitationId])
+    const afterResend = await deliveryReceipts()
+    assert.equal(afterResend.results.length, 2)
+    assert.equal(new Set(afterResend.results.map(receipt => receipt.provider_message_id)).size, 2)
     const getInvitation = async (token?: string) => {
       const url = new URL('/api/auth/organization/get-invitation', BASE)
       url.searchParams.set('id', invitationId)

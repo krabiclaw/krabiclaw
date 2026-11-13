@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "7c522587-2d4e-431d-9b78-a7c48bec2c36",
+  "id": "acb76070-d0d4-4846-9a1b-785fe04fc86a",
   "prevId": "58b25082-7882-4b36-9f79-304388ddfd2f",
   "tables": {
     "account": {
@@ -4845,23 +4845,6 @@
             "organizationId"
           ],
           "isUnique": false
-        },
-        "idx_invitation_org_pending_owner": {
-          "name": "idx_invitation_org_pending_owner",
-          "columns": [
-            "organizationId"
-          ],
-          "isUnique": true,
-          "where": "role = 'owner' AND status = 'pending'"
-        },
-        "idx_invitation_org_email_pending_unique": {
-          "name": "idx_invitation_org_email_pending_unique",
-          "columns": [
-            "organizationId",
-            "lower(\"email\")"
-          ],
-          "isUnique": true,
-          "where": "status = 'pending'"
         }
       },
       "foreignKeys": {
@@ -16695,13 +16678,6 @@
       "conversations_guest_email_idx": {
         "columns": {
           "lower(payload_json ->> '$.guest.email')": {
-            "isExpression": true
-          }
-        }
-      },
-      "idx_invitation_org_email_pending_unique": {
-        "columns": {
-          "lower(\"email\")": {
             "isExpression": true
           }
         }

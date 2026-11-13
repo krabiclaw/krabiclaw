@@ -19,8 +19,8 @@
     {
       "idx": 2,
       "version": "6",
-      "when": 1794539170276,
-      "tag": "0002_remove_organization_invite_links",
+      "when": 1794542429186,
+      "tag": "0002_use_better_auth_organization_invitations",
       "breakpoints": true
     }
   ]
