@@ -13,6 +13,14 @@
     <UAlert v-if="loadError" color="error" variant="soft" icon="i-lucide-triangle-alert" title="Catalog could not be loaded" :description="loadError" />
     <template v-else>
       <DashboardFilterPills id="catalog-kind" v-model="kind" label="Kind" :items="kindFilters" class="mb-8" />
+      <UAlert
+        v-if="loadsHomeSetup && setupError"
+        color="error"
+        variant="soft"
+        class="mb-6"
+        title="Home setup could not be loaded"
+        :description="getErrorMessage(setupError, 'The request failed')"
+      />
       <UButton v-if="kind === 'stay' && setup?.resume_home_setup && !firstHomeSetup" :to="setup.resume_home_setup.to" color="neutral" variant="outline" class="mb-6" :label="setup.resume_home_setup.label" />
       <section v-if="showFirstHomeSetup && firstHomeSetup" class="mx-auto max-w-2xl space-y-5" data-testid="first-home-setup">
         <h2 class="text-2xl font-semibold tracking-tight sm:text-3xl">{{ firstHomeSetup.title }}</h2>
@@ -31,13 +39,6 @@
           </NuxtLink>
         </div>
       </section>
-      <UAlert
-        v-else-if="showFirstHomeSetup && setupError"
-        color="error"
-        variant="soft"
-        title="Home setup could not be loaded"
-        :description="getErrorMessage(setupError, 'The request failed')"
-      />
       <OrganizationLocationSelector
         v-else-if="items.length"
         :items="items"
@@ -47,7 +48,7 @@
         missing-image-hint="Add one in this item’s photo editor."
         data-testid="catalog-grid"
       />
-      <UEmpty v-else-if="!showFirstHomeSetup || !setupPending" icon="i-lucide-store" :title="`No ${activeFilterLabel.toLowerCase()} yet`" />
+      <UEmpty v-else-if="!showFirstHomeSetup || (!setupPending && !setupError)" icon="i-lucide-store" :title="`No ${activeFilterLabel.toLowerCase()} yet`" />
     </template>
   </DashboardIndexPanel>
 </template>
@@ -143,9 +144,10 @@ const { organization } = useDashboardOrganization()
 const dashboardApi = useDashboardApi()
 const showFirstHomeSetup = computed(() => organization.value?.vertical === 'lodging' && !offered('stay')
   && (kind.value === 'stay' || (kind.value === 'all' && items.value.length === 0)))
+const loadsHomeSetup = computed(() => organization.value?.vertical === 'lodging' && (kind.value === 'stay' || showFirstHomeSetup.value))
 const { data: setup, error: setupError, pending: setupPending } = await useAsyncData(
   () => `first-home-setup:${organizationId}`,
-  () => organization.value?.vertical === 'lodging' && (kind.value === 'stay' || showFirstHomeSetup.value)
+  () => loadsHomeSetup.value
     ? dashboardApi('/api/dashboard/stay-homes', {
         validate: (value): value is { first_home_setup: FirstHomeSetup | null; resume_home_setup: HomeSetupAction | null } => {
           if (!isRecord(value)) return false

@@ -509,6 +509,9 @@ test('an owner changes their restaurant draft to lodging and saves their first h
   expect(partialHome).toMatchObject({ step: 'access', answers: { property_type: 'house', listing_type: 'private_room' } })
   const stale = await page.request.post(homeSetup, { ...scope, data: { action: 'exit', step: 'property', answers: { property_type: 'apartment' }, idempotency_key: partialHome.idempotency_key } })
   expect(stale.status(), await stale.text()).toBe(409)
+  const afterStale = await page.request.post(homeSetup, { ...scope, data: {} })
+  expect(afterStale.status(), await afterStale.text()).toBe(200)
+  expect((await afterStale.json()).draft).toEqual(partialHome)
   const separateBrowser = await browser.newContext()
   try {
     await loginAs(separateBrowser.request, baseURL!, 'user-e2e-onboarding-wizard')
