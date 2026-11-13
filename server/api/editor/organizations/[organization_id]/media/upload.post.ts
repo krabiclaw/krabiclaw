@@ -4,6 +4,7 @@ import { jsonResponse, rethrowHttpError } from '~/server/utils/api-response'
 import { requireOrganizationAccess } from '~/server/utils/location-access'
 import { sanitizeFilename, uploadResolvedMediaToAssetStore } from '~/server/utils/media-upload'
 import { sniffMediaMimeType, VIDEO_MIME_TYPES, MAX_VIDEO_BYTES, POSTER_IMAGE_MIME_TYPES, MAX_POSTER_BYTES, RESOLVED_MEDIA_IMAGE_TYPES, MAX_IMAGE_BYTES } from '~/server/utils/media-mime'
+import { isRecord } from '~/utils/api-clients'
 
 const VALID_CATEGORIES = new Set(['exterior', 'interior', 'food', 'menu', 'team', 'other'])
 const MULTIPART_OVERHEAD_BYTES = 64 * 1024
@@ -116,7 +117,7 @@ export default defineHandler(async (event) => {
       status: 'active',
     })
   } catch (error) {
-    if (HTTPError.isError(error) && error.data?.code === 'IMAGE_UPLOAD_UNAVAILABLE') {
+    if (HTTPError.isError(error) && isRecord(error.data) && error.data.code === 'IMAGE_UPLOAD_UNAVAILABLE') {
       return jsonResponse({ error: 'Photo uploads are unavailable in this environment.', code: 'IMAGE_UPLOAD_UNAVAILABLE' }, { status: 503 })
     }
     rethrowHttpError(error)
