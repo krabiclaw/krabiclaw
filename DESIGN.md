@@ -1351,8 +1351,8 @@ live there too, because appending `s` produces "dishs".
 ### Moving lodging occupancy from Hostaway
 
 The organization owns the one-time migration task at
-`O/integrations/hostaway-migration`, reached from Connections and offered at
-lodging onboarding's final review. Owners and admins with operations-update
+`O/integrations/hostaway-migration`, reached from Connections. Owners and
+admins with operations-update
 permission upload the host's reservation export, confirm column/date/amount
 formats and explicit home matches, review manual blocked dates, and approve
 stays before importing. The task index uses `DashboardIndexPanel`; its focused
