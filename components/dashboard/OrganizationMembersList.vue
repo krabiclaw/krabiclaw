@@ -11,30 +11,31 @@
         <li v-for="member in data.members" :key="member.id" class="py-2.5">
           <div class="flex items-start gap-2.5">
             <UAvatar :src="member.user.image || undefined" :alt="member.user.name || member.user.email" size="md" aria-hidden="true" class="mt-1.5 shrink-0" />
-            <div class="min-w-0 flex-1">
-              <div class="flex min-h-11 items-center gap-2">
-                <NuxtLink :to="memberAvailabilityPath(member)" class="min-w-0 flex-1 wrap-anywhere text-sm font-medium text-highlighted">
-                  {{ member.user.name || member.user.email }}<span v-if="member.isCurrentUser" class="text-muted"> (you)</span>
-                </NuxtLink>
-                <USelect
-                  v-if="member.roleChoices.length"
-                  :model-value="member.role"
-                  :items="member.roleChoices"
-                  color="neutral"
-                  variant="ghost"
-                  size="sm"
-                  :ui="{ base: 'min-h-11 px-2', trailing: 'end-1', value: 'pe-3' }"
-                  :aria-label="`Role for ${member.user.name || member.user.email}`"
-                  :loading="roleUpdatingId === member.id"
-                  :disabled="busy"
-                  @update:model-value="value => onRoleSelected(member, String(value))"
-                >{{ member.roleLabel }}</USelect>
-                <span v-else class="text-right text-sm text-muted">{{ member.roleLabel }}</span>
-                <UDropdownMenu v-if="member.canRemove" :items="[{ label: 'Remove member', color: 'error', onSelect: () => { removing = member } }]" :content="{ align: 'end' }">
-                  <UButton icon="i-lucide-ellipsis" color="neutral" variant="ghost" square class="-me-2 size-11 justify-center" :aria-label="`Actions for ${member.user.name || member.user.email}`" :disabled="busy" />
-                </UDropdownMenu>
-              </div>
-              <p class="-mt-2 wrap-anywhere text-xs text-muted">{{ member.user.email }}</p>
+            <div class="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto_auto] items-center">
+              <NuxtLink :to="memberAvailabilityPath(member)" class="col-span-full col-start-1 row-span-2 row-start-1 grid min-w-0 grid-cols-subgrid grid-rows-subgrid">
+                <span class="col-start-1 row-start-1 flex min-h-11 min-w-0 items-center pe-2 text-sm font-medium text-highlighted">
+                  <span class="min-w-0 wrap-anywhere">{{ member.user.name || member.user.email }}<span v-if="member.isCurrentUser" class="text-muted"> (you)</span></span>
+                </span>
+                <span class="col-span-full row-start-2 -mt-2 wrap-anywhere text-xs text-muted">{{ member.user.email }}</span>
+              </NuxtLink>
+              <USelect
+                v-if="member.roleChoices.length"
+                :model-value="member.role"
+                :items="member.roleChoices"
+                color="neutral"
+                variant="ghost"
+                size="sm"
+                class="z-10 col-start-2 row-start-1"
+                :ui="{ base: 'min-h-11 px-2', trailing: 'end-1', value: 'pe-3' }"
+                :aria-label="`Role for ${member.user.name || member.user.email}`"
+                :loading="roleUpdatingId === member.id"
+                :disabled="busy"
+                @update:model-value="value => onRoleSelected(member, String(value))"
+              >{{ member.roleLabel }}</USelect>
+              <span v-else class="col-start-2 row-start-1 text-right text-sm text-muted">{{ member.roleLabel }}</span>
+              <UDropdownMenu v-if="member.canRemove" :items="[{ label: 'Remove member', color: 'error', onSelect: () => { removing = member } }]" :content="{ align: 'end' }">
+                <UButton icon="i-lucide-ellipsis" color="neutral" variant="ghost" square class="z-10 col-start-3 row-start-1 -me-2 ms-2 size-11 justify-center" :aria-label="`Actions for ${member.user.name || member.user.email}`" :disabled="busy" />
+              </UDropdownMenu>
             </div>
           </div>
           <UAlert v-if="roleUpdateError && roleUpdateErrorMemberId === member.id" class="mt-2" color="error" variant="soft" :description="roleUpdateError" />
