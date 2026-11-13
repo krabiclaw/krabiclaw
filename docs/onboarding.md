@@ -211,7 +211,10 @@ can continue managing it from Catalog.
 
 Today links owners back to the server-selected resume step. Web and Booky Boo
 render the same guide response from `/api/dashboard/onboarding/offering`. On
-iOS, the guide opens the existing dashboard editor after saving.
+iOS, Finish opens the existing dashboard editor after saving. Safari opens it
+directly when signed out or already signed in with the app account. If Safari
+is signed in with a different account, it asks before switching. If a link
+expires, the saved draft can be opened again from the app.
 
 Lodging homes have their own addresses and timezones. Add a home as a draft,
 configure its listing and nightly calendar, then publish it. For Airbnb listings,

@@ -6,9 +6,9 @@ export default defineHandler(() => {
   const nonce = crypto.randomUUID()
   return new Response(`<!doctype html><html lang="en"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Open your editor</title>
+<title>Opening editor</title>
 <style nonce="${nonce}">body{font:1rem system-ui,sans-serif;margin:0;padding:2rem;color:#1f2447}main{max-width:30rem;margin:18vh auto 0}button{font:inherit;color:white;background:#1f2447;border:0;border-radius:.5rem;padding:.75rem 1.25rem}</style>
-<main><h1>Open your editor</h1><p id="status" role="status">Checking your sign-in…</p><button id="continue" hidden>Continue with app account</button>
+<main><p id="status" role="status">Opening editor…</p><button id="continue" hidden>Use app account</button>
 <noscript>Return to the KrabiClaw app to open your editor.</noscript></main>
 <script nonce="${nonce}">
 const params = new URLSearchParams(location.hash.slice(1));
@@ -25,7 +25,7 @@ if (!token || !user || !path || !/^\\/dashboard\\/[a-z0-9-]+\\/products\\/[a-zA-
     button.hidden = true;
     status.textContent = 'This link couldn’t open the editor. Return to the app and try again.';
   };
-  button.addEventListener('click', async () => {
+  const openEditor = async () => {
     button.disabled = true;
     try {
       const response = await fetch('/api/auth/one-time-token/verify', {
@@ -34,16 +34,16 @@ if (!token || !user || !path || !/^\\/dashboard\\/[a-z0-9-]+\\/products\\/[a-zA-
       if (!response.ok) throw new Error('Editor link expired');
       location.replace(path);
     } catch { unavailable(); }
-  });
+  };
+  button.addEventListener('click', openEditor);
   fetch('/api/auth/get-session', { cache: 'no-store' })
     .then(response => {
       if (!response.ok) throw new Error('Browser session could not be read');
       return response.json();
     }).then(session => {
       if (session?.user?.id === user) return location.replace(path);
-      status.textContent = session?.user?.id
-        ? 'Your browser is signed into a different account. Continue with the account from the KrabiClaw app.'
-        : 'Continue with the account from the KrabiClaw app.';
+      if (!session?.user?.id) return openEditor();
+      status.textContent = 'Safari is signed in to a different account.';
       button.hidden = false;
     }).catch(unavailable);
 }
