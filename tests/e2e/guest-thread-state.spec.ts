@@ -523,7 +523,7 @@ for (const viewport of [
     await expect(sheet.getByRole('button', { name: 'Archive', exact: true })).toBeVisible()
     await expect(sheet.getByRole('button', { name: 'Move to Messages', exact: true })).toHaveCount(0)
     // Let the save finish before the socket's scoped list request can return.
-    const reconciliation = Promise.withResolvers<void>()
+    const reconciliation = Promise.withResolvers<undefined>()
     await page.route(url => url.pathname === '/api/messages' && url.searchParams.get('mailbox') === 'current'
       && url.searchParams.get('ids')?.split(',').includes(threadId!) === true, async route => {
       await reconciliation.promise
@@ -538,7 +538,7 @@ for (const viewport of [
       // The archived conversation closes. Desktop selects the next visible row.
       await expectInbox('')
     } finally {
-      reconciliation.resolve()
+      reconciliation.resolve(undefined)
     }
 
     await openMessages('?archived=')
