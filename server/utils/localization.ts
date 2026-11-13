@@ -297,15 +297,22 @@ export async function getResourceLocalization(
   const resourceType = parseLocalizedResourceType(resourceTypeInput)
   const { locale, source } = await assertOrganizationLanguage(db, organizationId, localeInput)
   if (source) localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', 'Primary-language content is not stored as a resource localization')
+  const localization = await findResourceLocalization(db, organizationId, resourceType, resourceId, locale)
+  if (!localization) localizationError(404, 'LOCALIZATION_NOT_FOUND', 'Localized representation was not found', { resource_type: resourceType, resource_id: resourceId, locale })
+  return localization
+}
+
+export async function findResourceLocalization(
+  db: DbClient, organizationId: string, resourceType: LocalizedResourceType, resourceId: string, locale: string,
+): Promise<ResourceLocalizationRecord | null> {
   const row = await queryFirst<ResourceLocalizationRow>(db, `
     SELECT id, organization_id, resource_type, resource_id, locale, values_json, route_path,
            created_at, created_by_user_id, updated_at, updated_by_user_id
       FROM ${RESOURCE_LOCALIZATIONS_SQL}
-     WHERE organization_id = ?  AND resource_type = ? AND resource_id = ? AND locale = ?
+     WHERE organization_id = ? AND resource_type = ? AND resource_id = ? AND locale = ?
      LIMIT 1
   `, [organizationId, resourceType, resourceId, locale])
-  if (!row) localizationError(404, 'LOCALIZATION_NOT_FOUND', 'Localized representation was not found', { resource_type: resourceType, resource_id: resourceId, locale })
-  return mapLocalization(row)
+  return row ? mapLocalization(row) : null
 }
 
 export async function getLocalizationForAuthoring(

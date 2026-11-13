@@ -8,7 +8,7 @@ import { attachMediaPlacement, removeMediaPlacement, reorderMediaPlacements, set
 import { hydrateMediaAssetRefs } from '~/server/utils/media-asset-manager'
 import { purgePublicResourceCacheNow } from '~/server/utils/public-resource-cache'
 import { memberSchedulingList } from '~/server/domain/member-scheduling'
-import { editableProductKinds, PRODUCT_KIND_LABELS, productDetailFields, STAY_DESCRIPTION_DETAIL_KEYS, STAY_HOUSE_RULE_DETAIL_KEYS, STAY_LOCATION_DETAIL_KEYS, type ProductDetailsPatch } from '~/shared/product-details'
+import { editableProductKinds, PRODUCT_KIND_LABELS, productDetailFields, STAY_DESCRIPTION_DETAIL_KEYS, STAY_HOUSE_RULE_DETAIL_KEYS, STAY_LOCATION_DETAIL_KEYS, STAY_QUIET_HOUR_TIMES, type ProductDetailsPatch } from '~/shared/product-details'
 import { STAY_SAFETY_FIELDS, STAY_SAFETY_SECTIONS, staySafetySectionKeys, type StaySafetySection } from '~/shared/stay-safety'
 import { formatMinorAmount, majorAmountToMinor, minorAmountToMajor, scopedPriceAmountPatch, selectPrice } from '~/shared/prices'
 import { isCurrencyCode } from '~/shared/currencies'
@@ -19,8 +19,8 @@ import { getVerticalCopy } from '~/utils/vertical-copy'
 import { NOTICE_OPTIONS, noticeSummary } from '~/shared/availability-settings'
 import { createTenantPage, deleteTenantPage, getTenantPageById, listTenantPages, updateTenantPage } from '~/server/utils/content/pages'
 import { slugifyTitle } from '~/utils/post-slugs'
-import { alignTenantPageTranslationBlocks, createTenantPageBlock, createTenantPageTranslationBlocks, isTenantPageBlockAllowed, TENANT_PAGE_BLOCK_REGISTRY, tenantPageLocalizedTextFields, tenantPageTranslationSourceBlockId, writeTenantPageLocalizedText, type TenantPageBlock } from '~/utils/tenant-page-blocks'
-import { reorderTenantPageRecords, tenantPageBlockLabel, tenantPageRecordTitle, TENANT_PAGE_RECORD_NOUNS, type TenantPageBlockCollection } from '~/utils/tenant-page-block-sections'
+import { alignTenantPageTranslationBlocks, createTenantPageBlock, createTenantPageTranslationBlocks, isTenantPageBlockAllowed, TENANT_PAGE_BLOCK_REGISTRY, tenantPageLocalizedTextFields, tenantPageTranslationSourceBlockId, writeTenantPageLocalizedText, type TenantPageBlock, type TenantPageField } from '~/utils/tenant-page-blocks'
+import { reorderTenantPageRecords, tenantPageBlockFieldsForSection, tenantPageBlockLabel, tenantPageBlockSections, tenantPageRecordTitle, TENANT_PAGE_RECORD_NOUNS, type TenantPageBlockCollection } from '~/utils/tenant-page-block-sections'
 import { createTenantPageEditorData, validateTenantPageBlock } from '~/utils/tenant-page-editor'
 import { addOrganizationLanguage, disableOrganizationLanguage, getOrganizationLanguageSettings, publishOrganizationLanguage } from '~/server/utils/organization-languages'
 import { getOrganizationLocalizationProgress } from '~/server/utils/organization-localization-opportunities'
@@ -28,19 +28,22 @@ import { isDemoOrganization } from '~/shared/demo'
 import { hasPlatformEventPermission } from '~/server/utils/platform-admin-users'
 import { FORM_QUESTION_LIMITS, FORM_QUESTION_TYPES, isChoiceQuestionType } from '~/shared/form-questions'
 import { FORM_QUESTION_TYPE_LABELS, formQuestionRowSummary, formQuestionsSummary } from '~/utils/form-question-editing'
-import { queryAll, queryFirst } from '~/server/db'
-import { assertOrganizationLanguage, getLocalizationForAuthoring, getProductCatalogLocalization, putLocalizationForAuthoring, putResourceLocalization } from '~/server/utils/localization'
-import { RESOURCE_LOCALIZATIONS_SQL } from '~/shared/content-registries'
+import { queryAll } from '~/server/db'
+import { assertOrganizationLanguage, findResourceLocalization, getLocalizationForAuthoring, getProductCatalogLocalization, putLocalizationForAuthoring, putResourceLocalization } from '~/server/utils/localization'
 import { z } from 'zod'
 import { groupProductsByCollection } from '~/utils/product-presentation'
 import { createStayPhotoRoom, moveStayPhotos, readStayHome, removeStayPhotoRoom, stayAccessFor, updateStayHome, updateStayHomeAccessibility, updateStayPhotoRoom } from '~/server/domain/stays'
 import { isStayHomeAccessibilityFeature, isStayRoomAccessibilityFeature, STAY_HOME_ACCESSIBILITY_FEATURES, STAY_ROOM_ACCESSIBILITY_FEATURES } from '~/shared/stay-accessibility'
 import { STAY_BED_TYPES, STAY_PHOTO_ROOM_TYPES, stayPhotoRoomName, type StayBedType } from '~/shared/stay-photos'
-import { STAY_AMENITIES, STAY_LISTING_TYPES, STAY_PROPERTY_SIZE_UNITS } from '~/shared/stay-listing'
+import { STAY_AMENITIES, STAY_LISTING_TYPES, STAY_MAP_SHARING_MODES, STAY_PROPERTY_SIZE_UNITS } from '~/shared/stay-listing'
+import { MINUTE_TIME_PATTERN } from '~/utils/timezone'
 import { getLocation } from '~/server/utils/location-management'
 import { getContentDocumentById, getContentEditorSnapshotForDocument, getContentRepresentation, type ContentBlockInput } from '~/server/utils/content/documents'
-import { getLinksPage } from '~/server/utils/links-page'
+import { listArticleCategories } from '~/server/utils/content/article-categories'
+import { getLinksPage, OrganizationLinksValidationError, upsertLinksPage } from '~/server/utils/links-page'
 import { blankBlogLocalizedText, blogLocalizedTextFields, readBlogLocalizedText, writeBlogLocalizedText } from '~/utils/blog-editor'
+import { PRICING_CALCULATOR_COLUMNS, pricingCalculatorConfig, pricingCalculatorRows, updatePricingCalculator } from '~/utils/pricing-calculator'
+import { isPlatformSite } from '~/utils/site-routing'
 import { isRecord } from '~/server/utils/type-guards'
 
 const STAY_ROOM_VIEWS = ['stay-rooms', 'stay-room', 'stay-room-add', 'stay-room-beds', 'stay-room-privacy', 'stay-room-remove', 'stay-photo-room', 'stay-room-amenities', 'stay-room-accessibility']
@@ -125,7 +128,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
       if (answer) return missing('Choose a language')
       return { title: 'Languages', fields: [], rows: [
         ...settings.languages.map(language => ({
-          id: language.locale, label: language.label, summary: language.is_source ? 'Default' : language.status === 'published' ? 'Published' : 'Draft',
+          id: language.locale, label: language.label, summary: language.is_source ? 'Default' : language.status === 'published' ? 'Published' : 'Hidden',
           ...(language.is_source ? {} : { native: 'language', query: { locale: language.locale } }),
         })),
         ...(editable && available.length ? [{ id: 'add', label: 'Add a language', native: 'add-language', query: {} }] : []),
@@ -143,8 +146,9 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
         ...([['social_post', 'Posts'], ['article', 'Blog'], ['qa', 'Q&A'], ['links', 'Links']] as const).map(([kind, label]) => ({
           id: `translate-${kind}`, label: `Translate ${label}`, native: 'document-translations', query: { locale: language.locale, kind },
         })),
+        { id: 'translate-categories', label: 'Translate blog categories', native: 'category-translations', query: { locale: language.locale } },
         ...progress.opportunities.map(item => ({ id: item.id, label: item.label, summary: `${item.completed} of ${item.total} translated` })),
-        ...(editable ? [{ id: 'visibility', label: 'Website visibility', summary: language.status === 'published' ? 'Published' : 'Draft', native: 'language-visibility', query: { locale: language.locale } }] : []),
+        ...(editable ? [{ id: 'visibility', label: 'Website visibility', summary: language.status === 'published' ? 'Published' : 'Hidden', native: 'language-visibility', query: { locale: language.locale } }] : []),
       ] }
     }
     if (!editable) throw new HTTPError({ statusCode: 403, message: 'Demo organization is read-only' })
@@ -182,9 +186,19 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     const item = rows.find(item => item.id === query.resource_id && item.type === query.resource_type) ?? missing('Catalog item not found')
     const values = (item.localization?.values ?? {}) as Record<string, unknown>
     const original = item.source
+    const currentDetails = isRecord(values.details) ? values.details : {}
+    const definitions = item.type === 'product' ? productDetailFields(item.kind).filter(definition => definition.localizable) : []
+    const lines = (value: unknown) => Array.isArray(value) ? value.join('\n') : value
     const fields = [
       field('name', 'Name', 'text', values.name, { hint: original.name, optional: true }),
       field('description', 'Description', 'textarea', values.description, { hint: original.description ?? undefined, optional: true }),
+      ...(item.type === 'product' ? definitions.map(definition => {
+        const source = lines(item.source.details[definition.key])
+        return field(`detail:${definition.key}`, definition.name,
+          definition.value_type === 'single_line_text' ? 'text' : 'textarea', lines(currentDetails[definition.key]), {
+            hint: typeof source === 'string' ? source : undefined, optional: true,
+          })
+      }) : []),
     ]
     const revision = JSON.stringify([original, values])
     const screen = { title: original.name, rows: [], fields, revision, save_label: 'Save' }
@@ -192,11 +206,20 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     if (isDemoOrganization(organization) && !await hasPlatformEventPermission(event, env, { platform: ['access'] })) throw new HTTPError({ statusCode: 403, message: 'Demo organization is read-only' })
     if (answer.revision !== revision) throw new HTTPError({ statusCode: 409, message: 'This translation changed. Reopen it before saving.' })
     const next = { ...values }
-    for (const { key } of fields) {
-      const value = (answer.values[key] ?? invalid('Missing translation field')).trim()
-      if (value) next[key] = value
-      else Reflect.deleteProperty(next, key)
+    const details = { ...currentDetails }
+    for (const { key, value: shown } of fields) {
+      const submitted = answer.values[key] ?? invalid('Missing translation field')
+      if (submitted === shown) continue
+      const value = submitted.trim()
+      const definition = definitions.find(definition => key === `detail:${definition.key}`)
+      const target = definition ? details : next
+      const name = definition?.key ?? key
+      if (value) target[name] = definition?.value_type === 'list.single_line_text'
+        ? value.split('\n').map(line => line.trim()).filter(Boolean)
+        : value
+      else Reflect.deleteProperty(target, name)
     }
+    if (Object.keys(details).length || Object.hasOwn(next, 'details')) next.details = details
     await putResourceLocalization(env, db, { organizationId: organization.id, resourceType: item.type, resourceId: item.id, locale: catalog.locale, values: next, userId })
     await purgePublicResourceCacheNow(env, organization.id)
     return screen
@@ -283,6 +306,41 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     await purgePublicResourceCacheNow(env, organization.id)
     return screen
   }
+  if (view === 'category-translations' || view === 'category-translation') {
+    if (!isOrganizationWideRole(organization.role)) return missing('Blog categories not found')
+    const language = await assertOrganizationLanguage(db, organization.id, query.locale)
+    if (language.source) return missing('Choose an additional language')
+    const categories = (await Promise.all([
+      listArticleCategories(db, organization.id, 'blog'),
+      ...(isPlatformSite({ themeId: organization.theme_id }) ? [listArticleCategories(db, organization.id, 'docs')] : []),
+    ])).flat()
+    if (view === 'category-translations') {
+      if (answer) return missing('Choose a category')
+      return { title: 'Blog categories', fields: [], empty_title: 'No categories to translate', rows: categories.map(category => ({
+        id: category.id, label: category.name, native: 'category-translation', query: { locale: language.locale, category_id: category.id },
+      })) }
+    }
+    const category = categories.find(item => item.id === query.category_id) ?? missing('Category not found')
+    const saved = await findResourceLocalization(db, organization.id, 'article_category', category.id, language.locale)
+    const values = saved?.values ?? {}
+    const fields = [
+      field('name', 'Name', 'text', values.name, { hint: category.name, optional: true }),
+      field('description', 'Description', 'textarea', values.description, { hint: category.description ?? undefined, optional: true }),
+    ]
+    const revision = JSON.stringify([category.updated_at, saved?.updated_at])
+    const screen = { title: category.name, fields, rows: [], revision, save_label: 'Save' }
+    if (!answer) return screen
+    if (isDemoOrganization(organization) && !await hasPlatformEventPermission(event, env, { platform: ['access'] })) throw new HTTPError({ statusCode: 403, message: 'Demo organization is read-only' })
+    if (answer.revision !== revision) throw new HTTPError({ statusCode: 409, message: 'The category changed. Reopen the translation before saving.' })
+    if (fields.length !== Object.keys(answer.values).length || fields.some(item => typeof answer.values[item.key] !== 'string')) invalid('The saved fields do not match this translation')
+    await putResourceLocalization(env, db, {
+      organizationId: organization.id, resourceType: 'article_category', resourceId: category.id, locale: language.locale,
+      values: Object.fromEntries(Object.entries(answer.values).map(([key, value]) => [key, value.trim()]).filter(([, value]) => value)),
+      userId,
+    })
+    await purgePublicResourceCacheNow(env, organization.id)
+    return screen
+  }
   if (view === 'location-translations' || view === 'location-translation') {
     if (!isOrganizationWideRole(organization.role)) return missing('Location not found')
     const language = await assertOrganizationLanguage(db, organization.id, query.locale)
@@ -296,11 +354,8 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     }
     const target = locations.find(location => location.id === query.location_id) ?? missing('Location not found')
     const location = await getLocation(env.DB, organization.id, target.id) ?? missing('Location not found')
-    const saved = await queryFirst<{ values_json: string; updated_at: string }>(db, `
-      SELECT values_json, updated_at FROM ${RESOURCE_LOCALIZATIONS_SQL}
-      WHERE organization_id = ? AND resource_type = 'business_location' AND resource_id = ? AND locale = ?
-    `, [organization.id, location.id, language.locale])
-    const values = saved ? JSON.parse(saved.values_json) as Record<string, unknown> : {}
+    const saved = await findResourceLocalization(db, organization.id, 'business_location', location.id, language.locale)
+    const values = saved?.values ?? {}
     const address = (values.address ?? {}) as Record<string, unknown>
     const fields = [
       field('title', 'Name', 'text', values.title, { hint: location.title, optional: true }),
@@ -344,11 +399,8 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     if (!isOrganizationWideRole(organization.role)) return missing('Brand not found')
     const language = await assertOrganizationLanguage(db, organization.id, query.locale)
     if (language.source) return missing('Choose an additional language')
-    const saved = await queryFirst<{ values_json: string; updated_at: string }>(db, `
-      SELECT values_json, updated_at FROM ${RESOURCE_LOCALIZATIONS_SQL}
-      WHERE organization_id = ? AND resource_type = 'organization' AND resource_id = ? AND locale = ?
-    `, [organization.id, organization.id, language.locale])
-    const values = saved ? JSON.parse(saved.values_json) as Record<string, unknown> : {}
+    const saved = await findResourceLocalization(db, organization.id, 'organization', organization.id, language.locale)
+    const values = saved?.values ?? {}
     const fields = [
       field('name', 'Name', 'text', values.name, { hint: organization.name, optional: true }),
       field('brand_description', 'Description', 'textarea', values.brand_description, { optional: true }),
@@ -378,17 +430,72 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     await purgePublicResourceCacheNow(env, organization.id)
     return screen
   }
-  if (['pages', 'page', 'page-add', 'page-delete', 'page-content', 'page-sections', 'page-order', 'page-section-add', 'page-section-remove', 'page-media', 'page-media-item', 'page-media-order', 'page-records', 'page-record', 'page-record-order', 'page-settings'].includes(view)) {
+  if (['links-page', 'links-title', 'links-item', 'links-order'].includes(view)) {
+    if (!isOrganizationWideRole(organization.role)) return missing('Links page not found')
+    const { page, items } = await getLinksPage(db, organization.id)
+    const adding = query.link_id === undefined
+    if (view === 'links-page') {
+      if (answer) return missing('Choose a link or setting')
+      return { title: page?.title ?? 'Links', fields: [], rows: [
+        { id: 'title', label: page ? 'Title' : 'Create links page', summary: page?.title, native: 'links-title' },
+        ...items.map(item => ({ id: item.id, label: item.label, summary: item.status === 'hidden' ? 'Hidden' : item.destination, native: 'links-item', query: { link_id: item.id } })),
+        ...(page ? [{ id: 'add', label: 'Add a link', native: 'links-item' }] : []),
+        ...(items.length > 1 ? [{ id: 'order', label: 'Reorder links', native: 'links-order' }] : []),
+      ] }
+    }
+    const title = view === 'links-title'
+    const order = view === 'links-order'
+    if (!title && !page) return missing('Create the links page first')
+    const item = title || order || adding ? null : items.find(item => item.id === query.link_id) ?? missing('Link not found')
+    const fields = title ? [field('title', 'Title', 'text', page?.title)] : order ? [
+      field('order', 'Order', 'order', items.map(item => item.id).join('\n'), { choices: items.map(item => ({ value: item.id, label: item.label })) }),
+    ] : [
+      field('label', 'Label', 'text', item?.label),
+      field('destination', 'Destination', 'text', item?.destination),
+      field('visible', 'Show on links page', 'toggle', item?.status !== 'hidden'),
+      ...(item ? [field('remove', 'Remove link', 'toggle', false)] : []),
+    ]
+    const revision = page?.updated_at ?? 'new'
+    const screen = { title: title ? 'Links page title' : order ? 'Reorder links' : item?.label ?? 'Add a link', fields, rows: [], revision, save_label: 'Save' }
+    if (!answer) return screen
+    if (answer.revision !== revision) throw new HTTPError({ statusCode: 409, message: 'The links page changed. Reopen it before saving.' })
+    if (fields.length !== Object.keys(answer.values).length || fields.some(item => typeof answer.values[item.key] !== 'string')) invalid('The saved fields do not match this editor')
+    let next: Parameters<typeof upsertLinksPage>[1]['items'] = items
+    if (order) {
+      const ids = answer.values.order!.split('\n')
+      if (new Set(ids).size !== items.length || ids.length !== items.length) return invalid('Include each link once')
+      next = ids.map((id, sort_order) => ({ ...(items.find(item => item.id === id) ?? invalid('Link not found')), sort_order }))
+    } else if (!title) {
+      const visible = answer.values.visible
+      if (visible !== 'true' && visible !== 'false') return invalid('Choose On or Off')
+      const update = { label: answer.values.label, destination: answer.values.destination, status: visible === 'true' ? 'active' : 'hidden' }
+      next = !item ? [...items, { ...update, sort_order: items.length }]
+        : answer.values.remove === 'true' ? items.filter(row => row.id !== item.id)
+        : items.map(row => row.id === item.id ? { ...row, ...update } : row)
+    }
+    try {
+      await upsertLinksPage(db, {
+        organizationId: organization.id, page: { title: title ? answer.values.title : page!.title },
+        items: next, updatedBy: userId, expectedUpdatedAt: page?.updated_at,
+      })
+    } catch (error) {
+      if (error instanceof OrganizationLinksValidationError) return invalid(error.message)
+      throw error
+    }
+    await purgePublicResourceCacheNow(env, organization.id)
+    return screen
+  }
+  if (['pages', 'page', 'page-add', 'page-delete', 'page-content', 'page-sections', 'page-order', 'page-section-add', 'page-section-remove', 'page-media', 'page-media-item', 'page-media-order', 'page-records', 'page-record', 'page-record-order', 'page-settings', 'page-calculator'].includes(view)) {
     if (!isOrganizationWideRole(organization.role)) return missing('Page not found')
     const scope = { organizationId: organization.id }
     const locale = typeof query.locale === 'string' ? query.locale : undefined
     if (view === 'pages') {
       if (answer) return missing('Choose a page to edit')
-      const pages = await listTenantPages(db, organization.id)
+      const pages = (await listTenantPages(db, organization.id)).filter(page => page.recipe !== 'links')
       return { title: 'Pages', fields: [], rows: [...pages.map(page => ({
         id: page.id, label: page.title, summary: page.path, native: locale ? 'page-content' : 'page',
         query: { page_id: page.id, ...(locale ? { locale } : {}) },
-      })), ...(!locale ? [{ id: 'add', label: 'Add a page', native: 'page-add', query: {} }] : [])] }
+      })), ...(!locale ? [{ id: 'links', label: 'Links', native: 'links-page', query: {} }, { id: 'add', label: 'Add a page', native: 'page-add', query: {} }] : [])] }
     }
     if (view === 'page-add') {
       if (locale) return missing('Create the source page first')
@@ -405,8 +512,63 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     }
     const sourceId = typeof query.page_id === 'string' ? query.page_id : missing('Choose a page')
     const source = await getTenantPageById(db, sourceId, scope)
-    const references = async (block: TenantPageBlock) => {
-      const definitions = Object.entries(TENANT_PAGE_BLOCK_REGISTRY[block.type].fields).filter(([, item]) => item.reference)
+    const platform = isPlatformSite({ themeId: organization.theme_id })
+    const editFields = (
+      data: Record<string, unknown>, definitions: Readonly<Record<string, TenantPageField>>, prefix = '',
+    ): { fields: CatalogField[]; write: (values: Record<string, string>) => void } => {
+      const edits = Object.entries(definitions).flatMap(([key, item]) => {
+        if (item.kind === 'record' && item.of) {
+          const stored = data[key]
+          const record = isRecord(stored) ? { ...stored } : {}
+          const nested = editFields(record, item.of, `${prefix}${key}.`)
+          return [{ fields: nested.fields, write: (values: Record<string, string>) => {
+            nested.write(values)
+            if (Object.keys(record).length) data[key] = record
+            else Reflect.deleteProperty(data, key)
+          } }]
+        }
+        if (item.kind === 'reference' || item.kind === 'media' || item.kind === 'calculator' || (item.kind === 'list' && item.of)) return []
+        const value = data[key]
+        const choices = item.options?.filter(option => !option.platformOnly || platform || option.value === value)
+        if (choices?.length === 0) return []
+        const input = field(`${prefix}${key}`, item.label,
+          choices ? 'select' : item.kind === 'number' ? 'number' : item.kind === 'markdown' || item.kind === 'list' || item.multiline ? 'textarea' : 'text',
+          Array.isArray(value) ? value.join('\n') : value ?? item.default, { optional: !item.required, choices })
+        return [{ fields: [input], write: (values: Record<string, string>) => {
+          const submitted = values[input.key]!
+          if (submitted === input.value) return
+          if (choices && (submitted || item.required) && !choices.some(option => option.value === submitted)) return invalid(`Choose an available value for ${item.label}`)
+          if (item.kind === 'list') {
+            data[key] = submitted.split('\n').map(line => line.trim()).filter(Boolean)
+          } else if (!submitted.trim() && !item.required && item.store !== 'level') {
+            Reflect.deleteProperty(data, key)
+          } else if (item.kind === 'number' || item.store === 'level') {
+            const number = Number(submitted)
+            if (!submitted.trim() || !Number.isFinite(number) || (item.min !== undefined && number < item.min) || (item.max !== undefined && number > item.max)) {
+              return invalid(`Enter a valid number for ${item.label}`)
+            }
+            data[key] = number
+          } else {
+            data[key] = submitted
+          }
+        } }]
+      })
+      return { fields: edits.flatMap(edit => edit.fields), write: values => {
+        for (const edit of edits) edit.write(values)
+      } }
+    }
+    const blockFields = (block: TenantPageBlock, definitions: Record<string, TenantPageField>) => {
+      const level = { level: block.level }
+      const controls = editFields(block.data, Object.fromEntries(Object.entries(definitions).filter(([, item]) => item.store !== 'level')))
+      const heading = editFields(level, Object.fromEntries(Object.entries(definitions).filter(([, item]) => item.store === 'level')))
+      return { fields: [...controls.fields, ...heading.fields], write: (values: Record<string, string>) => {
+        controls.write(values)
+        heading.write(values)
+        block.level = level.level
+      } }
+    }
+    const references = async (block: TenantPageBlock, registry = TENANT_PAGE_BLOCK_REGISTRY[block.type].fields) => {
+      const definitions = Object.entries(registry).filter(([, item]) => item.reference)
       const types = new Set(definitions.map(([, item]) => item.reference))
       const [pages, products, collections, locations] = await Promise.all([
         types.has('page') ? listTenantPages(db, organization.id) : [],
@@ -445,6 +607,12 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
         }
       } }
     }
+    const savePage = (blocks = source.blocks) => updateTenantPage(db, source.id, {
+      userId, scope, env, data: {
+        path: source.path, title: source.title, summary: source.summary, page_type: source.page_type,
+        recipe: source.recipe, sort_order: source.sort_order, updated_at: source.document.updated_at, blocks,
+      },
+    })
     const removable = async () => (await listTenantPages(db, organization.id)).find(page => page.id === source.id)?.removable === true
     if (view === 'page-delete') {
       if (locale || !await removable()) return missing('This page cannot be removed')
@@ -456,52 +624,68 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
       await deleteTenantPage(db, source.id, { scope, expectedUpdatedAt: revision, env })
       return screen
     }
+    if (view === 'page-calculator') {
+      if (locale) return missing('Edit the calculator in the source language')
+      const block = source.blocks.find(block => block.id === query.block_id) ?? missing('Section not found')
+      if (!tenantPageBlockFieldsForSection(block, 'calculator').some(({ field }) => field.kind === 'calculator')) return missing('Calculator not found')
+      const config = pricingCalculatorConfig(block.data.calculator)
+      const rows = pricingCalculatorRows(config)
+      const base = { page_id: source.id, block_id: block.id }
+      if (!answer && query.row === undefined) {
+        return { title: 'Calculator', fields: [], rows: [
+          { id: 'note', label: 'Note', summary: String(config.note ?? ''), native: view, query: { ...base, row: 'note' } },
+          ...rows.map((row, index) => ({
+            id: String(index), label: `Household size ${row[0] ?? index + 1}`, native: view, query: { ...base, row: String(index) },
+          })),
+          { id: 'add', label: 'Add a row', native: view, query: { ...base, row: 'new' } },
+        ] }
+      }
+      const note = query.row === 'note'
+      const adding = query.row === 'new'
+      const index = typeof query.row === 'string' && /^\d+$/.test(query.row) ? Number(query.row) : -1
+      const row = adding ? [rows.length + 1, '', '', ''] : note ? [] : rows[index] ?? missing('Calculator row not found')
+      const fields = note ? [field('note', 'Note', 'text', config.note, { optional: true })] : [
+        ...PRICING_CALCULATOR_COLUMNS.map((label, column) => field(String(column), label, column ? 'money' : 'number', row[column])),
+        ...(!adding ? [field('remove', 'Remove row', 'toggle', false)] : []),
+      ]
+      const revision = source.document.updated_at
+      const screen = { title: note ? 'Note' : adding ? 'Add a row' : 'Calculator row', fields, rows: [], revision, save_label: 'Save' }
+      if (!answer) return screen
+      if (answer.revision !== revision) throw new HTTPError({ statusCode: 409, message: 'The calculator changed. Reopen it before saving.' })
+      if (fields.length !== Object.keys(answer.values).length || fields.some(item => typeof answer.values[item.key] !== 'string')) invalid('The saved fields do not match this calculator')
+      if (!note) {
+        if (answer.values.remove === 'true') {
+          rows.splice(index, 1)
+        } else {
+          const next = PRICING_CALCULATOR_COLUMNS.map((_, column) => answer.values[String(column)]!.trim())
+          if (!/^[1-8]$/.test(next[0]!)) return invalid('Enter a household size from 1 to 8')
+          if (adding) rows.push(next)
+          else rows[index] = next
+        }
+      }
+      block.data.calculator = updatePricingCalculator(config, rows, note ? answer.values.note! : String(config.note ?? ''))
+      await savePage()
+      return screen
+    }
     if (view === 'page-settings') {
       if (locale) return missing('Edit section settings in the source language')
       const block = source.blocks.find(block => block.id === query.block_id) ?? missing('Section not found')
-      const reference = await references(block)
-      const definitions = Object.entries(TENANT_PAGE_BLOCK_REGISTRY[block.type].fields).filter(([, item]) =>
-        item.kind === 'url' || item.kind === 'number' || item.kind === 'enum' || (item.kind === 'list' && !item.of))
-      const fields = [...definitions.map(([key, item]) => {
-        const value = item.store === 'level' ? block.level : block.data[key]
-        const choices = item.options?.filter(option => !option.platformOnly || option.value === String(value))
-        return field(key, item.label,
-          item.kind === 'enum' && choices?.length ? 'select' : item.kind === 'number' ? 'number' : item.kind === 'list' ? 'textarea' : 'text',
-          Array.isArray(value) ? value.join('\n') : value, { optional: !item.required, choices })
-      }), ...reference.fields]
+      const section = tenantPageBlockSections(block).find(item => item.key === query.section && item.kind === 'leaf') ?? missing('Section settings not found')
+      const entries = tenantPageBlockFieldsForSection(block, section.key).map(({ key, field }) => [key, field] as const)
+      const definitions = Object.fromEntries(entries)
+      const reference = await references(block, definitions)
+      const controls = blockFields(block, definitions)
+      const fields = [...controls.fields, ...reference.fields]
       const revision = source.document.updated_at
-      const screen = { title: `${tenantPageBlockLabel(block.type)} settings`, rows: [], fields, revision, save_label: 'Save' }
+      const screen = { title: section.label, rows: [], fields, revision, save_label: 'Save' }
       if (!answer) return screen
       if (answer.revision !== revision) throw new HTTPError({ statusCode: 409, message: 'The page changed. Reopen the section before saving.' })
       if (fields.length !== Object.keys(answer.values).length || fields.some(item => typeof answer.values[item.key] !== 'string')) invalid('The saved fields do not match this section')
-      for (const [key, item] of definitions) {
-        const value = answer.values[key]!.trim()
-        if (item.store === 'level') {
-          if (!/^\d+$/.test(value)) return invalid('Choose a heading level')
-          block.level = Number(value)
-        } else if (item.kind === 'list') {
-          block.data[key] = value.split('\n').map(line => line.trim()).filter(Boolean)
-        } else if (!value && !item.required) {
-          Reflect.deleteProperty(block.data, key)
-        } else if (item.kind === 'number') {
-          const number = Number(value)
-          if (!value || !Number.isFinite(number) || (item.min !== undefined && number < item.min) || (item.max !== undefined && number > item.max)) {
-            return invalid(`Enter a valid number for ${item.label}`)
-          }
-          block.data[key] = number
-        } else if (item.kind === 'enum' && item.options && !item.options.some(option => option.value === value && (!option.platformOnly || option.value === block.data[key]))) {
-          return invalid(`Choose an available value for ${item.label}`)
-        } else {
-          block.data[key] = value
-        }
-      }
+      controls.write(answer.values)
       reference.write(answer.values)
       const problem = validateTenantPageBlock(block)[0]
       if (problem) return invalid(problem)
-      await updateTenantPage(db, source.id, { userId, scope, env, data: {
-        path: source.path, title: source.title, summary: source.summary, page_type: source.page_type,
-        recipe: source.recipe, sort_order: source.sort_order, updated_at: revision, blocks: source.blocks,
-      } })
+      await savePage()
       return screen
     }
     if (view === 'page-records' || view === 'page-record' || view === 'page-record-order') {
@@ -509,7 +693,9 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
       const block = source.blocks.find(block => block.id === query.block_id) ?? missing('Section not found')
       const collection = Object.keys(TENANT_PAGE_RECORD_NOUNS).find(key => key === query.collection) as TenantPageBlockCollection | undefined
       const definition = collection ? TENANT_PAGE_BLOCK_REGISTRY[block.type].fields[collection] : undefined
-      if (!collection || !definition?.of || definition.kind !== 'list') return missing('Section records not found')
+      if (!collection || !definition?.of || !tenantPageBlockSections(block).some(section => section.collection === collection)) {
+        return missing('Section records not found')
+      }
       const value = block.data[collection]
       if (value !== undefined && (!Array.isArray(value) || !value.every(isRecord))) throw new Error('Section records are invalid')
       const records = (value ?? []) as Record<string, unknown>[]
@@ -529,14 +715,12 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
       const adding = !order && query.index === undefined
       const index = adding || order ? -1 : typeof query.index === 'string' && /^\d+$/.test(query.index) ? Number(query.index) : missing('Record not found')
       const record = adding || order ? {} : records[index] ?? missing('Record not found')
-      const definitions = Object.entries(definition.of).filter(([, item]) => ['text', 'markdown', 'url', 'enum', 'number'].includes(item.kind))
+      const next = { ...record }
+      const controls = editFields(next, definition.of, 'record:')
       const fields = order ? [field('order', 'Order', 'order', records.map((_, index) => String(index)).join('\n'), {
         choices: records.map((item, index) => ({ value: String(index), label: tenantPageRecordTitle(item, block.type, collection, index) })),
       })] : [
-        ...definitions.map(([key, item]) => field(`record:${key}`, item.label,
-          item.kind === 'enum' && item.options?.length ? 'select' : item.kind === 'number' ? 'number' : item.multiline || item.kind === 'markdown' ? 'textarea' : 'text',
-          record[key], { optional: !item.required, ...(item.kind === 'enum' && item.options?.length ? { choices: [...item.options] } : {}) },
-        )),
+        ...controls.fields,
         ...(!adding ? [field('remove', `Remove ${copy.one.toLowerCase()}`, 'toggle', false)] : []),
       ]
       const revision = source.document.updated_at
@@ -551,28 +735,30 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
       } else if (!adding && answer.values.remove === 'true') {
         reorderTenantPageRecords(block, collection, records.map((_, position) => position).filter(position => position !== index))
       } else {
-        const next = { ...record }
-        for (const [key, item] of definitions) {
-          const value = answer.values[`record:${key}`]!
-          if (!value && !item.required) Reflect.deleteProperty(next, key)
-          else next[key] = item.kind === 'number' ? Number(value) : value
-        }
+        controls.write(answer.values)
         block.data[collection] = adding ? [...records, next] : records.map((item, position) => position === index ? next : item)
       }
       const problem = validateTenantPageBlock(block)[0]
       if (problem) return invalid(problem)
-      await updateTenantPage(db, source.id, { userId, scope, env, data: {
-        path: source.path, title: source.title, summary: source.summary, page_type: source.page_type,
-        recipe: source.recipe, sort_order: source.sort_order, updated_at: revision, blocks: source.blocks,
-      } })
+      await savePage()
       return screen
     }
     if (view === 'page-media' || view === 'page-media-item' || view === 'page-media-order') {
       if (locale) return missing('Edit media in the source language')
       const block = source.blocks.find(block => block.id === query.block_id) ?? missing('Section not found')
-      const slots = Object.values(TENANT_PAGE_BLOCK_REGISTRY[block.type].fields)
-        .flatMap(definition => definition.kind === 'media'
-          ? [{ slot: definition.slot ?? 'media', label: definition.label, accept: definition.accept ?? 'image' as const }] : [])
+      const registry = TENANT_PAGE_BLOCK_REGISTRY[block.type].fields
+      const slots = Object.values(registry).flatMap(definition => {
+        if (definition.kind === 'media') {
+          return [{ slot: definition.slot ?? 'media', label: definition.label, accept: definition.accept ?? 'image' as const }]
+        }
+        const records = block.data.items
+        if (definition !== registry.items || !definition.of || !Array.isArray(records)
+          || !tenantPageBlockSections(block).some(section => section.collection === 'items')) return []
+        return records.flatMap((record, index) => Object.values(definition.of!).flatMap(item =>
+          item.kind === 'media' && item.slot && isRecord(record)
+            ? [{ slot: `items.${index}.${item.slot}`, label: `${tenantPageRecordTitle(record, block.type, 'items', index)} · ${item.label}`, accept: item.accept ?? 'image' as const }]
+            : []))
+      })
       const row = (id: string, label: string, native: string, slot: string, asset?: typeof block.media[number]): CatalogRow => ({
         id, label, native, image: mediaStillUrl(asset),
         query: { page_id: source.id, block_id: block.id, slot, ...(asset ? { asset_id: asset.asset_id } : {}) },
@@ -624,10 +810,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
         const blocks = source.blocks.map(item => item.id === block.id ? {
           ...item, media: [...item.media.filter(asset => asset.slot !== slot.slot), ...(value ? [{ asset_id: value, slot: slot.slot }] : [])],
         } : item)
-        await updateTenantPage(db, source.id, { userId, scope, env, data: {
-          path: source.path, title: source.title, summary: source.summary, page_type: source.page_type,
-          recipe: source.recipe, sort_order: source.sort_order, updated_at: source.document.updated_at, blocks,
-        } })
+        await savePage(blocks)
       } else if (asset && !value) {
         await removeMediaPlacement(db, { ...input, assetId: asset.asset_id })
       } else if (!asset && value) {
@@ -657,14 +840,20 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
         if (answer) return missing('Choose a page section')
         return { title: 'Sections', fields: [], rows: [
           ...source.blocks.flatMap(block => [
-            row(block.id, tenantPageBlockLabel(block.type), 'page-content', { block_id: block.id }),
-            ...(Object.values(TENANT_PAGE_BLOCK_REGISTRY[block.type].fields).some(item => item.reference || item.kind === 'url' || item.kind === 'number' || item.kind === 'enum' || (item.kind === 'list' && !item.of))
-              ? [row(`${block.id}:settings`, `${tenantPageBlockLabel(block.type)} settings`, 'page-settings', { block_id: block.id })] : []),
+            ...tenantPageBlockSections(block).flatMap(section => section.kind === 'leaf'
+              && tenantPageBlockFieldsForSection(block, section.key).some(({ field }) => field.kind !== 'media' && field.kind !== 'calculator')
+              ? [row(`${block.id}:${section.key}`, `${tenantPageBlockLabel(block.type)} · ${section.label}`, 'page-settings', { block_id: block.id, section: section.key })]
+              : []),
+            ...(tenantPageBlockFieldsForSection(block, 'calculator').length
+              ? [row(`${block.id}:calculator`, 'Calculator', 'page-calculator', { block_id: block.id })] : []),
             ...Object.entries(TENANT_PAGE_BLOCK_REGISTRY[block.type].fields).flatMap(([collection, item]) =>
               Object.hasOwn(TENANT_PAGE_RECORD_NOUNS, collection) && item.kind === 'list' && item.of
                 && (!item.availableWhen || item.availableWhen.equals.includes(String(block.data[item.availableWhen.field] ?? '')))
                 ? [row(`${block.id}:${collection}`, `${tenantPageBlockLabel(block.type)} · ${item.label}`, 'page-records', { block_id: block.id, collection })] : []),
-            ...(Object.values(TENANT_PAGE_BLOCK_REGISTRY[block.type].fields).some(item => item.kind === 'media')
+            ...(Object.values(TENANT_PAGE_BLOCK_REGISTRY[block.type].fields).some(item =>
+              item.kind === 'media' || (item === TENANT_PAGE_BLOCK_REGISTRY[block.type].fields.items
+                && Array.isArray(block.data.items) && block.data.items.length
+                && Object.values(item.of ?? {}).some(child => child.kind === 'media')))
               ? [row(`${block.id}:media`, `${tenantPageBlockLabel(block.type)} media`, 'page-media', { block_id: block.id })] : []),
           ]),
           ...(allowed.length ? [row('add', 'Add a section', 'page-section-add')] : []),
@@ -681,14 +870,14 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
       const type = add ? allowed.find(block => block.type === query.block_type)?.type ?? missing('Section type not found') : null
       const draft = type ? createTenantPageBlock(type, createTenantPageEditorData(type), source.blocks.length) : null
       const reference = draft ? await references(draft) : null
-      const textFields = draft ? tenantPageLocalizedTextFields(draft) : []
+      const controls = draft ? blockFields(draft, TENANT_PAGE_BLOCK_REGISTRY[draft.type].fields) : null
       const choices = add
         ? allowed.map(block => ({ value: block.type, label: block.label }))
         : source.blocks.map((block, index) => ({ value: block.id, label: `${tenantPageBlockLabel(block.type)} ${index + 1}` }))
       const title = order ? 'Reorder sections' : add ? 'Add a section' : 'Remove a section'
       const revision = source.document.updated_at
       const screen = { title, rows: [], fields: draft
-        ? [...textFields.map(({ label, path, value }) => field(path.join('.'), label, 'textarea', value, { optional: true })), ...reference!.fields]
+        ? [...controls!.fields, ...reference!.fields]
         : [field('value', title, order ? 'order' : 'select', order ? choices.map(item => item.value).join('\n') : '', { choices })],
       revision, save_label: 'Save', allow_unchanged: Boolean(draft && !validateTenantPageBlock(draft).length) }
       if (!answer) return screen
@@ -697,7 +886,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
       if (draft) {
         if (screen.fields.length !== Object.keys(answer.values).length || screen.fields.some(item => typeof answer.values[item.key] !== 'string')) invalid('The saved fields do not match this section')
         reference!.write(answer.values)
-        for (const { path } of textFields) writeTenantPageLocalizedText(draft, path, answer.values[path.join('.')] ?? invalid('Missing section field'))
+        controls!.write(answer.values)
         const problem = validateTenantPageBlock(draft)[0]
         if (problem) return invalid(problem)
         blocks = [...blocks, draft]
@@ -730,7 +919,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
       field('title', 'Title', 'text', saved?.title, { hint: translated ? source.title : undefined }),
       field('summary', 'Summary', 'textarea', saved?.summary, { optional: true, hint: translated ? source.summary ?? undefined : undefined }),
     ]
-    const edits = source.blocks.flatMap((block, index) => {
+    const edits = (translated ? source.blocks : []).flatMap((block, index) => {
       if (selected && selected.id !== block.id) return []
       const target = translated ? blocks.find(item => tenantPageTranslationSourceBlockId(item) === block.id) : block
       if (!target) throw new Error('Page section is missing from the translation')
@@ -873,7 +1062,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     await assertProductAccess(db, { ...principal, productId, patch: changes as Record<string, unknown> })
     await updateProduct(db, { ...target, patch: { updated_at: product.updated_at, ...changes }, actor, env })
   }
-  if (product.kind === 'stay' && !['questions', 'question', 'question-order', 'stay-details', 'stay-field', 'stay-safety', 'stay-rules', 'stay-property', 'stay-accessibility', 'stay-accessibility-feature', ...STAY_ROOM_VIEWS].includes(view)) return missing('Offering not found')
+  if (product.kind === 'stay' && !['questions', 'question', 'question-order', 'stay-details', 'stay-field', 'stay-safety', 'stay-rules', 'stay-property', 'stay-arrival-time', 'stay-map-sharing', 'stay-accessibility', 'stay-accessibility-feature', ...STAY_ROOM_VIEWS].includes(view)) return missing('Offering not found')
   const setBooking = async (changes: Parameters<typeof setProductBookingConfig>[1]['patch']) => {
     await assertProductAccess(db, { ...principal, productId, patch: changes as Record<string, unknown> })
     await setProductBookingConfig(db, { ...target, patch: changes, actorId: userId, env })
@@ -897,7 +1086,37 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
   const memberList = () => memberSchedulingList({ env, userId, organizationId: organization.id })
   const locationsUsed = locations.filter(entry => product.locations.some(binding => binding.location_id === entry.id))
 
-  if (view === 'stay-property') {
+  if (view === 'stay-arrival-time' || view === 'stay-map-sharing') {
+    if (product.kind !== 'stay' || !wide) return missing('Listing settings not found')
+    const access = await stayAccessFor(principal)
+    if (!access.manage) return missing('Listing settings not found')
+    const home = await readStayHome(db, access, productId)
+    if (view === 'stay-arrival-time') {
+      const endChoices = [...new Set([...STAY_QUIET_HOUR_TIMES, ...(home.check_in_end_time ? [home.check_in_end_time] : [])])].sort()
+      form('Check-in & checkout', [
+        field('check_in_time', 'Check-in start (HH:MM)', 'text', home.check_in_time, { optional: true, hint: home.timezone }),
+        field('check_in_end_time', 'Check-in end', 'select', home.check_in_end_time, {
+          choices: [{ value: '', label: 'Flexible' }, ...endChoices.map(value => ({ value, label: value }))],
+        }),
+        field('check_out_time', 'Checkout (HH:MM)', 'text', home.check_out_time, { optional: true }),
+      ], async values => {
+        const times = Object.fromEntries(screen.fields.map(item => [item.key, values(item.key).trim() || null]))
+        if (Object.values(times).some(time => time !== null && !MINUTE_TIME_PATTERN.test(time))) return invalid('Enter a 24-hour time in HH:MM format')
+        await updateStayHome(env, db, access, productId, times)
+      })
+    } else {
+      const location = await getLocation(db, organization.id, home.location_id) ?? missing('Location not found')
+      revision = JSON.stringify([home.location_id, location.updated_at])
+      form('Location sharing', [
+        field('stay_map_sharing', 'Public map', 'select', home.stay_map_sharing, {
+          choices: STAY_MAP_SHARING_MODES.map(value => ({ value, label: value === 'specific' ? 'Show specific location' : 'Show general location' })),
+          hint: 'This applies to all homes at this location.',
+        }),
+      ], async values => {
+        await updateStayHome(env, db, access, productId, { stay_map_sharing: values('stay_map_sharing') })
+      })
+    }
+  } else if (view === 'stay-property') {
     if (product.kind !== 'stay' || !wide) return missing('Listing details not found')
     const access = await stayAccessFor(principal)
     if (!access.manage) return missing('Listing details not found')
