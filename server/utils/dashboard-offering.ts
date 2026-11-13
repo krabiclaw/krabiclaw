@@ -19,7 +19,7 @@ import { getVerticalCopy } from '~/utils/vertical-copy'
 import { NOTICE_OPTIONS, noticeSummary } from '~/shared/availability-settings'
 import { createTenantPage, deleteTenantPage, getTenantPageById, listTenantPages, updateTenantPage } from '~/server/utils/content/pages'
 import { slugifyTitle } from '~/utils/post-slugs'
-import { alignTenantPageTranslationBlocks, createTenantPageBlock, createTenantPageTranslationBlocks, isTenantPageBlockAllowed, TENANT_PAGE_BLOCK_REGISTRY, tenantPageLocalizedTextFields, tenantPageTranslationSourceBlockId, writeTenantPageLocalizedText } from '~/utils/tenant-page-blocks'
+import { alignTenantPageTranslationBlocks, createTenantPageBlock, createTenantPageTranslationBlocks, isTenantPageBlockAllowed, TENANT_PAGE_BLOCK_REGISTRY, tenantPageLocalizedTextFields, tenantPageTranslationSourceBlockId, writeTenantPageLocalizedText, type TenantPageBlock } from '~/utils/tenant-page-blocks'
 import { reorderTenantPageRecords, tenantPageBlockLabel, tenantPageRecordTitle, TENANT_PAGE_RECORD_NOUNS, type TenantPageBlockCollection } from '~/utils/tenant-page-block-sections'
 import { createTenantPageEditorData, validateTenantPageBlock } from '~/utils/tenant-page-editor'
 import { addOrganizationLanguage, disableOrganizationLanguage, getOrganizationLanguageSettings, publishOrganizationLanguage } from '~/server/utils/organization-languages'
@@ -405,6 +405,46 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     }
     const sourceId = typeof query.page_id === 'string' ? query.page_id : missing('Choose a page')
     const source = await getTenantPageById(db, sourceId, scope)
+    const references = async (block: TenantPageBlock) => {
+      const definitions = Object.entries(TENANT_PAGE_BLOCK_REGISTRY[block.type].fields).filter(([, item]) => item.reference)
+      const types = new Set(definitions.map(([, item]) => item.reference))
+      const [pages, products, collections, locations] = await Promise.all([
+        types.has('page') ? listTenantPages(db, organization.id) : [],
+        types.has('product') ? listOrganizationProducts(db, scope) : [],
+        types.has('collection') ? listCollections(db, scope) : [],
+        types.has('location') ? listDashboardLocations(db, organization.id, undefined, true) : [],
+      ])
+      const choices = {
+        page: pages.filter(page => page.id !== source.id).map(page => ({ value: page.id, label: page.title })),
+        product: products.map(product => ({ value: product.id, label: product.name })),
+        collection: collections.map(collection => ({ value: collection.id, label: collection.name })),
+        location: locations.map(location => ({ value: location.id, label: location.title })),
+      }
+      const fields = definitions.flatMap(([key, item]) => {
+        const options = choices[item.reference!]
+        if (!key.endsWith('_ids')) return [field(`ref:${key}`, item.label, 'select', block.data[key], {
+          choices: [{ value: '', label: item.reference === 'location' ? 'All locations' : 'None' }, ...options],
+        })]
+        const saved = block.data[key]
+        return options.map(option => field(`ref:${key}:${option.value}`, option.label, 'toggle', Array.isArray(saved) && saved.includes(option.value), { hint: item.label }))
+      })
+      return { fields, write(values: Record<string, string>) {
+        for (const [key, item] of definitions) {
+          const options = choices[item.reference!]
+          if (key.endsWith('_ids')) {
+            const enabled = options.filter(option => values[`ref:${key}:${option.value}`] === 'true').map(option => option.value)
+            const saved = block.data[key]
+            const kept = Array.isArray(saved) ? saved.filter(id => enabled.includes(id)) : []
+            block.data[key] = [...kept, ...enabled.filter(id => !kept.includes(id))]
+          } else {
+            const value = values[`ref:${key}`]
+            if (value && !options.some(option => option.value === value)) invalid(`Choose an available ${item.label.toLowerCase()}`)
+            if (value) block.data[key] = value
+            else Reflect.deleteProperty(block.data, key)
+          }
+        }
+      } }
+    }
     const removable = async () => (await listTenantPages(db, organization.id)).find(page => page.id === source.id)?.removable === true
     if (view === 'page-delete') {
       if (locale || !await removable()) return missing('This page cannot be removed')
@@ -419,15 +459,16 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     if (view === 'page-settings') {
       if (locale) return missing('Edit section settings in the source language')
       const block = source.blocks.find(block => block.id === query.block_id) ?? missing('Section not found')
+      const reference = await references(block)
       const definitions = Object.entries(TENANT_PAGE_BLOCK_REGISTRY[block.type].fields).filter(([, item]) =>
         item.kind === 'url' || item.kind === 'number' || item.kind === 'enum' || (item.kind === 'list' && !item.of))
-      const fields = definitions.map(([key, item]) => {
+      const fields = [...definitions.map(([key, item]) => {
         const value = item.store === 'level' ? block.level : block.data[key]
         const choices = item.options?.filter(option => !option.platformOnly || option.value === String(value))
         return field(key, item.label,
           item.kind === 'enum' && choices?.length ? 'select' : item.kind === 'number' ? 'number' : item.kind === 'list' ? 'textarea' : 'text',
           Array.isArray(value) ? value.join('\n') : value, { optional: !item.required, choices })
-      })
+      }), ...reference.fields]
       const revision = source.document.updated_at
       const screen = { title: `${tenantPageBlockLabel(block.type)} settings`, rows: [], fields, revision, save_label: 'Save' }
       if (!answer) return screen
@@ -454,6 +495,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
           block.data[key] = value
         }
       }
+      reference.write(answer.values)
       const problem = validateTenantPageBlock(block)[0]
       if (problem) return invalid(problem)
       await updateTenantPage(db, source.id, { userId, scope, env, data: {
@@ -616,7 +658,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
         return { title: 'Sections', fields: [], rows: [
           ...source.blocks.flatMap(block => [
             row(block.id, tenantPageBlockLabel(block.type), 'page-content', { block_id: block.id }),
-            ...(Object.values(TENANT_PAGE_BLOCK_REGISTRY[block.type].fields).some(item => item.kind === 'url' || item.kind === 'number' || item.kind === 'enum' || (item.kind === 'list' && !item.of))
+            ...(Object.values(TENANT_PAGE_BLOCK_REGISTRY[block.type].fields).some(item => item.reference || item.kind === 'url' || item.kind === 'number' || item.kind === 'enum' || (item.kind === 'list' && !item.of))
               ? [row(`${block.id}:settings`, `${tenantPageBlockLabel(block.type)} settings`, 'page-settings', { block_id: block.id })] : []),
             ...Object.entries(TENANT_PAGE_BLOCK_REGISTRY[block.type].fields).flatMap(([collection, item]) =>
               Object.hasOwn(TENANT_PAGE_RECORD_NOUNS, collection) && item.kind === 'list' && item.of
@@ -638,6 +680,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
       }
       const type = add ? allowed.find(block => block.type === query.block_type)?.type ?? missing('Section type not found') : null
       const draft = type ? createTenantPageBlock(type, createTenantPageEditorData(type), source.blocks.length) : null
+      const reference = draft ? await references(draft) : null
       const textFields = draft ? tenantPageLocalizedTextFields(draft) : []
       const choices = add
         ? allowed.map(block => ({ value: block.type, label: block.label }))
@@ -645,13 +688,15 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
       const title = order ? 'Reorder sections' : add ? 'Add a section' : 'Remove a section'
       const revision = source.document.updated_at
       const screen = { title, rows: [], fields: draft
-        ? textFields.map(({ label, path, value }) => field(path.join('.'), label, 'textarea', value, { optional: true }))
+        ? [...textFields.map(({ label, path, value }) => field(path.join('.'), label, 'textarea', value, { optional: true })), ...reference!.fields]
         : [field('value', title, order ? 'order' : 'select', order ? choices.map(item => item.value).join('\n') : '', { choices })],
       revision, save_label: 'Save', allow_unchanged: Boolean(draft && !validateTenantPageBlock(draft).length) }
       if (!answer) return screen
       if (answer.revision !== revision) throw new HTTPError({ statusCode: 409, message: 'This page changed. Reopen it before saving.' })
       let blocks = source.blocks
       if (draft) {
+        if (screen.fields.length !== Object.keys(answer.values).length || screen.fields.some(item => typeof answer.values[item.key] !== 'string')) invalid('The saved fields do not match this section')
+        reference!.write(answer.values)
         for (const { path } of textFields) writeTenantPageLocalizedText(draft, path, answer.values[path.join('.')] ?? invalid('Missing section field'))
         const problem = validateTenantPageBlock(draft)[0]
         if (problem) return invalid(problem)
