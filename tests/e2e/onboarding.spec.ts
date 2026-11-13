@@ -481,7 +481,10 @@ test('an owner changes their restaurant draft to lodging and saves their first h
   await page.goBack()
   await choices.getByRole('link', { name: /Add your first home/ }).click()
   await expect(page).toHaveURL(`/dashboard/${created!.slug}/products/new?kind=stay&setup=guided`)
-  await expect(page.getByRole('heading', { name: 'Where is your place?' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Enter your address' })).toBeVisible()
+  await expect(page.getByPlaceholder('Search for an address')).toBeVisible()
+  await page.getByRole('button', { name: 'Next', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Confirm your address' })).toBeVisible()
   await expect(page.getByRole('textbox', { name: 'Street address' })).toHaveValue('88 Moo 2')
   await expect(page.getByRole('textbox', { name: 'City or town' })).toHaveValue('Ao Nang')
   await page.screenshot({ path: testInfo.outputPath('01-home-address.png') })
@@ -640,11 +643,14 @@ test('an owner changes their restaurant draft to lodging and saves their first h
   expect(latitude).toEqual(expect.any(Number))
   expect(longitude).toEqual(expect.any(Number))
   expect([latitude, longitude]).not.toEqual([8.045, 98.823])
-  await expect(page).toHaveURL(new RegExp(`/dashboard/${created!.slug}/products/(?!new)[^/?]+$`))
+  const homeCatalog = `/dashboard/${created!.slug}/products?kind=stay`
+  await expect(page).toHaveURL(homeCatalog)
+  const draftListing = page.getByRole('link', { name: /My first home/ })
+  await expect(draftListing).toBeVisible()
 
   const replay = await page.request.post(saveRequest.url(), { data: saveRequest.postDataJSON() })
   expect(replay.status(), await replay.text()).toBe(201)
-  expect(await replay.json()).toMatchObject({ to: new URL(page.url()).pathname })
+  expect(await replay.json()).toMatchObject({ to: homeCatalog })
   const homes = await page.request.get('/api/dashboard/stay-homes', { params: { org: created!.slug } })
   expect(homes.status(), await homes.text()).toBe(200)
   expect(await homes.json()).toMatchObject({
@@ -664,6 +670,7 @@ test('an owner changes their restaurant draft to lodging and saves their first h
     exterior_security_cameras_details: 'The front door camera records the entry path.',
     noise_decibel_monitors: false, weapons_on_property: false,
   })
+  await draftListing.click()
   const finishListing = page.getByRole('link', { name: /Complete steps to publish/ })
   await expect(finishListing).toBeVisible()
   await page.screenshot({ path: testInfo.outputPath('11-home-saved-draft.png') })

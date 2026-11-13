@@ -112,10 +112,11 @@ home or enable online payments: homes and their calendars are configured after
 site setup, and direct paid stay bookings require Business and Stripe setup.
 
 Manual lodging setup in Catalog uses the same server steps on web and iOS:
-address, property, space, map pin, location sharing, capacity, amenities,
-photos, title, description highlights, description, minimum stay, prices,
-discounts, and safety disclosures. Finish creates a private listing. The public
-listing shows the saved safety details before guests book.
+address search and confirmation, property, space, map pin, location sharing,
+capacity, amenities, photos, title, description highlights, description, minimum
+stay, prices, discounts, and safety disclosures. Finish creates a private listing
+and opens Catalog. The public listing shows the saved safety details before
+guests book.
 Save & exit preserves unfinished answers and the current question for the
 signed-in manager across web and iOS. A membership-scoped setup draft covers
 existing organizations and managers who never had a website onboarding draft.
@@ -188,7 +189,7 @@ Only asked again on **add-location** (the `add-location` flow), which never re-c
 
 After creating a lodging website, Catalog shows **Add your first home** and
 **Import from Airbnb**. Booky Boo uses the same choices from the stay-homes
-response. Manual setup starts with the address, then asks for property type,
+response. Manual setup starts with address search and confirmation, then asks for property type,
 rooms and capacity. Both clients use the steps returned by the server and save
 the home as an unpublished draft. Airbnb sync requires Business and opens the
 existing connection and listing picker.
@@ -199,22 +200,18 @@ can continue managing it from Catalog.
 
 - **Restaurant** resolves the menu section and asks for a dish name, photo,
   description and price. Photo, description and price are optional. **Finish**
-  opens the saved dish editor scoped to its menu location.
+  returns to Catalog, where the saved dish is in its location’s menu.
 - **Experiences** asks for a title, resolves venue and host, then collects
   duration, capacity, an optional photo, description, price and first session.
-  **Finish** saves the scheduled session and opens the draft experience editor.
+  **Finish** saves the scheduled session and returns to Catalog.
 - **Legal Services** asks for the practice area, description, consultation
   format and attorney. It collects a public name and working hours when
   needed, then duration, any office-specific availability, and fee. **Finish**
-  opens the draft practice area with consultation requests configured for firm
-  confirmation. Website visibility and accepting requests are separate actions.
+  saves the draft practice area with consultation requests configured for firm
+  confirmation, then returns to Catalog. Website visibility and accepting requests are separate actions.
 
 Today links owners back to the server-selected resume step. Web and Booky Boo
-render the same guide response from `/api/dashboard/onboarding/offering`. On
-iOS, Finish opens the existing dashboard editor after saving. Safari opens it
-directly when signed out or already signed in with the app account. If Safari
-is signed in with a different account, it asks before switching. If a link
-expires, the saved draft can be opened again from the app.
+render the same guide response from `/api/dashboard/onboarding/offering`.
 
 Lodging homes have their own addresses and timezones. Add a home as a draft,
 configure its listing and nightly calendar, then publish it. For Airbnb listings,

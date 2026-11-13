@@ -118,10 +118,10 @@ export async function firstPracticeAreaSetup(context: OfferingSetupContext, prod
   const guide = `${start}/${encodeURIComponent(productId)}`
   const stepPath = (id: StepId) => `${guide}?step=${id}`
   const state = await readPracticeArea(context, productId)
-  if (!state) return answer?.action === 'exit' ? { to: exitTo } : offeringDestination(orgSlug, productId)
+  if (!state) return answer?.action === 'exit' ? { to: exitTo } : offeringDestination(orgSlug, 'service', productId)
   const { product, booking, attorney, members, schedule, office, activeOffices, officeRules, officeTime, scope, format, variant, currency, price, draft, intake, progress, complete } = state
   const resume = steps.find(step => !complete[step])
-  if (!resume) return answer?.action === 'exit' ? { to: exitTo } : offeringDestination(orgSlug, productId)
+  if (!resume) return answer?.action === 'exit' ? { to: exitTo } : offeringDestination(orgSlug, 'service', productId)
   const applicable = steps.filter(step => {
     if (step === 'office-times') return Boolean(office) && format !== 'online'
     if (step === 'office-address') return Boolean(office) && format !== 'online'
@@ -366,6 +366,6 @@ export async function firstPracticeAreaSetup(context: OfferingSetupContext, prod
   }
   await purgePublicResourceCacheNow(env, organizationId)
   if (exit) return { to: exitTo }
-  if (step === 'fee') return offeringDestination(orgSlug, productId)
+  if (step === 'fee') return offeringDestination(orgSlug, 'service', productId)
   return { to: index < resumeIndex ? stepPath(applicable[index + 1]!) : guide, guide: true }
 }

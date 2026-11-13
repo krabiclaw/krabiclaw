@@ -2,11 +2,19 @@
   <GuidedSetupShell id="guided-stay-home" :title="step?.title" :detail="step && 'detail' in step ? step.detail : undefined"
     :wide="step && ['property', 'pin', 'visibility', 'amenities', 'photos', 'description'].includes(step.id)"
     :position="position" :total="flow?.steps.length" :next-label="step?.action" :back-label="finishing ? undefined : flow?.back_label"
-    :exit-label="finishing ? undefined : flow?.exit_label ?? 'Save & exit'" :exit-disabled="uploadingPhotos || !step || draftChanged" :busy="pending"
+    :exit-label="finishing ? undefined : flow?.exit_label ?? 'Save & exit'" :exit-disabled="uploadingPhotos || !step || draftChanged" :busy="pending || selectingAddress"
     :disabled="incomplete || uploadingPhotos || draftChanged" @next="advance" @back="back" @exit="saveAndExit">
     <USkeleton v-if="!step && pending" class="h-12 w-3/4" />
     <fieldset v-if="step" :inert="finishing">
-      <div v-if="step.id === 'address'" class="divide-y divide-default overflow-hidden rounded-xl border border-default">
+      <div v-if="step.id === 'address-search'" class="space-y-4">
+        <GooglePlacePicker v-model="addressQuery" v-model:selecting="selectingAddress" purpose="address" :placeholder="step.search_placeholder" @select="selectAddress" />
+        <p v-if="hasAddress" class="flex items-center gap-2 text-sm text-muted">
+          <UIcon name="i-lucide-map-pin" aria-hidden="true" />{{ formatPostalAddress(location.address) }}
+        </p>
+        <UButton type="button" color="neutral" variant="link" class="px-0" :label="step.manual_label" :disabled="pending || selectingAddress" @click="advance(true)" />
+      </div>
+
+      <div v-else-if="step.id === 'address'" class="divide-y divide-default overflow-hidden rounded-xl border border-default">
         <UFormField v-for="field in step.fields" :key="field.key" :label="field.label" :required="field.required" class="px-4 py-2" :ui="{ label: 'text-xs text-muted' }">
           <CountrySelect
             v-if="field.key === 'country'" :model-value="textValue(field.key)" :items="countries"
@@ -168,6 +176,9 @@ import GuidedSetupPhotos from './GuidedSetupPhotos.vue'
 import { projectPublicLocation } from '~/shared/location-sharing'
 import StaySetupMap from './StaySetupMap.client.vue'
 import OnboardingChoiceGrid from '~/lib/components/workspace/onboarding/OnboardingChoiceGrid.vue'
+import GooglePlacePicker from '~/lib/components/workspace/location/GooglePlacePicker.vue'
+import type { OnboardingPlacePreview } from '~/composables/useOnboardingFlow'
+import { formatPostalAddress } from '~/utils/postal-address'
 import { stayHomeSetupResponse, staySetupNightlyRates, type StayHomeSetupResponse } from '~/shared/stay-home-setup'
 import { minorAmountToMajor } from '~/shared/prices'
 import { isCurrencyCode } from '~/shared/currencies'
@@ -185,11 +196,16 @@ const amenities = ref<string[]>([])
 const uploadingPhotos = ref(false)
 const countries = listPhoneCountries()
 const answers = ref<Record<string, string | number | undefined>>({})
+const addressQuery = computed({
+  get: () => textValue('address_query'),
+  set: (value: string) => { answers.value.address_query = value.slice(0, 200) },
+})
 const flow = shallowRef<Flow>()
 const position = ref(0)
 const step = computed(() => flow.value?.steps[position.value])
 const pricing = computed(() => flow.value?.steps.find(item => item.id === 'pricing'))
 const pending = ref(true)
+const selectingAddress = ref(false)
 const finishing = ref(false)
 const draftChanged = ref(false)
 const error = ref('')
@@ -218,8 +234,11 @@ const location = computed(() => ({
 }))
 const publicMap = computed(() => projectPublicLocation(location.value, { is_stay_location: 1, stay_map_sharing: specificLocation.value ? 'specific' : 'general' }))
 const timezones = computed(() => [...new Set([textValue('timezone'), ...TIMEZONE_OPTIONS])].filter(Boolean).map(value => ({ value, label: timezoneLabel(value) })))
+const hasAddress = computed(() => Boolean(flow.value?.steps.find(item => item.id === 'address')
+  ?.fields.every(field => !field.required || textValue(field.key).trim())))
 const incomplete = computed(() => {
   switch (step.value?.id) {
+    case 'address-search': return !hasAddress.value
     case 'address': return step.value.fields.some(field => field.required && !textValue(field.key).trim())
     case 'property': return !textValue('property_type')
     case 'access': return !textValue('listing_type')
@@ -248,6 +267,22 @@ function setAddress(key: string, value: string) {
     delete answers.value.longitude
   }
   answers.value[key] = value
+}
+
+function selectAddress(place: OnboardingPlacePreview) {
+  const address = place.address
+  if (!address) {
+    error.value = 'This result has no street address. Choose another result or enter it manually.'
+    return
+  }
+  const timezone = place.timezone ?? (textValue('country') === address.regionCode ? textValue('timezone') : '')
+  setAddress('country', address.regionCode)
+  setAddress('address', address.addressLines.join(', '))
+  setAddress('city', address.locality ?? '')
+  setAddress('state', address.administrativeArea ?? '')
+  setAddress('zip_code', address.postalCode ?? '')
+  setAddress('timezone', timezone)
+  void advance(true)
 }
 
 function placePin(pin: { latitude: number; longitude: number }) {
@@ -323,8 +358,8 @@ function back() {
   error.value = ''
 }
 
-async function advance() {
-  if (!step.value || pending.value || incomplete.value || uploadingPhotos.value) return
+async function advance(addressSelected = false) {
+  if (!step.value || pending.value || (incomplete.value && !(step.value.id === 'address-search' && addressSelected)) || uploadingPhotos.value) return
   pending.value = true
   error.value = ''
   try {

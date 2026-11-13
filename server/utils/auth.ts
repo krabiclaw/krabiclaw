@@ -1,6 +1,5 @@
 import { APIError, betterAuth, type Account, type BetterAuthPlugin } from 'better-auth'
 import { createAuthMiddleware, getOAuthState, isAPIError } from 'better-auth/api'
-import { oneTimeToken } from 'better-auth/plugins/one-time-token'
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
 import { DISCORD_BOT_PERMISSIONS } from '~/server/utils/discord-bot'
 import { loginMethodForPath } from '~/shared/auth/login-method'
@@ -665,7 +664,6 @@ function buildAuth(env: CloudflareEnv) {
     },
     plugins: [
       bearer(),
-      oneTimeToken({ disableClientRequest: true, storeToken: 'hashed' }),
       lastLoginMethod({ customResolveMethod: ctx => loginMethodForPath(ctx.path, ctx.body) }),
       jwt({
         // The plugin's default after-hook mints a fresh JWT on every

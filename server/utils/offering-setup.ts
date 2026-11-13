@@ -3,7 +3,7 @@ import type { OfferingSetupAnswer, OfferingSetupField, OfferingSetupResponse } f
 import { queryFirst, type DbClient } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import type { MemberAccessPrincipal } from '~/server/utils/member-access'
-import { productEditorPath } from '~/server/utils/dashboard-links'
+import { catalogPath } from '~/server/utils/dashboard-links'
 import { creationDedupeKey, readCreationRecord } from '~/server/utils/organization-events'
 import { TIMEZONE_OPTIONS, timezoneLabel } from '~/utils/timezone'
 
@@ -21,8 +21,8 @@ export const invalidOfferingAnswer = (message: string) => new HTTPError({ status
 export const offeringSetupChanged = () => new HTTPError({ statusCode: 409, statusMessage: 'Setup changed. Reopen it to continue.', data: { code: 'OFFERING_SETUP_CHANGED' } })
 export const offeringToday = (orgSlug: string) => `/dashboard/${encodeURIComponent(orgSlug)}`
 
-export function offeringDestination(orgSlug: string, productId: string, locationId?: string): OfferingSetupResponse {
-  return { to: productEditorPath(orgSlug, productId, locationId), product_id: productId, ...(locationId ? { location_id: locationId } : {}) }
+export function offeringDestination(orgSlug: string, kind: 'menu' | 'experience' | 'service', productId: string, locationId?: string): OfferingSetupResponse {
+  return { to: `${catalogPath(orgSlug)}?kind=${kind}`, product_id: productId, ...(locationId ? { location_id: locationId } : {}) }
 }
 
 export function offeringScreen(input: {

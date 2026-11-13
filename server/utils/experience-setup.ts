@@ -103,8 +103,8 @@ export async function firstExperienceSetup(context: OfferingSetupContext, reques
   const state = await loadSetup(context)
   const { product, resume, booking, location, host, locations, members, photo, currency, price, variant, meetingPoint, hasStreet, needsHost, storedAddress, savedAddress, partialAddress, meetingStep } = state
   const exitTo = context.exitTo ?? offeringToday(orgSlug)
-  if (product && state.complete) return answer?.action === 'exit' ? { to: exitTo } : offeringDestination(orgSlug, product.id)
-  if (state.existing[0]) return answer?.action === 'exit' ? { to: exitTo } : offeringDestination(orgSlug, state.existing[0].id)
+  if (product && state.complete) return answer?.action === 'exit' ? { to: exitTo } : offeringDestination(orgSlug, 'experience', product.id)
+  if (state.existing[0]) return answer?.action === 'exit' ? { to: exitTo } : offeringDestination(orgSlug, 'experience', state.existing[0].id)
 
   const venueStep = requested === 'venue-street' || requested === 'venue-directions' ? requested : meetingStep
   const steps = stages.filter(step => {
@@ -331,7 +331,7 @@ export async function firstExperienceSetup(context: OfferingSetupContext, reques
         const end = new Date(start.getTime() + duration * 60_000)
         if (!Number.isFinite(end.getTime())) throw invalidOfferingAnswer('Choose a shorter duration.')
         await createSession(db, { ...target, locationId: location.id, actorId, startsAt: start.toISOString(), endsAt: end.toISOString(), capacity, idempotencyKey: sessionKey(product.id) })
-        return exit ? { to: exitTo } : offeringDestination(orgSlug, product.id)
+        return exit ? { to: exitTo } : offeringDestination(orgSlug, 'experience', product.id)
       }
     }
   }

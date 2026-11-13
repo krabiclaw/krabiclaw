@@ -4,7 +4,7 @@ import { createStayHome, placeStayHomePhotosFirst, readStayHome, stayAccessFor, 
 import { jsonResponse, readRequiredBody } from '~/server/utils/api-response'
 import { requireStays } from '~/server/utils/cms-capabilities'
 import { getDashboardMemberContext } from '~/server/utils/dashboard-context'
-import { firstHomeSetupPath, productEditorPath } from '~/server/utils/dashboard-links'
+import { firstHomeSetupPath } from '~/server/utils/dashboard-links'
 import { memberAccessPrincipal } from '~/server/utils/member-access'
 import { planStayListing } from '~/server/utils/product-management'
 import { isRecord } from '~/server/utils/type-guards'
@@ -48,7 +48,8 @@ const priceFields = [
 const weekendCount = { key: 'weekend_adjustment', label: 'Weekend adjustment', min: STAY_WEEKEND_ADJUSTMENT_MIN, max: STAY_WEEKEND_ADJUSTMENT_MAX, step: 1 }
 const suggestedDiscounts = { last_minute_percent: 7, weekly_percent: 10, monthly_percent: 20 } satisfies Record<keyof typeof STAY_DIRECT_DISCOUNTS, number>
 const steps = [
-  { id: 'address', title: 'Where is your place?', action: 'Next', fields: [
+  { id: 'address-search', title: 'Enter your address', action: 'Next', search_placeholder: 'Search for an address', manual_label: 'Enter address manually' },
+  { id: 'address', title: 'Confirm your address', action: 'Next', fields: [
     { key: 'country', label: 'Country or region', required: true },
     { key: 'address', label: 'Street address', required: true },
     { key: 'city', label: 'City or town', required: true },
@@ -152,7 +153,7 @@ export default defineHandler(async (event) => {
     if (!isStayAmenityCodes(parsed.data.amenities)) return invalid('amenities', 'Choose amenities from the listing options')
     return parsed.data
   }
-  const savedHome = (home: Awaited<ReturnType<typeof readStayHome>>) => jsonResponse({ home, to: productEditorPath(organization.slug, home.product_id) }, { status: 201 })
+  const savedHome = (home: Awaited<ReturnType<typeof readStayHome>>) => jsonResponse({ home, to: firstHomeSetupPath(organization.slug) }, { status: 201 })
   const completedHome = finishing && key && key.length <= 200
     ? await readCreationRecord(db, creationDedupeKey('product', organization.id, key))
     : null
@@ -164,6 +165,7 @@ export default defineHandler(async (event) => {
     await writeStayHomeSetupDraft(db, organization, input, current)
     return jsonResponse({ to: firstHomeSetupPath(organization.slug) })
   }
+  if (step.id === 'address-search') return next()
   const address = stayHomeSetupAddress(answers)
   if (step.id === 'address') return next()
   const propertyType = answers.property_type

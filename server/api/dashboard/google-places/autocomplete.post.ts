@@ -16,11 +16,12 @@ export default defineHandler(async (event) => {
   const session = await getAuthSession(event, env)
   if (!session?.user?.id) return jsonResponse({ error: 'Authentication required', code: 'UNAUTHENTICATED' }, { status: 401 })
 
-  const body = await readBody(event) as { input?: unknown; session_token?: unknown } | undefined
+  const body = await readBody(event) as { input?: unknown; session_token?: unknown; purpose?: unknown } | undefined
   const input = typeof body?.input === 'string' ? body.input : ''
   if (input.trim().length < 3) return jsonResponse({ error: 'input must be at least 3 characters', code: 'INVALID_BODY_FIELD' }, { status: 400 })
   if (input.length > 200) return jsonResponse({ error: 'input must be at most 200 characters', code: 'INVALID_BODY_FIELD' }, { status: 400 })
   if (!isPlacesSessionToken(body?.session_token)) return jsonResponse({ error: 'session_token must be a UUID', code: 'INVALID_BODY_FIELD' }, { status: 400 })
+  if (body.purpose !== undefined && body.purpose !== 'address') return jsonResponse({ error: 'Invalid search purpose', code: 'INVALID_BODY_FIELD' }, { status: 400 })
 
   const apiKey = env.GOOGLE_PLACES_API_KEY as string | undefined
   if (!apiKey) return jsonResponse({ error: 'Google Maps search is unavailable here.', code: 'GOOGLE_PLACES_UNAVAILABLE' }, { status: 503 })
@@ -31,7 +32,7 @@ export default defineHandler(async (event) => {
   }
 
   try {
-    return jsonResponse({ suggestions: await autocompletePlaces(apiKey, input.trim(), body.session_token) })
+    return jsonResponse({ suggestions: await autocompletePlaces(apiKey, input.trim(), body.session_token, body.purpose) })
   } catch (error) {
     return jsonResponse({ error: error instanceof Error ? error.message : 'Google Maps search failed', code: 'GOOGLE_PLACES_FAILED' }, { status: 502 })
   }

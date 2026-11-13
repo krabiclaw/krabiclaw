@@ -18,10 +18,11 @@ export default defineHandler(async (event) => {
   const session = await getAuthSession(event, env)
   if (!session?.user?.id) return jsonResponse({ error: 'Authentication required', code: 'UNAUTHENTICATED' }, { status: 401 })
 
-  const body = await readBody(event) as { google_place_id?: unknown; session_token?: unknown } | undefined
+  const body = await readBody(event) as { google_place_id?: unknown; session_token?: unknown; purpose?: unknown } | undefined
   const placeId = typeof body?.google_place_id === 'string' ? body.google_place_id.trim() : ''
   if (!placeId || placeId.length > 300) return jsonResponse({ error: 'google_place_id is required and at most 300 characters', code: 'INVALID_BODY_FIELD' }, { status: 400 })
   if (!isPlacesSessionToken(body?.session_token)) return jsonResponse({ error: 'session_token must be a UUID', code: 'INVALID_BODY_FIELD' }, { status: 400 })
+  if (body.purpose !== undefined && body.purpose !== 'address') return jsonResponse({ error: 'Invalid search purpose', code: 'INVALID_BODY_FIELD' }, { status: 400 })
 
   const apiKey = env.GOOGLE_PLACES_API_KEY as string | undefined
   if (!apiKey) return jsonResponse({ error: 'Google Maps search is unavailable here.', code: 'GOOGLE_PLACES_UNAVAILABLE' }, { status: 503 })
@@ -33,7 +34,7 @@ export default defineHandler(async (event) => {
 
   let place
   try {
-    place = await getPlaceDetails(apiKey, placeId, { sessionToken: body.session_token })
+    place = await getPlaceDetails(apiKey, placeId, { sessionToken: body.session_token, purpose: body.purpose })
   } catch (error) {
     return jsonResponse({ error: error instanceof Error ? error.message : 'Could not fetch place details. Try again.', code: 'GOOGLE_PLACES_FAILED' }, { status: 502 })
   }

@@ -123,7 +123,7 @@ async function submit(action: 'next' | 'exit') {
       validate,
     })
     if (!('to' in result)) throw new Error('The server did not return a setup destination.')
-    clearNuxtData('product-catalog:' + organizationId)
+    if (!result.guide) await refreshNuxtData(`product-catalog:${organizationId}`)
     await goTo(result.to)
   } catch (cause) {
     saveError.value = getErrorMessage(cause, 'Could not save your answer.')

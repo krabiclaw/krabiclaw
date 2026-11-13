@@ -25,7 +25,7 @@ const choice = z.object({ value: z.string(), label: z.string(), icon: z.string()
 const field = z.object({ key: z.string(), label: z.string(), required: z.boolean() })
 const count = z.object({ key: z.string(), label: z.string(), min: z.number(), max: z.number(), step: z.number() })
 const actionStep = z.object({ title: z.string(), action: z.string(), detail: z.string().optional() })
-const ids = ['address', 'property', 'access', 'pin', 'visibility', 'rooms', 'amenities', 'photos', 'title', 'highlights', 'description', 'booking', 'pricing', 'discounts', 'disclosures'] as const
+const ids = ['address-search', 'address', 'property', 'access', 'pin', 'visibility', 'rooms', 'amenities', 'photos', 'title', 'highlights', 'description', 'booking', 'pricing', 'discounts', 'disclosures'] as const
 const draftAnswers = z.record(z.string(), z.union([z.string(), z.number()]))
 export const stayHomeDraftInput = z.object({
   step: z.enum(ids),
@@ -39,6 +39,7 @@ export type StayHomeDraftInput = z.infer<typeof stayHomeDraftInput>
 const step = z.discriminatedUnion('id', [
   actionStep.extend({ id: z.literal('highlights'), choices: z.array(choice), max_selections: z.number().int().positive() }),
   actionStep.extend({ id: z.literal('booking'), counts: z.array(count) }),
+  actionStep.extend({ id: z.literal('address-search'), search_placeholder: z.string(), manual_label: z.string() }),
   actionStep.extend({ id: z.literal('pricing'), fields: z.array(field.extend({ detail: z.string().optional() })), currency: z.string(), currency_symbol: z.string(), counts: z.array(count) }),
   actionStep.extend({ id: z.literal('discounts'), choices: z.array(choice.extend({ detail: z.string(), suggested_percent: z.number().int() })), counts: z.array(count) }),
   actionStep.extend({ id: z.literal('disclosures'), fields: z.array(field.extend({ detail_key: z.string() })), max_length: z.number().int().positive() }),

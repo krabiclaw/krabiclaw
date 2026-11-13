@@ -87,9 +87,9 @@ export async function firstMenuSetup(context: OfferingSetupContext, locationId: 
   const today = offeringToday(orgSlug)
   const exitTo = context.exitTo ?? today
   const state = await readMenuSetup(db, organizationId, locationId)
-  if (!state) return { to: answer?.action === 'exit' ? exitTo : `${today}/products/menu?location_id=${encodeURIComponent(locationId)}` }
+  if (!state) return { to: answer?.action === 'exit' ? exitTo : `${today}/products?kind=menu` }
   const { draft, menuSections, section, chosenSectionId, creationKey, dish, variant, currency, price, photo, resume } = state
-  if (!resume && dish) return answer?.action === 'exit' ? { to: exitTo } : offeringDestination(orgSlug, dish.id, locationId)
+  if (!resume && dish) return answer?.action === 'exit' ? { to: exitTo } : offeringDestination(orgSlug, 'menu', dish.id, locationId)
   const canNameSection = menuSections.length === 0
     || (menuSections.length === 1 && section?.location_id === locationId && chosenSectionId === section.id)
   const steps = stages.filter(step => step !== 'section' || menuSections.length > 1 || canNameSection)
@@ -194,6 +194,6 @@ export async function firstMenuSetup(context: OfferingSetupContext, locationId: 
     }
   }
   if (exit) return { to: exitTo }
-  if (step === 'price' && dish) return offeringDestination(orgSlug, dish.id, locationId)
+  if (step === 'price' && dish) return offeringDestination(orgSlug, 'menu', dish.id, locationId)
   return { to: stepPath(steps[index + 1]!), guide: true }
 }
