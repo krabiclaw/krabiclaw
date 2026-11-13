@@ -10,7 +10,7 @@ import { MEMBER_REPLY_EVENT, MIRRORED_EVENT, OPENING_EVENT, SCHEDULED_MESSAGE_EV
 import { formatFormAnswer } from '~/shared/form-questions'
 import { EXPERIENCE_PRESENTATION } from '~/utils/product-presentation'
 import { normalizeVertical } from '~/utils/vertical-copy'
-import { calendarDate, clockTime, dayLabel, firstName, initial, localDateKey, providerInstant, sendTime, stayWhen } from './presentation'
+import { calendarDate, clockTime, firstName, initial, localDateKey, providerInstant, sendTime, stayWhen, transcriptDays } from './presentation'
 import { formatCalendarRange } from '~/utils/timezone'
 import type {
   GuestThreadDetailViewModel,
@@ -190,11 +190,13 @@ function eventSentence(entry: GuestThreadEntryViewModel, facts: ThreadFacts, vie
 function stream(facts: ThreadFacts, viewer: Viewer, now: Date, canReply: boolean): InboxStreamItem[] {
   const { raw, timeZone } = facts
   const items: InboxStreamItem[] = []
+  const days = transcriptDays(timeZone, now)
   let day: string | null = null
   let previous: MessageItem | null = null
   const place = (sentAt: string, id: string) => {
-    const key = localDateKey(sentAt, timeZone)
-    if (key !== day) { items.push({ type: 'day', id: `day:${id}`, label: dayLabel(sentAt, timeZone, now) }); day = key; previous = null }
+    const at = new Date(sentAt)
+    const date = days.date(at)
+    if (date.key !== day) { items.push({ type: 'day', id: `day:${id}`, label: days.label(at, date) }); day = date.key; previous = null }
   }
   const message = (entry: GuestThreadEntryViewModel, body: string | null, item: Omit<MessageItem, 'type' | 'id' | 'sent_at' | 'time' | 'body' | 'receipt' | 'retryable' | 'unshown_files'>) => {
     const sentAt = entrySentAt(entry)
