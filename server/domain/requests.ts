@@ -1,6 +1,6 @@
 import { openingMessageQueries } from '~/server/domain/guest-threads/opening'
 import { bookingStatusQuery } from '~/server/domain/bookings'
-import { CURRENT_GUEST_SQL, SUBMISSION_EVENT, messageQueries } from '~/server/domain/conversations'
+import { CURRENT_GUEST_SQL, SUBMISSION_EVENT, messageQueries, type ConversationRow } from '~/server/domain/conversations'
 import { z } from 'zod'
 import { HTTPError } from 'nitro'
 import { guestVisitRefundQueries, guestVisitRefundKey } from '~/server/domain/payments/visit-refund'
@@ -150,7 +150,7 @@ export const BOOKING_ENDS_SQL = (alias: string) => `CASE WHEN length(${alias}.en
 /** A booking's start as an instant SQL can compare, a start stored as a day reads as that day's first possible moment anywhere. */
 export const BOOKING_STARTS_SQL = (alias: string) => `CASE WHEN length(${alias}.starts_at) = 10 THEN date(${alias}.starts_at, '-1 day') || 'T10:00:00.000Z' ELSE ${alias}.starts_at END`
 
-export function parseGuestRequest(row: Record<string, unknown>): GuestRequest {
+export function parseGuestRequest(row: Record<string, unknown> | ConversationRow): GuestRequest {
   if (typeof row.payload_json !== 'string') throw new Error('Request payload is missing')
   return guestRequestSchema.parse({ ...row, payload: JSON.parse(row.payload_json) })
 }
@@ -164,7 +164,11 @@ export function participantLabel(request: GuestRequest): string {
 
 export async function getGuestRequest(db: DbClient, id: string, organizationId?: string, kind?: GuestRequestKind, buyerUserId?:string): Promise<GuestRequest | null> {
   const row = await queryFirst<Record<string, unknown>>(db, `SELECT r.* FROM conversations r WHERE r.id = ? AND r.kind IN ('contact', 'booking')${organizationId ? ' AND r.organization_id = ?' : ''}${kind ? ' AND r.kind = ?' : ''}${buyerUserId?` AND r.user_id=? AND ${CURRENT_GUEST_SQL('r')}`:''}`, [id, ...(organizationId ? [organizationId] : []), ...(kind ? [kind] : []),...(buyerUserId?[buyerUserId]:[])])
-  if (!row) return null
+  return row ? validateGuestRequest(db, row) : null
+}
+
+/** Parse the conversation row already returned by a scoped read and validate its channel association. */
+export async function validateGuestRequest(db: DbClient, row: Record<string, unknown> | ConversationRow): Promise<GuestRequest> {
   const request = parseGuestRequest(row)
   if (request.kind === 'booking' && request.payload.participant) {
     const mapped = await queryFirst(db, `SELECT 1 FROM conversations r
@@ -382,12 +386,12 @@ export async function requestSummary(db: DbClient, request: GuestRequest, knownR
   const record = knownRecord === undefined ? await getThreadOperationalRecord(db, request.id) : knownRecord
   // A thread without a location belongs to the business itself; one with a location must find it.
   const location = request.location_id === null ? null
-    : await queryFirst<{ title: string }>(db, 'SELECT title FROM business_locations WHERE id = ? AND organization_id = ?', [request.location_id, request.organization_id])
+    : await queryFirst<{ title: string; timezone: string }>(db, 'SELECT title, timezone FROM business_locations WHERE id = ? AND organization_id = ?', [request.location_id, request.organization_id])
   if (request.location_id !== null && !location) throw new HTTPError({ statusCode: 500, message: 'The conversation location does not exist', data: { code: 'INVALID_GUEST_THREAD', field: 'location_id', request_id: request.id } })
   return {
     guestName: request.payload.guest.name, participantLabel: participantLabel(request), guestEmail: request.payload.guest.email, guestPhone: request.payload.guest.phone,
     organizationId: request.organization_id, locationId: request.location_id,
-    locationTitle: location?.title ?? null, productTitle: record?.product_name ?? null,
+    locationTitle: location?.title ?? null, locationTimezone: location?.timezone ?? null, productTitle: record?.product_name ?? null,
     createdAt: request.created_at,
     operationalStatus: record?.status ?? null,
   }

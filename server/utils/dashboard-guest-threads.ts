@@ -1,4 +1,3 @@
-import { getGuestRequest } from '~/server/domain/requests'
 import type { DbClient } from '~/server/db'
 import { HTTPError, type H3Event } from 'nitro'
 import { getInboxThread, getInboxThreadDetails } from '~/server/domain/guest-threads/inbox'
@@ -124,23 +123,22 @@ export async function memberConversation(event: H3Event, organizationId: string,
 async function memberThread(event: H3Event, organizationId: string, threadId: string) {
   const { db, principal, conversation } = await memberConversation(event, organizationId, threadId)
   await assertGuestOperations(principal)
-  const thread = conversation.kind === 'team' ? null : await getGuestRequest(db, threadId, organizationId)
-  if (!thread) throw new HTTPError({ statusCode: 404, statusMessage: 'Thread not found', data: { code: 'THREAD_NOT_FOUND', field: 'threadId' } })
-  return { db, thread, principal }
+  if (conversation.kind === 'team') throw new HTTPError({ statusCode: 404, statusMessage: 'Thread not found', data: { code: 'THREAD_NOT_FOUND', field: 'threadId' } })
+  return { db, conversation, principal }
 }
 
 /** The conversation as the member reads it. Reading it never writes: the client reads it through with POST …/read. */
 export async function loadDashboardGuestThread(event: H3Event, organizationId: string, threadId: string) {
-  const { db, principal } = await memberThread(event, organizationId, threadId)
-  const view = await getInboxThread(db, threadId, organizationId, { audience: 'member', userId: principal.userId, principal })
+  const { db, conversation, principal } = await memberThread(event, organizationId, threadId)
+  const view = await getInboxThread(db, threadId, organizationId, { audience: 'member', userId: principal.userId, principal, conversation })
   if (!view) throw new HTTPError({ statusCode: 404, statusMessage: 'Thread not found', data: { code: 'THREAD_NOT_FOUND', field: 'threadId' } })
   return { thread: view }
 }
 
 /** "In this conversation": its people, gallery and actions. */
 export async function loadDashboardGuestThreadDetails(event: H3Event, organizationId: string, threadId: string) {
-  const { db, principal } = await memberThread(event, organizationId, threadId)
-  const details = await getInboxThreadDetails(db, threadId, organizationId, { audience: 'member', userId: principal.userId, principal })
+  const { db, conversation, principal } = await memberThread(event, organizationId, threadId)
+  const details = await getInboxThreadDetails(db, threadId, organizationId, { audience: 'member', userId: principal.userId, principal, conversation })
   if (!details) throw new HTTPError({ statusCode: 404, statusMessage: 'Thread not found', data: { code: 'THREAD_NOT_FOUND', field: 'threadId' } })
   return details
 }

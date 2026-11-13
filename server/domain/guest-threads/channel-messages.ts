@@ -17,6 +17,7 @@ import { isAirbnbSupportMessage, notifyGuestThreadReply, notifyAirbnbInquiry } f
 import { readAirbnbInquiry } from '~/server/integrations/channex/live-feed'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { planSourceMessages } from '~/server/domain/scheduled-guest-messages'
+import type { StayChannel } from '~/shared/bookings'
 
 type ChannelEnv = ChannexEnv & GuestInboxPublicationEnv & CloudflareEnv & UploadResolvedMediaInput['env']
 interface HomeMapping { organization_id: string; product_id: string; property_id: string; channel_id: string; location_id: string; enabled: number }
@@ -26,8 +27,35 @@ function fail(statusCode: number, code: string, message: string, field: string):
   throw new HTTPError({ statusCode, message, data: { code, field } })
 }
 
-export async function getChannelThreadMapping(db: DbClient, conversationId: string, organizationId: string): Promise<ChannelThreadMapping | null> {
-  return queryFirst<ChannelThreadMapping>(db, "SELECT * FROM channel_threads WHERE provider = 'channex' AND conversation_id = ? AND organization_id = ?", [conversationId, organizationId])
+/** Channel routing and the home used to present this conversation come from the same join. */
+export async function guestThreadChannel(db: DbClient, conversationId: string, organizationId: string) {
+  const row = await queryFirst<Omit<ChannelThreadMapping, 'product_id' | 'external_thread_id'> & {
+    product_id: string | null
+    mapped_product_id: string | null
+    external_thread_id: string | null
+    connected: number
+    booking_channel: StayChannel | null
+    booking_owner: 'app' | 'channel' | null
+  }>(db, `
+    SELECT c.organization_id, c.id AS conversation_id, ct.external_thread_id, ct.external_booking_id, ct.moved_from_thread_id,
+      ct.product_id AS mapped_product_id, COALESCE(ct.product_id, CASE WHEN b.owner = 'channel' THEN b.product_id END) AS product_id,
+      EXISTS (SELECT 1 FROM product_channel_mappings pcm
+        WHERE pcm.provider = ct.provider AND pcm.organization_id = ct.organization_id AND pcm.product_id = ct.product_id AND pcm.enabled = 1) AS connected,
+      b.channel AS booking_channel, b.owner AS booking_owner
+    FROM conversations c
+    LEFT JOIN channel_threads ct ON ct.organization_id = c.organization_id AND ct.conversation_id = c.id
+    LEFT JOIN bookings b ON b.organization_id = c.organization_id AND b.id = c.booking_id AND c.kind = 'booking'
+    WHERE c.id = ? AND c.organization_id = ?`, [conversationId, organizationId])
+  if (!row) return null
+  const { product_id, mapped_product_id, connected, booking_channel, booking_owner, ...mapping } = row
+  return {
+    productId: product_id,
+    mapping: mapped_product_id !== null && mapping.external_thread_id !== null
+      ? { ...mapping, product_id: mapped_product_id, external_thread_id: mapping.external_thread_id }
+      : null,
+    connected: connected === 1,
+    booking: booking_channel !== null && booking_owner !== null ? { channel: booking_channel, owner: booking_owner } : null,
+  }
 }
 
 async function homeMapping(db: DbClient, propertyId: string): Promise<HomeMapping | null> {
