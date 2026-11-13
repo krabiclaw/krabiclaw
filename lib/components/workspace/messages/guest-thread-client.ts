@@ -1,3 +1,4 @@
+import type { InboxTranscriptPage } from '~/server/domain/guest-threads/types'
 import { isRecord } from '~/utils/api-clients'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import type {
@@ -97,6 +98,18 @@ export function isThreadDetailResponse(value: unknown): value is { thread: Threa
     && Array.isArray(thread.pending) && thread.pending.every(item => isRecord(item) && isText(item.id) && (item.source === 'automatic' || item.source === 'later')
       && isText(item.label) && isText(item.due_at) && isText(item.time) && typeof item.body === 'string' && typeof item.cancellable === 'boolean')
     && isRecord(thread.composer) && (thread.composer.channel === 'airbnb' || thread.composer.channel === 'email') && typeof thread.composer.available === 'boolean' && (thread.composer.reason === null || typeof thread.composer.reason === 'string')
+}
+
+export type PagedThread = ThreadDetail & { page: InboxTranscriptPage }
+export function isPagedThreadResponse(value: unknown): value is { thread: PagedThread } {
+  if (!isThreadDetailResponse(value)) return false
+  const page: unknown = Reflect.get(value.thread, 'page')
+  const sequence = (n: unknown) => n === null || Number.isSafeInteger(n) && Number(n) > 0
+  return isRecord(page) && sequence(page.before) && sequence(page.oldest) && sequence(page.newest)
+    && (page.before === null || page.before === page.oldest)
+    && (page.oldest === null ? page.newest === null : Number(page.oldest) <= Number(page.newest))
+    && Array.isArray(page.failed_messages) && page.failed_messages.every(isText)
+    && Array.isArray(page.booking_actions) && page.booking_actions.every(item => isStreamItem(item) && item.type === 'change')
 }
 
 export function isThreadDetails(value: unknown): value is ThreadDetails {

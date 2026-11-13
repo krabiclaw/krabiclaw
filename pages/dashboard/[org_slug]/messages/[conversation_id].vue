@@ -35,7 +35,7 @@ const route = useRoute()
 const router = useRouter()
 const threadId = computed(() => String(route.params.conversation_id))
 const level = useRouteLevel()
-const { thread, refresh } = await useGuestThread(threadId)
+const { thread, refresh } = await useGuestThread(threadId, ref(false), true)
 const sheetOpen = ref(false)
 
 // Show reservation keeps the list it was reached through. A conversation with no record has none.

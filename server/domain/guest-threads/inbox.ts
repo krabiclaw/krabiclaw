@@ -6,7 +6,7 @@ import { stayAccessFor } from '~/server/domain/stays'
 import type { MemberAccessPrincipal } from '~/server/utils/member-access'
 import { loadGuestThreadDetail, type TranscriptView } from './detail'
 import { guestReplyDestination } from './operations'
-import { MEMBER_REPLY_EVENT, MIRRORED_EVENT, OPENING_EVENT, SCHEDULED_MESSAGE_EVENT, SUBMISSION_EVENT, type ConversationRow } from '~/server/domain/conversations'
+import { MEMBER_REPLY_EVENT, MIRRORED_EVENT, OPENING_EVENT, SCHEDULED_MESSAGE_EVENT, SUBMISSION_EVENT, type ConversationRow, type ConversationWindow } from '~/server/domain/conversations'
 import { formatFormAnswer } from '~/shared/form-questions'
 import { EXPERIENCE_PRESENTATION } from '~/utils/product-presentation'
 import { normalizeVertical } from '~/utils/vertical-copy'
@@ -14,6 +14,7 @@ import { calendarDate, clockTime, firstName, initial, localDateKey, providerInst
 import { formatCalendarRange } from '~/utils/timezone'
 import type {
   GuestThreadDetailViewModel,
+  InboxTranscriptPage,
   GuestThreadEntryViewModel,
   InboxChannel,
   InboxPendingMessage,
@@ -86,11 +87,11 @@ interface ThreadFacts {
  * Who the guest is, as every surface names them: Airbnb Support for a support case; otherwise
  * the first name Airbnb gives on the guest's messages, else the booked name, else the label.
  */
-export function inboxGuestNames(raw: Pick<TranscriptView, 'entries' | 'guestName' | 'participantLabel' | 'conversationChannel'>): { kind: InboxThreadKind; guestName: string; guestFullName: string } {
-  const kind: InboxThreadKind = isSupportThread(raw.entries) ? 'support' : 'guest'
+export function inboxGuestNames(raw: Pick<TranscriptView, 'entries' | 'guestName' | 'participantLabel' | 'conversationChannel' | 'window'>): { kind: InboxThreadKind; guestName: string; guestFullName: string } {
+  const kind: InboxThreadKind = (raw.window?.support ?? isSupportThread(raw.entries)) ? 'support' : 'guest'
   const airbnbName = raw.entries.findLast(entry => entry.actorKind === 'guest' && entry.eventName === MIRRORED_EVENT && text(meta(entry)?.name))
   // Airbnb gives the guest's first name on their messages; the stay, once booked, has their full name.
-  const airbnbFirstName = airbnbName ? text(meta(airbnbName)!.name)! : null
+  const airbnbFirstName = raw.window ? raw.window.channelGuestName : airbnbName ? text(meta(airbnbName)!.name)! : null
   const guestFullName = kind === 'support' ? 'Airbnb Support' : raw.guestName ?? airbnbFirstName ?? raw.participantLabel
   const guestName = kind === 'support' ? 'Airbnb Support'
     : airbnbFirstName ?? (raw.conversationChannel === 'airbnb' && raw.guestName ? firstName(raw.guestName) : guestFullName)
@@ -222,6 +223,10 @@ function stream(facts: ThreadFacts, viewer: Viewer, now: Date, canReply: boolean
   }
 
   let newestBusiness: { item: MessageItem; entry: GuestThreadEntryViewModel } | null = null
+  function applyReceipt(item: MessageItem, entry: GuestThreadEntryViewModel) {
+    item.receipt = receipt(entry, facts.guestName)
+    item.retryable = canReply && item.receipt === 'Not delivered' && entry.eventName === MEMBER_REPLY_EVENT && !item.photos.length && Boolean(text(item.body))
+  }
   for (const entry of raw.entries) {
     if (entry.eventName === SUBMISSION_EVENT) {
       // A contact form's words open its conversation: what the guest wrote, then their answers.
@@ -250,6 +255,7 @@ function stream(facts: ThreadFacts, viewer: Viewer, now: Date, canReply: boolean
         continue
       }
       const item = message(entry, entry.body, { side: 'business', ...businessAuthor(entry), photos, translated: null })
+      if (raw.window && viewer.audience === 'member' && receipt(entry, facts.guestName) === 'Not delivered') applyReceipt(item, entry)
       newestBusiness = { item, entry }
       continue
     }
@@ -267,10 +273,7 @@ function stream(facts: ThreadFacts, viewer: Viewer, now: Date, canReply: boolean
   }
   if (newestBusiness && viewer.audience === 'member') {
     const { item, entry } = newestBusiness
-    item.receipt = receipt(entry, facts.guestName)
-    // A team member's text reply that did not arrive can be sent again under its own key, where the reply
-    // operation can still send (`guestReplyDestination`); an automatic or photo reply cannot.
-    item.retryable = canReply && item.receipt === 'Not delivered' && entry.eventName === MEMBER_REPLY_EVENT && !item.photos.length && Boolean(text(item.body))
+    applyReceipt(item, entry)
   }
   return items
 }
@@ -291,11 +294,11 @@ function pendingMessages(rows: Awaited<ReturnType<typeof readPendingMessages>>, 
 }
 
 /** The conversation's view model, or null when the viewer has no such conversation. */
-export async function getInboxThread(db: DbClient, threadId: string, organizationId: string, viewer: Viewer, now = new Date()): Promise<InboxThread | null> {
+export async function getInboxThread(db: DbClient, threadId: string, organizationId: string, viewer: Viewer, now = new Date(), window?: ConversationWindow): Promise<(InboxThread & { page?: InboxTranscriptPage }) | null> {
   const [detail, scheduled] = await Promise.all([
     loadGuestThreadDetail(db, threadId, organizationId, viewer.audience === 'buyer'
       ? { buyerUserId: viewer.userId }
-      : { memberUserId: viewer.userId, conversation: viewer.conversation }, now, true),
+      : { memberUserId: viewer.userId, conversation: viewer.conversation }, now, true, window),
     viewer.audience === 'member' && viewer.conversation
       ? readPendingMessages(db, threadId, organizationId, viewer.principal)
       : null,
@@ -317,12 +320,19 @@ export async function getInboxThread(db: DbClient, threadId: string, organizatio
     channel: facts.channel,
     home: facts.home,
     when: facts.when,
-    translated: items.some(item => item.type === 'message' && item.translated !== null),
+    translated: raw.window?.translated ?? items.some(item => item.type === 'message' && item.translated !== null),
     booking_id: record?.id ?? null,
     record_kind: record ? record.unit === 'nights' ? 'stay' : 'booking' : null,
     record_title: record ? recordTitle(record, raw.organizationVertical) : null,
     activity_path: raw.activityPath,
     stream: items,
+    ...raw.window && { page: {
+      before: raw.window.before,
+      oldest: raw.window.oldest,
+      newest: raw.window.newest,
+      failed_messages: raw.window.failedMessages,
+      booking_actions: raw.window.bookingActions.map(entry => ({ type: 'change' as const, id: entry.id, sent_at: entry.occurredAt, change: entry.bookingChange! })),
+    } },
     pending: pendingMessages(pending, timeZone),
     composer: {
       channel: viewer.audience === 'member' && raw.conversationChannel === 'airbnb' ? 'airbnb' : 'email',

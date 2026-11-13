@@ -114,6 +114,7 @@ export default defineHandler(async (event) => {
     throw new HTTPError({ statusCode: 500, message: 'Guest-thread operation returned an unhandled outcome', data: { code: 'INVALID_OPERATION_OUTCOME', field: 'outcome.reason' } })
   }
 
-  const detail = await getInboxThread(db, threadId, organizationId, { audience: 'member', userId: principal.userId, principal, conversation: action === 'reply' ? conversation : undefined })
+  const paged = event.url.searchParams.get('transcript') === 'latest'
+  const detail = await getInboxThread(db, threadId, organizationId, { audience: 'member', userId: principal.userId, principal, conversation: action === 'reply' && !paged ? conversation : await assertConversationAccess(db, principal, thread.id) }, new Date(), paged ? { before: null, limit: 40 } : undefined)
   return jsonResponse({ thread: detail, available_actions: outcome.availableActions, ...outcome.message && { message: outcome.message } }, { status: outcome.status })
 })

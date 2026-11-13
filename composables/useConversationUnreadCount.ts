@@ -30,6 +30,7 @@ export function useConversationUnreadCount(connection?: DashboardInvalidationCon
       || authClient.organization.checkRolePermission({ role: role.value, permissions: { team_messages: ['read'] } })
     )))
   let revision = 0
+  let queued = false
   let active = false
 
   async function refresh() {
@@ -67,7 +68,9 @@ export function useConversationUnreadCount(connection?: DashboardInvalidationCon
   watch([reader, orgId, inboxRoute], () => {
     personal.value = 0
     error.value = null
-    void refresh()
+    if (queued) return
+    queued = true
+    void nextTick(() => { queued = false; void refresh() })
   }, { immediate: true })
 
   watch(realtime.event, event => {

@@ -12,7 +12,7 @@ import type {
 import type { GuestThreadMailbox } from '~/server/domain/guest-threads/mailbox'
 import { requireOrganizationMembership, requireOrganizationPrincipal } from '~/server/utils/location-access'
 import { memberAccessPrincipal, type MemberAccessPrincipal } from '~/server/utils/member-access'
-import { assertConversationAccess, assertGuestOperations, type ConversationRow } from '~/server/domain/conversations'
+import { assertConversationAccess, assertGuestOperations, type ConversationRow, type ConversationWindow } from '~/server/domain/conversations'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { messageListPage } from '~/server/domain/guest-message-schedule'
 
@@ -70,8 +70,8 @@ export function parseGuestThreadListQuery(query: Record<string, unknown>): Dashb
   // The menu's kinds: All is no filter.
   const kind = filter('kind', ['all', 'guests', 'support', 'team'])
   return {
-    conversationIds: ids,
-    includeSortKey: Boolean(includeSortKey),
+    ...ids && { conversationIds: ids },
+    ...includeSortKey && { includeSortKey: true },
     limit: query.limit === undefined ? 100 : Number(query.limit),
     offset: query.offset === undefined ? 0 : Number(query.offset),
     locationId: id('location_id'),
@@ -144,9 +144,9 @@ async function memberThread(event: H3Event, organizationId: string, threadId: st
 }
 
 /** The conversation as the member reads it. Reading it never writes: the client reads it through with POST …/read. */
-export async function loadDashboardGuestThread(event: H3Event, organizationId: string, threadId: string) {
+export async function loadDashboardGuestThread(event: H3Event, organizationId: string, threadId: string, window?: ConversationWindow) {
   const { db, conversation, principal } = await memberThread(event, organizationId, threadId)
-  const view = await getInboxThread(db, threadId, organizationId, { audience: 'member', userId: principal.userId, principal, conversation })
+  const view = await getInboxThread(db, threadId, organizationId, { audience: 'member', userId: principal.userId, principal, conversation }, new Date(), window)
   if (!view) throw new HTTPError({ statusCode: 404, statusMessage: 'Thread not found', data: { code: 'THREAD_NOT_FOUND', field: 'threadId' } })
   return { thread: view }
 }

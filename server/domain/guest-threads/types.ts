@@ -293,6 +293,14 @@ export interface InboxThread {
   composer: { channel: 'airbnb' | 'email'; available: boolean; reason: string | null }
 }
 
+export interface InboxTranscriptPage {
+  before: number | null
+  oldest: number | null
+  newest: number | null
+  failed_messages: string[]
+  booking_actions: Extract<InboxStreamItem, { type: 'change' }>[]
+}
+
 /** "In this conversation": who is in it, its photos and what can be done to it. */
 export interface InboxThreadDetails {
   participants: Array<{ name: string; initial: string; role: 'Guest' | 'Host' | 'Co-host' | 'Airbnb Support' }>

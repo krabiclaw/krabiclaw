@@ -259,7 +259,12 @@ async function loadMore() {
   nextPageError.value = null
   try {
     const page = await loadPage(before.pagination.next_offset, controller.signal)
-    if (controller.signal.aborted || key !== listKey.value || data.value !== before) return
+    if (controller.signal.aborted || key !== listKey.value) return
+    if (data.value !== before) {
+      loadedPages = Math.ceil((data.value?.threads.length ?? 100) / 100) + 1
+      await refresh()
+      return
+    }
     try {
       data.value = appendLoadedPage(before, page)
       loadedPages = Math.ceil(data.value.threads.length / 100)
@@ -379,6 +384,7 @@ function reconcile(id?: string) {
 async function drainChanges() {
   if (disposed || reconciling || pending.value || loadingMore.value || (!fullRefresh && !changedIds.size)) return
   reconciling = true
+  nextPageError.value = null
   const generationAtStart = generation
   const scope = listKey.value
   try {

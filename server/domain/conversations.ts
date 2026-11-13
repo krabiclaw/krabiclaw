@@ -224,7 +224,16 @@ export async function getMessage(db: DbClient, id: string): Promise<MessageRow |
 }
 
 /** A conversation's messages in order. */
-export function conversationMessagesQuery(conversationId: string, guestAudience: boolean): BatchQuery {
+export type ConversationWindow = { before: number | null; limit: number }
+
+export function conversationMessagesQuery(conversationId: string, guestAudience: boolean, window?: ConversationWindow): BatchQuery {
+  if (window) return {
+    query: `SELECT * FROM (SELECT m.* FROM messages m WHERE m.conversation_id = ?
+      ${guestAudience ? `AND ${guestVisibleSql('m')}` : ''}
+      ${window.before === null ? '' : 'AND m.sequence < ?'}
+      ORDER BY m.sequence DESC LIMIT ?) ORDER BY sequence`,
+    params: [conversationId, ...(window.before === null ? [] : [window.before]), window.limit + 1],
+  }
   return { query: `SELECT m.* FROM messages m WHERE m.conversation_id = ? ${guestAudience ? `AND ${guestVisibleSql('m')}` : ''} ORDER BY m.sequence`, params: [conversationId] }
 }
 

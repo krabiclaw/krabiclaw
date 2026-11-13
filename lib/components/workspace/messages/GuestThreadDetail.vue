@@ -11,7 +11,14 @@
     </div>
 
     <template v-else-if="thread">
-      <div ref="scroller" class="min-h-0 flex-1 overflow-y-auto overscroll-contain border-t border-default">
+      <div ref="scroller" class="min-h-0 flex-1 overflow-y-auto overscroll-contain border-t border-default" style="overflow-anchor: none">
+        <div v-if="olderFailureCount" class="px-4 pt-3 text-center text-sm text-error" role="status">
+          {{ olderFailureCount === 1 ? 'An older message has a delivery failure.' : `${olderFailureCount} older messages have delivery failures.` }}
+        </div>
+        <div v-if="before || olderError" class="flex flex-col items-center gap-2 pt-3">
+          <UButton v-if="before" color="neutral" variant="ghost" :loading="loadingOlder" @click="loadOlder">Load older messages</UButton>
+          <p v-if="olderError" class="text-sm text-error" role="alert">{{ olderError }}</p>
+        </div>
         <!--
           The stream as the server wrote it: day headers, runs of messages with
           one "Name time" line each, events as centred sentences, change
@@ -128,6 +135,7 @@
 </template>
 
 <script setup lang="ts">
+import { isPagedThreadResponse, type PagedThread } from './guest-thread-client'
 import { isMessageIdentity, type MessageIdentity } from '~/shared/dashboard-invalidations'
 
 import { useIntervalFn, useDocumentVisibility } from '@vueuse/core'
@@ -157,7 +165,88 @@ const realtime = useDashboardInvalidations()
 const { locale, t } = useI18n()
 const session = authClient.useSession()
 
-const { data, thread, pending, error, refresh, clear } = await useGuestThread(computed(() => props.threadId), computed(() => props.personalScope))
+const { data, thread, pending, error, refresh: refreshHead, clear, readPage } = await useGuestThread(computed(() => props.threadId), computed(() => props.personalScope), !props.personalScope)
+const older = shallowRef<PagedThread[]>([])
+const olderError = ref<string | null>(null)
+const loadingOlder = ref(false)
+const transcriptPage = computed(() => thread.value && 'page' in thread.value ? (thread.value as PagedThread).page : null)
+const olderFailureCount = computed(() => {
+  const failures = transcriptPage.value?.failed_messages ?? []
+  if (!failures.length) return 0
+  const loaded = new Set([...(thread.value?.stream ?? []), ...older.value.flatMap(page => page.stream)].map(item => item.id))
+  return failures.filter(id => !loaded.has(id)).length
+})
+const before = computed(() => older.value.length ? older.value[0]!.page.before : transcriptPage.value?.before)
+let olderRequest: AbortController | undefined
+
+function clearTranscript() {
+  olderRequest?.abort()
+  older.value = []
+  clear()
+}
+
+async function loadOlder() {
+  if (!before.value || loadingOlder.value || pending.value || reconciling) return
+  const cursor = before.value
+  const controller = new AbortController()
+  olderRequest = controller
+  loadingOlder.value = true
+  olderError.value = null
+  try {
+    const { thread: previous } = await readPage(cursor, controller.signal)
+    if (controller.signal.aborted || cursor !== before.value || previous.id !== props.threadId) return
+    const el = scroller.value
+    const height = el?.scrollHeight ?? 0
+    const top = el?.scrollTop ?? 0
+    older.value = [previous, ...older.value]
+    await nextTick()
+    if (el) el.scrollTop = top + el.scrollHeight - height
+  } catch (cause) {
+    if (!controller.signal.aborted) {
+      olderError.value = getErrorMessage(cause, 'Older messages could not be loaded')
+      if (isNotFoundError(cause) || (isRecord(cause) && cause.statusCode === 403)) clearTranscript()
+    }
+  } finally {
+    loadingOlder.value = false
+  }
+}
+
+async function refresh(options?: Parameters<typeof refreshHead>[0]) {
+  olderRequest?.abort()
+  const previousHead = transcriptPage.value
+  const olderPages = older.value.length
+  await refreshHead(options)
+  await reconcileOlder(previousHead, olderPages)
+}
+
+async function reconcileOlder(previousHead: typeof transcriptPage.value, olderPages: number) {
+  if (!thread.value) { older.value = []; return }
+  // Rebuild the loaded cursor window when the head moves or an existing
+  // message changes. Commit the older pages together so deleted rows vanish.
+  const nextHead = transcriptPage.value
+  if (olderPages && nextHead) {
+    const controller = new AbortController()
+    olderRequest = controller
+    const pages: PagedThread[] = []
+    let cursor = nextHead.before
+    const oldest = older.value[0]?.page.oldest ?? previousHead?.oldest
+    try {
+      for (let remaining = olderPages + 1; cursor && remaining > 0; remaining--) {
+        const { thread: page } = await readPage(cursor, controller.signal)
+        pages.unshift(page)
+        cursor = page.page.before
+        if (oldest !== null && oldest !== undefined && page.page.oldest !== null && page.page.oldest <= oldest) break
+      }
+      if (!controller.signal.aborted) older.value = pages
+    } catch (cause) {
+      if (!controller.signal.aborted) {
+        olderError.value = getErrorMessage(cause, 'Loaded messages could not be refreshed')
+        if (isNotFoundError(cause) || (isRecord(cause) && cause.statusCode === 403)) clearTranscript()
+      }
+    }
+  }
+}
+onScopeDispose(() => olderRequest?.abort())
 const threadPath = computed(() => props.personalScope ? `/api/account/messages/${encodeURIComponent(props.threadId)}` : `/api/dashboard/organizations/${dashboard.organizationId.value}/guest-threads/${encodeURIComponent(props.threadId)}`)
 
 const draft = ref('')
@@ -227,7 +316,21 @@ const mineSide = computed(() => props.personalScope ? 'guest' : 'business')
 const rows = computed<Row[]>(() => {
   const current = thread.value
   if (!current) return []
-  const items: Array<StreamItem | MessageItem> = [...current.stream]
+  const items: Array<StreamItem | MessageItem> = []
+  const seen = new Set<string>()
+  let previousDay: string | undefined
+  for (const item of [...older.value.flatMap(page => page.stream), ...current.stream]) {
+    if (seen.has(item.id)) continue
+    if (item.type === 'day') {
+      if (previousDay === item.label) continue
+      previousDay = item.label
+    }
+    items.push(item)
+    seen.add(item.id)
+  }
+  for (const action of [...(transcriptPage.value?.booking_actions ?? [])].reverse()) {
+    if (!seen.has(action.id)) items.unshift(action)
+  }
   if (attempt.value && sending.value) {
     items.push({
       type: 'message', id: `pending:${attempt.value.key}`, side: mineSide.value, author: 'You', label: null, sent_at: new Date().toISOString(),
@@ -322,16 +425,21 @@ async function cancelPending(later: InboxPendingMessage) {
 const answeringChange = ref<{ requestId: string; decision: 'accept' | 'decline' } | null>(null)
 async function answerChange(requestId: string, decision: 'accept' | 'decline') {
   if (answeringChange.value) return
+  const revision = accessRevision
   answeringChange.value = { requestId, decision }
   actionError.value = null
   try {
     // The host answers a guest's request on their channel through the conversation's operations.
     if (!props.personalScope) {
-      data.value = await dashboardApi(`${threadPath.value}/operations/${decision}_change`, {
+      const response = await dashboardApi(`${threadPath.value}/operations/${decision}_change`, {
         method: 'POST',
-        body: { message_id: requestId, idempotency_key: `${requestId}:${decision}` },
-        validate: isThreadDetailResponse,
+        body: { message_id: requestId, idempotency_key: `${requestId}:${decision}` }, query: { transcript: 'latest' },
+        validate: isPagedThreadResponse,
       })
+      if (revision !== accessRevision) return
+      const previousHead = transcriptPage.value
+      data.value = response
+      await reconcileOlder(previousHead, older.value.length)
       return
     }
     await applicationFetch(`/api/public/booking-changes/${encodeURIComponent(props.threadId)}/${encodeURIComponent(requestId)}`, {
@@ -411,16 +519,20 @@ async function sendReply() {
   try {
     const res = await (props.personalScope ? applicationFetch : dashboardApi)<{ thread: ThreadDetail; message?: MessageIdentity }>(`${threadPath.value}/${props.personalScope ? 'reply' : 'operations/reply'}`, {
       method: 'POST',
+      query: props.personalScope ? undefined : { transcript: 'latest' },
       body: photos.length ? messageReplyForm(body, photos, current.key, props.personalScope ? null : usedSuggestion.value) : { body, idempotency_key: current.key, ...(!props.personalScope && usedSuggestion.value ? { suggestion: usedSuggestion.value } : {}) },
       validate: (value): value is { thread: ThreadDetail; message?: MessageIdentity } => isThreadDetailResponse(value)
-        && (props.personalScope || isMessageIdentity(Reflect.get(value, 'message'))),
+        && (props.personalScope || (isPagedThreadResponse(value) && isMessageIdentity(Reflect.get(value, 'message')))),
     })
     if (revision !== accessRevision) return
     settledReply = res.message
     const reply = res.message ? res.thread.stream.find(item => item.type === 'message' && item.id === res.message?.id) : res.thread.stream.findLast(item => item.type === 'message' && item.side === mineSide.value && !current.sentAfter.has(item.id))
     if (reply) settledKeys.value = { ...settledKeys.value, [reply.id]: `pending:${current.key}` }
+    const previousHead = transcriptPage.value
     if (pending.value) clear()
     data.value = { thread: res.thread }
+    if (older.value.length) await reconcileOlder(previousHead, older.value.length)
+    if (revision !== accessRevision) return
     if (requestingChange.value) changeRequestSent.value = true
     attempt.value = null
     draft.value = ''
@@ -443,10 +555,15 @@ const chosen = useMessagePhotoDraft()
 // "Try again" sends the same reply under its own key, so one that did land is not sent twice.
 const retrying = ref(false)
 async function retry(messageId: string) {
+  const revision = accessRevision
   retrying.value = true
   actionError.value = null
   try {
-    data.value = await dashboardApi(`${threadPath.value}/operations/retry`, { method: 'POST', body: { message_id: messageId, idempotency_key: messageId }, validate: isThreadDetailResponse })
+    const response = await dashboardApi(`${threadPath.value}/operations/retry`, { method: 'POST', query: { transcript: 'latest' }, body: { message_id: messageId, idempotency_key: messageId }, validate: isPagedThreadResponse })
+    if (revision !== accessRevision) return
+    const previousHead = transcriptPage.value
+    data.value = response
+    await reconcileOlder(previousHead, older.value.length)
   } catch (err) {
     actionError.value = getErrorMessage(err, 'The reply could not be sent again')
   } finally {
@@ -460,7 +577,7 @@ watch(realtime.event, event => {
     accessRevision++
     settledReply = undefined
     deferredCreates.length = 0
-    clear()
+    clearTranscript()
     reconcileThread()
     return
   }
@@ -475,6 +592,8 @@ watch(realtime.event, event => {
 
 watch(error, cause => {
   if (cause?.statusCode !== 403 && cause?.statusCode !== 404) return
+  older.value = []
+  olderRequest?.abort()
   draft.value = ''
   chosen.value = []
   viewer.value = null

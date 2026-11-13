@@ -1,4 +1,4 @@
-import { execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
+import { d1JsonStringSet, execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import type { WebhookEventPayload } from 'resend'
 import type { ReplyEmailEnv } from '~/server/utils/submission-messages'
 import { buildReplyToAddress } from '~/server/utils/reply-address'
@@ -418,13 +418,13 @@ export async function deliverGuestThreadEmail(
  * detail view reads all of them from here and decides what to show; a query
  * that returned failures alone is why a successful send had no channel on it.
  */
-export function threadDeliveriesQuery(threadId: string): BatchQuery {
+export function threadDeliveriesQuery(threadId: string, messageIds?: string[]): BatchQuery {
   return { query: `
     SELECT d.* FROM guest_thread_deliveries d
     JOIN messages m ON m.id = d.message_id
-    WHERE m.conversation_id = ?
+    WHERE m.conversation_id = ? ${messageIds ? 'AND m.id IN (SELECT value FROM json_each(?))' : ''}
     ORDER BY d.created_at DESC
-  `, params: [threadId] }
+  `, params: [threadId, ...(messageIds ? [d1JsonStringSet(messageIds)] : [])] }
 }
 
 export async function listThreadDeliveries(db: DbClient, threadId: string): Promise<GuestThreadDeliveryRow[]> {
