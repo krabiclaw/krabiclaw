@@ -324,6 +324,19 @@ Follow `docs/local-development.md`.
 Use the repository's documented setup, fixtures, authentication, and local
 runtime paths rather than recreating their individual steps manually.
 
+Run one resource-intensive local check at a time, including builds, typechecks,
+browser suites, simulator runs, and benchmarks. Coordinate across agents and
+reuse a running service when it serves the same checkout and fixture. Record
+the process IDs and ports of local runners you start, stop their entire process
+trees and any simulators you boot when the check finishes or work pauses, and
+verify that those runners and listeners are gone. Keep benchmark artifacts on
+disk.
+
+For Messages consolidation, finish removing the separate history readers and
+send implementations before running any benchmark. Exercise the shared paths
+through the local runtime and compare the completed change against the
+matched baseline.
+
 ## Marketing execution
 
 For feature launches, blogs and social distribution, read
